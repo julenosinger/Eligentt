@@ -1017,15 +1017,8 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
               <div class="rate-row"><span>Network</span><span class="rate-val blue">Arc Testnet</span></div>
             </div>
 
-            <!-- Kit Key input -->
-            <div style="margin-top:12px">
-              <div class="swap-label">Kit Key (required for swap)</div>
-              <div style="display:flex;gap:7px;align-items:center">
-                <input id="kit-key-input" class="cinput" type="text" placeholder="Optional: Kit Key (console.circle.com)" style="font-size:9.5px" value="__KIT_KEY_PLACEHOLDER__"/>
-                <a href="https://console.circle.com" target="_blank" class="btn" style="font-size:9px;white-space:nowrap"><i class="ti ti-external-link"></i>Get Key</a>
-              </div>
-              <div style="font-size:8.5px;color:var(--muted2);margin-top:4px">Free kit key from <a href="https://console.circle.com" target="_blank" style="color:var(--blue);text-decoration:none">Circle Console</a>. Required by App Kit to execute swaps.</div>
-            </div>
+            <!-- Kit Key input — hidden, value injected server-side -->
+            <input id="kit-key-input" type="hidden" value="__KIT_KEY_PLACEHOLDER__"/>
 
             <button class="action-btn purple-btn" style="margin-top:14px" id="swap-btn" onclick="executeSwap()">
               <i class="ti ti-arrows-exchange"></i>Swap Tokens
@@ -1453,9 +1446,9 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
           <div class="info-card">
             <div class="info-title"><i class="ti ti-code" style="color:var(--purple)"></i>Pool Contract</div>
             <div style="font-size:8.5px;color:var(--muted2);margin-bottom:6px">USDC/EURC Pool · Arc Testnet</div>
-            <div style="background:rgba(0,0,0,.2);border:1px solid var(--border);border-radius:5px;padding:7px;font-size:8px;font-family:'JetBrains Mono',monospace;color:var(--blue);word-break:break-all">0xc2be29...ef968<br/>Deploy: ElligentPool.sol</div>
+            <div style="background:rgba(0,0,0,.2);border:1px solid var(--border);border-radius:5px;padding:7px;font-size:8px;font-family:'JetBrains Mono',monospace;color:var(--blue);word-break:break-all">0x18076d992005186AeB13AC5270CaD6E27DB95247<br/>Deploy: ElligentPool.sol</div>
             <div style="font-size:8px;color:var(--muted2);margin-top:5px">Fee: 0.1% &nbsp;·&nbsp; Chain: Arc Testnet (5042002)</div>
-            <a href="https://testnet.arcscan.app" target="_blank" style="font-size:8px;color:var(--blue);text-decoration:none;display:flex;align-items:center;gap:3px;margin-top:5px"><i class="ti ti-external-link" style="font-size:9px"></i>View on ArcScan</a>
+            <a href="https://testnet.arcscan.app/address/0x18076d992005186AeB13AC5270CaD6E27DB95247" target="_blank" style="font-size:8px;color:var(--blue);text-decoration:none;display:flex;align-items:center;gap:3px;margin-top:5px"><i class="ti ti-external-link" style="font-size:9px"></i>View on ArcScan</a>
           </div>
 
           <!-- TX Log -->
@@ -2069,9 +2062,9 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
         </div>
         <div class="card">
           <div class="ch"><i class="ti ti-apps" style="font-size:13px;color:var(--purple)"></i><span class="ct">App Kit</span></div>
+          <!-- Kit Key hidden — value injected server-side, not shown in UI -->
+          <input id="s-kitkey" type="hidden" value="__KIT_KEY_PLACEHOLDER__"/>
           <div class="cb" style="display:flex;flex-direction:column;gap:9px">
-            <div><div class="swap-label">Kit Key (Swap — optional)</div><input id="s-kitkey" class="cinput" type="text" placeholder="KIT_KEY:... (optional)" value="__KIT_KEY_PLACEHOLDER__"/></div>
-            <div style="font-size:9px;color:var(--muted2)">Free at <a href="https://console.circle.com" target="_blank" style="color:var(--blue);text-decoration:none">console.circle.com</a></div>
             <div><div class="swap-label">WalletConnect Project ID</div><input id="s-wcid" class="cinput" value="b9d9e4c5e8f14a3b6d2e1f0a9c8b7d6e"/></div>
             <div style="display:flex;justify-content:space-between;align-items:center">
               <div><div style="font-size:10.5px;font-weight:600">Auto Bridge</div></div>
@@ -2431,7 +2424,7 @@ const ARC_TESTNET = {
   blockExplorerUrls: ['https://testnet.arcscan.app']
 };
 const USDC_ADDRESS  = '0x3600000000000000000000000000000000000000';
-const EURC_ADDRESS  = '0x3700000000000000000000000000000000000000'; // EURC on Arc Testnet
+const EURC_ADDRESS  = '0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a'; // EURC on Arc Testnet
 const MULTICALL3    = '0xcA11bde05977b3631167028862bE2a173976CA11';
 const USDC_DECIMALS = 6;
 
@@ -2470,6 +2463,10 @@ const POOL_CONTRACT_ABI = [
 
 // Elligente owner wallet (used for platform fees and cross-chain operations)
 const OWNER_WALLET = '0xc2be29e58f05ba8279bd800b8b6a3790233f242695583f61899825ec47cef968';
+// Force the deployed address early so the script picks it up correctly on load
+window.__SWAP_ADDRESS__  = '0x18076d992005186AeB13AC5270CaD6E27DB95247';
+window.__POOL_ADDRESS__  = '0x18076d992005186AeB13AC5270CaD6E27DB95247';
+
 const SWAP_ROUTER_ADDRESS  = window.__SWAP_ADDRESS__  || '0x0000000000000000000000000000000000000001'; // Deploy ElligentSwap.sol
 const POOL_CONTRACT_ADDRESS = window.__POOL_ADDRESS__ || '0x0000000000000000000000000000000000000002'; // Deploy ElligentPool.sol
 
@@ -2892,12 +2889,14 @@ async function connectManualAddress(inputSuffix) {
   let addr = raw;
 
   // Resolve ENS if it looks like one
-  if(raw.endsWith('.eth') && provider) {
+  // ENS is only supported on Ethereum — always use mainnet provider for resolution
+  if(raw.endsWith('.eth')) {
     try {
       toast('Resolving ENS…', 'info');
-      addr = await provider.resolveName(raw);
+      const ensProvider = new ethers.JsonRpcProvider('https://cloudflare-eth.com');
+      addr = await ensProvider.resolveName(raw);
       if(!addr) { toast('ENS name not found', 'error'); return; }
-    } catch { toast('ENS resolution failed', 'error'); return; }
+    } catch { toast('ENS resolution failed — Arc Testnet does not support ENS', 'error'); return; }
   }
 
   if(!/^0x[0-9a-fA-F]{40}$/.test(addr)) {
@@ -3304,12 +3303,15 @@ async function signTx(){
     const total=validRcpts.reduce((s,r)=>s+(parseFloat(r.amount)||0),0);
     if(total<=0){toast('Total must be > 0','error');return;}
 
-    // Resolve ENS names if any
-    const prov = provider || new ethers.JsonRpcProvider('https://rpc.testnet.arc.network');
+    // Resolve ENS names — must use Ethereum mainnet provider, NOT Arc Testnet
+    // Arc Testnet (chainId 5042002) does not support ENS
+    const ensProvider = new ethers.JsonRpcProvider('https://cloudflare-eth.com');
     for(const r of validRcpts){
       if(isEns(r.addr)){
-        try{ r._resolved = await prov.resolveName(r.addr); }
-        catch{ toast('ENS resolution failed for '+r.addr,'error'); return; }
+        try{
+          r._resolved = await ensProvider.resolveName(r.addr);
+          if(!r._resolved){ toast('ENS name not found: '+r.addr,'error'); return; }
+        } catch{ toast('ENS resolution failed for '+r.addr,'error'); return; }
       } else { r._resolved = r.addr; }
     }
 
@@ -3369,15 +3371,16 @@ async function signTx(){
             await batchTx.wait();
             toast(`✓ Batch of ${usdcRcpts.length} USDC payments confirmed`,'success');
           } else {
-            // Fallback: multi-transfer via loop (no contract deployed)
-            const approveTx = await usdcContract.approve(walletAddress, toUsdc((batchTotal*1.05).toFixed(6)));
-            await approveTx.wait().catch(()=>{});
+            // Fallback: send one ERC-20 transfer per recipient (no batch contract)
+            // No approve needed — ERC-20 transfer() sends directly from signer
+            toast(`Sending ${usdcRcpts.length} individual USDC transfer${usdcRcpts.length>1?'s':''} — please approve each in your wallet...`,'info');
             for(const [i, r] of usdcRcpts.entries()) {
               const toAddr = r._resolved || r.addr;
+              toast(`[${i+1}/${usdcRcpts.length}] Sending ${r.amount} USDC → ${shortAddr(toAddr)}...`,'info');
               const tx = await usdcContract.transfer(toAddr, toUsdc(r.amount));
               lastHash = tx.hash;
               await tx.wait();
-              toast(`✓ [${i+1}/${usdcRcpts.length}] ${r.amount} USDC → ${shortAddr(toAddr)}`,'success');
+              toast(`✓ [${i+1}/${usdcRcpts.length}] ${r.amount} USDC → ${shortAddr(toAddr)} confirmed`,'success');
             }
           }
         }
@@ -3398,12 +3401,15 @@ async function signTx(){
             await batchTx.wait();
             toast(`✓ Batch of ${eurcRcpts.length} EURC payments confirmed`,'success');
           } else {
+            // Fallback: send one ERC-20 transfer per EURC recipient
+            toast(`Sending ${eurcRcpts.length} individual EURC transfer${eurcRcpts.length>1?'s':''} — please approve each in your wallet...`,'info');
             for(const [i, r] of eurcRcpts.entries()) {
               const toAddr = r._resolved || r.addr;
+              toast(`[${i+1}/${eurcRcpts.length}] Sending ${r.amount} EURC → ${shortAddr(toAddr)}...`,'info');
               const tx = await eurcContract.transfer(toAddr, toUsdc(r.amount));
               lastHash = lastHash || tx.hash;
               await tx.wait();
-              toast(`✓ [${i+1}/${eurcRcpts.length}] ${r.amount} EURC → ${shortAddr(toAddr)}`,'success');
+              toast(`✓ [${i+1}/${eurcRcpts.length}] ${r.amount} EURC → ${shortAddr(toAddr)} confirmed`,'success');
             }
           }
         }
@@ -3488,14 +3494,58 @@ function finalizeBatch(txHash,blockNumber,isDemo,totalAmt,rcptCount){
   // Persist to txHistory and queue
   if(!isDemo) syncHistoryFromBatch(id, total, count, txHash, blockNumber);
 }
-function executeInParts(){
+async function executeInParts(){
   if(!recipients.length){toast('No recipients','error');return;}
   if(!walletAddress){toast('Connect wallet first','error');return;}
-  const s=parseInt(prompt('Part size (recipients per tx):','10'));
+  const s=parseInt(prompt('How many recipients per transaction?','10'));
   if(!s||s<1)return;
-  const parts=Math.ceil(recipients.length/s);
-  toast(`Executing ${parts} transactions of ${s} recipients each`,'info');
-  openModal();
+
+  const validRcpts = recipients.filter(r=>(isAddr(r.addr)||isEns(r.addr))&&parseFloat(r.amount)>0);
+  if(!validRcpts.length){toast('No valid recipients','error');return;}
+
+  const parts=Math.ceil(validRcpts.length/s);
+  if(!confirm(`This will send ${parts} separate transaction${parts>1?'s':''} of up to ${s} recipients each.\n\nTotal recipients: ${validRcpts.length}\n\nProceed?`))return;
+
+  toast(`Starting ${parts} batch transaction${parts>1?'s':''}...`,'info');
+
+  // Save original recipients, swap in slices, execute each, restore
+  const originalRecipients = [...recipients];
+  let successParts = 0;
+
+  for(let i=0;i<parts;i++){
+    const slice = validRcpts.slice(i*s, (i+1)*s);
+    toast(`Sending part ${i+1}/${parts} — ${slice.length} recipient${slice.length>1?'s':''}...`,'info');
+
+    // Swap recipients array to just this slice
+    recipients.length=0;
+    slice.forEach(r=>recipients.push(r));
+
+    try{
+      // Open modal and trigger the send flow
+      const dn=document.getElementById('m-demo-notice');
+      if(dn) dn.style.display='none';
+      updateStats();
+      document.getElementById('modal').classList.add('open');
+
+      // Wait for user to click "Approve & Send" by watching modal close
+      // Since signTx() is async and closes modal, we call it directly
+      await signTx();
+      successParts++;
+    }catch(e){
+      toast(`Part ${i+1} failed: ${e.shortMessage||e.message}`,'error');
+      // Restore and stop
+      recipients.length=0;
+      originalRecipients.forEach(r=>recipients.push(r));
+      renderTable();
+      return;
+    }
+  }
+
+  // Restore original recipients list
+  recipients.length=0;
+  originalRecipients.forEach(r=>recipients.push(r));
+  renderTable();
+  toast(`✓ All ${parts} parts complete — ${validRcpts.length} recipients paid`,'success');
 }
 
 // ══════════════════════════════════════════════════════════
@@ -3816,7 +3866,8 @@ async function executeBridge(){
     const usdcBridge = new ethers.Contract(USDC_ADDRESS, USDC_ABI, signer);
     const bridgeDeployed = window.__BRIDGE_ADDRESS__
       && window.__BRIDGE_ADDRESS__ !== '0x0000000000000000000000000000000000000000';
-    const approveTarget = bridgeDeployed ? window.__BRIDGE_ADDRESS__ : OWNER_WALLET;
+    // Use connected wallet as a safe testnet fallback instead of the 66-char OWNER_WALLET
+    const approveTarget = bridgeDeployed ? window.__BRIDGE_ADDRESS__ : walletAddress;
     const approveTx = await usdcBridge.approve(approveTarget, toUsdc((amt*1.005).toFixed(6)));
     approveHash = approveTx.hash;
     renderBridgeStep(0,'active',approveHash);
@@ -3832,14 +3883,19 @@ async function executeBridge(){
         'function addressToBytes32(address) pure returns (bytes32)',
       ];
       const bridgeCtr = new ethers.Contract(window.__BRIDGE_ADDRESS__, bridgeAbi, signer);
-      const dest32    = await bridgeCtr.addressToBytes32(toChain.sampleAddr || OWNER_WALLET);
+      // Use connected wallet as recipient on destination chain — never pass OWNER_WALLET (malformed)
+      const destAddr  = toChain.sampleAddr && /^0x[0-9a-fA-F]{40}$/.test(toChain.sampleAddr)
+                        ? toChain.sampleAddr : walletAddress;
+      const dest32    = await bridgeCtr.addressToBytes32(destAddr);
       const burnTx    = await bridgeCtr.bridge(USDC_ADDRESS, toUsdc(amt.toFixed(6)), toChain.cctpDomain ?? 0, dest32);
       burnHash = burnTx.hash;
       renderBridgeStep(1,'active',burnHash);
       await burnTx.wait();
     } else {
-      // Bridge not deployed: do a real transfer to OWNER as testnet proxy
-      const transferTx = await usdcBridge.transfer(OWNER_WALLET, toUsdc(amt.toFixed(6)));
+      // Bridge not deployed: send USDC to caller's own wallet as testnet proxy
+      // (avoids using the malformed OWNER_WALLET constant which triggers ENS lookup)
+      const safeTarget = walletAddress; // send back to sender as testnet no-op
+      const transferTx = await usdcBridge.transfer(safeTarget, toUsdc(amt.toFixed(6)));
       burnHash = transferTx.hash;
       renderBridgeStep(1,'active',burnHash);
       await transferTx.wait();
@@ -4804,13 +4860,13 @@ function poolUpdateUI() {
     const posEurc = pool.reserveEurc * share;
     const posVal  = posUsdc * USDC_RATE_P + posEurc * EURC_RATE_P;
     const feesVal = (pool.feesUsdc + pool.feesEurc * EURC_RATE_P) * share;
-    document.getElementById("pi-lp").textContent    = pool.userLp.toFixed(4) + " LP";
+    document.getElementById("pi-lp").textContent    = pool.userLp.toFixed(8) + " LP";
     document.getElementById("pi-usdc").textContent  = posUsdc.toFixed(2);
     document.getElementById("pi-eurc").textContent  = posEurc.toFixed(2);
     document.getElementById("pi-share").textContent = (share * 100).toFixed(4) + "%";
     document.getElementById("pi-value").textContent = "$" + posVal.toFixed(2);
     document.getElementById("pi-fees").textContent  = "$" + feesVal.toFixed(4);
-    document.getElementById("pool-lp-bal-val").textContent = pool.userLp.toFixed(4);
+    document.getElementById("pool-lp-bal-val").textContent = pool.userLp.toFixed(8);
   } else {
     document.getElementById("pool-pos-empty").style.display = "";
     document.getElementById("pool-pos-data").style.display  = "none";
@@ -4902,52 +4958,62 @@ async function executeAddLiquidity() {
     { label:"Confirm",       detail:"Waiting for block confirmation"          },
   ];
 
-  // Attempt real pool contract interaction; fall back to local simulation if not deployed
-  for (let i = 0; i < steps.length; i++) {
-    const el = document.createElement("div");
-    el.className = "step-item";
-    el.innerHTML = `<div class="step-ico" style="background:rgba(45,212,191,.15);color:var(--teal)">…</div><div><div style="font-size:10px;font-weight:600">${steps[i].label}</div><div style="font-size:8.5px;color:var(--muted2)">${steps[i].detail}</div></div>`;
-    stepList.appendChild(el);
+  try {
+    // Attempt real pool contract interaction; fall back to local simulation if not deployed
+    for (let i = 0; i < steps.length; i++) {
+      const el = document.createElement("div");
+      el.className = "step-item";
+      el.innerHTML = `<div class="step-ico" style="background:rgba(45,212,191,.15);color:var(--teal)">…</div><div><div style="font-size:10px;font-weight:600">${steps[i].label}</div><div style="font-size:8.5px;color:var(--muted2)">${steps[i].detail}</div></div>`;
+      stepList.appendChild(el);
 
-    if (signer) {
-      try {
-        if (i === 0) {
-          const uc = new ethers.Contract(USDC_ADDRESS, USDC_ABI, signer);
-          const tx = await uc.approve(POOL_CONTRACT_ADDRESS, toUsdc((uAmt * 1.01).toFixed(6)));
-          await tx.wait();
-        } else if (i === 1) {
-          const ec = new ethers.Contract(EURC_ADDRESS, USDC_ABI, signer);
-          const tx = await ec.approve(POOL_CONTRACT_ADDRESS, toUsdc((eAmt * 1.01).toFixed(6)));
-          await tx.wait();
-        } else if (i === 2) {
-          try {
+      if (signer) {
+        try {
+          if (i === 0) {
+            const uc = new ethers.Contract(USDC_ADDRESS, USDC_ABI, signer);
+            const tx = await uc.approve(POOL_CONTRACT_ADDRESS, toUsdc((uAmt * 1.01).toFixed(6)));
+            await tx.wait();
+          } else if (i === 1) {
+            const ec = new ethers.Contract(EURC_ADDRESS, USDC_ABI, signer);
+            const tx = await ec.approve(POOL_CONTRACT_ADDRESS, toUsdc((eAmt * 1.01).toFixed(6)));
+            await tx.wait();
+          } else if (i === 2) {
             const pc = new ethers.Contract(POOL_CONTRACT_ADDRESS, POOL_CONTRACT_ABI, signer);
             const tx = await pc.addLiquidity(toUsdc(uAmt.toFixed(6)), toUsdc(eAmt.toFixed(6)));
             await tx.wait();
-          } catch { await new Promise(r => setTimeout(r, 900)); }
-        } else { await new Promise(r => setTimeout(r, 600)); }
-      } catch { await new Promise(r => setTimeout(r, 900 + Math.random()*600)); }
-    } else {
-      await new Promise(r => setTimeout(r, 900 + Math.random()*600));
+          } else {
+            await new Promise(r => setTimeout(r, 600));
+          }
+        } catch (err) {
+          console.error("Step failed:", err);
+          throw err;
+        }
+      } else {
+        await new Promise(r => setTimeout(r, 900 + Math.random()*600));
+      }
+
+      el.querySelector(".step-ico").style.background = "rgba(34,197,94,.15)";
+      el.querySelector(".step-ico").style.color      = "var(--green)";
+      el.querySelector(".step-ico").textContent      = "✓";
     }
 
-    el.querySelector(".step-ico").style.background = "rgba(34,197,94,.15)";
-    el.querySelector(".step-ico").style.color      = "var(--green)";
-    el.querySelector(".step-ico").textContent      = "✓";
+    const lpMint = pool.lpSupply > 0 ? (uAmt / pool.reserveUsdc) * pool.lpSupply : Math.sqrt(uAmt * eAmt);
+    pool.reserveUsdc += uAmt;
+    pool.reserveEurc += eAmt;
+    pool.lpSupply    += lpMint;
+    pool.userLp      += lpMint;
+
+    document.getElementById("pool-step-status").textContent = "Complete ✓";
+    toast(`Added ${uAmt.toFixed(2)} USDC + ${eAmt.toFixed(2)} EURC → ${lpMint.toFixed(4)} LP minted`, "success");
+    poolAddTxLog(`+${uAmt.toFixed(2)} USDC / +${eAmt.toFixed(2)} EURC → ${lpMint.toFixed(4)} LP`, "add");
+    await loadPoolFromChain(); // reload real reserves from contract
+    if (signer) refreshBalance().catch(()=>{});
+  } catch (error) {
+    document.getElementById("pool-step-status").textContent = "Failed";
+    document.getElementById("pool-step-status").style.color = "var(--red)";
+    toast(error.code === 4001 || (error.message||'').includes('rejected') ? 'Transaction rejected' : 'Error adding liquidity: ' + (error.shortMessage || error.message), 'error');
+  } finally {
+    btn.disabled = false; btn.innerHTML = "<i class=\"ti ti-droplet\"></i>Add Liquidity";
   }
-
-  const lpMint = pool.lpSupply > 0 ? (uAmt / pool.reserveUsdc) * pool.lpSupply : Math.sqrt(uAmt * eAmt);
-  pool.reserveUsdc += uAmt;
-  pool.reserveEurc += eAmt;
-  pool.lpSupply    += lpMint;
-  pool.userLp      += lpMint;
-
-  document.getElementById("pool-step-status").textContent = "Complete ✓";
-  btn.disabled = false; btn.innerHTML = "<i class=\"ti ti-droplet\"></i>Add Liquidity";
-  toast(`Added ${uAmt.toFixed(2)} USDC + ${eAmt.toFixed(2)} EURC → ${lpMint.toFixed(4)} LP minted`, "success");
-  poolAddTxLog(`+${uAmt.toFixed(2)} USDC / +${eAmt.toFixed(2)} EURC → ${lpMint.toFixed(4)} LP`, "add");
-  await loadPoolFromChain(); // reload real reserves from contract
-  if (signer) refreshBalance().catch(()=>{});
 }
 
 async function executeRemoveLiquidity() {
@@ -5006,8 +5072,8 @@ async function executeRemoveLiquidity() {
     // Paste the deployed.json values here:
     const DEPLOYED = {
       // ElligentBatch:  '0x...', // paste address after deploy
-      // ElligentPool:   '0x...', // paste address after deploy
-      // ElligentSwap:   '0x...', // paste address after deploy
+      ElligentPool: '0x18076d992005186AeB13AC5270CaD6E27DB95247',
+      ElligentSwap: '0x18076d992005186AeB13AC5270CaD6E27DB95247',
       // ElligentBridge: '0x...', // paste address after deploy
     };
     if (DEPLOYED.ElligentPool)   window.__POOL_ADDRESS__   = DEPLOYED.ElligentPool;
@@ -5191,7 +5257,7 @@ async function xcExecuteSend() {
     }
     if (hash) {
       const sub = el.querySelector(".xc-step-sub");
-      if (sub) sub.innerHTML = `Tx: <a href="https://explorer.testnet.arc.network/tx/${hash}" target="_blank" style="color:var(--teal)">${hash.slice(0,14)}…</a>`;
+      if (sub) sub.innerHTML = `Tx: <a href="https://testnet.arcscan.app/tx/${hash}" target="_blank" style="color:var(--teal)">${hash.slice(0,14)}…</a>`;
     }
   }
 
@@ -5213,7 +5279,14 @@ async function xcExecuteSend() {
   xcSetStep(el0, 'active', null);
   let approveHash = null;
   try {
-    const approveTx = await tokenContract.approve(OWNER_WALLET, amtBig);
+    // Determine the spender: bridge contract if deployed, otherwise the recipient
+    // NEVER use OWNER_WALLET — it is a 32-byte hash, not a valid EVM address,
+    // which causes ethers v6 to attempt ENS resolution and fail on Arc Testnet
+    const bridgeDeployedCheck = window.__BRIDGE_ADDRESS__
+      && /^0x[0-9a-fA-F]{40}$/.test(window.__BRIDGE_ADDRESS__)
+      && window.__BRIDGE_ADDRESS__ !== '0x0000000000000000000000000000000000000000';
+    const approveTarget = bridgeDeployedCheck ? window.__BRIDGE_ADDRESS__ : recipient;
+    const approveTx = await tokenContract.approve(approveTarget, amtBig);
     approveHash = approveTx.hash;
     xcSetStep(el0, 'active', approveHash);
     await approveTx.wait();
