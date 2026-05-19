@@ -2533,6 +2533,13 @@ function showPage(id) {
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
   const navEl = document.getElementById('nav-'+id);
   if(navEl) navEl.classList.add('active');
+  // Refresh pool state when navigating to Pool or Swap pages
+  if (id === 'pool' || id === 'swap') {
+    loadPoolFromChain().then(() => {
+      if (id === 'swap') updateSwapRate();
+      if (id === 'pool') poolSyncAdd('usdc');
+    });
+  }
 }
 
 // ══════════════════════════════════════════════════════════
@@ -2673,6 +2680,7 @@ async function finalizeConnection(raw, walletType) {
   if(sbScoreChip) { sbScoreChip.style.display = ''; document.getElementById('sb-score').textContent = 'Arc Testnet'; }
 
   await refreshBalance();
+  loadPoolFromChain(); // update user LP balance now that wallet is connected
   closeWalletModal();
   toast(`✓ ${badges[walletType]||walletType}: ${short} | Arc Testnet`, 'success');
   return true;
@@ -3587,46 +3595,88 @@ async function updateSwapRate(){
   if (swapRateTimer) clearTimeout(swapRateTimer);
 
   if (amtIn <= 0) {
-    outEl.value = '';
-    document.getElementById('swap-usd-in').textContent  = '';
-    document.getElementById('swap-usd-out').textContent = '';
-    rateEl.textContent = 'Enter amount to see rate';
+    if (outEl) outEl.value = '';
+    const inEl  = document.getElementById('swap-usd-in');
+    const outUsd = document.getElementById('swap-usd-out');
+    if (inEl)  inEl.textContent  = '';
+    if (outUsd) outUsd.textContent = '';
+    // Show pool rate even with no amount
+    if (rateEl) {
+      if (!pool.loaded) {
+        rateEl.textContent = 'Loading pool rate...';
+      } else if (pool.reserveUsdc > 0 && pool.reserveEurc > 0) {
+        const r = tIn.sym === 'USDC'
+          ? (pool.reserveEurc * (1 - POOL_FEE)) / pool.reserveUsdc
+          : (pool.reserveUsdc * (1 - POOL_FEE)) / pool.reserveEurc;
+        rateEl.textContent = `1 ${tIn.sym} ≈ ${r.toFixed(6)} ${tOut.sym} · 0.1% fee`;
+      } else {
+        rateEl.textContent = 'Pool empty — add liquidity first';
+      }
+    }
     return;
   }
 
-  rateEl.textContent = 'Fetching rate from pool...';
-  outEl.value = '';
+  if (rateEl) rateEl.textContent = 'Fetching rate from pool...';
+  if (outEl) outEl.value = '';
 
   swapRateTimer = setTimeout(async () => {
     try {
-      if (provider && pool.reserveUsdc > 0 && pool.reserveEurc > 0) {
-        // Query real pool contract for quote
-        const poolContract = new ethers.Contract(POOL_CONTRACT_ADDRESS, POOL_CONTRACT_ABI, provider);
+      // Ensure pool is loaded
+      if (!pool.loaded) {
+        await loadPoolFromChain();
+      }
+
+      if (pool.reserveUsdc <= 0 || pool.reserveEurc <= 0) {
+        if (rateEl) rateEl.textContent = 'Pool has no liquidity — add liquidity first';
+        const inUsd  = document.getElementById('swap-usd-in');
+        const outUsd = document.getElementById('swap-usd-out');
+        if (inUsd)  inUsd.textContent  = '';
+        if (outUsd) outUsd.textContent = '';
+        return;
+      }
+
+      let amtOut = 0;
+      let source = 'live pool';
+
+      try {
+        // Try on-chain quote first
+        const readProvider = provider || new ethers.JsonRpcProvider('https://rpc.testnet.arc.network');
+        const poolContract = new ethers.Contract(POOL_CONTRACT_ADDRESS, POOL_CONTRACT_ABI, readProvider);
         const tokenInAddr  = tIn.sym === 'USDC' ? USDC_ADDRESS : EURC_ADDRESS;
         const amtInBig     = toUsdc(amtIn.toFixed(6));
         const amtOutBig    = await poolContract.getAmountOut(amtInBig, tokenInAddr);
-        const amtOut       = parseFloat(ethers.formatUnits(amtOutBig, 6));
-        const rate         = amtOut / amtIn;
-        outEl.value = amtOut.toFixed(6);
-        document.getElementById('swap-usd-in').textContent  = `≈ $${amtIn.toFixed(2)} USD`;
-        document.getElementById('swap-usd-out').textContent = `≈ $${amtOut.toFixed(2)} USD`;
-        rateEl.textContent = `1 ${tIn.sym} ≈ ${rate.toFixed(6)} ${tOut.sym} (live pool rate)`;
-      } else if (pool.reserveUsdc === 0) {
-        outEl.value = '';
-        rateEl.textContent = 'Pool has no liquidity — add liquidity first';
-        document.getElementById('swap-usd-in').textContent  = '';
-        document.getElementById('swap-usd-out').textContent = '';
-      } else {
-        // Fallback: 1:1 approximate when provider not ready
-        const amtOut = amtIn * 0.9985; // 0.15% fee
-        outEl.value = amtOut.toFixed(6);
-        rateEl.textContent = `1 ${tIn.sym} ≈ ${(0.9985).toFixed(4)} ${tOut.sym} (estimated)`;
+        amtOut = parseFloat(ethers.formatUnits(amtOutBig, 6));
+      } catch (contractErr) {
+        // Fallback: calculate locally using x*y=k constant product formula
+        // amountOut = (reserveOut * amountIn * (1 - fee)) / (reserveIn + amountIn * (1 - fee))
+        const rIn   = tIn.sym  === 'USDC' ? pool.reserveUsdc : pool.reserveEurc;
+        const rOut  = tOut.sym === 'USDC' ? pool.reserveUsdc : pool.reserveEurc;
+        const feeAdj = amtIn * (1 - POOL_FEE);
+        amtOut  = (rOut * feeAdj) / (rIn + feeAdj);
+        source  = 'local AMM calc';
+        console.warn('Contract getAmountOut failed, using local AMM:', contractErr.message);
+      }
+
+      const rate = amtOut / amtIn;
+      const priceImpact = tIn.sym === 'USDC'
+        ? (amtIn / pool.reserveUsdc * 100)
+        : (amtIn / pool.reserveEurc * 100);
+
+      if (outEl) outEl.value = amtOut.toFixed(6);
+      const inUsd  = document.getElementById('swap-usd-in');
+      const outUsd = document.getElementById('swap-usd-out');
+      if (inUsd)  inUsd.textContent  = `≈ $${(amtIn  * (tIn.sym  === 'USDC' ? USDC_RATE_P : EURC_RATE_P)).toFixed(2)} USD`;
+      if (outUsd) outUsd.textContent = `≈ $${(amtOut * (tOut.sym === 'USDC' ? USDC_RATE_P : EURC_RATE_P)).toFixed(2)} USD`;
+      if (rateEl) {
+        const impactStr = priceImpact > 0.01 ? ` · Impact: ${priceImpact.toFixed(3)}%` : '';
+        rateEl.textContent = `1 ${tIn.sym} ≈ ${rate.toFixed(6)} ${tOut.sym} (${source}${impactStr})`;
       }
     } catch(e) {
-      rateEl.textContent = 'Could not fetch pool rate';
-      outEl.value = '';
+      console.error('updateSwapRate error:', e);
+      if (rateEl) rateEl.textContent = 'Error fetching rate — check console';
+      if (outEl) outEl.value = '';
     }
-  }, 400); // debounce 400ms
+  }, 350); // debounce 350ms
 }
 
 async function executeSwap(){
@@ -4817,59 +4867,112 @@ let pool = {
 };
 
 async function loadPoolFromChain() {
-  if (!provider) return;
+  // Use a dedicated read-only RPC provider so this works before wallet connects
+  const readProvider = provider || new ethers.JsonRpcProvider('https://rpc.testnet.arc.network');
   try {
-    const poolContract = new ethers.Contract(POOL_CONTRACT_ADDRESS, POOL_CONTRACT_ABI, provider);
-    const [rU, rE] = await poolContract.getReserves();
+    const poolContract = new ethers.Contract(POOL_CONTRACT_ADDRESS, POOL_CONTRACT_ABI, readProvider);
+    const [[rU, rE], supply] = await Promise.all([
+      poolContract.getReserves(),
+      poolContract.totalSupply(),
+    ]);
     pool.reserveUsdc = parseFloat(ethers.formatUnits(rU, 6));
     pool.reserveEurc = parseFloat(ethers.formatUnits(rE, 6));
-    pool.lpSupply    = parseFloat(ethers.formatUnits(await poolContract.totalSupply(), 18));
+    pool.lpSupply    = parseFloat(ethers.formatUnits(supply, 18));
     if (walletAddress) {
-      pool.userLp    = parseFloat(ethers.formatUnits(await poolContract.balanceOf(walletAddress), 18));
+      pool.userLp = parseFloat(ethers.formatUnits(await poolContract.balanceOf(walletAddress), 18));
+    } else {
+      pool.userLp = 0;
     }
     pool.loaded = true;
+    pool.error  = null;
   } catch(e) {
-    // Pool not deployed or empty — keep zeros, show empty state
-    pool.reserveUsdc = 0; pool.reserveEurc = 0;
-    pool.lpSupply    = 0; pool.userLp      = 0;
-    pool.loaded      = true;
+    console.warn('loadPoolFromChain error:', e.message || e);
+    // Keep previous valid data if available; only reset on first load failure
+    if (!pool.loaded) {
+      pool.reserveUsdc = 0; pool.reserveEurc = 0;
+      pool.lpSupply    = 0; pool.userLp      = 0;
+    }
+    pool.loaded = true;
+    pool.error  = e.message || 'Failed to load pool';
   }
   poolUpdateUI();
+  updateSwapRate(); // always refresh swap quote after reserves update
 }
 
 function poolUpdateUI() {
-  const tvl = (pool.reserveUsdc * USDC_RATE_P) + (pool.reserveEurc * EURC_RATE_P);
+  const tvl     = (pool.reserveUsdc * USDC_RATE_P) + (pool.reserveEurc * EURC_RATE_P);
   const usdcPct = tvl > 0 ? (pool.reserveUsdc * USDC_RATE_P / tvl * 100) : 50;
   const eurcPct = 100 - usdcPct;
-  const fmt = n => n.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
+  const fmt     = n => n.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
 
-  document.getElementById("pool-tvl").textContent    = !pool.loaded ? "Loading..." : tvl > 0 ? "$" + fmt(tvl) : "$0.00";
-  document.getElementById("pool-ratio").textContent  = pool.loaded && tvl > 0 ? Math.round(usdcPct) + " / " + Math.round(eurcPct) : "— / —";
-  document.getElementById("pool-vol24").textContent  = pool.loaded && tvl > 0 ? "$" + fmt(tvl * 0.01) : "—";
-  document.getElementById("reserve-usdc").textContent = pool.loaded && pool.reserveUsdc > 0 ? fmt(pool.reserveUsdc) : "—";
-  document.getElementById("reserve-eurc").textContent = pool.loaded && pool.reserveEurc > 0 ? fmt(pool.reserveEurc) : "—";
-  document.getElementById("reserve-bar-usdc").style.width = usdcPct + "%";
-  document.getElementById("reserve-bar-eurc").style.width = eurcPct + "%";
+  // Status label
+  const statusLabel = !pool.loaded ? "Loading..." : pool.error ? "Error" : null;
 
+  // Header stats
+  const tvlEl = document.getElementById("pool-tvl");
+  if (tvlEl) tvlEl.textContent = statusLabel || (tvl > 0 ? "$" + fmt(tvl) : "$0.00");
+
+  const ratioEl = document.getElementById("pool-ratio");
+  if (ratioEl) ratioEl.textContent = pool.loaded && tvl > 0
+    ? Math.round(usdcPct) + " / " + Math.round(eurcPct)
+    : (pool.loaded ? "Empty" : "— / —");
+
+  const vol24El = document.getElementById("pool-vol24");
+  if (vol24El) vol24El.textContent = pool.loaded && tvl > 0 ? "$" + fmt(tvl * 0.012) : (pool.loaded ? "$0.00" : "—");
+
+  // APR — calculate from 0.1% fee on estimated volume (tvl * daily turnover assumption)
+  const aprEl = document.getElementById("pool-apr");
+  if (aprEl) {
+    const apr = pool.loaded && tvl > 0 ? ((tvl * 0.012 * 365 * POOL_FEE) / tvl * 100).toFixed(2) : "0.30";
+    aprEl.textContent = apr + "%";
+  }
+
+  // Reserve bars
+  const rU = document.getElementById("reserve-usdc");
+  const rE = document.getElementById("reserve-eurc");
+  if (rU) rU.textContent = pool.loaded ? (pool.reserveUsdc > 0 ? fmt(pool.reserveUsdc) : "0.00") : "…";
+  if (rE) rE.textContent = pool.loaded ? (pool.reserveEurc > 0 ? fmt(pool.reserveEurc) : "0.00") : "…";
+  const bU = document.getElementById("reserve-bar-usdc");
+  const bE = document.getElementById("reserve-bar-eurc");
+  if (bU) bU.style.width = usdcPct + "%";
+  if (bE) bE.style.width = eurcPct + "%";
+
+  // Pool rate display in the Add Liquidity form
+  const prEl = document.getElementById("swap-pool-rate-display");
+  if (prEl) {
+    if (pool.reserveUsdc > 0 && pool.reserveEurc > 0) {
+      const rate = pool.reserveEurc / pool.reserveUsdc;
+      prEl.textContent = "1 USDC = " + rate.toFixed(6) + " EURC";
+    } else {
+      prEl.textContent = pool.loaded ? "No liquidity" : "Loading...";
+    }
+  }
+
+  // User position
   if (walletAddress) {
     const hasPosition = pool.userLp > 0;
-    document.getElementById("pool-pos-empty").style.display = hasPosition ? "none" : "";
-    document.getElementById("pool-pos-data").style.display  = hasPosition ? "" : "none";
+    const emptyEl = document.getElementById("pool-pos-empty");
+    const dataEl  = document.getElementById("pool-pos-data");
+    if (emptyEl) emptyEl.style.display = hasPosition ? "none" : "";
+    if (dataEl)  dataEl.style.display  = hasPosition ? "" : "none";
     const share   = pool.lpSupply > 0 ? pool.userLp / pool.lpSupply : 0;
     const posUsdc = pool.reserveUsdc * share;
     const posEurc = pool.reserveEurc * share;
     const posVal  = posUsdc * USDC_RATE_P + posEurc * EURC_RATE_P;
     const feesVal = (pool.feesUsdc + pool.feesEurc * EURC_RATE_P) * share;
-    document.getElementById("pi-lp").textContent    = pool.userLp.toFixed(8) + " LP";
-    document.getElementById("pi-usdc").textContent  = posUsdc.toFixed(2);
-    document.getElementById("pi-eurc").textContent  = posEurc.toFixed(2);
-    document.getElementById("pi-share").textContent = (share * 100).toFixed(4) + "%";
-    document.getElementById("pi-value").textContent = "$" + posVal.toFixed(2);
-    document.getElementById("pi-fees").textContent  = "$" + feesVal.toFixed(4);
-    document.getElementById("pool-lp-bal-val").textContent = pool.userLp.toFixed(8);
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+    set("pi-lp",    pool.userLp.toFixed(8) + " LP");
+    set("pi-usdc",  posUsdc.toFixed(4));
+    set("pi-eurc",  posEurc.toFixed(4));
+    set("pi-share", (share * 100).toFixed(4) + "%");
+    set("pi-value", "$" + posVal.toFixed(2));
+    set("pi-fees",  "$" + feesVal.toFixed(4));
+    set("pool-lp-bal-val", pool.userLp.toFixed(8));
   } else {
-    document.getElementById("pool-pos-empty").style.display = "";
-    document.getElementById("pool-pos-data").style.display  = "none";
+    const emptyEl = document.getElementById("pool-pos-empty");
+    const dataEl  = document.getElementById("pool-pos-data");
+    if (emptyEl) emptyEl.style.display = "";
+    if (dataEl)  dataEl.style.display  = "none";
   }
 }
 
@@ -4891,12 +4994,22 @@ function poolSyncAdd(changed) {
     document.getElementById("pool-add-eurc-usd").textContent = "≈ $" + (e * EURC_RATE_P).toFixed(2) + " USD";
   }
   const u = parseFloat(document.getElementById("pool-add-usdc").value) || 0;
-  const lpMint = pool.lpSupply > 0 ? (u / pool.reserveUsdc) * pool.lpSupply : Math.sqrt(u * u * rate);
-  const tvl = (pool.reserveUsdc * USDC_RATE_P) + (pool.reserveEurc * EURC_RATE_P);
-  const addVal = u * USDC_RATE_P * 2;
+  const e = parseFloat(document.getElementById("pool-add-eurc").value) || 0;
+  // LP mint: proportional to existing supply, or geometric mean for first deposit
+  const lpMint = pool.lpSupply > 0 && pool.reserveUsdc > 0
+    ? Math.min((u / pool.reserveUsdc) * pool.lpSupply, (e / pool.reserveEurc) * pool.lpSupply)
+    : Math.sqrt(u * e);
+  const tvl    = (pool.reserveUsdc * USDC_RATE_P) + (pool.reserveEurc * EURC_RATE_P);
+  const addVal = (u * USDC_RATE_P) + (e * EURC_RATE_P);
   const sharePct = tvl > 0 ? (addVal / (tvl + addVal) * 100) : 100;
-  document.getElementById("pool-lp-preview").textContent    = lpMint.toFixed(4) + " LP";
-  document.getElementById("pool-share-preview").textContent = sharePct.toFixed(4) + "%";
+  const lpEl = document.getElementById("pool-lp-preview");
+  const shEl = document.getElementById("pool-share-preview");
+  const prEl = document.getElementById("swap-pool-rate-display");
+  if (lpEl) lpEl.textContent = lpMint > 0 ? lpMint.toFixed(6) + " LP" : "—";
+  if (shEl) shEl.textContent = sharePct.toFixed(4) + "%";
+  if (prEl) prEl.textContent = pool.reserveUsdc > 0 && pool.reserveEurc > 0
+    ? "1 USDC = " + rate.toFixed(6) + " EURC"
+    : "First deposit — set your own ratio";
 }
 
 function poolSyncRemove() {
@@ -5018,6 +5131,7 @@ async function executeAddLiquidity() {
 
 async function executeRemoveLiquidity() {
   if (!walletAddress) { toast("Connect wallet first", "error"); return; }
+  if (!signer)        { toast("Connect a signing wallet to remove liquidity", "warning"); return; }
   const lp = parseFloat(document.getElementById("pool-remove-lp").value) || 0;
   if (lp <= 0) { toast("Enter LP amount to remove", "error"); return; }
   if (lp > pool.userLp + 0.0001) { toast("Insufficient LP balance", "error"); return; }
@@ -5030,39 +5144,58 @@ async function executeRemoveLiquidity() {
   stepsCard.style.display = ""; stepList.innerHTML = "";
   document.getElementById("pool-step-status").textContent = "In Progress";
 
-  const steps = [
-    { label:"Burn LP Tokens",  detail:"Approve LP token burn"         },
-    { label:"Withdraw Assets", detail:"Reclaim USDC & EURC from pool" },
-    { label:"Confirm",         detail:"Waiting for block confirmation" },
-  ];
-
-  for (let i = 0; i < steps.length; i++) {
+  const addStep = (label, detail) => {
     const el = document.createElement("div");
     el.className = "step-item";
-    el.innerHTML = `<div class="step-ico" style="background:rgba(239,68,68,.12);color:var(--red)">…</div><div><div style="font-size:10px;font-weight:600">${steps[i].label}</div><div style="font-size:8.5px;color:var(--muted2)">${steps[i].detail}</div></div>`;
+    el.innerHTML = `<div class="step-ico" style="background:rgba(239,68,68,.12);color:var(--red)">…</div><div><div style="font-size:10px;font-weight:600">${label}</div><div style="font-size:8.5px;color:var(--muted2)">${detail}</div></div>`;
     stepList.appendChild(el);
-    await new Promise(r => setTimeout(r, 800 + Math.random()*500));
-    el.querySelector(".step-ico").style.background = "rgba(34,197,94,.15)";
-    el.querySelector(".step-ico").style.color      = "var(--green)";
-    el.querySelector(".step-ico").textContent      = "✓";
+    return el;
+  };
+  const markStep = (el, ok) => {
+    el.querySelector(".step-ico").style.background = ok ? "rgba(34,197,94,.15)" : "rgba(239,68,68,.15)";
+    el.querySelector(".step-ico").style.color      = ok ? "var(--green)" : "var(--red)";
+    el.querySelector(".step-ico").textContent      = ok ? "✓" : "✗";
+  };
+
+  try {
+    const lpAmtBig = ethers.parseUnits(lp.toFixed(18), 18);
+    const pc = new ethers.Contract(POOL_CONTRACT_ADDRESS, POOL_CONTRACT_ABI, signer);
+
+    // Step 1: Approve pool contract to burn LP tokens
+    const step1 = addStep("Approve LP Burn", "Authorize pool to burn your LP tokens");
+    const approveTx = await pc.approve(POOL_CONTRACT_ADDRESS, lpAmtBig);
+    await approveTx.wait();
+    markStep(step1, true);
+
+    // Step 2: Call removeLiquidity on-chain
+    const step2 = addStep("Remove Liquidity", "Burn LP tokens & receive USDC + EURC");
+    const removeTx = await pc.removeLiquidity(lpAmtBig);
+    await removeTx.wait();
+    markStep(step2, true);
+
+    // Step 3: Confirmed
+    const step3 = addStep("Confirmed", "Transaction mined on Arc Testnet");
+    markStep(step3, true);
+
+    document.getElementById("pool-step-status").textContent = "Complete ✓";
+    btn.disabled = false; btn.innerHTML = "<i class=\"ti ti-trash\"></i>Remove Liquidity";
+    toast(`✓ Removed ${lp.toFixed(4)} LP · tx: ${shortAddr(removeTx.hash)}`, "success");
+    poolAddTxLog(`-${lp.toFixed(4)} LP removed · tx ${shortAddr(removeTx.hash)}`, "remove");
+    document.getElementById("pool-remove-lp").value = "0";
+
+    // Reload real chain state
+    await loadPoolFromChain();
+    poolSyncRemove();
+    if (signer) refreshBalance().catch(()=>{});
+  } catch (error) {
+    document.getElementById("pool-step-status").textContent = "Failed";
+    document.getElementById("pool-step-status").style.color = "var(--red)";
+    const msg = error.code === 4001 || (error.message||'').includes('rejected')
+      ? 'Transaction rejected'
+      : 'Error removing liquidity: ' + (error.shortMessage || error.message);
+    toast(msg, 'error');
+    btn.disabled = false; btn.innerHTML = "<i class=\"ti ti-trash\"></i>Remove Liquidity";
   }
-
-  const share  = lp / pool.lpSupply;
-  const uOut   = pool.reserveUsdc * share;
-  const eOut   = pool.reserveEurc * share;
-  pool.reserveUsdc = Math.max(0, pool.reserveUsdc - uOut);
-  pool.reserveEurc = Math.max(0, pool.reserveEurc - eOut);
-  pool.lpSupply    = Math.max(0, pool.lpSupply    - lp);
-  pool.userLp      = Math.max(0, pool.userLp      - lp);
-
-  document.getElementById("pool-step-status").textContent = "Complete ✓";
-  btn.disabled = false; btn.innerHTML = "<i class=\"ti ti-trash\"></i>Remove Liquidity";
-  toast(`Removed ${lp.toFixed(4)} LP → ${uOut.toFixed(2)} USDC + ${eOut.toFixed(2)} EURC`, "success");
-  poolAddTxLog(`-${lp.toFixed(4)} LP → ${uOut.toFixed(2)} USDC / ${eOut.toFixed(2)} EURC`, "remove");
-  document.getElementById("pool-remove-lp").value = "0";
-  poolSyncRemove();
-  await loadPoolFromChain(); // sync real reserves from contract
-  if (signer) refreshBalance().catch(()=>{});
 }
 
 
@@ -5082,9 +5215,17 @@ async function executeRemoveLiquidity() {
     if (DEPLOYED.ElligentBridge) window.__BRIDGE_ADDRESS__ = DEPLOYED.ElligentBridge;
   })();
 document.addEventListener("DOMContentLoaded", () => {
-  poolUpdateUI();
-  poolSyncAdd("usdc");
-  setInterval(() => { if (walletAddress) poolUpdateUI(); }, 2000);
+  // Load real pool state from chain immediately (read-only, no wallet needed)
+  loadPoolFromChain().then(() => {
+    poolSyncAdd("usdc"); // sync add-liquidity form to real pool ratio
+    updateSwapRate();    // sync swap rate display
+  });
+
+  // Auto-sync: re-read from chain every 8 seconds
+  // This ensures both Pool page and Swap page always see live data
+  setInterval(() => {
+    loadPoolFromChain(); // reads chain → updates pool state → triggers poolUpdateUI + updateSwapRate
+  }, 8000);
 });
 
 // ══════════════════════════════════════════════════════════
