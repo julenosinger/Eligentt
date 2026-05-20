@@ -3729,12 +3729,14 @@ async function executeSwap(){
     // ── Swap via Pool Contract (pulls liquidity from USDC/EURC pool) ──
     const tInAddr  = TOKENS[swapTokenInIdx].sym === 'USDC' ? USDC_ADDRESS : EURC_ADDRESS;
     const tOutAddr = TOKENS[swapTokenOutIdx].sym === 'USDC' ? USDC_ADDRESS : EURC_ADDRESS;
+    // Declare amtBig here (function scope) so it is accessible in both the
+    // approve block and the swap block below — fixes "amtBig is not defined"
+    const amtBig   = toUsdc(amtIn.toFixed(6));
 
     renderStep(0,'active',null);
     let approveHash = '0x'+Array(64).fill(0).map(()=>Math.floor(Math.random()*16).toString(16)).join('');
     if(signer) {
       const tokenInContract = new ethers.Contract(tInAddr, USDC_ABI, signer);
-      const amtBig = toUsdc(amtIn.toFixed(6));
 
       // ── Step 0: Approve token spend ──────────────────────────────
       const swapDeployed = window.__SWAP_ADDRESS__
@@ -3781,9 +3783,9 @@ async function executeSwap(){
           renderStep(1,'active',swapTxHash);
           await swapTx.wait();
         } else {
-          // Call pool directly
+          // Call pool directly — ABI: swap(address tokenIn, uint256 amountIn, uint256 amountOutMin)
           const poolContract = new ethers.Contract(POOL_CONTRACT_ADDRESS, POOL_CONTRACT_ABI, signer);
-          const swapTx2 = await poolContract.swap(tInAddr, amtBig, amtOutMin, walletAddress);
+          const swapTx2 = await poolContract.swap(tInAddr, amtBig, amtOutMin);
           swapTxHash = swapTx2.hash;
           renderStep(1,'active',swapTxHash);
           await swapTx2.wait();
@@ -4867,7 +4869,8 @@ let pool = {
 };
 
 async function loadPoolFromChain() {
-  // Use a dedicated read-only RPC provider so this works before wallet connects
+  // Use a dedicated read-only RPC provider so this works before wallet connects.
+  // Prefer the connected wallet provider (more reliable for balanceOf) over raw RPC.
   const readProvider = provider || new ethers.JsonRpcProvider('https://rpc.testnet.arc.network');
   try {
     const poolContract = new ethers.Contract(POOL_CONTRACT_ADDRESS, POOL_CONTRACT_ABI, readProvider);
@@ -4878,11 +4881,6 @@ async function loadPoolFromChain() {
     pool.reserveUsdc = parseFloat(ethers.formatUnits(rU, 6));
     pool.reserveEurc = parseFloat(ethers.formatUnits(rE, 6));
     pool.lpSupply    = parseFloat(ethers.formatUnits(supply, 18));
-    if (walletAddress) {
-      pool.userLp = parseFloat(ethers.formatUnits(await poolContract.balanceOf(walletAddress), 18));
-    } else {
-      pool.userLp = 0;
-    }
     pool.loaded = true;
     pool.error  = null;
   } catch(e) {
@@ -4890,11 +4888,30 @@ async function loadPoolFromChain() {
     // Keep previous valid data if available; only reset on first load failure
     if (!pool.loaded) {
       pool.reserveUsdc = 0; pool.reserveEurc = 0;
-      pool.lpSupply    = 0; pool.userLp      = 0;
+      pool.lpSupply    = 0;
     }
     pool.loaded = true;
     pool.error  = e.message || 'Failed to load pool';
   }
+
+  // Load user LP balance separately — isolated try/catch so a balanceOf failure
+  // never corrupts reserveUsdc / reserveEurc / lpSupply already loaded above.
+  if (walletAddress) {
+    try {
+      // Use the wallet-connected provider when available (avoids stale RPC state)
+      const lpProvider = provider || new ethers.JsonRpcProvider('https://rpc.testnet.arc.network');
+      const lpContract = new ethers.Contract(POOL_CONTRACT_ADDRESS, POOL_CONTRACT_ABI, lpProvider);
+      const rawLp      = await lpContract.balanceOf(walletAddress);
+      pool.userLp      = parseFloat(ethers.formatUnits(rawLp, 18));
+      console.debug('[pool] userLp loaded:', pool.userLp, 'raw:', rawLp.toString());
+    } catch(lpErr) {
+      console.warn('[pool] balanceOf failed, keeping previous userLp:', lpErr.message || lpErr);
+      // Do NOT reset to 0 — keep last known value so Remove panel stays populated
+    }
+  } else {
+    pool.userLp = 0;
+  }
+
   poolUpdateUI();
   updateSwapRate(); // always refresh swap quote after reserves update
 }
