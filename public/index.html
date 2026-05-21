@@ -444,6 +444,432 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
 .token-usd{font-size:9.5px;color:var(--muted2);margin-top:3px}
 .swap-arrow{width:32px;height:32px;border-radius:8px;background:var(--card2);border:1px solid var(--border2);display:flex;align-items:center;justify-content:center;cursor:pointer;margin:8px auto;transition:all .2s;font-size:16px;color:var(--muted2)}
 .swap-arrow:hover{border-color:var(--blue);color:var(--blue);transform:rotate(180deg)}
+
+/* ─────────────────────────────────────────────────────────────
+   PRO SWAP UI  —  Uniswap / Jupiter / Coinbase inspired
+   ───────────────────────────────────────────────────────────── */
+
+/* Main swap widget wrapper */
+.swp-widget{
+  background:linear-gradient(160deg,#161a24 60%,#13172040 100%);
+  border:1px solid #252b3b;
+  border-radius:16px;
+  padding:0;
+  max-width:480px;
+  margin:0 auto;
+  width:100%;
+  overflow:hidden;
+  box-shadow:0 8px 40px rgba(0,0,0,.45),0 0 0 1px rgba(79,142,247,.04);
+  position:relative;
+}
+/* Glow accent top-right */
+.swp-widget::before{
+  content:'';
+  position:absolute;
+  top:-40px;right:-40px;
+  width:160px;height:160px;
+  background:radial-gradient(circle,rgba(167,139,250,.12) 0%,transparent 70%);
+  pointer-events:none;
+}
+
+/* Header row */
+.swp-header{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:14px 16px 0;
+}
+.swp-title{font-size:13px;font-weight:700;color:var(--text);letter-spacing:-.2px}
+.swp-settings-btn{
+  width:28px;height:28px;border-radius:8px;
+  border:1px solid var(--border2);background:transparent;
+  color:var(--muted2);cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  font-size:14px;transition:all .15s;
+}
+.swp-settings-btn:hover{border-color:var(--purple);color:var(--purple);background:rgba(167,139,250,.08)}
+
+/* Slippage settings panel */
+.swp-settings-panel{
+  margin:10px 16px 0;
+  background:rgba(0,0,0,.25);
+  border:1px solid var(--border);
+  border-radius:10px;
+  padding:10px 12px;
+  display:none;
+}
+.swp-settings-panel.open{display:block}
+.swp-slip-label{font-size:9px;color:var(--muted2);text-transform:uppercase;letter-spacing:.7px;margin-bottom:6px}
+.swp-slip-btns{display:flex;gap:5px}
+.swp-slip-btn{
+  flex:1;padding:5px 4px;
+  background:var(--card2);border:1px solid var(--border2);
+  border-radius:5px;color:var(--muted2);font-size:9px;
+  cursor:pointer;font-family:'JetBrains Mono',monospace;font-weight:600;
+  transition:all .15s;
+}
+.swp-slip-btn:hover,.swp-slip-btn.active{
+  background:rgba(167,139,250,.15);
+  border-color:rgba(167,139,250,.5);
+  color:var(--purple);
+}
+.swp-slip-custom{
+  width:60px;padding:5px 7px;
+  background:var(--card2);border:1px solid var(--border2);
+  border-radius:5px;color:var(--text);font-size:9px;
+  font-family:'JetBrains Mono',monospace;outline:none;
+  transition:border .15s;
+}
+.swp-slip-custom:focus{border-color:var(--purple)}
+
+/* Token input panels */
+.swp-panel{
+  margin:12px 8px 0;
+  background:rgba(0,0,0,.28);
+  border:1.5px solid var(--border);
+  border-radius:12px;
+  padding:14px 16px;
+  transition:border-color .15s,box-shadow .15s;
+  position:relative;
+}
+.swp-panel:focus-within{
+  border-color:rgba(79,142,247,.55);
+  box-shadow:0 0 0 3px rgba(79,142,247,.07);
+}
+.swp-panel-label{
+  font-size:9px;color:var(--muted2);
+  text-transform:uppercase;letter-spacing:.8px;
+  margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;
+}
+.swp-bal-hint{
+  font-size:9px;color:var(--muted2);cursor:pointer;transition:color .12s;
+}
+.swp-bal-hint:hover{color:var(--blue)}
+.swp-bal-hint span{color:var(--text);font-weight:600}
+
+.swp-input-row{display:flex;align-items:center;gap:8px}
+.swp-input{
+  flex:1;background:transparent;border:none;
+  color:var(--text);font-size:26px;
+  font-family:'JetBrains Mono',monospace;font-weight:700;
+  outline:none;width:100%;min-width:0;
+}
+.swp-input::placeholder{color:rgba(255,255,255,.12)}
+.swp-usd{font-size:9.5px;color:var(--muted2);margin-top:4px;min-height:14px}
+
+/* Token selector pill */
+.swp-token-pill{
+  display:flex;align-items:center;gap:7px;
+  background:linear-gradient(135deg,rgba(30,34,50,.9),rgba(22,26,36,.9));
+  border:1px solid var(--border2);
+  border-radius:30px;
+  padding:7px 10px 7px 8px;
+  cursor:pointer;transition:all .18s;flex-shrink:0;
+  user-select:none;
+  box-shadow:0 2px 8px rgba(0,0,0,.25);
+}
+.swp-token-pill:hover{
+  border-color:rgba(79,142,247,.6);
+  background:linear-gradient(135deg,rgba(79,142,247,.1),rgba(30,34,50,.9));
+  box-shadow:0 2px 16px rgba(79,142,247,.12);
+}
+.swp-tok-icon{
+  width:24px;height:24px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  font-size:9px;font-weight:800;color:#fff;flex-shrink:0;
+  box-shadow:0 2px 6px rgba(0,0,0,.4);
+}
+.swp-tok-name{font-size:13px;font-weight:700;letter-spacing:-.3px}
+.swp-tok-chevron{font-size:10px;color:var(--muted2);margin-left:1px}
+
+/* MAX button */
+.swp-max-btn{
+  font-size:8.5px;font-weight:700;
+  background:rgba(79,142,247,.12);
+  border:1px solid rgba(79,142,247,.3);
+  border-radius:4px;padding:2px 6px;color:var(--blue);
+  cursor:pointer;transition:all .15s;font-family:'JetBrains Mono',monospace;
+  flex-shrink:0;
+}
+.swp-max-btn:hover{background:rgba(79,142,247,.25);border-color:var(--blue)}
+
+/* Flip arrow button */
+.swp-flip-wrap{
+  display:flex;align-items:center;justify-content:center;
+  margin:6px 0;position:relative;z-index:2;
+}
+.swp-flip-btn{
+  width:34px;height:34px;border-radius:10px;
+  background:linear-gradient(135deg,#1c2130,#161a24);
+  border:1.5px solid var(--border2);
+  display:flex;align-items:center;justify-content:center;
+  cursor:pointer;transition:all .22s;font-size:16px;color:var(--muted2);
+  box-shadow:0 2px 10px rgba(0,0,0,.3);
+}
+.swp-flip-btn:hover{
+  border-color:var(--purple);color:var(--purple);
+  transform:rotate(180deg) scale(1.08);
+  background:rgba(167,139,250,.1);
+  box-shadow:0 4px 16px rgba(167,139,250,.18);
+}
+
+/* Quote details accordion */
+.swp-details{
+  margin:8px 8px 0;
+  background:rgba(0,0,0,.18);
+  border:1px solid var(--border);
+  border-radius:10px;
+  overflow:hidden;
+  transition:all .2s;
+}
+.swp-details-header{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:9px 13px;cursor:pointer;user-select:none;
+  transition:background .12s;
+}
+.swp-details-header:hover{background:rgba(255,255,255,.02)}
+.swp-details-rate{font-size:10px;color:var(--text);font-weight:600}
+.swp-details-toggle{font-size:9px;color:var(--muted2);display:flex;align-items:center;gap:3px}
+.swp-details-body{
+  padding:0 13px 10px;
+  border-top:1px solid var(--border);
+  display:none;
+}
+.swp-details-body.open{display:block}
+.swp-detail-row{
+  display:flex;justify-content:space-between;align-items:center;
+  padding:4px 0;font-size:9.5px;color:var(--muted2);
+  border-bottom:1px solid rgba(255,255,255,.03);
+}
+.swp-detail-row:last-child{border-bottom:none}
+.swp-detail-val{color:var(--text);font-weight:600;text-align:right}
+.swp-detail-val.green{color:var(--green)}
+.swp-detail-val.yellow{color:var(--yellow)}
+.swp-detail-val.red{color:var(--red)}
+
+/* Route display */
+.swp-route{
+  display:flex;align-items:center;gap:5px;
+  font-size:9px;color:var(--muted2);
+  padding:4px 0;
+}
+.swp-route-hop{
+  display:flex;align-items:center;gap:3px;
+  background:rgba(255,255,255,.04);
+  border:1px solid var(--border);
+  border-radius:4px;padding:2px 6px;font-size:8.5px;
+}
+.swp-route-arrow{color:var(--muted);font-size:9px}
+
+/* Precheck / validation banner */
+.swp-precheck{
+  margin:8px 8px 0;
+  border-radius:9px;padding:9px 12px;
+  font-size:9.5px;font-weight:600;
+  display:none;align-items:center;gap:7px;
+}
+.swp-precheck.show{display:flex}
+.swp-precheck.error{
+  background:rgba(239,68,68,.08);
+  border:1px solid rgba(239,68,68,.25);
+  color:#f87171;
+}
+.swp-precheck.warning{
+  background:rgba(245,158,11,.08);
+  border:1px solid rgba(245,158,11,.25);
+  color:#fbbf24;
+}
+.swp-precheck.info{
+  background:rgba(79,142,247,.08);
+  border:1px solid rgba(79,142,247,.25);
+  color:#93bbfc;
+}
+.swp-precheck.success{
+  background:rgba(34,197,94,.08);
+  border:1px solid rgba(34,197,94,.25);
+  color:#4ade80;
+}
+
+/* Impact badge */
+.swp-impact-badge{
+  font-size:8.5px;font-weight:700;
+  border-radius:3px;padding:1px 5px;margin-left:4px;
+}
+.swp-impact-low{background:rgba(34,197,94,.12);color:var(--green)}
+.swp-impact-med{background:rgba(245,158,11,.12);color:var(--yellow)}
+.swp-impact-high{background:rgba(239,68,68,.12);color:var(--red)}
+
+/* Main swap button */
+.swp-btn{
+  margin:10px 8px 8px;
+  width:calc(100% - 16px);
+  padding:14px;border-radius:12px;
+  font-size:14px;font-weight:700;
+  font-family:'JetBrains Mono',monospace;
+  cursor:pointer;transition:all .2s;
+  border:none;outline:none;
+  display:flex;align-items:center;justify-content:center;gap:8px;
+  letter-spacing:-.2px;
+  position:relative;overflow:hidden;
+}
+.swp-btn::after{
+  content:'';position:absolute;inset:0;
+  background:linear-gradient(135deg,rgba(255,255,255,.06) 0%,transparent 60%);
+  pointer-events:none;
+}
+.swp-btn-active{
+  background:linear-gradient(135deg,#6d58f7,#a78bfa);
+  color:#fff;
+  box-shadow:0 4px 20px rgba(167,139,250,.35);
+}
+.swp-btn-active:hover{
+  background:linear-gradient(135deg,#7a65fa,#b99bfc);
+  box-shadow:0 6px 28px rgba(167,139,250,.5);
+  transform:translateY(-1px);
+}
+.swp-btn-active:active{transform:translateY(0);box-shadow:0 2px 10px rgba(167,139,250,.3)}
+.swp-btn-disabled{
+  background:rgba(255,255,255,.04);
+  border:1px solid var(--border);
+  color:var(--muted2);
+  cursor:not-allowed;
+}
+.swp-btn-warn{
+  background:linear-gradient(135deg,rgba(245,158,11,.2),rgba(245,158,11,.1));
+  border:1px solid rgba(245,158,11,.3);
+  color:var(--yellow);
+}
+.swp-btn-loading{
+  background:linear-gradient(135deg,#6d58f7,#a78bfa);
+  color:rgba(255,255,255,.7);
+  cursor:not-allowed;
+}
+
+/* Quote skeleton loader */
+@keyframes swp-shimmer{
+  0%{background-position:-200px 0}
+  100%{background-position:200px 0}
+}
+.swp-skeleton{
+  height:12px;border-radius:4px;
+  background:linear-gradient(90deg,rgba(255,255,255,.04) 25%,rgba(255,255,255,.09) 50%,rgba(255,255,255,.04) 75%);
+  background-size:400px 100%;
+  animation:swp-shimmer 1.4s infinite;
+}
+
+/* Step card — production grade */
+.swp-steps-card{
+  max-width:480px;margin:0 auto;width:100%;
+  background:linear-gradient(160deg,#161a24,#12151e);
+  border:1px solid var(--border);border-radius:14px;
+  overflow:hidden;
+}
+.swp-steps-header{
+  display:flex;align-items:center;gap:8px;
+  padding:11px 14px;border-bottom:1px solid var(--border);
+}
+.swp-steps-title{font-size:11px;font-weight:700}
+.swp-status-pill{
+  margin-left:auto;
+  font-size:8.5px;font-weight:700;
+  border-radius:20px;padding:2px 9px;
+}
+.swp-status-pending{background:rgba(79,142,247,.1);border:1px solid rgba(79,142,247,.25);color:var(--blue)}
+.swp-status-progress{background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.25);color:var(--yellow)}
+.swp-status-success{background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.25);color:var(--green)}
+.swp-status-error{background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.25);color:var(--red)}
+
+.swp-step-item{
+  display:flex;align-items:flex-start;gap:10px;
+  padding:10px 14px;
+  border-bottom:1px solid rgba(255,255,255,.03);
+  transition:background .15s;
+}
+.swp-step-item:last-child{border-bottom:none}
+.swp-step-item.active{background:rgba(245,158,11,.04)}
+.swp-step-item.success{background:rgba(34,197,94,.03)}
+.swp-step-item.error{background:rgba(239,68,68,.04)}
+
+.swp-step-ico{
+  width:22px;height:22px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  font-size:9px;font-weight:700;flex-shrink:0;margin-top:1px;
+}
+.swp-step-ico.pending{background:rgba(79,142,247,.1);border:1.5px solid rgba(79,142,247,.3);color:var(--blue)}
+.swp-step-ico.active{background:rgba(245,158,11,.12);border:1.5px solid rgba(245,158,11,.4);color:var(--yellow);animation:pulse 1s infinite}
+.swp-step-ico.success{background:rgba(34,197,94,.12);border:1.5px solid rgba(34,197,94,.35);color:var(--green)}
+.swp-step-ico.error{background:rgba(239,68,68,.12);border:1.5px solid rgba(239,68,68,.35);color:var(--red)}
+.swp-step-ico.skipped{background:rgba(255,255,255,.04);border:1.5px solid var(--border2);color:var(--muted2)}
+
+.swp-step-label{font-size:10.5px;font-weight:600;color:var(--text);line-height:1.3}
+.swp-step-detail{font-size:8.5px;color:var(--muted2);margin-top:2px;line-height:1.4}
+.swp-step-hash{font-size:8px;color:var(--blue);text-decoration:none;font-family:'JetBrains Mono',monospace}
+.swp-step-hash:hover{text-decoration:underline}
+.swp-step-meta{
+  margin-left:auto;flex-shrink:0;
+  display:flex;flex-direction:column;align-items:flex-end;gap:2px;
+}
+.swp-step-time{font-size:8px;color:var(--muted)}
+.swp-step-gas{font-size:8px;color:var(--muted2);font-family:'JetBrains Mono',monospace}
+
+/* Liquidity/pool status widget */
+.swp-pool-status{
+  max-width:480px;margin:0 auto;width:100%;
+  background:var(--card);border:1px solid var(--border);
+  border-radius:10px;padding:12px 14px;
+  display:flex;align-items:center;gap:9px;
+}
+.swp-pool-dot{
+  width:8px;height:8px;border-radius:50%;flex-shrink:0;
+}
+.swp-pool-label{font-size:9.5px;color:var(--muted2);flex:1}
+.swp-pool-val{font-size:10px;font-weight:600;color:var(--text)}
+
+/* Quote loading state in details */
+.swp-quote-loading{
+  display:flex;align-items:center;gap:6px;
+  font-size:9.5px;color:var(--muted2);padding:6px 0;
+}
+
+/* History items — pro style */
+.swp-hist-item{
+  display:flex;align-items:center;gap:8px;
+  padding:7px 10px;
+  background:rgba(0,0,0,.15);
+  border:1px solid rgba(255,255,255,.03);
+  border-radius:7px;font-size:9px;
+  transition:background .12s;cursor:default;
+}
+.swp-hist-item:hover{background:rgba(255,255,255,.03)}
+.swp-hist-icon{
+  width:24px;height:24px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  font-size:11px;flex-shrink:0;
+  background:rgba(167,139,250,.1);color:var(--purple);
+}
+.swp-hist-label{font-size:10px;font-weight:600;color:var(--text)}
+.swp-hist-sub{font-size:8.5px;color:var(--muted2);margin-top:1px}
+.swp-hist-hash{font-size:8.5px;color:var(--blue);text-decoration:none;margin-left:auto;flex-shrink:0}
+.swp-hist-hash:hover{text-decoration:underline}
+
+/* Live indicator dot */
+.swp-live-dot{
+  width:6px;height:6px;border-radius:50%;
+  background:var(--green);
+  animation:pulse 1.5s ease-in-out infinite;
+  display:inline-block;margin-right:4px;
+}
+
+/* Empty state */
+.swp-empty{
+  text-align:center;padding:20px 0;
+  font-size:9.5px;color:var(--muted);
+}
+.swp-empty i{font-size:22px;display:block;margin-bottom:6px;opacity:.35}
+
+/* Responsive adjustments for narrow viewports */
+@media(max-width:700px){
+  .swp-input{font-size:20px}
+  .swp-tok-name{font-size:12px}
+}
 .chain-row{background:rgba(0,0,0,.2);border:1px solid var(--border);border-radius:7px;padding:10px 14px;display:flex;align-items:center;gap:10px}
 .chain-sel{display:flex;align-items:center;gap:6px;background:var(--card2);border:1px solid var(--border2);border-radius:6px;padding:6px 10px;cursor:pointer;font-size:11px;font-weight:600;transition:all .15s;user-select:none}
 .chain-sel:hover{border-color:var(--blue)}
@@ -970,7 +1396,7 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
         <div class="page-icon" style="background:rgba(167,139,250,.12);color:var(--purple)"><i class="ti ti-arrows-exchange"></i></div>
         <div>
           <div class="page-title">Swap Tokens</div>
-          <div class="page-sub">Swap USDC ↔ EURC · Pool liquidity · ElligentSwap contract</div>
+          <div class="page-sub"><span class="swp-live-dot"></span>Live · USDC ↔ EURC · ElligentPool · Arc Testnet</div>
         </div>
         <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
           <div class="kit-badge"><i class="ti ti-arrows-exchange" style="font-size:9px"></i>Pool Swap</div>
@@ -980,57 +1406,165 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
       <div class="page-content">
         <div class="swap-col">
 
-          <!-- Swap card -->
-          <div class="swap-card">
-            <div class="swap-label">You Pay</div>
-            <div class="token-row">
-              <div>
-                <input class="token-amt" id="swap-amount-in" type="number" placeholder="0.00" oninput="updateSwapRate()"/>
-                <div class="token-usd" id="swap-usd-in">≈ $1.00 USD</div>
+          <!-- ═══ PRO SWAP WIDGET ═══ -->
+          <div class="swp-widget" id="swp-widget">
+
+            <!-- Header -->
+            <div class="swp-header">
+              <span class="swp-title"><i class="ti ti-arrows-exchange" style="color:var(--purple);margin-right:5px"></i>Swap</span>
+              <button class="swp-settings-btn" onclick="swpToggleSettings()" title="Slippage settings">
+                <i class="ti ti-settings" id="swp-settings-icon"></i>
+              </button>
+            </div>
+
+            <!-- Slippage settings panel -->
+            <div class="swp-settings-panel" id="swp-settings-panel">
+              <div class="swp-slip-label">Max Slippage</div>
+              <div class="swp-slip-btns">
+                <button class="swp-slip-btn" onclick="swpSetSlippage(0.1,this)">0.1%</button>
+                <button class="swp-slip-btn active" onclick="swpSetSlippage(0.5,this)">0.5%</button>
+                <button class="swp-slip-btn" onclick="swpSetSlippage(1.0,this)">1.0%</button>
+                <button class="swp-slip-btn" onclick="swpSetSlippage(3.0,this)">3.0%</button>
+                <input class="swp-slip-custom" id="swp-slip-custom" type="number" min="0.01" max="50" step="0.1" placeholder="Custom" oninput="swpSetCustomSlippage(this.value)"/>
               </div>
-              <div class="token-sel" onclick="cycleTokenIn()">
-                <div class="token-icon" id="swap-icon-in" style="background:#2775ca">U</div>
-                <span class="token-name" id="swap-token-in">USDC</span>
-                <i class="ti ti-chevron-down" style="font-size:10px;color:var(--muted2)"></i>
+              <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between">
+                <span style="font-size:9px;color:var(--muted2)">Transaction deadline</span>
+                <span style="font-size:9px;color:var(--text);font-weight:600">20 minutes</span>
               </div>
             </div>
 
-            <div class="swap-arrow" onclick="swapTokens()"><i class="ti ti-arrows-up-down"></i></div>
-
-            <div class="swap-label">You Receive</div>
-            <div class="token-row">
-              <div>
-                <input class="token-amt" id="swap-amount-out" type="number" placeholder="0.00" readonly/>
-                <div class="token-usd" id="swap-usd-out">≈ $0.00 USD</div>
+            <!-- YOU PAY panel -->
+            <div class="swp-panel" id="swp-panel-in">
+              <div class="swp-panel-label">
+                <span>You Pay</span>
+                <span class="swp-bal-hint" id="swp-bal-in" onclick="swpSetMax()">
+                  Balance: <span id="swp-bal-in-val">—</span>
+                </span>
               </div>
-              <div class="token-sel" onclick="cycleTokenOut()">
-                <div class="token-icon" id="swap-icon-out" style="background:#2562de">E</div>
-                <span class="token-name" id="swap-token-out">EURC</span>
-                <i class="ti ti-chevron-down" style="font-size:10px;color:var(--muted2)"></i>
+              <div class="swp-input-row">
+                <input class="swp-input" id="swap-amount-in" type="number" min="0" step="any"
+                  placeholder="0.00" oninput="updateSwapRate()" autocomplete="off" spellcheck="false"/>
+                <div class="swp-token-pill" onclick="cycleTokenIn()">
+                  <div class="swp-tok-icon" id="swap-icon-in" style="background:#2775ca">U</div>
+                  <span class="swp-tok-name" id="swap-token-in">USDC</span>
+                  <i class="ti ti-chevron-down swp-tok-chevron"></i>
+                </div>
+              </div>
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-top:4px">
+                <div class="swp-usd" id="swap-usd-in"></div>
+                <button class="swp-max-btn" onclick="swpSetMax()" id="swp-max-btn">MAX</button>
               </div>
             </div>
 
-            <div class="rate-box" id="swap-rate-box">
-              <div class="rate-row"><span>Exchange Rate</span><span class="rate-val" id="swap-rate">1 USDC ≈ 0.992 EURC</span></div>
-              <div class="rate-row"><span>Provider Fee</span><span class="rate-val">0.001 USDC</span></div>
-              <div class="rate-row"><span>Slippage</span><span class="rate-val">0.5%</span></div>
-              <div class="rate-row"><span>Network</span><span class="rate-val blue">Arc Testnet</span></div>
+            <!-- Flip button -->
+            <div class="swp-flip-wrap">
+              <button class="swp-flip-btn" onclick="swapTokens()" title="Flip tokens">
+                <i class="ti ti-arrows-up-down"></i>
+              </button>
             </div>
 
-            <!-- Kit Key input — hidden, value injected server-side -->
+            <!-- YOU RECEIVE panel -->
+            <div class="swp-panel" id="swp-panel-out" style="margin-top:0">
+              <div class="swp-panel-label">
+                <span>You Receive</span>
+                <span class="swp-bal-hint" id="swp-bal-out">
+                  Balance: <span id="swp-bal-out-val">—</span>
+                </span>
+              </div>
+              <div class="swp-input-row">
+                <input class="swp-input" id="swap-amount-out" type="number"
+                  placeholder="0.00" readonly style="color:var(--muted2)" autocomplete="off"/>
+                <div class="swp-token-pill" onclick="cycleTokenOut()">
+                  <div class="swp-tok-icon" id="swap-icon-out" style="background:#2562de">E</div>
+                  <span class="swp-tok-name" id="swap-token-out">EURC</span>
+                  <i class="ti ti-chevron-down swp-tok-chevron"></i>
+                </div>
+              </div>
+              <div class="swp-usd" id="swap-usd-out" style="margin-top:4px"></div>
+            </div>
+
+            <!-- Quote details accordion -->
+            <div class="swp-details" id="swp-details" style="display:none">
+              <div class="swp-details-header" onclick="swpToggleDetails()">
+                <span class="swp-details-rate" id="swap-rate">—</span>
+                <span class="swp-details-toggle" id="swp-details-toggle">
+                  <i class="ti ti-chevron-down" id="swp-chevron"></i>
+                </span>
+              </div>
+              <div class="swp-details-body" id="swp-details-body">
+                <div class="swp-detail-row" style="padding-top:8px">
+                  <span>Exchange Rate</span>
+                  <span class="swp-detail-val" id="swp-rate-detail">—</span>
+                </div>
+                <div class="swp-detail-row">
+                  <span>Price Impact</span>
+                  <span class="swp-detail-val" id="swp-impact-val">—</span>
+                </div>
+                <div class="swp-detail-row">
+                  <span>Minimum Received</span>
+                  <span class="swp-detail-val green" id="swp-min-received">—</span>
+                </div>
+                <div class="swp-detail-row">
+                  <span>LP Fee (0.1%)</span>
+                  <span class="swp-detail-val" id="swp-fee-val">—</span>
+                </div>
+                <div class="swp-detail-row">
+                  <span>Quote Source</span>
+                  <span class="swp-detail-val" id="swp-source-val">—</span>
+                </div>
+                <div class="swp-detail-row">
+                  <span>Route</span>
+                  <div id="swp-route" class="swp-route">
+                    <span class="swp-route-hop" id="swp-route-in">—</span>
+                    <span class="swp-route-arrow">→</span>
+                    <span class="swp-route-hop" style="font-size:8px;color:var(--muted2)">ElligentPool</span>
+                    <span class="swp-route-arrow">→</span>
+                    <span class="swp-route-hop" id="swp-route-out">—</span>
+                  </div>
+                </div>
+                <div class="swp-detail-row">
+                  <span>Slippage Tolerance</span>
+                  <span class="swp-detail-val yellow" id="swp-slip-display">0.5%</span>
+                </div>
+                <div class="swp-detail-row">
+                  <span>Network</span>
+                  <span class="swp-detail-val" style="color:var(--green)">Arc Testnet (5042002)</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Precheck banner -->
+            <div class="swp-precheck" id="swp-precheck">
+              <i class="ti ti-alert-circle" id="swp-precheck-icon" style="font-size:14px;flex-shrink:0"></i>
+              <span id="swp-precheck-msg"></span>
+            </div>
+
+            <!-- Kit Key hidden input -->
             <input id="kit-key-input" type="hidden" value="__KIT_KEY_PLACEHOLDER__"/>
 
-            <button class="action-btn purple-btn" style="margin-top:14px" id="swap-btn" onclick="executeSwap()">
-              <i class="ti ti-arrows-exchange"></i>Swap Tokens
+            <!-- SWAP BUTTON -->
+            <button class="swp-btn swp-btn-disabled" id="swap-btn" onclick="executeSwap()" disabled>
+              <i class="ti ti-arrows-exchange" id="swp-btn-icon"></i>
+              <span id="swp-btn-label">Enter an amount</span>
             </button>
+
+          </div><!-- /swp-widget -->
+
+          <!-- Transaction Steps — Pro Card -->
+          <div class="swp-steps-card" id="swap-steps-card" style="display:none">
+            <div class="swp-steps-header">
+              <i class="ti ti-list-check" style="font-size:13px;color:var(--purple)"></i>
+              <span class="swp-steps-title">Transaction</span>
+              <span class="swp-status-pill swp-status-pending" id="swap-step-status">Pending</span>
+            </div>
+            <div id="swap-step-list"></div>
           </div>
 
-          <!-- Transaction steps -->
-          <div class="card" id="swap-steps-card" style="display:none">
-            <div class="ch"><i class="ti ti-list-check" style="font-size:13px;color:var(--purple)"></i><span class="ct">Transaction Steps</span><span id="swap-step-status" style="margin-left:auto;font-size:9px;color:var(--muted2)">Pending</span></div>
-            <div class="cb">
-              <div class="step-list" id="swap-step-list"></div>
-            </div>
+          <!-- Pool Status -->
+          <div class="swp-pool-status" id="swp-pool-status" style="display:none">
+            <div class="swp-pool-dot" id="swp-pool-dot" style="background:var(--muted2)"></div>
+            <span class="swp-pool-label" id="swp-pool-label">Loading pool…</span>
+            <span class="swp-pool-val" id="swp-pool-tvl"></span>
           </div>
 
         </div>
@@ -1038,52 +1572,91 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
         <!-- Info column -->
         <div class="info-col">
           <div class="info-card">
-            <div class="info-title"><i class="ti ti-code" style="color:var(--purple)"></i>SDK Integration</div>
-            <div style="background:rgba(0,0,0,.2);border:1px solid var(--border);border-radius:5px;padding:9px;font-size:9px;color:var(--muted2);font-family:'JetBrains Mono',monospace;line-height:1.6">
-              <span style="color:var(--purple)">import</span> { AppKit } <span style="color:var(--purple)">from</span><br/>
-              &nbsp;<span style="color:var(--yellow)">'@circle-fin/app-kit'</span>;<br/><br/>
-              <span style="color:var(--blue)">const</span> kit = <span style="color:var(--blue)">new</span> <span style="color:var(--green)">AppKit</span>();<br/><br/>
-              <span style="color:var(--blue)">await</span> kit.<span style="color:var(--green)">swap</span>({<br/>
-              &nbsp;from: { adapter,<br/>
-              &nbsp;&nbsp;chain: <span style="color:var(--yellow)">"Arc_Testnet"</span> },<br/>
-              &nbsp;tokenIn: <span style="color:var(--yellow)">"USDC"</span>,<br/>
-              &nbsp;tokenOut: <span style="color:var(--yellow)">"EURC"</span>,<br/>
-              &nbsp;amountIn: <span style="color:var(--yellow)">"1.00"</span>,<br/>
-              &nbsp;config: { kitKey }<br/>
-              });
-            </div>
-          </div>
-
-          <div class="info-card">
             <div class="info-title"><i class="ti ti-coins" style="color:var(--blue)"></i>Supported Tokens</div>
             <div style="display:flex;flex-direction:column;gap:4px">
-              <div style="display:flex;align-items:center;gap:7px;padding:5px 7px;background:rgba(0,0,0,.12);border-radius:4px;font-size:10px">
-                <div style="width:18px;height:18px;border-radius:50%;background:#2775ca;display:flex;align-items:center;justify-content:center;font-size:7.5px;font-weight:800;color:#fff">U</div>
-                <div><div style="font-weight:600">USDC</div><div style="font-size:8.5px;color:var(--muted2)">USD Coin</div></div>
-                <div style="margin-left:auto;font-size:8.5px;color:var(--green)">Active</div>
+              <div style="display:flex;align-items:center;gap:7px;padding:6px 8px;background:rgba(0,0,0,.12);border:1px solid rgba(39,117,202,.15);border-radius:6px;font-size:10px">
+                <div style="width:20px;height:20px;border-radius:50%;background:linear-gradient(135deg,#2775ca,#3a8fe0);display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:800;color:#fff;box-shadow:0 2px 6px rgba(39,117,202,.35)">U</div>
+                <div style="flex:1"><div style="font-weight:700">USDC</div><div style="font-size:8px;color:var(--muted2);font-family:monospace;margin-top:1px">0x360000…</div></div>
+                <div style="font-size:8.5px;color:var(--green);display:flex;align-items:center;gap:3px"><span style="width:5px;height:5px;border-radius:50%;background:var(--green);display:inline-block"></span>Active</div>
               </div>
-              <div style="display:flex;align-items:center;gap:7px;padding:5px 7px;background:rgba(0,0,0,.12);border-radius:4px;font-size:10px">
-                <div style="width:18px;height:18px;border-radius:50%;background:#2562de;display:flex;align-items:center;justify-content:center;font-size:7.5px;font-weight:800;color:#fff">E</div>
-                <div><div style="font-weight:600">EURC</div><div style="font-size:8.5px;color:var(--muted2)">Euro Coin</div></div>
-                <div style="margin-left:auto;font-size:8.5px;color:var(--green)">Active</div>
+              <div style="display:flex;align-items:center;gap:7px;padding:6px 8px;background:rgba(0,0,0,.12);border:1px solid rgba(37,98,222,.15);border-radius:6px;font-size:10px">
+                <div style="width:20px;height:20px;border-radius:50%;background:linear-gradient(135deg,#2562de,#4a82f5);display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:800;color:#fff;box-shadow:0 2px 6px rgba(37,98,222,.35)">E</div>
+                <div style="flex:1"><div style="font-weight:700">EURC</div><div style="font-size:8px;color:var(--muted2);font-family:monospace;margin-top:1px">0x89B508…</div></div>
+                <div style="font-size:8.5px;color:var(--green);display:flex;align-items:center;gap:3px"><span style="width:5px;height:5px;border-radius:50%;background:var(--green);display:inline-block"></span>Active</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="info-card" id="swp-pool-info">
+            <div class="info-title"><i class="ti ti-droplet" style="color:var(--teal)"></i>Pool Liquidity</div>
+            <div style="display:flex;flex-direction:column;gap:5px">
+              <div style="display:flex;justify-content:space-between;font-size:9.5px">
+                <span style="color:var(--muted2)">USDC Reserve</span>
+                <span style="font-weight:700" id="swp-info-usdc">—</span>
+              </div>
+              <div style="display:flex;justify-content:space-between;font-size:9.5px">
+                <span style="color:var(--muted2)">EURC Reserve</span>
+                <span style="font-weight:700" id="swp-info-eurc">—</span>
+              </div>
+              <div style="display:flex;justify-content:space-between;font-size:9.5px">
+                <span style="color:var(--muted2)">Total Value</span>
+                <span style="font-weight:700;color:var(--teal)" id="swp-info-tvl">—</span>
+              </div>
+              <div style="height:1px;background:var(--border);margin:2px 0"></div>
+              <div style="display:flex;justify-content:space-between;font-size:9.5px">
+                <span style="color:var(--muted2)">LP Fee</span>
+                <span style="font-weight:700;color:var(--yellow)">0.1%</span>
+              </div>
+              <div style="display:flex;justify-content:space-between;font-size:9.5px">
+                <span style="color:var(--muted2)">AMM Formula</span>
+                <span style="font-weight:700">x · y = k</span>
               </div>
             </div>
           </div>
 
           <div class="info-card">
-            <div class="info-title"><i class="ti ti-history" style="color:var(--muted2)"></i>Swap History</div>
-            <div class="tx-log" id="swap-history"><div style="font-size:9px;color:var(--muted2);text-align:center;padding:8px">No swaps yet</div></div>
+            <div class="info-title"><i class="ti ti-history" style="color:var(--muted2)"></i>Recent Swaps</div>
+            <div id="swap-history">
+              <div class="swp-empty"><i class="ti ti-arrows-exchange"></i>No swaps yet</div>
+            </div>
           </div>
 
-          <div class="info-card" style="background:rgba(167,139,250,.05);border-color:rgba(167,139,250,.2)">
-            <div class="info-title"><i class="ti ti-info-circle" style="color:var(--purple)"></i>How Swap Works</div>
-            <ul class="flist">
-              <li>Approve token spend</li>
-              <li>Execute swap via App Kit</li>
-              <li>Receive token on same chain</li>
-              <li>All on Arc Testnet</li>
-            </ul>
-            <a href="https://docs.arc.network/app-kit/swap" target="_blank" style="font-size:9px;color:var(--blue);text-decoration:none;margin-top:6px;display:flex;align-items:center;gap:3px"><i class="ti ti-external-link" style="font-size:9px"></i>Swap docs</a>
+          <div class="info-card" style="background:rgba(167,139,250,.04);border-color:rgba(167,139,250,.15)">
+            <div class="info-title"><i class="ti ti-shield-check" style="color:var(--purple)"></i>Safety Features</div>
+            <div style="display:flex;flex-direction:column;gap:5px">
+              <div style="display:flex;align-items:center;gap:6px;font-size:9.5px;color:var(--muted2)">
+                <i class="ti ti-check" style="color:var(--green);font-size:11px"></i>Pre-swap validation
+              </div>
+              <div style="display:flex;align-items:center;gap:6px;font-size:9.5px;color:var(--muted2)">
+                <i class="ti ti-check" style="color:var(--green);font-size:11px"></i>Liquidity check
+              </div>
+              <div style="display:flex;align-items:center;gap:6px;font-size:9.5px;color:var(--muted2)">
+                <i class="ti ti-check" style="color:var(--green);font-size:11px"></i>Smart allowance detection
+              </div>
+              <div style="display:flex;align-items:center;gap:6px;font-size:9.5px;color:var(--muted2)">
+                <i class="ti ti-check" style="color:var(--green);font-size:11px"></i>Fallback gas strategy
+              </div>
+              <div style="display:flex;align-items:center;gap:6px;font-size:9.5px;color:var(--muted2)">
+                <i class="ti ti-check" style="color:var(--green);font-size:11px"></i>Slippage protection
+              </div>
+              <div style="display:flex;align-items:center;gap:6px;font-size:9.5px;color:var(--muted2)">
+                <i class="ti ti-check" style="color:var(--green);font-size:11px"></i>Revert decoding
+              </div>
+            </div>
+          </div>
+
+          <div class="info-card">
+            <div class="info-title"><i class="ti ti-code" style="color:var(--purple)"></i>SDK Integration</div>
+            <div style="background:rgba(0,0,0,.2);border:1px solid var(--border);border-radius:5px;padding:9px;font-size:8.5px;color:var(--muted2);font-family:'JetBrains Mono',monospace;line-height:1.7;overflow-x:auto">
+              <span style="color:var(--purple)">import</span> { AppKit }<br/>
+              &nbsp;<span style="color:var(--purple)">from</span> <span style="color:var(--yellow)">'@circle-fin/app-kit'</span>;<br/><br/>
+              <span style="color:var(--blue)">const</span> kit = <span style="color:var(--blue)">new</span> <span style="color:var(--teal)">AppKit</span>();<br/>
+              <span style="color:var(--blue)">await</span> kit.<span style="color:var(--teal)">swap</span>({<br/>
+              &nbsp;tokenIn: <span style="color:var(--yellow)">"USDC"</span>,<br/>
+              &nbsp;tokenOut: <span style="color:var(--yellow)">"EURC"</span>,<br/>
+              &nbsp;amountIn: <span style="color:var(--yellow)">"1.00"</span><br/>
+              });
+            </div>
           </div>
         </div>
       </div>
@@ -2680,7 +3253,11 @@ async function finalizeConnection(raw, walletType) {
   if(sbScoreChip) { sbScoreChip.style.display = ''; document.getElementById('sb-score').textContent = 'Arc Testnet'; }
 
   await refreshBalance();
-  loadPoolFromChain(); // update user LP balance now that wallet is connected
+  loadPoolFromChain().then(() => {
+    // After wallet connects: re-run quote to enable swap button + run precheck
+    updateSwapRate();
+    swpUpdatePoolInfo();
+  });
   closeWalletModal();
   toast(`✓ ${badges[walletType]||walletType}: ${short} | Arc Testnet`, 'success');
   return true;
@@ -3557,10 +4134,174 @@ async function executeInParts(){
 }
 
 // ══════════════════════════════════════════════════════════
-//  SWAP — kit.swap()
-//  Real SDK: npm install @circle-fin/app-kit @circle-fin/adapter-viem-v2
-//  Docs: https://docs.arc.network/app-kit/quickstarts/swap-tokens-same-chain
+//  SWAP ENGINE — Production-grade
+//  • Pre-swap validation (liquidity, balance, allowance, chain)
+//  • Safe gas strategy with fallback
+//  • staticCall simulation before submission
+//  • Human-readable revert decoding
+//  • Debounced quotes with local AMM fallback
+//  • Slippage + min-received + price impact
 // ══════════════════════════════════════════════════════════
+
+// ── State ────────────────────────────────────────────────
+const SWP = {
+  slippage:   0.5,      // percent (default 0.5%)
+  detailOpen: false,    // quote details accordion
+  lastQuote:  null,     // cached quote result
+  quoteTimer: null,     // debounce timer
+  checking:   false,    // precheck in-flight flag
+  FALLBACK_GAS: 300_000n, // safe fallback gas limit
+};
+
+// ── UI helpers ────────────────────────────────────────────
+function swpToggleSettings() {
+  const panel = document.getElementById('swp-settings-panel');
+  const icon  = document.getElementById('swp-settings-icon');
+  panel.classList.toggle('open');
+  icon.className = panel.classList.contains('open') ? 'ti ti-x' : 'ti ti-settings';
+}
+
+function swpSetSlippage(pct, btn) {
+  SWP.slippage = pct;
+  document.querySelectorAll('.swp-slip-btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  document.getElementById('swp-slip-custom').value = '';
+  document.getElementById('swp-slip-display').textContent = pct + '%';
+  updateSwapRate();
+}
+
+function swpSetCustomSlippage(val) {
+  const n = parseFloat(val);
+  if (!isNaN(n) && n > 0 && n <= 50) {
+    SWP.slippage = n;
+    document.querySelectorAll('.swp-slip-btn').forEach(b => b.classList.remove('active'));
+    document.getElementById('swp-slip-display').textContent = n + '%';
+    updateSwapRate();
+  }
+}
+
+function swpToggleDetails() {
+  SWP.detailOpen = !SWP.detailOpen;
+  const body    = document.getElementById('swp-details-body');
+  const chevron = document.getElementById('swp-chevron');
+  body.classList.toggle('open', SWP.detailOpen);
+  if (chevron) chevron.className = SWP.detailOpen ? 'ti ti-chevron-up' : 'ti ti-chevron-down';
+}
+
+function swpSetMax() {
+  if (!walletAddress) { toast('Connect wallet first', 'warning'); return; }
+  const tIn = TOKENS[swapTokenInIdx];
+  // Read balance from sidebar display
+  const balText = document.getElementById('sb-bal')?.textContent || '0';
+  const bal = parseFloat(balText.replace(/[^0-9.]/g, '')) || 0;
+  if (bal > 0) {
+    document.getElementById('swap-amount-in').value = bal.toFixed(6);
+    updateSwapRate();
+  }
+}
+
+// ── Swap button state machine ─────────────────────────────
+function swpSetBtn(state, label) {
+  const btn  = document.getElementById('swap-btn');
+  const icon = document.getElementById('swp-btn-icon');
+  const lbl  = document.getElementById('swp-btn-label');
+  if (!btn) return;
+  btn.className = 'swp-btn';
+  const states = {
+    disabled:  { cls:'swp-btn-disabled', ico:'ti-arrows-exchange', disabled:true  },
+    ready:     { cls:'swp-btn-active',   ico:'ti-arrows-exchange', disabled:false },
+    approving: { cls:'swp-btn-loading',  ico:'ti-loader spin',     disabled:true  },
+    swapping:  { cls:'swp-btn-loading',  ico:'ti-loader spin',     disabled:true  },
+    warning:   { cls:'swp-btn-warn',     ico:'ti-alert-triangle',  disabled:false },
+    nopool:    { cls:'swp-btn-disabled', ico:'ti-droplet-off',     disabled:true  },
+    nowallt:   { cls:'swp-btn-disabled', ico:'ti-wallet',          disabled:true  },
+  };
+  const s = states[state] || states.disabled;
+  btn.classList.add(s.cls);
+  btn.disabled = s.disabled;
+  if (icon) icon.className = `ti ${s.ico}`;
+  if (lbl)  lbl.textContent = label || '—';
+}
+
+// ── Precheck banner ───────────────────────────────────────
+function swpShowPrecheck(type, msg) {
+  const el   = document.getElementById('swp-precheck');
+  const icon = document.getElementById('swp-precheck-icon');
+  const text = document.getElementById('swp-precheck-msg');
+  if (!el) return;
+  const icons = {
+    error:   'ti-alert-circle',
+    warning: 'ti-alert-triangle',
+    info:    'ti-info-circle',
+    success: 'ti-circle-check',
+  };
+  el.className = `swp-precheck show ${type}`;
+  if (icon) icon.className = `ti ${icons[type]||'ti-info-circle'}`;
+  if (text) text.textContent = msg;
+}
+function swpHidePrecheck() {
+  const el = document.getElementById('swp-precheck');
+  if (el) el.className = 'swp-precheck';
+}
+
+// ── Human-readable error decoder ─────────────────────────
+function swpDecodeError(err) {
+  const msg = (err?.shortMessage || err?.message || err?.reason || String(err)).toLowerCase();
+  if (msg.includes('user rejected') || err?.code === 4001)
+    return 'Transaction rejected by user';
+  if (msg.includes('insufficient liquidity') || msg.includes('insufficient_liquidity'))
+    return 'Insufficient liquidity for this trade';
+  if (msg.includes('insufficient output'))
+    return 'Slippage exceeded — output too low. Raise slippage or reduce amount';
+  if (msg.includes('transfer amount exceeds balance') || msg.includes('insufficient balance'))
+    return 'Insufficient token balance';
+  if (msg.includes('allowance') || msg.includes('approve'))
+    return 'Approval required before swap';
+  if (msg.includes('deadline'))
+    return 'Transaction deadline exceeded — please retry';
+  if (msg.includes('k value') || msg.includes('invariant'))
+    return 'AMM invariant violated — pool reserves inconsistent';
+  if (msg.includes('missing revert data') || msg.includes('call_exception'))
+    return 'Contract call failed — pool may be empty or contract not deployed';
+  if (msg.includes('network') || msg.includes('chain'))
+    return 'Network mismatch — please switch to Arc Testnet';
+  if (msg.includes('nonce'))
+    return 'Nonce conflict — please wait and retry';
+  if (msg.includes('gas'))
+    return 'Gas estimation failed — retrying with fallback gas';
+  if (msg.includes('execution reverted'))
+    return 'Transaction reverted — check liquidity and amounts';
+  return err?.shortMessage || err?.message || 'Swap failed — see console for details';
+}
+
+// ── Live pool info sidebar ────────────────────────────────
+function swpUpdatePoolInfo() {
+  const fmt = n => n.toLocaleString('en-US', { minimumFractionDigits:2, maximumFractionDigits:2 });
+  const tvl  = pool.reserveUsdc + pool.reserveEurc;
+  const uel = document.getElementById('swp-info-usdc');
+  const eel = document.getElementById('swp-info-eurc');
+  const tel = document.getElementById('swp-info-tvl');
+  const pel = document.getElementById('swp-pool-status');
+  const dot = document.getElementById('swp-pool-dot');
+  const lbl = document.getElementById('swp-pool-label');
+  const tvlEl = document.getElementById('swp-pool-tvl');
+
+  if (uel) uel.textContent = pool.loaded ? fmt(pool.reserveUsdc) + ' USDC' : '…';
+  if (eel) eel.textContent = pool.loaded ? fmt(pool.reserveEurc) + ' EURC' : '…';
+  if (tel) tel.textContent = pool.loaded ? '$' + fmt(tvl) : '…';
+
+  if (pel) {
+    pel.style.display = '';
+    const hasLiq = pool.reserveUsdc > 0 && pool.reserveEurc > 0;
+    if (dot) dot.style.background = hasLiq ? 'var(--green)' : 'var(--yellow)';
+    if (lbl) lbl.textContent = !pool.loaded ? 'Loading pool…'
+      : hasLiq ? `Pool active · TVL $${fmt(tvl)}`
+      : 'Pool is empty — add liquidity in Pool tab';
+    if (tvlEl) tvlEl.textContent = '';
+  }
+}
+
+// ── Token display sync ────────────────────────────────────
 function cycleTokenIn(){
   swapTokenInIdx=(swapTokenInIdx+1)%TOKENS.length;
   if(swapTokenInIdx===swapTokenOutIdx)swapTokenInIdx=(swapTokenInIdx+1)%TOKENS.length;
@@ -3573,260 +4314,553 @@ function cycleTokenOut(){
 }
 function applySwapTokens(){
   const tIn=TOKENS[swapTokenInIdx],tOut=TOKENS[swapTokenOutIdx];
-  document.getElementById('swap-icon-in').style.background=tIn.color;
-  document.getElementById('swap-icon-in').textContent=tIn.icon;
-  document.getElementById('swap-token-in').textContent=tIn.sym;
-  document.getElementById('swap-icon-out').style.background=tOut.color;
-  document.getElementById('swap-icon-out').textContent=tOut.icon;
-  document.getElementById('swap-token-out').textContent=tOut.sym;
+  const iIn  = document.getElementById('swap-icon-in');
+  const iOut = document.getElementById('swap-icon-out');
+  const nIn  = document.getElementById('swap-token-in');
+  const nOut = document.getElementById('swap-token-out');
+  if (iIn)  { iIn.style.background=tIn.color;  iIn.textContent=tIn.icon;  }
+  if (iOut) { iOut.style.background=tOut.color; iOut.textContent=tOut.icon; }
+  if (nIn)  nIn.textContent  = tIn.sym;
+  if (nOut) nOut.textContent = tOut.sym;
+  // Update route display
+  const rIn  = document.getElementById('swp-route-in');
+  const rOut = document.getElementById('swp-route-out');
+  if (rIn)  rIn.textContent  = tIn.sym;
+  if (rOut) rOut.textContent = tOut.sym;
 }
 function swapTokens(){
   [swapTokenInIdx,swapTokenOutIdx]=[swapTokenOutIdx,swapTokenInIdx];
-  applySwapTokens();updateSwapRate();
+  // Flip amounts
+  const outVal = document.getElementById('swap-amount-out').value;
+  if (outVal && parseFloat(outVal) > 0) {
+    document.getElementById('swap-amount-in').value = outVal;
+  }
+  document.getElementById('swap-amount-out').value = '';
+  applySwapTokens();
+  updateSwapRate();
 }
-let swapRateTimer = null;
-async function updateSwapRate(){
-  const amtIn = parseFloat(document.getElementById('swap-amount-in').value) || 0;
-  const tIn   = TOKENS[swapTokenInIdx], tOut = TOKENS[swapTokenOutIdx];
-  const outEl = document.getElementById('swap-amount-out');
-  const rateEl = document.getElementById('swap-rate');
 
-  // Clear previous debounce
+// ── Quote Engine ──────────────────────────────────────────
+let swapRateTimer = null;
+
+async function updateSwapRate() {
+  const amtIn   = parseFloat(document.getElementById('swap-amount-in').value) || 0;
+  const tIn     = TOKENS[swapTokenInIdx];
+  const tOut    = TOKENS[swapTokenOutIdx];
+  const outEl   = document.getElementById('swap-amount-out');
+  const detailEl = document.getElementById('swp-details');
+
   if (swapRateTimer) clearTimeout(swapRateTimer);
+
+  // Update pool info sidebar always
+  swpUpdatePoolInfo();
 
   if (amtIn <= 0) {
     if (outEl) outEl.value = '';
-    const inEl  = document.getElementById('swap-usd-in');
-    const outUsd = document.getElementById('swap-usd-out');
-    if (inEl)  inEl.textContent  = '';
-    if (outUsd) outUsd.textContent = '';
-    // Show pool rate even with no amount
-    if (rateEl) {
+    const el = document.getElementById('swap-rate');
+    if (el) {
       if (!pool.loaded) {
-        rateEl.textContent = 'Loading pool rate...';
+        el.textContent = 'Loading pool…';
       } else if (pool.reserveUsdc > 0 && pool.reserveEurc > 0) {
         const r = tIn.sym === 'USDC'
           ? (pool.reserveEurc * (1 - POOL_FEE)) / pool.reserveUsdc
           : (pool.reserveUsdc * (1 - POOL_FEE)) / pool.reserveEurc;
-        rateEl.textContent = `1 ${tIn.sym} ≈ ${r.toFixed(6)} ${tOut.sym} · 0.1% fee`;
+        el.textContent = `1 ${tIn.sym} ≈ ${r.toFixed(6)} ${tOut.sym}`;
       } else {
-        rateEl.textContent = 'Pool empty — add liquidity first';
+        el.textContent = 'No liquidity — add to Pool tab';
       }
     }
+    // Clear details
+    if (detailEl) detailEl.style.display = 'none';
+    swpHidePrecheck();
+    SWP.lastQuote = null;
+    // Update button
+    if (!walletAddress)       swpSetBtn('nowallt', 'Connect Wallet');
+    else if (!pool.loaded || pool.reserveUsdc === 0) swpSetBtn('nopool', 'No Liquidity');
+    else swpSetBtn('disabled', 'Enter an amount');
     return;
   }
 
-  if (rateEl) rateEl.textContent = 'Fetching rate from pool...';
-  if (outEl) outEl.value = '';
+  // Show loading state in rate
+  const rateEl = document.getElementById('swap-rate');
+  if (rateEl) rateEl.textContent = 'Fetching quote…';
+  if (outEl)  outEl.value = '';
+  if (detailEl) detailEl.style.display = '';
+  swpHidePrecheck();
 
   swapRateTimer = setTimeout(async () => {
     try {
-      // Ensure pool is loaded
-      if (!pool.loaded) {
-        await loadPoolFromChain();
-      }
+      if (!pool.loaded) await loadPoolFromChain();
 
+      // ── Validate liquidity ────────────────────────────
       if (pool.reserveUsdc <= 0 || pool.reserveEurc <= 0) {
-        if (rateEl) rateEl.textContent = 'Pool has no liquidity — add liquidity first';
-        const inUsd  = document.getElementById('swap-usd-in');
-        const outUsd = document.getElementById('swap-usd-out');
-        if (inUsd)  inUsd.textContent  = '';
-        if (outUsd) outUsd.textContent = '';
+        if (rateEl) rateEl.textContent = 'No liquidity available';
+        swpShowPrecheck('warning', 'Pool has no liquidity. Add liquidity in the Pool tab first.');
+        swpSetBtn('nopool', 'No Liquidity');
+        SWP.lastQuote = null;
         return;
       }
 
-      let amtOut = 0;
-      let source = 'live pool';
-
+      // ── Get quote ─────────────────────────────────────
+      let amtOut = 0, source = 'onchain';
       try {
-        // Try on-chain quote first
         const readProvider = provider || new ethers.JsonRpcProvider('https://rpc.testnet.arc.network');
-        const poolContract = new ethers.Contract(POOL_CONTRACT_ADDRESS, POOL_CONTRACT_ABI, readProvider);
-        const tokenInAddr  = tIn.sym === 'USDC' ? USDC_ADDRESS : EURC_ADDRESS;
-        const amtInBig     = toUsdc(amtIn.toFixed(6));
-        const amtOutBig    = await poolContract.getAmountOut(amtInBig, tokenInAddr);
+        const pc = new ethers.Contract(POOL_CONTRACT_ADDRESS, POOL_CONTRACT_ABI, readProvider);
+        const tokenInAddr = tIn.sym === 'USDC' ? USDC_ADDRESS : EURC_ADDRESS;
+        const amtInBig    = toUsdc(amtIn.toFixed(6));
+        const amtOutBig   = await pc.getAmountOut(amtInBig, tokenInAddr);
         amtOut = parseFloat(ethers.formatUnits(amtOutBig, 6));
+        console.debug('[swap] onchain quote:', amtOut, tOut.sym, '| source: contract.getAmountOut');
       } catch (contractErr) {
-        // Fallback: calculate locally using x*y=k constant product formula
-        // amountOut = (reserveOut * amountIn * (1 - fee)) / (reserveIn + amountIn * (1 - fee))
+        // Local x*y=k fallback
         const rIn   = tIn.sym  === 'USDC' ? pool.reserveUsdc : pool.reserveEurc;
         const rOut  = tOut.sym === 'USDC' ? pool.reserveUsdc : pool.reserveEurc;
-        const feeAdj = amtIn * (1 - POOL_FEE);
-        amtOut  = (rOut * feeAdj) / (rIn + feeAdj);
-        source  = 'local AMM calc';
-        console.warn('Contract getAmountOut failed, using local AMM:', contractErr.message);
+        const adj   = amtIn * (1 - POOL_FEE);
+        amtOut  = (rOut * adj) / (rIn + adj);
+        source  = 'local AMM';
+        console.warn('[swap] getAmountOut failed, using local x*y=k fallback:', contractErr.message);
       }
 
-      const rate = amtOut / amtIn;
-      const priceImpact = tIn.sym === 'USDC'
-        ? (amtIn / pool.reserveUsdc * 100)
-        : (amtIn / pool.reserveEurc * 100);
+      if (amtOut <= 0) {
+        swpShowPrecheck('error', 'Swap amount too small for this pool.');
+        swpSetBtn('disabled', 'Amount too small');
+        if (rateEl) rateEl.textContent = 'Amount too small';
+        SWP.lastQuote = null;
+        return;
+      }
 
-      if (outEl) outEl.value = amtOut.toFixed(6);
+      const rate        = amtOut / amtIn;
+      const rIn         = tIn.sym === 'USDC' ? pool.reserveUsdc : pool.reserveEurc;
+      const priceImpact = rIn > 0 ? (amtIn / rIn) * 100 : 0;
+      const minReceived = amtOut * (1 - SWP.slippage / 100);
+      const fee         = amtIn * POOL_FEE;
+      const amtInUsd    = amtIn  * (tIn.sym  === 'USDC' ? USDC_RATE_P : EURC_RATE_P);
+      const amtOutUsd   = amtOut * (tOut.sym === 'USDC' ? USDC_RATE_P : EURC_RATE_P);
+
+      // ── Update UI ─────────────────────────────────────
+      if (outEl) {
+        outEl.value = amtOut.toFixed(6);
+        outEl.style.color = 'var(--text)';
+      }
+
       const inUsd  = document.getElementById('swap-usd-in');
       const outUsd = document.getElementById('swap-usd-out');
-      if (inUsd)  inUsd.textContent  = `≈ $${(amtIn  * (tIn.sym  === 'USDC' ? USDC_RATE_P : EURC_RATE_P)).toFixed(2)} USD`;
-      if (outUsd) outUsd.textContent = `≈ $${(amtOut * (tOut.sym === 'USDC' ? USDC_RATE_P : EURC_RATE_P)).toFixed(2)} USD`;
-      if (rateEl) {
-        const impactStr = priceImpact > 0.01 ? ` · Impact: ${priceImpact.toFixed(3)}%` : '';
-        rateEl.textContent = `1 ${tIn.sym} ≈ ${rate.toFixed(6)} ${tOut.sym} (${source}${impactStr})`;
+      if (inUsd)  inUsd.textContent  = `≈ $${amtInUsd.toFixed(2)} USD`;
+      if (outUsd) outUsd.textContent = `≈ $${amtOutUsd.toFixed(2)} USD`;
+
+      // Rate pill
+      const impactStr = priceImpact > 0.01 ? ` · ${priceImpact.toFixed(2)}% impact` : '';
+      if (rateEl) rateEl.textContent = `1 ${tIn.sym} ≈ ${rate.toFixed(6)} ${tOut.sym}${impactStr}`;
+
+      // Details panel
+      const impactCls = priceImpact < 1 ? 'green' : priceImpact < 3 ? 'yellow' : 'red';
+      swpSet('swp-rate-detail',    `1 ${tIn.sym} = ${rate.toFixed(6)} ${tOut.sym}`);
+      swpSet('swp-impact-val',     priceImpact.toFixed(3) + '%', impactCls);
+      swpSet('swp-min-received',   minReceived.toFixed(6) + ' ' + tOut.sym);
+      swpSet('swp-fee-val',        fee.toFixed(6) + ' ' + tIn.sym);
+      swpSet('swp-source-val',     source);
+
+      // Impact badge on rate
+      const badgeCls = impactCls === 'green' ? 'swp-impact-low'
+                     : impactCls === 'yellow' ? 'swp-impact-med' : 'swp-impact-high';
+
+      // Price impact warning
+      if (priceImpact > 5) {
+        swpShowPrecheck('warning', `High price impact: ${priceImpact.toFixed(2)}% — consider a smaller amount`);
+      } else if (source === 'local AMM') {
+        swpShowPrecheck('info', 'Rate from local AMM estimate — onchain quote unavailable');
+      } else {
+        swpHidePrecheck();
       }
+
+      // Cache quote
+      SWP.lastQuote = { amtIn, amtOut, minReceived, rate, priceImpact, fee, source, tIn, tOut };
+
+      // Run precheck + update button
+      await swpRunPrecheck(amtIn, amtOut, minReceived);
+
     } catch(e) {
-      console.error('updateSwapRate error:', e);
-      if (rateEl) rateEl.textContent = 'Error fetching rate — check console';
-      if (outEl) outEl.value = '';
+      console.error('[swap] updateSwapRate error:', e);
+      if (rateEl) rateEl.textContent = 'Quote error';
+      swpShowPrecheck('error', swpDecodeError(e));
+      swpSetBtn('disabled', 'Quote error');
+      SWP.lastQuote = null;
     }
-  }, 350); // debounce 350ms
+  }, 380);
 }
 
-async function executeSwap(){
-  if(!walletAddress){toast('Connect wallet first','error');return;}
-  if(!signer){toast('Connect a real wallet to swap — preview mode cannot sign transactions','warning');return;}
-  const amtIn=parseFloat(document.getElementById('swap-amount-in').value)||0;
-  if(amtIn<=0){toast('Enter an amount to swap','error');return;}
-  if(pool.loaded && pool.reserveUsdc===0 && pool.reserveEurc===0){
-    toast('Pool has no liquidity. Add liquidity first in the Pool tab.','warning');return;
-  }
-  const kitKey=document.getElementById('kit-key-input')?.value.trim() || 'elligente-internal';
-  const tIn=TOKENS[swapTokenInIdx],tOut=TOKENS[swapTokenOutIdx];
-  const btn=document.getElementById('swap-btn');
-  btn.disabled=true;btn.innerHTML='<i class="ti ti-loader spin"></i> Swapping...';
+// Helper to set detail row with optional color class
+function swpSet(id, val, cls) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = val;
+  el.className = 'swp-detail-val' + (cls ? ' ' + cls : '');
+}
 
-  const stepsCard=document.getElementById('swap-steps-card');
-  const stepList=document.getElementById('swap-step-list');
-  stepsCard.style.display='';stepList.innerHTML='';
+// ── Pre-swap Validation ───────────────────────────────────
+async function swpRunPrecheck(amtIn, amtOut, minReceived) {
+  if (SWP.checking) return;
+  SWP.checking = true;
+  try {
+    const tIn  = TOKENS[swapTokenInIdx];
+    const tOut = TOKENS[swapTokenOutIdx];
 
-  // Steps as shown in real App Kit execution
-  const steps=[
-    {name:'approve', label:`Approve ${amtIn} ${tIn.sym}`, detail:'Token approval on Arc Testnet'},
-    {name:'swap',    label:`Swap ${tIn.sym} → ${tOut.sym}`, detail:'Executing via App Kit kit.swap()'},
-    {name:'confirm', label:'Confirm transaction', detail:'Waiting for block confirmation'},
-  ];
-
-  function renderStep(idx,state,txHash){
-    const s=steps[idx];
-    const el=document.getElementById(`swap-step-${idx}`)||document.createElement('div');
-    el.id=`swap-step-${idx}`;el.className='step-item';
-    const stateIco={pending:'pending',active:'active',success:'success',error:'error'}[state];
-    const stateIcon={pending:'…',active:'<span class="spin">↻</span>',success:'✓',error:'✕'}[state];
-    el.innerHTML=`<div class="step-ico ${stateIco}">${stateIcon}</div><div style="flex:1"><div style="font-weight:600">${s.label}</div><div style="font-size:8.5px;color:var(--muted2)">${txHash?`Tx: <a href="https://testnet.arcscan.app/tx/${txHash}" target="_blank" style="color:var(--blue);text-decoration:none">${shortAddr(txHash)}</a>`:s.detail}</div></div>`;
-    if(!document.getElementById(`swap-step-${idx}`))stepList.appendChild(el);
-    else stepList.replaceChild(el,document.getElementById(`swap-step-${idx}`));
-  }
-
-  steps.forEach((_,i)=>renderStep(i,'pending',null));
-
-  try{
-    // ── REAL App Kit flow ─────────────────────────
-    // In a real Node.js/bundled environment:
-    // import { AppKit } from '@circle-fin/app-kit';
-    // import { createViemAdapterFromPrivateKey } from '@circle-fin/adapter-viem-v2';
-    // const kit = new AppKit();
-    // const result = await kit.swap({ from:{adapter,chain:'Arc_Testnet'}, tokenIn:'USDC', tokenOut:'EURC', amountIn:'1.00', config:{kitKey} });
-    //
-    // In browser we simulate the flow using ethers.js + real USDC contract:
-
-    // ── Swap via Pool Contract (pulls liquidity from USDC/EURC pool) ──
-    const tInAddr  = TOKENS[swapTokenInIdx].sym === 'USDC' ? USDC_ADDRESS : EURC_ADDRESS;
-    const tOutAddr = TOKENS[swapTokenOutIdx].sym === 'USDC' ? USDC_ADDRESS : EURC_ADDRESS;
-    // Declare amtBig here (function scope) so it is accessible in both the
-    // approve block and the swap block below — fixes "amtBig is not defined"
-    const amtBig   = toUsdc(amtIn.toFixed(6));
-
-    renderStep(0,'active',null);
-    let approveHash = '0x'+Array(64).fill(0).map(()=>Math.floor(Math.random()*16).toString(16)).join('');
-    if(signer) {
-      const tokenInContract = new ethers.Contract(tInAddr, USDC_ABI, signer);
-
-      // ── Step 0: Approve token spend ──────────────────────────────
-      const swapDeployed = window.__SWAP_ADDRESS__
-        && window.__SWAP_ADDRESS__ !== '0x0000000000000000000000000000000000000001';
-      const poolDeployed = window.__POOL_ADDRESS__
-        && window.__POOL_ADDRESS__ !== '0x0000000000000000000000000000000000000002';
-      const approveTarget = swapDeployed ? window.__SWAP_ADDRESS__
-                          : poolDeployed ? POOL_CONTRACT_ADDRESS
-                          : null;
-      if (!approveTarget) {
-        renderStep(0,'error',null);
-        throw new Error('Deploy ElligentSwap and ElligentPool contracts first, then add liquidity.');
-      }
-      try {
-        const approveTx = await tokenInContract.approve(approveTarget, amtBig * 2n);
-        approveHash = approveTx.hash;
-        renderStep(0,'active',approveHash);
-        await approveTx.wait();
-      } catch(approveErr) {
-        renderStep(0,'error',null);
-        const rej = approveErr.code===4001||(approveErr.message||'').includes('rejected');
-        throw rej ? new Error('User rejected approval') : approveErr;
-      }
-    } else {
-      await new Promise(r=>setTimeout(r,1200));
+    // 1) Wallet
+    if (!walletAddress) {
+      swpSetBtn('nowallt', 'Connect Wallet');
+      SWP.checking = false; return;
     }
-    renderStep(0,'success',approveHash);
 
-    renderStep(1,'active',null);
-    let swapTxHash = null;
-    if(signer) {
-      try {
-        const displayedOut = parseFloat(document.getElementById('swap-amount-out').value)||0;
-        const amtOutMin    = toUsdc((displayedOut * 0.995).toFixed(6));
-        const swapDeployed2 = window.__SWAP_ADDRESS__
-          && window.__SWAP_ADDRESS__ !== '0x0000000000000000000000000000000000000001';
-        if (swapDeployed2) {
-          // Route through ElligentSwap (which calls ElligentPool internally)
-          const swapAbi  = ['function swap(address,uint256,uint256,address,uint256) returns (uint256)'];
-          const swapCtr  = new ethers.Contract(window.__SWAP_ADDRESS__, swapAbi, signer);
-          const deadline = Math.floor(Date.now()/1000) + 1200;
-          const swapTx   = await swapCtr.swap(tInAddr, amtBig, amtOutMin, walletAddress, deadline);
-          swapTxHash = swapTx.hash;
-          renderStep(1,'active',swapTxHash);
-          await swapTx.wait();
-        } else {
-          // Call pool directly — ABI: swap(address tokenIn, uint256 amountIn, uint256 amountOutMin)
-          const poolContract = new ethers.Contract(POOL_CONTRACT_ADDRESS, POOL_CONTRACT_ABI, signer);
-          const swapTx2 = await poolContract.swap(tInAddr, amtBig, amtOutMin);
-          swapTxHash = swapTx2.hash;
-          renderStep(1,'active',swapTxHash);
-          await swapTx2.wait();
-        }
-      } catch(swapErr) {
-        renderStep(1,'error',null);
-        const rej = swapErr.code===4001||(swapErr.message||'').includes('rejected');
-        throw rej ? new Error('User rejected swap') : swapErr;
-      }
-    } else {
-      await new Promise(r=>setTimeout(r,1500));
+    // 2) Signer
+    if (!signer) {
+      swpSetBtn('warning', 'Read-only — connect wallet to sign');
+      SWP.checking = false; return;
     }
-    renderStep(1,'success',swapTxHash);
-    renderStep(2,'active',null);
-    await new Promise(r=>setTimeout(r,600));
-    renderStep(2,'success',swapTxHash);
 
-    document.getElementById('swap-step-status').textContent='Success';
-    document.getElementById('swap-step-status').style.color='var(--green)';
+    // 3) Chain check (Arc Testnet = 5042002)
+    try {
+      const net = await provider.getNetwork();
+      if (Number(net.chainId) !== 5042002) {
+        swpShowPrecheck('error', `Wrong network (chain ${net.chainId}) — please switch to Arc Testnet`);
+        swpSetBtn('disabled', 'Wrong Network');
+        SWP.checking = false; return;
+      }
+    } catch (_) { /* non-blocking */ }
 
-    // Add to history
-    await loadPoolFromChain(); // refresh pool reserves post-swap
-    updateSwapRate();           // refresh quote
-    const amtOut=parseFloat(document.getElementById('swap-amount-out').value)||0;
-    addToHistory('swap-history',{
-      icon:'ti-arrows-exchange',color:'var(--purple)',
-      label:`${amtIn} ${tIn.sym} → ${amtOut.toFixed(4)} ${tOut.sym}`,
-      sub:`Arc Testnet · ${new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})}`,
-      txHash:swapTxHash,dotColor:'#a78bfa'
-    });
+    // 4) Pool + liquidity
+    if (!pool.loaded || pool.reserveUsdc <= 0 || pool.reserveEurc <= 0) {
+      swpShowPrecheck('warning', 'Pool has no liquidity. Add liquidity in the Pool tab.');
+      swpSetBtn('nopool', 'No Liquidity');
+      SWP.checking = false; return;
+    }
 
-    toast(`✓ Swapped ${amtIn} ${tIn.sym} → ${amtOut.toFixed(4)} ${tOut.sym} on Arc Testnet`,'success');
-    if(signer)await refreshBalance();
-  }catch(e){
-    steps.forEach((_,i)=>{const el=document.getElementById(`swap-step-${i}`);if(el&&el.querySelector('.step-ico.active'))renderStep(i,'error',null);});
-    if(e.code===4001)toast('Rejected','error');
-    else toast('Swap error: '+(e.shortMessage||e.message||''),'error');
-  }finally{
-    btn.disabled=false;btn.innerHTML='<i class="ti ti-arrows-exchange"></i> Swap Tokens';
+    // 5) Token addresses
+    const tInAddr  = tIn.sym  === 'USDC' ? USDC_ADDRESS : EURC_ADDRESS;
+
+    // 6) Balance check (read from chain)
+    let userBal = 0n;
+    try {
+      const prov      = provider || new ethers.JsonRpcProvider('https://rpc.testnet.arc.network');
+      const tokenCtr  = new ethers.Contract(tInAddr, USDC_ABI, prov);
+      userBal         = await tokenCtr.balanceOf(walletAddress);
+      const amtBigChk = toUsdc(amtIn.toFixed(6));
+      if (userBal < amtBigChk) {
+        const have = parseFloat(ethers.formatUnits(userBal, 6)).toFixed(6);
+        swpShowPrecheck('error', `Insufficient ${tIn.sym} balance — have ${have}, need ${amtIn.toFixed(6)}`);
+        swpSetBtn('disabled', `Insufficient ${tIn.sym}`);
+        SWP.checking = false; return;
+      }
+    } catch (_) { /* non-blocking if RPC fails */ }
+
+    // 7) Allowance check
+    const poolDeployed = window.__POOL_ADDRESS__ && window.__POOL_ADDRESS__ !== '0x0000000000000000000000000000000000000002';
+    const swapDeployed = window.__SWAP_ADDRESS__ && window.__SWAP_ADDRESS__ !== '0x0000000000000000000000000000000000000001';
+    const approveTarget = swapDeployed ? window.__SWAP_ADDRESS__
+                        : poolDeployed ? POOL_CONTRACT_ADDRESS : null;
+
+    if (!approveTarget) {
+      swpShowPrecheck('error', 'ElligentPool contract not deployed. Deploy contracts first.');
+      swpSetBtn('disabled', 'Pool Not Deployed');
+      SWP.checking = false; return;
+    }
+
+    let needsApproval = false;
+    try {
+      const prov     = provider || new ethers.JsonRpcProvider('https://rpc.testnet.arc.network');
+      const tokenCtr = new ethers.Contract(tInAddr, USDC_ABI, prov);
+      const amtBig   = toUsdc(amtIn.toFixed(6));
+      const allowance = await tokenCtr.allowance(walletAddress, approveTarget);
+      needsApproval = allowance < amtBig;
+      console.debug('[swap] precheck allowance:', allowance.toString(), '| need:', amtBig.toString(), '| needsApproval:', needsApproval);
+    } catch (_) { /* non-blocking */ }
+
+    // 8) Slippage sanity
+    if (SWP.slippage > 15) {
+      swpShowPrecheck('warning', `Slippage ${SWP.slippage}% is very high — you may get a poor rate`);
+    } else if (!needsApproval) {
+      swpHidePrecheck();
+    }
+
+    // All checks passed
+    if (needsApproval) {
+      swpShowPrecheck('info', `Approve ${tIn.sym} spend first — approval transaction will be sent`);
+      swpSetBtn('ready', `Approve & Swap ${tIn.sym} → ${tOut.sym}`);
+    } else {
+      swpSetBtn('ready', `Swap ${tIn.sym} → ${tOut.sym}`);
+    }
+
+    console.debug('[swap] precheck passed | amtIn:', amtIn, '| amtOut:', amtOut, '| slippage:', SWP.slippage + '%');
+  } catch(e) {
+    console.warn('[swap] precheck error:', e.message);
+    swpSetBtn('ready', 'Swap'); // allow attempt even if precheck partially failed
+  } finally {
+    SWP.checking = false;
   }
 }
+
+// ── Execute Swap ──────────────────────────────────────────
+async function executeSwap() {
+  // ── Guard: must have wallet + signer ─────────────────
+  if (!walletAddress) { toast('Connect wallet first','error'); return; }
+  if (!signer)        { toast('Connect a signing wallet to execute swaps','warning'); return; }
+
+  const amtIn = parseFloat(document.getElementById('swap-amount-in').value) || 0;
+  if (amtIn <= 0) { toast('Enter an amount to swap','error'); return; }
+  if (pool.loaded && pool.reserveUsdc === 0 && pool.reserveEurc === 0) {
+    toast('Pool has no liquidity. Add liquidity in the Pool tab.','warning'); return;
+  }
+
+  const tIn    = TOKENS[swapTokenInIdx];
+  const tOut   = TOKENS[swapTokenOutIdx];
+  const tInAddr  = tIn.sym  === 'USDC' ? USDC_ADDRESS : EURC_ADDRESS;
+  const tOutAddr = tOut.sym === 'USDC' ? USDC_ADDRESS : EURC_ADDRESS;
+  const amtBig   = toUsdc(amtIn.toFixed(6));
+
+  // ── Resolve approve target ────────────────────────────
+  const swapDeployed = window.__SWAP_ADDRESS__ && window.__SWAP_ADDRESS__ !== '0x0000000000000000000000000000000000000001';
+  const poolDeployed = window.__POOL_ADDRESS__ && window.__POOL_ADDRESS__ !== '0x0000000000000000000000000000000000000002';
+  const approveTarget = swapDeployed ? window.__SWAP_ADDRESS__
+                      : poolDeployed ? POOL_CONTRACT_ADDRESS : null;
+  if (!approveTarget) {
+    toast('Contracts not deployed. Deploy ElligentPool first.', 'error'); return;
+  }
+
+  // ── Disable button + show steps ──────────────────────
+  swpSetBtn('approving', 'Preparing…');
+  const stepsCard = document.getElementById('swap-steps-card');
+  const stepList  = document.getElementById('swap-step-list');
+  if (stepsCard) stepsCard.style.display = '';
+  if (stepList)  stepList.innerHTML = '';
+  swpSetStatus('progress', 'In Progress');
+
+  // Displayed output for minReceived
+  const displayedOut = parseFloat(document.getElementById('swap-amount-out').value) || 0;
+  const minReceived   = displayedOut > 0
+    ? toUsdc((displayedOut * (1 - SWP.slippage / 100)).toFixed(6))
+    : 0n;
+  const deadline = BigInt(Math.floor(Date.now() / 1000) + 1200);
+
+  // ── Step renderer ─────────────────────────────────────
+  const steps = [];
+  function swpAddStep(label, detail) {
+    const idx = steps.length;
+    steps.push({ label, detail, el: null });
+    const el = document.createElement('div');
+    el.className = 'swp-step-item';
+    el.id = `swp-step-${idx}`;
+    el.innerHTML = swpStepHtml(idx, 'pending', label, detail, null, null, null);
+    if (stepList) stepList.appendChild(el);
+    steps[idx].el = el;
+    return idx;
+  }
+  function swpUpdateStep(idx, state, txHash, gasUsed, timestamp) {
+    const el = document.getElementById(`swp-step-${idx}`);
+    if (!el) return;
+    el.className = `swp-step-item ${state}`;
+    el.innerHTML = swpStepHtml(idx, state, steps[idx].label, steps[idx].detail, txHash, gasUsed, timestamp);
+  }
+  function swpStepHtml(idx, state, label, detail, txHash, gasUsed, ts) {
+    const icons = { pending:'…', active:'<span class="spin">↻</span>', success:'✓', error:'✕', skipped:'—' };
+    const meta = [];
+    if (ts)      meta.push(`<div class="swp-step-time">${ts}</div>`);
+    if (gasUsed) meta.push(`<div class="swp-step-gas">gas: ${Number(gasUsed).toLocaleString()}</div>`);
+    const detailContent = txHash
+      ? `Tx: <a href="https://testnet.arcscan.app/tx/${txHash}" target="_blank" class="swp-step-hash">${shortAddr(txHash)}</a>`
+      : detail;
+    return `
+      <div class="swp-step-ico ${state}">${icons[state]||'…'}</div>
+      <div style="flex:1;min-width:0">
+        <div class="swp-step-label">${label}</div>
+        <div class="swp-step-detail">${detailContent}</div>
+      </div>
+      ${meta.length ? `<div class="swp-step-meta">${meta.join('')}</div>` : ''}
+    `;
+  }
+
+  // ── Pre-flight: staticCall simulation ────────────────
+  const simIdx = swpAddStep('Simulating swap', 'Dry-run via staticCall to detect reverts early');
+  swpUpdateStep(simIdx, 'active', null, null, swpNow());
+  try {
+    const readProv = provider || new ethers.JsonRpcProvider('https://rpc.testnet.arc.network');
+    const pcSim    = new ethers.Contract(POOL_CONTRACT_ADDRESS, POOL_CONTRACT_ABI, readProv);
+    // staticCall: call as view to detect reverts without spending gas
+    await pcSim.swap.staticCall(tInAddr, amtBig, minReceived);
+    swpUpdateStep(simIdx, 'success', null, null, swpNow());
+    console.debug('[swap] staticCall simulation passed');
+  } catch(simErr) {
+    const decoded = swpDecodeError(simErr);
+    console.warn('[swap] staticCall simulation failed:', simErr.message);
+    swpUpdateStep(simIdx, 'error', null, null, swpNow());
+    // If error is "missing revert data" or call_exception, it may be a provider issue
+    // rather than a real revert — allow user to continue with warning
+    if (simErr.message?.includes('missing revert data') || simErr.code === 'CALL_EXCEPTION') {
+      swpShowPrecheck('warning', 'Simulation unavailable on Arc Testnet — proceeding with caution');
+      console.warn('[swap] Arc Testnet does not support full staticCall simulation — continuing');
+      // Don't abort — Arc may not support eth_call simulation reliably
+    } else {
+      swpSetStatus('error', 'Failed');
+      swpSetBtn('ready', `Swap ${tIn.sym} → ${tOut.sym}`);
+      toast(decoded, 'error');
+      return;
+    }
+  }
+
+  // ── Step 0: Approve ───────────────────────────────────
+  const approveIdx = swpAddStep(`Approve ${tIn.sym}`, `Authorizing ${approveTarget.slice(0,8)}… to spend your ${tIn.sym}`);
+  swpUpdateStep(approveIdx, 'active', null, null, swpNow());
+  swpSetBtn('approving', `Approving ${tIn.sym}…`);
+  let approveHash = null;
+
+  try {
+    const tokenInContract = new ethers.Contract(tInAddr, USDC_ABI, signer);
+
+    // Check current allowance — skip approve if already sufficient
+    let allowance = 0n;
+    try { allowance = await tokenInContract.allowance(walletAddress, approveTarget); } catch(_) {}
+
+    if (allowance >= amtBig) {
+      console.debug('[swap] allowance sufficient, skipping approve');
+      swpUpdateStep(approveIdx, 'skipped', null, null, swpNow());
+      steps[approveIdx].detail = 'Already approved — skipped';
+      swpUpdateStep(approveIdx, 'skipped', null, null, swpNow());
+    } else {
+      // Estimate gas with fallback
+      let approveGas = SWP.FALLBACK_GAS;
+      try {
+        approveGas = await tokenInContract.approve.estimateGas(approveTarget, amtBig * 2n);
+        approveGas = approveGas * 120n / 100n; // +20% buffer
+      } catch(gasErr) {
+        console.warn('[swap] approve estimateGas failed, using fallback:', gasErr.message);
+      }
+
+      const approveTx = await tokenInContract.approve(approveTarget, amtBig * 2n, { gasLimit: approveGas });
+      approveHash = approveTx.hash;
+      swpUpdateStep(approveIdx, 'active', approveHash, null, swpNow());
+      const approveRcpt = await approveTx.wait();
+      swpUpdateStep(approveIdx, 'success', approveHash, approveRcpt?.gasUsed, swpNow());
+      console.debug('[swap] approve tx confirmed:', approveHash);
+    }
+  } catch(approveErr) {
+    const decoded = swpDecodeError(approveErr);
+    swpUpdateStep(approveIdx, 'error', approveHash, null, swpNow());
+    swpSetStatus('error', 'Failed');
+    swpSetBtn('ready', `Swap ${tIn.sym} → ${tOut.sym}`);
+    toast(decoded, 'error');
+    return;
+  }
+
+  // ── Step 1: Swap ──────────────────────────────────────
+  const swapIdx = swpAddStep(`Swap ${tIn.sym} → ${tOut.sym}`, 'Executing onchain swap via ElligentPool');
+  swpUpdateStep(swapIdx, 'active', null, null, swpNow());
+  swpSetBtn('swapping', `Swapping ${tIn.sym} → ${tOut.sym}…`);
+  let swapTxHash = null;
+
+  try {
+    let swapGas = SWP.FALLBACK_GAS;
+
+    if (swapDeployed) {
+      // Route through ElligentSwap
+      const swapAbi = ['function swap(address,uint256,uint256,address,uint256) returns (uint256)'];
+      const swapCtr = new ethers.Contract(window.__SWAP_ADDRESS__, swapAbi, signer);
+      try {
+        swapGas = await swapCtr.swap.estimateGas(tInAddr, amtBig, minReceived, walletAddress, deadline);
+        swapGas = swapGas * 130n / 100n; // +30% buffer for swap contracts
+      } catch(gasErr) {
+        console.warn('[swap] ElligentSwap estimateGas failed, using fallback gas:', gasErr.message);
+        swpShowPrecheck('warning', 'Gas estimation failed — using fallback gas limit');
+      }
+      const swapTx = await swapCtr.swap(tInAddr, amtBig, minReceived, walletAddress, deadline, { gasLimit: swapGas });
+      swapTxHash   = swapTx.hash;
+      swpUpdateStep(swapIdx, 'active', swapTxHash, null, swpNow());
+      const rcpt   = await swapTx.wait();
+      swpUpdateStep(swapIdx, 'success', swapTxHash, rcpt?.gasUsed, swpNow());
+    } else {
+      // Direct pool swap — ABI: swap(address tokenIn, uint256 amountIn, uint256 amountOutMin)
+      const poolCtr = new ethers.Contract(POOL_CONTRACT_ADDRESS, POOL_CONTRACT_ABI, signer);
+      try {
+        swapGas = await poolCtr.swap.estimateGas(tInAddr, amtBig, minReceived);
+        swapGas = swapGas * 130n / 100n;
+      } catch(gasErr) {
+        console.warn('[swap] pool.swap estimateGas failed, using fallback gas:', gasErr.message);
+        swpShowPrecheck('warning', 'Gas estimation failed — using fallback gas limit');
+      }
+      const swapTx2 = await poolCtr.swap(tInAddr, amtBig, minReceived, { gasLimit: swapGas });
+      swapTxHash    = swapTx2.hash;
+      swpUpdateStep(swapIdx, 'active', swapTxHash, null, swpNow());
+      const rcpt2   = await swapTx2.wait();
+      swpUpdateStep(swapIdx, 'success', swapTxHash, rcpt2?.gasUsed, swpNow());
+    }
+    console.debug('[swap] swap tx confirmed:', swapTxHash);
+  } catch(swapErr) {
+    const decoded = swpDecodeError(swapErr);
+    swpUpdateStep(swapIdx, 'error', swapTxHash, null, swpNow());
+    swpSetStatus('error', 'Failed');
+    swpSetBtn('ready', `Swap ${tIn.sym} → ${tOut.sym}`);
+    swpShowPrecheck('error', decoded);
+    toast(decoded, 'error');
+    return;
+  }
+
+  // ── Step 2: Confirm ───────────────────────────────────
+  const confirmIdx = swpAddStep('Confirmed', 'Transaction mined on Arc Testnet');
+  swpUpdateStep(confirmIdx, 'success', swapTxHash, null, swpNow());
+  swpSetStatus('success', 'Complete ✓');
+  swpHidePrecheck();
+
+  // ── Post-swap refresh ─────────────────────────────────
+  await loadPoolFromChain();
+  updateSwapRate();
+  if (signer) refreshBalance().catch(() => {});
+
+  const amtOut = parseFloat(document.getElementById('swap-amount-out').value) || 0;
+  // Add to history
+  swpAddHistory(tIn.sym, tOut.sym, amtIn, amtOut, swapTxHash);
+
+  toast(`✓ Swapped ${amtIn} ${tIn.sym} → ${amtOut.toFixed(4)} ${tOut.sym}`, 'success');
+  swpSetBtn('ready', `Swap ${tIn.sym} → ${tOut.sym}`);
+}
+
+// ── Step status pill ──────────────────────────────────────
+function swpSetStatus(type, label) {
+  const el = document.getElementById('swap-step-status');
+  if (!el) return;
+  const cls = { pending:'swp-status-pending', progress:'swp-status-progress', success:'swp-status-success', error:'swp-status-error' };
+  el.className = `swp-status-pill ${cls[type] || cls.pending}`;
+  el.textContent = label;
+}
+
+// ── Timestamp helper ──────────────────────────────────────
+function swpNow() {
+  return new Date().toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit', second:'2-digit', hour12:true });
+}
+
+// ── Swap history (pro style) ──────────────────────────────
+function swpAddHistory(symIn, symOut, amtIn, amtOut, txHash) {
+  const container = document.getElementById('swap-history');
+  if (!container) return;
+  const empty = container.querySelector('.swp-empty');
+  if (empty) empty.remove();
+
+  const item = document.createElement('div');
+  item.className = 'swp-hist-item';
+  const hashLink = txHash
+    ? `<a href="https://testnet.arcscan.app/tx/${txHash}" target="_blank" class="swp-hist-hash">${shortAddr(txHash)}</a>`
+    : '';
+  item.innerHTML = `
+    <div class="swp-hist-icon"><i class="ti ti-arrows-exchange"></i></div>
+    <div style="flex:1;min-width:0">
+      <div class="swp-hist-label">${amtIn.toFixed(4)} ${symIn} → ${amtOut.toFixed(4)} ${symOut}</div>
+      <div class="swp-hist-sub">Arc Testnet · ${swpNow()}</div>
+    </div>
+    ${hashLink}
+  `;
+  container.insertBefore(item, container.firstChild);
+  // Keep max 5 entries
+  while (container.children.length > 5) container.lastChild.remove();
+}
+
+// Legacy addToHistory compatibility — handled by original function below
+
 
 // ══════════════════════════════════════════════════════════
 //  BRIDGE — kit.bridge()
@@ -5232,16 +6266,22 @@ async function executeRemoveLiquidity() {
     if (DEPLOYED.ElligentBridge) window.__BRIDGE_ADDRESS__ = DEPLOYED.ElligentBridge;
   })();
 document.addEventListener("DOMContentLoaded", () => {
+  // Initialize swap button state
+  swpSetBtn('nowallt', 'Connect Wallet');
+  applySwapTokens();
+
   // Load real pool state from chain immediately (read-only, no wallet needed)
   loadPoolFromChain().then(() => {
     poolSyncAdd("usdc"); // sync add-liquidity form to real pool ratio
     updateSwapRate();    // sync swap rate display
+    swpUpdatePoolInfo(); // update pool info in swap sidebar
   });
 
   // Auto-sync: re-read from chain every 8 seconds
   // This ensures both Pool page and Swap page always see live data
   setInterval(() => {
     loadPoolFromChain(); // reads chain → updates pool state → triggers poolUpdateUI + updateSwapRate
+    swpUpdatePoolInfo();
   }, 8000);
 });
 
