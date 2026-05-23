@@ -3082,7 +3082,7 @@ const CCTP_CONFIG = {
     domain: 0,
     usdc: '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238',
     tokenMessenger: '0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA',
-    messageTransmitter: '0x81D40F21F12A8F0E3252Bccb954D722d4c464B64',
+    messageTransmitter: '0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275',
     rpc: 'https://rpc.sepolia.org',
     explorer: 'https://sepolia.etherscan.io'
   },
@@ -3090,7 +3090,7 @@ const CCTP_CONFIG = {
     domain: 3,
     usdc: '0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d',
     tokenMessenger: '0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA',
-    messageTransmitter: '0x81D40F21F12A8F0E3252Bccb954D722d4c464B64',
+    messageTransmitter: '0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275',
     rpc: 'https://sepolia-rollup.arbitrum.io/rpc',
     explorer: 'https://sepolia.arbiscan.io'
   },
@@ -3098,7 +3098,7 @@ const CCTP_CONFIG = {
     domain: 6,
     usdc: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
     tokenMessenger: '0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA',
-    messageTransmitter: '0x81D40F21F12A8F0E3252Bccb954D722d4c464B64',
+    messageTransmitter: '0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275',
     rpc: 'https://sepolia.base.org',
     explorer: 'https://sepolia.basescan.org'
   },
@@ -3106,7 +3106,7 @@ const CCTP_CONFIG = {
     domain: 2,
     usdc: '0x5fd84259d66Cd46123540766Be93DFE6D43130D7',
     tokenMessenger: '0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA',
-    messageTransmitter: '0x81D40F21F12A8F0E3252Bccb954D722d4c464B64',
+    messageTransmitter: '0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275',
     rpc: 'https://sepolia.optimism.io',
     explorer: 'https://sepolia-optimism.etherscan.io'
   },
@@ -3114,7 +3114,7 @@ const CCTP_CONFIG = {
     domain: 7,
     usdc: '0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582',
     tokenMessenger: '0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA',
-    messageTransmitter: '0x81D40F21F12A8F0E3252Bccb954D722d4c464B64',
+    messageTransmitter: '0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275',
     rpc: 'https://rpc-amoy.polygon.technology',
     explorer: 'https://amoy.polygonscan.com'
   },
@@ -3122,7 +3122,7 @@ const CCTP_CONFIG = {
     domain: 26,
     usdc: '0x3600000000000000000000000000000000000000',
     tokenMessenger: '0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA',
-    messageTransmitter: '0x81D40F21F12A8F0E3252Bccb954D722d4c464B64',
+    messageTransmitter: '0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275',
     rpc: 'https://rpc.testnet.arc.network',
     explorer: 'https://testnet.arcscan.app'
   }
@@ -4954,253 +4954,303 @@ function updateBridgeEst(){
 }
 
 async function ensureNetwork(targetChainId) {
-  if (!window.ethereum) throw new Error("No wallet connected");
-  const chainIdHex = '0x' + targetChainId.toString(16);
-  const currentChainId = await window.ethereum.request({ method: 'eth_chainId' });
-  if (currentChainId.toLowerCase() === chainIdHex) return; // already on correct network
-  
+  // ── MANDATORY chain-switch with real verification ──────────────────────────
+  // wallet_switchEthereumChain resolves when MetaMask accepts the REQUEST,
+  // NOT when the chain has actually changed. We must poll eth_chainId
+  // until it matches before returning, otherwise signer/provider will still
+  // be on the old chain.
+  if (!window.ethereum) throw new Error("No injected wallet found");
+
+  const targetHex = '0x' + targetChainId.toString(16);
+
+  // Helper: read current chain from wallet (avoids stale ethers.js cache)
+  async function getWalletChain() {
+    const id = await window.ethereum.request({ method: 'eth_chainId' });
+    return id.toLowerCase();
+  }
+
+  // Already on correct chain — nothing to do
+  if ((await getWalletChain()) === targetHex) return;
+
   const chainConfig = CCTP_CONFIG[targetChainId];
-  if (!chainConfig) throw new Error("Unsupported network config");
+  if (!chainConfig) throw new Error(`Network ${targetChainId} is not supported`);
   const chainData = CHAINS.find(c => c.chainId === targetChainId);
-  
+
+  // Attempt to switch
   try {
     await window.ethereum.request({
       method: 'wallet_switchEthereumChain',
-      params: [{ chainId: chainIdHex }],
+      params: [{ chainId: targetHex }],
     });
-  } catch (switchError) {
-    // This error code indicates that the chain has not been added to MetaMask.
-    if (switchError.code === 4902) {
+  } catch (switchErr) {
+    if (switchErr.code === 4902 || switchErr.code === -32603) {
+      // Chain not added yet — add it first then switch
       await window.ethereum.request({
         method: 'wallet_addEthereumChain',
         params: [{
-          chainId: chainIdHex,
-          chainName: chainData ? chainData.name : 'Unknown Network',
+          chainId: targetHex,
+          chainName: chainData ? chainData.name : `Chain ${targetChainId}`,
           rpcUrls: [chainConfig.rpc],
           blockExplorerUrls: [chainConfig.explorer],
           nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 }
         }],
       });
+    } else if (switchErr.code === 4001 || switchErr.code === 'ACTION_REJECTED') {
+      throw new Error('User rejected network switch — please approve in your wallet');
     } else {
-      throw switchError;
+      throw switchErr;
     }
   }
+
+  // ── CRITICAL: Poll until wallet chain ACTUALLY changes ──────────────────────
+  // MetaMask resolves wallet_switchEthereumChain before the internal chain
+  // state updates. We must wait for eth_chainId to reflect the new chain.
+  const timeout  = 30000; // 30 s max
+  const interval = 300;   // check every 300 ms
+  const deadline = Date.now() + timeout;
+
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, interval));
+    if ((await getWalletChain()) === targetHex) return; // ✅ confirmed
+  }
+
+  throw new Error(
+    `Wallet did not switch to ${chainData ? chainData.name : targetChainId} within 30 seconds. ` +
+    `Please manually switch in your wallet and retry.`
+  );
 }
 
 async function executeBridge(){
   if(!walletAddress){toast('Connect wallet first','error');return;}
   const amt=parseFloat(document.getElementById('bridge-amount').value)||0;
   if(amt<=0){toast('Enter an amount to bridge','error');return;}
-  const fromChain=CHAINS[bridgeFromIdx];
-  const toChain=CHAINS[bridgeToIdx];
-  if (fromChain.chainId === toChain.chainId) { toast('Cannot bridge to the same network', 'error'); return; }
-  
+
+  const fromChain = CHAINS[bridgeFromIdx];
+  const toChain   = CHAINS[bridgeToIdx];
+  if (fromChain.chainId === toChain.chainId) { toast('Cannot bridge to the same network','error'); return; }
+
   const fromConfig = CCTP_CONFIG[fromChain.chainId];
-  const toConfig = CCTP_CONFIG[toChain.chainId];
-  if (!fromConfig || !toConfig) { toast('Unsupported chain for CCTP', 'error'); return; }
+  const toConfig   = CCTP_CONFIG[toChain.chainId];
+  if (!fromConfig || !toConfig) { toast('Unsupported chain for CCTP','error'); return; }
 
   const btn=document.getElementById('bridge-btn');
-  btn.disabled=true;btn.innerHTML='<i class="ti ti-loader spin"></i> Bridging...';
+  btn.disabled=true; btn.innerHTML='<i class="ti ti-loader spin"></i> Bridging...';
 
   const stepsCard=document.getElementById('bridge-steps-card');
   const stepList=document.getElementById('bridge-step-list');
-  stepsCard.style.display='';stepList.innerHTML='';
+  stepsCard.style.display=''; stepList.innerHTML='';
 
   const steps=[
-    {name:'approve', label:`Approve ${amt} USDC on ${fromChain.name}`, detail:'ERC-20 approval on source chain'},
-    {name:'burn',    label:`Burn USDC via CCTP v2`, detail:`Burning on ${fromChain.name} → initiating bridge`},
-    {name:'attest',  label:'CCTP Attestation', detail:'Circle attestation service confirming burn'},
-    {name:'mint',    label:`Mint USDC on ${toChain.name}`, detail:`Receiving ${amt} USDC on destination`},
+    {name:'approve', label:`Approve USDC on ${fromChain.name}`,     detail:'ERC-20 approval on source chain'},
+    {name:'burn',    label:`Burn USDC via CCTP v2`,                  detail:`depositForBurn() on ${fromChain.name}`},
+    {name:'attest',  label:'Circle Attestation',                      detail:'Polling Circle Iris API (~20–120s)'},
+    {name:'switch',  label:`Switch to ${toChain.name}`,              detail:'Wallet network switch required'},
+    {name:'mint',    label:`Mint USDC on ${toChain.name}`,           detail:`receiveMessage() → USDC delivered`},
   ];
 
   function renderBridgeStep(idx,state,txHash){
     const s=steps[idx];
-    const el=document.getElementById(`bridge-step-${idx}`)||document.createElement('div');
-    el.id=`bridge-step-${idx}`;el.className='step-item';
-    const stateIco={pending:'pending',active:'active',success:'success',error:'error'}[state];
+    let el=document.getElementById(`bridge-step-${idx}`);
+    if(!el){ el=document.createElement('div'); el.id=`bridge-step-${idx}`; el.className='step-item'; stepList.appendChild(el); }
     const stateIcon={pending:'…',active:'<span class="spin">↻</span>',success:'✓',error:'✕'}[state];
-    let explorerUrl = '';
-    if (txHash) {
-      const isSrc = (idx < 3);
-      explorerUrl = isSrc ? fromConfig.explorer : toConfig.explorer;
-      if (explorerUrl.endsWith('/')) explorerUrl = explorerUrl.slice(0, -1);
-    }
-    el.innerHTML=`<div class="step-ico ${stateIco}">${stateIcon}</div><div style="flex:1"><div style="font-weight:600">${s.label}</div><div style="font-size:8.5px;color:var(--muted2)">${txHash?`Tx: <a href="${explorerUrl}/tx/${txHash}" target="_blank" style="color:var(--teal);text-decoration:none">${shortAddr(txHash)}</a>`:s.detail}</div></div>`;
-    if(!document.getElementById(`bridge-step-${idx}`))stepList.appendChild(el);
-    else stepList.replaceChild(el,document.getElementById(`bridge-step-${idx}`));
+    const stateClass={pending:'',active:'active',success:'success',error:'error'}[state];
+    const explorerBase = (idx < 4) ? fromConfig.explorer : toConfig.explorer;
+    const txLink = txHash ? `Tx: <a href="${explorerBase.replace(/\/$/,'')}/tx/${txHash}" target="_blank" style="color:var(--teal);text-decoration:none">${shortAddr(txHash)}</a>` : s.detail;
+    el.innerHTML=`<div class="step-ico ${stateClass}">${stateIcon}</div><div style="flex:1"><div style="font-weight:600">${s.label}</div><div style="font-size:8.5px;color:var(--muted2)">${txLink}</div></div>`;
   }
 
   steps.forEach((_,i)=>renderBridgeStep(i,'pending',null));
 
-  try{
-    // 1. Switch to SOURCE chain
-    console.log(`[Bridge] Current chain expected: ${fromChain.chainId}`);
-    console.log(`[Bridge] Switching to source chain...`);
+  // Helper: decode errors
+  function bridgeDecodeErr(err) {
+    const msg = (err.shortMessage || err.message || '').toLowerCase();
+    if (err.code===4001||err.code==='ACTION_REJECTED'||msg.includes('rejected')||msg.includes('user denied')) return 'Transaction rejected by user';
+    if (msg.includes('insufficient')&&msg.includes('balance')) return 'Insufficient USDC balance';
+    if (msg.includes('wrong chain')||msg.includes('did not switch')) return err.message;
+    if (msg.includes('network')||msg.includes('chain')) return 'Network error — ' + (err.shortMessage||err.message||'');
+    if (msg.includes('gas')) return 'Gas estimation failed — ensure you have native gas on source chain';
+    return err.shortMessage || err.message || 'Unknown error';
+  }
+
+  try {
+    // ── STEP 0: Switch to SOURCE chain (verified) ────────────────────────────
+    console.log(`[Bridge] Switching to source chain: ${fromChain.name} (${fromChain.chainId})`);
     await ensureNetwork(fromChain.chainId);
-    
-    // Initialize provider and signer for SOURCE chain
+
+    // Recreate provider+signer AFTER confirmed chain switch
     const srcProvider = new ethers.BrowserProvider(window.ethereum);
+    // Verify provider is on correct network
+    const srcNetwork  = await srcProvider.getNetwork();
+    if (Number(srcNetwork.chainId) !== fromChain.chainId) {
+      throw new Error(`Provider chain mismatch: expected ${fromChain.chainId}, got ${srcNetwork.chainId}`);
+    }
     const srcSigner = await srcProvider.getSigner();
 
-    // 2. Approve USDC
+    // ── STEP 1: Approve USDC ─────────────────────────────────────────────────
     console.log("[Bridge] Approving USDC...");
     renderBridgeStep(0,'active',null);
-    const usdcAbi = ["function approve(address spender, uint256 amount) returns (bool)"];
-    const usdcContract = new ethers.Contract(fromConfig.usdc, usdcAbi, srcSigner);
+    const usdcAbi = [
+      "function approve(address spender, uint256 amount) returns (bool)",
+      "function allowance(address owner, address spender) view returns (uint256)"
+    ];
     const amtBig = toUsdc(amt.toFixed(6));
-    
-    const approveTx = await usdcContract.approve(fromConfig.tokenMessenger, amtBig);
-    renderBridgeStep(0,'active',approveTx.hash);
-    await approveTx.wait();
-    renderBridgeStep(0,'success',approveTx.hash);
+    // Use JsonRpcProvider for reads to avoid stale cache issues
+    const readProvider  = new ethers.JsonRpcProvider(fromConfig.rpc);
+    const usdcRead      = new ethers.Contract(fromConfig.usdc, usdcAbi, readProvider);
+    const usdcWrite     = new ethers.Contract(fromConfig.usdc, usdcAbi, srcSigner);
 
-    // 3. Burn USDC via TokenMessengerV2 (CCTP v2)
+    let currentAllowance;
+    try {
+      currentAllowance = await usdcRead.allowance(walletAddress, fromConfig.tokenMessenger);
+    } catch(_) {
+      currentAllowance = 0n;
+    }
+
+    let approveHash = null;
+    if (currentAllowance < amtBig) {
+      const approveTx = await usdcWrite.approve(fromConfig.tokenMessenger, amtBig);
+      approveHash = approveTx.hash;
+      renderBridgeStep(0,'active',approveHash);
+      const approveRcpt = await approveTx.wait();
+      if (!approveRcpt || approveRcpt.status !== 1) throw new Error("Approve transaction failed (status=0)");
+    }
+    renderBridgeStep(0,'success',approveHash);
+
+    // ── STEP 2: depositForBurn() ─────────────────────────────────────────────
     console.log("[Bridge] Burning via CCTP v2...");
     renderBridgeStep(1,'active',null);
-    const tmAbi = ["function depositForBurn(uint256 amount, uint32 destinationDomain, bytes32 mintRecipient, address burnToken, bytes32 destinationCaller, uint256 maxFee, uint32 minFinalityThreshold) external"];
-    const tmContract = new ethers.Contract(fromConfig.tokenMessenger, tmAbi, srcSigner);
-    
-    const destAddr32 = ethers.zeroPadValue(walletAddress, 32);
-    const zeroCaller = ethers.zeroPadValue('0x0000000000000000000000000000000000000000', 32); // allow any relayer
-    
+    const tmAbi = ["function depositForBurn(uint256 amount, uint32 destinationDomain, bytes32 mintRecipient, address burnToken, bytes32 destinationCaller, uint256 maxFee, uint32 minFinalityThreshold) external returns (uint64 nonce)"];
+    const tmContract   = new ethers.Contract(fromConfig.tokenMessenger, tmAbi, srcSigner);
+    const destAddr32   = ethers.zeroPadValue(walletAddress, 32);
+    const zeroCaller32 = ethers.zeroPadValue('0x0000000000000000000000000000000000000000', 32);
+
     const burnTx = await tmContract.depositForBurn(
-      amtBig,
-      toConfig.domain,
-      destAddr32,
-      fromConfig.usdc,
-      zeroCaller,  // destinationCaller — bytes32(0) = any caller allowed
-      0,           // maxFee — 0 for standard (finalized) transfer
-      1000         // minFinalityThreshold — 1000 = standard finality
+      amtBig, toConfig.domain, destAddr32, fromConfig.usdc,
+      zeroCaller32, 0n, 1000
     );
     renderBridgeStep(1,'active',burnTx.hash);
     const burnReceipt = await burnTx.wait();
-    console.log("[Bridge] Burn receipt logs:", burnReceipt.logs.length, "logs");
+    if (!burnReceipt || burnReceipt.status !== 1) throw new Error("depositForBurn transaction failed (status=0)");
+    console.log("[Bridge] Burn confirmed. Logs:", burnReceipt.logs.length);
     renderBridgeStep(1,'success',burnTx.hash);
 
-    // 4. Extract Message via V2 API and Fetch Attestation
-    console.log("[Bridge] Fetching attestation via CCTP v2 API...");
+    // ── STEP 3: Poll Circle Iris API for attestation ─────────────────────────
+    console.log("[Bridge] Polling Circle Iris attestation...");
     renderBridgeStep(2,'active',null);
-    
-    // CCTP V2: Use the /v2/messages API with transactionHash instead of manual event parsing
-    // This is more robust than parsing MessageSent events from logs
-    let messageBytes = null;
-    let attestationSignature = null;
-    let pollCount = 0;
-    const maxPolls = 120; // up to ~10 min (5s intervals)
-    
+
+    let messageBytes = null, attestationSig = null, pollCount = 0;
+    const maxPolls = 120;
+    const irisUrl  = `https://iris-api-sandbox.circle.com/v2/messages/${fromConfig.domain}?transactionHash=${burnTx.hash}`;
+    console.log("[Bridge] Iris URL:", irisUrl);
+
     while (pollCount < maxPolls) {
       await new Promise(r => setTimeout(r, 5000));
+      pollCount++;
       try {
-        const apiUrl = `https://iris-api-sandbox.circle.com/v2/messages/${fromConfig.domain}?transactionHash=${burnTx.hash}`;
-        console.log(`[Bridge] Polling attestation (${pollCount+1}/${maxPolls}):`, apiUrl);
-        const res = await fetch(apiUrl);
+        const res = await fetch(irisUrl);
         if (res.ok) {
           const data = await res.json();
-          console.log("[Bridge] Attestation API response:", JSON.stringify(data).slice(0, 500));
-          // V2 API returns messages array
+          console.log(`[Bridge] Iris #${pollCount}:`, JSON.stringify(data).slice(0,300));
           if (data.messages && data.messages.length > 0) {
             const msg = data.messages[0];
+            // Update sub-text with live status
+            const stepEl = document.getElementById('bridge-step-2');
+            if (stepEl) {
+              const sub = stepEl.querySelector('[style*="muted2"]');
+              if (sub) sub.textContent = `Iris status: ${msg.status||'pending'} (poll ${pollCount}/${maxPolls})`;
+            }
             if (msg.status === 'complete' && msg.attestation && msg.attestation !== 'PENDING') {
-              messageBytes = msg.message;
-              attestationSignature = msg.attestation;
+              messageBytes  = msg.message;
+              attestationSig = msg.attestation;
               break;
             }
           }
         }
-      } catch (err) {
-        console.warn("[Bridge] Attestation fetch warning:", err);
-      }
-      pollCount++;
+      } catch(pollErr) { console.warn(`[Bridge] Iris poll #${pollCount}:`, pollErr); }
     }
-    
-    // Fallback: try to parse MessageSent event from logs if V2 API didn't return message bytes
+
+    // Fallback: parse MessageSent event from logs
     if (!messageBytes) {
-      console.log("[Bridge] V2 API did not return message, trying event log parsing...");
-      const mtAbi = ["event MessageSent(bytes message)"];
-      const mtInterface = new ethers.Interface(mtAbi);
+      console.log("[Bridge] Iris V2 timed out — parsing MessageSent logs...");
+      const mtIface = new ethers.Interface(["event MessageSent(bytes message)"]);
       for (const log of burnReceipt.logs) {
         try {
-          const parsedLog = mtInterface.parseLog({ topics: log.topics, data: log.data });
-          if (parsedLog && parsedLog.name === "MessageSent") {
-            messageBytes = parsedLog.args.message;
-            console.log("[Bridge] Found MessageSent in logs");
-            break;
-          }
-        } catch (e) { /* ignore non-matching logs */ }
+          const parsed = mtIface.parseLog({topics: log.topics, data: log.data});
+          if (parsed?.name === "MessageSent") { messageBytes = parsed.args.message; break; }
+        } catch(_) {}
       }
-      
-      if (!messageBytes) throw new Error("Could not extract message from CCTP v2 API or transaction logs. The burn tx may not have been processed yet.");
-      
-      // If we got messageBytes from logs but no attestation, poll using V1 fallback
-      if (!attestationSignature) {
-        const messageHash = ethers.keccak256(messageBytes);
-        let fallbackPoll = 0;
-        while (fallbackPoll < 60) {
-          await new Promise(r => setTimeout(r, 5000));
-          try {
-            const res = await fetch(`https://iris-api-sandbox.circle.com/attestations/${messageHash}`);
-            if (res.ok) {
-              const data = await res.json();
-              if (data.attestation && data.attestation !== 'PENDING') {
-                attestationSignature = data.attestation;
-                break;
-              }
-            }
-          } catch (err) {
-            console.warn("[Bridge] Fallback attestation fetch warning:", err);
-          }
-          fallbackPoll++;
-        }
+      if (!messageBytes) throw new Error("Cannot extract CCTP message. Burn tx may not be indexed yet — retry in a minute.");
+      // V1 fallback attestation
+      const msgHash = ethers.keccak256(messageBytes);
+      for (let v1=0; v1<60 && !attestationSig; v1++) {
+        await new Promise(r=>setTimeout(r,5000));
+        try {
+          const r = await fetch(`https://iris-api-sandbox.circle.com/attestations/${msgHash}`);
+          if (r.ok) { const d=await r.json(); if(d.attestation&&d.attestation!=='PENDING') attestationSig=d.attestation; }
+        } catch(_) {}
       }
     }
-    
-    if (!attestationSignature) throw new Error("Attestation polling timed out. Please try again later.");
-    console.log("[Bridge] Attestation complete");
+    if (!attestationSig) throw new Error("Attestation timed out. Network may be congested — retry later.");
+    console.log("[Bridge] Attestation received.");
     renderBridgeStep(2,'success',null);
 
-    // 5. Switch to DESTINATION chain
-    console.log(`[Bridge] Switching to destination chain...`);
+    // ── STEP 4: Switch to DESTINATION chain (verified) ───────────────────────
+    console.log(`[Bridge] Switching to destination: ${toChain.name} (${toChain.chainId})`);
     renderBridgeStep(3,'active',null);
     await ensureNetwork(toChain.chainId);
-    
-    // Initialize provider and signer for DESTINATION chain
+
+    // ── CRITICAL: Recreate provider+signer for destination chain ─────────────
     const destProvider = new ethers.BrowserProvider(window.ethereum);
+    const destNetwork  = await destProvider.getNetwork();
+    if (Number(destNetwork.chainId) !== toChain.chainId) {
+      throw new Error(
+        `Wallet is still on chain ${destNetwork.chainId} — expected ${toChain.chainId} (${toChain.name}). ` +
+        `Please switch manually and retry.`
+      );
+    }
     const destSigner = await destProvider.getSigner();
-    
-    // 6. Mint on Destination via MessageTransmitterV2
-    console.log("[Bridge] Minting on destination...");
+    renderBridgeStep(3,'success',null);
+
+    // ── STEP 5: receiveMessage() on destination ──────────────────────────────
+    console.log("[Bridge] Calling receiveMessage() on destination...");
+    renderBridgeStep(4,'active',null);
     const destMtAbi = ["function receiveMessage(bytes message, bytes attestation) returns (bool)"];
     const destMtContract = new ethers.Contract(toConfig.messageTransmitter, destMtAbi, destSigner);
-    
-    const mintTx = await destMtContract.receiveMessage(messageBytes, attestationSignature);
-    renderBridgeStep(3,'active',mintTx.hash);
-    await mintTx.wait();
-    console.log("[Bridge] Bridge completed");
-    renderBridgeStep(3,'success',mintTx.hash);
 
-    document.getElementById('bridge-step-status').textContent='Success';
+    const mintTx = await destMtContract.receiveMessage(messageBytes, attestationSig);
+    renderBridgeStep(4,'active',mintTx.hash);
+    const mintReceipt = await mintTx.wait();
+    // ── MANDATORY: validate receipt ──────────────────────────────────────────
+    if (!mintReceipt || mintReceipt.status !== 1) {
+      throw new Error(`receiveMessage() failed on-chain (status=0). Tx: ${mintTx.hash}`);
+    }
+    console.log("[Bridge] receiveMessage() confirmed ✓ USDC minted on destination.");
+    renderBridgeStep(4,'success',mintTx.hash);
+
+    document.getElementById('bridge-step-status').textContent='Success ✓';
     document.getElementById('bridge-step-status').style.color='var(--green)';
 
     addToHistory('bridge-history',{
-      icon:'ti-topology-star-3',color:'var(--teal)',
+      icon:'ti-topology-star-3', color:'var(--teal)',
       label:`${amt} USDC: ${fromChain.name} → ${toChain.name}`,
       sub:`CCTP v2 · ${new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})}`,
-      txHash:mintTx.hash,dotColor:'#2dd4bf'
+      txHash: mintTx.hash, dotColor:'#2dd4bf'
     });
-
     toast(`✓ Bridged ${amt} USDC from ${fromChain.name} to ${toChain.name}`,'success');
-    
-    // Sync UI with destination chain balances since we are there now
-    if(signer) {
-      await refreshBalance(); 
+
+  } catch(e) {
+    console.error("[Bridge] Error:", e);
+    // Mark the currently-active step as error
+    for (let i=0; i<steps.length; i++) {
+      const el=document.getElementById(`bridge-step-${i}`);
+      if (el && el.querySelector('.step-ico.active')) { renderBridgeStep(i,'error',null); break; }
     }
-  }catch(e){
-    console.error(e);
-    if(e.code===4001)toast('Rejected','error');
-    else toast('Bridge error: '+(e.shortMessage||e.message||''),'error');
-    steps.forEach((_,i)=>{const el=document.getElementById(`bridge-step-${i}`);if(el&&el.querySelector('.step-ico.active'))renderBridgeStep(i,'error',null);});
-  }finally{
-    btn.disabled=false;btn.innerHTML='<i class="ti ti-topology-star-3"></i> Bridge USDC';
+    document.getElementById('bridge-step-status').textContent='Failed';
+    document.getElementById('bridge-step-status').style.color='var(--red)';
+    const msg = e.code===4001 ? 'Rejected by user' : (e.shortMessage||e.message||'Unknown error');
+    toast('Bridge error: '+msg,'error');
+  } finally {
+    btn.disabled=false; btn.innerHTML='<i class="ti ti-topology-star-3"></i> Bridge USDC';
   }
 }
 
@@ -6595,37 +6645,31 @@ function xcAddTxLog(from, to, amt, recipient) {
 
 async function xcExecuteSend() {
   // ══════════════════════════════════════════════════════════════════════════
-  //  REAL Circle CCTP v2 Cross-Chain Payment
-  //  Flow: Approve → depositForBurn → Iris Attestation → Switch → receiveMessage
-  //  Arc Network does NOT support ENS — direct 0x addresses only
+  //  REAL Circle CCTP v2 — Cross-Chain Payment
+  //  Fully-verified flow: no fake states, no optimistic completion.
+  //  Chain switches are verified before provider/signer recreation.
+  //  Arc Network does NOT support ENS — 0x addresses only.
   // ══════════════════════════════════════════════════════════════════════════
 
-  if (!walletAddress) {
-    toast("Connect your wallet to authorize cross-chain payment", "warning");
-    openWalletModal();
-    return;
-  }
-  if (!signer) { toast("Preview mode — connect a real wallet to send cross-chain payments", "warning"); return; }
+  if (!walletAddress) { toast("Connect your wallet to send cross-chain", "warning"); openWalletModal(); return; }
+  if (!signer)        { toast("Preview mode — connect a real wallet", "warning"); return; }
 
   const recipient = document.getElementById("xc-recipient").value.trim();
-  if (!xcValidateRecipient()) { toast("Enter a valid 0x recipient address (ENS not supported)", "error"); return; }
+  if (!xcValidateRecipient()) { toast("Enter a valid 0x address (ENS not supported)", "error"); return; }
 
   const amt = parseFloat(document.getElementById("xc-amount").value) || 0;
-  if (amt <= 0) { toast("Enter an amount to send", "error"); return; }
+  if (amt <= 0) { toast("Enter an amount", "error"); return; }
 
   const from = CHAINS[xcFromIdx];
   const to   = CHAINS[xcToIdx];
-
   if (from.chainId === to.chainId) { toast("Cannot send to the same chain", "error"); return; }
 
   const fromConfig = CCTP_CONFIG[from.chainId];
   const toConfig   = CCTP_CONFIG[to.chainId];
-  if (!fromConfig) { toast(`${from.name} is not supported for CCTP transfers`, "error"); return; }
-  if (!toConfig)   { toast(`${to.name} is not supported for CCTP transfers`, "error"); return; }
+  if (!fromConfig) { toast(`${from.name} is not supported for CCTP`, "error"); return; }
+  if (!toConfig)   { toast(`${to.name} is not supported for CCTP`, "error"); return; }
 
-  const tok = xcToken;
-  // Cross-chain payments only support USDC (CCTP native token)
-  if (tok !== 'USDC') { toast("CCTP cross-chain payments only support USDC", "error"); return; }
+  if (xcToken !== 'USDC') { toast("CCTP only supports USDC", "error"); return; }
 
   const btn = document.getElementById("xc-send-btn");
   btn.disabled = true;
@@ -6635,31 +6679,28 @@ async function xcExecuteSend() {
   const stepList  = document.getElementById("xc-step-list");
   stepsCard.style.display = ""; stepList.innerHTML = "";
   document.getElementById("xc-step-status").textContent = "In Progress";
+  document.getElementById("xc-step-status").style.color = "var(--yellow)";
 
   const steps = [
-    { label: `Approve USDC on ${from.name}`,      detail: `Allow TokenMessengerV2 to spend ${amt.toFixed(2)} USDC` },
-    { label: `Burn USDC via CCTP v2`,              detail: `depositForBurn() on ${from.name} → message emitted` },
-    { label: "Circle Attestation",                  detail: "Polling Circle Iris API until status = complete (~20–120s)" },
-    { label: `Switch to ${to.name}`,               detail: "Switching your wallet to destination network" },
-    { label: `Mint USDC on ${to.name}`,            detail: `receiveMessage() → ${amt.toFixed(2)} USDC delivered` },
-    { label: "Payment Complete",                    detail: `${amt.toFixed(2)} USDC delivered to ${recipient.slice(0,10)}…` },
+    { label: `Approve USDC on ${from.name}`,   detail: `Allow TokenMessengerV2 to spend ${amt.toFixed(2)} USDC` },
+    { label: `Burn via CCTP v2`,               detail: `depositForBurn() on ${from.name}` },
+    { label: "Circle Attestation",              detail: "Polling Iris API (~20–120s)" },
+    { label: `Switch to ${to.name}`,           detail: "Wallet chain switch (verified)" },
+    { label: `Mint USDC on ${to.name}`,        detail: `receiveMessage() — ${amt.toFixed(2)} USDC to recipient` },
+    { label: "Complete",                        detail: `${amt.toFixed(2)} USDC delivered to ${recipient.slice(0,10)}…` },
   ];
 
-  // Build step UI elements
   steps.forEach((s, i) => {
     const el = document.createElement("div");
-    el.className = "step-item";
-    el.id = `xc-step-el-${i}`;
+    el.className = "step-item"; el.id = `xc-step-el-${i}`;
     el.innerHTML = `<div class="step-ico" style="background:rgba(255,255,255,.05);color:var(--muted2)">…</div>` +
       `<div style="flex:1"><div style="font-size:10px;font-weight:600">${s.label}</div>` +
       `<div class="xc-step-sub" style="font-size:8.5px;color:var(--muted2)">${s.detail}</div></div>`;
     stepList.appendChild(el);
   });
 
-  // Helper: update step icon + optional tx link
   function xcSetStep(idx, state, txHash, explorerBase) {
-    const el  = document.getElementById(`xc-step-el-${idx}`);
-    if (!el) return;
+    const el = document.getElementById(`xc-step-el-${idx}`); if (!el) return;
     const ico = el.querySelector(".step-ico");
     if (state === 'active') {
       ico.innerHTML = '<span class="spin" style="display:inline-block">↻</span>';
@@ -6668,98 +6709,84 @@ async function xcExecuteSend() {
       ico.textContent = "✓"; ico.style.background = "rgba(34,197,94,.15)"; ico.style.color = "var(--green)";
     } else if (state === 'error') {
       ico.textContent = "✕"; ico.style.background = "rgba(239,68,68,.15)"; ico.style.color = "var(--red)";
-    } else if (state === 'pending') {
-      ico.textContent = "…"; ico.style.background = "rgba(255,255,255,.05)"; ico.style.color = "var(--muted2)";
     }
     if (txHash && explorerBase) {
       const sub = el.querySelector(".xc-step-sub");
-      const base = explorerBase.replace(/\/$/, '');
-      if (sub) sub.innerHTML = `Tx: <a href="${base}/tx/${txHash}" target="_blank" style="color:var(--teal);text-decoration:none">${txHash.slice(0,14)}…${txHash.slice(-6)}</a>`;
+      if (sub) sub.innerHTML = `Tx: <a href="${explorerBase.replace(/\/$/,'')}/tx/${txHash}" target="_blank" style="color:var(--teal);text-decoration:none">${txHash.slice(0,14)}…${txHash.slice(-6)}</a>`;
     }
   }
-
-  // Helper: reset button
-  function xcResetBtn() {
-    btn.disabled = false;
-    btn.innerHTML = "<i class=\"ti ti-world-share\"></i>Send Cross-Chain";
-  }
-
-  // Helper: decode common errors
+  function xcResetBtn() { btn.disabled=false; btn.innerHTML='<i class="ti ti-world-share"></i>Send Cross-Chain'; }
   function xcDecodeErr(err) {
-    const msg = (err.shortMessage || err.message || '').toLowerCase();
-    if (err.code === 4001 || err.code === 'ACTION_REJECTED' || msg.includes('rejected') || msg.includes('user denied')) return 'Transaction rejected by user';
-    if (msg.includes('insufficient') && msg.includes('balance')) return 'Insufficient USDC balance';
-    if (msg.includes('insufficient allowance')) return 'Approval insufficient — please try again';
-    if (msg.includes('already used') || msg.includes('nonce')) return 'Nonce error — please retry';
-    if (msg.includes('network') || msg.includes('chain')) return 'Network error — check wallet chain';
-    if (msg.includes('gas')) return 'Gas estimation failed — ensure you have native gas';
+    const msg = (err.shortMessage||err.message||'').toLowerCase();
+    if (err.code===4001||err.code==='ACTION_REJECTED'||msg.includes('rejected')||msg.includes('user denied')) return 'Transaction rejected by user';
+    if (msg.includes('insufficient')&&msg.includes('balance')) return 'Insufficient USDC balance';
+    if (msg.includes('did not switch')||msg.includes('wrong chain')) return err.message;
+    if (msg.includes('status=0')) return 'Transaction reverted on-chain: '+err.message;
+    if (msg.includes('gas')) return 'Gas estimation failed — ensure native gas on source chain';
     return err.shortMessage || err.message || 'Unknown error';
   }
 
-  const amtBig = toUsdc(amt.toFixed(6)); // USDC 6 decimals
+  const amtBig = toUsdc(amt.toFixed(6));
 
   try {
-    // ── STEP 0: Ensure we're on source chain & approve USDC to TokenMessengerV2 ──
+    // ── STEP 0: Switch to source chain (verified) + Approve ──────────────────
     xcSetStep(0, 'active', null, null);
-
+    console.log(`[XC] Switching to source: ${from.name} (${from.chainId})`);
     await ensureNetwork(from.chainId);
 
+    // Recreate provider+signer AFTER confirmed switch
     const srcProvider = new ethers.BrowserProvider(window.ethereum);
-    const srcSigner   = await srcProvider.getSigner();
+    const srcNetwork  = await srcProvider.getNetwork();
+    if (Number(srcNetwork.chainId) !== from.chainId) {
+      throw new Error(`Wallet chain mismatch: expected ${from.chainId}, got ${srcNetwork.chainId}`);
+    }
+    const srcSigner = await srcProvider.getSigner();
 
-    // Check current allowance first — skip approve if already sufficient
+    // Read allowance via JsonRpcProvider (avoids stale ethers cache)
     const usdcAbi = [
       "function approve(address spender, uint256 amount) returns (bool)",
       "function allowance(address owner, address spender) view returns (uint256)"
     ];
-    const usdcContract = new ethers.Contract(fromConfig.usdc, usdcAbi, srcSigner);
-    const currentAllowance = await usdcContract.allowance(walletAddress, fromConfig.tokenMessenger);
+    const readProv  = new ethers.JsonRpcProvider(fromConfig.rpc);
+    const usdcRead  = new ethers.Contract(fromConfig.usdc, usdcAbi, readProv);
+    const usdcWrite = new ethers.Contract(fromConfig.usdc, usdcAbi, srcSigner);
+
+    let currentAllowance;
+    try { currentAllowance = await usdcRead.allowance(walletAddress, fromConfig.tokenMessenger); }
+    catch(_) { currentAllowance = 0n; }
 
     let approveHash = null;
     if (currentAllowance < amtBig) {
-      const approveTx = await usdcContract.approve(fromConfig.tokenMessenger, amtBig);
+      const approveTx = await usdcWrite.approve(fromConfig.tokenMessenger, amtBig);
       approveHash = approveTx.hash;
       xcSetStep(0, 'active', approveHash, fromConfig.explorer);
-      await approveTx.wait();
+      const approveRcpt = await approveTx.wait();
+      if (!approveRcpt || approveRcpt.status !== 1) throw new Error("Approve tx failed (status=0)");
     }
     xcSetStep(0, 'success', approveHash, approveHash ? fromConfig.explorer : null);
 
-    // ── STEP 1: depositForBurn() → CCTP v2 ──────────────────────────────────
+    // ── STEP 1: depositForBurn() ──────────────────────────────────────────────
     xcSetStep(1, 'active', null, null);
-
-    const tmAbi = [
-      "function depositForBurn(uint256 amount, uint32 destinationDomain, bytes32 mintRecipient, address burnToken, bytes32 destinationCaller, uint256 maxFee, uint32 minFinalityThreshold) external returns (uint64 nonce)"
-    ];
-    const tmContract = new ethers.Contract(fromConfig.tokenMessenger, tmAbi, srcSigner);
-
-    // Pad recipient address to bytes32 (no ENS — raw 0x only)
+    const tmAbi = ["function depositForBurn(uint256 amount, uint32 destinationDomain, bytes32 mintRecipient, address burnToken, bytes32 destinationCaller, uint256 maxFee, uint32 minFinalityThreshold) external returns (uint64 nonce)"];
+    const tmContract      = new ethers.Contract(fromConfig.tokenMessenger, tmAbi, srcSigner);
     const mintRecipient32 = ethers.zeroPadValue(recipient, 32);
     const zeroCaller32    = ethers.zeroPadValue('0x0000000000000000000000000000000000000000', 32);
 
     const burnTx = await tmContract.depositForBurn(
-      amtBig,
-      toConfig.domain,        // destination CCTP domain
-      mintRecipient32,        // recipient as bytes32
-      fromConfig.usdc,        // USDC contract on source chain
-      zeroCaller32,           // destinationCaller = bytes32(0) → any relayer
-      0n,                     // maxFee = 0 (standard finality transfer)
-      1000                    // minFinalityThreshold = 1000 (standard)
+      amtBig, toConfig.domain, mintRecipient32, fromConfig.usdc, zeroCaller32, 0n, 1000
     );
     xcSetStep(1, 'active', burnTx.hash, fromConfig.explorer);
     const burnReceipt = await burnTx.wait();
+    if (!burnReceipt || burnReceipt.status !== 1) throw new Error(`depositForBurn failed (status=0). Tx: ${burnTx.hash}`);
     console.log("[XC] depositForBurn confirmed. Logs:", burnReceipt.logs.length);
     xcSetStep(1, 'success', burnTx.hash, fromConfig.explorer);
 
-    // ── STEP 2: Poll Circle Iris API for attestation ─────────────────────────
+    // ── STEP 2: Iris attestation polling ──────────────────────────────────────
     xcSetStep(2, 'active', null, null);
-
-    let messageBytes      = null;
-    let attestationSig    = null;
-    let pollCount         = 0;
-    const maxPolls        = 120; // 120 × 5s = 10 min max
-
-    const irisUrl = `https://iris-api-sandbox.circle.com/v2/messages/${fromConfig.domain}?transactionHash=${burnTx.hash}`;
-    console.log("[XC] Starting Iris attestation poll:", irisUrl);
+    let messageBytes = null, attestationSig = null, pollCount = 0;
+    const maxPolls   = 120;
+    const irisUrl    = `https://iris-api-sandbox.circle.com/v2/messages/${fromConfig.domain}?transactionHash=${burnTx.hash}`;
+    console.log("[XC] Iris poll URL:", irisUrl);
 
     while (pollCount < maxPolls) {
       await new Promise(r => setTimeout(r, 5000));
@@ -6768,110 +6795,93 @@ async function xcExecuteSend() {
         const res = await fetch(irisUrl);
         if (res.ok) {
           const data = await res.json();
-          console.log(`[XC] Iris poll #${pollCount}:`, JSON.stringify(data).slice(0, 300));
+          console.log(`[XC] Iris #${pollCount}:`, JSON.stringify(data).slice(0,300));
           if (data.messages && data.messages.length > 0) {
             const msg = data.messages[0];
-            if (msg.status === 'complete' && msg.attestation && msg.attestation !== 'PENDING') {
-              messageBytes   = msg.message;
-              attestationSig = msg.attestation;
-              break;
-            }
-            // Update step detail with live status
             const sub = document.querySelector(`#xc-step-el-2 .xc-step-sub`);
-            if (sub) sub.textContent = `Circle Iris: ${msg.status || 'pending'} — attempt ${pollCount}/${maxPolls}`;
+            if (sub) sub.textContent = `Iris: ${msg.status||'pending'} (poll ${pollCount}/${maxPolls})`;
+            if (msg.status === 'complete' && msg.attestation && msg.attestation !== 'PENDING') {
+              messageBytes = msg.message; attestationSig = msg.attestation; break;
+            }
           }
         }
-      } catch (pollErr) {
-        console.warn(`[XC] Iris poll #${pollCount} error:`, pollErr);
-      }
+      } catch(pollErr) { console.warn(`[XC] Iris poll ${pollCount}:`, pollErr); }
     }
 
-    // Fallback: parse MessageSent event from logs if V2 API timed out
+    // Fallback: parse MessageSent event
     if (!messageBytes) {
-      console.log("[XC] Iris V2 timed out — trying MessageSent event log fallback...");
-      const mtAbi   = ["event MessageSent(bytes message)"];
-      const mtIface = new ethers.Interface(mtAbi);
+      const mtIface = new ethers.Interface(["event MessageSent(bytes message)"]);
       for (const log of burnReceipt.logs) {
         try {
-          const parsed = mtIface.parseLog({ topics: log.topics, data: log.data });
-          if (parsed && parsed.name === "MessageSent") {
-            messageBytes = parsed.args.message;
-            console.log("[XC] Found MessageSent in logs — messageBytes length:", messageBytes.length);
-            break;
-          }
-        } catch (_) { /* non-matching log */ }
+          const parsed = mtIface.parseLog({topics:log.topics, data:log.data});
+          if (parsed?.name === "MessageSent") { messageBytes = parsed.args.message; break; }
+        } catch(_) {}
       }
-      if (!messageBytes) throw new Error("Could not extract CCTP message from burn transaction logs. Please retry.");
-
-      // Poll V1 attestation endpoint as fallback
-      const messageHash = ethers.keccak256(messageBytes);
-      let v1Poll = 0;
-      while (v1Poll < 60 && !attestationSig) {
-        await new Promise(r => setTimeout(r, 5000));
-        v1Poll++;
+      if (!messageBytes) throw new Error("Cannot extract CCTP message from logs. Please retry.");
+      const msgHash = ethers.keccak256(messageBytes);
+      for (let v1=0; v1<60 && !attestationSig; v1++) {
+        await new Promise(r=>setTimeout(r,5000));
         try {
-          const res = await fetch(`https://iris-api-sandbox.circle.com/attestations/${messageHash}`);
-          if (res.ok) {
-            const data = await res.json();
-            if (data.attestation && data.attestation !== 'PENDING') {
-              attestationSig = data.attestation;
-              break;
-            }
-          }
-        } catch (_) { /* ignore */ }
+          const r = await fetch(`https://iris-api-sandbox.circle.com/attestations/${msgHash}`);
+          if (r.ok) { const d=await r.json(); if(d.attestation&&d.attestation!=='PENDING') attestationSig=d.attestation; }
+        } catch(_) {}
       }
     }
-
-    if (!attestationSig) throw new Error("Attestation polling timed out. The network may be congested — check Circle status and retry.");
-    console.log("[XC] Attestation received.");
+    if (!attestationSig) throw new Error("Attestation timed out. Check Circle Iris status and retry.");
     xcSetStep(2, 'success', null, null);
 
-    // ── STEP 3: Switch wallet to destination chain ───────────────────────────
+    // ── STEP 3: Switch to DESTINATION chain (verified) ────────────────────────
     xcSetStep(3, 'active', null, null);
+    console.log(`[XC] Switching to destination: ${to.name} (${to.chainId})`);
     await ensureNetwork(to.chainId);
+
+    // ── CRITICAL: Recreate provider + signer for destination ──────────────────
+    const destProvider = new ethers.BrowserProvider(window.ethereum);
+    const destNetwork  = await destProvider.getNetwork();
+    if (Number(destNetwork.chainId) !== to.chainId) {
+      throw new Error(
+        `Wallet still on chain ${destNetwork.chainId} — expected ${to.chainId} (${to.name}). ` +
+        `Switch manually in wallet and retry.`
+      );
+    }
+    const destSigner = await destProvider.getSigner();
     xcSetStep(3, 'success', null, null);
 
-    // ── STEP 4: receiveMessage() on destination chain ────────────────────────
+    // ── STEP 4: receiveMessage() on destination ────────────────────────────────
     xcSetStep(4, 'active', null, null);
-
-    const destProvider = new ethers.BrowserProvider(window.ethereum);
-    const destSigner   = await destProvider.getSigner();
-
-    const destMtAbi = [
-      "function receiveMessage(bytes message, bytes attestation) returns (bool)"
-    ];
+    const destMtAbi = ["function receiveMessage(bytes message, bytes attestation) returns (bool)"];
     const destMtContract = new ethers.Contract(toConfig.messageTransmitter, destMtAbi, destSigner);
 
     const mintTx = await destMtContract.receiveMessage(messageBytes, attestationSig);
     xcSetStep(4, 'active', mintTx.hash, toConfig.explorer);
-    await mintTx.wait();
-    console.log("[XC] receiveMessage confirmed — USDC minted on destination.");
+    const mintReceipt = await mintTx.wait();
+    // ── MANDATORY: validate receipt.status ────────────────────────────────────
+    if (!mintReceipt || mintReceipt.status !== 1) {
+      throw new Error(`receiveMessage() reverted on ${to.name} (status=0). Tx: ${mintTx.hash}`);
+    }
+    console.log("[XC] receiveMessage() confirmed ✓");
     xcSetStep(4, 'success', mintTx.hash, toConfig.explorer);
 
-    // ── STEP 5: Complete ─────────────────────────────────────────────────────
+    // ── STEP 5: Complete ───────────────────────────────────────────────────────
     xcSetStep(5, 'success', null, null);
-
-    xcStats.count++;
-    xcStats.volume += amt;
+    xcStats.count++; xcStats.volume += amt;
     xcStats.chains.add(from.id); xcStats.chains.add(to.id);
     document.getElementById("xc-stat-count").textContent  = xcStats.count;
     document.getElementById("xc-stat-vol").textContent    = "$" + xcStats.volume.toFixed(2);
     document.getElementById("xc-stat-chains").textContent = xcStats.chains.size;
-
     document.getElementById("xc-step-status").textContent = "Complete ✓";
     document.getElementById("xc-step-status").style.color = "var(--green)";
-
     xcResetBtn();
-    toast(`✓ ${amt.toFixed(2)} USDC sent from ${from.name.split(" ")[0]} → ${to.name.split(" ")[0]}`, "success");
+    toast(`✓ ${amt.toFixed(2)} USDC: ${from.name.split(" ")[0]} → ${to.name.split(" ")[0]}`, "success");
     xcAddTxLog(xcFromIdx, xcToIdx, amt, recipient);
     document.getElementById("xc-recipient").value = "";
     document.getElementById("xc-addr-status").textContent = "—";
     document.getElementById("xc-addr-status").style.color = "var(--muted2)";
 
-  } catch (err) {
-    console.error("[XC] xcExecuteSend error:", err);
-    // Mark the active step as error
-    for (let i = 0; i < steps.length; i++) {
+  } catch(err) {
+    console.error("[XC] Error:", err);
+    // Mark the active step as failed
+    for (let i=0; i<steps.length; i++) {
       const el = document.getElementById(`xc-step-el-${i}`);
       if (el && el.querySelector(".step-ico")?.innerHTML.includes("↻")) {
         xcSetStep(i, 'error', null, null);
