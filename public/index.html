@@ -1187,7 +1187,7 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
         <i class="ti ti-copy" style="font-size:10px"></i>
       </div>
       <div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:4px">
-        <div class="chip chip-g" id="sb-score-chip" style="display:none"><i class="ti ti-shield-check" style="font-size:8px"></i><span id="sb-score">—</span></div>
+        <div class="chip" id="sb-score-chip" onclick="openNetworkSelector()" style="display:none;cursor:pointer;font-size:9px;border-radius:20px;padding:2px 8px;font-weight:600"><i class="ti ti-network" style="font-size:8px"></i><span id="sb-score">Arc Testnet</span></div>
         <div class="chip chip-b"><i class="ti ti-circle-dot" style="font-size:8px"></i>Arc Testnet</div>
         <div class="chip chip-p"><i class="ti ti-apps" style="font-size:8px"></i>App Kit</div>
       </div>
@@ -1205,7 +1205,7 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
       <div class="step-ln"></div>
       <div class="step"><div class="step-n">3</div>Pay Fee &amp; Send</div>
       <div class="tb-right">
-        <div class="net-pill"><div class="pulse"></div>Arc Testnet · 5042002</div>
+        <div class="net-pill" id="active-network-pill" onclick="openNetworkSelector()" title="Click to switch network" style="cursor:pointer;transition:all .2s"><div class="pulse"></div>Arc Testnet</div>
         <div class="wchip" id="wchip" onclick="walletChipClick()" style="position:relative">
           <span id="chip-indicator" style="width:7px;height:7px;border-radius:50%;background:#606880;flex-shrink:0;transition:background .3s"></span>
           <span id="chip-lbl">Connect Wallet</span>
@@ -2996,8 +2996,14 @@ const ARC_TESTNET = {
   rpcUrls:           ['https://rpc.testnet.arc.network'],
   blockExplorerUrls: ['https://testnet.arcscan.app']
 };
-const USDC_ADDRESS  = '0x3600000000000000000000000000000000000000';
-const EURC_ADDRESS  = '0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a'; // EURC on Arc Testnet
+// USDC_ADDRESS / EURC_ADDRESS are now dynamic getters (use getTokenAddress())
+// Kept as constants ONLY for backward-compat with legacy code paths;
+// all new code must use getTokenAddress('USDC') / getTokenAddress('EURC')
+const USDC_ADDRESS  = '0x3600000000000000000000000000000000000000'; // Arc default
+const EURC_ADDRESS  = '0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a'; // Arc default
+// Helpers: resolve token address for active chain or fallback to Arc
+function activeUSDC() { return getTokenAddress('USDC') || USDC_ADDRESS; }
+function activeEURC() { return getTokenAddress('EURC') || EURC_ADDRESS; }
 const MULTICALL3    = '0xcA11bde05977b3631167028862bE2a173976CA11';
 const USDC_DECIMALS = 6;
 
@@ -3066,67 +3072,153 @@ function loadPersistedRecipients() {
 }
 
 // ── Chains data ────────────────────────────────────────────
-const CHAINS = [
-  { id:'Arc_Testnet',      name:'Arc Testnet',        color:'#ff0202', symbol:'A', testnet:true, chainId: 5042002  },
-  { id:'Ethereum_Sepolia', name:'Ethereum Sepolia',   color:'#627eea', symbol:'Ξ', testnet:true, chainId: 11155111 },
-  { id:'Base_Sepolia',     name:'Base Sepolia',       color:'#0052ff', symbol:'B', testnet:true, chainId: 84532    },
-  { id:'Arbitrum_Sepolia', name:'Arbitrum Sepolia',   color:'#12aaff', symbol:'Ar', testnet:true, chainId: 421614   },
-  { id:'Optimism_Sepolia', name:'Optimism Sepolia',   color:'#ff0420', symbol:'OP', testnet:true, chainId: 11155420 },
-  { id:'Polygon_Amoy',     name:'Polygon Amoy',       color:'#8247e5', symbol:'POL', testnet:true, chainId: 80002   },
-  { id:'Solana_Devnet',    name:'Solana Devnet',      color:'#9945ff', symbol:'◎', testnet:true, chainId: 0        }, // Non-EVM
-];
-
-const CCTP_CONFIG = {
-  // ── CCTP V2 contract addresses (TokenMessengerV2 + MessageTransmitterV2) ──
-  11155111: {
-    domain: 0,
-    usdc: '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238',
-    tokenMessenger: '0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA',
-    messageTransmitter: '0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275',
-    rpc: 'https://rpc.sepolia.org',
-    explorer: 'https://sepolia.etherscan.io'
+// ═════════════════════════════════════════════════════════
+//  CHAIN REGISTRY — single source of truth for all networks
+//  Every chain: USDC, EURC, RPC, explorer, CCTP config,
+//  nativeCurrency (for wallet_addEthereumChain), UI colors
+// ═════════════════════════════════════════════════════════
+const CHAIN_REGISTRY = {
+  5042002: {
+    id: 'Arc_Testnet', name: 'Arc Testnet', shortName: 'Arc',
+    color: '#ff0202', symbol: 'A', testnet: true,
+    chainId: 5042002, chainHex: '0x4cef52',
+    rpc: 'https://rpc.testnet.arc.network',
+    explorer: 'https://testnet.arcscan.app',
+    nativeCurrency: { name: 'USDC', symbol: 'USDC', decimals: 18 },
+    tokens: {
+      USDC: { address: '0x3600000000000000000000000000000000000000', decimals: 6 },
+      EURC: { address: '0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a', decimals: 6 },
+    },
+    cctp: { domain: 26,
+      tokenMessenger:     '0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA',
+      messageTransmitter: '0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275' },
+    isEvm: true,
   },
-  421614: {
-    domain: 3,
-    usdc: '0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d',
-    tokenMessenger: '0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA',
-    messageTransmitter: '0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275',
-    rpc: 'https://sepolia-rollup.arbitrum.io/rpc',
-    explorer: 'https://sepolia.arbiscan.io'
+  11155111: {
+    id: 'Ethereum_Sepolia', name: 'Ethereum Sepolia', shortName: 'Sepolia',
+    color: '#627eea', symbol: 'Ξ', testnet: true,
+    chainId: 11155111, chainHex: '0xaa36a7',
+    rpc: 'https://rpc.sepolia.org',
+    explorer: 'https://sepolia.etherscan.io',
+    nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+    tokens: {
+      USDC: { address: '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238', decimals: 6 },
+      EURC: { address: '0x08210F9170F89Ab7658F0B5E3fF39b0E03C2Bfa4', decimals: 6 },
+    },
+    cctp: { domain: 0,
+      tokenMessenger:     '0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA',
+      messageTransmitter: '0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275' },
+    isEvm: true,
   },
   84532: {
-    domain: 6,
-    usdc: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
-    tokenMessenger: '0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA',
-    messageTransmitter: '0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275',
+    id: 'Base_Sepolia', name: 'Base Sepolia', shortName: 'Base',
+    color: '#0052ff', symbol: 'B', testnet: true,
+    chainId: 84532, chainHex: '0x14a34',
     rpc: 'https://sepolia.base.org',
-    explorer: 'https://sepolia.basescan.org'
+    explorer: 'https://sepolia.basescan.org',
+    nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+    tokens: {
+      USDC: { address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e', decimals: 6 },
+      EURC: { address: '0xe6FB90F2E62B36e9D95e04dd905BF73A6E800f9f', decimals: 6 },
+    },
+    cctp: { domain: 6,
+      tokenMessenger:     '0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA',
+      messageTransmitter: '0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275' },
+    isEvm: true,
+  },
+  421614: {
+    id: 'Arbitrum_Sepolia', name: 'Arbitrum Sepolia', shortName: 'Arb',
+    color: '#12aaff', symbol: 'Ar', testnet: true,
+    chainId: 421614, chainHex: '0x66eee',
+    rpc: 'https://sepolia-rollup.arbitrum.io/rpc',
+    explorer: 'https://sepolia.arbiscan.io',
+    nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+    tokens: {
+      USDC: { address: '0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d', decimals: 6 },
+      EURC: { address: '0x6Fc00b41a90E1E7eA7A6C2C45dA0be3e16D7bEB9', decimals: 6 },
+    },
+    cctp: { domain: 3,
+      tokenMessenger:     '0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA',
+      messageTransmitter: '0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275' },
+    isEvm: true,
   },
   11155420: {
-    domain: 2,
-    usdc: '0x5fd84259d66Cd46123540766Be93DFE6D43130D7',
-    tokenMessenger: '0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA',
-    messageTransmitter: '0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275',
+    id: 'Optimism_Sepolia', name: 'Optimism Sepolia', shortName: 'OP',
+    color: '#ff0420', symbol: 'OP', testnet: true,
+    chainId: 11155420, chainHex: '0xaa37dc',
     rpc: 'https://sepolia.optimism.io',
-    explorer: 'https://sepolia-optimism.etherscan.io'
+    explorer: 'https://sepolia-optimistic.etherscan.io',
+    nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+    tokens: {
+      USDC: { address: '0x5fd84259d66Cd46123540766Be93DFE6D43130D7', decimals: 6 },
+      EURC: { address: '0x5e1B0D9b92F80b9Ae24Ca71F90050a6a8f6A0e2', decimals: 6 },
+    },
+    cctp: { domain: 2,
+      tokenMessenger:     '0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA',
+      messageTransmitter: '0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275' },
+    isEvm: true,
   },
   80002: {
-    domain: 7,
-    usdc: '0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582',
-    tokenMessenger: '0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA',
-    messageTransmitter: '0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275',
+    id: 'Polygon_Amoy', name: 'Polygon Amoy', shortName: 'Amoy',
+    color: '#8247e5', symbol: 'POL', testnet: true,
+    chainId: 80002, chainHex: '0x13882',
     rpc: 'https://rpc-amoy.polygon.technology',
-    explorer: 'https://amoy.polygonscan.com'
+    explorer: 'https://amoy.polygonscan.com',
+    nativeCurrency: { name: 'MATIC', symbol: 'MATIC', decimals: 18 },
+    tokens: {
+      USDC: { address: '0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582', decimals: 6 },
+      EURC: { address: '0x4b8BCC128a9Eb5a8f08A1D41bae2FEA31AFe4830', decimals: 6 },
+    },
+    cctp: { domain: 7,
+      tokenMessenger:     '0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA',
+      messageTransmitter: '0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275' },
+    isEvm: true,
   },
-  5042002: {
-    domain: 26,
-    usdc: '0x3600000000000000000000000000000000000000',
-    tokenMessenger: '0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA',
-    messageTransmitter: '0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275',
-    rpc: 'https://rpc.testnet.arc.network',
-    explorer: 'https://testnet.arcscan.app'
-  }
+  // Solana Devnet — non-EVM, handled separately via Phantom
+  solana_devnet: {
+    id: 'Solana_Devnet', name: 'Solana Devnet', shortName: 'Solana',
+    color: '#9945ff', symbol: '◎', testnet: true,
+    chainId: 0, chainHex: null,
+    rpc: 'https://api.devnet.solana.com',
+    explorer: 'https://explorer.solana.com/?cluster=devnet',
+    nativeCurrency: { name: 'SOL', symbol: 'SOL', decimals: 9 },
+    tokens: {
+      USDC: { address: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU', decimals: 6 },
+      EURC: { address: 'HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr', decimals: 6 },
+    },
+    cctp: null,
+    isEvm: false,
+  },
 };
+
+// ── Derived helpers ───────────────────────────────────────────
+// EVM chains as ordered array (for Bridge/XC selectors — index-based)
+const CHAINS = Object.values(CHAIN_REGISTRY).filter(c => c.isEvm);
+// All chains including Solana
+const ALL_CHAINS = [...CHAINS, CHAIN_REGISTRY.solana_devnet];
+
+// Active chain state — updated by refreshProviderState() and chainChanged listener
+let activeChainId = 5042002; // default: Arc Testnet
+
+function getChainById(id) { return CHAIN_REGISTRY[id] || null; }
+function getActiveChain() { return getChainById(activeChainId) || CHAIN_REGISTRY[5042002]; }
+function getTokenAddress(sym) { return getActiveChain()?.tokens?.[sym]?.address || null; }
+function getTokenDecimals(sym) { return getActiveChain()?.tokens?.[sym]?.decimals ?? 6; }
+
+// Backward-compat alias — CCTP_CONFIG[chainId] used by executeBridge / xcExecuteSend
+const CCTP_CONFIG = Object.fromEntries(
+  Object.entries(CHAIN_REGISTRY)
+    .filter(([, c]) => c.isEvm && c.cctp)
+    .map(([k, c]) => [Number(k) || k, {
+      domain:             c.cctp.domain,
+      usdc:               c.tokens.USDC.address,
+      eurc:               c.tokens.EURC.address,
+      tokenMessenger:     c.cctp.tokenMessenger,
+      messageTransmitter: c.cctp.messageTransmitter,
+      rpc:                c.rpc,
+      explorer:           c.explorer,
+    }])
+);
 
 const TOKENS = [
   { sym:'USDC', icon:'U', color:'#2775ca', rate:1.000 }, // rate updated from pool
@@ -3265,30 +3357,51 @@ async function ensureArcTestnet(raw) {
   }
 }
 
+// ── refreshProviderState: HARD reset — destroys stale ethers cache, rebuilds from scratch ──
+// MUST be called after ANY confirmed chain switch or wallet reconnect.
+// ethers v6 BrowserProvider caches network internally; after chainChanged
+// the old instance returns the OLD chainId. We throw it away entirely.
+async function refreshProviderState() {
+  if (!window.ethereum) throw new Error('No injected wallet');
+  // Read live chainId directly from wallet (bypasses ethers v6 internal cache)
+  const hexId   = await window.ethereum.request({ method: 'eth_chainId' });
+  const chainId = parseInt(hexId, 16);
+  // Destroy old BrowserProvider, create brand-new instance
+  provider      = new ethers.BrowserProvider(window.ethereum);
+  signer        = await provider.getSigner();
+  walletAddress = await signer.getAddress();
+  activeChainId = chainId;
+  console.log('[refreshProviderState] chainId:', chainId, '| addr:', walletAddress);
+  return { provider, signer, walletAddress, chainId };
+}
+
+// ── updateNetworkBadge: refresh UI to show active chain ─────────────────
+function updateNetworkBadge(chain) {
+  const c = chain || getActiveChain();
+  const pill = document.getElementById('active-network-pill');
+  if (pill) {
+    pill.textContent       = c.shortName || c.name;
+    pill.style.background  = c.color + '22';
+    pill.style.color       = c.color;
+    pill.style.border      = '1px solid ' + c.color + '55';
+  }
+  const sbChip = document.getElementById('sb-score-chip');
+  if (sbChip) {
+    sbChip.style.display = '';
+    const scoreEl = document.getElementById('sb-score');
+    if (scoreEl) { scoreEl.textContent = c.name; scoreEl.style.color = c.color; }
+  }
+}
+
 // ── Finalize: called after any wallet grants access ────────
 async function finalizeConnection(raw, walletType) {
   _rawProvider     = raw;
   activeWalletType = walletType;
 
-  // Wrap with ethers
-  provider      = new ethers.BrowserProvider(raw);
-  signer        = await provider.getSigner();
-  walletAddress = await signer.getAddress();
+  // HARD provider refresh — reads live chainId, discards stale ethers cache
+  await refreshProviderState();
 
-  // Ensure Arc Testnet is active (may trigger wallet UI)
-  await ensureArcTestnet(raw);
-
-  // Re-wrap after potential chain switch
-  provider      = new ethers.BrowserProvider(raw);
-  signer        = await provider.getSigner();
-  walletAddress = await signer.getAddress();
-
-  // Verify we're on Arc (5042002)
-  const network = await provider.getNetwork();
-  if(Number(network.chainId) !== 5042002) {
-    console.warn('Still not on Arc Testnet after switch attempt, chainId:', network.chainId.toString());
-  }
-
+  const chain = getActiveChain();
   const short = shortAddr(walletAddress);
   const badges = { metamask:'🦊 MetaMask', coinbase:'🔵 Coinbase', rabby:'🐰 Rabby', injected:'💼 Wallet', walletconnect:'🔗 WalletConnect' };
 
@@ -3302,33 +3415,39 @@ async function finalizeConnection(raw, walletType) {
   document.getElementById('wchip').style.borderColor         = 'rgba(34,197,94,.5)';
   const scoreEl = document.getElementById('sender-score');
   if(scoreEl) scoreEl.style.display = '';
-  // Show sidebar score chip
-  const sbScoreChip = document.getElementById('sb-score-chip');
-  if(sbScoreChip) { sbScoreChip.style.display = ''; document.getElementById('sb-score').textContent = 'Arc Testnet'; }
 
+  updateNetworkBadge(chain);
   await refreshBalance();
-  loadPoolFromChain().then(() => {
-    // After wallet connects: re-run quote to enable swap button + run precheck
-    updateSwapRate();
-    swpUpdatePoolInfo();
-  });
+  loadPoolFromChain().then(() => { updateSwapRate(); swpUpdatePoolInfo(); });
   closeWalletModal();
-  toast(`✓ ${badges[walletType]||walletType}: ${short} | Arc Testnet`, 'success');
+  setupProviderEvents(raw);
+  toast(`✓ ${badges[walletType]||walletType}: ${short} | ${chain.name}`, 'success');
   return true;
 }
 
-// ── refreshBalance: fetch live USDC balance from chain ────────────────────
+// ── refreshBalance: fetch live USDC balance on active chain ─────────────
 async function refreshBalance() {
   if (!walletAddress) return;
   const set = (id, val) => { const el = document.getElementById(id); if(el) el.textContent = val; };
   try {
-    const prov = provider || new ethers.JsonRpcProvider('https://rpc.testnet.arc.network');
-    const usdc = new ethers.Contract(USDC_ADDRESS, USDC_ABI, prov);
-    const bal  = await usdc.balanceOf(walletAddress);
-    const fmt  = fromUsdc(bal);
+    // JsonRpcProvider avoids stale BrowserProvider cache for balance reads
+    const chain    = getActiveChain();
+    const prov     = new ethers.JsonRpcProvider(chain.rpc);
+    const usdcAddr = chain.tokens?.USDC?.address;
+    if (!usdcAddr) { set('sb-bal', '—'); return; }
+    const usdc  = new ethers.Contract(usdcAddr, USDC_ABI, prov);
+    const bal   = await usdc.balanceOf(walletAddress);
+    const fmt   = fromUsdc(bal);
     set('sb-bal',     fmt);
     set('dd-bal',     fmt);
     set('sender-bal', 'Balance: ' + fmt + ' USDC');
+    const eurcAddr = chain.tokens?.EURC?.address;
+    if (eurcAddr) {
+      try {
+        const eurc = new ethers.Contract(eurcAddr, USDC_ABI, prov);
+        set('sb-eurc-bal', fromUsdc(await eurc.balanceOf(walletAddress)));
+      } catch(_) {}
+    }
     return fmt;
   } catch(e) {
     console.warn('refreshBalance error:', e.message);
@@ -3337,12 +3456,11 @@ async function refreshBalance() {
   }
 }
 
-// ── Provider event listeners ───────────────────────────────
-// ── disconnectWallet ────────────────────────────────────────
+// ── disconnectWallet ────────────────────────────────────────────
 function disconnectWallet() {
   try { if(_rawProvider?.removeAllListeners) _rawProvider.removeAllListeners(); } catch(e){}
   walletAddress = null; provider = null; signer = null;
-  activeWalletType = null; _rawProvider = null;
+  activeWalletType = null; _rawProvider = null; activeChainId = 5042002;
   const set = (id, val) => { const el=document.getElementById(id); if(el) el.textContent=val; };
   set('chip-lbl',    'Connect Wallet');
   set('sb-addr',     'Not connected');
@@ -3357,40 +3475,43 @@ function disconnectWallet() {
   if(wchip) wchip.style.borderColor = '';
   const sbChip = document.getElementById('sb-score-chip');
   if(sbChip) sbChip.style.display = 'none';
+  const pill = document.getElementById('active-network-pill');
+  if(pill) { pill.textContent='No wallet'; pill.style.cssText=''; }
   toast('Wallet disconnected', 'info');
 }
 
 function setupProviderEvents(raw) {
+  // Remove stale listeners first (prevents duplicate handlers on reconnect)
+  try { if(raw.removeAllListeners) raw.removeAllListeners(); } catch(e){}
   try {
-    raw.on('accountsChanged', accs => {
+    raw.on('accountsChanged', async accs => {
       if(!accs || accs.length === 0) { disconnectWallet(); return; }
-      walletAddress = accs[0];
-      const short   = shortAddr(walletAddress);
+      await refreshProviderState();
+      const short = shortAddr(walletAddress);
       const set = (id, val) => { const el=document.getElementById(id); if(el) el.textContent=val; };
       set('chip-lbl',     short);
       set('sb-addr',      short);
       set('sender-addr',  walletAddress);
       set('dd-full-addr', walletAddress);
-      refreshBalance();
+      updateNetworkBadge();
+      await refreshBalance();
       toast('Account switched: ' + short, 'info');
     });
-    raw.on('chainChanged', hexChainId => {
-      const id = parseInt(hexChainId, 16);
-      if(id !== 5042002) {
-        toast('Switched away from Arc Testnet — switching back…', 'warning');
-        ensureArcTestnet(raw).then(() => {
-          provider = new ethers.BrowserProvider(raw);
-          refreshBalance();
-        });
-      } else {
-        provider = new ethers.BrowserProvider(raw);
-        refreshBalance();
-        toast('Arc Testnet active ✓', 'success');
-      }
+
+    // CRITICAL FIX: chainChanged NO longer forces Arc back.
+    // Hard-refresh provider so ethers v6 stale cache is discarded.
+    raw.on('chainChanged', async hexChainId => {
+      const newChainId = parseInt(hexChainId, 16);
+      console.log('[chainChanged] new chainId:', newChainId);
+      await refreshProviderState();
+      updateNetworkBadge();
+      await refreshBalance();
+      const knownChain = getChainById(newChainId);
+      toast('Network: ' + (knownChain ? knownChain.name : 'chain ' + newChainId), 'info');
     });
+
     raw.on('disconnect', () => disconnectWallet());
   } catch(e) {
-    // Some providers don't support .on() — safe to ignore
     console.warn('setupProviderEvents:', e.message);
   }
 }
@@ -4954,29 +5075,28 @@ function updateBridgeEst(){
 }
 
 async function ensureNetwork(targetChainId) {
-  // ── MANDATORY chain-switch with real verification ──────────────────────────
-  // wallet_switchEthereumChain resolves when MetaMask accepts the REQUEST,
-  // NOT when the chain has actually changed. We must poll eth_chainId
-  // until it matches before returning, otherwise signer/provider will still
-  // be on the old chain.
-  if (!window.ethereum) throw new Error("No injected wallet found");
+  // wallet_switchEthereumChain resolves when the wallet accepts the REQUEST,
+  // NOT when the chain has actually changed. We poll eth_chainId until it
+  // matches, then call refreshProviderState() to discard the stale ethers v6
+  // BrowserProvider cache.
+  if (!window.ethereum) throw new Error('No injected wallet found');
 
   const targetHex = '0x' + targetChainId.toString(16);
 
-  // Helper: read current chain from wallet (avoids stale ethers.js cache)
   async function getWalletChain() {
     const id = await window.ethereum.request({ method: 'eth_chainId' });
     return id.toLowerCase();
   }
 
-  // Already on correct chain — nothing to do
-  if ((await getWalletChain()) === targetHex) return;
+  // Already on correct chain
+  if ((await getWalletChain()) === targetHex) {
+    await refreshProviderState(); // still refresh to ensure clean state
+    return;
+  }
 
-  const chainConfig = CCTP_CONFIG[targetChainId];
-  if (!chainConfig) throw new Error(`Network ${targetChainId} is not supported`);
-  const chainData = CHAINS.find(c => c.chainId === targetChainId);
+  const chainInfo = getChainById(targetChainId) || CHAINS.find(c => c.chainId === targetChainId);
+  const cctp      = CCTP_CONFIG[targetChainId];
 
-  // Attempt to switch
   try {
     await window.ethereum.request({
       method: 'wallet_switchEthereumChain',
@@ -4984,15 +5104,16 @@ async function ensureNetwork(targetChainId) {
     });
   } catch (switchErr) {
     if (switchErr.code === 4902 || switchErr.code === -32603) {
-      // Chain not added yet — add it first then switch
+      // Chain not added yet — add it with proper nativeCurrency
+      const nc = chainInfo?.nativeCurrency || { name: 'ETH', symbol: 'ETH', decimals: 18 };
       await window.ethereum.request({
         method: 'wallet_addEthereumChain',
         params: [{
-          chainId: targetHex,
-          chainName: chainData ? chainData.name : `Chain ${targetChainId}`,
-          rpcUrls: [chainConfig.rpc],
-          blockExplorerUrls: [chainConfig.explorer],
-          nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 }
+          chainId:            targetHex,
+          chainName:          chainInfo ? chainInfo.name : `Chain ${targetChainId}`,
+          rpcUrls:            [cctp ? cctp.rpc : (chainInfo?.rpc || '')],
+          blockExplorerUrls:  [cctp ? cctp.explorer : (chainInfo?.explorer || '')],
+          nativeCurrency:     nc,
         }],
       });
     } else if (switchErr.code === 4001 || switchErr.code === 'ACTION_REJECTED') {
@@ -5002,20 +5123,23 @@ async function ensureNetwork(targetChainId) {
     }
   }
 
-  // ── CRITICAL: Poll until wallet chain ACTUALLY changes ──────────────────────
-  // MetaMask resolves wallet_switchEthereumChain before the internal chain
-  // state updates. We must wait for eth_chainId to reflect the new chain.
-  const timeout  = 30000; // 30 s max
-  const interval = 300;   // check every 300 ms
+  // Poll until wallet chain ACTUALLY changes (wallet_switchEthereumChain
+  // resolves before the EIP-1193 provider state updates)
+  const timeout  = 30000;
+  const interval = 300;
   const deadline = Date.now() + timeout;
 
   while (Date.now() < deadline) {
     await new Promise(r => setTimeout(r, interval));
-    if ((await getWalletChain()) === targetHex) return; // ✅ confirmed
+    if ((await getWalletChain()) === targetHex) {
+      // Chain confirmed — hard-refresh provider to discard stale ethers v6 cache
+      await refreshProviderState();
+      return;
+    }
   }
 
   throw new Error(
-    `Wallet did not switch to ${chainData ? chainData.name : targetChainId} within 30 seconds. ` +
+    `Wallet did not switch to ${chainInfo ? chainInfo.name : targetChainId} within 30 seconds. ` +
     `Please manually switch in your wallet and retry.`
   );
 }
@@ -7061,6 +7185,81 @@ function checkDueSchedules() {
 }
 
 
+
+// ═════════════════════════════════════════════════════════
+//  NETWORK SELECTOR — switch chains from anywhere in the app
+// ═════════════════════════════════════════════════════════
+function openNetworkSelector() {
+  let modal = document.getElementById('network-selector-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'network-selector-modal';
+    modal.style.cssText = 'position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.6);backdrop-filter:blur(4px)';
+    modal.innerHTML = `
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:14px;padding:20px;width:340px;max-width:95vw;box-shadow:0 20px 60px #0009">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+          <h3 style="margin:0;font-size:14px;font-weight:700">Select Network</h3>
+          <button onclick="document.getElementById('network-selector-modal').remove()" style="background:none;border:none;color:var(--muted2);cursor:pointer;font-size:18px;line-height:1">&times;</button>
+        </div>
+        <div id="network-list" style="display:flex;flex-direction:column;gap:6px"></div>
+        <p style="margin:12px 0 0;font-size:10px;color:var(--muted2);text-align:center">Wallet must be connected to switch networks</p>
+      </div>`;
+    modal.addEventListener('click', e => { if(e.target === modal) modal.remove(); });
+    document.body.appendChild(modal);
+  }
+
+  // Build chain list
+  const list = modal.querySelector('#network-list');
+  list.innerHTML = '';
+  CHAINS.forEach(chain => {
+    const isActive = chain.chainId === activeChainId;
+    const btn = document.createElement('button');
+    btn.style.cssText = `display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;
+      background:${isActive ? chain.color+'18' : 'var(--card2)'};border:1px solid ${isActive ? chain.color+'66' : 'var(--border)'};
+      cursor:pointer;width:100%;text-align:left;transition:all .15s;color:inherit`;
+    btn.innerHTML = `
+      <span style="width:28px;height:28px;border-radius:50%;background:${chain.color}22;
+        border:1.5px solid ${chain.color}66;display:flex;align-items:center;justify-content:center;
+        font-size:10px;font-weight:700;color:${chain.color};flex-shrink:0">${chain.symbol}</span>
+      <span style="flex:1">
+        <span style="display:block;font-size:12px;font-weight:600">${chain.name}</span>
+        <span style="display:block;font-size:9px;color:var(--muted2)">Chain ID: ${chain.chainId}</span>
+      </span>
+      ${isActive ? '<span style="font-size:10px;color:' + chain.color + '">&#x2714; Active</span>' : ''}`;
+    if (!isActive) {
+      btn.addEventListener('click', async () => {
+        modal.remove();
+        if (!walletAddress) { toast('Connect wallet first', 'error'); return; }
+        try {
+          toast(`Switching to ${chain.name}…`, 'info');
+          await ensureNetwork(chain.chainId);
+          updateNetworkBadge();
+          await refreshBalance();
+          toast(`✓ Switched to ${chain.name}`, 'success');
+        } catch(e) {
+          toast(e.message || 'Network switch failed', 'error');
+        }
+      });
+    }
+    list.appendChild(btn);
+  });
+
+  // Solana entry (non-EVM, informational)
+  const solana = CHAIN_REGISTRY.solana_devnet;
+  if (solana) {
+    const div = document.createElement('div');
+    div.style.cssText = 'display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;background:var(--card2);border:1px solid var(--border);opacity:.6';
+    div.innerHTML = `
+      <span style="width:28px;height:28px;border-radius:50%;background:${solana.color}22;
+        border:1.5px solid ${solana.color}66;display:flex;align-items:center;justify-content:center;
+        font-size:10px;font-weight:700;color:${solana.color};flex-shrink:0">◎</span>
+      <span style="flex:1">
+        <span style="display:block;font-size:12px;font-weight:600">Solana Devnet</span>
+        <span style="display:block;font-size:9px;color:var(--muted2)">Phantom wallet — coming soon</span>
+      </span>`;
+    list.appendChild(div);
+  }
+}
 </script>
 </body>
 </html>
