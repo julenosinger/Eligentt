@@ -3683,7 +3683,7 @@ async function connectManualAddress(inputSuffix) {
 
   // Fetch real balance from public RPC
   try {
-    const usdc = new ethers.Contract(USDC_ADDRESS, USDC_ABI, provider);
+    const usdc = new ethers.Contract(activeUSDC(), USDC_ABI, provider);
     const bal  = await usdc.balanceOf(addr);
     const fmt  = fromUsdc(bal);
     set('sb-bal',     fmt);
@@ -4091,8 +4091,8 @@ async function signTx(){
       // ── Real on-chain execution ───────────────────────────────
       // For each recipient, send USDC (or EURC) directly using ERC-20 transfer()
       // This works on any chain without needing a custom batch contract
-      const usdcContract = new ethers.Contract(USDC_ADDRESS, USDC_ABI, signer);
-      const eurcContract = new ethers.Contract(EURC_ADDRESS, USDC_ABI, signer);
+      const usdcContract = new ethers.Contract(activeUSDC(), USDC_ABI, signer);
+      const eurcContract = new ethers.Contract(activeEURC(), USDC_ABI, signer);
 
       // Check USDC balance for all direct USDC recipients
       const usdcTotal = directRcpts.filter(r=>(r.token||'USDC')==='USDC')
@@ -4199,7 +4199,7 @@ async function signTx(){
               const bridgeCtr = new ethers.Contract(window.__BRIDGE_ADDRESS__, bridgeAbi, signer);
               const dest32    = await bridgeCtr.addressToBytes32(toAddr);
               await tokenCtr.approve(window.__BRIDGE_ADDRESS__, amt);
-              tx = await bridgeCtr.bridge(USDC_ADDRESS, amt, chain.cctpDomain??0, dest32);
+              tx = await bridgeCtr.bridge(activeUSDC(), amt, chain.cctpDomain??0, dest32);
             } else {
               // Direct transfer on testnet as proxy
               tx = await tokenCtr.transfer(toAddr, amt);
@@ -4579,9 +4579,9 @@ async function updateSwapRate() {
       // ── Get quote ─────────────────────────────────────
       let amtOut = 0, source = 'onchain';
       try {
-        const readProvider = provider || new ethers.JsonRpcProvider('https://rpc.testnet.arc.network');
+        const readProvider = new ethers.JsonRpcProvider('https://rpc.testnet.arc.network');
         const pc = new ethers.Contract(POOL_CONTRACT_ADDRESS, POOL_CONTRACT_ABI, readProvider);
-        const tokenInAddr = tIn.sym === 'USDC' ? USDC_ADDRESS : EURC_ADDRESS;
+        const tokenInAddr = tIn.sym === 'USDC' ? activeUSDC() : activeEURC();
         const amtInBig    = toUsdc(amtIn.toFixed(6));
         const amtOutBig   = await pc.getAmountOut(amtInBig, tokenInAddr);
         amtOut = parseFloat(ethers.formatUnits(amtOutBig, 6));
@@ -4710,12 +4710,12 @@ async function swpRunPrecheck(amtIn, amtOut, minReceived) {
     }
 
     // 5) Token addresses
-    const tInAddr  = tIn.sym  === 'USDC' ? USDC_ADDRESS : EURC_ADDRESS;
+    const tInAddr  = tIn.sym  === 'USDC' ? activeUSDC() : activeEURC();
 
     // 6) Balance check (read from chain)
     let userBal = 0n;
     try {
-      const prov      = provider || new ethers.JsonRpcProvider('https://rpc.testnet.arc.network');
+      const prov      = new ethers.JsonRpcProvider('https://rpc.testnet.arc.network');
       const tokenCtr  = new ethers.Contract(tInAddr, USDC_ABI, prov);
       userBal         = await tokenCtr.balanceOf(walletAddress);
       const amtBigChk = toUsdc(amtIn.toFixed(6));
@@ -4741,7 +4741,7 @@ async function swpRunPrecheck(amtIn, amtOut, minReceived) {
 
     let needsApproval = false;
     try {
-      const prov     = provider || new ethers.JsonRpcProvider('https://rpc.testnet.arc.network');
+      const prov     = new ethers.JsonRpcProvider('https://rpc.testnet.arc.network');
       const tokenCtr = new ethers.Contract(tInAddr, USDC_ABI, prov);
       const amtBig   = toUsdc(amtIn.toFixed(6));
       const allowance = await tokenCtr.allowance(walletAddress, approveTarget);
@@ -4787,8 +4787,8 @@ async function executeSwap() {
 
   const tIn    = TOKENS[swapTokenInIdx];
   const tOut   = TOKENS[swapTokenOutIdx];
-  const tInAddr  = tIn.sym  === 'USDC' ? USDC_ADDRESS : EURC_ADDRESS;
-  const tOutAddr = tOut.sym === 'USDC' ? USDC_ADDRESS : EURC_ADDRESS;
+  const tInAddr  = tIn.sym  === 'USDC' ? activeUSDC() : activeEURC();
+  const tOutAddr = tOut.sym === 'USDC' ? activeUSDC() : activeEURC();
   const amtBig   = toUsdc(amtIn.toFixed(6));
 
   // ── Resolve approve target ────────────────────────────
@@ -4856,7 +4856,7 @@ async function executeSwap() {
   const simIdx = swpAddStep('Simulating swap', 'Dry-run via staticCall to detect reverts early');
   swpUpdateStep(simIdx, 'active', null, null, swpNow());
   try {
-    const readProv = provider || new ethers.JsonRpcProvider('https://rpc.testnet.arc.network');
+    const readProv = new ethers.JsonRpcProvider('https://rpc.testnet.arc.network');
     const pcSim    = new ethers.Contract(POOL_CONTRACT_ADDRESS, POOL_CONTRACT_ABI, readProv);
     // staticCall: call as view to detect reverts without spending gas
     await pcSim.swap.staticCall(tInAddr, amtBig, minReceived);
@@ -5248,9 +5248,17 @@ async function executeBridge(){
     const destAddr32   = ethers.zeroPadValue(walletAddress, 32);
     const zeroCaller32 = ethers.zeroPadValue('0x0000000000000000000000000000000000000000', 32);
 
+    // Arc Testnet as DESTINATION only supports Standard Transfer (minFinalityThreshold >= 2000).
+    // Fast Transfer (1000) is NOT supported for Arc as destination — Iris will never attest.
+    const ARC_DOMAIN_ID = 26;
+    const finalityThreshold = (toConfig.domain === ARC_DOMAIN_ID) ? 2000 : 1000;
+    console.log('[Bridge] SOURCE DOMAIN:', fromConfig.domain);
+    console.log('[Bridge] DESTINATION DOMAIN:', toConfig.domain);
+    console.log('[Bridge] finalityThreshold:', finalityThreshold, finalityThreshold === 2000 ? '(Standard — Arc destination)' : '(Fast)');
+
     const burnTx = await tmContract.depositForBurn(
       amtBig, toConfig.domain, destAddr32, fromConfig.usdc,
-      zeroCaller32, 0n, 1000
+      zeroCaller32, 0n, finalityThreshold
     );
     renderBridgeStep(1,'active',burnTx.hash);
     const burnReceipt = await burnTx.wait();
@@ -5286,6 +5294,7 @@ async function executeBridge(){
             if (msg.status === 'complete' && msg.attestation && msg.attestation !== 'PENDING') {
               messageBytes  = msg.message;
               attestationSig = msg.attestation;
+              if (messageBytes) console.log('[Bridge] MESSAGE HASH:', ethers.keccak256(messageBytes));
               break;
             }
           }
@@ -5306,6 +5315,7 @@ async function executeBridge(){
       if (!messageBytes) throw new Error("Cannot extract CCTP message. Burn tx may not be indexed yet — retry in a minute.");
       // V1 fallback attestation
       const msgHash = ethers.keccak256(messageBytes);
+      console.log('[Bridge] MESSAGE HASH (fallback):', msgHash);
       for (let v1=0; v1<60 && !attestationSig; v1++) {
         await new Promise(r=>setTimeout(r,5000));
         try {
@@ -5425,7 +5435,7 @@ function applySingleTokenUI() {
     tabE.style.background   = !isUsdc ? 'rgba(37,98,222,.12)' : 'transparent';
     tabE.querySelector('span').style.color = !isUsdc ? '#6da4ff' : 'var(--muted2)';
   }
-  const addr = isUsdc ? USDC_ADDRESS : EURC_ADDRESS;
+  const addr = isUsdc ? activeUSDC() : activeEURC();
   document.getElementById('ss-token-display').textContent  = singleToken;
   document.getElementById('ss-token-badge').textContent    = singleToken;
   document.getElementById('ss-contract-display').textContent = shortAddr(addr);
@@ -5450,7 +5460,7 @@ async function executeSingleSend() {
   btn.disabled = true;
   btn.innerHTML = '<i class="ti ti-loader spin"></i> Sending...';
   try {
-    const tokenAddr = singleToken === 'EURC' ? EURC_ADDRESS : USDC_ADDRESS;
+    const tokenAddr = singleToken === 'EURC' ? activeEURC() : activeUSDC();
     const amtBig    = toUsdc(amt.toFixed(6));
     if(signer) {
       const tok = new ethers.Contract(tokenAddr, USDC_ABI, signer);
@@ -5793,7 +5803,7 @@ async function payInvoice(id) {
   if(!inv) return;
   if(signer) {
     try {
-      const usdc = new ethers.Contract(USDC_ADDRESS, USDC_ABI, signer);
+      const usdc = new ethers.Contract(activeUSDC(), USDC_ABI, signer);
       const amt  = toUsdc(inv.total.toFixed(6));
       toast(`Sending ${inv.total} USDC for invoice ${id}...`,'info');
       const tx   = await usdc.transfer(inv.toAddr, amt);
@@ -6263,8 +6273,10 @@ let pool = {
 
 async function loadPoolFromChain() {
   // Use a dedicated read-only RPC provider so this works before wallet connects.
-  // Prefer the connected wallet provider (more reliable for balanceOf) over raw RPC.
-  const readProvider = provider || new ethers.JsonRpcProvider('https://rpc.testnet.arc.network');
+  // Always use a fresh Arc RPC provider for pool reads (pool contract lives on Arc).
+  // Do NOT use stale BrowserProvider which may point to wrong chain after chain switch.
+  const ARC_RPC = 'https://rpc.testnet.arc.network';
+  const readProvider = new ethers.JsonRpcProvider(ARC_RPC);
   try {
     const poolContract = new ethers.Contract(POOL_CONTRACT_ADDRESS, POOL_CONTRACT_ABI, readProvider);
     const [[rU, rE], supply] = await Promise.all([
@@ -6291,8 +6303,8 @@ async function loadPoolFromChain() {
   // never corrupts reserveUsdc / reserveEurc / lpSupply already loaded above.
   if (walletAddress) {
     try {
-      // Use the wallet-connected provider when available (avoids stale RPC state)
-      const lpProvider = provider || new ethers.JsonRpcProvider('https://rpc.testnet.arc.network');
+      // Always use a fresh Arc RPC provider for LP balanceOf reads.
+      const lpProvider = new ethers.JsonRpcProvider('https://rpc.testnet.arc.network');
       const lpContract = new ethers.Contract(POOL_CONTRACT_ADDRESS, POOL_CONTRACT_ABI, lpProvider);
       const rawLp      = await lpContract.balanceOf(walletAddress);
       pool.userLp      = parseFloat(ethers.formatUnits(rawLp, 18));
@@ -6492,11 +6504,11 @@ async function executeAddLiquidity() {
       if (signer) {
         try {
           if (i === 0) {
-            const uc = new ethers.Contract(USDC_ADDRESS, USDC_ABI, signer);
+            const uc = new ethers.Contract(activeUSDC(), USDC_ABI, signer);
             const tx = await uc.approve(POOL_CONTRACT_ADDRESS, toUsdc((uAmt * 1.01).toFixed(6)));
             await tx.wait();
           } else if (i === 1) {
-            const ec = new ethers.Contract(EURC_ADDRESS, USDC_ABI, signer);
+            const ec = new ethers.Contract(activeEURC(), USDC_ABI, signer);
             const tx = await ec.approve(POOL_CONTRACT_ADDRESS, toUsdc((eAmt * 1.01).toFixed(6)));
             await tx.wait();
           } else if (i === 2) {
@@ -6896,8 +6908,16 @@ async function xcExecuteSend() {
     const mintRecipient32 = ethers.zeroPadValue(recipient, 32);
     const zeroCaller32    = ethers.zeroPadValue('0x0000000000000000000000000000000000000000', 32);
 
+    // Arc Testnet as DESTINATION only supports Standard Transfer (minFinalityThreshold >= 2000).
+    // Fast Transfer (1000) is NOT supported for Arc as destination — Iris will never attest.
+    const ARC_DOMAIN_ID = 26;
+    const finalityThreshold = (toConfig.domain === ARC_DOMAIN_ID) ? 2000 : 1000;
+    console.log('[XC] SOURCE DOMAIN:', fromConfig.domain);
+    console.log('[XC] DESTINATION DOMAIN:', toConfig.domain);
+    console.log('[XC] finalityThreshold:', finalityThreshold, finalityThreshold === 2000 ? '(Standard — Arc destination)' : '(Fast)');
+
     const burnTx = await tmContract.depositForBurn(
-      amtBig, toConfig.domain, mintRecipient32, fromConfig.usdc, zeroCaller32, 0n, 1000
+      amtBig, toConfig.domain, mintRecipient32, fromConfig.usdc, zeroCaller32, 0n, finalityThreshold
     );
     xcSetStep(1, 'active', burnTx.hash, fromConfig.explorer);
     const burnReceipt = await burnTx.wait();
@@ -6925,7 +6945,9 @@ async function xcExecuteSend() {
             const sub = document.querySelector(`#xc-step-el-2 .xc-step-sub`);
             if (sub) sub.textContent = `Iris: ${msg.status||'pending'} (poll ${pollCount}/${maxPolls})`;
             if (msg.status === 'complete' && msg.attestation && msg.attestation !== 'PENDING') {
-              messageBytes = msg.message; attestationSig = msg.attestation; break;
+              messageBytes = msg.message; attestationSig = msg.attestation;
+              if (messageBytes) console.log('[XC] MESSAGE HASH:', ethers.keccak256(messageBytes));
+              break;
             }
           }
         }
@@ -6943,6 +6965,7 @@ async function xcExecuteSend() {
       }
       if (!messageBytes) throw new Error("Cannot extract CCTP message from logs. Please retry.");
       const msgHash = ethers.keccak256(messageBytes);
+      console.log('[XC] MESSAGE HASH (fallback):', msgHash);
       for (let v1=0; v1<60 && !attestationSig; v1++) {
         await new Promise(r=>setTimeout(r,5000));
         try {
