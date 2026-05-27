@@ -5307,13 +5307,12 @@ async function executeBridge(){
     // ── Ensure approval covers amount + maxFee for Forwarding Service ─────────
     const burnAmtBig = amtBig + maxFeeBig;
     console.log('[Bridge] amtBig:', amtBig.toString(), '| maxFeeBig:', maxFeeBig.toString(), '| burnAmtBig:', burnAmtBig.toString());
-    const usdcAbi2   = ["function allowance(address,address) view returns (uint256)", "function approve(address,uint256) external returns (bool)"];
-    const usdcCheck  = new ethers.Contract(fromConfig.usdc, usdcAbi2, srcSigner);
-    const currentAllowance = await usdcCheck.allowance(walletAddress, fromConfig.tokenMessenger);
-    if (currentAllowance < burnAmtBig) {
-      console.log('[Bridge] Re-approving for burnAmtBig:', burnAmtBig.toString(), '(current allowance:', currentAllowance.toString(), ')');
+    // Re-use usdcWrite (already declared above with srcSigner) — no need for a new contract instance
+    const reApproveAllowance = await usdcRead.allowance(walletAddress, fromConfig.tokenMessenger);
+    if (reApproveAllowance < burnAmtBig) {
+      console.log('[Bridge] Re-approving for burnAmtBig:', burnAmtBig.toString(), '(current allowance:', reApproveAllowance.toString(), ')');
       renderBridgeStep(0,'active',null);
-      const reApprove = await usdcCheck.approve(fromConfig.tokenMessenger, burnAmtBig);
+      const reApprove = await usdcWrite.approve(fromConfig.tokenMessenger, burnAmtBig);
       await reApprove.wait();
       renderBridgeStep(0,'success',reApprove.hash);
       console.log('[Bridge] Re-approval confirmed.');
@@ -7101,13 +7100,12 @@ async function xcExecuteSend() {
     // ── Ensure approval covers amount + maxFee ────────────────────────────────
     const burnAmtBig = amtBig + maxFeeBig;
     console.log('[XC] amtBig:', amtBig.toString(), '| maxFeeBig:', maxFeeBig.toString(), '| burnAmtBig:', burnAmtBig.toString());
-    const usdcAbi2 = ["function allowance(address,address) view returns (uint256)", "function approve(address,uint256) external returns (bool)"];
-    const usdcCheck = new ethers.Contract(fromConfig.usdc, usdcAbi2, srcSigner);
-    const currentAllowance = await usdcCheck.allowance(await srcSigner.getAddress(), fromConfig.tokenMessenger);
-    if (currentAllowance < burnAmtBig) {
-      console.log('[XC] Re-approving for burnAmtBig:', burnAmtBig.toString());
+    // Re-use usdcRead/usdcWrite (already declared above) — no new contract instance needed
+    const reApproveAllowance = await usdcRead.allowance(walletAddress, fromConfig.tokenMessenger);
+    if (reApproveAllowance < burnAmtBig) {
+      console.log('[XC] Re-approving for burnAmtBig:', burnAmtBig.toString(), '(current:', reApproveAllowance.toString(), ')');
       xcSetStep(0, 'active', null, null);
-      const reApprove = await usdcCheck.approve(fromConfig.tokenMessenger, burnAmtBig);
+      const reApprove = await usdcWrite.approve(fromConfig.tokenMessenger, burnAmtBig);
       await reApprove.wait();
       xcSetStep(0, 'success', reApprove.hash, fromConfig.explorer);
       console.log('[XC] Re-approval confirmed.');
