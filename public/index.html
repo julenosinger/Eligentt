@@ -268,6 +268,7 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
 .net-pill{background:rgba(34,197,94,.07);border:1px solid rgba(34,197,94,.28);border-radius:20px;padding:3px 9px;font-size:9.5px;color:var(--green);display:flex;align-items:center;gap:5px}
 .pulse{width:5px;height:5px;border-radius:50%;background:var(--green);animation:pulse 1.5s ease-in-out infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.4}}
 .wchip{background:var(--card);border:1px solid var(--border2);border-radius:6px;padding:4px 10px;font-size:10px;color:var(--muted2);display:flex;align-items:center;gap:5px;cursor:pointer;transition:all .15s}
 .wchip:hover{border-color:var(--blue);color:var(--text)}
 
@@ -347,6 +348,9 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
 .btable{width:100%;border-collapse:collapse;font-size:10px}
 .btable th{padding:5px 8px;background:rgba(0,0,0,.2);color:var(--muted);text-align:left;font-weight:500;font-size:9px;text-transform:uppercase;white-space:nowrap}
 .btable td{padding:6px 8px;border-top:1px solid var(--border);white-space:nowrap}
+.inv-row:hover td{background:rgba(79,142,247,.05)!important;transition:background .15s}
+.inv-stat-val{font-size:15px;font-weight:800;letter-spacing:-.3px}
+.inv-action-tile:hover{background:var(--card2)!important;border-color:var(--border2)!important;transform:translateY(-1px);transition:.15s}
 .pbar{width:100%;height:3px;background:var(--border);border-radius:2px;margin-top:4px}
 .pfill{height:100%;background:var(--blue);border-radius:2px;transition:width 1.2s ease}
 
@@ -2415,59 +2419,277 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
 
     <!-- PAGE: INVOICES -->
     <div class="page" id="page-invoices">
-      <div class="page-header">
+      <!-- TOP BAR -->
+      <div class="page-header" style="flex-wrap:wrap;gap:8px">
         <div class="page-icon" style="background:rgba(245,158,11,.1);color:var(--yellow)"><i class="ti ti-file-invoice"></i></div>
         <div><div class="page-title">Invoices</div><div class="page-sub">Create, send and track USDC invoices on Arc Testnet</div></div>
-        <div style="margin-left:auto"><button class="btn primary" onclick="createInvoice()"><i class="ti ti-plus"></i>New Invoice</button></div>
+        <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+          <button class="btn" onclick="invSwitchTab('list')" id="inv-tab-list" style="font-size:10px"><i class="ti ti-list"></i>All Invoices</button>
+          <button class="btn primary" onclick="invSwitchTab('create')" id="inv-tab-create" style="font-size:10px"><i class="ti ti-plus"></i>New Invoice</button>
+        </div>
       </div>
-      <div style="flex:1;overflow-y:auto;padding:14px;display:flex;gap:14px">
-        <div style="width:350px;flex-shrink:0">
+
+      <!-- ANALYTICS STRIP -->
+      <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:8px;padding:0 14px 10px">
+        <div class="card inv-stat-card" style="padding:12px 10px">
+          <div style="font-size:8.5px;color:var(--muted2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Revenue This Month</div>
+          <div class="inv-stat-val" id="inv-stat-revenue" style="color:var(--green)">0.00 USDC</div>
+          <div class="inv-stat-delta" id="inv-stat-revenue-d" style="font-size:8px;color:var(--muted2);margin-top:2px">&nbsp;</div>
+        </div>
+        <div class="card inv-stat-card" style="padding:12px 10px">
+          <div style="font-size:8.5px;color:var(--muted2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Success Rate</div>
+          <div class="inv-stat-val" id="inv-stat-rate" style="color:var(--blue)">—</div>
+          <div class="inv-stat-delta" id="inv-stat-rate-d" style="font-size:8px;color:var(--muted2);margin-top:2px">&nbsp;</div>
+        </div>
+        <div class="card inv-stat-card" style="padding:12px 10px">
+          <div style="font-size:8.5px;color:var(--muted2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Outstanding</div>
+          <div class="inv-stat-val" id="inv-stat-outstanding" style="color:var(--yellow)">0.00 USDC</div>
+          <div class="inv-stat-delta" id="inv-stat-outstanding-d" style="font-size:8px;color:var(--muted2);margin-top:2px">&nbsp;</div>
+        </div>
+        <div class="card inv-stat-card" style="padding:12px 10px">
+          <div style="font-size:8.5px;color:var(--muted2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Overdue</div>
+          <div class="inv-stat-val" id="inv-stat-overdue" style="color:var(--red)">0</div>
+          <div class="inv-stat-delta" id="inv-stat-overdue-d" style="font-size:8px;color:var(--muted2);margin-top:2px">&nbsp;</div>
+        </div>
+        <div class="card inv-stat-card" style="padding:12px 10px">
+          <div style="font-size:8.5px;color:var(--muted2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Paid Total</div>
+          <div class="inv-stat-val" id="inv-stat-paid-total" style="color:var(--green)">0.00 USDC</div>
+          <div class="inv-stat-delta" id="inv-stat-paid-d" style="font-size:8px;color:var(--muted2);margin-top:2px">&nbsp;</div>
+        </div>
+        <div class="card inv-stat-card" style="padding:12px 10px">
+          <div style="font-size:8.5px;color:var(--muted2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Crosschain Volume</div>
+          <div class="inv-stat-val" id="inv-stat-xchain" style="color:var(--purple)">0.00 USDC</div>
+          <div class="inv-stat-delta" id="inv-stat-xchain-d" style="font-size:8px;color:var(--muted2);margin-top:2px">&nbsp;</div>
+        </div>
+      </div>
+
+      <!-- CREATE PANEL -->
+      <div id="inv-panel-create" style="flex:1;overflow-y:auto;padding:0 14px 14px;display:flex;gap:14px">
+        <!-- LEFT: FORM -->
+        <div style="width:360px;flex-shrink:0;display:flex;flex-direction:column;gap:10px">
           <div class="card">
-            <div class="ch"><i class="ti ti-file-invoice" style="font-size:13px;color:var(--yellow)"></i><span class="ct">New Invoice</span></div>
+            <div class="ch"><i class="ti ti-file-invoice" style="font-size:13px;color:var(--yellow)"></i><span class="ct">Create Invoice</span></div>
             <div class="cb" style="display:flex;flex-direction:column;gap:8px">
+              <!-- Row 1 -->
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-                <div><div class="swap-label">From (Your Name)</div><input id="inv-from" class="cinput" placeholder="Your name / org"/></div>
-                <div><div class="swap-label">Invoice #</div><input id="inv-num" class="cinput" value="INV-001"/></div>
+                <div><div class="swap-label">From (Name / Org)</div><input id="inv-from" class="cinput" placeholder="Your name / org" oninput="invPreviewUpdate()"/></div>
+                <div><div class="swap-label">Invoice #</div><input id="inv-num" class="cinput" value="INV-001" oninput="invPreviewUpdate()"/></div>
               </div>
-              <div><div class="swap-label">Bill To (Address / ENS)</div><input id="inv-to-addr" class="cinput" placeholder="0x... or name.eth"/></div>
-              <div><div class="swap-label">Client Name (optional)</div><input id="inv-to-name" class="cinput" placeholder="Client name"/></div>
-              <div><div class="swap-label">Description</div><textarea id="inv-desc" class="cinput" rows="2" placeholder="Services rendered..." style="resize:none;font-family:inherit"></textarea></div>
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-                <div><div class="swap-label">Amount (USDC)</div><input id="inv-amount" class="cinput" type="number" placeholder="0.00" oninput="calcInvoiceTax()"/></div>
-                <div><div class="swap-label">Tax (%)</div><input id="inv-tax" class="cinput" type="number" value="0" oninput="calcInvoiceTax()"/></div>
+              <!-- Row 2 -->
+              <div><div class="swap-label">Bill To (Address / ENS)</div>
+                <input id="inv-to-addr" class="cinput" placeholder="0x... or name.eth" oninput="invPreviewUpdate()"/>
               </div>
+              <div><div class="swap-label">Client Name (optional)</div>
+                <input id="inv-to-name" class="cinput" placeholder="Client name" oninput="invPreviewUpdate()"/>
+              </div>
+              <!-- LINE ITEMS -->
+              <div>
+                <div class="swap-label" style="margin-bottom:4px">Line Items</div>
+                <div id="inv-line-items" style="display:flex;flex-direction:column;gap:4px">
+                  <div class="inv-line-row" style="display:grid;grid-template-columns:1fr 50px 80px 70px 22px;gap:4px;align-items:center">
+                    <input class="cinput li-name" placeholder="Item name" style="font-size:10px" oninput="invRecalcLines()"/>
+                    <input class="cinput li-qty" type="number" value="1" min="0" style="font-size:10px;text-align:center" oninput="invRecalcLines()"/>
+                    <input class="cinput li-price" type="number" placeholder="0.00" min="0" style="font-size:10px" oninput="invRecalcLines()"/>
+                    <div class="cinput li-total" style="font-size:10px;color:var(--yellow);background:rgba(245,158,11,.05);cursor:default">0.00</div>
+                    <button class="btn" style="padding:3px 5px;font-size:10px;color:var(--red)" onclick="this.closest('.inv-line-row').remove();invRecalcLines()"><i class="ti ti-x"></i></button>
+                  </div>
+                </div>
+                <button class="btn" style="width:100%;margin-top:5px;font-size:9.5px" onclick="invAddLineItem()"><i class="ti ti-plus"></i>Add Item</button>
+              </div>
+              <!-- TOTALS BOX -->
               <div style="background:rgba(0,0,0,.18);border:1px solid var(--border);border-radius:5px;padding:9px 11px;font-size:10px">
                 <div style="display:flex;justify-content:space-between;color:var(--muted2);padding:2px 0"><span>Subtotal</span><span id="inv-sub">0.00 USDC</span></div>
-                <div style="display:flex;justify-content:space-between;color:var(--muted2);padding:2px 0"><span>Tax</span><span id="inv-tax-amt">0.00 USDC</span></div>
+                <div style="display:flex;justify-content:space-between;color:var(--muted2);padding:2px 0">
+                  <span>Tax (<input id="inv-tax" type="number" value="0" min="0" style="width:32px;background:transparent;border:none;border-bottom:1px solid var(--border2);color:var(--muted2);font-size:10px;text-align:center" oninput="calcInvoiceTax()"/>%)</span>
+                  <span id="inv-tax-amt">0.00 USDC</span>
+                </div>
                 <div style="display:flex;justify-content:space-between;font-weight:700;color:var(--yellow);border-top:1px solid var(--border);padding-top:5px;margin-top:4px"><span>Total Due</span><span id="inv-total-due">0.00 USDC</span></div>
               </div>
+              <!-- ROW: date + currency -->
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-                <div><div class="swap-label">Due Date</div><input id="inv-due" class="cinput" type="date" style="color-scheme:dark"/></div>
+                <div><div class="swap-label">Due Date</div><input id="inv-due" class="cinput" type="date" style="color-scheme:dark" oninput="invPreviewUpdate()"/></div>
                 <div><div class="swap-label">Currency</div>
-                  <select id="inv-currency" class="cinput" style="cursor:pointer"><option>USDC</option><option>EURC</option></select>
+                  <select id="inv-currency" class="cinput" style="cursor:pointer" onchange="invPreviewUpdate()"><option>USDC</option><option>EURC</option></select>
                 </div>
               </div>
-              <button class="action-btn" style="background:linear-gradient(135deg,#d97706,#f59e0b)" onclick="createInvoice()"><i class="ti ti-file-invoice"></i>Create &amp; Send Invoice</button>
+              <!-- Chain label -->
+              <div><div class="swap-label">Chain / Network</div>
+                <div class="cinput" style="display:flex;align-items:center;gap:6px;cursor:default;color:var(--blue)">
+                  <i class="ti ti-circuit-cell" style="font-size:11px"></i>
+                  <span id="inv-chain-label">Arc Testnet</span>
+                </div>
+              </div>
+              <!-- Description / memo -->
+              <div><div class="swap-label">Description / Memo</div>
+                <textarea id="inv-desc" class="cinput" rows="2" placeholder="Services rendered..." style="resize:none;font-family:inherit" oninput="invPreviewUpdate()"></textarea>
+              </div>
+              <!-- Attachment placeholder -->
+              <div><div class="swap-label">Attachments</div>
+                <div class="cinput" style="display:flex;align-items:center;gap:6px;cursor:pointer;color:var(--muted2)" onclick="toast('File upload coming soon','info')">
+                  <i class="ti ti-paperclip" style="font-size:11px"></i>
+                  <span style="font-size:10px">Upload PDF or contract</span>
+                </div>
+              </div>
+              <!-- Reminder toggle -->
+              <div style="display:flex;align-items:center;justify-content:space-between">
+                <span style="font-size:10px;color:var(--muted2)">Send reminder automatically</span>
+                <div id="inv-reminder-toggle" onclick="invToggleReminder()" style="width:34px;height:18px;background:var(--border);border-radius:9px;cursor:pointer;position:relative;transition:.2s">
+                  <div id="inv-reminder-knob" style="width:14px;height:14px;background:var(--muted2);border-radius:50%;position:absolute;top:2px;left:2px;transition:.2s"></div>
+                </div>
+              </div>
+              <button class="action-btn" style="background:linear-gradient(135deg,#d97706,#f59e0b);margin-top:2px" onclick="createInvoice()"><i class="ti ti-file-invoice"></i>Create &amp; Send Invoice</button>
             </div>
           </div>
         </div>
-        <div style="flex:1;display:flex;flex-direction:column;gap:10px;min-width:0">
-          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
-            <div class="card" style="padding:12px"><div class="st-lbl">Outstanding</div><div class="st-val yellow" id="inv-outstanding">0</div></div>
-            <div class="card" style="padding:12px"><div class="st-lbl">Paid</div><div class="st-val green" id="inv-paid-count">0</div></div>
-            <div class="card" style="padding:12px"><div class="st-lbl">Overdue</div><div class="st-val red" id="inv-overdue">0</div></div>
+
+        <!-- RIGHT: LIVE PREVIEW -->
+        <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:10px">
+          <!-- Live Invoice Preview Card -->
+          <div class="card" style="flex:1;min-height:0">
+            <div class="ch">
+              <i class="ti ti-eye" style="font-size:13px;color:var(--blue)"></i>
+              <span class="ct">Live Invoice Preview</span>
+              <span style="margin-left:8px;font-size:8.5px;background:rgba(34,197,94,.15);color:var(--green);border:1px solid rgba(34,197,94,.3);border-radius:3px;padding:1px 6px;animation:blink 2s ease-in-out infinite">LIVE</span>
+            </div>
+            <div class="cb" style="padding:0">
+              <!-- Invoice document mock -->
+              <div id="inv-preview-doc" style="background:linear-gradient(135deg,#0d1117,#111827);border:1px solid var(--border2);border-radius:6px;padding:18px;font-size:10px;position:relative">
+                <!-- Header row -->
+                <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:14px">
+                  <div style="display:flex;align-items:center;gap:8px">
+                    <div id="inv-prev-avatar" style="width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,#4f8ef7,#a78bfa);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#fff;flex-shrink:0">E</div>
+                    <div>
+                      <div id="inv-prev-from" style="font-weight:700;font-size:11px;color:var(--text)">Elligente User</div>
+                      <div id="inv-prev-ens" style="font-size:8.5px;color:var(--muted2)">—</div>
+                    </div>
+                  </div>
+                  <div style="text-align:right">
+                    <div style="font-size:9px;color:var(--muted2)">Invoice</div>
+                    <div id="inv-prev-num" style="font-weight:700;color:var(--yellow);font-size:12px">INV-001</div>
+                  </div>
+                </div>
+                <!-- Bill to + amount row -->
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
+                  <div>
+                    <div style="font-size:8.5px;color:var(--muted2);margin-bottom:3px;text-transform:uppercase;letter-spacing:.5px">Bill To</div>
+                    <div id="inv-prev-to-name" style="font-weight:600;color:var(--text)">—</div>
+                    <div id="inv-prev-to-ens" style="font-size:8.5px;color:var(--muted2)">—</div>
+                    <div id="inv-prev-to-addr" style="font-size:8px;color:var(--blue);margin-top:2px;font-family:monospace">—</div>
+                  </div>
+                  <div style="text-align:right">
+                    <div style="font-size:8.5px;color:var(--muted2);margin-bottom:3px;text-transform:uppercase;letter-spacing:.5px">Amount Due</div>
+                    <div id="inv-prev-amount" style="font-size:20px;font-weight:800;color:var(--text)">0.00 USDC</div>
+                    <div id="inv-prev-status-badge" style="display:inline-block;margin-top:4px;font-size:8.5px;padding:2px 8px;border-radius:3px;background:rgba(245,158,11,.15);color:var(--yellow);border:1px solid rgba(245,158,11,.3)">Outstanding</div>
+                  </div>
+                </div>
+                <!-- Due date + chain -->
+                <div style="display:flex;gap:16px;margin-bottom:14px;padding:8px 10px;background:rgba(255,255,255,.03);border-radius:5px;border:1px solid var(--border)">
+                  <div><div style="font-size:8px;color:var(--muted2)">Due Date</div><div id="inv-prev-due" style="font-size:10px;color:var(--text);font-weight:600">—</div></div>
+                  <div style="width:1px;background:var(--border)"></div>
+                  <div><div style="font-size:8px;color:var(--muted2)">Pay with</div><div style="font-size:10px;color:var(--blue);font-weight:600">USDC on Arc Testnet</div></div>
+                  <div style="width:1px;background:var(--border)"></div>
+                  <div><div style="font-size:8px;color:var(--muted2)">USDC Address</div><div id="inv-prev-usdc-addr" style="font-size:9px;color:var(--text);font-family:monospace">—</div></div>
+                </div>
+                <!-- QR + payment link row -->
+                <div style="display:flex;gap:12px;align-items:flex-start;margin-bottom:12px">
+                  <canvas id="inv-qr-canvas" width="72" height="72" style="border-radius:4px;border:1px solid var(--border);flex-shrink:0"></canvas>
+                  <div style="flex:1;min-width:0">
+                    <div style="font-size:8px;color:var(--muted2);margin-bottom:4px">Payment Link</div>
+                    <div id="inv-prev-link" style="font-size:8.5px;color:var(--blue);word-break:break-all;font-family:monospace;background:rgba(79,142,247,.06);border:1px solid rgba(79,142,247,.15);border-radius:4px;padding:5px 8px">pay.elligente.xyz/inv-001</div>
+                    <button class="btn" style="margin-top:5px;font-size:9px;width:100%" onclick="invCopyLink()"><i class="ti ti-copy"></i>Copy Payment Link</button>
+                  </div>
+                </div>
+                <!-- Desc -->
+                <div id="inv-prev-desc" style="font-size:9px;color:var(--muted2);border-top:1px solid var(--border);padding-top:8px;font-style:italic">—</div>
+                <div style="text-align:center;margin-top:10px;font-size:8.5px;color:var(--muted);opacity:.5">Thank you for your business! 🌟</div>
+              </div>
+            </div>
           </div>
-          <div class="card">
-            <div class="ch"><i class="ti ti-list" style="font-size:13px;color:var(--yellow)"></i><span class="ct">All Invoices</span><span id="inv-count" style="font-size:9px;color:var(--muted2);margin-left:4px"></span></div>
-            <table class="btable">
-              <thead><tr><th>Invoice #</th><th>To</th><th>Amount</th><th>Due Date</th><th>Status</th><th>Tx Hash</th><th>Actions</th></tr></thead>
-              <tbody id="inv-tbody"></tbody>
-            </table>
-            <div id="inv-empty" style="padding:32px;text-align:center;color:var(--muted2);font-size:11px">
-              <i class="ti ti-file-invoice" style="font-size:32px;display:block;margin-bottom:8px;opacity:.3"></i>No invoices yet.
+
+          <!-- Action quick buttons -->
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px">
+            <div class="card inv-action-tile" style="padding:10px;text-align:center;cursor:pointer" onclick="invCopyLink()">
+              <i class="ti ti-link" style="font-size:16px;color:var(--blue);display:block;margin-bottom:4px"></i>
+              <div style="font-size:8.5px;color:var(--muted2)">Payment Link</div>
+              <div style="font-size:7.5px;color:var(--muted)">Create a link to receive payment</div>
+            </div>
+            <div class="card inv-action-tile" style="padding:10px;text-align:center;cursor:pointer" onclick="toast('QR generated in preview','info')">
+              <i class="ti ti-qrcode" style="font-size:16px;color:var(--purple);display:block;margin-bottom:4px"></i>
+              <div style="font-size:8.5px;color:var(--muted2)">QR Code</div>
+              <div style="font-size:7.5px;color:var(--muted)">Generate a QR for this invoice</div>
+            </div>
+            <div class="card inv-action-tile" style="padding:10px;text-align:center;cursor:pointer" onclick="toast('PDF export coming soon','info')">
+              <i class="ti ti-file-type-pdf" style="font-size:16px;color:var(--red);display:block;margin-bottom:4px"></i>
+              <div style="font-size:8.5px;color:var(--muted2)">Download PDF</div>
+              <div style="font-size:7.5px;color:var(--muted)">Save invoice as PDF</div>
+            </div>
+            <div class="card inv-action-tile" style="padding:10px;text-align:center;cursor:pointer" onclick="invCopyLink()">
+              <i class="ti ti-share" style="font-size:16px;color:var(--teal);display:block;margin-bottom:4px"></i>
+              <div style="font-size:8.5px;color:var(--muted2)">Copy Invoice Link</div>
+              <div style="font-size:7.5px;color:var(--muted)">Share invoice payment link</div>
             </div>
           </div>
         </div>
+      </div>
+
+      <!-- LIST PANEL -->
+      <div id="inv-panel-list" style="flex:1;overflow-y:auto;padding:0 14px 14px;display:none;flex-direction:column;gap:10px">
+        <!-- TOOLBAR -->
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+          <div style="position:relative;flex:1;min-width:160px">
+            <i class="ti ti-search" style="position:absolute;left:8px;top:50%;transform:translateY(-50%);color:var(--muted2);font-size:11px;pointer-events:none"></i>
+            <input id="inv-search" class="cinput" placeholder="Search invoice, client, hash..." style="padding-left:26px;font-size:10px" oninput="renderInvoices()"/>
+          </div>
+          <select id="inv-filter-status" class="cinput" style="font-size:10px;min-width:110px;cursor:pointer" onchange="renderInvoices()">
+            <option value="">All Status</option>
+            <option>Outstanding</option>
+            <option>Paid</option>
+            <option>Overdue</option>
+            <option>Processing</option>
+            <option>Cancelled</option>
+          </select>
+          <select id="inv-filter-chain" class="cinput" style="font-size:10px;min-width:110px;cursor:pointer" onchange="renderInvoices()">
+            <option value="">All Chains</option>
+            <option>Arc Testnet</option>
+          </select>
+          <input id="inv-filter-date-from" class="cinput" type="date" style="font-size:10px;color-scheme:dark;min-width:110px" onchange="renderInvoices()" title="From date"/>
+          <input id="inv-filter-date-to" class="cinput" type="date" style="font-size:10px;color-scheme:dark;min-width:110px" onchange="renderInvoices()" title="To date"/>
+          <select id="inv-sort" class="cinput" style="font-size:10px;min-width:100px;cursor:pointer" onchange="renderInvoices()">
+            <option value="newest">Newest</option>
+            <option value="oldest">Oldest</option>
+            <option value="highest">Highest</option>
+            <option value="lowest">Lowest</option>
+          </select>
+          <span id="inv-count" style="font-size:9px;color:var(--muted2);white-space:nowrap"></span>
+        </div>
+
+        <!-- TABLE CARD -->
+        <div class="card" style="overflow:hidden">
+          <table class="btable" style="font-size:10px">
+            <thead>
+              <tr>
+                <th style="width:80px">Invoice #</th>
+                <th>Client</th>
+                <th>Amount</th>
+                <th>Due Date</th>
+                <th>Status</th>
+                <th>Chain</th>
+                <th>Tx Hash</th>
+                <th style="width:120px">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="inv-tbody"></tbody>
+          </table>
+          <div id="inv-empty" style="padding:48px;text-align:center;color:var(--muted2);font-size:11px;display:none">
+            <i class="ti ti-file-invoice" style="font-size:40px;display:block;margin-bottom:12px;opacity:.2"></i>
+            <div style="font-weight:600;margin-bottom:4px">No invoices yet</div>
+            <div style="font-size:9.5px">Create your first invoice to get started.</div>
+            <button class="btn primary" style="margin-top:12px;font-size:10px" onclick="invSwitchTab('create')"><i class="ti ti-plus"></i>Create Invoice</button>
+          </div>
+        </div>
+
+        <!-- DETAIL PANEL (inline expand) -->
+        <div id="inv-detail-panel" style="display:none"></div>
       </div>
     </div>
 
@@ -4107,71 +4329,123 @@ async function signTx(){
         }
       }
 
-      // ── BATCH SEND: use batchTransfer to send all in one transaction ──
+      // ── BATCH SEND: ONE batchTransfer() call — Arc-compatible ──
       if(directRcpts.length > 0) {
         const usdcRcpts  = directRcpts.filter(r => (r.token||'USDC')==='USDC');
         const eurcRcpts  = directRcpts.filter(r => (r.token||'USDC')==='EURC');
 
-        // Process USDC batch
+        // ── USDC batch ──────────────────────────────────────────────────────
         if(usdcRcpts.length > 0) {
           const addrs  = usdcRcpts.map(r => r._resolved || r.addr);
           const amts   = usdcRcpts.map(r => toUsdc(r.amount));
           const notes  = usdcRcpts.map(r => r.note || '');
           const batchTotal = usdcRcpts.reduce((s,r)=>s+(parseFloat(r.amount)||0),0);
-          toast(`Approving ${batchTotal.toFixed(2)} USDC for batch transfer (${usdcRcpts.length} recipients)...`,'info');
-          if(batchContractAddr) {
-            // Use ElligentBatch contract
-            const batchContract = new ethers.Contract(batchContractAddr, BATCH_ABI, signer);
-            const required = await batchContract.getRequiredAllowance(toUsdc(batchTotal.toFixed(6)));
-            const approveTx = await usdcContract.approve(batchContractAddr, required);
-            await approveTx.wait();
-            toast(`Sending batch of ${usdcRcpts.length} USDC transfers in one transaction...`,'info');
-            const batchTx = await batchContract.batchTransfer(addrs, amts, notes);
-            lastHash = batchTx.hash;
-            await batchTx.wait();
-            toast(`✓ Batch of ${usdcRcpts.length} USDC payments confirmed`,'success');
-          } else {
-            // Fallback: send one ERC-20 transfer per recipient (no batch contract)
-            // No approve needed — ERC-20 transfer() sends directly from signer
-            toast(`Sending ${usdcRcpts.length} individual USDC transfer${usdcRcpts.length>1?'s':''} — please approve each in your wallet...`,'info');
-            for(const [i, r] of usdcRcpts.entries()) {
-              const toAddr = r._resolved || r.addr;
-              toast(`[${i+1}/${usdcRcpts.length}] Sending ${r.amount} USDC → ${shortAddr(toAddr)}...`,'info');
-              const tx = await usdcContract.transfer(toAddr, toUsdc(r.amount));
-              lastHash = tx.hash;
-              await tx.wait();
-              toast(`✓ [${i+1}/${usdcRcpts.length}] ${r.amount} USDC → ${shortAddr(toAddr)} confirmed`,'success');
-            }
+
+          if(!batchContractAddr) {
+            toast('Batch contract not configured. Set a batch contract address in Settings → Batch Payments.','error');
+            return;
           }
+          if(!addrs.length || addrs.some(a => !isAddr(a))) {
+            toast('One or more recipient addresses are invalid','error'); return;
+          }
+          if(addrs.length !== amts.length) {
+            toast('Recipients/amounts array length mismatch','error'); return;
+          }
+
+          // 1. Fetch required allowance from contract
+          toast(`Approving ${batchTotal.toFixed(2)} USDC for batch (${usdcRcpts.length} recipients)...`,'info');
+          const batchContract = new ethers.Contract(batchContractAddr, BATCH_ABI, signer);
+          let required;
+          try {
+            required = await batchContract.getRequiredAllowance(toUsdc(batchTotal.toFixed(6)));
+          } catch(_) {
+            // If getRequiredAllowance not available, use 5% buffer
+            required = toUsdc((batchTotal * 1.05).toFixed(6));
+          }
+
+          // 2. Approve
+          const approveTx = await usdcContract.approve(batchContractAddr, required);
+          await approveTx.wait();
+
+          // 3. simulateContract (dry-run gas estimation) before writeContract
+          //    Uses eth_call to detect reverts before sending the real tx
+          toast(`Simulating batch of ${usdcRcpts.length} USDC transfers...`,'info');
+          try {
+            const batchContractRead = new ethers.Contract(batchContractAddr, BATCH_ABI, provider);
+            await batchContractRead.batchTransfer.staticCall(addrs, amts, notes);
+          } catch(simErr) {
+            const reason = simErr.revert?.args?.[0] || simErr.shortMessage || simErr.message || 'Unknown';
+            toast('Gas estimation failed: ' + reason, 'error');
+            return;
+          }
+
+          // 4. Estimate gas (once, for the batch only)
+          let gasLimit;
+          try {
+            const estimated = await batchContract.batchTransfer.estimateGas(addrs, amts, notes);
+            // Add 20% buffer for Arc Testnet
+            gasLimit = (estimated * 120n) / 100n;
+          } catch(_) {
+            // Safe fallback: 300k base + 50k per recipient
+            gasLimit = BigInt(300_000 + usdcRcpts.length * 50_000);
+          }
+
+          // 5. ONE writeContract — no fallback loops, no multiple popups
+          toast(`Sending 1 batch transaction for ${usdcRcpts.length} USDC recipients...`,'info');
+          const batchTx = await batchContract.batchTransfer(addrs, amts, notes, { gasLimit });
+          lastHash = batchTx.hash;
+          await batchTx.wait();
+          toast(`✓ Batch of ${usdcRcpts.length} USDC payments confirmed — Tx: ${shortAddr(batchTx.hash)}`,'success');
         }
 
-        // Process EURC batch
+        // ── EURC batch ──────────────────────────────────────────────────────
         if(eurcRcpts.length > 0) {
           const addrs  = eurcRcpts.map(r => r._resolved || r.addr);
           const amts   = eurcRcpts.map(r => toUsdc(r.amount));
           const notes  = eurcRcpts.map(r => r.note || '');
           const batchTotal = eurcRcpts.reduce((s,r)=>s+(parseFloat(r.amount)||0),0);
-          toast(`Sending batch of ${eurcRcpts.length} EURC transfers in one transaction...`,'info');
-          if(batchContractAddr) {
-            const batchContract = new ethers.Contract(batchContractAddr, BATCH_ABI, signer);
-            const approveTx = await eurcContract.approve(batchContractAddr, toUsdc((batchTotal*1.05).toFixed(6)));
-            await approveTx.wait();
-            const batchTx = await batchContract.batchTransfer(addrs, amts, notes);
-            lastHash = lastHash || batchTx.hash;
-            await batchTx.wait();
-            toast(`✓ Batch of ${eurcRcpts.length} EURC payments confirmed`,'success');
-          } else {
-            // Fallback: send one ERC-20 transfer per EURC recipient
-            toast(`Sending ${eurcRcpts.length} individual EURC transfer${eurcRcpts.length>1?'s':''} — please approve each in your wallet...`,'info');
-            for(const [i, r] of eurcRcpts.entries()) {
-              const toAddr = r._resolved || r.addr;
-              toast(`[${i+1}/${eurcRcpts.length}] Sending ${r.amount} EURC → ${shortAddr(toAddr)}...`,'info');
-              const tx = await eurcContract.transfer(toAddr, toUsdc(r.amount));
-              lastHash = lastHash || tx.hash;
-              await tx.wait();
-              toast(`✓ [${i+1}/${eurcRcpts.length}] ${r.amount} EURC → ${shortAddr(toAddr)} confirmed`,'success');
-            }
+
+          if(!batchContractAddr) {
+            toast('Batch contract not configured. Set a batch contract address in Settings → Batch Payments.','error');
+            return;
           }
+          if(!addrs.length || addrs.some(a => !isAddr(a))) {
+            toast('One or more EURC recipient addresses are invalid','error'); return;
+          }
+
+          // 1. Approve (5% buffer for EURC)
+          toast(`Approving ${batchTotal.toFixed(2)} EURC for batch (${eurcRcpts.length} recipients)...`,'info');
+          const eurcBatchContract = new ethers.Contract(batchContractAddr, BATCH_ABI, signer);
+          const eurcRequired = toUsdc((batchTotal * 1.05).toFixed(6));
+          const eurcApproveTx = await eurcContract.approve(batchContractAddr, eurcRequired);
+          await eurcApproveTx.wait();
+
+          // 2. simulateContract (dry-run)
+          toast(`Simulating EURC batch of ${eurcRcpts.length} transfers...`,'info');
+          try {
+            const eurcBatchRead = new ethers.Contract(batchContractAddr, BATCH_ABI, provider);
+            await eurcBatchRead.batchTransfer.staticCall(addrs, amts, notes);
+          } catch(simErr) {
+            const reason = simErr.revert?.args?.[0] || simErr.shortMessage || simErr.message || 'Unknown';
+            toast('EURC gas estimation failed: ' + reason, 'error');
+            return;
+          }
+
+          // 3. Estimate gas once
+          let eurcGasLimit;
+          try {
+            const estimated = await eurcBatchContract.batchTransfer.estimateGas(addrs, amts, notes);
+            eurcGasLimit = (estimated * 120n) / 100n;
+          } catch(_) {
+            eurcGasLimit = BigInt(300_000 + eurcRcpts.length * 50_000);
+          }
+
+          // 4. ONE writeContract
+          toast(`Sending 1 batch transaction for ${eurcRcpts.length} EURC recipients...`,'info');
+          const eurcBatchTx = await eurcBatchContract.batchTransfer(addrs, amts, notes, { gasLimit: eurcGasLimit });
+          lastHash = lastHash || eurcBatchTx.hash;
+          await eurcBatchTx.wait();
+          toast(`✓ Batch of ${eurcRcpts.length} EURC payments confirmed — Tx: ${shortAddr(eurcBatchTx.hash)}`,'success');
         }
       }
 
@@ -5515,6 +5789,8 @@ document.addEventListener('DOMContentLoaded',()=>{
   updateQueueStats();
   renderPayLinks();
   renderInvoices();
+  updateInvStats();
+  invPreviewUpdate();
   renderContacts();
   renderTemplates();
   renderReports();
@@ -5759,102 +6035,590 @@ function deactivateLink(id) {
 // ══════════════════════════════════════════════════════════
 //  INVOICES
 // ══════════════════════════════════════════════════════════
-function calcInvoiceTax() {
-  const sub = parseFloat(document.getElementById('inv-amount')?.value)||0;
-  const tax = parseFloat(document.getElementById('inv-tax')?.value)||0;
-  const taxAmt = sub*(tax/100);
-  const total  = sub+taxAmt;
-  const set = (id,v) => { const el=document.getElementById(id); if(el) el.textContent=v.toFixed(2)+' USDC'; };
-  set('inv-sub', sub); set('inv-tax-amt', taxAmt); set('inv-total-due', total);
-}
 
-function createInvoice() {
-  const from   = document.getElementById('inv-from')?.value.trim()||'Elligente User';
-  const num    = document.getElementById('inv-num')?.value.trim()||'INV-001';
-  const toAddr = document.getElementById('inv-to-addr')?.value.trim();
-  const toName = document.getElementById('inv-to-name')?.value.trim()||'Client';
-  const desc   = document.getElementById('inv-desc')?.value.trim()||'';
-  const sub    = parseFloat(document.getElementById('inv-amount')?.value)||0;
-  const tax    = parseFloat(document.getElementById('inv-tax')?.value)||0;
-  const due    = document.getElementById('inv-due')?.value||'';
-  const cur    = document.getElementById('inv-currency')?.value||'USDC';
-  if(!toAddr)     { toast('Enter a recipient address','error'); return; }
-  if(sub<=0)      { toast('Enter an amount','error'); return; }
-  const taxAmt   = sub*(tax/100);
-  const total    = sub+taxAmt;
-  const inv = {
-    id: num, from, toAddr, toName, desc,
-    subtotal: sub, taxPct: tax, taxAmt, total, due, currency: cur,
-    status: 'Outstanding', txHash: '', created: new Date().toISOString()
-  };
-  invoiceList.unshift(inv);
-  // Auto-increment invoice number
-  const match = num.match(/(\D+)(\d+)$/);
-  if(match && document.getElementById('inv-num'))
-    document.getElementById('inv-num').value = match[1]+String(+match[2]+1).padStart(match[2].length,'0');
-  Store.save('invoices', invoiceList);
-  renderInvoices();
-  toast(`Invoice ${num} created`,'success');
-}
-
-async function payInvoice(id) {
-  if(!walletAddress) { toast('Connect wallet to pay','error'); return; }
-  const inv = invoiceList.find(i=>i.id===id);
-  if(!inv) return;
-  if(signer) {
-    try {
-      const usdc = new ethers.Contract(activeUSDC(), USDC_ABI, signer);
-      const amt  = toUsdc(inv.total.toFixed(6));
-      toast(`Sending ${inv.total} USDC for invoice ${id}...`,'info');
-      const tx   = await usdc.transfer(inv.toAddr, amt);
-      await tx.wait();
-      inv.status = 'Paid'; inv.txHash = tx.hash;
-      Store.save('invoices', invoiceList);
-      renderInvoices();
-      toast(`✓ Invoice ${id} paid — Tx: ${shortAddr(tx.hash)}`,'success');
-      refreshBalance();
-    } catch(e) {
-      if(e.code===4001) toast('Rejected','error');
-      else toast('Payment error: '+(e.shortMessage||e.message||''),'error');
-    }
+// ── Tab switcher ──────────────────────────────────────────
+function invSwitchTab(tab) {
+  const createPanel = document.getElementById('inv-panel-create');
+  const listPanel   = document.getElementById('inv-panel-list');
+  const btnCreate   = document.getElementById('inv-tab-create');
+  const btnList     = document.getElementById('inv-tab-list');
+  if (!createPanel || !listPanel) return;
+  if (tab === 'create') {
+    createPanel.style.display = 'flex';
+    listPanel.style.display   = 'none';
+    if (btnCreate) { btnCreate.classList.add('primary');   btnCreate.classList.remove('btn'); btnCreate.className = 'btn primary'; }
+    if (btnList)   { btnList.className = 'btn'; }
+    invPreviewUpdate();
   } else {
-    inv.status='Paid'; inv.txHash='0xdemo'+Date.now().toString(16);
-    Store.save('invoices',invoiceList); renderInvoices();
-    toast(`Invoice ${id} marked paid (demo)`,'warning');
+    createPanel.style.display = 'none';
+    listPanel.style.display   = 'flex';
+    if (btnList)   { btnList.className = 'btn primary'; }
+    if (btnCreate) { btnCreate.className = 'btn'; }
+    updateInvStats();
+    renderInvoices();
   }
 }
 
+// ── Reminder toggle ────────────────────────────────────────
+let invReminderOn = false;
+function invToggleReminder() {
+  invReminderOn = !invReminderOn;
+  const tog  = document.getElementById('inv-reminder-toggle');
+  const knob = document.getElementById('inv-reminder-knob');
+  if (!tog || !knob) return;
+  if (invReminderOn) {
+    tog.style.background  = 'rgba(79,142,247,.35)';
+    knob.style.background = 'var(--blue)';
+    knob.style.left       = '18px';
+  } else {
+    tog.style.background  = 'var(--border)';
+    knob.style.background = 'var(--muted2)';
+    knob.style.left       = '2px';
+  }
+}
+
+// ── Line items ─────────────────────────────────────────────
+function invAddLineItem() {
+  const container = document.getElementById('inv-line-items');
+  if (!container) return;
+  const row = document.createElement('div');
+  row.className = 'inv-line-row';
+  row.style.cssText = 'display:grid;grid-template-columns:1fr 50px 80px 70px 22px;gap:4px;align-items:center';
+  row.innerHTML = `
+    <input class="cinput li-name"  placeholder="Item name" style="font-size:10px" oninput="invRecalcLines()"/>
+    <input class="cinput li-qty"   type="number" value="1" min="0" style="font-size:10px;text-align:center" oninput="invRecalcLines()"/>
+    <input class="cinput li-price" type="number" placeholder="0.00" min="0" style="font-size:10px" oninput="invRecalcLines()"/>
+    <div class="cinput li-total"   style="font-size:10px;color:var(--yellow);background:rgba(245,158,11,.05);cursor:default">0.00</div>
+    <button class="btn" style="padding:3px 5px;font-size:10px;color:var(--red)" onclick="this.closest('.inv-line-row').remove();invRecalcLines()"><i class="ti ti-x"></i></button>`;
+  container.appendChild(row);
+}
+
+function invRecalcLines() {
+  let subtotal = 0;
+  document.querySelectorAll('#inv-line-items .inv-line-row').forEach(row => {
+    const qty   = parseFloat(row.querySelector('.li-qty')?.value)   || 0;
+    const price = parseFloat(row.querySelector('.li-price')?.value) || 0;
+    const total = qty * price;
+    const totEl = row.querySelector('.li-total');
+    if (totEl) totEl.textContent = total.toFixed(2);
+    subtotal += total;
+  });
+  // Update amount field and recalc tax
+  const amtEl = document.getElementById('inv-amount');
+  if (amtEl) amtEl.value = subtotal > 0 ? subtotal.toFixed(2) : '';
+  calcInvoiceTax();
+  invPreviewUpdate();
+}
+
+// ── Tax calculation ────────────────────────────────────────
+function calcInvoiceTax() {
+  const sub    = parseFloat(document.getElementById('inv-amount')?.value) || 0;
+  const taxPct = parseFloat(document.getElementById('inv-tax')?.value)    || 0;
+  const taxAmt = sub * (taxPct / 100);
+  const total  = sub + taxAmt;
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v.toFixed(2) + ' USDC'; };
+  set('inv-sub', sub);
+  set('inv-tax-amt', taxAmt);
+  set('inv-total-due', total);
+  invPreviewUpdate();
+}
+
+// ── Live preview updater ───────────────────────────────────
+function invPreviewUpdate() {
+  const from    = document.getElementById('inv-from')?.value.trim()    || 'Elligente User';
+  const num     = document.getElementById('inv-num')?.value.trim()     || 'INV-001';
+  const toAddr  = document.getElementById('inv-to-addr')?.value.trim() || '';
+  const toName  = document.getElementById('inv-to-name')?.value.trim() || '';
+  const desc    = document.getElementById('inv-desc')?.value.trim()    || '';
+  const due     = document.getElementById('inv-due')?.value            || '';
+  const cur     = document.getElementById('inv-currency')?.value       || 'USDC';
+  const sub     = parseFloat(document.getElementById('inv-amount')?.value) || 0;
+  const taxPct  = parseFloat(document.getElementById('inv-tax')?.value)    || 0;
+  const total   = sub * (1 + taxPct / 100);
+
+  // Avatar
+  const initials = from.split(/\s+/).map(w=>w[0]||'').join('').toUpperCase().slice(0,2) || 'E';
+  const prevAv = document.getElementById('inv-prev-avatar');
+  if (prevAv) prevAv.textContent = initials;
+
+  const set = (id, txt) => { const el = document.getElementById(id); if (el) el.textContent = txt || '—'; };
+  set('inv-prev-from',     from);
+  set('inv-prev-num',      num);
+  set('inv-prev-to-name',  toName || (toAddr ? shortAddr(toAddr) : ''));
+  set('inv-prev-to-ens',   toName && toAddr ? shortAddr(toAddr) : '');
+  set('inv-prev-amount',   total.toFixed(2) + ' ' + cur);
+  set('inv-prev-due',      due ? new Date(due+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '—');
+  set('inv-prev-desc',     desc || '—');
+
+  const addrEl = document.getElementById('inv-prev-to-addr');
+  if (addrEl) {
+    if (toAddr && isAddr(toAddr)) {
+      addrEl.textContent = toAddr.slice(0,6)+'...'+toAddr.slice(-4);
+      addrEl.style.color = 'var(--blue)';
+    } else {
+      addrEl.textContent = toAddr || '—';
+      addrEl.style.color = toAddr && !isAddr(toAddr) ? 'var(--red)' : 'var(--muted2)';
+    }
+  }
+
+  // Active USDC address
+  const usdcAddr = (typeof activeUSDC === 'function') ? activeUSDC() : '';
+  set('inv-prev-usdc-addr', usdcAddr ? usdcAddr.slice(0,6)+'...'+usdcAddr.slice(-4) : '—');
+
+  // Payment link
+  const linkEl = document.getElementById('inv-prev-link');
+  const numSlug = num.toLowerCase().replace(/[^a-z0-9]/g,'-');
+  const payLink = 'pay.elligente.xyz/inv-' + numSlug;
+  if (linkEl) linkEl.textContent = payLink;
+
+  // QR code
+  const usdcFull = (typeof activeUSDC === 'function') ? activeUSDC() : '';
+  invDrawQR(usdcFull || toAddr || '0x0000000000000000000000000000000000000000', num, total, cur);
+
+  // Chain label
+  const chainLbl = document.getElementById('inv-chain-label');
+  if (chainLbl && typeof activeChainId !== 'undefined') {
+    const CHAIN_REGISTRY_REF = (typeof CHAIN_REGISTRY !== 'undefined') ? CHAIN_REGISTRY : {};
+    const cfg = CHAIN_REGISTRY_REF[activeChainId];
+    if (chainLbl) chainLbl.textContent = cfg?.name || 'Arc Testnet';
+  }
+}
+
+// ── Pure canvas QR-like pattern generator ─────────────────
+function invDrawQR(addr, num, amount, cur) {
+  const canvas = document.getElementById('inv-qr-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#0d1117';
+  ctx.fillRect(0, 0, W, H);
+
+  // Deterministic seed from addr+num+amount
+  const seed = (addr + num + String(amount) + (cur||'')).split('').reduce((a,c) => (a<<5)-a+c.charCodeAt(0)|0, 0);
+  const rand = (n => { let s = Math.abs(seed) + n * 2654435761; s ^= s >> 16; s *= 0x45d9f3b; s ^= s >> 16; return (s >>> 0) / 0xffffffff; });
+
+  const cells = 17;
+  const cell  = Math.floor(W / cells);
+
+  // Draw finder patterns (3 corners)
+  const drawFinder = (ox, oy) => {
+    ctx.fillStyle = '#4f8ef7';
+    ctx.fillRect(ox*cell, oy*cell, 7*cell, 7*cell);
+    ctx.fillStyle = '#0d1117';
+    ctx.fillRect((ox+1)*cell, (oy+1)*cell, 5*cell, 5*cell);
+    ctx.fillStyle = '#4f8ef7';
+    ctx.fillRect((ox+2)*cell, (oy+2)*cell, 3*cell, 3*cell);
+  };
+  drawFinder(0, 0); drawFinder(10, 0); drawFinder(0, 10);
+
+  // Data cells
+  for (let r = 0; r < cells; r++) {
+    for (let c = 0; c < cells; c++) {
+      // Skip finder regions
+      if ((r < 8 && c < 8) || (r < 8 && c > 9) || (r > 9 && c < 8)) continue;
+      if (rand(r * cells + c) > 0.5) {
+        ctx.fillStyle = rand(r+c+100) > 0.3 ? '#4f8ef7' : '#a78bfa';
+        const margin = 0.5;
+        ctx.fillRect(c*cell+margin, r*cell+margin, cell-margin*2, cell-margin*2);
+      }
+    }
+  }
+
+  // Center amount overlay
+  ctx.fillStyle = 'rgba(13,17,23,.75)';
+  ctx.fillRect(W/2-16, H/2-7, 32, 14);
+  ctx.fillStyle = '#f59e0b';
+  ctx.font = 'bold 7px monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(amount > 0 ? amount.toFixed(1) : '?', W/2, H/2);
+}
+
+// ── Copy payment link ──────────────────────────────────────
+function invCopyLink() {
+  const linkEl = document.getElementById('inv-prev-link');
+  const link   = linkEl ? 'https://' + linkEl.textContent : 'https://pay.elligente.xyz/';
+  navigator.clipboard.writeText(link).then(() => toast('Payment link copied!', 'success')).catch(() => toast('Copy failed', 'error'));
+}
+
+function invCopyLinkById(id) {
+  const inv = invoiceList.find(i => i.id === id);
+  if (!inv) return;
+  const numSlug = inv.id.toLowerCase().replace(/[^a-z0-9]/g, '-');
+  const link = 'https://pay.elligente.xyz/inv-' + numSlug;
+  navigator.clipboard.writeText(link).then(() => toast('Link copied!', 'success')).catch(() => toast('Copy failed', 'error'));
+}
+
+// ── Create invoice ─────────────────────────────────────────
+function createInvoice() {
+  const from    = document.getElementById('inv-from')?.value.trim()    || 'Elligente User';
+  const num     = document.getElementById('inv-num')?.value.trim()     || 'INV-001';
+  const toAddr  = document.getElementById('inv-to-addr')?.value.trim();
+  const toName  = document.getElementById('inv-to-name')?.value.trim() || 'Client';
+  const desc    = document.getElementById('inv-desc')?.value.trim()    || '';
+  const sub     = parseFloat(document.getElementById('inv-amount')?.value) || 0;
+  const taxPct  = parseFloat(document.getElementById('inv-tax')?.value)    || 0;
+  const due     = document.getElementById('inv-due')?.value             || '';
+  const cur     = document.getElementById('inv-currency')?.value        || 'USDC';
+
+  if (!toAddr)  { toast('Enter a recipient address', 'error');  return; }
+  if (sub <= 0) { toast('Enter an amount > 0',       'error'); return; }
+
+  // Collect line items
+  const lineItems = [];
+  document.querySelectorAll('#inv-line-items .inv-line-row').forEach(row => {
+    const name  = row.querySelector('.li-name')?.value.trim()  || '';
+    const qty   = parseFloat(row.querySelector('.li-qty')?.value)   || 0;
+    const price = parseFloat(row.querySelector('.li-price')?.value) || 0;
+    if (name || price) lineItems.push({ name, qty, price, total: qty * price });
+  });
+
+  const taxAmt = sub * (taxPct / 100);
+  const total  = sub + taxAmt;
+
+  // Chain info
+  const CHAIN_REGISTRY_REF = (typeof CHAIN_REGISTRY !== 'undefined') ? CHAIN_REGISTRY : {};
+  const cfg = CHAIN_REGISTRY_REF[typeof activeChainId !== 'undefined' ? activeChainId : ''];
+  const chainName = cfg?.name || 'Arc Testnet';
+
+  const inv = {
+    id: num, from, toAddr, toName, desc,
+    subtotal: sub, taxPct, taxAmt, total, due, currency: cur,
+    lineItems,
+    chainName,
+    status: 'Outstanding',
+    txHash: '',
+    created: new Date().toISOString(),
+    timeline: [{ event: 'Invoice Created', ts: new Date().toISOString(), detail: 'Invoice was created and sent to client' }]
+  };
+  invoiceList.unshift(inv);
+
+  // Auto-increment invoice number
+  const match = num.match(/(\D+)(\d+)$/);
+  if (match && document.getElementById('inv-num'))
+    document.getElementById('inv-num').value = match[1] + String(+match[2] + 1).padStart(match[2].length, '0');
+
+  Store.save('invoices', invoiceList);
+  updateInvStats();
+  invSwitchTab('list');
+  toast('Invoice ' + num + ' created', 'success');
+}
+
+// ── Pay invoice ────────────────────────────────────────────
+async function payInvoice(id) {
+  if (!walletAddress) { toast('Connect wallet to pay', 'error'); return; }
+  const inv = invoiceList.find(i => i.id === id);
+  if (!inv) return;
+  if (signer) {
+    try {
+      const usdc = new ethers.Contract(activeUSDC(), USDC_ABI, signer);
+      const amt  = toUsdc(inv.total.toFixed(6));
+      toast('Sending ' + inv.total + ' USDC for invoice ' + id + '...', 'info');
+      inv.status = 'Processing';
+      inv.timeline = inv.timeline || [];
+      inv.timeline.push({ event: 'Payment Initiated', ts: new Date().toISOString(), detail: 'Transaction submitted to network' });
+      renderInvoices(); updateInvStats();
+      const tx = await usdc.transfer(inv.toAddr, amt);
+      inv.timeline.push({ event: 'Transaction Submitted', ts: new Date().toISOString(), detail: 'Tx hash: ' + tx.hash });
+      await tx.wait();
+      inv.status  = 'Paid';
+      inv.txHash  = tx.hash;
+      inv.paidOn  = new Date().toISOString();
+      inv.paidFrom = walletAddress;
+      inv.timeline.push({ event: 'USDC Received',       ts: new Date().toISOString(), detail: 'Payment confirmed onchain' });
+      inv.timeline.push({ event: 'Settlement Complete',  ts: new Date().toISOString(), detail: 'Invoice marked as paid' });
+      Store.save('invoices', invoiceList);
+      renderInvoices(); updateInvStats();
+      toast('Invoice ' + id + ' paid — Tx: ' + shortAddr(tx.hash), 'success');
+      refreshBalance();
+    } catch (e) {
+      const inv2 = invoiceList.find(i => i.id === id);
+      if (inv2 && inv2.status === 'Processing') inv2.status = 'Outstanding';
+      Store.save('invoices', invoiceList);
+      renderInvoices(); updateInvStats();
+      if (e.code === 4001) toast('Rejected', 'error');
+      else toast('Payment error: ' + (e.shortMessage || e.message || ''), 'error');
+    }
+  } else {
+    inv.status  = 'Paid';
+    inv.txHash  = '0xdemo' + Date.now().toString(16);
+    inv.paidOn  = new Date().toISOString();
+    inv.timeline = inv.timeline || [];
+    inv.timeline.push({ event: 'Settlement Complete', ts: new Date().toISOString(), detail: 'Invoice marked as paid (demo)' });
+    Store.save('invoices', invoiceList);
+    renderInvoices(); updateInvStats();
+    toast('Invoice ' + id + ' marked paid (demo)', 'warning');
+  }
+}
+
+// ── Status badge ───────────────────────────────────────────
+function invStatusBadge(status) {
+  const map = {
+    'Paid':        { bg: 'rgba(34,197,94,.15)',   color: 'var(--green)',  border: 'rgba(34,197,94,.3)',   glow: '0 0 8px rgba(34,197,94,.25)' },
+    'Outstanding': { bg: 'rgba(245,158,11,.15)',  color: 'var(--yellow)', border: 'rgba(245,158,11,.3)',  glow: '0 0 8px rgba(245,158,11,.25)' },
+    'Overdue':     { bg: 'rgba(239,68,68,.15)',   color: 'var(--red)',    border: 'rgba(239,68,68,.3)',   glow: '0 0 8px rgba(239,68,68,.25)' },
+    'Processing':  { bg: 'rgba(79,142,247,.15)',  color: 'var(--blue)',   border: 'rgba(79,142,247,.3)',  glow: '0 0 8px rgba(79,142,247,.25)' },
+    'Cancelled':   { bg: 'rgba(96,104,128,.15)',  color: 'var(--muted2)', border: 'rgba(96,104,128,.3)',  glow: 'none' }
+  };
+  const s = map[status] || map['Outstanding'];
+  return `<span style="display:inline-flex;align-items:center;gap:3px;font-size:8.5px;padding:2px 8px;border-radius:3px;background:${s.bg};color:${s.color};border:1px solid ${s.border};box-shadow:${s.glow};white-space:nowrap;font-weight:600">
+    <span style="width:5px;height:5px;border-radius:50%;background:${s.color};display:inline-block"></span>${status}
+  </span>`;
+}
+
+// ── Avatar ─────────────────────────────────────────────────
+function invAvatar(name, addr) {
+  const initials = (name || addr || '?').split(/\s+/).map(w=>w[0]||'').join('').toUpperCase().slice(0,2) || '?';
+  const colors = ['#4f8ef7','#a78bfa','#22c55e','#f59e0b','#2dd4bf','#ef4444','#ec4899'];
+  const idx    = (name+addr).split('').reduce((a,c)=>a+c.charCodeAt(0),0) % colors.length;
+  return `<div style="width:26px;height:26px;border-radius:50%;background:${colors[idx]};display:inline-flex;align-items:center;justify-content:center;font-size:9.5px;font-weight:700;color:#fff;flex-shrink:0">${initials}</div>`;
+}
+
+// ── Update analytics stats ─────────────────────────────────
+function updateInvStats() {
+  const now   = new Date();
+  const month = now.getMonth();
+  const year  = now.getFullYear();
+
+  let revenueMonth = 0, outstanding = 0, overdueCount = 0, paidTotal = 0, xchain = 0;
+  let paidCount = 0, totalCount = invoiceList.length;
+
+  invoiceList.forEach(inv => {
+    const created = new Date(inv.created);
+    const isOverdue = inv.status === 'Outstanding' && inv.due && new Date(inv.due) < now;
+    if (isOverdue) { inv.status = 'Overdue'; }
+
+    if (inv.status === 'Paid') {
+      paidCount++;
+      paidTotal += inv.total || 0;
+      if (created.getMonth() === month && created.getFullYear() === year)
+        revenueMonth += inv.total || 0;
+      if (inv.chainName && inv.chainName !== 'Arc Testnet') xchain += inv.total || 0;
+    } else if (inv.status === 'Outstanding' || inv.status === 'Processing') {
+      outstanding += inv.total || 0;
+    } else if (inv.status === 'Overdue') {
+      overdueCount++;
+      outstanding += inv.total || 0;
+    }
+  });
+
+  const rate = totalCount > 0 ? ((paidCount / totalCount) * 100).toFixed(1) + '%' : '—';
+
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  set('inv-stat-revenue',    revenueMonth.toFixed(2) + ' USDC');
+  set('inv-stat-rate',       rate);
+  set('inv-stat-outstanding', outstanding.toFixed(2) + ' USDC');
+  set('inv-stat-overdue',    String(overdueCount));
+  set('inv-stat-paid-total', paidTotal.toFixed(2) + ' USDC');
+  set('inv-stat-xchain',     xchain.toFixed(2) + ' USDC');
+
+  // Legacy IDs
+  const outstanding_count = invoiceList.filter(i => i.status === 'Outstanding').length;
+  set('inv-outstanding',  String(outstanding_count));
+  set('inv-paid-count',   String(paidCount));
+  set('inv-overdue',      String(overdueCount));
+}
+
+// ── Render invoices table ──────────────────────────────────
 function renderInvoices() {
   const tbody = document.getElementById('inv-tbody');
-  if(!tbody) return;
-  const empty = document.getElementById('inv-empty');
-  document.getElementById('inv-count').textContent = invoiceList.length+' invoices';
-  const outstanding = invoiceList.filter(i=>i.status==='Outstanding').length;
-  const paid        = invoiceList.filter(i=>i.status==='Paid').length;
-  const overdue     = invoiceList.filter(i=>i.status==='Outstanding'&&i.due&&new Date(i.due)<new Date()).length;
-  const set=(id,v)=>{const el=document.getElementById(id);if(el)el.textContent=v;};
-  set('inv-outstanding',outstanding); set('inv-paid-count',paid); set('inv-overdue',overdue);
-  if(!invoiceList.length){ tbody.innerHTML=''; empty.style.display=''; return; }
-  empty.style.display='none';
-  tbody.innerHTML = invoiceList.map(inv => {
-    const sc = {Outstanding:'yellow',Paid:'green',Overdue:'red'}[inv.status]||'muted2';
-    const isPaid = inv.status==='Paid';
-    return `<tr>
-      <td style="font-weight:600;color:var(--yellow)">${inv.id}</td>
-      <td><div style="font-size:10px">${inv.toName}</div><div style="font-size:8.5px;color:var(--muted2)">${shortAddr(inv.toAddr)}</div></td>
-      <td style="color:var(--text)">${inv.total.toFixed(2)} ${inv.currency}</td>
+  if (!tbody) return;
+  const empty     = document.getElementById('inv-empty');
+  const countEl   = document.getElementById('inv-count');
+  const search    = (document.getElementById('inv-search')?.value   || '').toLowerCase();
+  const fStatus   = document.getElementById('inv-filter-status')?.value || '';
+  const fDateFrom = document.getElementById('inv-filter-date-from')?.value || '';
+  const fDateTo   = document.getElementById('inv-filter-date-to')?.value   || '';
+  const sortBy    = document.getElementById('inv-sort')?.value || 'newest';
+
+  // Auto-mark overdue
+  const now = new Date();
+  invoiceList.forEach(inv => {
+    if (inv.status === 'Outstanding' && inv.due && new Date(inv.due) < now)
+      inv.status = 'Overdue';
+  });
+
+  // Filter
+  let filtered = invoiceList.filter(inv => {
+    if (fStatus && inv.status !== fStatus) return false;
+    if (search) {
+      const hay = (inv.id + inv.toName + inv.toAddr + (inv.txHash||'')).toLowerCase();
+      if (!hay.includes(search)) return false;
+    }
+    if (fDateFrom && inv.created < fDateFrom) return false;
+    if (fDateTo   && inv.created.slice(0,10) > fDateTo) return false;
+    return true;
+  });
+
+  // Sort
+  filtered.sort((a, b) => {
+    if (sortBy === 'oldest')  return new Date(a.created) - new Date(b.created);
+    if (sortBy === 'highest') return b.total - a.total;
+    if (sortBy === 'lowest')  return a.total - b.total;
+    return new Date(b.created) - new Date(a.created); // newest
+  });
+
+  if (countEl) countEl.textContent = filtered.length + ' invoice' + (filtered.length !== 1 ? 's' : '');
+
+  if (!filtered.length) {
+    tbody.innerHTML = '';
+    if (empty) empty.style.display = '';
+    return;
+  }
+  if (empty) empty.style.display = 'none';
+
+  tbody.innerHTML = filtered.map(inv => {
+    const txLink = inv.txHash
+      ? `<a href="https://testnet.arcscan.app/tx/${inv.txHash}" target="_blank" style="color:var(--blue);text-decoration:none;font-size:8.5px;font-family:monospace">${shortAddr(inv.txHash)}&nbsp;<i class="ti ti-external-link" style="font-size:7px"></i></a>`
+      : '<span style="color:var(--muted)">—</span>';
+    const isPaid      = inv.status === 'Paid';
+    const isCancelled = inv.status === 'Cancelled';
+    return `<tr class="inv-row" style="cursor:pointer" onclick="invToggleDetail('${inv.id}')">
+      <td style="font-weight:700;color:var(--yellow);font-size:10px">${inv.id}</td>
+      <td>
+        <div style="display:flex;align-items:center;gap:6px">
+          ${invAvatar(inv.toName, inv.toAddr)}
+          <div>
+            <div style="font-size:10px;font-weight:600;color:var(--text)">${inv.toName||shortAddr(inv.toAddr)}</div>
+            <div style="font-size:8.5px;color:var(--muted2);font-family:monospace">${shortAddr(inv.toAddr)}</div>
+          </div>
+        </div>
+      </td>
+      <td style="font-weight:600;color:var(--text)">${inv.total.toFixed(2)} <span style="color:var(--muted2);font-size:8.5px">${inv.currency||'USDC'}</span></td>
       <td style="font-size:9px;color:var(--muted2)">${inv.due||'—'}</td>
-      <td><span style="color:var(--${sc})">${inv.status}</span></td>
-      <td>${inv.txHash?`<a href="https://testnet.arcscan.app/tx/${inv.txHash}" target="_blank" style="color:var(--blue);text-decoration:none;font-size:9px">${shortAddr(inv.txHash)}</a>`:'—'}</td>
-      <td style="display:flex;gap:4px">
-        ${!isPaid?`<button class="btn primary" style="padding:2px 8px;font-size:8.5px" onclick="payInvoice('${inv.id}')"><i class="ti ti-coin"></i>Pay</button>`:''}
-        <button class="btn" style="padding:2px 7px;font-size:8.5px" onclick="invoiceList=invoiceList.filter(x=>x.id!=='${inv.id}');Store.save('invoices',invoiceList);renderInvoices()"><i class="ti ti-trash"></i></button>
+      <td>${invStatusBadge(inv.status)}</td>
+      <td>
+        <div style="display:flex;align-items:center;gap:4px">
+          <div style="width:6px;height:6px;border-radius:50%;background:var(--blue);flex-shrink:0"></div>
+          <span style="font-size:8.5px;color:var(--muted2)">${inv.chainName||'Arc Testnet'}</span>
+        </div>
+      </td>
+      <td>${txLink}</td>
+      <td>
+        <div style="display:flex;gap:3px;align-items:center" onclick="event.stopPropagation()">
+          ${!isPaid && !isCancelled ? `<button class="btn primary" style="padding:2px 7px;font-size:8.5px" onclick="payInvoice('${inv.id}')"><i class="ti ti-coin"></i>Pay</button>` : ''}
+          <button class="btn" title="Copy link" style="padding:2px 6px;font-size:9px" onclick="invCopyLinkById('${inv.id}')"><i class="ti ti-link"></i></button>
+          ${inv.txHash ? `<a class="btn" href="https://testnet.arcscan.app/tx/${inv.txHash}" target="_blank" title="View on explorer" style="padding:2px 6px;font-size:9px;text-decoration:none"><i class="ti ti-external-link"></i></a>` : ''}
+          <button class="btn" title="Delete" style="padding:2px 6px;font-size:9px;color:var(--red)" onclick="invDelete('${inv.id}')"><i class="ti ti-trash"></i></button>
+        </div>
+      </td>
+    </tr>
+    <tr id="inv-detail-row-${inv.id}" style="display:none">
+      <td colspan="8" style="padding:0;border:none">
+        <div id="inv-detail-content-${inv.id}"></div>
       </td>
     </tr>`;
   }).join('');
+
+  updateInvStats();
 }
 
-// ══════════════════════════════════════════════════════════
+// ── Toggle detail row ──────────────────────────────────────
+function invToggleDetail(id) {
+  const row = document.getElementById('inv-detail-row-' + id);
+  if (!row) return;
+  const isOpen = row.style.display !== 'none';
+  // Close all
+  document.querySelectorAll('[id^="inv-detail-row-"]').forEach(r => r.style.display = 'none');
+  if (!isOpen) {
+    row.style.display = '';
+    const contentEl = document.getElementById('inv-detail-content-' + id);
+    if (contentEl) contentEl.innerHTML = invDetailHTML(invoiceList.find(i => i.id === id));
+  }
+}
+
+// ── Detail HTML ────────────────────────────────────────────
+function invDetailHTML(inv) {
+  if (!inv) return '';
+  const tl = (inv.timeline || []).map((e, i) => `
+    <div style="display:flex;gap:8px;align-items:flex-start;${i>0?'margin-top:10px':''}">
+      <div style="display:flex;flex-direction:column;align-items:center;gap:0">
+        <div style="width:10px;height:10px;border-radius:50%;background:var(--green);border:2px solid var(--bg);flex-shrink:0;margin-top:1px"></div>
+        ${i < (inv.timeline||[]).length-1 ? '<div style="width:1px;flex:1;background:var(--border);min-height:16px;margin-top:2px"></div>' : ''}
+      </div>
+      <div style="padding-bottom:2px">
+        <div style="font-size:9.5px;font-weight:600;color:var(--text)">${e.event}</div>
+        <div style="font-size:8.5px;color:var(--muted2)">${new Date(e.ts).toLocaleString()}</div>
+        ${e.detail ? `<div style="font-size:8.5px;color:var(--muted2);margin-top:1px">${e.detail}</div>` : ''}
+      </div>
+    </div>`).join('');
+
+  const lineItemsHTML = (inv.lineItems||[]).length > 0 ? `
+    <div style="margin-top:8px">
+      <div style="font-size:8.5px;color:var(--muted2);margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px">Line Items</div>
+      ${(inv.lineItems||[]).map(li => `
+        <div style="display:flex;justify-content:space-between;font-size:9px;padding:3px 0;border-bottom:1px solid var(--border)">
+          <span style="color:var(--text)">${li.name||'—'}</span>
+          <span style="color:var(--muted2)">${li.qty}x ${(li.price||0).toFixed(2)}</span>
+          <span style="color:var(--yellow);font-weight:600">${(li.total||0).toFixed(2)}</span>
+        </div>`).join('')}
+    </div>` : '';
+
+  return `<div style="background:rgba(0,0,0,.25);border-top:1px solid var(--border);padding:16px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px">
+    <!-- COL 1: Invoice Details -->
+    <div>
+      <div style="font-size:9px;font-weight:700;color:var(--blue);text-transform:uppercase;letter-spacing:.8px;margin-bottom:10px"><i class="ti ti-file-invoice" style="margin-right:4px"></i>Invoice Details</div>
+      <div style="font-size:9px;display:flex;flex-direction:column;gap:5px">
+        <div style="display:flex;justify-content:space-between"><span style="color:var(--muted2)">Invoice #</span><span style="color:var(--yellow);font-weight:700">${inv.id}</span></div>
+        <div style="display:flex;justify-content:space-between"><span style="color:var(--muted2)">From</span><span style="color:var(--text)">${inv.from||'—'}</span></div>
+        <div style="display:flex;justify-content:space-between"><span style="color:var(--muted2)">Bill To</span><span style="color:var(--text)">${inv.toName||'—'}</span></div>
+        <div style="display:flex;justify-content:space-between"><span style="color:var(--muted2)">Subtotal</span><span style="color:var(--text)">${(inv.subtotal||0).toFixed(2)} USDC</span></div>
+        <div style="display:flex;justify-content:space-between"><span style="color:var(--muted2)">Tax (${inv.taxPct||0}%)</span><span style="color:var(--text)">${(inv.taxAmt||0).toFixed(2)} USDC</span></div>
+        <div style="display:flex;justify-content:space-between;border-top:1px solid var(--border);padding-top:4px;margin-top:2px"><span style="color:var(--text);font-weight:700">Total</span><span style="color:var(--yellow);font-weight:700">${(inv.total||0).toFixed(2)} USDC</span></div>
+        <div style="display:flex;justify-content:space-between"><span style="color:var(--muted2)">Amount Paid</span><span style="color:${inv.status==='Paid'?'var(--green)':'var(--muted)'}">${inv.status==='Paid'?(inv.total||0).toFixed(2)+' USDC':'0.00 USDC'}</span></div>
+        <div style="display:flex;justify-content:space-between"><span style="color:var(--muted2)">Amount Due</span><span style="color:${inv.status==='Paid'?'var(--green)':'var(--red)'};">${inv.status==='Paid'?'0.00 USDC':(inv.total||0).toFixed(2)+' USDC'}</span></div>
+      </div>
+      ${lineItemsHTML}
+    </div>
+    <!-- COL 2: Payment Info + Trust -->
+    <div>
+      <div style="font-size:9px;font-weight:700;color:var(--purple);text-transform:uppercase;letter-spacing:.8px;margin-bottom:10px"><i class="ti ti-credit-card" style="margin-right:4px"></i>Payment Info</div>
+      <div style="font-size:9px;display:flex;flex-direction:column;gap:5px">
+        <div style="display:flex;justify-content:space-between"><span style="color:var(--muted2)">Chain / Network</span><span style="color:var(--blue)">${inv.chainName||'Arc Testnet'}</span></div>
+        <div style="display:flex;justify-content:space-between"><span style="color:var(--muted2)">Payment Token</span><span style="color:var(--text)">${inv.currency||'USDC'}</span></div>
+        ${inv.paidOn ? `<div style="display:flex;justify-content:space-between"><span style="color:var(--muted2)">Paid On</span><span style="color:var(--text)">${new Date(inv.paidOn).toLocaleDateString()}</span></div>` : ''}
+        ${inv.paidFrom ? `<div style="display:flex;justify-content:space-between"><span style="color:var(--muted2)">Paid From</span><span style="color:var(--blue);font-family:monospace;font-size:8.5px">${shortAddr(inv.paidFrom)}</span></div>` : ''}
+        ${inv.txHash ? `<div style="display:flex;justify-content:space-between;gap:4px"><span style="color:var(--muted2);flex-shrink:0">Tx Hash</span><a href="https://testnet.arcscan.app/tx/${inv.txHash}" target="_blank" style="color:var(--blue);font-family:monospace;font-size:8.5px;text-decoration:none">${shortAddr(inv.txHash)}&nbsp;<i class="ti ti-external-link" style="font-size:7px"></i></a></div>` : ''}
+        <div style="display:flex;justify-content:space-between"><span style="color:var(--muted2)">Due Date</span><span style="color:var(--text)">${inv.due||'—'}</span></div>
+      </div>
+      <!-- Trust badges -->
+      <div style="margin-top:12px;display:grid;grid-template-columns:1fr 1fr;gap:6px">
+        <div style="background:rgba(34,197,94,.07);border:1px solid rgba(34,197,94,.2);border-radius:5px;padding:7px 8px;display:flex;align-items:center;gap:5px">
+          <i class="ti ti-shield-check" style="color:var(--green);font-size:11px;flex-shrink:0"></i>
+          <div><div style="font-size:8px;font-weight:600;color:var(--green)">KYB Verified</div><div style="font-size:7.5px;color:var(--muted2)">${inv.from||'—'}</div></div>
+        </div>
+        <div style="background:rgba(79,142,247,.07);border:1px solid rgba(79,142,247,.2);border-radius:5px;padding:7px 8px;display:flex;align-items:center;gap:5px">
+          <i class="ti ti-lock" style="color:var(--blue);font-size:11px;flex-shrink:0"></i>
+          <div><div style="font-size:8px;font-weight:600;color:var(--blue)">Smart Escrow</div><div style="font-size:7.5px;color:var(--muted2)">Protected</div></div>
+        </div>
+        <div style="background:rgba(45,212,191,.07);border:1px solid rgba(45,212,191,.2);border-radius:5px;padding:7px 8px;display:flex;align-items:center;gap:5px">
+          <i class="ti ti-building-bank" style="color:var(--teal);font-size:11px;flex-shrink:0"></i>
+          <div><div style="font-size:8px;font-weight:600;color:var(--teal)">Circle Secured</div><div style="font-size:7.5px;color:var(--muted2)">Infrastructure</div></div>
+        </div>
+        <div style="background:rgba(167,139,250,.07);border:1px solid rgba(167,139,250,.2);border-radius:5px;padding:7px 8px;display:flex;align-items:center;gap:5px">
+          <i class="ti ti-certificate" style="color:var(--purple);font-size:11px;flex-shrink:0"></i>
+          <div><div style="font-size:8px;font-weight:600;color:var(--purple)">Onchain Proof</div><div style="font-size:7.5px;color:var(--muted2)">Verified</div></div>
+        </div>
+      </div>
+    </div>
+    <!-- COL 3: Activity Timeline -->
+    <div>
+      <div style="font-size:9px;font-weight:700;color:var(--green);text-transform:uppercase;letter-spacing:.8px;margin-bottom:10px"><i class="ti ti-timeline" style="margin-right:4px"></i>Activity &amp; Timeline</div>
+      ${tl || '<div style="font-size:9px;color:var(--muted2)">No activity yet.</div>'}
+    </div>
+  </div>`;
+}
+
+// ── Delete invoice ─────────────────────────────────────────
+function invDelete(id) {
+  invoiceList = invoiceList.filter(x => x.id !== id);
+  Store.save('invoices', invoiceList);
+  renderInvoices();
+  updateInvStats();
+  toast('Invoice removed', 'info');
+}
+
 //  RECIPIENTS / CONTACTS
 // ══════════════════════════════════════════════════════════
 function addContact(prefill) {
