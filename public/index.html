@@ -4868,21 +4868,15 @@ async function executeSwap() {
     swpUpdateStep(simIdx, 'error', null, null, swpNow());
     // If error is "missing revert data" or call_exception, it may be a provider issue
     // rather than a real revert — allow user to continue with warning
-    // Arc Testnet does not support reliable eth_call/staticCall simulation.
-    // Never abort swap execution based on simulation failure alone.
-    // The real tx may still succeed — let the user decide.
-    const isSimCallException = simErr.message?.includes('missing revert data') ||
-      simErr.code === 'CALL_EXCEPTION' ||
-      simErr.message?.includes('could not coalesce error') ||
-      simErr.message?.includes('eth_call') ||
-      simErr.message?.includes('execution reverted');
-    if (isSimCallException) {
-      swpShowPrecheck('warning', 'Gas simulation unavailable on Arc — proceeding with fallback gas limit');
-      console.warn('[swap] Simulation failed (Arc staticCall limitation) — continuing with fallback gas. Error:', simErr.message);
+    if (simErr.message?.includes('missing revert data') || simErr.code === 'CALL_EXCEPTION') {
+      swpShowPrecheck('warning', 'Simulation unavailable on Arc Testnet — proceeding with caution');
+      console.warn('[swap] Arc Testnet does not support full staticCall simulation — continuing');
+      // Don't abort — Arc may not support eth_call simulation reliably
     } else {
-      // Non-simulation error (e.g. reverted with reason) — warn but continue
-      swpShowPrecheck('warning', 'Pre-flight check failed: ' + decoded + ' — attempting swap anyway');
-      console.warn('[swap] Non-simulation error in staticCall — continuing anyway:', simErr.message);
+      swpSetStatus('error', 'Failed');
+      swpSetBtn('ready', `Swap ${tIn.sym} → ${tOut.sym}`);
+      toast(decoded, 'error');
+      return;
     }
   }
 
@@ -4974,18 +4968,6 @@ async function executeSwap() {
     console.debug('[swap] swap tx confirmed:', swapTxHash);
   } catch(swapErr) {
     const decoded = swpDecodeError(swapErr);
-    console.error('[swap] Swap execution FAILED:', {
-      error:   swapErr.message,
-      code:    swapErr.code,
-      reason:  swapErr.reason,
-      data:    swapErr.data,
-      tInAddr, tOutAddr,
-      amtBig:  amtBig.toString(),
-      minReceived: minReceived.toString(),
-      approveTarget,
-      poolContract:  POOL_CONTRACT_ADDRESS,
-      swapAddress:   window.__SWAP_ADDRESS__,
-    });
     swpUpdateStep(swapIdx, 'error', swapTxHash, null, swpNow());
     swpSetStatus('error', 'Failed');
     swpSetBtn('ready', `Swap ${tIn.sym} → ${tOut.sym}`);
@@ -5258,214 +5240,71 @@ async function executeBridge(){
     }
     renderBridgeStep(0,'success',approveHash);
 
-    // ── STEP 2: depositForBurn / depositForBurnWithHook ──────────────────────
-    // Arc Testnet as DESTINATION uses the Circle Forwarding Service:
-    //   depositForBurnWithHook → Circle handles receiveMessage() on Arc automatically.
-    //   We poll forwardTxHash in Iris to confirm completion.
-    // Non-Arc destinations use standard depositForBurn + manual receiveMessage().
-    console.log("[Bridge] Preparing CCTP v2 burn...");
+    // ── STEP 2: depositForBurn() ─────────────────────────────────────────────
+    console.log("[Bridge] Burning via CCTP v2...");
     renderBridgeStep(1,'active',null);
-
-    const ARC_DOMAIN_ID  = 26;
-    const isArcDest      = (toConfig.domain === ARC_DOMAIN_ID);
-    // Circle Forwarding Service hook — enables auto-mint on Arc
-    const FORWARDING_HOOK = "0x636374702d666f72776172640000000000000000000000000000000000000000";
-
-    // minFinalityThreshold: Forwarding Service uses 1000 (Fast/Confirmed),
-    //   direct mint to Arc needs 2000 (Standard/Finalized).
-    const finalityThreshold = isArcDest ? 1000 : 1000;
-    console.log('[Bridge] SOURCE DOMAIN:', fromConfig.domain);
-    console.log('[Bridge] DESTINATION DOMAIN:', toConfig.domain);
-    console.log('[Bridge] isArcDest:', isArcDest, '| finalityThreshold:', finalityThreshold);
-    console.log('[Bridge] mode:', isArcDest ? 'Forwarding Service (depositForBurnWithHook)' : 'Direct mint (depositForBurn)');
-
-    // ── Fetch dynamic maxFee from Iris fees API ───────────────────────────────
-    let maxFeeBig = 0n;
-    try {
-      const feesUrl = `https://iris-api-sandbox.circle.com/v2/burn/USDC/fees/${fromConfig.domain}/${toConfig.domain}?forward=${isArcDest}`;
-      console.log('[Bridge] Fetching maxFee from:', feesUrl);
-      const feesRes  = await fetch(feesUrl);
-      if (feesRes.ok) {
-        const feesData = await feesRes.json();
-        console.log('[Bridge] Fees API response:', JSON.stringify(feesData).slice(0, 300));
-        // Circle returns maxFee as a string (USDC atomic units, 6 decimals)
-        const feeRaw = feesData?.maxFee ?? feesData?.fee ?? feesData?.burnFee ?? '0';
-        maxFeeBig = BigInt(feeRaw);
-        console.log('[Bridge] maxFee (raw):', feeRaw, '| maxFeeBig:', maxFeeBig.toString());
-      } else {
-        console.warn('[Bridge] Fees API returned', feesRes.status, '— using fallback maxFee');
-      }
-    } catch(feeErr) {
-      console.warn('[Bridge] Fees API error — using fallback maxFee:', feeErr.message);
-    }
-    // Fallback: if API returned 0 or failed, use 1 USDC (1_000_000) as safe default
-    if (maxFeeBig === 0n) {
-      maxFeeBig = 1000000n; // 1 USDC
-      console.log('[Bridge] Using fallback maxFee: 1000000 (1 USDC)');
-    }
-
-    // ── Ensure approval covers amount + maxFee for Forwarding Service ─────────
-    const burnAmtBig = amtBig + maxFeeBig;
-    console.log('[Bridge] amtBig:', amtBig.toString(), '| maxFeeBig:', maxFeeBig.toString(), '| burnAmtBig:', burnAmtBig.toString());
-    // Re-use usdcWrite (already declared above with srcSigner) — no need for a new contract instance
-    const reApproveAllowance = await usdcRead.allowance(walletAddress, fromConfig.tokenMessenger);
-    if (reApproveAllowance < burnAmtBig) {
-      console.log('[Bridge] Re-approving for burnAmtBig:', burnAmtBig.toString(), '(current allowance:', reApproveAllowance.toString(), ')');
-      renderBridgeStep(0,'active',null);
-      const reApprove = await usdcWrite.approve(fromConfig.tokenMessenger, burnAmtBig);
-      await reApprove.wait();
-      renderBridgeStep(0,'success',reApprove.hash);
-      console.log('[Bridge] Re-approval confirmed.');
-    }
-
+    const tmAbi = ["function depositForBurn(uint256 amount, uint32 destinationDomain, bytes32 mintRecipient, address burnToken, bytes32 destinationCaller, uint256 maxFee, uint32 minFinalityThreshold) external returns (uint64 nonce)"];
+    const tmContract   = new ethers.Contract(fromConfig.tokenMessenger, tmAbi, srcSigner);
     const destAddr32   = ethers.zeroPadValue(walletAddress, 32);
     const zeroCaller32 = ethers.zeroPadValue('0x0000000000000000000000000000000000000000', 32);
 
-    let burnTx, burnReceipt;
-    if (isArcDest) {
-      // ── Forwarding Service path ───────────────────────────────────────────
-      const tmHookAbi = [
-        "function depositForBurnWithHook(uint256 amount, uint32 destinationDomain, bytes32 mintRecipient, address burnToken, bytes32 destinationCaller, uint256 maxFee, uint32 minFinalityThreshold, bytes hookData) external returns (uint64 nonce)"
-      ];
-      const tmHook = new ethers.Contract(fromConfig.tokenMessenger, tmHookAbi, srcSigner);
-      console.log('[Bridge] Calling depositForBurnWithHook...');
-      console.log('[Bridge]   amount:', amtBig.toString(), ' dest domain:', toConfig.domain);
-      console.log('[Bridge]   mintRecipient:', destAddr32, ' burnToken:', fromConfig.usdc);
-      console.log('[Bridge]   maxFee:', maxFeeBig.toString(), ' finalityThreshold:', finalityThreshold);
-      console.log('[Bridge]   hookData:', FORWARDING_HOOK);
-      burnTx = await tmHook.depositForBurnWithHook(
-        amtBig, toConfig.domain, destAddr32, fromConfig.usdc,
-        zeroCaller32, maxFeeBig, finalityThreshold, FORWARDING_HOOK
-      );
-    } else {
-      // ── Standard path (non-Arc destination) ──────────────────────────────
-      const tmAbi = [
-        "function depositForBurn(uint256 amount, uint32 destinationDomain, bytes32 mintRecipient, address burnToken, bytes32 destinationCaller, uint256 maxFee, uint32 minFinalityThreshold) external returns (uint64 nonce)"
-      ];
-      const tmContract = new ethers.Contract(fromConfig.tokenMessenger, tmAbi, srcSigner);
-      console.log('[Bridge] Calling depositForBurn (standard)...');
-      burnTx = await tmContract.depositForBurn(
-        amtBig, toConfig.domain, destAddr32, fromConfig.usdc,
-        zeroCaller32, maxFeeBig, finalityThreshold
-      );
-    }
+    // Arc Testnet as DESTINATION only supports Standard Transfer (minFinalityThreshold >= 2000).
+    // Fast Transfer (1000) is NOT supported for Arc as destination — Iris will never attest.
+    const ARC_DOMAIN_ID = 26;
+    const finalityThreshold = (toConfig.domain === ARC_DOMAIN_ID) ? 2000 : 1000;
+    console.log('[Bridge] SOURCE DOMAIN:', fromConfig.domain);
+    console.log('[Bridge] DESTINATION DOMAIN:', toConfig.domain);
+    console.log('[Bridge] finalityThreshold:', finalityThreshold, finalityThreshold === 2000 ? '(Standard — Arc destination)' : '(Fast)');
 
+    const burnTx = await tmContract.depositForBurn(
+      amtBig, toConfig.domain, destAddr32, fromConfig.usdc,
+      zeroCaller32, 0n, finalityThreshold
+    );
     renderBridgeStep(1,'active',burnTx.hash);
-    burnReceipt = await burnTx.wait();
+    const burnReceipt = await burnTx.wait();
     if (!burnReceipt || burnReceipt.status !== 1) throw new Error("depositForBurn transaction failed (status=0)");
-    console.log('[Bridge] Burn confirmed. txHash:', burnTx.hash, '| logs:', burnReceipt.logs.length);
+    console.log("[Bridge] Burn confirmed. Logs:", burnReceipt.logs.length);
     renderBridgeStep(1,'success',burnTx.hash);
 
-    // ── STEP 3: Poll Circle Iris API ─────────────────────────────────────────
-    console.log("[Bridge] Polling Circle Iris...");
+    // ── STEP 3: Poll Circle Iris API for attestation ─────────────────────────
+    console.log("[Bridge] Polling Circle Iris attestation...");
     renderBridgeStep(2,'active',null);
 
-    const irisUrl   = `https://iris-api-sandbox.circle.com/v2/messages/${fromConfig.domain}?transactionHash=${burnTx.hash}`;
-    const maxPolls  = 180;  // 15 min max (180 × 5s)
-    let pollCount   = 0;
-    let messageBytes   = null;
-    let attestationSig = null;
-    let forwardDone    = false;
-    console.log('[Bridge] Iris poll URL:', irisUrl);
-    console.log('[Bridge] Polling up to', maxPolls, 'times (5s interval) =', Math.round(maxPolls*5/60), 'min max');
+    let messageBytes = null, attestationSig = null, pollCount = 0;
+    const maxPolls = 120;
+    const irisUrl  = `https://iris-api-sandbox.circle.com/v2/messages/${fromConfig.domain}?transactionHash=${burnTx.hash}`;
+    console.log("[Bridge] Iris URL:", irisUrl);
 
     while (pollCount < maxPolls) {
       await new Promise(r => setTimeout(r, 5000));
       pollCount++;
       try {
         const res = await fetch(irisUrl);
-
-        // 404 = tx not indexed yet — normal for first ~30s, continue silently
-        if (res.status === 404) {
-          if (pollCount % 6 === 0) console.log(`[Bridge] Iris #${pollCount}: not indexed yet (404) — waiting...`);
-          continue;
-        }
-
-        if (!res.ok) {
-          console.warn(`[Bridge] Iris #${pollCount}: HTTP ${res.status} — retrying...`);
-          continue;
-        }
-
-        const data = await res.json();
-        console.log(`[Bridge] Iris #${pollCount}:`, JSON.stringify(data).slice(0, 400));
-
-        if (data.messages && data.messages.length > 0) {
-          const msg = data.messages[0];
-          // Update live status sub-text
-          const stepEl = document.getElementById('bridge-step-2');
-          if (stepEl) {
-            const sub = stepEl.querySelector('[style*="muted2"]');
-            if (sub) sub.textContent = `Iris: ${msg.status||'pending'} (poll ${pollCount}/${maxPolls})`;
-          }
-
-          if (isArcDest) {
-            // ── Forwarding Service: poll forwardTxHash ──────────────────────
-            if (msg.forwardTxHash) {
-              console.log('[Bridge] Forwarding Service complete! forwardTxHash:', msg.forwardTxHash);
-              forwardDone = true;
-              break;
+        if (res.ok) {
+          const data = await res.json();
+          console.log(`[Bridge] Iris #${pollCount}:`, JSON.stringify(data).slice(0,300));
+          if (data.messages && data.messages.length > 0) {
+            const msg = data.messages[0];
+            // Update sub-text with live status
+            const stepEl = document.getElementById('bridge-step-2');
+            if (stepEl) {
+              const sub = stepEl.querySelector('[style*="muted2"]');
+              if (sub) sub.textContent = `Iris status: ${msg.status||'pending'} (poll ${pollCount}/${maxPolls})`;
             }
-            // Also check attestation in case Forwarding is slow
             if (msg.status === 'complete' && msg.attestation && msg.attestation !== 'PENDING') {
-              console.log('[Bridge] Arc dest: attestation ready (will use forwardTxHash path if available)');
-              messageBytes   = msg.message;
-              attestationSig = msg.attestation;
-              if (messageBytes) console.log('[Bridge] MESSAGE HASH:', ethers.keccak256(messageBytes));
-              // Give Forwarding Service 3 more polls to produce forwardTxHash
-              let fwdWait = 0;
-              while (fwdWait < 3 && !forwardDone) {
-                await new Promise(r => setTimeout(r, 5000));
-                fwdWait++;
-                try {
-                  const r2 = await fetch(irisUrl);
-                  if (r2.ok) {
-                    const d2 = await r2.json();
-                    if (d2.messages?.[0]?.forwardTxHash) {
-                      console.log('[Bridge] Forwarding confirmed after extra wait:', d2.messages[0].forwardTxHash);
-                      forwardDone = true;
-                    }
-                  }
-                } catch(_) {}
-              }
-              break;
-            }
-          } else {
-            // ── Standard path: wait for attestation ───────────────────────
-            if (msg.status === 'complete' && msg.attestation && msg.attestation !== 'PENDING') {
-              messageBytes   = msg.message;
+              messageBytes  = msg.message;
               attestationSig = msg.attestation;
               if (messageBytes) console.log('[Bridge] MESSAGE HASH:', ethers.keccak256(messageBytes));
               break;
             }
           }
         }
-      } catch(pollErr) {
-        console.warn(`[Bridge] Iris poll #${pollCount} error:`, pollErr.message || pollErr);
-      }
+      } catch(pollErr) { console.warn(`[Bridge] Iris poll #${pollCount}:`, pollErr); }
     }
 
-    // ── Forwarding Service: Circle handled receiveMessage() on Arc ────────────
-    if (isArcDest && forwardDone) {
-      console.log('[Bridge] Forwarding Service completed — USDC auto-minted on Arc by Circle. Skipping manual receiveMessage().');
-      renderBridgeStep(2,'success',null);
-      // Mark steps 3 and 4 as auto-completed by Circle
-      renderBridgeStep(3,'success',null);
-      renderBridgeStep(4,'success',burnTx.hash);
-      document.getElementById('bridge-step-status').textContent = 'Success ✓';
-      document.getElementById('bridge-step-status').style.color = 'var(--green)';
-      addToHistory('bridge-history',{
-        icon:'ti-topology-star-3', color:'var(--teal)',
-        label:`${amt} USDC: ${fromChain.name} → ${toChain.name}`,
-        sub:`CCTP v2 Forwarding · ${new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})}`,
-        txHash: burnTx.hash, dotColor:'#2dd4bf'
-      });
-      toast(`✓ Bridged ${amt} USDC from ${fromChain.name} to ${toChain.name} (Forwarding Service)`,'success');
-      return;
-    }
-
-    // ── Attestation timeout fallback ──────────────────────────────────────────
-    if (!attestationSig) {
-      console.log("[Bridge] Iris V2 timed out — parsing MessageSent from logs as fallback...");
+    // Fallback: parse MessageSent event from logs
+    if (!messageBytes) {
+      console.log("[Bridge] Iris V2 timed out — parsing MessageSent logs...");
       const mtIface = new ethers.Interface(["event MessageSent(bytes message)"]);
       for (const log of burnReceipt.logs) {
         try {
@@ -5474,25 +5313,27 @@ async function executeBridge(){
         } catch(_) {}
       }
       if (!messageBytes) throw new Error("Cannot extract CCTP message. Burn tx may not be indexed yet — retry in a minute.");
+      // V1 fallback attestation
       const msgHash = ethers.keccak256(messageBytes);
       console.log('[Bridge] MESSAGE HASH (fallback):', msgHash);
-      for (let v1 = 0; v1 < 60 && !attestationSig; v1++) {
-        await new Promise(r => setTimeout(r, 5000));
+      for (let v1=0; v1<60 && !attestationSig; v1++) {
+        await new Promise(r=>setTimeout(r,5000));
         try {
           const r = await fetch(`https://iris-api-sandbox.circle.com/attestations/${msgHash}`);
-          if (r.ok) { const d = await r.json(); if (d.attestation && d.attestation !== 'PENDING') attestationSig = d.attestation; }
+          if (r.ok) { const d=await r.json(); if(d.attestation&&d.attestation!=='PENDING') attestationSig=d.attestation; }
         } catch(_) {}
       }
     }
-    if (!attestationSig) throw new Error("Attestation timed out after 15 min. Network may be congested — retry later.");
+    if (!attestationSig) throw new Error("Attestation timed out. Network may be congested — retry later.");
     console.log("[Bridge] Attestation received.");
     renderBridgeStep(2,'success',null);
 
-    // ── STEP 4: Switch to DESTINATION chain ──────────────────────────────────
+    // ── STEP 4: Switch to DESTINATION chain (verified) ───────────────────────
     console.log(`[Bridge] Switching to destination: ${toChain.name} (${toChain.chainId})`);
     renderBridgeStep(3,'active',null);
     await ensureNetwork(toChain.chainId);
 
+    // ── CRITICAL: Recreate provider+signer for destination chain ─────────────
     const destProvider = new ethers.BrowserProvider(window.ethereum);
     const destNetwork  = await destProvider.getNetwork();
     if (Number(destNetwork.chainId) !== toChain.chainId) {
@@ -5504,15 +5345,16 @@ async function executeBridge(){
     const destSigner = await destProvider.getSigner();
     renderBridgeStep(3,'success',null);
 
-    // ── STEP 5: receiveMessage() on destination ───────────────────────────────
+    // ── STEP 5: receiveMessage() on destination ──────────────────────────────
     console.log("[Bridge] Calling receiveMessage() on destination...");
     renderBridgeStep(4,'active',null);
-    const destMtAbi      = ["function receiveMessage(bytes message, bytes attestation) returns (bool)"];
+    const destMtAbi = ["function receiveMessage(bytes message, bytes attestation) returns (bool)"];
     const destMtContract = new ethers.Contract(toConfig.messageTransmitter, destMtAbi, destSigner);
 
     const mintTx = await destMtContract.receiveMessage(messageBytes, attestationSig);
     renderBridgeStep(4,'active',mintTx.hash);
     const mintReceipt = await mintTx.wait();
+    // ── MANDATORY: validate receipt ──────────────────────────────────────────
     if (!mintReceipt || mintReceipt.status !== 1) {
       throw new Error(`receiveMessage() failed on-chain (status=0). Tx: ${mintTx.hash}`);
     }
@@ -5532,6 +5374,7 @@ async function executeBridge(){
 
   } catch(e) {
     console.error("[Bridge] Error:", e);
+    // Mark the currently-active step as error
     for (let i=0; i<steps.length; i++) {
       const el=document.getElementById(`bridge-step-${i}`);
       if (el && el.querySelector('.step-ico.active')) { renderBridgeStep(i,'error',null); break; }
@@ -7058,201 +6901,61 @@ async function xcExecuteSend() {
     }
     xcSetStep(0, 'success', approveHash, approveHash ? fromConfig.explorer : null);
 
-    // ── STEP 1: depositForBurn / depositForBurnWithHook ──────────────────────
-    // Arc Testnet as DESTINATION uses Circle Forwarding Service (depositForBurnWithHook).
-    // Circle handles receiveMessage() on Arc automatically — we poll forwardTxHash.
-    // Non-Arc destinations use standard depositForBurn + manual receiveMessage().
+    // ── STEP 1: depositForBurn() ──────────────────────────────────────────────
     xcSetStep(1, 'active', null, null);
-
-    const ARC_DOMAIN_ID  = 26;
-    const isArcDest      = (toConfig.domain === ARC_DOMAIN_ID);
-    const FORWARDING_HOOK = "0x636374702d666f72776172640000000000000000000000000000000000000000";
-    const finalityThreshold = 1000; // Forwarding Service uses Fast (1000) for all routes
-
-    console.log('[XC] SOURCE DOMAIN:', fromConfig.domain);
-    console.log('[XC] DESTINATION DOMAIN:', toConfig.domain);
-    console.log('[XC] isArcDest:', isArcDest, '| finalityThreshold:', finalityThreshold);
-    console.log('[XC] mode:', isArcDest ? 'Forwarding Service (depositForBurnWithHook)' : 'Direct mint (depositForBurn)');
-
-    // ── Fetch dynamic maxFee from Iris fees API ───────────────────────────────
-    let maxFeeBig = 0n;
-    try {
-      const feesUrl = `https://iris-api-sandbox.circle.com/v2/burn/USDC/fees/${fromConfig.domain}/${toConfig.domain}?forward=${isArcDest}`;
-      console.log('[XC] Fetching maxFee from:', feesUrl);
-      const feesRes = await fetch(feesUrl);
-      if (feesRes.ok) {
-        const feesData = await feesRes.json();
-        console.log('[XC] Fees API response:', JSON.stringify(feesData).slice(0, 300));
-        const feeRaw = feesData?.maxFee ?? feesData?.fee ?? feesData?.burnFee ?? '0';
-        maxFeeBig = BigInt(feeRaw);
-        console.log('[XC] maxFee (raw):', feeRaw, '| maxFeeBig:', maxFeeBig.toString());
-      } else {
-        console.warn('[XC] Fees API returned', feesRes.status, '— using fallback maxFee');
-      }
-    } catch(feeErr) {
-      console.warn('[XC] Fees API error — using fallback maxFee:', feeErr.message);
-    }
-    if (maxFeeBig === 0n) {
-      maxFeeBig = 1000000n; // 1 USDC fallback
-      console.log('[XC] Using fallback maxFee: 1000000 (1 USDC)');
-    }
-
-    // ── Ensure approval covers amount + maxFee ────────────────────────────────
-    const burnAmtBig = amtBig + maxFeeBig;
-    console.log('[XC] amtBig:', amtBig.toString(), '| maxFeeBig:', maxFeeBig.toString(), '| burnAmtBig:', burnAmtBig.toString());
-    // Re-use usdcRead/usdcWrite (already declared above) — no new contract instance needed
-    const reApproveAllowance = await usdcRead.allowance(walletAddress, fromConfig.tokenMessenger);
-    if (reApproveAllowance < burnAmtBig) {
-      console.log('[XC] Re-approving for burnAmtBig:', burnAmtBig.toString(), '(current:', reApproveAllowance.toString(), ')');
-      xcSetStep(0, 'active', null, null);
-      const reApprove = await usdcWrite.approve(fromConfig.tokenMessenger, burnAmtBig);
-      await reApprove.wait();
-      xcSetStep(0, 'success', reApprove.hash, fromConfig.explorer);
-      console.log('[XC] Re-approval confirmed.');
-    }
-
+    const tmAbi = ["function depositForBurn(uint256 amount, uint32 destinationDomain, bytes32 mintRecipient, address burnToken, bytes32 destinationCaller, uint256 maxFee, uint32 minFinalityThreshold) external returns (uint64 nonce)"];
+    const tmContract      = new ethers.Contract(fromConfig.tokenMessenger, tmAbi, srcSigner);
     const mintRecipient32 = ethers.zeroPadValue(recipient, 32);
     const zeroCaller32    = ethers.zeroPadValue('0x0000000000000000000000000000000000000000', 32);
 
-    let burnTx, burnReceipt;
-    if (isArcDest) {
-      // ── Forwarding Service path ───────────────────────────────────────────
-      const tmHookAbi = [
-        "function depositForBurnWithHook(uint256 amount, uint32 destinationDomain, bytes32 mintRecipient, address burnToken, bytes32 destinationCaller, uint256 maxFee, uint32 minFinalityThreshold, bytes hookData) external returns (uint64 nonce)"
-      ];
-      const tmHook = new ethers.Contract(fromConfig.tokenMessenger, tmHookAbi, srcSigner);
-      console.log('[XC] Calling depositForBurnWithHook...');
-      console.log('[XC]   amount:', amtBig.toString(), ' dest domain:', toConfig.domain);
-      console.log('[XC]   mintRecipient:', mintRecipient32, ' burnToken:', fromConfig.usdc);
-      console.log('[XC]   maxFee:', maxFeeBig.toString(), ' finalityThreshold:', finalityThreshold);
-      console.log('[XC]   hookData:', FORWARDING_HOOK);
-      burnTx = await tmHook.depositForBurnWithHook(
-        amtBig, toConfig.domain, mintRecipient32, fromConfig.usdc,
-        zeroCaller32, maxFeeBig, finalityThreshold, FORWARDING_HOOK
-      );
-    } else {
-      // ── Standard path (non-Arc destination) ──────────────────────────────
-      const tmAbi = [
-        "function depositForBurn(uint256 amount, uint32 destinationDomain, bytes32 mintRecipient, address burnToken, bytes32 destinationCaller, uint256 maxFee, uint32 minFinalityThreshold) external returns (uint64 nonce)"
-      ];
-      const tmContract = new ethers.Contract(fromConfig.tokenMessenger, tmAbi, srcSigner);
-      console.log('[XC] Calling depositForBurn (standard)...');
-      burnTx = await tmContract.depositForBurn(
-        amtBig, toConfig.domain, mintRecipient32, fromConfig.usdc,
-        zeroCaller32, maxFeeBig, finalityThreshold
-      );
-    }
+    // Arc Testnet as DESTINATION only supports Standard Transfer (minFinalityThreshold >= 2000).
+    // Fast Transfer (1000) is NOT supported for Arc as destination — Iris will never attest.
+    const ARC_DOMAIN_ID = 26;
+    const finalityThreshold = (toConfig.domain === ARC_DOMAIN_ID) ? 2000 : 1000;
+    console.log('[XC] SOURCE DOMAIN:', fromConfig.domain);
+    console.log('[XC] DESTINATION DOMAIN:', toConfig.domain);
+    console.log('[XC] finalityThreshold:', finalityThreshold, finalityThreshold === 2000 ? '(Standard — Arc destination)' : '(Fast)');
 
+    const burnTx = await tmContract.depositForBurn(
+      amtBig, toConfig.domain, mintRecipient32, fromConfig.usdc, zeroCaller32, 0n, finalityThreshold
+    );
     xcSetStep(1, 'active', burnTx.hash, fromConfig.explorer);
-    burnReceipt = await burnTx.wait();
+    const burnReceipt = await burnTx.wait();
     if (!burnReceipt || burnReceipt.status !== 1) throw new Error(`depositForBurn failed (status=0). Tx: ${burnTx.hash}`);
-    console.log('[XC] Burn confirmed. txHash:', burnTx.hash, '| logs:', burnReceipt.logs.length);
+    console.log("[XC] depositForBurn confirmed. Logs:", burnReceipt.logs.length);
     xcSetStep(1, 'success', burnTx.hash, fromConfig.explorer);
 
-    // ── STEP 2: Iris attestation polling ─────────────────────────────────────
+    // ── STEP 2: Iris attestation polling ──────────────────────────────────────
     xcSetStep(2, 'active', null, null);
-    const irisUrl  = `https://iris-api-sandbox.circle.com/v2/messages/${fromConfig.domain}?transactionHash=${burnTx.hash}`;
-    const maxPolls = 180; // 15 min max
-    let pollCount  = 0;
-    let messageBytes   = null;
-    let attestationSig = null;
-    let forwardDone    = false;
-    console.log('[XC] Iris poll URL:', irisUrl);
-    console.log('[XC] Polling up to', maxPolls, 'times (5s interval) =', Math.round(maxPolls*5/60), 'min max');
+    let messageBytes = null, attestationSig = null, pollCount = 0;
+    const maxPolls   = 120;
+    const irisUrl    = `https://iris-api-sandbox.circle.com/v2/messages/${fromConfig.domain}?transactionHash=${burnTx.hash}`;
+    console.log("[XC] Iris poll URL:", irisUrl);
 
     while (pollCount < maxPolls) {
       await new Promise(r => setTimeout(r, 5000));
       pollCount++;
       try {
         const res = await fetch(irisUrl);
-
-        // 404 = tx not indexed yet — normal for first ~30s
-        if (res.status === 404) {
-          if (pollCount % 6 === 0) console.log(`[XC] Iris #${pollCount}: not indexed yet (404) — waiting...`);
-          continue;
-        }
-        if (!res.ok) {
-          console.warn(`[XC] Iris #${pollCount}: HTTP ${res.status} — retrying...`);
-          continue;
-        }
-
-        const data = await res.json();
-        console.log(`[XC] Iris #${pollCount}:`, JSON.stringify(data).slice(0, 400));
-
-        if (data.messages && data.messages.length > 0) {
-          const msg = data.messages[0];
-          const sub = document.querySelector(`#xc-step-el-2 .xc-step-sub`);
-          if (sub) sub.textContent = `Iris: ${msg.status||'pending'} (poll ${pollCount}/${maxPolls})`;
-
-          if (isArcDest) {
-            // ── Forwarding Service: poll forwardTxHash ──────────────────────
-            if (msg.forwardTxHash) {
-              console.log('[XC] Forwarding Service complete! forwardTxHash:', msg.forwardTxHash);
-              forwardDone = true;
-              break;
-            }
-            // Attestation ready — give Forwarding Service a few extra polls
+        if (res.ok) {
+          const data = await res.json();
+          console.log(`[XC] Iris #${pollCount}:`, JSON.stringify(data).slice(0,300));
+          if (data.messages && data.messages.length > 0) {
+            const msg = data.messages[0];
+            const sub = document.querySelector(`#xc-step-el-2 .xc-step-sub`);
+            if (sub) sub.textContent = `Iris: ${msg.status||'pending'} (poll ${pollCount}/${maxPolls})`;
             if (msg.status === 'complete' && msg.attestation && msg.attestation !== 'PENDING') {
-              messageBytes   = msg.message;
-              attestationSig = msg.attestation;
-              if (messageBytes) console.log('[XC] MESSAGE HASH:', ethers.keccak256(messageBytes));
-              let fwdWait = 0;
-              while (fwdWait < 3 && !forwardDone) {
-                await new Promise(r => setTimeout(r, 5000));
-                fwdWait++;
-                try {
-                  const r2 = await fetch(irisUrl);
-                  if (r2.ok) {
-                    const d2 = await r2.json();
-                    if (d2.messages?.[0]?.forwardTxHash) {
-                      console.log('[XC] Forwarding confirmed after extra wait:', d2.messages[0].forwardTxHash);
-                      forwardDone = true;
-                    }
-                  }
-                } catch(_) {}
-              }
-              break;
-            }
-          } else {
-            // ── Standard path ──────────────────────────────────────────────
-            if (msg.status === 'complete' && msg.attestation && msg.attestation !== 'PENDING') {
-              messageBytes   = msg.message;
-              attestationSig = msg.attestation;
+              messageBytes = msg.message; attestationSig = msg.attestation;
               if (messageBytes) console.log('[XC] MESSAGE HASH:', ethers.keccak256(messageBytes));
               break;
             }
           }
         }
-      } catch(pollErr) {
-        console.warn(`[XC] Iris poll ${pollCount} error:`, pollErr.message || pollErr);
-      }
+      } catch(pollErr) { console.warn(`[XC] Iris poll ${pollCount}:`, pollErr); }
     }
 
-    // ── Forwarding Service completed — Circle minted on Arc ──────────────────
-    if (isArcDest && forwardDone) {
-      console.log('[XC] Forwarding Service completed — USDC auto-minted on Arc. Skipping manual steps.');
-      xcSetStep(2, 'success', null, null);
-      xcSetStep(3, 'success', null, null);
-      xcSetStep(4, 'success', burnTx.hash, fromConfig.explorer);
-      xcSetStep(5, 'success', null, null);
-      xcStats.count++; xcStats.volume += amt;
-      xcStats.chains.add(from.id); xcStats.chains.add(to.id);
-      document.getElementById("xc-stat-count").textContent  = xcStats.count;
-      document.getElementById("xc-stat-vol").textContent    = "$" + xcStats.volume.toFixed(2);
-      document.getElementById("xc-stat-chains").textContent = xcStats.chains.size;
-      document.getElementById("xc-step-status").textContent = "Complete ✓";
-      document.getElementById("xc-step-status").style.color = "var(--green)";
-      xcResetBtn();
-      toast(`✓ ${amt.toFixed(2)} USDC: ${from.name.split(" ")[0]} → ${to.name.split(" ")[0]} (Forwarding Service)`, "success");
-      xcAddTxLog(xcFromIdx, xcToIdx, amt, recipient);
-      document.getElementById("xc-recipient").value = "";
-      document.getElementById("xc-addr-status").textContent = "—";
-      document.getElementById("xc-addr-status").style.color = "var(--muted2)";
-      return;
-    }
-
-    // ── Fallback: parse MessageSent from logs ─────────────────────────────────
-    if (!attestationSig) {
+    // Fallback: parse MessageSent event
+    if (!messageBytes) {
       const mtIface = new ethers.Interface(["event MessageSent(bytes message)"]);
       for (const log of burnReceipt.logs) {
         try {
@@ -7263,22 +6966,23 @@ async function xcExecuteSend() {
       if (!messageBytes) throw new Error("Cannot extract CCTP message from logs. Please retry.");
       const msgHash = ethers.keccak256(messageBytes);
       console.log('[XC] MESSAGE HASH (fallback):', msgHash);
-      for (let v1 = 0; v1 < 60 && !attestationSig; v1++) {
-        await new Promise(r => setTimeout(r, 5000));
+      for (let v1=0; v1<60 && !attestationSig; v1++) {
+        await new Promise(r=>setTimeout(r,5000));
         try {
           const r = await fetch(`https://iris-api-sandbox.circle.com/attestations/${msgHash}`);
-          if (r.ok) { const d = await r.json(); if (d.attestation && d.attestation !== 'PENDING') attestationSig = d.attestation; }
+          if (r.ok) { const d=await r.json(); if(d.attestation&&d.attestation!=='PENDING') attestationSig=d.attestation; }
         } catch(_) {}
       }
     }
-    if (!attestationSig) throw new Error("Attestation timed out after 15 min. Check Circle Iris status and retry.");
+    if (!attestationSig) throw new Error("Attestation timed out. Check Circle Iris status and retry.");
     xcSetStep(2, 'success', null, null);
 
-    // ── STEP 3: Switch to DESTINATION chain ──────────────────────────────────
+    // ── STEP 3: Switch to DESTINATION chain (verified) ────────────────────────
     xcSetStep(3, 'active', null, null);
     console.log(`[XC] Switching to destination: ${to.name} (${to.chainId})`);
     await ensureNetwork(to.chainId);
 
+    // ── CRITICAL: Recreate provider + signer for destination ──────────────────
     const destProvider = new ethers.BrowserProvider(window.ethereum);
     const destNetwork  = await destProvider.getNetwork();
     if (Number(destNetwork.chainId) !== to.chainId) {
@@ -7290,14 +6994,15 @@ async function xcExecuteSend() {
     const destSigner = await destProvider.getSigner();
     xcSetStep(3, 'success', null, null);
 
-    // ── STEP 4: receiveMessage() on destination ───────────────────────────────
+    // ── STEP 4: receiveMessage() on destination ────────────────────────────────
     xcSetStep(4, 'active', null, null);
-    const destMtAbi      = ["function receiveMessage(bytes message, bytes attestation) returns (bool)"];
+    const destMtAbi = ["function receiveMessage(bytes message, bytes attestation) returns (bool)"];
     const destMtContract = new ethers.Contract(toConfig.messageTransmitter, destMtAbi, destSigner);
 
     const mintTx = await destMtContract.receiveMessage(messageBytes, attestationSig);
     xcSetStep(4, 'active', mintTx.hash, toConfig.explorer);
     const mintReceipt = await mintTx.wait();
+    // ── MANDATORY: validate receipt.status ────────────────────────────────────
     if (!mintReceipt || mintReceipt.status !== 1) {
       throw new Error(`receiveMessage() reverted on ${to.name} (status=0). Tx: ${mintTx.hash}`);
     }
