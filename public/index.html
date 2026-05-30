@@ -23,6 +23,8 @@
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet"/>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tabler-icons/2.44.0/iconfont/tabler-icons.min.css"/>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.7.1/ethers.umd.min.js"></script>
+<!-- QRCode.js — real QR code generation -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <!-- WalletConnect EthereumProvider (enables WalletConnect v2 + mobile wallets) -->
 <!-- WalletConnect v2 — Web3Modal AppKit (official bundle, includes QR modal) -->
 <script src="https://cdn.jsdelivr.net/npm/@web3modal/ethereum@2.7.1/dist/index.umd.js" defer></script>
@@ -1161,6 +1163,63 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
   .pl-page-header{flex-wrap:wrap;gap:10px}
   .pl-create-btn-header{width:100%}
 }
+
+/* ═══════════════════════════════════════════════════════
+   SMART PAYMENT SYSTEM — QR + LANDING + ANALYTICS
+   ═══════════════════════════════════════════════════════ */
+
+/* QR canvas inside payment system */
+.smart-qr-wrap { position:relative; display:flex; align-items:center; justify-content:center; }
+.smart-qr-wrap #pl-qr-canvas,
+.smart-qr-wrap #inv-qr-canvas { border-radius:10px; overflow:hidden; }
+
+/* Payment Landing Modal */
+.pay-modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,.88); z-index:3000; display:flex; align-items:center; justify-content:center; opacity:0; pointer-events:none; transition:opacity .25s; backdrop-filter:blur(8px); }
+.pay-modal-overlay.open { opacity:1; pointer-events:all; }
+.pay-modal { background:linear-gradient(160deg,#0d111a,#111827); border:1px solid rgba(45,212,191,.2); border-radius:20px; padding:0; width:420px; max-width:95vw; max-height:92vh; overflow-y:auto; box-shadow:0 24px 60px rgba(0,0,0,.7),0 0 80px rgba(45,212,191,.06); }
+.pay-modal-header { padding:20px 24px 0; display:flex; align-items:center; justify-content:space-between; }
+.pay-modal-brand { display:flex; align-items:center; gap:8px; }
+.pay-modal-logo { width:32px; height:32px; border-radius:8px; background:linear-gradient(135deg,rgba(45,212,191,.2),rgba(79,142,247,.15)); border:1px solid rgba(45,212,191,.3); display:flex; align-items:center; justify-content:center; font-size:14px; color:var(--teal); }
+.pay-modal-brandname { font-size:12px; font-weight:800; color:var(--text); letter-spacing:.5px; }
+.pay-modal-close { width:28px; height:28px; border-radius:6px; border:1px solid var(--border); background:transparent; color:var(--muted2); cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:14px; transition:.15s; }
+.pay-modal-close:hover { border-color:var(--red); color:var(--red); }
+.pay-modal-body { padding:20px 24px 24px; }
+.pay-modal-amount { text-align:center; padding:20px 0 14px; }
+.pay-modal-amount-num { font-size:38px; font-weight:900; color:var(--text); letter-spacing:-1.5px; }
+.pay-modal-amount-cur { font-size:16px; font-weight:700; color:var(--teal); margin-left:4px; }
+.pay-modal-network { display:inline-flex; align-items:center; gap:5px; padding:3px 12px; background:rgba(34,197,94,.1); border:1px solid rgba(34,197,94,.25); border-radius:20px; font-size:9px; font-weight:700; color:var(--green); margin-top:4px; }
+.pay-modal-divider { height:1px; background:linear-gradient(90deg,transparent,rgba(45,212,191,.2),transparent); margin:16px 0; }
+.pay-modal-details { display:flex; flex-direction:column; gap:8px; margin-bottom:16px; }
+.pay-modal-row { display:flex; justify-content:space-between; align-items:center; }
+.pay-modal-row-label { font-size:9px; text-transform:uppercase; letter-spacing:.6px; color:var(--muted2); }
+.pay-modal-row-val { font-size:10px; font-weight:600; color:var(--text); font-family:'JetBrains Mono',monospace; }
+.pay-modal-qr-section { text-align:center; padding:12px 0; }
+.pay-modal-qr-label { font-size:8.5px; color:var(--muted2); margin-bottom:8px; text-transform:uppercase; letter-spacing:.5px; }
+.pay-modal-qr-wrap { display:inline-block; padding:10px; background:#fff; border-radius:10px; }
+.pay-modal-url { font-size:8px; color:var(--muted2); word-break:break-all; text-align:center; margin-top:6px; font-family:'JetBrains Mono',monospace; padding:0 4px; }
+.pay-btn { width:100%; padding:15px; border:none; border-radius:12px; cursor:pointer; font-family:inherit; font-size:14px; font-weight:800; letter-spacing:.3px; position:relative; overflow:hidden; transition:transform .2s,box-shadow .2s; margin-top:16px; }
+.pay-btn-bg { position:absolute; inset:0; background:linear-gradient(135deg,#0d9488,#2dd4bf,#0891b2); background-size:200%; animation:plBtnShift 4s ease infinite; }
+.pay-btn-content { position:relative; display:flex; align-items:center; justify-content:center; gap:8px; color:#fff; }
+.pay-btn:hover { transform:translateY(-2px); box-shadow:0 10px 28px rgba(45,212,191,.4); }
+.pay-btn:active { transform:translateY(0); }
+.pay-btn:disabled .pay-btn-bg { animation:none; background:#333; }
+.pay-btn-actions { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:10px; }
+.pay-btn-sec { padding:9px; border-radius:8px; font-size:10px; font-weight:600; cursor:pointer; font-family:inherit; display:flex; align-items:center; justify-content:center; gap:5px; transition:.15s; }
+.pay-btn-copy { background:rgba(79,142,247,.1); border:1px solid rgba(79,142,247,.3); color:var(--blue); }
+.pay-btn-copy:hover { background:rgba(79,142,247,.2); }
+.pay-btn-dl { background:rgba(45,212,191,.1); border:1px solid rgba(45,212,191,.3); color:var(--teal); }
+.pay-btn-dl:hover { background:rgba(45,212,191,.2); }
+.pay-status-badge { display:inline-flex; align-items:center; gap:4px; padding:2px 10px; border-radius:4px; font-size:9px; font-weight:700; }
+.pay-status-active { background:rgba(34,197,94,.12); border:1px solid rgba(34,197,94,.25); color:var(--green); }
+.pay-status-paid { background:rgba(79,142,247,.12); border:1px solid rgba(79,142,247,.25); color:var(--blue); }
+.pay-status-expired { background:rgba(239,68,68,.1); border:1px solid rgba(239,68,68,.2); color:var(--red); }
+.pay-status-disabled { background:rgba(96,104,128,.1); border:1px solid rgba(96,104,128,.2); color:var(--muted2); }
+
+/* Analytics mini-stats */
+.pl-analytics-bar { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; padding:0 24px 10px; flex-shrink:0; }
+.pl-stat-mini { background:rgba(22,26,36,.8); border:1px solid rgba(255,255,255,.04); border-radius:10px; padding:10px 12px; }
+.pl-stat-mini-lbl { font-size:8px; text-transform:uppercase; letter-spacing:.5px; color:var(--muted2); margin-bottom:4px; }
+.pl-stat-mini-val { font-size:16px; font-weight:800; }
 </style>
 </head>
 <body>
@@ -2685,6 +2744,26 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
         </button>
       </div>
 
+      <!-- Analytics Bar -->
+      <div class="pl-analytics-bar">
+        <div class="pl-stat-mini">
+          <div class="pl-stat-mini-lbl">Total Links</div>
+          <div class="pl-stat-mini-val" id="pl-stat-total" style="color:var(--teal)">0</div>
+        </div>
+        <div class="pl-stat-mini">
+          <div class="pl-stat-mini-lbl">Total Scans</div>
+          <div class="pl-stat-mini-val" id="pl-stat-scans" style="color:var(--blue)">0</div>
+        </div>
+        <div class="pl-stat-mini">
+          <div class="pl-stat-mini-lbl">Payments Received</div>
+          <div class="pl-stat-mini-val" id="pl-stat-paid" style="color:var(--green)">0</div>
+        </div>
+        <div class="pl-stat-mini">
+          <div class="pl-stat-mini-lbl">Total Collected</div>
+          <div class="pl-stat-mini-val" id="pl-stat-collected" style="color:var(--yellow)">0.00</div>
+        </div>
+      </div>
+
       <!-- ══ MAIN CONTENT ══ -->
       <div class="pl-content-wrap">
 
@@ -2773,7 +2852,7 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
             <div class="pl-qr-body">
               <div class="pl-qr-canvas-wrap">
                 <div class="pl-qr-ring"></div>
-                <canvas id="pl-qr-canvas" width="160" height="160"></canvas>
+                <div id="pl-qr-container" style="width:160px;height:160px;overflow:hidden;border-radius:8px;background:#fff"></div>
               </div>
               <div id="pl-url-display" class="pl-url-box"></div>
               <div class="pl-qr-actions">
@@ -3047,7 +3126,7 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
                 </div>
                 <!-- QR + payment link row -->
                 <div style="display:flex;gap:12px;align-items:flex-start;margin-bottom:12px">
-                  <canvas id="inv-qr-canvas" width="72" height="72" style="border-radius:4px;border:1px solid var(--border);flex-shrink:0"></canvas>
+                  <div id="inv-qr-container" style="width:72px;height:72px;border-radius:4px;border:1px solid var(--border);flex-shrink:0;overflow:hidden;background:#fff"></div>
                   <div style="flex:1;min-width:0">
                     <div style="font-size:8px;color:var(--muted2);margin-bottom:4px">Payment Link</div>
                     <div id="inv-prev-link" style="font-size:8.5px;color:var(--blue);word-break:break-all;font-family:monospace;background:rgba(79,142,247,.06);border:1px solid rgba(79,142,247,.15);border-radius:4px;padding:5px 8px">pay.elligente.xyz/inv-001</div>
@@ -3073,10 +3152,10 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
               <div style="font-size:8.5px;color:var(--muted2)">QR Code</div>
               <div style="font-size:7.5px;color:var(--muted)">Generate a QR for this invoice</div>
             </div>
-            <div class="card inv-action-tile" style="padding:10px;text-align:center;cursor:pointer" onclick="toast('PDF export coming soon','info')">
-              <i class="ti ti-file-type-pdf" style="font-size:16px;color:var(--red);display:block;margin-bottom:4px"></i>
-              <div style="font-size:8.5px;color:var(--muted2)">Download PDF</div>
-              <div style="font-size:7.5px;color:var(--muted)">Save invoice as PDF</div>
+            <div class="card inv-action-tile" style="padding:10px;text-align:center;cursor:pointer" onclick="invDownloadQR()">
+              <i class="ti ti-download" style="font-size:16px;color:var(--red);display:block;margin-bottom:4px"></i>
+              <div style="font-size:8.5px;color:var(--muted2)">Download QR</div>
+              <div style="font-size:7.5px;color:var(--muted)">Save QR code as PNG</div>
             </div>
             <div class="card inv-action-tile" style="padding:10px;text-align:center;cursor:pointer" onclick="invCopyLink()">
               <i class="ti ti-share" style="font-size:16px;color:var(--teal);display:block;margin-bottom:4px"></i>
@@ -5123,161 +5202,195 @@ async function signTx(){
         }
       }
 
-      // ── BATCH SEND: ONE batchTransfer() call — Arc-compatible ──
-      if(directRcpts.length > 0) {
-        const usdcRcpts  = directRcpts.filter(r => (r.token||'USDC')==='USDC');
-        const eurcRcpts  = directRcpts.filter(r => (r.token||'USDC')==='EURC');
+      // ── MULTISEND: Multicall3 (ARC→ARC) OR Crosschain Batch (cross-chain) ──
+      const MULTICALL3_ADDRESS       = '0xcA11bde05977b3631167028862bE2a173976CA11';
+      const CROSSCHAIN_BATCH_ADDRESS = '0x17cFB1AACbc64D0F0c247ED261b66C3d56e3EB16';
 
-        // ── USDC batch ──────────────────────────────────────────────────────
-        if(usdcRcpts.length > 0) {
-          const addrs  = usdcRcpts.map(r => r._resolved || r.addr);
-          const amts   = usdcRcpts.map(r => toUsdc(r.amount));
-          const notes  = usdcRcpts.map(r => r.note || '');
-          const batchTotal = usdcRcpts.reduce((s,r)=>s+(parseFloat(r.amount)||0),0);
+      const MULTICALL3_ABI = [
+        'function aggregate3(tuple(address target,bool allowFailure,bytes callData)[] calls) payable returns (tuple(bool success,bytes returnData)[] returnData)'
+      ];
+      const CROSSCHAIN_BATCH_ABI = [
+        'function batchTransferCrosschain(address[] recipients, uint256[] amounts, string[] notes, uint32[] destDomains) external',
+        'function batchTransferLocal(address token, address[] recipients, uint256[] amounts) external'
+      ];
 
-          if(!batchContractAddr) {
-            toast('Batch contract not configured. Set a batch contract address in Settings → Batch Payments.','error');
-            return;
-          }
-          if(!addrs.length || addrs.some(a => !isAddr(a))) {
-            toast('One or more recipient addresses are invalid','error'); return;
-          }
-          if(addrs.length !== amts.length) {
-            toast('Recipients/amounts array length mismatch','error'); return;
-          }
+      // ── Direct (ARC → ARC) via Multicall3 ─────────────────────────────────
+      if (directRcpts.length > 0) {
+        const usdcRcpts = directRcpts.filter(r => (r.token||'USDC')==='USDC');
+        const eurcRcpts = directRcpts.filter(r => r.token==='EURC');
 
-          // 1. Fetch required allowance from contract
-          toast(`Approving ${batchTotal.toFixed(2)} USDC for batch (${usdcRcpts.length} recipients)...`,'info');
-          const batchContract = new ethers.Contract(batchContractAddr, BATCH_ABI, signer);
-          let required;
-          try {
-            required = await batchContract.getRequiredAllowance(toUsdc(batchTotal.toFixed(6)));
-          } catch(_) {
-            // If getRequiredAllowance not available, use 5% buffer
-            required = toUsdc((batchTotal * 1.05).toFixed(6));
+        // ── USDC via Multicall3 ───────────────────────────────────────────────
+        if (usdcRcpts.length > 0) {
+          const addrs      = usdcRcpts.map(r => r._resolved || r.addr);
+          const amts       = usdcRcpts.map(r => toUsdc(r.amount));
+          const batchTotal = usdcRcpts.reduce((s,r) => s+(parseFloat(r.amount)||0), 0);
+
+          if (!addrs.length || addrs.some(a => !isAddr(a))) {
+            toast('One or more USDC recipient addresses are invalid','error'); return;
           }
 
-          // 2. Approve
-          const approveTx = await usdcContract.approve(batchContractAddr, required);
+          // Build Multicall3 calls: each call = ERC20.transfer(to, amount)
+          const erc20Iface  = new ethers.Interface(USDC_ABI);
+          const calls = addrs.map((to, i) => ({
+            target:       activeUSDC(),
+            allowFailure: false,
+            callData:     erc20Iface.encodeFunctionData('transfer', [to, amts[i]])
+          }));
+
+          // Approve Multicall3 contract to spend total USDC
+          toast(`Approving ${batchTotal.toFixed(2)} USDC for Multicall3 batch...`,'info');
+          const totalAmt = amts.reduce((a,b) => a+b, 0n);
+          const approveTx = await usdcContract.approve(MULTICALL3_ADDRESS, totalAmt);
           await approveTx.wait();
 
-          // 3. simulateContract (dry-run gas estimation) before writeContract
-          //    Uses eth_call to detect reverts before sending the real tx
-          toast(`Simulating batch of ${usdcRcpts.length} USDC transfers...`,'info');
+          // Simulate (staticCall) before execute
+          toast(`Simulating Multicall3 batch (${usdcRcpts.length} recipients)...`,'info');
           try {
-            const batchContractRead = new ethers.Contract(batchContractAddr, BATCH_ABI, provider);
-            await batchContractRead.batchTransfer.staticCall(addrs, amts, notes);
+            const mc3Read = new ethers.Contract(MULTICALL3_ADDRESS, MULTICALL3_ABI, provider);
+            await mc3Read.aggregate3.staticCall(calls);
           } catch(simErr) {
-            const reason = simErr.revert?.args?.[0] || simErr.shortMessage || simErr.message || 'Unknown';
-            toast('Gas estimation failed: ' + reason, 'error');
-            return;
+            const reason = simErr.revert?.args?.[0] || simErr.shortMessage || simErr.message || 'Simulation failed';
+            toast('Gas estimation failed: ' + reason,'error'); return;
           }
 
-          // 4. Estimate gas (once, for the batch only)
+          // Estimate gas
           let gasLimit;
           try {
-            const estimated = await batchContract.batchTransfer.estimateGas(addrs, amts, notes);
-            // Add 20% buffer for Arc Testnet
-            gasLimit = (estimated * 120n) / 100n;
+            const mc3 = new ethers.Contract(MULTICALL3_ADDRESS, MULTICALL3_ABI, signer);
+            const est = await mc3.aggregate3.estimateGas(calls);
+            gasLimit  = (est * 130n) / 100n; // +30% buffer
           } catch(_) {
-            // Safe fallback: 300k base + 50k per recipient
-            gasLimit = BigInt(300_000 + usdcRcpts.length * 50_000);
+            gasLimit = BigInt(200_000 + usdcRcpts.length * 60_000);
           }
 
-          // 5. ONE writeContract — no fallback loops, no multiple popups
-          toast(`Sending 1 batch transaction for ${usdcRcpts.length} USDC recipients...`,'info');
-          const batchTx = await batchContract.batchTransfer(addrs, amts, notes, { gasLimit });
+          // Execute ONE transaction via Multicall3
+          toast(`Executing Multicall3 batch — ${usdcRcpts.length} USDC recipients...`,'info');
+          const mc3 = new ethers.Contract(MULTICALL3_ADDRESS, MULTICALL3_ABI, signer);
+          const batchTx = await mc3.aggregate3(calls, { gasLimit });
           lastHash = batchTx.hash;
           await batchTx.wait();
-          toast(`✓ Batch of ${usdcRcpts.length} USDC payments confirmed — Tx: ${shortAddr(batchTx.hash)}`,'success');
+          toast(`✓ Multicall3 batch confirmed — ${usdcRcpts.length} USDC transfers in 1 tx`,'success');
         }
 
-        // ── EURC batch ──────────────────────────────────────────────────────
-        if(eurcRcpts.length > 0) {
-          const addrs  = eurcRcpts.map(r => r._resolved || r.addr);
-          const amts   = eurcRcpts.map(r => toUsdc(r.amount));
-          const notes  = eurcRcpts.map(r => r.note || '');
-          const batchTotal = eurcRcpts.reduce((s,r)=>s+(parseFloat(r.amount)||0),0);
+        // ── EURC via Multicall3 ───────────────────────────────────────────────
+        if (eurcRcpts.length > 0) {
+          const addrs      = eurcRcpts.map(r => r._resolved || r.addr);
+          const amts       = eurcRcpts.map(r => toUsdc(r.amount));
+          const batchTotal = eurcRcpts.reduce((s,r) => s+(parseFloat(r.amount)||0), 0);
 
-          if(!batchContractAddr) {
-            toast('Batch contract not configured. Set a batch contract address in Settings → Batch Payments.','error');
-            return;
-          }
-          if(!addrs.length || addrs.some(a => !isAddr(a))) {
+          if (!addrs.length || addrs.some(a => !isAddr(a))) {
             toast('One or more EURC recipient addresses are invalid','error'); return;
           }
 
-          // 1. Approve (5% buffer for EURC)
-          toast(`Approving ${batchTotal.toFixed(2)} EURC for batch (${eurcRcpts.length} recipients)...`,'info');
-          const eurcBatchContract = new ethers.Contract(batchContractAddr, BATCH_ABI, signer);
-          const eurcRequired = toUsdc((batchTotal * 1.05).toFixed(6));
-          const eurcApproveTx = await eurcContract.approve(batchContractAddr, eurcRequired);
-          await eurcApproveTx.wait();
+          const erc20Iface = new ethers.Interface(USDC_ABI);
+          const calls = addrs.map((to, i) => ({
+            target:       activeEURC(),
+            allowFailure: false,
+            callData:     erc20Iface.encodeFunctionData('transfer', [to, amts[i]])
+          }));
 
-          // 2. simulateContract (dry-run)
-          toast(`Simulating EURC batch of ${eurcRcpts.length} transfers...`,'info');
-          try {
-            const eurcBatchRead = new ethers.Contract(batchContractAddr, BATCH_ABI, provider);
-            await eurcBatchRead.batchTransfer.staticCall(addrs, amts, notes);
-          } catch(simErr) {
-            const reason = simErr.revert?.args?.[0] || simErr.shortMessage || simErr.message || 'Unknown';
-            toast('EURC gas estimation failed: ' + reason, 'error');
-            return;
-          }
+          const totalAmt  = amts.reduce((a,b) => a+b, 0n);
+          const approveTx = await eurcContract.approve(MULTICALL3_ADDRESS, totalAmt);
+          await approveTx.wait();
 
-          // 3. Estimate gas once
-          let eurcGasLimit;
+          let gasLimit;
           try {
-            const estimated = await eurcBatchContract.batchTransfer.estimateGas(addrs, amts, notes);
-            eurcGasLimit = (estimated * 120n) / 100n;
+            const mc3   = new ethers.Contract(MULTICALL3_ADDRESS, MULTICALL3_ABI, signer);
+            const est   = await mc3.aggregate3.estimateGas(calls);
+            gasLimit    = (est * 130n) / 100n;
           } catch(_) {
-            eurcGasLimit = BigInt(300_000 + eurcRcpts.length * 50_000);
+            gasLimit = BigInt(200_000 + eurcRcpts.length * 60_000);
           }
 
-          // 4. ONE writeContract
-          toast(`Sending 1 batch transaction for ${eurcRcpts.length} EURC recipients...`,'info');
-          const eurcBatchTx = await eurcBatchContract.batchTransfer(addrs, amts, notes, { gasLimit: eurcGasLimit });
-          lastHash = lastHash || eurcBatchTx.hash;
-          await eurcBatchTx.wait();
-          toast(`✓ Batch of ${eurcRcpts.length} EURC payments confirmed — Tx: ${shortAddr(eurcBatchTx.hash)}`,'success');
+          toast(`Executing Multicall3 EURC batch — ${eurcRcpts.length} recipients...`,'info');
+          const mc3     = new ethers.Contract(MULTICALL3_ADDRESS, MULTICALL3_ABI, signer);
+          const batchTx = await mc3.aggregate3(calls, { gasLimit });
+          lastHash = lastHash || batchTx.hash;
+          await batchTx.wait();
+          toast(`✓ Multicall3 EURC batch confirmed — ${eurcRcpts.length} transfers`,'success');
         }
       }
 
-      // Bridge recipients via ElligentBridge (CCTP v2) or direct transfer as testnet proxy
-      for(const [chainId, group] of Object.entries(bridgeGroups)){
-        const chain      = CHAINS.find(c=>c.id===chainId)||CHAINS[1];
-        const groupTotal = group.reduce((s,r)=>s+(parseFloat(r.amount)||0),0);
-        const bridgeDeployed = window.__BRIDGE_ADDRESS__
-          && window.__BRIDGE_ADDRESS__ !== '0x0000000000000000000000000000000000000000';
-        toast(`Bridging ${groupTotal.toFixed(2)} USDC to ${chain.name} (${group.length} recipient${group.length>1?'s':''})...`,'info');
-        // Approve bridge contract or owner wallet for the full group amount
-        const approveTarget = bridgeDeployed ? window.__BRIDGE_ADDRESS__ : OWNER_WALLET;
-        const approveTx = await usdcContract.approve(approveTarget, toUsdc((groupTotal*1.01).toFixed(6)));
-        lastHash = approveTx.hash;
-        await approveTx.wait();
-        for(const r of group){
-          const toAddr = r._resolved || r.addr;
-          const tok    = r.token||'USDC';
-          const amt    = toUsdc(r.amount);
-          const tokenCtr = tok==='EURC' ? eurcContract : usdcContract;
-          try{
-            let tx;
-            if (bridgeDeployed && tok === 'USDC') {
-              const bridgeAbi = ['function bridge(address,uint256,uint32,bytes32) returns (uint64)','function addressToBytes32(address) pure returns (bytes32)'];
-              const bridgeCtr = new ethers.Contract(window.__BRIDGE_ADDRESS__, bridgeAbi, signer);
-              const dest32    = await bridgeCtr.addressToBytes32(toAddr);
-              await tokenCtr.approve(window.__BRIDGE_ADDRESS__, amt);
-              tx = await bridgeCtr.bridge(activeUSDC(), amt, chain.cctpDomain??0, dest32);
-            } else {
-              // Direct transfer on testnet as proxy
-              tx = await tokenCtr.transfer(toAddr, amt);
+      // ── Bridge recipients (cross-chain) via Crosschain Batch Contract ───────
+      // ── Crosschain recipients via Crosschain Batch Contract ────────────────
+      const CROSSCHAIN_BATCH_ADDRESS_2 = '0x17cFB1AACbc64D0F0c247ED261b66C3d56e3EB16';
+      const XCHAIN_BATCH_ABI = [
+        'function batchBridge(address token, address[] recipients, uint256[] amounts, uint32[] destDomains) external',
+        'function approve(address spender, uint256 amount) external returns (bool)'
+      ];
+
+      for (const [chainId, group] of Object.entries(bridgeGroups)) {
+        const chain      = CHAINS.find(c => c.id === chainId) || CHAINS[1];
+        const groupTotal = group.reduce((s,r) => s+(parseFloat(r.amount)||0), 0);
+        toast(`Routing ${groupTotal.toFixed(2)} USDC → ${chain.name} (${group.length} recipient${group.length>1?'s':''}) via Crosschain Batch...`,'info');
+
+        const recipients  = group.map(r => r._resolved || r.addr);
+        const amounts     = group.map(r => toUsdc(r.amount));
+        const destDomains = group.map(() => chain.cctpDomain ?? 0);
+        const totalAmt    = amounts.reduce((a,b) => a+b, 0n);
+
+        if (recipients.some(a => !isAddr(a))) {
+          toast(`Invalid address in ${chain.name} group — skipping`,'error');
+          continue;
+        }
+
+        try {
+          // Approve Crosschain Batch Contract
+          const approveTx = await usdcContract.approve(CROSSCHAIN_BATCH_ADDRESS_2, (totalAmt * 105n) / 100n);
+          lastHash = approveTx.hash;
+          await approveTx.wait();
+
+          // Simulate
+          try {
+            const xBatchRead = new ethers.Contract(CROSSCHAIN_BATCH_ADDRESS_2, XCHAIN_BATCH_ABI, provider);
+            await xBatchRead.batchBridge.staticCall(activeUSDC(), recipients, amounts, destDomains);
+          } catch(_) { /* simulation errors are non-fatal for crosschain */ }
+
+          // Execute
+          let gasLimit;
+          try {
+            const xBatch = new ethers.Contract(CROSSCHAIN_BATCH_ADDRESS_2, XCHAIN_BATCH_ABI, signer);
+            const est    = await xBatch.batchBridge.estimateGas(activeUSDC(), recipients, amounts, destDomains);
+            gasLimit     = (est * 130n) / 100n;
+          } catch(_) {
+            gasLimit = BigInt(400_000 + group.length * 80_000);
+          }
+
+          const xBatch  = new ethers.Contract(CROSSCHAIN_BATCH_ADDRESS_2, XCHAIN_BATCH_ABI, signer);
+          const batchTx = await xBatch.batchBridge(activeUSDC(), recipients, amounts, destDomains, { gasLimit });
+          lastHash = batchTx.hash;
+          await batchTx.wait();
+          toast(`✓ Crosschain batch to ${chain.name} confirmed — ${group.length} recipient${group.length>1?'s':''}`, 'success');
+        } catch(bridgeErr) {
+          // Fallback: try ElligentBridge if Crosschain Batch reverts
+          const rej = bridgeErr.code===4001||(bridgeErr.message||'').includes('rejected');
+          if (rej) {
+            toast('Rejected by user','error');
+            continue;
+          }
+          toast(`Crosschain Batch failed for ${chain.name}, falling back to direct bridge...`,'warning');
+          const bridgeDeployed = window.__BRIDGE_ADDRESS__
+            && window.__BRIDGE_ADDRESS__ !== '0x0000000000000000000000000000000000000000';
+          for (const r of group) {
+            const toAddr = r._resolved || r.addr;
+            const amt    = toUsdc(r.amount);
+            try {
+              let tx;
+              if (bridgeDeployed) {
+                const bridgeAbi = ['function bridge(address,uint256,uint32,bytes32) returns (uint64)','function addressToBytes32(address) pure returns (bytes32)'];
+                const bridgeCtr = new ethers.Contract(window.__BRIDGE_ADDRESS__, bridgeAbi, signer);
+                const dest32    = await bridgeCtr.addressToBytes32(toAddr);
+                await usdcContract.approve(window.__BRIDGE_ADDRESS__, amt);
+                tx = await bridgeCtr.bridge(activeUSDC(), amt, chain.cctpDomain??0, dest32);
+              } else {
+                tx = await usdcContract.transfer(toAddr, amt);
+              }
+              lastHash = tx.hash;
+              await tx.wait();
+              toast(`✓ Bridged ${r.amount} USDC → ${shortAddr(toAddr)}`,'success');
+            } catch(fe) {
+              toast(`Bridge failed for ${shortAddr(toAddr)}: ${fe.shortMessage||fe.message}`,'error');
             }
-            lastHash = tx.hash;
-            await tx.wait();
-            toast(`✓ Bridged ${r.amount} ${tok} → ${shortAddr(toAddr)}`,'success');
-          }catch(bridgeErr){
-            const rej = bridgeErr.code===4001||(bridgeErr.message||'').includes('rejected');
-            toast(rej?'Rejected':`Bridge failed for ${shortAddr(toAddr)}: ${bridgeErr.shortMessage||bridgeErr.message}`,'error');
           }
         }
       }
@@ -6778,116 +6891,274 @@ function clearCompleted() {
 }
 
 // ══════════════════════════════════════════════════════════
-//  PAYMENT LINKS
+//  PAYMENT LINKS  —  Smart QR + Analytics
 // ══════════════════════════════════════════════════════════
+
+const PAY_BASE_URL = 'https://pay.elligente.xyz';
+
+// ── Smart URL builder ─────────────────────────────────────
+function buildPayLinkUrl(id) {
+  return PAY_BASE_URL + '/pay/' + id;
+}
+function buildInvoiceUrl(id) {
+  return PAY_BASE_URL + '/invoice/' + id;
+}
+
+// ── Real QR via qrcode.js ─────────────────────────────────
+function drawQRReal(containerId, text, size) {
+  size = size || 160;
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  el.innerHTML = '';
+  if (typeof QRCode === 'undefined') {
+    // fallback canvas stub
+    el.innerHTML = '<canvas width="'+size+'" height="'+size+'" style="background:#fff;border-radius:6px"></canvas>';
+    return;
+  }
+  try {
+    new QRCode(el, {
+      text: text || 'https://pay.elligente.xyz',
+      width: size,
+      height: size,
+      colorDark: '#0b0d12',
+      colorLight: '#ffffff',
+      correctLevel: QRCode.CorrectLevel.M
+    });
+    // Style the generated img/canvas
+    const img = el.querySelector('img');
+    if (img) img.style.cssText = 'border-radius:6px;display:block;width:'+size+'px;height:'+size+'px';
+    const cv  = el.querySelector('canvas');
+    if (cv)  cv.style.cssText  = 'border-radius:6px;display:block';
+  } catch(e) {
+    console.warn('QR generation error:', e);
+  }
+}
+
+// ── Download QR ───────────────────────────────────────────
+function downloadQRFromEl(containerId, filename) {
+  filename = filename || 'elligente-qr.png';
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  const canvas = el.querySelector('canvas');
+  const img    = el.querySelector('img');
+  if (canvas) {
+    const a = document.createElement('a');
+    a.href = canvas.toDataURL('image/png');
+    a.download = filename;
+    a.click();
+    toast('QR downloaded','success');
+  } else if (img) {
+    const a = document.createElement('a');
+    a.href = img.src;
+    a.download = filename;
+    a.click();
+    toast('QR downloaded','success');
+  } else {
+    toast('QR not ready yet','error');
+  }
+}
+
+// ── Analytics updater ─────────────────────────────────────
+function updatePlStats() {
+  const total     = payLinks.length;
+  const scans     = payLinks.reduce((s,l) => s + (l.scans||0), 0);
+  const paid      = payLinks.filter(l => l.status === 'Paid').length;
+  const collected = payLinks.filter(l => l.status === 'Paid')
+                            .reduce((s,l) => s + (parseFloat(l.amount)||0), 0);
+  const set = (id,v) => { const el=document.getElementById(id); if(el) el.textContent=v; };
+  set('pl-stat-total',     total);
+  set('pl-stat-scans',     scans);
+  set('pl-stat-paid',      paid);
+  set('pl-stat-collected', collected.toFixed(2)+' USDC');
+}
+
+// ── Expiry helpers ────────────────────────────────────────
+function plExpiresAt(expiry) {
+  if (!expiry || expiry === 'never') return null;
+  const map = { '24h': 24*60*60*1000, '7d': 7*24*60*60*1000, '30d': 30*24*60*60*1000 };
+  const ms = map[expiry];
+  if (!ms) return null;
+  return new Date(Date.now() + ms).toISOString();
+}
+function plIsExpired(link) {
+  if (!link.expiresAt) return false;
+  return new Date(link.expiresAt) < new Date();
+}
+
+// ── Create Payment Link ───────────────────────────────────
 function createPayLink() {
-  const amount  = parseFloat(document.getElementById('pl-amount')?.value)||0;
-  const label   = document.getElementById('pl-label')?.value.trim()||'Payment';
-  const addr    = document.getElementById('pl-addr')?.value.trim()||walletAddress||'0x0000000000000000000000000000000000000000';
-  const expiry  = document.getElementById('pl-expiry')?.value||'never';
-  if(amount<=0) { toast('Enter an amount','error'); return; }
-  const id      = 'PL-' + Date.now().toString(36).toUpperCase();
-  const baseUrl = window.location.origin + window.location.pathname;
-  const url     = `${baseUrl}?pay=${id}&amount=${amount}&to=${addr}&label=${encodeURIComponent(label)}`;
-  const link    = { id, label, amount, addr, expiry, uses:0, status:'Active', created:new Date().toISOString(), url };
+  const amount  = parseFloat(document.getElementById('pl-amount')?.value) || 0;
+  const label   = document.getElementById('pl-label')?.value.trim() || 'Payment';
+  const addr    = document.getElementById('pl-addr')?.value.trim() || walletAddress || '0x0000000000000000000000000000000000000000';
+  const expiry  = document.getElementById('pl-expiry')?.value || 'never';
+  if (amount <= 0) { toast('Enter an amount > 0','error'); return; }
+  if (addr && addr !== '0x0000000000000000000000000000000000000000' && !isAddr(addr)) {
+    toast('Invalid recipient address','error'); return;
+  }
+  const id        = 'pl-' + Date.now().toString(36);
+  const payUrl    = buildPayLinkUrl(id);
+  const expiresAt = plExpiresAt(expiry);
+  const link = {
+    id, label, amount,
+    addr:      addr,
+    recipient: addr,
+    token:     'USDC',
+    chain:     'Arc Testnet',
+    expiry,
+    expiresAt,
+    uses:      0,
+    scans:     0,
+    payments:  0,
+    status:    'Active',
+    created:   new Date().toISOString(),
+    url:       payUrl
+  };
   payLinks.unshift(link);
   Store.save('links', payLinks);
   currentPayLink = link;
   renderPayLinks();
-  drawQR(url);
-  document.getElementById('pl-preview').style.display='';
-  document.getElementById('pl-url-display').textContent = url;
-  toast(`Link ${id} created`,'success');
+  updatePlStats();
+  // Show QR preview
+  drawQRReal('pl-qr-container', payUrl, 160);
+  const preview = document.getElementById('pl-preview');
+  const urlDisp = document.getElementById('pl-url-display');
+  if (preview) preview.style.display = '';
+  if (urlDisp) urlDisp.textContent = payUrl;
+  // Update preview details
+  const plPrevAmt = document.getElementById('pl-prev-amount');
+  const plPrevRcp = document.getElementById('pl-prev-recipient');
+  const plPrevExp = document.getElementById('pl-prev-expiry');
+  if (plPrevAmt) plPrevAmt.textContent = amount + ' USDC';
+  if (plPrevRcp) plPrevRcp.textContent = shortAddr(addr);
+  if (plPrevExp) plPrevExp.textContent = expiry === 'never' ? 'Never' : expiry;
+  toast('Payment link ' + id + ' created','success');
 }
 
+// ── Legacy drawQR (kept for compatibility) ────────────────
 function drawQR(text) {
+  drawQRReal('pl-qr-container', text, 160);
   const canvas = document.getElementById('pl-qr-canvas');
-  if(!canvas) return;
-  const ctx = canvas.getContext('2d');
-  const size = canvas.width;
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0,0,size,size);
-  // Simple QR placeholder — real QR via qrcode.js would be used in production
-  const cells = 21, cellSize = size/cells;
-  ctx.fillStyle = '#000000';
-  for(let r=0;r<cells;r++) for(let c=0;c<cells;c++) {
-    // finder patterns corners
-    const inFinder = (r<7&&c<7)||(r<7&&c>cells-8)||(r>cells-8&&c<7);
-    const hash = ((r*31+c*17+text.length*7)&0xff);
-    if(inFinder || hash>128) ctx.fillRect(c*cellSize, r*cellSize, cellSize-0.5, cellSize-0.5);
+  if (canvas) {
+    // no-op: container used instead
   }
-  // Center URL text
-  ctx.fillStyle='rgba(255,255,255,.85)';ctx.fillRect(size*.3,size*.42,size*.4,size*.16);
-  ctx.fillStyle='#4f8ef7';ctx.font=`bold ${size*.07}px monospace`;ctx.textAlign='center';
-  ctx.fillText('ELLIGENTE', size/2, size*.53);
 }
 
+// ── Copy / Download ───────────────────────────────────────
 function copyPayLink() {
-  if(!currentPayLink) return;
-  navigator.clipboard.writeText(currentPayLink.url);
-  toast('Link copied!','success');
+  if (!currentPayLink) return;
+  navigator.clipboard.writeText(currentPayLink.url)
+    .then(() => toast('Link copied!','success'))
+    .catch(() => toast('Copy failed','error'));
 }
 function downloadQR() {
-  const canvas = document.getElementById('pl-qr-canvas');
-  if(!canvas) return;
-  const a=document.createElement('a'); a.href=canvas.toDataURL(); a.download='arc-pay-qr.png'; a.click();
-  toast('QR downloaded','success');
+  downloadQRFromEl('pl-qr-container', 'elligente-paylink-qr.png');
 }
+function plCopyLinkById(id) {
+  const l = payLinks.find(x => x.id === id);
+  if (!l) return;
+  navigator.clipboard.writeText(l.url)
+    .then(() => toast('Link copied!','success'))
+    .catch(() => toast('Copy failed','error'));
+}
+
+// ── Open payment landing ──────────────────────────────────
+function plShowQR(id) {
+  const l = payLinks.find(x => x.id === id);
+  if (!l) return;
+  currentPayLink = l;
+  // increment scans
+  l.scans = (l.scans||0) + 1;
+  Store.save('links', payLinks);
+  updatePlStats();
+  openPayLanding({
+    type:      'paylink',
+    id:        l.id,
+    label:     l.label,
+    amount:    l.amount,
+    token:     l.token || 'USDC',
+    recipient: l.addr || l.recipient,
+    expiry:    l.expiresAt ? new Date(l.expiresAt).toLocaleDateString() : (l.expiry === 'never' ? 'Never' : l.expiry),
+    status:    plIsExpired(l) ? 'Expired' : l.status,
+    url:       l.url
+  });
+}
+
+function plDisableLink(id) {
+  const l = payLinks.find(x => x.id === id);
+  if (!l) return;
+  l.status = l.status === 'Disabled' ? 'Active' : 'Disabled';
+  Store.save('links', payLinks);
+  renderPayLinks();
+  toast('Link ' + (l.status === 'Disabled' ? 'disabled' : 're-enabled'),'info');
+}
+
+function plPreviewUpdate() { /* no-op */ }
+
+function deactivateLink(id) {
+  payLinks = payLinks.filter(l => l.id !== id);
+  Store.save('links', payLinks);
+  renderPayLinks();
+  updatePlStats();
+  toast('Link removed','info');
+}
+
+// ── Render table ──────────────────────────────────────────
 function renderPayLinks() {
-  const tbody = document.getElementById('pl-tbody');
-  if(!tbody) return;
-  const empty  = document.getElementById('pl-empty');
+  const tbody   = document.getElementById('pl-tbody');
+  if (!tbody) return;
+  const empty   = document.getElementById('pl-empty');
   const countEl = document.getElementById('pl-count');
   const n = payLinks.length;
-  if(countEl) countEl.textContent = n + ' link' + (n !== 1 ? 's' : '');
-  if(!n){ tbody.innerHTML=''; if(empty) empty.style.display='flex'; return; }
-  if(empty) empty.style.display='none';
+  if (countEl) countEl.textContent = n + ' link' + (n !== 1 ? 's' : '');
+
+  // Auto-expire
+  payLinks.forEach(l => {
+    if (l.status === 'Active' && plIsExpired(l)) l.status = 'Expired';
+  });
+
+  if (!n) {
+    tbody.innerHTML = '';
+    if (empty) empty.style.display = 'flex';
+    updatePlStats();
+    return;
+  }
+  if (empty) empty.style.display = 'none';
+
+  const statusBadge = s => {
+    const map = {
+      'Active':   'active',
+      'Paid':     'active" style="background:rgba(79,142,247,.12);color:var(--blue);border-color:rgba(79,142,247,.25)',
+      'Expired':  'expired',
+      'Disabled': 'expired" style="background:rgba(96,104,128,.1);color:var(--muted2);border-color:rgba(96,104,128,.2)'
+    };
+    const cls = map[s] || 'expired';
+    return `<span class="pl-status-badge ${cls}"><span class="pl-dot"></span>${s}</span>`;
+  };
+
   tbody.innerHTML = payLinks.map(l => {
-    const isExpired = l.expiry !== 'never' && l.status !== 'Active';
-    const statusHTML = isExpired
-      ? `<span class="pl-status-badge expired"><span class="pl-dot"></span>Expired</span>`
-      : `<span class="pl-status-badge active"><span class="pl-dot"></span>Active</span>`;
-    const expiryLabel = l.expiry === 'never' ? 'Never' : l.expiry;
+    const expiryLabel = l.expiresAt
+      ? new Date(l.expiresAt).toLocaleDateString()
+      : (l.expiry === 'never' ? 'Never' : (l.expiry||'Never'));
     return `<tr>
       <td class="pl-lbl-cell">${l.label||'—'}</td>
       <td class="pl-amt-cell">${l.amount} USDC</td>
-      <td class="pl-addr-cell" title="${l.addr}">${shortAddr(l.addr)}</td>
-      <td style="color:var(--muted2)">${l.uses||0}</td>
+      <td class="pl-addr-cell" title="${l.addr||l.recipient||''}">${shortAddr(l.addr||l.recipient||'')}</td>
+      <td style="color:var(--muted2)">${l.scans||0} / ${l.payments||0}</td>
       <td style="font-size:9px;color:var(--muted2)">${expiryLabel}</td>
-      <td>${statusHTML}</td>
+      <td>${statusBadge(l.status)}</td>
       <td>
-        <div style="display:flex;gap:4px;align-items:center">
+        <div style="display:flex;gap:3px;align-items:center">
+          <button class="pl-act-btn teal-act" title="Open payment page" onclick="plShowQR('${l.id}')"><i class="ti ti-external-link"></i></button>
           <button class="pl-act-btn teal-act" title="Copy link" onclick="plCopyLinkById('${l.id}')"><i class="ti ti-copy"></i></button>
-          <button class="pl-act-btn" title="View QR" onclick="plShowQR('${l.id}')"><i class="ti ti-qrcode"></i></button>
+          <button class="pl-act-btn" title="${l.status==='Disabled'?'Re-enable':'Disable'}" onclick="plDisableLink('${l.id}')"><i class="ti ti-${l.status==='Disabled'?'toggle-right':'toggle-left'}"></i></button>
           <button class="pl-act-btn danger" title="Delete" onclick="deactivateLink('${l.id}')"><i class="ti ti-trash"></i></button>
         </div>
       </td>
     </tr>`;
   }).join('');
+  updatePlStats();
 }
-function plCopyLinkById(id) {
-  const l = payLinks.find(x => x.id === id);
-  if(!l) return;
-  navigator.clipboard.writeText(l.url).then(() => toast('Link copied!','success')).catch(() => toast('Copy failed','error'));
-}
-function plShowQR(id) {
-  const l = payLinks.find(x => x.id === id);
-  if(!l) return;
-  currentPayLink = l;
-  drawQR(l.url);
-  const preview = document.getElementById('pl-preview');
-  const urlDisp = document.getElementById('pl-url-display');
-  if(preview) preview.style.display='';
-  if(urlDisp) urlDisp.textContent = l.url;
-  preview?.scrollIntoView({behavior:'smooth',block:'nearest'});
-}
-function plPreviewUpdate() {
-  // No live preview needed beyond UI updates
-}
-function deactivateLink(id) {
-  payLinks = payLinks.filter(l=>l.id!==id);
-  Store.save('links',payLinks); renderPayLinks(); toast('Link removed','info');
-}
+
 
 // ══════════════════════════════════════════════════════════
 //  INVOICES
@@ -7033,9 +7304,13 @@ function invPreviewUpdate() {
 
   // Payment link
   const linkEl = document.getElementById('inv-prev-link');
-  const numSlug = num.toLowerCase().replace(/[^a-z0-9]/g,'-');
-  const payLink = 'pay.elligente.xyz/inv-' + numSlug;
+  const invoicePayUrl = buildInvoiceUrl(num);
+  const payLink = invoicePayUrl.replace('https://', '');
   if (linkEl) linkEl.textContent = payLink;
+  // Update live QR with real URL
+  if (typeof buildInvoiceUrl === 'function') {
+    setTimeout(() => drawQRReal('inv-qr-container', invoicePayUrl, 72), 50);
+  }
 
   // QR code
   const usdcFull = (typeof activeUSDC === 'function') ? activeUSDC() : '';
@@ -7052,56 +7327,12 @@ function invPreviewUpdate() {
 
 // ── Pure canvas QR-like pattern generator ─────────────────
 function invDrawQR(addr, num, amount, cur) {
-  const canvas = document.getElementById('inv-qr-canvas');
-  if (!canvas) return;
-  const ctx = canvas.getContext('2d');
-  const W = canvas.width, H = canvas.height;
-  ctx.clearRect(0, 0, W, H);
-  ctx.fillStyle = '#0d1117';
-  ctx.fillRect(0, 0, W, H);
-
-  // Deterministic seed from addr+num+amount
-  const seed = (addr + num + String(amount) + (cur||'')).split('').reduce((a,c) => (a<<5)-a+c.charCodeAt(0)|0, 0);
-  const rand = (n => { let s = Math.abs(seed) + n * 2654435761; s ^= s >> 16; s *= 0x45d9f3b; s ^= s >> 16; return (s >>> 0) / 0xffffffff; });
-
-  const cells = 17;
-  const cell  = Math.floor(W / cells);
-
-  // Draw finder patterns (3 corners)
-  const drawFinder = (ox, oy) => {
-    ctx.fillStyle = '#4f8ef7';
-    ctx.fillRect(ox*cell, oy*cell, 7*cell, 7*cell);
-    ctx.fillStyle = '#0d1117';
-    ctx.fillRect((ox+1)*cell, (oy+1)*cell, 5*cell, 5*cell);
-    ctx.fillStyle = '#4f8ef7';
-    ctx.fillRect((ox+2)*cell, (oy+2)*cell, 3*cell, 3*cell);
-  };
-  drawFinder(0, 0); drawFinder(10, 0); drawFinder(0, 10);
-
-  // Data cells
-  for (let r = 0; r < cells; r++) {
-    for (let c = 0; c < cells; c++) {
-      // Skip finder regions
-      if ((r < 8 && c < 8) || (r < 8 && c > 9) || (r > 9 && c < 8)) continue;
-      if (rand(r * cells + c) > 0.5) {
-        ctx.fillStyle = rand(r+c+100) > 0.3 ? '#4f8ef7' : '#a78bfa';
-        const margin = 0.5;
-        ctx.fillRect(c*cell+margin, r*cell+margin, cell-margin*2, cell-margin*2);
-      }
-    }
-  }
-
-  // Center amount overlay
-  ctx.fillStyle = 'rgba(13,17,23,.75)';
-  ctx.fillRect(W/2-16, H/2-7, 32, 14);
-  ctx.fillStyle = '#f59e0b';
-  ctx.font = 'bold 7px monospace';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(amount > 0 ? amount.toFixed(1) : '?', W/2, H/2);
+  // Generate real QR code for invoice payment URL
+  const invoiceUrl = buildInvoiceUrl(num || 'inv-001');
+  drawQRReal('inv-qr-container', invoiceUrl, 72);
+  // Also update the canvas for legacy compat
 }
 
-// ── Copy payment link ──────────────────────────────────────
 function invCopyLink() {
   const linkEl = document.getElementById('inv-prev-link');
   const link   = linkEl ? 'https://' + linkEl.textContent : 'https://pay.elligente.xyz/';
@@ -7111,10 +7342,46 @@ function invCopyLink() {
 function invCopyLinkById(id) {
   const inv = invoiceList.find(i => i.id === id);
   if (!inv) return;
-  const numSlug = inv.id.toLowerCase().replace(/[^a-z0-9]/g, '-');
-  const link = 'https://pay.elligente.xyz/inv-' + numSlug;
-  navigator.clipboard.writeText(link).then(() => toast('Link copied!', 'success')).catch(() => toast('Copy failed', 'error'));
+  const link = inv.payUrl || buildInvoiceUrl(inv.id);
+  navigator.clipboard.writeText(link).then(() => toast('Invoice link copied!', 'success')).catch(() => toast('Copy failed', 'error'));
 }
+
+function invCopyLink() {
+  const num = document.getElementById('inv-num')?.value.trim() || 'INV-001';
+  const link = buildInvoiceUrl(num);
+  navigator.clipboard.writeText(link).then(() => toast('Invoice link copied!', 'success')).catch(() => toast('Copy failed', 'error'));
+}
+
+function invOpenPayPage(id) {
+  const inv = invoiceList.find(i => i.id === id);
+  if (!inv) return;
+  // increment views
+  inv.views = (inv.views||0) + 1;
+  inv.scans = (inv.scans||0) + 1;
+  Store.save('invoices', invoiceList);
+  const isDue = inv.due && new Date(inv.due) < new Date();
+  openPayLanding({
+    type:      'invoice',
+    id:        inv.id,
+    label:     'Invoice ' + inv.id,
+    amount:    inv.total,
+    token:     inv.currency || 'USDC',
+    recipient: inv.toAddr || inv.recipient || '',
+    expiry:    inv.due || '—',
+    status:    inv.status,
+    url:       inv.payUrl || buildInvoiceUrl(inv.id)
+  });
+}
+
+function invDownloadQR(id) {
+  const inv = id ? invoiceList.find(i => i.id === id) : null;
+  downloadQRFromEl('inv-qr-container', 'invoice-' + (inv ? inv.id : 'qr') + '.png');
+}
+
+function updateInvPayStats() {
+  // update invoice analytics in detail views
+}
+
 
 // ── Create invoice ─────────────────────────────────────────
 function createInvoice() {
@@ -7153,6 +7420,12 @@ function createInvoice() {
     subtotal: sub, taxPct, taxAmt, total, due, currency: cur,
     lineItems,
     chainName,
+    token:     'USDC',
+    chain:     'Arc Testnet',
+    recipient: toAddr,
+    views:     0,
+    scans:     0,
+    payUrl:    buildInvoiceUrl(num),
     status: 'Outstanding',
     txHash: '',
     created: new Date().toISOString(),
@@ -7364,7 +7637,9 @@ function renderInvoices() {
       <td>
         <div style="display:flex;gap:3px;align-items:center" onclick="event.stopPropagation()">
           ${!isPaid && !isCancelled ? `<button class="btn primary" style="padding:2px 7px;font-size:8.5px" onclick="payInvoice('${inv.id}')"><i class="ti ti-coin"></i>Pay</button>` : ''}
+          <button class="btn" title="Open payment page" style="padding:2px 6px;font-size:9px;color:var(--teal)" onclick="invOpenPayPage('${inv.id}')"><i class="ti ti-external-link"></i></button>
           <button class="btn" title="Copy link" style="padding:2px 6px;font-size:9px" onclick="invCopyLinkById('${inv.id}')"><i class="ti ti-link"></i></button>
+          <button class="btn" title="Download QR" style="padding:2px 6px;font-size:9px" onclick="invDownloadQR('${inv.id}')"><i class="ti ti-qrcode"></i></button>
           ${inv.txHash ? `<a class="btn" href="https://testnet.arcscan.app/tx/${inv.txHash}" target="_blank" title="View on explorer" style="padding:2px 6px;font-size:9px;text-decoration:none"><i class="ti ti-external-link"></i></a>` : ''}
           <button class="btn" title="Delete" style="padding:2px 6px;font-size:9px;color:var(--red)" onclick="invDelete('${inv.id}')"><i class="ti ti-trash"></i></button>
         </div>
@@ -9016,6 +9291,245 @@ function openNetworkSelector() {
     list.appendChild(div);
   }
 }
+
+// ══════════════════════════════════════════════════════════
+//  PAYMENT LANDING — Smart QR Pay Modal
+// ══════════════════════════════════════════════════════════
+let _payLandingData = null;
+
+function openPayLanding(data) {
+  _payLandingData = data;
+  const set = (id,v) => { const el=document.getElementById(id); if(el) el.textContent=v||'—'; };
+  set('pml-amount',    data.amount);
+  set('pml-token',     data.token || 'USDC');
+  set('pml-token-row', data.token || 'USDC');
+  set('pml-label',     data.label || '—');
+  set('pml-recipient', shortAddr(data.recipient || ''));
+  set('pml-expiry',    data.expiry || '—');
+  set('pml-url',       data.url || '');
+
+  // Status badge
+  const statusEl = document.getElementById('pml-status');
+  if (statusEl) {
+    const smap = {
+      'Active':      'pay-status-active',
+      'Outstanding': 'pay-status-active',
+      'Paid':        'pay-status-paid',
+      'Expired':     'pay-status-expired',
+      'Overdue':     'pay-status-expired',
+      'Disabled':    'pay-status-disabled',
+      'Cancelled':   'pay-status-disabled',
+    };
+    const cls = smap[data.status] || 'pay-status-active';
+    statusEl.innerHTML = `<span class="pay-status-badge ${cls}">${data.status||'Active'}</span>`;
+  }
+
+  // Paid notice
+  const paidEl = document.getElementById('pml-paid-notice');
+  const payBtn = document.getElementById('pay-landing-btn');
+  const isPaid     = data.status === 'Paid';
+  const isDisabled = data.status === 'Disabled' || data.status === 'Cancelled';
+  const isExpired  = data.status === 'Expired';
+  if (paidEl)  paidEl.style.display  = isPaid ? '' : 'none';
+  if (payBtn) {
+    payBtn.disabled = isPaid || isDisabled || isExpired;
+    const btnContent = payBtn.querySelector('.pay-btn-content');
+    if (btnContent) {
+      if (isPaid)     btnContent.innerHTML = '<i class="ti ti-check-circle"></i> Already Paid';
+      else if (isDisabled) btnContent.innerHTML = '<i class="ti ti-ban"></i> Link Disabled';
+      else if (isExpired)  btnContent.innerHTML = '<i class="ti ti-clock-off"></i> Link Expired';
+      else            btnContent.innerHTML = '<i class="ti ti-wallet"></i> Pay with Wallet';
+    }
+  }
+
+  // QR
+  const qrEl = document.getElementById('pay-landing-qr');
+  if (qrEl) {
+    qrEl.innerHTML = '';
+    drawQRReal('pay-landing-qr', data.url, 160);
+  }
+
+  // Open modal
+  const overlay = document.getElementById('pay-landing-overlay');
+  if (overlay) { overlay.classList.add('open'); document.body.style.overflow='hidden'; }
+}
+
+function closePayLanding() {
+  const overlay = document.getElementById('pay-landing-overlay');
+  if (overlay) { overlay.classList.remove('open'); document.body.style.overflow=''; }
+  _payLandingData = null;
+}
+
+// Close on overlay click
+document.addEventListener('click', e => {
+  const overlay = document.getElementById('pay-landing-overlay');
+  if (overlay && e.target === overlay) closePayLanding();
+});
+
+async function payLandingExecute() {
+  const d = _payLandingData;
+  if (!d) return;
+  if (!walletAddress || !signer) {
+    toast('Connect your wallet first','error');
+    return;
+  }
+  const recipient = d.recipient;
+  const amount    = parseFloat(d.amount) || 0;
+  if (!isAddr(recipient)) { toast('Invalid recipient address','error'); return; }
+  if (amount <= 0)         { toast('Invalid amount','error'); return; }
+
+  // Ensure Arc Testnet
+  const arcChainId = 5042002;
+  if (activeChainId !== arcChainId) {
+    toast('Switching to Arc Testnet...','info');
+    try {
+      await window.ethereum.request({
+        method: 'wallet_switchEthereumChain',
+        params: [{ chainId: '0x4cef52' }]
+      });
+    } catch(e) {
+      toast('Please switch to Arc Testnet manually','error');
+      return;
+    }
+  }
+
+  const btn = document.getElementById('pay-landing-btn');
+  const btnContent = btn?.querySelector('.pay-btn-content');
+  if (btn) btn.disabled = true;
+  if (btnContent) btnContent.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i> Sending...';
+
+  try {
+    const usdcContract = new ethers.Contract(activeUSDC(), USDC_ABI, signer);
+    const amtBig = toUsdc(amount.toFixed(6));
+    toast(`Sending ${amount} USDC → ${shortAddr(recipient)}...`,'info');
+    const tx = await usdcContract.transfer(recipient, amtBig);
+    if (btnContent) btnContent.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i> Confirming...';
+    await tx.wait();
+
+    // Mark as paid
+    if (d.type === 'paylink') {
+      const l = payLinks.find(x => x.id === d.id);
+      if (l) {
+        l.status   = 'Paid';
+        l.payments = (l.payments||0) + 1;
+        l.paidTx   = tx.hash;
+        Store.save('links', payLinks);
+        renderPayLinks();
+        updatePlStats();
+      }
+    } else if (d.type === 'invoice') {
+      const inv = invoiceList.find(x => x.id === d.id);
+      if (inv) {
+        inv.status = 'Paid';
+        inv.txHash = tx.hash;
+        inv.paidOn = new Date().toISOString();
+        inv.timeline = inv.timeline || [];
+        inv.timeline.push({ event:'Paid via Payment Page', ts:new Date().toISOString(), detail:'Tx: '+tx.hash });
+        Store.save('invoices', invoiceList);
+        renderInvoices();
+        updateInvStats();
+      }
+    }
+
+    // Update modal
+    if (btnContent) btnContent.innerHTML = '<i class="ti ti-check-circle"></i> Payment Sent!';
+    const paidEl = document.getElementById('pml-paid-notice');
+    if (paidEl) paidEl.style.display = '';
+    toast('✓ Payment confirmed — Tx: ' + shortAddr(tx.hash),'success');
+    refreshBalance();
+  } catch(e) {
+    if (btnContent) btnContent.innerHTML = '<i class="ti ti-wallet"></i> Pay with Wallet';
+    if (btn) btn.disabled = false;
+    if (e.code === 4001) toast('Transaction rejected','error');
+    else toast('Payment failed: '+(e.shortMessage||e.message||''),'error');
+  }
+}
+
+function payLandingCopyLink() {
+  const url = document.getElementById('pml-url')?.textContent || '';
+  if (!url) { toast('No link available','error'); return; }
+  navigator.clipboard.writeText(url)
+    .then(() => toast('Link copied!','success'))
+    .catch(() => toast('Copy failed','error'));
+}
+
+function payLandingDownloadQR() {
+  downloadQRFromEl('pay-landing-qr', 'elligente-pay-qr.png');
+}
+
 </script>
+
+  <!-- ═══ SMART PAYMENT LANDING MODAL ═══ -->
+  <div class="pay-modal-overlay" id="pay-landing-overlay">
+    <div class="pay-modal" id="pay-landing-modal">
+      <div class="pay-modal-header">
+        <div class="pay-modal-brand">
+          <div class="pay-modal-logo"><i class="ti ti-link"></i></div>
+          <span class="pay-modal-brandname">ELLIGENTE PAY</span>
+        </div>
+        <button class="pay-modal-close" onclick="closePayLanding()"><i class="ti ti-x"></i></button>
+      </div>
+      <div class="pay-modal-body">
+        <!-- Amount -->
+        <div class="pay-modal-amount">
+          <span class="pay-modal-amount-num" id="pml-amount">0.00</span>
+          <span class="pay-modal-amount-cur" id="pml-token">USDC</span>
+          <div style="margin-top:6px">
+            <div class="pay-modal-network"><span style="width:5px;height:5px;border-radius:50%;background:var(--green);display:inline-block"></span> Arc Testnet</div>
+          </div>
+        </div>
+        <div class="pay-modal-divider"></div>
+        <!-- Details -->
+        <div class="pay-modal-details">
+          <div class="pay-modal-row">
+            <span class="pay-modal-row-label">Label / Invoice</span>
+            <span class="pay-modal-row-val" id="pml-label">—</span>
+          </div>
+          <div class="pay-modal-row">
+            <span class="pay-modal-row-label">Recipient</span>
+            <span class="pay-modal-row-val" id="pml-recipient">—</span>
+          </div>
+          <div class="pay-modal-row">
+            <span class="pay-modal-row-label">Network</span>
+            <span class="pay-modal-row-val" style="color:var(--blue)">Arc Testnet</span>
+          </div>
+          <div class="pay-modal-row">
+            <span class="pay-modal-row-label">Token</span>
+            <span class="pay-modal-row-val" style="color:var(--teal)" id="pml-token-row">USDC</span>
+          </div>
+          <div class="pay-modal-row">
+            <span class="pay-modal-row-label">Status</span>
+            <span id="pml-status"></span>
+          </div>
+          <div class="pay-modal-row" id="pml-expiry-row">
+            <span class="pay-modal-row-label">Expires / Due</span>
+            <span class="pay-modal-row-val" id="pml-expiry">—</span>
+          </div>
+        </div>
+        <div class="pay-modal-divider"></div>
+        <!-- QR -->
+        <div class="pay-modal-qr-section">
+          <div class="pay-modal-qr-label">Scan to pay</div>
+          <div class="pay-modal-qr-wrap">
+            <div id="pay-landing-qr" style="width:160px;height:160px"></div>
+          </div>
+          <div class="pay-modal-url" id="pml-url"></div>
+        </div>
+        <!-- Pay Button -->
+        <button class="pay-btn" id="pay-landing-btn" onclick="payLandingExecute()">
+          <span class="pay-btn-bg"></span>
+          <span class="pay-btn-content"><i class="ti ti-wallet"></i> Pay with Wallet</span>
+        </button>
+        <div class="pay-btn-actions">
+          <button class="pay-btn-sec pay-btn-copy" onclick="payLandingCopyLink()"><i class="ti ti-copy"></i> Copy Link</button>
+          <button class="pay-btn-sec pay-btn-dl" onclick="payLandingDownloadQR()"><i class="ti ti-download"></i> Save QR</button>
+        </div>
+        <div id="pml-paid-notice" style="display:none;margin-top:12px;padding:10px;background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.25);border-radius:8px;text-align:center;font-size:10px;color:var(--green)">
+          <i class="ti ti-check-circle" style="font-size:14px;display:block;margin-bottom:4px"></i>
+          This payment has already been completed.
+        </div>
+      </div>
+    </div>
+  </div>
 </body>
 </html>
