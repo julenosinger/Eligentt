@@ -2160,6 +2160,511 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
 @media(max-width:900px){ .sa-body{flex-direction:column} .sa-left{width:100%} }
 </style>
 
+<style>
+/* Premium Web3 Invoicing Dashboard */
+.piv-container { display:flex; flex-direction:column; gap:16px; background:#0f121a; padding:24px; border-radius:12px; border:1px solid rgba(79,142,247,0.15); box-shadow:0 12px 32px rgba(0,0,0,0.5); font-family:'JetBrains Mono', monospace; position:relative; overflow:hidden; }
+.piv-container::before { content:''; position:absolute; top:-100px; right:-100px; width:300px; height:300px; background:radial-gradient(circle, rgba(79,142,247,0.1) 0%, transparent 70%); pointer-events:none; }
+.piv-header { display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:16px; z-index:1; }
+.piv-hero { display:flex; flex-direction:column; align-items:center; justify-content:center; padding:32px 16px; background:linear-gradient(180deg, rgba(255,255,255,0.03) 0%, rgba(0,0,0,0) 100%); border-radius:10px; border:1px solid rgba(255,255,255,0.05); margin:8px 0; }
+.piv-hero-amount { font-size:42px; font-weight:800; color:var(--text); letter-spacing:-1px; text-shadow:0 4px 16px rgba(0,0,0,0.4); margin-bottom:8px; line-height:1; }
+.piv-hero-status { display:inline-flex; align-items:center; gap:6px; padding:6px 14px; border-radius:20px; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:1px; }
+.piv-hero-status.Outstanding { background:rgba(245,158,11,0.1); color:var(--yellow); border:1px solid rgba(245,158,11,0.3); box-shadow:0 0 12px rgba(245,158,11,0.2); }
+.piv-hero-status.Paid { background:rgba(34,197,94,0.1); color:var(--green); border:1px solid rgba(34,197,94,0.3); box-shadow:0 0 12px rgba(34,197,94,0.2); }
+.piv-hero-status.Overdue { background:rgba(239,68,68,0.1); color:var(--red); border:1px solid rgba(239,68,68,0.3); box-shadow:0 0 12px rgba(239,68,68,0.2); }
+.piv-progress { display:flex; align-items:center; justify-content:space-between; margin:16px 0 24px; position:relative; }
+.piv-progress::before { content:''; position:absolute; top:50%; left:0; right:0; height:2px; background:rgba(255,255,255,0.05); transform:translateY(-50%); z-index:0; }
+.piv-prog-fill { position:absolute; top:50%; left:0; height:2px; background:linear-gradient(90deg, var(--blue), var(--teal)); transform:translateY(-50%); z-index:0; transition:width 0.5s ease; }
+.piv-step { display:flex; flex-direction:column; align-items:center; gap:8px; z-index:1; position:relative; }
+.piv-step-dot { width:16px; height:16px; border-radius:50%; background:var(--card); border:2px solid var(--border2); transition:all 0.3s ease; }
+.piv-step.active .piv-step-dot { background:var(--blue); border-color:var(--blue); box-shadow:0 0 12px var(--blue); animation:piv-pulse 2s infinite; }
+.piv-step.done .piv-step-dot { background:var(--teal); border-color:var(--teal); }
+.piv-step-label { font-size:9.5px; color:var(--muted2); font-weight:600; text-transform:uppercase; letter-spacing:0.5px; }
+.piv-step.active .piv-step-label, .piv-step.done .piv-step-label { color:var(--text); }
+@keyframes piv-pulse { 0% { box-shadow: 0 0 0 0 rgba(79,142,247,0.4); } 70% { box-shadow: 0 0 0 10px rgba(79,142,247,0); } 100% { box-shadow: 0 0 0 0 rgba(79,142,247,0); } }
+
+.piv-grid { display:grid; grid-template-columns:1fr 340px; gap:20px; }
+@media (max-width:900px) { .piv-grid { grid-template-columns:1fr; } }
+.piv-col-left { display:flex; flex-direction:column; gap:16px; }
+.piv-col-right { display:flex; flex-direction:column; gap:16px; }
+
+.piv-card { background:rgba(22,26,36,0.6); border:1px solid rgba(255,255,255,0.06); border-radius:10px; padding:16px; backdrop-filter:blur(10px); transition:transform 0.2s, box-shadow 0.2s; }
+.piv-card:hover { transform:translateY(-2px); box-shadow:0 8px 24px rgba(0,0,0,0.4); border-color:rgba(255,255,255,0.1); }
+.piv-card-title { font-size:10px; font-weight:700; color:var(--muted2); text-transform:uppercase; letter-spacing:1px; margin-bottom:12px; display:flex; align-items:center; gap:6px; }
+.piv-card-title i { font-size:12px; color:var(--blue); }
+
+.piv-client-profile { display:flex; align-items:center; gap:12px; margin-bottom:16px; }
+.piv-avatar { width:48px; height:48px; border-radius:50%; background:linear-gradient(135deg, var(--blue), var(--purple)); display:flex; align-items:center; justify-content:center; font-size:20px; font-weight:800; color:#fff; box-shadow:0 4px 12px rgba(0,0,0,0.3); }
+.piv-client-name { font-size:16px; font-weight:700; color:var(--text); margin-bottom:2px; }
+.piv-client-wallet { font-size:10px; color:var(--blue); font-family:monospace; background:rgba(79,142,247,0.1); padding:2px 6px; border-radius:4px; }
+.piv-badge { display:inline-flex; align-items:center; gap:4px; padding:3px 8px; border-radius:4px; font-size:9px; font-weight:600; }
+.piv-badge-green { background:rgba(34,197,94,0.1); color:var(--green); border:1px solid rgba(34,197,94,0.2); }
+
+.piv-score-circ { width:64px; height:64px; border-radius:50%; border:4px solid var(--border2); display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:800; position:relative; }
+.piv-score-circ.high { border-color:var(--green); color:var(--green); box-shadow:0 0 16px rgba(34,197,94,0.2); }
+.piv-score-circ.med { border-color:var(--yellow); color:var(--yellow); box-shadow:0 0 16px rgba(245,158,11,0.2); }
+
+.piv-breakdown-row { display:flex; justify-content:space-between; padding:6px 0; font-size:11px; color:var(--muted2); border-bottom:1px solid rgba(255,255,255,0.03); }
+.piv-breakdown-row:last-child { border-bottom:none; }
+.piv-breakdown-row.total { font-weight:800; color:var(--text); font-size:13px; border-top:1px solid rgba(255,255,255,0.1); padding-top:10px; margin-top:4px; }
+
+.piv-timeline-item { display:flex; gap:12px; margin-bottom:12px; position:relative; }
+.piv-timeline-item::before { content:''; position:absolute; left:7px; top:16px; bottom:-12px; width:1px; background:rgba(255,255,255,0.1); }
+.piv-timeline-item:last-child::before { display:none; }
+.piv-timeline-icon { width:16px; height:16px; border-radius:50%; background:var(--card); border:2px solid var(--blue); display:flex; align-items:center; justify-content:center; font-size:8px; color:var(--blue); z-index:1; margin-top:2px; }
+.piv-timeline-icon.done { background:var(--blue); color:#fff; box-shadow:0 0 8px var(--blue); }
+.piv-timeline-content { flex:1; padding-bottom:4px; }
+.piv-timeline-title { font-size:11px; font-weight:700; color:var(--text); }
+.piv-timeline-ts { font-size:9px; color:var(--muted2); margin-top:2px; }
+
+.piv-qr-box { background:#fff; padding:12px; border-radius:8px; display:inline-block; margin-bottom:16px; box-shadow:0 8px 24px rgba(0,0,0,0.5); }
+.piv-pay-btn { display:flex; align-items:center; justify-content:center; gap:8px; width:100%; padding:14px; background:linear-gradient(135deg, var(--blue), var(--purple)); border:none; border-radius:8px; color:#fff; font-size:14px; font-weight:800; cursor:pointer; transition:all 0.2s; box-shadow:0 4px 16px rgba(79,142,247,0.3); font-family:inherit; }
+.piv-pay-btn:hover { transform:translateY(-2px); box-shadow:0 8px 24px rgba(79,142,247,0.5); filter:brightness(1.1); }
+.piv-action-row { display:flex; gap:8px; margin-top:12px; }
+.piv-action-btn { flex:1; display:flex; align-items:center; justify-content:center; gap:6px; padding:8px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:6px; color:var(--text); font-size:10px; font-weight:600; cursor:pointer; transition:all 0.2s; font-family:inherit; }
+.piv-action-btn:hover { background:rgba(255,255,255,0.1); border-color:var(--blue); color:var(--blue); }
+
+@media print {
+  body * { visibility:hidden; }
+  .piv-container, .piv-container * { visibility:visible; }
+  .piv-container { position:absolute; left:0; top:0; width:100%; background:#fff !important; color:#000 !important; box-shadow:none !important; border:none !important; }
+  .piv-card { background:#fff !important; border:1px solid #ccc !important; box-shadow:none !important; color:#000 !important; }
+  .piv-card-title, .piv-timeline-title, .piv-breakdown-row { color:#000 !important; }
+  .piv-hero-amount { color:#000 !important; text-shadow:none !important; }
+  .piv-pay-btn, .piv-action-row { display:none !important; }
+  .piv-header .btn { display:none !important; }
+}
+</style>
+
+<style>
+/* ═══════════════════════════════════════════════════════════════
+   PREMIUM INVOICE DASHBOARD  —  Enterprise Web3 Fintech Design
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── Container ──────────────────────────────────────────────── */
+.piv-container {
+  display:flex; flex-direction:column; gap:0;
+  background:linear-gradient(145deg,#0b0e18 0%,#0d1020 50%,#090c15 100%);
+  font-family:'JetBrains Mono',monospace; position:relative; overflow:hidden;
+}
+.piv-container::before {
+  content:''; position:absolute; top:-120px; right:-120px; width:400px; height:400px;
+  background:radial-gradient(circle,rgba(79,142,247,.08) 0%,transparent 70%);
+  pointer-events:none; z-index:0;
+}
+.piv-container::after {
+  content:''; position:absolute; bottom:-80px; left:-80px; width:300px; height:300px;
+  background:radial-gradient(circle,rgba(45,212,191,.05) 0%,transparent 70%);
+  pointer-events:none; z-index:0;
+}
+
+/* ── Top header bar ─────────────────────────────────────────── */
+.piv-topbar {
+  display:flex; align-items:center; gap:10px; padding:10px 20px 0;
+  border-bottom:1px solid rgba(255,255,255,.05); position:relative; z-index:2;
+  flex-wrap:wrap;
+}
+.piv-back-btn {
+  display:flex; align-items:center; gap:5px; background:none; border:none;
+  color:var(--muted2); font-size:10px; font-family:inherit; cursor:pointer;
+  padding:6px 10px; border-radius:5px; transition:.15s;
+}
+.piv-back-btn:hover { color:var(--text); background:rgba(255,255,255,.05); }
+.piv-inv-id {
+  font-size:18px; font-weight:800; color:var(--text); letter-spacing:-.3px;
+  display:flex; align-items:center; gap:8px;
+}
+.piv-copy-id {
+  background:none; border:none; color:var(--muted2); cursor:pointer;
+  font-size:11px; padding:2px 4px; border-radius:3px; transition:.12s;
+}
+.piv-copy-id:hover { color:var(--blue); }
+.piv-status-badge {
+  display:inline-flex; align-items:center; gap:5px;
+  padding:4px 10px; border-radius:20px; font-size:9px;
+  font-weight:700; text-transform:uppercase; letter-spacing:.8px;
+}
+.piv-status-badge.Outstanding {
+  background:rgba(245,158,11,.1); color:var(--yellow);
+  border:1px solid rgba(245,158,11,.3);
+  box-shadow:0 0 12px rgba(245,158,11,.15);
+}
+.piv-status-badge.Paid {
+  background:rgba(34,197,94,.1); color:var(--green);
+  border:1px solid rgba(34,197,94,.3);
+  box-shadow:0 0 12px rgba(34,197,94,.15);
+}
+.piv-status-badge.Overdue {
+  background:rgba(239,68,68,.1); color:var(--red);
+  border:1px solid rgba(239,68,68,.3);
+  box-shadow:0 0 12px rgba(239,68,68,.15);
+}
+.piv-status-badge.Pending {
+  background:rgba(167,139,250,.1); color:var(--purple);
+  border:1px solid rgba(167,139,250,.3);
+}
+.piv-status-badge.Cancelled {
+  background:rgba(148,163,184,.1); color:var(--muted);
+  border:1px solid rgba(148,163,184,.2);
+}
+.piv-net-badge {
+  display:inline-flex; align-items:center; gap:4px;
+  padding:4px 9px; border-radius:20px; font-size:9px; font-weight:600;
+  background:rgba(79,142,247,.08); color:var(--blue);
+  border:1px solid rgba(79,142,247,.2);
+}
+.piv-net-badge .dot { width:5px; height:5px; border-radius:50%; background:var(--blue); }
+.piv-token-badge {
+  display:inline-flex; align-items:center; gap:4px;
+  padding:4px 9px; border-radius:20px; font-size:9px; font-weight:700;
+  background:rgba(45,212,191,.08); color:var(--teal);
+  border:1px solid rgba(45,212,191,.2);
+}
+.piv-topbar-actions { margin-left:auto; display:flex; gap:8px; }
+
+/* ── Hero ────────────────────────────────────────────────────── */
+.piv-hero {
+  padding:24px 20px 20px; position:relative; z-index:1;
+  display:flex; align-items:flex-end; gap:24px; flex-wrap:wrap;
+}
+.piv-hero-left { flex:1; min-width:200px; }
+.piv-hero-lbl { font-size:9px; font-weight:600; color:var(--muted2); text-transform:uppercase; letter-spacing:.8px; margin-bottom:6px; }
+.piv-hero-amount {
+  font-size:38px; font-weight:900; color:var(--text); letter-spacing:-2px; line-height:1;
+  text-shadow:0 4px 20px rgba(0,0,0,.5); margin-bottom:8px;
+}
+.piv-hero-amount span { color:var(--blue); }
+.piv-hero-due { font-size:10px; color:var(--muted2); display:flex; align-items:center; gap:6px; }
+.piv-hero-due .countdown { color:var(--yellow); font-weight:700; }
+.piv-hero-due .countdown.overdue { color:var(--red); }
+.piv-hero-right { display:flex; flex-direction:column; gap:8px; align-items:flex-end; }
+
+/* ── Progress tracker ───────────────────────────────────────── */
+.piv-progress-wrap {
+  padding:0 20px 20px; position:relative; z-index:1;
+}
+.piv-progress-label {
+  font-size:9px; font-weight:700; color:var(--muted2); text-transform:uppercase;
+  letter-spacing:.8px; margin-bottom:14px;
+}
+.piv-progress {
+  display:flex; align-items:center; position:relative;
+}
+.piv-progress-track {
+  position:absolute; top:7px; left:7px; right:7px; height:2px;
+  background:rgba(255,255,255,.05); z-index:0;
+}
+.piv-progress-fill {
+  position:absolute; top:0; left:0; height:100%;
+  background:linear-gradient(90deg,var(--blue),var(--teal));
+  transition:width .5s cubic-bezier(.4,0,.2,1);
+}
+.piv-step {
+  display:flex; flex-direction:column; align-items:center; gap:8px;
+  z-index:1; position:relative; flex:1;
+}
+.piv-step-dot {
+  width:16px; height:16px; border-radius:50%;
+  background:rgba(16,18,26,.9); border:2px solid rgba(255,255,255,.15);
+  transition:all .3s ease; position:relative;
+}
+.piv-step.done .piv-step-dot {
+  background:var(--teal); border-color:var(--teal);
+  box-shadow:0 0 8px rgba(45,212,191,.4);
+}
+.piv-step.done .piv-step-dot::after {
+  content:'\2713'; position:absolute; inset:0; display:flex;
+  align-items:center; justify-content:center;
+  font-size:8px; color:#fff; font-weight:800;
+}
+.piv-step.active .piv-step-dot {
+  background:var(--blue); border-color:var(--blue);
+  box-shadow:0 0 0 0 rgba(79,142,247,.4);
+  animation:piv-pulse 2s infinite;
+}
+.piv-step-label {
+  font-size:8.5px; color:var(--muted2); font-weight:600;
+  text-transform:uppercase; letter-spacing:.4px; white-space:nowrap;
+  text-align:center;
+}
+.piv-step.done .piv-step-label { color:var(--teal); }
+.piv-step.active .piv-step-label { color:var(--blue); }
+@keyframes piv-pulse {
+  0%   { box-shadow:0 0 0 0 rgba(79,142,247,.5); }
+  50%  { box-shadow:0 0 0 8px rgba(79,142,247,0); }
+  100% { box-shadow:0 0 0 0 rgba(79,142,247,0); }
+}
+
+/* ── Main grid ──────────────────────────────────────────────── */
+.piv-grid {
+  display:grid; grid-template-columns:1fr 320px;
+  gap:16px; padding:0 20px 20px; position:relative; z-index:1;
+}
+@media(max-width:900px) {
+  .piv-grid { grid-template-columns:1fr; }
+  .piv-col-right { order:-1; }
+}
+.piv-col-left { display:flex; flex-direction:column; gap:12px; }
+.piv-col-right { display:flex; flex-direction:column; gap:12px; }
+
+/* ── Cards ──────────────────────────────────────────────────── */
+.piv-card {
+  background:rgba(16,18,28,.8); border:1px solid rgba(255,255,255,.06);
+  border-radius:10px; padding:16px;
+  backdrop-filter:blur(8px);
+  transition:transform .2s, box-shadow .2s, border-color .2s;
+}
+.piv-card:hover {
+  transform:translateY(-1px);
+  box-shadow:0 8px 24px rgba(0,0,0,.4);
+  border-color:rgba(255,255,255,.09);
+}
+.piv-card-title {
+  font-size:9.5px; font-weight:700; color:var(--muted2);
+  text-transform:uppercase; letter-spacing:.8px; margin-bottom:14px;
+  display:flex; align-items:center; gap:6px;
+}
+.piv-card-title i { font-size:13px; }
+
+/* ── Client profile ─────────────────────────────────────────── */
+.piv-client-row { display:flex; align-items:center; gap:12px; margin-bottom:14px; }
+.piv-avatar {
+  width:48px; height:48px; border-radius:50%; flex-shrink:0;
+  background:linear-gradient(135deg,var(--blue),var(--purple));
+  display:flex; align-items:center; justify-content:center;
+  font-size:18px; font-weight:800; color:#fff;
+  box-shadow:0 4px 16px rgba(0,0,0,.3);
+  border:2px solid rgba(79,142,247,.3);
+}
+.piv-client-name { font-size:15px; font-weight:700; color:var(--text); margin-bottom:3px; }
+.piv-client-addr {
+  font-size:10px; color:var(--blue); font-family:monospace;
+  background:rgba(79,142,247,.08); padding:2px 7px;
+  border-radius:4px; display:inline-block;
+}
+.piv-badge {
+  display:inline-flex; align-items:center; gap:4px;
+  padding:3px 7px; border-radius:4px; font-size:8.5px; font-weight:600;
+}
+.piv-badge-green { background:rgba(34,197,94,.1); color:var(--green); border:1px solid rgba(34,197,94,.2); }
+.piv-badge-blue  { background:rgba(79,142,247,.1); color:var(--blue); border:1px solid rgba(79,142,247,.2); }
+.piv-client-stats { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:12px; }
+.piv-stat-box {
+  background:rgba(0,0,0,.2); border:1px solid rgba(255,255,255,.05);
+  border-radius:6px; padding:8px; text-align:center;
+}
+.piv-stat-lbl { font-size:7.5px; color:var(--muted2); text-transform:uppercase; letter-spacing:.5px; margin-bottom:3px; }
+.piv-stat-val { font-size:12px; font-weight:800; color:var(--text); }
+.piv-stat-val.green { color:var(--green); }
+.piv-stat-val.blue  { color:var(--blue); }
+
+/* ── Payment score ──────────────────────────────────────────── */
+.piv-score-row { display:flex; align-items:center; gap:20px; }
+.piv-score-circle-wrap { position:relative; width:80px; height:80px; flex-shrink:0; }
+.piv-score-svg { transform:rotate(-90deg); }
+.piv-score-bg { fill:none; stroke:rgba(255,255,255,.07); stroke-width:7; }
+.piv-score-arc {
+  fill:none; stroke-width:7; stroke-linecap:round;
+  transition:stroke-dashoffset .8s cubic-bezier(.4,0,.2,1);
+}
+.piv-score-arc.high { stroke:var(--green); filter:drop-shadow(0 0 4px rgba(34,197,94,.4)); }
+.piv-score-arc.med  { stroke:var(--yellow); filter:drop-shadow(0 0 4px rgba(245,158,11,.4)); }
+.piv-score-arc.low  { stroke:var(--red); filter:drop-shadow(0 0 4px rgba(239,68,68,.4)); }
+.piv-score-pct {
+  position:absolute; inset:0; display:flex; align-items:center;
+  justify-content:center; font-size:14px; font-weight:800;
+}
+.piv-score-pct.high { color:var(--green); }
+.piv-score-pct.med  { color:var(--yellow); }
+.piv-score-info { flex:1; display:flex; flex-direction:column; gap:10px; }
+.piv-score-item { display:flex; flex-direction:column; gap:2px; }
+.piv-score-item-lbl { font-size:8px; text-transform:uppercase; letter-spacing:.5px; color:var(--muted2); }
+.piv-score-item-val { font-size:11px; font-weight:700; color:var(--text); }
+.piv-score-item-val.green  { color:var(--green); }
+.piv-score-item-val.yellow { color:var(--yellow); }
+.piv-score-item-val.red    { color:var(--red); }
+
+/* ── Breakdown ─────────────────────────────────────────────── */
+.piv-breakdown-row {
+  display:flex; justify-content:space-between; align-items:center;
+  padding:7px 0; font-size:10.5px; color:var(--muted2);
+  border-bottom:1px solid rgba(255,255,255,.03);
+}
+.piv-breakdown-row:last-child { border-bottom:none; }
+.piv-breakdown-row.total {
+  font-weight:800; color:var(--text); font-size:14px;
+  border-top:1px solid rgba(255,255,255,.08); padding-top:10px;
+  margin-top:4px; border-bottom:none;
+}
+.piv-breakdown-row .val-highlight { color:var(--yellow); font-weight:800; }
+.piv-breakdown-row .val-paid { color:var(--green); }
+.piv-breakdown-row .val-due  { color:var(--red); font-weight:800; }
+
+/* ── Timeline ─────────────────────────────────────────────── */
+.piv-tl { display:flex; flex-direction:column; gap:0; }
+.piv-tl-item {
+  display:flex; gap:12px; position:relative; padding-bottom:14px;
+}
+.piv-tl-item:last-child { padding-bottom:0; }
+.piv-tl-item::before {
+  content:''; position:absolute; left:7px; top:18px; bottom:0;
+  width:2px; background:rgba(255,255,255,.07);
+}
+.piv-tl-item:last-child::before { display:none; }
+.piv-tl-dot {
+  width:16px; height:16px; border-radius:50%; flex-shrink:0;
+  display:flex; align-items:center; justify-content:center;
+  font-size:7px; margin-top:2px; z-index:1; position:relative;
+  background:rgba(16,18,26,.9); border:2px solid rgba(255,255,255,.15);
+  color:var(--muted2);
+}
+.piv-tl-dot.done {
+  background:rgba(45,212,191,.15); border-color:var(--teal); color:var(--teal);
+  box-shadow:0 0 6px rgba(45,212,191,.25);
+}
+.piv-tl-dot.active {
+  background:rgba(245,158,11,.15); border-color:var(--yellow); color:var(--yellow);
+  animation:piv-pulse-y 2s infinite;
+}
+@keyframes piv-pulse-y {
+  0%,100% { box-shadow:0 0 0 0 rgba(245,158,11,.4); }
+  50%      { box-shadow:0 0 0 6px rgba(245,158,11,0); }
+}
+.piv-tl-body { flex:1; min-width:0; }
+.piv-tl-title {
+  font-size:10.5px; font-weight:700; color:var(--text); margin-bottom:3px;
+  display:flex; align-items:center; gap:6px;
+}
+.piv-tl-channel {
+  font-size:8px; padding:1px 6px; border-radius:3px; font-weight:600;
+  background:rgba(79,142,247,.1); color:var(--blue);
+  border:1px solid rgba(79,142,247,.2);
+}
+.piv-tl-ts { font-size:8.5px; color:var(--muted2); }
+.piv-tl-detail { font-size:9px; color:var(--muted2); margin-top:2px; }
+
+/* ── Right panel: Pay Invoice ───────────────────────────────── */
+.piv-pay-module {
+  background:rgba(10,14,24,.9); border:1px solid rgba(79,142,247,.15);
+  border-radius:12px; padding:20px; text-align:center;
+  box-shadow:0 0 40px rgba(79,142,247,.06), inset 0 1px 0 rgba(255,255,255,.04);
+}
+.piv-pay-module-title {
+  font-size:9px; font-weight:700; color:var(--muted2);
+  text-transform:uppercase; letter-spacing:.8px; margin-bottom:14px;
+}
+.piv-qr-outer {
+  display:flex; align-items:center; justify-content:center; margin-bottom:14px;
+}
+.piv-qr-wrap {
+  background:#fff; padding:10px; border-radius:10px;
+  box-shadow:0 8px 32px rgba(0,0,0,.6), 0 0 0 1px rgba(79,142,247,.2);
+  display:inline-block; position:relative;
+}
+.piv-qr-badge {
+  position:absolute; bottom:-8px; left:50%; transform:translateX(-50%);
+  background:var(--blue); color:#fff; font-size:7px; font-weight:700;
+  padding:2px 8px; border-radius:10px; white-space:nowrap;
+  box-shadow:0 2px 8px rgba(79,142,247,.4);
+}
+.piv-pay-info { text-align:left; margin-bottom:16px; }
+.piv-pay-info-row {
+  display:flex; justify-content:space-between; align-items:center;
+  padding:5px 0; font-size:10px;
+  border-bottom:1px solid rgba(255,255,255,.04);
+}
+.piv-pay-info-row:last-child { border-bottom:none; }
+.piv-pay-info-row .lbl { color:var(--muted2); }
+.piv-pay-info-row .val { color:var(--text); font-weight:600; }
+.piv-pay-info-row .val.mono { font-family:monospace; font-size:9.5px; color:var(--blue); }
+.piv-pay-info-row .val-copy {
+  display:flex; align-items:center; gap:4px; cursor:pointer; transition:.12s;
+}
+.piv-pay-info-row .val-copy:hover { color:var(--blue); }
+.piv-pay-btn {
+  display:flex; align-items:center; justify-content:center; gap:8px;
+  width:100%; padding:13px; margin-bottom:10px;
+  background:linear-gradient(135deg,#1d4ed8,#3b82f6,#0ea5e9);
+  background-size:200%;
+  animation:plBtnShift 4s ease infinite;
+  border:none; border-radius:9px; color:#fff;
+  font-size:13px; font-weight:800; cursor:pointer;
+  transition:all .2s; font-family:inherit;
+  box-shadow:0 4px 20px rgba(79,142,247,.35);
+}
+.piv-pay-btn:hover { transform:translateY(-2px); box-shadow:0 8px 28px rgba(79,142,247,.5); }
+.piv-pay-btn:disabled { opacity:.6; transform:none; cursor:not-allowed; animation:none; background:#334155; }
+.piv-paid-banner {
+  display:flex; align-items:center; justify-content:center; gap:8px;
+  padding:13px; background:rgba(34,197,94,.1); border:1px solid rgba(34,197,94,.3);
+  border-radius:9px; color:var(--green); font-weight:800; font-size:13px;
+  margin-bottom:10px;
+}
+.piv-action-grid {
+  display:grid; grid-template-columns:1fr 1fr; gap:7px; margin-bottom:12px;
+}
+.piv-action-btn {
+  display:flex; align-items:center; justify-content:center; gap:5px;
+  padding:8px 6px; background:rgba(255,255,255,.04);
+  border:1px solid rgba(255,255,255,.09); border-radius:7px;
+  color:var(--muted2); font-size:9.5px; font-weight:600;
+  cursor:pointer; transition:.15s; font-family:inherit;
+}
+.piv-action-btn:hover { background:rgba(79,142,247,.07); border-color:rgba(79,142,247,.25); color:var(--blue); }
+
+/* ── Security badges ────────────────────────────────────────── */
+.piv-trust-grid { display:flex; flex-direction:column; gap:7px; }
+.piv-trust-item {
+  display:flex; align-items:center; gap:10px; padding:9px 11px;
+  border-radius:8px; border:1px solid; transition:.15s;
+}
+.piv-trust-item:hover { transform:translateX(2px); }
+.piv-trust-item.green { background:rgba(34,197,94,.06); border-color:rgba(34,197,94,.2); }
+.piv-trust-item.blue  { background:rgba(79,142,247,.06); border-color:rgba(79,142,247,.2); }
+.piv-trust-item.teal  { background:rgba(45,212,191,.06); border-color:rgba(45,212,191,.2); }
+.piv-trust-icon {
+  width:28px; height:28px; border-radius:7px; flex-shrink:0;
+  display:flex; align-items:center; justify-content:center; font-size:14px;
+}
+.piv-trust-item.green .piv-trust-icon { background:rgba(34,197,94,.12); color:var(--green); }
+.piv-trust-item.blue  .piv-trust-icon { background:rgba(79,142,247,.12); color:var(--blue); }
+.piv-trust-item.teal  .piv-trust-icon { background:rgba(45,212,191,.12); color:var(--teal); }
+.piv-trust-name { font-size:9.5px; font-weight:700; color:var(--text); margin-bottom:1px; }
+.piv-trust-sub  { font-size:8px; color:var(--muted2); }
+
+/* ── Activity feed ──────────────────────────────────────────── */
+.piv-activity-item {
+  display:flex; gap:10px; padding:8px 0;
+  border-bottom:1px solid rgba(255,255,255,.03);
+}
+.piv-activity-item:last-child { border-bottom:none; }
+.piv-activity-dot {
+  width:8px; height:8px; border-radius:50%; flex-shrink:0;
+  margin-top:4px; background:var(--blue);
+}
+.piv-activity-dot.done   { background:var(--teal); }
+.piv-activity-dot.active { background:var(--yellow); animation:piv-pulse-y 2s infinite; }
+.piv-activity-title { font-size:10px; font-weight:600; color:var(--text); }
+.piv-activity-ts    { font-size:8.5px; color:var(--muted2); margin-top:1px; }
+.piv-activity-note  { font-size:9px; color:var(--muted2); margin-top:2px; }
+
+/* ── Invoice bottom bar ─────────────────────────────────────── */
+.piv-bottom-bar {
+  padding:10px 20px; background:rgba(0,0,0,.3);
+  border-top:1px solid rgba(255,255,255,.05);
+  display:flex; align-items:center; justify-content:space-between;
+  flex-wrap:wrap; gap:8px; font-size:9px; color:var(--muted2);
+}
+.piv-bottom-bar .piv-secured { display:flex; align-items:center; gap:6px; }
+.piv-bottom-bar .piv-secured i { color:var(--yellow); }
+
+/* ── Print styles ───────────────────────────────────────────── */
+@media print {
+  body * { visibility:hidden; }
+  .piv-container, .piv-container * { visibility:visible; }
+  .piv-container { position:absolute; left:0; top:0; width:100%; background:#fff !important; color:#000 !important; }
+  .piv-pay-btn, .piv-action-grid, .piv-topbar-actions, .piv-back-btn { display:none !important; }
+}
+</style>
 </head>
 <body>
 
@@ -8722,6 +9227,31 @@ function clearCompleted() {
   toast(`${before-queueItems.length} completed items removed`,'info');
 }
 
+
+// ── Invoice helpers for premium dashboard ──────────────────
+function invCloseDetail(id) {
+  const row = document.getElementById('inv-detail-' + id);
+  if (row) row.style.display = 'none';
+  renderInvoices && renderInvoices();
+}
+function invShareInvoice(id) {
+  const inv = invoiceList.find(i => i.id === id);
+  if (!inv) return;
+  const url = inv.payUrl || ('https://pay.elligente.xyz/invoice/' + id);
+  if (navigator.share) {
+    navigator.share({ title: 'Invoice ' + id, text: 'Pay invoice ' + id, url }).catch(()=>{});
+  } else {
+    navigator.clipboard?.writeText(url);
+    toast('Invoice link copied!', 'success');
+  }
+}
+function invExportPDF(id) {
+  const inv = invoiceList.find(i => i.id === id);
+  if (!inv) { toast('Invoice not found', 'error'); return; }
+  window.print();
+  toast('Opening PDF export...', 'info');
+}
+
 // ══════════════════════════════════════════════════════════
 //  PAYMENT LINKS  —  Smart QR + Analytics + Card Design
 // ══════════════════════════════════════════════════════════
@@ -9721,93 +10251,393 @@ function invToggleDetail(id) {
   if (!isOpen) {
     row.style.display = '';
     const contentEl = document.getElementById('inv-detail-content-' + id);
-    if (contentEl) contentEl.innerHTML = invDetailHTML(invoiceList.find(i => i.id === id));
+    if (contentEl) {
+      const inv = invoiceList.find(i => i.id === id);
+      contentEl.innerHTML = invDetailHTML(inv);
+      // Generate QR Code for premium dashboard
+      setTimeout(() => {
+        const qrEl = document.getElementById('inv-detail-qr-' + id);
+        if (qrEl && typeof QRCode !== 'undefined') {
+          const payUrl = inv.payUrl || ('https://pay.elligente.xyz/invoice/' + id);
+          qrEl.innerHTML = '';
+          new QRCode(qrEl, { text: payUrl, width:120, height:120, colorDark:'#000', colorLight:'#fff', correctLevel: QRCode.CorrectLevel.L });
+        }
+      }, 50);
+      // Generate QR Code dynamically for the new dashboard
+      const qrEl = document.getElementById(`inv-detail-qr-${id}`);
+      if (qrEl && typeof QRCode !== 'undefined') {
+        qrEl.innerHTML = '';
+        new QRCode(qrEl, {
+          text: inv.payUrl || 'https://pay.elligente.xyz/' + id,
+          width: 140,
+          height: 140,
+          colorDark: "#000000",
+          colorLight: "#ffffff",
+          correctLevel: QRCode.CorrectLevel.L
+        });
+      }
+    }
   }
 }
 
 // ── Detail HTML ────────────────────────────────────────────
 function invDetailHTML(inv) {
   if (!inv) return '';
-  const tl = (inv.timeline || []).map((e, i) => `
-    <div style="display:flex;gap:8px;align-items:flex-start;${i>0?'margin-top:10px':''}">
-      <div style="display:flex;flex-direction:column;align-items:center;gap:0">
-        <div style="width:10px;height:10px;border-radius:50%;background:var(--green);border:2px solid var(--bg);flex-shrink:0;margin-top:1px"></div>
-        ${i < (inv.timeline||[]).length-1 ? '<div style="width:1px;flex:1;background:var(--border);min-height:16px;margin-top:2px"></div>' : ''}
-      </div>
-      <div style="padding-bottom:2px">
-        <div style="font-size:9.5px;font-weight:600;color:var(--text)">${e.event}</div>
-        <div style="font-size:8.5px;color:var(--muted2)">${new Date(e.ts).toLocaleString()}</div>
-        ${e.detail ? `<div style="font-size:8.5px;color:var(--muted2);margin-top:1px">${e.detail}</div>` : ''}
+  const isPaid    = inv.status === 'Paid';
+  const isOverdue = inv.status === 'Overdue';
+  const isCancelled = inv.status === 'Cancelled';
+
+  // ── Payment score ──────────────────────────────────────
+  const scorePct  = isPaid ? 100 : (isOverdue ? 15 : (inv.status === 'Pending' ? 72 : 85));
+  const scoreClass= scorePct >= 80 ? 'high' : (scorePct >= 50 ? 'med' : 'low');
+  const riskLabel = isPaid ? 'Zero' : (isOverdue ? 'High' : 'Low');
+  const riskClass = isPaid ? 'green' : (isOverdue ? 'red' : 'green');
+  const etaLabel  = isPaid ? 'Settled' : (isOverdue ? 'Overdue' : '< 30s');
+  const circumference = 2 * Math.PI * 28;
+  const offset = circumference - (scorePct / 100) * circumference;
+
+  // ── Progress stages ────────────────────────────────────
+  const stages = ['Created','Sent','Opened','Payment Pending','Paid'];
+  const stageMap = { 'Draft':0, 'Sent':1, 'Opened':2, 'Pending':2, 'Outstanding':2, 'Payment Pending':3, 'Paid':4, 'Overdue':2, 'Cancelled':1 };
+  const curStage = stageMap[inv.status] ?? 0;
+  const fillPct  = Math.max(0, Math.min(100, (curStage / (stages.length - 1)) * 100));
+
+  const stepsHTML = stages.map((s, i) => {
+    const cls = i < curStage ? 'done' : (i === curStage ? 'active' : '');
+    return `<div class="piv-step ${cls}"><div class="piv-step-dot"></div><div class="piv-step-label">${s}</div></div>`;
+  }).join('');
+
+  // ── Client info ────────────────────────────────────────
+  const clientName   = inv.toName || inv.to || 'Client';
+  const clientAddr   = inv.toAddr || inv.to || '';
+  const clientLetter = (clientName[0] || 'C').toUpperCase();
+  const memberSince  = inv.created ? new Date(inv.created).toLocaleDateString('en-US',{month:'short',year:'numeric'}) : 'May 2026';
+
+  // ── Due date countdown ─────────────────────────────────
+  let dueCountdown = '';
+  if (inv.due && !isPaid && !isCancelled) {
+    const dueMs = new Date(inv.due).getTime() - Date.now();
+    const dueDays = Math.ceil(dueMs / 86400000);
+    if (dueDays > 0) dueCountdown = `Due in ${dueDays} day${dueDays===1?'':'s'}`;
+    else if (dueDays === 0) dueCountdown = 'Due today';
+    else dueCountdown = `${Math.abs(dueDays)} days overdue`;
+  } else if (isPaid) {
+    dueCountdown = 'Paid';
+  }
+
+  // ── Timeline events ────────────────────────────────────
+  const fmt = ts => ts ? new Date(ts).toLocaleString('en-US',{month:'numeric',day:'numeric',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
+  const tlEvents = [
+    { label:'Invoice Created', ts: inv.created,      channel:'Arc Testnet', note:'Invoice was created and saved', cls:'done' },
+    { label:'Invoice Sent',    ts: inv.sentAt,        channel:'Email',       note:'Invoice was sent to client',   cls: inv.sentAt ? 'done' : '' },
+    { label:'Client Opened',   ts: inv.openedAt,      channel:'Web',         note:'Client viewed the invoice',    cls: inv.openedAt ? 'done' : '' },
+    { label:'Payment Pending', ts: inv.pendingAt,     channel:null,          note:'Waiting for payment',          cls: isPaid ? 'done' : (inv.pendingAt||curStage>=3 ? 'active':'') },
+    { label:'Payment Confirmed',ts:inv.confirmedAt||inv.paidOn, channel:null, note:'Payment confirmed on-chain',  cls: isPaid ? 'done' : '' },
+    { label:'Settled',         ts: inv.settledAt||inv.paidOn,   channel:null, note:'Invoice settled',            cls: isPaid ? 'done' : '' },
+  ];
+
+  const tlHTML = tlEvents.map(ev => `
+    <div class="piv-tl-item">
+      <div class="piv-tl-dot ${ev.cls}"><i class="ti ti-${ev.cls === 'done' ? 'check' : (ev.cls === 'active' ? 'clock' : 'circle')}" style="font-size:7px"></i></div>
+      <div class="piv-tl-body">
+        <div class="piv-tl-title">${ev.label}${ev.ts ? ` ${ev.channel ? `<span class="piv-tl-channel">${ev.channel}</span>` : ''}` : ''}</div>
+        <div class="piv-tl-ts">${ev.ts ? fmt(ev.ts) : '—'}</div>
+        ${ev.ts || ev.cls === 'active' ? `<div class="piv-tl-detail">${ev.note}</div>` : ''}
       </div>
     </div>`).join('');
 
+  // ── Activity feed ──────────────────────────────────────
+  const activities = [
+    { label:'Invoice Created', ts:inv.created, note:'Invoice was created and saved', ch:'Arc Testnet', cls:'done' },
+    ...(inv.sentAt    ? [{ label:'Invoice Sent',     ts:inv.sentAt,    note:'Invoice was sent to client',   ch:'Email', cls:'done' }] : []),
+    ...(inv.openedAt  ? [{ label:'Client Opened',    ts:inv.openedAt,  note:'Client viewed the invoice',    ch:'Web',   cls:'done' }] : []),
+    ...(curStage >= 3 ? [{ label:'Payment Pending',  ts:inv.pendingAt, note:'Waiting for payment',          ch:null,    cls: isPaid?'done':'active' }] : []),
+    ...(isPaid        ? [{ label:'Payment Confirmed',ts:inv.paidOn||inv.confirmedAt, note:'On-chain transfer confirmed', ch:null, cls:'done' }] : []),
+    ...(isPaid        ? [{ label:'Settled',          ts:inv.settledAt||inv.paidOn,   note:'Invoice fully settled',       ch:null, cls:'done' }] : []),
+  ];
+
+  const actHTML = activities.map(a => `
+    <div class="piv-activity-item">
+      <div class="piv-activity-dot ${a.cls}"></div>
+      <div style="flex:1;min-width:0">
+        <div class="piv-activity-title">${a.label}${a.ch ? ` <span style="font-size:8px;color:var(--blue);padding:1px 5px;background:rgba(79,142,247,.1);border-radius:3px">${a.ch}</span>` : ''}</div>
+        <div class="piv-activity-ts">${a.ts ? fmt(a.ts) : '—'}</div>
+        ${a.note ? `<div class="piv-activity-note">${a.note}</div>` : ''}
+      </div>
+    </div>`).join('');
+
+  // ── Line items ────────────────────────────────────────
   const lineItemsHTML = (inv.lineItems||[]).length > 0 ? `
-    <div style="margin-top:8px">
-      <div style="font-size:8.5px;color:var(--muted2);margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px">Line Items</div>
-      ${(inv.lineItems||[]).map(li => `
-        <div style="display:flex;justify-content:space-between;font-size:9px;padding:3px 0;border-bottom:1px solid var(--border)">
+    <div style="margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,.05)">
+      <div class="piv-card-title" style="margin-bottom:8px"><i class="ti ti-list" style="color:var(--muted2)"></i>Line Items</div>
+      ${(inv.lineItems||[]).map(li=>`
+        <div class="piv-breakdown-row" style="font-size:10px">
           <span style="color:var(--text)">${li.name||'—'}</span>
-          <span style="color:var(--muted2)">${li.qty}x ${(li.price||0).toFixed(2)}</span>
-          <span style="color:var(--yellow);font-weight:600">${(li.total||0).toFixed(2)}</span>
+          <span style="color:var(--muted2)">${li.qty||1}× ${(li.price||0).toFixed(2)}</span>
+          <span class="val-highlight">${(li.total||0).toFixed(2)}</span>
         </div>`).join('')}
     </div>` : '';
 
-  return `<div style="background:rgba(0,0,0,.25);border-top:1px solid var(--border);padding:16px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px">
-    <!-- COL 1: Invoice Details -->
-    <div>
-      <div style="font-size:9px;font-weight:700;color:var(--blue);text-transform:uppercase;letter-spacing:.8px;margin-bottom:10px"><i class="ti ti-file-invoice" style="margin-right:4px"></i>Invoice Details</div>
-      <div style="font-size:9px;display:flex;flex-direction:column;gap:5px">
-        <div style="display:flex;justify-content:space-between"><span style="color:var(--muted2)">Invoice #</span><span style="color:var(--yellow);font-weight:700">${inv.id}</span></div>
-        <div style="display:flex;justify-content:space-between"><span style="color:var(--muted2)">From</span><span style="color:var(--text)">${inv.from||'—'}</span></div>
-        <div style="display:flex;justify-content:space-between"><span style="color:var(--muted2)">Bill To</span><span style="color:var(--text)">${inv.toName||'—'}</span></div>
-        <div style="display:flex;justify-content:space-between"><span style="color:var(--muted2)">Subtotal</span><span style="color:var(--text)">${(inv.subtotal||0).toFixed(2)} USDC</span></div>
-        <div style="display:flex;justify-content:space-between"><span style="color:var(--muted2)">Tax (${inv.taxPct||0}%)</span><span style="color:var(--text)">${(inv.taxAmt||0).toFixed(2)} USDC</span></div>
-        <div style="display:flex;justify-content:space-between;border-top:1px solid var(--border);padding-top:4px;margin-top:2px"><span style="color:var(--text);font-weight:700">Total</span><span style="color:var(--yellow);font-weight:700">${(inv.total||0).toFixed(2)} USDC</span></div>
-        <div style="display:flex;justify-content:space-between"><span style="color:var(--muted2)">Amount Paid</span><span style="color:${inv.status==='Paid'?'var(--green)':'var(--muted)'}">${inv.status==='Paid'?(inv.total||0).toFixed(2)+' USDC':'0.00 USDC'}</span></div>
-        <div style="display:flex;justify-content:space-between"><span style="color:var(--muted2)">Amount Due</span><span style="color:${inv.status==='Paid'?'var(--green)':'var(--red)'};">${inv.status==='Paid'?'0.00 USDC':(inv.total||0).toFixed(2)+' USDC'}</span></div>
-      </div>
-      ${lineItemsHTML}
+  // ── Full HTML ──────────────────────────────────────────
+  return `
+<div class="piv-container">
+
+  <!-- Top bar -->
+  <div class="piv-topbar">
+    <button class="piv-back-btn" onclick="invCloseDetail('${inv.id}')">
+      <i class="ti ti-arrow-left"></i> Back to Invoices
+    </button>
+    <div class="piv-inv-id">
+      Invoice <span style="color:var(--yellow)">${inv.id}</span>
+      <button class="piv-copy-id" onclick="navigator.clipboard?.writeText('${inv.id}');toast('Copied','success')" title="Copy ID"><i class="ti ti-copy"></i></button>
     </div>
-    <!-- COL 2: Payment Info + Trust -->
-    <div>
-      <div style="font-size:9px;font-weight:700;color:var(--purple);text-transform:uppercase;letter-spacing:.8px;margin-bottom:10px"><i class="ti ti-credit-card" style="margin-right:4px"></i>Payment Info</div>
-      <div style="font-size:9px;display:flex;flex-direction:column;gap:5px">
-        <div style="display:flex;justify-content:space-between"><span style="color:var(--muted2)">Chain / Network</span><span style="color:var(--blue)">${inv.chainName||'Arc Testnet'}</span></div>
-        <div style="display:flex;justify-content:space-between"><span style="color:var(--muted2)">Payment Token</span><span style="color:var(--text)">${inv.currency||'USDC'}</span></div>
-        ${inv.paidOn ? `<div style="display:flex;justify-content:space-between"><span style="color:var(--muted2)">Paid On</span><span style="color:var(--text)">${new Date(inv.paidOn).toLocaleDateString()}</span></div>` : ''}
-        ${inv.paidFrom ? `<div style="display:flex;justify-content:space-between"><span style="color:var(--muted2)">Paid From</span><span style="color:var(--blue);font-family:monospace;font-size:8.5px">${shortAddr(inv.paidFrom)}</span></div>` : ''}
-        ${inv.txHash ? `<div style="display:flex;justify-content:space-between;gap:4px"><span style="color:var(--muted2);flex-shrink:0">Tx Hash</span><a href="https://testnet.arcscan.app/tx/${inv.txHash}" target="_blank" style="color:var(--blue);font-family:monospace;font-size:8.5px;text-decoration:none">${shortAddr(inv.txHash)}&nbsp;<i class="ti ti-external-link" style="font-size:7px"></i></a></div>` : ''}
-        <div style="display:flex;justify-content:space-between"><span style="color:var(--muted2)">Due Date</span><span style="color:var(--text)">${inv.due||'—'}</span></div>
-      </div>
-      <!-- Trust badges -->
-      <div style="margin-top:12px;display:grid;grid-template-columns:1fr 1fr;gap:6px">
-        <div style="background:rgba(34,197,94,.07);border:1px solid rgba(34,197,94,.2);border-radius:5px;padding:7px 8px;display:flex;align-items:center;gap:5px">
-          <i class="ti ti-shield-check" style="color:var(--green);font-size:11px;flex-shrink:0"></i>
-          <div><div style="font-size:8px;font-weight:600;color:var(--green)">KYB Verified</div><div style="font-size:7.5px;color:var(--muted2)">${inv.from||'—'}</div></div>
-        </div>
-        <div style="background:rgba(79,142,247,.07);border:1px solid rgba(79,142,247,.2);border-radius:5px;padding:7px 8px;display:flex;align-items:center;gap:5px">
-          <i class="ti ti-lock" style="color:var(--blue);font-size:11px;flex-shrink:0"></i>
-          <div><div style="font-size:8px;font-weight:600;color:var(--blue)">Smart Escrow</div><div style="font-size:7.5px;color:var(--muted2)">Protected</div></div>
-        </div>
-        <div style="background:rgba(45,212,191,.07);border:1px solid rgba(45,212,191,.2);border-radius:5px;padding:7px 8px;display:flex;align-items:center;gap:5px">
-          <i class="ti ti-building-bank" style="color:var(--teal);font-size:11px;flex-shrink:0"></i>
-          <div><div style="font-size:8px;font-weight:600;color:var(--teal)">Circle Secured</div><div style="font-size:7.5px;color:var(--muted2)">Infrastructure</div></div>
-        </div>
-        <div style="background:rgba(167,139,250,.07);border:1px solid rgba(167,139,250,.2);border-radius:5px;padding:7px 8px;display:flex;align-items:center;gap:5px">
-          <i class="ti ti-certificate" style="color:var(--purple);font-size:11px;flex-shrink:0"></i>
-          <div><div style="font-size:8px;font-weight:600;color:var(--purple)">Onchain Proof</div><div style="font-size:7.5px;color:var(--muted2)">Verified</div></div>
-        </div>
+    <span class="piv-status-badge ${inv.status||'Outstanding'}">${inv.status||'Outstanding'}</span>
+    <span class="piv-net-badge"><span class="dot"></span>${inv.chainName||'Arc Testnet'}</span>
+    <span class="piv-token-badge"><i class="ti ti-currency-dollar" style="font-size:9px"></i>${inv.currency||'USDC'}</span>
+    <div class="piv-topbar-actions">
+      <button class="btn" style="font-size:9.5px;padding:5px 10px" onclick="invExportPDF('${inv.id}')"><i class="ti ti-file-download"></i>PDF</button>
+      <button class="btn" style="font-size:9.5px;padding:5px 10px" onclick="invCopyLinkById('${inv.id}')"><i class="ti ti-link"></i>Copy Link</button>
+      <button class="btn primary" style="font-size:9.5px;padding:5px 10px" onclick="invOpenPayPage('${inv.id}')"><i class="ti ti-external-link"></i>Open Page</button>
+    </div>
+  </div>
+
+  <!-- Hero -->
+  <div class="piv-hero">
+    <div class="piv-hero-left">
+      <div class="piv-hero-lbl">Amount Due</div>
+      <div class="piv-hero-amount">${isPaid ? '0.00' : (inv.total||0).toFixed(2)} <span>${inv.currency||'USDC'}</span></div>
+      <div class="piv-hero-due">
+        ${inv.due ? `<i class="ti ti-calendar" style="font-size:11px"></i>
+        <span>Due ${new Date(inv.due).toLocaleDateString('en-US',{month:'2-digit',day:'2-digit',year:'numeric'})}</span>
+        ${dueCountdown ? `· <span class="countdown ${isOverdue?'overdue':''}">${dueCountdown}</span>` : ''}` : ''}
       </div>
     </div>
-    <!-- COL 3: Activity Timeline -->
-    <div>
-      <div style="font-size:9px;font-weight:700;color:var(--green);text-transform:uppercase;letter-spacing:.8px;margin-bottom:10px"><i class="ti ti-timeline" style="margin-right:4px"></i>Activity &amp; Timeline</div>
-      ${tl || '<div style="font-size:9px;color:var(--muted2)">No activity yet.</div>'}
+  </div>
+
+  <!-- Progress tracker -->
+  <div class="piv-progress-wrap">
+    <div class="piv-progress-label"><i class="ti ti-route" style="font-size:10px;margin-right:4px"></i>Payment Progress</div>
+    <div class="piv-progress">
+      <div class="piv-progress-track">
+        <div class="piv-progress-fill" style="width:${fillPct}%"></div>
+      </div>
+      ${stepsHTML}
     </div>
-  </div>`;
+  </div>
+
+  <!-- Main grid -->
+  <div class="piv-grid">
+
+    <!-- LEFT column -->
+    <div class="piv-col-left">
+
+      <!-- Client + Payment Score row -->
+      <div style="display:grid;grid-template-columns:1fr 200px;gap:12px">
+
+        <!-- Client card -->
+        <div class="piv-card">
+          <div class="piv-card-title" style="color:var(--blue)"><i class="ti ti-user-circle"></i>Client</div>
+          <div class="piv-client-row">
+            <div class="piv-avatar">${clientLetter}</div>
+            <div>
+              <div class="piv-client-name">${clientName}</div>
+              <div class="piv-client-addr">${clientAddr ? (clientAddr.length > 16 ? clientAddr.slice(0,8)+'...'+clientAddr.slice(-4) : clientAddr) : '—'}</div>
+              <div style="display:flex;gap:5px;margin-top:5px;flex-wrap:wrap">
+                <span class="piv-badge piv-badge-green"><i class="ti ti-shield-check" style="font-size:8px"></i>Wallet Verified</span>
+                <span class="piv-badge piv-badge-blue"><i class="ti ti-star" style="font-size:8px"></i>KYC Verified</span>
+              </div>
+            </div>
+          </div>
+          <div class="piv-client-stats">
+            <div class="piv-stat-box">
+              <div class="piv-stat-lbl">Invoice History</div>
+              <div class="piv-stat-val blue">${inv.clientHistory||12}</div>
+            </div>
+            <div class="piv-stat-box">
+              <div class="piv-stat-lbl">Success Rate</div>
+              <div class="piv-stat-val green">100%</div>
+            </div>
+            <div class="piv-stat-box">
+              <div class="piv-stat-lbl">Member Since</div>
+              <div class="piv-stat-val" style="font-size:10px">${memberSince}</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Payment Score card -->
+        <div class="piv-card">
+          <div class="piv-card-title" style="color:var(--purple)"><i class="ti ti-chart-pie"></i>Payment Score</div>
+          <div class="piv-score-row" style="flex-direction:column;gap:12px;align-items:center">
+            <div class="piv-score-circle-wrap">
+              <svg class="piv-score-svg" width="80" height="80" viewBox="0 0 80 80">
+                <circle class="piv-score-bg" cx="40" cy="40" r="28"/>
+                <circle class="piv-score-arc ${scoreClass}" cx="40" cy="40" r="28"
+                  stroke-dasharray="${circumference}"
+                  stroke-dashoffset="${offset}"/>
+              </svg>
+              <div class="piv-score-pct ${scoreClass}">${scorePct}%</div>
+            </div>
+            <div class="piv-score-info">
+              <div class="piv-score-item">
+                <div class="piv-score-item-lbl">Probability of Payment</div>
+                <div class="piv-score-item-val ${scoreClass}">${scoreClass === 'high' ? 'High' : (scoreClass === 'med' ? 'Medium' : 'Low')}</div>
+              </div>
+              <div class="piv-score-item">
+                <div class="piv-score-item-lbl">Risk Level</div>
+                <div class="piv-score-item-val ${riskClass}">${riskLabel}</div>
+              </div>
+              <div class="piv-score-item">
+                <div class="piv-score-item-lbl">Settlement ETA</div>
+                <div class="piv-score-item-val green">${etaLabel}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Invoice Details + Payment Breakdown row -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+
+        <!-- Invoice Details -->
+        <div class="piv-card">
+          <div class="piv-card-title" style="color:var(--yellow)"><i class="ti ti-file-invoice"></i>Invoice Details</div>
+          <div style="display:flex;flex-direction:column;gap:4px;font-size:10px">
+            <div class="piv-breakdown-row"><span>Invoice #</span><span style="color:var(--yellow);font-weight:700">${inv.id}</span></div>
+            <div class="piv-breakdown-row"><span>From</span><span style="color:var(--text)">${inv.from||'—'}</span></div>
+            <div class="piv-breakdown-row"><span>Bill To</span><span style="color:var(--text)">${clientName}</span></div>
+            <div class="piv-breakdown-row"><span>Chain / Network</span><span style="color:var(--blue)">${inv.chainName||'Arc Testnet'}</span></div>
+            ${inv.due ? `<div class="piv-breakdown-row"><span>Due Date</span><span style="color:var(--text)">${inv.due}</span></div>` : ''}
+            ${inv.description ? `<div class="piv-breakdown-row"><span>Description</span><span style="color:var(--muted2)">${inv.description}</span></div>` : ''}
+            ${inv.notes ? `<div class="piv-breakdown-row"><span>Notes</span><span style="color:var(--muted2);max-width:140px;text-align:right">${inv.notes}</span></div>` : ''}
+          </div>
+          ${lineItemsHTML}
+        </div>
+
+        <!-- Payment Breakdown -->
+        <div class="piv-card">
+          <div class="piv-card-title" style="color:var(--teal)"><i class="ti ti-receipt"></i>Payment Breakdown</div>
+          <div class="piv-breakdown-row">
+            <span>Subtotal</span>
+            <span>${(inv.subtotal||0).toFixed(2)} ${inv.currency||'USDC'}</span>
+          </div>
+          <div class="piv-breakdown-row">
+            <span>Tax (${inv.taxPct||0}%)</span>
+            <span>${(inv.taxAmt||0).toFixed(2)} ${inv.currency||'USDC'}</span>
+          </div>
+          <div class="piv-breakdown-row total">
+            <span>Total</span>
+            <span class="val-highlight">${(inv.total||0).toFixed(2)} ${inv.currency||'USDC'}</span>
+          </div>
+          <div class="piv-breakdown-row" style="margin-top:4px">
+            <span>Amount Paid</span>
+            <span class="${isPaid?'val-paid':''}">
+              ${isPaid?(inv.total||0).toFixed(2)+' '+(inv.currency||'USDC'):'0.00 '+(inv.currency||'USDC')}
+            </span>
+          </div>
+          <div class="piv-breakdown-row" style="font-weight:700;font-size:12px">
+            <span>Amount Due</span>
+            <span class="${isPaid?'val-paid':'val-due'}">
+              ${isPaid?'0.00':(inv.total||0).toFixed(2)} ${inv.currency||'USDC'}
+            </span>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Invoice Timeline -->
+      <div class="piv-card">
+        <div class="piv-card-title" style="color:var(--green)"><i class="ti ti-timeline"></i>Invoice Timeline</div>
+        <div class="piv-tl">${tlHTML}</div>
+      </div>
+
+      <!-- Activity & Events -->
+      <div class="piv-card">
+        <div class="piv-card-title"><i class="ti ti-activity"></i>Activity &amp; Events</div>
+        ${actHTML || '<div style="font-size:9px;color:var(--muted2);padding:8px 0">No activity yet.</div>'}
+      </div>
+
+    </div>
+
+    <!-- RIGHT column -->
+    <div class="piv-col-right">
+
+      <!-- Pay Invoice module -->
+      <div class="piv-pay-module">
+        <div class="piv-pay-module-title"><i class="ti ti-qrcode" style="font-size:11px;margin-right:4px"></i>Pay Invoice</div>
+        <div class="piv-qr-outer">
+          <div class="piv-qr-wrap">
+            <div id="inv-detail-qr-${inv.id}" style="width:120px;height:120px;display:flex;align-items:center;justify-content:center">
+              <i class="ti ti-qrcode" style="font-size:48px;color:#ccc;opacity:.3"></i>
+            </div>
+            <div class="piv-qr-badge"><i class="ti ti-currency-dollar" style="font-size:7px"></i> USDC</div>
+          </div>
+        </div>
+        <div style="font-size:9px;color:var(--muted2);margin-bottom:14px">Scan with your wallet to pay</div>
+
+        <div class="piv-pay-info">
+          <div class="piv-pay-info-row">
+            <span class="lbl">Amount</span>
+            <span class="val" style="color:var(--yellow);font-weight:800">${isPaid?'0.00':(inv.total||0).toFixed(2)} ${inv.currency||'USDC'}</span>
+          </div>
+          <div class="piv-pay-info-row">
+            <span class="lbl">To</span>
+            <span class="val-copy val mono" onclick="navigator.clipboard?.writeText('${inv.toAddr||''}');toast('Address copied','success')" title="${inv.toAddr||''}">
+              ${inv.toAddr ? (inv.toAddr.slice(0,8)+'...'+inv.toAddr.slice(-4)) : '—'}
+              <i class="ti ti-copy" style="font-size:9px;color:var(--muted2)"></i>
+            </span>
+          </div>
+          <div class="piv-pay-info-row">
+            <span class="lbl">Network</span>
+            <span class="val"><span class="piv-net-badge" style="font-size:8px;padding:2px 7px"><span class="dot"></span>${inv.chainName||'Arc Testnet'}</span></span>
+          </div>
+          ${inv.txHash ? `<div class="piv-pay-info-row"><span class="lbl">Tx Hash</span><a href="https://testnet.arcscan.app/tx/${inv.txHash}" target="_blank" style="color:var(--blue);font-family:monospace;font-size:9px;text-decoration:none">${inv.txHash.slice(0,10)}... <i class="ti ti-external-link" style="font-size:8px"></i></a></div>` : ''}
+        </div>
+
+        ${!isPaid && !isCancelled ? `<button class="piv-pay-btn" id="piv-pay-btn-${inv.id}" onclick="payInvoice('${inv.id}')"><i class="ti ti-wallet"></i> Pay Now</button>` : ''}
+        ${isPaid ? `<div class="piv-paid-banner"><i class="ti ti-check-circle"></i>Payment Complete</div>` : ''}
+
+        <div class="piv-action-grid">
+          <button class="piv-action-btn" onclick="invCopyLinkById('${inv.id}')"><i class="ti ti-link"></i>Copy Link</button>
+          <button class="piv-action-btn" onclick="invShareInvoice('${inv.id}')"><i class="ti ti-share"></i>Share</button>
+          <button class="piv-action-btn" onclick="invExportPDF('${inv.id}')"><i class="ti ti-file-download"></i>Download PDF</button>
+          <button class="piv-action-btn" onclick="${inv.txHash ? `window.open('https://testnet.arcscan.app/tx/${inv.txHash}','_blank')` : `invOpenPayPage('${inv.id}')`}">
+            <i class="ti ti-external-link"></i>${inv.txHash ? 'View on Explorer' : 'Open Page'}
+          </button>
+        </div>
+      </div>
+
+      <!-- Security & Trust -->
+      <div class="piv-card">
+        <div class="piv-card-title"><i class="ti ti-shield-lock"></i>Security &amp; Trust</div>
+        <div class="piv-trust-grid">
+          <div class="piv-trust-item green">
+            <div class="piv-trust-icon"><i class="ti ti-lock"></i></div>
+            <div><div class="piv-trust-name">Smart Escrow</div><div class="piv-trust-sub">Protected</div></div>
+          </div>
+          <div class="piv-trust-item teal">
+            <div class="piv-trust-icon"><i class="ti ti-building-bank"></i></div>
+            <div><div class="piv-trust-name">Circle Secured</div><div class="piv-trust-sub">Infrastructure</div></div>
+          </div>
+          <div class="piv-trust-item blue">
+            <div class="piv-trust-icon"><i class="ti ti-certificate"></i></div>
+            <div><div class="piv-trust-name">Onchain Proof</div><div class="piv-trust-sub">Verified</div></div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Bottom bar -->
+  <div class="piv-bottom-bar">
+    <div class="piv-secured"><i class="ti ti-lock"></i>This invoice is secured by Elligente Smart Escrow and verified onchain</div>
+    <div>Invoice ID: <span style="font-family:monospace;color:var(--blue)">${inv.id}</span></div>
+  </div>
+
+</div>`;
 }
 
-// ── Delete invoice ─────────────────────────────────────────
 function invDelete(id) {
   invoiceList = invoiceList.filter(x => x.id !== id);
   Store.save('invoices', invoiceList);
@@ -11262,6 +12092,22 @@ function scheduleSubmit() {
 
   if(!rcpList.length) { toast('Add at least one valid recipient','error'); return; }
 
+  const total = rcpList.reduce((s,r)=>s+r.amount, 0);
+  const sched = {
+    id: 'SCH'+Date.now(), name, token, freq, maxEx, gas,
+    nextRun: new Date(date).toISOString(),
+    recipients: rcpList, total,
+    execCount: 0, status: 'Active',
+    created: new Date().toISOString(),
+    walletAddress
+  };
+  schedules.unshift(sched);
+  Store.save('schedules', schedules);
+  renderSchedules();
+  document.getElementById('sch-create-panel').style.display = 'none';
+  toast(`Schedule "${name}" created — next run: ${formatUSDateTime(date)}`,'success');
+}
+
 // ══════════════════════════════════════════════════════════
 //  SEND ASSETS  —  Single Transfer Page
 // ══════════════════════════════════════════════════════════
@@ -11274,10 +12120,7 @@ const SA_TOKENS = {
   USDC:  { symbol: 'USDC',  name: 'USD Coin',    decimals: 6,  icon: 'U', color: '#2775ca', address: () => activeUSDC() },
   EURC:  { symbol: 'EURC',  name: 'Euro Coin',    decimals: 6,  icon: 'E', color: '#1a56a0', address: () => activeEURC() },
   cirBTC:{ symbol: 'cirBTC',name: 'Circle BTC',   decimals: 8,  icon: '₿', color: '#f7931a',
-    address: () => {
-      const chain = getActiveChain();
-      return chain?.tokens?.cirBTC?.address || chain?.tokens?.USDC?.address || activeUSDC();
-    }
+    address: () => '0xf0C4a4CE82A5746AbAAd9425360Ab04fbBA432BF'
   }
 };
 
@@ -11285,7 +12128,7 @@ function saGetTokenDecimals() {
   return SA_TOKENS[saCurrentAsset]?.decimals ?? 6;
 }
 function saGetTokenAddr() {
-  return SA_TOKENS[saCurrentAsset]?.address() || activeUSDC();
+  return SA_TOKENS[saCurrentAsset]?.address();
 }
 function saToRaw(amount) {
   const dec = saGetTokenDecimals();
@@ -11347,11 +12190,11 @@ function saUpdateRoute() {
   const tokenAddr = saGetTokenAddr();
 
   // Route fields
-  const set = (id,v) => { const el=document.getElementById(id); if(el) el.textContent=v; };
+  const set = (id,v) => { const el=document.getElementById(id); if(el) el.innerHTML=v; };
   set('sa-rt-asset',    saCurrentAsset);
-  set('sa-rt-amount',   amount > 0 ? amount.toFixed(saGetTokenDecimals() === 6 ? 2 : 6) + ' ' + saCurrentAsset : '—');
-  set('sa-rt-dest',     recipient ? shortAddr(recipient) : '—');
-  set('sa-rt-contract', shortAddr(tokenAddr) + ' (6 dec)');
+  set('sa-rt-amount',   amount > 0 ? amount.toFixed(saGetTokenDecimals() === 6 ? 2 : 8) + ' ' + saCurrentAsset : '—');
+  set('sa-rt-dest',     recipient ? `<a href="https://testnet.arcscan.app/address/${recipient}" target="_blank" style="color:var(--blue);text-decoration:none">${shortAddr(recipient)}</a>` : '—');
+  set('sa-rt-contract', `<a href="https://testnet.arcscan.app/address/${tokenAddr}" target="_blank" style="color:var(--blue);text-decoration:none">${shortAddr(tokenAddr)}</a> (${saGetTokenDecimals()} dec)`);
   set('sa-rt-network',  'Arc Testnet (5042002)');
   set('sa-rt-type',     'Direct ERC-20 Transfer');
   set('sa-rt-fee',      '~0.001 USDC (gas)');
@@ -11467,7 +12310,7 @@ async function saExecuteSend() {
 
     // Success
     if (btnContent) btnContent.innerHTML = '<i class="ti ti-check-circle"></i> Sent!';
-    toast(`✓ ${amount} ${saCurrentAsset} sent → ${shortAddr(recipient)} | Tx: ${shortAddr(tx.hash)}`, 'success');
+    toast(`✓ ${amount} ${saCurrentAsset} sent → ${shortAddr(recipient)} | <a href="https://testnet.arcscan.app/tx/${tx.hash}" target="_blank" style="color:inherit;text-decoration:underline">Tx: ${shortAddr(tx.hash)}</a>`, 'success');
 
     // Log transaction
     saLogTx({ hash: tx.hash, amount, asset: saCurrentAsset, recipient, memo, block: receipt.blockNumber });
@@ -11532,7 +12375,7 @@ function saRenderActivity() {
       </div>
       <div>
         <div class="sa-activity-amount">-${tx.amount} ${tx.asset}</div>
-        <div class="sa-tx-hash" onclick="window.open('https://explorer.testnet.arc.network/tx/${tx.hash}','_blank')" title="${tx.hash}">${shortAddr(tx.hash)}</div>
+        <div class="sa-tx-hash" onclick="window.open('https://testnet.arcscan.app/tx/${tx.hash}','_blank')" title="${tx.hash}">${shortAddr(tx.hash)}</div>
       </div>`;
     logEl.appendChild(item);
   });
@@ -11583,23 +12426,6 @@ document.addEventListener('DOMContentLoaded', () => {
     obs.observe(sendPage, { attributes: true, attributeFilter: ['class'] });
   }
 });
-
-
-  const total = rcpList.reduce((s,r)=>s+r.amount, 0);
-  const sched = {
-    id: 'SCH'+Date.now(), name, token, freq, maxEx, gas,
-    nextRun: new Date(date).toISOString(),
-    recipients: rcpList, total,
-    execCount: 0, status: 'Active',
-    created: new Date().toISOString(),
-    walletAddress
-  };
-  schedules.unshift(sched);
-  Store.save('schedules', schedules);
-  renderSchedules();
-  document.getElementById('sch-create-panel').style.display = 'none';
-  toast(`Schedule "${name}" created — next run: ${formatUSDateTime(date)}`,'success');
-}
 
 function scheduleNextDate(freq, from) {
   const d = new Date(from);
