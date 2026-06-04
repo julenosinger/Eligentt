@@ -2665,6 +2665,274 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
   .piv-pay-btn, .piv-action-grid, .piv-topbar-actions, .piv-back-btn { display:none !important; }
 }
 </style>
+
+<style>
+/* ── Vault System — CSS ──────────────────────────────────────────────── */
+/* vault-patch-applied */
+@keyframes vault-pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+@keyframes vault-spin { to { transform:rotate(360deg); } }
+
+/* Bridge mode selector */
+.bridge-mode-selector { display:flex; gap:6px; }
+.bridge-mode-btn {
+  flex:1; padding:8px 12px; border-radius:8px; border:1px solid rgba(255,255,255,.1);
+  background:rgba(255,255,255,.03); color:var(--muted2); font-size:10px; font-weight:600;
+  cursor:pointer; transition:.2s; display:flex; align-items:center; justify-content:center; gap:5px;
+}
+.bridge-mode-btn:hover { background:rgba(255,255,255,.06); color:var(--text); }
+.bridge-mode-btn.active {
+  background:rgba(79,142,247,.12); color:#7b9ef7;
+  border-color:rgba(79,142,247,.35); box-shadow:0 0 10px rgba(79,142,247,.15);
+}
+.bridge-mode-btn[data-mode="turbo"].active {
+  background:rgba(245,158,11,.12); color:var(--yellow);
+  border-color:rgba(245,158,11,.35); box-shadow:0 0 10px rgba(245,158,11,.15);
+}
+
+/* Turbo availability badge */
+.turbo-avail-badge {
+  display:inline-flex; align-items:center; gap:5px; font-size:9px; font-weight:700;
+  padding:3px 9px; border-radius:20px;
+}
+.turbo-avail-badge.available { background:rgba(34,197,94,.1); color:var(--green); border:1px solid rgba(34,197,94,.3); }
+.turbo-avail-badge.unavailable { background:rgba(239,68,68,.1); color:var(--red); border:1px solid rgba(239,68,68,.3); }
+
+/* Treasury layout */
+.trs-layout {
+  display:flex; flex:1; overflow:hidden; gap:0;
+  min-height:0;
+}
+.trs-sidebar {
+  width:160px; flex-shrink:0; padding:10px 8px;
+  border-right:1px solid rgba(255,255,255,.05);
+  display:flex; flex-direction:column; gap:2px; overflow-y:auto;
+}
+.trs-nav-item {
+  display:flex; align-items:center; gap:8px; padding:8px 10px;
+  border-radius:7px; cursor:pointer; font-size:10px; font-weight:500;
+  color:var(--muted2); transition:.15s; white-space:nowrap;
+}
+.trs-nav-item:hover  { background:rgba(255,255,255,.04); color:var(--text); }
+.trs-nav-item.active { background:rgba(79,142,247,.1); color:#7b9ef7; font-weight:700; }
+.trs-nav-item i { font-size:13px; flex-shrink:0; }
+
+.trs-content {
+  flex:1; overflow-y:auto; padding:14px; min-width:0;
+}
+.trs-section { display:none; }
+.trs-section.active { display:block; }
+
+/* Section title */
+.trs-section-title {
+  font-size:11px; font-weight:800; color:var(--text); margin-bottom:14px;
+  display:flex; align-items:center; gap:8px; letter-spacing:-.2px;
+}
+.trs-section-title i { font-size:14px; }
+.trs-section-sub { font-size:9px; color:var(--muted2); margin-top:1px; }
+
+/* Vault grid — 4 metric cards */
+.vault-grid {
+  display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:14px;
+}
+@media(max-width:900px){ .vault-grid{ grid-template-columns:repeat(2,1fr); } }
+
+.vault-metric-card {
+  background:rgba(255,255,255,.025); border:1px solid rgba(255,255,255,.07);
+  border-radius:10px; padding:12px; display:flex; align-items:flex-start; gap:10px;
+  transition:.2s;
+}
+.vault-metric-card:hover { background:rgba(255,255,255,.04); }
+.vmc-icon {
+  width:34px; height:34px; border-radius:8px; display:flex;
+  align-items:center; justify-content:center; font-size:15px; flex-shrink:0;
+}
+.vmc-body { flex:1; min-width:0; }
+.vmc-label { font-size:8.5px; color:var(--muted2); text-transform:uppercase; letter-spacing:.5px; }
+.vmc-value { font-size:16px; font-weight:800; color:var(--text); margin:2px 0; line-height:1.1; }
+.vmc-sub   { font-size:8.5px; color:var(--muted2); }
+
+/* Vault assets grid */
+.vault-assets-grid {
+  display:grid; grid-template-columns:repeat(3,1fr); gap:10px;
+}
+@media(max-width:860px){ .vault-assets-grid{ grid-template-columns:1fr; } }
+
+.vault-asset-card {
+  background:rgba(255,255,255,.025); border:1px solid rgba(255,255,255,.07);
+  border-radius:10px; padding:12px;
+}
+.vac-header { display:flex; align-items:center; gap:10px; margin-bottom:12px; }
+.vac-icon   { width:36px; height:36px; border-radius:10px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+.vac-name   { font-weight:700; font-size:12px; }
+.vac-chain  { font-size:8.5px; color:var(--muted2); }
+.vac-total  { font-weight:800; font-size:13px; }
+.vac-bars   { display:flex; flex-direction:column; gap:6px; }
+.vac-bar-row{ display:flex; align-items:center; gap:7px; font-size:8.5px; color:var(--muted2); }
+.vac-bar    { flex:1; height:4px; background:rgba(255,255,255,.06); border-radius:2px; overflow:hidden; }
+.vac-bar-fill { height:100%; border-radius:2px; transition:width .5s; }
+
+/* Security grid */
+.vault-security-grid {
+  display:grid; grid-template-columns:repeat(3,1fr); gap:8px;
+}
+.vsec-item {
+  display:flex; align-items:center; gap:8px; padding:8px 12px;
+  background:rgba(255,255,255,.02); border-radius:7px;
+  border:1px solid rgba(255,255,255,.06); font-size:9px;
+}
+.vsec-item i { font-size:13px; color:var(--blue); }
+.vsec-badge {
+  margin-left:auto; font-size:8px; padding:2px 7px;
+  border-radius:20px; font-weight:700;
+}
+.vsec-badge.ok   { background:rgba(34,197,94,.1);  color:var(--green); border:1px solid rgba(34,197,94,.2); }
+.vsec-badge.warn { background:rgba(245,158,11,.1); color:var(--yellow); border:1px solid rgba(245,158,11,.2); }
+
+/* Fulfiller card */
+.fulfiller-card {
+  background:rgba(79,142,247,.05); border:1px solid rgba(79,142,247,.15);
+  border-radius:10px; padding:14px;
+}
+.fc-header { display:flex; align-items:center; margin-bottom:14px; }
+.fc-stats   { display:flex; gap:0; }
+.fc-stat    { flex:1; text-align:center; padding:8px 4px; border-right:1px solid rgba(255,255,255,.06); }
+.fc-stat:last-child { border-right:none; }
+.fc-stat-val { font-size:20px; font-weight:800; color:var(--text); }
+.fc-stat-lbl { font-size:8px; color:var(--muted2); margin-top:2px; }
+
+/* Intent table */
+.intent-table-wrap { overflow-x:auto; border-radius:8px; border:1px solid rgba(255,255,255,.06); }
+.intent-table { width:100%; border-collapse:collapse; font-size:9.5px; }
+.intent-table thead tr { background:rgba(255,255,255,.03); }
+.intent-table th { padding:8px 12px; text-align:left; color:var(--muted2); font-weight:600; text-transform:uppercase; font-size:8px; letter-spacing:.5px; white-space:nowrap; }
+.intent-table td { padding:8px 12px; border-top:1px solid rgba(255,255,255,.04); color:var(--text); }
+.intent-table tbody tr:hover { background:rgba(255,255,255,.02); }
+.intent-empty-row td { padding:32px; text-align:center; color:var(--muted2); font-size:10px; }
+
+/* Liquidity pools */
+.liq-pools-grid { display:flex; flex-direction:column; gap:12px; }
+.liq-pool-card {
+  background:rgba(255,255,255,.025); border:1px solid rgba(255,255,255,.07);
+  border-radius:10px; padding:14px;
+}
+.lpc-header   { display:flex; align-items:center; gap:10px; margin-bottom:12px; }
+.liq-metric-row { display:flex; gap:0; margin-bottom:12px; }
+.liq-metric   { flex:1; text-align:center; padding:6px; border-right:1px solid rgba(255,255,255,.05); }
+.liq-metric:last-child { border-right:none; }
+.lm-val { font-size:14px; font-weight:700; color:var(--text); }
+.lm-lbl { font-size:8px; color:var(--muted2); margin-top:2px; }
+.liq-util-badge {
+  font-size:8.5px; padding:3px 8px; border-radius:20px;
+  background:rgba(255,255,255,.05); color:var(--muted2); font-weight:600;
+}
+.liq-bar-wrap { }
+.liq-stacked-bar {
+  height:8px; background:rgba(255,255,255,.06); border-radius:4px;
+  overflow:hidden; display:flex; margin-bottom:5px;
+}
+.liq-bar-legend {
+  display:flex; gap:10px; font-size:8px; color:var(--muted2);
+}
+.liq-bar-legend .dot { width:6px; height:6px; border-radius:50%; display:inline-block; margin-right:3px; }
+
+/* Turbo routes */
+.turbo-routes-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+@media(max-width:800px){ .turbo-routes-grid{ grid-template-columns:1fr; } }
+.turbo-route-card {
+  background:rgba(255,255,255,.025); border:1px solid rgba(255,255,255,.07);
+  border-radius:10px; padding:14px;
+}
+.trc-chains { display:flex; align-items:center; gap:8px; margin-bottom:10px; }
+.trc-chain  { padding:4px 10px; border-radius:5px; font-size:10px; font-weight:700; }
+.trc-chain.src { background:rgba(79,142,247,.12); color:#7b9ef7; }
+.trc-chain.dst { background:rgba(34,197,94,.12);  color:var(--green); }
+.trc-arrow  { color:var(--muted2); font-size:12px; }
+.trc-status { margin-bottom:6px; }
+.trc-badge  { display:inline-flex; align-items:center; gap:5px; font-size:9px; font-weight:700; padding:3px 9px; border-radius:20px; }
+.trc-badge.available { background:rgba(34,197,94,.1); color:var(--green); border:1px solid rgba(34,197,94,.3); }
+.trc-eta    { font-size:9px; color:var(--muted2); margin-bottom:4px; }
+.trc-liquidity { font-size:9px; color:var(--muted2); }
+
+/* Rebalancing */
+.rebal-card {
+  background:rgba(255,255,255,.025); border:1px solid rgba(255,255,255,.07);
+  border-radius:10px; padding:14px;
+}
+.rebal-header { display:flex; align-items:center; gap:10px; margin-bottom:14px; }
+.rebal-toggle-wrap { position:relative; display:inline-flex; align-items:center; }
+.rebal-toggle-wrap input { opacity:0; width:0; height:0; position:absolute; }
+.rebal-toggle-slider {
+  display:block; width:36px; height:20px; background:rgba(255,255,255,.1);
+  border-radius:20px; cursor:pointer; transition:.2s; position:relative;
+}
+.rebal-toggle-slider:before {
+  content:''; position:absolute; top:3px; left:3px;
+  width:14px; height:14px; border-radius:50%; background:var(--muted2); transition:.2s;
+}
+.rebal-toggle-wrap input:checked + .rebal-toggle-slider { background:rgba(34,197,94,.3); }
+.rebal-toggle-wrap input:checked + .rebal-toggle-slider:before { transform:translateX(16px); background:var(--green); }
+
+.rebal-chain-rows { display:flex; flex-direction:column; gap:8px; }
+.rebal-chain-row {
+  display:flex; align-items:center; gap:12px; padding:10px;
+  background:rgba(255,255,255,.02); border-radius:8px;
+  border:1px solid rgba(255,255,255,.05); flex-wrap:wrap;
+}
+.rcr-left { min-width:80px; }
+.rcr-chain-name { font-weight:700; font-size:10px; }
+.rcr-chain-sub  { font-size:8.5px; color:var(--muted2); }
+.rcr-metrics { display:flex; gap:0; flex:1; }
+.rcr-metric  { flex:1; text-align:center; padding:4px; border-right:1px solid rgba(255,255,255,.05); }
+.rcr-metric:last-child { border-right:none; }
+.rcr-val { font-size:12px; font-weight:700; color:var(--text); }
+.rcr-lbl { font-size:8px; color:var(--muted2); }
+.rcr-actions { flex-shrink:0; }
+.rebal-config { margin-top:12px; padding-top:12px; border-top:1px solid rgba(255,255,255,.06); }
+
+/* Turbo Bridge intent modal */
+.turbo-progress-wrap { padding:16px 20px; }
+.turbo-step-list { display:flex; flex-direction:column; gap:8px; }
+.turbo-step {
+  display:flex; align-items:center; gap:10px; padding:8px 10px;
+  border-radius:7px; background:rgba(255,255,255,.02); font-size:10px;
+  border:1px solid rgba(255,255,255,.05); transition:.3s;
+}
+.turbo-step.done   { background:rgba(34,197,94,.06); border-color:rgba(34,197,94,.2); }
+.turbo-step.active { background:rgba(79,142,247,.07); border-color:rgba(79,142,247,.25); }
+.turbo-step-dot {
+  width:20px; height:20px; border-radius:50%; display:flex;
+  align-items:center; justify-content:center; font-size:9px; flex-shrink:0;
+  background:rgba(255,255,255,.06); color:var(--muted2);
+}
+.turbo-step.done .turbo-step-dot   { background:rgba(34,197,94,.2);  color:var(--green); }
+.turbo-step.active .turbo-step-dot { background:rgba(79,142,247,.2); color:var(--blue); animation:vault-spin 1s linear infinite; }
+.turbo-step-label { flex:1; }
+.turbo-step-label strong { display:block; color:var(--text); font-weight:600; }
+.turbo-step-label small  { color:var(--muted2); font-size:8.5px; }
+
+/* Live ticker */
+.vault-ticker {
+  display:flex; gap:12px; overflow:hidden; padding:8px 0;
+  border-top:1px solid rgba(255,255,255,.04);
+  border-bottom:1px solid rgba(255,255,255,.04);
+  margin-bottom:16px; flex-wrap:wrap;
+}
+.vault-ticker-item {
+  display:flex; align-items:center; gap:6px; font-size:9px;
+  white-space:nowrap; color:var(--muted2);
+}
+.vault-ticker-item strong { color:var(--text); }
+.vault-ticker-item .up   { color:var(--green); }
+.vault-ticker-item .down { color:var(--red);   }
+
+/* Section headings */
+.trs-section-title {
+  font-size:11px; font-weight:800; color:var(--text); margin-bottom:14px;
+  display:flex; align-items:center; gap:8px; letter-spacing:-.2px;
+}
+.trs-section-title i { font-size:14px; }
+.trs-section-sub { font-size:9px; color:var(--muted2); margin-top:1px; }
+</style>
 </head>
 <body>
 
@@ -3069,6 +3337,8 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
       <div class="nav-item" id="nav-bridge" onclick="showPage('bridge')"><i class="ti ti-topology-star-3"></i>Bridge<span class="nav-kit">Kit</span></div>
       <div class="nav-item" id="nav-pool" onclick="showPage('pool')"><i class="ti ti-droplet"></i>Liquidity<span class="nav-kit">Pool</span></div>
       <div class="nav-item" id="nav-xchain" onclick="showPage('xchain')"><i class="ti ti-world-share"></i>Cross-Chain<span class="nav-kit">Pay</span></div>
+      <div class="nav-group" style="margin-top:4px">Protocol</div>
+      <div class="nav-item" id="nav-treasury" onclick="showPage('treasury')"><i class="ti ti-vault"></i>Treasury<span class="nav-kit" style="background:rgba(79,142,247,.12);color:#7b9ef7;border:1px solid rgba(79,142,247,.25)">Vault</span></div>
       <div class="nav-group" style="margin-top:4px">Manage</div>
       <div class="nav-item" id="nav-recipients" onclick="showPage('recipients')"><i class="ti ti-users"></i>Recipients</div>
       <div class="nav-item" id="nav-templates" onclick="showPage('templates')"><i class="ti ti-template"></i>Templates</div>
@@ -3624,7 +3894,17 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
           </div>
 
           <!-- Transaction steps -->
-          <div class="card" id="bridge-steps-card" style="display:none">
+          <div class="card" id="bridge-steps-card">
+            <div class="turbo-progress-wrap" id="turbo-steps-wrap" style="display:none">
+              <div style="font-size:9.5px;font-weight:700;color:var(--yellow);margin-bottom:8px"><i class="ti ti-bolt"></i> Turbo Bridge Progress</div>
+              <div class="turbo-step-list">
+                <div class="turbo-step" id="turbo-step-0"><div class="turbo-step-dot">1</div><div class="turbo-step-label"><strong>Check Vault Liquidity</strong><small>Verify available reserves</small></div></div>
+                <div class="turbo-step" id="turbo-step-1"><div class="turbo-step-dot">2</div><div class="turbo-step-label"><strong>Lock Liquidity</strong><small>Reserve funds in Vault</small></div></div>
+                <div class="turbo-step" id="turbo-step-2"><div class="turbo-step-dot">3</div><div class="turbo-step-label"><strong>Instant Fulfillment</strong><small>Send to destination immediately</small></div></div>
+                <div class="turbo-step" id="turbo-step-3"><div class="turbo-step-dot">4</div><div class="turbo-step-label"><strong>CCTP Settlement</strong><small>Initiate reimbursement via CCTP</small></div></div>
+                <div class="turbo-step" id="turbo-step-4"><div class="turbo-step-dot">✓</div><div class="turbo-step-label"><strong>Complete</strong><small>Vault reimbursed via attestation</small></div></div>
+              </div>
+            </div style="display:none">
             <div class="ch"><i class="ti ti-list-check" style="font-size:13px;color:var(--teal)"></i><span class="ct">Bridge Steps</span><span id="bridge-step-status" style="margin-left:auto;font-size:9px;color:var(--muted2)">Pending</span></div>
             <div class="cb">
               <div class="step-list" id="bridge-step-list"></div>
@@ -5201,6 +5481,541 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
       </div>
     </div>
 
+    
+    <!-- PAGE: TREASURY -->
+    <div class="page" id="page-treasury">
+      <div class="page-header">
+        <div class="page-icon" style="background:linear-gradient(135deg,rgba(79,142,247,.18),rgba(139,92,246,.18));color:#7b9ef7"><i class="ti ti-vault"></i></div>
+        <div>
+          <div class="page-title">Treasury <span style="font-size:9px;background:rgba(79,142,247,.15);color:#7b9ef7;border:1px solid rgba(79,142,247,.3);border-radius:4px;padding:2px 7px;margin-left:6px;font-weight:700;vertical-align:middle">PROTOCOL</span> <span style="font-size:9px;background:rgba(245,158,11,.12);color:var(--yellow);border:1px solid rgba(245,158,11,.25);border-radius:4px;padding:2px 7px;margin-left:2px;font-weight:700;vertical-align:middle">BETA</span></div>
+          <div class="page-sub">Vault · Liquidity · Fulfiller Engine · CCTP Settlement</div>
+        </div>
+        <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+          <div id="vault-live-dot" style="width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 6px var(--green);animation:vault-pulse 2s infinite"></div>
+          <span style="font-size:9px;color:var(--green)">Live</span>
+          <button class="btn" onclick="vaultRefreshAll()" style="padding:5px 10px"><i class="ti ti-refresh"></i>Refresh</button>
+        </div>
+      </div>
+
+      <!-- Vault ticker -->
+      <div class="vault-ticker" id="vault-ticker">
+        <div class="vault-ticker-item"><span>USDC</span><strong id="tk-usdc">0.00</strong><span class="up">▲</span></div>
+        <div class="vault-ticker-item"><span>|</span></div>
+        <div class="vault-ticker-item"><span>EURC</span><strong id="tk-eurc">0.00</strong><span class="up">▲</span></div>
+        <div class="vault-ticker-item"><span>|</span></div>
+        <div class="vault-ticker-item"><span>cirBTC</span><strong id="tk-cirbtc">0.000000</strong><span class="up">▲</span></div>
+        <div class="vault-ticker-item"><span>|</span></div>
+        <div class="vault-ticker-item"><span>Total TVL</span><strong id="tk-tvl">$0.00</strong></div>
+        <div class="vault-ticker-item"><span>|</span></div>
+        <div class="vault-ticker-item"><span>Intents</span><strong id="tk-intents">0</strong></div>
+        <div class="vault-ticker-item"><span>|</span></div>
+        <div class="vault-ticker-item"><span>Settlement Rate</span><strong id="tk-settlement" style="color:var(--green)">100%</strong></div>
+      </div>
+
+      <!-- Layout -->
+      <div class="trs-layout">
+        <!-- Sidebar nav -->
+        <nav class="trs-sidebar">
+          <div class="trs-nav-item active" id="trs-nav-overview" onclick="showTrsSection('overview')">
+            <i class="ti ti-layout-dashboard"></i><span>Overview</span>
+          </div>
+          <div class="trs-nav-item" id="trs-nav-vault" onclick="showTrsSection('vault')">
+            <i class="ti ti-vault"></i><span>Vault</span>
+          </div>
+          <div class="trs-nav-item" id="trs-nav-liquidity" onclick="showTrsSection('liquidity')">
+            <i class="ti ti-droplet"></i><span>Liquidity</span>
+          </div>
+          <div class="trs-nav-item" id="trs-nav-fast-bridge" onclick="showTrsSection('fast-bridge')">
+            <i class="ti ti-bolt"></i><span>Fast Bridge</span>
+            <span style="font-size:8px;background:rgba(34,197,94,.15);color:var(--green);border-radius:3px;padding:1px 5px;margin-left:auto">Turbo</span>
+          </div>
+          <div class="trs-nav-item" id="trs-nav-rebalancing" onclick="showTrsSection('rebalancing')">
+            <i class="ti ti-arrows-exchange-2"></i><span>Rebalancing</span>
+          </div>
+          <div class="trs-nav-item" id="trs-nav-analytics" onclick="showTrsSection('analytics')">
+            <i class="ti ti-chart-line"></i><span>Analytics</span>
+          </div>
+          <div style="margin-top:auto;padding-top:12px;border-top:1px solid rgba(255,255,255,.05)">
+            <div style="font-size:8.5px;color:var(--muted2);text-align:center;line-height:1.5">
+              Powered by<br><span style="color:var(--blue)">CCTP V2</span> · Circle
+            </div>
+          </div>
+        </nav>
+
+        <!-- Content -->
+        <div class="trs-content">
+
+          <!-- ── OVERVIEW ── -->
+          <div class="trs-section active" id="trs-overview">
+            <div class="trs-section-title"><i class="ti ti-layout-dashboard"></i>Protocol Overview
+              <span class="trs-section-sub">Real-time treasury metrics</span>
+            </div>
+
+            <!-- 4 metric cards -->
+            <div class="vault-grid">
+              <div class="vault-metric-card">
+                <div class="vmc-icon" style="background:rgba(79,142,247,.12);color:#7b9ef7"><i class="ti ti-coin"></i></div>
+                <div class="vmc-body">
+                  <div class="vmc-label">Total Treasury Value</div>
+                  <div class="vmc-value" id="ov-tvl">$0.00</div>
+                  <div class="vmc-sub" id="ov-tvl-sub">3 assets · 2 chains</div>
+                </div>
+              </div>
+              <div class="vault-metric-card">
+                <div class="vmc-icon" style="background:rgba(34,197,94,.12);color:var(--green)"><i class="ti ti-trending-up"></i></div>
+                <div class="vmc-body">
+                  <div class="vmc-label">Fees Earned (All Time)</div>
+                  <div class="vmc-value" id="ov-fees">$0.00</div>
+                  <div class="vmc-sub" id="ov-fees-sub">Standard + Turbo fees</div>
+                </div>
+              </div>
+              <div class="vault-metric-card">
+                <div class="vmc-icon" style="background:rgba(245,158,11,.12);color:var(--yellow)"><i class="ti ti-bolt"></i></div>
+                <div class="vmc-body">
+                  <div class="vmc-label">Active Intents</div>
+                  <div class="vmc-value" id="ov-intents">0</div>
+                  <div class="vmc-sub" id="ov-intents-sub">Pending · Settling</div>
+                </div>
+              </div>
+              <div class="vault-metric-card">
+                <div class="vmc-icon" style="background:rgba(139,92,246,.12);color:var(--purple)"><i class="ti ti-shield-check"></i></div>
+                <div class="vmc-body">
+                  <div class="vmc-label">Settlement Rate</div>
+                  <div class="vmc-value" id="ov-settlement" style="color:var(--green)">100%</div>
+                  <div class="vmc-sub">All intents resolved</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Asset cards -->
+            <div class="trs-section-title" style="margin-top:16px"><i class="ti ti-coins"></i>Vault Assets</div>
+            <div class="vault-assets-grid">
+              <div class="vault-asset-card">
+                <div class="vac-header">
+                  <div class="vac-icon" style="background:rgba(39,174,96,.12)"><img src="https://cryptologos.cc/logos/usd-coin-usdc-logo.svg" style="width:22px;height:22px" onerror="this.style.display='none';this.nextSibling.style.display='flex'"><div style="display:none;width:22px;height:22px;background:rgba(39,174,96,.2);border-radius:50%;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:var(--green)">$</div></div>
+                  <div><div class="vac-name">USDC</div><div class="vac-chain">USD Coin · Circle</div></div>
+                  <div style="margin-left:auto;text-align:right">
+                    <div class="vac-total" id="vac-usdc-total">$0.00</div>
+                    <div style="font-size:8.5px;color:var(--green)">Available</div>
+                  </div>
+                </div>
+                <div class="vac-bars">
+                  <div class="vac-bar-row"><span>Available</span><div class="vac-bar"><div class="vac-bar-fill" id="vbar-usdc-avail" style="width:0%;background:var(--green)"></div></div><span id="vac-usdc-avail">0.00</span></div>
+                  <div class="vac-bar-row"><span>Locked</span><div class="vac-bar"><div class="vac-bar-fill" id="vbar-usdc-locked" style="width:0%;background:var(--yellow)"></div></div><span id="vac-usdc-locked">0.00</span></div>
+                  <div class="vac-bar-row"><span>Pending</span><div class="vac-bar"><div class="vac-bar-fill" id="vbar-usdc-pend" style="width:0%;background:var(--blue)"></div></div><span id="vac-usdc-pend">0.00</span></div>
+                </div>
+              </div>
+              <div class="vault-asset-card">
+                <div class="vac-header">
+                  <div class="vac-icon" style="background:rgba(59,130,246,.12)"><div style="width:22px;height:22px;background:rgba(59,130,246,.2);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:800;color:#60a5fa">€</div></div>
+                  <div><div class="vac-name">EURC</div><div class="vac-chain">Euro Coin · Circle</div></div>
+                  <div style="margin-left:auto;text-align:right">
+                    <div class="vac-total" id="vac-eurc-total">€0.00</div>
+                    <div style="font-size:8.5px;color:var(--green)">Available</div>
+                  </div>
+                </div>
+                <div class="vac-bars">
+                  <div class="vac-bar-row"><span>Available</span><div class="vac-bar"><div class="vac-bar-fill" id="vbar-eurc-avail" style="width:0%;background:var(--green)"></div></div><span id="vac-eurc-avail">0.00</span></div>
+                  <div class="vac-bar-row"><span>Locked</span><div class="vac-bar"><div class="vac-bar-fill" id="vbar-eurc-locked" style="width:0%;background:var(--yellow)"></div></div><span id="vac-eurc-locked">0.00</span></div>
+                  <div class="vac-bar-row"><span>Pending</span><div class="vac-bar"><div class="vac-bar-fill" id="vbar-eurc-pend" style="width:0%;background:var(--blue)"></div></div><span id="vac-eurc-pend">0.00</span></div>
+                </div>
+              </div>
+              <div class="vault-asset-card">
+                <div class="vac-header">
+                  <div class="vac-icon" style="background:rgba(245,158,11,.12)"><div style="width:22px;height:22px;background:rgba(245,158,11,.2);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:800;color:var(--yellow)">₿</div></div>
+                  <div><div class="vac-name">cirBTC</div><div class="vac-chain">Circle Bitcoin · CCTP</div></div>
+                  <div style="margin-left:auto;text-align:right">
+                    <div class="vac-total" id="vac-cirbtc-total">0.000000 BTC</div>
+                    <div style="font-size:8.5px;color:var(--green)">Available</div>
+                  </div>
+                </div>
+                <div class="vac-bars">
+                  <div class="vac-bar-row"><span>Available</span><div class="vac-bar"><div class="vac-bar-fill" id="vbar-btc-avail" style="width:0%;background:var(--green)"></div></div><span id="vac-cirbtc-avail">0.000000</span></div>
+                  <div class="vac-bar-row"><span>Locked</span><div class="vac-bar"><div class="vac-bar-fill" id="vbar-btc-locked" style="width:0%;background:var(--yellow)"></div></div><span id="vac-cirbtc-locked">0.000000</span></div>
+                  <div class="vac-bar-row"><span>Pending</span><div class="vac-bar"><div class="vac-bar-fill" id="vbar-btc-pend" style="width:0%;background:var(--blue)"></div></div><span id="vac-cirbtc-pend">0.000000</span></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Security grid -->
+            <div class="trs-section-title" style="margin-top:16px"><i class="ti ti-shield"></i>Security Status</div>
+            <div class="vault-security-grid">
+              <div class="vsec-item ok"><i class="ti ti-lock"></i><span>Reentrancy Guard</span><span class="vsec-badge ok">Active</span></div>
+              <div class="vsec-item ok"><i class="ti ti-users-group"></i><span>Role Permissions</span><span class="vsec-badge ok">Enforced</span></div>
+              <div class="vsec-item ok"><i class="ti ti-switch"></i><span>Circuit Breaker</span><span class="vsec-badge ok">Armed</span></div>
+              <div class="vsec-item ok"><i class="ti ti-player-pause"></i><span>Emergency Pause</span><span class="vsec-badge warn">Standby</span></div>
+              <div class="vsec-item ok"><i class="ti ti-ban"></i><span>Replay Protection</span><span class="vsec-badge ok">Active</span></div>
+              <div class="vsec-item ok"><i class="ti ti-check"></i><span>Settlement Verify</span><span class="vsec-badge ok">Verified</span></div>
+            </div>
+          </div>
+
+          <!-- ── VAULT ── -->
+          <div class="trs-section" id="trs-vault">
+            <div class="trs-section-title"><i class="ti ti-vault"></i>Fulfiller Engine
+              <span class="trs-section-sub">CCTP V2 Intent-based settlement</span>
+            </div>
+            <!-- Fulfiller status card -->
+            <div class="fulfiller-card">
+              <div class="fc-header">
+                <div style="display:flex;align-items:center;gap:10px">
+                  <div style="width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,rgba(79,142,247,.2),rgba(139,92,246,.2));display:flex;align-items:center;justify-content:center;font-size:16px">⚡</div>
+                  <div>
+                    <div style="font-size:12px;font-weight:700;color:var(--text)">Elligente Fulfiller</div>
+                    <div style="font-size:9px;color:var(--muted2)">Pay First · Settle Later via CCTP</div>
+                  </div>
+                </div>
+                <div style="margin-left:auto;display:flex;align-items:center;gap:6px">
+                  <div style="width:7px;height:7px;border-radius:50%;background:var(--green);animation:vault-pulse 2s infinite"></div>
+                  <span style="font-size:9.5px;color:var(--green);font-weight:600">Operational</span>
+                </div>
+              </div>
+              <div class="fc-stats">
+                <div class="fc-stat"><div class="fc-stat-val" id="fc-total">0</div><div class="fc-stat-lbl">Total Intents</div></div>
+                <div class="fc-stat"><div class="fc-stat-val" id="fc-fulfilled" style="color:var(--green)">0</div><div class="fc-stat-lbl">Fulfilled</div></div>
+                <div class="fc-stat"><div class="fc-stat-val" id="fc-settling" style="color:var(--yellow)">0</div><div class="fc-stat-lbl">Settling</div></div>
+                <div class="fc-stat"><div class="fc-stat-val" id="fc-settled" style="color:var(--blue)">0</div><div class="fc-stat-lbl">Settled</div></div>
+                <div class="fc-stat"><div class="fc-stat-val" id="fc-failed" style="color:var(--red)">0</div><div class="fc-stat-lbl">Failed</div></div>
+              </div>
+            </div>
+
+            <!-- Intent table -->
+            <div class="trs-section-title" style="margin-top:16px"><i class="ti ti-list"></i>Bridge Intents</div>
+            <div class="intent-table-wrap">
+              <table class="intent-table">
+                <thead>
+                  <tr>
+                    <th>Intent ID</th><th>Route</th><th>Asset</th><th>Amount</th><th>Status</th><th>Age</th>
+                  </tr>
+                </thead>
+                <tbody id="intent-tbody">
+                  <tr class="intent-empty-row"><td colspan="6"><i class="ti ti-inbox" style="font-size:24px;display:block;margin-bottom:6px;opacity:.3"></i>No intents yet. Use Turbo Bridge to create intents.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- ── LIQUIDITY ── -->
+          <div class="trs-section" id="trs-liquidity">
+            <div class="trs-section-title"><i class="ti ti-droplet"></i>Liquidity Manager
+              <span class="trs-section-sub">Monitor · Manage · Auto-rebalance</span>
+            </div>
+
+            <!-- Liquidity pool cards -->
+            <div class="liq-pools-grid">
+              <!-- USDC Pool -->
+              <div class="liq-pool-card">
+                <div class="lpc-header">
+                  <div style="width:32px;height:32px;border-radius:50%;background:rgba(39,174,96,.15);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;color:var(--green)">$</div>
+                  <div>
+                    <div style="font-weight:700;font-size:11px">USDC Pool</div>
+                    <div style="font-size:8.5px;color:var(--muted2)">USD Coin</div>
+                  </div>
+                  <div style="margin-left:auto">
+                    <div class="liq-util-badge" id="liq-usdc-util">0% utilized</div>
+                  </div>
+                </div>
+                <div class="liq-metric-row">
+                  <div class="liq-metric"><div class="lm-val" id="liq-usdc-avail">0.00</div><div class="lm-lbl">Available</div></div>
+                  <div class="liq-metric"><div class="lm-val" id="liq-usdc-locked" style="color:var(--yellow)">0.00</div><div class="lm-lbl">Locked</div></div>
+                  <div class="liq-metric"><div class="lm-val" id="liq-usdc-pend" style="color:var(--blue)">0.00</div><div class="lm-lbl">Pending</div></div>
+                  <div class="liq-metric"><div class="lm-val" id="liq-usdc-total" style="color:var(--text)">0.00</div><div class="lm-lbl">Total</div></div>
+                </div>
+                <div class="liq-bar-wrap">
+                  <div class="liq-stacked-bar">
+                    <div id="lsb-usdc-avail" style="height:100%;background:var(--green);transition:width .5s;width:0%;border-radius:4px 0 0 4px"></div>
+                    <div id="lsb-usdc-locked" style="height:100%;background:var(--yellow);transition:width .5s;width:0%"></div>
+                    <div id="lsb-usdc-pend" style="height:100%;background:var(--blue);transition:width .5s;width:0%;border-radius:0 4px 4px 0"></div>
+                  </div>
+                  <div class="liq-bar-legend">
+                    <span><span class="dot" style="background:var(--green)"></span>Available</span>
+                    <span><span class="dot" style="background:var(--yellow)"></span>Locked</span>
+                    <span><span class="dot" style="background:var(--blue)"></span>Pending</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- EURC Pool -->
+              <div class="liq-pool-card">
+                <div class="lpc-header">
+                  <div style="width:32px;height:32px;border-radius:50%;background:rgba(59,130,246,.15);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;color:#60a5fa">€</div>
+                  <div>
+                    <div style="font-weight:700;font-size:11px">EURC Pool</div>
+                    <div style="font-size:8.5px;color:var(--muted2)">Euro Coin</div>
+                  </div>
+                  <div style="margin-left:auto">
+                    <div class="liq-util-badge" id="liq-eurc-util">0% utilized</div>
+                  </div>
+                </div>
+                <div class="liq-metric-row">
+                  <div class="liq-metric"><div class="lm-val" id="liq-eurc-avail">0.00</div><div class="lm-lbl">Available</div></div>
+                  <div class="liq-metric"><div class="lm-val" id="liq-eurc-locked" style="color:var(--yellow)">0.00</div><div class="lm-lbl">Locked</div></div>
+                  <div class="liq-metric"><div class="lm-val" id="liq-eurc-pend" style="color:var(--blue)">0.00</div><div class="lm-lbl">Pending</div></div>
+                  <div class="liq-metric"><div class="lm-val" id="liq-eurc-total" style="color:var(--text)">0.00</div><div class="lm-lbl">Total</div></div>
+                </div>
+                <div class="liq-bar-wrap">
+                  <div class="liq-stacked-bar">
+                    <div id="lsb-eurc-avail" style="height:100%;background:var(--green);transition:width .5s;width:0%;border-radius:4px 0 0 4px"></div>
+                    <div id="lsb-eurc-locked" style="height:100%;background:var(--yellow);transition:width .5s;width:0%"></div>
+                    <div id="lsb-eurc-pend" style="height:100%;background:var(--blue);transition:width .5s;width:0%;border-radius:0 4px 4px 0"></div>
+                  </div>
+                  <div class="liq-bar-legend">
+                    <span><span class="dot" style="background:var(--green)"></span>Available</span>
+                    <span><span class="dot" style="background:var(--yellow)"></span>Locked</span>
+                    <span><span class="dot" style="background:var(--blue)"></span>Pending</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- cirBTC Pool -->
+              <div class="liq-pool-card">
+                <div class="lpc-header">
+                  <div style="width:32px;height:32px;border-radius:50%;background:rgba(245,158,11,.15);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;color:var(--yellow)">₿</div>
+                  <div>
+                    <div style="font-weight:700;font-size:11px">cirBTC Pool</div>
+                    <div style="font-size:8.5px;color:var(--muted2)">Circle Bitcoin</div>
+                  </div>
+                  <div style="margin-left:auto">
+                    <div class="liq-util-badge" id="liq-btc-util">0% utilized</div>
+                  </div>
+                </div>
+                <div class="liq-metric-row">
+                  <div class="liq-metric"><div class="lm-val" id="liq-btc-avail">0.000000</div><div class="lm-lbl">Available</div></div>
+                  <div class="liq-metric"><div class="lm-val" id="liq-btc-locked" style="color:var(--yellow)">0.000000</div><div class="lm-lbl">Locked</div></div>
+                  <div class="liq-metric"><div class="lm-val" id="liq-btc-pend" style="color:var(--blue)">0.000000</div><div class="lm-lbl">Pending</div></div>
+                  <div class="liq-metric"><div class="lm-val" id="liq-btc-total" style="color:var(--text)">0.000000</div><div class="lm-lbl">Total</div></div>
+                </div>
+                <div class="liq-bar-wrap">
+                  <div class="liq-stacked-bar">
+                    <div id="lsb-btc-avail" style="height:100%;background:var(--green);transition:width .5s;width:0%;border-radius:4px 0 0 4px"></div>
+                    <div id="lsb-btc-locked" style="height:100%;background:var(--yellow);transition:width .5s;width:0%"></div>
+                    <div id="lsb-btc-pend" style="height:100%;background:var(--blue);transition:width .5s;width:0%;border-radius:0 4px 4px 0"></div>
+                  </div>
+                  <div class="liq-bar-legend">
+                    <span><span class="dot" style="background:var(--green)"></span>Available</span>
+                    <span><span class="dot" style="background:var(--yellow)"></span>Locked</span>
+                    <span><span class="dot" style="background:var(--blue)"></span>Pending</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ── FAST BRIDGE ── -->
+          <div class="trs-section" id="trs-fast-bridge">
+            <div class="trs-section-title"><i class="ti ti-bolt"></i>Turbo Bridge Engine
+              <span class="trs-section-sub">Instant liquidity · CCTP settlement</span>
+            </div>
+
+            <!-- Turbo routes -->
+            <div class="turbo-routes-grid">
+              <div class="turbo-route-card">
+                <div class="trc-chains">
+                  <span class="trc-chain src">Base</span>
+                  <div class="trc-arrow"><i class="ti ti-arrow-right"></i></div>
+                  <span class="trc-chain dst">ARC</span>
+                </div>
+                <div class="trc-status" id="route-base-arc">
+                  <span class="trc-badge available"><i class="ti ti-bolt"></i>Turbo Available</span>
+                </div>
+                <div class="trc-eta">ETA: <strong>10–30s</strong></div>
+                <div class="trc-liquidity">Vault liquidity: <strong id="route-base-liq">$0.00</strong></div>
+              </div>
+              <div class="turbo-route-card">
+                <div class="trc-chains">
+                  <span class="trc-chain src">Ethereum</span>
+                  <div class="trc-arrow"><i class="ti ti-arrow-right"></i></div>
+                  <span class="trc-chain dst">ARC</span>
+                </div>
+                <div class="trc-status" id="route-eth-arc">
+                  <span class="trc-badge available"><i class="ti ti-bolt"></i>Turbo Available</span>
+                </div>
+                <div class="trc-eta">ETA: <strong>10–30s</strong></div>
+                <div class="trc-liquidity">Vault liquidity: <strong id="route-eth-liq">$0.00</strong></div>
+              </div>
+              <div class="turbo-route-card">
+                <div class="trc-chains">
+                  <span class="trc-chain src">Arbitrum</span>
+                  <div class="trc-arrow"><i class="ti ti-arrow-right"></i></div>
+                  <span class="trc-chain dst">ARC</span>
+                </div>
+                <div class="trc-status" id="route-arb-arc">
+                  <span class="trc-badge available"><i class="ti ti-bolt"></i>Turbo Available</span>
+                </div>
+                <div class="trc-eta">ETA: <strong>10–30s</strong></div>
+                <div class="trc-liquidity">Vault liquidity: <strong id="route-arb-liq">$0.00</strong></div>
+              </div>
+            </div>
+
+            <!-- Active intents list -->
+            <div class="trs-section-title" style="margin-top:16px"><i class="ti ti-activity"></i>Recent Turbo Intents</div>
+            <div id="turbo-intent-list">
+              <div style="text-align:center;padding:24px;color:var(--muted2);font-size:10px">
+                <i class="ti ti-bolt" style="font-size:24px;display:block;margin-bottom:6px;opacity:.3"></i>
+                No Turbo Bridge intents yet.
+              </div>
+            </div>
+          </div>
+
+          <!-- ── REBALANCING ── -->
+          <div class="trs-section" id="trs-rebalancing">
+            <div class="trs-section-title"><i class="ti ti-arrows-exchange-2"></i>Auto Rebalancing
+              <span class="trs-section-sub">Threshold-based CCTP rebalancing</span>
+            </div>
+
+            <div class="rebal-card">
+              <div class="rebal-header">
+                <span style="font-weight:700;font-size:11px">Rebalancing Engine</span>
+                <label class="rebal-toggle-wrap">
+                  <input type="checkbox" id="rebal-toggle" onchange="toggleRebalancing(this.checked)">
+                  <span class="rebal-toggle-slider"></span>
+                </label>
+                <span id="rebal-status-text" style="font-size:9.5px;color:var(--muted2)">Disabled</span>
+              </div>
+              <div class="rebal-chain-rows" id="rebal-chain-rows">
+                <!-- ARC chain row -->
+                <div class="rebal-chain-row">
+                  <div class="rcr-left">
+                    <div class="rcr-chain-name">ARC Testnet</div>
+                    <div class="rcr-chain-sub">Destination chain</div>
+                  </div>
+                  <div class="rcr-metrics">
+                    <div class="rcr-metric"><div class="rcr-val" id="rcr-arc-balance">$0.00</div><div class="rcr-lbl">Balance</div></div>
+                    <div class="rcr-metric"><div class="rcr-val" id="rcr-arc-min" style="color:var(--red)">$10,000</div><div class="rcr-lbl">Minimum</div></div>
+                    <div class="rcr-metric"><div class="rcr-val" id="rcr-arc-target" style="color:var(--blue)">$50,000</div><div class="rcr-lbl">Target</div></div>
+                    <div class="rcr-metric"><div class="rcr-val" id="rcr-arc-emerg" style="color:var(--yellow)">$5,000</div><div class="rcr-lbl">Emergency</div></div>
+                  </div>
+                  <div class="rcr-actions">
+                    <button class="btn" onclick="triggerRebalance('arc','usdc')" style="font-size:9px;padding:5px 10px"><i class="ti ti-refresh"></i>Rebalance Now</button>
+                  </div>
+                </div>
+                <!-- Base chain row -->
+                <div class="rebal-chain-row">
+                  <div class="rcr-left">
+                    <div class="rcr-chain-name">Base</div>
+                    <div class="rcr-chain-sub">Source chain</div>
+                  </div>
+                  <div class="rcr-metrics">
+                    <div class="rcr-metric"><div class="rcr-val" id="rcr-base-balance">$0.00</div><div class="rcr-lbl">Balance</div></div>
+                    <div class="rcr-metric"><div class="rcr-val" id="rcr-base-min" style="color:var(--red)">$5,000</div><div class="rcr-lbl">Minimum</div></div>
+                    <div class="rcr-metric"><div class="rcr-val" id="rcr-base-target" style="color:var(--blue)">$20,000</div><div class="rcr-lbl">Target</div></div>
+                    <div class="rcr-metric"><div class="rcr-val" id="rcr-base-emerg" style="color:var(--yellow)">$2,000</div><div class="rcr-lbl">Emergency</div></div>
+                  </div>
+                  <div class="rcr-actions">
+                    <button class="btn" onclick="triggerRebalance('base','usdc')" style="font-size:9px;padding:5px 10px"><i class="ti ti-refresh"></i>Rebalance Now</button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Threshold config -->
+              <div class="rebal-config">
+                <div class="trs-section-title" style="margin:12px 0 8px"><i class="ti ti-sliders"></i>Threshold Configuration</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+                  <div><label style="font-size:9px;color:var(--muted2)">Minimum Balance (USDC)</label><input class="cinput" id="rebal-min" type="number" value="10000" style="margin-top:4px"></div>
+                  <div><label style="font-size:9px;color:var(--muted2)">Target Balance (USDC)</label><input class="cinput" id="rebal-target" type="number" value="50000" style="margin-top:4px"></div>
+                  <div><label style="font-size:9px;color:var(--muted2)">Emergency Balance (USDC)</label><input class="cinput" id="rebal-emerg" type="number" value="5000" style="margin-top:4px"></div>
+                </div>
+                <button class="btn primary" onclick="saveRebalConfig()" style="margin-top:10px;width:100%;justify-content:center"><i class="ti ti-device-floppy"></i>Save Thresholds</button>
+              </div>
+            </div>
+
+            <!-- Rebalancing activity log -->
+            <div class="trs-section-title" style="margin-top:16px"><i class="ti ti-history"></i>Rebalancing History</div>
+            <div id="rebal-history-list">
+              <div style="text-align:center;padding:24px;color:var(--muted2);font-size:10px">
+                <i class="ti ti-history" style="font-size:24px;display:block;margin-bottom:6px;opacity:.3"></i>No rebalancing operations yet.
+              </div>
+            </div>
+          </div>
+
+          <!-- ── ANALYTICS ── -->
+          <div class="trs-section" id="trs-analytics">
+            <div class="trs-section-title"><i class="ti ti-chart-line"></i>Vault Analytics
+              <span class="trs-section-sub">Protocol performance metrics</span>
+            </div>
+
+            <!-- Analytics metrics grid -->
+            <div class="vault-grid" style="grid-template-columns:repeat(4,1fr)">
+              <div class="vault-metric-card">
+                <div class="vmc-icon" style="background:rgba(79,142,247,.12);color:#7b9ef7"><i class="ti ti-coin"></i></div>
+                <div class="vmc-body"><div class="vmc-label">Total Treasury</div><div class="vmc-value" id="an-tvl">$0.00</div><div class="vmc-sub">All assets combined</div></div>
+              </div>
+              <div class="vault-metric-card">
+                <div class="vmc-icon" style="background:rgba(34,197,94,.12);color:var(--green)"><i class="ti ti-cash"></i></div>
+                <div class="vmc-body"><div class="vmc-label">Total Fees</div><div class="vmc-value" id="an-fees">$0.00</div><div class="vmc-sub">Standard + Turbo</div></div>
+              </div>
+              <div class="vault-metric-card">
+                <div class="vmc-icon" style="background:rgba(245,158,11,.12);color:var(--yellow)"><i class="ti ti-bolt"></i></div>
+                <div class="vmc-body"><div class="vmc-label">Turbo Volume</div><div class="vmc-value" id="an-turbo-vol">$0.00</div><div class="vmc-sub" id="an-turbo-count">0 bridges</div></div>
+              </div>
+              <div class="vault-metric-card">
+                <div class="vmc-icon" style="background:rgba(139,92,246,.12);color:var(--purple)"><i class="ti ti-topology-star-3"></i></div>
+                <div class="vmc-body"><div class="vmc-label">Standard Volume</div><div class="vmc-value" id="an-std-vol">$0.00</div><div class="vmc-sub" id="an-std-count">0 bridges</div></div>
+              </div>
+              <div class="vault-metric-card">
+                <div class="vmc-icon" style="background:rgba(239,68,68,.12);color:var(--red)"><i class="ti ti-clock"></i></div>
+                <div class="vmc-body"><div class="vmc-label">Pending Settlements</div><div class="vmc-value" id="an-pending">0</div><div class="vmc-sub">Awaiting CCTP</div></div>
+              </div>
+              <div class="vault-metric-card">
+                <div class="vmc-icon" style="background:rgba(34,197,94,.12);color:var(--green)"><i class="ti ti-circle-check"></i></div>
+                <div class="vmc-body"><div class="vmc-label">Completed</div><div class="vmc-value" id="an-completed">0</div><div class="vmc-sub">Fully settled</div></div>
+              </div>
+              <div class="vault-metric-card">
+                <div class="vmc-icon" style="background:rgba(79,142,247,.12);color:#7b9ef7"><i class="ti ti-percentage"></i></div>
+                <div class="vmc-body"><div class="vmc-label">Liq Utilization</div><div class="vmc-value" id="an-util">0%</div><div class="vmc-sub">Of total capacity</div></div>
+              </div>
+              <div class="vault-metric-card">
+                <div class="vmc-icon" style="background:rgba(139,92,246,.12);color:var(--purple)"><i class="ti ti-clock-hour-4"></i></div>
+                <div class="vmc-body"><div class="vmc-label">Avg Settlement</div><div class="vmc-value" id="an-avg-settle">—</div><div class="vmc-sub">CCTP attestation</div></div>
+              </div>
+            </div>
+
+            <!-- Revenue breakdown -->
+            <div class="trs-section-title" style="margin-top:16px"><i class="ti ti-chart-donut"></i>Revenue Breakdown</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+              <div class="card" style="padding:14px">
+                <div style="font-size:10px;font-weight:700;margin-bottom:10px;color:var(--text)">Fee Distribution</div>
+                <div style="display:flex;flex-direction:column;gap:8px">
+                  <div style="display:flex;justify-content:space-between;align-items:center;font-size:9.5px">
+                    <span style="display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:2px;background:var(--green);display:inline-block"></span>Standard Bridge Fees</span>
+                    <span id="rev-std" style="font-weight:700;color:var(--text)">$0.00</span>
+                  </div>
+                  <div style="display:flex;justify-content:space-between;align-items:center;font-size:9.5px">
+                    <span style="display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:2px;background:var(--yellow);display:inline-block"></span>Turbo Liquidity Fees</span>
+                    <span id="rev-turbo" style="font-weight:700;color:var(--text)">$0.00</span>
+                  </div>
+                  <div style="display:flex;justify-content:space-between;align-items:center;font-size:9.5px">
+                    <span style="display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:2px;background:var(--blue);display:inline-block"></span>Settlement Rebates</span>
+                    <span id="rev-settle" style="font-weight:700;color:var(--text)">$0.00</span>
+                  </div>
+                  <div style="border-top:1px solid rgba(255,255,255,.06);padding-top:8px;display:flex;justify-content:space-between;font-size:10px;font-weight:700">
+                    <span>Total Revenue</span><span id="rev-total" style="color:var(--green)">$0.00</span>
+                  </div>
+                </div>
+              </div>
+              <div class="card" style="padding:14px">
+                <div style="font-size:10px;font-weight:700;margin-bottom:10px;color:var(--text)">Bridge Volume Split</div>
+                <div style="display:flex;gap:8px;margin-bottom:10px">
+                  <div style="flex:1;padding:10px;background:rgba(245,158,11,.06);border:1px solid rgba(245,158,11,.15);border-radius:8px;text-align:center">
+                    <div style="font-size:16px;font-weight:800;color:var(--yellow)" id="an-turbo-pct">0%</div>
+                    <div style="font-size:8.5px;color:var(--muted2)">Turbo</div>
+                  </div>
+                  <div style="flex:1;padding:10px;background:rgba(79,142,247,.06);border:1px solid rgba(79,142,247,.15);border-radius:8px;text-align:center">
+                    <div style="font-size:16px;font-weight:800;color:#7b9ef7" id="an-std-pct">100%</div>
+                    <div style="font-size:8.5px;color:var(--muted2)">Standard</div>
+                  </div>
+                </div>
+                <div style="font-size:9px;color:var(--muted2);line-height:1.5">
+                  Turbo Bridge revenue flows directly into Vault treasury for compound growth.
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div><!-- end trs-content -->
+      </div><!-- end trs-layout -->
+    </div><!-- end page-treasury -->
+
+
     <!-- PAGE: SETTINGS -->
     <div class="page" id="page-settings">
       <div class="page-header">
@@ -5973,6 +6788,11 @@ function showPage(id) {
         saRefreshBalance && saRefreshBalance();
         saUpdateRoute && saUpdateRoute();
         saRenderActivity && saRenderActivity();
+      }, 50);
+    }
+    if (id === 'treasury') {
+      setTimeout(() => {
+        if (typeof vaultRefreshUI === 'function') vaultRefreshUI();
       }, 50);
     }
     if (id === 'reports') {
@@ -12865,6 +13685,810 @@ document.addEventListener('DOMContentLoaded', function() {
     }
   }
 });
+
+
+
+// ══════════════════════════════════════════════════════════════════════
+//  ELLIGENTE VAULT SYSTEM — CCTP V2 Fulfiller Repayment Architecture
+//  Inspired by: github.com/circlefin/circle-cctp-fulfiller-repayment
+//  Architecture: Pay First · Settle Later via CCTP attestation
+// ══════════════════════════════════════════════════════════════════════
+
+const VaultState = (() => {
+  const STORAGE_KEY = 'elligente_vault_v1';
+
+  const _defaults = () => ({
+    assets: {
+      usdc:   { available: 125000, locked: 8500,  pending: 3200  },
+      eurc:   { available: 48000,  locked: 1200,  pending: 800   },
+      cirbtc: { available: 2.45,   locked: 0.12,  pending: 0.08  }
+    },
+    intents: [],
+    rebalHistory: [],
+    fees: { standard: 0, turbo: 0, settlement: 0 },
+    bridgeVolume: { standard: 0, turbo: 0, stdCount: 0, turboCount: 0 },
+    rebalConfig: { min: 10000, target: 50000, emergency: 5000 },
+    rebalEnabled: false,
+    circuitBreaker: false,
+    pauseMode: false,
+    createdAt: Date.now()
+  });
+
+  let _state = null;
+
+  function load() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        _state = Object.assign(_defaults(), parsed);
+        // Ensure nested objects are merged
+        _state.assets   = Object.assign(_defaults().assets,   parsed.assets   || {});
+        _state.fees     = Object.assign(_defaults().fees,     parsed.fees     || {});
+        _state.bridgeVolume = Object.assign(_defaults().bridgeVolume, parsed.bridgeVolume || {});
+        _state.rebalConfig  = Object.assign(_defaults().rebalConfig,  parsed.rebalConfig  || {});
+      } else {
+        _state = _defaults();
+      }
+    } catch(e) {
+      _state = _defaults();
+    }
+    return _state;
+  }
+
+  function save() {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(_state)); } catch(e) {}
+  }
+
+  function get()  { if (!_state) load(); return _state; }
+  function set(fn){ if (!_state) load(); fn(_state); save(); }
+
+  function totalTVL() {
+    const s = get().assets;
+    const usdc   = (s.usdc.available   + s.usdc.locked   + s.usdc.pending)   * 1;
+    const eurc   = (s.eurc.available   + s.eurc.locked   + s.eurc.pending)   * 1.08;
+    const cirbtc = (s.cirbtc.available + s.cirbtc.locked + s.cirbtc.pending) * 67000;
+    return usdc + eurc + cirbtc;
+  }
+
+  function availableLiquidity(asset) {
+    const s = get().assets;
+    return s[asset] ? s[asset].available : 0;
+  }
+
+  function lockLiquidity(asset, amount) {
+    set(s => {
+      if (s.assets[asset] && s.assets[asset].available >= amount) {
+        s.assets[asset].available -= amount;
+        s.assets[asset].locked    += amount;
+        return true;
+      }
+    });
+  }
+
+  function releaseLiquidity(asset, amount, toPending) {
+    set(s => {
+      if (s.assets[asset]) {
+        s.assets[asset].locked  = Math.max(0, s.assets[asset].locked - amount);
+        if (toPending) s.assets[asset].pending += amount;
+      }
+    });
+  }
+
+  function settleReimbursement(asset, amount) {
+    set(s => {
+      if (s.assets[asset]) {
+        s.assets[asset].pending   = Math.max(0, s.assets[asset].pending - amount);
+        s.assets[asset].available += amount;
+      }
+    });
+  }
+
+  function addFee(type, amount) {
+    set(s => { s.fees[type] = (s.fees[type] || 0) + amount; });
+  }
+
+  function addVolume(mode, amount) {
+    set(s => {
+      if (mode === 'turbo') {
+        s.bridgeVolume.turbo      += amount;
+        s.bridgeVolume.turboCount += 1;
+      } else {
+        s.bridgeVolume.standard += amount;
+        s.bridgeVolume.stdCount += 1;
+      }
+    });
+  }
+
+  return { load, save, get, set, totalTVL, availableLiquidity, lockLiquidity, releaseLiquidity, settleReimbursement, addFee, addVolume };
+})();
+
+// ── Repayment Contract (JS simulation) ────────────────────────────────
+const RepaymentContract = (() => {
+  const _usedNonces = new Set();
+  const _repaidIntents = new Set();
+
+  function registerIntent(intentId, asset, amount, user, srcChain, dstChain) {
+    if (_usedNonces.has(intentId)) {
+      throw new Error('REPLAY_PROTECTION: Intent already registered');
+    }
+    _usedNonces.add(intentId);
+    VaultState.set(s => {
+      s.intents.push({
+        id: intentId, asset, amount, user, srcChain, dstChain,
+        status: 'Pending', createdAt: Date.now(), updatedAt: Date.now(),
+        txHash: null, settleTxHash: null, reimbursedAt: null
+      });
+    });
+    return intentId;
+  }
+
+  function fulfillIntent(intentId, txHash) {
+    _mutateIntent(intentId, i => {
+      if (i.status !== 'Pending') throw new Error('INVALID_STATE: Not Pending');
+      i.status    = 'Fulfilled';
+      i.txHash    = txHash;
+      i.updatedAt = Date.now();
+    });
+    VaultState.lockLiquidity(
+      _getIntent(intentId).asset,
+      _getIntent(intentId).amount
+    );
+  }
+
+  function markSettling(intentId) {
+    _mutateIntent(intentId, i => {
+      if (i.status !== 'Fulfilled') throw new Error('INVALID_STATE: Not Fulfilled');
+      i.status    = 'Settling';
+      i.updatedAt = Date.now();
+    });
+    VaultState.releaseLiquidity(
+      _getIntent(intentId).asset,
+      _getIntent(intentId).amount,
+      true
+    );
+  }
+
+  function verifyAndSettle(intentId, settleTxHash, reimbursedAmount) {
+    if (_repaidIntents.has(intentId)) throw new Error('DUPLICATE_REPAYMENT');
+    const intent = _getIntent(intentId);
+    if (!intent) throw new Error('INTENT_NOT_FOUND');
+    if (Math.abs(reimbursedAmount - intent.amount) > 0.01) {
+      throw new Error('AMOUNT_MISMATCH: Expected ' + intent.amount + ' got ' + reimbursedAmount);
+    }
+    _repaidIntents.add(intentId);
+    _mutateIntent(intentId, i => {
+      i.status         = 'Settled';
+      i.settleTxHash   = settleTxHash;
+      i.reimbursedAt   = Date.now();
+      i.updatedAt      = Date.now();
+    });
+    VaultState.settleReimbursement(intent.asset, intent.amount);
+    VaultState.addFee('settlement', intent.amount * 0.0005);
+  }
+
+  function failIntent(intentId, reason) {
+    _mutateIntent(intentId, i => {
+      i.status    = 'Failed';
+      i.failReason = reason;
+      i.updatedAt = Date.now();
+    });
+    // Release locked liquidity back to available
+    try {
+      const intent = _getIntent(intentId);
+      if (intent && intent.asset) {
+        VaultState.set(s => {
+          if (s.assets[intent.asset]) {
+            const locked = s.assets[intent.asset].locked;
+            s.assets[intent.asset].locked    = Math.max(0, locked - intent.amount);
+            s.assets[intent.asset].available += intent.amount;
+          }
+        });
+      }
+    } catch(e) {}
+  }
+
+  function _getIntent(id) {
+    return VaultState.get().intents.find(i => i.id === id);
+  }
+
+  function _mutateIntent(id, fn) {
+    VaultState.set(s => {
+      const intent = s.intents.find(i => i.id === id);
+      if (intent) fn(intent);
+    });
+  }
+
+  function getIntents(filter) {
+    const all = VaultState.get().intents;
+    if (!filter) return all;
+    return all.filter(i => i.status === filter);
+  }
+
+  return { registerIntent, fulfillIntent, markSettling, verifyAndSettle, failIntent, getIntents };
+})();
+
+// ── Fulfiller Engine ──────────────────────────────────────────────────
+const FulfillerEngine = (() => {
+  function generateIntentId() {
+    return 'INT-' + Date.now().toString(36).toUpperCase() + '-' + Math.random().toString(36).substr(2, 5).toUpperCase();
+  }
+
+  function generateTxHash() {
+    return '0x' + Array.from({length: 64}, () => Math.floor(Math.random()*16).toString(16)).join('');
+  }
+
+  async function createAndFulfill(srcChain, dstChain, asset, amount, userAddr) {
+    const intentId = generateIntentId();
+
+    // Security: validate amount
+    if (!amount || amount <= 0) throw new Error('INVALID_AMOUNT');
+    if (!userAddr) throw new Error('INVALID_USER');
+
+    // Security: circuit breaker
+    if (VaultState.get().circuitBreaker) throw new Error('CIRCUIT_BREAKER_ACTIVE');
+    if (VaultState.get().pauseMode) throw new Error('SYSTEM_PAUSED');
+
+    // Check vault liquidity
+    const avail = VaultState.availableLiquidity(asset);
+    if (avail < amount) {
+      throw new Error('INSUFFICIENT_LIQUIDITY: Available ' + avail + ' needed ' + amount);
+    }
+
+    // Register intent (replay protection)
+    RepaymentContract.registerIntent(intentId, asset, amount, userAddr, srcChain, dstChain);
+
+    // Simulate fulfillment delay
+    await new Promise(r => setTimeout(r, 800));
+    const txHash = generateTxHash();
+    RepaymentContract.fulfillIntent(intentId, txHash);
+
+    // Fee accounting
+    const liquidityFee = amount * 0.001;
+    VaultState.addFee('turbo', liquidityFee);
+    VaultState.addVolume('turbo', amount);
+
+    // Start CCTP settlement simulation
+    _simulateSettlement(intentId, asset, amount);
+
+    return { intentId, txHash, liquidityFee, status: 'Fulfilled' };
+  }
+
+  function _simulateSettlement(intentId, asset, amount) {
+    // Simulate CCTP attestation (10-30 seconds in real scenario)
+    setTimeout(() => {
+      try {
+        RepaymentContract.markSettling(intentId);
+        vaultRefreshUI();
+      } catch(e) {}
+    }, 3000);
+
+    setTimeout(() => {
+      try {
+        const settleTxHash = '0x' + Array.from({length: 64}, () => Math.floor(Math.random()*16).toString(16)).join('');
+        RepaymentContract.verifyAndSettle(intentId, settleTxHash, amount);
+        vaultRefreshUI();
+        showToast('Vault reimbursed via CCTP for intent ' + intentId.slice(0,10) + '...', 'success');
+      } catch(e) {}
+    }, 12000 + Math.random() * 8000);
+  }
+
+  return { generateIntentId, createAndFulfill };
+})();
+
+// ── Liquidity Manager ─────────────────────────────────────────────────
+const LiquidityManager = (() => {
+  function getUtilization(asset) {
+    const s = VaultState.get().assets[asset];
+    if (!s) return 0;
+    const total = s.available + s.locked + s.pending;
+    if (total === 0) return 0;
+    return ((s.locked + s.pending) / total) * 100;
+  }
+
+  function getTotalForAsset(asset) {
+    const s = VaultState.get().assets[asset];
+    if (!s) return 0;
+    return s.available + s.locked + s.pending;
+  }
+
+  function checkThresholds() {
+    const cfg = VaultState.get().rebalConfig;
+    const usdc = VaultState.get().assets.usdc;
+    const totalUsdc = usdc.available + usdc.locked + usdc.pending;
+    if (totalUsdc < cfg.emergency) return { severity: 'emergency', chain: 'arc', asset: 'usdc' };
+    if (totalUsdc < cfg.min)       return { severity: 'critical',  chain: 'arc', asset: 'usdc' };
+    return null;
+  }
+
+  return { getUtilization, getTotalForAsset, checkThresholds };
+})();
+
+// ── Rebalancing Engine ────────────────────────────────────────────────
+const RebalancingEngine = (() => {
+  function trigger(chain, asset, reason) {
+    const entry = {
+      id: 'RBL-' + Date.now().toString(36).toUpperCase(),
+      chain, asset, reason: reason || 'Manual',
+      amount: VaultState.get().rebalConfig.target,
+      status: 'Initiated',
+      createdAt: Date.now()
+    };
+    VaultState.set(s => {
+      s.rebalHistory.unshift(entry);
+      if (s.rebalHistory.length > 50) s.rebalHistory.pop();
+    });
+    showToast('Rebalancing initiated: ' + chain.toUpperCase() + ' ' + asset.toUpperCase(), 'success');
+    vaultRefreshUI();
+    // Simulate rebalance completion
+    setTimeout(() => {
+      VaultState.set(s => {
+        const rb = s.rebalHistory.find(r => r.id === entry.id);
+        if (rb) { rb.status = 'Completed'; rb.completedAt = Date.now(); }
+        // Simulate adding liquidity
+        if (s.assets[asset]) s.assets[asset].available += entry.amount * 0.1;
+      });
+      vaultRefreshUI();
+    }, 8000);
+    return entry;
+  }
+
+  function autoCheck() {
+    if (!VaultState.get().rebalEnabled) return;
+    const alert = LiquidityManager.checkThresholds();
+    if (alert) trigger(alert.chain, alert.asset, 'Auto: ' + alert.severity);
+  }
+
+  return { trigger, autoCheck };
+})();
+
+// ── Turbo Bridge Executor ─────────────────────────────────────────────
+const TurboExecutor = (() => {
+  let _currentMode = 'standard';
+  const TURBO_FEE_PCT = 0.001; // 0.1% liquidity fee
+
+  function setMode(mode) {
+    _currentMode = mode;
+    const btns = document.querySelectorAll('.bridge-mode-btn');
+    btns.forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
+
+    const turboInfo = document.getElementById('turbo-bridge-info');
+    const feeRows   = document.getElementById('turbo-fee-rows');
+    if (turboInfo) turboInfo.style.display  = mode === 'turbo' ? 'block' : 'none';
+    if (feeRows)   feeRows.style.display    = mode === 'turbo' ? 'flex'  : 'none';
+
+    if (mode === 'turbo') _checkVaultLiquidity();
+  }
+
+  function _checkVaultLiquidity() {
+    const avail  = VaultState.availableLiquidity('usdc');
+    const badge  = document.getElementById('turbo-avail-badge');
+    const eta    = document.getElementById('turbo-eta-display');
+    const liqFee = document.getElementById('turbo-liq-fee');
+
+    if (badge) {
+      if (avail > 100) {
+        badge.innerHTML = '<i class="ti ti-bolt"></i> Turbo Available ✓';
+        badge.className = 'turbo-avail-badge available';
+      } else {
+        badge.innerHTML = '<i class="ti ti-alert-triangle"></i> Insufficient Vault Liquidity';
+        badge.className = 'turbo-avail-badge unavailable';
+      }
+    }
+    if (eta)    eta.textContent    = avail > 100 ? '10 – 30 seconds' : 'Fallback to Standard';
+    if (liqFee) liqFee.textContent = (TURBO_FEE_PCT * 100).toFixed(2) + '% Turbo Fee';
+  }
+
+  async function execute(srcChain, dstChain, asset, amount, userAddr, onStep) {
+    if (_currentMode !== 'turbo') return null;
+
+    const avail = VaultState.availableLiquidity(asset);
+    if (avail < amount) {
+      showToast('Vault liquidity insufficient — falling back to Standard Bridge', 'warning');
+      setMode('standard');
+      return null;
+    }
+
+    try {
+      if (onStep) onStep(0, 'Checking Vault Liquidity...');
+      await new Promise(r => setTimeout(r, 600));
+
+      if (onStep) onStep(1, 'Locking Liquidity...');
+      const result = await FulfillerEngine.createAndFulfill(srcChain, dstChain, asset, amount, userAddr);
+      await new Promise(r => setTimeout(r, 500));
+
+      if (onStep) onStep(2, 'Sending funds to destination...');
+      await new Promise(r => setTimeout(r, 800));
+
+      if (onStep) onStep(3, 'Initiating CCTP Settlement...');
+      await new Promise(r => setTimeout(r, 600));
+
+      if (onStep) onStep(4, 'Complete ✓');
+
+      vaultRefreshUI();
+      return result;
+    } catch(err) {
+      showToast('Turbo Bridge error: ' + err.message, 'error');
+      return null;
+    }
+  }
+
+  function getMode() { return _currentMode; }
+
+  return { setMode, execute, getMode, checkLiquidity: _checkVaultLiquidity };
+})();
+
+// ── UI Functions ──────────────────────────────────────────────────────
+function showTrsSection(name) {
+  document.querySelectorAll('.trs-section').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.trs-nav-item').forEach(n => n.classList.remove('active'));
+  const sec = document.getElementById('trs-' + name);
+  const nav = document.getElementById('trs-nav-' + name);
+  if (sec) sec.classList.add('active');
+  if (nav) nav.classList.add('active');
+  vaultRefreshUI();
+}
+
+function setBridgeMode(mode) {
+  TurboExecutor.setMode(mode);
+}
+
+async function executeTurboBridge() {
+  if (TurboExecutor.getMode() !== 'turbo') return;
+  const asset  = 'usdc';
+  const amount = parseFloat(document.getElementById('bridge-amount')?.value || '0');
+  if (!amount || amount <= 0) { showToast('Enter a valid amount', 'error'); return; }
+
+  const userAddr = window._connectedAccount || '0x0000000000000000000000000000000000000001';
+  const srcSel   = document.getElementById('bridge-from');
+  const srcChain = srcSel ? srcSel.value : 'base';
+
+  // Show turbo progress
+  const stepsCard = document.getElementById('bridge-steps-card');
+  if (stepsCard) stepsCard.style.display = 'block';
+
+  const stepEls = [
+    document.getElementById('turbo-step-0'),
+    document.getElementById('turbo-step-1'),
+    document.getElementById('turbo-step-2'),
+    document.getElementById('turbo-step-3'),
+    document.getElementById('turbo-step-4'),
+  ];
+
+  function activateStep(idx, label) {
+    stepEls.forEach((el, i) => {
+      if (!el) return;
+      el.classList.remove('active', 'done');
+      if (i < idx)  el.classList.add('done');
+      if (i === idx) el.classList.add('active');
+      if (label && i === idx) {
+        const strong = el.querySelector('.turbo-step-label strong');
+        if (strong) strong.textContent = label;
+      }
+    });
+  }
+
+  const result = await TurboExecutor.execute(srcChain, 'arc', asset, amount, userAddr,
+    (step, msg) => activateStep(step, msg)
+  );
+
+  if (result) {
+    showToast('Turbo Bridge complete! Intent: ' + result.intentId, 'success');
+  }
+}
+
+function toggleRebalancing(enabled) {
+  VaultState.set(s => { s.rebalEnabled = enabled; });
+  const txt = document.getElementById('rebal-status-text');
+  if (txt) txt.textContent = enabled ? 'Enabled — Auto monitoring active' : 'Disabled';
+  if (txt) txt.style.color = enabled ? 'var(--green)' : 'var(--muted2)';
+  showToast('Auto rebalancing ' + (enabled ? 'enabled' : 'disabled'), 'success');
+}
+
+function saveRebalConfig() {
+  const min    = parseFloat(document.getElementById('rebal-min')?.value    || 10000);
+  const target = parseFloat(document.getElementById('rebal-target')?.value || 50000);
+  const emerg  = parseFloat(document.getElementById('rebal-emerg')?.value  || 5000);
+  VaultState.set(s => { s.rebalConfig = { min, target, emergency: emerg }; });
+  showToast('Rebalancing thresholds saved', 'success');
+}
+
+function triggerRebalance(chain, asset) {
+  RebalancingEngine.trigger(chain, asset, 'Manual trigger');
+  vaultRefreshUI();
+}
+
+function vaultRefreshAll() {
+  VaultState.load();
+  vaultRefreshUI();
+  showToast('Vault data refreshed', 'success');
+}
+
+function vaultRefreshUI() {
+  try {
+    _updateTicker();
+    _updateOverview();
+    _updateAssetCards();
+    _updateLiquidity();
+    _updateIntentTable();
+    _updateFastBridge();
+    _updateRebalancing();
+    _updateAnalytics();
+  } catch(e) { console.warn('vaultRefreshUI error:', e); }
+}
+
+function _fmt(n, dec) {
+  if (isNaN(n)) return '0.00';
+  if (n >= 1e6) return (n/1e6).toFixed(2) + 'M';
+  if (n >= 1e3) return (n/1e3).toFixed(1) + 'K';
+  return n.toFixed(dec !== undefined ? dec : 2);
+}
+
+function _updateTicker() {
+  const a = VaultState.get().assets;
+  const tvl = VaultState.totalTVL();
+  const intents = RepaymentContract.getIntents();
+  const total = intents.length;
+  const settled = intents.filter(i => i.status === 'Settled').length;
+  const rate = total > 0 ? Math.round((settled / total) * 100) : 100;
+
+  _setEl('tk-usdc',       _fmt(a.usdc.available + a.usdc.locked + a.usdc.pending));
+  _setEl('tk-eurc',       _fmt(a.eurc.available + a.eurc.locked + a.eurc.pending));
+  _setEl('tk-cirbtc',     (a.cirbtc.available + a.cirbtc.locked + a.cirbtc.pending).toFixed(6));
+  _setEl('tk-tvl',        '$' + _fmt(tvl));
+  _setEl('tk-intents',    total);
+  _setEl('tk-settlement', rate + '%');
+}
+
+function _updateOverview() {
+  const tvl     = VaultState.totalTVL();
+  const fees    = VaultState.get().fees;
+  const totalFees = (fees.standard || 0) + (fees.turbo || 0) + (fees.settlement || 0);
+  const intents = RepaymentContract.getIntents();
+  const pending = intents.filter(i => ['Pending','Fulfilled','Settling'].includes(i.status)).length;
+  const settled = intents.filter(i => i.status === 'Settled').length;
+  const total   = intents.length;
+  const rate    = total > 0 ? Math.round((settled / total) * 100) : 100;
+
+  _setEl('ov-tvl',       '$' + _fmt(tvl));
+  _setEl('ov-tvl-sub',   '3 assets · 2 chains');
+  _setEl('ov-fees',      '$' + totalFees.toFixed(4));
+  _setEl('ov-fees-sub',  'Standard + Turbo fees');
+  _setEl('ov-intents',   pending);
+  _setEl('ov-intents-sub', 'Pending · Settling');
+  _setEl('ov-settlement', rate + '%');
+}
+
+function _updateAssetCards() {
+  const a = VaultState.get().assets;
+
+  const assets = [
+    { key:'usdc',   ids:['vac-usdc','vbar-usdc'], pfx:'$',    dec:2  },
+    { key:'eurc',   ids:['vac-eurc','vbar-eurc'], pfx:'€',    dec:2  },
+    { key:'cirbtc', ids:['vac-cirbtc','vbar-btc'], pfx:'',   dec:6  }
+  ];
+
+  assets.forEach(({key, pfx, dec}) => {
+    const d = a[key];
+    const total = d.available + d.locked + d.pending;
+    const pctA = total > 0 ? (d.available / total * 100) : 100;
+    const pctL = total > 0 ? (d.locked    / total * 100) : 0;
+    const pctP = total > 0 ? (d.pending   / total * 100) : 0;
+
+    const suffix = key === 'cirbtc' ? ' BTC' : '';
+    _setEl('vac-' + key + '-total', pfx + total.toFixed(dec) + suffix);
+    _setEl('vac-' + key + '-avail', d.available.toFixed(dec));
+    _setEl('vac-' + key + '-locked', d.locked.toFixed(dec));
+    _setEl('vac-' + key + '-pend',  d.pending.toFixed(dec));
+
+    const barKey = key === 'cirbtc' ? 'btc' : key;
+    _setBarWidth('vbar-' + barKey + '-avail', pctA);
+    _setBarWidth('vbar-' + barKey + '-locked', pctL);
+    _setBarWidth('vbar-' + barKey + '-pend',   pctP);
+  });
+}
+
+function _updateLiquidity() {
+  const a = VaultState.get().assets;
+  const assets = ['usdc','eurc'];
+
+  assets.forEach(key => {
+    const d  = a[key];
+    const total = d.available + d.locked + d.pending;
+    const pctA  = total > 0 ? (d.available / total * 100) : 100;
+    const pctL  = total > 0 ? (d.locked    / total * 100) : 0;
+    const pctP  = total > 0 ? (d.pending   / total * 100) : 0;
+    const util  = total > 0 ? Math.round(((d.locked + d.pending) / total) * 100) : 0;
+
+    _setEl('liq-' + key + '-avail',  _fmt(d.available));
+    _setEl('liq-' + key + '-locked', _fmt(d.locked));
+    _setEl('liq-' + key + '-pend',   _fmt(d.pending));
+    _setEl('liq-' + key + '-total',  _fmt(total));
+    _setEl('liq-' + key + '-util',   util + '% utilized');
+
+    _setBarWidth('lsb-' + key + '-avail',  pctA);
+    _setBarWidth('lsb-' + key + '-locked', pctL);
+    _setBarWidth('lsb-' + key + '-pend',   pctP);
+  });
+
+  // cirBTC
+  const btc = a.cirbtc;
+  const btcTotal = btc.available + btc.locked + btc.pending;
+  const btcUtil  = btcTotal > 0 ? Math.round(((btc.locked + btc.pending) / btcTotal) * 100) : 0;
+  const pctA = btcTotal > 0 ? (btc.available / btcTotal * 100) : 100;
+  const pctL = btcTotal > 0 ? (btc.locked    / btcTotal * 100) : 0;
+  const pctP = btcTotal > 0 ? (btc.pending   / btcTotal * 100) : 0;
+
+  _setEl('liq-btc-avail',  btc.available.toFixed(6));
+  _setEl('liq-btc-locked', btc.locked.toFixed(6));
+  _setEl('liq-btc-pend',   btc.pending.toFixed(6));
+  _setEl('liq-btc-total',  btcTotal.toFixed(6));
+  _setEl('liq-btc-util',   btcUtil + '% utilized');
+  _setBarWidth('lsb-btc-avail',  pctA);
+  _setBarWidth('lsb-btc-locked', pctL);
+  _setBarWidth('lsb-btc-pend',   pctP);
+}
+
+function _updateIntentTable() {
+  const tbody = document.getElementById('intent-tbody');
+  if (!tbody) return;
+  const intents = RepaymentContract.getIntents().slice(-50).reverse();
+  if (intents.length === 0) {
+    tbody.innerHTML = '<tr class="intent-empty-row"><td colspan="6"><i class="ti ti-inbox" style="font-size:24px;display:block;margin-bottom:6px;opacity:.3"></i>No intents yet. Use Turbo Bridge to create intents.</td></tr>';
+    return;
+  }
+  const statusColors = { Pending:'var(--muted2)', Fulfilled:'var(--blue)', Settling:'var(--yellow)', Settled:'var(--green)', Failed:'var(--red)' };
+  tbody.innerHTML = intents.map(i => {
+    const age = Math.round((Date.now() - i.createdAt) / 1000);
+    const ageStr = age < 60 ? age + 's' : Math.round(age/60) + 'm';
+    const color  = statusColors[i.status] || 'var(--muted2)';
+    return `<tr>
+      <td style="font-family:monospace;font-size:9px">${i.id}</td>
+      <td>${i.srcChain || '?'} → ${i.dstChain || '?'}</td>
+      <td>${(i.asset || '').toUpperCase()}</td>
+      <td>${(i.amount || 0).toFixed(2)}</td>
+      <td><span style="color:${color};font-weight:700">${i.status}</span></td>
+      <td>${ageStr}</td>
+    </tr>`;
+  }).join('');
+
+  // Update fulfiller stats
+  const all = RepaymentContract.getIntents();
+  _setEl('fc-total',     all.length);
+  _setEl('fc-fulfilled', all.filter(i=>i.status==='Fulfilled').length);
+  _setEl('fc-settling',  all.filter(i=>i.status==='Settling').length);
+  _setEl('fc-settled',   all.filter(i=>i.status==='Settled').length);
+  _setEl('fc-failed',    all.filter(i=>i.status==='Failed').length);
+}
+
+function _updateFastBridge() {
+  const avail = VaultState.availableLiquidity('usdc');
+  const liqStr = '$' + _fmt(avail);
+  _setEl('route-base-liq', liqStr);
+  _setEl('route-eth-liq',  liqStr);
+  _setEl('route-arb-liq',  liqStr);
+
+  // Turbo intent list
+  const listEl = document.getElementById('turbo-intent-list');
+  if (!listEl) return;
+  const turboIntents = RepaymentContract.getIntents().slice(-10).reverse();
+  if (turboIntents.length === 0) {
+    listEl.innerHTML = '<div style="text-align:center;padding:24px;color:var(--muted2);font-size:10px"><i class="ti ti-bolt" style="font-size:24px;display:block;margin-bottom:6px;opacity:.3"></i>No Turbo Bridge intents yet.</div>';
+    return;
+  }
+  const statusColors = { Pending:'var(--muted2)', Fulfilled:'var(--blue)', Settling:'var(--yellow)', Settled:'var(--green)', Failed:'var(--red)' };
+  listEl.innerHTML = turboIntents.map(i => {
+    const color = statusColors[i.status] || 'var(--muted2)';
+    const age = Math.round((Date.now() - i.createdAt) / 1000);
+    return `<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:rgba(255,255,255,.02);border-radius:7px;margin-bottom:5px;border:1px solid rgba(255,255,255,.04);font-size:9.5px">
+      <i class="ti ti-bolt" style="color:var(--yellow)"></i>
+      <span style="font-family:monospace;color:var(--muted2)">${i.id}</span>
+      <span>${i.srcChain} → ${i.dstChain}</span>
+      <span style="color:var(--text);font-weight:700">${(i.amount||0).toFixed(2)} ${(i.asset||'').toUpperCase()}</span>
+      <span style="margin-left:auto;color:${color};font-weight:700">${i.status}</span>
+      <span style="color:var(--muted2)">${age}s ago</span>
+    </div>`;
+  }).join('');
+}
+
+function _updateRebalancing() {
+  const hist = VaultState.get().rebalHistory;
+  const listEl = document.getElementById('rebal-history-list');
+  if (!listEl) return;
+  if (hist.length === 0) {
+    listEl.innerHTML = '<div style="text-align:center;padding:24px;color:var(--muted2);font-size:10px"><i class="ti ti-history" style="font-size:24px;display:block;margin-bottom:6px;opacity:.3"></i>No rebalancing operations yet.</div>';
+    return;
+  }
+  listEl.innerHTML = hist.slice(0,10).map(r => {
+    const color = r.status === 'Completed' ? 'var(--green)' : 'var(--yellow)';
+    const age = Math.round((Date.now() - r.createdAt) / 1000);
+    return `<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:rgba(255,255,255,.02);border-radius:7px;margin-bottom:5px;border:1px solid rgba(255,255,255,.04);font-size:9.5px">
+      <i class="ti ti-arrows-exchange-2" style="color:var(--blue)"></i>
+      <span style="font-family:monospace;color:var(--muted2)">${r.id}</span>
+      <span>${r.chain.toUpperCase()} · ${(r.asset||'').toUpperCase()}</span>
+      <span style="color:var(--muted2)">${r.reason}</span>
+      <span style="margin-left:auto;color:${color};font-weight:700">${r.status}</span>
+      <span style="color:var(--muted2)">${age}s ago</span>
+    </div>`;
+  }).join('');
+}
+
+function _updateAnalytics() {
+  const tvl   = VaultState.totalTVL();
+  const fees  = VaultState.get().fees;
+  const vol   = VaultState.get().bridgeVolume;
+  const intents = RepaymentContract.getIntents();
+  const pending   = intents.filter(i=>['Pending','Fulfilled','Settling'].includes(i.status)).length;
+  const completed = intents.filter(i=>i.status==='Settled').length;
+  const totalFees = (fees.standard||0) + (fees.turbo||0) + (fees.settlement||0);
+
+  const totalVol = (vol.standard||0) + (vol.turbo||0);
+  const turboPct = totalVol > 0 ? Math.round((vol.turbo / totalVol) * 100) : 0;
+  const stdPct   = 100 - turboPct;
+
+  const a = VaultState.get().assets;
+  const usdc = a.usdc;
+  const usdcTotal = usdc.available + usdc.locked + usdc.pending;
+  const util = usdcTotal > 0 ? Math.round(((usdc.locked + usdc.pending) / usdcTotal) * 100) : 0;
+
+  const settled  = intents.filter(i=>i.status==='Settled');
+  let avgSettle  = '—';
+  if (settled.length > 0) {
+    const sum = settled.reduce((acc, i) => acc + (i.reimbursedAt - i.createdAt), 0);
+    const ms  = sum / settled.length;
+    avgSettle = ms < 60000 ? Math.round(ms/1000) + 's' : Math.round(ms/60000) + 'm';
+  }
+
+  _setEl('an-tvl',         '$' + _fmt(tvl));
+  _setEl('an-fees',        '$' + totalFees.toFixed(4));
+  _setEl('an-turbo-vol',   '$' + _fmt(vol.turbo||0));
+  _setEl('an-turbo-count', (vol.turboCount||0) + ' bridges');
+  _setEl('an-std-vol',     '$' + _fmt(vol.standard||0));
+  _setEl('an-std-count',   (vol.stdCount||0) + ' bridges');
+  _setEl('an-pending',     pending);
+  _setEl('an-completed',   completed);
+  _setEl('an-util',        util + '%');
+  _setEl('an-avg-settle',  avgSettle);
+  _setEl('an-turbo-pct',   turboPct + '%');
+  _setEl('an-std-pct',     stdPct + '%');
+  _setEl('rev-std',        '$' + (fees.standard||0).toFixed(4));
+  _setEl('rev-turbo',      '$' + (fees.turbo||0).toFixed(4));
+  _setEl('rev-settle',     '$' + (fees.settlement||0).toFixed(4));
+  _setEl('rev-total',      '$' + totalFees.toFixed(4));
+}
+
+function _setEl(id, val) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = val;
+}
+function _setBarWidth(id, pct) {
+  const el = document.getElementById(id);
+  if (el) el.style.width = Math.max(0, Math.min(100, pct)).toFixed(1) + '%';
+}
+
+// ── Vault Init ────────────────────────────────────────────────────────
+function vaultInit() {
+  VaultState.load();
+  vaultRefreshUI();
+
+  // Auto-refresh every 5 seconds
+  setInterval(() => {
+    if (document.getElementById('page-treasury')?.classList.contains('active')) {
+      vaultRefreshUI();
+      RebalancingEngine.autoCheck();
+    }
+  }, 5000);
+
+  // Auto-refresh ticker always
+  setInterval(_updateTicker, 3000);
+}
+
+// ── Bootstrap ─────────────────────────────────────────────────────────
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', vaultInit);
+} else {
+  setTimeout(vaultInit, 200);
+}
 
 </script>
 
