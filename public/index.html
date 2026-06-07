@@ -3888,7 +3888,7 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
               <div class="rate-row"><span>You Receive</span><span class="rate-val teal" id="bridge-receive">~1.00 USDC</span></div>
             </div>
 
-            <button class="action-btn teal-btn" style="margin-top:14px" id="bridge-btn" onclick="executeBridge()">
+            <button class="action-btn teal-btn" style="margin-top:14px" id="bridge-btn" onclick="executeBridgeOrTurbo()">
               <i class="ti ti-topology-star-3"></i>Bridge USDC
             </button>
           </div>
@@ -3904,7 +3904,7 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
                 <div class="turbo-step" id="turbo-step-3"><div class="turbo-step-dot">4</div><div class="turbo-step-label"><strong>CCTP Settlement</strong><small>Initiate reimbursement via CCTP</small></div></div>
                 <div class="turbo-step" id="turbo-step-4"><div class="turbo-step-dot">✓</div><div class="turbo-step-label"><strong>Complete</strong><small>Vault reimbursed via attestation</small></div></div>
               </div>
-            </div style="display:none">
+            </div>
             <div class="ch"><i class="ti ti-list-check" style="font-size:13px;color:var(--teal)"></i><span class="ct">Bridge Steps</span><span id="bridge-step-status" style="margin-left:auto;font-size:9px;color:var(--muted2)">Pending</span></div>
             <div class="cb">
               <div class="step-list" id="bridge-step-list"></div>
@@ -5808,7 +5808,7 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
 
             <!-- Turbo routes -->
             <div class="turbo-routes-grid">
-              <div class="turbo-route-card">
+              <div class="turbo-route-card" onclick="turboBridgeFromCard('Base_Sepolia')" style="cursor:pointer" title="Click to launch Turbo Bridge: Base → ARC">
                 <div class="trc-chains">
                   <span class="trc-chain src">Base</span>
                   <div class="trc-arrow"><i class="ti ti-arrow-right"></i></div>
@@ -5820,7 +5820,7 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
                 <div class="trc-eta">ETA: <strong>10–30s</strong></div>
                 <div class="trc-liquidity">Vault liquidity: <strong id="route-base-liq">$0.00</strong></div>
               </div>
-              <div class="turbo-route-card">
+              <div class="turbo-route-card" onclick="turboBridgeFromCard('Ethereum_Sepolia')" style="cursor:pointer" title="Click to launch Turbo Bridge: Ethereum → ARC">
                 <div class="trc-chains">
                   <span class="trc-chain src">Ethereum</span>
                   <div class="trc-arrow"><i class="ti ti-arrow-right"></i></div>
@@ -5832,7 +5832,7 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
                 <div class="trc-eta">ETA: <strong>10–30s</strong></div>
                 <div class="trc-liquidity">Vault liquidity: <strong id="route-eth-liq">$0.00</strong></div>
               </div>
-              <div class="turbo-route-card">
+              <div class="turbo-route-card" onclick="turboBridgeFromCard('Arbitrum_Sepolia')" style="cursor:pointer" title="Click to launch Turbo Bridge: Arbitrum → ARC">
                 <div class="trc-chains">
                   <span class="trc-chain src">Arbitrum</span>
                   <div class="trc-arrow"><i class="ti ti-arrow-right"></i></div>
@@ -14427,23 +14427,85 @@ function showTrsSection(name) {
   vaultRefreshUI();
 }
 
-function setBridgeMode(mode)   { TurboExecutor.setMode(mode); }
+function setBridgeMode(mode) {
+  TurboExecutor.setMode(mode);
+  // Update bridge button label and ETA row
+  const btn = document.getElementById('bridge-btn');
+  const timeEl = document.getElementById('bridge-time');
+  if (mode === 'turbo') {
+    if (btn) btn.innerHTML = '<i class="ti ti-bolt"></i> Turbo Bridge';
+    if (timeEl) timeEl.textContent = '10 – 30 seconds (Turbo)';
+    // Refresh vault availability
+    if (typeof vaultRefreshUI === 'function') vaultRefreshUI();
+  } else {
+    if (btn) btn.innerHTML = '<i class="ti ti-topology-star-3"></i>Bridge USDC';
+    updateBridgeEst();
+  }
+}
 
+// ── executeBridgeOrTurbo ─ routes bridge-btn to correct flow ─────────────
+function executeBridgeOrTurbo() {
+  if (TurboExecutor.getMode() === 'turbo') {
+    executeTurboBridge();
+  } else {
+    executeBridge();
+  }
+}
+
+// ── turboBridgeFromCard ─ called from Fast Bridge route cards ────────────
+// Navigates to Bridge page, selects Turbo mode, pre-selects the source chain
+function turboBridgeFromCard(chainId) {
+  // Map chainId string to CHAINS index
+  const idx = CHAINS.findIndex(c => c.id === chainId);
+  if (idx !== -1) {
+    bridgeFromIdx = idx;
+    // Ensure destination is Arc Testnet
+    const arcIdx = CHAINS.findIndex(c => c.id === 'Arc_Testnet');
+    if (arcIdx !== -1 && arcIdx !== bridgeFromIdx) {
+      bridgeToIdx = arcIdx;
+    }
+    applyBridgeChains();
+    updateBridgeEst();
+  }
+  // Navigate to bridge page and enable Turbo mode
+  showPage('bridge');
+  setTimeout(() => {
+    setBridgeMode('turbo');
+    // Focus amount input
+    const amtInput = document.getElementById('bridge-amount');
+    if (amtInput) amtInput.focus();
+  }, 80);
+}
+
+// ── executeTurboBridge ─ fixed: reads from CHAINS[bridgeFromIdx] ──────────
 async function executeTurboBridge() {
   if (TurboExecutor.getMode() !== 'turbo') return;
-  const amount  = parseFloat(document.getElementById('bridge-amount')?.value || '0');
+
+  const amount = parseFloat(document.getElementById('bridge-amount')?.value || '0');
   if (!amount || amount <= 0) { showToast('Enter a valid amount', 'error'); return; }
 
   const userAddr = walletAddress;
   if (!userAddr) { showToast('Connect wallet first', 'error'); return; }
 
-  const srcSel   = document.getElementById('bridge-from');
-  const srcChain = srcSel ? srcSel.value : 'base';
+  // Read source chain from existing bridge state (not a missing select element)
+  const fromChain = CHAINS[bridgeFromIdx];
+  const toChain   = CHAINS[bridgeToIdx];
+  const srcChainId = fromChain?.id || 'Base_Sepolia';
 
-  // Activate steps UI
+  // Validate route: destination must be Arc Testnet for Turbo
+  if (toChain?.id !== 'Arc_Testnet') {
+    showToast('Turbo Bridge only supports → ARC routes. Switch destination to Arc Testnet.', 'error');
+    return;
+  }
+
+  // Disable bridge button while processing
+  const btn = document.getElementById('bridge-btn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-bolt"></i> Turbo Processing...'; }
+
+  // Show Turbo steps UI
   const stepsCard = document.getElementById('bridge-steps-card');
   const stepsWrap = document.getElementById('turbo-steps-wrap');
-  if (stepsCard) stepsCard.style.display = 'block';
+  if (stepsCard) stepsCard.style.display = '';
   if (stepsWrap) stepsWrap.style.display = 'block';
 
   const stepEls = [0,1,2,3,4].map(i => document.getElementById('turbo-step-' + i));
@@ -14461,13 +14523,26 @@ async function executeTurboBridge() {
     });
   }
 
-  const result = await TurboExecutor.execute(
-    srcChain, 'arc', 'usdc', amount, userAddr,
-    (step, msg) => activateStep(step, msg)
-  );
+  try {
+    const result = await TurboExecutor.execute(
+      srcChainId, 'Arc_Testnet', 'usdc', amount, userAddr,
+      (step, msg) => activateStep(step, msg)
+    );
 
-  if (result) {
-    showToast('Turbo Bridge initiated! Intent: ' + result.intentId, 'success');
+    if (result) {
+      showToast('⚡ Turbo Bridge initiated! Intent: ' + result.intentId, 'success');
+      // Mark all steps done
+      stepEls.forEach(el => { if (el) { el.classList.remove('active'); el.classList.add('done'); }});
+      // Refresh Treasury metrics immediately
+      vaultRefreshUI();
+    }
+  } catch (err) {
+    showToast('Turbo Bridge error: ' + err.message, 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="ti ti-bolt"></i> Turbo Bridge';
+    }
   }
 }
 
