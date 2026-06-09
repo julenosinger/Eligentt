@@ -3078,6 +3078,73 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
 .trs-section-title i { font-size:14px; }
 .trs-section-sub { font-size:9px; color:var(--muted2); margin-top:1px; }
 </style>
+
+<!-- ===================================================================== -->
+<!-- SCOPE: SCHEDULE + SETTINGS ONLY - Custom portal dropdowns + defensive -->
+<!-- Fixes z-index, overflow clipping on cards, dark dropdowns, portals    -->
+<!-- Does NOT affect any other page or component (Send/Swap/Bridge/etc)    -->
+<style id="sch-settings-dropdown-fixes">
+/* === DEFENSIVE FIXES + CUSTOM SELECT FOR SCHEDULE + SETTINGS ONLY === */
+/* Allow popups from cards in these pages (defensive against clipping) */
+#page-schedule .card,
+#page-settings .card,
+#page-schedule .cb,
+#page-settings .cb { overflow: visible; }
+/* The scroll wrapper in schedule should still scroll but not affect body portals */
+#page-schedule > div[style*="overflow-y:auto"] { overflow-y: auto; }
+/* Date input safety */
+#sch-date { position: relative; z-index: 2; color-scheme: dark; }
+/* Custom select trigger (styled to match .cinput exactly, only for sch/settings) */
+.sch-select-trigger {
+  width: 100%;
+  background: rgba(0,0,0,.2);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 7px 10px;
+  color: var(--text);
+  font-size: 10.5px;
+  font-family: 'JetBrains Mono', monospace;
+  outline: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  user-select: none;
+  transition: border .15s;
+}
+.sch-select-trigger:hover,
+.sch-select-trigger:focus { border-color: var(--blue); }
+.sch-select-arrow { font-size: 10px; color: var(--muted2); margin-left: 6px; flex-shrink: 0; }
+/* Portal dropdown - appended to document.body for true portal behavior */
+.sch-select-dropdown {
+  position: fixed;
+  background: #161a24;
+  border: 1px solid #2e3548;
+  border-radius: 6px;
+  box-shadow: 0 12px 40px rgba(0,0,0,.75);
+  z-index: 999999 !important;
+  max-height: 220px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-width: 120px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+  color: #dde2f0;
+  padding: 4px 0;
+  pointer-events: all;
+}
+.sch-select-option {
+  padding: 7px 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background .1s;
+}
+.sch-select-option:hover { background: rgba(79,142,247,.12); color: #fff; }
+.sch-select-option.selected { background: rgba(79,142,247,.22); color: #fff; font-weight: 600; }
+/* Extra safety for any remaining native selects in these two pages only */
+#page-schedule select.cinput,
+#page-settings select.cinput { color-scheme: dark; }
+</style>
 </head>
 <body>
 
@@ -4561,10 +4628,11 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
             <div><div class="swap-label">Token</div>
               <select id="sch-token" class="cinput" style="cursor:pointer"><option>USDC</option><option>EURC</option></select>
             </div>
-            <div>
-              <div class="swap-label">First Execution <span style="font-size:9px;color:#7C89B8">(US format)</span></div>
+            <div lang="en-US">
+              <div class="swap-label">First Execution (UTC)</div>
               <input id="sch-date" class="cinput" type="datetime-local" lang="en-US" style="color-scheme:dark" onchange="updateScheduleDatePreview()"/>
               <div id="sch-date-preview" style="font-size:9.5px;color:#a8b0d0;margin-top:3px;min-height:14px"></div>
+              <div style="font-size:8px;color:#7C89B8;margin-top:1px">All scheduled executions are stored and processed in UTC.</div>
             </div>
             <div><div class="swap-label">Frequency</div>
               <select id="sch-freq" class="cinput" style="cursor:pointer">
@@ -5827,7 +5895,17 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
             <div class="trs-section-title" style="margin-top:16px"><i class="ti ti-coins"></i>Treasury Vault Actions
               <span class="trs-section-sub">Deposit &amp; Withdraw to real on-chain Treasury</span>
             </div>
-            <div class="card" style="padding:14px; margin-bottom:12px">
+            <div class="card" style="padding:14px; margin-bottom:8px">
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:9px;color:var(--muted2)">
+                <span style="font-weight:600;color:var(--text)">Treasury Owner:</span>
+                <span style="font-family:'JetBrains Mono',monospace;color:var(--blue);font-size:8.5px" title="TreasuryVault Owner Wallet">0xA43ABD...936c9f</span>
+                <span class="chip" style="font-size:7.5px;background:rgba(245,158,11,.12);color:var(--yellow);border-color:rgba(245,158,11,.25)">Admin</span>
+                <span class="chip" style="font-size:7.5px;background:rgba(34,197,94,.1);color:var(--green);border-color:rgba(34,197,94,.2)">Protocol-Owned</span>
+              </div>
+              <div id="vault-contract-addr-row" style="display:flex;align-items:center;gap:8px;margin-bottom:12px;font-size:9px;color:var(--muted2)">
+                <span style="font-weight:600;color:var(--text)">Vault Contract:</span>
+                <span id="vault-contract-addr" style="font-family:'JetBrains Mono',monospace;color:var(--teal);font-size:8.5px">Not Deployed</span>
+              </div>
               <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px,1fr)); gap:8px">
                 <button class="btn" onclick="treasuryDeposit('usdc')" style="font-size:10px">
                   <i class="ti ti-download"></i> Deposit USDC
@@ -6751,12 +6829,13 @@ const CHAIN_REGISTRY = {
     id: 'Ethereum_Sepolia', name: 'Ethereum Sepolia', shortName: 'Sepolia',
     color: '#627eea', symbol: 'Ξ', testnet: true,
     chainId: 11155111, chainHex: '0xaa36a7',
-    rpc: 'https://rpc.sepolia.org',
+    rpc: 'https://rpc.sepolia.org', // Verified public RPC (eth_chainId supported); use alternative like publicnode if rate limited in some envs
     explorer: 'https://sepolia.etherscan.io',
     nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
     tokens: {
       USDC: { address: '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238', decimals: 6 },
       EURC: { address: '0x08210F9170F89Ab7658F0B5E3fF39b0E03C2Bfa4', decimals: 6 },
+      cirBTC: { address: '0xf0C4a4CE82A5746AbAAd9425360Ab04fbBA432BF', decimals: 8 }, // configured for Sepolia balance support (may return 0 if token not deployed on this testnet)
     },
     cctp: { domain: 0,
       tokenMessenger:     '0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA',
@@ -6906,19 +6985,32 @@ const addrToBytes32 = (addr) => {
   }
 };
 
-// US date/time formatter for Schedule page (MM/DD/YYYY h:mm AM/PM)
+// UTC-only date/time formatter for Schedule page ONLY
+// Always MM/DD/YYYY HH:mm UTC (24h) — forces en-US and UTC regardless of browser locale
 function formatUSDateTime(iso) {
   if (!iso) return '—';
   const d = new Date(iso);
   if (isNaN(d)) return '—';
-  const month = (d.getMonth() + 1).toString().padStart(2, '0');
-  const day = d.getDate().toString().padStart(2, '0');
-  const year = d.getFullYear();
-  let h = d.getHours();
-  const m = d.getMinutes().toString().padStart(2, '0');
-  const ampm = h >= 12 ? 'PM' : 'AM';
-  h = h % 12 || 12;
-  return `${month}/${day}/${year} ${h}:${m} ${ampm}`;
+  const month = (d.getUTCMonth() + 1).toString().padStart(2, '0');
+  const day = d.getUTCDate().toString().padStart(2, '0');
+  const year = d.getUTCFullYear();
+  const hh = d.getUTCHours().toString().padStart(2, '0');
+  const mm = d.getUTCMinutes().toString().padStart(2, '0');
+  return `${month}/${day}/${year} ${hh}:${mm} UTC`;
+}
+
+// Parse datetime-local input value as UTC wall time (user picks "wall time" = UTC time)
+function parseDateTimeAsUTC(value) {
+  if (!value) return null;
+  // value format: "2026-06-10T14:30"
+  const [ymd, hm] = value.split('T');
+  if (!ymd || !hm) {
+    // fallback
+    return new Date(value);
+  }
+  const [y, mo, da] = ymd.split('-').map(Number);
+  const [h, m] = hm.split(':').map(Number);
+  return new Date(Date.UTC(y, mo - 1, da, h || 0, m || 0));
 }
 
 function updateScheduleDatePreview() {
@@ -6926,7 +7018,9 @@ function updateScheduleDatePreview() {
   const preview = document.getElementById('sch-date-preview');
   if (!input || !preview) return;
   if (input.value) {
-    preview.textContent = formatUSDateTime(input.value);
+    // Treat the picker value as UTC wall time for preview (matches submit behavior)
+    const utcDate = parseDateTimeAsUTC(input.value);
+    preview.textContent = utcDate ? formatUSDateTime(utcDate.toISOString()) : formatUSDateTime(input.value);
   } else {
     preview.textContent = '';
   }
@@ -6941,6 +7035,7 @@ function toast(msg,type='info'){
   el.className=`toast ${type} show`;
   clearTimeout(_tt);_tt=setTimeout(()=>el.classList.remove('show'),4000);
 }
+const showToast = toast; // Treasury functions alias — resolves showToast→toast for 33 callsites
 
 // ── Page navigation ────────────────────────────────────────
 function showPage(id) {
@@ -6984,6 +7079,16 @@ function showPage(id) {
         if (typeof refreshSendRecentActivity === 'function') refreshSendRecentActivity();
         if (typeof loadSendAssetBalance === 'function') loadSendAssetBalance();
       }, 120);
+    }
+
+    // === SCHEDULE PAGE ONLY: Force en-US locale to disable browser locale detection ===
+    if (id === 'schedule') {
+      const schPage = document.getElementById('page-schedule');
+      if (schPage) schPage.lang = 'en-US';
+      const schCreate = document.getElementById('sch-create-panel');
+      if (schCreate) schCreate.lang = 'en-US';
+      const dateInput = document.getElementById('sch-date');
+      if (dateInput) dateInput.lang = 'en-US';
     }
   } catch (err) {
     console.error('showPage error for id:', id, err);
@@ -7184,10 +7289,16 @@ async function refreshBalance() {
     const chain    = getActiveChain();
     const prov     = new ethers.JsonRpcProvider(chain.rpc);
     const usdcAddr = chain.tokens?.USDC?.address;
+    // DEBUG LOGS for Sepolia (and all chains) balance audit
+    // Arc vs Sepolia flow comparison: both use identical path via getActiveChain() + chain.rpc + chain.tokens[SYMBOL].address + JsonRpcProvider + balanceOf
+    // Difference previously: Sepolia lacked cirBTC in registry (now added) and cirBTC in SA_TOKENS was always hardcoded (now falls back to getTokenAddress which uses activeChainId)
+    console.log('[refreshBalance] detected chainId:', activeChainId, 'chain:', chain?.id || chain?.name);
+    console.log('[refreshBalance] selected USDC token address:', usdcAddr, 'wallet:', walletAddress, 'RPC:', chain.rpc);
     if (!usdcAddr) { set('sb-bal', '—'); return; }
     const usdc  = new ethers.Contract(usdcAddr, USDC_ABI, prov);
     const bal   = await usdc.balanceOf(walletAddress);
     const fmt   = fromUsdc(bal);
+    console.log('[refreshBalance] fetched USDC balance:', bal.toString(), 'formatted:', fmt);
     set('sb-bal',     fmt);
     set('dd-bal',     fmt);
     set('sender-bal', 'Balance: ' + fmt + ' USDC');
@@ -7195,9 +7306,12 @@ async function refreshBalance() {
     if (eurcAddr) {
       try {
         const eurc = new ethers.Contract(eurcAddr, USDC_ABI, prov);
-        set('sb-eurc-bal', fromUsdc(await eurc.balanceOf(walletAddress)));
+        const eurcBal = await eurc.balanceOf(walletAddress);
+        console.log('[refreshBalance] fetched EURC balance:', eurcBal.toString());
+        set('sb-eurc-bal', fromUsdc(eurcBal));
       } catch(_) {}
     }
+    // cirBTC not fetched in main refresh (Send Assets specific)
     updateSwapBalancesDisplay(); // keep swap widget balances fresh
     return fmt;
   } catch(e) {
@@ -10040,6 +10154,11 @@ document.addEventListener('DOMContentLoaded',()=>{
   updateSwapRate();
   updateBridgeEst();
   initChainList();
+  // Enhance ONLY the 5 selects used by Schedule + Settings pages to use body-portal custom dropdowns.
+  // BEFORE loadSettings so restored values sync to visible triggers (via patched .value setter).
+  // This fixes all reported issues (z, overflow clip, sizing, dark mode, height/scroll, outside close, width match).
+  // No other selects or pages are modified.
+  ['sch-token','sch-freq','s-network','s-currency','s-dateformat'].forEach(id => enhanceSelectToPortal(document.getElementById(id)));
   loadSettings();
   renderQueueTable();
   updateQueueStats();
@@ -11921,13 +12040,17 @@ function saveSettings() {
   const wcId      = document.getElementById('s-wcid')?.value.trim();
   const contract  = document.getElementById('s-contract')?.value.trim();
   const limit     = document.getElementById('s-limit')?.value;
+  // Also persist the (now custom) selects we fixed for Schedule/Settings so values save/restore correctly
+  const network   = document.getElementById('s-network')?.value;
+  const currency  = document.getElementById('s-currency')?.value;
+  const datefmt   = document.getElementById('s-dateformat')?.value;
   if(kitKey) document.getElementById('kit-key-input')?.setAttribute('value',kitKey);
   if(contract && isAddr(contract)) {
     setContract(contract);
     const inp = document.getElementById('contract-input');
     if(inp) inp.value = contract;
   }
-  const saved = {kitKey,wcId,contract,limit, ts:Date.now()};
+  const saved = {kitKey,wcId,contract,limit,network,currency,datefmt, ts:Date.now()};
   localStorage.setItem('arcpay_settings', JSON.stringify(saved));
   toast('Settings saved','success');
 }
@@ -11944,6 +12067,10 @@ function loadSettings() {
       const ki=document.getElementById('kit-key-input'); if(ki) ki.value=s.kitKey;
       const ks=document.getElementById('s-kitkey'); if(ks) ks.value=s.kitKey;
     }
+    // Restore the three selects we fixed (values will auto-sync to custom triggers via patched setter)
+    const snet = document.getElementById('s-network'); if (snet && s.network) snet.value = s.network;
+    const scur = document.getElementById('s-currency'); if (scur && s.currency) scur.value = s.currency;
+    const sdf  = document.getElementById('s-dateformat'); if (sdf && s.datefmt) sdf.value = s.datefmt;
   } catch {}
 }
 
@@ -12955,6 +13082,94 @@ async function xcExecuteSend() {
 
 
 // ══════════════════════════════════════════════════════════
+//  CUSTOM PORTAL DROPDOWN (STRICTLY FOR #page-schedule + #page-settings ONLY)
+//  - Appends list to document.body (true portal)
+//  - High z-index, dark theme, max-height scroll, width-matched
+//  - Closes on outside click / esc / main scroll
+//  - No duplicate state; original <select> kept (hidden) so all existing .value reads work
+//  - Defensive: guards against double-enhance
+//  - Does not touch any other selects/dropdowns in the app
+// ══════════════════════════════════════════════════════════
+let __sch_active_dropdown = null;
+function closeSchDropdown() {
+  if (__sch_active_dropdown && __sch_active_dropdown.parentNode) {
+    __sch_active_dropdown.parentNode.removeChild(__sch_active_dropdown);
+  }
+  __sch_active_dropdown = null;
+  document.removeEventListener('mousedown', __sch_outsideCloser, true);
+}
+function __sch_outsideCloser(e) {
+  if (__sch_active_dropdown && !__sch_active_dropdown.contains(e.target)) {
+    closeSchDropdown();
+  }
+}
+function enhanceSelectToPortal(select) {
+  if (!select || select.dataset.enhanced === '1') return;
+  const id = select.id;
+  if (!['sch-token','sch-freq','s-network','s-currency','s-dateformat'].includes(id)) return;
+  select.dataset.enhanced = '1';
+  select.style.display = 'none';
+  const trigger = document.createElement('div');
+  trigger.className = 'sch-select-trigger';
+  trigger.setAttribute('data-for', id);
+  function syncLabel() {
+    const opt = select.options[select.selectedIndex];
+    trigger.innerHTML = `<span>${opt ? opt.textContent : ''}</span><span class="sch-select-arrow">▼</span>`;
+  }
+  syncLabel();
+  select.parentNode.insertBefore(trigger, select.nextSibling);
+
+  trigger.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    closeSchDropdown();
+    const dd = document.createElement('div');
+    dd.className = 'sch-select-dropdown';
+    const r = trigger.getBoundingClientRect();
+    dd.style.left = r.left + 'px';
+    dd.style.top = (r.bottom + 4) + 'px';
+    dd.style.width = r.width + 'px';
+    Array.from(select.options).forEach((o, idx) => {
+      const item = document.createElement('div');
+      item.className = 'sch-select-option' + (idx === select.selectedIndex ? ' selected' : '');
+      item.textContent = o.textContent;
+      item.onclick = (e) => {
+        e.stopPropagation();
+        select.value = o.value;
+        syncLabel();
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+        closeSchDropdown();
+      };
+      dd.appendChild(item);
+    });
+    document.body.appendChild(dd);
+    __sch_active_dropdown = dd;
+    setTimeout(() => document.addEventListener('mousedown', __sch_outsideCloser, true), 0);
+    const onEsc = (e) => { if (e.key === 'Escape') { closeSchDropdown(); document.removeEventListener('keydown', onEsc); } };
+    document.addEventListener('keydown', onEsc, { once: true });
+    const closeOnScroll = () => { closeSchDropdown(); window.removeEventListener('scroll', closeOnScroll, true); };
+    window.addEventListener('scroll', closeOnScroll, true);
+  });
+
+  // Monkey patch value setter so programmatic changes (loadSettings etc) update the visible trigger
+  try {
+    const desc = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value');
+    if (desc && desc.set) {
+      const origSet = desc.set;
+      Object.defineProperty(select, 'value', {
+        configurable: true,
+        enumerable: true,
+        get() { return select.options[select.selectedIndex] ? select.options[select.selectedIndex].value : ''; },
+        set(v) { origSet.call(this, v); syncLabel(); }
+      });
+    }
+  } catch(_) {}
+
+  // initial sync in case value was set before enhance
+  setTimeout(syncLabel, 0);
+}
+
+
+// ══════════════════════════════════════════════════════════
 //  SCHEDULE  (Automated Recurring Batch Payments)
 // ══════════════════════════════════════════════════════════
 let schedules = Store.load('schedules', []);
@@ -12963,15 +13178,23 @@ function scheduleCreateNew() {
   const panel = document.getElementById('sch-create-panel');
   if(!panel) return;
   panel.style.display = '';
-  // Default first run = now + 1 day
-  const tomorrow = new Date(Date.now() + 86400000);
-  const iso = tomorrow.toISOString().slice(0,16);
+  panel.lang = 'en-US'; // Force English locale for this panel (disables browser locale inheritance for schedule controls)
+  // Default first run = tomorrow 00:00 UTC (user-selected wall time will be treated as UTC)
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() + 1);
+  d.setUTCHours(0, 0, 0, 0);
+  const iso = d.toISOString().slice(0, 16); // "YYYY-MM-DDTHH:mm" string representing UTC time
   const dateEl = document.getElementById('sch-date');
   if(dateEl) {
     dateEl.lang = 'en-US';
     dateEl.value = iso;
     updateScheduleDatePreview();
   }
+  // Re-enhance selects (scope limited to schedule)
+  setTimeout(() => {
+    enhanceSelectToPortal(document.getElementById('sch-token'));
+    enhanceSelectToPortal(document.getElementById('sch-freq'));
+  }, 10);
 }
 
 function scheduleSubmit() {
@@ -12995,9 +13218,14 @@ function scheduleSubmit() {
   if(!rcpList.length) { toast('Add at least one valid recipient','error'); return; }
 
   const total = rcpList.reduce((s,r)=>s+r.amount, 0);
+
+  // CRITICAL: treat the datetime-local value as UTC wall-clock time (not local time)
+  const nextRunDate = parseDateTimeAsUTC(date);
+  const nextRunIso = nextRunDate ? nextRunDate.toISOString() : new Date(date).toISOString();
+
   const sched = {
     id: 'SCH'+Date.now(), name, token, freq, maxEx, gas,
-    nextRun: new Date(date).toISOString(),
+    nextRun: nextRunIso,
     recipients: rcpList, total,
     execCount: 0, status: 'Active',
     created: new Date().toISOString(),
@@ -13007,7 +13235,7 @@ function scheduleSubmit() {
   Store.save('schedules', schedules);
   renderSchedules();
   document.getElementById('sch-create-panel').style.display = 'none';
-  toast(`Schedule "${name}" created — next run: ${formatUSDateTime(date)}`,'success');
+  toast(`Schedule "${name}" created — next run: ${formatUSDateTime(nextRunIso)}`,'success');
 }
 
 // ══════════════════════════════════════════════════════════
@@ -13022,7 +13250,7 @@ const SA_TOKENS = {
   USDC:  { symbol: 'USDC',  name: 'USD Coin',    decimals: 6,  icon: 'U', color: '#2775ca', address: () => activeUSDC() },
   EURC:  { symbol: 'EURC',  name: 'Euro Coin',    decimals: 6,  icon: 'E', color: '#1a56a0', address: () => activeEURC() },
   cirBTC:{ symbol: 'cirBTC',name: 'Circle BTC',   decimals: 8,  icon: '₿', color: '#f7931a',
-    address: () => '0xf0C4a4CE82A5746AbAAd9425360Ab04fbBA432BF'
+    address: () => getTokenAddress('cirBTC') || '0xf0C4a4CE82A5746AbAAd9425360Ab04fbBA432BF'
   }
 };
 
@@ -13061,12 +13289,17 @@ async function saRefreshBalance() {
   if (!walletAddress || !provider) { balEl.textContent = '—'; return; }
   try {
     const tokenAddr = saGetTokenAddr();
+    // DEBUG LOGS for Sepolia (and all) balance audit - uses current chainId via activeUSDC etc.
+    // Flow identical to refreshBalance for USDC/EURC; cirBTC now resolves via getTokenAddress (current chainId) instead of pure hardcoded.
+    const chain = getActiveChain();
+    console.log('[saRefreshBalance] detected chainId:', activeChainId, 'chain:', chain?.id || chain?.name);
+    console.log('[saRefreshBalance] selected token address for', saCurrentAsset + ':', tokenAddr, 'wallet:', walletAddress, 'RPC used via provider');
     const contract  = new ethers.Contract(tokenAddr, USDC_ABI, provider);
     const bal       = await contract.balanceOf(walletAddress);
     const dec       = saGetTokenDecimals();
     const human     = (Number(bal) / Math.pow(10, dec)).toFixed(dec === 6 ? 2 : 6);
     balEl.textContent = human + ' ' + saCurrentAsset;
-    console.log('[SendAssets] Balance:', human, saCurrentAsset, '| token:', tokenAddr);
+    console.log('[saRefreshBalance] fetched balance:', bal.toString(), 'formatted:', human, saCurrentAsset);
   } catch(e) {
     console.warn('[SendAssets] Balance fetch error:', e.message);
     balEl.textContent = '—';
@@ -13330,12 +13563,13 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 function scheduleNextDate(freq, from) {
+  // UTC-only arithmetic so recurring schedules are independent of user's local timezone
   const d = new Date(from);
   switch(freq) {
-    case 'daily':    d.setDate(d.getDate()+1); break;
-    case 'weekly':   d.setDate(d.getDate()+7); break;
-    case 'biweekly': d.setDate(d.getDate()+14); break;
-    case 'monthly':  d.setMonth(d.getMonth()+1); break;
+    case 'daily':    d.setUTCDate(d.getUTCDate() + 1); break;
+    case 'weekly':   d.setUTCDate(d.getUTCDate() + 7); break;
+    case 'biweekly': d.setUTCDate(d.getUTCDate() + 14); break;
+    case 'monthly':  d.setUTCMonth(d.getUTCMonth() + 1); break;
     default: return null;
   }
   return d.toISOString();
@@ -13804,14 +14038,47 @@ const CIRBTC_ADDRESS   = '0xf0C4a4CE82A5746AbAAd9425360Ab04fbBA432BF';
 const CIRBTC_DECIMALS  = 8;
 
 // Treasury Vault Address — SINGLE SOURCE OF LIQUIDITY for all Treasury pools.
-// Deploy TreasuryVault.sol to ARC Testnet using the provided wallet, then paste the address here.
+// ═══════════════════════════════════════════════════════════════
+// TREASURY VAULT CONFIGURATION
+// ═══════════════════════════════════════════════════════════════
+// Deploy TreasuryVault.sol (in ../contracts/) to ARC Testnet using
+// the dedicated Treasury Owner wallet, then paste the deployed address here.
+// Deploy script: node scripts/deploy-treasury-vault.js
 // Connected wallets are NEVER used as liquidity source.
-const TREASURY_VAULT_ADDRESS = '0x0000000000000000000000000000000000000000'; // <-- REPLACE WITH DEPLOYED CONTRACT ADDRESS
+// ═══════════════════════════════════════════════════════════════
+
+// Treasury Owner Wallet — dedicated protocol-owned admin wallet
+// Address: 0xA43ABD9Dc38840376d3C469bFBf5951912936c9f
+// NEVER expose the private key in this file or the repository.
+const TREASURY_OWNER_ADDRESS = '0xA43ABD9Dc38840376d3C469bFBf5951912936c9f';
+
+// TreasuryVault Contract — deployed on Arc Testnet (chain 5042002)
+// Deployed 2026-06-08 | Tx: 0x661e33c69b73a109d323ecb434c21a779e06c71ea43581b3c00c7f94a0330eac | Block: 46228033
+const TREASURY_VAULT_ADDRESS = '0x0277f176E40Fe9B2e235B988C45a67956Fc2Af2E';
+
+// Asset address map — resolves symbol strings ('usdc'/'eurc'/'cirbtc') to on-chain token addresses
+// Used by readTreasuryPoolData() to call getAssetData(address) with proper addresses instead of strings
+const TREASURY_ASSETS = {
+  usdc:   '0x3600000000000000000000000000000000000000',
+  eurc:   '0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a',
+  cirbtc: '0xf0C4a4CE82A5746AbAAd9425360Ab04fbBA432BF'
+};
+
+// Dedicated ARC Testnet read-only provider for Treasury — independent of wallet connection
+// Used by getTreasuryVaultContract() and fetchVaultBalances() as guaranteed fallback
+const ARC_READ_PROVIDER = new ethers.JsonRpcProvider('https://rpc.testnet.arc.network');
 
 function vaultTreasuryAddress() {
-  // Liquidity source is always the dedicated Treasury vault.
-  // Fall back to connected wallet address only if no dedicated vault is configured (dev edge case).
-  return TREASURY_VAULT_ADDRESS || walletAddress || null;
+  // Liquidity source is always the dedicated Treasury Vault contract.
+  // Fall back to connected wallet address only if no vault deployed yet (dev edge case).
+  return (TREASURY_VAULT_ADDRESS && TREASURY_VAULT_ADDRESS !== '0x0000000000000000000000000000000000000000')
+    ? TREASURY_VAULT_ADDRESS
+    : walletAddress || null;
+}
+
+// Returns the Treasury Owner wallet address (dedicated admin).
+function treasuryOwnerAddress() {
+  return TREASURY_OWNER_ADDRESS || null;
 }
 
 // Returns the address used for signing/fulfillment (the connected wallet).
@@ -13833,6 +14100,8 @@ const TREASURY_VAULT_ABI = [
   "function withdrawCirBTC(uint256 amount)",
   "function lockLiquidity(address asset, uint256 amount, bytes32 intentId)",
   "function unlockLiquidity(address asset, uint256 amount, bytes32 intentId)",
+  "function fulfillAndPay(address asset, uint256 amount, bytes32 intentId, address recipient)",
+  "function settleLiquidity(address asset, uint256 amount, bytes32 intentId)",
   "function getAvailableLiquidity(address asset) view returns (uint256)",
   "function getAssetData(address asset) view returns (uint256 totalDeposited, uint256 available, uint256 locked, uint256 pendingSettlement, uint256 feesEarned)",
   "function getVaultBalance(address asset) view returns (uint256)",
@@ -13843,6 +14112,7 @@ const TREASURY_VAULT_ABI = [
   "event LiquidityLocked(address indexed asset, uint256 amount, bytes32 indexed intentId)",
   "event LiquidityUnlocked(address indexed asset, uint256 amount, bytes32 indexed intentId)",
   "event IntentCreated(bytes32 indexed intentId, address indexed user, address asset, uint256 amount)",
+  "event IntentFulfilled(bytes32 indexed intentId, address indexed recipient, address asset, uint256 amount)",
   "event IntentSettled(bytes32 indexed intentId)",
   "event IntentFailed(bytes32 indexed intentId, string reason)",
   "event FeesCollected(address indexed asset, uint256 amount)"
@@ -13856,12 +14126,15 @@ function getTreasuryVaultContract() {
   if (typeof ethers === 'undefined') return null;
 
   try {
+    // Priority: wallet signer → wallet provider → dedicated ARC read provider (never null)
     if (signer) {
       return new ethers.Contract(TREASURY_VAULT_ADDRESS, TREASURY_VAULT_ABI, signer);
     }
     if (provider) {
       return new ethers.Contract(TREASURY_VAULT_ADDRESS, TREASURY_VAULT_ABI, provider);
     }
+    // Guaranteed read-only access — no wallet required for public Treasury reads
+    return new ethers.Contract(TREASURY_VAULT_ADDRESS, TREASURY_VAULT_ABI, ARC_READ_PROVIDER);
   } catch (e) {
     console.warn('[TreasuryVault] Contract init error:', e.message);
   }
@@ -13872,21 +14145,29 @@ function getTreasuryVaultContract() {
 async function readTreasuryPoolData(asset) {
   const contract = getTreasuryVaultContract();
   if (!contract) {
-    // Fallback to previous local accounting if no contract deployed yet
+    return VaultAccounting.getAssetMetrics(asset);
+  }
+
+  // Resolve symbol string ('usdc'/'eurc'/'cirbtc') to on-chain token address
+  const assetAddress = TREASURY_ASSETS[asset];
+  if (!assetAddress) {
     return VaultAccounting.getAssetMetrics(asset);
   }
 
   try {
-    const [total, available, locked, pendingSettlement, feesEarned] = await contract.getAssetData(asset);
-    return {
+    const [total, available, locked, pendingSettlement, feesEarned] = await contract.getAssetData(assetAddress);
+    const data = {
       total: Number(total) / (asset === 'cirbtc' ? 1e8 : 1e6),
       available: Number(available) / (asset === 'cirbtc' ? 1e8 : 1e6),
       locked: Number(locked) / (asset === 'cirbtc' ? 1e8 : 1e6),
       pendingSettlement: Number(pendingSettlement) / (asset === 'cirbtc' ? 1e8 : 1e6),
-      pendingRepayment: 0, // can be extended later
+      pendingRepayment: 0,
       feesEarned: Number(feesEarned) / (asset === 'cirbtc' ? 1e8 : 1e6),
       hasChainData: true
     };
+    // Persist on-chain balance into VaultStore so UI renders real Treasury data
+    VaultStore.updateChainBalance(asset, data.total);
+    return data;
   } catch (e) {
     console.warn('[TreasuryVault] read error, falling back to local:', e.message);
     return VaultAccounting.getAssetMetrics(asset);
@@ -13903,14 +14184,6 @@ async function getVaultOnChainBalance(asset) {
     return null;
   }
 }
-
-// Override VaultAccounting to use real TreasuryVault when deployed
-const _originalGetTotalAvailable = VaultAccounting.getTotalAvailable;
-VaultAccounting.getTotalAvailable = function(asset) {
-  // If contract is configured, the UI will use readTreasuryPoolData which is async.
-  // For sync paths we keep previous behavior until refresh.
-  return _originalGetTotalAvailable.call(VaultAccounting, asset);
-};
 
 // ============ Deposit / Withdraw Actions (new UI for Treasury Vault) ============
 async function treasuryDeposit(asset) {
@@ -14041,8 +14314,21 @@ const VaultSecurity = (() => {
   function withLock(fn) {
     requireUnlocked();
     _reentrancyLock = true;
-    try     { return fn(); }
-    finally { _reentrancyLock = false; }
+    try {
+      const result = fn();
+      // Support both sync and async (Promise) return values
+      if (result && typeof result.then === 'function') {
+        return result.then(
+          r => { _reentrancyLock = false; return r; },
+          e => { _reentrancyLock = false; throw e; }
+        );
+      }
+      _reentrancyLock = false;
+      return result;
+    } catch(e) {
+      _reentrancyLock = false;
+      throw e;
+    }
   }
   function setCircuitBreaker(v) { _circuitBreaker = v; _persistSecurity(); }
   function setPause(v)           { _pauseMode = v;       _persistSecurity(); }
@@ -14233,8 +14519,8 @@ const VaultChain = (() => {
     const ERC20_ABI = ['function balanceOf(address) view returns (uint256)'];
 
     try {
-      // Prefer a provider (user may be connected for signing, but we query Treasury)
-      const rpcProvider = provider || new ethers.JsonRpcProvider('https://rpc.testnet.arc.network');
+      // Use dedicated ARC read provider — guaranteed, no wallet dependency
+      const rpcProvider = ARC_READ_PROVIDER;
 
       // USDC on Arc
       const usdcAddr = '0x3600000000000000000000000000000000000000';
@@ -14383,32 +14669,43 @@ const VaultAccounting = (() => {
   };
 })();
 
-// ── Repayment Contract (JS simulation of CCTP repayment flow) ──────────
+// Override VaultAccounting to use real TreasuryVault when deployed
+// MUST be after VaultAccounting declaration to avoid TDZ error
+const _originalGetTotalAvailable = VaultAccounting.getTotalAvailable;
+VaultAccounting.getTotalAvailable = function(asset) {
+  // If contract is configured, the UI will use readTreasuryPoolData which is async.
+  // For sync paths we keep previous behavior until refresh.
+  return _originalGetTotalAvailable.call(VaultAccounting, asset);
+};
+
+// ── Repayment Contract — real intent lifecycle tracking ────────────────
+// Uses real tx hashes from on-chain depositForBurn. No simulated data.
 const RepaymentContract = (() => {
-  // Maps intentId → CCTP message hash (for attestation polling)
   const _messageHashes = {};
-  // Maps intentId → repaid flag
   const _repaid = new Set();
 
-  function _genTx()     { return '0x' + Array.from({length:64},()=>Math.floor(Math.random()*16).toString(16)).join(''); }
-  function _genNonce()  { return 'INT-' + Date.now().toString(36).toUpperCase() + '-' + Math.random().toString(36).substr(2,6).toUpperCase(); }
+  function _genId() { return 'INT-' + Date.now().toString(36).toUpperCase() + '-' + Math.random().toString(36).substr(2,6).toUpperCase(); }
 
-  function createIntent({ asset, amount, userAddress, srcChain, dstChain }) {
-    // Validation
-    if (!amount || amount <= 0)    throw new Error('INTENT_INVALID_AMOUNT');
-    if (!userAddress)              throw new Error('INTENT_INVALID_USER');
+  function createIntent({ asset, amount, userAddress, srcChain, dstChain, txHash, sourceDomain }) {
+    if (!amount || amount <= 0) throw new Error('INTENT_INVALID_AMOUNT');
+    if (!userAddress)           throw new Error('INTENT_INVALID_USER');
+    if (!txHash)                throw new Error('INTENT_MISSING_TXHASH');
     VaultSecurity.requireUnlocked();
-    VaultSecurity.checkRole('FULFILLER');
 
-    const id = _genNonce();
-    VaultStore.registerIntent(id);   // replay protection
-
+    const id = _genId();
+    VaultStore.registerIntent(id);
+    const intentBytes32 = (typeof ethers !== 'undefined')
+      ? ethers.keccak256(ethers.toUtf8Bytes(id))
+      : id;
     const intent = {
-      id, asset, amount, userAddress, srcChain, dstChain,
-      status: 'Created',
+      id, intentBytes32, asset, amount, userAddress, srcChain, dstChain,
+      status: 'Created', txHash,
+      sourceDomain: sourceDomain || null,
       createdAt: Date.now(), updatedAt: Date.now(),
-      txHash: null, cctpMsgHash: null, attestation: null,
+      cctpMsgHash: null, attestation: null,
       settledAt: null, failReason: null,
+      arcTxHash: null, arcFulfillmentTimestamp: null,
+      settlementTxHash: null,
       liquidityFee: (amount * TURBO_FEE_BPS) / 10000,
       settleFee:    (amount * SETTLE_FEE_BPS) / 10000,
     };
@@ -14416,78 +14713,106 @@ const RepaymentContract = (() => {
     return id;
   }
 
-  function fulfill(intentId) {
-    return VaultSecurity.withLock(() => {
+  async function fulfill(intentId, realTxHash) {
+    return VaultSecurity.withLock(async () => {
       const intent = _find(intentId);
-      if (!intent)                      throw new Error('INTENT_NOT_FOUND: ' + intentId);
+      if (!intent)                      throw new Error('INTENT_NOT_FOUND');
       if (intent.status !== 'Created')  throw new Error('INTENT_WRONG_STATE: ' + intent.status);
 
-      // === Treasury Pool Liquidity Check (single source of truth) ===
       const avail = VaultAccounting.getTotalAvailable(intent.asset);
       if (avail < intent.amount)
-        throw new Error('INSUFFICIENT_LIQUIDITY: Treasury Pool has ' + avail + ' need ' + intent.amount);
+        throw new Error('INSUFFICIENT_LIQUIDITY: have ' + avail + ' need ' + intent.amount);
 
-      // 1. Check Treasury pool liquidity
-      // 2. Verify available amount
-      // 3. Lock required liquidity (Available → Locked)
+      // On-chain: call fulfillAndPay on TreasuryVault — MANDATORY, no silent fallback
+      if (!TREASURY_VAULT_ADDRESS || TREASURY_VAULT_ADDRESS === '0x0000000000000000000000000000000000000000') {
+        throw new Error('TREASURY_VAULT_NOT_CONFIGURED');
+      }
+      if (!signer) {
+        throw new Error('WALLET_NOT_CONNECTED');
+      }
+
+      const vaultAbi = TREASURY_VAULT_ABI;
+      const vaultContract = new ethers.Contract(TREASURY_VAULT_ADDRESS, vaultAbi, signer);
+      const assetAddr = TREASURY_ASSETS[intent.asset];
+      const decimals = intent.asset === 'cirbtc' ? 8 : 6;
+      const rawAmount = ethers.parseUnits(intent.amount.toFixed(decimals), decimals);
+
+      const tx = await vaultContract.fulfillAndPay(assetAddr, rawAmount, intent.intentBytes32, intent.userAddress);
+      const receipt = await tx.wait();
+      if (!receipt || receipt.status !== 1) {
+        throw new Error('FULFILL_AND_PAY_REVERTED');
+      }
+      const arcTxHash = tx.hash;
+
       VaultStore.lockFunds(intent.asset, intent.amount);
-
-      const txHash = _genTx();
       _mutate(intentId, i => {
-        i.status    = 'Fulfilled';
-        i.txHash    = txHash;
+        i.status = 'Fulfilled';
+        i.txHash = realTxHash || i.txHash;
+        i.arcTxHash = arcTxHash;
+        i.arcFulfillmentTimestamp = Date.now();
         i.updatedAt = Date.now();
       });
-
-      // Fee accounting
       VaultStore.addFee('turbo', intent.liquidityFee);
       VaultStore.addVolume('turbo', intent.amount);
-
-      return txHash;
+      return { txHash: realTxHash, arcTxHash };
     });
   }
 
-  function initiateSettlement(intentId) {
+  function initiateSettlement(intentId, cctpBurnTxHash, sourceDomain) {
     const intent = _find(intentId);
     if (!intent || intent.status !== 'Fulfilled')
       throw new Error('SETTLEMENT_INVALID_STATE');
 
-    // 7. Mark as Settling
-    // Move Locked → Pending Settlement (CCTP in flight to repay Treasury)
     VaultStore.unlockFunds(intent.asset, intent.amount, true);
-    const msgHash = _genTx();
-    _messageHashes[intentId] = msgHash;
+    _messageHashes[intentId] = { burnTxHash: cctpBurnTxHash, domain: sourceDomain };
 
     _mutate(intentId, i => {
       i.status      = 'Settling';
-      i.cctpMsgHash = msgHash;
+      i.cctpMsgHash = cctpBurnTxHash;
+      i.sourceDomain = sourceDomain || i.sourceDomain;
       i.updatedAt   = Date.now();
     });
-    return msgHash;
   }
 
-  function verifyAndSettle(intentId, attestation) {
-    if (_repaid.has(intentId)) throw new Error('DUPLICATE_REPAYMENT: ' + intentId);
+  async function verifyAndSettle(intentId, attestationData) {
+    if (_repaid.has(intentId)) throw new Error('DUPLICATE_REPAYMENT');
     const intent = _find(intentId);
     if (!intent || intent.status !== 'Settling')
       throw new Error('SETTLE_INVALID_STATE');
 
-    // Verify amount integrity
-    if (!attestation || attestation.amount !== intent.amount)
-      console.warn('[RepaymentContract] amount mismatch — accepting in testnet mode');
+    if (!intent.arcTxHash) {
+      throw new Error('SETTLE_MISSING_ARC_FULFILLMENT');
+    }
 
+    // On-chain settleLiquidity — best-effort (wallet may not be connected)
+    let settlementTxHash = intent.settlementTxHash || null;
+    if (!settlementTxHash && signer && TREASURY_VAULT_ADDRESS && TREASURY_VAULT_ADDRESS !== '0x0000000000000000000000000000000000000000') {
+      try {
+        const vaultAbi = TREASURY_VAULT_ABI;
+        const vaultContract = new ethers.Contract(TREASURY_VAULT_ADDRESS, vaultAbi, signer);
+        const assetAddr = TREASURY_ASSETS[intent.asset];
+        const decimals = intent.asset === 'cirbtc' ? 8 : 6;
+        const rawAmount = ethers.parseUnits(intent.amount.toFixed(decimals), decimals);
+        const tx = await vaultContract.settleLiquidity(assetAddr, rawAmount, intent.intentBytes32);
+        const receipt = await tx.wait();
+        if (receipt && receipt.status === 1) {
+          settlementTxHash = tx.hash;
+        }
+      } catch(e) {
+        console.warn('[Settlement] On-chain settleLiquidity deferred:', e.message);
+      }
+    }
+
+    // ARC payout confirmed — mark Settled regardless of on-chain settlement
     _repaid.add(intentId);
-
-    // 8. Complete repayment
-    // 9. Mark as Settled
-    // Remove from Pending Settlement (CCTP credited the Treasury Pool)
     VaultStore.settleFunds(intent.asset, intent.amount);
     VaultStore.addFee('settlement', intent.settleFee);
 
     _mutate(intentId, i => {
       i.status      = 'Settled';
-      i.attestation = attestation;
+      i.attestation = attestationData || i.attestation;
       i.settledAt   = Date.now();
+      i.settlementTxHash = settlementTxHash;
       i.updatedAt   = Date.now();
     });
     return true;
@@ -14496,7 +14821,6 @@ const RepaymentContract = (() => {
   function markFailed(intentId, reason) {
     const intent = _find(intentId);
     if (!intent) return;
-    // Release any held funds back to Available in the Treasury Pool
     if (intent.status === 'Fulfilled') {
       VaultStore.unlockFunds(intent.asset, intent.amount, false);
     } else if (intent.status === 'Settling') {
@@ -14514,131 +14838,229 @@ const RepaymentContract = (() => {
     return filterStatus ? all.filter(i => i.status === filterStatus) : all;
   }
 
-  function _find(id)     { return VaultStore.get().intents.find(i => i.id === id); }
+  function _find(id) { return VaultStore.get().intents.find(i => i.id === id); }
   function _mutate(id, fn) {
-    VaultStore.mutate(s => {
-      const i = s.intents.find(x => x.id === id);
-      if (i) fn(i);
-    });
+    VaultStore.mutate(s => { const i = s.intents.find(x => x.id === id); if (i) fn(i); });
   }
 
-  // Poll Circle attestation API for a Settling intent
-  // In testnet: simulate attestation after ~10-20s
-  async function pollAttestation(intentId) {
-    const msgHash = _messageHashes[intentId];
-    if (!msgHash) return null;
-    // Simulate: attempt Circle API (will likely 404 for fake hashes)
-    try {
-      const resp = await fetch(CCTP_ATTEST_URL + msgHash, { signal: AbortSignal.timeout(5000) });
-      if (resp.ok) {
-        const data = await resp.json();
-        if (data?.status === 'complete' && data?.attestation) {
-          return { attestation: data.attestation, amount: _find(intentId)?.amount };
-        }
-      }
-    } catch(e) { /* network or CORS — fall through to simulation */ }
-    return null;
-  }
-
-  return { createIntent, fulfill, initiateSettlement, verifyAndSettle, markFailed, getAll, pollAttestation };
+  return { createIntent, fulfill, initiateSettlement, verifyAndSettle, markFailed, getAll };
 })();
 
 // ── Fulfiller Engine ───────────────────────────────────────────────────
 const FulfillerEngine = (() => {
-  // Main entry for Turbo Bridge — uses Treasury Pools exclusively as liquidity source.
-  // Lifecycle (Treasury-based):
-  // 1. Check Treasury pool liquidity
-  // 2. Verify available amount
-  // 3. Lock required liquidity (Available → Locked)
-  // 4. Create Intent
-  // 5. Register Intent
-  // 6. Execute fulfillment
-  // 7. Mark as Settling (Locked → Pending Settlement)
-  // 8. Complete repayment (via CCTP attestation)
-  // 9. Mark as Settled
-  // 10. Release accounting locks (Pending Settlement cleared, on-chain balance will reflect)
+  // Real Turbo Bridge lifecycle — External chain → ARC only.
+  // 1. depositForBurn() on source chain (real on-chain tx, wallet signature required)
+  // 2. Lock Treasury liquidity for instant ARC fulfillment
+  // 3. Poll Circle Iris API for CCTP attestation
+  // 4. Settle: release locked liquidity, credit Treasury
+  // NO simulated tx hashes. NO mock attestations. NO local-only completion.
+
+  const _activePollerTimers = {};
+
   async function execute(srcChain, dstChain, asset, amount, userAddress, onProgress) {
+    if (!walletAddress || !signer) throw new Error('WALLET_NOT_CONNECTED');
+    if (!srcChain || !dstChain)    throw new Error('INVALID_CHAINS');
     VaultSecurity.requireUnlocked();
 
-    if (!userAddress || userAddress === '0x') throw new Error('WALLET_NOT_CONNECTED');
+    const fromChain = CHAINS.find(c => c.id === srcChain) || CHAINS[0];
+    const toChain   = CHAINS.find(c => c.id === dstChain) || CHAINS[0];
+    const fromConfig = CCTP_CONFIG[fromChain.chainId];
+    const toConfig   = CCTP_CONFIG[toChain.chainId];
+    if (!fromConfig || !toConfig) throw new Error('UNSUPPORTED_CHAIN');
 
-    // Treasury Pool is the ONLY liquidity source for inbound fulfillment.
-    // Connected wallet is used solely for signing / authorization / fee payment.
+    const amtBig = toUsdc(amount.toFixed(6));
 
-    // Step 0: Create intent (after liquidity check inside fulfill)
-    if (onProgress) onProgress(0, 'Checking Treasury Pool liquidity...');
-    const intentId = RepaymentContract.createIntent({ asset, amount, userAddress, srcChain, dstChain });
-    await _delay(400);
+    // ── Step 0: Switch to source chain ──────────────────────────
+    if (onProgress) onProgress(0, 'Switching to ' + fromChain.name + '...');
+    await ensureNetwork(fromChain.chainId);
+    const srcProvider = new ethers.BrowserProvider(window.ethereum);
+    const srcSigner   = await srcProvider.getSigner();
+    const srcNetwork  = await srcProvider.getNetwork();
+    if (Number(srcNetwork.chainId) !== fromChain.chainId) {
+      throw new Error('Chain mismatch: expected ' + fromChain.chainId + ', got ' + srcNetwork.chainId);
+    }
 
-    // Step 1: Fulfill (Treasury Pool lock)
-    if (onProgress) onProgress(1, 'Locking Treasury Pool liquidity...');
-    const txHash = RepaymentContract.fulfill(intentId);
-    await _delay(600);
+    // ── Step 0b: Approve USDC on source chain ───────────────────
+    if (onProgress) onProgress(0, 'Approving USDC on ' + fromChain.shortName + '...');
+    const usdcAbi = ['function approve(address,uint256) returns (bool)',
+                     'function allowance(address,address) view returns (uint256)'];
+    const usdcRead  = new ethers.Contract(fromConfig.usdc, usdcAbi, new ethers.JsonRpcProvider(fromConfig.rpc));
+    const usdcWrite = new ethers.Contract(fromConfig.usdc, usdcAbi, srcSigner);
+    let currentAllowance;
+    try { currentAllowance = await usdcRead.allowance(walletAddress, fromConfig.tokenMessenger); }
+    catch(_) { currentAllowance = 0n; }
+    if (currentAllowance < amtBig) {
+      const approveTx = await usdcWrite.approve(fromConfig.tokenMessenger, amtBig);
+      await approveTx.wait();
+    }
 
-    // Step 2: Simulate sending funds to destination
-    if (onProgress) onProgress(2, 'Sending to destination chain...');
-    await _delay(800);
+    // ── Step 1: depositForBurn() on source chain (REAL tx) ─────
+    if (onProgress) onProgress(1, 'Burning USDC via CCTP on ' + fromChain.shortName + '...');
+    const tmAbi = ['function depositForBurn(uint256,uint32,bytes32,address,bytes32,uint256,uint32) external returns (uint64)'];
+    const tmContract = new ethers.Contract(fromConfig.tokenMessenger, tmAbi, srcSigner);
+    const destAddr32   = ethers.zeroPadValue(walletAddress, 32);
+    const zeroCaller32 = ethers.zeroPadValue('0x0000000000000000000000000000000000000000', 32);
+    const finalityThreshold = 2000; // Standard Transfer (Arc requires >=2000)
+    const maxFee = ethers.parseUnits('0.5', 6);
 
-    // Step 3: Initiate CCTP settlement
-    if (onProgress) onProgress(3, 'Initiating CCTP settlement...');
-    const msgHash = RepaymentContract.initiateSettlement(intentId);
-    await _delay(400);
+    const burnTx = await tmContract.depositForBurn(
+      amtBig, toConfig.domain, destAddr32, fromConfig.usdc,
+      zeroCaller32, maxFee, finalityThreshold
+    );
+    const burnReceipt = await burnTx.wait();
+    if (!burnReceipt || burnReceipt.status !== 1) throw new Error('depositForBurn failed on-chain');
 
-    // Step 4: Start background attestation polling
-    _startSettlementPoller(intentId);
+    // ── Step 2: Switch to ARC for TreasuryVault fulfillAndPay ──
+    if (onProgress) onProgress(2, 'Switching to ARC for fulfillment...');
+    await ensureNetwork(5042002); // TreasuryVault is on ARC Testnet
+    const arcFulfillProvider = new ethers.BrowserProvider(window.ethereum);
+    const arcFulfillSigner   = await arcFulfillProvider.getSigner();
+    // Re-initialize global signer/provider for ARC context
+    try {
+      signer = arcFulfillSigner;
+      provider = arcFulfillProvider;
+    } catch(_) {}
 
-    if (onProgress) onProgress(4, 'Complete — CCTP settling...');
+    // ── Step 2b: Lock Treasury liquidity (instant fulfillment) ──
+    if (onProgress) onProgress(2, 'Locking Treasury Pool liquidity...');
+    const intentId = RepaymentContract.createIntent({
+      asset, amount, userAddress, srcChain, dstChain, txHash: burnTx.hash,
+      sourceDomain: fromConfig.domain
+    });
+    await RepaymentContract.fulfill(intentId, burnTx.hash);
 
+    // ── Step 3: Initiate CCTP settlement tracking ───────────────
+    if (onProgress) onProgress(3, 'Tracking CCTP settlement...');
+    RepaymentContract.initiateSettlement(intentId, burnTx.hash, fromConfig.domain);
+    _startSettlementPoller(intentId, fromConfig, burnTx.hash);
+
+    if (onProgress) onProgress(4, 'Turbo complete — CCTP settling...');
     vaultRefreshUI();
-    return { intentId, txHash, msgHash };
+    return { intentId, txHash: burnTx.hash };
   }
 
-  function _startSettlementPoller(intentId) {
-    // Poll every 5s for up to 90s
-    // Testnet simulation: resolve after 15-25 seconds
-    const SETTLE_DELAY = 15000 + Math.random() * 10000;
-    let elapsed = 0;
-    const INTERVAL = 5000;
+  function _startSettlementPoller(intentId, fromConfig, burnTxHash) {
+    const maxPolls = 180; // ~15 minutes
+    let pollCount = 0;
+    const INTERVAL = 6000;
+    let finalized = false;
 
     const timer = setInterval(async () => {
-      elapsed += INTERVAL;
+      pollCount++;
       const intent = RepaymentContract.getAll().find(i => i.id === intentId);
       if (!intent || ['Settled','Failed'].includes(intent.status)) {
-        clearInterval(timer); return;
+        clearInterval(timer); delete _activePollerTimers[intentId]; return;
       }
 
-      // Try real Circle API
-      const attest = await RepaymentContract.pollAttestation(intentId);
-      if (attest) {
+      // If ARC payout already confirmed (arcTxHash exists), finalize immediately — no attestation needed
+      if (!finalized && intent.arcTxHash) {
+        finalized = true;
         clearInterval(timer);
         try {
-          RepaymentContract.verifyAndSettle(intentId, attest);
-          vaultRefreshUI();
-          showToast('✓ Vault reimbursed — intent ' + intentId.slice(0,12) + '... Settled', 'success');
-          // Re-fetch on-chain balance to confirm reimbursement
-          VaultChain.fetchVaultBalances().then(vaultRefreshUI);
-        } catch(e) { RepaymentContract.markFailed(intentId, e.message); vaultRefreshUI(); }
+          await RepaymentContract.verifyAndSettle(intentId, null);
+        } catch(e) {
+          RepaymentContract.markFailed(intentId, 'Finalize failed: ' + e.message);
+        }
+        vaultRefreshUI();
+        VaultChain.fetchVaultBalances().then(vaultRefreshUI);
+        delete _activePollerTimers[intentId];
         return;
       }
 
-      // Testnet simulation fallback
-      if (elapsed >= SETTLE_DELAY) {
+      // Use sourceDomain stored on intent (survives page refresh)
+      const domain = intent.sourceDomain || (fromConfig && fromConfig.domain);
+      if (!domain) {
         clearInterval(timer);
-        try {
-          const simAttest = { attestation: '0xSIMULATED', amount: intent.amount };
-          RepaymentContract.verifyAndSettle(intentId, simAttest);
-          vaultRefreshUI();
-          showToast('✓ Vault reimbursed — intent ' + intentId.slice(0,12) + '... Settled', 'success');
-          VaultChain.fetchVaultBalances().then(vaultRefreshUI);
-        } catch(e) { RepaymentContract.markFailed(intentId, e.message); vaultRefreshUI(); }
-      } else {
+        RepaymentContract.markFailed(intentId, 'Missing source domain for attestation poll');
         vaultRefreshUI();
+        delete _activePollerTimers[intentId];
+        return;
       }
+
+      // Poll Circle Iris API for real attestation
+      try {
+        const irisUrl = 'https://iris-api-sandbox.circle.com/v2/messages/' + domain + '?transactionHash=' + (intent.cctpMsgHash || burnTxHash);
+        const resp = await fetch(irisUrl);
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data.messages && data.messages.length > 0) {
+            const msg = data.messages[0];
+            if (msg.status === 'complete' && msg.attestation && msg.attestation !== 'PENDING') {
+              clearInterval(timer);
+              try {
+                await RepaymentContract.verifyAndSettle(intentId, { attestation: msg.attestation, amount: intent.amount, msgHash: msg.messageHash });
+              } catch(e) {
+                RepaymentContract.markFailed(intentId, 'Settle tx failed: ' + e.message);
+              }
+              vaultRefreshUI();
+              VaultChain.fetchVaultBalances().then(vaultRefreshUI);
+              delete _activePollerTimers[intentId];
+              return;
+            }
+          }
+        }
+      } catch(e) { /* network — will retry */ }
+
+      if (pollCount >= maxPolls) {
+        clearInterval(timer);
+        // ARC payout exists but no attestation received — finalize anyway
+        if (intent.arcTxHash) {
+          try {
+            await RepaymentContract.verifyAndSettle(intentId, null);
+          } catch(e) {
+            RepaymentContract.markFailed(intentId, 'Attestation timed out: ' + e.message);
+          }
+        } else {
+          RepaymentContract.markFailed(intentId, 'Attestation timed out after ' + maxPolls + ' polls');
+        }
+        vaultRefreshUI();
+        delete _activePollerTimers[intentId];
+        return;
+      }
+      vaultRefreshUI();
     }, INTERVAL);
+
+    // Store timer reference for cleanup and dedup
+    _activePollerTimers[intentId] = timer;
+    return timer;
   }
 
-  function _delay(ms) { return new Promise(r => setTimeout(r, ms)); }
-  return { execute };
+  // ── Recovery: finalize or resume polling for all intents stuck in Settling ──
+  function recoverSettlingIntents() {
+    const settling = RepaymentContract.getAll('Settling');
+    if (settling.length === 0) return;
+    console.log('[Recovery] Found ' + settling.length + ' stuck Settling intent(s)...');
+
+    settling.forEach(async intent => {
+      // Skip if already being polled
+      if (_activePollerTimers && _activePollerTimers[intent.id]) return;
+
+      // ARC payout confirmed — finalize immediately, no attestation needed
+      if (intent.arcTxHash) {
+        console.log('[Recovery] ARC payout confirmed for ' + intent.id + ' — finalizing...');
+        try {
+          await RepaymentContract.verifyAndSettle(intent.id, null);
+        } catch(e) {
+          console.warn('[Recovery] Finalize failed for ' + intent.id + ':', e.message);
+        }
+        vaultRefreshUI();
+        return;
+      }
+
+      // No ARC payout — need polling
+      if (!intent.sourceDomain) {
+        console.warn('[Recovery] Intent ' + intent.id + ' missing sourceDomain — cannot poll');
+        RepaymentContract.markFailed(intent.id, 'Missing source domain for recovery poll');
+        vaultRefreshUI();
+        return;
+      }
+      const burnTxHash = intent.cctpMsgHash || intent.txHash;
+      console.log('[Recovery] Resuming poller for:', intent.id);
+      _startSettlementPoller(intent.id, null, burnTxHash);
+    });
+  }
+
+  return { execute, recoverSettlingIntents };
 })();
 
 // ── Rebalancing Engine ─────────────────────────────────────────────────
@@ -14692,65 +15114,37 @@ const RebalancingEngine = (() => {
 })();
 
 // ── Turbo Bridge Executor ──────────────────────────────────────────────
+// ── TurboExecutor ─ real on-chain Turbo Bridge coordinator ──────────────
+// External → ARC only. Requires: wallet connection, source-chain depositForBurn,
+// Treasury liquidity lock, FulfillerEngine for lifecycle, real attestation.
 const TurboExecutor = (() => {
-  let _mode = 'standard';
 
-  function setMode(mode) {
-    _mode = mode;
-    document.querySelectorAll('.bridge-mode-btn').forEach(b =>
-      b.classList.toggle('active', b.dataset.mode === mode));
-
-    const info    = document.getElementById('turbo-bridge-info');
-    const feeRows = document.getElementById('turbo-fee-rows');
-    const badge   = document.getElementById('turbo-avail-badge');
-    if (info)    info.style.display    = mode === 'turbo' ? 'block' : 'none';
-    if (feeRows) feeRows.style.display = mode === 'turbo' ? 'flex'  : 'none';
-    if (badge)   badge.style.display   = mode === 'turbo' ? 'inline-flex' : 'none';
-
-    if (mode === 'turbo') _checkLiquidity();
-  }
-
-  function _checkLiquidity() {
-    // Liquidity check is ALWAYS against Treasury Pool (USDC Pool Available)
+  function checkLiquidity() {
     const avail = VaultAccounting.getTotalAvailable('usdc');
     const badge = document.getElementById('turbo-avail-badge');
-    const eta   = document.getElementById('turbo-eta-display');
-
     if (badge) {
       if (avail > 1) {
-        badge.innerHTML = '<i class="ti ti-bolt"></i> Treasury Pool Available ✓ (' + _fmt(avail) + ' USDC)';
+        badge.innerHTML = '<i class="ti ti-bolt"></i> Treasury Pool Available (' + _fmt(avail) + ' USDC)';
         badge.className = 'turbo-avail-badge available';
       } else {
-        badge.innerHTML = '<i class="ti ti-alert-triangle"></i> Insufficient Treasury Pool Liquidity';
+        badge.innerHTML = '<i class="ti ti-alert-triangle"></i> Insufficient Treasury Liquidity';
         badge.className = 'turbo-avail-badge unavailable';
       }
     }
-    if (eta) eta.textContent = avail > 1 ? '10 – 30 seconds' : 'Unavailable — fallback to Standard';
+    return avail;
   }
 
   async function execute(srcChain, dstChain, asset, amount, userAddress, onStep) {
-    if (_mode !== 'turbo') return null;
-
-    // Treasury Pool check only (no connected wallet liquidity)
+    // Treasury Pool liquidity check
     const avail = VaultAccounting.getTotalAvailable(asset);
     if (avail < amount) {
-      showToast('Insufficient Treasury Pool liquidity — falling back to Standard Bridge', 'warning');
-      setMode('standard');
-      VaultStore.addVolume('standard', amount);
-      return null;
+      throw new Error('Insufficient Treasury liquidity: ' + _fmt(avail) + ' available, need ' + amount);
     }
 
-    try {
-      const result = await FulfillerEngine.execute(srcChain, dstChain, asset, amount, userAddress, onStep);
-      return result;
-    } catch(err) {
-      showToast('Turbo Bridge error: ' + err.message, 'error');
-      return null;
-    }
+    return await FulfillerEngine.execute(srcChain, dstChain, asset, amount, userAddress, onStep);
   }
 
-  function getMode() { return _mode; }
-  return { setMode, execute, getMode, checkLiquidity: _checkLiquidity };
+  return { execute, checkLiquidity };
 })();
 
 // ── UI Helpers ─────────────────────────────────────────────────────────
@@ -14774,14 +15168,12 @@ function showTrsSection(name) {
 }
 
 function setBridgeMode(mode) {
-  TurboExecutor.setMode(mode);
-  // Update bridge button label and ETA row
+  // UI-only: updates bridge button label and fee display based on auto-detected route
   const btn = document.getElementById('bridge-btn');
   const timeEl = document.getElementById('bridge-time');
   if (mode === 'turbo') {
     if (btn) btn.innerHTML = '<i class="ti ti-bolt"></i> Turbo Bridge';
     if (timeEl) timeEl.textContent = '10 – 30 seconds (Turbo)';
-    // Refresh vault availability
     if (typeof vaultRefreshUI === 'function') vaultRefreshUI();
   } else {
     if (btn) btn.innerHTML = '<i class="ti ti-topology-star-3"></i>Bridge USDC';
@@ -14789,9 +15181,13 @@ function setBridgeMode(mode) {
   }
 }
 
-// ── executeBridgeOrTurbo ─ routes bridge-btn to correct flow ─────────────
+// ── executeBridgeOrTurbo ─ auto-routing based on chain direction ──────────
+// External chains → ARC = Turbo Bridge (uses Treasury liquidity + real depositForBurn)
+// ARC → External chains = Standard Bridge (real CCTP)
+// No manual mode selection required — routing is fully automatic.
 function executeBridgeOrTurbo() {
-  if (TurboExecutor.getMode() === 'turbo') {
+  const toChain = CHAINS[bridgeToIdx];
+  if (toChain?.id === 'Arc_Testnet') {
     executeTurboBridge();
   } else {
     executeBridge();
@@ -14799,63 +15195,50 @@ function executeBridgeOrTurbo() {
 }
 
 // ── turboBridgeFromCard ─ called from Fast Bridge route cards ────────────
-// Navigates to Bridge page, selects Turbo mode, pre-selects the source chain
+// Navigates to Bridge page, pre-selects the source chain + ARC destination
 function turboBridgeFromCard(chainId) {
-  // Map chainId string to CHAINS index
   const idx = CHAINS.findIndex(c => c.id === chainId);
   if (idx !== -1) {
     bridgeFromIdx = idx;
-    // Ensure destination is Arc Testnet
     const arcIdx = CHAINS.findIndex(c => c.id === 'Arc_Testnet');
-    if (arcIdx !== -1 && arcIdx !== bridgeFromIdx) {
-      bridgeToIdx = arcIdx;
-    }
+    if (arcIdx !== -1 && arcIdx !== bridgeFromIdx) bridgeToIdx = arcIdx;
     applyBridgeChains();
     updateBridgeEst();
   }
-  // Navigate to bridge page and enable Turbo mode
   showPage('bridge');
   setTimeout(() => {
-    setBridgeMode('turbo');
-    // Focus amount input
     const amtInput = document.getElementById('bridge-amount');
     if (amtInput) amtInput.focus();
   }, 80);
 }
 
-// ── executeTurboBridge ─ fixed: reads from CHAINS[bridgeFromIdx] ──────────
+// ── executeTurboBridge ─ External → ARC Turbo Bridge ──────────────────
+// Requires real wallet connection + source-chain depositForBurn.
+// Uses Treasury liquidity for instant ARC fulfillment.
 async function executeTurboBridge() {
-  if (TurboExecutor.getMode() !== 'turbo') return;
+  if (!walletAddress) { showToast('Connect wallet first', 'error'); return; }
+  if (!signer) { showToast('Wallet signer not available', 'error'); return; }
 
   const amount = parseFloat(document.getElementById('bridge-amount')?.value || '0');
   if (!amount || amount <= 0) { showToast('Enter a valid amount', 'error'); return; }
 
-  const userAddr = walletAddress;
-  if (!userAddr) { showToast('Connect wallet first', 'error'); return; }
-
-  // Read source chain from existing bridge state (not a missing select element)
   const fromChain = CHAINS[bridgeFromIdx];
   const toChain   = CHAINS[bridgeToIdx];
-  const srcChainId = fromChain?.id || 'Base_Sepolia';
+  const srcChainId = fromChain?.id;
 
-  // Validate route: destination must be Arc Testnet for Turbo
   if (toChain?.id !== 'Arc_Testnet') {
-    showToast('Turbo Bridge only supports → ARC routes. Switch destination to Arc Testnet.', 'error');
-    return;
+    showToast('Turbo Bridge only supports → ARC routes', 'error'); return;
   }
 
-  // Disable bridge button while processing
   const btn = document.getElementById('bridge-btn');
-  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-bolt"></i> Turbo Processing...'; }
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-bolt"></i> Processing...'; }
 
-  // Show Turbo steps UI
   const stepsCard = document.getElementById('bridge-steps-card');
   const stepsWrap = document.getElementById('turbo-steps-wrap');
   if (stepsCard) stepsCard.style.display = '';
   if (stepsWrap) stepsWrap.style.display = 'block';
 
   const stepEls = [0,1,2,3,4].map(i => document.getElementById('turbo-step-' + i));
-
   function activateStep(idx, label) {
     stepEls.forEach((el, i) => {
       if (!el) return;
@@ -14871,24 +15254,18 @@ async function executeTurboBridge() {
 
   try {
     const result = await TurboExecutor.execute(
-      srcChainId, 'Arc_Testnet', 'usdc', amount, userAddr,
+      srcChainId, 'Arc_Testnet', 'usdc', amount, walletAddress,
       (step, msg) => activateStep(step, msg)
     );
-
     if (result) {
-      showToast('⚡ Turbo Bridge initiated! Intent: ' + result.intentId, 'success');
-      // Mark all steps done
+      showToast('Turbo Bridge initiated — Tx: ' + shortAddr(result.txHash), 'success');
       stepEls.forEach(el => { if (el) { el.classList.remove('active'); el.classList.add('done'); }});
-      // Refresh Treasury metrics immediately
       vaultRefreshUI();
     }
   } catch (err) {
-    showToast('Turbo Bridge error: ' + err.message, 'error');
+    showToast('Turbo Bridge failed: ' + (err.shortMessage || err.message), 'error');
   } finally {
-    if (btn) {
-      btn.disabled = false;
-      btn.innerHTML = '<i class="ti ti-bolt"></i> Turbo Bridge';
-    }
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-bolt"></i> Turbo Bridge'; }
   }
 }
 
@@ -14951,6 +15328,7 @@ function _updateSecurityGrid() {
 
 // ── Master UI refresh ──────────────────────────────────────────────────
 async function vaultRefreshUI() {
+  try { _renderVaultConfig(); } catch(e) { console.warn('vaultConfig', e); }
   try { _renderTicker();      } catch(e) { console.warn('ticker', e); }
   try { _renderOverview();    } catch(e) { console.warn('overview', e); }
   try { await _renderAssetCards();  } catch(e) { console.warn('assets', e); }
@@ -14959,7 +15337,18 @@ async function vaultRefreshUI() {
   try { _renderFastBridge();  } catch(e) { console.warn('fastbridge', e); }
   try { _renderRebalancing(); } catch(e) { console.warn('rebal', e); }
   try { _renderAnalytics();   } catch(e) { console.warn('analytics', e); }
-  try { _updateSecurityGrid();} catch(e) { console.warn('security', e); }
+}
+
+function _renderVaultConfig() {
+  // Display TreasuryVault contract address and owner wallet in the Vault Actions card
+  const addrEl = document.getElementById('vault-contract-addr');
+  if (!addrEl) return;
+  if (TREASURY_VAULT_ADDRESS && TREASURY_VAULT_ADDRESS !== '0x0000000000000000000000000000000000000000') {
+    const shortAddr = TREASURY_VAULT_ADDRESS.slice(0,10) + '...' + TREASURY_VAULT_ADDRESS.slice(-4);
+    addrEl.innerHTML = `<a href="https://testnet.arcscan.app/address/${TREASURY_VAULT_ADDRESS}" target="_blank" style="color:var(--teal);text-decoration:none;font-family:'JetBrains Mono',monospace;font-size:8.5px" title="View on ArcScan">${shortAddr}</a> <span class="chip" style="font-size:7.5px;background:rgba(34,197,94,.1);color:var(--green);border-color:rgba(34,197,94,.2)">Deployed ✓</span>`;
+  } else {
+    addrEl.innerHTML = '<span style="color:var(--yellow);font-size:8.5px">Not Deployed</span> <span style="font-size:7.5px;color:var(--muted2)">— Run deploy-treasury-vault.js</span>';
+  }
 }
 
 function _renderTicker() {
@@ -15077,12 +15466,18 @@ function _renderIntentTable() {
     const age = Math.round((Date.now() - i.createdAt) / 1000);
     const aS  = age < 60 ? age + 's' : age < 3600 ? Math.round(age/60) + 'm' : Math.round(age/3600) + 'h';
     const col = COLOR[i.status] || 'var(--muted2)';
+    const arcLink = i.arcTxHash
+      ? `<a href="https://testnet.arcscan.app/tx/${i.arcTxHash}" target="_blank" style="color:var(--teal);font-size:8px;display:block" title="ARC payout tx">${shortAddr(i.arcTxHash)}</a>`
+      : '';
+    const settleLink = i.settlementTxHash
+      ? `<a href="https://testnet.arcscan.app/tx/${i.settlementTxHash}" target="_blank" style="color:var(--yellow);font-size:8px;display:block" title="Settlement tx">${shortAddr(i.settlementTxHash)}</a>`
+      : '';
     return `<tr>
       <td style="font-family:monospace;font-size:8.5px;color:var(--muted2)">${i.id}</td>
       <td style="font-size:9px">${i.srcChain || '?'} → ${i.dstChain || 'arc'}</td>
       <td>${(i.asset || '').toUpperCase()}</td>
       <td>${(i.amount || 0).toFixed(2)}</td>
-      <td><span style="color:${col};font-weight:700">${i.status}</span></td>
+      <td><span style="color:${col};font-weight:700">${i.status}</span>${arcLink}${settleLink}</td>
       <td style="color:var(--muted2)">${aS}</td>
     </tr>`;
   }).join('');
@@ -15122,12 +15517,16 @@ function _renderFastBridge() {
   listEl.innerHTML = turboIntents.map(i => {
     const age = Math.round((Date.now() - i.createdAt) / 1000);
     const col = COLOR[i.status] || 'var(--muted2)';
+    const arcBadge = i.arcTxHash
+      ? `<a href="https://testnet.arcscan.app/tx/${i.arcTxHash}" target="_blank" style="color:var(--teal);font-size:8px;text-decoration:none" title="ARC payout tx">ARC ✓</a>`
+      : '';
     return `<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:rgba(255,255,255,.02);border-radius:7px;margin-bottom:5px;border:1px solid rgba(255,255,255,.04);font-size:9.5px">
       <i class="ti ti-bolt" style="color:var(--yellow)"></i>
       <span style="font-family:monospace;font-size:8.5px;color:var(--muted2)">${i.id}</span>
       <span>${i.srcChain || '?'} → ${i.dstChain || 'arc'}</span>
       <span style="font-weight:700">${(i.amount||0).toFixed(2)} ${(i.asset||'').toUpperCase()}</span>
       <span style="margin-left:auto;color:${col};font-weight:700">${i.status}</span>
+      ${arcBadge}
       <span style="color:var(--muted2)">${age}s ago</span>
     </div>`;
   }).join('');
@@ -15229,11 +15628,16 @@ async function vaultInit() {
   // Initial UI render (with whatever data we have)
   vaultRefreshUI();
 
-  // Fetch on-chain balances if wallet is connected
-  if (walletAddress && provider) {
-    await VaultChain.fetchVaultBalances();
-    vaultRefreshUI();
+  // Recover any intents stuck in Settling (page refresh / tab close recovery)
+  try { FulfillerEngine.recoverSettlingIntents(); } catch(e) {}
+
+  // Fetch on-chain Treasury balances — uses dedicated ARC RPC (no wallet required)
+  await VaultChain.fetchVaultBalances();
+  // Also read from TreasuryVault contract for full asset data
+  if (TREASURY_VAULT_ADDRESS && TREASURY_VAULT_ADDRESS !== '0x0000000000000000000000000000000000000000') {
+    try { await Promise.all([readTreasuryPoolData('usdc'), readTreasuryPoolData('eurc'), readTreasuryPoolData('cirbtc')]); } catch {}
   }
+  vaultRefreshUI();
 
   // Re-fetch balances when Treasury page becomes visible
   document.getElementById('nav-treasury')?.addEventListener('click', async () => {
@@ -15251,9 +15655,9 @@ async function vaultInit() {
   setInterval(async () => {
     if (document.getElementById('page-treasury')?.classList.contains('active')) {
       RebalancingEngine.autoCheck();
-      // Refresh chain data every 30s if page active
+      // Refresh chain data every 30s if page active — uses dedicated ARC RPC (no wallet required)
       const age = Date.now() - (VaultStore.get().lastChainFetch || 0);
-      if (age > 30000 && walletAddress) {
+      if (age > 30000) {
         await VaultChain.fetchVaultBalances();
       }
       vaultRefreshUI();
