@@ -4791,10 +4791,10 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
             <!-- Fee breakdown -->
             <div class="rate-box" id="xc-fee-box" style="margin-bottom:14px">
               <div class="rate-row"><span>You Send</span><span class="rate-val" id="xc-fee-send" style="color:var(--text)">10.00 USDC</span></div>
-              <div class="rate-row"><span>Bridge Fee (CCTP)</span><span class="rate-val" id="xc-fee-bridge" style="color:var(--yellow)">~0.01 USDC</span></div>
+              <div class="rate-row"><span id="xc-fee-label">Bridge Fee (CCTP)</span><span class="rate-val" id="xc-fee-bridge" style="color:var(--yellow)">~0.01 USDC</span></div>
               <div class="rate-row"><span>Gas (relayer)</span><span class="rate-val" id="xc-fee-gas" style="color:var(--muted2)">~0.001 USDC</span></div>
               <div class="rate-row" style="border-top:1px solid var(--border);padding-top:6px;margin-top:2px"><span style="font-weight:600">Recipient Gets</span><span class="rate-val" id="xc-fee-receive" style="color:var(--green);font-weight:700">≈ 9.989 USDC</span></div>
-              <div class="rate-row"><span>Est. Time</span><span class="rate-val" style="color:var(--yellow)"><i class="ti ti-clock" style="font-size:9px"></i> ~20 seconds</span></div>
+              <div class="rate-row"><span>Est. Time</span><span class="rate-val" id="xc-fee-time" style="color:var(--yellow)"><i class="ti ti-clock" style="font-size:9px"></i> ~20 seconds</span></div>
             </div>
 
             <button class="action-btn" id="xc-send-btn" onclick="xcExecuteSend()" style="background:linear-gradient(135deg,rgba(245,158,11,.2),rgba(245,158,11,.08));color:var(--yellow);border:1px solid rgba(245,158,11,.35);margin-top:0">
@@ -5748,6 +5748,9 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
           <div class="trs-nav-item" id="trs-nav-analytics" onclick="showTrsSection('analytics')">
             <i class="ti ti-chart-line"></i><span>Analytics</span>
           </div>
+          <div class="trs-nav-item" id="trs-nav-settlements" onclick="showTrsSection('settlements')">
+            <i class="ti ti-transfer"></i> Settlements
+          </div>
           <div style="margin-top:auto;padding-top:12px;border-top:1px solid rgba(255,255,255,.05)">
             <div style="font-size:8.5px;color:var(--muted2);text-align:center;line-height:1.5">
               Powered by<br><span style="color:var(--blue)">CCTP V2</span> · Circle
@@ -5907,6 +5910,7 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
                 <span id="vault-contract-addr" style="font-family:'JetBrains Mono',monospace;color:var(--teal);font-size:8.5px">Not Deployed</span>
               </div>
               <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px,1fr)); gap:8px">
+                <div id="treasury-deposit-btns" style="display:contents">
                 <button class="btn" onclick="treasuryDeposit('usdc')" style="font-size:10px">
                   <i class="ti ti-download"></i> Deposit USDC
                 </button>
@@ -5916,6 +5920,10 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
                 <button class="btn" onclick="treasuryDeposit('cirbtc')" style="font-size:10px">
                   <i class="ti ti-download"></i> Deposit cirBTC
                 </button>
+                </div>
+                <div id="treasury-deposit-unauthorized" style="display:none;grid-column:1/-1;padding:8px 12px;background:rgba(239,68,68,.06);border:1px solid rgba(239,68,68,.2);border-radius:6px;font-size:9.5px;color:var(--muted2);text-align:center">
+                  <i class="ti ti-lock" style="margin-right:4px"></i>This Treasury accepts deposits only from authorized liquidity providers.
+                </div>
 
                 <button class="btn" onclick="treasuryWithdraw('usdc')" style="font-size:10px; border-color:#f59e0b; color:#f59e0b">
                   <i class="ti ti-upload"></i> Withdraw USDC
@@ -6264,6 +6272,235 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
               </div>
             </div>
           </div>
+
+          <!-- ─── SETTLEMENTS SECTION ─────────────────────────────── -->
+          <div class="trs-section" id="trs-settlements">
+
+            <!-- KPI CARDS -->
+            <div class="vault-grid" style="grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px;margin-bottom:14px;">
+
+              <div class="vault-card" style="padding:12px 14px;">
+                <div style="font-size:10px;color:var(--muted2);margin-bottom:4px;">Pending Settlement Value</div>
+                <div id="stl-kpi-pending-value" style="font-size:18px;font-weight:700;color:var(--text);">—</div>
+                <div id="stl-kpi-pending-count" style="font-size:10px;color:var(--muted2);margin-top:2px;">— intents pending</div>
+              </div>
+
+              <div class="vault-card" style="padding:12px 14px;">
+                <div style="font-size:10px;color:var(--muted2);margin-bottom:4px;">Avg Settlement Time</div>
+                <div id="stl-kpi-avg-time" style="font-size:18px;font-weight:700;color:var(--text);">—</div>
+                <div style="font-size:10px;color:var(--muted2);margin-top:2px;">seconds avg</div>
+              </div>
+
+              <div class="vault-card" style="padding:12px 14px;">
+                <div style="font-size:10px;color:var(--muted2);margin-bottom:4px;">Longest Pending</div>
+                <div id="stl-kpi-longest" style="font-size:18px;font-weight:700;color:#f59e0b;">—</div>
+                <div id="stl-kpi-longest-id" style="font-size:10px;color:var(--muted2);margin-top:2px;font-family:monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">—</div>
+              </div>
+
+              <div class="vault-card" style="padding:12px 14px;">
+                <div style="font-size:10px;color:var(--muted2);margin-bottom:4px;">Settled Today</div>
+                <div id="stl-kpi-settled-today" style="font-size:18px;font-weight:700;color:#22c55e;">—</div>
+                <div id="stl-kpi-settled-today-val" style="font-size:10px;color:var(--muted2);margin-top:2px;">— USDC</div>
+              </div>
+
+              <div class="vault-card" style="padding:12px 14px;">
+                <div style="font-size:10px;color:var(--muted2);margin-bottom:4px;">Success Rate</div>
+                <div id="stl-kpi-success-rate" style="font-size:18px;font-weight:700;color:#7b9ef7;">—</div>
+                <div style="font-size:10px;color:var(--muted2);margin-top:2px;">last 30 days</div>
+              </div>
+
+            </div>
+
+            <!-- TREASURY EXPOSURE -->
+            <div class="vault-card" style="padding:14px;margin-bottom:14px;">
+              <div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:10px;display:flex;align-items:center;gap:6px;">
+                <i class="ti ti-building-bank" style="color:#7b9ef7;"></i> Treasury Exposure
+                <span id="stl-health-badge" style="margin-left:auto;font-size:10px;padding:2px 8px;border-radius:10px;background:rgba(34,197,94,.15);color:#22c55e;">Healthy</span>
+              </div>
+              <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;">
+                <div style="background:var(--card-inner,rgba(255,255,255,.03));border-radius:7px;padding:9px 11px;">
+                  <div style="font-size:10px;color:var(--muted2);">Available Liquidity</div>
+                  <div id="stl-exp-available" style="font-size:14px;font-weight:700;color:#22c55e;margin-top:3px;">—</div>
+                </div>
+                <div style="background:var(--card-inner,rgba(255,255,255,.03));border-radius:7px;padding:9px 11px;">
+                  <div style="font-size:10px;color:var(--muted2);">Locked Liquidity</div>
+                  <div id="stl-exp-locked" style="font-size:14px;font-weight:700;color:#f59e0b;margin-top:3px;">—</div>
+                </div>
+                <div style="background:var(--card-inner,rgba(255,255,255,.03));border-radius:7px;padding:9px 11px;">
+                  <div style="font-size:10px;color:var(--muted2);">Pending Reimburse</div>
+                  <div id="stl-exp-pending-reimb" style="font-size:14px;font-weight:700;color:#7b9ef7;margin-top:3px;">—</div>
+                </div>
+                <div style="background:var(--card-inner,rgba(255,255,255,.03));border-radius:7px;padding:9px 11px;">
+                  <div style="font-size:10px;color:var(--muted2);">Total Treasury Value</div>
+                  <div id="stl-exp-total" style="font-size:14px;font-weight:700;color:var(--text);margin-top:3px;">—</div>
+                </div>
+                <div style="background:var(--card-inner,rgba(255,255,255,.03));border-radius:7px;padding:9px 11px;">
+                  <div style="font-size:10px;color:var(--muted2);">Utilization Rate</div>
+                  <div id="stl-exp-util" style="font-size:14px;font-weight:700;color:var(--text);margin-top:3px;">—</div>
+                </div>
+                <div style="background:var(--card-inner,rgba(255,255,255,.03));border-radius:7px;padding:9px 11px;">
+                  <div style="font-size:10px;color:var(--muted2);">Total Fees Earned</div>
+                  <div id="stl-exp-fees" style="font-size:14px;font-weight:700;color:#22c55e;margin-top:3px;">—</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- SETTLEMENT QUEUE FLOW -->
+            <div class="vault-card" style="padding:14px;margin-bottom:14px;">
+              <div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:10px;display:flex;align-items:center;gap:6px;">
+                <i class="ti ti-arrows-right-left" style="color:#7b9ef7;"></i> Settlement Queue Flow
+                <button onclick="stlRefreshAll()" style="margin-left:auto;background:transparent;border:1px solid var(--border);border-radius:6px;padding:3px 10px;font-size:10px;color:var(--muted2);cursor:pointer;">
+                  <i class="ti ti-refresh"></i> Refresh
+                </button>
+              </div>
+              <!-- Flow steps -->
+              <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin-bottom:12px;">
+                <div class="stl-flow-step" id="stl-flow-burn" style="flex:1;min-width:90px;background:var(--card-inner,rgba(255,255,255,.03));border-radius:7px;padding:8px 10px;text-align:center;border:1px solid var(--border);">
+                  <div style="font-size:9px;color:var(--muted2);">1. Source Burn</div>
+                  <div id="stl-flow-burn-count" style="font-size:15px;font-weight:700;color:var(--text);">—</div>
+                </div>
+                <i class="ti ti-chevron-right" style="color:var(--muted2);font-size:12px;flex-shrink:0;"></i>
+                <div class="stl-flow-step" id="stl-flow-attest" style="flex:1;min-width:90px;background:var(--card-inner,rgba(255,255,255,.03));border-radius:7px;padding:8px 10px;text-align:center;border:1px solid var(--border);">
+                  <div style="font-size:9px;color:var(--muted2);">2. Circle Attestation</div>
+                  <div id="stl-flow-attest-count" style="font-size:15px;font-weight:700;color:#f59e0b;">—</div>
+                </div>
+                <i class="ti ti-chevron-right" style="color:var(--muted2);font-size:12px;flex-shrink:0;"></i>
+                <div class="stl-flow-step" id="stl-flow-mint" style="flex:1;min-width:90px;background:var(--card-inner,rgba(255,255,255,.03));border-radius:7px;padding:8px 10px;text-align:center;border:1px solid var(--border);">
+                  <div style="font-size:9px;color:var(--muted2);">3. ARC Mint</div>
+                  <div id="stl-flow-mint-count" style="font-size:15px;font-weight:700;color:#7b9ef7;">—</div>
+                </div>
+                <i class="ti ti-chevron-right" style="color:var(--muted2);font-size:12px;flex-shrink:0;"></i>
+                <div class="stl-flow-step" id="stl-flow-reimb" style="flex:1;min-width:90px;background:var(--card-inner,rgba(255,255,255,.03));border-radius:7px;padding:8px 10px;text-align:center;border:1px solid var(--border);">
+                  <div style="font-size:9px;color:var(--muted2);">4. Tsy Reimburse</div>
+                  <div id="stl-flow-reimb-count" style="font-size:15px;font-weight:700;color:#a78bfa;">—</div>
+                </div>
+                <i class="ti ti-chevron-right" style="color:var(--muted2);font-size:12px;flex-shrink:0;"></i>
+                <div class="stl-flow-step" id="stl-flow-settled" style="flex:1;min-width:90px;background:rgba(34,197,94,.07);border-radius:7px;padding:8px 10px;text-align:center;border:1px solid rgba(34,197,94,.2);">
+                  <div style="font-size:9px;color:var(--muted2);">5. Intent Settled</div>
+                  <div id="stl-flow-settled-count" style="font-size:15px;font-weight:700;color:#22c55e;">—</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- FILTERS -->
+            <div class="vault-card" style="padding:12px 14px;margin-bottom:12px;">
+              <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+                <select id="stl-filter-asset" onchange="stlApplyFilters()" style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:5px 8px;font-size:11px;color:var(--text);min-width:90px;">
+                  <option value="">All Assets</option>
+                  <option value="usdc">USDC</option>
+                  <option value="eurc">EURC</option>
+                  <option value="cirbtc">cirBTC</option>
+                </select>
+                <select id="stl-filter-status" onchange="stlApplyFilters()" style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:5px 8px;font-size:11px;color:var(--text);min-width:110px;">
+                  <option value="">All Status</option>
+                  <option value="Created">Created</option>
+                  <option value="Fulfilled">Fulfilled</option>
+                  <option value="Settling">Settling</option>
+                  <option value="Settled">Settled</option>
+                  <option value="Failed">Failed</option>
+                </select>
+                <select id="stl-filter-route" onchange="stlApplyFilters()" style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:5px 8px;font-size:11px;color:var(--text);min-width:130px;">
+                  <option value="">All Routes</option>
+                  <option value="Base→ARC">Base → ARC</option>
+                  <option value="Ethereum→ARC">Ethereum → ARC</option>
+                  <option value="Arbitrum→ARC">Arbitrum → ARC</option>
+                </select>
+                <input type="date" id="stl-filter-date-from" onchange="stlApplyFilters()" style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:5px 8px;font-size:11px;color:var(--text);">
+                <input type="date" id="stl-filter-date-to" onchange="stlApplyFilters()" style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:5px 8px;font-size:11px;color:var(--text);">
+                <input type="text" id="stl-filter-intent" placeholder="Search Intent ID..." oninput="stlApplyFilters()" style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:5px 8px;font-size:11px;color:var(--text);flex:1;min-width:150px;">
+                <button onclick="stlClearFilters()" style="background:transparent;border:1px solid var(--border);border-radius:6px;padding:5px 10px;font-size:11px;color:var(--muted2);cursor:pointer;">Clear</button>
+              </div>
+            </div>
+
+            <!-- ACTIVE SETTLEMENTS TABLE -->
+            <div class="vault-card" style="padding:0;margin-bottom:14px;overflow:hidden;">
+              <div style="padding:12px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;">
+                <i class="ti ti-list-details" style="color:#7b9ef7;font-size:13px;"></i>
+                <span style="font-size:11px;font-weight:700;color:var(--text);">Active Settlements</span>
+                <span id="stl-table-count" style="margin-left:auto;font-size:10px;color:var(--muted2);">0 records</span>
+              </div>
+              <div style="overflow-x:auto;">
+                <table style="width:100%;border-collapse:collapse;font-size:10px;">
+                  <thead>
+                    <tr style="border-bottom:1px solid var(--border);">
+                      <th style="padding:8px 10px;text-align:left;color:var(--muted2);font-weight:600;white-space:nowrap;">Intent ID</th>
+                      <th style="padding:8px 10px;text-align:left;color:var(--muted2);font-weight:600;">Route</th>
+                      <th style="padding:8px 10px;text-align:left;color:var(--muted2);font-weight:600;">Asset</th>
+                      <th style="padding:8px 10px;text-align:right;color:var(--muted2);font-weight:600;">Amount</th>
+                      <th style="padding:8px 10px;text-align:center;color:var(--muted2);font-weight:600;">Status</th>
+                      <th style="padding:8px 10px;text-align:right;color:var(--muted2);font-weight:600;">Age</th>
+                      <th style="padding:8px 6px;text-align:center;color:var(--muted2);font-weight:600;">Src TX</th>
+                      <th style="padding:8px 6px;text-align:center;color:var(--muted2);font-weight:600;">ARC TX</th>
+                      <th style="padding:8px 6px;text-align:center;color:var(--muted2);font-weight:600;">Attest TX</th>
+                      <th style="padding:8px 6px;text-align:center;color:var(--muted2);font-weight:600;">Settle TX</th>
+                    </tr>
+                  </thead>
+                  <tbody id="stl-table-body">
+                    <tr>
+                      <td colspan="10" style="padding:24px;text-align:center;color:var(--muted2);font-size:11px;">
+                        <i class="ti ti-database-off" style="font-size:20px;display:block;margin-bottom:6px;"></i>
+                        No settlements found. Connect wallet to load protocol data.
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- RECOVERY ENGINE PANEL (operators only) -->
+            <div class="vault-card" id="stl-recovery-panel" style="padding:14px;margin-bottom:14px;display:none;">
+              <div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:10px;display:flex;align-items:center;gap:6px;">
+                <i class="ti ti-tools" style="color:#f59e0b;"></i> Settlement Recovery Engine
+                <span style="font-size:9px;padding:1px 6px;border-radius:8px;background:rgba(245,158,11,.15);color:#f59e0b;">OPERATOR</span>
+              </div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <button onclick="stlResumeSettlement()" class="btn" style="font-size:11px;padding:6px 14px;">
+                  <i class="ti ti-player-play"></i> Resume Settlement
+                </button>
+                <button onclick="stlRecheckAttestation()" class="btn" style="font-size:11px;padding:6px 14px;border-color:#7b9ef7;color:#7b9ef7;">
+                  <i class="ti ti-circle-check"></i> Recheck Attestation
+                </button>
+                <button onclick="stlForceSyncState()" class="btn" style="font-size:11px;padding:6px 14px;border-color:#a78bfa;color:#a78bfa;">
+                  <i class="ti ti-refresh-alert"></i> Force Sync State
+                </button>
+                <button onclick="stlRefreshCircle()" class="btn" style="font-size:11px;padding:6px 14px;border-color:#f59e0b;color:#f59e0b;">
+                  <i class="ti ti-brand-circle"></i> Refresh Circle Status
+                </button>
+              </div>
+              <div id="stl-recovery-log" style="margin-top:10px;background:var(--bg2);border-radius:6px;padding:8px;font-size:10px;color:var(--muted2);font-family:monospace;max-height:80px;overflow-y:auto;display:none;"></div>
+            </div>
+
+            <!-- TREASURY METRICS -->
+            <div class="vault-card" style="padding:14px;">
+              <div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:10px;display:flex;align-items:center;gap:6px;">
+                <i class="ti ti-trending-up" style="color:#22c55e;"></i> Treasury Profitability Metrics
+              </div>
+              <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;">
+                <div style="background:var(--card-inner,rgba(255,255,255,.03));border-radius:7px;padding:9px 11px;">
+                  <div style="font-size:10px;color:var(--muted2);">Total Reimbursements</div>
+                  <div id="stl-met-reimb" style="font-size:14px;font-weight:700;color:#22c55e;margin-top:3px;">—</div>
+                  <div style="font-size:9px;color:var(--muted2);">from Circle CCTP</div>
+                </div>
+                <div style="background:var(--card-inner,rgba(255,255,255,.03));border-radius:7px;padding:9px 11px;">
+                  <div style="font-size:10px;color:var(--muted2);">Liquidity Deployed</div>
+                  <div id="stl-met-deployed" style="font-size:14px;font-weight:700;color:#7b9ef7;margin-top:3px;">—</div>
+                  <div style="font-size:9px;color:var(--muted2);">currently active</div>
+                </div>
+                <div style="background:var(--card-inner,rgba(255,255,255,.03));border-radius:7px;padding:9px 11px;">
+                  <div style="font-size:10px;color:var(--muted2);">Turbo Fees Earned</div>
+                  <div id="stl-met-fees" style="font-size:14px;font-weight:700;color:#22c55e;margin-top:3px;">—</div>
+                  <div style="font-size:9px;color:var(--muted2);">all time</div>
+                </div>
+                <div style="background:var(--card-inner,rgba(255,255,255,.03));border-radius:7px;padding:9px 11px;">
+                  <div style="font-size:10px;color:var(--muted2);">Net Profitability</div>
+                  <div id="stl-met-profit" style="font-size:14px;font-weight:700;color:#22c55e;margin-top:3px;">—</div>
+                  <div style="font-size:9px;color:var(--muted2);">fees − gas costs</div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+          <!-- ─── END SETTLEMENTS SECTION ───────────────────────────── -->
 
         </div><!-- end trs-content -->
       </div><!-- end trs-layout -->
@@ -9606,17 +9843,18 @@ function applyBridgeChains(){
 }
 function updateBridgeEst(){
   const amt=parseFloat(document.getElementById('bridge-amount').value)||0;
-  const fee=Math.max(0.001,amt*0.0005);
-  const receive=Math.max(0,amt-fee);
+  const toIsArc = CHAINS[bridgeToIdx]?.id === 'Arc_Testnet';
+  // Turbo Bridge fee: 1.00% for inbound ARC routes; Standard: 0.05%
+  const feeRate = toIsArc ? (TURBO_FEE_BPS / 10000) : 0.0005;
+  const fee=Math.max(0.000001, amt * feeRate);
+  const receive=Math.max(0, amt - fee);
   document.getElementById('bridge-usd').textContent=`≈ $${amt.toFixed(2)} USD`;
   document.getElementById('bridge-amount-out').textContent=`~${receive.toFixed(4)}`;
-  document.getElementById('bridge-fee-display').textContent=`~${fee.toFixed(4)} USDC`;
+  document.getElementById('bridge-fee-display').textContent=`~${fee.toFixed(4)} USDC (${(feeRate*100).toFixed(2)}%)`;
   document.getElementById('bridge-receive').textContent=`~${receive.toFixed(4)} USDC`;
-  // When destination is Arc, Standard Transfer attestations on sandbox can take significantly longer
-  const toIsArc = CHAINS[bridgeToIdx]?.id === 'Arc_Testnet';
   if (toIsArc) {
-    document.getElementById('bridge-time').textContent = '~10-20 minutes (Arc inbound Standard)';
-  } else if (CHAINS[bridgeFromIdx].id === 'Solana_Devnet') {
+    document.getElementById('bridge-time').textContent = '10 – 30 seconds (Turbo)';
+  } else if (CHAINS[bridgeFromIdx]?.id === 'Solana_Devnet') {
     document.getElementById('bridge-time').textContent = '~3 minutes';
   } else {
     document.getElementById('bridge-time').textContent = '~2 minutes';
@@ -12689,18 +12927,33 @@ function xcSetAmt(n) {
 function xcUpdateFees() {
   const amt = parseFloat(document.getElementById("xc-amount")?.value) || 0;
   const isEurc = xcToken === 'EURC';
-  const rate = isEurc ? 1.12 : 1.0; // EUR/USD approx
-  const bridgeFee = Math.max(0.01, amt * 0.001);
-  const gasFee    = 0.001;
+  const rate = isEurc ? 1.12 : 1.0;
+  const toChain = CHAINS[xcToIdx];
+  const isTurbo = toChain?.id === 'Arc_Testnet';
+  const feeRate = isTurbo ? (TURBO_FEE_BPS / 10000) : 0.001;
+  const bridgeFee = Math.max(0.000001, amt * feeRate);
+  const gasFee    = isTurbo ? 0 : 0.001;
   const receives  = Math.max(0, amt - bridgeFee - gasFee);
   const tok = xcToken;
   const usdEl = document.getElementById("xc-amount-usd");
   if(usdEl) usdEl.textContent = "≈ $" + (amt * rate).toFixed(2) + " USD";
   const setSafe = (id, v) => { const el = document.getElementById(id); if(el) el.textContent = v; };
   setSafe("xc-fee-send",    amt.toFixed(2) + " " + tok);
-  setSafe("xc-fee-bridge",  "~" + bridgeFee.toFixed(3) + " " + tok);
-  setSafe("xc-fee-gas",     "~" + gasFee.toFixed(3) + " " + tok);
-  setSafe("xc-fee-receive", "≈ " + receives.toFixed(3) + " " + tok);
+  setSafe("xc-fee-bridge",  "~" + bridgeFee.toFixed(4) + " " + tok + (isTurbo ? " (1.00%)" : ""));
+  setSafe("xc-fee-gas",     isTurbo ? "—" : "~" + gasFee.toFixed(3) + " " + tok);
+  setSafe("xc-fee-receive", "≈ " + receives.toFixed(4) + " " + tok);
+  // Update fee box label for Turbo routes
+  const feeLabel = document.getElementById("xc-fee-label");
+  if (feeLabel) {
+    feeLabel.textContent = isTurbo ? "Turbo Cross-Chain Fee" : "Bridge Fee (CCTP)";
+    feeLabel.style.color = isTurbo ? "var(--yellow)" : "";
+  }
+  const timeEl = document.getElementById("xc-fee-time");
+  if (timeEl) {
+    timeEl.innerHTML = isTurbo
+      ? '<i class="ti ti-clock" style="font-size:9px"></i> 10 – 30 sec (Turbo)'
+      : '<i class="ti ti-clock" style="font-size:9px"></i> ~2 minutes';
+  }
 }
 
 function xcValidateRecipient() {
@@ -12768,6 +13021,15 @@ async function xcExecuteSend() {
   if (!toConfig)   { toast(`${to.name} is not supported for CCTP`, "error"); return; }
 
   if (xcToken !== 'USDC') { toast("CCTP only supports USDC", "error"); return; }
+
+  // ── AUTO-ROUTE: External → ARC = Turbo Cross-Chain Payment ──
+  if (to?.id === 'Arc_Testnet') {
+    return await xcExecuteTurbo(from, to, amt, recipient);
+  }
+
+  // ════════════════════════════════════════════════════════════
+  // ARC → External: Standard CCTP flow (unchanged)
+  // ════════════════════════════════════════════════════════════
 
   const btn = document.getElementById("xc-send-btn");
   btn.disabled = true;
@@ -13078,6 +13340,113 @@ async function xcExecuteSend() {
     toast(xcDecodeErr(err), "error");
     xcResetBtn();
   }
+}
+
+// ── Turbo Cross-Chain Payment (External → ARC only) ───────────────────
+// Reuses TurboExecutor/FulfillerEngine with XC-specific UI
+async function xcExecuteTurbo(from, to, amt, recipient) {
+  if (!walletAddress || !signer) { toast("Connect your wallet", "warning"); return; }
+
+  const btn = document.getElementById("xc-send-btn");
+  btn.disabled = true;
+  btn.innerHTML = '<i class="ti ti-loader spin"></i> Turbo...';
+
+  const stepsCard = document.getElementById("xc-steps-card");
+  const stepList  = document.getElementById("xc-step-list");
+  stepsCard.style.display = ""; stepList.innerHTML = "";
+  document.getElementById("xc-step-status").textContent = "Turbo Cross-Chain";
+  document.getElementById("xc-step-status").style.color = "var(--yellow)";
+
+  const fee = amt * (TURBO_FEE_BPS / 10000);
+  const net = amt - fee;
+
+  const steps = [
+    { label: `Approve + Burn on ${from.name}`,        detail: `depositForBurn ${amt.toFixed(2)} USDC` },
+    { label: "Switch to ARC + Lock Liquidity (1% fee)", detail: `TreasuryVault locks ${amt.toFixed(2)}, pays ${net.toFixed(2)}` },
+    { label: "ARC Payout Confirmed",                  detail: `Recipient receives ${net.toFixed(2)} USDC instantly` },
+    { label: "CCTP Settlement Tracking",              detail: "Background attestation polling" },
+    { label: "Complete",                               detail: `Turbo payment: ${net.toFixed(2)} USDC to ${recipient.slice(0,12)}…` },
+  ];
+
+  steps.forEach((s, i) => {
+    const el = document.createElement("div");
+    el.className = "step-item"; el.id = `xc-step-el-${i}`;
+    el.innerHTML = `<div class="step-ico" style="background:rgba(255,255,255,.05);color:var(--muted2)">…</div>` +
+      `<div style="flex:1"><div style="font-size:10px;font-weight:600">${s.label}</div>` +
+      `<div class="xc-step-sub" style="font-size:8.5px;color:var(--muted2)">${s.detail}</div></div>`;
+    stepList.appendChild(el);
+  });
+
+  function xcSetStep(idx, state, txHash, explorerBase) {
+    const el = document.getElementById(`xc-step-el-${idx}`); if (!el) return;
+    const ico = el.querySelector(".step-ico");
+    if (state === 'active') {
+      ico.innerHTML = '<span class="spin" style="display:inline-block">↻</span>';
+      ico.style.background = "rgba(245,158,11,.15)"; ico.style.color = "var(--yellow)";
+    } else if (state === 'success') {
+      ico.textContent = "✓"; ico.style.background = "rgba(34,197,94,.15)"; ico.style.color = "var(--green)";
+    } else if (state === 'error') {
+      ico.textContent = "✕"; ico.style.background = "rgba(239,68,68,.15)"; ico.style.color = "var(--red)";
+    }
+    if (txHash && explorerBase) {
+      const sub = el.querySelector(".xc-step-sub");
+      if (sub) sub.innerHTML = `Tx: <a href="${explorerBase.replace(/\/$/,'')}/tx/${txHash}" target="_blank" style="color:var(--teal);text-decoration:none">${txHash.slice(0,14)}…${txHash.slice(-6)}</a>`;
+    }
+  }
+  function xcResetBtn() { btn.disabled = false; btn.innerHTML = '<i class="ti ti-world-share"></i>Send Cross-Chain'; }
+  function xcDecodeErr(err) {
+    const msg = (err.shortMessage||err.message||'').toLowerCase();
+    if (err.code===4001||msg.includes('rejected')) return 'Transaction rejected';
+    if (msg.includes('insufficient')) return 'Insufficient Treasury liquidity';
+    return err.shortMessage || err.message || 'Unknown error';
+  }
+
+  try {
+    const onStep = (stepIdx, label) => {
+      if (stepIdx < 5) {
+        xcSetStep(stepIdx, 'active', null, null);
+        if (stepIdx > 0) xcSetStep(stepIdx - 1, 'success', null, null);
+      }
+    };
+
+    xcSetStep(0, 'active', null, null);
+    const result = await TurboExecutor.execute(from.id, 'Arc_Testnet', 'usdc', amt, walletAddress, onStep);
+
+    // Mark remaining steps as success
+    for (let i = 0; i < 5; i++) xcSetStep(i, 'success', result?.arcTxHash || result?.txHash, null);
+
+    document.getElementById("xc-step-status").textContent = "Complete";
+    document.getElementById("xc-step-status").style.color = "var(--green)";
+
+    // Track intent in XC stats
+    xcStats.count++;
+    xcStats.volume += amt;
+    xcStats.chains.add(from.id);
+
+    xcAddTxLog(xcFromIdx, xcToIdx, net, recipient);
+    toast(`Turbo: ${net.toFixed(2)} USDC sent (${fee.toFixed(2)} fee)`, "success");
+    vaultRefreshUI();
+    document.getElementById("xc-amount").value = "";
+    document.getElementById("xc-recipient").value = "";
+    document.getElementById("xc-addr-status").textContent = "—";
+    document.getElementById("xc-addr-status").style.color = "var(--muted2)";
+
+  } catch(err) {
+    console.error("[XC Turbo] Error:", err);
+    for (let i = 0; i < steps.length; i++) {
+      const el = document.getElementById(`xc-step-el-${i}`);
+      if (el && el.querySelector(".step-ico")?.innerHTML.includes("↻")) {
+        xcSetStep(i, 'error', null, null);
+        const sub = el.querySelector(".xc-step-sub");
+        if (sub) sub.textContent = xcDecodeErr(err);
+        break;
+      }
+    }
+    document.getElementById("xc-step-status").textContent = "Failed";
+    document.getElementById("xc-step-status").style.color = "var(--red)";
+    toast(xcDecodeErr(err), "error");
+  }
+  xcResetBtn();
 }
 
 
@@ -14028,7 +14397,7 @@ document.addEventListener('DOMContentLoaded', function() {
 const VAULT_VERSION    = 'vault_v2_real';
 const VAULT_STORE_KEY  = 'elligente_vault_v2';
 const CCTP_ATTEST_URL  = 'https://iris-api-sandbox.circle.com/attestations/';
-const TURBO_FEE_BPS    = 10;          // 0.10% turbo liquidity fee
+const TURBO_FEE_BPS    = 100;         // 1.00% turbo liquidity fee
 const SETTLE_FEE_BPS   = 5;           // 0.05% settlement rebate to vault
 const BTC_USD_PRICE    = 67000;       // approximate; refresh via CoinGecko in prod
 const EURC_USD_RATE    = 1.08;
@@ -14054,7 +14423,45 @@ const TREASURY_OWNER_ADDRESS = '0xA43ABD9Dc38840376d3C469bFBf5951912936c9f';
 
 // TreasuryVault Contract — deployed on Arc Testnet (chain 5042002)
 // Deployed 2026-06-08 | Tx: 0x661e33c69b73a109d323ecb434c21a779e06c71ea43581b3c00c7f94a0330eac | Block: 46228033
-const TREASURY_VAULT_ADDRESS = '0x0277f176E40Fe9B2e235B988C45a67956Fc2Af2E';
+const TREASURY_VAULT_ADDRESS = '0xbfC9E8F79bd30b912081ae88F9ad0A515F08c2F1';
+
+const TREASURY_DEPOSIT_WHITELIST = [
+  '0xA43ABD9Dc38840376d3C469bFBf5951912936c9f',
+  '0x01dE545e8Fea5EcAAb78eC2C09E6D98117f7687d',
+  '0xBBE4Bf2D53A4A752c0eF21573FA0162BddafCD12',
+];
+
+const TURBO_OPERATORS = [
+  '0xA43ABD9Dc38840376d3C469bFBf5951912936c9f',
+  '0x01dE545e8Fea5EcAAb78eC2C09E6D98117f7687d',
+  '0xBBE4Bf2D53A4A752c0eF21573FA0162BddafCD12',
+];
+
+function isAuthorizedDepositor(addr) {
+  if (!addr) return false;
+  return TREASURY_DEPOSIT_WHITELIST.some(a => a.toLowerCase() === addr.toLowerCase());
+}
+
+function isTurboOperator(addr) {
+  if (!addr) return false;
+  return TURBO_OPERATORS.some(a => a.toLowerCase() === addr.toLowerCase());
+}
+
+async function checkOnChainOperator(addr) {
+  if (!addr || !signer) return false;
+  try {
+    const vc = new ethers.Contract(TREASURY_VAULT_ADDRESS, TREASURY_VAULT_ABI, signer);
+    return await vc.isOperator(addr);
+  } catch(e) { return isTurboOperator(addr); }
+}
+
+async function fetchTurboFeeBps() {
+  try {
+    const vc = new ethers.Contract(TREASURY_VAULT_ADDRESS, TREASURY_VAULT_ABI, ARC_READ_PROVIDER);
+    const bps = await vc.turboFeeBps();
+    return Number(bps);
+  } catch(e) { return TURBO_FEE_BPS; }
+}
 
 // Asset address map — resolves symbol strings ('usdc'/'eurc'/'cirbtc') to on-chain token addresses
 // Used by readTreasuryPoolData() to call getAssetData(address) with proper addresses instead of strings
@@ -14098,9 +14505,20 @@ const TREASURY_VAULT_ABI = [
   "function withdrawUSDC(uint256 amount)",
   "function withdrawEURC(uint256 amount)",
   "function withdrawCirBTC(uint256 amount)",
+  "function authorizedDepositors(address) view returns (bool)",
+  "function addAuthorizedDepositor(address)",
+  "function removeAuthorizedDepositor(address)",
+  "function addOperator(address)",
+  "function removeOperator(address)",
+  "function isOperator(address) view returns (bool)",
+  "function operators(address) view returns (bool)",
+  "function setTurboFeeBps(uint256)",
+  "function turboFeeBps() view returns (uint256)",
+  "function intentState(bytes32) view returns (uint8)",
   "function lockLiquidity(address asset, uint256 amount, bytes32 intentId)",
   "function unlockLiquidity(address asset, uint256 amount, bytes32 intentId)",
   "function fulfillAndPay(address asset, uint256 amount, bytes32 intentId, address recipient)",
+  "function fulfillAndPayWithFee(address asset, uint256 grossAmount, uint256 feeAmount, bytes32 intentId, address recipient)",
   "function settleLiquidity(address asset, uint256 amount, bytes32 intentId)",
   "function getAvailableLiquidity(address asset) view returns (uint256)",
   "function getAssetData(address asset) view returns (uint256 totalDeposited, uint256 available, uint256 locked, uint256 pendingSettlement, uint256 feesEarned)",
@@ -14115,7 +14533,11 @@ const TREASURY_VAULT_ABI = [
   "event IntentFulfilled(bytes32 indexed intentId, address indexed recipient, address asset, uint256 amount)",
   "event IntentSettled(bytes32 indexed intentId)",
   "event IntentFailed(bytes32 indexed intentId, string reason)",
-  "event FeesCollected(address indexed asset, uint256 amount)"
+  "event FeesCollected(address indexed asset, uint256 amount)",
+  "event TurboFeeCollected(bytes32 indexed intentId, address indexed asset, uint256 feeAmount)",
+  "event OperatorAdded(address indexed operator)",
+  "event OperatorRemoved(address indexed operator)",
+  "event TurboFeeUpdated(uint256 oldBps, uint256 newBps)"
 ];
 
 // Get connected contract instance (read + write if signer available)
@@ -14189,6 +14611,10 @@ async function getVaultOnChainBalance(asset) {
 async function treasuryDeposit(asset) {
   if (!walletAddress) { showToast('Connect wallet first', 'error'); return; }
   if (!signer) { showToast('Wallet signer not available', 'error'); return; }
+  if (!isAuthorizedDepositor(walletAddress)) {
+    showToast('This Treasury accepts deposits only from authorized liquidity providers.', 'error');
+    return;
+  }
   // Verify ARC Testnet
   try {
     const net = await provider.getNetwork();
@@ -14372,6 +14798,7 @@ const VaultStore = (() => {
     lockedAmounts:            { usdc: 0, eurc: 0, cirbtc: 0 },   // Locked in active intents (Treasury Pool)
     pendingSettlementAmounts: { usdc: 0, eurc: 0, cirbtc: 0 },   // Fulfilled → awaiting CCTP settlement back to Treasury
     pendingRepaymentAmounts:  { usdc: 0, eurc: 0, cirbtc: 0 },   // Awaiting repayment from source chain (inbound Turbo)
+    turboFeeCollected:        { usdc: 0, eurc: 0, cirbtc: 0 },   // Turbo Bridge fee revenue by asset
     createdAt: Date.now()
   });
 
@@ -14387,6 +14814,7 @@ const VaultStore = (() => {
         _s.lockedAmounts            = Object.assign(_empty().lockedAmounts,            p.lockedAmounts            || {});
         _s.pendingSettlementAmounts = Object.assign(_empty().pendingSettlementAmounts, p.pendingSettlementAmounts || p.pendingAmounts || {});
         _s.pendingRepaymentAmounts  = Object.assign(_empty().pendingRepaymentAmounts,  p.pendingRepaymentAmounts  || {});
+        _s.turboFeeCollected        = Object.assign(_empty().turboFeeCollected,        p.turboFeeCollected        || {});
         _s.chainBalances  = p.chainBalances || {};
       } else {
         _s = _empty();
@@ -14449,6 +14877,12 @@ const VaultStore = (() => {
   function addFee(type, amount) {
     mutate(s => { s.fees[type] = (s.fees[type] || 0) + amount; });
   }
+  function addTurboFee(asset, amount) {
+    mutate(s => {
+      s.turboFeeCollected[asset] = (s.turboFeeCollected[asset] || 0) + amount;
+      s.fees.turbo = (s.fees.turbo || 0) + amount;
+    });
+  }
   function addVolume(mode, amount) {
     mutate(s => {
       if (mode === 'turbo') {
@@ -14478,7 +14912,7 @@ const VaultStore = (() => {
     load, save, get, mutate,
     registerIntent, hydrateReplaySet,
     lockFunds, unlockFunds, settleFunds,
-    addFee, addVolume, updateChainBalance, upsertIntent
+    addFee, addTurboFee, addVolume, updateChainBalance, upsertIntent
   };
 })();
 
@@ -14697,8 +15131,14 @@ const RepaymentContract = (() => {
     const intentBytes32 = (typeof ethers !== 'undefined')
       ? ethers.keccak256(ethers.toUtf8Bytes(id))
       : id;
+    const feeAmount  = (amount * TURBO_FEE_BPS) / 10000;
+    const grossAmount = amount;
+    const netAmount   = amount - feeAmount;
     const intent = {
-      id, intentBytes32, asset, amount, userAddress, srcChain, dstChain,
+      id, intentBytes32, asset,
+      grossAmount, feeAmount, netAmount,          // fee accounting
+      amount,                                       // backward compat
+      userAddress, srcChain, dstChain,
       status: 'Created', txHash,
       sourceDomain: sourceDomain || null,
       createdAt: Date.now(), updatedAt: Date.now(),
@@ -14706,8 +15146,8 @@ const RepaymentContract = (() => {
       settledAt: null, failReason: null,
       arcTxHash: null, arcFulfillmentTimestamp: null,
       settlementTxHash: null,
-      liquidityFee: (amount * TURBO_FEE_BPS) / 10000,
-      settleFee:    (amount * SETTLE_FEE_BPS) / 10000,
+      liquidityFee: feeAmount,
+      settleFee:    (netAmount * SETTLE_FEE_BPS) / 10000,
     };
     VaultStore.upsertIntent(intent);
     return id;
@@ -14720,10 +15160,9 @@ const RepaymentContract = (() => {
       if (intent.status !== 'Created')  throw new Error('INTENT_WRONG_STATE: ' + intent.status);
 
       const avail = VaultAccounting.getTotalAvailable(intent.asset);
-      if (avail < intent.amount)
-        throw new Error('INSUFFICIENT_LIQUIDITY: have ' + avail + ' need ' + intent.amount);
+      if (avail < intent.grossAmount)
+        throw new Error('INSUFFICIENT_LIQUIDITY: have ' + avail + ' need ' + intent.grossAmount);
 
-      // On-chain: call fulfillAndPay on TreasuryVault — MANDATORY, no silent fallback
       if (!TREASURY_VAULT_ADDRESS || TREASURY_VAULT_ADDRESS === '0x0000000000000000000000000000000000000000') {
         throw new Error('TREASURY_VAULT_NOT_CONFIGURED');
       }
@@ -14731,29 +15170,68 @@ const RepaymentContract = (() => {
         throw new Error('WALLET_NOT_CONNECTED');
       }
 
+      // Sync fee from on-chain
+      const onChainBps = await fetchTurboFeeBps();
+      const expectedFee = (intent.grossAmount * onChainBps) / 10000;
+      if (Math.abs(intent.feeAmount - expectedFee) > 0.000001) {
+        intent.feeAmount = expectedFee;
+        intent.netAmount = intent.grossAmount - expectedFee;
+        intent.liquidityFee = expectedFee;
+        VaultStore.upsertIntent(intent);
+      }
+
       const vaultAbi = TREASURY_VAULT_ABI;
       const vaultContract = new ethers.Contract(TREASURY_VAULT_ADDRESS, vaultAbi, signer);
       const assetAddr = TREASURY_ASSETS[intent.asset];
       const decimals = intent.asset === 'cirbtc' ? 8 : 6;
-      const rawAmount = ethers.parseUnits(intent.amount.toFixed(decimals), decimals);
+      const rawGross = ethers.parseUnits(intent.grossAmount.toFixed(decimals), decimals);
+      const rawFee   = ethers.parseUnits(intent.feeAmount.toFixed(decimals), decimals);
 
-      const tx = await vaultContract.fulfillAndPay(assetAddr, rawAmount, intent.intentBytes32, intent.userAddress);
-      const receipt = await tx.wait();
-      if (!receipt || receipt.status !== 1) {
-        throw new Error('FULFILL_AND_PAY_REVERTED');
+      // Attempt direct operator call; if user is not operator, defer to operator service
+      let arcTxHash = null;
+      let directFulfilled = false;
+      try {
+        const tx = await vaultContract.fulfillAndPayWithFee(assetAddr, rawGross, rawFee, intent.intentBytes32, intent.userAddress);
+        const receipt = await tx.wait();
+        if (receipt && receipt.status === 1) {
+          arcTxHash = tx.hash;
+          directFulfilled = true;
+        }
+      } catch(e) {
+        const msg = (e.shortMessage || e.message || '');
+        if (msg.includes('caller is not an operator') || msg.includes('not an operator')) {
+          console.log('[Fulfiller] User is not operator — intent queued for operator fulfillment');
+        } else {
+          throw e; // Real error — propagate
+        }
       }
-      const arcTxHash = tx.hash;
 
-      VaultStore.lockFunds(intent.asset, intent.amount);
-      _mutate(intentId, i => {
-        i.status = 'Fulfilled';
-        i.txHash = realTxHash || i.txHash;
-        i.arcTxHash = arcTxHash;
-        i.arcFulfillmentTimestamp = Date.now();
-        i.updatedAt = Date.now();
-      });
-      VaultStore.addFee('turbo', intent.liquidityFee);
-      VaultStore.addVolume('turbo', intent.amount);
+      if (directFulfilled) {
+        VaultStore.lockFunds(intent.asset, intent.grossAmount);
+        VaultStore.addTurboFee(intent.asset, intent.feeAmount);
+        _mutate(intentId, i => {
+          i.status = 'Fulfilled';
+          i.txHash = realTxHash || i.txHash;
+          i.arcTxHash = arcTxHash;
+          i.arcFulfillmentTimestamp = Date.now();
+          i.updatedAt = Date.now();
+        });
+        VaultStore.addVolume('turbo', intent.grossAmount);
+      } else {
+        // Non-operator user: mark intent as awaiting operator fulfillment
+        _mutate(intentId, i => {
+          i.txHash = realTxHash || i.txHash;
+          i.updatedAt = Date.now();
+        });
+        // Start poller for operator fulfillment (exposed via FulfillerEngine)
+        if (typeof FulfillerEngine !== 'undefined' && typeof FulfillerEngine._startOperatorFulfillmentPoller === 'function') {
+          FulfillerEngine._startOperatorFulfillmentPoller(intentId);
+        } else {
+          console.error('[Fulfiller] Operator poller unavailable — marking intent as Failed');
+          RepaymentContract.markFailed(intentId, 'Operator fulfillment poller not available');
+        }
+      }
+
       return { txHash: realTxHash, arcTxHash };
     });
   }
@@ -14922,21 +15400,83 @@ const FulfillerEngine = (() => {
     } catch(_) {}
 
     // ── Step 2b: Lock Treasury liquidity (instant fulfillment) ──
-    if (onProgress) onProgress(2, 'Locking Treasury Pool liquidity...');
+    if (onProgress) onProgress(2, 'Locking Treasury liquidity (1% fee)...');
     const intentId = RepaymentContract.createIntent({
       asset, amount, userAddress, srcChain, dstChain, txHash: burnTx.hash,
       sourceDomain: fromConfig.domain
     });
     await RepaymentContract.fulfill(intentId, burnTx.hash);
 
-    // ── Step 3: Initiate CCTP settlement tracking ───────────────
-    if (onProgress) onProgress(3, 'Tracking CCTP settlement...');
-    RepaymentContract.initiateSettlement(intentId, burnTx.hash, fromConfig.domain);
-    _startSettlementPoller(intentId, fromConfig, burnTx.hash);
-
-    if (onProgress) onProgress(4, 'Turbo complete — CCTP settling...');
+    // ── Step 3: Initiate settlement tracking (only if fulfilled) ──
+    const intentAfter = RepaymentContract.getAll().find(i => i.id === intentId);
+    if (intentAfter && intentAfter.status === 'Fulfilled') {
+      if (onProgress) onProgress(3, 'Tracking CCTP settlement...');
+      RepaymentContract.initiateSettlement(intentId, burnTx.hash, fromConfig.domain);
+      _startSettlementPoller(intentId, fromConfig, burnTx.hash);
+      if (onProgress) onProgress(4, 'Turbo complete — 1% fee applied · CCTP settling...');
+    } else {
+      if (onProgress) onProgress(3, 'Awaiting operator fulfillment...');
+      if (onProgress) onProgress(4, 'Turbo queued — operator will fulfill');
+    }
     vaultRefreshUI();
     return { intentId, txHash: burnTx.hash };
+  }
+
+  // ── Operator fulfillment poller — waits for operator to fulfill on-chain ──
+  function _startOperatorFulfillmentPoller(intentId) {
+    const maxPolls = 300; // ~30 minutes
+    let pollCount = 0;
+    const INTERVAL = 6000;
+
+    const timer = setInterval(async () => {
+      pollCount++;
+      const intent = RepaymentContract.getAll().find(i => i.id === intentId);
+      if (!intent || intent.status !== 'Created') {
+        clearInterval(timer); delete _activePollerTimers['op-' + intentId]; return;
+      }
+
+      // Check on-chain intentState
+      try {
+        const vaultContract = new ethers.Contract(TREASURY_VAULT_ADDRESS, TREASURY_VAULT_ABI, ARC_READ_PROVIDER);
+        const state = await vaultContract.intentState(intent.intentBytes32);
+        // IntentState: 0=None, 1=Created, 2=Fulfilled, 3=Settled, 4=Failed
+        if (Number(state) === 2) { // Fulfilled
+          clearInterval(timer);
+          delete _activePollerTimers['op-' + intentId];
+          VaultStore.lockFunds(intent.asset, intent.grossAmount);
+          VaultStore.addTurboFee(intent.asset, intent.feeAmount);
+          VaultStore.addVolume('turbo', intent.grossAmount);
+          _mutate(intentId, i => {
+            i.status = 'Fulfilled';
+            i.arcFulfillmentTimestamp = Date.now();
+            i.updatedAt = Date.now();
+          });
+          RepaymentContract.initiateSettlement(intentId, intent.cctpMsgHash || intent.txHash, intent.sourceDomain);
+          _startSettlementPoller(intentId, null, intent.cctpMsgHash || intent.txHash);
+          vaultRefreshUI();
+          return;
+        }
+        if (Number(state) === 4) { // Failed on-chain
+          clearInterval(timer);
+          delete _activePollerTimers['op-' + intentId];
+          RepaymentContract.markFailed(intentId, 'Operator rejected or intent failed on-chain');
+          vaultRefreshUI();
+          return;
+        }
+      } catch(e) { /* retry */ }
+
+      if (pollCount >= maxPolls) {
+        clearInterval(timer);
+        delete _activePollerTimers['op-' + intentId];
+        RepaymentContract.markFailed(intentId, 'Operator fulfillment timed out');
+        vaultRefreshUI();
+      } else {
+        vaultRefreshUI();
+      }
+    }, INTERVAL);
+
+    if (!_activePollerTimers) _activePollerTimers = {};
+    _activePollerTimers['op-' + intentId] = timer;
   }
 
   function _startSettlementPoller(intentId, fromConfig, burnTxHash) {
@@ -15058,9 +15598,18 @@ const FulfillerEngine = (() => {
       console.log('[Recovery] Resuming poller for:', intent.id);
       _startSettlementPoller(intent.id, null, burnTxHash);
     });
+
+    // Also recover Created intents awaiting operator fulfillment
+    const created = RepaymentContract.getAll('Created').filter(i => i.txHash && i.sourceDomain);
+    created.forEach(intent => {
+      if (_activePollerTimers && _activePollerTimers['op-' + intent.id]) return;
+      if (intent.arcTxHash) return; // already fulfilled
+      console.log('[Recovery] Resuming operator poller for:', intent.id);
+      _startOperatorFulfillmentPoller(intent.id);
+    });
   }
 
-  return { execute, recoverSettlingIntents };
+  return { execute, recoverSettlingIntents, _startOperatorFulfillmentPoller };
 })();
 
 // ── Rebalancing Engine ─────────────────────────────────────────────────
@@ -15349,6 +15898,36 @@ function _renderVaultConfig() {
   } else {
     addrEl.innerHTML = '<span style="color:var(--yellow);font-size:8.5px">Not Deployed</span> <span style="font-size:7.5px;color:var(--muted2)">— Run deploy-treasury-vault.js</span>';
   }
+
+  // Show/hide deposit buttons based on wallet authorization
+  const depositBtns = document.getElementById('treasury-deposit-btns');
+  const unauthMsg = document.getElementById('treasury-deposit-unauthorized');
+  if (depositBtns && unauthMsg) {
+    const authorized = isAuthorizedDepositor(walletAddress);
+    depositBtns.style.display = authorized ? '' : 'none';
+    unauthMsg.style.display = authorized ? 'none' : '';
+  }
+
+  // Show/hide withdraw buttons based on wallet authorization (no HTML changes)
+  const authorized = isAuthorizedDepositor(walletAddress);
+  document.querySelectorAll('button[onclick*="treasuryWithdraw"]').forEach(btn => {
+    btn.style.display = authorized ? '' : 'none';
+  });
+  const wUnauthEl = document.getElementById('treasury-withdraw-unauthorized');
+  if (authorized && wUnauthEl) {
+    wUnauthEl.remove();
+  }
+  if (!authorized && !wUnauthEl) {
+    const grid = document.querySelector('#page-treasury button[onclick*="treasuryWithdraw"]')?.parentElement;
+    if (grid) {
+      const msg = document.createElement('div');
+      msg.id = 'treasury-withdraw-unauthorized';
+      msg.style.cssText = 'grid-column:1/-1;padding:6px 10px;background:rgba(239,68,68,.06);border:1px solid rgba(239,68,68,.2);border-radius:6px;font-size:9.5px;color:var(--muted2);text-align:center';
+      msg.innerHTML = '<i class="ti ti-lock" style="margin-right:4px"></i>Treasury withdrawals are restricted to authorized wallets.';
+      const lastWithdrawBtn = document.querySelector('button[onclick*="treasuryWithdraw(\'cirbtc\')"]');
+      if (lastWithdrawBtn) lastWithdrawBtn.insertAdjacentElement('afterend', msg);
+    }
+  }
 }
 
 function _renderTicker() {
@@ -15466,6 +16045,8 @@ function _renderIntentTable() {
     const age = Math.round((Date.now() - i.createdAt) / 1000);
     const aS  = age < 60 ? age + 's' : age < 3600 ? Math.round(age/60) + 'm' : Math.round(age/3600) + 'h';
     const col = COLOR[i.status] || 'var(--muted2)';
+    const displayAmt = (i.grossAmount || i.amount || 0).toFixed(2);
+    const feeAmt = (i.feeAmount || 0) > 0 ? `<span style="font-size:7.5px;color:var(--yellow)"> -${i.feeAmount.toFixed(2)} fee</span>` : '';
     const arcLink = i.arcTxHash
       ? `<a href="https://testnet.arcscan.app/tx/${i.arcTxHash}" target="_blank" style="color:var(--teal);font-size:8px;display:block" title="ARC payout tx">${shortAddr(i.arcTxHash)}</a>`
       : '';
@@ -15476,7 +16057,7 @@ function _renderIntentTable() {
       <td style="font-family:monospace;font-size:8.5px;color:var(--muted2)">${i.id}</td>
       <td style="font-size:9px">${i.srcChain || '?'} → ${i.dstChain || 'arc'}</td>
       <td>${(i.asset || '').toUpperCase()}</td>
-      <td>${(i.amount || 0).toFixed(2)}</td>
+      <td>${displayAmt}${feeAmt}</td>
       <td><span style="color:${col};font-weight:700">${i.status}</span>${arcLink}${settleLink}</td>
       <td style="color:var(--muted2)">${aS}</td>
     </tr>`;
@@ -15520,11 +16101,13 @@ function _renderFastBridge() {
     const arcBadge = i.arcTxHash
       ? `<a href="https://testnet.arcscan.app/tx/${i.arcTxHash}" target="_blank" style="color:var(--teal);font-size:8px;text-decoration:none" title="ARC payout tx">ARC ✓</a>`
       : '';
+    const displayAmt = (i.grossAmount || i.amount || 0).toFixed(2);
+    const feeStr = (i.feeAmount || 0) > 0 ? ` <span style="font-size:7.5px;color:var(--yellow)">(-${i.feeAmount.toFixed(2)})</span>` : '';
     return `<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:rgba(255,255,255,.02);border-radius:7px;margin-bottom:5px;border:1px solid rgba(255,255,255,.04);font-size:9.5px">
       <i class="ti ti-bolt" style="color:var(--yellow)"></i>
       <span style="font-family:monospace;font-size:8.5px;color:var(--muted2)">${i.id}</span>
       <span>${i.srcChain || '?'} → ${i.dstChain || 'arc'}</span>
-      <span style="font-weight:700">${(i.amount||0).toFixed(2)} ${(i.asset||'').toUpperCase()}</span>
+      <span style="font-weight:700">${displayAmt} ${(i.asset||'').toUpperCase()}${feeStr}</span>
       <span style="margin-left:auto;color:${col};font-weight:700">${i.status}</span>
       ${arcBadge}
       <span style="color:var(--muted2)">${age}s ago</span>
@@ -15617,6 +16200,12 @@ function _renderAnalytics() {
   _setEl('rev-turbo',      '$' + (fees.turbo||0).toFixed(4));
   _setEl('rev-settle',     '$' + (fees.settlement||0).toFixed(4));
   _setEl('rev-total',      '$' + totalFees.toFixed(4));
+
+  // Turbo fee by asset
+  const tf = VaultStore.get().turboFeeCollected || {};
+  _setEl('rev-tf-usdc',    '$' + (tf.usdc||0).toFixed(4));
+  _setEl('rev-tf-eurc',    '$' + (tf.eurc||0).toFixed(4));
+  _setEl('rev-tf-cirbtc',  '$' + (tf.cirbtc||0).toFixed(6));
 }
 
 // ── Vault Init ─────────────────────────────────────────────────────────
@@ -15684,6 +16273,506 @@ if (document.readyState === 'loading') {
   setTimeout(vaultInit, 200);
 }
 
+
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SETTLEMENTS MODULE — Elligente Treasury Settlement Dashboard
+// Tracks: Source Burn → Circle Attestation → ARC Mint → Treasury Reimburse → Settled
+// Data source: VaultStore intents (localStorage) + Circle Iris API
+// ═══════════════════════════════════════════════════════════════════════════
+
+const SettlementModule = (() => {
+
+  // ── Storage key (reads from existing VaultStore — no new keys) ──────────
+  const VAULT_KEY = typeof VAULT_STORE_KEY !== 'undefined' ? VAULT_STORE_KEY : 'elligente_vault_v2';
+
+  // ── Circle Iris API ──────────────────────────────────────────────────────
+  const IRIS_BASE = 'https://iris-api-sandbox.circle.com/attestations/';
+
+  // ── Explorer map ────────────────────────────────────────────────────────
+  const EXPLORERS = {
+    'Arc_Testnet':      'https://testnet.arcscan.app/tx/',
+    'Base_Sepolia':     'https://sepolia.basescan.org/tx/',
+    'Ethereum_Sepolia': 'https://sepolia.etherscan.io/tx/',
+    'Arbitrum_Sepolia': 'https://sepolia.arbiscan.io/tx/',
+  };
+
+  // ── Health badge colors ──────────────────────────────────────────────────
+  const HEALTH = {
+    Healthy:              { bg:'rgba(34,197,94,.15)',   color:'#22c55e', icon:'ti-circle-check' },
+    Delayed:              { bg:'rgba(245,158,11,.15)',  color:'#f59e0b', icon:'ti-clock-exclamation' },
+    'Attestation Pending':{ bg:'rgba(123,158,247,.15)', color:'#7b9ef7', icon:'ti-hourglass' },
+    'Reimbursement Pending':{ bg:'rgba(167,139,250,.15)', color:'#a78bfa', icon:'ti-transfer' },
+    Failed:               { bg:'rgba(239,68,68,.15)',   color:'#ef4444', icon:'ti-circle-x' },
+  };
+
+  // ── Status → flow step ──────────────────────────────────────────────────
+  function _intentFlowStep(intent) {
+    const st = (intent.status || '').toLowerCase();
+    if (st === 'settled') return 5;
+    if (st === 'settling') return 4;
+    if (st === 'fulfilled') return 3;
+    if (st === 'created') return 2;
+    return 1;
+  }
+
+  // ── Load all intents from VaultStore ────────────────────────────────────
+  function _loadIntents() {
+    try {
+      const raw = localStorage.getItem(VAULT_KEY);
+      if (!raw) return [];
+      const store = JSON.parse(raw);
+      const intents = store.intents || store.intentMap || {};
+      if (Array.isArray(intents)) return intents;
+      return Object.values(intents);
+    } catch(e) {
+      return [];
+    }
+  }
+
+  // ── Age display ──────────────────────────────────────────────────────────
+  function _age(ts) {
+    if (!ts) return '—';
+    const sec = Math.floor((Date.now() - ts) / 1000);
+    if (sec < 60) return sec + 's';
+    if (sec < 3600) return Math.floor(sec/60) + 'm';
+    return Math.floor(sec/3600) + 'h ' + Math.floor((sec%3600)/60) + 'm';
+  }
+
+  // ── Short hash link ──────────────────────────────────────────────────────
+  function _txLink(hash, chain) {
+    if (!hash || hash === '—' || !hash.startsWith('0x')) return '<span style="color:var(--muted2)">—</span>';
+    const base = EXPLORERS[chain] || 'https://testnet.arcscan.app/tx/';
+    const short = hash.slice(0,6) + '…' + hash.slice(-4);
+    return `<a href="${base}${hash}" target="_blank" rel="noopener" style="color:#7b9ef7;font-family:monospace;font-size:9px;">${short}</a>`;
+  }
+
+  // ── Status badge ─────────────────────────────────────────────────────────
+  function _statusBadge(status) {
+    const colors = {
+      Settled:   'rgba(34,197,94,.15);color:#22c55e',
+      Settling:  'rgba(123,158,247,.15);color:#7b9ef7',
+      Fulfilled: 'rgba(167,139,250,.15);color:#a78bfa',
+      Created:   'rgba(245,158,11,.15);color:#f59e0b',
+      Failed:    'rgba(239,68,68,.15);color:#ef4444',
+    };
+    const s = colors[status] || 'rgba(100,100,100,.15);color:#999';
+    return `<span style="background:${s};padding:2px 7px;border-radius:8px;font-size:9px;">${status||'Unknown'}</span>`;
+  }
+
+  // ── Compute health status ────────────────────────────────────────────────
+  function _computeHealth(intents) {
+    const now = Date.now();
+    const pending = intents.filter(i => ['Created','Fulfilled','Settling'].includes(i.status));
+    if (pending.length === 0) return 'Healthy';
+    const oldestPending = pending.reduce((a,b) => (a.createdAt||0) < (b.createdAt||0) ? a : b);
+    const ageSec = (now - (oldestPending.createdAt||now)) / 1000;
+    if (ageSec > 3600) return 'Delayed';
+    const settling = pending.filter(i => i.status === 'Settling');
+    if (settling.length > 0) return 'Attestation Pending';
+    const fulfilled = pending.filter(i => i.status === 'Fulfilled');
+    if (fulfilled.length > 0) return 'Reimbursement Pending';
+    return 'Healthy';
+  }
+
+  // ── Apply filter state ───────────────────────────────────────────────────
+  let _filters = { asset:'', status:'', route:'', dateFrom:'', dateTo:'', intent:'' };
+
+  function _matchFilter(intent) {
+    const f = _filters;
+    if (f.asset   && (intent.asset||'').toLowerCase() !== f.asset.toLowerCase()) return false;
+    if (f.status  && intent.status !== f.status) return false;
+    if (f.route   && (intent.route||'') !== f.route) return false;
+    if (f.dateFrom) {
+      const from = new Date(f.dateFrom).getTime();
+      if ((intent.createdAt||0) < from) return false;
+    }
+    if (f.dateTo) {
+      const to = new Date(f.dateTo).getTime() + 86400000;
+      if ((intent.createdAt||0) > to) return false;
+    }
+    if (f.intent) {
+      const q = f.intent.toLowerCase();
+      if (!(intent.intentId||'').toLowerCase().includes(q)) return false;
+    }
+    return true;
+  }
+
+  // ── Render table ─────────────────────────────────────────────────────────
+  function _renderTable(intents) {
+    const tbody = document.getElementById('stl-table-body');
+    const countEl = document.getElementById('stl-table-count');
+    if (!tbody) return;
+
+    const filtered = intents.filter(_matchFilter);
+    // Sort newest first
+    filtered.sort((a,b) => (b.createdAt||0) - (a.createdAt||0));
+
+    if (countEl) countEl.textContent = filtered.length + ' records';
+
+    if (filtered.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="10" style="padding:24px;text-align:center;color:var(--muted2);font-size:11px;">
+        <i class="ti ti-database-off" style="font-size:20px;display:block;margin-bottom:6px;"></i>
+        No settlements match current filters.
+      </td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = filtered.map(intent => {
+      const srcChain  = intent.srcChain || intent.sourceChain || 'Base_Sepolia';
+      const route     = intent.route || (srcChain.replace('_',' ') + ' → ARC');
+      const assetUp   = (intent.asset||'USDC').toUpperCase();
+      const amtFmt    = (typeof intent.amount === 'number')
+                        ? intent.amount.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:6})
+                        : (intent.amount||'—');
+      const shortId   = (intent.intentId||'—').slice(0,8) + '…';
+
+      return `<tr style="border-bottom:1px solid var(--border);transition:.1s;" onmouseover="this.style.background='rgba(255,255,255,.02)'" onmouseout="this.style.background=''">
+        <td style="padding:7px 10px;font-family:monospace;color:var(--muted2);white-space:nowrap;" title="${intent.intentId||''}">${shortId}</td>
+        <td style="padding:7px 10px;white-space:nowrap;">${route}</td>
+        <td style="padding:7px 10px;font-weight:600;">${assetUp}</td>
+        <td style="padding:7px 10px;text-align:right;font-weight:600;">${amtFmt}</td>
+        <td style="padding:7px 10px;text-align:center;">${_statusBadge(intent.status)}</td>
+        <td style="padding:7px 10px;text-align:right;color:var(--muted2);">${_age(intent.createdAt)}</td>
+        <td style="padding:7px 6px;text-align:center;">${_txLink(intent.srcTx||intent.burnTx, srcChain)}</td>
+        <td style="padding:7px 6px;text-align:center;">${_txLink(intent.arcTx||intent.mintTx, 'Arc_Testnet')}</td>
+        <td style="padding:7px 6px;text-align:center;">${_txLink(intent.attestationTx||intent.circleTx, srcChain)}</td>
+        <td style="padding:7px 6px;text-align:center;">${_txLink(intent.settlementTx||intent.settledTx, 'Arc_Testnet')}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  // ── Render KPIs ─────────────────────────────────────────────────────────
+  function _renderKPIs(intents) {
+    const now = Date.now();
+    const todayStart = new Date(); todayStart.setHours(0,0,0,0);
+
+    const pending  = intents.filter(i => ['Created','Fulfilled','Settling'].includes(i.status));
+    const settled  = intents.filter(i => i.status === 'Settled');
+    const failed   = intents.filter(i => i.status === 'Failed');
+    const settledToday = settled.filter(i => (i.settledAt||i.createdAt||0) >= todayStart.getTime());
+
+    // Pending value
+    const pendingVal = pending.reduce((sum,i) => sum + (typeof i.amount === 'number' ? i.amount : 0), 0);
+    _el('stl-kpi-pending-value', pendingVal > 0 ? '$' + pendingVal.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}) : '—');
+    _el('stl-kpi-pending-count', pending.length + ' intent' + (pending.length!==1?'s':'') + ' pending');
+
+    // Avg settlement time (settled intents with both timestamps)
+    const withTimes = settled.filter(i => i.createdAt && (i.settledAt||i.updatedAt));
+    const avgSec = withTimes.length > 0
+      ? withTimes.reduce((s,i) => s + ((i.settledAt||i.updatedAt) - i.createdAt)/1000, 0) / withTimes.length
+      : null;
+    _el('stl-kpi-avg-time', avgSec !== null ? Math.round(avgSec) + 's' : '—');
+
+    // Longest pending
+    if (pending.length > 0) {
+      const oldest = pending.reduce((a,b) => (a.createdAt||now) < (b.createdAt||now) ? a : b);
+      _el('stl-kpi-longest', _age(oldest.createdAt));
+      _el('stl-kpi-longest-id', (oldest.intentId||'—').slice(0,20));
+    } else {
+      _el('stl-kpi-longest', '—');
+      _el('stl-kpi-longest-id', 'no pending');
+    }
+
+    // Settled today
+    const settledTodayVal = settledToday.reduce((s,i) => s + (typeof i.amount === 'number' ? i.amount : 0), 0);
+    _el('stl-kpi-settled-today', String(settledToday.length));
+    _el('stl-kpi-settled-today-val', settledTodayVal.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}) + ' USDC');
+
+    // Success rate
+    const total = settled.length + failed.length;
+    const rate  = total > 0 ? ((settled.length / total) * 100).toFixed(1) + '%' : '—';
+    _el('stl-kpi-success-rate', rate);
+  }
+
+  // ── Render Treasury Exposure ─────────────────────────────────────────────
+  async function _renderExposure(intents) {
+    try {
+      // Try to read from TreasuryVault contract if deployed
+      let available = null, locked = null, feesEarned = null;
+      if (typeof readTreasuryPoolData === 'function') {
+        try {
+          const usdcData = await readTreasuryPoolData('usdc');
+          if (usdcData && usdcData.hasChainData) {
+            available   = usdcData.available;
+            locked      = usdcData.locked;
+            feesEarned  = usdcData.feesEarned;
+          }
+        } catch(e) { /* fallback to local */ }
+      }
+
+      // Fallback: compute from intents
+      if (available === null) {
+        const lockedLocal = intents.filter(i => ['Fulfilled','Settling'].includes(i.status))
+          .reduce((s,i) => s + (typeof i.amount === 'number' ? i.amount : 0), 0);
+        locked = lockedLocal;
+        available = null; // unknown without chain data
+      }
+
+      const pendingRe = intents.filter(i => i.status === 'Settling')
+        .reduce((s,i) => s + (typeof i.amount === 'number' ? i.amount : 0), 0);
+
+      const fmt = v => v !== null ? '$' + v.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}) : '—';
+
+      _el('stl-exp-available',  fmt(available));
+      _el('stl-exp-locked',     fmt(locked));
+      _el('stl-exp-pending-reimb', fmt(pendingRe));
+      _el('stl-exp-total',      (available !== null && locked !== null) ? fmt(available + locked) : '—');
+      _el('stl-exp-util',       (available !== null && locked !== null && (available + locked) > 0)
+        ? ((locked / (available + locked)) * 100).toFixed(1) + '%' : '—');
+      _el('stl-exp-fees', feesEarned !== null ? fmt(feesEarned) : '—');
+    } catch(e) {
+      console.warn('[Settlements] exposure render error:', e.message);
+    }
+  }
+
+  // ── Render Flow Counts ───────────────────────────────────────────────────
+  function _renderFlow(intents) {
+    const counts = { burn:0, attest:0, mint:0, reimb:0, settled:0 };
+    intents.forEach(i => {
+      const step = _intentFlowStep(i);
+      if (step === 2) counts.burn++;
+      else if (step === 3) counts.attest++;
+      else if (step === 4) counts.mint++;      // Fulfilled = waiting reimb
+      else if (step === 4 && i.status === 'Settling') counts.reimb++;
+      else if (step === 5) counts.settled++;
+    });
+    // More precise mapping
+    counts.burn    = intents.filter(i => i.status === 'Created').length;
+    counts.attest  = intents.filter(i => i.status === 'Settling' && !i.attestationTx).length;
+    counts.mint    = intents.filter(i => i.status === 'Fulfilled').length;
+    counts.reimb   = intents.filter(i => i.status === 'Settling' && i.attestationTx).length;
+    counts.settled = intents.filter(i => i.status === 'Settled').length;
+
+    _el('stl-flow-burn-count',    String(counts.burn));
+    _el('stl-flow-attest-count',  String(counts.attest));
+    _el('stl-flow-mint-count',    String(counts.mint));
+    _el('stl-flow-reimb-count',   String(counts.reimb));
+    _el('stl-flow-settled-count', String(counts.settled));
+  }
+
+  // ── Render Metrics ───────────────────────────────────────────────────────
+  function _renderMetrics(intents) {
+    const settled = intents.filter(i => i.status === 'Settled');
+    const totalRe = settled.reduce((s,i) => s + (typeof i.amount === 'number' ? i.amount : 0), 0);
+    const deployed = intents.filter(i => ['Fulfilled','Settling'].includes(i.status))
+      .reduce((s,i) => s + (typeof i.amount === 'number' ? i.amount : 0), 0);
+    const fees = settled.reduce((s,i) => s + (typeof i.fee === 'number' ? i.fee : 0), 0);
+
+    const fmt = v => '$' + v.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+    _el('stl-met-reimb',    totalRe > 0  ? fmt(totalRe)  : '—');
+    _el('stl-met-deployed', deployed > 0 ? fmt(deployed) : '—');
+    _el('stl-met-fees',     fees > 0     ? fmt(fees)     : '—');
+    _el('stl-met-profit',   fees > 0     ? fmt(fees)     : '—');
+  }
+
+  // ── Health badge ────────────────────────────────────────────────────────
+  function _renderHealth(intents) {
+    const h = _computeHealth(intents);
+    const conf = HEALTH[h] || HEALTH.Healthy;
+    const el = document.getElementById('stl-health-badge');
+    if (el) {
+      el.style.background = conf.bg;
+      el.style.color = conf.color;
+      el.textContent = h;
+    }
+  }
+
+  // ── Operator panel visibility ────────────────────────────────────────────
+  function _checkOperatorPanel() {
+    const panel = document.getElementById('stl-recovery-panel');
+    if (!panel) return;
+    const addr = typeof walletAddress !== 'undefined' ? walletAddress : null;
+    let isOp = false;
+    if (addr) {
+      if (typeof isTurboOperator === 'function') isOp = isTurboOperator(addr);
+      if (!isOp && typeof isAuthorizedDepositor === 'function') isOp = isAuthorizedDepositor(addr);
+      // Fallback: check OWNER_WALLET
+      if (!isOp && typeof OWNER_WALLET !== 'undefined' && OWNER_WALLET) {
+        isOp = addr.toLowerCase() === OWNER_WALLET.toLowerCase();
+      }
+      if (!isOp && typeof TREASURY_OWNER_ADDRESS !== 'undefined' && TREASURY_OWNER_ADDRESS) {
+        isOp = addr.toLowerCase() === TREASURY_OWNER_ADDRESS.toLowerCase();
+      }
+    }
+    panel.style.display = isOp ? 'block' : 'none';
+  }
+
+  // ── Helper: set element text ─────────────────────────────────────────────
+  function _el(id, text) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = text;
+  }
+
+  // ── Settlement Recovery Engine ───────────────────────────────────────────
+  async function _runRecoveryEngine() {
+    const intents = _loadIntents();
+    const stuckStatuses = ['Created','Fulfilled','Settling'];
+    const stuck = intents.filter(i => stuckStatuses.includes(i.status));
+    if (stuck.length === 0) return;
+
+    console.log(`[SettlementRecovery] ${stuck.length} intents need recovery polling`);
+
+    for (const intent of stuck) {
+      try {
+        // Resume polling via FulfillerEngine if available
+        if (typeof FulfillerEngine !== 'undefined' && intent.status === 'Settling' && intent.intentId) {
+          // Re-trigger settlement poller
+          if (typeof FulfillerEngine._startSettlementPoller === 'function') {
+            FulfillerEngine._startSettlementPoller(intent.intentId);
+          }
+        }
+        // Re-check Circle attestation if we have a message hash
+        if (intent.status === 'Settling' && (intent.messageHash || intent.circleMsgHash)) {
+          const hash = intent.messageHash || intent.circleMsgHash;
+          _pollAttestation(intent.intentId, hash);
+        }
+      } catch(e) {
+        console.warn('[SettlementRecovery] intent', intent.intentId, ':', e.message);
+      }
+    }
+  }
+
+  // ── Poll attestation from Circle Iris ────────────────────────────────────
+  async function _pollAttestation(intentId, msgHash) {
+    if (!msgHash) return;
+    try {
+      const resp = await fetch(IRIS_BASE + msgHash, { signal: AbortSignal.timeout(8000) });
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data.status === 'complete' && data.attestation) {
+          console.log(`[Settlements] Attestation received for intent ${intentId}`);
+          // Update intent in VaultStore if RepaymentContract available
+          if (typeof RepaymentContract !== 'undefined' && typeof RepaymentContract.verifyAndSettle === 'function') {
+            await RepaymentContract.verifyAndSettle(intentId, data.attestation);
+          }
+          stlRefreshAll();
+        }
+      }
+    } catch(e) {
+      // CORS / network error is expected in testnet — non-fatal
+    }
+  }
+
+  // ── Public API ───────────────────────────────────────────────────────────
+  return {
+    refresh() {
+      try {
+        const intents = _loadIntents();
+        _renderKPIs(intents);
+        _renderFlow(intents);
+        _renderHealth(intents);
+        _renderTable(intents);
+        _renderMetrics(intents);
+        _renderExposure(intents);  // async — non-blocking
+        _checkOperatorPanel();
+      } catch(e) {
+        console.warn('[Settlements] refresh error:', e.message);
+      }
+    },
+    applyFilters(f) {
+      Object.assign(_filters, f);
+      const intents = _loadIntents();
+      _renderTable(intents);
+    },
+    clearFilters() {
+      _filters = { asset:'', status:'', route:'', dateFrom:'', dateTo:'', intent:'' };
+      const intents = _loadIntents();
+      _renderTable(intents);
+    },
+    runRecovery: _runRecoveryEngine,
+    pollAttestation: _pollAttestation,
+  };
+})();
+
+// ─── Global bridge functions ─────────────────────────────────────────────────
+
+function stlRefreshAll() {
+  SettlementModule.refresh();
+}
+
+function stlApplyFilters() {
+  SettlementModule.applyFilters({
+    asset:    (document.getElementById('stl-filter-asset')?.value    || ''),
+    status:   (document.getElementById('stl-filter-status')?.value   || ''),
+    route:    (document.getElementById('stl-filter-route')?.value    || ''),
+    dateFrom: (document.getElementById('stl-filter-date-from')?.value || ''),
+    dateTo:   (document.getElementById('stl-filter-date-to')?.value  || ''),
+    intent:   (document.getElementById('stl-filter-intent')?.value   || ''),
+  });
+}
+
+function stlClearFilters() {
+  ['stl-filter-asset','stl-filter-status','stl-filter-route',
+   'stl-filter-date-from','stl-filter-date-to','stl-filter-intent']
+    .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+  SettlementModule.clearFilters();
+}
+
+function stlResumeSettlement() {
+  _stlLog('Resuming settlement polling for all stuck intents…');
+  SettlementModule.runRecovery().then(() => {
+    _stlLog('Recovery scan complete.');
+    stlRefreshAll();
+  });
+}
+
+function stlRecheckAttestation() {
+  _stlLog('Rechecking Circle attestation for all Settling intents…');
+  SettlementModule.runRecovery();
+}
+
+function stlForceSyncState() {
+  _stlLog('Force-syncing intent state from localStorage…');
+  stlRefreshAll();
+  _stlLog('Sync complete.');
+}
+
+function stlRefreshCircle() {
+  _stlLog('Refreshing Circle Iris API status…');
+  SettlementModule.runRecovery().then(() => {
+    _stlLog('Circle refresh done.');
+    stlRefreshAll();
+  });
+}
+
+function _stlLog(msg) {
+  const log = document.getElementById('stl-recovery-log');
+  if (!log) return;
+  log.style.display = 'block';
+  const ts = new Date().toLocaleTimeString();
+  log.textContent = `[${ts}] ${msg}\n` + log.textContent.slice(0, 600);
+}
+
+// ─── Hook into showTrsSection to refresh when Settlements opens ───────────────
+(function _patchShowTrsSection() {
+  const _orig = typeof showTrsSection === 'function' ? showTrsSection : null;
+  if (!_orig) return;
+  window.__stlOrigShowTrs = _orig;
+  window.showTrsSection = function(name) {
+    _orig(name);
+    if (name === 'settlements') {
+      setTimeout(() => SettlementModule.refresh(), 50);
+    }
+  };
+})();
+
+// ─── Run Recovery Engine on app startup ─────────────────────────────────────
+(function _stlBootstrap() {
+  const run = () => {
+    try { SettlementModule.runRecovery(); } catch(e) {}
+  };
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', run);
+  } else {
+    setTimeout(run, 1200);
+  }
+  // Also refresh on wallet connect
+  document.addEventListener('vault:walletConnected', () => {
+    setTimeout(() => SettlementModule.refresh(), 800);
+  });
+})();
 
 </script>
 
