@@ -4,6 +4,7 @@
  * with API keys injected from Cloudflare environment secrets.
  *
  * Environment Variables required (set in CF Dashboard):
+ *   WC_PROJECT_ID — WalletConnect v2 Project ID
  *   TEST_API_KEY  — Circle API key
  *   KIT_KEY       — Circle App Kit key
  */
@@ -24,9 +25,12 @@ export async function onRequest(context) {
   const kitKey     = env.KIT_KEY     || '';
   const testApiKey = env.TEST_API_KEY || '';
 
+  const wcProjectId = env.WC_PROJECT_ID || '';
+
   // Replace placeholders with actual key values
-  html = html.replaceAll('__KIT_KEY_PLACEHOLDER__',     kitKey);
-  html = html.replaceAll('__TEST_API_KEY_PLACEHOLDER__', testApiKey);
+  html = html.replaceAll('__WC_PROJECT_ID_PLACEHOLDER__',  wcProjectId);
+  html = html.replaceAll('__KIT_KEY_PLACEHOLDER__',        kitKey);
+  html = html.replaceAll('__TEST_API_KEY_PLACEHOLDER__',    testApiKey);
 
   return new Response(html, {
     status: response.status,

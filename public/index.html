@@ -22,12 +22,12 @@
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet"/>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tabler-icons/2.44.0/iconfont/tabler-icons.min.css"/>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.7.1/ethers.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.7.1/ethers.umd.min.js" integrity="sha384-eoEZatO/ymJi+LdBilp3xt/M9N9Lla2JlMVPZuk48Fg1YGl2Mc+vmsky+nkOtlSi" crossorigin="anonymous"></script>
 <!-- QRCode.js — real QR code generation -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" integrity="sha384-3zSEDfvllQohrq0PHL1fOXJuC/jSOO34H46t6UQfobFOmxE5BpjjaIJY5F2/bMnU" crossorigin="anonymous"></script>
 <!-- WalletConnect EthereumProvider (enables WalletConnect v2 + mobile wallets) -->
 <!-- WalletConnect v2 — Web3Modal AppKit (official bundle, includes QR modal) -->
-<script src="https://cdn.jsdelivr.net/npm/@web3modal/ethereum@2.7.1/dist/index.umd.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/@web3modal/ethereum@2.7.1/dist/index.js" integrity="sha384-scb267QicZDIPcJtRbV2eSYKkU7C4HaAWIMu31Ou9tDHHJXvp3Lg9XsWxQ+CWR7a" crossorigin="anonymous" defer></script>
 <style>
 /* ── Wallet Modal ───────────────────────────────────────── */
 .wm-overlay{position:fixed;inset:0;background:rgba(0,0,0,.82);z-index:2000;display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .22s;backdrop-filter:blur(4px)}
@@ -3144,6 +3144,24 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
 /* Extra safety for any remaining native selects in these two pages only */
 #page-schedule select.cinput,
 #page-settings select.cinput { color-scheme: dark; }
+</style>
+<style>
+/* ═══ REIMBURSEMENT PROOF SYSTEM ═══ */
+.verbadge{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:10px;font-size:9px;font-weight:600;white-space:nowrap}
+.verbadge.verified{background:rgba(34,197,94,.12);color:#22c55e;border:1px solid rgba(34,197,94,.2)}
+.verbadge.awaiting{background:rgba(245,158,11,.12);color:#f59e0b;border:1px solid rgba(245,158,11,.2)}
+.verbadge.failed{background:rgba(239,68,68,.1);color:#ef4444;border:1px solid rgba(239,68,68,.2)}
+.status-badge-pb{background:rgba(245,158,11,.12);color:#f59e0b}
+.status-badge-aa{background:rgba(123,158,247,.12);color:#7b9ef7}
+.status-badge-ar{background:rgba(139,92,246,.12);color:#a78bfa}
+.status-badge-tr{background:rgba(34,197,94,.12);color:#22c55e}
+.status-badge-fs{background:rgba(16,185,129,.12);color:#10b981}
+.audit-row td{font-family:'JetBrains Mono',monospace;font-size:8.5px}
+.audit-head th{font-size:8px;color:var(--muted2);font-weight:600;text-transform:uppercase;letter-spacing:.3px}
+.proof-check{display:flex;align-items:center;gap:3px;font-size:8px;margin-top:3px}
+.proof-check.pass{color:#22c55e}
+.proof-check.fail{color:#ef4444}
+.stl-section-divider{margin:20px 0 10px;font-size:11px;font-weight:700;color:var(--text);display:flex;align-items:center;gap:6px}
 </style>
 </head>
 <body>
@@ -6286,21 +6304,15 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
               </div>
 
               <div class="vault-card" style="padding:12px 14px;">
+                <div style="font-size:10px;color:var(--muted2);margin-bottom:4px;">Verified Reimbursements</div>
+                <div id="stl-kpi-verified-reimb" style="font-size:18px;font-weight:700;color:#22c55e;">—</div>
+                <div style="font-size:10px;color:var(--muted2);margin-top:2px;">on-chain proven</div>
+              </div>
+
+              <div class="vault-card" style="padding:12px 14px;">
                 <div style="font-size:10px;color:var(--muted2);margin-bottom:4px;">Avg Settlement Time</div>
                 <div id="stl-kpi-avg-time" style="font-size:18px;font-weight:700;color:var(--text);">—</div>
                 <div style="font-size:10px;color:var(--muted2);margin-top:2px;">seconds avg</div>
-              </div>
-
-              <div class="vault-card" style="padding:12px 14px;">
-                <div style="font-size:10px;color:var(--muted2);margin-bottom:4px;">Longest Pending</div>
-                <div id="stl-kpi-longest" style="font-size:18px;font-weight:700;color:#f59e0b;">—</div>
-                <div id="stl-kpi-longest-id" style="font-size:10px;color:var(--muted2);margin-top:2px;font-family:monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">—</div>
-              </div>
-
-              <div class="vault-card" style="padding:12px 14px;">
-                <div style="font-size:10px;color:var(--muted2);margin-bottom:4px;">Settled Today</div>
-                <div id="stl-kpi-settled-today" style="font-size:18px;font-weight:700;color:#22c55e;">—</div>
-                <div id="stl-kpi-settled-today-val" style="font-size:10px;color:var(--muted2);margin-top:2px;">— USDC</div>
               </div>
 
               <div class="vault-card" style="padding:12px 14px;">
@@ -6345,7 +6357,7 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
               </div>
             </div>
 
-            <!-- SETTLEMENT QUEUE FLOW -->
+            <!-- SETTLEMENT QUEUE FLOW (with new statuses) -->
             <div class="vault-card" style="padding:14px;margin-bottom:14px;">
               <div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:10px;display:flex;align-items:center;gap:6px;">
                 <i class="ti ti-arrows-right-left" style="color:#7b9ef7;"></i> Settlement Queue Flow
@@ -6356,27 +6368,27 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
               <!-- Flow steps -->
               <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin-bottom:12px;">
                 <div class="stl-flow-step" id="stl-flow-burn" style="flex:1;min-width:90px;background:var(--card-inner,rgba(255,255,255,.03));border-radius:7px;padding:8px 10px;text-align:center;border:1px solid var(--border);">
-                  <div style="font-size:9px;color:var(--muted2);">1. Source Burn</div>
+                  <div style="font-size:9px;color:var(--muted2);">1. Pending Burn</div>
                   <div id="stl-flow-burn-count" style="font-size:15px;font-weight:700;color:var(--text);">—</div>
                 </div>
                 <i class="ti ti-chevron-right" style="color:var(--muted2);font-size:12px;flex-shrink:0;"></i>
                 <div class="stl-flow-step" id="stl-flow-attest" style="flex:1;min-width:90px;background:var(--card-inner,rgba(255,255,255,.03));border-radius:7px;padding:8px 10px;text-align:center;border:1px solid var(--border);">
-                  <div style="font-size:9px;color:var(--muted2);">2. Circle Attestation</div>
+                  <div style="font-size:9px;color:var(--muted2);">2. Awaiting Attest</div>
                   <div id="stl-flow-attest-count" style="font-size:15px;font-weight:700;color:#f59e0b;">—</div>
                 </div>
                 <i class="ti ti-chevron-right" style="color:var(--muted2);font-size:12px;flex-shrink:0;"></i>
                 <div class="stl-flow-step" id="stl-flow-mint" style="flex:1;min-width:90px;background:var(--card-inner,rgba(255,255,255,.03));border-radius:7px;padding:8px 10px;text-align:center;border:1px solid var(--border);">
-                  <div style="font-size:9px;color:var(--muted2);">3. ARC Mint</div>
+                  <div style="font-size:9px;color:var(--muted2);">3. Attest Received</div>
                   <div id="stl-flow-mint-count" style="font-size:15px;font-weight:700;color:#7b9ef7;">—</div>
                 </div>
                 <i class="ti ti-chevron-right" style="color:var(--muted2);font-size:12px;flex-shrink:0;"></i>
                 <div class="stl-flow-step" id="stl-flow-reimb" style="flex:1;min-width:90px;background:var(--card-inner,rgba(255,255,255,.03));border-radius:7px;padding:8px 10px;text-align:center;border:1px solid var(--border);">
-                  <div style="font-size:9px;color:var(--muted2);">4. Tsy Reimburse</div>
+                  <div style="font-size:9px;color:var(--muted2);">4. Tsy Reimbursed</div>
                   <div id="stl-flow-reimb-count" style="font-size:15px;font-weight:700;color:#a78bfa;">—</div>
                 </div>
                 <i class="ti ti-chevron-right" style="color:var(--muted2);font-size:12px;flex-shrink:0;"></i>
                 <div class="stl-flow-step" id="stl-flow-settled" style="flex:1;min-width:90px;background:rgba(34,197,94,.07);border-radius:7px;padding:8px 10px;text-align:center;border:1px solid rgba(34,197,94,.2);">
-                  <div style="font-size:9px;color:var(--muted2);">5. Intent Settled</div>
+                  <div style="font-size:9px;color:var(--muted2);">5. Fully Settled</div>
                   <div id="stl-flow-settled-count" style="font-size:15px;font-weight:700;color:#22c55e;">—</div>
                 </div>
               </div>
@@ -6391,12 +6403,13 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
                   <option value="eurc">EURC</option>
                   <option value="cirbtc">cirBTC</option>
                 </select>
-                <select id="stl-filter-status" onchange="stlApplyFilters()" style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:5px 8px;font-size:11px;color:var(--text);min-width:110px;">
+                <select id="stl-filter-status" onchange="stlApplyFilters()" style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:5px 8px;font-size:11px;color:var(--text);min-width:150px;">
                   <option value="">All Status</option>
-                  <option value="Created">Created</option>
-                  <option value="Fulfilled">Fulfilled</option>
-                  <option value="Settling">Settling</option>
-                  <option value="Settled">Settled</option>
+                  <option value="Pending Burn">Pending Burn</option>
+                  <option value="Awaiting Attestation">Awaiting Attestation</option>
+                  <option value="Attestation Received">Attestation Received</option>
+                  <option value="Treasury Reimbursed">Treasury Reimbursed</option>
+                  <option value="Fully Settled">Fully Settled</option>
                   <option value="Failed">Failed</option>
                 </select>
                 <select id="stl-filter-route" onchange="stlApplyFilters()" style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:5px 8px;font-size:11px;color:var(--text);min-width:130px;">
@@ -6412,32 +6425,34 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
               </div>
             </div>
 
-            <!-- ACTIVE SETTLEMENTS TABLE -->
+            <!-- UPGRADED SETTLEMENTS TABLE (with verification columns) -->
             <div class="vault-card" style="padding:0;margin-bottom:14px;overflow:hidden;">
               <div style="padding:12px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;">
                 <i class="ti ti-list-details" style="color:#7b9ef7;font-size:13px;"></i>
-                <span style="font-size:11px;font-weight:700;color:var(--text);">Active Settlements</span>
+                <span style="font-size:11px;font-weight:700;color:var(--text);">Settlement Ledger</span>
                 <span id="stl-table-count" style="margin-left:auto;font-size:10px;color:var(--muted2);">0 records</span>
               </div>
               <div style="overflow-x:auto;">
                 <table style="width:100%;border-collapse:collapse;font-size:10px;">
                   <thead>
                     <tr style="border-bottom:1px solid var(--border);">
-                      <th style="padding:8px 10px;text-align:left;color:var(--muted2);font-weight:600;white-space:nowrap;">Intent ID</th>
-                      <th style="padding:8px 10px;text-align:left;color:var(--muted2);font-weight:600;">Route</th>
-                      <th style="padding:8px 10px;text-align:left;color:var(--muted2);font-weight:600;">Asset</th>
-                      <th style="padding:8px 10px;text-align:right;color:var(--muted2);font-weight:600;">Amount</th>
-                      <th style="padding:8px 10px;text-align:center;color:var(--muted2);font-weight:600;">Status</th>
-                      <th style="padding:8px 10px;text-align:right;color:var(--muted2);font-weight:600;">Age</th>
-                      <th style="padding:8px 6px;text-align:center;color:var(--muted2);font-weight:600;">Src TX</th>
-                      <th style="padding:8px 6px;text-align:center;color:var(--muted2);font-weight:600;">ARC TX</th>
-                      <th style="padding:8px 6px;text-align:center;color:var(--muted2);font-weight:600;">Attest TX</th>
-                      <th style="padding:8px 6px;text-align:center;color:var(--muted2);font-weight:600;">Settle TX</th>
+                      <th style="padding:8px 8px;text-align:left;color:var(--muted2);font-weight:600;white-space:nowrap;">Intent ID</th>
+                      <th style="padding:8px 6px;text-align:left;color:var(--muted2);font-weight:600;">Route</th>
+                      <th style="padding:8px 6px;text-align:left;color:var(--muted2);font-weight:600;">Asset</th>
+                      <th style="padding:8px 6px;text-align:right;color:var(--muted2);font-weight:600;">Amount</th>
+                      <th style="padding:8px 6px;text-align:center;color:var(--muted2);font-weight:600;">Status</th>
+                      <th style="padding:8px 6px;text-align:center;color:var(--muted2);font-weight:600;">Source Burn TX</th>
+                      <th style="padding:8px 6px;text-align:center;color:var(--muted2);font-weight:600;">Circle Attest</th>
+                      <th style="padding:8px 6px;text-align:center;color:var(--muted2);font-weight:600;">ARC Fulfill TX</th>
+                      <th style="padding:8px 6px;text-align:center;color:var(--muted2);font-weight:600;">Treasury Settle TX</th>
+                      <th style="padding:8px 6px;text-align:right;color:var(--muted2);font-weight:600;">Reimb Amt</th>
+                      <th style="padding:8px 6px;text-align:right;color:var(--muted2);font-weight:600;">Settle Time</th>
+                      <th style="padding:8px 6px;text-align:center;color:var(--muted2);font-weight:600;">Verification</th>
                     </tr>
                   </thead>
                   <tbody id="stl-table-body">
                     <tr>
-                      <td colspan="10" style="padding:24px;text-align:center;color:var(--muted2);font-size:11px;">
+                      <td colspan="12" style="padding:24px;text-align:center;color:var(--muted2);font-size:11px;">
                         <i class="ti ti-database-off" style="font-size:20px;display:block;margin-bottom:6px;"></i>
                         No settlements found. Connect wallet to load protocol data.
                       </td>
@@ -6447,7 +6462,7 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
               </div>
             </div>
 
-            <!-- RECOVERY ENGINE PANEL (operators only) -->
+            <!-- RECOVERY ENGINE PANEL (operators only) — PRESERVED -->
             <div class="vault-card" id="stl-recovery-panel" style="padding:14px;margin-bottom:14px;display:none;">
               <div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:10px;display:flex;align-items:center;gap:6px;">
                 <i class="ti ti-tools" style="color:#f59e0b;"></i> Settlement Recovery Engine
@@ -6470,7 +6485,39 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
               <div id="stl-recovery-log" style="margin-top:10px;background:var(--bg2);border-radius:6px;padding:8px;font-size:10px;color:var(--muted2);font-family:monospace;max-height:80px;overflow-y:auto;display:none;"></div>
             </div>
 
-            <!-- TREASURY METRICS -->
+            <!-- REIMBURSEMENT AUDIT TRAIL -->
+            <div class="vault-card" style="padding:14px;margin-bottom:14px;">
+              <div class="stl-section-divider">
+                <i class="ti ti-zoom-scan" style="color:#a78bfa;"></i> Reimbursement Audit Trail
+                <span style="margin-left:auto;font-size:9px;color:var(--muted2);font-weight:400;">on-chain verified only</span>
+              </div>
+              <div style="overflow-x:auto;">
+                <table style="width:100%;border-collapse:collapse;font-size:9px;">
+                  <thead>
+                    <tr class="audit-head" style="border-bottom:1px solid var(--border);">
+                      <th style="padding:6px 8px;text-align:left;">Intent ID</th>
+                      <th style="padding:6px 8px;text-align:center;">Burn TX</th>
+                      <th style="padding:6px 8px;text-align:center;">Attestation Hash</th>
+                      <th style="padding:6px 8px;text-align:center;">Mint TX</th>
+                      <th style="padding:6px 8px;text-align:center;">Settlement TX</th>
+                      <th style="padding:6px 8px;text-align:right;">Reimb Amount</th>
+                      <th style="padding:6px 8px;text-align:right;">Verification Time</th>
+                      <th style="padding:6px 8px;text-align:center;">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody id="stl-audit-body">
+                    <tr>
+                      <td colspan="8" style="padding:24px;text-align:center;color:var(--muted2);font-size:11px;">
+                        <i class="ti ti-search" style="font-size:20px;display:block;margin-bottom:6px;"></i>
+                        No verified reimbursements yet. Complete settlements appear here.
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- TREASURY METRICS (corrected) -->
             <div class="vault-card" style="padding:14px;">
               <div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:10px;display:flex;align-items:center;gap:6px;">
                 <i class="ti ti-trending-up" style="color:#22c55e;"></i> Treasury Profitability Metrics
@@ -6479,7 +6526,7 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
                 <div style="background:var(--card-inner,rgba(255,255,255,.03));border-radius:7px;padding:9px 11px;">
                   <div style="font-size:10px;color:var(--muted2);">Total Reimbursements</div>
                   <div id="stl-met-reimb" style="font-size:14px;font-weight:700;color:#22c55e;margin-top:3px;">—</div>
-                  <div style="font-size:9px;color:var(--muted2);">from Circle CCTP</div>
+                  <div style="font-size:9px;color:var(--muted2);">SUM verified on-chain</div>
                 </div>
                 <div style="background:var(--card-inner,rgba(255,255,255,.03));border-radius:7px;padding:9px 11px;">
                   <div style="font-size:10px;color:var(--muted2);">Liquidity Deployed</div>
@@ -6901,7 +6948,7 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
 // ── Cloudflare Pages runtime configuration ──────────────────
 // Keys are injected at runtime by the Cloudflare Pages Function
 window.__ARC_PAY_CONFIG__ = window.__ARC_PAY_CONFIG__ || {
-  wcProjectId:   '',    // WalletConnect v2 Project ID
+  wcProjectId:   '__WC_PROJECT_ID_PLACEHOLDER__',    // WalletConnect v2 Project ID (injected at runtime)
   kitKey:        '__KIT_KEY_PLACEHOLDER__',    // Circle App Kit key (for Swap)
   testApiKey:    '__TEST_API_KEY_PLACEHOLDER__', // Circle API key
   batchContract: '',    // Deployed ElligentBatch.sol address (leave empty to use direct ERC-20 transfers)
@@ -6913,6 +6960,60 @@ window.__ARC_PAY_CONFIG__ = window.__ARC_PAY_CONFIG__ || {
 </script>
 
 <script>
+// ═══════════════════════════════════════════════════════════
+//  INTERVAL TRACKER — clean up all intervals on page unload
+// ═══════════════════════════════════════════════════════════
+const _intervals = [];
+function _setInterval(fn, ms) {
+  const id = setInterval(fn, ms);
+  _intervals.push(id);
+  return id;
+}
+function _clearAllIntervals() {
+  _intervals.forEach(id => clearInterval(id));
+  _intervals.length = 0;
+}
+window.addEventListener('beforeunload', _clearAllIntervals);
+window.addEventListener('pagehide', _clearAllIntervals);
+// ═══════════════════════════════════════════════════════════
+//  DEBUG LOGGER — production-safe conditional logging
+//  Set localStorage.arcpay_debug=1 to enable verbose logs
+// ═══════════════════════════════════════════════════════════
+const __DEBUG__ = (() => {
+  try { return localStorage.getItem('arcpay_debug') === '1'; } catch(_) { return false; }
+})();
+function _log(...args) { if (__DEBUG__) console.log(...args); }
+function _warn(...args) { if (__DEBUG__) console.warn(...args); }
+function _err(...args) { console.error(...args); } // errors always visible
+// ═══════════════════════════════════════════════════════════
+//  PROVIDER CACHE — reuses JsonRpcProvider per RPC URL
+//  TTL: 5 minutes before refresh. Retry on stale/failed connections.
+// ═══════════════════════════════════════════════════════════
+const _providerCache = {};
+const PROVIDER_TTL = 5 * 60 * 1000; // 5 minutes
+
+function getCachedProvider(rpcUrl) {
+  const entry = _providerCache[rpcUrl];
+  const now = Date.now();
+  if (entry && (now - entry.createdAt) < PROVIDER_TTL) {
+    return entry.provider;
+  }
+  // Create or refresh
+  _providerCache[rpcUrl] = {
+    provider: new ethers.JsonRpcProvider(rpcUrl),
+    createdAt: now,
+  };
+  return _providerCache[rpcUrl].provider;
+}
+// ── Secure random utilities (crypto.getRandomValues) ──────────────
+function _secureRandomInt(max) {
+  const arr = new Uint32Array(1);
+  crypto.getRandomValues(arr);
+  return arr[0] % max;
+}
+// ── XSS sanitizer ─────────────────────────────────────────────────
+function _esc(s) { return escHtml ? escHtml(s) : (typeof s === 'string' ? s.replace(/</g,'&lt;') : s); }
+
 // ═══════════════════════════════════════════════════════════
 //  ARC TESTNET — Real network config
 //  Source: https://docs.arc.network/arc/references/connect-to-arc
@@ -6981,12 +7082,22 @@ const PLATFORM_FEE_BPS = 100; // 1% = 100 basis points. This is the actual on-ch
 window.__SWAP_ADDRESS__  = '0x0000000000000000000000000000000000000001';
 window.__POOL_ADDRESS__  = '0x18076d992005186AeB13AC5270CaD6E27DB95247';
 
-const SWAP_ROUTER_ADDRESS  = window.__SWAP_ADDRESS__  || '0x0000000000000000000000000000000000000001'; // (optional) ElligentSwap router — currently disabled, swap uses pool directly
-const POOL_CONTRACT_ADDRESS = window.__POOL_ADDRESS__ || '0x0000000000000000000000000000000000000002'; // Deploy ElligentPool.sol
+const SWAP_ROUTER_ADDRESS  = window.__SWAP_ADDRESS__  || '0x0000000000000000000000000000000000000001';
+const POOL_CONTRACT_ADDRESS = window.__POOL_ADDRESS__ || '0x0000000000000000000000000000000000000002'; 
+
+// ── Freeze ABIs — immutable protection (only internal arrays, never passed to external APIs) ──
+Object.freeze(USDC_ABI);
+Object.freeze(BATCH_ABI);
+Object.freeze(SWAP_ROUTER_ABI);
+Object.freeze(POOL_CONTRACT_ABI);
 
 
 // ── State ──────────────────────────────────────────────────
 let walletAddress = null, provider = null, signer = null;
+// ── AppState namespace — provides centralized access to wallet & chain state
+// All existing code continues to use the global variables directly.
+// New code should reference window.__App to find the canonical state.
+window.__App = { get walletAddress() { return walletAddress; }, get provider() { return provider; }, get signer() { return signer; }, get activeChainId() { return activeChainId; }, get activeWalletType() { return activeWalletType; } };
 // Hardcoded contract addresses (managed in code / "backend", not user-configurable in UI)
 // These replace the removed UI sections for ElligentBatch and Cross-Chain Batcher.
 let batchContractAddr = '0x...';           // <-- Paste your deployed ElligentBatch address here (or leave empty for direct transfers)
@@ -6995,7 +7106,7 @@ let batchCount = 0, successCount = 0;
 // Recipients are persisted in localStorage — loaded at init
 const recipients = [];
 function saveRecipients() {
-  try { localStorage.setItem('arcpay_recipients', JSON.stringify(recipients)); } catch(e) {}
+  try { localStorage.setItem('arcpay_recipients', JSON.stringify(recipients)); } catch(e) { _warn('catch', e?.message||e); }
 }
 function loadPersistedRecipients() {
   try {
@@ -7005,7 +7116,7 @@ function loadPersistedRecipients() {
       saved.forEach(r => recipients.push(r));
       return true;
     }
-  } catch(e) {}
+  } catch(e) { _warn('catch', e?.message||e); }
   return false;
 }
 
@@ -7014,7 +7125,7 @@ function saveBatcherAddresses() {
   try {
     localStorage.setItem('arcpay_batch_contract', batchContractAddr || '');
     localStorage.setItem('arcpay_xc_batcher', crossChainBatcherAddr || '');
-  } catch(e) {}
+  } catch(e) { _warn('catch', e?.message||e); }
 }
 
 function loadBatcherAddresses() {
@@ -7036,7 +7147,7 @@ function loadBatcherAddresses() {
     if (!crossChainBatcherAddr && b2 && isAddr(b2)) {
       crossChainBatcherAddr = b2;
     }
-  } catch(e) {}
+  } catch(e) { _warn('catch', e?.message||e); }
 }
 
 // ── Chains data ────────────────────────────────────────────
@@ -7203,13 +7314,14 @@ const fromUsdc = bn => (Number(bn)/1e6).toFixed(2);
 const shortAddr= a  => a?a.slice(0,6)+'...'+a.slice(-4):'—';
 const isAddr   = a  => /^0x[0-9a-fA-F]{40}$/.test(a);
 const isEns    = a  => typeof a==='string'&&a.endsWith('.eth');
+const escHtml  = s  => { if (typeof s !== 'string') return s; return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); };
 
 // Global error handler to help debug broken buttons
 window.addEventListener('error', function(e) {
-  console.error('[GLOBAL JS ERROR]', e.message, 'at', e.filename + ':' + e.lineno);
+  _err('[GLOBAL JS ERROR]', e.message, 'at', e.filename + ':' + e.lineno);
 });
 window.addEventListener('unhandledrejection', function(e) {
-  console.error('[UNHANDLED PROMISE]', e.reason);
+  _err('[UNHANDLED PROMISE]', e.reason);
 });
 
 // Local helper — much more reliable than calling the contract
@@ -7268,7 +7380,7 @@ let _tt;
 function toast(msg,type='info'){
   const el=document.getElementById('toast');
   const ic={success:'ti-check',error:'ti-x',info:'ti-info-circle',warning:'ti-alert-triangle'};
-  el.innerHTML=`<i class="ti ${ic[type]||'ti-info-circle'}" style="font-size:13px;flex-shrink:0"></i>${msg}`;
+  el.innerHTML=`<i class="ti ${ic[type]||'ti-info-circle'}" style="font-size:13px;flex-shrink:0"></i>${escHtml(msg)}`;
   el.className=`toast ${type} show`;
   clearTimeout(_tt);_tt=setTimeout(()=>el.classList.remove('show'),4000);
 }
@@ -7328,7 +7440,7 @@ function showPage(id) {
       if (dateInput) dateInput.lang = 'en-US';
     }
   } catch (err) {
-    console.error('showPage error for id:', id, err);
+    _err('showPage error for id:', id, err);
   }
 }
 
@@ -7339,8 +7451,8 @@ function showPage(id) {
 //  Native gas token: USDC (18 dec field) | ERC-20 USDC: 6 dec
 // ══════════════════════════════════════════════════════════
 
-// WalletConnect Project ID — replace with yours from cloud.walletconnect.com
-const WC_PROJECT_ID = (window.__ARC_PAY_CONFIG__?.wcProjectId) || 'b9d9e4c5e8f14a3b6d2e1f0a9c8b7d6e';
+// WalletConnect Project ID — injected at runtime by Cloudflare Pages Function
+const WC_PROJECT_ID = (window.__ARC_PAY_CONFIG__?.wcProjectId) || '';
 
 let wcProvider      = null;
 let activeWalletType = null; // 'metamask' | 'coinbase' | 'rabby' | 'injected' | 'walletconnect'
@@ -7408,7 +7520,6 @@ const ARC_CHAIN_PARAMS = {
   rpcUrls:           ['https://rpc.testnet.arc.network'],
   blockExplorerUrls: ['https://testnet.arcscan.app']
 };
-
 // ── Ensure wallet is on Arc Testnet ────────────────────────
 async function ensureArcTestnet(raw) {
   try {
@@ -7438,12 +7549,12 @@ async function ensureArcTestnet(raw) {
         });
       } catch(addErr) {
         if(addErr.code !== 4001) {
-          console.warn('wallet_addEthereumChain error:', addErr);
+          _warn('wallet_addEthereumChain error:', addErr);
         }
       }
     } else if(switchErr.code !== 4001) {
       // Not a user rejection — log but don't throw (some wallets accept the chain silently)
-      console.warn('wallet_switchEthereumChain:', switchErr.message);
+      _warn('wallet_switchEthereumChain:', switchErr.message);
     }
   }
 }
@@ -7462,7 +7573,7 @@ async function refreshProviderState() {
   signer        = await provider.getSigner();
   walletAddress = await signer.getAddress();
   activeChainId = chainId;
-  console.log('[refreshProviderState] chainId:', chainId, '| addr:', walletAddress);
+  _log('[refreshProviderState] chainId:', chainId, '| addr:', walletAddress);
   return { provider, signer, walletAddress, chainId };
 }
 
@@ -7524,18 +7635,18 @@ async function refreshBalance() {
   try {
     // JsonRpcProvider avoids stale BrowserProvider cache for balance reads
     const chain    = getActiveChain();
-    const prov     = new ethers.JsonRpcProvider(chain.rpc);
+    const prov     = getCachedProvider(chain.rpc);
     const usdcAddr = chain.tokens?.USDC?.address;
     // DEBUG LOGS for Sepolia (and all chains) balance audit
     // Arc vs Sepolia flow comparison: both use identical path via getActiveChain() + chain.rpc + chain.tokens[SYMBOL].address + JsonRpcProvider + balanceOf
     // Difference previously: Sepolia lacked cirBTC in registry (now added) and cirBTC in SA_TOKENS was always hardcoded (now falls back to getTokenAddress which uses activeChainId)
-    console.log('[refreshBalance] detected chainId:', activeChainId, 'chain:', chain?.id || chain?.name);
-    console.log('[refreshBalance] selected USDC token address:', usdcAddr, 'wallet:', walletAddress, 'RPC:', chain.rpc);
+    _log('[refreshBalance] detected chainId:', activeChainId, 'chain:', chain?.id || chain?.name);
+    _log('[refreshBalance] selected USDC token address:', usdcAddr, 'wallet:', walletAddress, 'RPC:', chain.rpc);
     if (!usdcAddr) { set('sb-bal', '—'); return; }
     const usdc  = new ethers.Contract(usdcAddr, USDC_ABI, prov);
     const bal   = await usdc.balanceOf(walletAddress);
     const fmt   = fromUsdc(bal);
-    console.log('[refreshBalance] fetched USDC balance:', bal.toString(), 'formatted:', fmt);
+    _log('[refreshBalance] fetched USDC balance:', bal.toString(), 'formatted:', fmt);
     set('sb-bal',     fmt);
     set('dd-bal',     fmt);
     set('sender-bal', 'Balance: ' + fmt + ' USDC');
@@ -7544,15 +7655,15 @@ async function refreshBalance() {
       try {
         const eurc = new ethers.Contract(eurcAddr, USDC_ABI, prov);
         const eurcBal = await eurc.balanceOf(walletAddress);
-        console.log('[refreshBalance] fetched EURC balance:', eurcBal.toString());
+        _log('[refreshBalance] fetched EURC balance:', eurcBal.toString());
         set('sb-eurc-bal', fromUsdc(eurcBal));
-      } catch(_) {}
+      } catch(e) { _warn('silent-catch', e?.message||e); }
     }
     // cirBTC not fetched in main refresh (Send Assets specific)
     updateSwapBalancesDisplay(); // keep swap widget balances fresh
     return fmt;
   } catch(e) {
-    console.warn('refreshBalance error:', e.message);
+    _warn('refreshBalance error:', e.message);
     set('sb-bal', '—');
     set('dd-bal', '—');
   }
@@ -7560,7 +7671,7 @@ async function refreshBalance() {
 
 // ── disconnectWallet ────────────────────────────────────────────
 function disconnectWallet() {
-  try { if(_rawProvider?.removeAllListeners) _rawProvider.removeAllListeners(); } catch(e){}
+  try { if(_rawProvider?.removeAllListeners) _rawProvider.removeAllListeners(); } catch(e){ _warn('catch', e?.message||e); }
   walletAddress = null; provider = null; signer = null;
   activeWalletType = null; _rawProvider = null; activeChainId = 5042002;
   const set = (id, val) => { const el=document.getElementById(id); if(el) el.textContent=val; };
@@ -7584,7 +7695,7 @@ function disconnectWallet() {
 
 function setupProviderEvents(raw) {
   // Remove stale listeners first (prevents duplicate handlers on reconnect)
-  try { if(raw.removeAllListeners) raw.removeAllListeners(); } catch(e){}
+  try { if(raw.removeAllListeners) raw.removeAllListeners(); } catch(e){ _warn('catch', e?.message||e); }
   try {
     raw.on('accountsChanged', async accs => {
       if(!accs || accs.length === 0) { disconnectWallet(); return; }
@@ -7604,7 +7715,7 @@ function setupProviderEvents(raw) {
     // Hard-refresh provider so ethers v6 stale cache is discarded.
     raw.on('chainChanged', async hexChainId => {
       const newChainId = parseInt(hexChainId, 16);
-      console.log('[chainChanged] new chainId:', newChainId);
+      _log('[chainChanged] new chainId:', newChainId);
       await refreshProviderState();
       updateNetworkBadge();
       await refreshBalance();
@@ -7614,7 +7725,7 @@ function setupProviderEvents(raw) {
 
     raw.on('disconnect', () => disconnectWallet());
   } catch(e) {
-    console.warn('setupProviderEvents:', e.message);
+    _warn('setupProviderEvents:', e.message);
   }
 }
 
@@ -7738,7 +7849,7 @@ function openInstallLink() {
         toast('Install at: ' + _pendingInstallUrl, 'info');
       });
     // Also attempt window.open — may work in some contexts
-    try { window.open(_pendingInstallUrl, '_blank'); } catch {}
+    try { window.open(_pendingInstallUrl, '_blank'); } catch(e) { _warn('silent-catch', e?.message||e); }
   }
 }
 
@@ -7756,7 +7867,7 @@ async function connectManualAddress(inputSuffix) {
   if(raw.endsWith('.eth')) {
     try {
       toast('Resolving ENS…', 'info');
-      const ensProvider = new ethers.JsonRpcProvider('https://cloudflare-eth.com');
+      const ensProvider = getCachedProvider('https://cloudflare-eth.com');
       addr = await ensProvider.resolveName(raw);
       if(!addr) { toast('ENS name not found', 'error'); return; }
     } catch { toast('ENS resolution failed — Arc Testnet does not support ENS', 'error'); return; }
@@ -7768,7 +7879,7 @@ async function connectManualAddress(inputSuffix) {
 
   // Set as read-only "preview" session — no signer, no signing
   walletAddress    = addr;
-  provider         = new ethers.JsonRpcProvider('https://rpc.testnet.arc.network');
+  provider         = getCachedProvider('https://rpc.testnet.arc.network');
   signer           = null;              // no signer — preview only
   activeWalletType = 'preview';
   _rawProvider     = null;
@@ -7839,7 +7950,7 @@ async function connectMetaMask() {
   } catch(e) {
     if(row) row.style.opacity = '1';
     if(e.code === 4001) toast('Connection rejected by user', 'error');
-    else { console.error('MetaMask:', e); toast('MetaMask: ' + (e.shortMessage||e.message||'error'), 'error'); }
+    else { _err('MetaMask:', e); toast('MetaMask: ' + (e.shortMessage||e.message||'error'), 'error'); }
   }
 }
 
@@ -7867,7 +7978,7 @@ async function connectCoinbase() {
   } catch(e) {
     if(row) row.style.opacity = '1';
     if(e.code === 4001) toast('Connection rejected', 'error');
-    else { console.error('Coinbase:', e); toast('Coinbase Wallet: ' + (e.message||'error'), 'error'); }
+    else { _err('Coinbase:', e); toast('Coinbase Wallet: ' + (e.message||'error'), 'error'); }
   }
 }
 
@@ -7895,7 +8006,7 @@ async function connectRabby() {
   } catch(e) {
     if(row) row.style.opacity = '1';
     if(e.code === 4001) toast('Connection rejected', 'error');
-    else { console.error('Rabby:', e); toast('Rabby: ' + (e.message||'error'), 'error'); }
+    else { _err('Rabby:', e); toast('Rabby: ' + (e.message||'error'), 'error'); }
   }
 }
 
@@ -7964,7 +8075,7 @@ async function connectWalletConnect() {
     if(statusEl) statusEl.textContent = 'Trust, Rainbow, Uniswap & 300+ wallets';
     const cancelled = /User rejected|cancelled|Modal closed/i.test(e.message||'');
     if(cancelled) toast('WalletConnect cancelled', 'info');
-    else { console.error('WalletConnect:', e); toast('WalletConnect error — see console', 'error'); }
+    else { _err('WalletConnect:', e); toast('WalletConnect error — see console', 'error'); }
   }
 }
 
@@ -8165,7 +8276,7 @@ async function executeCrossChainBatch(crossRcpts, useHook = false){
             chainName: (CHAINS[rcpt.chainId] && CHAINS[rcpt.chainId].name) || 'Unknown'
           });
         }
-      } catch (_) {}
+      } catch (e) { _warn('silent-catch', e?.message||e); }
     }
 
     // Beautiful display of pending CCTP transfers
@@ -8181,7 +8292,7 @@ async function executeCrossChainBatch(crossRcpts, useHook = false){
 
       // Use a nicer toast + console + alert fallback
       toast(`✓ ${pending.length} cross-chain transfers initiated! Check console for nonces.`, 'success');
-      console.log('%c[Elligente] Cross-Chain Batch Results', 'color:#14b8a6;font-weight:600', { tx: tx.hash, pending });
+      _log('%c[Elligente] Cross-Chain Batch Results', 'color:#14b8a6;font-weight:600', { tx: tx.hash, pending });
       // Show in a more prominent way
       setTimeout(() => {
         const detail = `Batch TX: ${tx.hash}\n\n` + pending.map(p => `${p.amount} USDC to ${p.chainName} → Nonce: ${p.nonce}`).join('\n');
@@ -8201,7 +8312,7 @@ async function executeCrossChainBatch(crossRcpts, useHook = false){
     renderRecipients();
 
   } catch(e){
-    console.error('Cross-chain batch error:', e);
+    _err('Cross-chain batch error:', e);
     const msg = e.shortMessage || e.message || 'Unknown error';
     toast('Cross-chain batch failed: ' + msg, 'error');
   }
@@ -8247,10 +8358,10 @@ function renderTable(){
       <td style="font-size:9px;color:var(--muted2);text-align:center">${i+1}</td>
       <td>
         <div class="avc" style="flex-direction:column;align-items:flex-start;gap:2px">
-          <input class="ni" value="${name}" placeholder="Name (opt.)" style="font-size:9px;margin-bottom:2px;width:100%" onchange="recipients[${i}].name=this.value"/>
+          <input class="ni" value="${escHtml(name)}" placeholder="Name (opt.)" style="font-size:9px;margin-bottom:2px;width:100%" onchange="recipients[${i}].name=this.value"/>
           <div style="display:flex;align-items:center;gap:4px">
-            <div class="av" style="background:${GRAD[i%GRAD.length]};flex-shrink:0">${name?name[0].toUpperCase():'0x'}</div>
-            <input class="ai" value="${r.addr}" placeholder="0x... address" style="font-size:10px;font-family:'JetBrains Mono',monospace;width:130px" onchange="recipients[${i}].addr=this.value;renderTable()"/>
+            <div class="av" style="background:${GRAD[i%GRAD.length]};flex-shrink:0">${escHtml(name) ? name[0].toUpperCase() : '0x'}</div>
+            <input class="ai" value="${escHtml(r.addr)}" placeholder="0x... address" style="font-size:10px;font-family:'JetBrains Mono',monospace;width:130px" onchange="recipients[${i}].addr=this.value;renderTable()"/>
           </div>
         </div>
       </td>
@@ -8270,8 +8381,8 @@ function renderTable(){
           </select>
         </div>
       </td>
-      <td><input class="ai" value="${r.amount}" onchange="recipients[${i}].amount=this.value;updateStats()"/></td>
-      <td><input class="ni" value="${r.note||''}" placeholder="Note..." style="min-width:70px" onchange="recipients[${i}].note=this.value"/></td>
+      <td><input class="ai" value="${escHtml(r.amount)}" onchange="recipients[${i}].amount=this.value;updateStats()"/></td>
+      <td><input class="ni" value="${escHtml(r.note||'')}" placeholder="Note..." style="min-width:70px" onchange="recipients[${i}].note=this.value"/></td>
       <td>${routeBadge}</td>
       <td>${badge}</td>
       <td><div class="rm" onclick="removeRow(${i})">×</div></td>`;
@@ -8401,7 +8512,7 @@ function startLiveRecipientProgress(total) {
   if (ln) ln.classList.add('sending');
   let current = 0;
   clearInterval(wfSendInterval);
-  wfSendInterval = setInterval(() => {
+  wfSendInterval = _setInterval(() => {
     current = Math.min(total, current + 1);
     text.textContent = `Sending ${current}/${total}`;
     const p = Math.round((current / total) * 100);
@@ -8505,11 +8616,11 @@ async function signTx(){
     for(const r of validRcpts){
       if(isEns(r.addr) && r.addr.length > 4 && r.addr.length < 100){
         try{
-          const ensProvider = new ethers.JsonRpcProvider('https://cloudflare-eth.com');
+          const ensProvider = getCachedProvider('https://cloudflare-eth.com');
           r._resolved = await ensProvider.resolveName(r.addr);
           if(!r._resolved){ toast('ENS name not found: '+r.addr,'error'); return; }
         } catch(e){ 
-          console.warn('ENS resolution error:', e);
+          _warn('ENS resolution error:', e);
           toast('ENS resolution failed for '+r.addr + ' (Arc Testnet dApp does not support ENS directly)', 'error'); 
           return; 
         }
@@ -8544,7 +8655,7 @@ async function signTx(){
       const eurcContract = new ethers.Contract(activeEURC(), USDC_ABI, signer);
 
       // Use fresh read-only provider only for balance checks (to avoid decode errors on some RPC states)
-      const readProvider = new ethers.JsonRpcProvider('https://rpc.testnet.arc.network');
+      const readProvider = getCachedProvider('https://rpc.testnet.arc.network');
       const usdcRead = new ethers.Contract(activeUSDC(), USDC_ABI, readProvider);
       const eurcRead = new ethers.Contract(activeEURC(), USDC_ABI, readProvider);
 
@@ -8638,29 +8749,29 @@ async function signTx(){
         const feeAmt = (totalAmt * BigInt(PLATFORM_FEE_BPS)) / 10000n;
         const effectiveTotal = totalAmt + feeAmt;
 
-        console.log(`[Multisend] ${label} batch — sender: ${senderAddr}`);
-        console.log(`[Multisend] token: ${tokenAddr}`);
-        console.log(`[Multisend] Multicall3: ${MULTICALL3_ADDRESS}`);
-        console.log(`[Multisend] recipients (${addrs.length}):`, addrs);
-        console.log(`[Multisend] amounts (raw):`, amts.map(a => a.toString()));
-        console.log(`[Multisend] totalAmt (raw): ${totalAmt.toString()}`);
-        console.log(`[Multisend] platformFee (1%, raw): ${feeAmt.toString()}`);
-        console.log(`[Multisend] batchTotal: ${batchTotal.toFixed(6)} ${label}`);
+        _log(`[Multisend] ${label} batch — sender: ${senderAddr}`);
+        _log(`[Multisend] token: ${tokenAddr}`);
+        _log(`[Multisend] Multicall3: ${MULTICALL3_ADDRESS}`);
+        _log(`[Multisend] recipients (${addrs.length}):`, addrs);
+        _log(`[Multisend] amounts (raw):`, amts.map(a => a.toString()));
+        _log(`[Multisend] totalAmt (raw): ${totalAmt.toString()}`);
+        _log(`[Multisend] platformFee (1%, raw): ${feeAmt.toString()}`);
+        _log(`[Multisend] batchTotal: ${batchTotal.toFixed(6)} ${label}`);
 
         if (addrs.length > 150) {
-          console.warn(`[Multisend] Large batch detected (${addrs.length} recipients). Encoding very large Multicall3 tx can cause "Maximum call stack size exceeded" in some browsers. Consider using "Execute in Parts" for >150 recipients.`);
+          _warn(`[Multisend] Large batch detected (${addrs.length} recipients). Encoding very large Multicall3 tx can cause "Maximum call stack size exceeded" in some browsers. Consider using "Execute in Parts" for >150 recipients.`);
           toast(`Large batch (${addrs.length} recipients) — if you see stack errors, use "Execute in Parts"`, 'warning');
         }
 
         // ── Balance check (using fresh provider to avoid decode issues) ─────
         let balance;
         try {
-          const readProvider = new ethers.JsonRpcProvider('https://rpc.testnet.arc.network');
+          const readProvider = getCachedProvider('https://rpc.testnet.arc.network');
           const readContract = new ethers.Contract(tokenAddr, USDC_ABI, readProvider);
           balance = await readContract.balanceOf(senderAddr);
-          console.log(`[Multisend] balance (raw): ${balance.toString()}`);
+          _log(`[Multisend] balance (raw): ${balance.toString()}`);
         } catch (balErr) {
-          console.error('[Multisend] Failed to read balance:', balErr);
+          _err('[Multisend] Failed to read balance:', balErr);
           toast('Could not read your balance. Check if you are on Arc Testnet.', 'error');
           throw new Error('balance_read_failed');
         }
@@ -8674,11 +8785,11 @@ async function signTx(){
 
         // ── Check if Multicall3 is deployed on this chain ───────────────────
         const mc3Deployed = await isMulticall3Deployed();
-        console.log(`[Multisend] Multicall3 deployed on chain: ${mc3Deployed}`);
+        _log(`[Multisend] Multicall3 deployed on chain: ${mc3Deployed}`);
 
         if (!mc3Deployed) {
           // FALLBACK: Sequential individual transfers
-          console.warn('[Multisend] Multicall3 not found on this chain — falling back to sequential transfers');
+          _warn('[Multisend] Multicall3 not found on this chain — falling back to sequential transfers');
           toast(`Multicall3 not available on Arc — sending ${rcpts.length} individual transfer${rcpts.length>1?'s':''}...`, 'warning');
           for (let i = 0; i < addrs.length; i++) {
             toast(`Sending ${rcpts[i].amount} ${label} → ${shortAddr(addrs[i])} (${i+1}/${addrs.length})...`, 'info');
@@ -8694,10 +8805,10 @@ async function signTx(){
               await feeTx.wait();
               toast(`✓ Platform fee ${ (Number(feeAmt)/1e6).toFixed(4) } ${label} sent to owner`, 'info');
             } catch (feeErr) {
-              console.warn('[Multisend] Fee transfer in fallback failed (non-fatal):', feeErr);
+              _warn('[Multisend] Fee transfer in fallback failed (non-fatal):', feeErr);
             }
           } else if (feeAmt > 0n) {
-            console.warn('[Multisend] Platform fee (fallback) skipped: invalid OWNER_WALLET');
+            _warn('[Multisend] Platform fee (fallback) skipped: invalid OWNER_WALLET');
           }
           toast(`✓ All ${addrs.length} ${label} transfers complete`, 'success');
           return null; // no single hash for sequential
@@ -8723,70 +8834,70 @@ async function signTx(){
             allowFailure: false,
             callData:     erc20Iface.encodeFunctionData('transferFrom', [senderAddr, OWNER_WALLET, feeAmt])
           });
-          console.log(`[Multisend] added platform fee call: ${Number(feeAmt)/1e6} ${label} → ${shortAddr(OWNER_WALLET)}`);
+          _log(`[Multisend] added platform fee call: ${Number(feeAmt)/1e6} ${label} → ${shortAddr(OWNER_WALLET)}`);
         } else if (feeAmt > 0n) {
-          console.warn('[Multisend] Platform fee skipped: OWNER_WALLET is not a valid address');
+          _warn('[Multisend] Platform fee skipped: OWNER_WALLET is not a valid address');
         }
 
-        console.log(`[Multisend] calls[0] callData:`, calls[0]?.callData?.slice(0, 66));
+        _log(`[Multisend] calls[0] callData:`, calls[0]?.callData?.slice(0, 66));
 
         // ── Verify execution model: confirm we are NOT using transfer() ───────
         try {
           const decoded = erc20Iface.parseTransaction({ data: calls[0].callData });
-          console.log(`[Multisend] VERIFIED: using ${decoded.name} (from=${decoded.args[0]}, to=${decoded.args[1]}) inside Multicall3`);
-          console.log('[Multisend] Execution model: Multicall3 will call transferFrom as msg.sender → token will pull from user allowance');
+          _log(`[Multisend] VERIFIED: using ${decoded.name} (from=${decoded.args[0]}, to=${decoded.args[1]}) inside Multicall3`);
+          _log('[Multisend] Execution model: Multicall3 will call transferFrom as msg.sender → token will pull from user allowance');
           if (decoded.name === 'transfer') {
-            console.error('[Multisend] !!! CRITICAL: Still using transfer() instead of transferFrom() — this will fail because Multicall3 has 0 balance');
+            _err('[Multisend] !!! CRITICAL: Still using transfer() instead of transferFrom() — this will fail because Multicall3 has 0 balance');
           }
         } catch(e) {
-          console.warn('[Multisend] could not decode callData for method verification', e);
+          _warn('[Multisend] could not decode callData for method verification', e);
         }
 
         // ── Check & set allowance (includes platform fee) ─────────────────────
         const allowance = await tokenContract.allowance(senderAddr, MULTICALL3_ADDRESS);
-        console.log(`[Multisend] current allowance (raw): ${allowance.toString()}`);
-        console.log(`[Multisend] needed allowance (raw, +1% fee): ${effectiveTotal.toString()}`);
+        _log(`[Multisend] current allowance (raw): ${allowance.toString()}`);
+        _log(`[Multisend] needed allowance (raw, +1% fee): ${effectiveTotal.toString()}`);
         if (allowance < effectiveTotal) {
           const approveDisplay = batchTotal + (Number(feeAmt) / 1e6);
           toast(`Approving ${(approveDisplay).toFixed(2)} ${label} (recipients + 1% platform fee) for Multicall3...`, 'info');
           const approveTx = await tokenContract.approve(MULTICALL3_ADDRESS, effectiveTotal);
-          console.log(`[Multisend] approve tx: ${approveTx.hash}`);
+          _log(`[Multisend] approve tx: ${approveTx.hash}`);
           await approveTx.wait();
-          console.log(`[Multisend] approve confirmed`);
+          _log(`[Multisend] approve confirmed`);
         } else {
-          console.log(`[Multisend] allowance sufficient (incl fee), skipping approve`);
+          _log(`[Multisend] allowance sufficient (incl fee), skipping approve`);
         }
 
         // ── DETAILED DIAGNOSTICS BEFORE SIMULATION (as requested) ─────────────
         console.groupCollapsed('[Multisend] === PRE-SIMULATION DIAGNOSTICS ===');
-        console.log('chainId:', activeChainId);
-        console.log('sender (walletAddress):', senderAddr);
-        console.log('tokenAddress:', tokenAddr);
-        console.log('recipients:', addrs);
-        console.log('amounts (raw bigint):', amts.map(a => a.toString()));
-        console.log('total batch amount (raw):', totalAmt.toString());
-        console.log('batchTotal (decimal):', batchTotal);
-        console.log('first calldata (transferFrom):', calls[0]?.callData);
+        _log('chainId:', activeChainId);
+        _log('sender (walletAddress):', senderAddr);
+        _log('tokenAddress:', tokenAddr);
+        _log('recipients:', addrs);
+        _log('amounts (raw bigint):', amts.map(a => a.toString()));
+        _log('total batch amount (raw):', totalAmt.toString());
+        _log('batchTotal (decimal):', batchTotal);
+        _log('first calldata (transferFrom):', calls[0]?.callData);
         try {
-          const readProv = new ethers.JsonRpcProvider('https://rpc.testnet.arc.network');
+          const readProv = getCachedProvider('https://rpc.testnet.arc.network');
           const readCtr = new ethers.Contract(tokenAddr, USDC_ABI, readProv);
           const bal = await readCtr.balanceOf(senderAddr);
-          console.log('wallet USDC balance (raw):', bal.toString(), '(', (Number(bal)/1e6).toFixed(6), ')');
-        } catch(e){ console.error('balance fetch failed in diag', e); }
+          _log('wallet USDC balance (raw):', bal.toString(), '(', (Number(bal)/1e6).toFixed(6), ')');
+        } catch(e){ _err('balance fetch failed in diag', e); }
         try {
-          const readProv = new ethers.JsonRpcProvider('https://rpc.testnet.arc.network');
+          const readProv = getCachedProvider('https://rpc.testnet.arc.network');
           const readCtr = new ethers.Contract(tokenAddr, USDC_ABI, readProv);
           const allw = await readCtr.allowance(senderAddr, MULTICALL3_ADDRESS);
-          console.log('allowance to Multicall3 (raw):', allw.toString(), '(', (Number(allw)/1e6).toFixed(6), ')');
-        } catch(e){ console.error('allowance fetch failed in diag', e); }
-        console.log('Number of calls in aggregate3:', calls.length);
+          _log('allowance to Multicall3 (raw):', allw.toString(), '(', (Number(allw)/1e6).toFixed(6), ')');
+        } catch(e){ _err('allowance fetch failed in diag', e); }
+        _log('Number of calls in aggregate3:', calls.length);
         calls.forEach((c, i) => {
-          console.log(`  [${i}] target=${c.target} allowFailure=${c.allowFailure} calldata=${c.callData?.slice(0,82)}...`);
+          _log(`  [${i}] target=${c.target} allowFailure=${c.allowFailure} calldata=${c.callData?.slice(0,82)}...`);
         });
         console.groupEnd();
 
         // ── Per-call raw provider.call diagnostics (to capture real revert reasons) ──
-        console.log('[Multisend] Running per-call raw provider.call simulations...');
+        _log('[Multisend] Running per-call raw provider.call simulations...');
         for (let i = 0; i < calls.length; i++) {
           const c = calls[i];
           try {
@@ -8797,10 +8908,10 @@ async function signTx(){
               data: c.callData,
               from: MULTICALL3_ADDRESS   // important for msg.sender simulation inside token contract
             });
-            console.log(`[Multisend] Call #${i} provider.call SUCCESS → returnData: ${result}`);
+            _log(`[Multisend] Call #${i} provider.call SUCCESS → returnData: ${result}`);
           } catch (rawErr) {
-            console.error(`[Multisend] Call #${i} RAW provider.call REVERTED`);
-            console.error(rawErr);
+            _err(`[Multisend] Call #${i} RAW provider.call REVERTED`);
+            _err(rawErr);
             // Try to extract the real revert reason
             let realReason = rawErr?.data || rawErr?.error?.data || rawErr?.shortMessage || rawErr?.message || 'unknown';
             if (rawErr?.data && typeof rawErr.data === 'string' && rawErr.data.startsWith('0x')) {
@@ -8809,12 +8920,12 @@ async function signTx(){
             const toDisp = i < addrs.length ? addrs[i] : (OWNER_WALLET || 'fee');
             const amtDisp = i < addrs.length ? (amts[i]?.toString() || '0') : (feeAmt?.toString() || '0');
             try {
-              console.error(`[Multisend] Call #${i} REAL REVERT REASON:`, realReason, 'to=', toDisp + (i >= addrs.length ? ' (platform fee)' : ''), 'amt=', amtDisp);
-            } catch (_) {}
+              _err(`[Multisend] Call #${i} REAL REVERT REASON:`, realReason, 'to=', toDisp + (i >= addrs.length ? ' (platform fee)' : ''), 'amt=', amtDisp);
+            } catch (e) { _warn('silent-catch', e?.message||e); }
           }
         }
 
-        console.log('[Multisend] === Direct per-call simulation complete. Review the logs above for actual token behavior ===');
+        _log('[Multisend] === Direct per-call simulation complete. Review the logs above for actual token behavior ===');
 
         // ── Simulate (allowFailure: true to get per-call errors) ─────────────
         toast(`Simulating ${label} batch (${rcpts.length} recipients)...`, 'info');
@@ -8836,7 +8947,7 @@ async function signTx(){
               try {
                 const toDisp2 = f.idx < addrs.length ? addrs[f.idx] : (OWNER_WALLET || 'fee');
                 const amtDisp2 = f.idx < addrs.length ? (amts[f.idx]?.toString() || '0') : (feeAmt?.toString() || '0');
-                console.error(`[Multisend] Call #${f.idx} would fail: ${reason} → to=${toDisp2}${f.idx >= addrs.length ? ' (platform fee)' : ''}, amt=${amtDisp2}`);
+                _err(`[Multisend] Call #${f.idx} would fail: ${reason} → to=${toDisp2}${f.idx >= addrs.length ? ' (platform fee)' : ''}, amt=${amtDisp2}`);
               } catch (_) { /* logging only */ }
             });
 
@@ -8845,8 +8956,8 @@ async function signTx(){
             if (allEmpty) {
               // Common on Arc Testnet: Multicall3 simulation returns empty returnData even when calls would succeed.
               // We already ran direct per-call diagnostics above.
-              console.warn('[Multisend] Multicall3 simulation returned only empty returnData for all calls.');
-              console.warn('[Multisend] This is a known simulation quirk on Arc Testnet. The direct per-call checks above are more reliable.');
+              _warn('[Multisend] Multicall3 simulation returned only empty returnData for all calls.');
+              _warn('[Multisend] This is a known simulation quirk on Arc Testnet. The direct per-call checks above are more reliable.');
 
               toast('Multicall3 sim returned empty data (Arc quirk). Using direct checks instead...', 'warning');
 
@@ -8859,13 +8970,13 @@ async function signTx(){
                 const dispTo = shortAddr( isFee ? OWNER_WALLET : addrs[f.idx] );
                 try {
                   toast(`${dispLabel} to ${dispTo} would fail: ${reason}`, 'error');
-                } catch (_) {}
+                } catch (e) { _warn('silent-catch', e?.message||e); }
               });
-              console.error('[Multisend] DETAILED SIMULATION FAILURE:', detailed);
+              _err('[Multisend] DETAILED SIMULATION FAILURE:', detailed);
               throw new Error(detailed);
             }
           }
-          console.log(`[Multisend] simulation OK — all ${calls.length} calls passed`);
+          _log(`[Multisend] simulation OK — all ${calls.length} calls passed`);
         } catch(simErr) {
           if (simErr.message && simErr.message.startsWith('simulation_failed')) throw simErr;
           // Static call itself failed (whole batch reverted) — capture real data
@@ -8874,8 +8985,8 @@ async function signTx(){
           else if (simErr?.error?.data) realReason = decodeCallRevert(simErr.error.data);
           else if (simErr?.revert?.args?.[0]) realReason = simErr.revert.args[0];
           else realReason = simErr.shortMessage || simErr.message || 'Batch simulation reverted';
-          console.error('[Multisend] batch simulation FULL REVERT (raw error):', simErr);
-          console.error('[Multisend] DECODED REVERT REASON from aggregate3.staticCall:', realReason);
+          _err('[Multisend] batch simulation FULL REVERT (raw error):', simErr);
+          _err('[Multisend] DECODED REVERT REASON from aggregate3.staticCall:', realReason);
           toast(`Batch simulation failed: ${realReason}`, 'error');
           throw new Error(`simulation_failed: ${realReason}`);
         }
@@ -8886,24 +8997,24 @@ async function signTx(){
           const mc3Gas = new ethers.Contract(MULTICALL3_ADDRESS, MULTICALL3_ABI, signer);
           const est    = await mc3Gas.aggregate3.estimateGas(calls);
           gasLimit     = (est * 130n) / 100n; // +30% buffer
-          console.log(`[Multisend] gasEstimate: ${est.toString()}, gasLimit: ${gasLimit.toString()}`);
+          _log(`[Multisend] gasEstimate: ${est.toString()}, gasLimit: ${gasLimit.toString()}`);
         } catch(gasErr) {
-          console.warn('[Multisend] gas estimation failed, using fallback:', gasErr.shortMessage || gasErr.message);
+          _warn('[Multisend] gas estimation failed, using fallback:', gasErr.shortMessage || gasErr.message);
           gasLimit = BigInt(150_000 + rcpts.length * 80_000);
-          console.log(`[Multisend] fallback gasLimit: ${gasLimit.toString()}`);
+          _log(`[Multisend] fallback gasLimit: ${gasLimit.toString()}`);
         }
 
         // ── Execute ───────────────────────────────────────────────────────────
         toast(`Executing ${label} batch — ${rcpts.length} recipient${rcpts.length>1?'s':''}...`, 'info');
         const mc3 = new ethers.Contract(MULTICALL3_ADDRESS, MULTICALL3_ABI, signer);
         const batchTx = await mc3.aggregate3(calls, { gasLimit });
-        console.log(`[Multisend] batch tx: ${batchTx.hash}`);
+        _log(`[Multisend] batch tx: ${batchTx.hash}`);
         let receipt;
         try {
           receipt = await batchTx.wait();
-          console.log(`[Multisend] batch confirmed in block ${receipt.blockNumber}`);
+          _log(`[Multisend] batch confirmed in block ${receipt.blockNumber}`);
         } catch(waitErr) {
-          console.error('[Multisend] Error waiting for receipt:', waitErr);
+          _err('[Multisend] Error waiting for receipt:', waitErr);
           // Still try to return the hash so the UI can show success
           toast(`✓ Multicall3 batch sent — check explorer for confirmation`, 'success');
           return batchTx.hash;
@@ -9030,18 +9141,18 @@ async function signTx(){
       try {
         finalizeBatch(lastHash, null, false, total, rcptCount);
       } catch (finErr) {
-        console.error('[Multisend] Error in finalizeBatch (non-fatal):', finErr);
+        _err('[Multisend] Error in finalizeBatch (non-fatal):', finErr);
       }
 
       // Ensure Multisend always appears in Reports (local + onchain)
       try {
         logToReports('Batch (Multisend)', total, rcptCount, lastHash, { fee: +(total*0.01).toFixed(2) });
-      } catch (_) {}
+      } catch (e) { _warn('silent-catch', e?.message||e); }
 
       try {
         await refreshBalance();
       } catch (refErr) {
-        console.error('[Multisend] Error in refreshBalance (non-fatal):', refErr);
+        _err('[Multisend] Error in refreshBalance (non-fatal):', refErr);
       }
 
     } else {
@@ -9052,14 +9163,14 @@ async function signTx(){
   }catch(e){
     if(e.code===4001||e.code==='ACTION_REJECTED')toast('Rejected by user','error');
     else toast('Error: '+(e.shortMessage||e.message||'Check console'),'error');
-    console.error('signTx error:', e);
+    _err('signTx error:', e);
     updateWorkflowStep(3, 'error', {message: (e.shortMessage || e.message || 'Failed').substring(0, 35)});
   }finally{btn.disabled=false;btn.innerHTML='<i class="ti ti-pen"></i> Approve &amp; Send';}
 }
 
 function finalizeBatch(txHash,blockNumber,isDemo,totalAmt,rcptCount){
   batchCount++;successCount++;
-  const id='#'+Math.floor(Math.random()*9e7+1e7);
+  const id='#'+_secureRandomInt(9e7).toString().padStart(7,'0');
   const now=new Date();
   const ts=now.toLocaleDateString('en-US')+' '+now.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true});
   const total = totalAmt!=null ? totalAmt : recipients.reduce((s,r)=>s+(parseFloat(r.amount)||0),0);
@@ -9345,7 +9456,7 @@ async function updateSwapBalancesDisplay() {
     return;
   }
   try {
-    const prov = new ethers.JsonRpcProvider('https://rpc.testnet.arc.network');
+    const prov = getCachedProvider('https://rpc.testnet.arc.network');
     const tIn = TOKENS[swapTokenInIdx];
     const tOut = TOKENS[swapTokenOutIdx];
 
@@ -9442,13 +9553,13 @@ async function updateSwapRate() {
       // ── Get quote ─────────────────────────────────────
       let amtOut = 0, source = 'onchain';
       try {
-        const readProvider = new ethers.JsonRpcProvider('https://rpc.testnet.arc.network');
+        const readProvider = getCachedProvider('https://rpc.testnet.arc.network');
         const pc = new ethers.Contract(POOL_CONTRACT_ADDRESS, POOL_CONTRACT_ABI, readProvider);
         const tokenInAddr = tIn.sym === 'USDC' ? activeUSDC() : activeEURC();
         const amtInBig    = toUsdc(amtIn.toFixed(6));
         const amtOutBig   = await pc.getAmountOut(amtInBig, tokenInAddr);
         amtOut = parseFloat(ethers.formatUnits(amtOutBig, 6));
-        console.debug('[swap] onchain quote:', amtOut, tOut.sym, '| source: contract.getAmountOut');
+        _log('[swap] onchain quote:', amtOut, tOut.sym, '| source: contract.getAmountOut');
       } catch (contractErr) {
         // Local x*y=k fallback
         const rIn   = tIn.sym  === 'USDC' ? pool.reserveUsdc : pool.reserveEurc;
@@ -9456,7 +9567,7 @@ async function updateSwapRate() {
         const adj   = amtIn * (1 - POOL_FEE);
         amtOut  = (rOut * adj) / (rIn + adj);
         source  = 'local AMM';
-        console.warn('[swap] getAmountOut failed, using local x*y=k fallback:', contractErr.message);
+        _warn('[swap] getAmountOut failed, using local x*y=k fallback:', contractErr.message);
       }
 
       if (amtOut <= 0) {
@@ -9518,7 +9629,7 @@ async function updateSwapRate() {
       await swpRunPrecheck(amtIn, amtOut, minReceived);
 
     } catch(e) {
-      console.error('[swap] updateSwapRate error:', e);
+      _err('[swap] updateSwapRate error:', e);
       if (rateEl) rateEl.textContent = 'Quote error';
       swpShowPrecheck('error', swpDecodeError(e));
       swpSetBtn('disabled', 'Quote error');
@@ -9578,7 +9689,7 @@ async function swpRunPrecheck(amtIn, amtOut, minReceived) {
     // 6) Balance check (read from chain)
     let userBal = 0n;
     try {
-      const prov      = new ethers.JsonRpcProvider('https://rpc.testnet.arc.network');
+      const prov      = getCachedProvider('https://rpc.testnet.arc.network');
       const tokenCtr  = new ethers.Contract(tInAddr, USDC_ABI, prov);
       userBal         = await tokenCtr.balanceOf(walletAddress);
       const amtBigChk = toUsdc(amtIn.toFixed(6));
@@ -9604,12 +9715,12 @@ async function swpRunPrecheck(amtIn, amtOut, minReceived) {
 
     let needsApproval = false;
     try {
-      const prov     = new ethers.JsonRpcProvider('https://rpc.testnet.arc.network');
+      const prov     = getCachedProvider('https://rpc.testnet.arc.network');
       const tokenCtr = new ethers.Contract(tInAddr, USDC_ABI, prov);
       const amtBig   = toUsdc(amtIn.toFixed(6));
       const allowance = await tokenCtr.allowance(walletAddress, approveTarget);
       needsApproval = allowance < amtBig;
-      console.debug('[swap] precheck allowance:', allowance.toString(), '| need:', amtBig.toString(), '| needsApproval:', needsApproval);
+      _log('[swap] precheck allowance:', allowance.toString(), '| need:', amtBig.toString(), '| needsApproval:', needsApproval);
     } catch (_) { /* non-blocking */ }
 
     // 8) Slippage sanity
@@ -9627,9 +9738,9 @@ async function swpRunPrecheck(amtIn, amtOut, minReceived) {
       swpSetBtn('ready', `Swap ${tIn.sym} → ${tOut.sym}`);
     }
 
-    console.debug('[swap] precheck passed | amtIn:', amtIn, '| amtOut:', amtOut, '| slippage:', SWP.slippage + '%');
+    _log('[swap] precheck passed | amtIn:', amtIn, '| amtOut:', amtOut, '| slippage:', SWP.slippage + '%');
   } catch(e) {
-    console.warn('[swap] precheck error:', e.message);
+    _warn('[swap] precheck error:', e.message);
     swpSetBtn('ready', 'Swap'); // allow attempt even if precheck partially failed
   } finally {
     SWP.checking = false;
@@ -9675,10 +9786,10 @@ async function executeSwap() {
 
   // ── Pre-flight simulation (non-blocking) ───────────────
   try {
-    const readProv = new ethers.JsonRpcProvider('https://rpc.testnet.arc.network');
+    const readProv = getCachedProvider('https://rpc.testnet.arc.network');
     const pcSim    = new ethers.Contract(POOL_CONTRACT_ADDRESS, POOL_CONTRACT_ABI, readProv);
     await pcSim.swap.staticCall(tInAddr, amtBig, minReceived);
-    console.debug('[swap] staticCall simulation passed');
+    _log('[swap] staticCall simulation passed');
   } catch(simErr) {
     if (!simErr.message?.includes('missing revert data') && simErr.code !== 'CALL_EXCEPTION') {
       const decoded = swpDecodeError(simErr);
@@ -9686,7 +9797,7 @@ async function executeSwap() {
       toast(decoded, 'error');
       return;
     }
-    console.warn('[swap] Simulation skipped (Arc Testnet limitation)');
+    _warn('[swap] Simulation skipped (Arc Testnet limitation)');
   }
 
   // ── Approve (if needed) ─────────────────────────────────
@@ -9696,22 +9807,22 @@ async function executeSwap() {
   try {
     const tokenInContract = new ethers.Contract(tInAddr, USDC_ABI, signer);
     let allowance = 0n;
-    try { allowance = await tokenInContract.allowance(walletAddress, approveTarget); } catch(_) {}
+    try { allowance = await tokenInContract.allowance(walletAddress, approveTarget); } catch(e) { _warn('silent-catch', e?.message||e); }
 
     if (allowance < amtBig) {
       let approveGas = SWP.FALLBACK_GAS;
       try {
         approveGas = await tokenInContract.approve.estimateGas(approveTarget, amtBig * 2n);
         approveGas = approveGas * 120n / 100n;
-      } catch(_) {}
+      } catch(e) { _warn('silent-catch', e?.message||e); }
 
       const approveTx = await tokenInContract.approve(approveTarget, amtBig * 2n, { gasLimit: approveGas });
       approveHash = approveTx.hash;
       toast(`Approve submitted...`, 'info');
       await approveTx.wait();
-      console.debug('[swap] approve confirmed:', approveHash);
+      _log('[swap] approve confirmed:', approveHash);
     } else {
-      console.debug('[swap] allowance sufficient, skipping approve');
+      _log('[swap] allowance sufficient, skipping approve');
     }
   } catch(approveErr) {
     const decoded = swpDecodeError(approveErr);
@@ -9733,7 +9844,7 @@ async function executeSwap() {
       try {
         swapGas = await swapCtr.swap.estimateGas(tInAddr, amtBig, minReceived, walletAddress, deadline);
         swapGas = swapGas * 130n / 100n;
-      } catch(_) {}
+      } catch(e) { _warn('silent-catch', e?.message||e); }
       const swapTx = await swapCtr.swap(tInAddr, amtBig, minReceived, walletAddress, deadline, { gasLimit: swapGas });
       swapTxHash = swapTx.hash;
       toast('Swap submitted to network...', 'info');
@@ -9744,13 +9855,13 @@ async function executeSwap() {
       try {
         swapGas = await poolCtr.swap.estimateGas(tInAddr, amtBig, minReceived);
         swapGas = swapGas * 130n / 100n;
-      } catch(_) {}
+      } catch(e) { _warn('silent-catch', e?.message||e); }
       const swapTx2 = await poolCtr.swap(tInAddr, amtBig, minReceived, { gasLimit: swapGas });
       swapTxHash = swapTx2.hash;
       toast('Swap submitted to ElligentPool...', 'info');
       await swapTx2.wait();
     }
-    console.debug('[swap] swap tx confirmed:', swapTxHash);
+    _log('[swap] swap tx confirmed:', swapTxHash);
   } catch(swapErr) {
     const decoded = swpDecodeError(swapErr);
     swpSetBtn('ready', `Swap ${tIn.sym} → ${tOut.sym}`);
@@ -9771,7 +9882,7 @@ async function executeSwap() {
   swpAddHistory(tIn.sym, tOut.sym, amtIn, amtOut, swapTxHash);
 
   // Log to Reports (local + onchain)
-  try { logToReports('Swap', amtIn, 1, swapTxHash, { fee: 0 }); } catch (_) {}
+  try { logToReports('Swap', amtIn, 1, swapTxHash, { fee: 0 }); } catch (e) { _warn('silent-catch', e?.message||e); }
 
   toast(`✓ Swapped ${amtIn} ${tIn.sym} → ${amtOut.toFixed(4)} ${tOut.sym}`, 'success');
   swpSetBtn('ready', `Swap ${tIn.sym} → ${tOut.sym}`);
@@ -9985,7 +10096,7 @@ async function executeBridge(){
 
   try {
     // ── STEP 0: Switch to SOURCE chain (verified) ────────────────────────────
-    console.log(`[Bridge] Switching to source chain: ${fromChain.name} (${fromChain.chainId})`);
+    _log(`[Bridge] Switching to source chain: ${fromChain.name} (${fromChain.chainId})`);
     await ensureNetwork(fromChain.chainId);
 
     // Recreate provider+signer AFTER confirmed chain switch
@@ -9998,7 +10109,7 @@ async function executeBridge(){
     const srcSigner = await srcProvider.getSigner();
 
     // ── STEP 1: Approve USDC ─────────────────────────────────────────────────
-    console.log("[Bridge] Approving USDC...");
+    _log("[Bridge] Approving USDC...");
     renderBridgeStep(0,'active',null);
     const usdcAbi = [
       "function approve(address spender, uint256 amount) returns (bool)",
@@ -10006,7 +10117,7 @@ async function executeBridge(){
     ];
     const amtBig = toUsdc(amt.toFixed(6));
     // Use JsonRpcProvider for reads to avoid stale cache issues
-    const readProvider  = new ethers.JsonRpcProvider(fromConfig.rpc);
+    const readProvider  = getCachedProvider(fromConfig.rpc);
     const usdcRead      = new ethers.Contract(fromConfig.usdc, usdcAbi, readProvider);
     const usdcWrite     = new ethers.Contract(fromConfig.usdc, usdcAbi, srcSigner);
 
@@ -10028,7 +10139,7 @@ async function executeBridge(){
     renderBridgeStep(0,'success',approveHash);
 
     // ── STEP 2: depositForBurn() ─────────────────────────────────────────────
-    console.log("[Bridge] Burning via CCTP v2...");
+    _log("[Bridge] Burning via CCTP v2...");
     renderBridgeStep(1,'active',null);
     const tmAbi = ["function depositForBurn(uint256 amount, uint32 destinationDomain, bytes32 mintRecipient, address burnToken, bytes32 destinationCaller, uint256 maxFee, uint32 minFinalityThreshold) external returns (uint64 nonce)"];
     const tmContract   = new ethers.Contract(fromConfig.tokenMessenger, tmAbi, srcSigner);
@@ -10044,10 +10155,10 @@ async function executeBridge(){
     // For inbound to Arc (Standard), we try a small maxFee as suggested — it may help relayer priority in some cases
     const maxFee = isToArc ? ethers.parseUnits('0.5', 6) : 0n;
 
-    console.log('[Bridge] SOURCE DOMAIN:', fromConfig.domain);
-    console.log('[Bridge] DESTINATION DOMAIN:', toConfig.domain);
-    console.log('[Bridge] finalityThreshold:', finalityThreshold, isToArc ? '(Standard — Arc destination)' : '(Fast)');
-    console.log('[Bridge] maxFee for burn:', ethers.formatUnits(maxFee, 6), 'USDC');
+    _log('[Bridge] SOURCE DOMAIN:', fromConfig.domain);
+    _log('[Bridge] DESTINATION DOMAIN:', toConfig.domain);
+    _log('[Bridge] finalityThreshold:', finalityThreshold, isToArc ? '(Standard — Arc destination)' : '(Fast)');
+    _log('[Bridge] maxFee for burn:', ethers.formatUnits(maxFee, 6), 'USDC');
 
     const burnTx = await tmContract.depositForBurn(
       amtBig, toConfig.domain, destAddr32, fromConfig.usdc,
@@ -10056,11 +10167,11 @@ async function executeBridge(){
     renderBridgeStep(1,'active',burnTx.hash);
     const burnReceipt = await burnTx.wait();
     if (!burnReceipt || burnReceipt.status !== 1) throw new Error("depositForBurn transaction failed (status=0)");
-    console.log("[Bridge] Burn confirmed. Logs:", burnReceipt.logs.length);
+    _log("[Bridge] Burn confirmed. Logs:", burnReceipt.logs.length);
     renderBridgeStep(1,'success',burnTx.hash);
 
     // ── STEP 3: Poll Circle Iris API for attestation ─────────────────────────
-    console.log("[Bridge] Polling Circle Iris attestation...");
+    _log("[Bridge] Polling Circle Iris attestation...");
     renderBridgeStep(2,'active',null);
 
     let messageBytes = null, attestationSig = null;
@@ -10069,7 +10180,7 @@ async function executeBridge(){
     const isInboundToArcBridge = (toConfig && toConfig.domain === 26);
 
     if (isInboundToArcBridge) {
-      console.log("[Bridge] Inbound to Arc — using reliable V2 attestation path (Standard Transfer).");
+      _log("[Bridge] Inbound to Arc — using reliable V2 attestation path (Standard Transfer).");
 
       // Extract message from logs (needed for receiveMessage later)
       const mtIface = new ethers.Interface(["event MessageSent(bytes message)"]);
@@ -10080,20 +10191,20 @@ async function executeBridge(){
             messageBytes = parsed.args.message;
             break;
           }
-        } catch(_) {}
+        } catch(e) { _warn('silent-catch', e?.message||e); }
       }
 
       if (!messageBytes) {
         throw new Error("Failed to extract CCTP message from burn logs for Arc inbound. Retry in a minute.");
       }
 
-      console.log("[Bridge] MESSAGE HASH (Arc inbound):", ethers.keccak256(messageBytes));
+      _log("[Bridge] MESSAGE HASH (Arc inbound):", ethers.keccak256(messageBytes));
 
       // Use the same reliable V2 polling as other routes, but with much higher patience for Arc inbound on sandbox.
       // This is the key fix — the previous custom direct-hash + /0 fallback was unreliable.
       const maxInboundPolls = 180; // ~15 minutes
       const irisUrl = `https://iris-api-sandbox.circle.com/v2/messages/${fromConfig.domain}?transactionHash=${burnTx.hash}`;
-      console.log("[Bridge] Using reliable Iris V2 for Arc inbound:", irisUrl);
+      _log("[Bridge] Using reliable Iris V2 for Arc inbound:", irisUrl);
 
       for (let i = 0; i < maxInboundPolls && !attestationSig; i++) {
         await new Promise(r => setTimeout(r, 5000));
@@ -10111,13 +10222,13 @@ async function executeBridge(){
               if (msg.status === 'complete' && msg.attestation && msg.attestation !== 'PENDING') {
                 messageBytes = msg.message;
                 attestationSig = msg.attestation;
-                console.log("[Bridge] Attestation received via reliable V2 (Arc inbound).");
+                _log("[Bridge] Attestation received via reliable V2 (Arc inbound).");
                 break;
               }
             }
           }
         } catch(pollErr) {
-          console.warn(`[Bridge] Arc inbound poll ${i+1}:`, pollErr);
+          _warn(`[Bridge] Arc inbound poll ${i+1}:`, pollErr);
         }
       }
 
@@ -10126,7 +10237,7 @@ async function executeBridge(){
       let pollCount = 0;
       const maxPolls = 120;
       const irisUrl  = `https://iris-api-sandbox.circle.com/v2/messages/${fromConfig.domain}?transactionHash=${burnTx.hash}`;
-      console.log("[Bridge] Iris URL:", irisUrl);
+      _log("[Bridge] Iris URL:", irisUrl);
 
       while (pollCount < maxPolls) {
         await new Promise(r => setTimeout(r, 5000));
@@ -10135,7 +10246,7 @@ async function executeBridge(){
           const res = await fetch(irisUrl);
           if (res.ok) {
             const data = await res.json();
-            console.log(`[Bridge] Iris #${pollCount}:`, JSON.stringify(data).slice(0,300));
+            _log(`[Bridge] Iris #${pollCount}:`, JSON.stringify(data).slice(0,300));
             if (data.messages && data.messages.length > 0) {
               const msg = data.messages[0];
               const stepEl = document.getElementById('bridge-step-2');
@@ -10146,32 +10257,32 @@ async function executeBridge(){
               if (msg.status === 'complete' && msg.attestation && msg.attestation !== 'PENDING') {
                 messageBytes  = msg.message;
                 attestationSig = msg.attestation;
-                if (messageBytes) console.log('[Bridge] MESSAGE HASH:', ethers.keccak256(messageBytes));
+                if (messageBytes) _log('[Bridge] MESSAGE HASH:', ethers.keccak256(messageBytes));
                 break;
               }
             }
           }
-        } catch(pollErr) { console.warn(`[Bridge] Iris poll #${pollCount}:`, pollErr); }
+        } catch(pollErr) { _warn(`[Bridge] Iris poll #${pollCount}:`, pollErr); }
       }
 
       if (!messageBytes) {
-        console.log("[Bridge] Iris V2 timed out — parsing MessageSent logs...");
+        _log("[Bridge] Iris V2 timed out — parsing MessageSent logs...");
         const mtIface = new ethers.Interface(["event MessageSent(bytes message)"]);
         for (const log of burnReceipt.logs) {
           try {
             const parsed = mtIface.parseLog({topics: log.topics, data: log.data});
             if (parsed?.name === "MessageSent") { messageBytes = parsed.args.message; break; }
-          } catch(_) {}
+          } catch(e) { _warn('silent-catch', e?.message||e); }
         }
         if (!messageBytes) throw new Error("Cannot extract CCTP message. Burn tx may not be indexed yet — retry in a minute.");
         const msgHash = ethers.keccak256(messageBytes);
-        console.log('[Bridge] MESSAGE HASH (fallback):', msgHash);
+        _log('[Bridge] MESSAGE HASH (fallback):', msgHash);
         for (let v1=0; v1<60 && !attestationSig; v1++) {
           await new Promise(r=>setTimeout(r,5000));
           try {
             const r = await fetch(`https://iris-api-sandbox.circle.com/attestations/${msgHash}`);
             if (r.ok) { const d=await r.json(); if(d.attestation&&d.attestation!=='PENDING') attestationSig=d.attestation; }
-          } catch(_) {}
+          } catch(e) { _warn('silent-catch', e?.message||e); }
         }
       }
     }
@@ -10183,11 +10294,11 @@ async function executeBridge(){
       }
       throw new Error("Attestation timed out. Network may be congested — retry later.");
     }
-    console.log("[Bridge] Attestation received.");
+    _log("[Bridge] Attestation received.");
     renderBridgeStep(2,'success',null);
 
     // ── STEP 4: Switch to DESTINATION chain (verified) ───────────────────────
-    console.log(`[Bridge] Switching to destination: ${toChain.name} (${toChain.chainId})`);
+    _log(`[Bridge] Switching to destination: ${toChain.name} (${toChain.chainId})`);
     renderBridgeStep(3,'active',null);
     await ensureNetwork(toChain.chainId);
 
@@ -10204,7 +10315,7 @@ async function executeBridge(){
     renderBridgeStep(3,'success',null);
 
     // ── STEP 5: receiveMessage() on destination ──────────────────────────────
-    console.log("[Bridge] Calling receiveMessage() on destination...");
+    _log("[Bridge] Calling receiveMessage() on destination...");
     renderBridgeStep(4,'active',null);
     const destMtAbi = ["function receiveMessage(bytes message, bytes attestation) returns (bool)"];
     const destMtContract = new ethers.Contract(toConfig.messageTransmitter, destMtAbi, destSigner);
@@ -10216,7 +10327,7 @@ async function executeBridge(){
     if (!mintReceipt || mintReceipt.status !== 1) {
       throw new Error(`receiveMessage() failed on-chain (status=0). Tx: ${mintTx.hash}`);
     }
-    console.log("[Bridge] receiveMessage() confirmed ✓ USDC minted on destination.");
+    _log("[Bridge] receiveMessage() confirmed ✓ USDC minted on destination.");
     renderBridgeStep(4,'success',mintTx.hash);
 
     document.getElementById('bridge-step-status').textContent='Success ✓';
@@ -10233,7 +10344,7 @@ async function executeBridge(){
     logToReports('Bridge', amt, 1, mintTx?.hash || '', { fee: 0.001 });
 
   } catch(e) {
-    console.error("[Bridge] Error:", e);
+    _err("[Bridge] Error:", e);
     // Mark the currently-active step as error
     for (let i=0; i<steps.length; i++) {
       const el=document.getElementById(`bridge-step-${i}`);
@@ -10338,12 +10449,12 @@ async function executeSingleSend() {
           const feeSingle = toUsdc('0.005'); // 0.005 = half a cent fixed platform fee
           const feeTx = await tok.transfer(OWNER_WALLET, feeSingle);
           await feeTx.wait();
-          console.log('[SingleSend] platform fee collected:', (Number(feeSingle)/1e6));
+          _log('[SingleSend] platform fee collected:', (Number(feeSingle)/1e6));
         } catch (feeErr) {
-          console.warn('Single send platform fee failed (non-fatal):', feeErr);
+          _warn('Single send platform fee failed (non-fatal):', feeErr);
         }
       } else {
-        console.warn('[SingleSend] Platform fee skipped: invalid OWNER_WALLET');
+        _warn('[SingleSend] Platform fee skipped: invalid OWNER_WALLET');
       }
 
       // Log to Reports (local + onchain) — fee recorded
@@ -10437,7 +10548,7 @@ document.addEventListener('DOMContentLoaded',()=>{
                      : 'injected';
           finalizeConnection(raw, type)
             .then(() => setupProviderEvents(raw))
-            .catch(e => console.warn('Auto-reconnect skipped:', e.message));
+            .catch(e => _warn('Auto-reconnect skipped:', e.message));
         }
       })
       .catch(() => {});
@@ -10486,7 +10597,7 @@ function syncQueueFromBatch(batchId, total, rcptCount) {
 // Supports both local (demo/preview) and real on-chain (with txHash)
 function logToReports(type, amount, recipientsCount, txHash, opts = {}) {
   const entry = {
-    id: opts.id || ('#' + Math.floor(Math.random()*9e7 + 1e7)),
+    id: opts.id || ('#' + _secureRandomInt(9e7).toString().padStart(7,'0')),
     date: new Date().toISOString(),
     type: type,
     recipients: Number(recipientsCount) || 1,
@@ -10500,7 +10611,7 @@ function logToReports(type, amount, recipientsCount, txHash, opts = {}) {
   // Re-render only if Reports page is open (cheap & safe)
   const rptPage = document.getElementById('page-reports');
   if (rptPage && rptPage.style.display !== 'none' && !rptPage.classList.contains('hidden')) {
-    try { renderReports(); } catch(_) {}
+    try { renderReports(); } catch(e) { _warn('silent-catch', e?.message||e); }
   }
 }
 
@@ -10636,7 +10747,7 @@ function drawQRReal(containerId, text, size) {
     if (img) img.style.cssText = 'border-radius:4px;display:block;width:'+size+'px;height:'+size+'px';
     const cv  = el.querySelector('canvas');
     if (cv)  cv.style.cssText  = 'border-radius:4px;display:block';
-  } catch(e) { console.warn('QR error:', e); }
+  } catch(e) { _warn('QR error:', e); }
 }
 
 // ── Download QR ───────────────────────────────────────────
@@ -10858,7 +10969,7 @@ function plShowQR(id) {
   if (!l.url || !l.url.startsWith('http')) {
     l.url = buildPayLinkUrl(l.id);
     Store.save('links', payLinks);
-    console.log('[PayLinks] Generated missing URL for link:', l.id, '→', l.url);
+    _log('[PayLinks] Generated missing URL for link:', l.id, '→', l.url);
   }
 
   l.scans = (l.scans||0) + 1;
@@ -10874,11 +10985,11 @@ function plShowQR(id) {
     Store.save('links', payLinks);
   }
 
-  console.log('[PayLinks] Opening payment page for:', l.id);
-  console.log('[PayLinks] url:', l.url);
-  console.log('[PayLinks] recipient:', recipient);
-  console.log('[PayLinks] amount:', l.amount);
-  console.log('[PayLinks] token:', l.token||'USDC');
+  _log('[PayLinks] Opening payment page for:', l.id);
+  _log('[PayLinks] url:', l.url);
+  _log('[PayLinks] recipient:', recipient);
+  _log('[PayLinks] amount:', l.amount);
+  _log('[PayLinks] token:', l.token||'USDC');
 
   openPayLanding({
     type:      'paylink',
@@ -10966,7 +11077,7 @@ function ppOpenLink() {
   // Ensure URL exists
   const url = currentPayLink.url || buildPayLinkUrl(currentPayLink.id);
   if (!url) { toast('Could not generate payment URL','error'); return; }
-  console.log('[PayLinks] Opening payment page:', url);
+  _log('[PayLinks] Opening payment page:', url);
   // Open inside app (payment modal) AND external tab
   openPayLanding({
     type:      'paylink',
@@ -12309,7 +12420,7 @@ function loadSettings() {
     const snet = document.getElementById('s-network'); if (snet && s.network) snet.value = s.network;
     const scur = document.getElementById('s-currency'); if (scur && s.currency) scur.value = s.currency;
     const sdf  = document.getElementById('s-dateformat'); if (sdf && s.datefmt) sdf.value = s.datefmt;
-  } catch {}
+  } catch(e) { _warn('silent-catch', e?.message||e); }
 }
 
 async function testRPC() {
@@ -12418,7 +12529,7 @@ async function loadPoolFromChain() {
   // Always use a fresh Arc RPC provider for pool reads (pool contract lives on Arc).
   // Do NOT use stale BrowserProvider which may point to wrong chain after chain switch.
   const ARC_RPC = 'https://rpc.testnet.arc.network';
-  const readProvider = new ethers.JsonRpcProvider(ARC_RPC);
+  const readProvider = getCachedProvider(ARC_RPC);
   try {
     const poolContract = new ethers.Contract(POOL_CONTRACT_ADDRESS, POOL_CONTRACT_ABI, readProvider);
     const [[rU, rE], supply] = await Promise.all([
@@ -12431,7 +12542,7 @@ async function loadPoolFromChain() {
     pool.loaded = true;
     pool.error  = null;
   } catch(e) {
-    console.warn('loadPoolFromChain error:', e.message || e);
+    _warn('loadPoolFromChain error:', e.message || e);
     // Keep previous valid data if available; only reset on first load failure
     if (!pool.loaded) {
       pool.reserveUsdc = 0; pool.reserveEurc = 0;
@@ -12446,13 +12557,13 @@ async function loadPoolFromChain() {
   if (walletAddress) {
     try {
       // Always use a fresh Arc RPC provider for LP balanceOf reads.
-      const lpProvider = new ethers.JsonRpcProvider('https://rpc.testnet.arc.network');
+      const lpProvider = getCachedProvider('https://rpc.testnet.arc.network');
       const lpContract = new ethers.Contract(POOL_CONTRACT_ADDRESS, POOL_CONTRACT_ABI, lpProvider);
       const rawLp      = await lpContract.balanceOf(walletAddress);
       pool.userLp      = parseFloat(ethers.formatUnits(rawLp, 18));
-      console.debug('[pool] userLp loaded:', pool.userLp, 'raw:', rawLp.toString());
+      _log('[pool] userLp loaded:', pool.userLp, 'raw:', rawLp.toString());
     } catch(lpErr) {
-      console.warn('[pool] balanceOf failed, keeping previous userLp:', lpErr.message || lpErr);
+      _warn('[pool] balanceOf failed, keeping previous userLp:', lpErr.message || lpErr);
       // Do NOT reset to 0 — keep last known value so Remove panel stays populated
     }
   } else {
@@ -12679,7 +12790,7 @@ async function executeAddLiquidity() {
             await new Promise(r => setTimeout(r, 600));
           }
         } catch (err) {
-          console.error("Step failed:", err);
+          _err("Step failed:", err);
           throw err;
         }
       } else {
@@ -12751,18 +12862,18 @@ async function executeRemoveLiquidity() {
     // Validation as requested
     if (!lpTokenForApproval || typeof lpTokenForApproval.approve !== "function") {
       // Extra diagnostic logging
-      console.error("[Pool] LP token contract instance does not have .approve()");
-      console.error("[Pool] Contract address used:", POOL_CONTRACT_ADDRESS);
-      console.error("[Pool] ABI used for approval instance:", USDC_ABI);
+      _err("[Pool] LP token contract instance does not have .approve()");
+      _err("[Pool] Contract address used:", POOL_CONTRACT_ADDRESS);
+      _err("[Pool] ABI used for approval instance:", USDC_ABI);
       throw new Error("LP token contract does not expose approve() — check ABI");
     }
 
     // Logging as requested
-    console.log("[Pool] Removing liquidity");
-    console.log("[Pool] Pool address:", POOL_CONTRACT_ADDRESS);
-    console.log("[Pool] LP token address (same as pool in this design):", POOL_CONTRACT_ADDRESS);
-    console.log("[Pool] Using USDC_ABI (standard ERC20) for the approve() call");
-    console.log("[Pool] Detected functions on approval contract:", Object.keys(lpTokenForApproval.interface.functions || {}));
+    _log("[Pool] Removing liquidity");
+    _log("[Pool] Pool address:", POOL_CONTRACT_ADDRESS);
+    _log("[Pool] LP token address (same as pool in this design):", POOL_CONTRACT_ADDRESS);
+    _log("[Pool] Using USDC_ABI (standard ERC20) for the approve() call");
+    _log("[Pool] Detected functions on approval contract:", Object.keys(lpTokenForApproval.interface.functions || {}));
 
     // Step 1: Approve pool contract to burn LP tokens
     const step1 = addStep("Approve LP Burn", "Authorize pool to burn your LP tokens");
@@ -12803,7 +12914,7 @@ async function executeRemoveLiquidity() {
       msg = 'Error removing liquidity: ' + (error.shortMessage || error.message || error);
     }
     toast(msg, 'error');
-    console.error("[Pool] Remove liquidity error:", error);
+    _err("[Pool] Remove liquidity error:", error);
     btn.disabled = false; btn.innerHTML = "<i class=\"ti ti-trash\"></i>Remove Liquidity";
   }
 }
@@ -12837,7 +12948,7 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     }, 300);
   } catch (e) {
-    console.warn('Send Assets initialization skipped due to error (app remains functional):', e);
+    _warn('Send Assets initialization skipped due to error (app remains functional):', e);
   }
 
   // Load real pool state from chain immediately (read-only, no wallet needed)
@@ -12849,7 +12960,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Auto-sync: re-read from chain every 8 seconds
   // This ensures both Pool page and Swap page always see live data
-  setInterval(() => {
+  _setInterval(() => {
     loadPoolFromChain(); // reads chain → updates pool state → triggers poolUpdateUI + updateSwapRate
     swpUpdatePoolInfo();
     updateSwapBalancesDisplay(); // keep in/out balances live in swap widget
@@ -13091,7 +13202,7 @@ async function xcExecuteSend() {
   try {
     // ── STEP 0: Switch to source chain (verified) + Approve ──────────────────
     xcSetStep(0, 'active', null, null);
-    console.log(`[XC] Switching to source: ${from.name} (${from.chainId})`);
+    _log(`[XC] Switching to source: ${from.name} (${from.chainId})`);
     await ensureNetwork(from.chainId);
 
     // Recreate provider+signer AFTER confirmed switch
@@ -13107,7 +13218,7 @@ async function xcExecuteSend() {
       "function approve(address spender, uint256 amount) returns (bool)",
       "function allowance(address owner, address spender) view returns (uint256)"
     ];
-    const readProv  = new ethers.JsonRpcProvider(fromConfig.rpc);
+    const readProv  = getCachedProvider(fromConfig.rpc);
     const usdcRead  = new ethers.Contract(fromConfig.usdc, usdcAbi, readProv);
     const usdcWrite = new ethers.Contract(fromConfig.usdc, usdcAbi, srcSigner);
 
@@ -13141,10 +13252,10 @@ async function xcExecuteSend() {
     // For inbound to Arc (Standard), we try a small maxFee as suggested — it may help relayer priority in some cases
     const maxFee = isToArc ? ethers.parseUnits('0.5', 6) : 0n;
 
-    console.log('[XC] SOURCE DOMAIN:', fromConfig.domain);
-    console.log('[XC] DESTINATION DOMAIN:', toConfig.domain);
-    console.log('[XC] finalityThreshold:', finalityThreshold, isToArc ? '(Standard — Arc destination)' : '(Fast)');
-    console.log('[XC] maxFee for burn:', ethers.formatUnits(maxFee, 6), 'USDC');
+    _log('[XC] SOURCE DOMAIN:', fromConfig.domain);
+    _log('[XC] DESTINATION DOMAIN:', toConfig.domain);
+    _log('[XC] finalityThreshold:', finalityThreshold, isToArc ? '(Standard — Arc destination)' : '(Fast)');
+    _log('[XC] maxFee for burn:', ethers.formatUnits(maxFee, 6), 'USDC');
 
     const burnTx = await tmContract.depositForBurn(
       amtBig, toConfig.domain, mintRecipient32, fromConfig.usdc, zeroCaller32, maxFee, finalityThreshold
@@ -13152,7 +13263,7 @@ async function xcExecuteSend() {
     xcSetStep(1, 'active', burnTx.hash, fromConfig.explorer);
     const burnReceipt = await burnTx.wait();
     if (!burnReceipt || burnReceipt.status !== 1) throw new Error(`depositForBurn failed (status=0). Tx: ${burnTx.hash}`);
-    console.log("[XC] depositForBurn confirmed. Logs:", burnReceipt.logs.length);
+    _log("[XC] depositForBurn confirmed. Logs:", burnReceipt.logs.length);
     xcSetStep(1, 'success', burnTx.hash, fromConfig.explorer);
 
     // ── STEP 2: Iris attestation polling ──────────────────────────────────────
@@ -13167,7 +13278,7 @@ async function xcExecuteSend() {
     if (isInboundToArc) {
       // Inbound to Arc — use the same reliable V2 polling as other routes (with longer patience).
       // The previous custom direct-hash + hardcoded /0 fallback was the root cause of timeouts.
-      console.log("[XC] Inbound to Arc detected — using reliable V2 attestation path.");
+      _log("[XC] Inbound to Arc detected — using reliable V2 attestation path.");
 
       const mtIface = new ethers.Interface(["event MessageSent(bytes message)"]);
       for (const log of burnReceipt.logs) {
@@ -13177,18 +13288,18 @@ async function xcExecuteSend() {
             messageBytes = parsed.args.message;
             break;
           }
-        } catch(_) {}
+        } catch(e) { _warn('silent-catch', e?.message||e); }
       }
 
       if (!messageBytes) {
         throw new Error("Failed to extract CCTP message from burn tx logs. Please retry in 1-2 minutes.");
       }
 
-      console.log("[XC] MESSAGE HASH (Arc inbound):", ethers.keccak256(messageBytes));
+      _log("[XC] MESSAGE HASH (Arc inbound):", ethers.keccak256(messageBytes));
 
       const maxInboundPolls = 180; // ~15 minutes
       const irisUrl = `https://iris-api-sandbox.circle.com/v2/messages/${fromConfig.domain}?transactionHash=${burnTx.hash}`;
-      console.log("[XC] Using reliable Iris V2 for Arc inbound:", irisUrl);
+      _log("[XC] Using reliable Iris V2 for Arc inbound:", irisUrl);
 
       for (let i = 0; i < maxInboundPolls && !attestationSig; i++) {
         await new Promise(r => setTimeout(r, 5000));
@@ -13203,13 +13314,13 @@ async function xcExecuteSend() {
               if (msg.status === 'complete' && msg.attestation && msg.attestation !== 'PENDING') {
                 messageBytes = msg.message;
                 attestationSig = msg.attestation;
-                console.log("[XC] Attestation received via reliable V2 (Arc inbound).");
+                _log("[XC] Attestation received via reliable V2 (Arc inbound).");
                 break;
               }
             }
           }
         } catch(pollErr) {
-          console.warn(`[XC] Arc inbound poll ${i+1}:`, pollErr);
+          _warn(`[XC] Arc inbound poll ${i+1}:`, pollErr);
         }
       }
 
@@ -13218,7 +13329,7 @@ async function xcExecuteSend() {
       let pollCount = 0;
       const maxPolls   = 120;
       const irisUrl    = `https://iris-api-sandbox.circle.com/v2/messages/${fromConfig.domain}?transactionHash=${burnTx.hash}`;
-      console.log("[XC] Iris poll URL:", irisUrl);
+      _log("[XC] Iris poll URL:", irisUrl);
 
       while (pollCount < maxPolls) {
         await new Promise(r => setTimeout(r, 5000));
@@ -13227,19 +13338,19 @@ async function xcExecuteSend() {
           const res = await fetch(irisUrl);
           if (res.ok) {
             const data = await res.json();
-            console.log(`[XC] Iris #${pollCount}:`, JSON.stringify(data).slice(0,300));
+            _log(`[XC] Iris #${pollCount}:`, JSON.stringify(data).slice(0,300));
             if (data.messages && data.messages.length > 0) {
               const msg = data.messages[0];
               const sub = document.querySelector(`#xc-step-el-2 .xc-step-sub`);
               if (sub) sub.textContent = `Iris: ${msg.status||'pending'} (poll ${pollCount}/${maxPolls})`;
               if (msg.status === 'complete' && msg.attestation && msg.attestation !== 'PENDING') {
                 messageBytes = msg.message; attestationSig = msg.attestation;
-                if (messageBytes) console.log('[XC] MESSAGE HASH:', ethers.keccak256(messageBytes));
+                if (messageBytes) _log('[XC] MESSAGE HASH:', ethers.keccak256(messageBytes));
                 break;
               }
             }
           }
-        } catch(pollErr) { console.warn(`[XC] Iris poll ${pollCount}:`, pollErr); }
+        } catch(pollErr) { _warn(`[XC] Iris poll ${pollCount}:`, pollErr); }
       }
 
       // Fallback for non-Arc-destination routes
@@ -13249,17 +13360,17 @@ async function xcExecuteSend() {
           try {
             const parsed = mtIface.parseLog({topics:log.topics, data:log.data});
             if (parsed?.name === "MessageSent") { messageBytes = parsed.args.message; break; }
-          } catch(_) {}
+          } catch(e) { _warn('silent-catch', e?.message||e); }
         }
         if (!messageBytes) throw new Error("Cannot extract CCTP message from logs. Please retry.");
         const msgHash = ethers.keccak256(messageBytes);
-        console.log('[XC] MESSAGE HASH (fallback):', msgHash);
+        _log('[XC] MESSAGE HASH (fallback):', msgHash);
         for (let v1=0; v1<60 && !attestationSig; v1++) {
           await new Promise(r=>setTimeout(r,5000));
           try {
             const r = await fetch(`https://iris-api-sandbox.circle.com/attestations/${msgHash}`);
             if (r.ok) { const d=await r.json(); if(d.attestation&&d.attestation!=='PENDING') attestationSig=d.attestation; }
-          } catch(_) {}
+          } catch(e) { _warn('silent-catch', e?.message||e); }
         }
       }
     }
@@ -13275,7 +13386,7 @@ async function xcExecuteSend() {
 
     // ── STEP 3: Switch to DESTINATION chain (verified) ────────────────────────
     xcSetStep(3, 'active', null, null);
-    console.log(`[XC] Switching to destination: ${to.name} (${to.chainId})`);
+    _log(`[XC] Switching to destination: ${to.name} (${to.chainId})`);
     await ensureNetwork(to.chainId);
 
     // ── CRITICAL: Recreate provider + signer for destination ──────────────────
@@ -13302,7 +13413,7 @@ async function xcExecuteSend() {
     if (!mintReceipt || mintReceipt.status !== 1) {
       throw new Error(`receiveMessage() reverted on ${to.name} (status=0). Tx: ${mintTx.hash}`);
     }
-    console.log("[XC] receiveMessage() confirmed ✓");
+    _log("[XC] receiveMessage() confirmed ✓");
     xcSetStep(4, 'success', mintTx.hash, toConfig.explorer);
 
     // ── STEP 5: Complete ───────────────────────────────────────────────────────
@@ -13324,7 +13435,7 @@ async function xcExecuteSend() {
     document.getElementById("xc-addr-status").style.color = "var(--muted2)";
 
   } catch(err) {
-    console.error("[XC] Error:", err);
+    _err("[XC] Error:", err);
     // Mark the active step as failed
     for (let i=0; i<steps.length; i++) {
       const el = document.getElementById(`xc-step-el-${i}`);
@@ -13432,7 +13543,7 @@ async function xcExecuteTurbo(from, to, amt, recipient) {
     document.getElementById("xc-addr-status").style.color = "var(--muted2)";
 
   } catch(err) {
-    console.error("[XC Turbo] Error:", err);
+    _err("[XC Turbo] Error:", err);
     for (let i = 0; i < steps.length; i++) {
       const el = document.getElementById(`xc-step-el-${i}`);
       if (el && el.querySelector(".step-ico")?.innerHTML.includes("↻")) {
@@ -13531,7 +13642,7 @@ function enhanceSelectToPortal(select) {
         set(v) { origSet.call(this, v); syncLabel(); }
       });
     }
-  } catch(_) {}
+  } catch(e) { _warn('silent-catch', e?.message||e); }
 
   // initial sync in case value was set before enhance
   setTimeout(syncLabel, 0);
@@ -13648,7 +13759,7 @@ function saSelectAsset(asset, btn) {
   // Refresh balance
   saRefreshBalance();
   saUpdateRoute();
-  console.log('[SendAssets] Asset selected:', asset, '| address:', saGetTokenAddr());
+  _log('[SendAssets] Asset selected:', asset, '| address:', saGetTokenAddr());
 }
 
 // ── Balance refresh ───────────────────────────────────────
@@ -13661,16 +13772,16 @@ async function saRefreshBalance() {
     // DEBUG LOGS for Sepolia (and all) balance audit - uses current chainId via activeUSDC etc.
     // Flow identical to refreshBalance for USDC/EURC; cirBTC now resolves via getTokenAddress (current chainId) instead of pure hardcoded.
     const chain = getActiveChain();
-    console.log('[saRefreshBalance] detected chainId:', activeChainId, 'chain:', chain?.id || chain?.name);
-    console.log('[saRefreshBalance] selected token address for', saCurrentAsset + ':', tokenAddr, 'wallet:', walletAddress, 'RPC used via provider');
+    _log('[saRefreshBalance] detected chainId:', activeChainId, 'chain:', chain?.id || chain?.name);
+    _log('[saRefreshBalance] selected token address for', saCurrentAsset + ':', tokenAddr, 'wallet:', walletAddress, 'RPC used via provider');
     const contract  = new ethers.Contract(tokenAddr, USDC_ABI, provider);
     const bal       = await contract.balanceOf(walletAddress);
     const dec       = saGetTokenDecimals();
     const human     = (Number(bal) / Math.pow(10, dec)).toFixed(dec === 6 ? 2 : 6);
     balEl.textContent = human + ' ' + saCurrentAsset;
-    console.log('[saRefreshBalance] fetched balance:', bal.toString(), 'formatted:', human, saCurrentAsset);
+    _log('[saRefreshBalance] fetched balance:', bal.toString(), 'formatted:', human, saCurrentAsset);
   } catch(e) {
-    console.warn('[SendAssets] Balance fetch error:', e.message);
+    _warn('[SendAssets] Balance fetch error:', e.message);
     balEl.textContent = '—';
   }
 }
@@ -13736,23 +13847,23 @@ async function saExecuteSend() {
   const amount    = parseFloat(document.getElementById('sa-amount')?.value) || 0;
   const memo      = document.getElementById('sa-memo')?.value.trim() || '';
 
-  console.log('[SendAssets] Execute send start');
-  console.log('[SendAssets] Asset:', saCurrentAsset);
-  console.log('[SendAssets] Token address:', saGetTokenAddr());
-  console.log('[SendAssets] Recipient:', recipient);
-  console.log('[SendAssets] Amount:', amount);
-  console.log('[SendAssets] Wallet:', walletAddress);
-  console.log('[SendAssets] Chain:', activeChainId);
+  _log('[SendAssets] Execute send start');
+  _log('[SendAssets] Asset:', saCurrentAsset);
+  _log('[SendAssets] Token address:', saGetTokenAddr());
+  _log('[SendAssets] Recipient:', recipient);
+  _log('[SendAssets] Amount:', amount);
+  _log('[SendAssets] Wallet:', walletAddress);
+  _log('[SendAssets] Chain:', activeChainId);
 
   // Validation
   if (!walletAddress || !signer) {
     toast('Connect your wallet first', 'error');
-    console.warn('[SendAssets] No wallet connected');
+    _warn('[SendAssets] No wallet connected');
     return;
   }
   if (!isAddr(recipient)) {
     toast('Invalid recipient address', 'error');
-    console.warn('[SendAssets] Invalid recipient:', recipient);
+    _warn('[SendAssets] Invalid recipient:', recipient);
     return;
   }
   if (recipient === '0x0000000000000000000000000000000000000000') {
@@ -13768,12 +13879,12 @@ async function saExecuteSend() {
   // Ensure Arc Testnet
   if (activeChainId !== 5042002) {
     toast('Switching to Arc Testnet...', 'info');
-    console.log('[SendAssets] Switching chain from', activeChainId, 'to 5042002');
+    _log('[SendAssets] Switching chain from', activeChainId, 'to 5042002');
     try {
       await window.ethereum?.request({ method:'wallet_switchEthereumChain', params:[{chainId:'0x4cef52'}] });
     } catch(e) {
       toast('Please switch to Arc Testnet manually', 'error');
-      console.error('[SendAssets] Chain switch failed:', e.message);
+      _err('[SendAssets] Chain switch failed:', e.message);
       return;
     }
   }
@@ -13784,14 +13895,14 @@ async function saExecuteSend() {
   try {
     const tc  = new ethers.Contract(tokenAddr, USDC_ABI, provider);
     const bal = await tc.balanceOf(walletAddress);
-    console.log('[SendAssets] Balance check: have', bal.toString(), 'need', rawAmt.toString());
+    _log('[SendAssets] Balance check: have', bal.toString(), 'need', rawAmt.toString());
     if (bal < rawAmt) {
       const have = (Number(bal) / Math.pow(10, saGetTokenDecimals())).toFixed(2);
       toast(`Insufficient ${saCurrentAsset}. Have: ${have}, Need: ${amount.toFixed(2)}`, 'error');
       return;
     }
   } catch(e) {
-    console.warn('[SendAssets] Balance check error:', e.message);
+    _warn('[SendAssets] Balance check error:', e.message);
   }
 
   // Update button
@@ -13802,15 +13913,15 @@ async function saExecuteSend() {
 
   try {
     const contract = new ethers.Contract(tokenAddr, USDC_ABI, signer);
-    console.log('[SendAssets] Sending transfer:', amount, saCurrentAsset, '→', recipient);
+    _log('[SendAssets] Sending transfer:', amount, saCurrentAsset, '→', recipient);
     toast(`Sending ${amount} ${saCurrentAsset} → ${shortAddr(recipient)}...`, 'info');
 
     const tx = await contract.transfer(recipient, rawAmt);
-    console.log('[SendAssets] Tx submitted:', tx.hash);
+    _log('[SendAssets] Tx submitted:', tx.hash);
     if (btnContent) btnContent.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i> Confirming...';
 
     const receipt = await tx.wait();
-    console.log('[SendAssets] Tx confirmed in block', receipt.blockNumber, '| hash:', tx.hash);
+    _log('[SendAssets] Tx confirmed in block', receipt.blockNumber, '| hash:', tx.hash);
 
     // Success
     if (btnContent) btnContent.innerHTML = '<i class="ti ti-check-circle"></i> Sent!';
@@ -13832,7 +13943,7 @@ async function saExecuteSend() {
     }, 2000);
 
   } catch(e) {
-    console.error('[SendAssets] Send error:', e);
+    _err('[SendAssets] Send error:', e);
     if (btnContent) btnContent.innerHTML = '<i class="ti ti-send"></i> Send Asset';
     if (btn) btn.disabled = false;
     if (e.code === 4001 || (e.message||'').includes('rejected')) {
@@ -14227,24 +14338,24 @@ async function payLandingExecute() {
   if (!d) { toast('No payment data loaded','error'); return; }
 
   // ── Diagnostics ──────────────────────────────────────
-  console.log('[PayLanding] Execute triggered');
-  console.log('[PayLanding] data:', JSON.stringify({ id:d.id, type:d.type, amount:d.amount, recipient:d.recipient, token:d.token, status:d.status, url:d.url }));
-  console.log('[PayLanding] walletAddress:', walletAddress);
-  console.log('[PayLanding] signer:', !!signer);
-  console.log('[PayLanding] activeChainId:', activeChainId);
-  console.log('[PayLanding] window.ethereum:', !!(window.ethereum));
+  _log('[PayLanding] Execute triggered');
+  _log('[PayLanding] data:', JSON.stringify({ id:d.id, type:d.type, amount:d.amount, recipient:d.recipient, token:d.token, status:d.status, url:d.url }));
+  _log('[PayLanding] walletAddress:', walletAddress);
+  _log('[PayLanding] signer:', !!signer);
+  _log('[PayLanding] activeChainId:', activeChainId);
+  _log('[PayLanding] window.ethereum:', !!(window.ethereum));
 
   // ── Wallet detection ─────────────────────────────────
   if (!walletAddress) {
-    console.warn('[PayLanding] No wallet connected');
+    _warn('[PayLanding] No wallet connected');
     toast('Connect your wallet first to pay','warning');
-    try { openWalletModal && openWalletModal(); } catch(_){}
+    try { openWalletModal && openWalletModal(); } catch(_){ _warn('catch', _?.message||_); }
     return;
   }
   if (!signer) {
-    console.warn('[PayLanding] Wallet connected but no signer — attempting reconnect');
+    _warn('[PayLanding] Wallet connected but no signer — attempting reconnect');
     toast('Wallet connected but no signer. Please reconnect your wallet.','warning');
-    try { openWalletModal && openWalletModal(); } catch(_){}
+    try { openWalletModal && openWalletModal(); } catch(_){ _warn('catch', _?.message||_); }
     return;
   }
 
@@ -14253,11 +14364,11 @@ async function payLandingExecute() {
 
   // ── Validation ────────────────────────────────────────
   if (!isAddr(recipient)) {
-    console.error('[PayLanding] Invalid recipient:', recipient);
+    _err('[PayLanding] Invalid recipient:', recipient);
     toast('Invalid recipient address on this payment link','error'); return;
   }
   if (amount <= 0) {
-    console.error('[PayLanding] Invalid amount:', amount);
+    _err('[PayLanding] Invalid amount:', amount);
     toast('Invalid amount on this payment link','error'); return;
   }
   if (d.status === 'Paid')     { toast('This payment has already been completed','info'); return; }
@@ -14269,21 +14380,21 @@ async function payLandingExecute() {
     const checkContract = new ethers.Contract(activeUSDC(), USDC_ABI, provider);
     const bal = await checkContract.balanceOf(walletAddress);
     const rawNeed = toUsdc(amount.toFixed(6));
-    console.log('[PayLanding] Balance check: have', bal.toString(), 'need', rawNeed.toString());
+    _log('[PayLanding] Balance check: have', bal.toString(), 'need', rawNeed.toString());
     if (bal < rawNeed) {
       const have = (Number(bal)/1e6).toFixed(2);
       toast(`Insufficient USDC. Have: ${have}, Need: ${amount.toFixed(2)}`, 'error');
       return;
     }
   } catch(balErr) {
-    console.warn('[PayLanding] Balance check failed (non-fatal):', balErr.message);
+    _warn('[PayLanding] Balance check failed (non-fatal):', balErr.message);
   }
 
   // ── Ensure Arc Testnet ────────────────────────────────
   const arcChainId = 5042002;
   if (activeChainId !== arcChainId) {
     toast('Switching to Arc Testnet...','info');
-    console.log('[PayLanding] Switching chain from', activeChainId, 'to 5042002');
+    _log('[PayLanding] Switching chain from', activeChainId, 'to 5042002');
     try {
       if (!window.ethereum) throw new Error('no provider');
       await window.ethereum.request({
@@ -14291,7 +14402,7 @@ async function payLandingExecute() {
         params: [{ chainId: '0x4cef52' }]
       });
     } catch(e) {
-      console.error('[PayLanding] Chain switch failed:', e.message);
+      _err('[PayLanding] Chain switch failed:', e.message);
       toast('Please switch to Arc Testnet manually','error');
       return;
     }
@@ -14305,13 +14416,13 @@ async function payLandingExecute() {
   try {
     const usdcContract = new ethers.Contract(activeUSDC(), USDC_ABI, signer);
     const amtBig = toUsdc(amount.toFixed(6));
-    console.log('[PayLanding] Sending', amount, 'USDC →', recipient);
+    _log('[PayLanding] Sending', amount, 'USDC →', recipient);
     toast(`Sending ${amount} USDC → ${shortAddr(recipient)}...`,'info');
     const tx = await usdcContract.transfer(recipient, amtBig);
-    console.log('[PayLanding] Tx submitted:', tx.hash);
+    _log('[PayLanding] Tx submitted:', tx.hash);
     if (btnContent) btnContent.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i> Confirming...';
     await tx.wait();
-    console.log('[PayLanding] Tx confirmed:', tx.hash);
+    _log('[PayLanding] Tx confirmed:', tx.hash);
 
     // Mark as paid
     if (d.type === 'paylink') {
@@ -14338,7 +14449,7 @@ async function payLandingExecute() {
     toast(`✓ Payment of ${amount} USDC sent successfully! Tx: ${shortAddr(tx.hash)}`, 'success');
     setTimeout(() => closePayLanding(), 3000);
   } catch(e) {
-    console.error('[PayLanding] Payment error:', e);
+    _err('[PayLanding] Payment error:', e);
     if (btn) btn.disabled = false;
     if (btnContent) btnContent.innerHTML = '<i class="ti ti-wallet"></i> Pay with Wallet';
     if (e.code === 4001 || (e.message||'').includes('rejected'))
@@ -14473,7 +14584,7 @@ const TREASURY_ASSETS = {
 
 // Dedicated ARC Testnet read-only provider for Treasury — independent of wallet connection
 // Used by getTreasuryVaultContract() and fetchVaultBalances() as guaranteed fallback
-const ARC_READ_PROVIDER = new ethers.JsonRpcProvider('https://rpc.testnet.arc.network');
+const ARC_READ_PROVIDER = getCachedProvider('https://rpc.testnet.arc.network');
 
 function vaultTreasuryAddress() {
   // Liquidity source is always the dedicated Treasury Vault contract.
@@ -14558,7 +14669,7 @@ function getTreasuryVaultContract() {
     // Guaranteed read-only access — no wallet required for public Treasury reads
     return new ethers.Contract(TREASURY_VAULT_ADDRESS, TREASURY_VAULT_ABI, ARC_READ_PROVIDER);
   } catch (e) {
-    console.warn('[TreasuryVault] Contract init error:', e.message);
+    _warn('[TreasuryVault] Contract init error:', e.message);
   }
   return null;
 }
@@ -14587,11 +14698,13 @@ async function readTreasuryPoolData(asset) {
       feesEarned: Number(feesEarned) / (asset === 'cirbtc' ? 1e8 : 1e6),
       hasChainData: true
     };
-    // Persist on-chain balance into VaultStore so UI renders real Treasury data
-    VaultStore.updateChainBalance(asset, data.total);
+    // NOTE: chainBalances is the single source of truth for "total" — fed ONLY by
+    // fetchVaultBalances() → balanceOf(TREASURY_VAULT_ADDRESS).
+    // readTreasuryPoolData() provides contract-level breakdown (locked, available, fees)
+    // but must NOT overwrite chainBalances since getAssetData().total may differ from raw balanceOf.
     return data;
   } catch (e) {
-    console.warn('[TreasuryVault] read error, falling back to local:', e.message);
+    _warn('[TreasuryVault] read error, falling back to local:', e.message);
     return VaultAccounting.getAssetMetrics(asset);
   }
 }
@@ -14759,14 +14872,14 @@ const VaultSecurity = (() => {
   function setCircuitBreaker(v) { _circuitBreaker = v; _persistSecurity(); }
   function setPause(v)           { _pauseMode = v;       _persistSecurity(); }
   function _persistSecurity() {
-    try { localStorage.setItem('vault_security', JSON.stringify({ cb: _circuitBreaker, pause: _pauseMode })); } catch(e) {}
+    try { localStorage.setItem('vault_security', JSON.stringify({ cb: _circuitBreaker, pause: _pauseMode })); } catch(e) { _warn('catch', e?.message||e); }
   }
   function load() {
     try {
       const s = JSON.parse(localStorage.getItem('vault_security') || '{}');
       _circuitBreaker = !!s.cb;
       _pauseMode      = !!s.pause;
-    } catch(e) {}
+    } catch(e) { _warn('catch', e?.message||e); }
   }
   function status() {
     return {
@@ -14824,7 +14937,7 @@ const VaultStore = (() => {
   }
 
   function save() {
-    try { localStorage.setItem(VAULT_STORE_KEY, JSON.stringify(_s)); } catch(e) {}
+    try { localStorage.setItem(VAULT_STORE_KEY, JSON.stringify(_s)); } catch(e) { _warn('catch', e?.message||e); }
   }
 
   function get()   { if (!_s) load(); return _s; }
@@ -14973,7 +15086,7 @@ const VaultChain = (() => {
       const rawCir = await cirC.balanceOf(treasuryAddr);
       cirBtcBal = Number(rawCir) / Math.pow(10, CIRBTC_DECIMALS);
     } catch (e) {
-      console.warn('[VaultChain] Treasury balance fetch error (using public RPC):', e.message);
+      _warn('[VaultChain] Treasury balance fetch error (using public RPC):', e.message);
       // Leave as null so accounting falls back to committed amounts only (real behavior)
     }
 
@@ -15117,8 +15230,9 @@ VaultAccounting.getTotalAvailable = function(asset) {
 const RepaymentContract = (() => {
   const _messageHashes = {};
   const _repaid = new Set();
+  const _preBalances = {};  // intentId → Treasury balance before CCTP reimbursement
 
-  function _genId() { return 'INT-' + Date.now().toString(36).toUpperCase() + '-' + Math.random().toString(36).substr(2,6).toUpperCase(); }
+  function _genId() { const r = crypto.getRandomValues(new Uint8Array(4)); return 'INT-' + Date.now().toString(36).toUpperCase() + '-' + Array.from(r, b => b.toString(16).padStart(2,'0')).join('').toUpperCase(); }
 
   function createIntent({ asset, amount, userAddress, srcChain, dstChain, txHash, sourceDomain }) {
     if (!amount || amount <= 0) throw new Error('INTENT_INVALID_AMOUNT');
@@ -15200,7 +15314,7 @@ const RepaymentContract = (() => {
       } catch(e) {
         const msg = (e.shortMessage || e.message || '');
         if (msg.includes('caller is not an operator') || msg.includes('not an operator')) {
-          console.log('[Fulfiller] User is not operator — intent queued for operator fulfillment');
+          _log('[Fulfiller] User is not operator — intent queued for operator fulfillment');
         } else {
           throw e; // Real error — propagate
         }
@@ -15227,7 +15341,7 @@ const RepaymentContract = (() => {
         if (typeof FulfillerEngine !== 'undefined' && typeof FulfillerEngine._startOperatorFulfillmentPoller === 'function') {
           FulfillerEngine._startOperatorFulfillmentPoller(intentId);
         } else {
-          console.error('[Fulfiller] Operator poller unavailable — marking intent as Failed');
+          _err('[Fulfiller] Operator poller unavailable — marking intent as Failed');
           RepaymentContract.markFailed(intentId, 'Operator fulfillment poller not available');
         }
       }
@@ -15262,38 +15376,112 @@ const RepaymentContract = (() => {
       throw new Error('SETTLE_MISSING_ARC_FULFILLMENT');
     }
 
-    // On-chain settleLiquidity — best-effort (wallet may not be connected)
-    let settlementTxHash = intent.settlementTxHash || null;
-    if (!settlementTxHash && signer && TREASURY_VAULT_ADDRESS && TREASURY_VAULT_ADDRESS !== '0x0000000000000000000000000000000000000000') {
-      try {
-        const vaultAbi = TREASURY_VAULT_ABI;
-        const vaultContract = new ethers.Contract(TREASURY_VAULT_ADDRESS, vaultAbi, signer);
-        const assetAddr = TREASURY_ASSETS[intent.asset];
+    // ── PHASE 1: Verify CCTP reimbursement on-chain ──────────────────
+    let treasuryReimbursed = false;
+    let reimbursementProof = {};
+
+    try {
+      const assetAddr = TREASURY_ASSETS[intent.asset];
+      if (assetAddr && ARC_READ_PROVIDER) {
+        const erc20Abi = ['function balanceOf(address) view returns (uint256)'];
+        const token = new ethers.Contract(assetAddr, erc20Abi, ARC_READ_PROVIDER);
+        const currentBal = await token.balanceOf(TREASURY_VAULT_ADDRESS);
         const decimals = intent.asset === 'cirbtc' ? 8 : 6;
-        const rawAmount = ethers.parseUnits(intent.amount.toFixed(decimals), decimals);
-        const tx = await vaultContract.settleLiquidity(assetAddr, rawAmount, intent.intentBytes32);
-        const receipt = await tx.wait();
-        if (receipt && receipt.status === 1) {
-          settlementTxHash = tx.hash;
+        const currentBalNum = parseFloat(ethers.formatUnits(currentBal, decimals));
+
+        // Store post-reimbursement balance
+        const intentIdKey = intentId || intent.intentId;
+        const preBal = _preBalances[intentIdKey] || intent._preBalance;
+        reimbursementProof.balanceBefore = preBal;
+        reimbursementProof.balanceAfter  = currentBalNum;
+
+        // If pre-balance was captured, verify net change
+        if (preBal !== null && preBal !== undefined) {
+          const netChange = currentBalNum - preBal;
+          reimbursementProof.netChange = netChange;
+          // Reimbursed if balance increased (accounting for fulfillAndPayWithFee payout)
+          // The Treasury paid out ~grossAmount, CCTP should reimburse ~amount
+          // Net change should be >= 0 after both events settle
+          treasuryReimbursed = netChange >= 0;
+        } else if (intent.attestation && intent.settlementTxHash) {
+          // Fallback: attestation exists and on-chain settlement confirmed
+          treasuryReimbursed = true;
         }
-      } catch(e) {
-        console.warn('[Settlement] On-chain settleLiquidity deferred:', e.message);
+
+        reimbursementProof.onChainVerified = treasuryReimbursed;
       }
+    } catch(e) {
+      _warn('[Settlement] On-chain reimbursement check deferred:', e.message);
     }
 
-    // ARC payout confirmed — mark Settled regardless of on-chain settlement
-    _repaid.add(intentId);
-    VaultStore.settleFunds(intent.asset, intent.amount);
-    VaultStore.addFee('settlement', intent.settleFee);
+    // ── PHASE 2: Automatic settlement — no user signature required ──
+    // The CCTP receiveMessage (mint) transaction itself serves as settlement proof.
+    // Treasury accounting is verified on-chain via balanceOf in PHASE 1.
+    // The connected user wallet must NEVER pay gas for Treasury accounting operations.
+    let settlementTxHash = intent.settlementTxHash || null;
+    if (!settlementTxHash && attestationData && attestationData.mintTxHash) {
+      settlementTxHash = attestationData.mintTxHash;
+    }
 
+    // ── PHASE 3: Determine final status based on proof ───────────────
+    const hasAttestation = !!(attestationData || intent.attestation);
+    const hasSettlementTx = !!settlementTxHash;
+
+    if (treasuryReimbursed && hasAttestation && hasSettlementTx) {
+      // Full proof: Treasury reimbursed + attestation + on-chain settlement
+      _repaid.add(intentId);
+      VaultStore.settleFunds(intent.asset, intent.amount);
+      VaultStore.addFee('settlement', intent.settleFee);
+
+      _mutate(intentId, i => {
+        i.status           = 'Settled';
+        i.attestation      = attestationData || i.attestation;
+        i.settledAt        = Date.now();
+        i.settlementTxHash = settlementTxHash;
+        i.mintTxHash       = (attestationData && attestationData.mintTxHash) || i.mintTxHash;
+        i.updatedAt        = Date.now();
+        i._reimbursementProof = reimbursementProof;
+        i._treasuryReimbursed = true;
+      });
+      return { status: 'Fully Settled', proof: 'on-chain', ...reimbursementProof };
+    }
+
+    if (treasuryReimbursed || (hasAttestation && hasSettlementTx)) {
+      // Partial proof: mark settling with available evidence
+      _repaid.add(intentId);
+      VaultStore.settleFunds(intent.asset, intent.amount);
+      if (hasSettlementTx) {
+        VaultStore.addFee('settlement', intent.settleFee);
+      }
+
+      _mutate(intentId, i => {
+        i.status           = treasuryReimbursed ? 'Settled' : 'Settling';
+        i.attestation      = attestationData || i.attestation;
+        i.settledAt        = treasuryReimbursed ? Date.now() : (i.settledAt || null);
+        i.settlementTxHash = settlementTxHash;
+        i.mintTxHash       = (attestationData && attestationData.mintTxHash) || i.mintTxHash;
+        i.updatedAt        = Date.now();
+        i._reimbursementProof = reimbursementProof;
+        i._treasuryReimbursed = treasuryReimbursed;
+      });
+      return { status: treasuryReimbursed ? 'Treasury Reimbursed' : 'Attestation Received', proof: 'partial', ...reimbursementProof };
+    }
+
+    // Insufficient proof — do NOT mark as Settled
     _mutate(intentId, i => {
-      i.status      = 'Settled';
-      i.attestation = attestationData || i.attestation;
-      i.settledAt   = Date.now();
-      i.settlementTxHash = settlementTxHash;
-      i.updatedAt   = Date.now();
+      i.updatedAt = Date.now();
+      i._reimbursementProof = reimbursementProof;
     });
-    return true;
+    return { status: 'Awaiting Reimbursement', proof: 'pending', ...reimbursementProof };
+  }
+
+  function _storePreBalance(intentId, balance) {
+    _preBalances[intentId] = balance;
+    // Also store on the intent object for persistence
+    _mutate(intentId, i => {
+      i._preBalance = balance;
+      i._preBalanceTimestamp = Date.now();
+    });
   }
 
   function markFailed(intentId, reason) {
@@ -15321,7 +15509,7 @@ const RepaymentContract = (() => {
     VaultStore.mutate(s => { const i = s.intents.find(x => x.id === id); if (i) fn(i); });
   }
 
-  return { createIntent, fulfill, initiateSettlement, verifyAndSettle, markFailed, getAll };
+  return { createIntent, fulfill, initiateSettlement, verifyAndSettle, markFailed, getAll, _storePreBalance };
 })();
 
 // ── Fulfiller Engine ───────────────────────────────────────────────────
@@ -15362,7 +15550,7 @@ const FulfillerEngine = (() => {
     if (onProgress) onProgress(0, 'Approving USDC on ' + fromChain.shortName + '...');
     const usdcAbi = ['function approve(address,uint256) returns (bool)',
                      'function allowance(address,address) view returns (uint256)'];
-    const usdcRead  = new ethers.Contract(fromConfig.usdc, usdcAbi, new ethers.JsonRpcProvider(fromConfig.rpc));
+    const usdcRead  = new ethers.Contract(fromConfig.usdc, usdcAbi, getCachedProvider(fromConfig.rpc));
     const usdcWrite = new ethers.Contract(fromConfig.usdc, usdcAbi, srcSigner);
     let currentAllowance;
     try { currentAllowance = await usdcRead.allowance(walletAddress, fromConfig.tokenMessenger); }
@@ -15376,10 +15564,21 @@ const FulfillerEngine = (() => {
     if (onProgress) onProgress(1, 'Burning USDC via CCTP on ' + fromChain.shortName + '...');
     const tmAbi = ['function depositForBurn(uint256,uint32,bytes32,address,bytes32,uint256,uint32) external returns (uint64)'];
     const tmContract = new ethers.Contract(fromConfig.tokenMessenger, tmAbi, srcSigner);
-    const destAddr32   = ethers.zeroPadValue(walletAddress, 32);
+    // CCTP mint to TreasuryVault — reimburses liquidity after instant payout
+    const destAddr32   = ethers.zeroPadValue(TREASURY_VAULT_ADDRESS, 32);
     const zeroCaller32 = ethers.zeroPadValue('0x0000000000000000000000000000000000000000', 32);
     const finalityThreshold = 2000; // Standard Transfer (Arc requires >=2000)
     const maxFee = ethers.parseUnits('0.5', 6);
+
+    // Capture Treasury balance BEFORE CCTP reimbursement for later verification
+    let _tsBalBefore = null;
+    try {
+      const assetAddr = TREASURY_ASSETS[asset];
+      const erc20Abi = ['function balanceOf(address) view returns (uint256)'];
+      const token = new ethers.Contract(assetAddr, erc20Abi, ARC_READ_PROVIDER);
+      const bal = await token.balanceOf(TREASURY_VAULT_ADDRESS);
+      _tsBalBefore = parseFloat(ethers.formatUnits(bal, asset === 'cirbtc' ? 8 : 6));
+    } catch(e) { _warn('silent-catch', e?.message||e); }
 
     const burnTx = await tmContract.depositForBurn(
       amtBig, toConfig.domain, destAddr32, fromConfig.usdc,
@@ -15397,7 +15596,7 @@ const FulfillerEngine = (() => {
     try {
       signer = arcFulfillSigner;
       provider = arcFulfillProvider;
-    } catch(_) {}
+    } catch(e) { _warn('silent-catch', e?.message||e); }
 
     // ── Step 2b: Lock Treasury liquidity (instant fulfillment) ──
     if (onProgress) onProgress(2, 'Locking Treasury liquidity (1% fee)...');
@@ -15405,6 +15604,12 @@ const FulfillerEngine = (() => {
       asset, amount, userAddress, srcChain, dstChain, txHash: burnTx.hash,
       sourceDomain: fromConfig.domain
     });
+
+    // Store pre-reimbursement Treasury balance on intent for later verification
+    if (_tsBalBefore !== null) {
+      RepaymentContract._storePreBalance(intentId, _tsBalBefore);
+    }
+
     await RepaymentContract.fulfill(intentId, burnTx.hash);
 
     // ── Step 3: Initiate settlement tracking (only if fulfilled) ──
@@ -15483,28 +15688,12 @@ const FulfillerEngine = (() => {
     const maxPolls = 180; // ~15 minutes
     let pollCount = 0;
     const INTERVAL = 6000;
-    let finalized = false;
 
     const timer = setInterval(async () => {
       pollCount++;
       const intent = RepaymentContract.getAll().find(i => i.id === intentId);
       if (!intent || ['Settled','Failed'].includes(intent.status)) {
         clearInterval(timer); delete _activePollerTimers[intentId]; return;
-      }
-
-      // If ARC payout already confirmed (arcTxHash exists), finalize immediately — no attestation needed
-      if (!finalized && intent.arcTxHash) {
-        finalized = true;
-        clearInterval(timer);
-        try {
-          await RepaymentContract.verifyAndSettle(intentId, null);
-        } catch(e) {
-          RepaymentContract.markFailed(intentId, 'Finalize failed: ' + e.message);
-        }
-        vaultRefreshUI();
-        VaultChain.fetchVaultBalances().then(vaultRefreshUI);
-        delete _activePollerTimers[intentId];
-        return;
       }
 
       // Use sourceDomain stored on intent (survives page refresh)
@@ -15528,7 +15717,31 @@ const FulfillerEngine = (() => {
             if (msg.status === 'complete' && msg.attestation && msg.attestation !== 'PENDING') {
               clearInterval(timer);
               try {
-                await RepaymentContract.verifyAndSettle(intentId, { attestation: msg.attestation, amount: intent.amount, msgHash: msg.messageHash });
+                // CCTP V2: Submit attestation on-chain via receiveMessage() to mint USDC on ARC
+                // Reference: circle-cctp-fulfiller-repayment (Circle official sample)
+                let mintTxHash = null;
+                if (signer && msg.message && msg.attestation) {
+                  try {
+                    const arcCfg = CCTP_CONFIG[5042002];
+                    if (arcCfg) {
+                      const destMtAbi = ['function receiveMessage(bytes message, bytes attestation) returns (bool)'];
+                      const destMtContract = new ethers.Contract(arcCfg.messageTransmitter, destMtAbi, signer);
+                      const mintTx = await destMtContract.receiveMessage(msg.message, msg.attestation);
+                      const mintReceipt = await mintTx.wait();
+                      if (mintReceipt && mintReceipt.status === 1) {
+                        mintTxHash = mintTx.hash;
+                      }
+                    }
+                  } catch(e) {
+                    _warn('[Settlement] receiveMessage deferred (relayer may have already processed):', e.message);
+                  }
+                }
+                // After mint (or if already minted), verify and settle
+                await RepaymentContract.verifyAndSettle(intentId, {
+                  attestation: msg.attestation, amount: intent.amount,
+                  msgHash: msg.messageHash, message: msg.message,
+                  mintTxHash: mintTxHash
+                });
               } catch(e) {
                 RepaymentContract.markFailed(intentId, 'Settle tx failed: ' + e.message);
               }
@@ -15569,7 +15782,7 @@ const FulfillerEngine = (() => {
   function recoverSettlingIntents() {
     const settling = RepaymentContract.getAll('Settling');
     if (settling.length === 0) return;
-    console.log('[Recovery] Found ' + settling.length + ' stuck Settling intent(s)...');
+    _log('[Recovery] Found ' + settling.length + ' stuck Settling intent(s)...');
 
     settling.forEach(async intent => {
       // Skip if already being polled
@@ -15577,11 +15790,11 @@ const FulfillerEngine = (() => {
 
       // ARC payout confirmed — finalize immediately, no attestation needed
       if (intent.arcTxHash) {
-        console.log('[Recovery] ARC payout confirmed for ' + intent.id + ' — finalizing...');
+        _log('[Recovery] ARC payout confirmed for ' + intent.id + ' — finalizing...');
         try {
           await RepaymentContract.verifyAndSettle(intent.id, null);
         } catch(e) {
-          console.warn('[Recovery] Finalize failed for ' + intent.id + ':', e.message);
+          _warn('[Recovery] Finalize failed for ' + intent.id + ':', e.message);
         }
         vaultRefreshUI();
         return;
@@ -15589,13 +15802,13 @@ const FulfillerEngine = (() => {
 
       // No ARC payout — need polling
       if (!intent.sourceDomain) {
-        console.warn('[Recovery] Intent ' + intent.id + ' missing sourceDomain — cannot poll');
+        _warn('[Recovery] Intent ' + intent.id + ' missing sourceDomain — cannot poll');
         RepaymentContract.markFailed(intent.id, 'Missing source domain for recovery poll');
         vaultRefreshUI();
         return;
       }
       const burnTxHash = intent.cctpMsgHash || intent.txHash;
-      console.log('[Recovery] Resuming poller for:', intent.id);
+      _log('[Recovery] Resuming poller for:', intent.id);
       _startSettlementPoller(intent.id, null, burnTxHash);
     });
 
@@ -15604,7 +15817,7 @@ const FulfillerEngine = (() => {
     created.forEach(intent => {
       if (_activePollerTimers && _activePollerTimers['op-' + intent.id]) return;
       if (intent.arcTxHash) return; // already fulfilled
-      console.log('[Recovery] Resuming operator poller for:', intent.id);
+      _log('[Recovery] Resuming operator poller for:', intent.id);
       _startOperatorFulfillmentPoller(intent.id);
     });
   }
@@ -15850,7 +16063,7 @@ async function vaultRefreshAll() {
         readTreasuryPoolData('eurc'),
         readTreasuryPoolData('cirbtc')
       ]);
-    } catch (e) {}
+    } catch (e) { _warn('catch', e?.message||e); }
   }
 
   vaultRefreshUI();
@@ -15877,15 +16090,15 @@ function _updateSecurityGrid() {
 
 // ── Master UI refresh ──────────────────────────────────────────────────
 async function vaultRefreshUI() {
-  try { _renderVaultConfig(); } catch(e) { console.warn('vaultConfig', e); }
-  try { _renderTicker();      } catch(e) { console.warn('ticker', e); }
-  try { _renderOverview();    } catch(e) { console.warn('overview', e); }
-  try { await _renderAssetCards();  } catch(e) { console.warn('assets', e); }
-  try { _renderLiquidity();   } catch(e) { console.warn('liquidity', e); }
-  try { _renderIntentTable(); } catch(e) { console.warn('intents', e); }
-  try { _renderFastBridge();  } catch(e) { console.warn('fastbridge', e); }
-  try { _renderRebalancing(); } catch(e) { console.warn('rebal', e); }
-  try { _renderAnalytics();   } catch(e) { console.warn('analytics', e); }
+  try { _renderVaultConfig(); } catch(e) { _warn('vaultConfig', e); }
+  try { _renderTicker();      } catch(e) { _warn('ticker', e); }
+  try { _renderOverview();    } catch(e) { _warn('overview', e); }
+  try { await _renderAssetCards();  } catch(e) { _warn('assets', e); }
+  try { _renderLiquidity();   } catch(e) { _warn('liquidity', e); }
+  try { _renderIntentTable(); } catch(e) { _warn('intents', e); }
+  try { _renderFastBridge();  } catch(e) { _warn('fastbridge', e); }
+  try { _renderRebalancing(); } catch(e) { _warn('rebal', e); }
+  try { _renderAnalytics();   } catch(e) { _warn('analytics', e); }
 }
 
 function _renderVaultConfig() {
@@ -15960,27 +16173,35 @@ function _renderOverview() {
 }
 
 async function _renderAssetMetric(asset, fmtDec, prefix, suffix) {
-  // Prefer real on-chain TreasuryVault data
-  let m = VaultAccounting.getAssetMetrics(asset);
+  // chainBalances (fed by fetchVaultBalances → balanceOf) is the single source of truth for total
+  const m = VaultAccounting.getAssetMetrics(asset);
+  // readTreasuryPoolData provides contract-level breakdown (locked, available, fees)
+  // but its "total" may differ from raw balanceOf — only use it for supplementary fields
+  let poolData = null;
   try {
-    const onchain = await readTreasuryPoolData(asset);
-    if (onchain && onchain.hasChainData) m = onchain;
-  } catch (_) {}
+    poolData = await readTreasuryPoolData(asset);
+  } catch (e) { _warn('silent-catch', e?.message||e); }
 
+  // total = raw balanceOf (never getAssetData.total)
   const total = m.total || 0;
-  const pendingCombined = (m.pendingSettlement || 0) + (m.pendingRepayment || 0);
+  // available/locked/pendingSettlement prefer poolData if available, else fall back to accounting
+  const available = (poolData && poolData.hasChainData) ? poolData.available : m.available;
+  const locked    = (poolData && poolData.hasChainData) ? poolData.locked    : m.locked;
+  const pendingSettlement = (poolData && poolData.hasChainData) ? (poolData.pendingSettlement || 0) : (m.pendingSettlement || 0);
+  const pendingRepayment  = m.pendingRepayment || 0;
+  const pendingCombined = pendingSettlement + pendingRepayment;
 
-  const pctA  = total > 0 ? (m.available / total * 100) : 100;
-  const pctL  = total > 0 ? (m.locked / total * 100) : 0;
+  const pctA  = total > 0 ? (available / total * 100) : 100;
+  const pctL  = total > 0 ? (locked / total * 100) : 0;
   const pctP  = total > 0 ? (pendingCombined / total * 100) : 0;
 
-  const noData = !m.hasChainData;
+  const noData = !m.hasChainData && !(poolData && poolData.hasChainData);
   const fmt = v => noData ? '—' : (prefix || '') + v.toFixed(fmtDec) + (suffix || '');
 
   const barKey = asset === 'cirbtc' ? 'btc' : asset;
   _setEl('vac-' + asset + '-total',  noData ? '—' : fmt(total));
-  _setEl('vac-' + asset + '-avail',  noData ? '—' : (m.available || 0).toFixed(fmtDec));
-  _setEl('vac-' + asset + '-locked', noData ? '—' : (m.locked || 0).toFixed(fmtDec));
+  _setEl('vac-' + asset + '-avail',  noData ? '—' : (available || 0).toFixed(fmtDec));
+  _setEl('vac-' + asset + '-locked', noData ? '—' : (locked || 0).toFixed(fmtDec));
   _setEl('vac-' + asset + '-pend',   noData ? '—' : pendingCombined.toFixed(fmtDec));
   _setW('vbar-' + barKey + '-avail',  noData ? 100 : pctA);
   _setW('vbar-' + barKey + '-locked', noData ? 0   : pctL);
@@ -16218,13 +16439,13 @@ async function vaultInit() {
   vaultRefreshUI();
 
   // Recover any intents stuck in Settling (page refresh / tab close recovery)
-  try { FulfillerEngine.recoverSettlingIntents(); } catch(e) {}
+  try { FulfillerEngine.recoverSettlingIntents(); } catch(e) { _warn('catch', e?.message||e); }
 
   // Fetch on-chain Treasury balances — uses dedicated ARC RPC (no wallet required)
   await VaultChain.fetchVaultBalances();
   // Also read from TreasuryVault contract for full asset data
   if (TREASURY_VAULT_ADDRESS && TREASURY_VAULT_ADDRESS !== '0x0000000000000000000000000000000000000000') {
-    try { await Promise.all([readTreasuryPoolData('usdc'), readTreasuryPoolData('eurc'), readTreasuryPoolData('cirbtc')]); } catch {}
+    try { await Promise.all([readTreasuryPoolData('usdc'), readTreasuryPoolData('eurc'), readTreasuryPoolData('cirbtc')]); } catch(e) { _warn('silent-catch', e?.message||e); }
   }
   vaultRefreshUI();
 
@@ -16241,7 +16462,7 @@ async function vaultInit() {
   });
 
   // Periodic: refresh while Treasury page is active
-  setInterval(async () => {
+  _setInterval(async () => {
     if (document.getElementById('page-treasury')?.classList.contains('active')) {
       RebalancingEngine.autoCheck();
       // Refresh chain data every 30s if page active — uses dedicated ARC RPC (no wallet required)
@@ -16254,7 +16475,7 @@ async function vaultInit() {
   }, 5000);
 
   // Ticker always updates
-  setInterval(() => { try { _renderTicker(); } catch(e){} }, 3000);
+  _setInterval(() => { try { _renderTicker(); } catch(e){ _warn('catch', e?.message||e); } }, 3000);
 }
 
 // ── Hook into wallet connect flow ─────────────────────────────────────
@@ -16277,20 +16498,21 @@ if (document.readyState === 'loading') {
 
 
 // ═══════════════════════════════════════════════════════════════════════════
-// SETTLEMENTS MODULE — Elligente Treasury Settlement Dashboard
-// Tracks: Source Burn → Circle Attestation → ARC Mint → Treasury Reimburse → Settled
-// Data source: VaultStore intents (localStorage) + Circle Iris API
+// REIMBURSEMENT PROOF ENGINE — Verifiable On-Chain Settlement System
+// Tracks: Pending Burn → Awaiting Attest → Attest Received → Tsy Reimbursed → Fully Settled
+// Data source: VaultStore intents (localStorage) + Circle Iris API + TreasuryVault on-chain
 // ═══════════════════════════════════════════════════════════════════════════
 
 const SettlementModule = (() => {
 
-  // ── Storage key (reads from existing VaultStore — no new keys) ──────────
+  // ── Storage ───────────────────────────────────────────────────────────────
   const VAULT_KEY = typeof VAULT_STORE_KEY !== 'undefined' ? VAULT_STORE_KEY : 'elligente_vault_v2';
 
-  // ── Circle Iris API ──────────────────────────────────────────────────────
-  const IRIS_BASE = 'https://iris-api-sandbox.circle.com/attestations/';
+  // ── Circle Iris API endpoints ─────────────────────────────────────────────
+  const IRIS_ATTEST  = 'https://iris-api-sandbox.circle.com/attestations/';
+  const IRIS_V2      = 'https://iris-api-sandbox.circle.com/v2/messages/';
 
-  // ── Explorer map ────────────────────────────────────────────────────────
+  // ── Explorer map ──────────────────────────────────────────────────────────
   const EXPLORERS = {
     'Arc_Testnet':      'https://testnet.arcscan.app/tx/',
     'Base_Sepolia':     'https://sepolia.basescan.org/tx/',
@@ -16298,26 +16520,254 @@ const SettlementModule = (() => {
     'Arbitrum_Sepolia': 'https://sepolia.arbiscan.io/tx/',
   };
 
-  // ── Health badge colors ──────────────────────────────────────────────────
-  const HEALTH = {
-    Healthy:              { bg:'rgba(34,197,94,.15)',   color:'#22c55e', icon:'ti-circle-check' },
-    Delayed:              { bg:'rgba(245,158,11,.15)',  color:'#f59e0b', icon:'ti-clock-exclamation' },
-    'Attestation Pending':{ bg:'rgba(123,158,247,.15)', color:'#7b9ef7', icon:'ti-hourglass' },
-    'Reimbursement Pending':{ bg:'rgba(167,139,250,.15)', color:'#a78bfa', icon:'ti-transfer' },
-    Failed:               { bg:'rgba(239,68,68,.15)',   color:'#ef4444', icon:'ti-circle-x' },
+  // ── Cache for verification results (survives refresh within session) ──────
+  let _verificationCache = {};
+  let _treasuryBalanceCache = { before: {}, after: {}, lastFetch: 0 };
+
+  // ── Status mapping: old → new display ────────────────────────────────────
+  const STATUS_MAP = {
+    'Created':   'Pending Burn',
+    'Fulfilled': 'Awaiting Attestation',
+    'Settling':  'Attestation Received',
+    'Settled':   'Fully Settled',
+    'Failed':    'Failed',
   };
 
-  // ── Status → flow step ──────────────────────────────────────────────────
-  function _intentFlowStep(intent) {
-    const st = (intent.status || '').toLowerCase();
-    if (st === 'settled') return 5;
-    if (st === 'settling') return 4;
-    if (st === 'fulfilled') return 3;
-    if (st === 'created') return 2;
-    return 1;
+  const STATUS_ORDER = [
+    'Pending Burn',
+    'Awaiting Attestation',
+    'Attestation Received',
+    'Treasury Reimbursed',
+    'Fully Settled',
+    'Failed',
+  ];
+
+  function _displayStatus(intent) {
+    if (intent.verificationStatus === 'Verified On-Chain') return 'Treasury Reimbursed';
+    if (intent.status === 'Failed') return 'Failed';
+    const mapped = STATUS_MAP[intent.status] || intent.status;
+    // If attestation exists and settled, map to Treasury Reimbursed
+    if (intent.status === 'Settled' && intent.attestation && intent.settlementTxHash) {
+      return 'Treasury Reimbursed';
+    }
+    return mapped || 'Pending Burn';
   }
 
-  // ── Load all intents from VaultStore ────────────────────────────────────
+  // ── Verification status badge ─────────────────────────────────────────────
+  function _verificationBadge(intent) {
+    if (intent.status === 'Failed' || intent._verificationFailed) {
+      return { label:'Verification Failed', cls:'failed', icon:'ti-circle-x' };
+    }
+
+    // On-chain reimbursement confirmed by verifyAndSettle balance check
+    if (intent._treasuryReimbursed || intent._reimbursementProof?.onChainVerified) {
+      return { label:'Verified On-Chain', cls:'verified', icon:'ti-shield-check' };
+    }
+
+    // Attestation received but treasury reimbursement not yet confirmed
+    if (intent.attestation || intent.settlementTxHash) {
+      return { label:'Awaiting Verification', cls:'awaiting', icon:'ti-clock-exclamation' };
+    }
+
+    return { label:'Awaiting Verification', cls:'awaiting', icon:'ti-clock-exclamation' };
+  }
+
+  // ── Reimbursement Proof Engine ────────────────────────────────────────────
+  const ReimbursementProof = {
+    _auditEntries: [],
+
+    // Fetch audit entries (verified reimbursements only)
+    getAuditEntries() {
+      const intents = _loadIntents();
+      return intents.filter(i => {
+        return !!(i._treasuryReimbursed || (i._reimbursementProof && i._reimbursementProof.onChainVerified));
+      }).map(i => ({
+        intentId:        i.intentId || i.id || '—',
+        burnTxHash:      i.srcTx || i.burnTx || i.txHash || i.cctpMsgHash || '—',
+        attestationHash: (typeof i.attestation === 'string' ? i.attestation : (i.attestation?.attestation||i.cctpMsgHash||i._reimbursementProof?.attestationData||'—')),
+        settlementTx:    i.settlementTxHash || i.settlementTx || '—',
+        mintTxHash:      i.arcTxHash || i.arcTx || '—',
+        reimbursedAmount: typeof i.amount === 'number' ? i.amount : 0,
+        verificationTimestamp: i.settledAt || i.verificationTimestamp || i.updatedAt || Date.now(),
+        proof:           i._reimbursementProof || null,
+      }));
+    },
+
+    // Store verification proof on intent
+    recordProof(intentId, proofData) {
+      const intents = _loadAllRaw();
+      const idx = intents.findIndex(i => (i.id === intentId || i.intentId === intentId));
+      if (idx < 0) return;
+      intents[idx]._proofData = {
+        ...(intents[idx]._proofData || {}),
+        ...proofData,
+        recordedAt: Date.now(),
+      };
+      _saveIntents(intents);
+      _verificationCache[intentId] = intents[idx]._proofData;
+    },
+
+    // Verify Circle CCTP attestation
+    async verifyAttestation(intent) {
+      const intentId = intent.intentId || intent.id;
+      if (_verificationCache[intentId]?.attestationVerified) return true;
+
+      const msgHash = intent.cctpMsgHash || intent.messageHash;
+      const domain  = intent.sourceDomain;
+
+      // Try V2 API first if domain is available
+      if (domain && msgHash) {
+        try {
+          const url = IRIS_V2 + domain + '?transactionHash=' + msgHash;
+          const resp = await fetch(url, { signal: AbortSignal.timeout(12000) });
+          if (resp.ok) {
+            const data = await resp.json();
+            if (data.messages && data.messages.length > 0) {
+              const msg = data.messages[0];
+              if (msg.status === 'complete' && msg.attestation && msg.attestation !== 'PENDING') {
+                _verificationCache[intentId] = _verificationCache[intentId] || {};
+                _verificationCache[intentId].attestationVerified = true;
+                _verificationCache[intentId].messageHash = msg.messageHash || msgHash;
+                _verificationCache[intentId].attestationData = msg.attestation;
+                return true;
+              }
+            }
+          }
+        } catch(e) { /* CORS/network expected in testnet */ }
+      }
+
+      // Try V1 fallback
+      if (msgHash && msgHash.startsWith('0x')) {
+        try {
+          const resp = await fetch(IRIS_ATTEST + msgHash, { signal: AbortSignal.timeout(12000) });
+          if (resp.ok) {
+            const data = await resp.json();
+            if (data.status === 'complete' && data.attestation) {
+              _verificationCache[intentId] = _verificationCache[intentId] || {};
+              _verificationCache[intentId].attestationVerified = true;
+              _verificationCache[intentId].attestationData = data.attestation;
+              return true;
+            }
+          }
+        } catch(e) { /* fallback failed */ }
+      }
+
+      // If intent's attestation field is already set, consider it verified
+      if (intent.attestation && typeof intent.attestation === 'object' && intent.attestation.attestation) {
+        _verificationCache[intentId] = _verificationCache[intentId] || {};
+        _verificationCache[intentId].attestationVerified = true;
+        return true;
+      }
+
+      return false;
+    },
+
+    // Verify TreasuryVault balance restoration
+    async verifyTreasuryBalance(intent, asset) {
+      const intentId = intent.intentId || intent.id;
+      if (_verificationCache[intentId]?.treasuryVerified) return true;
+
+      if (typeof ARC_READ_PROVIDER === 'undefined' || typeof TREASURY_VAULT_ADDRESS === 'undefined') return false;
+      if (!TREASURY_VAULT_ADDRESS || TREASURY_VAULT_ADDRESS === '0x0000000000000000000000000000000000000000') return false;
+
+      try {
+        const assetAddr = typeof TREASURY_ASSETS !== 'undefined' ? TREASURY_ASSETS[asset] : null;
+        if (!assetAddr) return false;
+
+        const erc20Abi = ['function balanceOf(address) view returns (uint256)'];
+        const token = new ethers.Contract(assetAddr, erc20Abi, ARC_READ_PROVIDER);
+        const balance = await token.balanceOf(TREASURY_VAULT_ADDRESS);
+        const decimals = asset === 'cirbtc' ? 8 : 6;
+        const balanceNum = parseFloat(ethers.formatUnits(balance, decimals));
+
+        _treasuryBalanceCache.after[asset] = balanceNum;
+        _treasuryBalanceCache.lastFetch = Date.now();
+
+        // Real verification: compare pre vs post balance if pre-balance was captured
+        const preBal = intent._preBalance;
+        if (preBal !== null && preBal !== undefined) {
+          const netChange = balanceNum - preBal;
+          // Treasury paid out ~amount via fulfillAndPayWithFee, CCTP should reimburse similar amount
+          // Net change >= 0 means Treasury was reimbursed
+          if (netChange >= 0) {
+            _verificationCache[intentId] = _verificationCache[intentId] || {};
+            _verificationCache[intentId].treasuryVerified = true;
+            _verificationCache[intentId].treasuryBalanceAfter = balanceNum;
+            _verificationCache[intentId].netChange = netChange;
+            return true;
+          }
+        }
+
+        // Fallback: check if already settled on-chain via _treasuryReimbursed flag
+        if (intent._treasuryReimbursed) {
+          _verificationCache[intentId] = _verificationCache[intentId] || {};
+          _verificationCache[intentId].treasuryVerified = true;
+          _verificationCache[intentId].treasuryBalanceAfter = balanceNum;
+          return true;
+        }
+
+        return false;
+      } catch(e) {
+        return false;
+      }
+    },
+
+    // Full verification pipeline (read-only — does NOT override verifyAndSettle authority)
+    async runVerification(intents) {
+      const results = [];
+      for (const intent of intents) {
+        if (intent.status === 'Failed') continue;
+        const asset = intent.asset || 'usdc';
+        try {
+          const attestOk = await ReimbursementProof.verifyAttestation(intent);
+          const tsyOk     = await ReimbursementProof.verifyTreasuryBalance(intent, asset);
+
+          const intentId = intent.intentId || intent.id;
+          const hasBurnTx    = !!(intent.srcTx || intent.burnTx || intent.txHash || intent.cctpMsgHash);
+          const hasArcTx     = !!(intent.arcTxHash || intent.arcTx);
+          const hasSettleTx  = !!(intent.settlementTxHash || intent.settlementTx);
+
+          // Respect the authority: _treasuryReimbursed is only set by verifyAndSettle (on-chain proof)
+          const alreadyReimbursed = !!(intent._treasuryReimbursed);
+          const proofOk = alreadyReimbursed || (attestOk && hasBurnTx && hasArcTx && (tsyOk || hasSettleTx));
+
+          results.push({
+            intentId,
+            status: _displayStatus(intent),
+            verified: proofOk,
+            proofs: { burnTx: hasBurnTx, attestation: attestOk, arcFulfillment: hasArcTx, treasuryReimburse: tsyOk || alreadyReimbursed, settlementTx: hasSettleTx },
+          });
+
+          // Cache verification data but do NOT set _treasuryReimbursed (that's verifyAndSettle's job)
+          if (proofOk && attestOk) {
+            intent.cctpAttestationVerified = attestOk;
+            intent.verificationTimestamp = intent.verificationTimestamp || Date.now();
+          }
+        } catch(e) {
+          results.push({ intentId: intent.intentId || intent.id, status: _displayStatus(intent), verified: false, error: e.message });
+        }
+      }
+      return results;
+    },
+  };
+
+  // ── Health badge colors ────────────────────────────────────────────────────
+  const HEALTH = {
+    Healthy:                 { bg:'rgba(34,197,94,.15)',   color:'#22c55e', icon:'ti-circle-check' },
+    Delayed:                 { bg:'rgba(245,158,11,.15)',  color:'#f59e0b', icon:'ti-clock-exclamation' },
+    'Attestation Pending':   { bg:'rgba(123,158,247,.15)', color:'#7b9ef7', icon:'ti-hourglass' },
+    'Reimbursement Pending': { bg:'rgba(167,139,250,.15)', color:'#a78bfa', icon:'ti-transfer' },
+    Failed:                  { bg:'rgba(239,68,68,.15)',   color:'#ef4444', icon:'ti-circle-x' },
+  };
+
+  // ── Intent flow step ─────────────────────────────────────────────────────
+  function _intentFlowStep(intent) {
+    const ds = _displayStatus(intent);
+    const idx = STATUS_ORDER.indexOf(ds);
+    return idx >= 0 ? idx + 1 : 1;
+  }
+
+  // ── Load intents ─────────────────────────────────────────────────────────
   function _loadIntents() {
     try {
       const raw = localStorage.getItem(VAULT_KEY);
@@ -16326,9 +16776,27 @@ const SettlementModule = (() => {
       const intents = store.intents || store.intentMap || {};
       if (Array.isArray(intents)) return intents;
       return Object.values(intents);
-    } catch(e) {
-      return [];
-    }
+    } catch(e) { return []; }
+  }
+
+  function _loadAllRaw() {
+    try {
+      const raw = localStorage.getItem(VAULT_KEY);
+      if (!raw) return [];
+      const store = JSON.parse(raw);
+      return store.intents || [];
+    } catch(e) { return []; }
+  }
+
+  function _saveIntents(intents) {
+    try {
+      const raw = localStorage.getItem(VAULT_KEY);
+      if (raw) {
+        const store = JSON.parse(raw);
+        store.intents = intents;
+        localStorage.setItem(VAULT_KEY, JSON.stringify(store));
+      }
+    } catch(e) { /* graceful */ }
   }
 
   // ── Age display ──────────────────────────────────────────────────────────
@@ -16345,45 +16813,53 @@ const SettlementModule = (() => {
     if (!hash || hash === '—' || !hash.startsWith('0x')) return '<span style="color:var(--muted2)">—</span>';
     const base = EXPLORERS[chain] || 'https://testnet.arcscan.app/tx/';
     const short = hash.slice(0,6) + '…' + hash.slice(-4);
-    return `<a href="${base}${hash}" target="_blank" rel="noopener" style="color:#7b9ef7;font-family:monospace;font-size:9px;">${short}</a>`;
+    return '<a href="' + base + hash + '" target="_blank" rel="noopener" style="color:#7b9ef7;font-family:monospace;font-size:8.5px;">' + short + '</a>';
   }
 
-  // ── Status badge ─────────────────────────────────────────────────────────
-  function _statusBadge(status) {
+  // ── Status badge (new statuses) ──────────────────────────────────────────
+  function _statusBadge(intent) {
+    const ds = _displayStatus(intent);
     const colors = {
-      Settled:   'rgba(34,197,94,.15);color:#22c55e',
-      Settling:  'rgba(123,158,247,.15);color:#7b9ef7',
-      Fulfilled: 'rgba(167,139,250,.15);color:#a78bfa',
-      Created:   'rgba(245,158,11,.15);color:#f59e0b',
-      Failed:    'rgba(239,68,68,.15);color:#ef4444',
+      'Pending Burn':          'background:rgba(245,158,11,.12);color:#f59e0b',
+      'Awaiting Attestation':  'background:rgba(123,158,247,.12);color:#7b9ef7',
+      'Attestation Received':  'background:rgba(139,92,246,.12);color:#a78bfa',
+      'Treasury Reimbursed':   'background:rgba(34,197,94,.12);color:#22c55e',
+      'Fully Settled':         'background:rgba(16,185,129,.12);color:#10b981',
+      'Failed':                'background:rgba(239,68,68,.12);color:#ef4444',
     };
-    const s = colors[status] || 'rgba(100,100,100,.15);color:#999';
-    return `<span style="background:${s};padding:2px 7px;border-radius:8px;font-size:9px;">${status||'Unknown'}</span>`;
+    const s = colors[ds] || 'background:rgba(100,100,100,.12);color:#999';
+    return '<span style="' + s + ';padding:2px 7px;border-radius:8px;font-size:8.5px;white-space:nowrap;">' + ds + '</span>';
   }
 
   // ── Compute health status ────────────────────────────────────────────────
   function _computeHealth(intents) {
     const now = Date.now();
-    const pending = intents.filter(i => ['Created','Fulfilled','Settling'].includes(i.status));
+    const pending = intents.filter(i => {
+      const ds = _displayStatus(i);
+      return ['Pending Burn','Awaiting Attestation','Attestation Received'].includes(ds);
+    });
     if (pending.length === 0) return 'Healthy';
     const oldestPending = pending.reduce((a,b) => (a.createdAt||0) < (b.createdAt||0) ? a : b);
     const ageSec = (now - (oldestPending.createdAt||now)) / 1000;
     if (ageSec > 3600) return 'Delayed';
-    const settling = pending.filter(i => i.status === 'Settling');
-    if (settling.length > 0) return 'Attestation Pending';
-    const fulfilled = pending.filter(i => i.status === 'Fulfilled');
-    if (fulfilled.length > 0) return 'Reimbursement Pending';
+    const attestPending = pending.filter(i => _displayStatus(i) === 'Awaiting Attestation');
+    if (attestPending.length > 0) return 'Attestation Pending';
+    const reimbursing = pending.filter(i => _displayStatus(i) === 'Attestation Received');
+    if (reimbursing.length > 0) return 'Reimbursement Pending';
     return 'Healthy';
   }
 
-  // ── Apply filter state ───────────────────────────────────────────────────
+  // ── Filter state ──────────────────────────────────────────────────────────
   let _filters = { asset:'', status:'', route:'', dateFrom:'', dateTo:'', intent:'' };
 
   function _matchFilter(intent) {
     const f = _filters;
-    if (f.asset   && (intent.asset||'').toLowerCase() !== f.asset.toLowerCase()) return false;
-    if (f.status  && intent.status !== f.status) return false;
-    if (f.route   && (intent.route||'') !== f.route) return false;
+    if (f.asset && (intent.asset||'').toLowerCase() !== f.asset.toLowerCase()) return false;
+    if (f.status) {
+      const ds = _displayStatus(intent);
+      if (ds !== f.status) return false;
+    }
+    if (f.route && (intent.route||'') !== f.route) return false;
     if (f.dateFrom) {
       const from = new Date(f.dateFrom).getTime();
       if ((intent.createdAt||0) < from) return false;
@@ -16394,91 +16870,107 @@ const SettlementModule = (() => {
     }
     if (f.intent) {
       const q = f.intent.toLowerCase();
-      if (!(intent.intentId||'').toLowerCase().includes(q)) return false;
+      if (!(intent.intentId||intent.id||'').toLowerCase().includes(q)) return false;
     }
     return true;
   }
 
-  // ── Render table ─────────────────────────────────────────────────────────
+  // ── Render upgraded settlement table ─────────────────────────────────────
   function _renderTable(intents) {
     const tbody = document.getElementById('stl-table-body');
     const countEl = document.getElementById('stl-table-count');
     if (!tbody) return;
 
     const filtered = intents.filter(_matchFilter);
-    // Sort newest first
     filtered.sort((a,b) => (b.createdAt||0) - (a.createdAt||0));
 
     if (countEl) countEl.textContent = filtered.length + ' records';
 
     if (filtered.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="10" style="padding:24px;text-align:center;color:var(--muted2);font-size:11px;">
-        <i class="ti ti-database-off" style="font-size:20px;display:block;margin-bottom:6px;"></i>
-        No settlements match current filters.
-      </td></tr>`;
+      tbody.innerHTML = '<tr><td colspan="12" style="padding:24px;text-align:center;color:var(--muted2);font-size:11px;">'
+        + '<i class="ti ti-database-off" style="font-size:20px;display:block;margin-bottom:6px;"></i>'
+        + 'No settlements match current filters.'
+        + '</td></tr>';
       return;
     }
 
     tbody.innerHTML = filtered.map(intent => {
       const srcChain  = intent.srcChain || intent.sourceChain || 'Base_Sepolia';
-      const route     = intent.route || (srcChain.replace('_',' ') + ' → ARC');
+      const route     = intent.route || (srcChain.replace('_',' ') + ' \u2192 ARC');
       const assetUp   = (intent.asset||'USDC').toUpperCase();
       const amtFmt    = (typeof intent.amount === 'number')
                         ? intent.amount.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:6})
                         : (intent.amount||'—');
-      const shortId   = (intent.intentId||'—').slice(0,8) + '…';
+      const shortId   = (intent.intentId||intent.id||'—').slice(0,8) + '\u2026';
 
-      return `<tr style="border-bottom:1px solid var(--border);transition:.1s;" onmouseover="this.style.background='rgba(255,255,255,.02)'" onmouseout="this.style.background=''">
-        <td style="padding:7px 10px;font-family:monospace;color:var(--muted2);white-space:nowrap;" title="${intent.intentId||''}">${shortId}</td>
-        <td style="padding:7px 10px;white-space:nowrap;">${route}</td>
-        <td style="padding:7px 10px;font-weight:600;">${assetUp}</td>
-        <td style="padding:7px 10px;text-align:right;font-weight:600;">${amtFmt}</td>
-        <td style="padding:7px 10px;text-align:center;">${_statusBadge(intent.status)}</td>
-        <td style="padding:7px 10px;text-align:right;color:var(--muted2);">${_age(intent.createdAt)}</td>
-        <td style="padding:7px 6px;text-align:center;">${_txLink(intent.srcTx||intent.burnTx, srcChain)}</td>
-        <td style="padding:7px 6px;text-align:center;">${_txLink(intent.arcTx||intent.mintTx, 'Arc_Testnet')}</td>
-        <td style="padding:7px 6px;text-align:center;">${_txLink(intent.attestationTx||intent.circleTx, srcChain)}</td>
-        <td style="padding:7px 6px;text-align:center;">${_txLink(intent.settlementTx||intent.settledTx, 'Arc_Testnet')}</td>
-      </tr>`;
+      const burnTx     = intent.srcTx || intent.burnTx || intent.txHash || intent.cctpMsgHash;
+      const arcTx      = intent.arcTxHash || intent.arcTx;
+      const settleTx   = intent.settlementTxHash || intent.settlementTx;
+      const reimbAmt   = amtFmt;
+      const settleTime = intent.settledAt ? _age(intent.settledAt) : '—';
+
+      const vb = _verificationBadge(intent);
+      const vbHtml = '<span class="verbadge ' + vb.cls + '"><i class="ti ' + vb.icon + '"></i> ' + vb.label + '</span>';
+
+      // Attestation display
+      let attestDisplay = '<span style="color:var(--muted2)">—</span>';
+      if (intent.attestation) {
+        const attStr = typeof intent.attestation === 'string' ? intent.attestation : (intent.attestation?.attestation||intent.attestation?.msgHash||'Attested');
+        const shortAtt = attStr.length > 12 ? attStr.slice(0,6) + '\u2026' + attStr.slice(-4) : attStr;
+        attestDisplay = '<span style="color:#22c55e;font-family:monospace;font-size:8.5px;" title="' + attStr + '"><i class="ti ti-circle-check" style="font-size:8px;"></i> ' + shortAtt + '</span>';
+      } else if (intent.cctpMsgHash) {
+        const attHash = intent.cctpMsgHash;
+        const shortAtt = attHash.length > 12 ? attHash.slice(0,6) + '\u2026' + attHash.slice(-4) : attHash;
+        attestDisplay = '<span style="color:#f59e0b;font-family:monospace;font-size:8.5px;">' + shortAtt + '</span>';
+      }
+
+      return '<tr style="border-bottom:1px solid var(--border);transition:.1s;" onmouseover="this.style.background=\'rgba(255,255,255,.02)\'" onmouseout="this.style.background=\'\'">'
+        + '<td style="padding:6px 8px;font-family:monospace;color:var(--muted2);white-space:nowrap;font-size:9px;" title="' + (intent.intentId||intent.id||'') + '">' + shortId + '</td>'
+        + '<td style="padding:6px 6px;white-space:nowrap;font-size:9px;">' + route + '</td>'
+        + '<td style="padding:6px 6px;font-weight:600;font-size:9px;">' + assetUp + '</td>'
+        + '<td style="padding:6px 6px;text-align:right;font-weight:600;font-size:9px;">' + amtFmt + '</td>'
+        + '<td style="padding:6px 6px;text-align:center;">' + _statusBadge(intent) + '</td>'
+        + '<td style="padding:6px 6px;text-align:center;">' + _txLink(burnTx, srcChain) + '</td>'
+        + '<td style="padding:6px 6px;text-align:center;">' + attestDisplay + '</td>'
+        + '<td style="padding:6px 6px;text-align:center;">' + _txLink(arcTx, 'Arc_Testnet') + '</td>'
+        + '<td style="padding:6px 6px;text-align:center;">' + _txLink(settleTx, 'Arc_Testnet') + '</td>'
+        + '<td style="padding:6px 6px;text-align:right;font-weight:600;font-size:9px;">' + reimbAmt + '</td>'
+        + '<td style="padding:6px 6px;text-align:right;font-size:9px;color:var(--muted2);">' + settleTime + '</td>'
+        + '<td style="padding:6px 6px;text-align:center;">' + vbHtml + '</td>'
+        + '</tr>';
     }).join('');
   }
 
-  // ── Render KPIs ─────────────────────────────────────────────────────────
+  // ── Render KPIs ──────────────────────────────────────────────────────────
   function _renderKPIs(intents) {
     const now = Date.now();
-    const todayStart = new Date(); todayStart.setHours(0,0,0,0);
 
-    const pending  = intents.filter(i => ['Created','Fulfilled','Settling'].includes(i.status));
-    const settled  = intents.filter(i => i.status === 'Settled');
+    const pending  = intents.filter(i => {
+      const ds = _displayStatus(i);
+      return ['Pending Burn','Awaiting Attestation','Attestation Received'].includes(ds);
+    });
+    const settled  = intents.filter(i => _displayStatus(i) === 'Fully Settled' || _displayStatus(i) === 'Treasury Reimbursed');
     const failed   = intents.filter(i => i.status === 'Failed');
-    const settledToday = settled.filter(i => (i.settledAt||i.createdAt||0) >= todayStart.getTime());
 
     // Pending value
     const pendingVal = pending.reduce((sum,i) => sum + (typeof i.amount === 'number' ? i.amount : 0), 0);
     _el('stl-kpi-pending-value', pendingVal > 0 ? '$' + pendingVal.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}) : '—');
     _el('stl-kpi-pending-count', pending.length + ' intent' + (pending.length!==1?'s':'') + ' pending');
 
-    // Avg settlement time (settled intents with both timestamps)
+    // Verified reimbursements (ONLY sum verified on-chain)
+    const verified = intents.filter(i => {
+      const vb = _verificationBadge(i);
+      return vb.label === 'Verified On-Chain';
+    });
+    const verifiedVal = verified.reduce((sum,i) => sum + (typeof i.amount === 'number' ? i.amount : 0), 0);
+    _el('stl-kpi-verified-reimb', verifiedVal > 0 ? '$' + verifiedVal.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}) : '—');
+
+    // Avg settlement time
     const withTimes = settled.filter(i => i.createdAt && (i.settledAt||i.updatedAt));
     const avgSec = withTimes.length > 0
       ? withTimes.reduce((s,i) => s + ((i.settledAt||i.updatedAt) - i.createdAt)/1000, 0) / withTimes.length
       : null;
     _el('stl-kpi-avg-time', avgSec !== null ? Math.round(avgSec) + 's' : '—');
-
-    // Longest pending
-    if (pending.length > 0) {
-      const oldest = pending.reduce((a,b) => (a.createdAt||now) < (b.createdAt||now) ? a : b);
-      _el('stl-kpi-longest', _age(oldest.createdAt));
-      _el('stl-kpi-longest-id', (oldest.intentId||'—').slice(0,20));
-    } else {
-      _el('stl-kpi-longest', '—');
-      _el('stl-kpi-longest-id', 'no pending');
-    }
-
-    // Settled today
-    const settledTodayVal = settledToday.reduce((s,i) => s + (typeof i.amount === 'number' ? i.amount : 0), 0);
-    _el('stl-kpi-settled-today', String(settledToday.length));
-    _el('stl-kpi-settled-today-val', settledTodayVal.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}) + ' USDC');
 
     // Success rate
     const total = settled.length + failed.length;
@@ -16489,61 +16981,52 @@ const SettlementModule = (() => {
   // ── Render Treasury Exposure ─────────────────────────────────────────────
   async function _renderExposure(intents) {
     try {
-      // Try to read from TreasuryVault contract if deployed
       let available = null, locked = null, feesEarned = null;
       if (typeof readTreasuryPoolData === 'function') {
         try {
           const usdcData = await readTreasuryPoolData('usdc');
           if (usdcData && usdcData.hasChainData) {
-            available   = usdcData.available;
-            locked      = usdcData.locked;
-            feesEarned  = usdcData.feesEarned;
+            available  = usdcData.available;
+            locked     = usdcData.locked;
+            feesEarned = usdcData.feesEarned;
           }
-        } catch(e) { /* fallback to local */ }
+        } catch(e) { /* fallback */ }
       }
 
-      // Fallback: compute from intents
       if (available === null) {
-        const lockedLocal = intents.filter(i => ['Fulfilled','Settling'].includes(i.status))
-          .reduce((s,i) => s + (typeof i.amount === 'number' ? i.amount : 0), 0);
+        const lockedLocal = intents.filter(i => {
+          const ds = _displayStatus(i);
+          return ['Awaiting Attestation','Attestation Received'].includes(ds);
+        }).reduce((s,i) => s + (typeof i.amount === 'number' ? i.amount : 0), 0);
         locked = lockedLocal;
-        available = null; // unknown without chain data
       }
 
-      const pendingRe = intents.filter(i => i.status === 'Settling')
+      const pendingRe = intents.filter(i => _displayStatus(i) === 'Attestation Received')
         .reduce((s,i) => s + (typeof i.amount === 'number' ? i.amount : 0), 0);
 
       const fmt = v => v !== null ? '$' + v.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}) : '—';
 
-      _el('stl-exp-available',  fmt(available));
-      _el('stl-exp-locked',     fmt(locked));
+      _el('stl-exp-available',     fmt(available));
+      _el('stl-exp-locked',        fmt(locked));
       _el('stl-exp-pending-reimb', fmt(pendingRe));
-      _el('stl-exp-total',      (available !== null && locked !== null) ? fmt(available + locked) : '—');
-      _el('stl-exp-util',       (available !== null && locked !== null && (available + locked) > 0)
+      _el('stl-exp-total',         (available !== null && locked !== null) ? fmt(available + locked) : '—');
+      _el('stl-exp-util',          (available !== null && locked !== null && (available + locked) > 0)
         ? ((locked / (available + locked)) * 100).toFixed(1) + '%' : '—');
-      _el('stl-exp-fees', feesEarned !== null ? fmt(feesEarned) : '—');
+      _el('stl-exp-fees',          feesEarned !== null ? fmt(feesEarned) : '—');
     } catch(e) {
-      console.warn('[Settlements] exposure render error:', e.message);
+      _warn('[Settlements] exposure render error:', e.message);
     }
   }
 
   // ── Render Flow Counts ───────────────────────────────────────────────────
   function _renderFlow(intents) {
-    const counts = { burn:0, attest:0, mint:0, reimb:0, settled:0 };
-    intents.forEach(i => {
-      const step = _intentFlowStep(i);
-      if (step === 2) counts.burn++;
-      else if (step === 3) counts.attest++;
-      else if (step === 4) counts.mint++;      // Fulfilled = waiting reimb
-      else if (step === 4 && i.status === 'Settling') counts.reimb++;
-      else if (step === 5) counts.settled++;
-    });
-    // More precise mapping
-    counts.burn    = intents.filter(i => i.status === 'Created').length;
-    counts.attest  = intents.filter(i => i.status === 'Settling' && !i.attestationTx).length;
-    counts.mint    = intents.filter(i => i.status === 'Fulfilled').length;
-    counts.reimb   = intents.filter(i => i.status === 'Settling' && i.attestationTx).length;
-    counts.settled = intents.filter(i => i.status === 'Settled').length;
+    const counts = {
+      burn:    intents.filter(i => _displayStatus(i) === 'Pending Burn').length,
+      attest:  intents.filter(i => _displayStatus(i) === 'Awaiting Attestation').length,
+      mint:    intents.filter(i => _displayStatus(i) === 'Attestation Received').length,
+      reimb:   intents.filter(i => _displayStatus(i) === 'Treasury Reimbursed').length,
+      settled: intents.filter(i => _displayStatus(i) === 'Fully Settled').length,
+    };
 
     _el('stl-flow-burn-count',    String(counts.burn));
     _el('stl-flow-attest-count',  String(counts.attest));
@@ -16552,13 +17035,18 @@ const SettlementModule = (() => {
     _el('stl-flow-settled-count', String(counts.settled));
   }
 
-  // ── Render Metrics ───────────────────────────────────────────────────────
+  // ── Render Metrics (CORRECTED: uses verified reimbursements) ─────────────
   function _renderMetrics(intents) {
-    const settled = intents.filter(i => i.status === 'Settled');
-    const totalRe = settled.reduce((s,i) => s + (typeof i.amount === 'number' ? i.amount : 0), 0);
-    const deployed = intents.filter(i => ['Fulfilled','Settling'].includes(i.status))
-      .reduce((s,i) => s + (typeof i.amount === 'number' ? i.amount : 0), 0);
-    const fees = settled.reduce((s,i) => s + (typeof i.fee === 'number' ? i.fee : 0), 0);
+    // Total Reimbursements = SUM(all intents where _treasuryReimbursed = true — on-chain verified)
+    const verified = intents.filter(i => !!(i._treasuryReimbursed || (i._reimbursementProof && i._reimbursementProof.onChainVerified)));
+    const totalRe = verified.reduce((s,i) => s + (typeof i.amount === 'number' ? i.amount : 0), 0);
+
+    const deployed = intents.filter(i => {
+      const ds = _displayStatus(i);
+      return ['Awaiting Attestation','Attestation Received'].includes(ds);
+    }).reduce((s,i) => s + (typeof i.amount === 'number' ? i.amount : 0), 0);
+
+    const fees = verified.reduce((s,i) => s + (typeof i.fee === 'number' ? i.fee : (typeof i.liquidityFee === 'number' ? i.liquidityFee : 0)), 0);
 
     const fmt = v => '$' + v.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
     _el('stl-met-reimb',    totalRe > 0  ? fmt(totalRe)  : '—');
@@ -16567,7 +17055,48 @@ const SettlementModule = (() => {
     _el('stl-met-profit',   fees > 0     ? fmt(fees)     : '—');
   }
 
-  // ── Health badge ────────────────────────────────────────────────────────
+  // ── Render Audit Trail ───────────────────────────────────────────────────
+  function _renderAudit(intents) {
+    const tbody = document.getElementById('stl-audit-body');
+    if (!tbody) return;
+
+    const entries = ReimbursementProof.getAuditEntries();
+
+    if (entries.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="8" style="padding:24px;text-align:center;color:var(--muted2);font-size:11px;">'
+        + '<i class="ti ti-search" style="font-size:20px;display:block;margin-bottom:6px;"></i>'
+        + 'No verified reimbursements yet. Complete settlements appear here.'
+        + '</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = entries.map(e => {
+      const shortId    = e.intentId.slice(0,8) + '\u2026';
+      const shortBurn  = (e.burnTxHash||'—').length > 12 ? (e.burnTxHash||'—').slice(0,6) + '\u2026' + (e.burnTxHash||'—').slice(-4) : (e.burnTxHash||'—');
+      const shortAtt   = (typeof e.attestationHash === 'string' && e.attestationHash.length > 12)
+        ? e.attestationHash.slice(0,6) + '\u2026' + e.attestationHash.slice(-4) : (String(e.attestationHash||'—').slice(0,14));
+      const shortMint   = (e.mintTxHash||'—').length > 12 ? (e.mintTxHash||'—').slice(0,6) + '\u2026' + (e.mintTxHash||'—').slice(-4) : (e.mintTxHash||'—');
+      const shortSettle = (e.settlementTx||'—').length > 12 ? (e.settlementTx||'—').slice(0,6) + '\u2026' + (e.settlementTx||'—').slice(-4) : (e.settlementTx||'—');
+      const reimbAmt    = typeof e.reimbursedAmount === 'number'
+        ? '$' + e.reimbursedAmount.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:6})
+        : '—';
+      const verTime     = e.verificationTimestamp ? new Date(e.verificationTimestamp).toLocaleString() : '—';
+      const verStatus   = '<span class="verbadge verified"><i class="ti ti-shield-check"></i> Verified</span>';
+
+      return '<tr class="audit-row" style="border-bottom:1px solid var(--border);">'
+        + '<td style="padding:5px 8px;font-family:monospace;color:#a78bfa;">' + shortId + '</td>'
+        + '<td style="padding:5px 8px;text-align:center;font-family:monospace;color:var(--muted2);">' + shortBurn + '</td>'
+        + '<td style="padding:5px 8px;text-align:center;font-family:monospace;color:#22c55e;">' + shortAtt + '</td>'
+        + '<td style="padding:5px 8px;text-align:center;font-family:monospace;color:#a78bfa;">' + shortMint + '</td>'
+        + '<td style="padding:5px 8px;text-align:center;font-family:monospace;color:#7b9ef7;">' + shortSettle + '</td>'
+        + '<td style="padding:5px 8px;text-align:right;font-weight:600;color:#22c55e;">' + reimbAmt + '</td>'
+        + '<td style="padding:5px 8px;text-align:right;font-size:8px;color:var(--muted2);">' + verTime + '</td>'
+        + '<td style="padding:5px 8px;text-align:center;">' + verStatus + '</td>'
+        + '</tr>';
+    }).join('');
+  }
+
+  // ── Health badge ──────────────────────────────────────────────────────────
   function _renderHealth(intents) {
     const h = _computeHealth(intents);
     const conf = HEALTH[h] || HEALTH.Healthy;
@@ -16588,7 +17117,6 @@ const SettlementModule = (() => {
     if (addr) {
       if (typeof isTurboOperator === 'function') isOp = isTurboOperator(addr);
       if (!isOp && typeof isAuthorizedDepositor === 'function') isOp = isAuthorizedDepositor(addr);
-      // Fallback: check OWNER_WALLET
       if (!isOp && typeof OWNER_WALLET !== 'undefined' && OWNER_WALLET) {
         isOp = addr.toLowerCase() === OWNER_WALLET.toLowerCase();
       }
@@ -16599,60 +17127,94 @@ const SettlementModule = (() => {
     panel.style.display = isOp ? 'block' : 'none';
   }
 
-  // ── Helper: set element text ─────────────────────────────────────────────
+  // ── Helper ───────────────────────────────────────────────────────────────
   function _el(id, text) {
     const el = document.getElementById(id);
     if (el) el.textContent = text;
   }
 
-  // ── Settlement Recovery Engine ───────────────────────────────────────────
+  // ── Settlement Recovery Engine (PRESERVED + ENHANCED) ────────────────────
   async function _runRecoveryEngine() {
     const intents = _loadIntents();
-    const stuckStatuses = ['Created','Fulfilled','Settling'];
-    const stuck = intents.filter(i => stuckStatuses.includes(i.status));
-    if (stuck.length === 0) return;
+    const stuckStatuses = ['Pending Burn','Awaiting Attestation','Attestation Received','Created','Fulfilled','Settling'];
+    const allPending = intents.filter(i => {
+      const ds = _displayStatus(i);
+      return stuckStatuses.includes(i.status) || stuckStatuses.includes(ds);
+    });
+    if (allPending.length === 0) return;
 
-    console.log(`[SettlementRecovery] ${stuck.length} intents need recovery polling`);
+    _log('[SettlementRecovery] ' + allPending.length + ' intents need recovery polling');
 
-    for (const intent of stuck) {
+    for (const intent of allPending) {
       try {
+        // Run verification pipeline
+        await ReimbursementProof.runVerification([intent]);
+
         // Resume polling via FulfillerEngine if available
-        if (typeof FulfillerEngine !== 'undefined' && intent.status === 'Settling' && intent.intentId) {
-          // Re-trigger settlement poller
-          if (typeof FulfillerEngine._startSettlementPoller === 'function') {
-            FulfillerEngine._startSettlementPoller(intent.intentId);
+        if (typeof FulfillerEngine !== 'undefined') {
+          if ((intent.status === 'Settling' || _displayStatus(intent) === 'Attestation Received') && intent.intentId) {
+            if (typeof FulfillerEngine._startSettlementPoller === 'function') {
+              FulfillerEngine._startSettlementPoller(intent.intentId);
+            }
+          }
+          if ((intent.status === 'Created' || _displayStatus(intent) === 'Pending Burn') && intent.intentId) {
+            if (typeof FulfillerEngine._startOperatorFulfillmentPoller === 'function') {
+              FulfillerEngine._startOperatorFulfillmentPoller(intent.intentId);
+            }
           }
         }
-        // Re-check Circle attestation if we have a message hash
-        if (intent.status === 'Settling' && (intent.messageHash || intent.circleMsgHash)) {
-          const hash = intent.messageHash || intent.circleMsgHash;
-          _pollAttestation(intent.intentId, hash);
+
+        // Re-check Circle attestation
+        const msgHash = intent.messageHash || intent.cctpMsgHash;
+        if (msgHash && (intent.status === 'Settling' || _displayStatus(intent) === 'Awaiting Attestation')) {
+          _pollAttestation(intent.intentId || intent.id, msgHash, intent.sourceDomain);
         }
       } catch(e) {
-        console.warn('[SettlementRecovery] intent', intent.intentId, ':', e.message);
+        _warn('[SettlementRecovery] intent', intent.intentId||intent.id, ':', e.message);
       }
     }
   }
 
   // ── Poll attestation from Circle Iris ────────────────────────────────────
-  async function _pollAttestation(intentId, msgHash) {
+  async function _pollAttestation(intentId, msgHash, sourceDomain) {
     if (!msgHash) return;
     try {
-      const resp = await fetch(IRIS_BASE + msgHash, { signal: AbortSignal.timeout(8000) });
-      if (resp.ok) {
-        const data = await resp.json();
-        if (data.status === 'complete' && data.attestation) {
-          console.log(`[Settlements] Attestation received for intent ${intentId}`);
-          // Update intent in VaultStore if RepaymentContract available
-          if (typeof RepaymentContract !== 'undefined' && typeof RepaymentContract.verifyAndSettle === 'function') {
-            await RepaymentContract.verifyAndSettle(intentId, data.attestation);
+      // Try V2 first
+      if (sourceDomain) {
+        const url = IRIS_V2 + sourceDomain + '?transactionHash=' + msgHash;
+        const resp = await fetch(url, { signal: AbortSignal.timeout(8000) });
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data.messages && data.messages.length > 0) {
+            const msg = data.messages[0];
+            if (msg.status === 'complete' && msg.attestation && msg.attestation !== 'PENDING') {
+              _log('[Settlements] Attestation received for intent ' + intentId);
+              if (typeof RepaymentContract !== 'undefined' && typeof RepaymentContract.verifyAndSettle === 'function') {
+                await RepaymentContract.verifyAndSettle(intentId, msg.attestation);
+              }
+              _verificationCache[intentId] = { attestationVerified: true, attestationData: msg.attestation, messageHash: msg.messageHash };
+              stlRefreshAll();
+              return;
+            }
           }
-          stlRefreshAll();
         }
       }
-    } catch(e) {
-      // CORS / network error is expected in testnet — non-fatal
-    }
+      // Fallback V1
+      if (msgHash.startsWith('0x')) {
+        const resp = await fetch(IRIS_ATTEST + msgHash, { signal: AbortSignal.timeout(8000) });
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data.status === 'complete' && data.attestation) {
+            _log('[Settlements] V1 attestation received for intent ' + intentId);
+            if (typeof RepaymentContract !== 'undefined' && typeof RepaymentContract.verifyAndSettle === 'function') {
+              await RepaymentContract.verifyAndSettle(intentId, data.attestation);
+            }
+            _verificationCache[intentId] = { attestationVerified: true, attestationData: data.attestation };
+            stlRefreshAll();
+          }
+        }
+      }
+    } catch(e) { /* CORS/network expected */ }
   }
 
   // ── Public API ───────────────────────────────────────────────────────────
@@ -16660,29 +17222,40 @@ const SettlementModule = (() => {
     refresh() {
       try {
         const intents = _loadIntents();
+        // Pre-compute verification badges for all intents (cached)
+        intents.forEach(i => { i._vbadge = _verificationBadge(i); });
         _renderKPIs(intents);
         _renderFlow(intents);
         _renderHealth(intents);
         _renderTable(intents);
         _renderMetrics(intents);
-        _renderExposure(intents);  // async — non-blocking
+        _renderAudit(intents);
+        _renderExposure(intents);
         _checkOperatorPanel();
       } catch(e) {
-        console.warn('[Settlements] refresh error:', e.message);
+        _warn('[Settlements] refresh error:', e.message);
       }
     },
     applyFilters(f) {
       Object.assign(_filters, f);
       const intents = _loadIntents();
+      intents.forEach(i => { i._vbadge = _verificationBadge(i); });
       _renderTable(intents);
+      _renderAudit(intents);
     },
     clearFilters() {
       _filters = { asset:'', status:'', route:'', dateFrom:'', dateTo:'', intent:'' };
       const intents = _loadIntents();
+      intents.forEach(i => { i._vbadge = _verificationBadge(i); });
       _renderTable(intents);
+      _renderAudit(intents);
     },
     runRecovery: _runRecoveryEngine,
     pollAttestation: _pollAttestation,
+    // Expose for direct verification
+    runVerification: (intents) => ReimbursementProof.runVerification(intents || _loadIntents()),
+    getVerificationBadge: _verificationBadge,
+    getAuditEntries: () => ReimbursementProof.getAuditEntries(),
   };
 })();
 
@@ -16761,7 +17334,7 @@ function _stlLog(msg) {
 // ─── Run Recovery Engine on app startup ─────────────────────────────────────
 (function _stlBootstrap() {
   const run = () => {
-    try { SettlementModule.runRecovery(); } catch(e) {}
+    try { SettlementModule.runRecovery(); } catch(e) { _warn('catch', e?.message||e); }
   };
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', run);
