@@ -27,6 +27,8 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" integrity="sha384-3zSEDfvllQohrq0PHL1fOXJuC/jSOO34H46t6UQfobFOmxE5BpjjaIJY5F2/bMnU" crossorigin="anonymous"></script>
 <!-- WalletConnect EthereumProvider (enables WalletConnect v2 + mobile wallets) -->
 <!-- WalletConnect v2 — Web3Modal AppKit (official bundle, includes QR modal) -->
+<!-- DOMPurify — XSS sanitizer for safe DOM manipulation -->
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@web3modal/ethereum@2.7.1/dist/index.js" integrity="sha384-scb267QicZDIPcJtRbV2eSYKkU7C4HaAWIMu31Ou9tDHHJXvp3Lg9XsWxQ+CWR7a" crossorigin="anonymous" defer></script>
 <style>
 /* ── Wallet Modal ───────────────────────────────────────── */
@@ -5964,7 +5966,7 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
               <table class="intent-table">
                 <thead>
                   <tr>
-                    <th>Intent ID</th><th>Route</th><th>Asset</th><th>Amount</th><th>Status</th><th>Age</th>
+                    <th>Intent ID</th><th>Route</th><th>Asset</th><th>Amount</th><th>Status</th><th>Last Poll</th><th>Poll #</th>
                   </tr>
                 </thead>
                 <tbody id="intent-tbody">
@@ -6448,6 +6450,8 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
                       <th style="padding:8px 6px;text-align:right;color:var(--muted2);font-weight:600;">Reimb Amt</th>
                       <th style="padding:8px 6px;text-align:right;color:var(--muted2);font-weight:600;">Settle Time</th>
                       <th style="padding:8px 6px;text-align:center;color:var(--muted2);font-weight:600;">Verification</th>
+                      <th style="padding:8px 6px;text-align:center;color:var(--muted2);font-weight:600;">Last Poll</th>
+                      <th style="padding:8px 6px;text-align:right;color:var(--muted2);font-weight:600;">Poll #</th>
                     </tr>
                   </thead>
                   <tbody id="stl-table-body">
@@ -6985,6 +6989,29 @@ const __DEBUG__ = (() => {
 function _log(...args) { if (__DEBUG__) console.log(...args); }
 function _warn(...args) { if (__DEBUG__) console.warn(...args); }
 function _err(...args) { console.error(...args); } // errors always visible
+
+// ═══════════════════════════════════════════════════════════
+//  SAFE DOM UTILITIES — XSS hardening
+// ═══════════════════════════════════════════════════════════
+function _safePurify(html) {
+  if (typeof DOMPurify !== 'undefined' && DOMPurify.sanitize) {
+    return DOMPurify.sanitize(html, {
+      ALLOWED_TAGS: ['a','b','br','code','div','em','i','li','ol','p',
+                     'pre','span','strong','table','tbody','td','th',
+                     'thead','tr','ul'],
+      ALLOWED_ATTR: ['class','style','href','target','rel','title',
+                     'onclick','value','type','colspan','rowspan'],
+      ALLOW_DATA_ATTR: true
+    });
+  }
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/\s+on\w+\s*=\s*(?:"[^"]*"|'[^']*')/gi, '');
+}
+function setSafeHTML(el, html) {
+  if (!el) return;
+  el.innerHTML = _safePurify(html);
+}
 // ═══════════════════════════════════════════════════════════
 //  PROVIDER CACHE — reuses JsonRpcProvider per RPC URL
 //  TTL: 5 minutes before refresh. Retry on stale/failed connections.
@@ -7274,6 +7301,18 @@ const CHAIN_REGISTRY = {
 // ── Derived helpers ───────────────────────────────────────────
 // EVM chains as ordered array (for Bridge/XC selectors — index-based)
 const CHAINS = Object.values(CHAIN_REGISTRY).filter(c => c.isEvm);
+
+// CHAIN_MAP: alias → canonical id (CSV import, contact lookup)
+const CHAIN_MAP = (() => {
+  const m = {};
+  for (const c of CHAINS) {
+    const id  = c.id;
+    m[id.toLowerCase().replace(/_/g, ' ')] = id;
+    if (c.shortName) m[c.shortName.toLowerCase()] = id;
+    if (c.name)      m[c.name.toLowerCase()]       = id;
+  }
+  return m;
+})();
 // All chains including Solana
 const ALL_CHAINS = [...CHAINS, CHAIN_REGISTRY.solana_devnet];
 
@@ -7380,7 +7419,7 @@ let _tt;
 function toast(msg,type='info'){
   const el=document.getElementById('toast');
   const ic={success:'ti-check',error:'ti-x',info:'ti-info-circle',warning:'ti-alert-triangle'};
-  el.innerHTML=`<i class="ti ${ic[type]||'ti-info-circle'}" style="font-size:13px;flex-shrink:0"></i>${escHtml(msg)}`;
+  setSafeHTML(el, `<i class="ti ${ic[type]||'ti-info-circle'}" style="font-size:13px;flex-shrink:0"></i>${escHtml(msg)}`);
   el.className=`toast ${type} show`;
   clearTimeout(_tt);_tt=setTimeout(()=>el.classList.remove('show'),4000);
 }
@@ -7708,6 +7747,10 @@ function setupProviderEvents(raw) {
       set('dd-full-addr', walletAddress);
       updateNetworkBadge();
       await refreshBalance();
+      // Submit any pending attestations with the new signer
+      if (typeof FulfillerEngine !== 'undefined' && typeof FulfillerEngine.submitPendingAttestations === 'function') {
+        setTimeout(() => FulfillerEngine.submitPendingAttestations().catch(_err), 1200);
+      }
       toast('Account switched: ' + short, 'info');
     });
 
@@ -8159,7 +8202,7 @@ function prepareCrossChainBatch(){
   }
   // Detect if all going to same destination (ideal for Hook mode)
   const uniqueDomains = new Set(crossChainRecipients.map(r => {
-    const ch = CHAINS[r.chainId] || CHAINS[11155111];
+    const ch = CHAINS.find(c => c.id === r.chainId) || null;
     return ch?.cctp?.domain ?? 0;
   }));
 
@@ -8200,7 +8243,7 @@ async function executeCrossChainBatch(crossRcpts, useHook = false){
 
     for(const r of crossRcpts){
       const amt = toUsdc(r.amount);
-      const destChain = CHAINS[r.chainId] || CHAINS[11155111];
+      const destChain = CHAINS.find(c => c.id === r.chainId) || null;
       const domain = destChain?.cctp?.domain ?? 0;
       const mintRecipient = addrToBytes32(r._resolved || r.addr);
       if (!mintRecipient) {
@@ -8273,7 +8316,7 @@ async function executeCrossChainBatch(crossRcpts, useHook = false){
             amount: ethers.formatUnits(parsed.args.amount, 6),
             domain: Number(parsed.args.destinationDomain),
             nonce: parsed.args.nonce.toString(),
-            chainName: (CHAINS[rcpt.chainId] && CHAINS[rcpt.chainId].name) || 'Unknown'
+            chainName: (CHAINS.find(c => c.id === rcpt.chainId) || {}).name || 'Unknown'
           });
         }
       } catch (e) { _warn('silent-catch', e?.message||e); }
@@ -8328,7 +8371,7 @@ function getRecipientRoute(r) {
 
 function renderTable(){
   const tbody=document.getElementById('tbody');
-  tbody.innerHTML='';
+  tbody.textContent='';
   recipients.forEach((r,i)=>{
     const amt   = parseFloat(r.amount)||0;
     const valid = isAddr(r.addr)||isEns(r.addr);
@@ -8336,7 +8379,7 @@ function renderTable(){
       ? `<span class="sbadge s-ok"><i class="ti ti-check" style="font-size:8px"></i> Ready</span>`
       : `<span class="sbadge s-err"><i class="ti ti-x" style="font-size:8px"></i> Invalid</span>`;
     const chainId  = r.chainId || 'Arc_Testnet';
-    const chain    = CHAINS.find(c=>c.id===chainId) || CHAINS[0];
+    const chain    = CHAINS.find(c=>c.id===chainId) || null;
     const route    = getRecipientRoute(r);
     const routeBadge = route === 'direct'
       ? `<span style="padding:2px 7px;background:rgba(34,197,94,.13);border:1px solid rgba(34,197,94,.3);border-radius:4px;font-size:8.5px;font-weight:700;color:var(--green);white-space:nowrap">Direct Send</span>`
@@ -8345,7 +8388,7 @@ function renderTable(){
     const chainOpts = CHAINS.map(c => {
       const dom = c.cctp?.domain ?? '';
       const domLabel = dom ? ` (dom ${dom})` : '';
-      return `<option value="${c.id}" ${c.id===chainId?'selected':''}>${c.shortName || c.name}${domLabel}</option>`;
+      return `<option value="${c.id}" ${c.id===chainId?'selected':''}>${escHtml(c.shortName || c.name)}${domLabel}</option>`;
     }).join('');
     const name = r.name || '';
     const tok = r.token || 'USDC';
@@ -8354,7 +8397,7 @@ function renderTable(){
     const tokenOpts = ['USDC','EURC'].map(t=>`<option value="${t}" ${t===tok?'selected':''}>${t}</option>`).join('');
     const tr=document.createElement('tr');
     tr.style.opacity='0';tr.style.transition='opacity .22s';
-    tr.innerHTML=`
+    setSafeHTML(tr, `
       <td style="font-size:9px;color:var(--muted2);text-align:center">${i+1}</td>
       <td>
         <div class="avc" style="flex-direction:column;align-items:flex-start;gap:2px">
@@ -8385,7 +8428,7 @@ function renderTable(){
       <td><input class="ni" value="${escHtml(r.note||'')}" placeholder="Note..." style="min-width:70px" onchange="recipients[${i}].note=this.value"/></td>
       <td>${routeBadge}</td>
       <td>${badge}</td>
-      <td><div class="rm" onclick="removeRow(${i})">×</div></td>`;
+      <td><div class="rm" onclick="removeRow(${i})">×</div></td>`);
     tbody.appendChild(tr);
     requestAnimationFrame(()=>tr.style.opacity='1');
   });
@@ -8543,7 +8586,7 @@ function showBatchSuccess(count) {
 function loadTemplateDefault(){recipients.push({addr:'0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045',amount:'10.00',note:'Grant',token:'USDC'},{addr:'0x1234567890abcdef1234567890abcdef12345678',amount:'25.00',note:'Bounty',token:'EURC'});renderTable();toast('Template loaded','success');}
 function loadCSV(input){
   const file=input.files[0];if(!file)return;
-  const CHAIN_MAP={'arc':'Arc_Testnet','arc testnet':'Arc_Testnet','ethereum':'Ethereum_Sepolia','eth':'Ethereum_Sepolia','sepolia':'Ethereum_Sepolia','base':'Base_Sepolia','arbitrum':'Arbitrum_Sepolia','arb':'Arbitrum_Sepolia','solana':'Solana_Devnet','sol':'Solana_Devnet'};
+  // CHAIN_MAP is now defined globally
   const reader=new FileReader();
   reader.onload=e=>{
     const lines=e.target.result.split('\n').filter(l=>l.trim());
@@ -9055,7 +9098,7 @@ async function signTx(){
       ];
 
       for (const [chainId, group] of Object.entries(bridgeGroups)) {
-        const chain      = CHAINS.find(c => c.id === chainId) || CHAINS[1];
+        const chain      = CHAINS.find(c => c.id === chainId) || null;
         const groupTotal = group.reduce((s,r) => s+(parseFloat(r.amount)||0), 0);
         toast(`Routing ${groupTotal.toFixed(2)} USDC → ${chain.name} (${group.length} recipient${group.length>1?'s':''}) via Crosschain Batch...`,'info');
 
@@ -9182,7 +9225,7 @@ function finalizeBatch(txHash,blockNumber,isDemo,totalAmt,rcptCount){
   document.getElementById('q-tot').textContent=batchCount;
   document.getElementById('q-suc').textContent=successCount;
   const tr=document.createElement('tr');
-  tr.innerHTML=`<td class="blue">${id}</td><td><span class="green"><i class="ti ti-check" style="font-size:8px"></i> ${isDemo?'Demo':'Success'}</span></td><td>${count}</td><td>${total.toFixed(2)} USDC</td><td><span class="blue">Arc Testnet</span></td><td><a href="${url}" target="_blank" style="color:var(--blue);text-decoration:none;font-size:9px">${shortTx}${blockNumber?' · #'+blockNumber:''}</a></td><td>${ts}</td><td><i class="ti ti-eye" style="cursor:pointer;color:var(--muted2);margin-right:4px" onclick="window.open('${url}','_blank')"></i><i class="ti ti-download" style="cursor:pointer;color:var(--muted2)" onclick="exportCSV()"></i></td>`;
+  setSafeHTML(tr, `<td class="blue">${escHtml(id)}</td><td><span class="green"><i class="ti ti-check" style="font-size:8px"></i> ${isDemo?'Demo':'Success'}</span></td><td>${count}</td><td>${total.toFixed(2)} USDC</td><td><span class="blue">Arc Testnet</span></td><td><a href="${url}" target="_blank" style="color:var(--blue);text-decoration:none;font-size:9px">${shortTx}${blockNumber?' · #'+blockNumber:''}</a></td><td>${ts}</td><td><i class="ti ti-eye" style="cursor:pointer;color:var(--muted2);margin-right:4px" onclick="window.open('${url}','_blank')"></i><i class="ti ti-download" style="cursor:pointer;color:var(--muted2)" onclick="exportCSV()"></i></td>`);
   document.getElementById('batches-body').prepend(tr);
   document.getElementById('last-tx').textContent='Tx: '+shortTx;
   document.getElementById('explorer-link').href=url;
@@ -9910,14 +9953,14 @@ function swpAddHistory(symIn, symOut, amtIn, amtOut, txHash) {
     : '';
   const inNum  = Number(amtIn)  || 0;
   const outNum = Number(amtOut) || 0;
-  item.innerHTML = `
+  setSafeHTML(item, `
     <div class="swp-hist-icon"><i class="ti ti-arrows-exchange"></i></div>
     <div style="flex:1;min-width:0">
       <div class="swp-hist-label">${inNum.toFixed(4)} ${symIn} → ${outNum.toFixed(4)} ${symOut}</div>
       <div class="swp-hist-sub">Arc Testnet · ${swpNow()}</div>
     </div>
     ${hashLink}
-  `;
+  `);
   container.insertBefore(item, container.firstChild);
   // Keep max 5 entries
   while (container.children.length > 5) container.lastChild.remove();
@@ -10078,7 +10121,7 @@ async function executeBridge(){
     const stateClass={pending:'',active:'active',success:'success',error:'error'}[state];
     const explorerBase = (idx < 4) ? fromConfig.explorer : toConfig.explorer;
     const txLink = txHash ? `Tx: <a href="${explorerBase.replace(/\/$/,'')}/tx/${txHash}" target="_blank" style="color:var(--teal);text-decoration:none">${shortAddr(txHash)}</a>` : s.detail;
-    el.innerHTML=`<div class="step-ico ${stateClass}">${stateIcon}</div><div style="flex:1"><div style="font-weight:600">${s.label}</div><div style="font-size:8.5px;color:var(--muted2)">${txLink}</div></div>`;
+    setSafeHTML(el, `<div class="step-ico ${stateClass}">${stateIcon}</div><div style="flex:1"><div style="font-weight:600">${s.label}</div><div style="font-size:8.5px;color:var(--muted2)">${txLink}</div></div>`);
   }
 
   steps.forEach((_,i)=>renderBridgeStep(i,'pending',null));
@@ -10366,7 +10409,7 @@ function addToHistory(containerId,{icon,color,label,sub,txHash,dotColor}){
   if(empty)empty.remove();
   const div=document.createElement('div');
   div.className='tx-item';
-  div.innerHTML=`<div class="tx-dot" style="background:${dotColor}"></div><div style="flex:1"><div style="font-weight:600;font-size:9px">${label}</div><div style="font-size:8px;color:var(--muted2)">${sub}</div></div><a href="https://testnet.arcscan.app/tx/${txHash}" target="_blank" style="color:var(--blue);font-size:8px;text-decoration:none;flex-shrink:0"><i class="ti ti-external-link" style="font-size:9px"></i></a>`;
+  setSafeHTML(div, `<div class="tx-dot" style="background:${dotColor}"></div><div style="flex:1"><div style="font-weight:600;font-size:9px">${label}</div><div style="font-size:8px;color:var(--muted2)">${sub}</div></div><a href="https://testnet.arcscan.app/tx/${txHash}" target="_blank" style="color:var(--blue);font-size:8px;text-decoration:none;flex-shrink:0"><i class="ti ti-external-link" style="font-size:9px"></i></a>`);
   c.prepend(div);
 }
 
@@ -11051,7 +11094,7 @@ function plUpdatePreviewPanel(l) {
   const statusEl = document.getElementById('pp-status');
   if (statusEl) {
     const st = plIsExpired(l) ? 'expired' : l.status.toLowerCase();
-    statusEl.innerHTML = `<span class="pl-status-badge ${st}"><span class="pl-dot"></span>${plIsExpired(l)?'Expired':l.status}</span>`;
+    setSafeHTML(statusEl, `<span class="pl-status-badge ${st}"><span class="pl-dot"></span>${plIsExpired(l)?'Expired':l.status}</span>`);
   }
 }
 
@@ -12049,7 +12092,7 @@ function addToCurrentBatch(contactId) {
   renderTable();
   // Stay on Recipients page as requested; do not navigate to batch
   renderContacts();
-  toast(`${c.name} added to batch (${(CHAINS.find(ch=>ch.id===c.chainId)||CHAINS[0]).name})`, 'success');
+  toast(`${c.name} added to batch (${(CHAINS.find(ch=>ch.id===c.chainId)||{name:'Unknown'}).name})`, 'success');
 }
 
 function filterContacts(type, btn) {
@@ -12162,7 +12205,7 @@ function renderContacts() {
   empty.style.display='none';
   const GRAD=['linear-gradient(135deg,#4f8ef7,#a78bfa)','linear-gradient(135deg,#f59e0b,#ef4444)','linear-gradient(135deg,#22c55e,#4f8ef7)','linear-gradient(135deg,#a78bfa,#ef4444)'];
   grid.innerHTML = list.map((c,i)=>{
-    const chain = CHAINS.find(ch=>ch.id===(c.chainId||'Arc_Testnet'))||CHAINS[0];
+    const chain = CHAINS.find(ch=>ch.id===(c.chainId||'Arc_Testnet'))||null;
     const soc = c.socials || {};
     const socialLinks = [
       soc.x       ? `<a href="https://x.com/${soc.x.replace('@','')}" target="_blank" style="font-size:8px;color:var(--blue);text-decoration:none;display:flex;align-items:center;gap:2px"><i class="ti ti-brand-x" style="font-size:9px"></i>${soc.x}</a>` : '',
@@ -15249,7 +15292,7 @@ const RepaymentContract = (() => {
     const grossAmount = amount;
     const netAmount   = amount - feeAmount;
     const intent = {
-      id, intentBytes32, asset,
+      id, intentId: id, intentBytes32,              // intentId for SettlementModule compatibility
       grossAmount, feeAmount, netAmount,          // fee accounting
       amount,                                       // backward compat
       userAddress, srcChain, dstChain,
@@ -15262,6 +15305,7 @@ const RepaymentContract = (() => {
       settlementTxHash: null,
       liquidityFee: feeAmount,
       settleFee:    (netAmount * SETTLE_FEE_BPS) / 10000,
+      lastPollAt: null, lastError: null, pollCount: 0,
     };
     VaultStore.upsertIntent(intent);
     return id;
@@ -15528,8 +15572,8 @@ const FulfillerEngine = (() => {
     if (!srcChain || !dstChain)    throw new Error('INVALID_CHAINS');
     VaultSecurity.requireUnlocked();
 
-    const fromChain = CHAINS.find(c => c.id === srcChain) || CHAINS[0];
-    const toChain   = CHAINS.find(c => c.id === dstChain) || CHAINS[0];
+    const fromChain = CHAINS.find(c => c.id === srcChain) || null;
+    const toChain   = CHAINS.find(c => c.id === dstChain) || null;
     const fromConfig = CCTP_CONFIG[fromChain.chainId];
     const toConfig   = CCTP_CONFIG[toChain.chainId];
     if (!fromConfig || !toConfig) throw new Error('UNSUPPORTED_CHAIN');
@@ -15592,6 +15636,11 @@ const FulfillerEngine = (() => {
     await ensureNetwork(5042002); // TreasuryVault is on ARC Testnet
     const arcFulfillProvider = new ethers.BrowserProvider(window.ethereum);
     const arcFulfillSigner   = await arcFulfillProvider.getSigner();
+    const arcNetwork         = await arcFulfillProvider.getNetwork();
+    if (Number(arcNetwork.chainId) !== 5042002) {
+      showToast('Please switch to ARC Testnet (chainId 5042002) to fulfill', 'warning');
+      return;
+    }
     // Re-initialize global signer/provider for ARC context
     try {
       signer = arcFulfillSigner;
@@ -15632,6 +15681,16 @@ const FulfillerEngine = (() => {
     const maxPolls = 300; // ~30 minutes
     let pollCount = 0;
     const INTERVAL = 6000;
+    // Initialize observability fields on intent
+    VaultStore.mutate(s => {
+      const i = s.intents.find(x => x.id === intentId || x.intentId === intentId);
+      if (i) {
+        if (i.lastPollAt  === undefined) i.lastPollAt  = null;
+        if (i.lastError   === undefined) i.lastError   = null;
+        if (i.pollCount   === undefined) i.pollCount   = 0;
+      }
+    });
+
 
     const timer = setInterval(async () => {
       pollCount++;
@@ -15651,8 +15710,7 @@ const FulfillerEngine = (() => {
           VaultStore.lockFunds(intent.asset, intent.grossAmount);
           VaultStore.addTurboFee(intent.asset, intent.feeAmount);
           VaultStore.addVolume('turbo', intent.grossAmount);
-          _mutate(intentId, i => {
-            i.status = 'Fulfilled';
+          VaultStore.mutate(s => { const i = s.intents.find(x => x.id === intentId || x.intentId === intentId); if (i) i.status = 'Fulfilled';
             i.arcFulfillmentTimestamp = Date.now();
             i.updatedAt = Date.now();
           });
@@ -15685,7 +15743,7 @@ const FulfillerEngine = (() => {
   }
 
   function _startSettlementPoller(intentId, fromConfig, burnTxHash) {
-    const maxPolls = 180; // ~15 minutes
+    const maxPolls = 180; // ~15 minutes (18 min total)
     let pollCount = 0;
     const INTERVAL = 6000;
 
@@ -15700,13 +15758,38 @@ const FulfillerEngine = (() => {
       const domain = intent.sourceDomain || (fromConfig && fromConfig.domain);
       if (!domain) {
         clearInterval(timer);
+        VaultStore.mutate(s => { const i = s.intents.find(x => x.id === intentId || x.intentId === intentId); if (i) i.lastError = 'Missing source domain'; });
         RepaymentContract.markFailed(intentId, 'Missing source domain for attestation poll');
         vaultRefreshUI();
         delete _activePollerTimers[intentId];
         return;
       }
 
-      // Poll Circle Iris API for real attestation
+      // Phase A: If attestation already cached, retry on-chain actions
+      const cachedIntent = RepaymentContract.getAll().find(x => x.id === intentId || x.intentId === intentId);
+      if (cachedIntent?.attestation && cachedIntent.attestation !== 'PENDING' && cachedIntent.status !== 'Settled') {
+        _log('[Settlement:PhaseA] Retrying with cached attestation for', intentId);
+        VaultStore.mutate(s => { const i = s.intents.find(x => x.id === intentId || x.intentId === intentId); if (i) { i.lastPollAt = Date.now(); i.pollCount = (i.pollCount || 0) + 1; } });
+        try {
+          const minterAbi  = ['function receiveMessage(bytes messageBytes, bytes attestation) external returns (bool)'];
+          const minterAddr = fromConfig?.cctp?.minterAddress;
+          if (minterAddr) {
+            const prov   = new ethers.BrowserProvider(window.ethereum);
+            const sgnr   = await prov.getSigner();
+            const ctr    = new ethers.Contract(minterAddr, minterAbi, sgnr);
+            const mintTx = await ctr.receiveMessage(cachedIntent.messageBytes, cachedIntent.attestation);
+            const rcpt   = await mintTx.wait();
+            if (rcpt?.status === 1) {
+              clearInterval(timer);
+              VaultStore.mutate(s => { const i = s.intents.find(x => x.id === intentId || x.intentId === intentId); if (i) { i.status = 'Settled'; i.settlementTxHash = mintTx.hash; } });
+              RepaymentContract.markSettled(intentId, mintTx.hash);
+              return;
+            }
+          }
+        } catch (e) { _log('[Settlement:PhaseA] retry failed:', e.message); }
+      }
+
+      // Phase B: Poll Circle Iris API for real attestation
       try {
         const irisUrl = 'https://iris-api-sandbox.circle.com/v2/messages/' + domain + '?transactionHash=' + (intent.cctpMsgHash || burnTxHash);
         const resp = await fetch(irisUrl);
@@ -15716,6 +15799,7 @@ const FulfillerEngine = (() => {
             const msg = data.messages[0];
             if (msg.status === 'complete' && msg.attestation && msg.attestation !== 'PENDING') {
               clearInterval(timer);
+              VaultStore.mutate(s => { const i = s.intents.find(x => x.id === intentId || x.intentId === intentId); if (i) { i.lastPollAt = Date.now(); i.pollCount = (i.pollCount||0)+1; i.status = 'Settling'; } });
               try {
                 // CCTP V2: Submit attestation on-chain via receiveMessage() to mint USDC on ARC
                 // Reference: circle-cctp-fulfiller-repayment (Circle official sample)
@@ -15730,6 +15814,8 @@ const FulfillerEngine = (() => {
                       const mintReceipt = await mintTx.wait();
                       if (mintReceipt && mintReceipt.status === 1) {
                         mintTxHash = mintTx.hash;
+                        _log('[Settlement:PhaseB] receiveMessage TX HASH:', mintTxHash);
+                        VaultStore.mutate(s => { const i = s.intents.find(x => x.id === intentId || x.intentId === intentId); if (i) { i.status = 'Settled'; i.settlementTxHash = mintTxHash; } });
                       }
                     }
                   } catch(e) {
@@ -15743,6 +15829,7 @@ const FulfillerEngine = (() => {
                   mintTxHash: mintTxHash
                 });
               } catch(e) {
+                VaultStore.mutate(s => { const i = s.intents.find(x => x.id === intentId || x.intentId === intentId); if (i) i.lastError = e.message; });
                 RepaymentContract.markFailed(intentId, 'Settle tx failed: ' + e.message);
               }
               vaultRefreshUI();
@@ -15773,7 +15860,6 @@ const FulfillerEngine = (() => {
       vaultRefreshUI();
     }, INTERVAL);
 
-    // Store timer reference for cleanup and dedup
     _activePollerTimers[intentId] = timer;
     return timer;
   }
@@ -15822,7 +15908,34 @@ const FulfillerEngine = (() => {
     });
   }
 
-  return { execute, recoverSettlingIntents, _startOperatorFulfillmentPoller };
+  async function submitPendingAttestations() {
+    const pending = RepaymentContract.getAll().filter(i =>
+      i.attestation && i.attestation !== 'PENDING' && i.status !== 'Settled' && i.status !== 'Failed'
+    );
+    if (!pending.length) return;
+    _log(`[submitPendingAttestations] retrying ${pending.length} intent(s)`);
+    for (const intent of pending) {
+      try {
+        const srcChain   = intent.srcChain || intent.sourceChain || 'Arc_Testnet';
+        const fromCfg    = CHAIN_REGISTRY[srcChain] || Object.values(CHAIN_REGISTRY).find(c => c.id === srcChain);
+        const minterAddr = fromCfg?.cctp?.minterAddress;
+        if (!minterAddr || !intent.messageBytes) continue;
+        const minterAbi  = ['function receiveMessage(bytes messageBytes, bytes attestation) external returns (bool)'];
+        const prov       = new ethers.BrowserProvider(window.ethereum);
+        const sgnr       = await prov.getSigner();
+        const ctr        = new ethers.Contract(minterAddr, minterAbi, sgnr);
+        const mintTx     = await ctr.receiveMessage(intent.messageBytes, intent.attestation);
+        const receipt    = await mintTx.wait();
+        if (receipt?.status === 1) {
+          RepaymentContract.markSettled(intent.id, mintTx.hash);
+          VaultStore.mutate(s => { const i = s.intents.find(x => x.id === intent.id || x.intentId === intent.id); if (i) { i.status = 'Settled'; i.settlementTxHash = mintTx.hash; } });
+          showToast(`Intent ${intent.id.slice(0,8)}… settled ✓`, 'success');
+        }
+      } catch (e) { _log('[submitPendingAttestations] error:', e.message); }
+    }
+  }
+
+  return { execute, recoverSettlingIntents, _startOperatorFulfillmentPoller, submitPendingAttestations };
 })();
 
 // ── Rebalancing Engine ─────────────────────────────────────────────────
@@ -16107,7 +16220,7 @@ function _renderVaultConfig() {
   if (!addrEl) return;
   if (TREASURY_VAULT_ADDRESS && TREASURY_VAULT_ADDRESS !== '0x0000000000000000000000000000000000000000') {
     const shortAddr = TREASURY_VAULT_ADDRESS.slice(0,10) + '...' + TREASURY_VAULT_ADDRESS.slice(-4);
-    addrEl.innerHTML = `<a href="https://testnet.arcscan.app/address/${TREASURY_VAULT_ADDRESS}" target="_blank" style="color:var(--teal);text-decoration:none;font-family:'JetBrains Mono',monospace;font-size:8.5px" title="View on ArcScan">${shortAddr}</a> <span class="chip" style="font-size:7.5px;background:rgba(34,197,94,.1);color:var(--green);border-color:rgba(34,197,94,.2)">Deployed ✓</span>`;
+    setSafeHTML(addrEl, `<a href="https://testnet.arcscan.app/address/${escHtml(TREASURY_VAULT_ADDRESS)}" target="_blank" style="color:var(--teal);text-decoration:none;font-family:'JetBrains Mono',monospace;font-size:8.5px" title="View on ArcScan">${shortAddr}</a> <span class="chip" style="font-size:7.5px;background:rgba(34,197,94,.1);color:var(--green);border-color:rgba(34,197,94,.2)">Deployed ✓</span>`);
   } else {
     addrEl.innerHTML = '<span style="color:var(--yellow);font-size:8.5px">Not Deployed</span> <span style="font-size:7.5px;color:var(--muted2)">— Run deploy-treasury-vault.js</span>';
   }
@@ -16258,7 +16371,7 @@ function _renderIntentTable() {
   if (!tbody) return;
   const intents = RepaymentContract.getAll().slice(-100).reverse();
   if (intents.length === 0) {
-    tbody.innerHTML = '<tr class="intent-empty-row"><td colspan="6"><i class="ti ti-inbox" style="font-size:24px;display:block;margin-bottom:6px;opacity:.3"></i>No intents yet. Use Turbo Bridge to create intents.</td></tr>';
+    tbody.innerHTML = '<tr class="intent-empty-row"><td colspan="9"><i class="ti ti-inbox" style="font-size:24px;display:block;margin-bottom:6px;opacity:.3"></i>No intents yet. Use Turbo Bridge to create intents.</td></tr>';
     return;
   }
   const COLOR = { Created:'var(--muted2)', Fulfilled:'var(--blue)', Settling:'var(--yellow)', Settled:'var(--green)', Failed:'var(--red)' };
@@ -16274,6 +16387,10 @@ function _renderIntentTable() {
     const settleLink = i.settlementTxHash
       ? `<a href="https://testnet.arcscan.app/tx/${i.settlementTxHash}" target="_blank" style="color:var(--yellow);font-size:8px;display:block" title="Settlement tx">${shortAddr(i.settlementTxHash)}</a>`
       : '';
+    const lpAge47 = i.lastPollAt ? Math.round((Date.now() - i.lastPollAt) / 1000) : null;
+    const lpStr   = lpAge47 !== null ? (lpAge47 < 60 ? `${lpAge47}s ago` : `${Math.round(lpAge47/60)}m ago`) : '—';
+    const lpColor = i.lastError ? 'color:#ef4444;' : 'color:var(--muted2);';
+    const nrStr   = i.pollCount ? String(i.pollCount) : '—';
     return `<tr>
       <td style="font-family:monospace;font-size:8.5px;color:var(--muted2)">${i.id}</td>
       <td style="font-size:9px">${i.srcChain || '?'} → ${i.dstChain || 'arc'}</td>
@@ -16281,6 +16398,8 @@ function _renderIntentTable() {
       <td>${displayAmt}${feeAmt}</td>
       <td><span style="color:${col};font-weight:700">${i.status}</span>${arcLink}${settleLink}</td>
       <td style="color:var(--muted2)">${aS}</td>
+      <td style="font-size:8.5px;${lpColor}">${lpStr}</td>
+      <td style="font-size:8.5px;color:var(--muted2)">${nrStr}</td>
     </tr>`;
   }).join('');
 }
@@ -16887,7 +17006,7 @@ const SettlementModule = (() => {
     if (countEl) countEl.textContent = filtered.length + ' records';
 
     if (filtered.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="12" style="padding:24px;text-align:center;color:var(--muted2);font-size:11px;">'
+      tbody.innerHTML = '<tr><td colspan="15" style="padding:24px;text-align:center;color:var(--muted2);font-size:11px;">'
         + '<i class="ti ti-database-off" style="font-size:20px;display:block;margin-bottom:6px;"></i>'
         + 'No settlements match current filters.'
         + '</td></tr>';
@@ -16895,7 +17014,7 @@ const SettlementModule = (() => {
     }
 
     tbody.innerHTML = filtered.map(intent => {
-      const srcChain  = intent.srcChain || intent.sourceChain || 'Base_Sepolia';
+      const srcChain  = intent.srcChain || intent.sourceChain || getActiveChain()?.id || 'Arc_Testnet';
       const route     = intent.route || (srcChain.replace('_',' ') + ' \u2192 ARC');
       const assetUp   = (intent.asset||'USDC').toUpperCase();
       const amtFmt    = (typeof intent.amount === 'number')
@@ -16924,6 +17043,13 @@ const SettlementModule = (() => {
         attestDisplay = '<span style="color:#f59e0b;font-family:monospace;font-size:8.5px;">' + shortAtt + '</span>';
       }
 
+      // Observability: Last Poll, Poll #, Last Error
+      const lpAge2       = intent.lastPollAt ? Math.round((Date.now() - intent.lastPollAt) / 1000) : null;
+      const lpStr2       = lpAge2 !== null ? (lpAge2 < 60 ? `${lpAge2}s ago` : `${Math.round(lpAge2/60)}m ago`) : '—';
+      const lpColor2     = intent.lastError ? 'color:#ef4444;' : 'color:var(--muted2);';
+      const pollCountStr = intent.pollCount ? String(intent.pollCount) : '—';
+
+
       return '<tr style="border-bottom:1px solid var(--border);transition:.1s;" onmouseover="this.style.background=\'rgba(255,255,255,.02)\'" onmouseout="this.style.background=\'\'">'
         + '<td style="padding:6px 8px;font-family:monospace;color:var(--muted2);white-space:nowrap;font-size:9px;" title="' + (intent.intentId||intent.id||'') + '">' + shortId + '</td>'
         + '<td style="padding:6px 6px;white-space:nowrap;font-size:9px;">' + route + '</td>'
@@ -16937,6 +17063,8 @@ const SettlementModule = (() => {
         + '<td style="padding:6px 6px;text-align:right;font-weight:600;font-size:9px;">' + reimbAmt + '</td>'
         + '<td style="padding:6px 6px;text-align:right;font-size:9px;color:var(--muted2);">' + settleTime + '</td>'
         + '<td style="padding:6px 6px;text-align:center;">' + vbHtml + '</td>'
+        + '<td style="padding:6px 4px;text-align:center;font-size:8.5px;' + lpColor2 + '">' + lpStr2 + '</td>'
+        + '<td style="padding:6px 4px;text-align:right;font-size:8.5px;color:var(--muted2);">' + pollCountStr + '</td>'
         + '</tr>';
     }).join('');
   }
@@ -17152,7 +17280,7 @@ const SettlementModule = (() => {
 
         // Resume polling via FulfillerEngine if available
         if (typeof FulfillerEngine !== 'undefined') {
-          if ((intent.status === 'Settling' || _displayStatus(intent) === 'Attestation Received') && intent.intentId) {
+          if ((intent.status === 'Settling' || intent.status === 'Fulfilling' || _displayStatus(intent) === 'Attestation Received') && (intent.intentId || intent.id)) {
             if (typeof FulfillerEngine._startSettlementPoller === 'function') {
               FulfillerEngine._startSettlementPoller(intent.intentId);
             }
@@ -17343,7 +17471,12 @@ function _stlLog(msg) {
   }
   // Also refresh on wallet connect
   document.addEventListener('vault:walletConnected', () => {
-    setTimeout(() => SettlementModule.refresh(), 800);
+    setTimeout(() => {
+      SettlementModule.refresh();
+      if (typeof FulfillerEngine !== 'undefined' && typeof FulfillerEngine.submitPendingAttestations === 'function') {
+        FulfillerEngine.submitPendingAttestations().catch(_err);
+      }
+    }, 800);
   });
 })();
 
