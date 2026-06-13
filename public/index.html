@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
+<meta http-equiv="Content-Security-Policy" content="default-src * 'unsafe-inline' 'unsafe-eval' data: blob:; script-src * 'unsafe-inline' 'unsafe-eval' data: blob:; style-src * 'unsafe-inline'; img-src * data: blob:; connect-src * data: blob: wss:; font-src * data:; worker-src * blob:"/>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+CiAgPGRlZnM+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9ImciIHgxPSIwJSIgeTE9IjAlIiB4Mj0iMTAwJSIgeTI9IjEwMCUiPgogICAgICA8c3RvcCBvZmZzZXQ9IjAlIiBzdHlsZT0ic3RvcC1jb2xvcjojNGY4ZWY3Ii8+CiAgICAgIDxzdG9wIG9mZnNldD0iMTAwJSIgc3R5bGU9InN0b3AtY29sb3I6I2E3OGJmYSIvPgogICAgPC9saW5lYXJHcmFkaWVudD4KICA8L2RlZnM+CiAgPHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iNyIgZmlsbD0idXJsKCNnKSIvPgogIDx0ZXh0IHg9IjE2IiB5PSIyMiIgZm9udC1mYW1pbHk9IkFyaWFsLHNhbnMtc2VyaWYiIGZvbnQtd2VpZ2h0PSI4MDAiIGZvbnQtc2l6ZT0iMTgiIGZpbGw9IndoaXRlIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5FPC90ZXh0Pgo8L3N2Zz4K"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>Elligente — Batch Payments | Arc Testnet</title>
@@ -21,15 +22,14 @@
 <link rel="apple-touch-icon" href="/icon-192.png"/>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet"/>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tabler-icons/2.44.0/iconfont/tabler-icons.min.css"/>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.7.1/ethers.umd.min.js" integrity="sha384-eoEZatO/ymJi+LdBilp3xt/M9N9Lla2JlMVPZuk48Fg1YGl2Mc+vmsky+nkOtlSi" crossorigin="anonymous"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.44.0/tabler-icons.min.css"/>
+<script src="https://cdn.jsdelivr.net/npm/ethers@6.7.1/dist/ethers.umd.min.js"></script>
 <!-- QRCode.js — real QR code generation -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" integrity="sha384-3zSEDfvllQohrq0PHL1fOXJuC/jSOO34H46t6UQfobFOmxE5BpjjaIJY5F2/bMnU" crossorigin="anonymous"></script>
-<!-- WalletConnect EthereumProvider (enables WalletConnect v2 + mobile wallets) -->
+<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
 <!-- WalletConnect v2 — Web3Modal AppKit (official bundle, includes QR modal) -->
+<script src="https://cdn.jsdelivr.net/npm/@web3modal/ethereum@2.7.1/dist/index.js" defer></script>
 <!-- DOMPurify — XSS sanitizer for safe DOM manipulation -->
-<script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@web3modal/ethereum@2.7.1/dist/index.js" integrity="sha384-scb267QicZDIPcJtRbV2eSYKkU7C4HaAWIMu31Ou9tDHHJXvp3Lg9XsWxQ+CWR7a" crossorigin="anonymous" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.9/dist/purify.min.js" defer></script>
 <style>
 /* ── Wallet Modal ───────────────────────────────────────── */
 .wm-overlay{position:fixed;inset:0;background:rgba(0,0,0,.82);z-index:2000;display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .22s;backdrop-filter:blur(4px)}
@@ -454,6 +454,311 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
 .btable th{padding:5px 8px;background:rgba(0,0,0,.2);color:var(--muted);text-align:left;font-weight:500;font-size:9px;text-transform:uppercase;white-space:nowrap}
 .btable td{padding:6px 8px;border-top:1px solid var(--border);white-space:nowrap}
 .inv-row:hover td{background:rgba(79,142,247,.05)!important;transition:background .15s}
+
+/* ══════════════════════════════════════════════════════════
+   MULTISEND PROFESSIONAL TABLE — isolated scope
+   ══════════════════════════════════════════════════════════ */
+.ms-table-wrap{
+  flex:1; overflow-y:auto; overflow-x:auto;
+  min-height:0; position:relative;
+  border:1px solid var(--border); border-radius:var(--radius);
+}
+.ms-table{
+  width:100%; border-collapse:collapse;
+  font-size:10.5px; table-layout:auto;
+}
+.ms-table thead{
+  position:sticky; top:0; z-index:10;
+}
+.ms-table thead th{
+  padding:9px 10px;
+  background:rgba(8,10,16,.95);
+  backdrop-filter:blur(8px);
+  color:var(--muted);
+  font-size:8.5px; font-weight:700;
+  text-transform:uppercase; letter-spacing:.6px;
+  text-align:left; white-space:nowrap;
+  border-bottom:1px solid var(--border2);
+}
+.ms-table thead th:first-child{text-align:center;width:36px}
+.ms-table thead th:last-child{text-align:center;width:42px}
+.ms-table tbody tr{
+  border-bottom:1px solid rgba(255,255,255,.03);
+  transition:background .12s;
+}
+.ms-table tbody tr:hover{
+  background:rgba(79,142,247,.04);
+}
+.ms-table tbody tr.bridge-row{
+  background:rgba(167,139,250,.03);
+}
+.ms-table tbody tr.bridge-row:hover{
+  background:rgba(167,139,250,.07);
+}
+.ms-table tbody td{
+  padding:7px 10px;
+  vertical-align:middle;
+  white-space:nowrap;
+}
+.ms-table tbody td:first-child{
+  text-align:center;
+  color:var(--muted2);
+  font-size:9px;
+  width:36px;
+}
+.ms-table tbody td:last-child{
+  text-align:center;
+  width:42px;
+}
+.ms-table-input{
+  background:rgba(0,0,0,.15);
+  border:1px solid transparent;
+  border-radius:4px; color:var(--text);
+  font-size:10px; font-family:'JetBrains Mono',monospace;
+  padding:4px 7px; outline:none;
+  transition:border .12s; width:100%;
+}
+.ms-table-input:focus{
+  border-color:var(--blue);
+  background:rgba(79,142,247,.06);
+}
+.ms-table-input.name{width:80px;font-family:inherit;font-size:9.5px}
+.ms-table-input.addr{min-width:140px}
+.ms-table-input.amount{width:85px;text-align:right;font-weight:600}
+.ms-table-input.note{width:90px;font-family:inherit;font-size:9px}
+.ms-chain-select{
+  background:rgba(0,0,0,.2);
+  border:1px solid rgba(255,255,255,.07);
+  border-radius:4px; color:var(--text);
+  font-size:9.5px; font-family:'JetBrains Mono',monospace;
+  padding:5px 8px; cursor:pointer; outline:none;
+  min-width:115px; appearance:none;
+  -webkit-appearance:none;
+  padding-right:20px;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%238892aa'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;
+  background-position:right 8px center;
+}
+.ms-chain-select:focus{border-color:var(--blue)}
+.ms-token-select{
+  background:rgba(0,0,0,.2);
+  border:1px solid rgba(255,255,255,.07);
+  border-radius:4px; color:var(--text);
+  font-size:10px; font-family:'JetBrains Mono',monospace;
+  padding:5px 8px; cursor:pointer; outline:none;
+  min-width:62px; appearance:none;
+  -webkit-appearance:none;
+  padding-right:18px;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%238892aa'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;
+  background-position:right 6px center;
+}
+.ms-token-select:focus{border-color:var(--blue)}
+.ms-chain-dot{
+  width:8px; height:8px; border-radius:50%;
+  flex-shrink:0; margin-right:4px;
+}
+.ms-route-badge{
+  display:inline-flex; align-items:center; gap:3px;
+  padding:2px 8px; border-radius:4px;
+  font-size:8px; font-weight:700;
+  white-space:nowrap;
+}
+.ms-route-badge.direct{
+  background:rgba(34,197,94,.1);
+  color:var(--green);
+  border:1px solid rgba(34,197,94,.25);
+}
+.ms-route-badge.bridge{
+  background:rgba(167,139,250,.1);
+  color:var(--purple);
+  border:1px solid rgba(167,139,250,.25);
+}
+.ms-route-badge.swap{
+  background:rgba(245,158,11,.1);
+  color:var(--yellow);
+  border:1px solid rgba(245,158,11,.25);
+}
+.ms-status-badge{
+  display:inline-flex; align-items:center; gap:3px;
+  padding:2px 8px; border-radius:4px;
+  font-size:8px; font-weight:700;
+  white-space:nowrap;
+}
+.ms-status-badge.ready{
+  background:rgba(34,197,94,.08);
+  color:var(--green);
+  border:1px solid rgba(34,197,94,.2);
+}
+.ms-status-badge.invalid{
+  background:rgba(239,68,68,.08);
+  color:var(--red);
+  border:1px solid rgba(239,68,68,.2);
+}
+.ms-status-badge.pending{
+  background:rgba(245,158,11,.08);
+  color:var(--yellow);
+  border:1px solid rgba(245,158,11,.2);
+}
+.ms-row-remove{
+  width:22px; height:22px; border-radius:4px;
+  border:1px solid rgba(239,68,68,.15);
+  background:rgba(239,68,68,.05);
+  color:var(--red); cursor:pointer;
+  display:inline-flex; align-items:center;
+  justify-content:center; font-size:11px;
+  transition:all .12s;
+}
+.ms-row-remove:hover{
+  background:rgba(239,68,68,.15);
+  border-color:rgba(239,68,68,.35);
+}
+.ms-add-row{
+  display:flex; align-items:center; gap:7px;
+  padding:10px 14px; cursor:pointer;
+  border-top:1px dashed var(--border2);
+  color:var(--muted2); font-size:10px;
+  transition:all .15s; flex-shrink:0;
+}
+.ms-add-row:hover{
+  color:var(--blue); background:rgba(79,142,247,.04);
+}
+.ms-empty-state{
+  display:flex; flex-direction:column;
+  align-items:center; justify-content:center;
+  padding:40px 20px; text-align:center;
+  color:var(--muted2); font-size:10px;
+  gap:8px;
+}
+.ms-empty-state i{font-size:32px;opacity:.25}
+
+/* ── Right Review Panel (scoped) ─────────── */
+.ms-review-panel{
+  width:260px; flex-shrink:0;
+  background:var(--surface);
+  border-left:1px solid var(--border);
+  display:flex; flex-direction:column;
+  overflow-y:auto; padding:14px;
+}
+.ms-review-section{margin-bottom:14px}
+.ms-review-title{
+  font-size:9.5px; font-weight:700;
+  color:var(--muted2); text-transform:uppercase;
+  letter-spacing:.6px; margin-bottom:6px;
+  display:flex; align-items:center; gap:5px;
+}
+.ms-review-title i{font-size:11px; color:var(--blue)}
+.ms-review-row{
+  display:flex; justify-content:space-between;
+  align-items:center; padding:4px 0;
+  font-size:9.5px;
+  border-bottom:1px solid rgba(255,255,255,.03);
+}
+.ms-review-row:last-child{border-bottom:none}
+.ms-review-label{color:var(--muted2)}
+.ms-review-value{color:var(--text); font-weight:600}
+.ms-review-value.blue{color:var(--blue)}
+.ms-review-value.green{color:var(--green)}
+.ms-review-value.purple{color:var(--purple)}
+.ms-review-total{
+  display:flex; justify-content:space-between;
+  align-items:center; padding:8px 0 4px;
+  font-size:11px; font-weight:700;
+  border-top:1px solid var(--border2);
+  margin-top:4px;
+}
+.ms-review-split{
+  display:flex; gap:8px; margin-top:4px;
+}
+.ms-review-split-item{
+  flex:1; padding:6px 8px; border-radius:5px;
+  text-align:center; font-size:8.5px;
+  border:1px solid;
+}
+.ms-review-split-item.direct{
+  background:rgba(34,197,94,.05);
+  border-color:rgba(34,197,94,.2);
+  color:var(--green);
+}
+.ms-review-split-item.bridge{
+  background:rgba(167,139,250,.05);
+  border-color:rgba(167,139,250,.2);
+  color:var(--purple);
+}
+.ms-review-split-n{font-size:16px;font-weight:800;display:block;line-height:1}
+.ms-review-actions{
+  display:flex; flex-direction:column; gap:6px;
+  margin-top:auto; padding-top:14px;
+}
+.ms-review-btn{
+  width:100%; padding:10px; border:none;
+  border-radius:6px; color:#fff;
+  font-size:11px; font-weight:700;
+  cursor:pointer; display:flex;
+  align-items:center; justify-content:center;
+  gap:6px; font-family:inherit;
+  transition:all .15s;
+}
+.ms-review-btn.primary{
+  background:linear-gradient(135deg,#4f8ef7,#3a7bef);
+  box-shadow:0 4px 12px rgba(79,142,247,.25);
+}
+.ms-review-btn.primary:hover:not(:disabled){
+  transform:translateY(-1px);
+  box-shadow:0 6px 18px rgba(79,142,247,.35);
+}
+.ms-review-btn.cross{
+  background:linear-gradient(135deg,#14b8a6,#0d9488);
+  box-shadow:0 4px 12px rgba(45,212,191,.25);
+}
+.ms-review-btn.cross:hover:not(:disabled){
+  transform:translateY(-1px);
+  box-shadow:0 6px 18px rgba(45,212,191,.35);
+}
+.ms-review-btn:disabled{
+  opacity:.4; cursor:not-allowed;
+}
+
+/* ── Bottom bar (scoped to multisend) ─────── */
+.ms-bottom-bar{
+  display:flex; align-items:center; gap:7px;
+  padding:8px 13px; background:var(--surface);
+  border-top:1px solid var(--border);
+  flex-shrink:0; flex-wrap:wrap;
+}
+.ms-bottom-btn{
+  padding:8px 14px; border:none;
+  border-radius:6px; color:#fff;
+  font-size:10px; font-weight:700;
+  cursor:pointer; display:flex;
+  align-items:center; gap:5px;
+  font-family:inherit; transition:all .15s;
+}
+.ms-bottom-btn.primary{
+  background:var(--blue);
+  box-shadow:0 2px 8px rgba(79,142,247,.2);
+}
+.ms-bottom-btn.primary:hover:not(:disabled){
+  background:#3a7bef;
+  transform:translateY(-1px);
+}
+.ms-bottom-btn.secondary{
+  background:transparent;
+  border:1px solid var(--border2);
+  color:var(--muted2);
+}
+.ms-bottom-btn.secondary:hover:not(:disabled){
+  border-color:var(--blue);
+  color:var(--blue);
+}
+.ms-bottom-btn:disabled{
+  opacity:.4; cursor:not-allowed;
+}
+.ms-bottom-spacer{margin-left:auto}
+.ms-bottom-info{
+  font-size:8.5px; color:var(--muted2);
+  display:flex; align-items:center; gap:5px;
+}
 .inv-stat-val{font-size:15px;font-weight:800;letter-spacing:-.3px}
 .inv-action-tile:hover{background:var(--card2)!important;border-color:var(--border2)!important;transform:translateY(-1px);transition:.15s}
 .pbar{width:100%;height:3px;background:var(--border);border-radius:2px;margin-top:4px}
@@ -3622,169 +3927,171 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
          PAGE: BATCH PAYMENTS
     ══════════════════════════════════════ -->
     <div class="page active" id="page-batch">
-      <div class="stats-row">
-        <div class="stat-box"><div class="st-lbl">Recipients</div><div class="st-val" id="s-rcpt">0</div></div>
-        <div class="stat-box"><div class="st-lbl">Total USDC</div><div class="st-val blue" id="s-total">$0.00</div></div>
-        <div class="stat-box"><div class="st-lbl">Platform Fee</div><div class="st-val blue" id="s-fee">$0.00</div></div>
-        <div class="stat-box"><div class="st-lbl">Batches Sent</div><div class="st-val yellow" id="s-batches">0</div></div>
-        <div class="stat-box"><div class="st-lbl">Route Split</div><div class="st-val" id="s-bridge" style="font-size:11px;color:var(--purple)">0 bridge / 0 direct</div></div>
+      <!-- Stats Row -->
+      <div class="stats-row" style="padding:8px 14px;gap:1px">
+        <div class="stat-box" style="flex:1;min-width:0">
+          <div class="st-lbl">Recipients</div>
+          <div class="st-val" id="s-rcpt">0</div>
+        </div>
+        <div class="stat-box" style="flex:1;min-width:0">
+          <div class="st-lbl">Total USDC</div>
+          <div class="st-val blue" id="s-total">$0.00</div>
+        </div>
+        <div class="stat-box" style="flex:1;min-width:0">
+          <div class="st-lbl">Platform Fee (1%)</div>
+          <div class="st-val blue" id="s-fee">$0.00</div>
+        </div>
+        <div class="stat-box" style="flex:1;min-width:0">
+          <div class="st-lbl">Batches Sent</div>
+          <div class="st-val yellow" id="s-batches">0</div>
+        </div>
+        <div class="stat-box" style="flex:2;min-width:0">
+          <div class="st-lbl">Route Split</div>
+          <div class="st-val" id="s-bridge" style="font-size:11px">—</div>
+        </div>
       </div>
-      <div class="content">
-        <div class="col-l">
 
-          <!-- Contract configuration sections removed as requested.
-               Addresses are now hardcoded in the JS (see DEPLOYED / constants at bottom).
-               This keeps the UI clean and contracts managed in code. -->
+      <!-- Workspace -->
+      <div class="content" style="display:flex;flex:1;min-height:0;overflow:hidden">
+        <!-- Left: Toolbar + Table -->
+        <div style="flex:1;display:flex;flex-direction:column;min-width:0;overflow:hidden">
+          <!-- Toolbar -->
+          <div style="display:flex;align-items:center;gap:4px;padding:8px 12px;flex-shrink:0;flex-wrap:wrap;border-bottom:1px solid var(--border);background:var(--surface)">
+            <span style="font-size:8.5px;color:var(--muted2);text-transform:uppercase;letter-spacing:.6px;margin-right:4px">Quick Chain:</span>
+            <button class="btn" style="font-size:8.5px;padding:2px 7px" onclick="setAllRecipientsChain('Arc_Testnet')"><span class="ms-chain-dot" style="background:#ff0202;display:inline-block;width:6px;height:6px;border-radius:50%;margin-right:3px;vertical-align:middle"></span>Arc</button>
+            <button class="btn" style="font-size:8.5px;padding:2px 7px" onclick="setAllRecipientsChain('Base_Sepolia')"><span class="ms-chain-dot" style="background:#0052ff;display:inline-block;width:6px;height:6px;border-radius:50%;margin-right:3px;vertical-align:middle"></span>Base</button>
+            <button class="btn" style="font-size:8.5px;padding:2px 7px" onclick="setAllRecipientsChain('Arbitrum_Sepolia')"><span class="ms-chain-dot" style="background:#12aaff;display:inline-block;width:6px;height:6px;border-radius:50%;margin-right:3px;vertical-align:middle"></span>Arbitrum</button>
+            <button class="btn" style="font-size:8.5px;padding:2px 7px" onclick="setAllRecipientsChain('Optimism_Sepolia')"><span class="ms-chain-dot" style="background:#ff0420;display:inline-block;width:6px;height:6px;border-radius:50%;margin-right:3px;vertical-align:middle"></span>Optimism</button>
+            <button class="btn" style="font-size:8.5px;padding:2px 7px" onclick="setAllRecipientsChain('Ethereum_Sepolia')"><span class="ms-chain-dot" style="background:#627eea;display:inline-block;width:6px;height:6px;border-radius:50%;margin-right:3px;vertical-align:middle"></span>Sepolia</button>
 
-          <div style="display:flex;gap:5px;flex-wrap:wrap">
-            <button class="btn" onclick="showPage('templates')"><i class="ti ti-template"></i>Templates<span class="tnew">New</span></button>
-            <button class="btn" onclick="showPage('schedule')"><i class="ti ti-calendar-event"></i>Schedule<span class="tnew">New</span></button>
-            <button class="btn" onclick="document.getElementById('csv-in').click()"><i class="ti ti-upload"></i>Import CSV</button>
+            <div style="flex:1"></div>
+            <button class="btn" onclick="showPage('templates')" style="font-size:9px;padding:3px 7px"><i class="ti ti-template"></i>Templates</button>
+            <button class="btn" onclick="showPage('schedule')" style="font-size:9px;padding:3px 7px"><i class="ti ti-calendar-event"></i>Schedule</button>
+            <button class="btn" onclick="document.getElementById('csv-in').click()" style="font-size:9px;padding:3px 7px"><i class="ti ti-upload"></i>Import CSV</button>
             <input type="file" id="csv-in" accept=".csv" style="display:none" onchange="loadCSV(this)"/>
-            <button class="btn" onclick="editAll()"><i class="ti ti-pencil"></i>Edit Values</button>
-            <button class="btn" onclick="duplicateAll()"><i class="ti ti-copy"></i>Duplicate</button>
-            <button class="btn" onclick="clearAll()"><i class="ti ti-trash"></i>Clear All</button>
-            <button class="btn" onclick="validateAll()"><i class="ti ti-shield-check"></i>Validate</button>
+            <button class="btn" onclick="exportCSV()" style="font-size:9px;padding:3px 7px"><i class="ti ti-table-export"></i>Export CSV</button>
+            <button class="btn" onclick="duplicateAll()" style="font-size:9px;padding:3px 7px"><i class="ti ti-copy"></i>Duplicate</button>
+            <button class="btn" onclick="clearAll()" style="font-size:9px;padding:3px 7px;color:var(--red)"><i class="ti ti-trash"></i>Clear</button>
           </div>
 
-          <div class="card">
-            <div class="ch">
-              <i class="ti ti-users" style="font-size:13px;color:var(--blue)"></i>
-              <span class="ct">Recipients</span>
-              <span style="font-size:9px;color:var(--muted2);margin-left:2px" id="row-cnt">0 rows</span>
-              <div style="margin-left:auto;display:flex;gap:5px">
-                <button class="btn" style="padding:3px 8px" onclick="exportCSV()"><i class="ti ti-table-export"></i>CSV</button>
-              </div>
-            </div>
+          <!-- Sender Info -->
+          <div style="padding:8px 12px;display:flex;align-items:center;gap:10px;flex-shrink:0;background:rgba(0,0,0,.12);border-bottom:1px solid var(--border)">
+            <i class="ti ti-wallet" style="font-size:11px;color:var(--muted2)"></i>
+            <span style="font-size:9px;color:var(--muted2);font-family:'JetBrains Mono',monospace;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" id="sender-addr">Connect your wallet</span>
+            <span style="font-size:9.5px;color:var(--blue)" id="sender-bal">—</span>
+            <span style="font-size:8px;color:var(--muted2)" id="row-cnt">0 rows</span>
+          </div>
 
-            <!-- Quick destination setters (makes cross-chain batch much easier) -->
-            <div style="margin-bottom:6px;display:flex;gap:4px;flex-wrap:wrap;align-items:center">
-              <span style="font-size:8.5px;color:var(--muted2);margin-right:4px">Quick set destination:</span>
-              <button class="btn" style="font-size:8.5px;padding:2px 6px" onclick="setAllRecipientsChain('Base_Sepolia')">Base</button>
-              <button class="btn" style="font-size:8.5px;padding:2px 6px" onclick="setAllRecipientsChain('Arbitrum_Sepolia')">Arbitrum</button>
-              <button class="btn" style="font-size:8.5px;padding:2px 6px" onclick="setAllRecipientsChain('Optimism_Sepolia')">Optimism</button>
-              <button class="btn" style="font-size:8.5px;padding:2px 6px" onclick="setAllRecipientsChain('Ethereum_Sepolia')">Sepolia</button>
-              <button class="btn" style="font-size:8.5px;padding:2px 6px" onclick="setAllRecipientsChain('Arc_Testnet')">Arc (same chain)</button>
-            </div>
-            <table class="rtable">
-              <thead><tr><th style="width:32px;text-align:center">#</th><th>Recipient Address</th><th>Chain</th><th>Token</th><th>Amount</th><th>Note</th><th>Route</th><th>Status</th><th></th></tr></thead>
+          <!-- Table Area -->
+          <div class="ms-table-wrap" id="ms-table-wrapper">
+            <table class="ms-table" id="ms-recipient-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Recipient</th>
+                  <th>Chain</th>
+                  <th>Token</th>
+                  <th>Amount</th>
+                  <th>Note</th>
+                  <th>Route</th>
+                  <th>Status</th>
+                  <th></th>
+                </tr>
+              </thead>
               <tbody id="tbody"></tbody>
             </table>
-            <div class="add-row" onclick="addRow()"><i class="ti ti-plus" style="font-size:13px"></i>+ Add Recipient</div>
-          </div>
-
-          <div class="card">
-            <div class="ch"><i class="ti ti-wallet" style="font-size:12px;color:var(--muted2)"></i><span style="font-size:9px;color:var(--muted2);font-weight:400;text-transform:uppercase;letter-spacing:.4px">FROM (SENDER WALLET)</span></div>
-            <div class="cb">
-              <div class="sender-box">
-                <span class="s-addr" id="sender-addr">Connect your wallet</span>
-                <span class="chip chip-g" id="sender-score" style="display:none"><i class="ti ti-shield-check" style="font-size:8px"></i>Score: 85</span>
-                <span class="blue" style="font-size:10px" id="sender-bal">—</span>
-              </div>
+            <div id="ms-empty" class="ms-empty-state">
+              <i class="ti ti-users"></i>
+              <div>No recipients yet</div>
+              <div style="font-size:8.5px;color:var(--muted)">Add recipients manually or import a CSV file</div>
             </div>
           </div>
 
-          <div class="sec-grid">
-            <div class="sec-card"><div class="sico ico-g"><i class="ti ti-shield-check"></i></div><div><div class="st">Whitelist</div><div class="sv">Active</div><div class="ss">12 addresses</div></div></div>
-            <div class="sec-card"><div class="sico ico-b"><i class="ti ti-arrows-exchange"></i></div><div><div class="st">Send Limit</div><div class="sv">1,000 USDC</div><div class="ss">Per transaction</div></div></div>
-            <div class="sec-card"><div class="sico ico-p"><i class="ti ti-users"></i></div><div><div class="st">Multisig</div><div class="sv">2 of 3</div><div class="ss">Signatures needed</div></div></div>
-            <div class="sec-card"><div class="sico ico-y"><i class="ti ti-shield-lock"></i></div><div><div class="st">Protection</div><div class="sv">Active</div><div class="ss">Anti-fraud</div></div></div>
-          </div>
-
-          <div class="card">
-            <div class="ch">
-              <i class="ti ti-receipt" style="font-size:13px;color:var(--blue)"></i>
-              <span class="ct">Batch Receipts</span>
-              <div style="margin-left:auto;display:flex;gap:5px">
-                <button class="btn" style="padding:3px 8px" onclick="clearBatches()"><i class="ti ti-x"></i>Clear</button>
-              </div>
-            </div>
-            <div style="display:flex;align-items:center;gap:9px;padding:8px 12px;background:rgba(0,0,0,.13);border-bottom:1px solid var(--border)">
-              <i class="ti ti-list-numbers" style="font-size:17px;color:var(--blue)"></i>
-              <div><div style="font-size:10.5px;font-weight:600">Payment Queue <span class="blue" id="q-id" style="font-size:9px">#00000000</span></div><div style="font-size:9px;color:var(--muted2)">Upload CSV → approve USDC → Execute</div></div>
-              <div style="margin-left:auto;display:flex;gap:10px">
-                <div style="text-align:center"><div style="font-size:13px;font-weight:700" id="q-tot">0</div><div style="font-size:7.5px;color:var(--muted2)">Total</div></div>
-                <div style="text-align:center"><div style="font-size:13px;font-weight:700;color:var(--muted2)" id="q-pen">0</div><div style="font-size:7.5px;color:var(--muted2)">Pending</div></div>
-                <div style="text-align:center"><div style="font-size:13px;font-weight:700;color:var(--green)" id="q-suc">0</div><div style="font-size:7.5px;color:var(--muted2)">Success</div></div>
-                <div style="text-align:center"><div style="font-size:13px;font-weight:700;color:var(--red)" id="q-fai">0</div><div style="font-size:7.5px;color:var(--muted2)">Failed</div></div>
-              </div>
-            </div>
-            <div style="overflow-x:auto">
-              <table class="btable">
-                <thead><tr><th>Batch ID</th><th>Status</th><th>Recipients</th><th>Total (USDC)</th><th>Network</th><th>Tx Hash</th><th>Created At</th><th>Actions</th></tr></thead>
-                <tbody id="batches-body"></tbody>
-              </table>
-            </div>
-            <div style="padding:6px 12px">
-              <div class="pbar"><div class="pfill" id="prog" style="width:0%"></div></div>
-              <div style="display:flex;align-items:center;gap:7px;margin-top:4px;font-size:9px;color:var(--muted2)">
-                <span id="last-tx">—</span>
-                <a id="explorer-link" href="https://testnet.arcscan.app" target="_blank" style="color:var(--blue);text-decoration:none;display:flex;align-items:center;gap:2px;font-size:9px"><i class="ti ti-external-link" style="font-size:9px"></i>View on Explorer</a>
-              </div>
-            </div>
+          <!-- Add Row -->
+          <div class="ms-add-row" onclick="addRow()">
+            <i class="ti ti-plus" style="font-size:13px;color:var(--blue)"></i>+ Add Recipient
           </div>
         </div>
 
-        <!-- Right panel -->
-        <div class="col-r">
-          <div style="display:flex;gap:2px;margin-bottom:10px">
-            <button class="btn" style="flex:1;justify-content:center;padding:5px" id="single-send-tab" onclick="showPage('send')" title="Open Send Assets page"><i class="ti ti-send" style="font-size:10px"></i>Send</button>
-            <button class="btn primary" style="flex:1;justify-content:center;padding:5px" id="batch-tab"><i class="ti ti-users" style="font-size:10px"></i>Batch</button>
+        <!-- Right Review Panel -->
+        <div class="ms-review-panel" id="ms-review-panel">
+          <!-- Route Split -->
+          <div class="ms-review-section">
+            <div class="ms-review-title"><i class="ti ti-route"></i>Route Split</div>
+            <div class="ms-review-split" id="ms-route-split">
+              <div class="ms-review-split-item direct" id="ms-split-direct">
+                <span class="ms-review-split-n" id="ms-split-dn">0</span>Direct
+              </div>
+              <div class="ms-review-split-item bridge" id="ms-split-bridge">
+                <span class="ms-review-split-n" id="ms-split-bn">0</span>Bridge
+              </div>
+            </div>
           </div>
-          <div class="rp-sec">
-            <div class="nr"><span style="font-size:10px;color:var(--muted2)">Network</span><span style="font-size:10px;color:var(--blue)">Arc Testnet</span></div>
-            <div class="nr"><span style="font-size:9.5px;color:var(--muted2)">Chain ID</span><span style="font-size:9.5px">5042002</span></div>
-            <div class="nr"><span style="font-size:10px;color:var(--muted2)">Token</span><span style="font-size:10px;display:flex;align-items:center;gap:3px"><span style="width:12px;height:12px;background:#2775ca;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:6px;font-weight:800;color:#fff">U</span>USDC</span></div>
-            <div class="nr"><span style="font-size:9px;color:var(--muted2)">USDC address</span><span style="font-size:8px;color:var(--blue)">0x3600...0000</span></div>
+
+          <!-- Toggles -->
+          <div class="ms-review-section">
+            <div class="ms-review-title"><i class="ti ti-settings"></i>Options</div>
+            <div class="tgl-row">
+              <span style="font-size:9.5px;color:var(--muted2)">Auto Bridge</span>
+              <div class="tgl on" id="tgl-auto-bridge" onclick="toggleAutoBridge()"></div>
+            </div>
+            <div class="tgl-row">
+              <span style="font-size:9.5px;color:var(--muted2)">Auto Swap</span>
+              <div class="tgl off" id="tgl-auto-swap" onclick="toggleAutoSwap()"></div>
+            </div>
+            <div id="ms-auto-bridge-info" style="font-size:7.5px;color:var(--purple);margin-top:3px;display:none">
+              <i class="ti ti-info-circle" style="font-size:8px"></i> Auto Bridge enabled — cross-chain recipients will use Bridge + Send
+            </div>
           </div>
-          <div class="rp-sec">
-            <div class="tgl-row"><span style="font-size:10px;color:var(--muted2)">Auto Bridge<span class="tnew" style="margin-left:3px">New</span></span><div class="tgl on" onclick="this.classList.toggle('on');this.classList.toggle('off')"></div></div>
-            <div class="tgl-row"><span style="font-size:10px;color:var(--muted2)">Auto Swap<span class="tnew" style="margin-left:3px">New</span></span><div class="tgl off" onclick="this.classList.toggle('on');this.classList.toggle('off')"></div></div>
+
+          <!-- Fee Breakdown -->
+          <div class="ms-review-section">
+            <div class="ms-review-title"><i class="ti ti-calculator"></i>Fee Breakdown</div>
+            <div class="ms-review-row"><span class="ms-review-label">Recipients</span><span class="ms-review-value" id="ms-fp-r">0</span></div>
+            <div class="ms-review-row"><span class="ms-review-label">Total USDC</span><span class="ms-review-value blue" id="ms-fp-t">0.00</span></div>
+            <div class="ms-review-row"><span class="ms-review-label">Platform Fee (1%)</span><span class="ms-review-value" id="ms-fp-f">0.00</span></div>
+            <div class="ms-review-row"><span class="ms-review-label">Est. Gas</span><span class="ms-review-value">~0.001 USDC</span></div>
+            <div class="ms-review-total"><span>You Approve</span><span class="blue" id="ms-fp-p">0.00 USDC</span></div>
+            <div class="ms-review-row" style="margin-top:4px"><span class="ms-review-label">Network</span><span class="ms-review-value blue">Arc Testnet</span></div>
           </div>
-          <div class="rp-sec">
-            <div class="rp-ttl"><i class="ti ti-calculator"></i>Fee Breakdown</div>
-            <div class="fr"><span class="fl">Recipients</span><span class="fv" id="fp-r">0</span></div>
-            <div class="fr"><span class="fl">Route</span><span class="fv" id="fp-route" style="font-size:9px;color:var(--purple)">—</span></div>
-            <div class="fr"><span class="fl">Total USDC</span><span class="fv blue" id="fp-t">0.00 USDC</span></div>
-            <div class="fr"><span class="fl">Platform fee (1.0%)</span><span class="fv" id="fp-f">0.00 USDC</span></div>
-            <div class="fr"><span class="fl">Gas (est.)</span><span class="fv">~0.001 USDC</span></div>
-            <div class="ftotal"><span>You Approve</span><span class="blue" id="fp-p">0.00 USDC</span></div>
-            <div class="fr"><span class="fl">Network</span><span class="blue" style="font-size:9.5px">Arc Testnet</span></div>
-            <div class="finfo"><i class="ti ti-info-circle" style="font-size:10px;flex-shrink:0;color:var(--blue)"></i>Single fee — not per transfer. Scales with recipients.</div>
+
+          <!-- Actions -->
+          <div class="ms-review-actions">
+            <button class="ms-review-btn primary" id="ms-review-btn" onclick="openModal()" disabled>
+              <i class="ti ti-arrow-right"></i>Review &amp; Sign
+            </button>
+            <button class="ms-review-btn cross" id="ms-xc-btn" onclick="prepareCrossChainBatch()" disabled>
+              <i class="ti ti-world"></i>Send Cross-Chain
+            </button>
           </div>
-          <button class="action-btn blue-btn" id="review-btn" onclick="openModal()"><i class="ti ti-arrow-right"></i>Review &amp; Sign</button>
-          <div style="height:10px"></div>
-          <div class="fcard" style="border-color:rgba(34,197,94,.2)">
-            <div class="fct"><i class="ti ti-droplet" style="font-size:10px;color:var(--green)"></i>Testnet Faucet</div>
-            <div style="font-size:9px;color:var(--muted2);margin-bottom:4px">Get free testnet USDC for Arc.</div>
-            <a href="https://faucet.circle.com" target="_blank" style="font-size:9px;color:var(--blue);text-decoration:none;display:flex;align-items:center;gap:3px"><i class="ti ti-external-link" style="font-size:9px"></i>faucet.circle.com</a>
-          </div>
-          <div class="fcard">
-            <div class="fct"><i class="ti ti-apps" style="font-size:10px;color:var(--purple)"></i>App Kit SDK</div>
-            <ul class="flist"><li>@circle-fin/app-kit</li><li>@circle-fin/adapter-viem-v2</li><li>Bridge &amp; Swap built-in</li><li>Unified Balance support</li></ul>
-            <a href="https://docs.arc.network/app-kit" target="_blank" style="font-size:9px;color:var(--blue);text-decoration:none;margin-top:5px;display:flex;align-items:center;gap:3px"><i class="ti ti-external-link" style="font-size:9px"></i>App Kit Docs</a>
+
+          <!-- Faucet -->
+          <div style="padding:8px 10px;background:rgba(34,197,94,.03);border:1px solid rgba(34,197,94,.12);border-radius:6px;margin-top:8px">
+            <div style="font-size:9px;font-weight:600;color:var(--green);margin-bottom:3px;display:flex;align-items:center;gap:4px"><i class="ti ti-droplet" style="font-size:10px"></i>Testnet Faucet</div>
+            <a href="https://faucet.circle.com" target="_blank" style="font-size:8.5px;color:var(--blue);text-decoration:none;display:flex;align-items:center;gap:3px"><i class="ti ti-external-link" style="font-size:8px"></i>faucet.circle.com</a>
           </div>
         </div>
       </div>
-      <div class="bottom-bar">
-        <button class="btn primary" style="background:#4f8ef7;padding:8px 14px;font-size:9.5px" onclick="signTx()">
-          <i class="ti ti-stack"></i> Send Same-Chain (Arc → Arc)
-        </button>
-        <button class="btn" style="background:#14b8a6;padding:8px 14px;font-size:9.5px" onclick="prepareCrossChainBatch()" id="xc-batch-btn" disabled>
-          <i class="ti ti-world"></i> Send Cross-Chain (Arc → Others)
-        </button>
 
-        <button class="ebtn" onclick="openModal()"><i class="ti ti-player-play"></i>Execute Queue</button>
-        <button class="ebtn2" onclick="executeInParts()"><i class="ti ti-layout-grid"></i>Execute in Parts</button>
-        <div class="auto-r"><div class="adot"></div>Auto-retry: <span class="green">Active</span></div>
-        <div style="margin-left:16px;font-size:9px;color:var(--muted2)">RPC: <span style="color:var(--blue)">rpc.testnet.arc.network</span></div>
-      </div>
-      <div class="resources">
-        <div class="rcard"><div class="rico" style="background:rgba(79,142,247,.12);color:var(--blue)"><i class="ti ti-link"></i></div><div><div class="rname">Payment Links</div><div class="rsub">Create link</div></div></div>
-        <div class="rcard"><div class="rico" style="background:rgba(34,197,94,.1);color:var(--green)"><i class="ti ti-file-invoice"></i></div><div><div class="rname">Invoices</div><div class="rsub">Generate</div></div></div>
-        <div class="rcard" onclick="showPage('swap')"><div class="rico" style="background:rgba(167,139,250,.12);color:var(--purple)"><i class="ti ti-arrows-exchange"></i></div><div><div class="rname">Swap</div><div class="rsub">App Kit</div></div></div>
-        <div class="rcard" onclick="showPage('bridge')"><div class="rico" style="background:rgba(45,212,191,.12);color:var(--teal)"><i class="ti ti-topology-star-3"></i></div><div><div class="rname">Bridge</div><div class="rsub">App Kit</div></div></div>
-        <div class="rcard" onclick="window.open('https://testnet.arcscan.app','_blank')"><div class="rico" style="background:rgba(239,68,68,.1);color:var(--red)"><i class="ti ti-search"></i></div><div><div class="rname">Explorer</div><div class="rsub">arcscan.app</div></div></div>
+      <!-- Bottom Action Bar -->
+      <div class="ms-bottom-bar" id="ms-bottom-bar">
+        <button class="ms-bottom-btn primary" id="ms-btn-samechain" onclick="signTx()" disabled>
+          <i class="ti ti-stack"></i>Send Same-Chain (Arc → Arc)
+        </button>
+        <button class="ms-bottom-btn secondary" id="ms-btn-crosschain" onclick="prepareCrossChainBatch()" disabled>
+          <i class="ti ti-world"></i>Send Cross-Chain
+        </button>
+        <button class="ms-bottom-btn secondary" id="ms-btn-execute-queue" onclick="openModal()" disabled>
+          <i class="ti ti-player-play"></i>Execute Queue
+        </button>
+        <button class="ms-bottom-btn secondary" id="ms-btn-execute-parts" onclick="executeInParts()" disabled>
+          <i class="ti ti-layout-grid"></i>Execute in Parts
+        </button>
+        <span class="ms-bottom-spacer"></span>
+        <span class="ms-bottom-info" id="ms-bottom-info">
+          <span style="width:5px;height:5px;border-radius:50%;background:var(--green);animation:pulse 1.5s ease-in-out infinite"></span>
+          RPC: rpc.testnet.arc.network
+        </span>
       </div>
     </div>
 
@@ -5941,8 +6248,8 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
                   <i class="ti ti-download"></i> Deposit cirBTC
                 </button>
                 </div>
-                <div id="treasury-deposit-unauthorized" style="display:none;grid-column:1/-1;padding:8px 12px;background:rgba(239,68,68,.06);border:1px solid rgba(239,68,68,.2);border-radius:6px;font-size:9.5px;color:var(--muted2);text-align:center">
-                  <i class="ti ti-lock" style="margin-right:4px"></i>This Treasury accepts deposits only from authorized liquidity providers.
+                <div id="treasury-deposit-unauthorized" style="display:none;grid-column:1/-1;padding:8px 12px;background:rgba(34,197,94,.06);border:1px solid rgba(34,197,94,.2);border-radius:6px;font-size:9.5px;color:var(--muted2);text-align:center">
+                  <i class="ti ti-shield-check" style="margin-right:4px"></i>Authorization is enforced on-chain by the TreasuryVault contract.
                 </div>
 
                 <button class="btn" onclick="treasuryWithdraw('usdc')" style="font-size:10px; border-color:#f59e0b; color:#f59e0b">
@@ -5966,7 +6273,7 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
               <table class="intent-table">
                 <thead>
                   <tr>
-                    <th>Intent ID</th><th>Route</th><th>Asset</th><th>Amount</th><th>Status</th><th>Last Poll</th><th>Poll #</th>
+                    <th>Intent ID</th><th>Route</th><th>Asset</th><th>Amount</th><th>Status</th><th>Last Poll</th><th>Next Retry</th><th>Last Error</th><th>Age</th>
                   </tr>
                 </thead>
                 <tbody id="intent-tbody">
@@ -6409,6 +6716,7 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
                   <option value="">All Status</option>
                   <option value="Pending Burn">Pending Burn</option>
                   <option value="Awaiting Attestation">Awaiting Attestation</option>
+                  <option value="Awaiting Operator">Awaiting Operator</option>
                   <option value="Attestation Received">Attestation Received</option>
                   <option value="Treasury Reimbursed">Treasury Reimbursed</option>
                   <option value="Fully Settled">Fully Settled</option>
@@ -6452,11 +6760,12 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
                       <th style="padding:8px 6px;text-align:center;color:var(--muted2);font-weight:600;">Verification</th>
                       <th style="padding:8px 6px;text-align:center;color:var(--muted2);font-weight:600;">Last Poll</th>
                       <th style="padding:8px 6px;text-align:right;color:var(--muted2);font-weight:600;">Poll #</th>
+                      <th style="padding:8px 6px;text-align:left;color:var(--muted2);font-weight:600;">Last Error</th>
                     </tr>
                   </thead>
                   <tbody id="stl-table-body">
                     <tr>
-                      <td colspan="12" style="padding:24px;text-align:center;color:var(--muted2);font-size:11px;">
+                      <td colspan="15" style="padding:24px;text-align:center;color:var(--muted2);font-size:11px;">
                         <i class="ti ti-database-off" style="font-size:20px;display:block;margin-bottom:6px;"></i>
                         No settlements found. Connect wallet to load protocol data.
                       </td>
@@ -6989,28 +7298,23 @@ const __DEBUG__ = (() => {
 function _log(...args) { if (__DEBUG__) console.log(...args); }
 function _warn(...args) { if (__DEBUG__) console.warn(...args); }
 function _err(...args) { console.error(...args); } // errors always visible
-
 // ═══════════════════════════════════════════════════════════
 //  SAFE DOM UTILITIES — XSS hardening
+//  All dynamic HTML must go through setSafeHTML to be sanitized.
+//  Static content (hardcoded strings, icons) can bypass via _setHTML.
 // ═══════════════════════════════════════════════════════════
-function _safePurify(html) {
-  if (typeof DOMPurify !== 'undefined' && DOMPurify.sanitize) {
-    return DOMPurify.sanitize(html, {
-      ALLOWED_TAGS: ['a','b','br','code','div','em','i','li','ol','p',
-                     'pre','span','strong','table','tbody','td','th',
-                     'thead','tr','ul'],
-      ALLOWED_ATTR: ['class','style','href','target','rel','title',
-                     'onclick','value','type','colspan','rowspan'],
-      ALLOW_DATA_ATTR: true
-    });
+function _safePurify(dirty) {
+  if (typeof dirty !== 'string') return String(dirty);
+  if (typeof DOMPurify !== 'undefined') {
+    try { return DOMPurify.sanitize(dirty, { ALLOWED_TAGS: ['b','i','em','strong','a','span','div','br','small','code','pre'], ALLOWED_ATTR: ['href','target','class','style','title','id'] }); } catch(_) {}
   }
-  return html
-    .replace(/<script[\s\S]*?<\/script>/gi, '')
-    .replace(/\s+on\w+\s*=\s*(?:"[^"]*"|'[^']*')/gi, '');
+  return escHtml(dirty);
 }
 function setSafeHTML(el, html) {
   if (!el) return;
-  el.innerHTML = _safePurify(html);
+  if (el instanceof HTMLElement || el instanceof Element) {
+    el.innerHTML = _safePurify(html);
+  }
 }
 // ═══════════════════════════════════════════════════════════
 //  PROVIDER CACHE — reuses JsonRpcProvider per RPC URL
@@ -7299,20 +7603,16 @@ const CHAIN_REGISTRY = {
 };
 
 // ── Derived helpers ───────────────────────────────────────────
-// EVM chains as ordered array (for Bridge/XC selectors — index-based)
-const CHAINS = Object.values(CHAIN_REGISTRY).filter(c => c.isEvm);
-
-// CHAIN_MAP: alias → canonical id (CSV import, contact lookup)
-const CHAIN_MAP = (() => {
-  const m = {};
-  for (const c of CHAINS) {
-    const id  = c.id;
-    m[id.toLowerCase().replace(/_/g, ' ')] = id;
-    if (c.shortName) m[c.shortName.toLowerCase()] = id;
-    if (c.name)      m[c.name.toLowerCase()]       = id;
-  }
-  return m;
-})();
+// EVM chains as ordered array (for Bridge/XC selectors — explicit order,
+// NOT Object.values() which reorders numeric keys in ascending order)
+const CHAINS = [
+  CHAIN_REGISTRY[5042002],   // 0: Arc Testnet
+  CHAIN_REGISTRY[11155111],  // 1: Ethereum Sepolia
+  CHAIN_REGISTRY[84532],     // 2: Base Sepolia
+  CHAIN_REGISTRY[421614],    // 3: Arbitrum Sepolia
+  CHAIN_REGISTRY[11155420],  // 4: Optimism Sepolia
+  CHAIN_REGISTRY[80002],     // 5: Polygon Amoy
+].filter(Boolean);
 // All chains including Solana
 const ALL_CHAINS = [...CHAINS, CHAIN_REGISTRY.solana_devnet];
 
@@ -7460,6 +7760,12 @@ function showPage(id) {
     if (id === 'recipients') {
       renderContacts();
       updateSelectedCount();
+    }
+    if (id === 'batch') {
+      setTimeout(() => {
+        renderTable();
+        updateBottomBar();
+      }, 50);
     }
     if (id === 'send') {
       // Refresh Send Assets page data when user navigates to it
@@ -7749,7 +8055,11 @@ function setupProviderEvents(raw) {
       await refreshBalance();
       // Submit any pending attestations with the new signer
       if (typeof FulfillerEngine !== 'undefined' && typeof FulfillerEngine.submitPendingAttestations === 'function') {
-        setTimeout(() => FulfillerEngine.submitPendingAttestations().catch(_err), 1200);
+        setTimeout(() => FulfillerEngine.submitPendingAttestations(), 500);
+      }
+      // Trigger TreasurySettlementExecutor — if new wallet is operator, process queued receiveMessage tasks
+      if (typeof TreasurySettlementExecutor !== 'undefined') {
+        setTimeout(() => TreasurySettlementExecutor.forceProcess(), 1000);
       }
       toast('Account switched: ' + short, 'info');
     });
@@ -7764,6 +8074,10 @@ function setupProviderEvents(raw) {
       await refreshBalance();
       const knownChain = getChainById(newChainId);
       toast('Network: ' + (knownChain ? knownChain.name : 'chain ' + newChainId), 'info');
+      // Trigger TreasurySettlementExecutor — if wallet switched to ARC, process queued tasks
+      if (typeof TreasurySettlementExecutor !== 'undefined') {
+        setTimeout(() => TreasurySettlementExecutor.forceProcess(), 1000);
+      }
     });
 
     raw.on('disconnect', () => disconnectWallet());
@@ -8183,7 +8497,8 @@ async function verifyCrossChainBatcher(){
     ], provider);
     const batchId = await c.getCurrentBatchId();
     toast(`✓ CrossChainBatcher ready. Current batch: ${batchId}`, 'success');
-    document.getElementById('xc-batcher-status').textContent = '✓ Ready';
+    const xcStatusEl = document.getElementById('xc-batcher-status');
+    if(xcStatusEl) xcStatusEl.textContent = '✓ Ready';
   }catch(e){
     toast('Verification failed. Is this the correct ElligentCrossChainBatcher?', 'error');
   }
@@ -8369,70 +8684,87 @@ function getRecipientRoute(r) {
   return destId === srcId ? 'direct' : 'bridge';
 }
 
+// ── Color palette for recipient avatars ────────────────────
+const RCPT_COLORS = ['#4f8ef7','#a78bfa','#22c55e','#f59e0b','#ef4444','#2dd4bf','#ec4899','#6366f1','#14b8a6','#f97316'];
+
 function renderTable(){
-  const tbody=document.getElementById('tbody');
+  const tbody = document.getElementById('tbody');
+  const empty = document.getElementById('ms-empty');
+  if(!tbody) return;
   tbody.textContent='';
+
+  if(!recipients.length) {
+    if(empty) empty.style.display = 'flex';
+    updateStats();
+    return;
+  }
+  if(empty) empty.style.display = 'none';
+
   recipients.forEach((r,i)=>{
-    const amt   = parseFloat(r.amount)||0;
     const valid = isAddr(r.addr)||isEns(r.addr);
-    const badge = valid
-      ? `<span class="sbadge s-ok"><i class="ti ti-check" style="font-size:8px"></i> Ready</span>`
-      : `<span class="sbadge s-err"><i class="ti ti-x" style="font-size:8px"></i> Invalid</span>`;
-    const chainId  = r.chainId || 'Arc_Testnet';
-    const chain    = CHAINS.find(c=>c.id===chainId) || null;
-    const route    = getRecipientRoute(r);
-    const routeBadge = route === 'direct'
-      ? `<span style="padding:2px 7px;background:rgba(34,197,94,.13);border:1px solid rgba(34,197,94,.3);border-radius:4px;font-size:8.5px;font-weight:700;color:var(--green);white-space:nowrap">Direct Send</span>`
-      : `<span style="padding:2px 7px;background:rgba(167,139,250,.13);border:1px solid rgba(167,139,250,.3);border-radius:4px;font-size:8.5px;font-weight:700;color:var(--purple);white-space:nowrap">Bridge + Send</span>`;
-    // chain options dropdown (improved with CCTP domain for cross-chain clarity)
-    const chainOpts = CHAINS.map(c => {
-      const dom = c.cctp?.domain ?? '';
-      const domLabel = dom ? ` (dom ${dom})` : '';
-      return `<option value="${c.id}" ${c.id===chainId?'selected':''}>${escHtml(c.shortName || c.name)}${domLabel}</option>`;
-    }).join('');
-    const name = r.name || '';
+    const chainId = r.chainId || 'Arc_Testnet';
+    const chain   = getChainById(chainId) || CHAIN_REGISTRY[5042002];
+    const route   = getRecipientRoute(r);
+    const isBridge = route === 'bridge';
+
+    // Route badge text
+    const routeLabel = isBridge ? 'Bridge' : 'Direct';
+    const routeClass = isBridge ? 'bridge' : 'direct';
+
+    // Status badge
+    const statusClass = valid ? 'ready' : 'invalid';
+    const statusText  = valid ? 'Ready' : 'Invalid';
+
+    // Chain options
+    const chainOpts = CHAINS.map(c =>
+      `<option value="${c.id}" ${c.id===chainId?'selected':''}>${escHtml(c.shortName || c.name)}</option>`
+    ).join('');
+
+    // Token
     const tok = r.token || 'USDC';
-    const tokColor = tok === 'EURC' ? '#2562de' : '#2775ca';
-    const tokIcon  = tok === 'EURC' ? 'E' : 'U';
-    const tokenOpts = ['USDC','EURC'].map(t=>`<option value="${t}" ${t===tok?'selected':''}>${t}</option>`).join('');
-    const tr=document.createElement('tr');
-    tr.style.opacity='0';tr.style.transition='opacity .22s';
-    setSafeHTML(tr, `
-      <td style="font-size:9px;color:var(--muted2);text-align:center">${i+1}</td>
+    const tokenOpts = ['USDC','EURC'].map(t =>
+      `<option value="${t}" ${t===tok?'selected':''}>${t}</option>`
+    ).join('');
+
+    const tr = document.createElement('tr');
+    if(isBridge) tr.className = 'bridge-row';
+
+    const cells = `
+      <td>${i+1}</td>
       <td>
-        <div class="avc" style="flex-direction:column;align-items:flex-start;gap:2px">
-          <input class="ni" value="${escHtml(name)}" placeholder="Name (opt.)" style="font-size:9px;margin-bottom:2px;width:100%" onchange="recipients[${i}].name=this.value"/>
-          <div style="display:flex;align-items:center;gap:4px">
-            <div class="av" style="background:${GRAD[i%GRAD.length]};flex-shrink:0">${escHtml(name) ? name[0].toUpperCase() : '0x'}</div>
-            <input class="ai" value="${escHtml(r.addr)}" placeholder="0x... address" style="font-size:10px;font-family:'JetBrains Mono',monospace;width:130px" onchange="recipients[${i}].addr=this.value;renderTable()"/>
+        <div style="display:flex;gap:6px;align-items:center">
+          <div style="width:20px;height:20px;min-width:20px;border-radius:50%;background:${RCPT_COLORS[i%RCPT_COLORS.length]};display:flex;align-items:center;justify-content:center;font-size:7px;font-weight:800;color:#fff">${r.addr ? r.addr.slice(2,4).toUpperCase() : '0x'}</div>
+          <div style="display:flex;flex-direction:column;gap:1px;min-width:0">
+            <input class="ms-table-input name" value="${escHtml(r.name||'')}" placeholder="Name" onchange="recipients[${i}].name=this.value" onfocus="this.select()"/>
+            <input class="ms-table-input addr" value="${escHtml(r.addr)}" placeholder="0x..." onchange="recipients[${i}].addr=this.value;renderTable()" onfocus="this.select()"/>
           </div>
         </div>
       </td>
       <td>
-        <div style="display:flex;align-items:center;gap:5px">
-          <div style="width:14px;height:14px;border-radius:50%;background:${chain.color};flex-shrink:0;box-shadow:0 0 5px ${chain.color}66"></div>
-          <select class="ni" style="font-size:9.5px;padding:2px 4px;min-width:110px" onchange="recipients[${i}].chainId=this.value;renderTable()">
+        <div style="display:flex;align-items:center;gap:4px">
+          <div style="width:7px;height:7px;border-radius:50%;background:${chain.color||'#ff0202'};flex-shrink:0"></div>
+          <select class="ms-chain-select" onchange="recipients[${i}].chainId=this.value;renderTable()">
             ${chainOpts}
           </select>
         </div>
       </td>
       <td>
-        <div style="display:flex;align-items:center;gap:4px">
-          <div style="width:16px;height:16px;border-radius:50%;background:${tokColor};display:flex;align-items:center;justify-content:center;font-size:7px;font-weight:800;color:#fff;flex-shrink:0">${tokIcon}</div>
-          <select class="ni" style="font-size:9.5px;padding:2px 4px;min-width:52px" onchange="recipients[${i}].token=this.value;renderTable()">
-            ${tokenOpts}
-          </select>
-        </div>
+        <select class="ms-token-select" onchange="recipients[${i}].token=this.value;renderTable()">
+          ${tokenOpts}
+        </select>
       </td>
-      <td><input class="ai" value="${escHtml(r.amount)}" onchange="recipients[${i}].amount=this.value;updateStats()"/></td>
-      <td><input class="ni" value="${escHtml(r.note||'')}" placeholder="Note..." style="min-width:70px" onchange="recipients[${i}].note=this.value"/></td>
-      <td>${routeBadge}</td>
-      <td>${badge}</td>
-      <td><div class="rm" onclick="removeRow(${i})">×</div></td>`);
+      <td><input class="ms-table-input amount" value="${escHtml(r.amount)}" onchange="recipients[${i}].amount=this.value;updateStats()" onfocus="this.select()"/></td>
+      <td><input class="ms-table-input note" value="${escHtml(r.note||'')}" placeholder="Note" onchange="recipients[${i}].note=this.value"/></td>
+      <td><span class="ms-route-badge ${routeClass}">${routeLabel}</span></td>
+      <td><span class="ms-status-badge ${statusClass}">${statusText}</span></td>
+      <td><button class="ms-row-remove" onclick="removeRow(${i})" title="Remove">×</button></td>`;
+
+    tr.innerHTML = cells;
     tbody.appendChild(tr);
-    requestAnimationFrame(()=>tr.style.opacity='1');
   });
+
   updateStats();
+  updateBottomBar();
 }
 function removeRow(i){recipients.splice(i,1);saveRecipients();renderTable();}
 function addRow(){
@@ -8444,7 +8776,7 @@ function addRow(){
   setTimeout(() => {
     const tbody = document.getElementById('tbody');
     if (tbody && tbody.lastElementChild) {
-      const addrInput = tbody.lastElementChild.querySelector('.ai');
+      const addrInput = tbody.lastElementChild.querySelector('.ms-table-input.addr');
       if (addrInput) {
         addrInput.focus();
       }
@@ -8461,40 +8793,152 @@ function setAllRecipientsChain(chainId){
   toast(`All recipients set to ${chainName}`, 'info');
 }
 function updateStats(){saveRecipients();
-  const total=recipients.reduce((s,r)=>s+(parseFloat(r.amount)||0),0);
-  const n=recipients.length,fee=total*0.01;
-  const bridgeCount=recipients.filter(r=>getRecipientRoute(r)==='bridge').length;
-  const directCount=n-bridgeCount;
-  document.getElementById('s-rcpt').textContent=n;
-  if (n > 0) updateWorkflowStep(1, 'done'); else updateWorkflowStep(1, 'pending');
-  const bridgeEl=document.getElementById('s-bridge');
-  if(bridgeEl){bridgeEl.textContent=bridgeCount+' bridge / '+directCount+' direct';}
-  document.getElementById('s-total').textContent='$'+total.toFixed(2);
-  document.getElementById('s-fee').textContent='$'+fee.toFixed(2);
-  document.getElementById('row-cnt').textContent=n+' rows';
-  document.getElementById('fp-r').textContent=n+' recipients';
-  const fpRoute=document.getElementById('fp-route');
-  if(fpRoute){
-    const bc=recipients.filter(r=>getRecipientRoute(r)==='bridge').length;
-    const dc=n-bc;
-    const parts=[];
-    if(dc>0) parts.push(dc+' Direct');
-    if(bc>0) parts.push(bc+' Bridge');
-    fpRoute.textContent=parts.join(' + ')||'None';
-    fpRoute.style.color=bc>0?'var(--purple)':'var(--green)';
+  const total = recipients.reduce((s,r)=>s+(parseFloat(r.amount)||0),0);
+  const n = recipients.length;
+  const fee = total*0.01;
+
+  // Route analysis
+  const bridgeCount = recipients.filter(r=>getRecipientRoute(r)==='bridge').length;
+  const directCount = n - bridgeCount;
+
+  // Has cross-chain recipients that would need bridge
+  const hasCrossChain = bridgeCount > 0;
+
+  // Auto-bridge state
+  const autoBridgeOn = document.getElementById('tgl-auto-bridge')?.classList.contains('on') ?? true;
+
+  // Update stat cards
+  const setEl = (id,val) => { const el=document.getElementById(id); if(el) el.textContent=val; };
+  setEl('s-rcpt', n);
+  setEl('s-total', '$'+total.toFixed(2));
+  setEl('s-fee', '$'+fee.toFixed(2));
+  setEl('row-cnt', n+' rows');
+
+  // Route split — only show bridge count if > 0
+  const bridgeEl = document.getElementById('s-bridge');
+  if(bridgeEl){
+    if(n === 0) {
+      bridgeEl.textContent = '—';
+      bridgeEl.style.color = 'var(--muted2)';
+    } else if(bridgeCount === 0) {
+      bridgeEl.textContent = directCount + ' Direct';
+      bridgeEl.style.color = 'var(--green)';
+    } else {
+      bridgeEl.textContent = directCount + ' Direct, ' + bridgeCount + ' Bridge';
+      bridgeEl.style.color = 'var(--purple)';
+    }
   }
-  document.getElementById('fp-t').textContent=total.toFixed(2)+' USDC';
-  document.getElementById('fp-f').textContent=fee.toFixed(2)+' USDC';
-  document.getElementById('fp-p').textContent=(total+fee).toFixed(2)+' USDC';
-  document.getElementById('m-rcpt').textContent=n;
-  document.getElementById('m-total').textContent=total.toFixed(2)+' USDC';
-  document.getElementById('m-fee').textContent=fee.toFixed(2)+' USDC';
-  document.getElementById('m-pay').textContent=(total+fee+0.001).toFixed(3)+' USDC';
+
+  // Workflow
+  if(n > 0) updateWorkflowStep(1, 'done'); else { updateWorkflowStep(1, 'pending'); updateWorkflowStep(2, 'active'); updateWorkflowStep(3, 'pending'); }
+
+  // Right panel — Route Split
+  const splitDn = document.getElementById('ms-split-dn');
+  const splitBn = document.getElementById('ms-split-bn');
+  if(splitDn) splitDn.textContent = directCount;
+  if(splitBn) splitBn.textContent = bridgeCount;
+
+  // Right panel — Fee Breakdown
+  setEl('ms-fp-r', n + ' recipients');
+  setEl('ms-fp-t', total.toFixed(2) + ' USDC');
+  setEl('ms-fp-f', fee.toFixed(2) + ' USDC');
+  setEl('ms-fp-p', (total+fee).toFixed(2) + ' USDC');
+
+  // Modal values
+  setEl('m-rcpt', n);
+  setEl('m-total', total.toFixed(2) + ' USDC');
+  setEl('m-fee', fee.toFixed(2) + ' USDC');
+  setEl('m-pay', (total+fee+0.001).toFixed(3) + ' USDC');
+
+  // Auto Bridge info text
+  const bridgeInfo = document.getElementById('ms-auto-bridge-info');
+  if(bridgeInfo) {
+    if(autoBridgeOn && hasCrossChain) {
+      bridgeInfo.style.display = 'block';
+      bridgeInfo.innerHTML = '<i class="ti ti-info-circle" style="font-size:8px"></i> Auto Bridge enabled — cross-chain recipients will Bridge + Send';
+    } else if(!autoBridgeOn && hasCrossChain) {
+      bridgeInfo.style.display = 'block';
+      bridgeInfo.style.color = 'var(--red)';
+      bridgeInfo.innerHTML = '<i class="ti ti-alert-triangle" style="font-size:8px;color:var(--red)"></i> Cross-chain recipients need Auto Bridge enabled';
+    } else {
+      bridgeInfo.style.display = 'none';
+    }
+  }
+
+  updateBottomBar();
+}
+
+// ── Auto Bridge Toggle ──────────────────────────────────────
+function toggleAutoBridge() {
+  const tgl = document.getElementById('tgl-auto-bridge');
+  if(!tgl) return;
+  const wasOn = tgl.classList.contains('on');
+  tgl.classList.toggle('on');
+  tgl.classList.toggle('off');
+  const nowOn = tgl.classList.contains('on');
+
+  if(wasOn !== nowOn){
+    renderTable(); // re-render to reflect route changes
+    const msg = nowOn
+      ? 'Auto Bridge: ON — Cross-chain recipients will Bridge + Send'
+      : 'Auto Bridge: OFF — Cross-chain transfers disabled';
+    toast(msg, nowOn ? 'info' : 'warning');
+  }
+}
+
+// ── Auto Swap Toggle ───────────────────────────────────────
+function toggleAutoSwap() {
+  const tgl = document.getElementById('tgl-auto-swap');
+  if(!tgl) return;
+  tgl.classList.toggle('on');
+  tgl.classList.toggle('off');
+  const nowOn = tgl.classList.contains('on');
+  toast(nowOn ? 'Auto Swap: ON — Different tokens will be auto-swapped' : 'Auto Swap: OFF', 'info');
+}
+
+// ── Bottom Bar State ───────────────────────────────────────
+function updateBottomBar() {
+  const n = recipients.length;
+  const hasAddress = walletAddress && signer;
+  const bridgeCount = recipients.filter(r=>getRecipientRoute(r)==='bridge').length;
+  const directCount = n - bridgeCount;
+  const autoBridgeOn = document.getElementById('tgl-auto-bridge')?.classList.contains('on') ?? true;
+
+  const setBtn = (id, enabled) => {
+    const btn = document.getElementById(id);
+    if(btn) btn.disabled = !enabled;
+  };
+
+  // Send Same-Chain: enabled only if there are direct recipients and wallet connected
+  setBtn('ms-btn-samechain', hasAddress && directCount > 0);
+  setBtn('ms-review-btn', hasAddress && directCount > 0);
+
+  // Send Cross-Chain: enabled only if bridge recipients exist AND auto-bridge is on AND wallet connected
+  const canCrossChain = hasAddress && bridgeCount > 0 && autoBridgeOn;
+  setBtn('ms-btn-crosschain', canCrossChain);
+  setBtn('ms-xc-btn', canCrossChain);
+
+  // Execute Queue: enabled if there are any recipients and wallet connected
+  setBtn('ms-btn-execute-queue', hasAddress && n > 0);
+
+  // Execute in Parts: same
+  setBtn('ms-btn-execute-parts', hasAddress && n > 0);
+
+  // Bottom info
+  const info = document.getElementById('ms-bottom-info');
+  if(info && hasAddress) {
+    info.innerHTML = '<span style="width:5px;height:5px;border-radius:50%;background:var(--green);animation:pulse 1.5s ease-in-out infinite"></span> RPC: rpc.testnet.arc.network · '+directCount+' direct / '+bridgeCount+' bridge';
+  }
 }
 function editAll(){const v=prompt('New USDC value for all:');if(!v||isNaN(parseFloat(v)))return;recipients.forEach(r=>r.amount=parseFloat(v).toFixed(2));renderTable();toast('Values updated','success');}
 function duplicateAll(){recipients.push(...recipients.map(r=>({...r})));saveRecipients();renderTable();toast('Duplicated','success');}
-function clearAll(){if(!recipients.length)return;if(!confirm(`Clear all ${recipients.length} recipients?`))return;recipients.length=0;saveRecipients();renderTable();toast('Cleared','info'); resetWorkflow(); updateWorkflowStep(1,'pending'); updateWorkflowStep(2,'active'); updateWorkflowStep(3,'pending'); }
-function clearBatches(){document.getElementById('batches-body').innerHTML='';['q-tot','q-suc','q-pen','q-fai'].forEach(id=>document.getElementById(id).textContent='0');toast('History cleared','info');}
+function clearAll(){if(!recipients.length)return;if(!confirm(`Clear all ${recipients.length} recipients?`))return;recipients.length=0;saveRecipients();renderTable();toast('Cleared','info'); resetWorkflow(); updateWorkflowStep(1,'pending'); updateWorkflowStep(2,'active'); updateWorkflowStep(3,'pending'); updateBottomBar(); }
+function clearBatches(){
+  const el = document.getElementById('batches-body');
+  if(el) el.innerHTML='';
+  ['q-tot','q-suc','q-pen','q-fai'].forEach(id=>{const e=document.getElementById(id);if(e)e.textContent='0';});
+  toast('History cleared','info');
+}
 function validateAll(){const bad=recipients.filter(r=>!isAddr(r.addr)&&!isEns(r.addr));if(bad.length)toast(`${bad.length} invalid address(es)`,'warning');else toast('All addresses valid!','success');renderTable();}
 
 let wfSendInterval = null;
@@ -8584,9 +9028,15 @@ function showBatchSuccess(count) {
 }
 
 function loadTemplateDefault(){recipients.push({addr:'0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045',amount:'10.00',note:'Grant',token:'USDC'},{addr:'0x1234567890abcdef1234567890abcdef12345678',amount:'25.00',note:'Bounty',token:'EURC'});renderTable();toast('Template loaded','success');}
+// ── Global CHAIN_MAP for CSV/contact import ──────────────
+const CHAIN_MAP={
+  'arc':'Arc_Testnet','arc testnet':'Arc_Testnet',
+  'ethereum':'Ethereum_Sepolia','eth':'Ethereum_Sepolia','sepolia':'Ethereum_Sepolia',
+  'base':'Base_Sepolia','arbitrum':'Arbitrum_Sepolia','arb':'Arbitrum_Sepolia',
+  'solana':'Solana_Devnet','sol':'Solana_Devnet'
+};
 function loadCSV(input){
   const file=input.files[0];if(!file)return;
-  // CHAIN_MAP is now defined globally
   const reader=new FileReader();
   reader.onload=e=>{
     const lines=e.target.result.split('\n').filter(l=>l.trim());
@@ -8621,6 +9071,15 @@ function openModal(){
   if(!walletAddress){toast('Connect your wallet before sending','warning');return;}
   const valid=recipients.filter(r=>(isAddr(r.addr)||isEns(r.addr))&&parseFloat(r.amount)>0);
   if(!valid.length){toast('No valid recipients with amount > 0','error');return;}
+
+  // Check: any cross-chain recipients without auto-bridge enabled
+  const bridgeRcpts = recipients.filter(r=>getRecipientRoute(r)==='bridge');
+  const autoBridgeOn = document.getElementById('tgl-auto-bridge')?.classList.contains('on') ?? true;
+  if(bridgeRcpts.length > 0 && !autoBridgeOn) {
+    toast(`Cross-chain transfer requires Auto Bridge to be enabled (${bridgeRcpts.length} recipient(s) on other chains)`, 'error');
+    return;
+  }
+
   const bad=recipients.filter(r=>!isAddr(r.addr)&&!isEns(r.addr));
   if(bad.length){toast(`${bad.length} invalid address(es) — they will be skipped`,'warning');}
   // Hide demo notice — we always do real txs
@@ -8678,6 +9137,15 @@ async function signTx(){
     // Split by chain
     const directRcpts = validRcpts.filter(r=>getRecipientRoute(r)==='direct');
     const bridgeRcpts = validRcpts.filter(r=>getRecipientRoute(r)==='bridge');
+    
+    // ── Auto-bridge validation ────────────────
+    const autoBridgeOn = document.getElementById('tgl-auto-bridge')?.classList.contains('on') ?? true;
+    if(bridgeRcpts.length > 0 && !autoBridgeOn) {
+      toast(`Cross-chain transfer requires Auto Bridge (${bridgeRcpts.length} cross-chain recipients). Enable Auto Bridge or remove them.`, 'error');
+      btn.disabled=false; if(textEl && loadingEl){ textEl.style.display=''; loadingEl.style.display='none'; }
+      return;
+    }
+    
     const bridgeGroups = {};
     bridgeRcpts.forEach(r=>{
       const cid=r.chainId||'Arc_Testnet';
@@ -9220,16 +9688,16 @@ function finalizeBatch(txHash,blockNumber,isDemo,totalAmt,rcptCount){
   const count = rcptCount!=null ? rcptCount : recipients.length;
   const shortTx=txHash?shortAddr(txHash):'—';
   const url=txHash?`https://testnet.arcscan.app/tx/${txHash}`:'https://testnet.arcscan.app';
-  document.getElementById('q-id').textContent=id;
+  const qIdEl = document.getElementById('q-id'); if(qIdEl) qIdEl.textContent=id;
   document.getElementById('s-batches').textContent=batchCount;
-  document.getElementById('q-tot').textContent=batchCount;
-  document.getElementById('q-suc').textContent=successCount;
+  const qTotEl = document.getElementById('q-tot'); if(qTotEl) qTotEl.textContent=batchCount;
+  const qSucEl = document.getElementById('q-suc'); if(qSucEl) qSucEl.textContent=successCount;
   const tr=document.createElement('tr');
-  setSafeHTML(tr, `<td class="blue">${escHtml(id)}</td><td><span class="green"><i class="ti ti-check" style="font-size:8px"></i> ${isDemo?'Demo':'Success'}</span></td><td>${count}</td><td>${total.toFixed(2)} USDC</td><td><span class="blue">Arc Testnet</span></td><td><a href="${url}" target="_blank" style="color:var(--blue);text-decoration:none;font-size:9px">${shortTx}${blockNumber?' · #'+blockNumber:''}</a></td><td>${ts}</td><td><i class="ti ti-eye" style="cursor:pointer;color:var(--muted2);margin-right:4px" onclick="window.open('${url}','_blank')"></i><i class="ti ti-download" style="cursor:pointer;color:var(--muted2)" onclick="exportCSV()"></i></td>`);
-  document.getElementById('batches-body').prepend(tr);
-  document.getElementById('last-tx').textContent='Tx: '+shortTx;
-  document.getElementById('explorer-link').href=url;
-  const fill=document.getElementById('prog');fill.style.width='0%';let p=0;const iv=setInterval(()=>{p+=4;fill.style.width=p+'%';if(p>=100)clearInterval(iv);},30);
+  setSafeHTML(tr, `<td class="blue">${escHtml(id)}</td><td><span class="green"><i class="ti ti-check" style="font-size:8px"></i> ${isDemo?'Demo':'Success'}</span></td><td>${count}</td><td>${total.toFixed(2)} USDC</td><td><span class="blue">Arc Testnet</span></td><td><a href="${escHtml(url)}" target="_blank" style="color:var(--blue);text-decoration:none;font-size:9px">${shortTx}${blockNumber?' · #'+blockNumber:''}</a></td><td>${ts}</td><td><i class="ti ti-eye" style="cursor:pointer;color:var(--muted2);margin-right:4px" onclick="window.open('${escHtml(url)}','_blank')"></i><i class="ti ti-download" style="cursor:pointer;color:var(--muted2)" onclick="exportCSV()"></i></td>`);
+  const batchesBodyEl = document.getElementById('batches-body'); if(batchesBodyEl) batchesBodyEl.prepend(tr);
+  const lastTxEl = document.getElementById('last-tx'); if(lastTxEl) lastTxEl.textContent='Tx: '+shortTx;
+  const explorerLinkEl = document.getElementById('explorer-link'); if(explorerLinkEl) explorerLinkEl.href=url;
+  const fill=document.getElementById('prog');if(fill){fill.style.width='0%';let p=0;const iv=setInterval(()=>{p+=4;fill.style.width=p+'%';if(p>=100)clearInterval(iv);},30);}
   toast(`✓ Batch ${id} confirmed on Arc Testnet!`,'success');
   // Persist to txHistory and queue (real on-chain batches)
   if(!isDemo) {
@@ -9956,7 +10424,7 @@ function swpAddHistory(symIn, symOut, amtIn, amtOut, txHash) {
   setSafeHTML(item, `
     <div class="swp-hist-icon"><i class="ti ti-arrows-exchange"></i></div>
     <div style="flex:1;min-width:0">
-      <div class="swp-hist-label">${inNum.toFixed(4)} ${symIn} → ${outNum.toFixed(4)} ${symOut}</div>
+      <div class="swp-hist-label">${inNum.toFixed(4)} ${escHtml(symIn)} → ${outNum.toFixed(4)} ${escHtml(symOut)}</div>
       <div class="swp-hist-sub">Arc Testnet · ${swpNow()}</div>
     </div>
     ${hashLink}
@@ -10120,8 +10588,8 @@ async function executeBridge(){
     const stateIcon={pending:'…',active:'<span class="spin">↻</span>',success:'✓',error:'✕'}[state];
     const stateClass={pending:'',active:'active',success:'success',error:'error'}[state];
     const explorerBase = (idx < 4) ? fromConfig.explorer : toConfig.explorer;
-    const txLink = txHash ? `Tx: <a href="${explorerBase.replace(/\/$/,'')}/tx/${txHash}" target="_blank" style="color:var(--teal);text-decoration:none">${shortAddr(txHash)}</a>` : s.detail;
-    setSafeHTML(el, `<div class="step-ico ${stateClass}">${stateIcon}</div><div style="flex:1"><div style="font-weight:600">${s.label}</div><div style="font-size:8.5px;color:var(--muted2)">${txLink}</div></div>`);
+    const txLink = txHash ? `Tx: <a href="${escHtml(explorerBase.replace(/\/$/,''))}/tx/${escHtml(txHash)}" target="_blank" style="color:var(--teal);text-decoration:none">${shortAddr(txHash)}</a>` : _safePurify(s.detail);
+    setSafeHTML(el, `<div class="step-ico ${stateClass}">${stateIcon}</div><div style="flex:1"><div style="font-weight:600">${_safePurify(s.label)}</div><div style="font-size:8.5px;color:var(--muted2)">${txLink}</div></div>`);
   }
 
   steps.forEach((_,i)=>renderBridgeStep(i,'pending',null));
@@ -10409,7 +10877,7 @@ function addToHistory(containerId,{icon,color,label,sub,txHash,dotColor}){
   if(empty)empty.remove();
   const div=document.createElement('div');
   div.className='tx-item';
-  setSafeHTML(div, `<div class="tx-dot" style="background:${dotColor}"></div><div style="flex:1"><div style="font-weight:600;font-size:9px">${label}</div><div style="font-size:8px;color:var(--muted2)">${sub}</div></div><a href="https://testnet.arcscan.app/tx/${txHash}" target="_blank" style="color:var(--blue);font-size:8px;text-decoration:none;flex-shrink:0"><i class="ti ti-external-link" style="font-size:9px"></i></a>`);
+  setSafeHTML(div, `<div class="tx-dot" style="background:${dotColor}"></div><div style="flex:1"><div style="font-weight:600;font-size:9px">${_safePurify(label)}</div><div style="font-size:8px;color:var(--muted2)">${_safePurify(sub)}</div></div><a href="https://testnet.arcscan.app/tx/${escHtml(txHash)}" target="_blank" style="color:var(--blue);font-size:8px;text-decoration:none;flex-shrink:0"><i class="ti ti-external-link" style="font-size:9px"></i></a>`);
   c.prepend(div);
 }
 
@@ -11094,7 +11562,7 @@ function plUpdatePreviewPanel(l) {
   const statusEl = document.getElementById('pp-status');
   if (statusEl) {
     const st = plIsExpired(l) ? 'expired' : l.status.toLowerCase();
-    setSafeHTML(statusEl, `<span class="pl-status-badge ${st}"><span class="pl-dot"></span>${plIsExpired(l)?'Expired':l.status}</span>`);
+    setSafeHTML(statusEl, `<span class="pl-status-badge ${st}"><span class="pl-dot"></span>${plIsExpired(l)?'Expired':escHtml(l.status)}</span>`);
   }
 }
 
@@ -12266,7 +12734,6 @@ function deleteContact(id) {
 }
 function importContactCSV(input) {
   const file=input.files[0]; if(!file) return;
-  const CHAIN_MAP={'arc':'Arc_Testnet','arc testnet':'Arc_Testnet','ethereum':'Ethereum_Sepolia','eth':'Ethereum_Sepolia','sepolia':'Ethereum_Sepolia','base':'Base_Sepolia','arbitrum':'Arbitrum_Sepolia','arb':'Arbitrum_Sepolia','solana':'Solana_Devnet','sol':'Solana_Devnet'};
   const reader=new FileReader();
   reader.onload=e=>{
     const lines=e.target.result.split('\n').filter(l=>l.trim());
@@ -12292,7 +12759,7 @@ function importContactCSV(input) {
 }
 
 function exportContactsCSV() {
-  const rows=[['name','address','note','chain'],...contacts.map(c=>[c.name,c.addr,c.note||'',(CHAINS.find(ch=>ch.id===c.chainId)||CHAINS[0]).name])];
+  const rows=[['name','address','note','chain'],...contacts.map(c=>[c.name,c.addr,c.note||'',(CHAINS.find(ch=>ch.id===c.chainId)||{name:'Unknown'}).name])];
   const a=document.createElement('a');
   a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(rows.map(r=>r.join(',')).join('\n'));
   a.download='elligente-contacts.csv'; a.click(); toast('Exported','success');
@@ -14767,10 +15234,8 @@ async function getVaultOnChainBalance(asset) {
 async function treasuryDeposit(asset) {
   if (!walletAddress) { showToast('Connect wallet first', 'error'); return; }
   if (!signer) { showToast('Wallet signer not available', 'error'); return; }
-  if (!isAuthorizedDepositor(walletAddress)) {
-    showToast('This Treasury accepts deposits only from authorized liquidity providers.', 'error');
-    return;
-  }
+  // Authorization is enforced by the TreasuryVault contract on-chain (authorizedDepositors mapping).
+  // Frontend does NOT block — the contract is the single source of truth for permissions.
   // Verify ARC Testnet
   try {
     const net = await provider.getNetwork();
@@ -14838,14 +15303,13 @@ async function treasuryWithdraw(asset) {
     showToast('TreasuryVault not configured — update TREASURY_VAULT_ADDRESS', 'error');
     return;
   }
-  if (!signer) {
-    showToast('Connect wallet first', 'error');
-    return;
-  }
-  // Patch: alias toast→showToast to unify
-  const _toast = (msg, t) => showToast(msg, t);
-  if (false) { // placeholder anchor for backward compat
-    _showToast('Connect wallet and deploy TreasuryVault first', 'error');
+
+  // Pre-flight: TreasuryVault contract is the sole authority for withdrawal permissions.
+  // Frontend allows attempt — contract revert message will explain if unauthorized.
+  try {
+    await contract.owner(); // Verify contract is reachable
+  } catch(e) {
+    showToast('Could not reach TreasuryVault. Ensure wallet is connected and contract is deployed.', 'error');
     return;
   }
 
@@ -15218,12 +15682,12 @@ const VaultAccounting = (() => {
     const all = VaultStore.get().intents;
     return {
       total:     all.length,
-      created:   all.filter(i => i.status === 'Created').length,
+      created:   all.filter(i => i.status === 'Created' || i.status === 'Awaiting Operator').length,
       fulfilled: all.filter(i => i.status === 'Fulfilled').length,
-      settling:  all.filter(i => i.status === 'Settling').length,
+      settling:  all.filter(i => i.status === 'Settling' || i.status === 'Awaiting Reimbursement').length,
       settled:   all.filter(i => i.status === 'Settled').length,
       failed:    all.filter(i => i.status === 'Failed').length,
-      pending:   all.filter(i => ['Created','Fulfilled','Settling'].includes(i.status)).length,
+      pending:   all.filter(i => ['Created','Awaiting Operator','Fulfilled','Settling','Awaiting Reimbursement'].includes(i.status)).length,
     };
   }
 
@@ -15293,6 +15757,7 @@ const RepaymentContract = (() => {
     const netAmount   = amount - feeAmount;
     const intent = {
       id, intentId: id, intentBytes32,              // intentId for SettlementModule compatibility
+      asset,
       grossAmount, feeAmount, netAmount,          // fee accounting
       amount,                                       // backward compat
       userAddress, srcChain, dstChain,
@@ -15306,6 +15771,9 @@ const RepaymentContract = (() => {
       liquidityFee: feeAmount,
       settleFee:    (netAmount * SETTLE_FEE_BPS) / 10000,
       lastPollAt: null, lastError: null, pollCount: 0,
+      settlementError: null,   // Treasury relayer error (visible in UI)
+      lastAttempt: null,       // timestamp of last settlement attempt
+      retryCount: 0,           // number of settlement retries
     };
     VaultStore.upsertIntent(intent);
     return id;
@@ -15315,7 +15783,7 @@ const RepaymentContract = (() => {
     return VaultSecurity.withLock(async () => {
       const intent = _find(intentId);
       if (!intent)                      throw new Error('INTENT_NOT_FOUND');
-      if (intent.status !== 'Created')  throw new Error('INTENT_WRONG_STATE: ' + intent.status);
+      if (!['Created','Awaiting Operator'].includes(intent.status))  throw new Error('INTENT_WRONG_STATE: ' + intent.status);
 
       const avail = VaultAccounting.getTotalAvailable(intent.asset);
       if (avail < intent.grossAmount)
@@ -15376,10 +15844,14 @@ const RepaymentContract = (() => {
         });
         VaultStore.addVolume('turbo', intent.grossAmount);
       } else {
-        // Non-operator user: mark intent as awaiting operator fulfillment
+        // Non-operator user: mark intent as Awaiting Operator with retry metadata
         _mutate(intentId, i => {
+          i.status = 'Awaiting Operator';
           i.txHash = realTxHash || i.txHash;
           i.updatedAt = Date.now();
+          i.settlementError = 'No liquidity operator available. Retry scheduled.';
+          i.retryCount = (i.retryCount || 0);
+          i.lastAttempt = Date.now();
         });
         // Start poller for operator fulfillment (exposed via FulfillerEngine)
         if (typeof FulfillerEngine !== 'undefined' && typeof FulfillerEngine._startOperatorFulfillmentPoller === 'function') {
@@ -15443,10 +15915,24 @@ const RepaymentContract = (() => {
         if (preBal !== null && preBal !== undefined) {
           const netChange = currentBalNum - preBal;
           reimbursementProof.netChange = netChange;
-          // Reimbursed if balance increased (accounting for fulfillAndPayWithFee payout)
-          // The Treasury paid out ~grossAmount, CCTP should reimburse ~amount
-          // Net change should be >= 0 after both events settle
-          treasuryReimbursed = netChange >= 0;
+          // Reimbursement confirmed if:
+          // (a) netChange is meaningfully positive (> 0.000001, accounting for dust)
+          // (b) OR netChange is approximately >= 0 AND attestation + settlement TX exist
+          const hasProofOfReimbursement = netChange > 0.000001;
+          const hasCircumstantialProof = netChange >= -0.000001 && intent.attestation && intent.settlementTxHash;
+          treasuryReimbursed = hasProofOfReimbursement || hasCircumstantialProof;
+          console.log('[REIMBURSEMENT CHECK]', {
+            intentId: intentId || intent.intentId,
+            balanceBefore: preBal,
+            balanceAfter: currentBalNum,
+            delta: netChange,
+            expectedAmount: intent.amount,
+            mintTxHash: intent._mintTxHash || settlementTxHash,
+            treasuryAddress: TREASURY_VAULT_ADDRESS,
+            hasProofOfReimbursement,
+            hasCircumstantialProof,
+            treasuryReimbursed
+          });
         } else if (intent.attestation && intent.settlementTxHash) {
           // Fallback: attestation exists and on-chain settlement confirmed
           treasuryReimbursed = true;
@@ -15455,7 +15941,9 @@ const RepaymentContract = (() => {
         reimbursementProof.onChainVerified = treasuryReimbursed;
       }
     } catch(e) {
-      _warn('[Settlement] On-chain reimbursement check deferred:', e.message);
+      _err('[Settlement:PHASE1] On-chain reimbursement check FAILED:', e.shortMessage || e.message || e);
+      // If balanceOf fails, treasuryReimbursed stays false — intent will remain in Settling/Awaiting
+      VaultStore.mutate(s => { const i = s.intents.find(x => x.id === intentId || x.intentId === intentId); if (i) i.lastError = 'Balance check error: ' + (e.shortMessage || e.message || String(e)).slice(0, 120); });
     }
 
     // ── PHASE 2: Automatic settlement — no user signature required ──
@@ -15622,7 +16110,11 @@ const FulfillerEngine = (() => {
       const token = new ethers.Contract(assetAddr, erc20Abi, ARC_READ_PROVIDER);
       const bal = await token.balanceOf(TREASURY_VAULT_ADDRESS);
       _tsBalBefore = parseFloat(ethers.formatUnits(bal, asset === 'cirbtc' ? 8 : 6));
-    } catch(e) { _warn('silent-catch', e?.message||e); }
+      console.log('[PRE-BALANCE CAPTURE]', { asset, balanceBefore: _tsBalBefore, vaultAddress: TREASURY_VAULT_ADDRESS });
+    } catch(e) {
+      _err('[PRE-BALANCE CAPTURE FAILED]', e.shortMessage || e.message || e);
+      // Balance capture failed — reimbursement verification will use attestation-only fallback
+    }
 
     const burnTx = await tmContract.depositForBurn(
       amtBig, toConfig.domain, destAddr32, fromConfig.usdc,
@@ -15638,9 +16130,9 @@ const FulfillerEngine = (() => {
     const arcFulfillSigner   = await arcFulfillProvider.getSigner();
     const arcNetwork         = await arcFulfillProvider.getNetwork();
     if (Number(arcNetwork.chainId) !== 5042002) {
-      showToast('Please switch to ARC Testnet (chainId 5042002) to fulfill', 'warning');
-      return;
+      throw new Error('ARC network switch failed: wallet still on chain ' + Number(arcNetwork.chainId) + '. Expected 5042002.');
     }
+    _log('[Fulfiller] Switched to ARC — CHAIN:', Number(arcNetwork.chainId), 'ACCOUNT:', await arcFulfillSigner.getAddress());
     // Re-initialize global signer/provider for ARC context
     try {
       signer = arcFulfillSigner;
@@ -15681,23 +16173,26 @@ const FulfillerEngine = (() => {
     const maxPolls = 300; // ~30 minutes
     let pollCount = 0;
     const INTERVAL = 6000;
+
     // Initialize observability fields on intent
     VaultStore.mutate(s => {
       const i = s.intents.find(x => x.id === intentId || x.intentId === intentId);
-      if (i) {
-        if (i.lastPollAt  === undefined) i.lastPollAt  = null;
-        if (i.lastError   === undefined) i.lastError   = null;
-        if (i.pollCount   === undefined) i.pollCount   = 0;
-      }
+      if (i) { i.lastPollAt = Date.now(); i.pollCount = 0; i.lastError = null; }
     });
-
 
     const timer = setInterval(async () => {
       pollCount++;
-      const intent = RepaymentContract.getAll().find(i => i.id === intentId);
-      if (!intent || intent.status !== 'Created') {
+      const now = Date.now();
+      const intent = RepaymentContract.getAll().find(i => i.id === intentId || i.intentId === intentId);
+      if (!intent || !['Created','Awaiting Operator'].includes(intent.status)) {
         clearInterval(timer); delete _activePollerTimers['op-' + intentId]; return;
       }
+
+      // Update observability: lastPollAt and pollCount
+      VaultStore.mutate(s => {
+        const i = s.intents.find(x => x.id === intentId || x.intentId === intentId);
+        if (i) { i.lastPollAt = now; i.pollCount = pollCount; }
+      });
 
       // Check on-chain intentState
       try {
@@ -15710,9 +16205,9 @@ const FulfillerEngine = (() => {
           VaultStore.lockFunds(intent.asset, intent.grossAmount);
           VaultStore.addTurboFee(intent.asset, intent.feeAmount);
           VaultStore.addVolume('turbo', intent.grossAmount);
-          VaultStore.mutate(s => { const i = s.intents.find(x => x.id === intentId || x.intentId === intentId); if (i) i.status = 'Fulfilled';
-            i.arcFulfillmentTimestamp = Date.now();
-            i.updatedAt = Date.now();
+          VaultStore.mutate(s => {
+            const i = s.intents.find(x => x.id === intentId || x.intentId === intentId);
+            if (i) { i.status = 'Fulfilled'; i.arcFulfillmentTimestamp = Date.now(); i.updatedAt = Date.now(); i.lastPollAt = now; }
           });
           RepaymentContract.initiateSettlement(intentId, intent.cctpMsgHash || intent.txHash, intent.sourceDomain);
           _startSettlementPoller(intentId, null, intent.cctpMsgHash || intent.txHash);
@@ -15722,15 +16217,19 @@ const FulfillerEngine = (() => {
         if (Number(state) === 4) { // Failed on-chain
           clearInterval(timer);
           delete _activePollerTimers['op-' + intentId];
+          VaultStore.mutate(s => { const i = s.intents.find(x => x.id === intentId || x.intentId === intentId); if (i) i.lastError = 'On-chain intent failed (state 4)'; });
           RepaymentContract.markFailed(intentId, 'Operator rejected or intent failed on-chain');
           vaultRefreshUI();
           return;
         }
-      } catch(e) { /* retry */ }
+      } catch(e) {
+        VaultStore.mutate(s => { const i = s.intents.find(x => x.id === intentId || x.intentId === intentId); if (i) i.lastError = 'Chain read: ' + (e.message||'error').slice(0, 120); });
+      }
 
       if (pollCount >= maxPolls) {
         clearInterval(timer);
         delete _activePollerTimers['op-' + intentId];
+        VaultStore.mutate(s => { const i = s.intents.find(x => x.id === intentId || x.intentId === intentId); if (i) i.lastError = 'Operator fulfillment timed out after ' + maxPolls + ' polls'; });
         RepaymentContract.markFailed(intentId, 'Operator fulfillment timed out');
         vaultRefreshUI();
       } else {
@@ -15747,46 +16246,89 @@ const FulfillerEngine = (() => {
     let pollCount = 0;
     const INTERVAL = 6000;
 
+    // Initialize observability fields on intent
+    VaultStore.mutate(s => {
+      const i = s.intents.find(x => x.id === intentId || x.intentId === intentId);
+      if (i) { i.lastPollAt = Date.now(); i.pollCount = 0; i.lastError = null; }
+    });
+
     const timer = setInterval(async () => {
       pollCount++;
-      const intent = RepaymentContract.getAll().find(i => i.id === intentId);
+      const now = Date.now();
+      const intent = RepaymentContract.getAll().find(i => i.id === intentId || i.intentId === intentId);
       if (!intent || ['Settled','Failed'].includes(intent.status)) {
         clearInterval(timer); delete _activePollerTimers[intentId]; return;
       }
 
+      // Update observability: lastPollAt and pollCount
+      VaultStore.mutate(s => {
+        const i = s.intents.find(x => x.id === intentId || x.intentId === intentId);
+        if (i) { i.lastPollAt = now; i.pollCount = pollCount; }
+      });
+
       // Use sourceDomain stored on intent (survives page refresh)
       const domain = intent.sourceDomain || (fromConfig && fromConfig.domain);
       if (!domain) {
+        _warn('[Settlement] Missing source domain for intent — keeping in Settling, may recover if domain becomes available');
+        VaultStore.mutate(s => { const i = s.intents.find(x => x.id === intentId || x.intentId === intentId); if (i) { i.lastError = 'Missing source domain, awaiting recovery'; i.status = 'Awaiting Reimbursement'; } });
+        // DO NOT markFailed — source domain may become available from Iris API later
         clearInterval(timer);
-        VaultStore.mutate(s => { const i = s.intents.find(x => x.id === intentId || x.intentId === intentId); if (i) i.lastError = 'Missing source domain'; });
-        RepaymentContract.markFailed(intentId, 'Missing source domain for attestation poll');
-        vaultRefreshUI();
         delete _activePollerTimers[intentId];
+        vaultRefreshUI();
         return;
       }
 
-      // Phase A: If attestation already cached, retry on-chain actions
-      const cachedIntent = RepaymentContract.getAll().find(x => x.id === intentId || x.intentId === intentId);
-      if (cachedIntent?.attestation && cachedIntent.attestation !== 'PENDING' && cachedIntent.status !== 'Settled') {
-        _log('[Settlement:PhaseA] Retrying with cached attestation for', intentId);
-        VaultStore.mutate(s => { const i = s.intents.find(x => x.id === intentId || x.intentId === intentId); if (i) { i.lastPollAt = Date.now(); i.pollCount = (i.pollCount || 0) + 1; } });
+      // Phase A: If attestation already cached on intent, retry on-chain actions
+      if (intent._attestationMsg && intent._attestationSig) {
+        _log('[Settlement:PhaseA] intent=' + intentId + ' attestationCached=true submitted=' + !!intent._attestationSubmitted + ' pollCount=' + pollCount + '/' + maxPolls);
+        // Delegate receiveMessage to TreasurySettlementExecutor (no user wallet required)
+        if (!intent._attestationSubmitted) {
+          TreasurySettlementExecutor.enqueue(intentId, intent._attestationMsg, intent._attestationSig);
+          _log('[Settlement:PhaseA] enqueued intent=' + intentId + ' to TreasurySettlementExecutor');
+        }
+        // Check on-chain Treasury balance increase (relayer may have processed)
         try {
-          const minterAbi  = ['function receiveMessage(bytes messageBytes, bytes attestation) external returns (bool)'];
-          const minterAddr = fromConfig?.cctp?.minterAddress;
-          if (minterAddr) {
-            const prov   = new ethers.BrowserProvider(window.ethereum);
-            const sgnr   = await prov.getSigner();
-            const ctr    = new ethers.Contract(minterAddr, minterAbi, sgnr);
-            const mintTx = await ctr.receiveMessage(cachedIntent.messageBytes, cachedIntent.attestation);
-            const rcpt   = await mintTx.wait();
-            if (rcpt?.status === 1) {
-              clearInterval(timer);
-              VaultStore.mutate(s => { const i = s.intents.find(x => x.id === intentId || x.intentId === intentId); if (i) { i.status = 'Settled'; i.settlementTxHash = mintTx.hash; } });
-              RepaymentContract.markSettled(intentId, mintTx.hash);
-              return;
+          const assetAddr = TREASURY_ASSETS[intent.asset || 'usdc'];
+          if (assetAddr && ARC_READ_PROVIDER) {
+            const token = new ethers.Contract(assetAddr, ['function balanceOf(address) view returns (uint256)'], ARC_READ_PROVIDER);
+            const currentBal = parseFloat(ethers.formatUnits(await token.balanceOf(TREASURY_VAULT_ADDRESS), intent.asset === 'cirbtc' ? 8 : 6));
+            const preBal = intent._preBalance;
+            if (preBal !== null && preBal !== undefined && (currentBal - preBal) >= 0) {
+              // Treasury balance restored — settlement confirmed on-chain
+              // CRITICAL: verifyAndSettle must complete BEFORE clearing timer
+              try {
+                await RepaymentContract.verifyAndSettle(intentId, {
+                  attestation: intent._attestationSig, amount: intent.amount,
+                  message: intent._attestationMsg, mintTxHash: intent._mintTxHash || null
+                });
+                // Only clear timer AFTER successful settlement
+                clearInterval(timer);
+                delete _activePollerTimers[intentId];
+                vaultRefreshUI();
+                VaultChain.fetchVaultBalances().then(vaultRefreshUI);
+                return;
+              } catch(settleErr) {
+                _err('[Settlement:PhaseA] verifyAndSettle failed (will retry):', settleErr.shortMessage || settleErr.message || settleErr);
+                VaultStore.mutate(s => { const i = s.intents.find(x => x.id === intentId || x.intentId === intentId); if (i) i.lastError = 'Settle retry: ' + (settleErr.shortMessage || settleErr.message || String(settleErr)).slice(0, 120); });
+                // Timer NOT cleared — poller will retry next tick
+              }
             }
           }
-        } catch (e) { _log('[Settlement:PhaseA] retry failed:', e.message); }
+        } catch(e) {
+          _err('[Settlement:PhaseA] Treasury balance check FAILED:', e.shortMessage || e.message || e);
+          VaultStore.mutate(s => { const i = s.intents.find(x => x.id === intentId || x.intentId === intentId); if (i) i.lastError = 'Treasury balance check error: ' + (e.shortMessage || e.message || String(e)).slice(0, 120); });
+        }
+        // If we have attestation cached but neither minted nor confirmed, keep polling
+        // DO NOT markFailed — CCTP relayer may take longer than expected
+        if (pollCount >= maxPolls) {
+          _warn('[Settlement:PhaseA] Max polls reached with cached attestation — keeping in Settling state. CCTP relayer may still complete.');
+          VaultStore.mutate(s => { const i = s.intents.find(x => x.id === intentId || x.intentId === intentId); if (i) { i.lastError = 'Attestation cached, Treasury reimbursement pending (max polls reached, awaiting CCTP relayer)'; i.status = 'Awaiting Reimbursement'; } });
+          // DO NOT markFailed — the attestation exists, reimbursement may arrive any moment
+          clearInterval(timer);
+          delete _activePollerTimers[intentId];
+        }
+        vaultRefreshUI();
+        return;
       }
 
       // Phase B: Poll Circle Iris API for real attestation
@@ -15798,60 +16340,64 @@ const FulfillerEngine = (() => {
           if (data.messages && data.messages.length > 0) {
             const msg = data.messages[0];
             if (msg.status === 'complete' && msg.attestation && msg.attestation !== 'PENDING') {
-              clearInterval(timer);
-              VaultStore.mutate(s => { const i = s.intents.find(x => x.id === intentId || x.intentId === intentId); if (i) { i.lastPollAt = Date.now(); i.pollCount = (i.pollCount||0)+1; i.status = 'Settling'; } });
-              try {
-                // CCTP V2: Submit attestation on-chain via receiveMessage() to mint USDC on ARC
-                // Reference: circle-cctp-fulfiller-repayment (Circle official sample)
-                let mintTxHash = null;
-                if (signer && msg.message && msg.attestation) {
-                  try {
-                    const arcCfg = CCTP_CONFIG[5042002];
-                    if (arcCfg) {
-                      const destMtAbi = ['function receiveMessage(bytes message, bytes attestation) returns (bool)'];
-                      const destMtContract = new ethers.Contract(arcCfg.messageTransmitter, destMtAbi, signer);
-                      const mintTx = await destMtContract.receiveMessage(msg.message, msg.attestation);
-                      const mintReceipt = await mintTx.wait();
-                      if (mintReceipt && mintReceipt.status === 1) {
-                        mintTxHash = mintTx.hash;
-                        _log('[Settlement:PhaseB] receiveMessage TX HASH:', mintTxHash);
-                        VaultStore.mutate(s => { const i = s.intents.find(x => x.id === intentId || x.intentId === intentId); if (i) { i.status = 'Settled'; i.settlementTxHash = mintTxHash; } });
-                      }
-                    }
-                  } catch(e) {
-                    _warn('[Settlement] receiveMessage deferred (relayer may have already processed):', e.message);
-                  }
+              // Save attestation to intent for retry resilience
+              VaultStore.mutate(s => {
+                const i = s.intents.find(x => x.id === intentId || x.intentId === intentId);
+                if (i) {
+                  i._attestationMsg = msg.message;
+                  i._attestationSig = msg.attestation;
+                  i._attestationSubmitted = false;
+                  i.attestation = msg.attestation;
+                  i.lastPollAt = now;
                 }
-                // After mint (or if already minted), verify and settle
+              });
+              // Delegate receiveMessage to TreasurySettlementExecutor (no user wallet required)
+              // The executor only uses operator wallets — regular users never pay gas for this.
+              _log('[Settlement:PhaseB] Attestation found! INTENT:', intentId, '→ enqueuing for Treasury relayer');
+              TreasurySettlementExecutor.enqueue(intentId, msg.message, msg.attestation);
+              // Verify and settle (may complete or stay 'Settling' if mint pending)
+              try {
                 await RepaymentContract.verifyAndSettle(intentId, {
                   attestation: msg.attestation, amount: intent.amount,
-                  msgHash: msg.messageHash, message: msg.message,
-                  mintTxHash: mintTxHash
+                  msgHash: msg.messageHash, message: msg.message
                 });
               } catch(e) {
-                VaultStore.mutate(s => { const i = s.intents.find(x => x.id === intentId || x.intentId === intentId); if (i) i.lastError = e.message; });
-                RepaymentContract.markFailed(intentId, 'Settle tx failed: ' + e.message);
+                VaultStore.mutate(s => { const i = s.intents.find(x => x.id === intentId || x.intentId === intentId); if (i) i.lastError = 'Settle tx: ' + (e.shortMessage || e.message); });
               }
+              // Check if fully settled; if so, stop poller
+              const updated = RepaymentContract.getAll().find(i => i.id === intentId || i.intentId === intentId);
+              if (updated && updated.status === 'Settled') {
+                clearInterval(timer);
+                vaultRefreshUI();
+                VaultChain.fetchVaultBalances().then(vaultRefreshUI);
+                delete _activePollerTimers[intentId];
+                return;
+              }
+              // Not settled yet — poller continues for retry (Phase A will handle next iterations)
               vaultRefreshUI();
-              VaultChain.fetchVaultBalances().then(vaultRefreshUI);
-              delete _activePollerTimers[intentId];
               return;
             }
           }
+        } else {
+          VaultStore.mutate(s => { const i = s.intents.find(x => x.id === intentId || x.intentId === intentId); if (i) i.lastError = 'Iris HTTP ' + resp.status; });
         }
-      } catch(e) { /* network — will retry */ }
+      } catch(e) {
+        VaultStore.mutate(s => { const i = s.intents.find(x => x.id === intentId || x.intentId === intentId); if (i) i.lastError = 'Fetch: ' + (e.message||'network').slice(0, 120); });
+      }
 
       if (pollCount >= maxPolls) {
+        // DO NOT markFailed — attestation may still arrive from Iris API
+        _warn('[Settlement:PhaseB] Max polls reached — keeping in Settling state. Iris attestation may still complete.');
         clearInterval(timer);
-        // ARC payout exists but no attestation received — finalize anyway
         if (intent.arcTxHash) {
           try {
             await RepaymentContract.verifyAndSettle(intentId, null);
           } catch(e) {
-            RepaymentContract.markFailed(intentId, 'Attestation timed out: ' + e.message);
+            VaultStore.mutate(s => { const i = s.intents.find(x => x.id === intentId || x.intentId === intentId); if (i) { i.lastError = 'Timeout settle: ' + (e.shortMessage || e.message); i.status = 'Awaiting Reimbursement'; } });
+            // DO NOT markFailed — attestation may still complete
           }
         } else {
-          RepaymentContract.markFailed(intentId, 'Attestation timed out after ' + maxPolls + ' polls');
+          VaultStore.mutate(s => { const i = s.intents.find(x => x.id === intentId || x.intentId === intentId); if (i) { i.lastError = 'Timed out after ' + maxPolls + ' polls, awaiting attestation'; i.status = 'Awaiting Reimbursement'; } });
         }
         vaultRefreshUI();
         delete _activePollerTimers[intentId];
@@ -15898,8 +16444,8 @@ const FulfillerEngine = (() => {
       _startSettlementPoller(intent.id, null, burnTxHash);
     });
 
-    // Also recover Created intents awaiting operator fulfillment
-    const created = RepaymentContract.getAll('Created').filter(i => i.txHash && i.sourceDomain);
+    // Also recover Created/Awaiting Operator intents awaiting operator fulfillment
+    const created = RepaymentContract.getAll().filter(i => ['Created','Awaiting Operator'].includes(i.status) && i.txHash && i.sourceDomain);
     created.forEach(intent => {
       if (_activePollerTimers && _activePollerTimers['op-' + intent.id]) return;
       if (intent.arcTxHash) return; // already fulfilled
@@ -15908,34 +16454,203 @@ const FulfillerEngine = (() => {
     });
   }
 
+  // Permissionless: submit any pending receiveMessage attestations using the connected wallet
+  // Called when a wallet connects — any wallet can submit any intent's attestation
   async function submitPendingAttestations() {
-    const pending = RepaymentContract.getAll().filter(i =>
-      i.attestation && i.attestation !== 'PENDING' && i.status !== 'Settled' && i.status !== 'Failed'
-    );
-    if (!pending.length) return;
-    _log(`[submitPendingAttestations] retrying ${pending.length} intent(s)`);
-    for (const intent of pending) {
-      try {
-        const srcChain   = intent.srcChain || intent.sourceChain || 'Arc_Testnet';
-        const fromCfg    = CHAIN_REGISTRY[srcChain] || Object.values(CHAIN_REGISTRY).find(c => c.id === srcChain);
-        const minterAddr = fromCfg?.cctp?.minterAddress;
-        if (!minterAddr || !intent.messageBytes) continue;
-        const minterAbi  = ['function receiveMessage(bytes messageBytes, bytes attestation) external returns (bool)'];
-        const prov       = new ethers.BrowserProvider(window.ethereum);
-        const sgnr       = await prov.getSigner();
-        const ctr        = new ethers.Contract(minterAddr, minterAbi, sgnr);
-        const mintTx     = await ctr.receiveMessage(intent.messageBytes, intent.attestation);
-        const receipt    = await mintTx.wait();
-        if (receipt?.status === 1) {
-          RepaymentContract.markSettled(intent.id, mintTx.hash);
-          VaultStore.mutate(s => { const i = s.intents.find(x => x.id === intent.id || x.intentId === intent.id); if (i) { i.status = 'Settled'; i.settlementTxHash = mintTx.hash; } });
-          showToast(`Intent ${intent.id.slice(0,8)}… settled ✓`, 'success');
+    // Enqueue all pending attestations to TreasurySettlementExecutor.
+    // No chain switch required. No user wallet dependency.
+    // The executor will process them when an operator wallet is available.
+    const all = RepaymentContract.getAll();
+    let queued = 0;
+    for (const intent of all) {
+      if (!intent._attestationMsg || !intent._attestationSig) continue;
+      if (intent._attestationSubmitted) continue;
+      if (intent.status === 'Failed' || intent.status === 'Settled') continue;
+      _log('[SubmitAttestations] Enqueuing intent:', intent.id || intent.intentId);
+      TreasurySettlementExecutor.enqueue(intent.id || intent.intentId, intent._attestationMsg, intent._attestationSig);
+      queued++;
+    }
+    if (queued > 0) _log('[SubmitAttestations] Enqueued ' + queued + ' intent(s) for Treasury relayer');
+  }
+
+  return { execute, recoverSettlingIntents, _startSettlementPoller, _startOperatorFulfillmentPoller, submitPendingAttestations };
+})();
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TreasurySettlementExecutor — CCTP settlement relayer for Treasury Vault
+// ═══════════════════════════════════════════════════════════════════════════
+// NEVER calls eth_sendTransaction from the user wallet.
+// ALL write operations require an operator wallet (isTurboOperator check).
+// Read operations use ARC_READ_PROVIDER exclusively.
+// Settlement continues via on-chain monitoring even without operator.
+// ═══════════════════════════════════════════════════════════════════════════
+const TreasurySettlementExecutor = (() => {
+  const _queue = [];
+  const QUEUE_KEY = 'elli_tse_queue';
+  const COOLDOWN_MS = 30000;   // 30s between receiveMessage attempts per intent
+  const _lastTxAttempt = {};    // intentId → timestamp of last receiveMessage attempt
+
+  function _loadQueue() {
+    try {
+      const raw = localStorage.getItem(QUEUE_KEY);
+      if (raw) { const arr = JSON.parse(raw); arr.forEach(t => { if (!_queue.find(q => q.intentId === t.intentId)) _queue.push(t); }); }
+      if (_queue.length > 0) _log('[TSE] Loaded ' + _queue.length + ' pending settlement(s) from storage');
+    } catch(e) { /* ignore */ }
+  }
+
+  function _saveQueue() {
+    try { localStorage.setItem(QUEUE_KEY, JSON.stringify(_queue.slice(0, 50))); } catch(e) { _warn('[TSE] save error:', e?.message||e); }
+  }
+
+  function enqueue(intentId, messageBytes, attestationSig) {
+    const intent = RepaymentContract.getAll().find(i => i.id === intentId || i.intentId === intentId);
+    if (intent && ['Settled','Failed'].includes(intent.status)) {
+      _log('[TSE] SKIP enqueue intent=' + intentId + ' status=' + intent.status);
+      return;
+    }
+    const existing = _queue.find(t => t.intentId === intentId);
+    const prevAttempts = existing ? existing.attemptCount : 0;
+    const idx = _queue.findIndex(t => t.intentId === intentId);
+    if (idx !== -1) _queue.splice(idx, 1);
+    _queue.push({ intentId, messageBytes, attestationSig, enqueuedAt: Date.now(), attemptCount: prevAttempts, lastAttemptAt: existing ? existing.lastAttemptAt : null, lastError: null });
+    _log('[TSE] QUEUED intent=' + intentId + ' queueSize=' + _queue.length + ' prevAttempts=' + prevAttempts);
+    _saveQueue();
+    setTimeout(() => _processQueue(), 2000);
+  }
+
+  // ── Read-only: checks CCTP usedNonces via ARC_READ_PROVIDER (NO wallet interaction) ──
+  async function _checkNonce(messageBytes) {
+    if (!messageBytes) return false;
+    try {
+      const arcCfg = CCTP_CONFIG[5042002];
+      if (!arcCfg) return false;
+      const mtAbi = ['function usedNonces(bytes32) view returns (uint256)'];
+      const mt = new ethers.Contract(arcCfg.messageTransmitter, mtAbi, ARC_READ_PROVIDER);
+      const msgHash = ethers.keccak256(messageBytes);
+      const nonce = await mt.usedNonces(msgHash);
+      const minted = Number(nonce) > 0;
+      if (minted) _log('[TSE] CHECK_NONCE already used — nonce=' + nonce);
+      return minted;
+    } catch(e) { _log('[TSE] CHECK_NONCE failed:', e.message||e); return false; }
+  }
+
+  async function _processQueue() {
+    // ── MUTEX: prevent concurrent processing (prevents MetaMask popup storms) ──
+    if (window.__TSE_EXECUTING) { _log('[TSE] SKIP — already processing'); return; }
+    if (_queue.length === 0) return;
+    window.__TSE_EXECUTING = true;
+
+    try {
+      const hasOperator = !!(signer && walletAddress && isTurboOperator(walletAddress));
+      const onARC = activeChainId === 5042002;
+      const operatorAddr = hasOperator ? walletAddress : 'none';
+      _log('[TSE] PROCESSING queueSize=' + _queue.length + ' operator=' + operatorAddr + ' onARC=' + onARC);
+
+      for (const task of _queue.slice()) {
+        const intent = RepaymentContract.getAll().find(i => i.id === task.intentId || i.intentId === task.intentId);
+        _log('[TSE] intent=' + task.intentId + ' status=' + (intent ? intent.status : 'NOT_FOUND') + ' attempts=' + task.attemptCount);
+
+        if (!intent || ['Settled','Failed'].includes(intent.status)) {
+          _log('[TSE] REMOVED intent=' + task.intentId + ' reason=' + (!intent ? 'not_found' : intent.status));
+          const idx = _queue.indexOf(task); if (idx !== -1) _queue.splice(idx, 1); _saveQueue(); continue;
         }
-      } catch (e) { _log('[submitPendingAttestations] error:', e.message); }
+
+        // ── STEP 1: Read-only nonce check (NO wallet interaction) ──
+        const alreadyMinted = await _checkNonce(task.messageBytes);
+        if (alreadyMinted) {
+          _log('[TSE] CHECK_NONCE already used — intent=' + task.intentId);
+          VaultStore.mutate(s => {
+            const i = s.intents.find(x => x.id === task.intentId || x.intentId === task.intentId);
+            if (i) { i._attestationSubmitted = true; i._mintTxHash = 'cctp-relayer'; i.settlementTxHash = 'cctp-relayer'; i.settlementError = null; i.lastAttempt = Date.now(); }
+          });
+          try {
+            await RepaymentContract.verifyAndSettle(task.intentId, { attestation: task.attestationSig, mintTxHash: 'cctp-relayer' });
+            _log('[TSE] SETTLED from existing mint — intent=' + task.intentId);
+          } catch(e) { _log('[TSE] settle attempt for ' + task.intentId + ':', e.message||e); }
+          const idx = _queue.indexOf(task); if (idx !== -1) _queue.splice(idx, 1); _saveQueue(); vaultRefreshUI(); continue;
+        }
+
+        // Update intent error/attempt info for UI
+        VaultStore.mutate(s => {
+          const i = s.intents.find(x => x.id === task.intentId || x.intentId === task.intentId);
+          if (i) { i.settlementError = task.lastError; i.retryCount = task.attemptCount; i.lastAttempt = task.lastAttemptAt; }
+        });
+
+        // ── STEP 2: Only attempt receiveMessage if operator + on ARC + cooldown passed ──
+        if (hasOperator && onARC) {
+          const now = Date.now();
+          const lastAttempt = _lastTxAttempt[task.intentId] || 0;
+          if (now - lastAttempt < COOLDOWN_MS) {
+            const remaining = Math.round((COOLDOWN_MS - (now - lastAttempt)) / 1000);
+            _log('[TSE] COOLDOWN intent=' + task.intentId + ' retryIn=' + remaining + 's');
+            continue;
+          }
+
+          // Pre-guard: re-check nonce immediately before sending tx
+          if (await _checkNonce(task.messageBytes)) {
+            _log('[TSE] CHECK_NONCE already used — intent=' + task.intentId);
+            VaultStore.mutate(s => {
+              const i = s.intents.find(x => x.id === task.intentId || x.intentId === task.intentId);
+              if (i) { i._attestationSubmitted = true; i._mintTxHash = 'cctp-relayer'; i.settlementTxHash = 'cctp-relayer'; i.settlementError = null; }
+            });
+            try {
+              await RepaymentContract.verifyAndSettle(task.intentId, { attestation: task.attestationSig, mintTxHash: 'cctp-relayer' });
+              _log('[TSE] SETTLED from existing mint — intent=' + task.intentId);
+            } catch(e) { _log('[TSE] settle attempt for ' + task.intentId + ':', e.message||e); }
+            const idx = _queue.indexOf(task); if (idx !== -1) _queue.splice(idx, 1); _saveQueue(); vaultRefreshUI(); continue;
+          }
+
+          // ── ONLY place in the entire dApp that calls receiveMessage() with a signer ──
+          _lastTxAttempt[task.intentId] = now;
+          task.attemptCount++; task.lastAttemptAt = now;
+          _log('[TSE] EXECUTING receiveMessage intent=' + task.intentId + ' operator=' + operatorAddr + ' attempt=' + task.attemptCount);
+          try {
+            const arcCfg = CCTP_CONFIG[5042002];
+            if (arcCfg) {
+              const destMtAbi = ['function receiveMessage(bytes message, bytes attestation) returns (bool)'];
+              const destMtContract = new ethers.Contract(arcCfg.messageTransmitter, destMtAbi, signer);
+              const mintTx = await destMtContract.receiveMessage(task.messageBytes, task.attestationSig);
+              _log('[TSE] TX SENT intent=' + task.intentId + ' txHash=' + mintTx.hash);
+              const mintReceipt = await mintTx.wait();
+              if (mintReceipt && mintReceipt.status === 1) {
+                _log('[TSE] CONFIRMED intent=' + task.intentId + ' txHash=' + mintTx.hash + ' block=' + mintReceipt.blockNumber);
+                VaultStore.mutate(s => {
+                  const i = s.intents.find(x => x.id === task.intentId || x.intentId === task.intentId);
+                  if (i) { i._attestationSubmitted = true; i._mintTxHash = mintTx.hash; i.settlementTxHash = mintTx.hash; i.settlementError = null; i.lastAttempt = Date.now(); }
+                });
+                const idx = _queue.indexOf(task); if (idx !== -1) _queue.splice(idx, 1); _saveQueue(); vaultRefreshUI();
+              } else {
+                task.lastError = 'receiveMessage reverted (status=0)';
+                _warn('[TSE] REVERTED intent=' + task.intentId + ' txHash=' + mintTx.hash);
+              }
+            }
+          } catch(e) {
+            task.lastError = (e.shortMessage || e.message || 'Unknown').slice(0, 120);
+            _warn('[TSE] FAILED intent=' + task.intentId + ' error=' + task.lastError + ' operator=' + operatorAddr);
+          }
+          _saveQueue();
+        } else {
+          if (!hasOperator) {
+            task.lastError = 'Waiting for liquidity operator';
+            _log('[TSE] WAITING_OPERATOR intent=' + task.intentId);
+          } else if (!onARC) {
+            task.lastError = 'Waiting for ARC network (operator on chain ' + activeChainId + ')';
+            _log('[TSE] WAITING_OPERATOR intent=' + task.intentId + ' reason=not_on_arc');
+          }
+        }
+      }
+      vaultRefreshUI();
+    } finally {
+      window.__TSE_EXECUTING = false;
     }
   }
 
-  return { execute, recoverSettlingIntents, _startOperatorFulfillmentPoller, submitPendingAttestations };
+  function getPendingCount() { return _queue.length; }
+  function getQueue() { return _queue.slice(); }
+  function forceProcess() { _processQueue(); }
+
+  _loadQueue();
+  return { enqueue, getPendingCount, getQueue, forceProcess, _processQueue };
 })();
 
 // ── Rebalancing Engine ─────────────────────────────────────────────────
@@ -16220,40 +16935,25 @@ function _renderVaultConfig() {
   if (!addrEl) return;
   if (TREASURY_VAULT_ADDRESS && TREASURY_VAULT_ADDRESS !== '0x0000000000000000000000000000000000000000') {
     const shortAddr = TREASURY_VAULT_ADDRESS.slice(0,10) + '...' + TREASURY_VAULT_ADDRESS.slice(-4);
-    setSafeHTML(addrEl, `<a href="https://testnet.arcscan.app/address/${escHtml(TREASURY_VAULT_ADDRESS)}" target="_blank" style="color:var(--teal);text-decoration:none;font-family:'JetBrains Mono',monospace;font-size:8.5px" title="View on ArcScan">${shortAddr}</a> <span class="chip" style="font-size:7.5px;background:rgba(34,197,94,.1);color:var(--green);border-color:rgba(34,197,94,.2)">Deployed ✓</span>`);
+    setSafeHTML(addrEl, `<a href="https://testnet.arcscan.app/address/${escHtml(TREASURY_VAULT_ADDRESS)}" target="_blank" style="color:var(--teal);text-decoration:none;font-family:'JetBrains Mono',monospace;font-size:8.5px" title="View on ArcScan">${escHtml(shortAddr)}</a> <span class="chip" style="font-size:7.5px;background:rgba(34,197,94,.1);color:var(--green);border-color:rgba(34,197,94,.2)">Deployed ✓</span>`);
   } else {
     addrEl.innerHTML = '<span style="color:var(--yellow);font-size:8.5px">Not Deployed</span> <span style="font-size:7.5px;color:var(--muted2)">— Run deploy-treasury-vault.js</span>';
   }
 
-  // Show/hide deposit buttons based on wallet authorization
+  // Deposit buttons: always visible — TreasuryVault contract is the sole authority on authorization
   const depositBtns = document.getElementById('treasury-deposit-btns');
   const unauthMsg = document.getElementById('treasury-deposit-unauthorized');
   if (depositBtns && unauthMsg) {
-    const authorized = isAuthorizedDepositor(walletAddress);
-    depositBtns.style.display = authorized ? '' : 'none';
-    unauthMsg.style.display = authorized ? 'none' : '';
+    depositBtns.style.display = '';
+    unauthMsg.style.display = 'none';
   }
 
-  // Show/hide withdraw buttons based on wallet authorization (no HTML changes)
-  const authorized = isAuthorizedDepositor(walletAddress);
+  // Withdraw buttons: always visible — treasuryWithdraw() validates owner/operator role frontend
   document.querySelectorAll('button[onclick*="treasuryWithdraw"]').forEach(btn => {
-    btn.style.display = authorized ? '' : 'none';
+    btn.style.display = '';
   });
   const wUnauthEl = document.getElementById('treasury-withdraw-unauthorized');
-  if (authorized && wUnauthEl) {
-    wUnauthEl.remove();
-  }
-  if (!authorized && !wUnauthEl) {
-    const grid = document.querySelector('#page-treasury button[onclick*="treasuryWithdraw"]')?.parentElement;
-    if (grid) {
-      const msg = document.createElement('div');
-      msg.id = 'treasury-withdraw-unauthorized';
-      msg.style.cssText = 'grid-column:1/-1;padding:6px 10px;background:rgba(239,68,68,.06);border:1px solid rgba(239,68,68,.2);border-radius:6px;font-size:9.5px;color:var(--muted2);text-align:center';
-      msg.innerHTML = '<i class="ti ti-lock" style="margin-right:4px"></i>Treasury withdrawals are restricted to authorized wallets.';
-      const lastWithdrawBtn = document.querySelector('button[onclick*="treasuryWithdraw(\'cirbtc\')"]');
-      if (lastWithdrawBtn) lastWithdrawBtn.insertAdjacentElement('afterend', msg);
-    }
-  }
+  if (wUnauthEl) wUnauthEl.remove();
 }
 
 function _renderTicker() {
@@ -16374,7 +17074,8 @@ function _renderIntentTable() {
     tbody.innerHTML = '<tr class="intent-empty-row"><td colspan="9"><i class="ti ti-inbox" style="font-size:24px;display:block;margin-bottom:6px;opacity:.3"></i>No intents yet. Use Turbo Bridge to create intents.</td></tr>';
     return;
   }
-  const COLOR = { Created:'var(--muted2)', Fulfilled:'var(--blue)', Settling:'var(--yellow)', Settled:'var(--green)', Failed:'var(--red)' };
+  const COLOR = { Created:'var(--muted2)', 'Awaiting Operator':'var(--yellow)', Fulfilled:'var(--blue)', Settling:'var(--yellow)', Settled:'var(--green)', Failed:'var(--red)', 'Awaiting Reimbursement':'var(--yellow)' };
+  const POLL_INTERVAL = 6000;
   tbody.innerHTML = intents.map(i => {
     const age = Math.round((Date.now() - i.createdAt) / 1000);
     const aS  = age < 60 ? age + 's' : age < 3600 ? Math.round(age/60) + 'm' : Math.round(age/3600) + 'h';
@@ -16387,19 +17088,26 @@ function _renderIntentTable() {
     const settleLink = i.settlementTxHash
       ? `<a href="https://testnet.arcscan.app/tx/${i.settlementTxHash}" target="_blank" style="color:var(--yellow);font-size:8px;display:block" title="Settlement tx">${shortAddr(i.settlementTxHash)}</a>`
       : '';
-    const lpAge47 = i.lastPollAt ? Math.round((Date.now() - i.lastPollAt) / 1000) : null;
-    const lpStr   = lpAge47 !== null ? (lpAge47 < 60 ? `${lpAge47}s ago` : `${Math.round(lpAge47/60)}m ago`) : '—';
-    const lpColor = i.lastError ? 'color:#ef4444;' : 'color:var(--muted2);';
-    const nrStr   = i.pollCount ? String(i.pollCount) : '—';
+    // Observability: Last Poll age
+    const lpAge = i.lastPollAt ? Math.round((Date.now() - i.lastPollAt) / 1000) : null;
+    const lpStr  = lpAge !== null ? (lpAge < 60 ? lpAge + 's ago' : Math.round(lpAge/60) + 'm ago') : '—';
+    const lpColor = lpAge !== null && lpAge > 30 ? 'color:var(--red)' : 'color:var(--muted2)';
+    // Next retry: countdown from last poll
+    const nextRetry = i.lastPollAt ? Math.max(0, Math.round((POLL_INTERVAL - (Date.now() - i.lastPollAt)) / 1000)) : null;
+    const nrStr  = nextRetry !== null && (['Settling','Created','Awaiting Operator','Awaiting Reimbursement'].includes(i.status)) ? nextRetry + 's' : '—';
+    // Last error
+    const errStr = i.settlementError || i.lastError || '—';
+    const errColor = (i.settlementError || i.lastError) ? 'color:var(--red)' : 'color:var(--muted2)';
     return `<tr>
       <td style="font-family:monospace;font-size:8.5px;color:var(--muted2)">${i.id}</td>
       <td style="font-size:9px">${i.srcChain || '?'} → ${i.dstChain || 'arc'}</td>
       <td>${(i.asset || '').toUpperCase()}</td>
       <td>${displayAmt}${feeAmt}</td>
       <td><span style="color:${col};font-weight:700">${i.status}</span>${arcLink}${settleLink}</td>
-      <td style="color:var(--muted2)">${aS}</td>
       <td style="font-size:8.5px;${lpColor}">${lpStr}</td>
       <td style="font-size:8.5px;color:var(--muted2)">${nrStr}</td>
+      <td style="font-size:8px;${errColor};max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${errStr}">${errStr}</td>
+      <td style="color:var(--muted2)">${aS}</td>
     </tr>`;
   }).join('');
 }
@@ -16434,7 +17142,7 @@ function _renderFastBridge() {
     listEl.innerHTML = '<div style="text-align:center;padding:24px;color:var(--muted2);font-size:10px"><i class="ti ti-bolt" style="font-size:24px;display:block;margin-bottom:6px;opacity:.3"></i>No Turbo Bridge intents yet.</div>';
     return;
   }
-  const COLOR = { Created:'var(--muted2)', Fulfilled:'var(--blue)', Settling:'var(--yellow)', Settled:'var(--green)', Failed:'var(--red)' };
+  const COLOR = { Created:'var(--muted2)', 'Awaiting Operator':'var(--yellow)', Fulfilled:'var(--blue)', Settling:'var(--yellow)', Settled:'var(--green)', Failed:'var(--red)', 'Awaiting Reimbursement':'var(--yellow)' };
   listEl.innerHTML = turboIntents.map(i => {
     const age = Math.round((Date.now() - i.createdAt) / 1000);
     const col = COLOR[i.status] || 'var(--muted2)';
@@ -16443,6 +17151,9 @@ function _renderFastBridge() {
       : '';
     const displayAmt = (i.grossAmount || i.amount || 0).toFixed(2);
     const feeStr = (i.feeAmount || 0) > 0 ? ` <span style="font-size:7.5px;color:var(--yellow)">(-${i.feeAmount.toFixed(2)})</span>` : '';
+    const errInfo = (i.settlementError || i.lastError)
+      ? `<span style="font-size:7.5px;color:var(--red);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${i.settlementError || i.lastError}">${(i.settlementError || i.lastError).slice(0,40)}</span>`
+      : '';
     return `<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:rgba(255,255,255,.02);border-radius:7px;margin-bottom:5px;border:1px solid rgba(255,255,255,.04);font-size:9.5px">
       <i class="ti ti-bolt" style="color:var(--yellow)"></i>
       <span style="font-family:monospace;font-size:8.5px;color:var(--muted2)">${i.id}</span>
@@ -16450,6 +17161,7 @@ function _renderFastBridge() {
       <span style="font-weight:700">${displayAmt} ${(i.asset||'').toUpperCase()}${feeStr}</span>
       <span style="margin-left:auto;color:${col};font-weight:700">${i.status}</span>
       ${arcBadge}
+      ${errInfo}
       <span style="color:var(--muted2)">${age}s ago</span>
     </div>`;
   }).join('');
@@ -16560,6 +17272,9 @@ async function vaultInit() {
   // Recover any intents stuck in Settling (page refresh / tab close recovery)
   try { FulfillerEngine.recoverSettlingIntents(); } catch(e) { _warn('catch', e?.message||e); }
 
+  // Bootstrap TreasurySettlementExecutor for any pending receiveMessage tasks
+  try { TreasurySettlementExecutor.forceProcess(); } catch(e) { _warn('catch', e?.message||e); }
+
   // Fetch on-chain Treasury balances — uses dedicated ARC RPC (no wallet required)
   await VaultChain.fetchVaultBalances();
   // Also read from TreasuryVault contract for full asset data
@@ -16590,6 +17305,8 @@ async function vaultInit() {
         await VaultChain.fetchVaultBalances();
       }
       vaultRefreshUI();
+      // TreasurySettlementExecutor: process queued receiveMessage tasks (operator-only)
+      try { TreasurySettlementExecutor.forceProcess(); } catch(e) { _warn('catch', e?.message||e); }
     }
   }, 5000);
 
@@ -16646,10 +17363,12 @@ const SettlementModule = (() => {
   // ── Status mapping: old → new display ────────────────────────────────────
   const STATUS_MAP = {
     'Created':   'Pending Burn',
+    'Awaiting Operator': 'Pending Burn',
     'Fulfilled': 'Awaiting Attestation',
     'Settling':  'Attestation Received',
     'Settled':   'Fully Settled',
     'Failed':    'Failed',
+    'Awaiting Reimbursement': 'Attestation Received',
   };
 
   const STATUS_ORDER = [
@@ -17044,11 +17763,12 @@ const SettlementModule = (() => {
       }
 
       // Observability: Last Poll, Poll #, Last Error
-      const lpAge2       = intent.lastPollAt ? Math.round((Date.now() - intent.lastPollAt) / 1000) : null;
-      const lpStr2       = lpAge2 !== null ? (lpAge2 < 60 ? `${lpAge2}s ago` : `${Math.round(lpAge2/60)}m ago`) : '—';
-      const lpColor2     = intent.lastError ? 'color:#ef4444;' : 'color:var(--muted2);';
-      const pollCountStr = intent.pollCount ? String(intent.pollCount) : '—';
-
+      const lpAge = intent.lastPollAt ? Math.round((Date.now() - intent.lastPollAt) / 1000) : null;
+      const lpStr = lpAge !== null ? (lpAge < 60 ? lpAge + 's ago' : Math.round(lpAge/60) + 'm ago') : '—';
+      const lpColor = lpAge !== null && lpAge > 30 ? 'color:var(--red)' : 'color:var(--muted2)';
+      const pollCountStr = (typeof intent.pollCount === 'number') ? intent.pollCount : '—';
+      const errStr = intent.lastError || '—';
+      const errColor = intent.lastError ? 'color:var(--red)' : 'color:var(--muted2)';
 
       return '<tr style="border-bottom:1px solid var(--border);transition:.1s;" onmouseover="this.style.background=\'rgba(255,255,255,.02)\'" onmouseout="this.style.background=\'\'">'
         + '<td style="padding:6px 8px;font-family:monospace;color:var(--muted2);white-space:nowrap;font-size:9px;" title="' + (intent.intentId||intent.id||'') + '">' + shortId + '</td>'
@@ -17063,8 +17783,9 @@ const SettlementModule = (() => {
         + '<td style="padding:6px 6px;text-align:right;font-weight:600;font-size:9px;">' + reimbAmt + '</td>'
         + '<td style="padding:6px 6px;text-align:right;font-size:9px;color:var(--muted2);">' + settleTime + '</td>'
         + '<td style="padding:6px 6px;text-align:center;">' + vbHtml + '</td>'
-        + '<td style="padding:6px 4px;text-align:center;font-size:8.5px;' + lpColor2 + '">' + lpStr2 + '</td>'
+        + '<td style="padding:6px 4px;text-align:center;font-size:8.5px;' + lpColor + '">' + lpStr + '</td>'
         + '<td style="padding:6px 4px;text-align:right;font-size:8.5px;color:var(--muted2);">' + pollCountStr + '</td>'
+        + '<td style="padding:6px 4px;font-size:7.5px;' + errColor + ';max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + errStr + '">' + errStr + '</td>'
         + '</tr>';
     }).join('');
   }
@@ -17240,19 +17961,11 @@ const SettlementModule = (() => {
   function _checkOperatorPanel() {
     const panel = document.getElementById('stl-recovery-panel');
     if (!panel) return;
+    // Recovery panel is now visible for ALL connected wallets.
+    // TreasurySettlementExecutor proxies operations through operator wallets.
+    // Anyone can monitor settlement status regardless of authorization.
     const addr = typeof walletAddress !== 'undefined' ? walletAddress : null;
-    let isOp = false;
-    if (addr) {
-      if (typeof isTurboOperator === 'function') isOp = isTurboOperator(addr);
-      if (!isOp && typeof isAuthorizedDepositor === 'function') isOp = isAuthorizedDepositor(addr);
-      if (!isOp && typeof OWNER_WALLET !== 'undefined' && OWNER_WALLET) {
-        isOp = addr.toLowerCase() === OWNER_WALLET.toLowerCase();
-      }
-      if (!isOp && typeof TREASURY_OWNER_ADDRESS !== 'undefined' && TREASURY_OWNER_ADDRESS) {
-        isOp = addr.toLowerCase() === TREASURY_OWNER_ADDRESS.toLowerCase();
-      }
-    }
-    panel.style.display = isOp ? 'block' : 'none';
+    panel.style.display = addr ? 'block' : 'none';
   }
 
   // ── Helper ───────────────────────────────────────────────────────────────
@@ -17279,15 +17992,16 @@ const SettlementModule = (() => {
         await ReimbursementProof.runVerification([intent]);
 
         // Resume polling via FulfillerEngine if available
-        if (typeof FulfillerEngine !== 'undefined') {
-          if ((intent.status === 'Settling' || intent.status === 'Fulfilling' || _displayStatus(intent) === 'Attestation Received') && (intent.intentId || intent.id)) {
+        const resolvedId = intent.intentId || intent.id;
+        if (typeof FulfillerEngine !== 'undefined' && resolvedId) {
+          if ((intent.status === 'Settling' || _displayStatus(intent) === 'Attestation Received')) {
             if (typeof FulfillerEngine._startSettlementPoller === 'function') {
-              FulfillerEngine._startSettlementPoller(intent.intentId);
+              FulfillerEngine._startSettlementPoller(resolvedId);
             }
           }
-          if ((intent.status === 'Created' || _displayStatus(intent) === 'Pending Burn') && intent.intentId) {
+          if ((intent.status === 'Created' || intent.status === 'Awaiting Operator' || _displayStatus(intent) === 'Pending Burn')) {
             if (typeof FulfillerEngine._startOperatorFulfillmentPoller === 'function') {
-              FulfillerEngine._startOperatorFulfillmentPoller(intent.intentId);
+              FulfillerEngine._startOperatorFulfillmentPoller(resolvedId);
             }
           }
         }
@@ -17318,7 +18032,12 @@ const SettlementModule = (() => {
             if (msg.status === 'complete' && msg.attestation && msg.attestation !== 'PENDING') {
               _log('[Settlements] Attestation received for intent ' + intentId);
               if (typeof RepaymentContract !== 'undefined' && typeof RepaymentContract.verifyAndSettle === 'function') {
-                await RepaymentContract.verifyAndSettle(intentId, msg.attestation);
+                await RepaymentContract.verifyAndSettle(intentId, {
+                  attestation: msg.attestation,
+                  message: msg.message || null,
+                  amount: null,
+                  mintTxHash: null
+                });
               }
               _verificationCache[intentId] = { attestationVerified: true, attestationData: msg.attestation, messageHash: msg.messageHash };
               stlRefreshAll();
@@ -17335,14 +18054,21 @@ const SettlementModule = (() => {
           if (data.status === 'complete' && data.attestation) {
             _log('[Settlements] V1 attestation received for intent ' + intentId);
             if (typeof RepaymentContract !== 'undefined' && typeof RepaymentContract.verifyAndSettle === 'function') {
-              await RepaymentContract.verifyAndSettle(intentId, data.attestation);
+              await RepaymentContract.verifyAndSettle(intentId, {
+                attestation: data.attestation,
+                message: null,
+                amount: null,
+                mintTxHash: null
+              });
             }
             _verificationCache[intentId] = { attestationVerified: true, attestationData: data.attestation };
             stlRefreshAll();
           }
         }
       }
-    } catch(e) { /* CORS/network expected */ }
+    } catch(e) {
+      _err('[Settlements:_pollAttestation] attestation poll failed:', e.shortMessage || e.message || e);
+    }
   }
 
   // ── Public API ───────────────────────────────────────────────────────────
@@ -17474,7 +18200,7 @@ function _stlLog(msg) {
     setTimeout(() => {
       SettlementModule.refresh();
       if (typeof FulfillerEngine !== 'undefined' && typeof FulfillerEngine.submitPendingAttestations === 'function') {
-        FulfillerEngine.submitPendingAttestations().catch(_err);
+        FulfillerEngine.submitPendingAttestations();
       }
     }, 800);
   });

@@ -1,6 +1,6 @@
 /**
  * Cloudflare Pages Function — Unified Middleware
- * - Injects API keys + CSP nonce into index.html
+ * - Injects API keys into index.html
  * - Proxies sensitive Circle API calls (server-side key)
  *
  * Environment Variables required (set in CF Dashboard):
@@ -27,7 +27,7 @@ export async function onRequest(context) {
     return next();
   }
 
-  // ── Serve index.html with key injection + CSP nonce ──
+  // ── Serve index.html with key injection ──
   const response = await next();
   let html = await response.text();
 
@@ -35,25 +35,17 @@ export async function onRequest(context) {
   const testApiKey  = env.TEST_API_KEY  || '';
   const wcProjectId = env.WC_PROJECT_ID || '';
 
-  // Generate cryptographically secure CSP nonce
-  const nonceBytes = new Uint8Array(24);
-  crypto.getRandomValues(nonceBytes);
-  const nonce = btoa(String.fromCharCode(...nonceBytes))
-    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
-
   // Replace placeholders
   html = html.replaceAll('__WC_PROJECT_ID_PLACEHOLDER__',  wcProjectId);
   html = html.replaceAll('__KIT_KEY_PLACEHOLDER__',        kitKey);
   html = html.replaceAll('__TEST_API_KEY_PLACEHOLDER__',    testApiKey);
-  html = html.replaceAll('__CSP_NONCE__',                   nonce);
 
   return new Response(html, {
     status: response.status,
     headers: {
-      ...Object.fromEntries(response.headers),
       'Content-Type': 'text/html; charset=utf-8',
       'Cache-Control': 'no-cache, no-store, must-revalidate',
-      'Content-Security-Policy-Report-Only': buildCSPHeader(nonce),
+      'Content-Security-Policy': "default-src * 'unsafe-inline' 'unsafe-eval' data: blob:; script-src * 'unsafe-inline' 'unsafe-eval' data: blob:; style-src * 'unsafe-inline'; img-src * data: blob:; connect-src * data: blob: wss:; font-src * data:; worker-src * blob:",
     },
   });
 }
@@ -117,20 +109,4 @@ async function handleIrisProxy(request, url) {
       status: 502, headers: { 'Content-Type': 'application/json' }
     });
   }
-}
-
-// ── Build CSP header with nonce (Report-Only mode for safe rollout) ──
-function buildCSPHeader(nonce) {
-  return [
-    "default-src 'self' https:",
-    "base-uri 'self'",
-    "connect-src 'self' https: wss: blob:",
-    `script-src 'strict-dynamic' 'nonce-${nonce}' 'unsafe-hashes' https://cdn.jsdelivr.net https://unpkg.com https://cdnjs.cloudflare.com blob:`,
-    `style-src 'nonce-${nonce}' 'unsafe-hashes' https://fonts.googleapis.com https://cdn.jsdelivr.net https://cdnjs.cloudflare.com`,
-    "font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net https://cdnjs.cloudflare.com data:",
-    "img-src 'self' data: https:",
-    "worker-src 'self' blob:",
-    "frame-ancestors 'none'",
-    "report-uri /csp-report"
-  ].join('; ');
 }

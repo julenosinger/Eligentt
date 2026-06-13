@@ -91,13 +91,13 @@ const Resilience = (() => {
    * after page visibility change or network interruption.
    */
   function resumePolling() {
-    // Recover Treasury intents
-    if (typeof Treasury !== 'undefined' && Treasury.FulfillerEngine) {
-      try { Treasury.FulfillerEngine.recoverSettlingIntents(); } catch(e) {}
+    // Recover Treasury intents via global FulfillerEngine
+    if (typeof FulfillerEngine !== 'undefined' && typeof FulfillerEngine.recoverSettlingIntents === 'function') {
+      try { FulfillerEngine.recoverSettlingIntents(); } catch(e) { console.error('[Resilience] recoverSettlingIntents error:', e); }
     }
     // Recover Settlement Module if exists
     if (typeof SettlementModule !== 'undefined' && typeof SettlementModule.runRecovery === 'function') {
-      try { SettlementModule.runRecovery(); } catch(e) {}
+      try { SettlementModule.runRecovery(); } catch(e) { console.error('[Resilience] runRecovery error:', e); }
     }
   }
 
