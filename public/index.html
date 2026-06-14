@@ -3122,6 +3122,10 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
 /* ── Vault System — CSS ──────────────────────────────────────────────── */
 /* vault-patch-applied */
 @keyframes vault-pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+/* Mint Console toggle switch */
+.mc-switch-on { background: var(--green) !important; }
+.mc-switch-on div { left: 20px !important; background: #fff !important; }
 @keyframes vault-spin { to { transform:rotate(360deg); } }
 
 /* Bridge mode selector */
@@ -3665,6 +3669,55 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
   </div>
 </div>
 
+<!-- ── Edit All Modal (Multisend bulk edit) ──────────────── -->
+<div class="modal-ov" id="edit-all-modal">
+  <div class="modal" style="width:420px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+      <div>
+        <div class="mt" style="display:flex;align-items:center;gap:7px"><i class="ti ti-edit" style="font-size:15px;color:var(--yellow)"></i>Edit All Recipients</div>
+        <div class="ms">Bulk update all <span id="ea-row-count">0</span> rows at once</div>
+      </div>
+      <button onclick="closeEditAllModal()" style="width:28px;height:28px;border-radius:6px;border:1px solid var(--border2);background:transparent;color:var(--muted2);cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center">×</button>
+    </div>
+
+    <div style="margin-bottom:10px">
+      <div style="font-size:9px;color:var(--muted2);margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px">Chain (all rows)</div>
+      <select id="ea-chain" class="cinput" style="width:100%;font-size:11px;padding:7px 9px">
+        <option value="">— Keep current —</option>
+        <option value="Arc_Testnet">Arc Testnet</option>
+        <option value="Base_Sepolia">Base Sepolia</option>
+        <option value="Arbitrum_Sepolia">Arbitrum Sepolia</option>
+        <option value="Optimism_Sepolia">Optimism Sepolia</option>
+        <option value="Ethereum_Sepolia">Ethereum Sepolia</option>
+      </select>
+    </div>
+
+    <div style="margin-bottom:10px">
+      <div style="font-size:9px;color:var(--muted2);margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px">Token (all rows)</div>
+      <select id="ea-token" class="cinput" style="width:100%;font-size:11px;padding:7px 9px">
+        <option value="">— Keep current —</option>
+        <option value="USDC">USDC</option>
+        <option value="EURC">EURC</option>
+      </select>
+    </div>
+
+    <div style="margin-bottom:10px">
+      <div style="font-size:9px;color:var(--muted2);margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px">Amount (all rows)</div>
+      <input id="ea-amount" type="number" placeholder="Leave empty to keep current" class="cinput" style="width:100%;font-size:13px;padding:7px 9px" step="any"/>
+    </div>
+
+    <div style="margin-bottom:10px">
+      <div style="font-size:9px;color:var(--muted2);margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px">Note (all rows)</div>
+      <input id="ea-note" type="text" placeholder="Leave empty to keep current" class="cinput" style="width:100%;font-size:11px;padding:7px 9px"/>
+    </div>
+
+    <div class="ma">
+      <button class="mcancel" onclick="closeEditAllModal()">Cancel</button>
+      <button class="mconfirm" id="ea-apply-btn" onclick="applyEditAll()" style="background:var(--yellow);color:#000"><i class="ti ti-check"></i>Apply to All</button>
+    </div>
+  </div>
+</div>
+
 <!-- ── Wallet Connect Modal ──────────────────────────────── -->
 <div class="wm-overlay" id="wallet-modal">
   <div class="wm-box">
@@ -3971,6 +4024,7 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
             <input type="file" id="csv-in" accept=".csv" style="display:none" onchange="loadCSV(this)"/>
             <button class="btn" onclick="exportCSV()" style="font-size:9px;padding:3px 7px"><i class="ti ti-table-export"></i>Export CSV</button>
             <button class="btn" onclick="duplicateAll()" style="font-size:9px;padding:3px 7px"><i class="ti ti-copy"></i>Duplicate</button>
+            <button class="btn" onclick="openEditAllModal()" style="font-size:9px;padding:3px 7px"><i class="ti ti-edit"></i>Edit All</button>
             <button class="btn" onclick="clearAll()" style="font-size:9px;padding:3px 7px;color:var(--red)"><i class="ti ti-trash"></i>Clear</button>
           </div>
 
@@ -5957,6 +6011,40 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
         <div id="rcp-empty" style="display:none;padding:48px;text-align:center;color:var(--muted2)">
           <i class="ti ti-users" style="font-size:40px;display:block;margin-bottom:10px;opacity:.3"></i>No contacts yet.
         </div>
+
+        <!-- Add Contact Modal -->
+        <div id="add-contact-modal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.7);z-index:9999;align-items:center;justify-content:center">
+          <div style="background:var(--card);border:1px solid var(--border2);border-radius:12px;padding:0;width:440px;max-width:92vw;overflow:hidden">
+            <!-- Header -->
+            <div style="height:80px;background:linear-gradient(135deg,rgba(167,139,250,.2),rgba(79,142,247,.1));display:flex;align-items:center;justify-content:center;position:relative">
+              <i class="ti ti-user-plus" style="font-size:32px;color:var(--purple);opacity:.8"></i>
+              <div style="position:absolute;bottom:0;left:0;right:0;height:40px;background:linear-gradient(transparent,var(--card))"></div>
+            </div>
+            <div style="padding:0 20px 20px">
+              <div style="font-size:13px;font-weight:700;margin:-10px 0 16px;position:relative">Add Contact</div>
+              <div style="margin-bottom:10px">
+                <div style="font-size:9px;color:var(--muted2);margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px">Contact Name *</div>
+                <input id="ac-name" class="cinput" type="text" placeholder="Vitalik" style="width:100%;font-size:11px;padding:8px 10px"/>
+              </div>
+              <div style="margin-bottom:10px">
+                <div style="font-size:9px;color:var(--muted2);margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px">Wallet Address (0x...) *</div>
+                <input id="ac-addr" class="cinput" type="text" placeholder="0x..." style="width:100%;font-size:11px;padding:8px 10px;font-family:monospace"/>
+              </div>
+              <div style="margin-bottom:10px">
+                <div style="font-size:9px;color:var(--muted2);margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px">Destination Chain</div>
+                <select id="ac-chain" class="cinput" style="width:100%;font-size:11px;padding:7px 9px"></select>
+              </div>
+              <div style="margin-bottom:12px">
+                <div style="font-size:9px;color:var(--muted2);margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px">Note (optional)</div>
+                <input id="ac-note" class="cinput" type="text" placeholder="Optional note..." style="width:100%;font-size:11px;padding:8px 10px"/>
+              </div>
+              <div style="display:flex;gap:8px">
+                <button onclick="closeAddContactModal()" style="flex:1;padding:9px;background:transparent;border:1px solid var(--border2);border-radius:6px;color:var(--muted2);font-size:11px;cursor:pointer;font-family:inherit">Cancel</button>
+                <button onclick="saveContact()" style="flex:1;padding:9px;background:var(--purple);border:none;border-radius:6px;color:#fff;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:5px"><i class="ti ti-check"></i>Save Contact</button>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -6077,6 +6165,10 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
           </div>
           <div class="trs-nav-item" id="trs-nav-settlements" onclick="showTrsSection('settlements')">
             <i class="ti ti-transfer"></i> Settlements
+          </div>
+          <div class="trs-nav-item" id="trs-nav-mint" onclick="showTrsSection('mint')">
+            <i class="ti ti-coins"></i><span>Mint Console</span>
+            <span style="font-size:8px;background:rgba(245,158,11,.15);color:var(--yellow);border-radius:3px;padding:1px 5px;margin-left:auto">OPERATOR</span>
           </div>
           <div style="margin-top:auto;padding-top:12px;border-top:1px solid rgba(255,255,255,.05)">
             <div style="font-size:8.5px;color:var(--muted2);text-align:center;line-height:1.5">
@@ -6861,6 +6953,107 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
 
           </div>
           <!-- ─── END SETTLEMENTS SECTION ───────────────────────────── -->
+
+          <!-- ── MINT CONSOLE ──────────────────────────────────────── -->
+          <div class="trs-section" id="trs-mint">
+
+            <div class="trs-section-title" style="display:flex;align-items:center;gap:8px">
+              <i class="ti ti-coins" style="color:var(--yellow)"></i>Treasury Mint Console
+              <span class="trs-section-sub">CCTP Settlement Operator Panel</span>
+            </div>
+
+            <!-- Operator Status Bar -->
+            <div class="vault-card" style="padding:12px 14px;margin-bottom:12px;">
+              <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;font-size:10px;">
+                <div style="display:flex;align-items:center;gap:6px;">
+                  <span style="color:var(--muted2)">Operator Wallet:</span>
+                  <span id="mc-operator-addr" style="font-family:monospace;font-size:9px;color:var(--text)">—</span>
+                  <span id="mc-operator-dot" style="width:7px;height:7px;border-radius:50%;background:var(--red)"></span>
+                  <span id="mc-operator-status" style="font-size:9px;color:var(--red)">Not Connected</span>
+                </div>
+                <div style="width:1px;height:16px;background:var(--border);flex-shrink:0"></div>
+                <div style="display:flex;align-items:center;gap:6px;">
+                  <span style="color:var(--muted2)">Vault Owner:</span>
+                  <span id="mc-vault-owner" style="font-family:monospace;font-size:9px;color:var(--muted2)">—</span>
+                </div>
+                <div style="width:1px;height:16px;background:var(--border);flex-shrink:0"></div>
+                <div style="display:flex;align-items:center;gap:6px;">
+                  <span style="color:var(--muted2)">Network:</span>
+                  <span id="mc-network" style="font-size:9px;color:var(--green)">—</span>
+                </div>
+                <div style="width:1px;height:16px;background:var(--border);flex-shrink:0"></div>
+                <div style="display:flex;align-items:center;gap:6px;">
+                  <span style="color:var(--muted2)">Pending:</span>
+                  <span id="mc-pending-count" style="font-weight:700;color:var(--yellow);font-size:11px">0</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Card 1: Pending Mint Queue -->
+            <div class="vault-card" style="padding:14px;margin-bottom:12px;">
+              <div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:10px;display:flex;align-items:center;gap:6px;">
+                <i class="ti ti-list" style="color:var(--yellow)"></i> Pending Mint Queue
+                <button onclick="mcRefreshQueue()" style="margin-left:auto;background:transparent;border:1px solid var(--border);border-radius:6px;padding:3px 10px;font-size:10px;color:var(--muted2);cursor:pointer;">
+                  <i class="ti ti-refresh"></i> Refresh
+                </button>
+              </div>
+              <div style="overflow-x:auto;">
+                <table style="width:100%;border-collapse:collapse;font-size:9px;">
+                  <thead>
+                    <tr style="border-bottom:1px solid var(--border);">
+                      <th style="padding:6px 8px;text-align:left;">Intent ID</th>
+                      <th style="padding:6px 8px;text-align:left;">Route</th>
+                      <th style="padding:6px 8px;text-align:left;">Asset</th>
+                      <th style="padding:6px 8px;text-align:right;">Amount</th>
+                      <th style="padding:6px 8px;text-align:center;">Attestation</th>
+                      <th style="padding:6px 8px;text-align:center;">Nonce Check</th>
+                      <th style="padding:6px 8px;text-align:center;">Status</th>
+                      <th style="padding:6px 8px;text-align:center;">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody id="mc-queue-tbody">
+                    <tr>
+                      <td colspan="8" style="padding:24px;text-align:center;color:var(--muted2);font-size:10px;">
+                        <i class="ti ti-inbox" style="font-size:22px;display:block;margin-bottom:6px;opacity:.3"></i>
+                        No pending mints. Attestations will appear here once detected.
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Card 2: Mint Execution Log -->
+            <div class="vault-card" style="padding:14px;margin-bottom:12px;">
+              <div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:8px;display:flex;align-items:center;gap:6px;">
+                <i class="ti ti-terminal-2" style="color:var(--green)"></i> Mint Execution Log
+                <button onclick="document.getElementById('mc-log').textContent = ''" style="margin-left:auto;background:transparent;border:1px solid var(--border);border-radius:6px;padding:3px 8px;font-size:9px;color:var(--muted2);cursor:pointer;">Clear</button>
+              </div>
+              <div id="mc-log" style="background:var(--bg2);border-radius:6px;padding:8px;font-size:9.5px;color:var(--muted2);font-family:monospace;max-height:200px;overflow-y:auto;min-height:60px;white-space:pre-wrap;word-break:break-all">— Ready —</div>
+            </div>
+
+            <!-- Card 3: Auto Mint Mode -->
+            <div class="vault-card" style="padding:14px;">
+              <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <i class="ti ti-refresh" style="color:var(--blue);font-size:14px"></i>
+                  <div>
+                    <div style="font-size:11px;font-weight:700;color:var(--text)">Auto Mint Mode</div>
+                    <div style="font-size:8.5px;color:var(--muted2)">Automatically execute receiveMessage() every 10 seconds for pending attestations</div>
+                  </div>
+                </div>
+                <label style="margin-left:auto;display:flex;align-items:center;gap:8px;cursor:pointer;">
+                  <span id="mc-auto-status" style="font-size:9px;color:var(--muted2)">OFF</span>
+                  <input type="checkbox" id="mc-auto-toggle" onchange="mcToggleAutoMint()" style="display:none">
+                  <div id="mc-auto-switch" style="width:40px;height:22px;border-radius:11px;background:var(--border);position:relative;transition:background .2s;">
+                    <div style="width:18px;height:18px;border-radius:50%;background:var(--muted2);position:absolute;top:2px;left:2px;transition:all .2s;"></div>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+          </div>
+          <!-- ─── END MINT CONSOLE SECTION ──────────────────────────── -->
 
         </div><!-- end trs-content -->
       </div><!-- end trs-layout -->
@@ -8053,14 +8246,10 @@ function setupProviderEvents(raw) {
       set('dd-full-addr', walletAddress);
       updateNetworkBadge();
       await refreshBalance();
-      // Submit any pending attestations with the new signer
-      if (typeof FulfillerEngine !== 'undefined' && typeof FulfillerEngine.submitPendingAttestations === 'function') {
-        setTimeout(() => FulfillerEngine.submitPendingAttestations(), 500);
-      }
-      // Trigger TreasurySettlementExecutor — if new wallet is operator, process queued receiveMessage tasks
-      if (typeof TreasurySettlementExecutor !== 'undefined') {
-        setTimeout(() => TreasurySettlementExecutor.forceProcess(), 1000);
-      }
+      // NO automatic write-triggering on wallet events.
+      // Settlement poller handles enqueuing to TreasurySettlementExecutor.
+      // Operator wallets will only process when poller finds an attestation.
+      // This prevents MetaMask popups on every wallet connect/switch.
       toast('Account switched: ' + short, 'info');
     });
 
@@ -8074,10 +8263,8 @@ function setupProviderEvents(raw) {
       await refreshBalance();
       const knownChain = getChainById(newChainId);
       toast('Network: ' + (knownChain ? knownChain.name : 'chain ' + newChainId), 'info');
-      // Trigger TreasurySettlementExecutor — if wallet switched to ARC, process queued tasks
-      if (typeof TreasurySettlementExecutor !== 'undefined') {
-        setTimeout(() => TreasurySettlementExecutor.forceProcess(), 1000);
-      }
+      // NO automatic write-triggering on chain change.
+      // Settlement poller drives TSE processing.
     });
 
     raw.on('disconnect', () => disconnectWallet());
@@ -8933,6 +9120,32 @@ function updateBottomBar() {
 function editAll(){const v=prompt('New USDC value for all:');if(!v||isNaN(parseFloat(v)))return;recipients.forEach(r=>r.amount=parseFloat(v).toFixed(2));renderTable();toast('Values updated','success');}
 function duplicateAll(){recipients.push(...recipients.map(r=>({...r})));saveRecipients();renderTable();toast('Duplicated','success');}
 function clearAll(){if(!recipients.length)return;if(!confirm(`Clear all ${recipients.length} recipients?`))return;recipients.length=0;saveRecipients();renderTable();toast('Cleared','info'); resetWorkflow(); updateWorkflowStep(1,'pending'); updateWorkflowStep(2,'active'); updateWorkflowStep(3,'pending'); updateBottomBar(); }
+function openEditAllModal(){
+  if(!recipients.length){toast('Add recipients first','warning');return;}
+  document.getElementById('ea-row-count').textContent=recipients.length;
+  document.getElementById('ea-chain').value='';
+  document.getElementById('ea-token').value='';
+  document.getElementById('ea-amount').value='';
+  document.getElementById('ea-note').value='';
+  document.getElementById('edit-all-modal').classList.add('open');
+}
+function closeEditAllModal(){document.getElementById('edit-all-modal').classList.remove('open');}
+function applyEditAll(){
+  const chain=document.getElementById('ea-chain').value;
+  const token=document.getElementById('ea-token').value;
+  const amount=document.getElementById('ea-amount').value;
+  const note=document.getElementById('ea-note').value;
+  let changed=0;
+  recipients.forEach(r=>{
+    if(chain){r.chainId=chain;changed++}
+    if(token){r.token=token;changed++}
+    if(amount!==''){r.amount=amount;changed++}
+    if(note!==''){r.note=note;changed++}
+  });
+  saveRecipients();renderTable();updateStats();
+  closeEditAllModal();
+  toast(`Updated ${changed} field(s) across ${recipients.length} rows`,'success');
+}
 function clearBatches(){
   const el = document.getElementById('batches-body');
   if(el) el.innerHTML='';
@@ -10987,6 +11200,10 @@ async function executeSingleSend() {
 document.addEventListener('DOMContentLoaded', () => {
   const ssModal = document.getElementById('single-send-modal');
   if(ssModal) ssModal.addEventListener('click', e => { if(e.target === ssModal) closeSingleSendModal(); });
+  const eaModal = document.getElementById('edit-all-modal');
+  if(eaModal) eaModal.addEventListener('click', e => { if(e.target === eaModal) closeEditAllModal(); });
+  const acModal = document.getElementById('add-contact-modal');
+  if(acModal) acModal.addEventListener('click', e => { if(e.target === acModal) closeAddContactModal(); });
 });
 
 
@@ -12530,25 +12747,42 @@ function invDelete(id) {
 //  RECIPIENTS / CONTACTS
 // ══════════════════════════════════════════════════════════
 function addContact(prefill) {
-  const name  = prompt('Contact name:', prefill?.name||'');
-  if(!name) return;
-  const addr  = prompt('Wallet address (0x... or ENS):', prefill?.addr||'');
-  if(!addr || (!isAddr(addr)&&!isEns(addr))) { toast('Invalid address','error'); return; }
-  const chainOptions = CHAINS.map((c,i) => `${i+1}: ${c.name}`).join('\n');
-  const chainInput = prompt(`Destination chain (1-${CHAINS.length}):\n${chainOptions}`, prefill?.chainIdx||'1');
-  const chainIdx = Math.max(0, Math.min(CHAINS.length-1, (parseInt(chainInput)||1)-1));
-  const note  = prompt('Note (optional):', prefill?.note||'');
+  // Populate chain select
+  const sel = document.getElementById('ac-chain');
+  if (sel) {
+    sel.innerHTML = CHAINS.map((c,i) => `<option value="${c.id}" ${(!prefill && c.id==='Arc_Testnet')?'selected':''}>${c.name}</option>`).join('');
+  }
+  // Pre-fill if editing
+  document.getElementById('ac-name').value = prefill?.name || '';
+  document.getElementById('ac-addr').value = prefill?.addr || '';
+  document.getElementById('ac-note').value = prefill?.note || '';
+  if (prefill?.chainId) { document.getElementById('ac-chain').value = prefill.chainId; }
+  // Show modal
+  document.getElementById('add-contact-modal').style.display = 'flex';
+  document.getElementById('ac-name').focus();
+}
+function closeAddContactModal() {
+  document.getElementById('add-contact-modal').style.display = 'none';
+}
+function saveContact() {
+  const name = document.getElementById('ac-name').value.trim();
+  const addr = document.getElementById('ac-addr').value.trim();
+  const chainId = document.getElementById('ac-chain').value;
+  const note = document.getElementById('ac-note').value.trim();
+  if (!name) { toast('Enter a contact name', 'warning'); return; }
+  if (!addr || (!isAddr(addr) && !isEns(addr))) { toast('Invalid wallet address', 'error'); return; }
   const c = {
     id: 'C'+Date.now(),
     name, addr,
     note: note||'',
-    chainId: CHAINS[chainIdx].id,
+    chainId,
     favorite: false,
     lastUsed: new Date().toISOString()
   };
   contacts.unshift(c);
   Store.save('contacts', contacts); renderContacts();
-  toast(`${name} saved (${CHAINS[chainIdx].name})`,'success');
+  closeAddContactModal();
+  toast(`${name} saved (${(CHAINS.find(ch=>ch.id===chainId)||{name:'Unknown'}).name})`,'success');
 }
 
 function addToCurrentBatch(contactId) {
@@ -15813,22 +16047,40 @@ const RepaymentContract = (() => {
       const rawGross = ethers.parseUnits(intent.grossAmount.toFixed(decimals), decimals);
       const rawFee   = ethers.parseUnits(intent.feeAmount.toFixed(decimals), decimals);
 
-      // Attempt direct operator call; if user is not operator, defer to operator service
+      // Pre-check: read-only on-chain verification (NO frontend whitelist fallback).
+      // Only the TreasuryVault contract determines who is an operator.
+      // TREASURY_DEPOSIT_WHITELIST / TURBO_OPERATORS are NEVER used as gates here.
+      let isOperatorOnChain = false;
+      try {
+        const vcRead = new ethers.Contract(TREASURY_VAULT_ADDRESS, vaultAbi, ARC_READ_PROVIDER);
+        isOperatorOnChain = await vcRead.isOperator(walletAddress);
+        _log('[Fulfiller] On-chain operator check:', walletAddress, '→', isOperatorOnChain);
+      } catch(e) {
+        // On-chain check failed — do NOT fall back to isTurboOperator whitelist.
+        // If we can't verify on-chain, assume non-operator to avoid wallet popups.
+        _log('[Fulfiller] On-chain isOperator() check failed, assuming non-operator:', e.message||e);
+        isOperatorOnChain = false;
+      }
+
+      // Attempt direct operator call ONLY if wallet has operator role ON-CHAIN.
+      // Non-operators skip directly to 'Awaiting Operator' — no wallet popup.
       let arcTxHash = null;
       let directFulfilled = false;
-      try {
-        const tx = await vaultContract.fulfillAndPayWithFee(assetAddr, rawGross, rawFee, intent.intentBytes32, intent.userAddress);
-        const receipt = await tx.wait();
-        if (receipt && receipt.status === 1) {
-          arcTxHash = tx.hash;
-          directFulfilled = true;
-        }
-      } catch(e) {
-        const msg = (e.shortMessage || e.message || '');
-        if (msg.includes('caller is not an operator') || msg.includes('not an operator')) {
-          _log('[Fulfiller] User is not operator — intent queued for operator fulfillment');
-        } else {
-          throw e; // Real error — propagate
+      if (isOperatorOnChain) {
+        try {
+          const tx = await vaultContract.fulfillAndPayWithFee(assetAddr, rawGross, rawFee, intent.intentBytes32, intent.userAddress);
+          const receipt = await tx.wait();
+          if (receipt && receipt.status === 1) {
+            arcTxHash = tx.hash;
+            directFulfilled = true;
+          }
+        } catch(e) {
+          const msg = (e.shortMessage || e.message || '');
+          if (msg.includes('caller is not an operator') || msg.includes('not an operator')) {
+            _log('[Fulfiller] User is not operator — intent queued for operator fulfillment');
+          } else {
+            throw e; // Real error — propagate
+          }
         }
       }
 
@@ -16123,14 +16375,89 @@ const FulfillerEngine = (() => {
     const burnReceipt = await burnTx.wait();
     if (!burnReceipt || burnReceipt.status !== 1) throw new Error('depositForBurn failed on-chain');
 
+    _log('[BURN] Transaction confirmed — txHash:', burnTx.hash);
+    _log('[BURN] Block:', burnReceipt.blockNumber, 'Gas used:', burnReceipt.gasUsed?.toString());
+
+    // ── Extract CCTP MessageSent event from burn receipt ──
+    _log('[CCTP] Scanning receipt logs for MessageSent event...');
+    let cctpMessageBytes = null;
+    let cctpMessageHash = null;
+    try {
+      const mtIface = new ethers.Interface(['event MessageSent(bytes message)']);
+      for (const log of burnReceipt.logs) {
+        try {
+          const parsed = mtIface.parseLog({ topics: log.topics, data: log.data });
+          if (parsed?.name === 'MessageSent') {
+            cctpMessageBytes = parsed.args.message;
+            cctpMessageHash = ethers.keccak256(cctpMessageBytes);
+            _log('[CCTP] MessageSent found — hash:', cctpMessageHash);
+            _log('[CCTP] Message bytes (first 66 chars):', cctpMessageBytes.slice(0, 66));
+            break;
+          }
+        } catch(e) { /* skip non-matching logs */ }
+      }
+    } catch(e) { _warn('[CCTP] Log parsing error:', e.message||e); }
+    if (!cctpMessageBytes) {
+      _warn('[CCTP] MessageSent event missing from burn transaction logs.');
+      _warn('[CCTP] Check: TokenMessenger address, ABI, and source chain config.');
+    }
+
+    // ── CREATE INTENT IMMEDIATELY after burn (before chain switch) ──
+    // Critical: intent must exist in localStorage even if chain switch fails.
+    // This ensures the operator poller can find and fulfill it later.
+    _log('[BRIDGE] Creating repayment intent from burn tx:', burnTx.hash);
+    const intentId = RepaymentContract.createIntent({
+      asset, amount, userAddress, srcChain, dstChain, txHash: burnTx.hash,
+      sourceDomain: fromConfig.domain
+    });
+    _log('[BRIDGE] Intent created — id:', intentId, 'status: Created');
+
+    // Store CCTP message data on intent for attestation polling
+    if (cctpMessageBytes) {
+      VaultStore.mutate(s => {
+        const i = s.intents.find(x => x.id === intentId);
+        if (i) {
+          i._cctpMessageBytes = cctpMessageBytes;
+          i._cctpMessageHash = cctpMessageHash;
+          i.cctpMsgHash = cctpMessageHash || burnTx.hash;
+        }
+      });
+      _log('[CCTP] Message hash stored on intent:', cctpMessageHash);
+    }
+
+    // Store pre-reimbursement Treasury balance on intent for later verification
+    if (_tsBalBefore !== null) {
+      RepaymentContract._storePreBalance(intentId, _tsBalBefore);
+    }
+
     // ── Step 2: Switch to ARC for TreasuryVault fulfillAndPay ──
     if (onProgress) onProgress(2, 'Switching to ARC for fulfillment...');
-    await ensureNetwork(5042002); // TreasuryVault is on ARC Testnet
+    try {
+      await ensureNetwork(5042002); // TreasuryVault is on ARC Testnet
+    } catch(switchErr) {
+      _warn('[BRIDGE] ARC network switch failed:', switchErr.message || switchErr);
+      // Intent is already created — operator can fulfill later
+      VaultStore.mutate(s => {
+        const i = s.intents.find(x => x.id === intentId);
+        if (i) { i.status = 'Awaiting Operator'; i.settlementError = 'Chain switch failed — awaiting operator fulfillment'; i.lastAttempt = Date.now(); }
+      });
+      // Start operator poller even if chain switch failed
+      _startOperatorFulfillmentPoller(intentId);
+      vaultRefreshUI();
+      return { intentId, txHash: burnTx.hash };
+    }
     const arcFulfillProvider = new ethers.BrowserProvider(window.ethereum);
     const arcFulfillSigner   = await arcFulfillProvider.getSigner();
     const arcNetwork         = await arcFulfillProvider.getNetwork();
     if (Number(arcNetwork.chainId) !== 5042002) {
-      throw new Error('ARC network switch failed: wallet still on chain ' + Number(arcNetwork.chainId) + '. Expected 5042002.');
+      _warn('[BRIDGE] ARC network mismatch after switch. Intent saved — operator will fulfill.');
+      VaultStore.mutate(s => {
+        const i = s.intents.find(x => x.id === intentId);
+        if (i) { i.status = 'Awaiting Operator'; i.settlementError = 'Network mismatch — awaiting operator fulfillment'; i.lastAttempt = Date.now(); }
+      });
+      _startOperatorFulfillmentPoller(intentId);
+      vaultRefreshUI();
+      return { intentId, txHash: burnTx.hash };
     }
     _log('[Fulfiller] Switched to ARC — CHAIN:', Number(arcNetwork.chainId), 'ACCOUNT:', await arcFulfillSigner.getAddress());
     // Re-initialize global signer/provider for ARC context
@@ -16139,19 +16466,25 @@ const FulfillerEngine = (() => {
       provider = arcFulfillProvider;
     } catch(e) { _warn('silent-catch', e?.message||e); }
 
-    // ── Step 2b: Lock Treasury liquidity (instant fulfillment) ──
+    // ── Step 2b: Fulfill intent (intent already created before chain switch) ──
     if (onProgress) onProgress(2, 'Locking Treasury liquidity (1% fee)...');
-    const intentId = RepaymentContract.createIntent({
-      asset, amount, userAddress, srcChain, dstChain, txHash: burnTx.hash,
-      sourceDomain: fromConfig.domain
-    });
-
-    // Store pre-reimbursement Treasury balance on intent for later verification
-    if (_tsBalBefore !== null) {
-      RepaymentContract._storePreBalance(intentId, _tsBalBefore);
+    _log('[BRIDGE] Attempting fulfillment for intent:', intentId);
+    try {
+      await RepaymentContract.fulfill(intentId, burnTx.hash);
+    } catch(fulfillErr) {
+      _warn('[BRIDGE] Fulfillment attempt failed:', fulfillErr.shortMessage || fulfillErr.message || fulfillErr);
+      // Ensure intent is not stuck at 'Created' — move to Awaiting Operator
+      VaultStore.mutate(s => {
+        const i = s.intents.find(x => x.id === intentId);
+        if (i && i.status === 'Created') {
+          i.status = 'Awaiting Operator';
+          i.settlementError = 'Fulfill error — awaiting operator: ' + ((fulfillErr.shortMessage || fulfillErr.message || '').slice(0, 80));
+          i.lastAttempt = Date.now();
+        }
+      });
+      _startOperatorFulfillmentPoller(intentId);
+      _log('[BRIDGE] Intent moved to Awaiting Operator after fulfillment error');
     }
-
-    await RepaymentContract.fulfill(intentId, burnTx.hash);
 
     // ── Step 3: Initiate settlement tracking (only if fulfilled) ──
     const intentAfter = RepaymentContract.getAll().find(i => i.id === intentId);
@@ -16163,13 +16496,51 @@ const FulfillerEngine = (() => {
     } else {
       if (onProgress) onProgress(3, 'Awaiting operator fulfillment...');
       if (onProgress) onProgress(4, 'Turbo queued — operator will fulfill');
+      _log('[BRIDGE] Burn completed, intent=' + intentId + ' awaiting operator fulfillment');
+      // Trigger backend relayer for automatic operator fulfillment
+      _callTurboRelayer(intentId, intentAfter);
     }
     vaultRefreshUI();
     return { intentId, txHash: burnTx.hash };
   }
 
+  // ── Backend relayer call — delegates fulfillment to Cloudflare Function ──
+  async function _callTurboRelayer(intentId, intent) {
+    if (!intent) return;
+    _log('[RELAYER] Calling backend relayer for intent:', intentId);
+    try {
+      const resp = await fetch('/api/relayer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          intentBytes32: intent.intentBytes32,
+          asset: intent.asset,
+          grossAmount: intent.grossAmount,
+          feeAmount: intent.feeAmount,
+          userAddress: intent.userAddress,
+        }),
+      });
+      const data = await resp.json();
+      if (data.success) {
+        _log('[RELAYER] Fulfilled by backend — TX:', data.txHash);
+        VaultStore.mutate(s => {
+          const i = s.intents.find(x => x.id === intentId);
+          if (i) { i.settlementError = null; i._relayerTxHash = data.txHash; }
+        });
+      } else if (data.skipped) {
+        _log('[RELAYER] Skipped —', data.reason);
+      } else {
+        _log('[RELAYER] Backend error:', data.error);
+      }
+    } catch(e) {
+      _log('[RELAYER] Call failed (backend may not be deployed):', e.message||e);
+      // Fallback: frontend operator poller will handle it when an operator wallet connects
+    }
+  }
+
   // ── Operator fulfillment poller — waits for operator to fulfill on-chain ──
   function _startOperatorFulfillmentPoller(intentId) {
+    if (window.__SETTLEMENT_RECOVERY_READONLY) return;
     const maxPolls = 300; // ~30 minutes
     let pollCount = 0;
     const INTERVAL = 6000;
@@ -16179,6 +16550,7 @@ const FulfillerEngine = (() => {
       const i = s.intents.find(x => x.id === intentId || x.intentId === intentId);
       if (i) { i.lastPollAt = Date.now(); i.pollCount = 0; i.lastError = null; }
     });
+    _log('[OPERATOR] Polling started for intent:', intentId, '— checking on-chain every 6s');
 
     const timer = setInterval(async () => {
       pollCount++;
@@ -16202,6 +16574,7 @@ const FulfillerEngine = (() => {
         if (Number(state) === 2) { // Fulfilled
           clearInterval(timer);
           delete _activePollerTimers['op-' + intentId];
+          _log('[OPERATOR] Fulfillment detected on-chain for intent:', intentId);
           VaultStore.lockFunds(intent.asset, intent.grossAmount);
           VaultStore.addTurboFee(intent.asset, intent.feeAmount);
           VaultStore.addVolume('turbo', intent.grossAmount);
@@ -16226,6 +16599,52 @@ const FulfillerEngine = (() => {
         VaultStore.mutate(s => { const i = s.intents.find(x => x.id === intentId || x.intentId === intentId); if (i) i.lastError = 'Chain read: ' + (e.message||'error').slice(0, 120); });
       }
 
+      // ── Attempt auto-fulfill if connected wallet is an operator on ARC ──
+      if (!intent._opFulfillAttempted && signer && activeChainId === 5042002) {
+        const isOp = isTurboOperator(walletAddress);
+        if (isOp) {
+          intent._opFulfillAttempted = true;
+          VaultStore.mutate(s => {
+            const i = s.intents.find(x => x.id === intentId || x.intentId === intentId);
+            if (i) { i._opFulfillAttempted = true; i.settlementError = 'Operator fulfilling...'; }
+          });
+          _log('[OPERATOR] Attempting fulfillAndPayWithFee — intent:', intentId, 'operator:', walletAddress);
+          try {
+            const vaultAbi = TREASURY_VAULT_ABI;
+            const assetAddr = TREASURY_ASSETS[intent.asset];
+            const decimals = intent.asset === 'cirbtc' ? 8 : 6;
+            const rawGross = ethers.parseUnits(intent.grossAmount.toFixed(decimals), decimals);
+            const rawFee   = ethers.parseUnits(intent.feeAmount.toFixed(decimals), decimals);
+            const vaultWrite = new ethers.Contract(TREASURY_VAULT_ADDRESS, vaultAbi, signer);
+            const tx = await vaultWrite.fulfillAndPayWithFee(assetAddr, rawGross, rawFee, intent.intentBytes32, intent.userAddress);
+            _log('[OPERATOR] Fulfill TX sent:', tx.hash);
+            const receipt = await tx.wait();
+            if (receipt && receipt.status === 1) {
+              _log('[OPERATOR] Fulfill confirmed — TX:', tx.hash);
+              VaultStore.lockFunds(intent.asset, intent.grossAmount);
+              VaultStore.addTurboFee(intent.asset, intent.feeAmount);
+              VaultStore.addVolume('turbo', intent.grossAmount);
+              VaultStore.mutate(s => {
+                const i = s.intents.find(x => x.id === intentId || x.intentId === intentId);
+                if (i) { i.status = 'Fulfilled'; i.arcTxHash = tx.hash; i.arcFulfillmentTimestamp = Date.now(); i.updatedAt = Date.now(); i.settlementError = null; }
+              });
+              RepaymentContract.initiateSettlement(intentId, intent.cctpMsgHash || intent.txHash, intent.sourceDomain);
+              _startSettlementPoller(intentId, null, intent.cctpMsgHash || intent.txHash);
+              clearInterval(timer);
+              delete _activePollerTimers['op-' + intentId];
+              vaultRefreshUI();
+              return;
+            }
+          } catch(e) {
+            _warn('[OPERATOR] Fulfill attempt failed:', e.shortMessage || e.message);
+            VaultStore.mutate(s => {
+              const i = s.intents.find(x => x.id === intentId || x.intentId === intentId);
+              if (i) i.settlementError = 'Fulfill attempt failed: ' + (e.shortMessage || e.message || '').slice(0, 100);
+            });
+          }
+        }
+      }
+
       if (pollCount >= maxPolls) {
         clearInterval(timer);
         delete _activePollerTimers['op-' + intentId];
@@ -16242,6 +16661,7 @@ const FulfillerEngine = (() => {
   }
 
   function _startSettlementPoller(intentId, fromConfig, burnTxHash) {
+    if (window.__SETTLEMENT_RECOVERY_READONLY) return;
     const maxPolls = 180; // ~15 minutes (18 min total)
     let pollCount = 0;
     const INTERVAL = 6000;
@@ -16333,6 +16753,7 @@ const FulfillerEngine = (() => {
 
       // Phase B: Poll Circle Iris API for real attestation
       try {
+        _log('[CCTP] Fetching attestation from Iris — domain:', domain, 'txHash:', (intent.cctpMsgHash || burnTxHash));
         const irisUrl = 'https://iris-api-sandbox.circle.com/v2/messages/' + domain + '?transactionHash=' + (intent.cctpMsgHash || burnTxHash);
         const resp = await fetch(irisUrl);
         if (resp.ok) {
@@ -16353,7 +16774,7 @@ const FulfillerEngine = (() => {
               });
               // Delegate receiveMessage to TreasurySettlementExecutor (no user wallet required)
               // The executor only uses operator wallets — regular users never pay gas for this.
-              _log('[Settlement:PhaseB] Attestation found! INTENT:', intentId, '→ enqueuing for Treasury relayer');
+              _log('[CCTP] Attestation received — intent:', intentId, 'status:', msg.status);
               TreasurySettlementExecutor.enqueue(intentId, msg.message, msg.attestation);
               // Verify and settle (may complete or stay 'Settling' if mint pending)
               try {
@@ -16456,7 +16877,13 @@ const FulfillerEngine = (() => {
 
   // Permissionless: submit any pending receiveMessage attestations using the connected wallet
   // Called when a wallet connects — any wallet can submit any intent's attestation
+  // This can lead to writes (via TSE), so it is blocked when the Settlement Recovery Engine
+  // is in read-only mode (Recovery UI buttons set the flag temporarily).
   async function submitPendingAttestations() {
+    if (window.__SETTLEMENT_RECOVERY_READONLY) {
+      console.error("ILLEGAL USER TRANSACTION FROM RECOVERY ENGINE — blocked submitPendingAttestations");
+      return;
+    }
     // Enqueue all pending attestations to TreasurySettlementExecutor.
     // No chain switch required. No user wallet dependency.
     // The executor will process them when an operator wallet is available.
@@ -16477,12 +16904,12 @@ const FulfillerEngine = (() => {
 })();
 
 // ═══════════════════════════════════════════════════════════════════════════
-// TreasurySettlementExecutor — CCTP settlement relayer for Treasury Vault
+// TreasurySettlementExecutor — CCTP settlement MONITOR (READ-ONLY)
 // ═══════════════════════════════════════════════════════════════════════════
 // NEVER calls eth_sendTransaction from the user wallet.
-// ALL write operations require an operator wallet (isTurboOperator check).
+// All write operations (receiveMessage) moved to the Mint Console operator panel.
+// TSE only performs read-only monitoring: nonce checks, balance verification, queuing.
 // Read operations use ARC_READ_PROVIDER exclusively.
-// Settlement continues via on-chain monitoring even without operator.
 // ═══════════════════════════════════════════════════════════════════════════
 const TreasurySettlementExecutor = (() => {
   const _queue = [];
@@ -16503,6 +16930,10 @@ const TreasurySettlementExecutor = (() => {
   }
 
   function enqueue(intentId, messageBytes, attestationSig) {
+    if (window.__SETTLEMENT_RECOVERY_READONLY) {
+      console.error("ILLEGAL USER TRANSACTION FROM RECOVERY ENGINE — blocked enqueue");
+      return;
+    }
     const intent = RepaymentContract.getAll().find(i => i.id === intentId || i.intentId === intentId);
     if (intent && ['Settled','Failed'].includes(intent.status)) {
       _log('[TSE] SKIP enqueue intent=' + intentId + ' status=' + intent.status);
@@ -16538,6 +16969,11 @@ const TreasurySettlementExecutor = (() => {
     // ── MUTEX: prevent concurrent processing (prevents MetaMask popup storms) ──
     if (window.__TSE_EXECUTING) { _log('[TSE] SKIP — already processing'); return; }
     if (_queue.length === 0) return;
+    if (window.__SETTLEMENT_RECOVERY_READONLY) {
+      console.error("ILLEGAL USER TRANSACTION FROM RECOVERY ENGINE — blocked TSE process");
+      _warn('[TSE] BLOCKED processing while recovery read-only flag is set');
+      return;
+    }
     window.__TSE_EXECUTING = true;
 
     try {
@@ -16576,67 +17012,16 @@ const TreasurySettlementExecutor = (() => {
           if (i) { i.settlementError = task.lastError; i.retryCount = task.attemptCount; i.lastAttempt = task.lastAttemptAt; }
         });
 
-        // ── STEP 2: Only attempt receiveMessage if operator + on ARC + cooldown passed ──
-        if (hasOperator && onARC) {
-          const now = Date.now();
-          const lastAttempt = _lastTxAttempt[task.intentId] || 0;
-          if (now - lastAttempt < COOLDOWN_MS) {
-            const remaining = Math.round((COOLDOWN_MS - (now - lastAttempt)) / 1000);
-            _log('[TSE] COOLDOWN intent=' + task.intentId + ' retryIn=' + remaining + 's');
-            continue;
-          }
-
-          // Pre-guard: re-check nonce immediately before sending tx
-          if (await _checkNonce(task.messageBytes)) {
-            _log('[TSE] CHECK_NONCE already used — intent=' + task.intentId);
-            VaultStore.mutate(s => {
-              const i = s.intents.find(x => x.id === task.intentId || x.intentId === task.intentId);
-              if (i) { i._attestationSubmitted = true; i._mintTxHash = 'cctp-relayer'; i.settlementTxHash = 'cctp-relayer'; i.settlementError = null; }
-            });
-            try {
-              await RepaymentContract.verifyAndSettle(task.intentId, { attestation: task.attestationSig, mintTxHash: 'cctp-relayer' });
-              _log('[TSE] SETTLED from existing mint — intent=' + task.intentId);
-            } catch(e) { _log('[TSE] settle attempt for ' + task.intentId + ':', e.message||e); }
-            const idx = _queue.indexOf(task); if (idx !== -1) _queue.splice(idx, 1); _saveQueue(); vaultRefreshUI(); continue;
-          }
-
-          // ── ONLY place in the entire dApp that calls receiveMessage() with a signer ──
-          _lastTxAttempt[task.intentId] = now;
-          task.attemptCount++; task.lastAttemptAt = now;
-          _log('[TSE] EXECUTING receiveMessage intent=' + task.intentId + ' operator=' + operatorAddr + ' attempt=' + task.attemptCount);
-          try {
-            const arcCfg = CCTP_CONFIG[5042002];
-            if (arcCfg) {
-              const destMtAbi = ['function receiveMessage(bytes message, bytes attestation) returns (bool)'];
-              const destMtContract = new ethers.Contract(arcCfg.messageTransmitter, destMtAbi, signer);
-              const mintTx = await destMtContract.receiveMessage(task.messageBytes, task.attestationSig);
-              _log('[TSE] TX SENT intent=' + task.intentId + ' txHash=' + mintTx.hash);
-              const mintReceipt = await mintTx.wait();
-              if (mintReceipt && mintReceipt.status === 1) {
-                _log('[TSE] CONFIRMED intent=' + task.intentId + ' txHash=' + mintTx.hash + ' block=' + mintReceipt.blockNumber);
-                VaultStore.mutate(s => {
-                  const i = s.intents.find(x => x.id === task.intentId || x.intentId === task.intentId);
-                  if (i) { i._attestationSubmitted = true; i._mintTxHash = mintTx.hash; i.settlementTxHash = mintTx.hash; i.settlementError = null; i.lastAttempt = Date.now(); }
-                });
-                const idx = _queue.indexOf(task); if (idx !== -1) _queue.splice(idx, 1); _saveQueue(); vaultRefreshUI();
-              } else {
-                task.lastError = 'receiveMessage reverted (status=0)';
-                _warn('[TSE] REVERTED intent=' + task.intentId + ' txHash=' + mintTx.hash);
-              }
-            }
-          } catch(e) {
-            task.lastError = (e.shortMessage || e.message || 'Unknown').slice(0, 120);
-            _warn('[TSE] FAILED intent=' + task.intentId + ' error=' + task.lastError + ' operator=' + operatorAddr);
-          }
-          _saveQueue();
+        // ── TSE is READ-ONLY monitoring only ──
+        // receiveMessage() execution has been moved to the Mint Console operator panel.
+        // TSE only checks nonce on-chain and updates queue status for visibility.
+        // The Mint Console (trs-mint) is the ONLY module that calls receiveMessage() with a signer.
+        if (!hasOperator) {
+          task.lastError = 'Pending mint — use Mint Console with operator wallet';
+          _log('[TSE] QUEUED for Mint Console — intent=' + task.intentId);
         } else {
-          if (!hasOperator) {
-            task.lastError = 'Waiting for liquidity operator';
-            _log('[TSE] WAITING_OPERATOR intent=' + task.intentId);
-          } else if (!onARC) {
-            task.lastError = 'Waiting for ARC network (operator on chain ' + activeChainId + ')';
-            _log('[TSE] WAITING_OPERATOR intent=' + task.intentId + ' reason=not_on_arc');
-          }
+          task.lastError = 'Ready for mint — click Execute Mint in Mint Console';
+          _log('[TSE] READY intent=' + task.intentId + ' operator=' + operatorAddr + ' — use Mint Console');
         }
       }
       vaultRefreshUI();
@@ -17305,8 +17690,12 @@ async function vaultInit() {
         await VaultChain.fetchVaultBalances();
       }
       vaultRefreshUI();
-      // TreasurySettlementExecutor: process queued receiveMessage tasks (operator-only)
-      try { TreasurySettlementExecutor.forceProcess(); } catch(e) { _warn('catch', e?.message||e); }
+      // TSE is triggered ONLY by settlement poller (Phase A/B enqueue).
+      // No periodic auto-processing — prevents MetaMask popups every 5s.
+      // Auto-refresh Mint Console if on that section
+      if (document.getElementById('trs-mint')?.classList.contains('active')) {
+        try { mcRefreshQueue(); } catch(e) { _warn('catch', e?.message||e); }
+      }
     }
   }, 5000);
 
@@ -17974,7 +18363,11 @@ const SettlementModule = (() => {
     if (el) el.textContent = text;
   }
 
-  // ── Settlement Recovery Engine (PRESERVED + ENHANCED) ────────────────────
+  // ── Settlement Recovery Engine — 100% READ ONLY ──────────────────────────
+  // This engine ONLY performs reads: Iris API, on-chain reads via ARC_READ_PROVIDER,
+  // localStorage verification state, and UI updates.
+  // It MUST NEVER trigger any on-chain write, receiveMessage, fulfill, or signer transaction.
+  // All writes are exclusively handled by TreasurySettlementExecutor (guarded by operator + cooldown + mutex).
   async function _runRecoveryEngine() {
     const intents = _loadIntents();
     const stuckStatuses = ['Pending Burn','Awaiting Attestation','Attestation Received','Created','Fulfilled','Settling'];
@@ -17984,33 +18377,23 @@ const SettlementModule = (() => {
     });
     if (allPending.length === 0) return;
 
-    _log('[SettlementRecovery] ' + allPending.length + ' intents need recovery polling');
+    _log('[SettlementRecovery] ' + allPending.length + ' intents need read-only recovery verification');
 
     for (const intent of allPending) {
       try {
-        // Run verification pipeline
+        // Run verification pipeline (read-only on-chain + local)
         await ReimbursementProof.runVerification([intent]);
 
-        // Resume polling via FulfillerEngine if available
-        const resolvedId = intent.intentId || intent.id;
-        if (typeof FulfillerEngine !== 'undefined' && resolvedId) {
-          if ((intent.status === 'Settling' || _displayStatus(intent) === 'Attestation Received')) {
-            if (typeof FulfillerEngine._startSettlementPoller === 'function') {
-              FulfillerEngine._startSettlementPoller(resolvedId);
-            }
-          }
-          if ((intent.status === 'Created' || intent.status === 'Awaiting Operator' || _displayStatus(intent) === 'Pending Burn')) {
-            if (typeof FulfillerEngine._startOperatorFulfillmentPoller === 'function') {
-              FulfillerEngine._startOperatorFulfillmentPoller(resolvedId);
-            }
-          }
-        }
-
-        // Re-check Circle attestation
+        // Re-check Circle attestation (Iris read only)
         const msgHash = intent.messageHash || intent.cctpMsgHash;
         if (msgHash && (intent.status === 'Settling' || _displayStatus(intent) === 'Awaiting Attestation')) {
           _pollAttestation(intent.intentId || intent.id, msgHash, intent.sourceDomain);
         }
+
+        // NOTE: We deliberately do NOT start any FulfillerEngine pollers here.
+        // Pollers (which eventually enqueue to TSE for possible writes) are managed
+        // exclusively by the main Turbo execution path and FulfillerEngine.recoverSettlingIntents.
+        // Recovery UI is for monitoring/verification only.
       } catch(e) {
         _warn('[SettlementRecovery] intent', intent.intentId||intent.id, ':', e.message);
       }
@@ -18138,30 +18521,244 @@ function stlClearFilters() {
 }
 
 function stlResumeSettlement() {
-  _stlLog('Resuming settlement polling for all stuck intents…');
-  SettlementModule.runRecovery().then(() => {
-    _stlLog('Recovery scan complete.');
-    stlRefreshAll();
-  });
+  // Recovery is READ-ONLY. This only re-runs verification + Iris polling.
+  // No on-chain writes, no receiveMessage, no signer transactions.
+  _stlLog('Recovery: read-only re-verification + Iris poll (no writes)…');
+  window.__SETTLEMENT_RECOVERY_READONLY = true;
+  try {
+    SettlementModule.runRecovery().then(() => {
+      _stlLog('Recovery scan complete (read-only).');
+      stlRefreshAll();
+    });
+  } finally {
+    setTimeout(() => { window.__SETTLEMENT_RECOVERY_READONLY = false; }, 100);
+  }
 }
 
 function stlRecheckAttestation() {
-  _stlLog('Rechecking Circle attestation for all Settling intents…');
-  SettlementModule.runRecovery();
+  // READ-ONLY: only re-polls Iris for attestations.
+  _stlLog('Recovery: read-only recheck of Circle attestations…');
+  window.__SETTLEMENT_RECOVERY_READONLY = true;
+  try {
+    SettlementModule.runRecovery();
+  } finally {
+    setTimeout(() => { window.__SETTLEMENT_RECOVERY_READONLY = false; }, 100);
+  }
 }
 
 function stlForceSyncState() {
-  _stlLog('Force-syncing intent state from localStorage…');
+  // Purely local read + UI refresh. No network writes.
+  _stlLog('Recovery: local state sync (read-only)…');
   stlRefreshAll();
   _stlLog('Sync complete.');
 }
 
 function stlRefreshCircle() {
-  _stlLog('Refreshing Circle Iris API status…');
-  SettlementModule.runRecovery().then(() => {
-    _stlLog('Circle refresh done.');
-    stlRefreshAll();
-  });
+  // READ-ONLY: refresh from Iris API only.
+  _stlLog('Recovery: read-only Circle Iris refresh…');
+  window.__SETTLEMENT_RECOVERY_READONLY = true;
+  try {
+    SettlementModule.runRecovery().then(() => {
+      _stlLog('Circle refresh done (read-only).');
+      stlRefreshAll();
+    });
+  } finally {
+    setTimeout(() => { window.__SETTLEMENT_RECOVERY_READONLY = false; }, 100);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MINT CONSOLE — CCTP receiveMessage() Operator Panel
+// ═══════════════════════════════════════════════════════════════════════════
+// ONLY module authorized to call receiveMessage() with a signer.
+// Requires: connected wallet is TreasuryVault owner OR operator.
+// TreasurySettlementExecutor does read-only monitoring + queuing.
+// ═══════════════════════════════════════════════════════════════════════════
+
+let _mcAutoTimer = null;
+let _mcAutoEnabled = false;
+
+function _mcLog(msg) {
+  const el = document.getElementById('mc-log');
+  if (!el) return;
+  const ts = new Date().toLocaleTimeString();
+  if (el.textContent === '— Ready —') el.textContent = '';
+  el.textContent = '[' + ts + '] ' + msg + '\n' + el.textContent.slice(0, 2000);
+}
+
+function mcUpdateStatus() {
+  const hasWallet = !!(signer && walletAddress);
+  const isOp = hasWallet ? isTurboOperator(walletAddress) : false;
+  const isOwner = (hasWallet && typeof TREASURY_OWNER_ADDRESS !== 'undefined')
+    ? walletAddress.toLowerCase() === TREASURY_OWNER_ADDRESS.toLowerCase() : false;
+  const authorized = isOp || isOwner;
+
+  const addrEl = document.getElementById('mc-operator-addr');
+  const dotEl  = document.getElementById('mc-operator-dot');
+  const stEl   = document.getElementById('mc-operator-status');
+  const ownerEl = document.getElementById('mc-vault-owner');
+  const netEl   = document.getElementById('mc-network');
+  const countEl = document.getElementById('mc-pending-count');
+
+  if (addrEl) addrEl.textContent = hasWallet ? shortAddr(walletAddress) : '—';
+  if (ownerEl) ownerEl.textContent = TREASURY_OWNER_ADDRESS ? shortAddr(TREASURY_OWNER_ADDRESS) : '—';
+  if (netEl) {
+    netEl.textContent = activeChainId === 5042002 ? 'ARC Testnet ✓' : 'Chain ' + activeChainId;
+    netEl.style.color = activeChainId === 5042002 ? 'var(--green)' : 'var(--red)';
+  }
+  if (dotEl) dotEl.style.background = authorized ? 'var(--green)' : 'var(--red)';
+  if (stEl) {
+    stEl.textContent = authorized ? '● Connected' : '● Not Connected / Unauthorized';
+    stEl.style.color = authorized ? 'var(--green)' : 'var(--red)';
+  }
+  if (countEl) {
+    const pending = RepaymentContract.getAll().filter(i =>
+      i._attestationMsg && i._attestationSig && !i._attestationSubmitted &&
+      !['Settled','Failed'].includes(i.status)
+    );
+    countEl.textContent = pending.length;
+  }
+}
+
+function mcRefreshQueue() {
+  mcUpdateStatus();
+  const tbody = document.getElementById('mc-queue-tbody');
+  if (!tbody) return;
+
+  const intents = RepaymentContract.getAll().filter(i =>
+    i._attestationMsg && i._attestationSig && !i._attestationSubmitted &&
+    !['Settled','Failed'].includes(i.status)
+  );
+
+  if (intents.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="8" style="padding:24px;text-align:center;color:var(--muted2);font-size:10px;"><i class="ti ti-inbox" style="font-size:22px;display:block;margin-bottom:6px;opacity:.3"></i>No pending mints. Attestations will appear here once detected.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = intents.map(i => {
+    const id = i.id || i.intentId || '?';
+    const route = (i.srcChain || '?') + ' → ' + (i.dstChain || 'ARC');
+    const asset = (i.asset || 'usdc').toUpperCase();
+    const amt = (i.grossAmount || i.amount || 0).toFixed(2);
+    const attHash = (i._attestationSig || '').slice(0, 12) + '…';
+    const nonce = i._attestationSubmitted ? '✓' : 'Pending';
+    const nonceColor = i._attestationSubmitted ? 'var(--green)' : 'var(--yellow)';
+    const status = 'Ready for Mint';
+    const statusColor = 'var(--green)';
+    const disabled = '';
+    return '<tr style="border-bottom:1px solid rgba(255,255,255,.03)">' +
+      '<td style="padding:8px;font-family:monospace;font-size:8.5px;color:var(--muted2)">' + id + '</td>' +
+      '<td style="padding:8px;font-size:9px">' + route + '</td>' +
+      '<td style="padding:8px">' + asset + '</td>' +
+      '<td style="padding:8px;text-align:right;font-weight:600">' + amt + '</td>' +
+      '<td style="padding:8px;text-align:center;font-family:monospace;font-size:8px;color:var(--blue)">' + attHash + '</td>' +
+      '<td style="padding:8px;text-align:center;color:' + nonceColor + '">' + nonce + '</td>' +
+      '<td style="padding:8px;text-align:center;color:' + statusColor + ';font-weight:600">' + status + '</td>' +
+      '<td style="padding:8px;text-align:center"><button onclick="mcExecuteMint(\'' + id + '\')" class="btn" style="font-size:9px;padding:4px 10px;border-color:var(--yellow);color:var(--yellow)"' + disabled + '><i class="ti ti-coins"></i> Execute Mint</button></td>' +
+      '</tr>';
+  }).join('');
+
+  _mcLog('Pending intent(s) detected: ' + intents.length);
+}
+
+async function mcExecuteMint(intentId) {
+  const intent = RepaymentContract.getAll().find(i => (i.id === intentId || i.intentId === intentId));
+  if (!intent) { _mcLog('Intent not found: ' + intentId); return; }
+  if (!intent._attestationMsg || !intent._attestationSig) { _mcLog('No attestation data for: ' + intentId); return; }
+
+  // SECURITY: only owner or operator wallet can execute
+  const isOp = isTurboOperator(walletAddress);
+  const isOwner = (walletAddress && TREASURY_OWNER_ADDRESS)
+    ? walletAddress.toLowerCase() === TREASURY_OWNER_ADDRESS.toLowerCase() : false;
+  if (!isOp && !isOwner) {
+    _mcLog('UNAUTHORIZED — wallet is not Vault owner or operator');
+    showToast('Unauthorized operator wallet. Only Vault owner or operators can execute mint.', 'error');
+    return;
+  }
+  if (activeChainId !== 5042002) {
+    _mcLog('Wrong network — must be on ARC Testnet (5042002), current: ' + activeChainId);
+    showToast('Switch to ARC Testnet to execute mint', 'error');
+    return;
+  }
+
+  _mcLog('Preparing receiveMessage() for intent ' + intentId + '…');
+
+  try {
+    // Pre-check nonce
+    const arcCfg = CCTP_CONFIG[5042002];
+    const mtAbi = ['function usedNonces(bytes32) view returns (uint256)'];
+    const mtRead = new ethers.Contract(arcCfg.messageTransmitter, mtAbi, ARC_READ_PROVIDER);
+    const msgHash = ethers.keccak256(intent._attestationMsg);
+    const nonce = await mtRead.usedNonces(msgHash);
+    if (Number(nonce) > 0) {
+      _mcLog('SKIP — nonce already used (already minted on-chain)');
+      VaultStore.mutate(s => {
+        const i = s.intents.find(x => x.id === intentId || x.intentId === intentId);
+        if (i) { i._attestationSubmitted = true; i._mintTxHash = 'already-minted'; i.settlementTxHash = 'already-minted'; i.settlementError = null; }
+      });
+      mcRefreshQueue(); vaultRefreshUI(); return;
+    }
+
+    // Execute receiveMessage
+    _mcLog('Transaction submitted — signing with operator wallet…');
+    const destMtAbi = ['function receiveMessage(bytes message, bytes attestation) returns (bool)'];
+    const destMtContract = new ethers.Contract(arcCfg.messageTransmitter, destMtAbi, signer);
+    const mintTx = await destMtContract.receiveMessage(intent._attestationMsg, intent._attestationSig);
+    _mcLog('TX SENT: ' + mintTx.hash);
+
+    const mintReceipt = await mintTx.wait();
+    if (mintReceipt && mintReceipt.status === 1) {
+      _mcLog('MINT COMPLETED — TX: ' + mintTx.hash + ' block: ' + mintReceipt.blockNumber);
+      VaultStore.mutate(s => {
+        const i = s.intents.find(x => x.id === intentId || x.intentId === intentId);
+        if (i) { i._attestationSubmitted = true; i._mintTxHash = mintTx.hash; i.settlementTxHash = mintTx.hash; i.settlementError = null; i.lastAttempt = Date.now(); }
+      });
+      try {
+        await RepaymentContract.verifyAndSettle(intentId, { attestation: intent._attestationSig, mintTxHash: mintTx.hash });
+        _mcLog('Settlement verified — intent ' + intentId + ' marked Settled');
+      } catch(e) { _mcLog('Settle attempt: ' + (e.message||e).slice(0, 100)); }
+      showToast('Mint completed: ' + shortAddr(mintTx.hash), 'success');
+    } else {
+      _mcLog('MINT REVERTED — TX: ' + mintTx.hash + ' status=0');
+      showToast('Mint reverted on-chain', 'error');
+    }
+  } catch(e) {
+    _mcLog('MINT FAILED: ' + (e.shortMessage || e.message || 'Unknown').slice(0, 200));
+    showToast('Mint failed: ' + (e.shortMessage || e.message), 'error');
+  }
+  mcRefreshQueue();
+  vaultRefreshUI();
+}
+
+function mcToggleAutoMint() {
+  _mcAutoEnabled = !_mcAutoEnabled;
+  const toggle = document.getElementById('mc-auto-toggle');
+  const statusEl = document.getElementById('mc-auto-status');
+  const switchEl = document.getElementById('mc-auto-switch');
+
+  if (toggle) toggle.checked = _mcAutoEnabled;
+  if (statusEl) { statusEl.textContent = _mcAutoEnabled ? 'ON' : 'OFF'; statusEl.style.color = _mcAutoEnabled ? 'var(--green)' : 'var(--muted2)'; }
+  if (switchEl) {
+    switchEl.style.background = _mcAutoEnabled ? 'var(--green)' : 'var(--border)';
+    const dot = switchEl.querySelector('div');
+    if (dot) { dot.style.left = _mcAutoEnabled ? '20px' : '2px'; dot.style.background = _mcAutoEnabled ? '#fff' : 'var(--muted2)'; }
+  }
+
+  if (_mcAutoEnabled) {
+    _mcLog('Auto Mint ENABLED — scanning every 10s');
+    _mcAutoTimer = setInterval(() => {
+      const intents = RepaymentContract.getAll().filter(i =>
+        i._attestationMsg && i._attestationSig && !i._attestationSubmitted &&
+        !['Settled','Failed'].includes(i.status)
+      );
+      if (intents.length === 0) return;
+      _mcLog('Auto-scan: ' + intents.length + ' pending mint(s)');
+      intents.forEach(i => mcExecuteMint(i.id || i.intentId));
+    }, 10000);
+  } else {
+    _mcLog('Auto Mint DISABLED');
+    if (_mcAutoTimer) { clearInterval(_mcAutoTimer); _mcAutoTimer = null; }
+  }
 }
 
 function _stlLog(msg) {
@@ -18182,26 +18779,30 @@ function _stlLog(msg) {
     if (name === 'settlements') {
       setTimeout(() => SettlementModule.refresh(), 50);
     }
+    if (name === 'mint') {
+      setTimeout(() => mcRefreshQueue(), 150);
+    }
   };
 })();
 
-// ─── Run Recovery Engine on app startup ─────────────────────────────────────
+// ─── Run Recovery Engine on app startup — READ-ONLY ─────────────────────────
 (function _stlBootstrap() {
   const run = () => {
+    window.__SETTLEMENT_RECOVERY_READONLY = true;
     try { SettlementModule.runRecovery(); } catch(e) { _warn('catch', e?.message||e); }
+    setTimeout(() => { window.__SETTLEMENT_RECOVERY_READONLY = false; }, 100);
   };
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', run);
   } else {
     setTimeout(run, 1200);
   }
-  // Also refresh on wallet connect
+  // Also refresh on wallet connect — recovery is READ-ONLY refresh only, no writes
   document.addEventListener('vault:walletConnected', () => {
     setTimeout(() => {
-      SettlementModule.refresh();
-      if (typeof FulfillerEngine !== 'undefined' && typeof FulfillerEngine.submitPendingAttestations === 'function') {
-        FulfillerEngine.submitPendingAttestations();
-      }
+      window.__SETTLEMENT_RECOVERY_READONLY = true;
+      try { SettlementModule.refresh(); } catch(e) { _warn('catch', e?.message||e); }
+      setTimeout(() => { window.__SETTLEMENT_RECOVERY_READONLY = false; }, 100);
     }, 800);
   });
 })();

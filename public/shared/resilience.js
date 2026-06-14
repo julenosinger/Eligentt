@@ -91,11 +91,16 @@ const Resilience = (() => {
    * after page visibility change or network interruption.
    */
   function resumePolling() {
+    // BLOCK: if Settlement Recovery Engine is in read-only mode, do NOT resume any writes
+    if (typeof window !== 'undefined' && window.__SETTLEMENT_RECOVERY_READONLY) {
+      console.error("ILLEGAL USER TRANSACTION FROM RECOVERY ENGINE — blocked resumePolling");
+      return;
+    }
     // Recover Treasury intents via global FulfillerEngine
     if (typeof FulfillerEngine !== 'undefined' && typeof FulfillerEngine.recoverSettlingIntents === 'function') {
       try { FulfillerEngine.recoverSettlingIntents(); } catch(e) { console.error('[Resilience] recoverSettlingIntents error:', e); }
     }
-    // Recover Settlement Module if exists
+    // Recover Settlement Module if exists — recovery is now read-only in SettlementModule
     if (typeof SettlementModule !== 'undefined' && typeof SettlementModule.runRecovery === 'function') {
       try { SettlementModule.runRecovery(); } catch(e) { console.error('[Resilience] runRecovery error:', e); }
     }

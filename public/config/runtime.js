@@ -87,6 +87,10 @@ const RT = Object.freeze({
   CIRCLE_WEBSITE_URL: 'https://circle.com',
   CLOUDFLARE_ETH_RPC: 'https://cloudflare-eth.com',
 
+  // ── Turbo Relayer ────────────────────────────────────────
+  RELAYER_ENDPOINT:    '/api/relayer',   // Cloudflare Function endpoint for operator fulfillment
+  RELAYER_ENABLED:     true,             // Set to false to disable backend relayer calls
+
   // ── App Info ────────────────────────────────────────────
   APP_NAME:           'Elligente',
   APP_URL:            'https://elligente.pages.dev',
