@@ -4,19 +4,20 @@
  * Cloudflare Pages Function — POST /api/relayer
  *
  * Receives intent data and executes fulfillAndPayWithFee() on-chain
- * using OPERATOR_PRIVATE_KEY from Cloudflare environment variables.
+ * using TURBO_RELAYER_PRIVATE_KEY from Cloudflare environment variables.
  *
- * NEVER exposes the private key to the browser.
- * NEVER depends on user wallet or MetaMask browser extension.
+ * The relayer wallet is a dedicated EOA authorized as operator on TreasuryVault.
+ * It operates fully server-side — NEVER exposed to browser, NEVER depends on
+ * user wallet or MetaMask.
  *
  * Deployment:
- *   1. Set OPERATOR_PRIVATE_KEY in Cloudflare Dashboard > Pages > Settings > Environment Variables
+ *   1. Set TURBO_RELAYER_PRIVATE_KEY in Cloudflare Dashboard > Pages > Settings > Environment Variables
  *   2. Set ARC_RPC_URL (optional, defaults to ARC Testnet)
- *   3. Deploy: npx wrangler pages deploy src --branch main
+ *   3. Deploy: npx wrangler pages deploy public --project-name elligente
  *
  * Environment Variables (CF Dashboard):
- *   OPERATOR_PRIVATE_KEY  — 0x-prefixed private key of an operator wallet
- *   ARC_RPC_URL           — (optional) ARC RPC URL
+ *   TURBO_RELAYER_PRIVATE_KEY  — 0x-prefixed private key of the relayer operator wallet
+ *   ARC_RPC_URL                — (optional) ARC RPC URL
  */
 import { ethers } from 'ethers';
 
@@ -50,9 +51,9 @@ export async function onRequest(context) {
     return json({ error: 'Method not allowed' }, 405);
   }
 
-  const key = env.OPERATOR_PRIVATE_KEY;
+  const key = env.TURBO_RELAYER_PRIVATE_KEY;
   if (!key) {
-    return json({ error: 'OPERATOR_PRIVATE_KEY not set in Cloudflare environment' }, 500);
+    return json({ error: 'TURBO_RELAYER_PRIVATE_KEY not set in Cloudflare environment' }, 500);
   }
 
   let body;
