@@ -45,7 +45,7 @@ export async function onRequest(context) {
     headers: {
       'Content-Type': 'text/html; charset=utf-8',
       'Cache-Control': 'no-cache, no-store, must-revalidate',
-      'Content-Security-Policy': "default-src * 'unsafe-inline' 'unsafe-eval' data: blob:; script-src * 'unsafe-inline' 'unsafe-eval' data: blob:; style-src * 'unsafe-inline'; img-src * data: blob:; connect-src * data: blob: wss:; font-src * data:; worker-src * blob:",
+      'Content-Security-Policy-Report-Only': "default-src * 'unsafe-inline' 'unsafe-eval' data: blob:; script-src * 'unsafe-inline' 'unsafe-eval' data: blob:; style-src * 'unsafe-inline'; img-src * data: blob:; connect-src * data: blob: wss:; font-src * data:; worker-src * blob:; report-uri /api/csp-report",
     },
   });
 }

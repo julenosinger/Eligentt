@@ -122,11 +122,69 @@ const CCTPShared = (() => {
     return null;
   }
 
+  /**
+   * Unified bridge attestation poller — replaces duplicate inline code.
+   * @param {object} config - CCTP_CONFIG entry for source chain
+   * @param {string} burnTxHash - depositForBurn tx hash
+   * @param {object} burnReceipt - tx receipt for log extraction
+   * @param {object} opts - { isArcInbound, maxPolls, interval, onPoll }
+   * @returns {Promise<{messageBytes, attestationSig, messageHash}|null>}
+   */
+  async function pollBridgeAttestation(config, burnTxHash, burnReceipt, opts = {}) {
+    const domain = config.domain;
+    const isArcInbound = opts.isArcInbound || false;
+
+    // Step 1: Extract MessageSent from logs (needed for receiveMessage + V1 fallback)
+    const messageBytes = extractMessageFromLogs(burnReceipt);
+
+    if (isArcInbound) {
+      const maxPolls = opts.maxPolls || 180;
+      const interval = opts.interval || 5000;
+      const irisUrl = IRIS_V2_URL + domain + '?transactionHash=' + burnTxHash;
+
+      for (let i = 0; i < maxPolls; i++) {
+        await new Promise(r => setTimeout(r, interval));
+        try {
+          const res = await fetch(irisUrl);
+          if (!res.ok) continue;
+          const data = await res.json();
+          if (data.messages && data.messages.length > 0) {
+            const msg = data.messages[0];
+            if (opts.onPoll) opts.onPoll(i + 1, msg.status || 'pending');
+            if (msg.status === 'complete' && msg.attestation && msg.attestation !== 'PENDING') {
+              return {
+                messageBytes: msg.message || messageBytes,
+                attestationSig: msg.attestation,
+                messageHash: msg.messageHash,
+              };
+            }
+          }
+        } catch (e) { /* retry */ }
+      }
+
+      if (messageBytes && typeof ethers !== 'undefined') {
+        const msgHash = ethers.keccak256(messageBytes);
+        const sig = await pollIrisV1(msgHash, { maxPolls: 60, interval: 5000 });
+        if (sig) return { messageBytes, attestationSig: sig, messageHash: msgHash };
+      }
+
+      return null;
+    }
+
+    // Standard flow (non-Arc): V2 with shorter timeout + V1 fallback
+    return pollForAttestation(domain, burnTxHash, burnReceipt, {
+      maxPolls: opts.maxPolls || 120,
+      interval: opts.interval || 5000,
+      onPoll: opts.onPoll
+    });
+  }
+
   // ── Public API ──────────────────────────────────────────
   return {
     pollIrisV2,
     pollIrisV1,
     extractMessageFromLogs,
-    pollForAttestation
+    pollForAttestation,
+    pollBridgeAttestation,
   };
 })();

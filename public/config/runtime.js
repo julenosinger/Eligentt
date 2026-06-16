@@ -94,7 +94,7 @@ const RT = Object.freeze({
   RELAYER_ENABLED:     true,             // Set to false to disable backend relayer calls
 
   // ── App Info ────────────────────────────────────────────
-  APP_NAME:           'Elligente',
+  APP_NAME:           'Elligentt',
   APP_URL:            'https://elligente.pages.dev',
   VAULT_VERSION:      'vault_v2_real',
   VAULT_STORE_KEY:    'elligente_vault_v2',

@@ -20,13 +20,19 @@
  *   ARC_RPC_URL                — (optional) ARC RPC URL
  */
 import { ethers } from 'ethers';
+import { checkRelayLimit } from './rate-limit.mjs';
 
 // ── CORS ──
-const CORS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
-};
+function getCORS(request, env) {
+  const allowed = (env.ALLOWED_ORIGINS || 'https://elligente.pages.dev').split(',').map(s => s.trim());
+  const origin = request.headers.get('Origin') || '';
+  const corsOrigin = allowed.includes(origin) ? origin : (allowed[0] || 'https://elligente.pages.dev');
+  return {
+    'Access-Control-Allow-Origin': corsOrigin,
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+  };
+}
 
 // ── Contract addresses (must match frontend config/runtime.js) ──
 const TREASURY_VAULT = '0xbfC9E8F79bd30b912081ae88F9ad0A515F08c2F1';
@@ -44,8 +50,20 @@ const VAULT_ABI = [
 export async function onRequest(context) {
   const { request, env } = context;
 
+  const corsHeaders = getCORS(request, env);
+
+  // Rate limit check
+  const clientIP = request.headers.get('CF-Connecting-IP') || request.headers.get('X-Forwarded-For') || 'unknown';
+  const rateCheck = checkRelayLimit(clientIP);
+  if (!rateCheck.allowed) {
+    return new Response(JSON.stringify({ error: 'Rate limit exceeded', retryAfter: rateCheck.reset }), {
+      status: 429,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json', 'Retry-After': String(rateCheck.reset) },
+    });
+  }
+
   if (request.method === 'OPTIONS') {
-    return new Response(null, { status: 204, headers: CORS });
+    return new Response(null, { status: 204, headers: corsHeaders });
   }
   if (request.method !== 'POST') {
     return json({ error: 'Method not allowed' }, 405);
@@ -64,6 +82,22 @@ export async function onRequest(context) {
   const { intentBytes32, asset, grossAmount, feeAmount, userAddress } = body;
   if (!intentBytes32 || !asset || grossAmount == null || feeAmount == null || !userAddress) {
     return json({ error: 'Missing fields: intentBytes32, asset, grossAmount, feeAmount, userAddress' }, 400);
+  }
+
+  if (typeof grossAmount !== 'number' || grossAmount <= 0) {
+    return json({ error: 'Invalid grossAmount: must be positive' }, 400);
+  }
+  if (typeof feeAmount !== 'number' || feeAmount < 0 || feeAmount > grossAmount) {
+    return json({ error: 'Invalid feeAmount: must be between 0 and grossAmount' }, 400);
+  }
+  if (!ethers.isAddress(userAddress)) {
+    return json({ error: 'Invalid userAddress: not a valid Ethereum address' }, 400);
+  }
+  if (typeof intentBytes32 !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(intentBytes32)) {
+    return json({ error: 'Invalid intentBytes32: must be 0x-prefixed bytes32 hex' }, 400);
+  }
+  if (!['usdc', 'eurc', 'cirbtc'].includes(asset)) {
+    return json({ error: 'Unknown asset: must be usdc, eurc, or cirbtc' }, 400);
   }
 
   const rpc = env.ARC_RPC_URL || 'https://rpc.testnet.arc.network';
@@ -119,11 +153,11 @@ export async function onRequest(context) {
     console.error('[RELAYER] Fail:', e.shortMessage || e.message || e);
     return json({ success: false, error: e.shortMessage || e.message || 'Unknown' }, 500);
   }
-}
 
-function json(data, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { ...CORS, 'Content-Type': 'application/json' },
-  });
+  function json(data, status = 200) {
+    return new Response(JSON.stringify(data), {
+      status,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
 }

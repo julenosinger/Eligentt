@@ -19,13 +19,19 @@
  *   ARC_RPC_URL                — (optional) ARC RPC URL
  */
 import { ethers } from 'ethers';
+import { checkMintLimit } from '../rate-limit.mjs';
 
 // ── CORS ──
-const CORS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
-};
+function getCORS(request, env) {
+  const allowed = (env.ALLOWED_ORIGINS || 'https://elligente.pages.dev').split(',').map(s => s.trim());
+  const origin = request.headers.get('Origin') || '';
+  const corsOrigin = allowed.includes(origin) ? origin : (allowed[0] || 'https://elligente.pages.dev');
+  return {
+    'Access-Control-Allow-Origin': corsOrigin,
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+  };
+}
 
 // ── Contract addresses (must match frontend config/runtime.js) ──
 const TREASURY_VAULT = '0xbfC9E8F79bd30b912081ae88F9ad0A515F08c2F1';
@@ -45,8 +51,20 @@ const ARC_CHAIN_ID = 5042002;
 export async function onRequest(context) {
   const { request, env } = context;
 
+  const corsHeaders = getCORS(request, env);
+
+  // Rate limit check
+  const clientIP = request.headers.get('CF-Connecting-IP') || request.headers.get('X-Forwarded-For') || 'unknown';
+  const rateCheck = checkMintLimit(clientIP);
+  if (!rateCheck.allowed) {
+    return new Response(JSON.stringify({ error: 'Rate limit exceeded', retryAfter: rateCheck.reset }), {
+      status: 429,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json', 'Retry-After': String(rateCheck.reset) },
+    });
+  }
+
   if (request.method === 'OPTIONS') {
-    return new Response(null, { status: 204, headers: CORS });
+    return new Response(null, { status: 204, headers: corsHeaders });
   }
   if (request.method !== 'POST') {
     return json({ error: 'Method not allowed' }, 405);
@@ -65,6 +83,13 @@ export async function onRequest(context) {
   const { messageBytes, attestationSignature, intentId } = body;
   if (!messageBytes || !attestationSignature) {
     return json({ error: 'Missing fields: messageBytes, attestationSignature' }, 400);
+  }
+
+  if (typeof messageBytes !== 'string' || !/^0x[0-9a-fA-F]+$/.test(messageBytes) || messageBytes.length < 10) {
+    return json({ error: 'Invalid messageBytes: must be 0x-prefixed hex' }, 400);
+  }
+  if (typeof attestationSignature !== 'string' || !/^0x[0-9a-fA-F]+$/.test(attestationSignature) || attestationSignature.length < 10) {
+    return json({ error: 'Invalid attestationSignature: must be 0x-prefixed hex' }, 400);
   }
 
   const rpc = env.ARC_RPC_URL || 'https://rpc.testnet.arc.network';
@@ -123,12 +148,12 @@ export async function onRequest(context) {
     const mtWrite = new ethers.Contract(MESSAGE_TRANSMITTER, MT_ABI, signer);
     const tx = await mtWrite.receiveMessage(messageBytes, attestationSignature);
 
-    console.log('[RELAYER] Mint tx submitted:', tx.hash);
+    console.log('[RELAYER] receiveMessage submitted — TX:', tx.hash);
 
     const rc = await tx.wait();
 
     if (rc && rc.status === 1) {
-      console.log('[RELAYER] Mint confirmed — TX:', tx.hash, 'Block:', rc.blockNumber);
+      console.log('[RELAYER] Treasury mint confirmed — TX:', tx.hash, 'Block:', rc.blockNumber);
       return json({ success: true, txHash: tx.hash, blockNumber: rc.blockNumber });
     } else {
       console.error('[RELAYER] Mint reverted on-chain — TX:', tx.hash);
@@ -138,11 +163,11 @@ export async function onRequest(context) {
     console.error('[RELAYER] Mint failed:', e.shortMessage || e.message || e);
     return json({ success: false, error: e.shortMessage || e.message || 'Unknown' }, 500);
   }
-}
 
-function json(data, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { ...CORS, 'Content-Type': 'application/json' },
-  });
+  function json(data, status = 200) {
+    return new Response(JSON.stringify(data), {
+      status,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
 }
