@@ -9,6 +9,10 @@ export const RELAYER_CONFIG = {
   ARC_CHAIN_ID:    5042002,
   ARC_RPC_URL:     'https://rpc.testnet.arc.network',
   ALLOWED_ORIGINS: 'https://elligente.pages.dev',
+  PAYLINK_FEE_BPS: 200,
+  INVOICE_FEE_BPS: 200,
+  SEND_ASSETS_FEE_BPS: 20,
+  MULTISEND_FEE_BPS: 20,
 
   ASSETS: {
     usdc:   '0x3600000000000000000000000000000000000000',

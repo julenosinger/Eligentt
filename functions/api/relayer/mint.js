@@ -150,15 +150,21 @@ export async function onRequest(context) {
 
     console.log('[RELAYER] receiveMessage submitted — TX:', tx.hash);
 
-    const rc = await tx.wait();
+    const rc = await tx.wait(1, 25000);
 
-    if (rc && rc.status === 1) {
-      console.log('[RELAYER] Treasury mint confirmed — TX:', tx.hash, 'Block:', rc.blockNumber);
-      return json({ success: true, txHash: tx.hash, blockNumber: rc.blockNumber });
-    } else {
-      console.error('[RELAYER] Mint reverted on-chain — TX:', tx.hash);
-      return json({ success: false, error: 'Transaction reverted on-chain', txHash: tx.hash }, 500);
+    if (!rc || rc.status !== 1) {
+      console.error('[RELAYER] Mint reverted or no receipt — TX:', tx.hash);
+      return json({ success: false, error: 'Transaction reverted on-chain or no receipt', txHash: tx.hash }, 500);
     }
+
+    const verifyReceipt = await provider.getTransactionReceipt(tx.hash);
+    if (!verifyReceipt || verifyReceipt.status !== 1) {
+      console.error('[RELAYER] Post-confirm verification failed — TX:', tx.hash, 'receipt:', !!verifyReceipt);
+      return json({ success: false, error: 'Transaction not confirmed on re-verification', txHash: tx.hash }, 500);
+    }
+
+    console.log('[RELAYER] Treasury mint confirmed — TX:', tx.hash, 'Block:', rc.blockNumber);
+    return json({ success: true, txHash: tx.hash, blockNumber: rc.blockNumber, verified: true });
   } catch (e) {
     console.error('[RELAYER] Mint failed:', e.shortMessage || e.message || e);
     return json({ success: false, error: e.shortMessage || e.message || 'Unknown' }, 500);

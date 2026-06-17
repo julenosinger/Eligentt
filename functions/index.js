@@ -22,9 +22,18 @@ export async function onRequest(context) {
     return handleIrisProxy(request, url);
   }
 
-  // ── Only intercept root path for HTML injection ──
-  if (url.pathname !== '/') {
+  // ── Intercept SPA routes for HTML injection ──
+  const isApiPath = url.pathname.startsWith('/api/');
+  const hasExtension = /\.\w+$/.test(url.pathname);
+  const isSpaRoute = !isApiPath && !hasExtension;
+  if (!isSpaRoute) {
     return next();
+  }
+
+  // ── Landing page at root (/) — no key injection needed ──
+  const isRoot = url.pathname === '/' || url.pathname === '';
+  if (isRoot) {
+    return next(); // _redirects handles / → landing.html
   }
 
   // ── Serve index.html with key injection ──
