@@ -30,12 +30,6 @@ export async function onRequest(context) {
     return next();
   }
 
-  // ── Landing page at root (/) — no key injection needed ──
-  const isRoot = url.pathname === '/' || url.pathname === '';
-  if (isRoot) {
-    return next(); // _redirects handles / → landing.html
-  }
-
   // ── Serve index.html with key injection ──
   const response = await next();
   let html = await response.text();
