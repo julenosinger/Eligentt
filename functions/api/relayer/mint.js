@@ -1,10 +1,13 @@
 /**
- * Turbo Bridge CCTP Mint Relayer
- * ═══════════════════════════════
+ * Turbo Bridge CCTP Mint Relayer + Arc Transaction Memo
+ * ═══════════════════════════════════════════════════════
  * Cloudflare Pages Function — POST /api/relayer/mint
  *
  * Receives CCTP attestation data and executes MessageTransmitter.receiveMessage()
  * on-chain using TURBO_RELAYER_PRIVATE_KEY from Cloudflare environment variables.
+ *
+ * Wraps the receiveMessage() call through the Arc Memo contract to emit
+ * ELLIGENTE transaction memos for on-chain audit trail and recovery.
  *
  * This completes the Turbo Bridge cycle: after the Treasury pays the user instantly
  * (via fulfillAndPayWithFee), this endpoint mints USDC back to the TreasuryVault
@@ -36,6 +39,7 @@ function getCORS(request, env) {
 // ── Contract addresses (must match frontend config/runtime.js) ──
 const TREASURY_VAULT = '0xbfC9E8F79bd30b912081ae88F9ad0A515F08c2F1';
 const MESSAGE_TRANSMITTER = '0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275';
+const MEMO_CONTRACT_ADDRESS = '0x5294E9927c3306DcBaDb03fe70b92e01cCede505';
 
 const VAULT_ABI = [
   'function isOperator(address) view returns (bool)',
@@ -46,7 +50,16 @@ const MT_ABI = [
   'function usedNonces(bytes32) view returns (uint256)',
 ];
 
+const MEMO_ABI = [
+  'function memo(address target, bytes calldata data, bytes32 memoId, bytes calldata memoData) external',
+];
+
 const ARC_CHAIN_ID = 5042002;
+const MEMO_PREFIX = 'ELLIGENTE';
+
+function generateMemo(action, intentId, asset, amount) {
+  return `${MEMO_PREFIX}|${action}|${intentId}|${(asset ?? 'USDC').toUpperCase()}|${amount}`;
+}
 
 export async function onRequest(context) {
   const { request, env } = context;
@@ -80,9 +93,21 @@ export async function onRequest(context) {
     return json({ error: 'Invalid JSON' }, 400);
   }
 
-  const { messageBytes, attestationSignature, intentId } = body;
+  const { messageBytes, attestationSignature, intentId, asset, amount } = body;
   if (!messageBytes || !attestationSignature) {
     return json({ error: 'Missing fields: messageBytes, attestationSignature' }, 400);
+  }
+  if (!intentId || typeof intentId !== 'string' || intentId.trim().length === 0) {
+    return json({ error: 'Missing or invalid intentId' }, 400);
+  }
+  if (intentId.includes('|')) {
+    return json({ error: 'Invalid intentId: contains reserved character' }, 400);
+  }
+  if (asset !== undefined && !['usdc', 'eurc', 'cirbtc'].includes(String(asset).toLowerCase())) {
+    return json({ error: 'Invalid asset: must be usdc, eurc, or cirbtc' }, 400);
+  }
+  if (amount !== undefined && (typeof amount !== 'number' || !isFinite(amount) || amount < 0)) {
+    return json({ error: 'Invalid amount: must be a non-negative number' }, 400);
   }
 
   if (typeof messageBytes !== 'string' || !/^0x[0-9a-fA-F]+$/.test(messageBytes) || messageBytes.length < 10) {
@@ -141,14 +166,34 @@ export async function onRequest(context) {
     return json({ error: 'Nonce check failed: ' + (e.shortMessage || e.message) }, 500);
   }
 
-  // ── Execute receiveMessage ──
-  console.log('[RELAYER] Executing receiveMessage…');
+  // ── Generate Elligente Transaction Memo ──
+  const memoStr = generateMemo('REPAY', intentId ?? 'UNKNOWN', asset ?? 'USDC', amount ?? 0);
+  const memoId = ethers.id(intentId ?? 'UNKNOWN');
+  const memoData = ethers.toUtf8Bytes(memoStr);
+  console.log('[RELAYER] Generated memo:', memoStr);
+
+  // ── Execute receiveMessage wrapped via Arc Memo contract ──
+  console.log('[RELAYER] Executing receiveMessage via Memo contract…');
 
   try {
-    const mtWrite = new ethers.Contract(MESSAGE_TRANSMITTER, MT_ABI, signer);
-    const tx = await mtWrite.receiveMessage(messageBytes, attestationSignature);
+    const mtIface = new ethers.Interface(MT_ABI);
+    const receiveMessageCalldata = mtIface.encodeFunctionData('receiveMessage', [messageBytes, attestationSignature]);
 
-    console.log('[RELAYER] receiveMessage submitted — TX:', tx.hash);
+    const memoContract = new ethers.Contract(MEMO_CONTRACT_ADDRESS, MEMO_ABI, signer);
+
+    let tx;
+    let memoOnChain = false;
+    try {
+      tx = await memoContract.memo(MESSAGE_TRANSMITTER, receiveMessageCalldata, memoId, memoData);
+      memoOnChain = true;
+      console.log('[RELAYER] Memo-wrapped receiveMessage submitted — TX:', tx.hash);
+    } catch (memoErr) {
+      console.warn('[RELAYER] Memo-wrapped call failed, falling back to direct receiveMessage:', memoErr.shortMessage || memoErr.message);
+      const mtWrite = new ethers.Contract(MESSAGE_TRANSMITTER, MT_ABI, signer);
+      tx = await mtWrite.receiveMessage(messageBytes, attestationSignature);
+      memoOnChain = false;
+      console.log('[RELAYER] Direct receiveMessage submitted (no memo) — TX:', tx.hash);
+    }
 
     const rc = await tx.wait(1, 25000);
 
@@ -163,8 +208,15 @@ export async function onRequest(context) {
       return json({ success: false, error: 'Transaction not confirmed on re-verification', txHash: tx.hash }, 500);
     }
 
-    console.log('[RELAYER] Treasury mint confirmed — TX:', tx.hash, 'Block:', rc.blockNumber);
-    return json({ success: true, txHash: tx.hash, blockNumber: rc.blockNumber, verified: true });
+    console.log('[RELAYER] Treasury mint confirmed — TX:', tx.hash, 'Block:', rc.blockNumber, 'Memo:', memoStr, 'OnChain:', memoOnChain);
+    return json({
+      success: true,
+      txHash: tx.hash,
+      blockNumber: rc.blockNumber,
+      verified: true,
+      memo: memoStr,
+      memoOnChain,
+    });
   } catch (e) {
     console.error('[RELAYER] Mint failed:', e.shortMessage || e.message || e);
     return json({ success: false, error: e.shortMessage || e.message || 'Unknown' }, 500);

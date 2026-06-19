@@ -30,6 +30,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@web3modal/ethereum@2.7.1/dist/index.js" defer></script>
 <!-- DOMPurify -->
 <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.9/dist/purify.min.js" defer></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 <!-- Elligente Centralized Config (load before inline scripts) -->
 <script src="config/chains.js"></script>
 <script src="config/contracts.js"></script>
@@ -37,6 +38,10 @@
 <script src="config/fees.js"></script>
 <script src="config/slippage.js"></script>
 <script src="config/runtime.js"></script>
+<script src="shared/memoIndexer.js"></script>
+<script src="shared/treasuryIndexer.js"></script>
+<script src="shared/profile.js"></script>
+<script src="shared/walletManager.js"></script>
 <style>
 /* ── Wallet Modal ───────────────────────────────────────── */
 .wm-overlay{position:fixed;inset:0;background:rgba(0,0,0,.82);z-index:2000;display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .22s;backdrop-filter:blur(4px)}
@@ -3595,6 +3600,10 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
   .info-col{width:200px}
 }
 
+@media(max-width:900px){
+  #prf-layout{grid-template-columns:1fr !important}
+}
+
 @media(max-width:768px){
   html,body{overflow-x:hidden}
   body{padding-bottom:60px}
@@ -4254,6 +4263,8 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
       <div class="nav-item" id="nav-templates" onclick="showPage('templates')"><i class="ti ti-template"></i>Templates</div>
       <div class="nav-item" id="nav-reports" onclick="showPage('reports')"><i class="ti ti-chart-bar"></i>Reports</div>
       <div class="nav-item" id="nav-settings" onclick="showPage('settings')"><i class="ti ti-settings"></i>Settings</div>
+      <div class="nav-group" style="margin-top:4px">Account</div>
+      <div class="nav-item" id="nav-profile" onclick="showPage('profile')"><i class="ti ti-user-circle"></i>Profile<span class="nav-kit" style="background:rgba(167,139,250,.12);color:#a78bfa;border:1px solid rgba(167,139,250,.25)">ID</span></div>
     </nav>
     <div class="wallet-panel">
       <div class="wp-lbl">USDC Balance</div>
@@ -4780,12 +4791,14 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
                 <div class="turbo-step" id="turbo-step-1"><div class="turbo-step-dot">2</div><div class="turbo-step-label"><strong>Lock Liquidity</strong><small>Reserve funds in Vault</small></div></div>
                 <div class="turbo-step" id="turbo-step-2"><div class="turbo-step-dot">3</div><div class="turbo-step-label"><strong>Instant Fulfillment</strong><small>Send to destination immediately</small></div></div>
                 <div class="turbo-step" id="turbo-step-3"><div class="turbo-step-dot">4</div><div class="turbo-step-label"><strong>CCTP Settlement</strong><small>Initiate reimbursement via CCTP</small></div></div>
-                <div class="turbo-step" id="turbo-step-4"><div class="turbo-step-dot">✓</div><div class="turbo-step-label"><strong>Complete</strong><small>Vault reimbursed via attestation</small></div></div>
+                <div class="turbo-step" id="turbo-step-4"><div class="turbo-step-dot">&#10003;</div><div class="turbo-step-label"><strong>Complete</strong><small>Vault reimbursed via attestation</small></div></div>
               </div>
             </div>
-            <div class="ch"><i class="ti ti-list-check" style="font-size:13px;color:var(--teal)"></i><span class="ct">Bridge Steps</span><span id="bridge-step-status" style="margin-left:auto;font-size:9px;color:var(--muted2)">Pending</span></div>
-            <div class="cb">
-              <div class="step-list" id="bridge-step-list"></div>
+            <div id="bridge-standard-steps">
+              <div class="ch"><i class="ti ti-list-check" style="font-size:13px;color:var(--teal)"></i><span class="ct">Bridge Steps</span><span id="bridge-step-status" style="margin-left:auto;font-size:9px;color:var(--muted2)">Pending</span></div>
+              <div class="cb">
+                <div class="step-list" id="bridge-step-list"></div>
+              </div>
             </div>
           </div>
 
@@ -5443,10 +5456,9 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
         <div class="page-icon" style="background:rgba(245,158,11,.12);color:var(--yellow)"><i class="ti ti-world-share"></i></div>
         <div>
           <div class="page-title">Cross-Chain Payments</div>
-          <div class="page-sub">Send USDC to any chain in one click · CCTP v2 · Arc Testnet</div>
+          <div class="page-sub">Send USDC to any chain in one click · Arc Testnet</div>
         </div>
         <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
-          <div class="kit-badge" style="background:rgba(245,158,11,.1);color:var(--yellow);border-color:rgba(245,158,11,.2)"><i class="ti ti-topology-star-3" style="font-size:9px"></i>CCTP v2</div>
           <div class="chip chip-b"><i class="ti ti-circle-dot" style="font-size:8px"></i>Arc Testnet</div>
         </div>
       </div>
@@ -5506,7 +5518,7 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
                 <div id="xc-path-to-dot" style="width:12px;height:12px;border-radius:50%;background:#ff0202;box-shadow:0 0 6px #ff020266"></div>
                 <span id="xc-path-to-label" style="font-size:9px;font-weight:600">Arc Testnet</span>
               </div>
-              <div style="margin-left:auto;font-size:8.5px;color:var(--muted2);display:flex;align-items:center;gap:4px"><i class="ti ti-clock" style="font-size:9px;color:var(--yellow)"></i>CCTP v2</div>
+              <div style="margin-left:auto;font-size:8.5px;color:var(--muted2);display:flex;align-items:center;gap:4px"><i class="ti ti-clock" style="font-size:9px;color:var(--yellow)"></i>~20s</div>
             </div>
           </div>
 
@@ -5594,6 +5606,10 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
               <div style="display:flex;align-items:flex-start;gap:5px">
                 <div style="width:16px;height:16px;border-radius:50%;background:rgba(245,158,11,.15);color:var(--yellow);display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:700;flex-shrink:0;margin-top:1px">4</div>
                 <span><strong style="color:var(--text)">Mint USDC</strong> to recipient on dest chain</span>
+              </div>
+              <div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border);display:flex;align-items:center;gap:5px">
+                <i class="ti ti-topology-star-3" style="font-size:10px;color:var(--yellow)"></i>
+                <span style="font-size:8.5px;color:var(--muted2)">Powered by <strong style="color:var(--yellow)">CCTP v2</strong> · Circle Cross-Chain Transfer Protocol</span>
               </div>
             </div>
           </div>
@@ -7222,6 +7238,7 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
                 <input type="date" id="stl-filter-date-from" onchange="stlApplyFilters()" style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:5px 8px;font-size:11px;color:var(--text);">
                 <input type="date" id="stl-filter-date-to" onchange="stlApplyFilters()" style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:5px 8px;font-size:11px;color:var(--text);">
                 <input type="text" id="stl-filter-intent" placeholder="Search Intent ID..." oninput="stlApplyFilters()" style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:5px 8px;font-size:11px;color:var(--text);flex:1;min-width:150px;">
+                <input type="text" id="stl-filter-memo" placeholder="Search Memo..." oninput="stlApplyFilters()" style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:5px 8px;font-size:11px;color:var(--text);flex:1;min-width:150px;">
                 <button onclick="stlClearFilters()" style="background:transparent;border:1px solid var(--border);border-radius:6px;padding:5px 10px;font-size:11px;color:var(--muted2);cursor:pointer;">Clear</button>
               </div>
             </div>
@@ -7231,6 +7248,7 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
               <div style="padding:12px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;">
                 <i class="ti ti-list-details" style="color:#7b9ef7;font-size:13px;"></i>
                 <span style="font-size:11px;font-weight:700;color:var(--text);">Settlement Ledger</span>
+                <span id="stl-sync-badge" style="font-size:8.5px;padding:2px 8px;border-radius:8px;background:rgba(245,158,11,.12);color:#f59e0b;margin-left:6px;">Cache</span>
                 <span id="stl-table-count" style="margin-left:auto;font-size:10px;color:var(--muted2);">0 records</span>
               </div>
               <div style="overflow-x:auto;">
@@ -7249,6 +7267,7 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
                       <th style="padding:8px 6px;text-align:right;color:var(--muted2);font-weight:600;">Reimb Amt</th>
                       <th style="padding:8px 6px;text-align:right;color:var(--muted2);font-weight:600;">Settle Time</th>
                       <th style="padding:8px 6px;text-align:center;color:var(--muted2);font-weight:600;">Verification</th>
+                      <th style="padding:8px 6px;text-align:left;color:var(--muted2);font-weight:600;">On-chain Memo</th>
                       <th style="padding:8px 6px;text-align:center;color:var(--muted2);font-weight:600;">Last Poll</th>
                       <th style="padding:8px 6px;text-align:right;color:var(--muted2);font-weight:600;">Poll #</th>
                       <th style="padding:8px 6px;text-align:left;color:var(--muted2);font-weight:600;">Last Error</th>
@@ -7256,7 +7275,7 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
                   </thead>
                   <tbody id="stl-table-body">
                     <tr>
-                      <td colspan="15" style="padding:24px;text-align:center;color:var(--muted2);font-size:11px;">
+                      <td colspan="16" style="padding:24px;text-align:center;color:var(--muted2);font-size:11px;">
                         <i class="ti ti-database-off" style="font-size:20px;display:block;margin-bottom:6px;"></i>
                         No settlements found. Connect wallet to load protocol data.
                       </td>
@@ -7285,6 +7304,9 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
                 <button onclick="stlRefreshCircle()" class="btn" style="font-size:11px;padding:6px 14px;border-color:#f59e0b;color:#f59e0b;">
                   <i class="ti ti-brand-circle"></i> Refresh Circle Status
                 </button>
+                <button onclick="stlRecoverFromMemos()" class="btn" style="font-size:11px;padding:6px 14px;border-color:#22c55e;color:#22c55e;">
+                  <i class="ti ti-scan"></i> Recover from Arc Memos
+                </button>
               </div>
               <div id="stl-recovery-log" style="margin-top:10px;background:var(--bg2);border-radius:6px;padding:8px;font-size:10px;color:var(--muted2);font-family:monospace;max-height:80px;overflow-y:auto;display:none;"></div>
             </div>
@@ -7305,13 +7327,14 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
                       <th style="padding:6px 8px;text-align:center;">Mint TX</th>
                       <th style="padding:6px 8px;text-align:center;">Settlement TX</th>
                       <th style="padding:6px 8px;text-align:right;">Reimb Amount</th>
+                      <th style="padding:6px 8px;text-align:left;">Memo</th>
                       <th style="padding:6px 8px;text-align:right;">Verification Time</th>
                       <th style="padding:6px 8px;text-align:center;">Status</th>
                     </tr>
                   </thead>
                   <tbody id="stl-audit-body">
                     <tr>
-                      <td colspan="8" style="padding:24px;text-align:center;color:var(--muted2);font-size:11px;">
+                      <td colspan="9" style="padding:24px;text-align:center;color:var(--muted2);font-size:11px;">
                         <i class="ti ti-search" style="font-size:20px;display:block;margin-bottom:6px;"></i>
                         No verified reimbursements yet. Complete settlements appear here.
                       </td>
@@ -7614,6 +7637,249 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
       </div>
     </div>
 
+    <!-- ══════════════════════════════════════════════════════════
+         PAGE: PROFILE  (Account & Intelligent Wallet)
+    ══════════════════════════════════════ -->
+    <div class="page" id="page-profile">
+      <div class="page-header">
+        <div class="page-icon" style="background:rgba(167,139,250,.12);color:#a78bfa"><i class="ti ti-user-circle"></i></div>
+        <div>
+          <div class="page-title">Profile</div>
+          <div class="page-sub">Account, Intelligent Wallet & Activity</div>
+        </div>
+        <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+          <div id="prf-auth-badge" class="chip" style="background:rgba(245,158,11,.1);color:var(--yellow);border:1px solid rgba(245,158,11,.2)"><i class="ti ti-lock" style="font-size:8px"></i>Not signed in</div>
+        </div>
+      </div>
+      <div class="page-content" style="padding:14px">
+        <div style="display:grid;grid-template-columns:1fr 260px;gap:12px;align-items:start" id="prf-layout">
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;align-content:start">
+
+          <div class="card" style="grid-column:1/3">
+            <div class="ch"><i class="ti ti-user-circle" style="font-size:14px;color:#a78bfa"></i><span class="ct">User Profile</span><span id="prf-status-chip" style="margin-left:auto;font-size:8.5px;padding:2px 8px;border-radius:10px;background:rgba(245,158,11,.12);color:#f59e0b;">Guest</span></div>
+            <div class="cb" id="prf-guest-view">
+              <div style="text-align:center;padding:20px 0">
+                <div style="width:64px;height:64px;border-radius:50%;background:linear-gradient(135deg,rgba(167,139,250,.2),rgba(79,142,247,.2));border:2px solid rgba(167,139,250,.3);display:flex;align-items:center;justify-content:center;margin:0 auto 12px;font-size:28px;color:#a78bfa"><i class="ti ti-user"></i></div>
+                <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:4px">Create Your Account</div>
+                <div style="font-size:10px;color:var(--muted2);margin-bottom:16px;max-width:320px;margin-left:auto;margin-right:auto">Sign in to get your Intelligent Wallet — a smart account created automatically with your login. No browser extension required.</div>
+                <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+                  <button onclick="prfSignIn('google')" class="btn" style="padding:8px 20px;font-size:11px;border-color:rgba(167,139,250,.4);color:#a78bfa"><i class="ti ti-brand-google"></i> Sign in with Google</button>
+                  <button onclick="prfSignIn('email')" class="btn" style="padding:8px 20px;font-size:11px;border-color:rgba(79,142,247,.4);color:#7b9ef7"><i class="ti ti-mail"></i> Sign in with Email</button>
+                </div>
+                <div style="font-size:8.5px;color:var(--muted2);margin-top:12px">Or continue without an account — all features remain available</div>
+              </div>
+            </div>
+            <div class="cb" id="prf-user-view" style="display:none">
+              <div style="display:flex;align-items:center;gap:14px">
+                <div id="prf-avatar" style="width:56px;height:56px;border-radius:50%;background:linear-gradient(135deg,#a78bfa,#4f8ef7);display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:800;color:#fff;flex-shrink:0">E</div>
+                <div style="flex:1">
+                  <div style="display:flex;align-items:center;gap:6px">
+                    <span id="prf-name" style="font-size:14px;font-weight:700;color:var(--text)">—</span>
+                    <span id="prf-verified" style="display:none;font-size:8px;padding:2px 6px;border-radius:8px;background:rgba(34,197,94,.12);color:#22c55e"><i class="ti ti-circle-check" style="font-size:7px"></i> Verified</span>
+                  </div>
+                  <div id="prf-email" style="font-size:10px;color:var(--muted2);margin-top:2px">—</div>
+                  <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
+                    <span style="font-size:8px;padding:2px 6px;border-radius:6px;background:rgba(167,139,250,.1);color:#a78bfa;border:1px solid rgba(167,139,250,.2)"><i class="ti ti-cpu" style="font-size:7px"></i> Smart Account</span>
+                    <span id="prf-uid" style="font-size:8px;padding:2px 6px;border-radius:6px;background:rgba(0,0,0,.2);color:var(--muted2);font-family:monospace">—</span>
+                  </div>
+                </div>
+                <div style="text-align:right;font-size:9px;color:var(--muted2)">
+                  <div>Created <span id="prf-created">—</span></div>
+                  <div style="margin-top:3px">Last login <span id="prf-lastlogin">—</span></div>
+                  <button onclick="prfSignOut()" class="btn" style="margin-top:8px;font-size:9px;padding:4px 10px;border-color:rgba(239,68,68,.3);color:#ef4444"><i class="ti ti-logout"></i> Sign Out</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="ch"><i class="ti ti-cpu" style="font-size:13px;color:#a78bfa"></i><span class="ct">Intelligent Wallet</span><span id="prf-iw-status" style="margin-left:auto;font-size:8.5px;padding:2px 8px;border-radius:10px;background:rgba(100,100,100,.15);color:var(--muted2)">Inactive</span></div>
+            <div class="cb">
+              <div style="font-size:9px;color:var(--muted2);margin-bottom:10px">Your smart wallet created with your login — no browser extension needed</div>
+              <div style="background:rgba(0,0,0,.2);border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:10px">
+                <div style="display:flex;justify-content:space-between;font-size:9.5px;margin-bottom:5px"><span style="color:var(--muted2)">Address</span><span id="prf-iw-addr" style="font-family:monospace;color:var(--text);font-size:8.5px">Not created</span></div>
+                <div style="display:flex;justify-content:space-between;font-size:9.5px;margin-bottom:5px"><span style="color:var(--muted2)">Network</span><span id="prf-iw-net" style="color:#22c55e">Arc Testnet</span></div>
+                <div style="display:flex;justify-content:space-between;font-size:9.5px"><span style="color:var(--muted2)">Type</span><span style="color:#a78bfa">Smart Account (AA)</span></div>
+              </div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap">
+                <button onclick="showPage('send')" class="btn" style="flex:1;font-size:9px;padding:6px 0"><i class="ti ti-send"></i> Send</button>
+                <button onclick="prfShowReceive()" class="btn" style="flex:1;font-size:9px;padding:6px 0"><i class="ti ti-download"></i> Receive</button>
+                <button onclick="showPage('swap')" class="btn" style="flex:1;font-size:9px;padding:6px 0"><i class="ti ti-arrows-exchange"></i> Swap</button>
+                <button onclick="showPage('bridge')" class="btn" style="flex:1;font-size:9px;padding:6px 0"><i class="ti ti-topology-star-3"></i> Bridge</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="ch"><i class="ti ti-wallet" style="font-size:13px;color:#4f8ef7"></i><span class="ct">Connected Wallets</span></div>
+            <div class="cb">
+              <div id="prf-wallets-list" style="display:flex;flex-direction:column;gap:6px">
+                <div id="prf-iw-row" style="display:flex;align-items:center;gap:8px;background:rgba(167,139,250,.06);border:1px solid rgba(167,139,250,.15);border-radius:7px;padding:8px 10px">
+                  <i class="ti ti-cpu" style="color:#a78bfa;font-size:14px"></i>
+                  <div style="flex:1">
+                    <div style="font-size:10px;font-weight:600;color:var(--text)">Intelligent Wallet</div>
+                    <div id="prf-iw-row-addr" style="font-size:8px;color:var(--muted2);font-family:monospace">Not created</div>
+                  </div>
+                  <span style="font-size:8px;padding:2px 6px;border-radius:6px;background:rgba(167,139,250,.12);color:#a78bfa">Primary</span>
+                </div>
+                <div id="prf-ext-row" style="display:flex;align-items:center;gap:8px;background:rgba(0,0,0,.15);border:1px solid var(--border);border-radius:7px;padding:8px 10px">
+                  <i class="ti ti-wallet" style="color:var(--muted2);font-size:14px"></i>
+                  <div style="flex:1">
+                    <div style="font-size:10px;font-weight:600;color:var(--text)">External Wallet</div>
+                    <div id="prf-ext-addr" style="font-size:8px;color:var(--muted2);font-family:monospace">Not connected</div>
+                  </div>
+                  <button onclick="connectWallet()" class="btn" style="font-size:8px;padding:3px 8px"><i class="ti ti-plug"></i> Connect</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card" style="grid-column:1/3">
+            <div class="ch"><i class="ti ti-coins" style="font-size:13px;color:#22c55e"></i><span class="ct">Assets</span><button onclick="prfRefreshAssets()" style="margin-left:auto;background:transparent;border:1px solid var(--border);border-radius:6px;padding:3px 8px;font-size:9px;color:var(--muted2);cursor:pointer"><i class="ti ti-refresh"></i></button></div>
+            <div class="cb" style="padding:0">
+              <table style="width:100%;border-collapse:collapse;font-size:10px">
+                <thead><tr style="border-bottom:1px solid var(--border)">
+                  <th style="padding:8px 12px;text-align:left;color:var(--muted2);font-weight:600">Token</th>
+                  <th style="padding:8px 8px;text-align:right;color:var(--muted2);font-weight:600">Balance</th>
+                  <th style="padding:8px 8px;text-align:right;color:var(--muted2);font-weight:600">Value</th>
+                  <th style="padding:8px 12px;text-align:center;color:var(--muted2);font-weight:600">Network</th>
+                </tr></thead>
+                <tbody id="prf-assets-tbody">
+                  <tr><td colspan="4" style="padding:18px;text-align:center;color:var(--muted2);font-size:10px"><i class="ti ti-coins" style="font-size:16px;display:block;margin-bottom:4px;opacity:.3"></i>Connect wallet to view assets</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="card" style="grid-column:1/3">
+            <div class="ch"><i class="ti ti-history" style="font-size:13px;color:var(--yellow)"></i><span class="ct">Recent Activity</span></div>
+            <div class="cb" style="padding:0">
+              <table style="width:100%;border-collapse:collapse;font-size:10px">
+                <thead><tr style="border-bottom:1px solid var(--border)">
+                  <th style="padding:8px 12px;text-align:left;color:var(--muted2);font-weight:600">Type</th>
+                  <th style="padding:8px 8px;text-align:right;color:var(--muted2);font-weight:600">Amount</th>
+                  <th style="padding:8px 8px;text-align:center;color:var(--muted2);font-weight:600">Status</th>
+                  <th style="padding:8px 8px;text-align:center;color:var(--muted2);font-weight:600">Network</th>
+                  <th style="padding:8px 8px;text-align:center;color:var(--muted2);font-weight:600">TX</th>
+                  <th style="padding:8px 12px;text-align:right;color:var(--muted2);font-weight:600">Date</th>
+                </tr></thead>
+                <tbody id="prf-activity-tbody">
+                  <tr><td colspan="6" style="padding:18px;text-align:center;color:var(--muted2);font-size:10px"><i class="ti ti-history" style="font-size:16px;display:block;margin-bottom:4px;opacity:.3"></i>No activity yet</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          </div>
+
+          <div style="display:flex;flex-direction:column;gap:12px">
+
+            <div class="card">
+              <div class="ch"><i class="ti ti-id" style="font-size:13px;color:#a78bfa"></i><span class="ct">Personal Information</span></div>
+              <div class="cb" style="display:flex;flex-direction:column;gap:10px">
+                <div style="display:flex;align-items:center;gap:10px">
+                  <div id="prf-sb-avatar" style="width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,rgba(167,139,250,.25),rgba(79,142,247,.25));border:1.5px solid rgba(167,139,250,.3);display:flex;align-items:center;justify-content:center;font-size:16px;color:#a78bfa;flex-shrink:0"><i class="ti ti-user"></i></div>
+                  <div style="flex:1;min-width:0">
+                    <div id="prf-sb-name" style="font-size:11px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Guest</div>
+                    <div id="prf-sb-email" style="font-size:8.5px;color:var(--muted2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Not signed in</div>
+                  </div>
+                </div>
+                <div style="background:rgba(0,0,0,.2);border:1px solid var(--border);border-radius:7px;padding:8px 10px;display:flex;flex-direction:column;gap:5px">
+                  <div style="display:flex;justify-content:space-between;font-size:9px"><span style="color:var(--muted2)">Account ID</span><span id="prf-sb-uid" style="font-family:monospace;color:var(--text);font-size:8px">—</span></div>
+                  <div style="display:flex;justify-content:space-between;font-size:9px"><span style="color:var(--muted2)">Member Since</span><span id="prf-sb-since" style="color:var(--text)">—</span></div>
+                  <div style="display:flex;justify-content:space-between;font-size:9px"><span style="color:var(--muted2)">Status</span><span id="prf-sb-status" style="color:#f59e0b">Guest</span></div>
+                </div>
+                <button onclick="prfEditProfile()" class="btn" style="width:100%;font-size:9px;padding:6px 0;border-color:rgba(167,139,250,.3);color:#a78bfa"><i class="ti ti-edit"></i> Edit Profile</button>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="ch"><i class="ti ti-adjustments-horizontal" style="font-size:13px;color:#4f8ef7"></i><span class="ct">Preferences</span></div>
+              <div class="cb" style="display:flex;flex-direction:column;gap:8px">
+                <div style="display:flex;justify-content:space-between;align-items:center;font-size:9.5px">
+                  <span style="color:var(--muted2)"><i class="ti ti-language" style="font-size:10px;margin-right:4px"></i>Language</span>
+                  <span id="prf-pref-lang" style="color:var(--text);font-weight:600">English</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;align-items:center;font-size:9.5px">
+                  <span style="color:var(--muted2)"><i class="ti ti-palette" style="font-size:10px;margin-right:4px"></i>Theme</span>
+                  <span style="color:var(--text);font-weight:600">Dark</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;align-items:center;font-size:9.5px">
+                  <span style="color:var(--muted2)"><i class="ti ti-bell" style="font-size:10px;margin-right:4px"></i>Notifications</span>
+                  <span id="prf-pref-notif" style="color:#22c55e;font-weight:600">Enabled</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;align-items:center;font-size:9.5px">
+                  <span style="color:var(--muted2)"><i class="ti ti-network" style="font-size:10px;margin-right:4px"></i>Default Network</span>
+                  <span style="color:#22c55e;font-weight:600">Arc Testnet</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="ch"><i class="ti ti-shield-lock" style="font-size:13px;color:#22c55e"></i><span class="ct">Account Settings</span></div>
+              <div class="cb" style="display:flex;flex-direction:column;gap:8px">
+                <div style="display:flex;justify-content:space-between;align-items:center;font-size:9.5px">
+                  <span style="color:var(--muted2)"><i class="ti ti-fingerprint" style="font-size:10px;margin-right:4px"></i>Login Method</span>
+                  <span id="prf-auth-method" style="color:var(--text);font-weight:600">None</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;align-items:center;font-size:9.5px">
+                  <span style="color:var(--muted2)"><i class="ti ti-brand-google" style="font-size:10px;margin-right:4px"></i>Google</span>
+                  <span id="prf-auth-provider" style="color:var(--muted2)">Not connected</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;align-items:center;font-size:9.5px">
+                  <span style="color:var(--muted2)"><i class="ti ti-key" style="font-size:10px;margin-right:4px"></i>Recovery</span>
+                  <span id="prf-recovery" style="color:var(--muted2)">Not configured</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;align-items:center;font-size:9.5px">
+                  <span style="color:var(--muted2)"><i class="ti ti-device-desktop" style="font-size:10px;margin-right:4px"></i>Sessions</span>
+                  <span id="prf-sessions" style="color:var(--text);font-weight:600">1</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;align-items:center;font-size:9.5px">
+                  <span style="color:var(--muted2)"><i class="ti ti-plug" style="font-size:10px;margin-right:4px"></i>Connected Apps</span>
+                  <span id="prf-apps" style="color:var(--text);font-weight:600">0</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="ch"><i class="ti ti-circle-check" style="font-size:13px;color:#a78bfa"></i><span class="ct">Profile Completion</span></div>
+              <div class="cb">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+                  <div style="flex:1;height:6px;background:rgba(255,255,255,.06);border-radius:3px;overflow:hidden">
+                    <div id="prf-completion-bar" style="height:100%;width:20%;background:linear-gradient(90deg,#a78bfa,#4f8ef7);border-radius:3px;transition:width .4s"></div>
+                  </div>
+                  <span id="prf-completion-pct" style="font-size:11px;font-weight:700;color:#a78bfa;min-width:32px;text-align:right">20%</span>
+                </div>
+                <div style="font-size:8.5px;color:var(--muted2);margin-bottom:10px">Complete your profile to unlock all features</div>
+                <div id="prf-completion-tasks" style="display:flex;flex-direction:column;gap:5px">
+                  <div class="prf-task" id="prf-task-signin" style="display:flex;align-items:center;gap:6px;font-size:9px;color:var(--muted2)"><i class="ti ti-circle" style="font-size:10px;color:var(--muted2)"></i>Sign in to your account</div>
+                  <div class="prf-task" id="prf-task-avatar" style="display:flex;align-items:center;gap:6px;font-size:9px;color:var(--muted2)"><i class="ti ti-circle" style="font-size:10px;color:var(--muted2)"></i>Add avatar</div>
+                  <div class="prf-task" id="prf-task-wallet" style="display:flex;align-items:center;gap:6px;font-size:9px;color:var(--muted2)"><i class="ti ti-circle" style="font-size:10px;color:var(--muted2)"></i>Connect external wallet</div>
+                  <div class="prf-task" id="prf-task-recovery" style="display:flex;align-items:center;gap:6px;font-size:9px;color:var(--muted2)"><i class="ti ti-circle" style="font-size:10px;color:var(--muted2)"></i>Enable recovery</div>
+                  <div class="prf-task" id="prf-task-tx" style="display:flex;align-items:center;gap:6px;font-size:9px;color:var(--muted2)"><i class="ti ti-circle" style="font-size:10px;color:var(--muted2)"></i>Complete first transaction</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="ch"><i class="ti ti-chart-dots-3" style="font-size:13px;color:#4f8ef7"></i><span class="ct">Account Stats</span></div>
+              <div class="cb" style="display:flex;flex-direction:column;gap:8px">
+                <div style="display:flex;justify-content:space-between;font-size:9.5px"><span style="color:var(--muted2)">Total Transactions</span><span id="prf-stat-tx" style="font-weight:700;color:var(--text)">0</span></div>
+                <div style="display:flex;justify-content:space-between;font-size:9.5px"><span style="color:var(--muted2)">Total Volume</span><span id="prf-stat-vol" style="font-weight:700;color:#22c55e">$0.00</span></div>
+                <div style="display:flex;justify-content:space-between;font-size:9.5px"><span style="color:var(--muted2)">Chains Used</span><span id="prf-stat-chains" style="font-weight:700;color:#a78bfa">0</span></div>
+                <div style="display:flex;justify-content:space-between;font-size:9.5px"><span style="color:var(--muted2)">Payments Sent</span><span id="prf-stat-payments" style="font-weight:700;color:#4f8ef7">0</span></div>
+                <div style="display:flex;justify-content:space-between;font-size:9.5px"><span style="color:var(--muted2)">Swaps Executed</span><span id="prf-stat-swaps" style="font-weight:700;color:var(--text)">0</span></div>
+                <div style="display:flex;justify-content:space-between;font-size:9.5px"><span style="color:var(--muted2)">Bridges Completed</span><span id="prf-stat-bridges" style="font-weight:700;color:var(--yellow)">0</span></div>
+              </div>
+            </div>
+
+          </div>
+
+        </div>
+      </div>
+    </div>
+
   </div><!-- /main -->
 </div><!-- /app -->
 
@@ -7905,6 +8171,7 @@ window.__ARC_PAY_CONFIG__ = window.__ARC_PAY_CONFIG__ || {
   wcProjectId:   '__WC_PROJECT_ID_PLACEHOLDER__',    // WalletConnect v2 Project ID (injected at runtime)
   kitKey:        '__KIT_KEY_PLACEHOLDER__',    // Circle App Kit key (for Swap)
   testApiKey:    '__TEST_API_KEY_PLACEHOLDER__', // Circle API key
+  googleClientId: '__GOOGLE_CLIENT_ID_PLACEHOLDER__',
   batchContract: '',    // Deployed ElligentBatch.sol address (leave empty to use direct ERC-20 transfers)
   eurcAddress:   '0x3700000000000000000000000000000000000000',  // EURC on Arc Testnet
   rpcUrl:        'https://rpc.testnet.arc.network',
@@ -8027,6 +8294,250 @@ const BATCH_ABI = [
   'function getVersion() view returns (string)'
 ];
 
+const MEMO_CONTRACT_ADDRESS = '0x5294E9927c3306DcBaDb03fe70b92e01cCede505';
+const MEMO_ABI = [
+  'function memo(address target, bytes calldata data, bytes32 memoId, bytes calldata memoData) external',
+  'event BeforeMemo(uint256 indexed memoIndex)',
+  'event Memo(address indexed sender, address indexed target, bytes32 callDataHash, bytes32 indexed memoId, bytes memo, uint256 memoIndex)'
+];
+
+const ElligenteMemo = (() => {
+  const PREFIX = 'ELLIGENTE';
+  const VALID_ACTIONS = ['REPAY', 'BRIDGE', 'INVOICE', 'BATCH'];
+  const STORE_KEY = 'elligente_memo_index';
+
+  function generate(action, intentId, asset, amount) {
+    return `${PREFIX}|${action}|${intentId}|${(asset ?? 'USDC').toUpperCase()}|${amount}`;
+  }
+
+  function parse(memoStr) {
+    if (!memoStr || typeof memoStr !== 'string') return null;
+    if (!memoStr.startsWith(PREFIX + '|')) return null;
+    const parts = memoStr.split('|');
+    if (parts.length < 4) return null;
+    return {
+      prefix: parts[0],
+      action: parts[1],
+      intentId: parts[2],
+      asset: parts[3] ?? null,
+      amount: parts[4] ? parseFloat(parts[4]) : null,
+    };
+  }
+
+  function validate(memoStr) {
+    if (!memoStr || typeof memoStr !== 'string') return false;
+    if (!memoStr.startsWith(PREFIX + '|')) return false;
+    const parts = memoStr.split('|');
+    if (parts.length < 5) return false;
+    if (!VALID_ACTIONS.includes(parts[1])) return false;
+    if (!parts[2] || parts[2].trim().length === 0) return false;
+    if (!parts[3] || parts[3].trim().length === 0) return false;
+    const amt = parseFloat(parts[4]);
+    if (isNaN(amt) || amt < 0) return false;
+    return true;
+  }
+
+  function toBytes32Id(intentId) {
+    return (typeof ethers !== 'undefined') ? ethers.id(intentId) : intentId;
+  }
+
+  function toMemoBytes(memoStr) {
+    return (typeof ethers !== 'undefined') ? ethers.toUtf8Bytes(memoStr) : new TextEncoder().encode(memoStr);
+  }
+
+  function fromMemoBytes(memoBytes) {
+    return (typeof ethers !== 'undefined') ? ethers.toUtf8String(memoBytes) : new TextDecoder().decode(memoBytes);
+  }
+
+  function _loadIndex() {
+    try {
+      const raw = localStorage.getItem(STORE_KEY);
+      return raw ? JSON.parse(raw) : { entries: [], lastScannedBlock: 0 };
+    } catch(_) { return { entries: [], lastScannedBlock: 0 }; }
+  }
+
+  function _saveIndex(index) {
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(index)); } catch(_) {}
+  }
+
+  function recordMemo(entry) {
+    const index = _loadIndex();
+    const existing = index.entries.findIndex(e => e.intentId === entry.intentId);
+    if (existing >= 0) {
+      index.entries[existing] = { ...index.entries[existing], ...entry, updatedAt: Date.now() };
+    } else {
+      index.entries.push({ ...entry, recordedAt: Date.now() });
+    }
+    _saveIndex(index);
+  }
+
+  function getByIntentId(intentId) {
+    const index = _loadIndex();
+    return index.entries.find(e => e.intentId === intentId) ?? null;
+  }
+
+  function getAllMemos() {
+    return _loadIndex().entries;
+  }
+
+  function getLastScannedBlock() {
+    return _loadIndex().lastScannedBlock ?? 0;
+  }
+
+  function setLastScannedBlock(block) {
+    const index = _loadIndex();
+    index.lastScannedBlock = block;
+    _saveIndex(index);
+  }
+
+  async function scanArcMemos(provider, fromBlock, toBlock) {
+    if (!provider) return [];
+    const memoContract = new ethers.Contract(MEMO_CONTRACT_ADDRESS, MEMO_ABI, provider);
+    const filter = memoContract.filters.Memo();
+    const events = await memoContract.queryFilter(filter, fromBlock, toBlock);
+    const results = [];
+    for (const ev of events) {
+      try {
+        const memoStr = fromMemoBytes(ev.args.memo);
+        if (!validate(memoStr)) continue;
+        const parsed = parse(memoStr);
+        if (!parsed) continue;
+        results.push({
+          intentId: parsed.intentId,
+          action: parsed.action,
+          asset: parsed.asset,
+          amount: parsed.amount,
+          memo: memoStr,
+          txHash: ev.transactionHash,
+          blockNumber: ev.blockNumber,
+          sender: ev.args.sender,
+          target: ev.args.target,
+          memoId: ev.args.memoId,
+          memoIndex: Number(ev.args.memoIndex),
+          timestamp: Date.now(),
+        });
+      } catch(_) {}
+    }
+    return results;
+  }
+
+  async function incrementalScan(provider) {
+    if (!provider) return [];
+    const lastBlock = getLastScannedBlock();
+    let currentBlock;
+    try { currentBlock = await provider.getBlockNumber(); } catch(_) { return []; }
+    if (currentBlock <= lastBlock) return [];
+    const fromBlock = lastBlock > 0 ? lastBlock + 1 : Math.max(0, currentBlock - 10000);
+    const BATCH_SIZE = 2000;
+    const allResults = [];
+    for (let start = fromBlock; start <= currentBlock; start += BATCH_SIZE) {
+      const end = Math.min(start + BATCH_SIZE - 1, currentBlock);
+      try {
+        const batch = await scanArcMemos(provider, start, end);
+        allResults.push(...batch);
+      } catch(e) { console.warn('[MemoIndexer] Scan batch failed:', start, '-', end, e.message ?? e); }
+    }
+    for (const entry of allResults) {
+      recordMemo(entry);
+    }
+    setLastScannedBlock(currentBlock);
+    return allResults;
+  }
+
+  async function recoverFromMemos(provider) {
+    const memos = await incrementalScan(provider);
+    const recovered = [];
+    for (const m of memos) {
+      if (m.action !== 'REPAY') continue;
+      const existing = (typeof RepaymentContract !== 'undefined')
+        ? RepaymentContract.getAll().find(i => (i.id === m.intentId || i.intentId === m.intentId))
+        : null;
+      if (existing) {
+        if (!existing.memo) {
+          if (typeof VaultStore !== 'undefined') {
+            VaultStore.mutate(s => {
+              const i = s.intents.find(x => x.id === m.intentId || x.intentId === m.intentId);
+              if (i) {
+                i.memo = m.memo;
+                i.mintTxHash = i.mintTxHash ?? m.txHash;
+                i.mintBlockNumber = i.mintBlockNumber ?? m.blockNumber;
+                i.memoOnChain = true;
+              }
+            });
+          }
+        }
+        continue;
+      }
+      if (typeof VaultStore !== 'undefined') {
+        VaultStore.mutate(s => {
+          s.intents.push({
+            id: m.intentId,
+            intentId: m.intentId,
+            intentBytes32: (typeof ethers !== 'undefined') ? ethers.keccak256(ethers.toUtf8Bytes(m.intentId)) : m.intentId,
+            asset: (m.asset ?? 'USDC').toLowerCase(),
+            amount: m.amount ?? 0,
+            grossAmount: m.amount ?? 0,
+            netAmount: m.amount ?? 0,
+            feeAmount: 0,
+            userAddress: m.sender ?? null,
+            srcChain: null,
+            dstChain: 'Arc_Testnet',
+            status: 'Settled',
+            txHash: null,
+            sourceDomain: null,
+            createdAt: m.timestamp ?? Date.now(),
+            updatedAt: Date.now(),
+            settledAt: m.timestamp ?? Date.now(),
+            cctpMsgHash: null,
+            attestation: null,
+            arcTxHash: m.txHash,
+            arcFulfillmentTimestamp: m.timestamp ?? Date.now(),
+            settlementTxHash: m.txHash,
+            mintTxHash: m.txHash,
+            mintBlockNumber: m.blockNumber,
+            memo: m.memo,
+            memoOnChain: true,
+            _treasuryReimbursed: true,
+            _reimbursementProof: { onChainVerified: true, recoveredFromMemo: true },
+            failReason: null,
+            liquidityFee: 0,
+            settleFee: 0,
+            lastPollAt: null,
+            lastError: null,
+            pollCount: 0,
+            settlementError: null,
+            lastAttempt: null,
+            retryCount: 0,
+            _recoveredFromChain: true,
+          });
+        });
+        console.log('[MemoRecovery] Reconstructed intent from on-chain memo:', m.intentId);
+      }
+      recovered.push({
+        intentId: m.intentId,
+        action: m.action,
+        asset: m.asset,
+        amount: m.amount,
+        memo: m.memo,
+        txHash: m.txHash,
+        blockNumber: m.blockNumber,
+        recoveredFromChain: true,
+        reconstructed: true,
+        timestamp: m.timestamp,
+      });
+    }
+    return recovered;
+  }
+
+  return {
+    PREFIX, VALID_ACTIONS,
+    generate, parse, validate,
+    toBytes32Id, toMemoBytes, fromMemoBytes,
+    recordMemo, getByIntentId, getAllMemos,
+    getLastScannedBlock, setLastScannedBlock,
+    scanArcMemos, incrementalScan, recoverFromMemos,
+  };
+})();
 
 const SWAP_ROUTER_ABI = [
   'function swapExactTokensForTokens(uint256 amountIn, uint256 amountOutMin, address[] path, address to, uint256 deadline) returns (uint256[] amounts)',
@@ -9747,6 +10258,9 @@ function showPage(id) {
       const dateInput = document.getElementById('sch-date');
       if (dateInput) dateInput.lang = 'en-US';
     }
+    if (id === 'profile') {
+      setTimeout(() => { if (typeof prfRefreshProfile === 'function') prfRefreshProfile(); }, 50);
+    }
     updateMobileNav(id);
   } catch (err) {
     _err('showPage error for id:', id, err);
@@ -10009,6 +10523,10 @@ function disconnectWallet() {
   if(pill) { pill.textContent='No wallet'; pill.style.cssText=''; }
   toast('Wallet disconnected', 'info');
 }
+
+setInterval(() => {
+  if (walletAddress) refreshBalance().catch(() => {});
+}, 5000);
 
 function setupProviderEvents(raw) {
   // Remove stale listeners first (prevents duplicate handlers on reconnect)
@@ -11634,7 +12152,17 @@ async function signTx(){
         // ── Execute ───────────────────────────────────────────────────────────
         toast(`Executing ${label} batch — ${rcpts.length} recipient${rcpts.length>1?'s':''}...`, 'info');
         const mc3 = new ethers.Contract(MULTICALL3_ADDRESS, MULTICALL3_ABI, signer);
-        const batchTx = await mc3.aggregate3(calls, { gasLimit });
+        let batchTx;
+        if (activeChainId === 5042002) {
+          _log('[Multisend] Wrapping batch via Arc Memo contract');
+          const mc3Iface = new ethers.Interface(MULTICALL3_ABI);
+          const aggData = mc3Iface.encodeFunctionData('aggregate3', [calls]);
+          const memoC = new ethers.Contract(MEMO_CONTRACT_ADDRESS, MEMO_ABI, signer);
+          const batchId = 'BATCH-' + label + '-' + Date.now();
+          batchTx = await memoC.memo(MULTICALL3_ADDRESS, aggData, ethers.id(batchId), ethers.toUtf8Bytes(JSON.stringify({type:'batch',asset:label,recipients:addrs.length,total:batchTotal,ts:Date.now()})), { gasLimit: gasLimit + 80000n });
+        } else {
+          batchTx = await mc3.aggregate3(calls, { gasLimit });
+        }
         _log(`[Multisend] batch tx: ${batchTx.hash}`);
         let receipt;
         try {
@@ -13071,9 +13599,17 @@ async function executeBridge(){
 
   const stepsCard=document.getElementById('bridge-steps-card');
   const stepList=document.getElementById('bridge-step-list');
-  stepsCard.style.display=''; stepList.innerHTML='';
-  document.getElementById('bridge-step-status').textContent='Pending';
-  document.getElementById('bridge-step-status').style.color='var(--muted2)';
+  const stdStepsEl=document.getElementById('bridge-standard-steps');
+  const turboWrapEl=document.getElementById('turbo-steps-wrap');
+  if (fromChain.chainId === 5042002) {
+    stepsCard.style.display=''; stepList.innerHTML='';
+    if (stdStepsEl) stdStepsEl.style.display='';
+    if (turboWrapEl) turboWrapEl.style.display='none';
+    document.getElementById('bridge-step-status').textContent='Pending';
+    document.getElementById('bridge-step-status').style.color='var(--muted2)';
+  } else {
+    stepsCard.style.display='none';
+  }
 
   const steps=[
     {name:'approve', label:`Approve USDC on ${fromChain.name}`,     detail:'ERC-20 approval on source chain'},
@@ -14623,7 +15159,16 @@ async function payInvoice(id) {
       inv.timeline.push({ event: 'Payment Initiated', ts: new Date().toISOString(), detail: 'Transaction submitted to network' });
       renderInvoices(); updateInvStats();
 
-      const tx = await usdc.transfer(inv.toAddr, toUsdc(recipientAmt.toFixed(6)));
+      let tx;
+      if (activeChainId === 5042002) {
+        _log('[Invoice] Wrapping payment via Arc Memo contract, invoice:', inv.id);
+        const erc20If = new ethers.Interface(USDC_ABI);
+        const transferData = erc20If.encodeFunctionData('transfer', [inv.toAddr, toUsdc(recipientAmt.toFixed(6))]);
+        const memoC = new ethers.Contract(MEMO_CONTRACT_ADDRESS, MEMO_ABI, signer);
+        tx = await memoC.memo(activeUSDC(), transferData, ethers.id('INV-' + inv.id), ethers.toUtf8Bytes(JSON.stringify({type:'invoice',id:inv.id,num:inv.num||'',amount:recipientAmt,ts:Date.now()})));
+      } else {
+        tx = await usdc.transfer(inv.toAddr, toUsdc(recipientAmt.toFixed(6)));
+      }
       inv.timeline.push({ event: 'Transaction Submitted', ts: new Date().toISOString(), detail: 'Recipient tx: ' + tx.hash });
       await tx.wait();
       inv.txHash = tx.hash;
@@ -17550,10 +18095,21 @@ async function saExecuteSend() {
     const callData2 = erc20If.encodeFunctionData('transferFrom', [walletAddress, TREASURY_VAULT_ADDRESS, feeRaw]);
 
     const mc3 = new ethers.Contract(MC3_ADDR, mc3Abi, signer);
-    const tx = await mc3.aggregate3([
+    const aggCalls = [
       { target: tokenAddr, allowFailure: false, callData: callData1 },
       { target: tokenAddr, allowFailure: false, callData: callData2 }
-    ]);
+    ];
+    let tx;
+    if (activeChainId === 5042002) {
+      const memoText = memo || ('ELLIGENTE|SEND|' + recipient.slice(0, 8) + '|' + saCurrentAsset.toUpperCase() + '|' + amount);
+      _log('[SendAssets] Wrapping via Arc Memo contract:', memoText);
+      const mc3Iface = new ethers.Interface(mc3Abi);
+      const aggData = mc3Iface.encodeFunctionData('aggregate3', [aggCalls]);
+      const memoC = new ethers.Contract(MEMO_CONTRACT_ADDRESS, MEMO_ABI, signer);
+      tx = await memoC.memo(MC3_ADDR, aggData, ethers.id(memoText.slice(0, 64)), ethers.toUtf8Bytes(memoText));
+    } else {
+      tx = await mc3.aggregate3(aggCalls);
+    }
 
     _log('[SendAssets] Batch tx submitted:', tx.hash);
     if (btnContent) btnContent.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i> Confirming...';
@@ -18087,7 +18643,16 @@ async function payLandingExecute() {
 
     toast(`Sending ${totalPay.toFixed(2)} USDC...`,'info');
 
-    const tx = await usdcContract.transfer(recipient, toUsdc(amount.toFixed(6)));
+    let tx;
+    if (activeChainId === 5042002) {
+      const erc20If = new ethers.Interface(['function transfer(address to, uint256 amount) returns (bool)']);
+      const transferData = erc20If.encodeFunctionData('transfer', [recipient, toUsdc(amount.toFixed(6))]);
+      const payMemo = 'ELLIGENTE|PAYMENT|' + (d.id ?? 'PAY') + '|USDC|' + amount;
+      const memoC = new ethers.Contract(MEMO_CONTRACT_ADDRESS, MEMO_ABI, signer);
+      tx = await memoC.memo(activeUSDC(), transferData, ethers.id(d.id ?? 'payment'), ethers.toUtf8Bytes(payMemo));
+    } else {
+      tx = await usdcContract.transfer(recipient, toUsdc(amount.toFixed(6)));
+    }
     toast(`Tx submitted: ${shortAddr(tx.hash)} — waiting confirmation...`,'info');
     if (btnContent) btnContent.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i> Confirming ' + shortAddr(tx.hash) + '...';
 
@@ -18113,7 +18678,16 @@ async function payLandingExecute() {
     let feeTxHash = null;
     if (feeAmount > 0 && feeReceiver && isAddr(feeReceiver)) {
       try {
-        const feeTx = await usdcContract.transfer(feeReceiver, toUsdc(feeAmount.toFixed(6)));
+        let feeTx;
+        if (activeChainId === 5042002) {
+          const erc20If2 = new ethers.Interface(['function transfer(address to, uint256 amount) returns (bool)']);
+          const feeData = erc20If2.encodeFunctionData('transfer', [feeReceiver, toUsdc(feeAmount.toFixed(6))]);
+          const feeMemo = 'ELLIGENTE|FEE|' + (d.id ?? 'PAY') + '|USDC|' + feeAmount;
+          const memoC2 = new ethers.Contract(MEMO_CONTRACT_ADDRESS, MEMO_ABI, signer);
+          feeTx = await memoC2.memo(activeUSDC(), feeData, ethers.id('fee-' + (d.id ?? 'payment')), ethers.toUtf8Bytes(feeMemo));
+        } else {
+          feeTx = await usdcContract.transfer(feeReceiver, toUsdc(feeAmount.toFixed(6)));
+        }
         feeTxHash = feeTx.hash;
         feeTx.wait().then(() => {
           var mod = d.type === 'paylink' ? 'Payment Links' : d.type === 'invoice' ? 'Invoices' : 'Other';
@@ -18655,6 +19229,10 @@ const VaultStore = (() => {
     pendingSettlementAmounts: { usdc: 0, eurc: 0, cirbtc: 0 },   // Fulfilled → awaiting CCTP settlement back to Treasury
     pendingRepaymentAmounts:  { usdc: 0, eurc: 0, cirbtc: 0 },   // Awaiting repayment from source chain (inbound Turbo)
     turboFeeCollected:        { usdc: 0, eurc: 0, cirbtc: 0 },   // Turbo Bridge fee revenue by asset
+    cacheVersion: 2,
+    lastChainSyncBlock: 0,
+    lastSyncTimestamp: 0,
+    synced: false,
     createdAt: Date.now()
   });
 
@@ -19021,6 +19599,9 @@ const RepaymentContract = (() => {
       settlementError: null,   // Treasury relayer error (visible in UI)
       lastAttempt: null,       // timestamp of last settlement attempt
       retryCount: 0,           // number of settlement retries
+      memo: null,
+      memoOnChain: false,
+      mintBlockNumber: null,
     };
     VaultStore.upsertIntent(intent);
     return id;
@@ -19148,7 +19729,6 @@ const RepaymentContract = (() => {
   }
 
   async function verifyAndSettle(intentId, attestationData) {
-    // ── Duplicate check: if already settled, report success ──
     if (_repaid.has(intentId)) {
       _log('[SETTLEMENT] Duplicate settlement call for intent', intentId, '— already processed');
       return { status: 'Fully Settled', proof: 'already-processed', duplicate: true };
@@ -19156,6 +19736,38 @@ const RepaymentContract = (() => {
     const intent = _find(intentId);
     if (!intent || !['Settling','Awaiting Reimbursement'].includes(intent.status))
       throw new Error('SETTLE_INVALID_STATE');
+
+    if (typeof TreasuryIndexer !== 'undefined') {
+      const chainSettlements = TreasuryIndexer.getAllSettlements();
+      const chainMatch = chainSettlements.find(s => s.intentId === intentId);
+      if (chainMatch && chainMatch.memoOnChain && chainMatch.txHash) {
+        _log('[SETTLEMENT] On-chain memo found via TreasuryIndexer — intent=' + intentId);
+        _repaid.add(intentId);
+        VaultStore.settleFunds(intent.asset, intent.amount);
+        VaultStore.addFee('settlement', intent.settleFee);
+        _mutate(intentId, i => {
+          i.status = 'Settled';
+          i.attestation = attestationData || i.attestation;
+          i.settledAt = Date.now();
+          i.settlementTxHash = chainMatch.txHash;
+          i.mintTxHash = chainMatch.txHash;
+          i.mintBlockNumber = chainMatch.blockNumber;
+          i.updatedAt = Date.now();
+          i._treasuryReimbursed = true;
+          i.memo = chainMatch.memo ?? i.memo;
+          i.memoOnChain = true;
+          i._dataSource = 'chain';
+          i._reimbursementProof = { onChainVerified: true, source: 'TreasuryIndexer' };
+        });
+        ElligenteMemo.recordMemo({
+          intentId, action: 'REPAY', memo: chainMatch.memo,
+          mintTxHash: chainMatch.txHash, blockNumber: chainMatch.blockNumber,
+          amount: intent.amount, asset: intent.asset, timestamp: Date.now(),
+          memoOnChain: true,
+        });
+        return { status: 'Fully Settled', proof: 'on-chain-indexer', memoOnChain: true };
+      }
+    }
 
     if (!intent.arcTxHash) {
       throw new Error('SETTLE_MISSING_ARC_FULFILLMENT');
@@ -19262,7 +19874,15 @@ const RepaymentContract = (() => {
         i.updatedAt        = Date.now();
         i._reimbursementProof = reimbursementProof;
         i._treasuryReimbursed = true;
+        i.memo = i.memo ?? ElligenteMemo.generate('REPAY', intentId, intent.asset, intent.amount);
       });
+      if (typeof ElligenteMemo !== 'undefined') {
+        ElligenteMemo.recordMemo({
+          intentId, action: 'REPAY', memo: ElligenteMemo.generate('REPAY', intentId, intent.asset, intent.amount),
+          mintTxHash: (attestationData && attestationData.mintTxHash) || settlementTxHash,
+          amount: intent.amount, asset: intent.asset, timestamp: Date.now(),
+        });
+      }
       return { status: 'Fully Settled', proof: 'on-chain', ...reimbursementProof };
     }
 
@@ -19283,7 +19903,17 @@ const RepaymentContract = (() => {
         i.updatedAt        = Date.now();
         i._reimbursementProof = reimbursementProof;
         i._treasuryReimbursed = treasuryReimbursed;
+        if (treasuryReimbursed) {
+          i.memo = i.memo ?? ElligenteMemo.generate('REPAY', intentId, intent.asset, intent.amount);
+        }
       });
+      if (treasuryReimbursed && typeof ElligenteMemo !== 'undefined') {
+        ElligenteMemo.recordMemo({
+          intentId, action: 'REPAY', memo: ElligenteMemo.generate('REPAY', intentId, intent.asset, intent.amount),
+          mintTxHash: (attestationData && attestationData.mintTxHash) || settlementTxHash,
+          amount: intent.amount, asset: intent.asset, timestamp: Date.now(),
+        });
+      }
       return { status: treasuryReimbursed ? 'Treasury Reimbursed' : 'Attestation Received', proof: 'partial', ...reimbursementProof };
     }
 
@@ -19803,6 +20433,7 @@ const FulfillerEngine = (() => {
                       i._treasuryReimbursed = true;
                       i.settlementError = null;
                       i.lastError = null;
+                      i.memo = i.memo ?? (typeof ElligenteMemo !== 'undefined' ? ElligenteMemo.generate('REPAY', intentId, i.asset, i.amount) : null);
                     }
                   });
                   clearInterval(timer);
@@ -19891,7 +20522,7 @@ const FulfillerEngine = (() => {
                   _log('[SETTLEMENT] PhaseB — duplicate settlement (already processed on-chain)');
                   VaultStore.mutate(s => {
                     const i = s.intents.find(x => x.id === intentId || x.intentId === intentId);
-                    if (i) { i.status = 'Settled'; i.settlementTxHash = i.settlementTxHash || 'already-processed'; i.settledAt = Date.now(); i.updatedAt = Date.now(); i._treasuryReimbursed = true; i.lastError = null; }
+                    if (i) { i.status = 'Settled'; i.settlementTxHash = i.settlementTxHash || 'already-processed'; i.settledAt = Date.now(); i.updatedAt = Date.now(); i._treasuryReimbursed = true; i.lastError = null; i.memo = i.memo ?? (typeof ElligenteMemo !== 'undefined' ? ElligenteMemo.generate('REPAY', intentId, i.asset, i.amount) : null); }
                   });
                 } else {
                   VaultStore.mutate(s => { const i = s.intents.find(x => x.id === intentId || x.intentId === intentId); if (i) i.lastError = 'Settle tx: ' + (e.shortMessage || e.message); });
@@ -20201,6 +20832,8 @@ const TreasurySettlementExecutor = (() => {
               messageBytes: task.messageBytes,
               attestationSignature: task.attestationSig,
               intentId: task.intentId,
+              asset: intent?.asset ?? 'usdc',
+              amount: intent?.amount ?? 0,
             }),
           });
 
@@ -20229,8 +20862,16 @@ const TreasurySettlementExecutor = (() => {
             }
             VaultStore.mutate(s => {
               const i = s.intents.find(x => x.id === task.intentId || x.intentId === task.intentId);
-              if (i) { i._attestationSubmitted = true; i._mintTxHash = verifiedTxHash; i.settlementTxHash = verifiedTxHash; i.settlementError = null; i.lastAttempt = Date.now(); }
+              if (i) { i._attestationSubmitted = true; i._mintTxHash = verifiedTxHash; i.settlementTxHash = verifiedTxHash; i.settlementError = null; i.lastAttempt = Date.now(); i.mintBlockNumber = data.blockNumber ?? i.mintBlockNumber; i.memo = data.memo ?? i.memo; i.memoOnChain = data.memoOnChain ?? false; }
             });
+            if (data.memo && typeof ElligenteMemo !== 'undefined') {
+              ElligenteMemo.recordMemo({
+                intentId: task.intentId, action: 'REPAY', memo: data.memo,
+                mintTxHash: verifiedTxHash, blockNumber: data.blockNumber,
+                amount: intent?.amount, asset: intent?.asset, timestamp: Date.now(),
+                memoOnChain: data.memoOnChain ?? false,
+              });
+            }
             try {
               await RepaymentContract.verifyAndSettle(task.intentId, { attestation: task.attestationSig, mintTxHash: verifiedTxHash });
               _log('[SETTLEMENT] Marking Treasury reimbursed — intent=' + task.intentId);
@@ -20493,10 +21134,10 @@ async function executeTurboBridge() {
 
   const stepsCard = document.getElementById('bridge-steps-card');
   const stepsWrap = document.getElementById('turbo-steps-wrap');
+  const stdSteps = document.getElementById('bridge-standard-steps');
   if (stepsCard) stepsCard.style.display = '';
   if (stepsWrap) stepsWrap.style.display = 'block';
-  document.getElementById('bridge-step-status').textContent='Pending';
-  document.getElementById('bridge-step-status').style.color='var(--muted2)';
+  if (stdSteps) stdSteps.style.display = 'none';
   document.getElementById('bridge-step-list').innerHTML='';
 
   const stepEls = [0,1,2,3,4].map(i => document.getElementById('turbo-step-' + i));
@@ -20984,56 +21625,76 @@ async function vaultInit() {
   VaultStore.load();
   VaultStore.hydrateReplaySet();
 
-  // Initial UI render (with whatever data we have)
   vaultRefreshUI();
 
-  // Recover any intents stuck in Settling (page refresh / tab close recovery)
   try { FulfillerEngine.recoverSettlingIntents(); } catch(e) { _warn('catch', e?.message||e); }
 
-  // Bootstrap TreasurySettlementExecutor for any pending receiveMessage tasks
   try { TreasurySettlementExecutor.forceProcess(); } catch(e) { _warn('catch', e?.message||e); }
 
-  // Fetch on-chain Treasury balances — uses dedicated ARC RPC (no wallet required)
   await VaultChain.fetchVaultBalances();
-  // Also read from TreasuryVault contract for full asset data
   if (TREASURY_VAULT_ADDRESS && TREASURY_VAULT_ADDRESS !== '0x0000000000000000000000000000000000000000') {
     try { await Promise.all([readTreasuryPoolData('usdc'), readTreasuryPoolData('eurc'), readTreasuryPoolData('cirbtc')]); } catch(e) { _warn('silent-catch', e?.message||e); }
   }
   vaultRefreshUI();
 
-  // Re-fetch balances when Treasury page becomes visible
+  _chainSyncTreasury();
+
   document.getElementById('nav-treasury')?.addEventListener('click', async () => {
     await VaultChain.fetchVaultBalances();
     vaultRefreshUI();
   });
 
-  // Listen for wallet connect/switch events to refresh vault balances
   window.addEventListener('vault:walletConnected', async () => {
     await VaultChain.fetchVaultBalances();
     vaultRefreshUI();
   });
 
-  // Periodic: refresh while Treasury page is active
   _setInterval(async () => {
     if (document.getElementById('page-treasury')?.classList.contains('active')) {
       RebalancingEngine.autoCheck();
-      // Refresh chain data every 30s if page active — uses dedicated ARC RPC (no wallet required)
       const age = Date.now() - (VaultStore.get().lastChainFetch || 0);
       if (age > 30000) {
         await VaultChain.fetchVaultBalances();
       }
       vaultRefreshUI();
-      // TSE is triggered ONLY by settlement poller (Phase A/B enqueue).
-      // No periodic auto-processing — prevents MetaMask popups every 5s.
-      // Auto-refresh Mint Console if on that section
       if (document.getElementById('trs-mint')?.classList.contains('active')) {
         try { mcRefreshQueue(); } catch(e) { _warn('catch', e?.message||e); }
       }
     }
   }, 5000);
 
-  // Ticker always updates
   _setInterval(() => { try { _renderTicker(); } catch(e){ _warn('catch', e?.message||e); } }, 3000);
+
+  _setInterval(() => { _chainSyncTreasury(); }, 120000);
+}
+
+async function _chainSyncTreasury() {
+  if (typeof TreasuryIndexer === 'undefined' || typeof ARC_READ_PROVIDER === 'undefined') return;
+  try {
+    const chainState = await TreasuryIndexer.syncFromChain(ARC_READ_PROVIDER);
+    if (!chainState || !chainState.settlements || chainState.settlements.length === 0) return;
+
+    const localIntents = VaultStore.get().intents || [];
+    const merged = TreasuryIndexer.syncLocalCache(chainState, localIntents);
+    const reconciliation = TreasuryIndexer.reconcileTreasuryState(chainState, localIntents);
+
+    VaultStore.mutate(s => {
+      s.intents = merged;
+      s.lastChainSyncBlock = chainState.lastChainSyncBlock;
+      s.lastSyncTimestamp = Date.now();
+      s.synced = true;
+    });
+
+    if (reconciliation.issues.length > 0) {
+      console.warn('[TreasurySync] Reconciliation issues:', reconciliation.issues);
+    }
+    _log('[TreasurySync] Chain sync complete — matched=' + reconciliation.matched + ' added=' + (merged.length - localIntents.length) + ' block=' + chainState.lastChainSyncBlock);
+
+    vaultRefreshUI();
+    try { SettlementModule.refresh(); } catch(_) {}
+  } catch(e) {
+    _warn('[TreasurySync] Chain sync error:', e.message ?? e);
+  }
 }
 
 // ── Hook into wallet connect flow ─────────────────────────────────────
@@ -21119,17 +21780,19 @@ const SettlementModule = (() => {
       return { label:'Verification Failed', cls:'failed', icon:'ti-circle-x' };
     }
 
-    // On-chain reimbursement confirmed by verifyAndSettle balance check
+    if (intent._dataSource === 'chain' || (intent.memoOnChain && intent._treasuryReimbursed)) {
+      return { label:'On-chain Verified', cls:'verified', icon:'ti-shield-check' };
+    }
+
     if (intent._treasuryReimbursed || intent._reimbursementProof?.onChainVerified) {
       return { label:'Verified On-Chain', cls:'verified', icon:'ti-shield-check' };
     }
 
-    // Attestation received but treasury reimbursement not yet confirmed
     if (intent.attestation || intent.settlementTxHash) {
       return { label:'Awaiting Verification', cls:'awaiting', icon:'ti-clock-exclamation' };
     }
 
-    return { label:'Awaiting Verification', cls:'awaiting', icon:'ti-clock-exclamation' };
+    return { label:'Cache Only', cls:'awaiting', icon:'ti-cloud-off' };
   }
 
   // ── Reimbursement Proof Engine ────────────────────────────────────────────
@@ -21148,6 +21811,8 @@ const SettlementModule = (() => {
         settlementTx:    i.settlementTxHash || i.settlementTx || '—',
         mintTxHash:      i.arcTxHash || i.arcTx || '—',
         reimbursedAmount: typeof i.amount === 'number' ? i.amount : 0,
+        memo:            i.memo ?? null,
+        memoOnChain:     i.memoOnChain ?? false,
         verificationTimestamp: i.settledAt || i.verificationTimestamp || i.updatedAt || Date.now(),
         proof:           i._reimbursementProof || null,
       }));
@@ -21445,7 +22110,7 @@ const SettlementModule = (() => {
   }
 
   // ── Filter state ──────────────────────────────────────────────────────────
-  let _filters = { asset:'', status:'', route:'', dateFrom:'', dateTo:'', intent:'' };
+  let _filters = { asset:'', status:'', route:'', dateFrom:'', dateTo:'', intent:'', memo:'' };
 
   function _matchFilter(intent) {
     const f = _filters;
@@ -21467,6 +22132,10 @@ const SettlementModule = (() => {
       const q = f.intent.toLowerCase();
       if (!(intent.intentId||intent.id||'').toLowerCase().includes(q)) return false;
     }
+    if (f.memo) {
+      const mq = f.memo.toLowerCase();
+      if (!(intent.memo||'').toLowerCase().includes(mq)) return false;
+    }
     return true;
   }
 
@@ -21482,7 +22151,7 @@ const SettlementModule = (() => {
     if (countEl) countEl.textContent = filtered.length + ' records';
 
     if (filtered.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="15" style="padding:24px;text-align:center;color:var(--muted2);font-size:11px;">'
+      tbody.innerHTML = '<tr><td colspan="16" style="padding:24px;text-align:center;color:var(--muted2);font-size:11px;">'
         + '<i class="ti ti-database-off" style="font-size:20px;display:block;margin-bottom:6px;"></i>'
         + 'No settlements match current filters.'
         + '</td></tr>';
@@ -21540,6 +22209,7 @@ const SettlementModule = (() => {
         + '<td style="padding:6px 6px;text-align:right;font-weight:600;font-size:9px;">' + reimbAmt + '</td>'
         + '<td style="padding:6px 6px;text-align:right;font-size:9px;color:var(--muted2);">' + settleTime + '</td>'
         + '<td style="padding:6px 6px;text-align:center;">' + vbHtml + '</td>'
+        + '<td style="padding:6px 6px;font-family:monospace;font-size:7.5px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + (intent.memo ?? '') + '">' + (intent.memo ? (intent.memoOnChain ? '<i class="ti ti-shield-check" style="color:#22c55e;font-size:8px;"></i> ' : '<i class="ti ti-alert-triangle" style="color:#f59e0b;font-size:8px;"></i> ') + '<span style="color:' + (intent.memoOnChain ? '#a78bfa' : '#f59e0b') + ';">' + intent.memo + '</span>' : '<span style="color:var(--muted2)">—</span>') + '</td>'
         + '<td style="padding:6px 4px;text-align:center;font-size:8.5px;' + lpColor + '">' + lpStr + '</td>'
         + '<td style="padding:6px 4px;text-align:right;font-size:8.5px;color:var(--muted2);">' + pollCountStr + '</td>'
         + '<td style="padding:6px 4px;font-size:7.5px;' + errColor + ';max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + errStr + '">' + errStr + '</td>'
@@ -21669,7 +22339,7 @@ const SettlementModule = (() => {
     const entries = ReimbursementProof.getAuditEntries();
 
     if (entries.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="8" style="padding:24px;text-align:center;color:var(--muted2);font-size:11px;">'
+      tbody.innerHTML = '<tr><td colspan="9" style="padding:24px;text-align:center;color:var(--muted2);font-size:11px;">'
         + '<i class="ti ti-search" style="font-size:20px;display:block;margin-bottom:6px;"></i>'
         + 'No verified reimbursements yet. Complete settlements appear here.'
         + '</td></tr>';
@@ -21686,6 +22356,7 @@ const SettlementModule = (() => {
       const reimbAmt    = typeof e.reimbursedAmount === 'number'
         ? '$' + e.reimbursedAmount.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:6})
         : '—';
+      const memoDisplay = e.memo ? '<span style="font-family:monospace;font-size:7.5px;color:' + (e.memoOnChain ? '#22c55e' : '#f59e0b') + ';" title="' + e.memo + '">' + (e.memoOnChain ? '\u2705 ' : '\u26A0 ') + (e.memo.length > 28 ? e.memo.slice(0,28) + '\u2026' : e.memo) + '</span>' : '<span style="color:var(--muted2)">\u2014</span>';
       const verTime     = e.verificationTimestamp ? new Date(e.verificationTimestamp).toLocaleString() : '—';
       const verStatus   = '<span class="verbadge verified"><i class="ti ti-shield-check"></i> Verified</span>';
 
@@ -21696,6 +22367,7 @@ const SettlementModule = (() => {
         + '<td style="padding:5px 8px;text-align:center;font-family:monospace;color:#a78bfa;">' + shortMint + '</td>'
         + '<td style="padding:5px 8px;text-align:center;font-family:monospace;color:#7b9ef7;">' + shortSettle + '</td>'
         + '<td style="padding:5px 8px;text-align:right;font-weight:600;color:#22c55e;">' + reimbAmt + '</td>'
+        + '<td style="padding:5px 8px;">' + memoDisplay + '</td>'
         + '<td style="padding:5px 8px;text-align:right;font-size:8px;color:var(--muted2);">' + verTime + '</td>'
         + '<td style="padding:5px 8px;text-align:center;">' + verStatus + '</td>'
         + '</tr>';
@@ -21776,6 +22448,34 @@ const SettlementModule = (() => {
         // Recovery UI is for monitoring/verification only.
       } catch(e) {
         _warn('[SettlementRecovery] intent', intent.intentId||intent.id, ':', e.message);
+      }
+    }
+
+    if (typeof ElligenteMemo !== 'undefined' && typeof ARC_READ_PROVIDER !== 'undefined') {
+      try {
+        const memoResults = await ElligenteMemo.incrementalScan(ARC_READ_PROVIDER);
+        if (memoResults.length > 0) {
+          _log('[SettlementRecovery] Found ' + memoResults.length + ' new ELLIGENTE memo(s) on Arc chain');
+          for (const m of memoResults) {
+            if (m.action !== 'REPAY') continue;
+            const existingIntent = _loadIntents().find(i => (i.id === m.intentId || i.intentId === m.intentId));
+            if (existingIntent && !existingIntent.memo) {
+              if (typeof VaultStore !== 'undefined') {
+                VaultStore.mutate(s => {
+                  const i = s.intents.find(x => x.id === m.intentId || x.intentId === m.intentId);
+                  if (i) {
+                    i.memo = m.memo;
+                    i.mintTxHash = i.mintTxHash ?? m.txHash;
+                    i.mintBlockNumber = i.mintBlockNumber ?? m.blockNumber;
+                  }
+                });
+              }
+              _log('[SettlementRecovery] Updated intent ' + m.intentId + ' with on-chain memo');
+            }
+          }
+        }
+      } catch(e) {
+        _warn('[SettlementRecovery] Memo scan error:', e.message ?? e);
       }
     }
   }
@@ -21876,7 +22576,6 @@ const SettlementModule = (() => {
     refresh() {
       try {
         const intents = _loadIntents();
-        // Pre-compute verification badges for all intents (cached)
         intents.forEach(i => { i._vbadge = _verificationBadge(i); });
         _renderKPIs(intents);
         _renderFlow(intents);
@@ -21886,6 +22585,24 @@ const SettlementModule = (() => {
         _renderAudit(intents);
         _renderExposure(intents);
         _checkOperatorPanel();
+        const syncBadge = document.getElementById('stl-sync-badge');
+        if (syncBadge) {
+          const isSynced = typeof TreasuryIndexer !== 'undefined' && TreasuryIndexer.isSynced();
+          const chainCount = intents.filter(i => i._dataSource === 'chain' || i.memoOnChain).length;
+          if (isSynced && chainCount > 0) {
+            syncBadge.textContent = 'On-chain (' + chainCount + ')';
+            syncBadge.style.background = 'rgba(34,197,94,.12)';
+            syncBadge.style.color = '#22c55e';
+          } else if (isSynced) {
+            syncBadge.textContent = 'Synced';
+            syncBadge.style.background = 'rgba(34,197,94,.12)';
+            syncBadge.style.color = '#22c55e';
+          } else {
+            syncBadge.textContent = 'Cache';
+            syncBadge.style.background = 'rgba(245,158,11,.12)';
+            syncBadge.style.color = '#f59e0b';
+          }
+        }
       } catch(e) {
         _warn('[Settlements] refresh error:', e.message);
       }
@@ -21898,7 +22615,7 @@ const SettlementModule = (() => {
       _renderAudit(intents);
     },
     clearFilters() {
-      _filters = { asset:'', status:'', route:'', dateFrom:'', dateTo:'', intent:'' };
+      _filters = { asset:'', status:'', route:'', dateFrom:'', dateTo:'', intent:'', memo:'' };
       const intents = _loadIntents();
       intents.forEach(i => { i._vbadge = _verificationBadge(i); });
       _renderTable(intents);
@@ -21927,12 +22644,13 @@ function stlApplyFilters() {
     dateFrom: (document.getElementById('stl-filter-date-from')?.value || ''),
     dateTo:   (document.getElementById('stl-filter-date-to')?.value  || ''),
     intent:   (document.getElementById('stl-filter-intent')?.value   || ''),
+    memo:     (document.getElementById('stl-filter-memo')?.value     || ''),
   });
 }
 
 function stlClearFilters() {
   ['stl-filter-asset','stl-filter-status','stl-filter-route',
-   'stl-filter-date-from','stl-filter-date-to','stl-filter-intent']
+   'stl-filter-date-from','stl-filter-date-to','stl-filter-intent','stl-filter-memo']
     .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
   SettlementModule.clearFilters();
 }
@@ -21981,6 +22699,30 @@ function stlRefreshCircle() {
     });
   } finally {
     setTimeout(() => { window.__SETTLEMENT_RECOVERY_READONLY = false; }, 100);
+  }
+}
+
+async function stlRecoverFromMemos() {
+  _stlLog('Recovery: scanning Arc chain for ELLIGENTE memos…');
+  try {
+    if (typeof ElligenteMemo === 'undefined' || typeof ARC_READ_PROVIDER === 'undefined') {
+      _stlLog('Error: ElligenteMemo or ARC_READ_PROVIDER not available');
+      return;
+    }
+    const recovered = await ElligenteMemo.recoverFromMemos(ARC_READ_PROVIDER);
+    if (recovered.length === 0) {
+      _stlLog('No new intents found from Arc memos. Last scanned block: ' + ElligenteMemo.getLastScannedBlock());
+    } else {
+      _stlLog('Recovered ' + recovered.length + ' intent(s) from Arc on-chain memos.');
+      recovered.forEach(r => {
+        _stlLog('  → ' + r.intentId + ' | ' + r.action + ' | ' + (r.asset ?? '') + ' | ' + (r.amount ?? '') + ' | TX: ' + (r.txHash ?? '').slice(0, 14) + '…');
+      });
+    }
+    const allMemos = ElligenteMemo.getAllMemos();
+    _stlLog('Total indexed memos: ' + allMemos.length + ' | Last block: ' + ElligenteMemo.getLastScannedBlock());
+    stlRefreshAll();
+  } catch(e) {
+    _stlLog('Memo recovery error: ' + (e.message ?? e));
   }
 }
 
@@ -22120,20 +22862,48 @@ async function mcExecuteMint(intentId) {
       mcRefreshQueue(); vaultRefreshUI(); return;
     }
 
-    // Execute receiveMessage
+    // Execute receiveMessage wrapped via Arc Memo contract
     _mcLog('Transaction submitted — signing with operator wallet…');
     const destMtAbi = ['function receiveMessage(bytes message, bytes attestation) returns (bool)'];
-    const destMtContract = new ethers.Contract(arcCfg.messageTransmitter, destMtAbi, signer);
-    const mintTx = await destMtContract.receiveMessage(intent._attestationMsg, intent._attestationSig);
-    _mcLog('TX SENT: ' + mintTx.hash);
+    const memoStr = (typeof ElligenteMemo !== 'undefined') ? ElligenteMemo.generate('REPAY', intentId, intent.asset ?? 'usdc', intent.amount ?? 0) : null;
+    let mintTx;
+    let memoOnChain = false;
+    if (memoStr && activeChainId === 5042002) {
+      try {
+        const mtIface = new ethers.Interface(destMtAbi);
+        const rmCalldata = mtIface.encodeFunctionData('receiveMessage', [intent._attestationMsg, intent._attestationSig]);
+        const memoC = new ethers.Contract(MEMO_CONTRACT_ADDRESS, MEMO_ABI, signer);
+        const memoId = ethers.id(intentId);
+        const memoData = ethers.toUtf8Bytes(memoStr);
+        mintTx = await memoC.memo(arcCfg.messageTransmitter, rmCalldata, memoId, memoData);
+        memoOnChain = true;
+        _mcLog('Memo-wrapped TX SENT: ' + mintTx.hash);
+      } catch(memoErr) {
+        _mcLog('Memo wrap failed, falling back to direct call: ' + (memoErr.shortMessage ?? memoErr.message ?? '').slice(0, 80));
+        const destMtContract = new ethers.Contract(arcCfg.messageTransmitter, destMtAbi, signer);
+        mintTx = await destMtContract.receiveMessage(intent._attestationMsg, intent._attestationSig);
+        _mcLog('Direct TX SENT: ' + mintTx.hash);
+      }
+    } else {
+      const destMtContract = new ethers.Contract(arcCfg.messageTransmitter, destMtAbi, signer);
+      mintTx = await destMtContract.receiveMessage(intent._attestationMsg, intent._attestationSig);
+      _mcLog('TX SENT: ' + mintTx.hash);
+    }
 
     const mintReceipt = await mintTx.wait();
     if (mintReceipt && mintReceipt.status === 1) {
-      _mcLog('MINT COMPLETED — TX: ' + mintTx.hash + ' block: ' + mintReceipt.blockNumber);
+      _mcLog('MINT COMPLETED — TX: ' + mintTx.hash + ' block: ' + mintReceipt.blockNumber + (memoStr ? ' memo: ' + memoStr : '') + ' onChain: ' + memoOnChain);
       VaultStore.mutate(s => {
         const i = s.intents.find(x => x.id === intentId || x.intentId === intentId);
-        if (i) { i._attestationSubmitted = true; i._mintTxHash = mintTx.hash; i.settlementTxHash = mintTx.hash; i.settlementError = null; i.lastAttempt = Date.now(); }
+        if (i) { i._attestationSubmitted = true; i._mintTxHash = mintTx.hash; i.settlementTxHash = mintTx.hash; i.settlementError = null; i.lastAttempt = Date.now(); i.mintBlockNumber = mintReceipt.blockNumber; i.memo = memoStr ?? i.memo; i.memoOnChain = memoOnChain; }
       });
+      if (memoStr && typeof ElligenteMemo !== 'undefined') {
+        ElligenteMemo.recordMemo({
+          intentId, action: 'REPAY', memo: memoStr,
+          mintTxHash: mintTx.hash, blockNumber: mintReceipt.blockNumber,
+          amount: intent.amount, asset: intent.asset, timestamp: Date.now(),
+        });
+      }
       try {
         await RepaymentContract.verifyAndSettle(intentId, { attestation: intent._attestationSig, mintTxHash: mintTx.hash });
         _mcLog('Settlement verified — intent ' + intentId + ' marked Settled');
@@ -22149,7 +22919,7 @@ async function mcExecuteMint(intentId) {
       _mcLog('[SETTLEMENT] receiveMessage duplicate detected — already processed on-chain');
       VaultStore.mutate(s => {
         const i = s.intents.find(x => x.id === intentId || x.intentId === intentId);
-        if (i) { i._attestationSubmitted = true; i._mintTxHash = 'already-processed'; i.settlementTxHash = 'already-processed'; i.settlementError = null; i.status = 'Settled'; i.updatedAt = Date.now(); i._treasuryReimbursed = true; }
+        if (i) { i._attestationSubmitted = true; i._mintTxHash = 'already-processed'; i.settlementTxHash = 'already-processed'; i.settlementError = null; i.status = 'Settled'; i.updatedAt = Date.now(); i._treasuryReimbursed = true; i.memo = i.memo ?? (typeof ElligenteMemo !== 'undefined' ? ElligenteMemo.generate('REPAY', intentId, i.asset, i.amount) : null); }
       });
       try { await RepaymentContract.verifyAndSettle(intentId, { attestation: intent._attestationSig, mintTxHash: 'already-processed' }); } catch(_) {}
     } else {
@@ -22239,6 +23009,281 @@ function _stlLog(msg) {
 })();
 
 // ══════════════════════════════════════════════════════════
+//  PROFILE PAGE — Account & Intelligent Wallet
+// ══════════════════════════════════════════════════════════
+
+function prfRefreshProfile() {
+  if (typeof ProfileManager === 'undefined') return;
+  const p = ProfileManager.get();
+  const signedIn = ProfileManager.isSignedIn();
+  const guestEl = document.getElementById('prf-guest-view');
+  const userEl = document.getElementById('prf-user-view');
+  if (guestEl) guestEl.style.display = signedIn ? 'none' : 'block';
+  if (userEl) userEl.style.display = signedIn ? 'block' : 'none';
+  const _s = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  const badge = document.getElementById('prf-auth-badge');
+  const statusChip = document.getElementById('prf-status-chip');
+  if (signedIn) {
+    _s('prf-name', p.name || 'User');
+    _s('prf-email', p.email || '—');
+    _s('prf-uid', p.id || '—');
+    _s('prf-created', p.auth.createdAt ? new Date(p.auth.createdAt).toLocaleDateString() : '—');
+    _s('prf-lastlogin', p.auth.lastLogin ? new Date(p.auth.lastLogin).toLocaleString() : '—');
+    const avatar = document.getElementById('prf-avatar');
+    if (avatar) {
+      if (p.avatar) { avatar.innerHTML = '<img src="' + p.avatar + '" style="width:100%;height:100%;border-radius:50%;object-fit:cover" referrerpolicy="no-referrer"/>'; }
+      else { avatar.textContent = (p.name || 'U').charAt(0).toUpperCase(); }
+    }
+    const verified = document.getElementById('prf-verified');
+    if (verified) verified.style.display = p.auth.verified ? 'inline' : 'none';
+    const acctType = typeof WalletManager !== 'undefined' ? WalletManager.getAccountType() : null;
+    const acctLabel = acctType === 'internal' ? 'Intelligent Account' : acctType === 'external' ? 'External Wallet' : 'Signed in';
+    if (badge) { badge.innerHTML = '<i class="ti ti-shield-check" style="font-size:8px"></i> ' + acctLabel; badge.style.background = acctType === 'internal' ? 'rgba(167,139,250,.1)' : 'rgba(34,197,94,.1)'; badge.style.color = acctType === 'internal' ? '#a78bfa' : '#22c55e'; badge.style.borderColor = acctType === 'internal' ? 'rgba(167,139,250,.2)' : 'rgba(34,197,94,.2)'; }
+    if (statusChip) { statusChip.textContent = 'Verified'; statusChip.style.background = 'rgba(34,197,94,.12)'; statusChip.style.color = '#22c55e'; }
+    _s('prf-auth-method', p.auth.provider ? p.auth.provider.charAt(0).toUpperCase() + p.auth.provider.slice(1) : '—');
+    _s('prf-auth-provider', p.auth.provider === 'google' ? 'Google Account' : p.auth.provider === 'email' ? 'Email' : p.auth.provider || 'None');
+    _s('prf-recovery', p.auth.provider === 'google' ? 'Google Recovery' : 'Email Recovery');
+    const iwAddr = p.wallet.address;
+    const short = iwAddr ? iwAddr.slice(0, 6) + '...' + iwAddr.slice(-4) : 'Not created';
+    _s('prf-iw-addr', short);
+    _s('prf-iw-row-addr', short);
+    const iwStatus = document.getElementById('prf-iw-status');
+    if (iwStatus && iwAddr) { iwStatus.textContent = 'Active'; iwStatus.style.background = 'rgba(34,197,94,.12)'; iwStatus.style.color = '#22c55e'; }
+  } else {
+    if (badge) { badge.innerHTML = '<i class="ti ti-lock" style="font-size:8px"></i> Not signed in'; badge.style.background = 'rgba(245,158,11,.1)'; badge.style.color = 'var(--yellow)'; badge.style.borderColor = 'rgba(245,158,11,.2)'; }
+    if (statusChip) { statusChip.textContent = 'Guest'; statusChip.style.background = 'rgba(245,158,11,.12)'; statusChip.style.color = '#f59e0b'; }
+    _s('prf-auth-method', 'None');
+    _s('prf-auth-provider', 'Not connected');
+    _s('prf-recovery', 'Not configured');
+    _s('prf-iw-addr', 'Not created');
+    _s('prf-iw-row-addr', 'Not created');
+    const iwStatus = document.getElementById('prf-iw-status');
+    if (iwStatus) { iwStatus.textContent = 'Inactive'; iwStatus.style.background = 'rgba(100,100,100,.15)'; iwStatus.style.color = 'var(--muted2)'; }
+  }
+  const extAddr = typeof walletAddress !== 'undefined' && walletAddress ? walletAddress.slice(0, 6) + '...' + walletAddress.slice(-4) : 'Not connected';
+  _s('prf-ext-addr', extAddr);
+  _s('prf-stat-tx', String(p.stats.transactions || 0));
+  _s('prf-stat-vol', '$' + (p.stats.volume || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+  _s('prf-stat-chains', String(p.stats.chainsUsed ? p.stats.chainsUsed.size || 0 : 0));
+  _s('prf-stat-payments', String(p.stats.payments || 0));
+  _s('prf-stat-swaps', String(p.stats.swaps || 0));
+  _s('prf-stat-bridges', String(p.stats.bridges || 0));
+  _s('prf-sb-name', signedIn ? (p.name || 'User') : 'Guest');
+  _s('prf-sb-email', signedIn ? (p.email || 'Not set') : 'Not signed in');
+  _s('prf-sb-uid', p.id || '—');
+  _s('prf-sb-since', p.auth.createdAt ? new Date(p.auth.createdAt).toLocaleDateString() : '—');
+  const sbStatus = document.getElementById('prf-sb-status');
+  if (sbStatus) { sbStatus.textContent = signedIn ? 'Verified' : 'Guest'; sbStatus.style.color = signedIn ? '#22c55e' : '#f59e0b'; }
+  const sbAvatar = document.getElementById('prf-sb-avatar');
+  if (sbAvatar) {
+    if (signedIn && p.avatar) { sbAvatar.innerHTML = '<img src="' + p.avatar + '" style="width:100%;height:100%;border-radius:50%;object-fit:cover" referrerpolicy="no-referrer"/>'; sbAvatar.style.background = 'none'; sbAvatar.style.border = '1.5px solid rgba(167,139,250,.3)'; }
+    else if (signedIn) { sbAvatar.innerHTML = '<span style="font-size:16px;font-weight:800;color:#fff">' + (p.name || 'U').charAt(0).toUpperCase() + '</span>'; sbAvatar.style.background = 'linear-gradient(135deg,#a78bfa,#4f8ef7)'; }
+    else { sbAvatar.innerHTML = '<i class="ti ti-user"></i>'; sbAvatar.style.background = 'linear-gradient(135deg,rgba(167,139,250,.25),rgba(79,142,247,.25))'; }
+  }
+  let completion = 20;
+  const tasks = [
+    { id: 'prf-task-signin', done: signedIn },
+    { id: 'prf-task-avatar', done: signedIn && !!p.avatar },
+    { id: 'prf-task-wallet', done: !!(typeof walletAddress !== 'undefined' && walletAddress) },
+    { id: 'prf-task-recovery', done: signedIn && p.auth.provider === 'google' },
+    { id: 'prf-task-tx', done: (p.stats.transactions || 0) > 0 },
+  ];
+  tasks.forEach(t => {
+    const el = document.getElementById(t.id);
+    if (el) {
+      const icon = el.querySelector('i');
+      if (t.done) { if (icon) { icon.className = 'ti ti-circle-check'; icon.style.color = '#22c55e'; } el.style.color = '#22c55e'; el.style.textDecoration = 'line-through'; completion += 16; }
+      else { if (icon) { icon.className = 'ti ti-circle'; icon.style.color = 'var(--muted2)'; } el.style.color = 'var(--muted2)'; el.style.textDecoration = 'none'; }
+    }
+  });
+  completion = Math.min(100, completion);
+  _s('prf-completion-pct', completion + '%');
+  const bar = document.getElementById('prf-completion-bar');
+  if (bar) bar.style.width = completion + '%';
+  prfRefreshAssets();
+  prfRenderActivity();
+}
+
+function prfEditProfile() {
+  if (typeof ProfileManager === 'undefined' || !ProfileManager.isSignedIn()) {
+    try { toast('Sign in first to edit your profile', 'info'); } catch (_) {}
+    return;
+  }
+  const name = prompt('Enter your display name:', ProfileManager.get().name || '');
+  if (name !== null && name.trim().length > 0) {
+    const p = ProfileManager.get();
+    p.name = name.trim();
+    try { localStorage.setItem('elligente_profile', JSON.stringify({ ...p, stats: { ...p.stats, chainsUsed: [...(p.stats.chainsUsed || [])] } })); } catch (_) {}
+    prfRefreshProfile();
+    try { toast('Profile updated', 'success'); } catch (_) {}
+  }
+}
+
+(async function _prfAutoRestore() {
+  const run = async () => {
+    if (typeof ProfileManager === 'undefined' || typeof WalletManager === 'undefined') return;
+    if (!ProfileManager.isSignedIn()) return;
+    if (window.walletAddress && window.activeWalletType !== 'intelligent') return;
+    const p = ProfileManager.get();
+    if (!p.id || !p.email) return;
+    try {
+      const iw = await WalletManager.createOrRestoreWallet(p.email, p.id);
+      if (iw && !window.walletAddress) {
+        WalletManager.activateInternalWallet(iw);
+        console.log('[Profile] Auto-restored Intelligent Wallet:', iw.address);
+      }
+    } catch (e) { console.warn('[Profile] Auto-restore failed:', e.message ?? e); }
+  };
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => setTimeout(run, 800));
+  } else {
+    setTimeout(run, 800);
+  }
+})();
+
+async function prfSignIn(authProvider) {
+  if (typeof ProfileManager === 'undefined') return;
+  let userData = null;
+  if (authProvider === 'google') {
+    const clientId = window.__ARC_PAY_CONFIG__?.googleClientId;
+    if (clientId && !clientId.includes('PLACEHOLDER') && typeof google !== 'undefined' && google.accounts && google.accounts.oauth2) {
+      try {
+        userData = await _googleOAuthPopup(clientId);
+      } catch (e) {
+        console.warn('[Auth] Google OAuth error:', e.message ?? e);
+        try { toast('Google Sign-In failed: ' + (e.message ?? 'popup closed'), 'error'); } catch (_) {}
+        return;
+      }
+    } else {
+      try { toast('Google Client ID not configured. Set GOOGLE_CLIENT_ID in Cloudflare env vars.', 'error'); } catch (_) {}
+      return;
+    }
+  } else if (authProvider === 'email') {
+    const email = prompt('Enter your email address:');
+    if (!email || !email.includes('@')) { try { toast('Invalid email', 'error'); } catch (_) {} return; }
+    userData = { name: email.split('@')[0], email: email };
+  }
+  if (!userData) return;
+  const profile = await ProfileManager.signIn(authProvider, userData);
+  if (typeof WalletManager !== 'undefined' && profile && profile.id) {
+    try {
+      const iw = await WalletManager.createOrRestoreWallet(profile.email || profile.id, profile.id);
+      if (iw) {
+        profile.wallet.address = iw.address;
+        try { localStorage.setItem('elligente_profile', JSON.stringify({ ...profile, stats: { ...profile.stats, chainsUsed: [...(profile.stats.chainsUsed || [])] } })); } catch (_) {}
+        if (!window.walletAddress || window.activeWalletType === 'intelligent') {
+          WalletManager.activateInternalWallet(iw);
+        }
+        try { toast('Intelligent Wallet activated: ' + iw.address.slice(0, 8) + '...', 'success'); } catch (_) {}
+      }
+    } catch (e) {
+      console.warn('[Profile] Internal wallet creation error:', e.message ?? e);
+      try { toast('Wallet created (offline mode)', 'info'); } catch (_) {}
+    }
+  }
+  prfRefreshProfile();
+}
+
+function _googleOAuthPopup(clientId) {
+  return new Promise((resolve, reject) => {
+    try {
+      const client = google.accounts.oauth2.initTokenClient({
+        client_id: clientId,
+        scope: 'email profile openid',
+        callback: async (tokenResponse) => {
+          if (tokenResponse.error) { reject(new Error(tokenResponse.error_description ?? tokenResponse.error)); return; }
+          try {
+            const resp = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', { headers: { Authorization: 'Bearer ' + tokenResponse.access_token } });
+            if (!resp.ok) { reject(new Error('Google API error: ' + resp.status)); return; }
+            const info = await resp.json();
+            resolve({ name: info.name ?? info.given_name ?? 'User', email: info.email, avatar: info.picture ?? null, sub: info.sub, verified: info.email_verified ?? false });
+          } catch (e) { reject(e); }
+        },
+        error_callback: (err) => { reject(new Error(err.type ?? 'popup_closed')); },
+      });
+      client.requestAccessToken();
+    } catch (e) { reject(e); }
+  });
+}
+
+function prfSignOut() {
+  if (typeof ProfileManager === 'undefined') return;
+  ProfileManager.signOut();
+  if (typeof WalletManager !== 'undefined') {
+    WalletManager.deactivateInternalWallet();
+  }
+  try { toast('Signed out', 'info'); } catch (_) {}
+  prfRefreshProfile();
+}
+
+async function prfRefreshAssets() {
+  const tbody = document.getElementById('prf-assets-tbody');
+  if (!tbody) return;
+  const addr = (typeof walletAddress !== 'undefined' && walletAddress) ? walletAddress : (typeof ProfileManager !== 'undefined' && ProfileManager.isSignedIn() ? ProfileManager.get().wallet.address : null);
+  if (!addr || typeof ARC_READ_PROVIDER === 'undefined' || typeof ethers === 'undefined') {
+    tbody.innerHTML = '<tr><td colspan="4" style="padding:18px;text-align:center;color:var(--muted2);font-size:10px"><i class="ti ti-coins" style="font-size:16px;display:block;margin-bottom:4px;opacity:.3"></i>Connect wallet to view assets</td></tr>';
+    return;
+  }
+  tbody.innerHTML = '<tr><td colspan="4" style="padding:12px;text-align:center;color:var(--muted2);font-size:9px"><i class="ti ti-loader" style="animation:spin 1s linear infinite"></i> Loading balances...</td></tr>';
+  try {
+    const assets = await ProfileManager.fetchAssetBalances(ARC_READ_PROVIDER, addr);
+    if (assets.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="4" style="padding:18px;text-align:center;color:var(--muted2);font-size:10px">No assets found</td></tr>';
+      return;
+    }
+    tbody.innerHTML = assets.map(a => {
+      const val = a.symbol === 'cirBTC' ? (a.balance * 67000).toFixed(2) : a.balance.toFixed(2);
+      return '<tr style="border-bottom:1px solid var(--border)">'
+        + '<td style="padding:8px 12px"><div style="display:flex;align-items:center;gap:6px"><div style="width:22px;height:22px;border-radius:50%;background:' + a.color + ';display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:800;color:#fff">' + a.symbol.charAt(0) + '</div><span style="font-weight:600">' + a.symbol + '</span></div></td>'
+        + '<td style="padding:8px;text-align:right;font-weight:600;font-family:monospace">' + a.balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: a.decimals === 8 ? 8 : 6 }) + '</td>'
+        + '<td style="padding:8px;text-align:right;color:#22c55e">$' + parseFloat(val).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '</td>'
+        + '<td style="padding:8px;text-align:center"><span style="font-size:8px;padding:2px 6px;border-radius:6px;background:rgba(34,197,94,.1);color:#22c55e">Arc Testnet</span></td>'
+        + '</tr>';
+    }).join('');
+  } catch (e) {
+    tbody.innerHTML = '<tr><td colspan="4" style="padding:12px;text-align:center;color:var(--red);font-size:9px">Error loading balances</td></tr>';
+  }
+}
+
+function prfShowReceive() {
+  const addr = (typeof walletAddress !== 'undefined' && walletAddress) ? walletAddress : (typeof ProfileManager !== 'undefined' && ProfileManager.isSignedIn() ? ProfileManager.get().wallet.address : null);
+  if (!addr) { try { toast('No wallet address available', 'error'); } catch (_) {} return; }
+  try {
+    navigator.clipboard.writeText(addr);
+    toast('Address copied: ' + addr.slice(0, 8) + '...' + addr.slice(-6), 'success');
+  } catch (_) {
+    prompt('Your wallet address:', addr);
+  }
+}
+
+function prfRenderActivity() {
+  const tbody = document.getElementById('prf-activity-tbody');
+  if (!tbody || typeof ProfileManager === 'undefined') return;
+  const activity = ProfileManager.getActivity();
+  if (activity.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" style="padding:18px;text-align:center;color:var(--muted2);font-size:10px"><i class="ti ti-history" style="font-size:16px;display:block;margin-bottom:4px;opacity:.3"></i>No activity yet</td></tr>';
+    return;
+  }
+  const typeIcons = { send: 'ti-send', batch: 'ti-stack', swap: 'ti-arrows-exchange', bridge: 'ti-topology-star-3', liquidity: 'ti-droplet' };
+  const typeColors = { send: '#4f8ef7', batch: '#a78bfa', swap: '#2dd4bf', bridge: '#f59e0b', liquidity: '#22c55e' };
+  tbody.innerHTML = activity.slice(0, 20).map(a => {
+    const icon = typeIcons[a.type] || 'ti-transfer';
+    const color = typeColors[a.type] || 'var(--muted2)';
+    const txShort = a.txHash ? '<a href="https://testnet.arcscan.app/tx/' + a.txHash + '" target="_blank" style="color:#7b9ef7;font-family:monospace;font-size:8px">' + a.txHash.slice(0, 6) + '...' + a.txHash.slice(-4) + '</a>' : '<span style="color:var(--muted2)">—</span>';
+    const statusBg = a.status === 'success' ? 'rgba(34,197,94,.12)' : a.status === 'failed' ? 'rgba(239,68,68,.12)' : 'rgba(245,158,11,.12)';
+    const statusColor = a.status === 'success' ? '#22c55e' : a.status === 'failed' ? '#ef4444' : '#f59e0b';
+    return '<tr style="border-bottom:1px solid var(--border)">'
+      + '<td style="padding:6px 12px"><span style="color:' + color + '"><i class="ti ' + icon + '" style="font-size:10px;margin-right:4px"></i>' + (a.type || '—') + '</span></td>'
+      + '<td style="padding:6px 8px;text-align:right;font-weight:600">' + (a.amount ? a.amount.toLocaleString(undefined, { minimumFractionDigits: 2 }) + ' ' + (a.asset || 'USDC') : '—') + '</td>'
+      + '<td style="padding:6px 8px;text-align:center"><span style="font-size:8px;padding:2px 6px;border-radius:6px;background:' + statusBg + ';color:' + statusColor + '">' + (a.status || 'pending') + '</span></td>'
+      + '<td style="padding:6px 8px;text-align:center;font-size:8.5px;color:var(--muted2)">' + (a.network || 'Arc') + '</td>'
+      + '<td style="padding:6px 8px;text-align:center">' + txShort + '</td>'
+      + '<td style="padding:6px 12px;text-align:right;font-size:8.5px;color:var(--muted2)">' + (a.timestamp ? new Date(a.timestamp).toLocaleString() : '—') + '</td>'
+      + '</tr>';
+  }).join('');
+}
+
+// ══════════════════════════════════════════════════════════
 //  MOBILE RESPONSIVE — Navigation & UI helpers
 // ══════════════════════════════════════════════════════════
 
@@ -22269,7 +23314,7 @@ function mobileNav(page) {
   showPage(page);
 }
 
-const _mobileNavMap = { send:'mob-nav-send', batch:'mob-nav-batch', bridge:'mob-nav-bridge', treasury:'mob-nav-treasury' };
+const _mobileNavMap = { send:'mob-nav-send', batch:'mob-nav-batch', bridge:'mob-nav-bridge', swap:'mob-nav-swap' };
 function updateMobileNav(id) {
   document.querySelectorAll('.mob-nav-btn').forEach(b => b.classList.remove('active'));
   const btn = document.getElementById(_mobileNavMap[id]);
@@ -22415,7 +23460,7 @@ function toggleMobileRoute() {
     <button class="mob-nav-btn active" id="mob-nav-send" onclick="mobileNav('send')"><i class="ti ti-send"></i><span>Send</span></button>
     <button class="mob-nav-btn" id="mob-nav-batch" onclick="mobileNav('batch')"><i class="ti ti-stack"></i><span>Batch</span></button>
     <button class="mob-nav-btn" id="mob-nav-bridge" onclick="mobileNav('bridge')"><i class="ti ti-topology-star-3"></i><span>Bridge</span></button>
-    <button class="mob-nav-btn" id="mob-nav-treasury" onclick="mobileNav('treasury')"><i class="ti ti-vault"></i><span>Treasury</span></button>
+    <button class="mob-nav-btn" id="mob-nav-swap" onclick="mobileNav('swap')"><i class="ti ti-arrows-exchange"></i><span>Swap</span></button>
     <button class="mob-nav-btn" id="mob-nav-more" onclick="toggleMobileSidebar()"><i class="ti ti-dots"></i><span>More</span></button>
   </div>
 </nav>

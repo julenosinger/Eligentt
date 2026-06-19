@@ -37,11 +37,13 @@ export async function onRequest(context) {
   const kitKey      = env.KIT_KEY      || '';
   const testApiKey  = env.TEST_API_KEY  || '';
   const wcProjectId = env.WC_PROJECT_ID || '';
+  const googleClientId = env.GOOGLE_CLIENT_ID || '';
 
   // Replace placeholders
   html = html.replaceAll('__WC_PROJECT_ID_PLACEHOLDER__',  wcProjectId);
   html = html.replaceAll('__KIT_KEY_PLACEHOLDER__',        kitKey);
   html = html.replaceAll('__TEST_API_KEY_PLACEHOLDER__',    testApiKey);
+  html = html.replaceAll('__GOOGLE_CLIENT_ID_PLACEHOLDER__', googleClientId);
 
   return new Response(html, {
     status: response.status,
@@ -78,11 +80,14 @@ async function handleCircleProxy(request, env, url) {
     });
 
     const data = await resp.text();
+    const origin = request.headers.get('Origin') || '';
+    const allowedOrigins = (env.ALLOWED_ORIGINS || 'https://elligente.pages.dev').split(',').map(s => s.trim());
+    const corsOrigin = allowedOrigins.includes(origin) ? origin : allowedOrigins[0];
     return new Response(data, {
       status: resp.status,
       headers: {
         'Content-Type': resp.headers.get('Content-Type') || 'application/json',
-        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Origin': corsOrigin,
       },
     });
   } catch (e) {
@@ -100,11 +105,12 @@ async function handleIrisProxy(request, url) {
   try {
     const resp = await fetch(irisUrl, { method: request.method });
     const data = await resp.text();
+    const origin = request.headers.get('Origin') || '';
     return new Response(data, {
       status: resp.status,
       headers: {
         'Content-Type': resp.headers.get('Content-Type') || 'application/json',
-        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Origin': origin || '*',
       },
     });
   } catch (e) {
