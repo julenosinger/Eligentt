@@ -1,33 +1,58 @@
+import { ethers } from 'ethers';
 import { RELAYER_CONFIG } from './shared-config.mjs';
+import { checkPaymentLimit } from './rate-limit.mjs';
 
-const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
-  'Content-Type': 'application/json',
-};
+function getCorsHeaders(request, env) {
+  const allowed = (env.ALLOWED_ORIGINS || 'https://elligente.pages.dev').split(',').map(s => s.trim());
+  const origin = request.headers.get('Origin') || '';
+  const corsOrigin = allowed.includes(origin) ? origin : allowed[0];
+  return {
+    'Access-Control-Allow-Origin': corsOrigin,
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+    'Content-Type': 'application/json',
+  };
+}
 
-export async function onRequestOptions() {
-  return new Response(null, { status: 204, headers: CORS_HEADERS });
+export async function onRequestOptions(context) {
+  return new Response(null, { status: 204, headers: getCorsHeaders(context.request, context.env) });
 }
 
 export async function onRequestPost(context) {
+  const headers = getCorsHeaders(context.request, context.env);
+
+  const clientIP = context.request.headers.get('CF-Connecting-IP') || context.request.headers.get('X-Forwarded-For') || 'unknown';
+  const rateCheck = await checkPaymentLimit(context.env.RATE_LIMIT_KV, clientIP);
+  if (!rateCheck.allowed) {
+    return new Response(JSON.stringify({ error: 'Rate limit exceeded', retryAfter: rateCheck.retryAfter }), {
+      status: 429, headers: { ...headers, 'Retry-After': String(rateCheck.retryAfter) },
+    });
+  }
+
   try {
     const body = await context.request.json();
     const { label, amount, type, desc, recipient, token, chain, expiry } = body;
 
     if (!recipient || !/^0x[0-9a-fA-F]{40}$/.test(recipient)) {
-      return new Response(JSON.stringify({ error: 'Invalid recipient address' }), { status: 400, headers: CORS_HEADERS });
+      return new Response(JSON.stringify({ error: 'Invalid recipient address' }), { status: 400, headers });
     }
     if (type !== 'open' && (!amount || amount <= 0)) {
-      return new Response(JSON.stringify({ error: 'Invalid amount' }), { status: 400, headers: CORS_HEADERS });
+      return new Response(JSON.stringify({ error: 'Invalid amount' }), { status: 400, headers });
     }
 
     const feeBps = RELAYER_CONFIG.PAYLINK_FEE_BPS || 200;
-    const feeAmount = type === 'open' ? 0 : parseFloat((amount * feeBps / 10000).toFixed(6));
-    const totalAmount = type === 'open' ? 0 : parseFloat((amount + feeAmount).toFixed(6));
+    let feeAmount = 0;
+    let totalAmount = 0;
 
-    const id = 'pl-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    if (type !== 'open' && amount > 0) {
+      const amountRaw = ethers.parseUnits(String(amount), 6);
+      const feeRaw = (amountRaw * BigInt(feeBps)) / 10000n;
+      const totalRaw = amountRaw + feeRaw;
+      feeAmount = parseFloat(ethers.formatUnits(feeRaw, 6));
+      totalAmount = parseFloat(ethers.formatUnits(totalRaw, 6));
+    }
+
+    const id = 'pl_' + crypto.randomUUID();
 
     let expiresAt = null;
     if (expiry && expiry !== 'never') {
@@ -66,8 +91,8 @@ export async function onRequestPost(context) {
       await KV.put(id, JSON.stringify(link), ttl ? { expirationTtl: ttl } : undefined);
     }
 
-    return new Response(JSON.stringify({ ok: true, link }), { status: 201, headers: CORS_HEADERS });
+    return new Response(JSON.stringify({ ok: true, link }), { status: 201, headers });
   } catch (e) {
-    return new Response(JSON.stringify({ error: 'Server error: ' + (e.message || '') }), { status: 500, headers: CORS_HEADERS });
+    return new Response(JSON.stringify({ error: 'Server error: ' + (e.message || '') }), { status: 500, headers });
   }
 }

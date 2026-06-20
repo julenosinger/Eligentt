@@ -1,11 +1,12 @@
 /**
- * Elligente Relayer Shared Config
- * Used by Cloudflare Pages Functions (relayer.js, mint.js)
- * Must match browser-side config files exactly.
+ * Elligente Relayer Shared Config — Server-side source of truth
+ * Used by Cloudflare Pages Functions (relayer.js, mint.js, payment-links.js)
+ * Values MUST match config/system.js (browser-side source of truth)
  */
 export const RELAYER_CONFIG = {
   TREASURY_VAULT:  '0xbfC9E8F79bd30b912081ae88F9ad0A515F08c2F1',
   MESSAGE_TRANSMITTER: '0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275',
+  MEMO_CONTRACT:   '0x5294E9927c3306DcBaDb03fe70b92e01cCede505',
   ARC_CHAIN_ID:    5042002,
   ARC_RPC_URL:     'https://rpc.testnet.arc.network',
   ALLOWED_ORIGINS: 'https://elligente.pages.dev',
@@ -29,5 +30,9 @@ export const RELAYER_CONFIG = {
   MT_ABI: [
     'function receiveMessage(bytes message, bytes attestation) returns (bool)',
     'function usedNonces(bytes32) view returns (uint256)',
+  ],
+
+  MEMO_ABI: [
+    'function memo(address target, bytes calldata data, bytes32 memoId, bytes calldata memoData) external',
   ],
 };

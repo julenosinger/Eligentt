@@ -21,8 +21,9 @@
  */
 import { ethers } from 'ethers';
 import { checkRelayLimit } from './rate-limit.mjs';
+import { RELAYER_CONFIG } from './shared-config.mjs';
+import { verifyRelayerAuth } from './relayer-auth.mjs';
 
-// ── CORS ──
 function getCORS(request, env) {
   const allowed = (env.ALLOWED_ORIGINS || 'https://elligente.pages.dev').split(',').map(s => s.trim());
   const origin = request.headers.get('Origin') || '';
@@ -34,18 +35,9 @@ function getCORS(request, env) {
   };
 }
 
-// ── Contract addresses (must match frontend config/runtime.js) ──
-const TREASURY_VAULT = '0xbfC9E8F79bd30b912081ae88F9ad0A515F08c2F1';
-const ASSETS = {
-  usdc:   '0x3600000000000000000000000000000000000000',
-  eurc:   '0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a',
-  cirbtc: '0xf0C4a4CE82A5746AbAAd9425360Ab04fbBA432BF',
-};
-const VAULT_ABI = [
-  'function fulfillAndPayWithFee(address asset, uint256 grossAmount, uint256 feeAmount, bytes32 intentId, address recipient)',
-  'function intentState(bytes32) view returns (uint8)',
-  'function isOperator(address) view returns (bool)',
-];
+const TREASURY_VAULT = RELAYER_CONFIG.TREASURY_VAULT;
+const ASSETS = RELAYER_CONFIG.ASSETS;
+const VAULT_ABI = RELAYER_CONFIG.VAULT_ABI;
 
 export async function onRequest(context) {
   const { request, env } = context;
@@ -54,7 +46,7 @@ export async function onRequest(context) {
 
   // Rate limit check
   const clientIP = request.headers.get('CF-Connecting-IP') || request.headers.get('X-Forwarded-For') || 'unknown';
-  const rateCheck = checkRelayLimit(clientIP);
+  const rateCheck = await checkRelayLimit(env.RATE_LIMIT_KV, clientIP);
   if (!rateCheck.allowed) {
     return new Response(JSON.stringify({ error: 'Rate limit exceeded', retryAfter: rateCheck.reset }), {
       status: 429,
@@ -65,6 +57,7 @@ export async function onRequest(context) {
   if (request.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: corsHeaders });
   }
+
   if (request.method !== 'POST') {
     return json({ error: 'Method not allowed' }, 405);
   }
@@ -77,6 +70,11 @@ export async function onRequest(context) {
   let body;
   try { body = await request.json(); } catch (_) {
     return json({ error: 'Invalid JSON' }, 400);
+  }
+
+  const authResult = await verifyRelayerAuth(body, env.RATE_LIMIT_KV);
+  if (!authResult.valid) {
+    return json({ error: 'Auth failed: ' + authResult.error }, 401);
   }
 
   const { intentBytes32, asset, grossAmount, feeAmount, userAddress } = body;

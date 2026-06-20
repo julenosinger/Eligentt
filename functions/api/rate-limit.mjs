@@ -1,41 +1,53 @@
-/**
- * Simple in-memory rate limiter for Cloudflare Pages Functions.
- * Tracks requests per IP using a sliding window.
- * Not persistent across cold starts — provides basic DoS protection.
- */
-export class RateLimiter {
-  constructor(maxRequests = 30, windowMs = 60000) {
-    this.maxRequests = maxRequests;
-    this.windowMs = windowMs;
-    this.clients = new Map();
+export async function checkRateLimit(kv, { identifier, endpoint, limit = 20, windowMs = 60000 }) {
+  if (!kv) return { allowed: true, remaining: limit, resetAt: Date.now() + windowMs };
+
+  const key = `rate:${endpoint}:${identifier}`;
+  const now = Date.now();
+
+  let data;
+  try {
+    const raw = await kv.get(key);
+    data = raw ? JSON.parse(raw) : null;
+  } catch (_) {
+    data = null;
   }
 
-  check(ip) {
-    const now = Date.now();
-    const key = ip || 'unknown';
-
-    if (!this.clients.has(key)) {
-      this.clients.set(key, []);
-    }
-
-    const timestamps = this.clients.get(key);
-    const windowStart = now - this.windowMs;
-
-    while (timestamps.length > 0 && timestamps[0] < windowStart) {
-      timestamps.shift();
-    }
-
-    if (timestamps.length >= this.maxRequests) {
-      return { allowed: false, remaining: 0, reset: Math.ceil((timestamps[0] + this.windowMs - now) / 1000) };
-    }
-
-    timestamps.push(now);
-    return { allowed: true, remaining: this.maxRequests - timestamps.length, reset: Math.ceil(this.windowMs / 1000) };
+  if (!data || (now - data.windowStart) > windowMs) {
+    data = { count: 0, windowStart: now };
   }
+
+  if (data.count >= limit) {
+    const resetAt = data.windowStart + windowMs;
+    return {
+      allowed: false,
+      remaining: 0,
+      resetAt,
+      retryAfter: Math.max(1, Math.ceil((resetAt - now) / 1000)),
+    };
+  }
+
+  data.count++;
+  const ttl = Math.ceil(windowMs / 1000) + 60;
+
+  try {
+    await kv.put(key, JSON.stringify(data), { expirationTtl: ttl });
+  } catch (_) {}
+
+  return {
+    allowed: true,
+    remaining: limit - data.count,
+    resetAt: data.windowStart + windowMs,
+  };
 }
 
-const relayLimiter = new RateLimiter(20, 60000);
-const mintLimiter = new RateLimiter(20, 60000);
+export async function checkRelayLimit(kv, identifier) {
+  return checkRateLimit(kv, { identifier, endpoint: 'relayer', limit: 20, windowMs: 60000 });
+}
 
-export function checkRelayLimit(ip) { return relayLimiter.check(ip); }
-export function checkMintLimit(ip)  { return mintLimiter.check(ip); }
+export async function checkMintLimit(kv, identifier) {
+  return checkRateLimit(kv, { identifier, endpoint: 'mint', limit: 20, windowMs: 60000 });
+}
+
+export async function checkPaymentLimit(kv, identifier) {
+  return checkRateLimit(kv, { identifier, endpoint: 'payment', limit: 30, windowMs: 60000 });
+}

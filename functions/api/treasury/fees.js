@@ -1,17 +1,23 @@
 import { RELAYER_CONFIG } from '../shared-config.mjs';
 
-const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
-  'Content-Type': 'application/json',
-};
+function getCorsHeaders(request, env) {
+  const allowed = (env.ALLOWED_ORIGINS || 'https://elligente.pages.dev').split(',').map(s => s.trim());
+  const origin = request.headers.get('Origin') || '';
+  const corsOrigin = allowed.includes(origin) ? origin : allowed[0];
+  return {
+    'Access-Control-Allow-Origin': corsOrigin,
+    'Access-Control-Allow-Methods': 'GET, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+    'Content-Type': 'application/json',
+  };
+}
 
-export async function onRequestOptions() {
-  return new Response(null, { status: 204, headers: CORS_HEADERS });
+export async function onRequestOptions(context) {
+  return new Response(null, { status: 204, headers: getCorsHeaders(context.request, context.env) });
 }
 
 export async function onRequestGet(context) {
+  const headers = getCorsHeaders(context.request, context.env);
   try {
     const KV = context.env.PAYMENT_LINKS;
     const result = {
@@ -48,8 +54,8 @@ export async function onRequestGet(context) {
 
     result.totalFees = Object.values(result.byModule).reduce((a, b) => a + b, 0);
 
-    return new Response(JSON.stringify({ ok: true, ...result }), { status: 200, headers: CORS_HEADERS });
+    return new Response(JSON.stringify({ ok: true, ...result }), { status: 200, headers });
   } catch (e) {
-    return new Response(JSON.stringify({ error: 'Server error: ' + (e.message || '') }), { status: 500, headers: CORS_HEADERS });
+    return new Response(JSON.stringify({ error: 'Server error: ' + (e.message || '') }), { status: 500, headers });
   }
 }

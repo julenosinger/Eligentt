@@ -23,8 +23,9 @@
  */
 import { ethers } from 'ethers';
 import { checkMintLimit } from '../rate-limit.mjs';
+import { RELAYER_CONFIG } from '../shared-config.mjs';
+import { verifyRelayerAuth } from '../relayer-auth.mjs';
 
-// ── CORS ──
 function getCORS(request, env) {
   const allowed = (env.ALLOWED_ORIGINS || 'https://elligente.pages.dev').split(',').map(s => s.trim());
   const origin = request.headers.get('Origin') || '';
@@ -36,25 +37,14 @@ function getCORS(request, env) {
   };
 }
 
-// ── Contract addresses (must match frontend config/runtime.js) ──
-const TREASURY_VAULT = '0xbfC9E8F79bd30b912081ae88F9ad0A515F08c2F1';
-const MESSAGE_TRANSMITTER = '0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275';
-const MEMO_CONTRACT_ADDRESS = '0x5294E9927c3306DcBaDb03fe70b92e01cCede505';
+const TREASURY_VAULT = RELAYER_CONFIG.TREASURY_VAULT;
+const MESSAGE_TRANSMITTER = RELAYER_CONFIG.MESSAGE_TRANSMITTER;
+const MEMO_CONTRACT_ADDRESS = RELAYER_CONFIG.MEMO_CONTRACT;
+const VAULT_ABI = RELAYER_CONFIG.VAULT_ABI;
+const MT_ABI = RELAYER_CONFIG.MT_ABI;
+const MEMO_ABI = RELAYER_CONFIG.MEMO_ABI;
 
-const VAULT_ABI = [
-  'function isOperator(address) view returns (bool)',
-];
-
-const MT_ABI = [
-  'function receiveMessage(bytes message, bytes attestation) returns (bool)',
-  'function usedNonces(bytes32) view returns (uint256)',
-];
-
-const MEMO_ABI = [
-  'function memo(address target, bytes calldata data, bytes32 memoId, bytes calldata memoData) external',
-];
-
-const ARC_CHAIN_ID = 5042002;
+const ARC_CHAIN_ID = RELAYER_CONFIG.ARC_CHAIN_ID;
 const MEMO_PREFIX = 'ELLIGENTE';
 
 function generateMemo(action, intentId, asset, amount) {
@@ -68,7 +58,7 @@ export async function onRequest(context) {
 
   // Rate limit check
   const clientIP = request.headers.get('CF-Connecting-IP') || request.headers.get('X-Forwarded-For') || 'unknown';
-  const rateCheck = checkMintLimit(clientIP);
+  const rateCheck = await checkMintLimit(env.RATE_LIMIT_KV, clientIP);
   if (!rateCheck.allowed) {
     return new Response(JSON.stringify({ error: 'Rate limit exceeded', retryAfter: rateCheck.reset }), {
       status: 429,
@@ -79,6 +69,7 @@ export async function onRequest(context) {
   if (request.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: corsHeaders });
   }
+
   if (request.method !== 'POST') {
     return json({ error: 'Method not allowed' }, 405);
   }
@@ -91,6 +82,11 @@ export async function onRequest(context) {
   let body;
   try { body = await request.json(); } catch (_) {
     return json({ error: 'Invalid JSON' }, 400);
+  }
+
+  const authResult = await verifyRelayerAuth(body, env.RATE_LIMIT_KV);
+  if (!authResult.valid) {
+    return json({ error: 'Auth failed: ' + authResult.error }, 401);
   }
 
   const { messageBytes, attestationSignature, intentId, asset, amount } = body;

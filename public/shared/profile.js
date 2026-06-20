@@ -1,13 +1,3 @@
-/**
- * Elligente Profile & Intelligent Wallet Module
- * ══════════════════════════════════════════════
- * Account management, embedded smart wallet, and activity tracking.
- * Prepares for Account Abstraction (ERC-4337) integration on Arc Network.
- *
- * Login is optional. The dApp works without an account.
- * When a user signs in, an Intelligent Wallet (smart account) is created.
- */
-
 const ProfileManager = (() => {
   'use strict';
 
@@ -20,7 +10,7 @@ const ProfileManager = (() => {
       email: null,
       name: null,
       avatar: null,
-      wallet: { address: null, type: 'smart-account', network: 'Arc Testnet', chainId: 5042002 },
+      wallet: { address: null, type: 'embedded', status: 'pending', network: 'Arc Testnet', chainId: 5042002 },
       auth: { provider: null, verified: false, createdAt: null, lastLogin: null },
       preferences: { currency: 'USD', locale: 'en-US' },
       stats: { transactions: 0, volume: 0, swaps: 0, bridges: 0, payments: 0, chainsUsed: new Set() },
@@ -51,11 +41,9 @@ const ProfileManager = (() => {
 
   function get() { if (!_profile) _load(); return _profile; }
 
-  function isSignedIn() { return !!(get().id && get().auth.provider); }
-
-  function generateWalletAddress() {
-    const bytes = crypto.getRandomValues(new Uint8Array(20));
-    return '0x' + Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+  function isSignedIn() {
+    if (typeof AuthManager !== 'undefined' && AuthManager.isAuthenticated()) return true;
+    return !!(get().id && get().auth.provider);
   }
 
   function generateUserId() {
@@ -82,8 +70,9 @@ const ProfileManager = (() => {
     }
 
     if (!p.wallet.address) {
-      p.wallet.address = generateWalletAddress();
-      p.wallet.type = 'smart-account';
+      p.wallet.address = null;
+      p.wallet.type = 'embedded';
+      p.wallet.status = 'pending';
       p.wallet.network = 'Arc Testnet';
       p.wallet.chainId = 5042002;
     }
@@ -92,10 +81,50 @@ const ProfileManager = (() => {
     return p;
   }
 
+  function signInFromAuth(serverProfile) {
+    const p = get();
+    p.id = serverProfile.id || p.id || generateUserId();
+    p.email = serverProfile.email || p.email;
+    p.name = serverProfile.name || p.name;
+    p.avatar = serverProfile.avatar || p.avatar;
+    p.wallet = {
+      address: serverProfile.wallet.address,
+      type: 'embedded',
+      status: serverProfile.wallet.address ? 'active' : 'pending',
+      network: serverProfile.wallet.network || 'Arc Testnet',
+      chainId: serverProfile.wallet.chainId || 5042002,
+    };
+    p.auth = {
+      provider: 'email',
+      verified: true,
+      createdAt: serverProfile.auth.createdAt || p.auth.createdAt || Date.now(),
+      lastLogin: Date.now(),
+    };
+    if (serverProfile.stats) {
+      p.stats.transactions = serverProfile.stats.transactions || p.stats.transactions || 0;
+      p.stats.volume = serverProfile.stats.volume || p.stats.volume || 0;
+      p.stats.swaps = serverProfile.stats.swaps || p.stats.swaps || 0;
+      p.stats.bridges = serverProfile.stats.bridges || p.stats.bridges || 0;
+      p.stats.payments = serverProfile.stats.payments || p.stats.payments || 0;
+    }
+    _save();
+    return p;
+  }
+
+  function setWalletAddress(address) {
+    const p = get();
+    p.wallet.address = address;
+    p.wallet.status = address ? 'active' : 'pending';
+    _save();
+  }
+
   function signOut() {
     const provider = _profile?.auth?.provider;
     _profile = _emptyProfile();
     _save();
+    if (typeof AuthManager !== 'undefined' && AuthManager.isAuthenticated()) {
+      AuthManager.logout().catch(() => {});
+    }
     return provider;
   }
 
@@ -147,10 +176,9 @@ const ProfileManager = (() => {
   }
 
   return {
-    get, isSignedIn, signIn, signOut,
+    get, isSignedIn, signIn, signInFromAuth, setWalletAddress, signOut,
     updateStats, getActivity, recordActivity,
-    fetchAssetBalances,
-    generateWalletAddress, generateUserId,
+    fetchAssetBalances, generateUserId,
   };
 })();
 
