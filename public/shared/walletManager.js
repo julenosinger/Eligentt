@@ -9,10 +9,15 @@ const WalletManager = (() => {
   const IDB_NAME = 'elligente_wallet';
   const IDB_STORE = 'secrets';
 
+  // ── Private state ──────────────────────────────────────────
   let _internalWallet = null;
   let _internalProvider = null;
   let _accountType = null;
 
+  // Which wallet source is currently active: 'none' | 'internal' | 'external'
+  let _activeSource = 'none';
+
+  // ── IndexedDB helpers ──────────────────────────────────────
   function _openIDB() {
     return new Promise((resolve, reject) => {
       if (typeof indexedDB === 'undefined') { reject(new Error('No IndexedDB')); return; }
@@ -50,7 +55,6 @@ const WalletManager = (() => {
   async function _getOrCreateDeviceSecret() {
     let secret = await _idbGet('device_secret');
     if (secret && typeof secret === 'string' && secret.length >= 32) return secret;
-
     try {
       const lsSecret = localStorage.getItem(DEVICE_SECRET_KEY);
       if (lsSecret && lsSecret.length >= 32) {
@@ -59,7 +63,6 @@ const WalletManager = (() => {
         return lsSecret;
       }
     } catch (_) {}
-
     const arr = new Uint8Array(32);
     crypto.getRandomValues(arr);
     secret = Array.from(arr, b => b.toString(16).padStart(2, '0')).join('');
@@ -103,6 +106,7 @@ const WalletManager = (() => {
     return Array.from(arr, b => b.toString(16).padStart(2, '0')).join('');
   }
 
+  // ── Wallet creation / restore ──────────────────────────────
   async function createOrRestoreWallet(email, userId) {
     if (typeof ethers === 'undefined') throw new Error('ethers.js not loaded');
 
@@ -159,10 +163,48 @@ const WalletManager = (() => {
     return _internalWallet;
   }
 
+  // ── Universal getters — always use these, never access globals directly ──
+
+  /** Returns the current active wallet address, or null if none. */
+  function getAddress() {
+    return window.walletAddress || null;
+  }
+
+  /** Returns the current active signer, or null if read-only. */
+  function getSigner() {
+    return window.signer || null;
+  }
+
+  /** Returns the current active provider. */
+  function getProvider() {
+    return window.provider || null;
+  }
+
+  /** Returns 'internal' | 'external' | 'preview' | null */
+  function getType() {
+    if (_activeSource === 'internal') return 'internal';
+    if (window.activeWalletType && window.activeWalletType !== 'intelligent') return 'external';
+    if (window.activeWalletType === 'preview') return 'preview';
+    if (window.activeWalletType === 'intelligent') return 'internal';
+    return null;
+  }
+
+  /** Returns true if any wallet is connected and ready. */
+  function isConnected() {
+    return !!(getAddress() && getProvider());
+  }
+
+  /** Returns true if a signer is available (can execute transactions). */
+  function canSign() {
+    return !!(getAddress() && getSigner());
+  }
+
+  // ── Activation ─────────────────────────────────────────────
+
   function activateInternalWallet(wallet) {
     if (!wallet) return;
     if (wallet._isRemoteSigner) {
-      wallet.getAddress().then(addr => { window.walletAddress = addr; _updateUI(addr); });
+      wallet.getAddress().then(addr => { window.walletAddress = addr; _syncUI(addr); });
       window.signer = wallet;
       window.provider = wallet.provider;
     } else {
@@ -172,9 +214,10 @@ const WalletManager = (() => {
     }
     window.activeChainId = ARC_CHAIN_ID;
     window.activeWalletType = 'intelligent';
+    _activeSource = 'internal';
     _accountType = 'internal';
     const addr = wallet.address || window.walletAddress;
-    if (addr) _updateUI(addr);
+    if (addr) _syncUI(addr);
   }
 
   function activateFromAuth() {
@@ -190,92 +233,138 @@ const WalletManager = (() => {
     window.provider = remoteProvider;
     window.activeChainId = ARC_CHAIN_ID;
     window.activeWalletType = 'intelligent';
-    _updateUI(walletAddr);
+    _activeSource = 'internal';
+    _syncUI(walletAddr);
     return true;
   }
 
-  function _updateUI(address) {
-    const short = address ? address.slice(0, 6) + '...' + address.slice(-4) : '';
-    const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
-    set('chip-lbl', short);
-    set('sb-addr', short);
-    set('sender-addr', address);
-    set('dd-full-addr', address);
-    const chip = document.getElementById('chip-indicator');
-    if (chip) chip.style.background = '#a78bfa';
-    const wchip = document.getElementById('wchip');
-    if (wchip) wchip.style.borderColor = 'rgba(167,139,250,.5)';
-    const scoreEl = document.getElementById('sender-score');
-    if (scoreEl) scoreEl.style.display = '';
-    if (typeof updateNetworkBadge === 'function') { try { updateNetworkBadge(); } catch (_) {} }
-    if (typeof refreshBalance === 'function') { refreshBalance().catch(() => {}); }
+  /** Called by external wallet connection flow to register an external wallet. */
+  function registerExternalWallet(address, signer, provider, walletType) {
+    window.walletAddress = address;
+    window.signer = signer;
+    window.provider = provider;
+    window.activeWalletType = walletType;
+    _activeSource = 'external';
+    _syncUI(address);
   }
+
+  /** Called when external wallet disconnects. */
+  function unregisterExternalWallet() {
+    if (_activeSource !== 'external') return;
+    window.walletAddress = null;
+    window.signer = null;
+    window.provider = null;
+    window.activeWalletType = null;
+    _activeSource = 'none';
+    _syncUI(null);
+  }
+
+  // ── Switching ──────────────────────────────────────────────
+
+  /** Switch the active wallet to internal (loads from vault if needed). */
+  async function switchToInternal(email, userId) {
+    if (!_internalWallet) {
+      try { await createOrRestoreWallet(email, userId); } catch(e) {
+        console.error('[WalletManager] switchToInternal failed:', e);
+        return false;
+      }
+    }
+    if (!_internalWallet) return false;
+    activateInternalWallet(_internalWallet);
+    return true;
+  }
+
+  /** Switch the active wallet to external (if one is connected). */
+  function switchToExternal() {
+    if (!window.ethereum && !_cachedExternalProvider) return false;
+    // Re-activate the external wallet if we have a cached provider
+    if (window.walletAddress && _activeSource === 'external') return true;
+    // Trigger reconnection via the standard flow
+    if (typeof connectWallet === 'function') { connectWallet(); return true; }
+    return false;
+  }
+
+  /** Returns which source is active: 'none' | 'internal' | 'external' */
+  function getActiveSource() {
+    return _activeSource;
+  }
+
+  // ── Deactivation ───────────────────────────────────────────
 
   function deactivateInternalWallet() {
     _internalWallet = null;
     _internalProvider = null;
     _accountType = null;
-    if (window.activeWalletType === 'intelligent') {
+    if (_activeSource === 'internal') {
       window.walletAddress = null;
       window.signer = null;
       window.provider = null;
       window.activeWalletType = null;
       window.activeChainId = ARC_CHAIN_ID;
-      const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
-      set('chip-lbl', 'Connect Wallet');
-      set('sb-addr', 'Not connected');
-      set('sb-bal', '\u2014');
-      set('dd-bal', '\u2014');
-      set('sender-addr', '');
-      set('sender-bal', '');
-      set('dd-full-addr', '');
-      const chip = document.getElementById('chip-indicator');
-      if (chip) chip.style.background = '#6b7280';
-      const wchip = document.getElementById('wchip');
-      if (wchip) wchip.style.borderColor = '';
+      _activeSource = 'none';
+      _syncUI(null);
     }
   }
 
+  // ── Balance helpers ────────────────────────────────────────
+
+  /** Get ETH/native balance for the active wallet. */
+  async function getEthBalance() {
+    const addr = getAddress();
+    const prov = getProvider();
+    if (!addr || !prov) return null;
+    try {
+      const bal = await prov.getBalance(addr);
+      return parseFloat(ethers.formatUnits(bal, 18));
+    } catch(_) { return null; }
+  }
+
+  /** Get ERC20 balance for the active wallet. */
+  async function getTokenBalance(tokenAddress, decimals) {
+    const addr = getAddress();
+    const prov = getProvider();
+    if (!addr || !prov || !tokenAddress) return null;
+    try {
+      const abi = ['function balanceOf(address) view returns (uint256)'];
+      const c = new ethers.Contract(tokenAddress, abi, prov);
+      const bal = await c.balanceOf(addr);
+      return parseFloat(ethers.formatUnits(bal, decimals || 6));
+    } catch(_) { return null; }
+  }
+
+  // ── Legacy helpers ─────────────────────────────────────────
+
   function getAccountType() {
+    if (_activeSource === 'internal') return 'internal';
+    if (_activeSource === 'external') return 'external';
     if (typeof AuthManager !== 'undefined' && AuthManager.isAuthenticated()) return 'internal';
-    if (window.activeWalletType === 'intelligent') return 'internal';
-    if (window.walletAddress) return 'external';
     return null;
   }
 
-  function isInternalWallet() { return getAccountType() === 'internal'; }
-  function isExternalWallet() { return getAccountType() === 'external'; }
+  function isInternalWallet() { return _activeSource === 'internal'; }
+  function isExternalWallet() { return _activeSource === 'external'; }
 
   function getActiveWallet() {
-    if (typeof AuthManager !== 'undefined' && AuthManager.isAuthenticated() && window.activeWalletType === 'intelligent') {
-      return {
-        address: AuthManager.getWalletAddress() || window.walletAddress,
-        signer: AuthManager.getRemoteSigner() || window.signer,
-        provider: AuthManager.getRemoteProvider() || _internalProvider,
-        chainId: ARC_CHAIN_ID, type: 'internal', label: 'Intelligent Wallet',
-      };
-    }
-    const type = getAccountType();
-    if (!type) return null;
+    const addr = getAddress();
+    if (!addr) return null;
+    const type = _activeSource === 'internal' ? 'internal' : 'external';
     return {
-      address: window.walletAddress, signer: window.signer,
-      provider: type === 'internal' ? _internalProvider : window.provider,
-      chainId: window.activeChainId ?? ARC_CHAIN_ID, type,
-      label: type === 'internal' ? 'Intelligent Wallet' : 'External Wallet',
+      address: addr,
+      signer: getSigner(),
+      provider: getProvider(),
+      chainId: window.activeChainId ?? ARC_CHAIN_ID,
+      type,
+      label: type === 'internal' ? 'Internal Wallet' : 'External Wallet',
     };
   }
 
   function resolveWallet() {
-    if (window.walletAddress && window.activeWalletType && window.activeWalletType !== 'intelligent') {
-      return { type: 'external', address: window.walletAddress, source: window.activeWalletType };
+    const addr = getAddress();
+    if (!addr) return null;
+    if (_activeSource === 'internal') {
+      return { type: 'internal', address: addr, source: 'intelligent' };
     }
-    if (typeof AuthManager !== 'undefined' && AuthManager.isAuthenticated()) {
-      return { type: 'internal', address: AuthManager.getWalletAddress(), source: 'intelligent' };
-    }
-    if (_internalWallet) {
-      return { type: 'internal', address: _internalWallet.address, source: 'intelligent' };
-    }
-    return null;
+    return { type: 'external', address: addr, source: window.activeWalletType || 'external' };
   }
 
   function clearVault() {
@@ -283,10 +372,57 @@ const WalletManager = (() => {
     deactivateInternalWallet();
   }
 
+  // ── Internal cache for external provider ───────────────────
+  let _cachedExternalProvider = null;
+  function cacheExternalProvider(p) { _cachedExternalProvider = p; }
+
+  // ── UI Sync ────────────────────────────────────────────────
+  function _syncUI(address) {
+    const short = address ? address.slice(0, 6) + '...' + address.slice(-4) : '';
+    const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+    set('chip-lbl', address ? short : 'Connect Wallet');
+    set('sb-addr', address ? short : 'Not connected');
+    set('sender-addr', address || '');
+    set('dd-full-addr', address || '');
+    set('wm-type-badge', _activeSource === 'internal' ? 'Internal' : _activeSource === 'external' ? 'External' : '');
+    const chip = document.getElementById('chip-indicator');
+    if (chip) chip.style.background = _activeSource === 'internal' ? '#a78bfa' : _activeSource === 'external' ? '#4f8ef7' : '#6b7280';
+    const wchip = document.getElementById('wchip');
+    if (wchip) wchip.style.borderColor = _activeSource === 'internal' ? 'rgba(167,139,250,.5)' : _activeSource === 'external' ? 'rgba(79,142,247,.5)' : '';
+    const scoreEl = document.getElementById('sender-score');
+    if (scoreEl) scoreEl.style.display = address ? '' : 'none';
+    if (typeof updateNetworkBadge === 'function') { try { updateNetworkBadge(); } catch (_) {} }
+    if (address && typeof refreshBalance === 'function') { refreshBalance().catch(() => {}); }
+  }
+
+  // ── Public API ─────────────────────────────────────────────
   return {
-    createOrRestoreWallet, activateInternalWallet, activateFromAuth,
-    deactivateInternalWallet, getAccountType, isInternalWallet, isExternalWallet,
-    getActiveWallet, resolveWallet, clearVault,
+    // Creation / restore
+    createOrRestoreWallet,
+
+    // Universal getters
+    getAddress, getSigner, getProvider, getType,
+    isConnected, canSign,
+
+    // Activation / registration
+    activateInternalWallet, activateFromAuth,
+    registerExternalWallet, unregisterExternalWallet,
+    cacheExternalProvider,
+
+    // Switching
+    switchToInternal, switchToExternal, getActiveSource,
+
+    // Deactivation
+    deactivateInternalWallet, clearVault,
+
+    // Balance
+    getEthBalance, getTokenBalance,
+
+    // Legacy
+    getAccountType, isInternalWallet, isExternalWallet,
+    getActiveWallet, resolveWallet,
+
+    // Internals (read-only)
     get internalWallet() { return _internalWallet; },
     get internalProvider() { return _internalProvider; },
     ARC_CHAIN_ID,
