@@ -1,22 +1,44 @@
 import { ethers } from 'ethers';
 
-const CORS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-  'Content-Type': 'application/json',
-};
+import { getAuthCors } from './_cors.mjs';
 
-function json(data, status = 200) {
-  return new Response(JSON.stringify(data), { status, headers: CORS });
+// SECURITY: responses use a per-request CORS allowlist (see _cors.mjs).
+function mkJson(headers) {
+  return (data, status = 200) => new Response(JSON.stringify(data), { status, headers });
 }
 
-export async function onRequestOptions() {
-  return new Response(null, { status: 204, headers: CORS });
+// SECURITY: OTP is never stored in plaintext nor returned in the response.
+// We persist only a salted PBKDF2 hash so a KV leak does not expose live codes.
+function randomSaltHex(bytes = 16) {
+  return Array.from(crypto.getRandomValues(new Uint8Array(bytes)))
+    .map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function hashOTP(code, salt) {
+  const enc = new TextEncoder();
+  const material = await crypto.subtle.importKey('raw', enc.encode(code), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', salt: enc.encode(salt), iterations: 100000, hash: 'SHA-256' },
+    material, 256
+  );
+  return Array.from(new Uint8Array(bits)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+// SECURITY: OTP delivery hook. Wire your existing email provider here.
+// Until an email transport is configured this is a no-op and the code is
+// ONLY persisted (hashed) in KV — it is never returned to the client.
+async function deliverVerificationCode(_env, _email, _code) {
+  // TODO(email): integrate transactional email provider (e.g. MailChannels / Resend).
+  return;
+}
+
+export async function onRequestOptions(context) {
+  return new Response(null, { status: 204, headers: getAuthCors(context.request, context.env) });
 }
 
 export async function onRequestPost(context) {
   const { request, env } = context;
+  const json = mkJson(getAuthCors(request, env));
   const KV = env.AUTH_KV;
   if (!KV) return json({ error: 'AUTH_KV not configured' }, 503);
 
@@ -42,24 +64,32 @@ export async function onRequestPost(context) {
   crypto.getRandomValues(codeArr);
   const code = String(codeArr[0] % 900000 + 100000);
 
+  // SECURITY: persist only a salted hash + TTL, never the raw code.
+  const TTL_SECONDS = 600;
+  const otpSalt = randomSaltHex();
+  const otpHash = await hashOTP(code, otpSalt);
+
   await KV.put(`verify:${normalizedEmail}`, JSON.stringify({
-    code,
-    createdAt: Date.now(),
+    otpHash,
+    salt: otpSalt,
+    expiresAt: Date.now() + TTL_SECONDS * 1000,
     attempts: 0,
-  }), { expirationTtl: 600 });
+    version: 2,
+  }), { expirationTtl: TTL_SECONDS });
 
   await KV.put(rateLimitKey, '1', { expirationTtl: 60 });
 
   const existingUser = await KV.get(`user:${normalizedEmail}`);
   const isNewUser = !existingUser;
 
-  console.log(`[AUTH] Verification code for ${normalizedEmail}: ${code}`);
+  // SECURITY: hand the raw code to the email transport only; do not log or return it.
+  await deliverVerificationCode(env, normalizedEmail, code);
 
   return json({
     ok: true,
+    success: true,
     email: normalizedEmail,
     isNewUser,
     message: 'Verification code sent',
-    _testCode: code,
   }, 200);
 }

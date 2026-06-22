@@ -1,20 +1,17 @@
-const CORS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, DELETE, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-  'Content-Type': 'application/json',
-};
+import { getAuthCors } from './_cors.mjs';
 
-function json(data, status = 200) {
-  return new Response(JSON.stringify(data), { status, headers: CORS });
+// SECURITY: responses use a per-request CORS allowlist (see _cors.mjs).
+function mkJson(headers) {
+  return (data, status = 200) => new Response(JSON.stringify(data), { status, headers });
 }
 
-export async function onRequestOptions() {
-  return new Response(null, { status: 204, headers: CORS });
+export async function onRequestOptions(context) {
+  return new Response(null, { status: 204, headers: getAuthCors(context.request, context.env) });
 }
 
 export async function onRequestGet(context) {
   const { request, env } = context;
+  const json = mkJson(getAuthCors(request, env));
   const KV = env.AUTH_KV;
   if (!KV) return json({ error: 'AUTH_KV not configured' }, 503);
 
@@ -59,6 +56,7 @@ export async function onRequestGet(context) {
 
 export async function onRequestDelete(context) {
   const { request, env } = context;
+  const json = mkJson(getAuthCors(request, env));
   const KV = env.AUTH_KV;
   if (!KV) return json({ error: 'AUTH_KV not configured' }, 503);
 

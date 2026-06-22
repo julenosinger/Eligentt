@@ -1,12 +1,8 @@
-const CORS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-  'Content-Type': 'application/json',
-};
+import { getAuthCors } from './_cors.mjs';
 
-function json(data, status = 200) {
-  return new Response(JSON.stringify(data), { status, headers: CORS });
+// SECURITY: responses use a per-request CORS allowlist (see _cors.mjs).
+function mkJson(headers) {
+  return (data, status = 200) => new Response(JSON.stringify(data), { status, headers });
 }
 
 async function hashPassword(password, salt) {
@@ -25,12 +21,41 @@ function generateSessionToken() {
   return Array.from(arr).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-export async function onRequestOptions() {
-  return new Response(null, { status: 204, headers: CORS });
+// SECURITY: per-email login throttling (anti brute-force) — 5 attempts / 15 min.
+const LOGIN_MAX_ATTEMPTS = 5;
+const LOGIN_WINDOW_MS = 900000;
+
+async function getLoginAttempts(KV, email) {
+  try {
+    const raw = await KV.get(`login_attempt:${email}`);
+    if (!raw) return { count: 0, windowStart: Date.now() };
+    const data = JSON.parse(raw);
+    if (Date.now() - data.windowStart > LOGIN_WINDOW_MS) return { count: 0, windowStart: Date.now() };
+    return data;
+  } catch (_) {
+    return { count: 0, windowStart: Date.now() };
+  }
+}
+
+async function recordLoginFailure(KV, email) {
+  const data = await getLoginAttempts(KV, email);
+  data.count = (data.count || 0) + 1;
+  try {
+    await KV.put(`login_attempt:${email}`, JSON.stringify(data), { expirationTtl: Math.ceil(LOGIN_WINDOW_MS / 1000) });
+  } catch (_) {}
+}
+
+async function clearLoginAttempts(KV, email) {
+  try { await KV.delete(`login_attempt:${email}`); } catch (_) {}
+}
+
+export async function onRequestOptions(context) {
+  return new Response(null, { status: 204, headers: getAuthCors(context.request, context.env) });
 }
 
 export async function onRequestPost(context) {
   const { request, env } = context;
+  const json = mkJson(getAuthCors(request, env));
   const KV = env.AUTH_KV;
   if (!KV) return json({ error: 'AUTH_KV not configured' }, 503);
 
@@ -49,21 +74,34 @@ export async function onRequestPost(context) {
 
   const normalizedEmail = email.trim().toLowerCase();
 
+  // SECURITY: throttle brute-force attempts before touching credentials.
+  const attempts = await getLoginAttempts(KV, normalizedEmail);
+  if (attempts.count >= LOGIN_MAX_ATTEMPTS) {
+    return json({ error: 'Too many login attempts. Try again later.' }, 429);
+  }
+
+  // SECURITY: generic 'Invalid credentials' for every failure — no user enumeration.
   const userRaw = await KV.get(`user:${normalizedEmail}`);
   if (!userRaw) {
-    return json({ error: 'Account not found. Create one first.' }, 404);
+    await recordLoginFailure(KV, normalizedEmail);
+    return json({ error: 'Invalid credentials' }, 401);
   }
 
   const user = JSON.parse(userRaw);
 
   if (!user.passwordHash || !user.passwordSalt) {
-    return json({ error: 'No password set for this account. Use email verification to login.' }, 400);
+    await recordLoginFailure(KV, normalizedEmail);
+    return json({ error: 'Invalid credentials' }, 401);
   }
 
   const hash = await hashPassword(password, user.passwordSalt);
   if (hash !== user.passwordHash) {
-    return json({ error: 'Invalid password' }, 401);
+    await recordLoginFailure(KV, normalizedEmail);
+    return json({ error: 'Invalid credentials' }, 401);
   }
+
+  // SECURITY: successful login clears the failure counter.
+  await clearLoginAttempts(KV, normalizedEmail);
 
   user.auth.lastLogin = Date.now();
   await KV.put(`user:${normalizedEmail}`, JSON.stringify(user));
@@ -76,7 +114,8 @@ export async function onRequestPost(context) {
     createdAt: Date.now(),
   }), { expirationTtl: 86400 });
 
-  console.log(`[AUTH] Password login: ${normalizedEmail}`);
+  // SECURITY: technical log only — never log email, password, token or wallet.
+  console.log('[AUTH] password login successful');
 
   return json({
     ok: true,

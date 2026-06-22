@@ -22,7 +22,18 @@
 import { ethers } from 'ethers';
 import { checkRelayLimit } from './rate-limit.mjs';
 import { RELAYER_CONFIG } from './shared-config.mjs';
-import { verifyRelayerAuth } from './relayer-auth.mjs';
+import { verifyRelayerAuth, relayerConfigError } from './relayer-auth.mjs';
+
+// SECURITY: structured, safe telemetry only — never logs signature, token, key,
+// OTP, session or intent payload. Fields are limited to operational metadata.
+function relayerEvent(event, fields) {
+  try {
+    console.log(JSON.stringify({ event, timestamp: Date.now(), ...(fields || {}) }));
+  } catch (_) {}
+}
+function relayerTelemetry(endpoint, reason) {
+  relayerEvent('relayer_auth_failed', { endpoint, reason: reason || 'unknown' });
+}
 
 function getCORS(request, env) {
   const allowed = (env.ALLOWED_ORIGINS || 'https://elligente.pages.dev').split(',').map(s => s.trim());
@@ -62,6 +73,20 @@ export async function onRequest(context) {
     return json({ error: 'Method not allowed' }, 405);
   }
 
+  // OPERATIONAL: emergency kill switch. Blocks relayer execution only.
+  // Does NOT affect auth/login (separate endpoints). Default off.
+  if (env.RELAYER_KILL_SWITCH === 'true') {
+    relayerEvent('relayer_blocked', { endpoint: 'relayer', reason: 'kill_switch' });
+    return json({ error: 'Relayer temporarily disabled' }, 503);
+  }
+
+  // SECURITY: in production the relayer allowlist must be configured.
+  const cfgErr = relayerConfigError(env);
+  if (cfgErr) {
+    relayerTelemetry('relayer', 'config_missing');
+    return json({ error: cfgErr }, 500);
+  }
+
   const key = env.TURBO_RELAYER_PRIVATE_KEY;
   if (!key) {
     return json({ error: 'TURBO_RELAYER_PRIVATE_KEY not set in Cloudflare environment' }, 500);
@@ -72,8 +97,9 @@ export async function onRequest(context) {
     return json({ error: 'Invalid JSON' }, 400);
   }
 
-  const authResult = await verifyRelayerAuth(body, env.RATE_LIMIT_KV);
+  const authResult = await verifyRelayerAuth(body, env.RATE_LIMIT_KV, env);
   if (!authResult.valid) {
+    relayerTelemetry('relayer', authResult.reason);
     return json({ error: 'Auth failed: ' + authResult.error }, 401);
   }
 
@@ -97,6 +123,19 @@ export async function onRequest(context) {
   if (!['usdc', 'eurc', 'cirbtc'].includes(asset)) {
     return json({ error: 'Unknown asset: must be usdc, eurc, or cirbtc' }, 400);
   }
+
+  // SECURITY: bind the authorization to the intent recipient — the signer of the
+  // auth must be the same address that gets paid (userAddress). This stops a
+  // valid signature from one user being used to authorize a payout to another.
+  // Disable only via RELAYER_REQUIRE_SELF="false" for legitimate delegated flows.
+  if (env.RELAYER_REQUIRE_SELF !== 'false' && authResult.address &&
+      authResult.address.toLowerCase() !== String(userAddress).toLowerCase()) {
+    relayerTelemetry('relayer', 'address_mismatch');
+    return json({ error: 'Invalid authorization' }, 403);
+  }
+
+  // OBSERVABILITY: authorization accepted (no sensitive data).
+  relayerEvent('relayer_auth_success', { endpoint: 'relayer', mode: authResult.scheme || 'legacy' });
 
   const rpc = env.ARC_RPC_URL || 'https://rpc.testnet.arc.network';
 

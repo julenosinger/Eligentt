@@ -24,7 +24,18 @@
 import { ethers } from 'ethers';
 import { checkMintLimit } from '../rate-limit.mjs';
 import { RELAYER_CONFIG } from '../shared-config.mjs';
-import { verifyRelayerAuth } from '../relayer-auth.mjs';
+import { verifyRelayerAuth, relayerConfigError } from '../relayer-auth.mjs';
+
+// SECURITY: structured, safe telemetry only — never logs signature, token, key,
+// OTP, session or intent payload. Fields are limited to operational metadata.
+function relayerEvent(event, fields) {
+  try {
+    console.log(JSON.stringify({ event, timestamp: Date.now(), ...(fields || {}) }));
+  } catch (_) {}
+}
+function relayerTelemetry(endpoint, reason) {
+  relayerEvent('relayer_auth_failed', { endpoint, reason: reason || 'unknown' });
+}
 
 function getCORS(request, env) {
   const allowed = (env.ALLOWED_ORIGINS || 'https://elligente.pages.dev').split(',').map(s => s.trim());
@@ -74,6 +85,20 @@ export async function onRequest(context) {
     return json({ error: 'Method not allowed' }, 405);
   }
 
+  // OPERATIONAL: emergency kill switch. Blocks mint execution only.
+  // Does NOT affect auth/login (separate endpoints). Default off.
+  if (env.RELAYER_KILL_SWITCH === 'true') {
+    relayerEvent('relayer_blocked', { endpoint: 'mint', reason: 'kill_switch' });
+    return json({ error: 'Relayer temporarily disabled' }, 503);
+  }
+
+  // SECURITY: in production the relayer allowlist must be configured.
+  const cfgErr = relayerConfigError(env);
+  if (cfgErr) {
+    relayerTelemetry('mint', 'config_missing');
+    return json({ error: cfgErr }, 500);
+  }
+
   const key = env.TURBO_RELAYER_PRIVATE_KEY;
   if (!key) {
     return json({ error: 'TURBO_RELAYER_PRIVATE_KEY not set in Cloudflare environment' }, 500);
@@ -84,10 +109,31 @@ export async function onRequest(context) {
     return json({ error: 'Invalid JSON' }, 400);
   }
 
-  const authResult = await verifyRelayerAuth(body, env.RATE_LIMIT_KV);
+  const authResult = await verifyRelayerAuth(body, env.RATE_LIMIT_KV, env);
   if (!authResult.valid) {
+    relayerTelemetry('mint', authResult.reason);
     return json({ error: 'Auth failed: ' + authResult.error }, 401);
   }
+
+  // SECURITY: bind the authorization to userAddress when the client provides it.
+  // Optional for now (legacy clients omit it) — enforced once present so a valid
+  // signature from one user cannot authorize a mint bound to another user.
+  // Works for both legacy and EIP-712 (authResult.address is the recovered signer).
+  // Disable via RELAYER_REQUIRE_SELF="false".
+  if (body.userAddress !== undefined) {
+    if (typeof body.userAddress !== 'string' || !ethers.isAddress(body.userAddress)) {
+      return json({ error: 'Invalid userAddress' }, 400);
+    }
+    if (env.RELAYER_REQUIRE_SELF !== 'false' && authResult.address &&
+        authResult.address.toLowerCase() !== body.userAddress.toLowerCase()) {
+      relayerTelemetry('mint', 'address_mismatch');
+      return json({ error: 'Invalid authorization' }, 403);
+    }
+  }
+
+  // OBSERVABILITY: authorization accepted. mint_path reflects which scheme bound it.
+  const mintPath = authResult.scheme || 'legacy';
+  relayerEvent('relayer_auth_success', { endpoint: 'mint', mode: mintPath, mint_path: mintPath });
 
   const { messageBytes, attestationSignature, intentId, asset, amount } = body;
   if (!messageBytes || !attestationSignature) {
@@ -195,16 +241,19 @@ export async function onRequest(context) {
 
     if (!rc || rc.status !== 1) {
       console.error('[RELAYER] Mint reverted or no receipt — TX:', tx.hash);
+      relayerEvent('mint_failed', { endpoint: 'mint', mode: mintPath, reason: 'reverted' });
       return json({ success: false, error: 'Transaction reverted on-chain or no receipt', txHash: tx.hash }, 500);
     }
 
     const verifyReceipt = await provider.getTransactionReceipt(tx.hash);
     if (!verifyReceipt || verifyReceipt.status !== 1) {
       console.error('[RELAYER] Post-confirm verification failed — TX:', tx.hash, 'receipt:', !!verifyReceipt);
+      relayerEvent('mint_failed', { endpoint: 'mint', mode: mintPath, reason: 'not_confirmed' });
       return json({ success: false, error: 'Transaction not confirmed on re-verification', txHash: tx.hash }, 500);
     }
 
     console.log('[RELAYER] Treasury mint confirmed — TX:', tx.hash, 'Block:', rc.blockNumber, 'Memo:', memoStr, 'OnChain:', memoOnChain);
+    relayerEvent('mint_success', { endpoint: 'mint', mode: mintPath });
     return json({
       success: true,
       txHash: tx.hash,
@@ -215,6 +264,7 @@ export async function onRequest(context) {
     });
   } catch (e) {
     console.error('[RELAYER] Mint failed:', e.shortMessage || e.message || e);
+    relayerEvent('mint_failed', { endpoint: 'mint', mode: mintPath, reason: 'exception' });
     return json({ success: false, error: e.shortMessage || e.message || 'Unknown' }, 500);
   }
 

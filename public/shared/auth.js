@@ -126,6 +126,13 @@ const AuthManager = (() => {
         return result.signature;
       },
 
+      // SECURITY: EIP-712 typed-data signing (capability only — dormant until the
+      // relayer flow opts in). Produces a signature, never a transaction.
+      signTypedData: async (domain, types, value) => {
+        const result = await signOnServer('signTypedData', { domain, types, value });
+        return result.signature;
+      },
+
       signTransaction: async (tx) => {
         const serializable = {};
         for (const key of Object.keys(tx)) {

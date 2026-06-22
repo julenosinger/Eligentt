@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0"/>
+<title>Elligentt Pay — Secure Web3 Payment</title>
+<meta name="description" content="Secure Web3 payment powered by Elligentt. Pay USDC on Arc Testnet directly from your wallet."/>
+<meta name="robots" content="noindex"/>
+<meta name="theme-color" content="#050816"/>
+<link rel="icon" type="image/svg+xml" href="/favicon-main.svg"/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.44.0/tabler-icons.min.css"/>
+<script src="https://cdn.jsdelivr.net/npm/ethers@6.7.1/dist/ethers.umd.min.js" integrity="sha384-eoEZatO/ymJi+LdBilp3xt/M9N9Lla2JlMVPZuk48Fg1YGl2Mc+vmsky+nkOtlSi" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js" integrity="sha384-3zSEDfvllQohrq0PHL1fOXJuC/jSOO34H46t6UQfobFOmxE5BpjjaIJY5F2/bMnU" crossorigin="anonymous"></script>
+<!-- Real config — single source of truth (addresses, chain, fees) -->
+<script src="/config/system.js"></script>
+<script src="/config/chains.js"></script>
+<script src="/config/contracts.js"></script>
+<script src="/config/fees.js"></script>
+<style>
+  :root{
+    --bg:#050816; --bg2:#0b0f1c; --card:#0f1117; --card2:#11151f;
+    --border:rgba(255,255,255,.08); --border2:rgba(79,142,247,.22);
+    --text:#e8edf7; --muted:#94a3b8; --muted2:#64748b;
+    --blue:#4f8ef7; --indigo:#6366f1; --teal:#2dd4bf; --purple:#a78bfa;
+    --green:#22c55e; --red:#ef4444; --yellow:#f59e0b;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    font-family:'JetBrains Mono',ui-monospace,monospace;
+    background:radial-gradient(1200px 600px at 50% -10%,rgba(79,142,247,.12),transparent 60%),
+               radial-gradient(900px 500px at 90% 110%,rgba(163,139,250,.10),transparent 55%),
+               var(--bg);
+    color:var(--text); min-height:100vh; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; padding:24px 14px;
+    -webkit-font-smoothing:antialiased;
+  }
+  .shell{width:100%;max-width:680px;display:flex;flex-direction:column;align-items:center}
+
+  /* Top brand */
+  .brand{display:flex;align-items:center;gap:10px;margin-bottom:18px}
+  .brand-logo{width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,var(--blue),var(--indigo));
+    display:flex;align-items:center;justify-content:center;color:#fff;font-size:19px;
+    box-shadow:0 8px 24px rgba(79,142,247,.4)}
+  .brand-text{display:flex;flex-direction:column;line-height:1.1}
+  .brand-name{font-size:15px;font-weight:800;letter-spacing:.4px}
+  .brand-sub{font-size:9.5px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--muted2);display:flex;align-items:center;gap:5px;margin-top:2px}
+  .brand-sub i{font-size:11px;color:var(--green)}
+
+  /* Card */
+  .card{width:100%;background:linear-gradient(180deg,var(--card),var(--card2));
+    border:1px solid var(--border);border-radius:18px;overflow:hidden;
+    box-shadow:0 30px 70px -20px rgba(0,0,0,.8),0 0 0 1px rgba(79,142,247,.06)}
+  .card-head{padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+  .card-head-title{font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--muted)}
+  .net-pill{display:inline-flex;align-items:center;gap:6px;font-size:10px;font-weight:600;color:var(--muted);
+    background:rgba(79,142,247,.08);border:1px solid var(--border2);padding:4px 9px;border-radius:999px}
+  .net-pill .dot{width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green)}
+
+  .card-body{padding:16px 18px}
+
+  /* Two-column layout (desktop) — keeps the card compact */
+  .checkout-grid{display:grid;grid-template-columns:1.15fr .85fr;gap:18px;align-items:start}
+  .col-info{min-width:0}
+
+  .amount-wrap{padding:2px 0 12px;border-bottom:1px solid var(--border);margin-bottom:12px}
+  .amount-label{font-size:9.5px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--muted2);margin-bottom:6px}
+  .amount{font-size:34px;font-weight:800;line-height:1;letter-spacing:-1px}
+  .amount .cur{font-size:14px;font-weight:700;color:var(--blue);margin-left:6px}
+  .amount-label2{font-size:10.5px;color:var(--muted);margin-top:8px;word-break:break-word}
+
+  .summary{background:rgba(79,142,247,.05);border:1px solid var(--border2);border-radius:12px;padding:8px 12px;margin-bottom:12px}
+  .block-title{font-size:9px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted2);margin:0 0 4px}
+  .details .block-title{margin-top:2px}
+  .rows{display:grid;gap:0}
+  .row{display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:11.5px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.05)}
+  .row:last-child{border-bottom:none}
+  .row .k{color:var(--muted2);white-space:nowrap}
+  .row .v{font-weight:600;text-align:right;word-break:break-all;min-width:0}
+  .v.total{color:var(--text)}
+  .v.fee{color:var(--purple)}
+  .v.net{color:var(--blue)}
+  .v.tok{color:var(--teal)}
+  .v.addr{font-size:11px}
+
+  .badge{display:inline-flex;align-items:center;gap:5px;font-size:10px;font-weight:700;padding:3px 9px;border-radius:999px;text-transform:uppercase;letter-spacing:.4px}
+  .badge.active{background:rgba(34,197,94,.12);color:var(--green);border:1px solid rgba(34,197,94,.3)}
+  .badge.paid{background:rgba(79,142,247,.12);color:var(--blue);border:1px solid rgba(79,142,247,.3)}
+  .badge.warn{background:rgba(245,158,11,.12);color:var(--yellow);border:1px solid rgba(245,158,11,.3)}
+  .badge.dead{background:rgba(239,68,68,.12);color:var(--red);border:1px solid rgba(239,68,68,.3)}
+
+  /* QR — dedicated reserved area, never overlapped by text/link/buttons */
+  .col-qr{display:flex;flex-direction:column;align-items:center;gap:10px;
+    background:rgba(255,255,255,.02);border:1px solid var(--border);border-radius:14px;padding:16px 14px}
+  .qr-cap{font-size:10px;font-weight:600;color:var(--muted2);text-align:center;letter-spacing:.3px}
+  .qr-wrap{padding:8px;background:#fff;border:1px solid var(--border);border-radius:12px;line-height:0}
+  #qr{width:140px;height:140px}
+  .qr-link{width:100%;font-size:10px;color:var(--blue);word-break:break-all;text-align:center;cursor:pointer;
+    background:rgba(79,142,247,.06);border:1px solid var(--border2);border-radius:8px;padding:7px 9px;transition:.15s}
+  .qr-link:hover{background:rgba(79,142,247,.12)}
+
+  .card-actions{margin-top:16px}
+
+  /* Buttons */
+  .btn{width:100%;border:none;border-radius:12px;font-family:inherit;font-size:14px;font-weight:700;
+    cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;padding:14px;
+    transition:transform .15s,box-shadow .15s,opacity .15s}
+  .btn-primary{background:linear-gradient(90deg,var(--blue),var(--indigo));color:#fff;
+    box-shadow:0 8px 24px rgba(79,142,247,.4);margin-top:6px}
+  .btn-primary:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 12px 30px rgba(79,142,247,.5)}
+  .btn-primary:disabled{opacity:.55;cursor:not-allowed;box-shadow:none}
+  .btn-primary.success{background:linear-gradient(90deg,#16a34a,#22c55e);box-shadow:0 8px 24px rgba(34,197,94,.4)}
+  .btn-primary.error{background:linear-gradient(90deg,#dc2626,#ef4444);box-shadow:0 8px 24px rgba(239,68,68,.4)}
+  .btn-row{display:flex;gap:8px;margin-top:8px}
+  .btn-sec{flex:1;background:rgba(255,255,255,.04);border:1px solid var(--border);color:var(--muted);
+    padding:10px;border-radius:10px;font-family:inherit;font-size:11px;font-weight:600;cursor:pointer;
+    display:flex;align-items:center;justify-content:center;gap:6px;transition:.15s}
+  .btn-sec:hover{background:rgba(79,142,247,.1);color:var(--text);border-color:var(--border2)}
+
+  .spin{animation:spin 1s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  /* Status notice */
+  .notice{margin-top:14px;padding:12px;border-radius:10px;text-align:center;font-size:11px;line-height:1.5;display:none}
+  .notice.show{display:block}
+  .notice.ok{background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.25);color:var(--green)}
+  .notice.bad{background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.25);color:#fca5a5}
+  .notice.info{background:rgba(79,142,247,.08);border:1px solid var(--border2);color:var(--muted)}
+  .notice a{color:inherit;font-weight:700;text-decoration:underline;word-break:break-all}
+
+  /* Wallet chip */
+  .wallet-chip{display:none;align-items:center;justify-content:center;gap:7px;margin-top:12px;font-size:10.5px;color:var(--muted)}
+  .wallet-chip.show{display:flex}
+  .wallet-chip .dot{width:6px;height:6px;border-radius:50%;background:var(--green)}
+
+  /* Loading / state screens */
+  .state{width:100%;display:none;flex-direction:column;align-items:center;justify-content:center;
+    padding:48px 18px;text-align:center;gap:14px}
+  .state.show{display:flex}
+  .state i{font-size:30px}
+  .state .t{font-size:14px;font-weight:700}
+  .state .s{font-size:11px;color:var(--muted)}
+  .loader-ring{width:34px;height:34px;border:3px solid rgba(79,142,247,.2);border-top-color:var(--blue);border-radius:50%;animation:spin .9s linear infinite}
+
+  .footer{margin-top:20px;font-size:9.5px;color:var(--muted2);text-align:center;line-height:1.6;display:flex;align-items:center;gap:6px}
+  .footer i{font-size:11px}
+
+  /* Toast */
+  .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(20px);
+    background:#11151f;border:1px solid var(--border);border-left:3px solid var(--blue);
+    color:var(--text);padding:11px 16px;border-radius:10px;font-size:11.5px;display:flex;align-items:center;gap:8px;
+    box-shadow:0 12px 30px rgba(0,0,0,.5);opacity:0;pointer-events:none;transition:.25s;z-index:50;max-width:90vw}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  .toast.success{border-left-color:var(--green)}
+  .toast.error{border-left-color:var(--red)}
+  .toast.warning{border-left-color:var(--yellow)}
+
+  @media(max-width:640px){
+    .checkout-grid{grid-template-columns:1fr;gap:14px}
+    .amount{font-size:32px}
+    .card-body{padding:14px}
+    .shell{max-width:460px}
+    .col-qr{padding:14px 12px}
+  }
+</style>
+</head>
+<body>
+  <div class="shell">
+    <div class="brand">
+      <div class="brand-logo"><i class="ti ti-bolt"></i></div>
+      <div class="brand-text">
+        <div class="brand-name">ELLIGENTT PAY</div>
+        <div class="brand-sub"><i class="ti ti-shield-check"></i> Secure Web3 Payment</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <!-- Loading -->
+      <div class="state show" id="state-loading">
+        <div class="loader-ring"></div>
+        <div class="t">Preparing payment…</div>
+        <div class="s">Loading payment request</div>
+      </div>
+
+      <!-- Not found / error loading -->
+      <div class="state" id="state-error">
+        <i class="ti ti-alert-triangle" style="color:var(--red)"></i>
+        <div class="t">Payment not available</div>
+        <div class="s" id="state-error-msg">This payment link could not be found.</div>
+      </div>
+
+      <!-- Main checkout -->
+      <div id="checkout" style="display:none">
+        <div class="card-head">
+          <span class="card-head-title">Payment Request</span>
+          <span class="net-pill"><span class="dot"></span> <span id="net-name">Arc Testnet</span></span>
+        </div>
+        <div class="card-body">
+          <div class="checkout-grid">
+            <!-- Left: payment info + financial summary -->
+            <div class="col-info">
+              <div class="amount-wrap">
+                <div class="amount-label">Amount due</div>
+                <div class="amount"><span id="amt-total">0.00</span><span class="cur" id="amt-token">USDC</span></div>
+                <div class="amount-label2" id="amt-desc">—</div>
+              </div>
+
+              <div class="summary">
+                <div class="block-title">Payment Summary</div>
+                <div class="rows">
+                  <div class="row"><span class="k">Total</span><span class="v total" id="s-total">—</span></div>
+                  <div class="row"><span class="k">Recipient receives</span><span class="v" id="s-receives">—</span></div>
+                  <div class="row"><span class="k">Network fee</span><span class="v fee" id="s-fee">—</span></div>
+                </div>
+              </div>
+
+              <div class="details">
+                <div class="block-title">Details</div>
+                <div class="rows">
+                  <div class="row"><span class="k">Recipient</span><span class="v addr" id="s-recipient">—</span></div>
+                  <div class="row"><span class="k">Network</span><span class="v net">Arc Testnet</span></div>
+                  <div class="row"><span class="k">Token</span><span class="v tok" id="s-token">USDC</span></div>
+                  <div class="row"><span class="k">Invoice</span><span class="v" id="s-label">—</span></div>
+                  <div class="row"><span class="k">Status</span><span id="s-status"></span></div>
+                  <div class="row" id="s-expiry-row"><span class="k">Expires</span><span class="v" id="s-expiry">—</span></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Right: dedicated QR area -->
+            <div class="col-qr">
+              <div class="qr-cap">Scan to pay</div>
+              <div class="qr-wrap"><div id="qr"></div></div>
+              <div class="qr-cap">or copy payment link</div>
+              <div class="qr-link" id="pay-link" onclick="copyLink()" title="Copy payment link">—</div>
+            </div>
+          </div>
+
+          <!-- Actions (full width, always visible) -->
+          <div class="card-actions">
+            <button class="btn btn-primary" id="pay-btn" onclick="onPrimary()">
+              <span id="pay-btn-content"><i class="ti ti-wallet"></i> Connect Wallet</span>
+            </button>
+            <div class="btn-row">
+              <button class="btn-sec" onclick="copyLink()"><i class="ti ti-copy"></i> Copy Payment Link</button>
+              <button class="btn-sec" onclick="downloadQR()"><i class="ti ti-download"></i> Download QR</button>
+            </div>
+            <div class="wallet-chip" id="wallet-chip"><span class="dot"></span> <span id="wallet-addr"></span></div>
+            <div class="notice" id="notice"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="footer"><i class="ti ti-lock"></i> Powered by Elligentt · Arc Testnet</div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+<script>
+(function () {
+  'use strict';
+
+  // ── Real config (single source of truth) with resilient fallbacks ──
+  var SC = window.SystemConfig || {};
+  var CH = window.ElligenteChains || {};
+  var CT = window.ElligenteContracts || {};
+  var FE = window.ElligenteFees || {};
+
+  var ARC_CHAIN_ID  = SC.ARC_CHAIN_ID  || CH.ARC_CHAIN_ID  || 5042002;
+  var ARC_CHAIN_HEX = SC.ARC_CHAIN_HEX || CH.ARC_CHAIN_HEX || '0x4cef52';
+  var ARC_RPC_URL   = SC.ARC_RPC_URL   || CH.ARC_RPC_URL   || 'https://rpc.testnet.arc.network';
+  var ARC_EXPLORER  = SC.ARC_EXPLORER_URL || CH.ARC_EXPLORER_URL || 'https://testnet.arcscan.app';
+  var USDC_ADDRESS  = CT.USDC_ADDRESS  || SC.USDC_ADDRESS  || '0x3600000000000000000000000000000000000000';
+  var USDC_DECIMALS = CT.USDC_DECIMALS || SC.USDC_DECIMALS || 6;
+  var MEMO_CONTRACT = SC.MEMO_CONTRACT_ADDRESS || '0x5294E9927c3306DcBaDb03fe70b92e01cCede505';
+  var TREASURY_VAULT = CT.TREASURY_VAULT_ADDRESS || SC.TREASURY_VAULT_ADDRESS || '0xbfC9E8F79bd30b912081ae88F9ad0A515F08c2F1';
+
+  var USDC_ABI = [
+    'function balanceOf(address) view returns (uint256)',
+    'function transfer(address,uint256) returns (bool)'
+  ];
+  var MEMO_ABI = ['function memo(address target, bytes calldata data, bytes32 memoId, bytes calldata memoData) external'];
+
+  // ── Helpers ──
+  function $(id){ return document.getElementById(id); }
+  function isAddr(a){ return /^0x[0-9a-fA-F]{40}$/.test(a||''); }
+  function shortAddr(a){ a=a||''; return a.length>12 ? a.slice(0,6)+'…'+a.slice(-4) : a; }
+  function shortHash(h){ h=h||''; return h.length>14 ? h.slice(0,8)+'…'+h.slice(-6) : h; }
+  function toUsdc(n){ return ethers.parseUnits(Number(n).toFixed(USDC_DECIMALS), USDC_DECIMALS); }
+  function fmt(n){ return (Number(n)||0).toFixed(2); }
+
+  var _tt;
+  function toast(msg, type){
+    var el=$('toast'); if(!el) return;
+    var ic={success:'ti-check',error:'ti-x',warning:'ti-alert-triangle',info:'ti-info-circle'}[type||'info']||'ti-info-circle';
+    el.innerHTML='<i class="ti '+ic+'"></i>'+String(msg);
+    el.className='toast '+(type||'info')+' show';
+    clearTimeout(_tt); _tt=setTimeout(function(){ el.classList.remove('show'); }, 4200);
+  }
+
+  // ── State ──
+  var token = null;
+  var link  = null;          // real payment data from backend
+  var provider = null;       // ethers BrowserProvider
+  var signer = null;
+  var account = null;
+  var chainId = null;
+  var paying = false;
+
+  // ── Token extraction (path /pay/<token> or ?token=) ──
+  function getToken(){
+    var m = (window.location.pathname || '').match(/\/pay\/([^/?#]+)/);
+    if (m) return decodeURIComponent(m[1]);
+    var q = new URLSearchParams(window.location.search).get('token');
+    return q ? decodeURIComponent(q) : null;
+  }
+
+  // ── Load real payment data ──
+  function loadPayment(){
+    fetch('/api/payment/' + encodeURIComponent(token), { headers: { 'Accept':'application/json' } })
+      .then(function(r){ return r.json().then(function(j){ return { status:r.status, body:j }; }); })
+      .then(function(res){
+        if (res.body && res.body.ok && res.body.link) {
+          link = res.body.link;
+          renderCheckout();
+        } else {
+          showError(res.body && res.body.error ? res.body.error : 'This payment link could not be found.');
+        }
+      })
+      .catch(function(){
+        showError('Unable to reach the payment service. Please try again.');
+      });
+  }
+
+  function showError(msg){
+    $('state-loading').classList.remove('show');
+    $('state-error-msg').textContent = msg;
+    $('state-error').classList.add('show');
+  }
+
+  // ── Render ──
+  function statusBadge(status){
+    var s = status || 'Active';
+    var cls = 'active', label = s;
+    if (s === 'Paid')                       { cls='paid'; }
+    else if (s === 'Expired')               { cls='dead'; }
+    else if (s === 'Disabled'||s==='Cancelled'){ cls='dead'; }
+    else if (s === 'Overdue')               { cls='warn'; }
+    return '<span class="badge '+cls+'">'+label+'</span>';
+  }
+
+  function renderCheckout(){
+    var tk    = link.token || 'USDC';
+    var amt   = parseFloat(link.amount) || 0;          // recipient receives
+    var fee   = parseFloat(link.feeAmount) || 0;
+    var total = fee > 0 ? (parseFloat(link.totalAmount) || (amt + fee)) : amt;
+    var label = link.number || link.label || link.id || '—';
+
+    $('amt-total').textContent = fmt(total);
+    $('amt-token').textContent = tk;
+    $('amt-desc').textContent  = link.desc || link.label || ('Payment ' + (link.number || ''));
+    $('net-name').textContent  = link.chain || 'Arc Testnet';
+
+    $('s-total').textContent    = fmt(total) + ' ' + tk;
+    $('s-receives').textContent = fmt(amt) + ' ' + tk;
+    $('s-fee').textContent      = fmt(fee) + ' ' + tk;
+    $('s-recipient').textContent= shortAddr(link.recipient || '');
+    $('s-token').textContent    = tk;
+    $('s-label').textContent    = label;
+    $('s-status').innerHTML     = statusBadge(link.status);
+
+    if (link.expiresAt) {
+      $('s-expiry').textContent = new Date(link.expiresAt).toLocaleString();
+    } else {
+      $('s-expiry-row').style.display = 'none';
+    }
+
+    var full = window.location.host + '/pay/' + token;
+    $('pay-link').textContent = full.length > 42 ? full.slice(0, 36) + '…' : full;
+
+    drawQR(window.location.href);
+    renderPrimary();
+
+    $('state-loading').classList.remove('show');
+    $('checkout').style.display = 'block';
+  }
+
+  function drawQR(text){
+    var el = $('qr'); if(!el) return; el.innerHTML='';
+    if (typeof QRCode === 'undefined') return;
+    try {
+      new QRCode(el, { text: text, width:140, height:140, colorDark:'#0b0d12', colorLight:'#ffffff', correctLevel: QRCode.CorrectLevel.M });
+      var img = el.querySelector('img'); if (img) img.style.cssText='display:block;border-radius:4px;width:140px;height:140px';
+      var cv = el.querySelector('canvas'); if (cv) cv.style.cssText='display:block;border-radius:4px';
+    } catch(e){}
+  }
+
+  // ── Primary button rendering by state ──
+  function setBtn(html, opts){
+    opts = opts || {};
+    var btn = $('pay-btn');
+    btn.disabled = !!opts.disabled;
+    btn.className = 'btn btn-primary' + (opts.cls ? ' ' + opts.cls : '');
+    $('pay-btn-content').innerHTML = html;
+  }
+
+  function isPayable(){
+    var s = link.status;
+    return s !== 'Paid' && s !== 'Expired' && s !== 'Disabled' && s !== 'Cancelled';
+  }
+
+  function renderPrimary(){
+    if (paying) return;
+    var tk  = link.token || 'USDC';
+    var fee = parseFloat(link.feeAmount) || 0;
+    var amt = parseFloat(link.amount) || 0;
+    var total = fee > 0 ? (parseFloat(link.totalAmount) || (amt + fee)) : amt;
+
+    if (link.status === 'Paid') {
+      setBtn('<i class="ti ti-check-circle"></i> Payment completed', { disabled:true, cls:'success' });
+      showNotice('ok', 'This payment has already been completed.' + (link.paidTx ? explorerLink(link.paidTx) : ''));
+      return;
+    }
+    if (link.status === 'Expired')  { setBtn('<i class="ti ti-clock-off"></i> Link expired',  { disabled:true }); return; }
+    if (link.status === 'Disabled' || link.status === 'Cancelled') { setBtn('<i class="ti ti-ban"></i> Link disabled', { disabled:true }); return; }
+
+    if (!account) {
+      if (!hasInjected() && isMobile()) {
+        setBtn('<i class="ti ti-device-mobile"></i> Open in Wallet App');
+      } else {
+        setBtn('<i class="ti ti-wallet"></i> Connect Wallet');
+      }
+      hideNotice();
+      return;
+    }
+    setBtn('<i class="ti ti-bolt"></i> Pay ' + fmt(total) + ' ' + tk);
+  }
+
+  function showNotice(kind, html){ var n=$('notice'); n.className='notice show '+kind; n.innerHTML=html; }
+  function hideNotice(){ var n=$('notice'); n.className='notice'; n.innerHTML=''; }
+  function explorerLink(hash){
+    return ' <br><a href="'+ARC_EXPLORER+'/tx/'+hash+'" target="_blank" rel="noopener">'+shortHash(hash)+'</a>';
+  }
+
+  // ── Wallet connection (external / injected providers, incl. mobile) ──
+  function hasInjected(){ return typeof window.ethereum !== 'undefined' && window.ethereum; }
+  function isMobile(){ return /Android|iPhone|iPad|iPod|Mobile|Opera Mini|IEMobile|BlackBerry/i.test(navigator.userAgent || ''); }
+  function mmDeepLink(){ return 'https://metamask.app.link/dapp/' + window.location.host + window.location.pathname + window.location.search; }
+
+  function connectWallet(){
+    if (!hasInjected()) {
+      if (isMobile()) {
+        // Re-open this exact checkout inside the wallet's in-app browser
+        // (MetaMask Mobile and most mobile wallets honor this deep link), where
+        // an injected provider is available and the normal flow runs unchanged.
+        toast('Opening your wallet app…', 'info');
+        window.location.href = mmDeepLink();
+        return Promise.reject(new Error('no wallet'));
+      }
+      toast('No Web3 wallet detected. Open this link in your wallet browser or install MetaMask.', 'error');
+      showNotice('info', 'No wallet detected. Open this page inside your wallet app (e.g. MetaMask) or install a Web3 wallet to continue.');
+      return Promise.reject(new Error('no wallet'));
+    }
+    return window.ethereum.request({ method: 'eth_requestAccounts' })
+      .then(function(accs){
+        if (!accs || !accs.length) throw new Error('No account');
+        provider = new ethers.BrowserProvider(window.ethereum);
+        return provider.getSigner();
+      })
+      .then(function(s){
+        signer = s;
+        return signer.getAddress();
+      })
+      .then(function(addr){
+        account = addr;
+        return provider.getNetwork();
+      })
+      .then(function(net){
+        chainId = Number(net.chainId);
+        var chip = $('wallet-chip');
+        $('wallet-addr').textContent = 'Connected ' + shortAddr(account);
+        chip.classList.add('show');
+        bindProviderEvents();
+        renderPrimary();
+      });
+  }
+
+  function bindProviderEvents(){
+    if (!hasInjected() || window.ethereum.__elligenttBound) return;
+    window.ethereum.__elligenttBound = true;
+    window.ethereum.on && window.ethereum.on('accountsChanged', function(accs){
+      account = (accs && accs[0]) || null;
+      if (!account) {
+        signer = null; $('wallet-chip').classList.remove('show');
+      } else {
+        provider = new ethers.BrowserProvider(window.ethereum);
+        provider.getSigner().then(function(s){ signer=s; $('wallet-addr').textContent='Connected '+shortAddr(account); });
+      }
+      renderPrimary();
+    });
+    window.ethereum.on && window.ethereum.on('chainChanged', function(hex){
+      chainId = parseInt(hex, 16);
+      provider = new ethers.BrowserProvider(window.ethereum);
+      provider.getSigner().then(function(s){ signer=s; }).catch(function(){});
+    });
+  }
+
+  function ensureArc(){
+    if (chainId === ARC_CHAIN_ID) return Promise.resolve();
+    toast('Switching to Arc Testnet…', 'info');
+    return window.ethereum.request({ method:'wallet_switchEthereumChain', params:[{ chainId: ARC_CHAIN_HEX }] })
+      .catch(function(err){
+        if (err && (err.code === 4902 || (err.data && err.data.originalError && err.data.originalError.code === 4902))) {
+          return window.ethereum.request({ method:'wallet_addEthereumChain', params:[{
+            chainId: ARC_CHAIN_HEX,
+            chainName: 'Arc Testnet',
+            nativeCurrency: { name:'USDC', symbol:'USDC', decimals:18 },
+            rpcUrls: [ARC_RPC_URL],
+            blockExplorerUrls: [ARC_EXPLORER]
+          }]});
+        }
+        throw err;
+      })
+      .then(function(){
+        provider = new ethers.BrowserProvider(window.ethereum);
+        return provider.getSigner();
+      })
+      .then(function(s){ signer = s; chainId = ARC_CHAIN_ID; });
+  }
+
+  // ── Primary action ──
+  function onPrimary(){
+    if (paying) return;
+    if (!isPayable()) return;
+    if (!account) {
+      connectWallet().catch(function(e){
+        if (e && e.message !== 'no wallet') toast('Wallet connection cancelled', 'warning');
+      });
+      return;
+    }
+    payNow();
+  }
+
+  function payNow(){
+    var recipient = link.recipient || '';
+    var amount    = parseFloat(link.amount) || 0;
+    var fee       = parseFloat(link.feeAmount) || 0;
+    var tk        = link.token || 'USDC';
+
+    if (!isAddr(recipient)) { toast('Invalid recipient on this payment request', 'error'); return; }
+    if (!(amount > 0))      { toast('Invalid amount on this payment request', 'error'); return; }
+
+    paying = true;
+    hideNotice();
+    setBtn('<i class="ti ti-loader-2 spin"></i> Preparing payment…', { disabled:true });
+
+    var usdcRead, usdcWrite, memoWrite, tx, feeTxHash = null;
+
+    Promise.resolve()
+      .then(function(){ return ensureArc(); })
+      .then(function(){
+        // Balance check
+        usdcRead = new ethers.Contract(USDC_ADDRESS, USDC_ABI, provider);
+        return usdcRead.balanceOf(account);
+      })
+      .then(function(bal){
+        var need = toUsdc((amount + fee).toFixed(6));
+        if (bal < need) {
+          var have = ethers.formatUnits(bal, USDC_DECIMALS);
+          throw new Error('Insufficient USDC. You have ' + parseFloat(have).toFixed(2) + ', need ' + (amount + fee).toFixed(2));
+        }
+        // Send main transfer (memo-wrapped on Arc)
+        setBtn('<i class="ti ti-loader-2 spin"></i> Confirm in wallet…', { disabled:true });
+        var iface = new ethers.Interface(['function transfer(address to, uint256 amount) returns (bool)']);
+        var data = iface.encodeFunctionData('transfer', [recipient, toUsdc(amount.toFixed(6))]);
+        var memoStr = 'ELLIGENTT|PAYMENT|' + (link.id || 'PAY') + '|' + tk + '|' + amount;
+        memoWrite = new ethers.Contract(MEMO_CONTRACT, MEMO_ABI, signer);
+        return memoWrite.memo(USDC_ADDRESS, data, ethers.id(String(link.id || 'payment')), ethers.toUtf8Bytes(memoStr));
+      })
+      .then(function(t){
+        tx = t;
+        setBtn('<i class="ti ti-loader-2 spin"></i> Confirming ' + shortHash(tx.hash) + '…', { disabled:true });
+        toast('Transaction submitted', 'info');
+        return Promise.race([
+          tx.wait().then(function(){ return true; }),
+          new Promise(function(res){ setTimeout(function(){ res(false); }, 60000); })
+        ]);
+      })
+      .then(function(confirmed){
+        if (!confirmed) throw Object.assign(new Error('pending'), { _pending:true });
+        // Fee transfer (separate, memo-wrapped)
+        if (fee > 0 && isAddr(TREASURY_VAULT)) {
+          var iface2 = new ethers.Interface(['function transfer(address to, uint256 amount) returns (bool)']);
+          var feeData = iface2.encodeFunctionData('transfer', [TREASURY_VAULT, toUsdc(fee.toFixed(6))]);
+          var feeMemo = 'ELLIGENTT|FEE|' + (link.id || 'PAY') + '|' + tk + '|' + fee;
+          var memoFee = new ethers.Contract(MEMO_CONTRACT, MEMO_ABI, signer);
+          setBtn('<i class="ti ti-loader-2 spin"></i> Settling network fee…', { disabled:true });
+          return memoFee.memo(USDC_ADDRESS, feeData, ethers.id('fee-' + String(link.id || 'payment')), ethers.toUtf8Bytes(feeMemo))
+            .then(function(ft){ feeTxHash = ft.hash; return ft.wait().catch(function(){}); });
+        }
+        return null;
+      })
+      .then(function(){
+        // Notify backend for on-chain verification + status update
+        return fetch('/api/payment/' + encodeURIComponent(token), {
+          method:'POST', headers:{ 'Content-Type':'application/json' },
+          body: JSON.stringify({ txHash: tx.hash, feeTxHash: feeTxHash, paidBy: account })
+        }).catch(function(){});
+      })
+      .then(function(){
+        paying = false;
+        link.status = 'Paid'; link.paidTx = tx.hash;
+        $('s-status').innerHTML = statusBadge('Paid');
+        setBtn('<i class="ti ti-check-circle"></i> Payment completed', { disabled:true, cls:'success' });
+        showNotice('ok', 'Payment completed &#10003;' + explorerLink(tx.hash));
+        toast('Payment completed', 'success');
+      })
+      .catch(function(e){
+        paying = false;
+        if (e && e._pending && tx) {
+          setBtn('<i class="ti ti-clock"></i> Confirmation pending', { disabled:false });
+          showNotice('info', 'Transaction sent, awaiting confirmation.' + explorerLink(tx.hash));
+          return;
+        }
+        var rejected = e && (e.code === 4001 || (e.message||'').toLowerCase().indexOf('reject') !== -1 || (e.message||'').toLowerCase().indexOf('denied') !== -1);
+        var msg = rejected ? 'Transaction rejected' : (e && (e.shortMessage || e.message) ? (e.shortMessage || e.message) : 'Payment failed');
+        setBtn('<i class="ti ti-refresh"></i> Payment failed — Try again', { disabled:false, cls:'error' });
+        showNotice('bad', msg);
+        toast(rejected ? 'Transaction rejected' : 'Payment failed', 'error');
+        setTimeout(function(){ if (!paying && link.status !== 'Paid') renderPrimary(); }, 4000);
+      });
+  }
+
+  // ── Secondary actions ──
+  function copyLink(){
+    var url = window.location.href;
+    navigator.clipboard.writeText(url)
+      .then(function(){ toast('Payment link copied', 'success'); })
+      .catch(function(){ toast('Copy failed', 'error'); });
+  }
+  function downloadQR(){
+    var el = $('qr'); if(!el) return;
+    var cv = el.querySelector('canvas'); var img = el.querySelector('img');
+    var href = cv ? cv.toDataURL('image/png') : (img ? img.src : '');
+    if (!href) { toast('QR not ready', 'error'); return; }
+    var a = document.createElement('a'); a.href = href; a.download = 'elligentt-pay-' + (token || 'qr') + '.png'; a.click();
+  }
+
+  // expose for inline handlers
+  window.onPrimary = onPrimary;
+  window.copyLink = copyLink;
+  window.downloadQR = downloadQR;
+
+  // ── Boot ──
+  token = getToken();
+  if (!token) {
+    showError('No payment reference provided.');
+  } else if (typeof ethers === 'undefined') {
+    showError('Payment engine failed to load. Please refresh.');
+  } else {
+    loadPayment();
+    // Best-effort silent reconnect if wallet already authorized
+    if (hasInjected()) {
+      window.ethereum.request({ method:'eth_accounts' }).then(function(accs){
+        if (accs && accs.length) {
+          provider = new ethers.BrowserProvider(window.ethereum);
+          provider.getSigner().then(function(s){
+            signer = s; return s.getAddress();
+          }).then(function(addr){
+            account = addr;
+            return provider.getNetwork();
+          }).then(function(net){
+            chainId = Number(net.chainId);
+            $('wallet-addr').textContent = 'Connected ' + shortAddr(account);
+            $('wallet-chip').classList.add('show');
+            bindProviderEvents();
+            if (link) renderPrimary();
+          }).catch(function(){});
+        }
+      }).catch(function(){});
+    }
+  }
+})();
+</script>
+</body>
+</html>
