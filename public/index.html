@@ -387,6 +387,25 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
 .step.done { transition:all .3s; }
 .step.done .step-n { transition:transform .3s; }
 .step.error { color:var(--red); border-bottom-color:var(--red); box-shadow:0 0 10px rgba(239,68,68,.6); }
+
+/* === Stepper visual states (UI only — driven by the EXISTING .active/.done/.signing/.sending classes; no logic change) ===
+   Hierarchy so only the CURRENT step stands out:  ACTIVE (strong) > COMPLETED (discreet green) > PENDING (gray). */
+.wf-step{ border-radius:8px; transition:opacity .25s ease, background .25s ease, box-shadow .25s ease, transform .25s ease; }
+
+/* PENDING — future steps: gray, dim, no background, no glow, no animation */
+.wf-step:not(.active):not(.done):not(.signing):not(.sending):not(.error){ opacity:.45; background:transparent; transform:none; animation:none; }
+
+/* COMPLETED — finished steps: keep the green check (base .step.done) + a DISCREET green tint. No glow, no scale, recedes. */
+.wf-step.done{ opacity:.9; background:rgba(34,197,94,.07); transform:none; }
+.wf-step.done .step-n{ box-shadow:none; }
+
+/* ACTIVE — ONLY the current step: stronger background + lit border + highlighted icon + subtle scale (pulse glow comes from .step.active) */
+.wf-step.active{ opacity:1; background:linear-gradient(180deg, rgba(79,142,247,.16), rgba(79,142,247,.05)); outline:1px solid rgba(79,142,247,.55); outline-offset:-1px; transform:scale(1.01); }
+.wf-step.active .step-n{ background:rgba(79,142,247,.22); box-shadow:0 0 10px rgba(79,142,247,.8); }
+
+/* Signing / Sending are still the ACTIVE (current) step — amber accent matching the existing theme */
+.wf-step.signing.active, .wf-step.sending.active{ background:linear-gradient(180deg, rgba(245,158,11,.16), rgba(245,158,11,.05)); outline-color:rgba(245,158,11,.6); }
+.wf-step.signing.active .step-n, .wf-step.sending.active .step-n{ background:rgba(245,158,11,.22); box-shadow:0 0 10px rgba(245,158,11,.75); }
 #wf-live { font-size:9px; align-items:center; }
 .wf-bar-mini { width:48px; height:2px; background:rgba(255,255,255,.1); border-radius:1px; overflow:hidden; }
 .wf-fill { height:100%; width:0; background:linear-gradient(90deg,var(--blue),#2dd4bf); transition:width .18s linear; }
@@ -4548,7 +4567,7 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
   <!-- ── Sidebar ── -->
   <aside class="sidebar">
     <div class="logo">
-      <div class="logo-icon"><svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg" fill="none"><defs><linearGradient id="eGrad" x1="0" y1="0" x2="120" y2="120" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#06F7E9"/><stop offset="45%" stop-color="#4f8ef7"/><stop offset="100%" stop-color="#a78bfa"/></linearGradient><linearGradient id="eBg" x1="0" y1="0" x2="120" y2="120" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#131A2E"/><stop offset="100%" stop-color="#0B0F1A"/></linearGradient><filter id="eGlow"><feGaussianBlur stdDeviation="2" result="b"/><feComposite in="SourceGraphic" in2="b" operator="over"/></filter></defs><rect width="120" height="120" rx="28" fill="url(#eBg)"/><rect x="1" y="1" width="118" height="118" rx="27" fill="none" stroke="url(#eGrad)" stroke-opacity=".14" stroke-width="1.5"/><g filter="url(#eGlow)"><path d="M34 28h52M34 60h40M34 92h52" stroke="url(#eGrad)" stroke-width="8" stroke-linecap="round"/><path d="M34 28v64" stroke="url(#eGrad)" stroke-width="8" stroke-linecap="round"/></g><circle cx="86" cy="28" r="5.5" fill="#06F7E9" opacity=".95"/><circle cx="74" cy="60" r="5.5" fill="#4f8ef7" opacity=".95"/><circle cx="86" cy="92" r="5.5" fill="#a78bfa" opacity=".95"/><circle cx="34" cy="28" r="3.5" fill="#06F7E9" opacity=".5"/><circle cx="34" cy="60" r="3.5" fill="#4f8ef7" opacity=".5"/><circle cx="34" cy="92" r="3.5" fill="#a78bfa" opacity=".5"/></svg></div>
+      <div class="logo-icon"><img src="/favicon-main.svg" alt="Elligentt" style="width:100%;height:100%;display:block;object-fit:contain"></div>
       <div class="logo-text">Elligentt<span class="logo-badge">App Kit</span></div>
     </div>
     <nav class="nav">
@@ -4603,6 +4622,8 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
       <div id="wf-step-2" class="step active wf-step"><div class="step-n">2</div><span class="wf-label">Review &amp; Sign</span><span id="wf-step2-detail" class="wf-detail"></span></div>
       <div class="step-ln" id="wf-ln-2-3"></div>
       <div id="wf-step-3" class="step wf-step"><div class="step-n">3</div><span class="wf-label">Pay Fee &amp; Send</span><span id="wf-step3-detail" class="wf-detail"></span></div>
+      <div class="step-ln" id="wf-ln-3-4"></div>
+      <div id="wf-step-4" class="step wf-step"><div class="step-n">4</div><span class="wf-label">Completed</span><span id="wf-step4-detail" class="wf-detail"></span></div>
       <div id="wf-live" style="display:none;margin-left:6px;font-size:9px;color:var(--yellow);align-items:center;gap:3px;flex-shrink:0">
         <span id="wf-live-text"></span>
         <div class="wf-bar-mini"><div id="wf-live-fill" class="wf-fill"></div></div>
@@ -4846,7 +4867,7 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
               <div class="swp-input-row">
                 <input class="swp-input" id="swap-amount-in" type="number" min="0" step="any"
                   placeholder="0.00" oninput="updateSwapRate()" autocomplete="off" spellcheck="false"/>
-                <div class="swp-token-pill" onclick="openTokenSelector('in')">
+                <div class="swp-token-pill" onclick="cycleTokenIn()">
                   <div class="swp-tok-icon" id="swap-icon-in" style="background:#2775ca">U</div>
                   <span class="swp-tok-name" id="swap-token-in">USDC</span>
                   <i class="ti ti-chevron-down swp-tok-chevron"></i>
@@ -4876,7 +4897,7 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
               <div class="swp-input-row">
                 <input class="swp-input" id="swap-amount-out" type="number"
                   placeholder="0.00" readonly style="color:var(--muted2)" autocomplete="off"/>
-                <div class="swp-token-pill" onclick="openTokenSelector('out')">
+                <div class="swp-token-pill" onclick="cycleTokenOut()">
                   <div class="swp-tok-icon" id="swap-icon-out" style="background:#2562de">E</div>
                   <span class="swp-tok-name" id="swap-token-out">EURC</span>
                   <i class="ti ti-chevron-down swp-tok-chevron"></i>
@@ -6234,7 +6255,7 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
               <option value="Expired">Expired</option>
               <option value="Disabled">Disabled</option>
             </select>
-            <button class="pl-card-act" onclick="renderPayLinks()" title="Refresh" style="width:30px;height:30px">
+            <button class="pl-card-act" onclick="plSyncStatuses()" title="Refresh" style="width:30px;height:30px">
               <i class="ti ti-refresh"></i>
             </button>
           </div>
@@ -7961,6 +7982,36 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
     <!-- ══════════════════════════════════════════════════════════
          PAGE: PROFILE  (Account & Intelligent Wallet)
     ══════════════════════════════════════ -->
+    <style id="prf-dashboard-css">
+    .prf-hero-grid{display:grid;grid-template-columns:1.25fr 1fr;gap:14px;align-items:center}
+    .prf-hero-id{display:flex;align-items:center;gap:12px;min-width:0}
+    .prf-hero-avatar{width:50px;height:50px;border-radius:14px;background:linear-gradient(135deg,#a78bfa,#4f8ef7);flex-shrink:0;box-shadow:0 6px 18px rgba(167,139,250,.35)}
+    .prf-hero-label{font-size:8px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--muted2);margin-bottom:3px}
+    .prf-hero-addr-row{display:flex;align-items:center;gap:6px}
+    .prf-hero-addr{font-family:monospace;font-size:14px;font-weight:700;color:var(--text);word-break:break-all}
+    .prf-hero-copy{background:rgba(255,255,255,.05);border:1px solid var(--border);border-radius:6px;color:var(--muted2);cursor:pointer;width:24px;height:22px;font-size:11px;flex-shrink:0;display:inline-flex;align-items:center;justify-content:center}
+    .prf-hero-copy:hover{color:var(--text)}
+    .prf-hero-tags{display:flex;gap:5px;flex-wrap:wrap;margin-top:6px}
+    .prf-hero-tag{font-size:8px;padding:2px 7px;border-radius:6px;font-weight:600}
+    .prf-hero-tag.type{background:rgba(167,139,250,.12);color:#a78bfa}
+    .prf-hero-tag.net{background:rgba(34,197,94,.1);color:#22c55e}
+    .prf-hero-tag.status{background:rgba(79,142,247,.1);color:#4f8ef7}
+    .prf-hero-created{font-size:8px;color:var(--muted2);margin-top:6px}
+    .prf-hero-bal{text-align:right}
+    .prf-hero-balance{font-size:26px;font-weight:800;color:var(--text);line-height:1.1}
+    .prf-hero-balance-cur{font-size:12px;color:#4f8ef7;font-weight:700}
+    .prf-hero-actions{display:flex;gap:6px;margin-top:10px;justify-content:flex-end;flex-wrap:wrap}
+    .prf-hero-actions button{flex:1;min-width:62px;background:rgba(255,255,255,.04);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:inherit;font-size:9px;font-weight:600;padding:7px 0;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px;transition:.15s}
+    .prf-hero-actions button:hover{border-color:var(--border2);background:rgba(79,142,247,.1)}
+    .prf-health{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-top:14px;padding-top:12px;border-top:1px solid var(--border)}
+    .prf-health-item{display:flex;flex-direction:column;align-items:center;gap:3px;text-align:center;background:rgba(0,0,0,.18);border:1px solid var(--border);border-radius:8px;padding:8px 4px}
+    .prf-health-item i{font-size:13px;color:var(--muted2)}
+    .prf-health-item span{font-size:7px;color:var(--muted2);text-transform:uppercase;letter-spacing:.3px}
+    .prf-health-item b{font-size:8.5px;font-weight:700;color:var(--muted2)}
+    .prf-health-item.ok i,.prf-health-item.ok b{color:#22c55e}
+    @media(max-width:900px){#prf-layout{grid-template-columns:1fr !important}}
+    @media(max-width:760px){.prf-hero-grid{grid-template-columns:1fr}.prf-hero-bal{text-align:left}.prf-hero-actions{justify-content:flex-start}.prf-health{grid-template-columns:repeat(2,1fr)}#prf-cards{grid-template-columns:1fr !important}}
+    </style>
     <div class="page" id="page-profile">
       <div class="page-header">
         <div class="page-icon" style="background:rgba(167,139,250,.12);color:#a78bfa"><i class="ti ti-user-circle"></i></div>
@@ -7975,7 +8026,47 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
       <div class="page-content" style="padding:14px">
         <div style="display:grid;grid-template-columns:1fr 260px;gap:12px;align-items:start" id="prf-layout">
 
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;align-content:start">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;align-content:start" id="prf-cards">
+
+          <div class="card prf-hero" style="grid-column:1/3">
+            <div class="ch"><i class="ti ti-wallet" style="font-size:14px;color:#a78bfa"></i><span class="ct">Wallet Identity</span></div>
+            <div class="cb">
+              <div class="prf-hero-grid">
+                <div class="prf-hero-id">
+                  <div class="prf-hero-avatar" id="prf-hero-avatar"></div>
+                  <div style="min-width:0;flex:1">
+                    <div class="prf-hero-addr-row">
+                      <span class="prf-hero-addr" id="prf-hero-addr">Not connected</span>
+                      <button class="prf-hero-copy" id="prf-hero-copy" onclick="prfCopyAddress()" title="Copy address" style="display:none"><i class="ti ti-copy"></i></button>
+                    </div>
+                    <div class="prf-hero-tags">
+                      <span class="prf-hero-tag type" id="prf-hero-type">—</span>
+                      <span class="prf-hero-tag net" id="prf-hero-net">Arc Testnet</span>
+                      <span class="prf-hero-tag status" id="prf-hero-status">—</span>
+                    </div>
+                    <div class="prf-hero-created">Wallet created: <span id="prf-hero-created">—</span></div>
+                  </div>
+                </div>
+                <div class="prf-hero-bal">
+                  <div class="prf-hero-label">Total Balance</div>
+                  <div class="prf-hero-balance"><span id="prf-hero-balance">$0.00</span> <span class="prf-hero-balance-cur">USDC</span></div>
+                  <div class="prf-hero-actions">
+                    <button onclick="showPage('send')"><i class="ti ti-send"></i> Send</button>
+                    <button onclick="prfShowReceive()"><i class="ti ti-download"></i> Receive</button>
+                    <button onclick="showPage('swap')"><i class="ti ti-arrows-exchange"></i> Swap</button>
+                    <button onclick="showPage('bridge')"><i class="ti ti-topology-star-3"></i> Bridge</button>
+                  </div>
+                </div>
+              </div>
+              <div class="prf-health">
+                <div class="prf-health-item" id="prf-health-smart"><i class="ti ti-cpu"></i><span>Smart Account</span><b id="prf-health-smart-v">—</b></div>
+                <div class="prf-health-item" id="prf-health-xchain"><i class="ti ti-topology-star-3"></i><span>Cross-chain</span><b id="prf-health-xchain-v">—</b></div>
+                <div class="prf-health-item" id="prf-health-session"><i class="ti ti-shield-lock"></i><span>Session</span><b id="prf-health-session-v">—</b></div>
+                <div class="prf-health-item" id="prf-health-recovery"><i class="ti ti-rotate-clockwise"></i><span>Recovery</span><b id="prf-health-recovery-v">—</b></div>
+                <div class="prf-health-item" id="prf-health-gas"><i class="ti ti-gas-station"></i><span>Gas Sponsor</span><b id="prf-health-gas-v">—</b></div>
+              </div>
+            </div>
+          </div>
 
           <div class="card" style="grid-column:1/3">
             <div class="ch"><i class="ti ti-user-circle" style="font-size:14px;color:#a78bfa"></i><span class="ct">User Profile</span><span id="prf-status-chip" style="margin-left:auto;font-size:8.5px;padding:2px 8px;border-radius:10px;background:rgba(245,158,11,.12);color:#f59e0b;">Guest</span></div>
@@ -8309,7 +8400,7 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
     <!-- Brand & About -->
     <div class="footer-brand footer-col">
       <div class="fb-logo">
-        <div class="fb-icon"><svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg" fill="none"><defs><linearGradient id="eGradF" x1="0" y1="0" x2="120" y2="120" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#06F7E9"/><stop offset="45%" stop-color="#4f8ef7"/><stop offset="100%" stop-color="#a78bfa"/></linearGradient><linearGradient id="eBgF" x1="0" y1="0" x2="120" y2="120" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#131A2E"/><stop offset="100%" stop-color="#0B0F1A"/></linearGradient></defs><rect width="120" height="120" rx="28" fill="url(#eBgF)"/><rect x="1" y="1" width="118" height="118" rx="27" fill="none" stroke="url(#eGradF)" stroke-opacity=".14" stroke-width="1.5"/><path d="M34 28h52M34 60h40M34 92h52" stroke="url(#eGradF)" stroke-width="8" stroke-linecap="round"/><path d="M34 28v64" stroke="url(#eGradF)" stroke-width="8" stroke-linecap="round"/><circle cx="86" cy="28" r="5.5" fill="#06F7E9" opacity=".95"/><circle cx="74" cy="60" r="5.5" fill="#4f8ef7" opacity=".95"/><circle cx="86" cy="92" r="5.5" fill="#a78bfa" opacity=".95"/><circle cx="34" cy="28" r="3.5" fill="#06F7E9" opacity=".5"/><circle cx="34" cy="60" r="3.5" fill="#4f8ef7" opacity=".5"/><circle cx="34" cy="92" r="3.5" fill="#a78bfa" opacity=".5"/></svg></div>
+        <div class="fb-icon"><img src="/favicon-main.svg" alt="Elligentt" style="width:100%;height:100%;display:block;object-fit:contain"></div>
         <span class="fb-name">Elligentt<span class="fb-kit">App Kit</span></span>
       </div>
       <p class="fb-tagline">
@@ -10715,8 +10806,9 @@ function showPage(id) {
     if(navEl) navEl.classList.add('active');
     // Persist current page so refresh stays on same page
     try { localStorage.setItem('elligente_current_page', id); } catch(_) {}
-    // Set URL hash
-    try { if (window.location.hash !== '#' + id) history.replaceState(null, '', '#' + id); } catch(_) {}
+    // Set URL path (Browser Routing via History API).
+    // Never rewrite the public /pay/:token checkout path (preserves the token).
+    try { if (window.location.pathname.indexOf('/pay/') !== 0 && window.location.pathname !== '/' + id) history.replaceState(null, '', '/' + id); } catch(_) {}
     // Refresh pool state when navigating to Pool or Swap pages
     if (id === 'pool' || id === 'swap') {
       loadAllPools().then(() => {
@@ -10756,6 +10848,11 @@ function showPage(id) {
     }
     if (id === 'bridge') {
       setTimeout(() => { refreshBridgeBalances(); }, 50);
+    }
+    if (id === 'links') {
+      // Sync payment-link statuses from the backend so links paid on the public
+      // /pay/:token page reflect as "Paid" here.
+      setTimeout(() => { if (typeof plSyncStatuses === 'function') plSyncStatuses(); }, 50);
     }
     if (id === 'send') {
       // Refresh Send Assets page data when user navigates to it
@@ -10815,6 +10912,41 @@ try {
 function _safeEth() {
   if (_rawProvider) return _rawProvider;
   try { return window.ethereum || null; } catch(e) { return null; }
+}
+
+// ── Wallet/provider readiness guards (race-condition hardening) ──────────
+// Prevents the Bridge / Cross-Chain "stuck wallet" issue: a single global guard
+// stops overlapping wallet operations from firing duplicate EIP-1193 requests
+// (the classic cause of a wallet hanging until a hard reload). These helpers do
+// NOT change any contract, bridge, CCTP or payment logic.
+let _walletOpInProgress = false;          // global guard (vanilla equivalent of initializingRef)
+let _pendingChainSwitch = null;           // { hex, promise } de-dups concurrent chain switches
+
+// Build a BrowserProvider from the ACTUAL connected wallet (EIP-6963 / _rawProvider),
+// never raw window.ethereum (which may be a different/hijacked injected provider when
+// multiple wallet extensions are installed — the source of the intermittent freeze).
+function getWriteProvider() {
+  const eth = _safeEth();
+  if (!eth) throw new Error('Wallet provider not available');
+  return new ethers.BrowserProvider(eth);
+}
+
+// Safe retry: wait small intervals for the provider to become ready (max 3 tries).
+async function waitForWalletProvider(maxTries = 3, gapMs = 250) {
+  for (let i = 0; i < maxTries; i++) {
+    if (_safeEth()) return _safeEth();
+    await new Promise(r => setTimeout(r, gapMs));
+  }
+  return _safeEth();
+}
+
+// Validate connected + provider + address before any bridge/CCTP/switch/tx call.
+async function assertWalletReady(needSigner = false) {
+  if (!walletAddress) { toast('Connect your wallet first', 'warning'); openWalletModal(); throw new Error('Wallet not connected'); }
+  const eth = await waitForWalletProvider();
+  if (!eth && !signer) { toast('Wallet provider not ready — please reconnect your wallet', 'error'); throw new Error('Provider not ready'); }
+  if (needSigner && !signer) { toast('Preview mode — connect a real wallet to continue', 'warning'); throw new Error('Signer not available'); }
+  return true;
 }
 
 // ── Wallet modal ───────────────────────────────────────────
@@ -12051,7 +12183,7 @@ function addRow(){
   recipients.push({addr:'',amount:'0.00',note:'',name:'',chainId:'Arc_Testnet',token:'USDC'});
   saveRecipients();
   renderTable();
-  if (recipients.length === 1) updateWorkflowStep(1, 'done');
+  if (recipients.length === 1) updateWorkflowStep(1, 'active');
   // Focus the new blank address field so user sees empty input ready to type (instead of pre-filled invalid-looking state)
   setTimeout(() => {
     const tbody = document.getElementById('tbody');
@@ -12110,7 +12242,7 @@ function updateStats(){saveRecipients();
   }
 
   // Workflow
-  if(n > 0) updateWorkflowStep(1, 'done'); else { updateWorkflowStep(1, 'pending'); updateWorkflowStep(2, 'active'); updateWorkflowStep(3, 'pending'); }
+  updateWorkflowStep(1, 'active'); updateWorkflowStep(2, 'pending'); updateWorkflowStep(3, 'pending'); updateWorkflowStep(4, 'pending');
 
   // Right panel — Route Split
   const splitDn = document.getElementById('ms-split-dn');
@@ -12212,7 +12344,7 @@ function updateBottomBar() {
 }
 function editAll(){const v=prompt('New USDC value for all:');if(!v||isNaN(parseFloat(v)))return;recipients.forEach(r=>r.amount=parseFloat(v).toFixed(2));renderTable();toast('Values updated','success');}
 function duplicateAll(){recipients.push(...recipients.map(r=>({...r})));saveRecipients();renderTable();toast('Duplicated','success');}
-function clearAll(){if(!recipients.length)return;if(!confirm(`Clear all ${recipients.length} recipients?`))return;recipients.length=0;saveRecipients();renderTable();toast('Cleared','info'); resetWorkflow(); updateWorkflowStep(1,'pending'); updateWorkflowStep(2,'active'); updateWorkflowStep(3,'pending'); updateBottomBar(); }
+function clearAll(){if(!recipients.length)return;if(!confirm(`Clear all ${recipients.length} recipients?`))return;recipients.length=0;saveRecipients();renderTable();toast('Cleared','info'); resetWorkflow(); updateWorkflowStep(1,'active'); updateWorkflowStep(2,'pending'); updateWorkflowStep(3,'pending'); updateWorkflowStep(4,'pending'); updateBottomBar(); }
 function openEditAllModal(){
   if(!recipients.length){toast('Add recipients first','warning');return;}
   document.getElementById('ea-row-count').textContent=recipients.length;
@@ -12256,7 +12388,7 @@ function updateWorkflowStep(step, state, opts = {}) {
   const detail = document.getElementById(`wf-step${step}-detail`);
   const nEl = el.querySelector('.step-n');
   if (state === 'pending' && nEl) {
-    nEl.innerHTML = (step === 1 ? '1' : (step === 2 ? '2' : '3'));
+    nEl.innerHTML = (step === 1 ? '1' : (step === 2 ? '2' : (step === 3 ? '3' : '4')));
   }
   if (state === 'done') {
     el.classList.add('done');
@@ -12280,7 +12412,7 @@ function updateWorkflowStep(step, state, opts = {}) {
   }
 }
 function resetWorkflow() {
-  for (let i = 1; i <= 3; i++) {
+  for (let i = 1; i <= 4; i++) {
     const el = document.getElementById(`wf-step-${i}`);
     if (el) {
       el.classList.remove('active','done','error','signing','sending');
@@ -12328,6 +12460,9 @@ function showBatchSuccess(count) {
     el.classList.add('done');
     const d = document.getElementById('wf-step3-detail');
     if (d) d.textContent = `✓ ${count} sent`;
+  }
+  updateWorkflowStep(4, 'active');
+  if (el) {
     el.classList.add('wf-success-glow');
     setTimeout(() => { if (el) el.classList.remove('wf-success-glow'); }, 1400);
   }
@@ -12395,6 +12530,7 @@ function openModal(){
   updateWorkflowStep(1, 'done');
   updateWorkflowStep(2, 'active');
   updateWorkflowStep(3, 'pending');
+  updateWorkflowStep(4, 'pending');
   document.getElementById('modal').classList.add('open');
 }
 function closeModal(){document.getElementById('modal').classList.remove('open');}
@@ -12947,6 +13083,7 @@ async function signTx(){
 
       stopLiveRecipientProgress();
       updateWorkflowStep(3, 'done');
+      updateWorkflowStep(4, 'active');
       showBatchSuccess(validRcpts.length);
 
       closeModal();
@@ -13362,9 +13499,22 @@ function selectToken(sym) {
   closeTokenSelector();
 }
 
-// Backward compat aliases
-function cycleTokenIn(){ openTokenSelector('in'); }
-function cycleTokenOut(){ openTokenSelector('out'); }
+// Inline token cycling (same UX as Bridge / Cross-Chain chain selectors — no modal).
+// Reuses the existing swap state (SWP.tokenInIdx/OutIdx) and setters; no swap logic change.
+function cycleTokenIn(){
+  if (!Array.isArray(TOKEN_LIST) || TOKEN_LIST.length < 2) return;
+  SWP.tokenInIdx = (SWP.tokenInIdx + 1) % TOKEN_LIST.length;
+  if (SWP.tokenInIdx === SWP.tokenOutIdx) SWP.tokenInIdx = (SWP.tokenInIdx + 1) % TOKEN_LIST.length;
+  applySwapTokens();
+  updateSwapRate();
+}
+function cycleTokenOut(){
+  if (!Array.isArray(TOKEN_LIST) || TOKEN_LIST.length < 2) return;
+  SWP.tokenOutIdx = (SWP.tokenOutIdx + 1) % TOKEN_LIST.length;
+  if (SWP.tokenOutIdx === SWP.tokenInIdx) SWP.tokenOutIdx = (SWP.tokenOutIdx + 1) % TOKEN_LIST.length;
+  applySwapTokens();
+  updateSwapRate();
+}
 
 // ── Swap button state machine ─────────────────────────────
 function swpSetBtn(state, label) {
@@ -14207,7 +14357,7 @@ async function refreshBridgeBalances(){
 // ── Chain verification: quick check before any transaction ─────────────
 async function verifyCurrentChain(expectedChainId, label) {
   try {
-    const net = await (new ethers.BrowserProvider(window.ethereum)).getNetwork();
+    const net = await (getWriteProvider()).getNetwork();
     if (Number(net.chainId) !== expectedChainId) {
       const msg = 'Wrong network: expected ' + expectedChainId + ', got ' + Number(net.chainId) + (label ? ' — ' + label : '');
       showToast(msg, 'error');
@@ -14245,54 +14395,70 @@ async function ensureNetwork(targetChainId) {
     return;
   }
 
+  // De-dup: if a switch to this exact chain is already in flight, await it
+  // instead of issuing a second (duplicate) wallet_switchEthereumChain request
+  // (a duplicate pending request is what leaves the wallet hanging until reload).
+  if (_pendingChainSwitch && _pendingChainSwitch.hex === targetHex) {
+    return _pendingChainSwitch.promise;
+  }
+
   const chainInfo = getChainById(targetChainId) || CHAINS.find(c => c.chainId === targetChainId);
   const cctp      = CCTP_CONFIG[targetChainId];
 
-  try {
-    await eth.request({
-      method: 'wallet_switchEthereumChain',
-      params: [{ chainId: targetHex }],
-    });
-  } catch (switchErr) {
-    if (switchErr.code === 4902 || switchErr.code === -32603) {
-      // Chain not added yet — add it with proper nativeCurrency
-      const nc = chainInfo?.nativeCurrency || { name: 'ETH', symbol: 'ETH', decimals: 18 };
+  const run = (async () => {
+    try {
       await eth.request({
-        method: 'wallet_addEthereumChain',
-        params: [{
-          chainId:            targetHex,
-          chainName:          chainInfo ? chainInfo.name : `Chain ${targetChainId}`,
-          rpcUrls:            [cctp ? cctp.rpc : (chainInfo?.rpc || '')],
-          blockExplorerUrls:  [cctp ? cctp.explorer : (chainInfo?.explorer || '')],
-          nativeCurrency:     nc,
-        }],
+        method: 'wallet_switchEthereumChain',
+        params: [{ chainId: targetHex }],
       });
-    } else if (switchErr.code === 4001 || switchErr.code === 'ACTION_REJECTED') {
-      throw new Error('User rejected network switch — please approve in your wallet');
-    } else {
-      throw switchErr;
+    } catch (switchErr) {
+      if (switchErr.code === 4902 || switchErr.code === -32603) {
+        // Chain not added yet — add it with proper nativeCurrency
+        const nc = chainInfo?.nativeCurrency || { name: 'ETH', symbol: 'ETH', decimals: 18 };
+        await eth.request({
+          method: 'wallet_addEthereumChain',
+          params: [{
+            chainId:            targetHex,
+            chainName:          chainInfo ? chainInfo.name : `Chain ${targetChainId}`,
+            rpcUrls:            [cctp ? cctp.rpc : (chainInfo?.rpc || '')],
+            blockExplorerUrls:  [cctp ? cctp.explorer : (chainInfo?.explorer || '')],
+            nativeCurrency:     nc,
+          }],
+        });
+      } else if (switchErr.code === 4001 || switchErr.code === 'ACTION_REJECTED') {
+        throw new Error('User rejected network switch — please approve in your wallet');
+      } else {
+        throw switchErr;
+      }
     }
-  }
 
-  // Poll until wallet chain ACTUALLY changes (wallet_switchEthereumChain
-  // resolves before the EIP-1193 provider state updates)
-  const timeout  = 30000;
-  const interval = 300;
-  const deadline = Date.now() + timeout;
+    // Poll until wallet chain ACTUALLY changes (wallet_switchEthereumChain
+    // resolves before the EIP-1193 provider state updates)
+    const timeout  = 30000;
+    const interval = 300;
+    const deadline = Date.now() + timeout;
 
-  while (Date.now() < deadline) {
-    await new Promise(r => setTimeout(r, interval));
-    if ((await getWalletChain()) === targetHex) {
-      // Chain confirmed — hard-refresh provider to discard stale ethers v6 cache
-      await refreshProviderState();
-      return;
+    while (Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, interval));
+      if ((await getWalletChain()) === targetHex) {
+        // Chain confirmed — hard-refresh provider to discard stale ethers v6 cache
+        await refreshProviderState();
+        return;
+      }
     }
-  }
 
-  throw new Error(
-    `Wallet did not switch to ${chainInfo ? chainInfo.name : targetChainId} within 30 seconds. ` +
-    `Please manually switch in your wallet and retry.`
-  );
+    throw new Error(
+      `Wallet did not switch to ${chainInfo ? chainInfo.name : targetChainId} within 30 seconds. ` +
+      `Please manually switch in your wallet and retry.`
+    );
+  })();
+
+  _pendingChainSwitch = { hex: targetHex, promise: run };
+  try {
+    return await run;
+  } finally {
+    if (_pendingChainSwitch && _pendingChainSwitch.promise === run) _pendingChainSwitch = null;
+  }
 }
 
 async function executeBridge(){
@@ -14307,6 +14473,9 @@ async function executeBridge(){
   const fromConfig = CCTP_CONFIG[fromChain.chainId];
   const toConfig   = CCTP_CONFIG[toChain.chainId];
   if (!fromConfig || !toConfig) { toast('Unsupported chain for CCTP','error'); return; }
+
+  if (_walletOpInProgress) { toast('A wallet operation is already in progress', 'warning'); return; }
+  _walletOpInProgress = true;
 
   const btn=document.getElementById('bridge-btn');
   btn.disabled=true; btn.innerHTML='<i class="ti ti-loader spin"></i> Bridging...';
@@ -14363,13 +14532,12 @@ async function executeBridge(){
     await ensureNetwork(fromChain.chainId);
 
     // Recreate provider+signer AFTER confirmed chain switch
-    const srcProvider = new ethers.BrowserProvider(window.ethereum);
+    const srcProvider = getWriteProvider();
     // Verify provider is on correct network
     const srcNetwork  = await srcProvider.getNetwork();
     if (Number(srcNetwork.chainId) !== fromChain.chainId) {
       throw new Error(`Provider chain mismatch: expected ${fromChain.chainId}, got ${srcNetwork.chainId}`);
     }
-    const srcSigner = await srcProvider.getSigner();
 
     // ── STEP 1: Approve USDC ─────────────────────────────────────────────────
     _log("[Bridge] Approving USDC...");
@@ -14382,14 +14550,14 @@ async function executeBridge(){
     // Use JsonRpcProvider for reads to avoid stale cache issues
     const readProvider  = getCachedProvider(fromConfig.rpc);
     const usdcRead      = new ethers.Contract(fromConfig.usdc, usdcAbi, readProvider);
-    const usdcWrite     = new ethers.Contract(fromConfig.usdc, usdcAbi, srcSigner);
 
-    let currentAllowance;
-    try {
-      currentAllowance = await usdcRead.allowance(walletAddress, fromConfig.tokenMessenger);
-    } catch(_) {
-      currentAllowance = 0n;
-    }
+    // Parallelize the two independent read-only calls (signer + allowance) —
+    // same results/behaviour, just concurrent instead of sequential (faster popup).
+    const [srcSigner, currentAllowance] = await Promise.all([
+      srcProvider.getSigner(),
+      usdcRead.allowance(walletAddress, fromConfig.tokenMessenger).catch(() => 0n),
+    ]);
+    const usdcWrite     = new ethers.Contract(fromConfig.usdc, usdcAbi, srcSigner);
 
     let approveHash = null;
     if (currentAllowance < amtBig) {
@@ -14574,7 +14742,7 @@ async function executeBridge(){
     await ensureNetwork(toChain.chainId);
 
     // ── CRITICAL: Recreate provider+signer for destination chain ─────────────
-    const destProvider = new ethers.BrowserProvider(window.ethereum);
+    const destProvider = getWriteProvider();
     const destNetwork  = await destProvider.getNetwork();
     if (Number(destNetwork.chainId) !== toChain.chainId) {
       throw new Error(
@@ -14627,6 +14795,7 @@ async function executeBridge(){
     toast('Bridge error: '+msg,'error');
   } finally {
     btn.disabled=false; btn.innerHTML='<i class="ti ti-topology-star-3"></i> Bridge USDC';
+    _walletOpInProgress = false;
   }
 }
 
@@ -14771,11 +14940,15 @@ document.addEventListener('DOMContentLoaded',()=>{
   loadPersistedRecipients();
   loadBatcherAddresses(); // NEW: restore batcher contract addresses
   renderTable();
-  if (recipients.length > 0) updateWorkflowStep(1, 'done'); else updateWorkflowStep(1, 'pending');
-  updateWorkflowStep(2, 'active');
+  updateWorkflowStep(1, 'active');
+  updateWorkflowStep(2, 'pending');
   updateWorkflowStep(3, 'pending');
-  // Restore last page from hash or localStorage, default to batch
-  const savedPage = (window.location.hash && window.location.hash.replace('#','')) || (localStorage.getItem('elligente_current_page')) || 'send';
+  updateWorkflowStep(4, 'pending');
+  // Restore last page from URL path or localStorage, default to send.
+  // Ignore the public /pay/:token checkout path (handled separately below).
+  const _routePath = window.location.pathname || '/';
+  const _routeFromPath = _routePath.indexOf('/pay/') === 0 ? '' : _routePath.replace(/^\/+/, '').split('/')[0];
+  const savedPage = _routeFromPath || (localStorage.getItem('elligente_current_page')) || 'send';
   showPage(savedPage);
   updateSwapRate();
   updateBridgeEst();
@@ -15480,6 +15653,39 @@ function plStatusBadgeHTML(link) {
 }
 
 // ── Render Payment Links (card grid) ─────────────────────
+// ── Sync payment-link statuses from the backend (KV is the source of truth for
+//    payments). Lets a link paid on the public /pay/:token page show as "Paid"
+//    here too. Updates ONLY payment-status fields — never local config. ──
+let _plSyncing = false;
+async function plSyncStatuses() {
+  if (_plSyncing) { renderPayLinks(); return; }
+  if (!Array.isArray(payLinks) || !payLinks.length) { renderPayLinks(); return; }
+  _plSyncing = true;
+  let changed = false;
+  try {
+    await Promise.all(payLinks.map(async (l) => {
+      if (!l || typeof l.id !== 'string') return;
+      try {
+        const r = await fetch('/api/payment/' + encodeURIComponent(l.id), { headers: { 'Accept': 'application/json' } });
+        if (!r.ok) return; // 404 = local-only link (never persisted) or expired-not-found
+        const res = await r.json();
+        if (!res || !res.ok || !res.link) return;
+        const k = res.link;
+        if (k.status && k.status !== l.status)                       { l.status = k.status; changed = true; }
+        if (typeof k.payments === 'number' && k.payments !== l.payments) { l.payments = k.payments; changed = true; }
+        if (typeof k.scans === 'number' && k.scans > (l.scans || 0))     { l.scans = k.scans; changed = true; }
+        if (k.paidTx && k.paidTx !== l.paidTx)                        { l.paidTx = k.paidTx; changed = true; }
+      } catch (_) { /* per-link network error — keep local */ }
+    }));
+  } catch (_) { /* keep local on failure */ }
+  finally {
+    _plSyncing = false;
+    if (changed) Store.save('links', payLinks);
+    renderPayLinks();
+    if (typeof updatePlStats === 'function') updatePlStats();
+  }
+}
+
 function renderPayLinks() {
   const cardsBody = document.getElementById('pl-cards-body');
   const emptyEl   = document.getElementById('pl-empty');
@@ -18341,6 +18547,9 @@ async function xcExecuteSend() {
 
   if (xcToken !== 'USDC') { toast("CCTP only supports USDC", "error"); return; }
 
+  if (_walletOpInProgress) { toast('A wallet operation is already in progress', 'warning'); return; }
+  _walletOpInProgress = true;
+
   // ── AUTO-ROUTE: External → ARC = Turbo Cross-Chain Payment ──
   if (to?.id === 'Arc_Testnet') {
     return await xcExecuteTurbo(from, to, amt, recipient);
@@ -18394,7 +18603,7 @@ async function xcExecuteSend() {
       if (sub) sub.innerHTML = `Tx: <a href="${explorerBase.replace(/\/$/,'')}/tx/${txHash}" target="_blank" style="color:var(--teal);text-decoration:none">${txHash.slice(0,14)}…${txHash.slice(-6)}</a>`;
     }
   }
-  function xcResetBtn() { btn.disabled=false; btn.innerHTML='<i class="ti ti-world-share"></i>Send Cross-Chain'; }
+  function xcResetBtn() { btn.disabled=false; btn.innerHTML='<i class="ti ti-world-share"></i>Send Cross-Chain'; _walletOpInProgress = false; }
   function xcDecodeErr(err) {
     const msg = (err.shortMessage||err.message||'').toLowerCase();
     if (err.code===4001||err.code==='ACTION_REJECTED'||msg.includes('rejected')||msg.includes('user denied')) return 'Transaction rejected by user';
@@ -18414,12 +18623,11 @@ async function xcExecuteSend() {
     await ensureNetwork(from.chainId);
 
     // Recreate provider+signer AFTER confirmed switch
-    const srcProvider = new ethers.BrowserProvider(window.ethereum);
+    const srcProvider = getWriteProvider();
     const srcNetwork  = await srcProvider.getNetwork();
     if (Number(srcNetwork.chainId) !== from.chainId) {
       throw new Error(`Wallet chain mismatch: expected ${from.chainId}, got ${srcNetwork.chainId}`);
     }
-    const srcSigner = await srcProvider.getSigner();
 
     // Read allowance via JsonRpcProvider (avoids stale ethers cache)
     const usdcAbi = [
@@ -18428,11 +18636,14 @@ async function xcExecuteSend() {
     ];
     const readProv  = getCachedProvider(fromConfig.rpc);
     const usdcRead  = new ethers.Contract(fromConfig.usdc, usdcAbi, readProv);
-    const usdcWrite = new ethers.Contract(fromConfig.usdc, usdcAbi, srcSigner);
 
-    let currentAllowance;
-    try { currentAllowance = await usdcRead.allowance(walletAddress, fromConfig.tokenMessenger); }
-    catch(_) { currentAllowance = 0n; }
+    // Parallelize the two independent read-only calls (signer + allowance) —
+    // same results/behaviour, just concurrent instead of sequential (faster popup).
+    const [srcSigner, currentAllowance] = await Promise.all([
+      srcProvider.getSigner(),
+      usdcRead.allowance(walletAddress, fromConfig.tokenMessenger).catch(() => 0n),
+    ]);
+    const usdcWrite = new ethers.Contract(fromConfig.usdc, usdcAbi, srcSigner);
 
     let approveHash = null;
     if (currentAllowance < amtBig) {
@@ -18606,7 +18817,7 @@ async function xcExecuteSend() {
     await ensureNetwork(to.chainId);
 
     // ── CRITICAL: Recreate provider + signer for destination ──────────────────
-    const destProvider = new ethers.BrowserProvider(window.ethereum);
+    const destProvider = getWriteProvider();
     const destNetwork  = await destProvider.getNetwork();
     if (Number(destNetwork.chainId) !== to.chainId) {
       throw new Error(
@@ -18720,7 +18931,7 @@ async function xcExecuteTurbo(from, to, amt, recipient) {
       if (sub) sub.innerHTML = `Tx: <a href="${explorerBase.replace(/\/$/,'')}/tx/${txHash}" target="_blank" style="color:var(--teal);text-decoration:none">${txHash.slice(0,14)}…${txHash.slice(-6)}</a>`;
     }
   }
-  function xcResetBtn() { btn.disabled = false; btn.innerHTML = '<i class="ti ti-world-share"></i>Send Cross-Chain'; }
+  function xcResetBtn() { btn.disabled = false; btn.innerHTML = '<i class="ti ti-world-share"></i>Send Cross-Chain'; _walletOpInProgress = false; }
   function xcDecodeErr(err) {
     const msg = (err.shortMessage||err.message||'').toLowerCase();
     if (err.code===4001||msg.includes('rejected')) return 'Transaction rejected';
@@ -19791,11 +20002,26 @@ async function payLandingExecute() {
 }
 
 function payLandingCopyLink() {
-  const url = document.getElementById('pml-url')?.textContent || '';
-  if (!url) { toast('No link available','error'); return; }
-  navigator.clipboard.writeText(url)
-    .then(() => toast('Payment link copied','success'))
-    .catch(() => toast('Copy failed','error'));
+  const url = (typeof _payLandingData !== 'undefined' && _payLandingData && _payLandingData.url)
+    ? _payLandingData.url
+    : (document.getElementById('pml-url')?.textContent || '');
+  if (!url || url === '—') { toast('No link available','error'); return; }
+  const ok = () => toast('Payment link copied','success');
+  const tryFallback = () => {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = url; ta.style.position = 'fixed'; ta.style.top = '-9999px';
+      document.body.appendChild(ta); ta.focus(); ta.select();
+      const done = document.execCommand('copy');
+      document.body.removeChild(ta);
+      done ? ok() : toast('Copy failed','error');
+    } catch (_) { toast('Copy failed','error'); }
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(url).then(ok).catch(tryFallback);
+  } else {
+    tryFallback();
+  }
 }
 
 function payLandingDownloadQR() {
@@ -21114,11 +21340,10 @@ async function _signRelayerAuth(opts) {
     }
   }
 
-  // ── Legacy personal_sign path (unchanged; cached) ──
-  if (_cachedRelayerAuth && (Date.now() - _cachedRelayerAuth.timestamp) < 240000) {
-    return _cachedRelayerAuth;
-  }
-
+  // ── Legacy personal_sign path ──
+  // Fresh nonce per call: the backend enforces a per-nonce anti-replay guard, so
+  // reusing a cached auth across the fulfill + mint/settlement calls (and retries)
+  // produced "Nonce already used (replay attack)" 401s. Always sign a new nonce.
   const nonceBytes = new Uint8Array(16);
   crypto.getRandomValues(nonceBytes);
   const nonce = Array.from(nonceBytes, b => b.toString(16).padStart(2, '0')).join('');
@@ -21168,8 +21393,7 @@ const FulfillerEngine = (() => {
     // ── Step 0: Switch to source chain ──────────────────────────
     if (onProgress) onProgress(0, 'Switching to ' + fromChain.name + '...');
     await ensureNetwork(fromChain.chainId);
-    const srcProvider = new ethers.BrowserProvider(window.ethereum);
-    const srcSigner   = await srcProvider.getSigner();
+    const srcProvider = getWriteProvider();
     const srcNetwork  = await srcProvider.getNetwork();
     if (Number(srcNetwork.chainId) !== fromChain.chainId) {
       throw new Error('Chain mismatch: expected ' + fromChain.chainId + ', got ' + srcNetwork.chainId);
@@ -21180,10 +21404,13 @@ const FulfillerEngine = (() => {
     const usdcAbi = ['function approve(address,uint256) returns (bool)',
                      'function allowance(address,address) view returns (uint256)'];
     const usdcRead  = new ethers.Contract(fromConfig.usdc, usdcAbi, getCachedProvider(fromConfig.rpc));
+    // Parallelize the two independent read-only calls (signer + allowance) —
+    // same results/behaviour, just concurrent instead of sequential (faster popup).
+    const [srcSigner, currentAllowance] = await Promise.all([
+      srcProvider.getSigner(),
+      usdcRead.allowance(walletAddress, fromConfig.tokenMessenger).catch(() => 0n),
+    ]);
     const usdcWrite = new ethers.Contract(fromConfig.usdc, usdcAbi, srcSigner);
-    let currentAllowance;
-    try { currentAllowance = await usdcRead.allowance(walletAddress, fromConfig.tokenMessenger); }
-    catch(_) { currentAllowance = 0n; }
     if (currentAllowance < amtBig) {
       let approveGas;
       try { approveGas = await usdcWrite.approve.estimateGas(fromConfig.tokenMessenger, amtBig); approveGas = approveGas * 130n / 100n; }
@@ -21299,7 +21526,7 @@ const FulfillerEngine = (() => {
       vaultRefreshUI();
       return { intentId, txHash: burnTx.hash };
     }
-    const arcFulfillProvider = new ethers.BrowserProvider(window.ethereum);
+    const arcFulfillProvider = getWriteProvider();
     const arcFulfillSigner   = await arcFulfillProvider.getSigner();
     const arcNetwork         = await arcFulfillProvider.getNetwork();
     if (Number(arcNetwork.chainId) !== 5042002) {
@@ -21361,20 +21588,13 @@ const FulfillerEngine = (() => {
     if (!intent) return;
     _log('[RELAYER] Calling backend relayer for intent:', intentId);
     try {
-      const auth = await _signRelayerAuth({
-        endpoint: 'relayer',
-        user: intent.userAddress,
-        intentId: intent.intentBytes32,
-        asset: intent.asset,
-        grossAmount: intent.grossAmount,
-        feeAmount: intent.feeAmount,
-      });
+      // Fulfillment is delegated to the backend operator relayer with no user
+      // signature — automatic, any wallet, popup-free (matches the original
+      // working flow). The operator EOA is the trust anchor.
       const resp = await fetch('/api/relayer', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          auth,
-          authType: auth.authType || 'legacy',
           intentBytes32: intent.intentBytes32,
           asset: intent.asset,
           grossAmount: intent.grossAmount,
@@ -22013,13 +22233,14 @@ const TreasurySettlementExecutor = (() => {
         _log('[SETTLEMENT] Sending mint request to relayer — intent=' + task.intentId + ' attempt=' + task.attemptCount + '/' + MAX_RETRIES);
 
         try {
-          const auth = await _signRelayerAuth({ endpoint: 'mint' });
+          // Settlement is authorized on-chain by the CCTP attestation (the
+          // MessageTransmitter only accepts a valid Circle-attested message that
+          // reimburses the Treasury), so no user signature is needed here — keeps
+          // settlement automatic and popup-free for any wallet.
           const resp = await fetch('/api/relayer/mint', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              auth,
-              authType: auth.authType || 'legacy',
               messageBytes: task.messageBytes,
               attestationSignature: task.attestationSig,
               intentId: task.intentId,
@@ -22321,6 +22542,9 @@ async function executeTurboBridge() {
     showToast('Turbo Bridge only supports → ARC routes', 'error'); return;
   }
 
+  if (_walletOpInProgress) { showToast('A wallet operation is already in progress', 'warning'); return; }
+  _walletOpInProgress = true;
+
   const btn = document.getElementById('bridge-btn');
   if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-bolt"></i> Processing...'; }
 
@@ -22360,6 +22584,7 @@ async function executeTurboBridge() {
     showToast('Turbo Bridge failed: ' + (err.shortMessage || err.message), 'error');
   } finally {
     if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-bolt"></i> Turbo Bridge'; }
+    _walletOpInProgress = false;
   }
 }
 
@@ -24292,6 +24517,38 @@ function prfRefreshProfile() {
   _s('prf-completion-pct', completion + '%');
   const bar = document.getElementById('prf-completion-bar');
   if (bar) bar.style.width = completion + '%';
+  // ── Wallet Profile Dashboard hero (UI only — reuses existing data/state) ──
+  try {
+    const liveAddr = (typeof walletAddress !== 'undefined' && walletAddress)
+      ? walletAddress
+      : (signedIn ? (p.wallet.address || null) : null);
+    const acctType2 = typeof WalletManager !== 'undefined' ? WalletManager.getAccountType() : null;
+    _s('prf-hero-addr', liveAddr ? (liveAddr.slice(0, 6) + '…' + liveAddr.slice(-4)) : 'Not connected');
+    const heroAv = document.getElementById('prf-hero-avatar');
+    if (heroAv) heroAv.style.opacity = liveAddr ? '1' : '.4';
+    const copyBtn = document.getElementById('prf-hero-copy');
+    if (copyBtn) copyBtn.style.display = liveAddr ? '' : 'none';
+    _s('prf-hero-type', acctType2 === 'internal' ? 'Smart Account (AA)' : acctType2 === 'external' ? 'External Wallet' : (liveAddr ? 'Wallet' : 'No wallet'));
+    const chName = (typeof activeChainId !== 'undefined' && typeof CHAIN_REGISTRY !== 'undefined' && CHAIN_REGISTRY[activeChainId])
+      ? CHAIN_REGISTRY[activeChainId].name : (p.wallet.network || 'Arc Testnet');
+    _s('prf-hero-net', chName);
+    _s('prf-hero-status', liveAddr ? 'Active' : 'Disconnected');
+    _s('prf-hero-created', p.auth.createdAt ? new Date(p.auth.createdAt).toLocaleDateString() : (liveAddr ? 'Connected' : '—'));
+    if (!liveAddr) _s('prf-hero-balance', '$0.00');
+    // Wallet Health — derived from existing state; neutral where no real source exists.
+    const setHealth = (id, label, ok) => {
+      const v = document.getElementById('prf-health-' + id + '-v');
+      if (v) v.textContent = label;
+      const item = document.getElementById('prf-health-' + id);
+      if (item) item.classList.toggle('ok', !!ok);
+    };
+    setHealth('smart',    acctType2 === 'internal' ? 'Active' : (liveAddr ? 'External' : 'Inactive'), acctType2 === 'internal');
+    setHealth('xchain',   liveAddr ? 'Ready' : 'Off', !!liveAddr);
+    setHealth('session',  signedIn ? 'Secured' : 'Guest', signedIn);
+    setHealth('recovery', signedIn ? (p.auth.provider === 'google' ? 'Google' : 'Email') : 'Not set', signedIn);
+    setHealth('gas',      'Not available', false); // no data source — neutral, never invented
+  } catch (_) {}
+
   prfRefreshAssets();
   prfRenderActivity();
 }
@@ -24431,6 +24688,7 @@ async function prfRefreshAssets() {
   const addr = (typeof walletAddress !== 'undefined' && walletAddress) ? walletAddress : (typeof ProfileManager !== 'undefined' && ProfileManager.isSignedIn() ? ProfileManager.get().wallet.address : null);
   if (!addr || typeof ARC_READ_PROVIDER === 'undefined' || typeof ethers === 'undefined') {
     tbody.innerHTML = '<tr><td colspan="4" style="padding:18px;text-align:center;color:var(--muted2);font-size:10px"><i class="ti ti-coins" style="font-size:16px;display:block;margin-bottom:4px;opacity:.3"></i>Connect wallet to view assets</td></tr>';
+    const _hb0 = document.getElementById('prf-hero-balance'); if (_hb0) _hb0.textContent = '$0.00';
     return;
   }
   tbody.innerHTML = '<tr><td colspan="4" style="padding:12px;text-align:center;color:var(--muted2);font-size:9px"><i class="ti ti-loader" style="animation:spin 1s linear infinite"></i> Loading balances...</td></tr>';
@@ -24449,6 +24707,9 @@ async function prfRefreshAssets() {
         + '<td style="padding:8px;text-align:center"><span style="font-size:8px;padding:2px 6px;border-radius:6px;background:rgba(34,197,94,.1);color:#22c55e">Arc Testnet</span></td>'
         + '</tr>';
     }).join('');
+    const _total = assets.reduce((s, a) => s + (a.symbol === 'cirBTC' ? a.balance * 67000 : a.balance), 0);
+    const _hb = document.getElementById('prf-hero-balance');
+    if (_hb) _hb.textContent = '$' + _total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   } catch (e) {
     tbody.innerHTML = '<tr><td colspan="4" style="padding:12px;text-align:center;color:var(--red);font-size:9px">Error loading balances</td></tr>';
   }
@@ -24463,6 +24724,19 @@ function prfShowReceive() {
   } catch (_) {
     prompt('Your wallet address:', addr);
   }
+}
+
+function prfCopyAddress() {
+  const addr = (typeof walletAddress !== 'undefined' && walletAddress)
+    ? walletAddress
+    : (typeof ProfileManager !== 'undefined' && ProfileManager.isSignedIn() ? ProfileManager.get().wallet.address : null);
+  if (!addr) { try { toast('No wallet address available', 'error'); } catch (_) {} return; }
+  const ok = () => { try { toast('Address copied', 'success'); } catch (_) {} };
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(addr).then(ok).catch(() => { try { prompt('Your wallet address:', addr); } catch (_) {} });
+    } else { prompt('Your wallet address:', addr); }
+  } catch (_) { try { prompt('Your wallet address:', addr); } catch (_) {} }
 }
 
 function prfRenderActivity() {

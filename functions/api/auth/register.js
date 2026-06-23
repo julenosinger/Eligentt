@@ -24,12 +24,39 @@ async function hashOTP(code, salt) {
   return Array.from(new Uint8Array(bits)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-// SECURITY: OTP delivery hook. Wire your existing email provider here.
-// Until an email transport is configured this is a no-op and the code is
-// ONLY persisted (hashed) in KV — it is never returned to the client.
-async function deliverVerificationCode(_env, _email, _code) {
-  // TODO(email): integrate transactional email provider (e.g. MailChannels / Resend).
-  return;
+// SECURITY: OTP delivery via Resend transactional email. The raw code is handed
+// only to the email transport — never logged, stored in plaintext, or returned.
+// If RESEND_API_KEY is not configured this stays a no-op so registration never
+// breaks (the hashed code remains in KV).
+async function deliverVerificationCode(env, email, code) {
+  const apiKey = env && env.RESEND_API_KEY;
+  if (!apiKey) return;
+  const from = (env && env.MAIL_FROM) || 'Elligentt <noreply@elligentt.xyz>';
+  const subject = 'Your Elligentt verification code';
+  const text = 'Your Elligentt verification code is ' + code +
+    '. It expires in 10 minutes. If you did not request this, ignore this email.';
+  const html =
+    '<div style="font-family:Arial,Helvetica,sans-serif;max-width:480px;margin:0 auto;padding:24px">' +
+    '<div style="font-size:18px;font-weight:800;color:#0f1117;margin-bottom:6px">Elligentt</div>' +
+    '<div style="font-size:13px;color:#475569;margin-bottom:16px">Use this code to verify your account:</div>' +
+    '<div style="font-size:30px;font-weight:800;letter-spacing:8px;background:#0f1117;color:#fff;padding:16px;border-radius:10px;text-align:center">' +
+    code + '</div>' +
+    '<div style="font-size:12px;color:#94a3b8;margin-top:16px">This code expires in 10 minutes. If you did not request it, you can safely ignore this email.</div>' +
+    '</div>';
+  try {
+    const resp = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from, to: [email], subject, text, html }),
+    });
+    // OBSERVABILITY: log only transport status — never the code, email, or key.
+    if (!resp.ok) {
+      console.log(JSON.stringify({ event: 'email_send_failed', status: resp.status, ts: Date.now() }));
+    }
+  } catch (_) {
+    // Delivery failure must not break registration; the hashed code stays in KV.
+    console.log(JSON.stringify({ event: 'email_send_error', ts: Date.now() }));
+  }
 }
 
 export async function onRequestOptions(context) {

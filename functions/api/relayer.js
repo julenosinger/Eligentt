@@ -97,10 +97,18 @@ export async function onRequest(context) {
     return json({ error: 'Invalid JSON' }, 400);
   }
 
-  const authResult = await verifyRelayerAuth(body, env.RATE_LIMIT_KV, env);
-  if (!authResult.valid) {
-    relayerTelemetry('relayer', authResult.reason);
-    return json({ error: 'Auth failed: ' + authResult.error }, 401);
+  // Fulfillment authorization: when an `auth` object is present it is verified and
+  // bound to userAddress (legacy/EIP-712). When absent, the backend operator relayer
+  // fulfills the intent directly — automatic / popup-free for any wallet — with the
+  // operator EOA as the trust anchor. (Testnet posture: with no auth the relayer is
+  // "open"; for mainnet, gate this with on-chain burn verification.)
+  let authResult = null;
+  if (body && body.auth) {
+    authResult = await verifyRelayerAuth(body, env.RATE_LIMIT_KV, env);
+    if (!authResult.valid) {
+      relayerTelemetry('relayer', authResult.reason);
+      return json({ error: 'Auth failed: ' + authResult.error }, 401);
+    }
   }
 
   const { intentBytes32, asset, grossAmount, feeAmount, userAddress } = body;
@@ -124,18 +132,18 @@ export async function onRequest(context) {
     return json({ error: 'Unknown asset: must be usdc, eurc, or cirbtc' }, 400);
   }
 
-  // SECURITY: bind the authorization to the intent recipient — the signer of the
-  // auth must be the same address that gets paid (userAddress). This stops a
+  // SECURITY: when an auth is present, bind it to the intent recipient — the signer
+  // of the auth must be the same address that gets paid (userAddress). This stops a
   // valid signature from one user being used to authorize a payout to another.
   // Disable only via RELAYER_REQUIRE_SELF="false" for legitimate delegated flows.
-  if (env.RELAYER_REQUIRE_SELF !== 'false' && authResult.address &&
+  if (authResult && env.RELAYER_REQUIRE_SELF !== 'false' && authResult.address &&
       authResult.address.toLowerCase() !== String(userAddress).toLowerCase()) {
     relayerTelemetry('relayer', 'address_mismatch');
     return json({ error: 'Invalid authorization' }, 403);
   }
 
   // OBSERVABILITY: authorization accepted (no sensitive data).
-  relayerEvent('relayer_auth_success', { endpoint: 'relayer', mode: authResult.scheme || 'legacy' });
+  relayerEvent('relayer_auth_success', { endpoint: 'relayer', mode: (authResult && authResult.scheme) || 'open' });
 
   const rpc = env.ARC_RPC_URL || 'https://rpc.testnet.arc.network';
 

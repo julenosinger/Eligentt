@@ -109,30 +109,36 @@ export async function onRequest(context) {
     return json({ error: 'Invalid JSON' }, 400);
   }
 
-  const authResult = await verifyRelayerAuth(body, env.RATE_LIMIT_KV, env);
-  if (!authResult.valid) {
-    relayerTelemetry('mint', authResult.reason);
-    return json({ error: 'Auth failed: ' + authResult.error }, 401);
-  }
+  // The CCTP mint/reimbursement is authorized on-chain by the MessageTransmitter:
+  // it only accepts a valid Circle-attested message, and that message mints USDC to
+  // the TreasuryVault (reimbursement) — it cannot pay anyone else and cannot drain
+  // the Treasury. So a user signature is NOT required here, which keeps settlement
+  // fully automatic / popup-free for any wallet. If an `auth` object is present
+  // (legacy clients), it is still verified for backward compatibility.
+  let mintPath = 'attestation';
+  if (body && body.auth) {
+    const authResult = await verifyRelayerAuth(body, env.RATE_LIMIT_KV, env);
+    if (!authResult.valid) {
+      relayerTelemetry('mint', authResult.reason);
+      return json({ error: 'Auth failed: ' + authResult.error }, 401);
+    }
 
-  // SECURITY: bind the authorization to userAddress when the client provides it.
-  // Optional for now (legacy clients omit it) — enforced once present so a valid
-  // signature from one user cannot authorize a mint bound to another user.
-  // Works for both legacy and EIP-712 (authResult.address is the recovered signer).
-  // Disable via RELAYER_REQUIRE_SELF="false".
-  if (body.userAddress !== undefined) {
-    if (typeof body.userAddress !== 'string' || !ethers.isAddress(body.userAddress)) {
-      return json({ error: 'Invalid userAddress' }, 400);
+    // SECURITY: bind the authorization to userAddress when the client provides it.
+    if (body.userAddress !== undefined) {
+      if (typeof body.userAddress !== 'string' || !ethers.isAddress(body.userAddress)) {
+        return json({ error: 'Invalid userAddress' }, 400);
+      }
+      if (env.RELAYER_REQUIRE_SELF !== 'false' && authResult.address &&
+          authResult.address.toLowerCase() !== body.userAddress.toLowerCase()) {
+        relayerTelemetry('mint', 'address_mismatch');
+        return json({ error: 'Invalid authorization' }, 403);
+      }
     }
-    if (env.RELAYER_REQUIRE_SELF !== 'false' && authResult.address &&
-        authResult.address.toLowerCase() !== body.userAddress.toLowerCase()) {
-      relayerTelemetry('mint', 'address_mismatch');
-      return json({ error: 'Invalid authorization' }, 403);
-    }
+
+    mintPath = authResult.scheme || 'legacy';
   }
 
   // OBSERVABILITY: authorization accepted. mint_path reflects which scheme bound it.
-  const mintPath = authResult.scheme || 'legacy';
   relayerEvent('relayer_auth_success', { endpoint: 'mint', mode: mintPath, mint_path: mintPath });
 
   const { messageBytes, attestationSignature, intentId, asset, amount } = body;
