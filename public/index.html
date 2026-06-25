@@ -7932,7 +7932,7 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
         <div class="card">
           <div class="ch"><i class="ti ti-apps" style="font-size:13px;color:var(--purple)"></i><span class="ct">App Kit</span></div>
           <!-- Kit Key hidden — value injected server-side, not shown in UI -->
-          <input id="s-kitkey" type="hidden" value="__KIT_KEY_PLACEHOLDER__"/>
+          <input id="s-kitkey" type="hidden" value=""/>
           <div class="cb" style="display:flex;flex-direction:column;gap:9px">
             <div><div class="swap-label">WalletConnect Project ID</div><input id="s-wcid" class="cinput" value="b9d9e4c5e8f14a3b6d2e1f0a9c8b7d6e"/></div>
             <div style="display:flex;justify-content:space-between;align-items:center">
@@ -8009,6 +8009,9 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
     .prf-health-item span{font-size:7px;color:var(--muted2);text-transform:uppercase;letter-spacing:.3px}
     .prf-health-item b{font-size:8.5px;font-weight:700;color:var(--muted2)}
     .prf-health-item.ok i,.prf-health-item.ok b{color:#22c55e}
+    #prf-locked{flex:1;display:flex;align-items:center;justify-content:center;padding:20px 0}
+    #sc-import-consent{-webkit-appearance:none;appearance:none;border:2px solid rgba(255,255,255,.35);border-radius:4px;background:rgba(255,255,255,.06);transition:background .15s,border .15s}
+    #sc-import-consent:checked{background:#22c55e;border-color:#22c55e}
     @media(max-width:900px){#prf-layout{grid-template-columns:1fr !important}}
     @media(max-width:760px){.prf-hero-grid{grid-template-columns:1fr}.prf-hero-bal{text-align:left}.prf-hero-actions{justify-content:flex-start}.prf-health{grid-template-columns:repeat(2,1fr)}#prf-cards{grid-template-columns:1fr !important}}
     </style>
@@ -8023,14 +8026,55 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
           <div id="prf-auth-badge" class="chip" style="background:rgba(245,158,11,.1);color:var(--yellow);border:1px solid rgba(245,158,11,.2)"><i class="ti ti-lock" style="font-size:8px"></i>Not signed in</div>
         </div>
       </div>
-      <div class="page-content" style="padding:14px">
+      <div class="page-content" style="padding:14px;display:flex;flex-direction:column">
+        <div id="prf-locked">
+          <div class="card" style="max-width:420px;margin:0 auto">
+            <div class="ch"><i class="ti ti-lock" style="font-size:14px;color:#f59e0b"></i><span class="ct">Profile Locked</span></div>
+            <div class="cb">
+              <div style="text-align:center;padding:28px 20px">
+                <div style="font-size:10px;color:var(--muted2);margin-bottom:18px;line-height:1.6">Connect your wallet or create an account to access your profile</div>
+                <div style="display:flex;flex-direction:column;gap:8px;max-width:280px;margin:0 auto">
+                  <button onclick="connectWallet()" class="btn" style="padding:10px 0;font-size:11px;justify-content:center;border-color:rgba(79,142,247,.4);color:#4f8ef7"><i class="ti ti-wallet"></i> Connect Wallet</button>
+                  <button onclick="authOpen()" class="btn" style="padding:10px 0;font-size:11px;justify-content:center;border-color:rgba(167,139,250,.4);color:#a78bfa"><i class="ti ti-mail"></i> Create Account with Email</button>
+                  <button onclick="prfSignIn('google')" class="btn" style="padding:10px 0;font-size:11px;justify-content:center;border-color:rgba(79,142,247,.4);color:#7b9ef7"><i class="ti ti-brand-google"></i> Sign in with Google</button>
+                </div>
+                <div style="margin-top:20px;padding-top:14px;border-top:1px solid var(--border)">
+                  <div style="font-size:9px;color:var(--muted2);margin-bottom:8px">Self-Custody</div>
+                  <div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap">
+                    <button onclick="prfCreateLocalWallet()" class="btn" style="padding:8px 16px;font-size:10px;justify-content:center;border-color:rgba(34,197,94,.35);color:#22c55e"><i class="ti ti-key"></i> Create Local Wallet</button>
+                    <button onclick="prfImportLocalWallet()" class="btn" style="padding:8px 16px;font-size:10px;justify-content:center;border-color:rgba(245,158,11,.35);color:#f59e0b"><i class="ti ti-file-import"></i> Restore</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div id="prf-unlocked" style="display:none">
         <div style="display:grid;grid-template-columns:1fr 260px;gap:12px;align-items:start" id="prf-layout">
 
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;align-content:start" id="prf-cards">
 
           <div class="card prf-hero" style="grid-column:1/3">
-            <div class="ch"><i class="ti ti-wallet" style="font-size:14px;color:#a78bfa"></i><span class="ct">Wallet Identity</span></div>
+            <div class="ch"><i class="ti ti-id" style="font-size:14px;color:#a78bfa"></i><span class="ct">Profile Identity</span><span id="prf-status-chip" style="margin-left:auto;font-size:8.5px;padding:2px 8px;border-radius:10px;background:rgba(245,158,11,.12);color:#f59e0b;">Guest</span></div>
             <div class="cb">
+              <div id="prf-user-view" style="display:none">
+                <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid var(--border)">
+                  <div id="prf-avatar" style="width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,#a78bfa,#4f8ef7);display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:800;color:#fff;flex-shrink:0">E</div>
+                  <div style="flex:1;min-width:0">
+                    <div style="display:flex;align-items:center;gap:6px"><span id="prf-name" style="font-size:14px;font-weight:700;color:var(--text)">—</span><span id="prf-verified" style="display:none;font-size:8px;padding:2px 6px;border-radius:8px;background:rgba(34,197,94,.12);color:#22c55e"><i class="ti ti-circle-check" style="font-size:7px"></i> Verified</span></div>
+                    <div id="prf-email" style="font-size:10px;color:var(--muted2);margin-top:2px">—</div>
+                    <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
+                      <span style="font-size:8px;padding:2px 6px;border-radius:6px;background:rgba(167,139,250,.1);color:#a78bfa;border:1px solid rgba(167,139,250,.2)"><i class="ti ti-cpu" style="font-size:7px"></i> Smart Account</span>
+                      <span id="prf-uid" style="font-size:8px;padding:2px 6px;border-radius:6px;background:rgba(0,0,0,.2);color:var(--muted2);font-family:monospace">—</span>
+                    </div>
+                  </div>
+                  <div style="text-align:right;font-size:9px;color:var(--muted2)">
+                    <div>Created <span id="prf-created">—</span></div>
+                    <div style="margin-top:3px">Last login <span id="prf-lastlogin">—</span></div>
+                    <button onclick="prfSignOut()" class="btn" style="margin-top:8px;font-size:9px;padding:4px 10px;border-color:rgba(239,68,68,.3);color:#ef4444"><i class="ti ti-logout"></i> Sign Out</button>
+                  </div>
+                </div>
+              </div>
               <div class="prf-hero-grid">
                 <div class="prf-hero-id">
                   <div class="prf-hero-avatar" id="prf-hero-avatar"></div>
@@ -8064,43 +8108,6 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
                 <div class="prf-health-item" id="prf-health-session"><i class="ti ti-shield-lock"></i><span>Session</span><b id="prf-health-session-v">—</b></div>
                 <div class="prf-health-item" id="prf-health-recovery"><i class="ti ti-rotate-clockwise"></i><span>Recovery</span><b id="prf-health-recovery-v">—</b></div>
                 <div class="prf-health-item" id="prf-health-gas"><i class="ti ti-gas-station"></i><span>Gas Sponsor</span><b id="prf-health-gas-v">—</b></div>
-              </div>
-            </div>
-          </div>
-
-          <div class="card" style="grid-column:1/3">
-            <div class="ch"><i class="ti ti-user-circle" style="font-size:14px;color:#a78bfa"></i><span class="ct">User Profile</span><span id="prf-status-chip" style="margin-left:auto;font-size:8.5px;padding:2px 8px;border-radius:10px;background:rgba(245,158,11,.12);color:#f59e0b;">Guest</span></div>
-            <div class="cb" id="prf-guest-view">
-              <div style="text-align:center;padding:20px 0">
-                <div style="width:64px;height:64px;border-radius:50%;background:linear-gradient(135deg,rgba(167,139,250,.2),rgba(79,142,247,.2));border:2px solid rgba(167,139,250,.3);display:flex;align-items:center;justify-content:center;margin:0 auto 12px;font-size:28px;color:#a78bfa"><i class="ti ti-user"></i></div>
-                <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:4px">Create Your Account</div>
-                <div style="font-size:10px;color:var(--muted2);margin-bottom:16px;max-width:320px;margin-left:auto;margin-right:auto">Sign in with email to get your Intelligent Wallet — a secure smart account created automatically. No browser extension required.</div>
-                <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
-                  <button onclick="authOpen()" class="btn" style="padding:8px 20px;font-size:11px;border-color:rgba(167,139,250,.4);color:#a78bfa"><i class="ti ti-mail"></i> Create Account with Email</button>
-                  <button onclick="prfSignIn('google')" class="btn" style="padding:8px 20px;font-size:11px;border-color:rgba(79,142,247,.4);color:#7b9ef7"><i class="ti ti-brand-google"></i> Sign in with Google</button>
-                </div>
-                <div style="font-size:8.5px;color:var(--muted2);margin-top:12px">Or continue without an account — all features remain available</div>
-              </div>
-            </div>
-            <div class="cb" id="prf-user-view" style="display:none">
-              <div style="display:flex;align-items:center;gap:14px">
-                <div id="prf-avatar" style="width:56px;height:56px;border-radius:50%;background:linear-gradient(135deg,#a78bfa,#4f8ef7);display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:800;color:#fff;flex-shrink:0">E</div>
-                <div style="flex:1">
-                  <div style="display:flex;align-items:center;gap:6px">
-                    <span id="prf-name" style="font-size:14px;font-weight:700;color:var(--text)">—</span>
-                    <span id="prf-verified" style="display:none;font-size:8px;padding:2px 6px;border-radius:8px;background:rgba(34,197,94,.12);color:#22c55e"><i class="ti ti-circle-check" style="font-size:7px"></i> Verified</span>
-                  </div>
-                  <div id="prf-email" style="font-size:10px;color:var(--muted2);margin-top:2px">—</div>
-                  <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
-                    <span style="font-size:8px;padding:2px 6px;border-radius:6px;background:rgba(167,139,250,.1);color:#a78bfa;border:1px solid rgba(167,139,250,.2)"><i class="ti ti-cpu" style="font-size:7px"></i> Smart Account</span>
-                    <span id="prf-uid" style="font-size:8px;padding:2px 6px;border-radius:6px;background:rgba(0,0,0,.2);color:var(--muted2);font-family:monospace">—</span>
-                  </div>
-                </div>
-                <div style="text-align:right;font-size:9px;color:var(--muted2)">
-                  <div>Created <span id="prf-created">—</span></div>
-                  <div style="margin-top:3px">Last login <span id="prf-lastlogin">—</span></div>
-                  <button onclick="prfSignOut()" class="btn" style="margin-top:8px;font-size:9px;padding:4px 10px;border-color:rgba(239,68,68,.3);color:#ef4444"><i class="ti ti-logout"></i> Sign Out</button>
-                </div>
               </div>
             </div>
           </div>
@@ -8255,26 +8262,6 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
             </div>
 
             <div class="card">
-              <div class="ch"><i class="ti ti-circle-check" style="font-size:13px;color:#a78bfa"></i><span class="ct">Profile Completion</span></div>
-              <div class="cb">
-                <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-                  <div style="flex:1;height:6px;background:rgba(255,255,255,.06);border-radius:3px;overflow:hidden">
-                    <div id="prf-completion-bar" style="height:100%;width:20%;background:linear-gradient(90deg,#a78bfa,#4f8ef7);border-radius:3px;transition:width .4s"></div>
-                  </div>
-                  <span id="prf-completion-pct" style="font-size:11px;font-weight:700;color:#a78bfa;min-width:32px;text-align:right">20%</span>
-                </div>
-                <div style="font-size:8.5px;color:var(--muted2);margin-bottom:10px">Complete your profile to unlock all features</div>
-                <div id="prf-completion-tasks" style="display:flex;flex-direction:column;gap:5px">
-                  <div class="prf-task" id="prf-task-signin" style="display:flex;align-items:center;gap:6px;font-size:9px;color:var(--muted2)"><i class="ti ti-circle" style="font-size:10px;color:var(--muted2)"></i>Sign in to your account</div>
-                  <div class="prf-task" id="prf-task-avatar" style="display:flex;align-items:center;gap:6px;font-size:9px;color:var(--muted2)"><i class="ti ti-circle" style="font-size:10px;color:var(--muted2)"></i>Add avatar</div>
-                  <div class="prf-task" id="prf-task-wallet" style="display:flex;align-items:center;gap:6px;font-size:9px;color:var(--muted2)"><i class="ti ti-circle" style="font-size:10px;color:var(--muted2)"></i>Connect external wallet</div>
-                  <div class="prf-task" id="prf-task-recovery" style="display:flex;align-items:center;gap:6px;font-size:9px;color:var(--muted2)"><i class="ti ti-circle" style="font-size:10px;color:var(--muted2)"></i>Enable recovery</div>
-                  <div class="prf-task" id="prf-task-tx" style="display:flex;align-items:center;gap:6px;font-size:9px;color:var(--muted2)"><i class="ti ti-circle" style="font-size:10px;color:var(--muted2)"></i>Complete first transaction</div>
-                </div>
-              </div>
-            </div>
-
-            <div class="card">
               <div class="ch"><i class="ti ti-chart-dots-3" style="font-size:13px;color:#4f8ef7"></i><span class="ct">Account Stats</span></div>
               <div class="cb" style="display:flex;flex-direction:column;gap:8px">
                 <div style="display:flex;justify-content:space-between;font-size:9.5px"><span style="color:var(--muted2)">Total Transactions</span><span id="prf-stat-tx" style="font-weight:700;color:var(--text)">0</span></div>
@@ -8288,6 +8275,7 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
 
           </div>
 
+        </div>
         </div>
       </div>
     </div>
@@ -8419,7 +8407,7 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
         <span><strong style="color:#dde2f0">Arc Testnet</strong> · Chain ID 5042002 · USDC gas · ElligentBatch + ElligentPool</span>
       </div>
       <div class="footer-socials">
-        <a class="footer-social-btn" href="https://github.com" target="_blank" title="GitHub"><i class="ti ti-brand-github"></i></a>
+        <a class="footer-social-btn" href="https://github.com/julenosinger/Eligentt" target="_blank" title="GitHub"><i class="ti ti-brand-github"></i></a>
         <a class="footer-social-btn" href="https://x.com/juleno14" target="_blank" title="X / Twitter @juleno14"><i class="ti ti-brand-x"></i></a>
         <a class="footer-social-btn" href="https://t.me/Julenno" target="_blank" title="Telegram @Julenno"><i class="ti ti-brand-telegram"></i></a>
         <a class="footer-social-btn" href="mailto:damaskstore14@gmail.com" title="Email damaskstore14@gmail.com"><i class="ti ti-mail"></i></a>
@@ -8674,10 +8662,10 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
 // ── Cloudflare Pages runtime configuration ──────────────────
 // Keys are injected at runtime by the Cloudflare Pages Function
 window.__ARC_PAY_CONFIG__ = window.__ARC_PAY_CONFIG__ || {
-  wcProjectId:   '__WC_PROJECT_ID_PLACEHOLDER__',    // WalletConnect v2 Project ID (injected at runtime)
-  kitKey:        '__KIT_KEY_PLACEHOLDER__',    // Circle App Kit key (for Swap)
-  testApiKey:    '__TEST_API_KEY_PLACEHOLDER__', // Circle API key
-  googleClientId: '__GOOGLE_CLIENT_ID_PLACEHOLDER__',
+  wcProjectId:   '',    // WalletConnect v2 Project ID (injected at runtime)
+  kitKey:        '',    // Circle App Kit key (for Swap)
+  testApiKey:    '', // Circle API key
+  googleClientId: '',
   batchContract: '',    // Deployed ElligentBatch.sol address (leave empty to use direct ERC-20 transfers)
   eurcAddress:   '0x3700000000000000000000000000000000000000',  // EURC on Arc Testnet
   rpcUrl:        'https://rpc.testnet.arc.network',
@@ -10926,6 +10914,15 @@ let _pendingChainSwitch = null;           // { hex, promise } de-dups concurrent
 // never raw window.ethereum (which may be a different/hijacked injected provider when
 // multiple wallet extensions are installed — the source of the intermittent freeze).
 function getWriteProvider() {
+  // Internal (Intelligent) wallet: no injected provider. Use the embedded
+  // signer/provider directly. Callers only use .getNetwork() and .getSigner().
+  if (typeof WalletManager !== 'undefined' && typeof WalletManager.isInternalWallet === 'function' && WalletManager.isInternalWallet()) {
+    const p = WalletManager.getProvider() || provider;
+    const s = WalletManager.getSigner() || signer;
+    if (p && s) {
+      return { getNetwork: () => p.getNetwork(), getSigner: async () => s };
+    }
+  }
   const eth = _safeEth();
   if (!eth) throw new Error('Wallet provider not available');
   return new ethers.BrowserProvider(eth);
@@ -11026,6 +11023,7 @@ async function toggleWalletSource() {
     const userId = saved?.id || email;
     const ok = await WalletManager.switchToInternal(email, userId);
     if (ok) {
+      _adoptInternalWalletGlobals();
       toast('Switched to Internal Wallet', 'success');
       await refreshBalance();
       updateSwapBalancesDisplay();
@@ -14371,6 +14369,15 @@ async function verifyCurrentChain(expectedChainId, label) {
 }
 
 async function ensureNetwork(targetChainId) {
+  // Internal (Intelligent) wallet has no injected provider — switch its RPC directly.
+  if (typeof WalletManager !== 'undefined' && typeof WalletManager.isInternalWallet === 'function' && WalletManager.isInternalWallet()) {
+    const _okInternal = await WalletManager.switchInternalChain(targetChainId);
+    if (!_okInternal) throw new Error('Could not switch the internal wallet to chain ' + targetChainId);
+    if (typeof _adoptInternalWalletGlobals === 'function') _adoptInternalWalletGlobals(); else activeChainId = targetChainId;
+    if (typeof updateNetworkBadge === 'function') updateNetworkBadge();
+    if (typeof refreshBalance === 'function') refreshBalance().catch(() => {});
+    return;
+  }
   // wallet_switchEthereumChain resolves when the wallet accepts the REQUEST,
   // NOT when the chain has actually changed. We poll eth_chainId until it
   // matches, then call refreshProviderState() to discard the stale ethers v6
@@ -24425,6 +24432,89 @@ function _stlLog(msg) {
   });
 })();
 
+// ─── Settlement Recovery Auto-Scheduler — READ-ONLY, every 30s ──────────────
+// Background layer that automatically re-runs the SAME read-only recovery
+// routines the operator triggers via the Recovery Engine buttons. It REUSES the
+// existing functions (SettlementModule.runRecovery, stlRefreshAll,
+// stlRecoverFromMemos) — no duplicated logic, no second Treasury implementation.
+// It NEVER: creates settlements, sends transactions, calls depositForBurn,
+// mutates state, or interferes with a manual operator run. Protections: mutex
+// (no overlapping cycles), timeout, and the recovery READ-ONLY write-guard kept
+// active for the whole cycle (blocks any enqueue/write). Audit logs every action.
+const SettlementRecoveryScheduler = (() => {
+  const INTERVAL_MS = 30000;
+  const CYCLE_TIMEOUT_MS = 25000;
+  let _busy = false;   // mutex: never two cycles at once
+  let _timer = null;
+  let _cycles = 0;
+
+  function _audit(action, result, err) {
+    const line = '[Settlement Recovery Scheduler] ' + new Date().toISOString() +
+      ' | ' + action + ' | ' + (err ? ('ERROR: ' + (err.message || err)) : (result || 'ok'));
+    try { if (typeof _log === 'function') _log(line); } catch (_) {}
+    try { if (typeof _stlLog === 'function') _stlLog(line); } catch (_) {}
+  }
+
+  function _withTimeout(promise, ms, label) {
+    return Promise.race([
+      Promise.resolve(promise),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout after ' + ms + 'ms: ' + label)), ms)),
+    ]);
+  }
+
+  async function _runCycle() {
+    if (_busy) { _audit('cycle skipped', 'previous cycle still running'); return; }
+    // Do not interfere with a manual operator recovery (or startup run) in progress.
+    if (window.__SETTLEMENT_RECOVERY_READONLY === true) { _audit('cycle skipped', 'manual/startup recovery in progress'); return; }
+    if (typeof SettlementModule === 'undefined' || typeof SettlementModule.runRecovery !== 'function') return;
+
+    _busy = true;
+    _cycles++;
+    // Keep the recovery write-guard ACTIVE for the whole cycle so no enqueue/write
+    // can be triggered automatically (manual buttons clear it after 100ms; we don't).
+    window.__SETTLEMENT_RECOVERY_READONLY = true;
+    _audit('cycle start', 'cycle #' + _cycles + ' — check pending / resume / verify attestations / sync / refresh Circle / recover memos');
+    try {
+      await _withTimeout((async () => {
+        // Resume Settlement + Recheck Attestation + Refresh Circle Status
+        // (the same read-only engine; run ONCE to avoid duplicate calls).
+        try { await SettlementModule.runRecovery(); _audit('resume/recheck/refreshCircle (runRecovery)', 'ok'); }
+        catch (e) { _audit('resume/recheck/refreshCircle (runRecovery)', null, e); }
+        // Force Sync State (local read + UI refresh only).
+        try { if (typeof stlRefreshAll === 'function') stlRefreshAll(); _audit('forceSyncState (stlRefreshAll)', 'ok'); }
+        catch (e) { _audit('forceSyncState (stlRefreshAll)', null, e); }
+        // Recover from Arc Memos (read-only on-chain scan).
+        try { if (typeof stlRecoverFromMemos === 'function') await stlRecoverFromMemos(); _audit('recoverFromMemos', 'ok'); }
+        catch (e) { _audit('recoverFromMemos', null, e); }
+      })(), CYCLE_TIMEOUT_MS, 'recovery cycle');
+      _audit('cycle done', 'cycle #' + _cycles);
+    } catch (e) {
+      _audit('cycle aborted', null, e);
+    } finally {
+      window.__SETTLEMENT_RECOVERY_READONLY = false;
+      _busy = false;
+    }
+  }
+
+  function start() {
+    if (_timer) return;
+    const iv = (typeof _setInterval === 'function') ? _setInterval : setInterval;
+    _timer = iv(_runCycle, INTERVAL_MS);
+    _audit('scheduler started', 'interval ' + (INTERVAL_MS / 1000) + 's');
+  }
+  function stop() { if (_timer) { try { clearInterval(_timer); } catch (_) {} _timer = null; _audit('scheduler stopped'); } }
+
+  // Start after load (after the bootstrap read-only run); first cycle ~30s later.
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => setTimeout(start, INTERVAL_MS));
+  } else {
+    setTimeout(start, INTERVAL_MS);
+  }
+
+  return { start, stop, runCycle: _runCycle, isBusy: () => _busy };
+})();
+if (typeof window !== 'undefined') window.SettlementRecoveryScheduler = SettlementRecoveryScheduler;
+
 // ══════════════════════════════════════════════════════════
 //  PROFILE PAGE — Account & Intelligent Wallet
 // ══════════════════════════════════════════════════════════
@@ -24433,6 +24523,12 @@ function prfRefreshProfile() {
   if (typeof ProfileManager === 'undefined') return;
   const p = ProfileManager.get();
   const signedIn = ProfileManager.isSignedIn();
+  // Profile access control: only reveal content when authenticated OR a wallet is connected.
+  const _prfUnlocked = signedIn || (typeof walletAddress !== 'undefined' && !!walletAddress);
+  const _lockEl = document.getElementById('prf-locked');
+  if (_lockEl) _lockEl.style.display = _prfUnlocked ? 'none' : '';
+  const _unlockEl = document.getElementById('prf-unlocked');
+  if (_unlockEl) _unlockEl.style.display = _prfUnlocked ? '' : 'none';
   const guestEl = document.getElementById('prf-guest-view');
   const userEl = document.getElementById('prf-user-view');
   if (guestEl) guestEl.style.display = signedIn ? 'none' : 'block';
@@ -24485,12 +24581,16 @@ function prfRefreshProfile() {
   _s('prf-stat-payments', String(p.stats.payments || 0));
   _s('prf-stat-swaps', String(p.stats.swaps || 0));
   _s('prf-stat-bridges', String(p.stats.bridges || 0));
-  _s('prf-sb-name', signedIn ? (p.name || 'User') : 'Guest');
-  _s('prf-sb-email', signedIn ? (p.email || 'Not set') : 'Not signed in');
+  const _hasWalletSB = signedIn || (typeof walletAddress !== 'undefined' && !!walletAddress);
+  const _sbWalletType = (typeof WalletManager !== 'undefined' && WalletManager.getAccountType) ? WalletManager.getAccountType() : null;
+  const _sbDispName = signedIn ? (p.name || 'User') : (typeof walletAddress !== 'undefined' && walletAddress ? walletAddress.slice(0, 6) + '...' + walletAddress.slice(-4) : 'Connected');
+  const _sbDispEmail = signedIn ? (p.email || 'Not set') : (_sbWalletType === 'external' ? 'External Wallet' : 'Self-Custody Wallet');
+  _s('prf-sb-name', _hasWalletSB ? _sbDispName : 'Guest');
+  _s('prf-sb-email', _hasWalletSB ? _sbDispEmail : 'Not signed in');
   _s('prf-sb-uid', p.id || '—');
   _s('prf-sb-since', p.auth.createdAt ? new Date(p.auth.createdAt).toLocaleDateString() : '—');
   const sbStatus = document.getElementById('prf-sb-status');
-  if (sbStatus) { sbStatus.textContent = signedIn ? 'Verified' : 'Guest'; sbStatus.style.color = signedIn ? '#22c55e' : '#f59e0b'; }
+  if (sbStatus) { sbStatus.textContent = signedIn ? 'Verified' : _hasWalletSB ? 'Connected' : 'Guest'; sbStatus.style.color = signedIn ? '#22c55e' : _hasWalletSB ? '#4f8ef7' : '#f59e0b'; }
   const sbAvatar = document.getElementById('prf-sb-avatar');
   if (sbAvatar) {
     if (signedIn && p.avatar) { sbAvatar.innerHTML = '<img src="' + p.avatar + '" style="width:100%;height:100%;border-radius:50%;object-fit:cover" referrerpolicy="no-referrer"/>'; sbAvatar.style.background = 'none'; sbAvatar.style.border = '1.5px solid rgba(167,139,250,.3)'; }
@@ -24580,10 +24680,27 @@ function prfEditProfile() {
         if (typeof WalletManager !== 'undefined') {
           WalletManager.activateFromAuth();
         }
+        _adoptInternalWalletGlobals();
+        if (typeof refreshBalance === 'function') refreshBalance().catch(() => {});
+        if (typeof _refreshAllSurfaceBalances === 'function') _refreshAllSurfaceBalances();
         console.log('[Profile] Auto-restored from AuthManager:', p?.wallet?.address);
         if (typeof prfRefreshProfile === 'function') prfRefreshProfile();
         return;
       }
+    }
+    // Self-custody local wallet — restore from encrypted vault (no auth/login required).
+    if (typeof WalletManager !== 'undefined' && typeof WalletManager.restoreLocalWallet === 'function') {
+      try {
+        const lw = await WalletManager.restoreLocalWallet();
+        if (lw) {
+          WalletManager.activateInternalWallet(lw);
+          _adoptInternalWalletGlobals();
+          if (typeof refreshBalance === 'function') refreshBalance().catch(() => {});
+          console.log('[Profile] Auto-restored self-custody wallet:', lw.address);
+          if (typeof prfRefreshProfile === 'function') prfRefreshProfile();
+          return;
+        }
+      } catch (e) { console.warn('[Profile] Self-custody auto-restore failed:', e.message ?? e); }
     }
     if (typeof ProfileManager === 'undefined' || typeof WalletManager === 'undefined') return;
     if (!ProfileManager.isSignedIn()) return;
@@ -24604,6 +24721,234 @@ function prfEditProfile() {
     setTimeout(run, 800);
   }
 })();
+
+// ── Self-custody (local key) wallet — multi-step onboarding ─────────────
+let _scMnemonic = null;
+let _scPrivateKey = null;
+let _scStep = 1;
+
+function _scModal(content) {
+  let modal = document.getElementById('selfcustody-modal');
+  if (modal) modal.remove();
+  modal = document.createElement('div');
+  modal.id = 'selfcustody-modal';
+  modal.style.cssText = 'position:fixed;inset:0;z-index:9999;display:flex;align-items:flex-start;justify-content:center;background:rgba(0,0,0,.75);backdrop-filter:blur(6px);padding:20px 8px 20px 8px;overflow-y:auto;-webkit-overflow-scrolling:touch';
+  modal.innerHTML = '<div id="sc-modal-inner" style="background:var(--card);border:1px solid var(--border2);border-radius:16px;padding:22px 20px;width:440px;max-width:100%;box-shadow:0 24px 72px rgba(0,0,0,.8);margin:0 auto">' + content + '</div>';
+  modal.addEventListener('click', function(e) { if (e.target === modal) { _scCleanup(); modal.remove(); } });
+  document.body.appendChild(modal);
+  _scStep = 1;
+}
+
+function _scCleanup() { _scMnemonic = null; _scPrivateKey = null; _scStep = 1; }
+
+function _scClose() { var m = document.getElementById('selfcustody-modal'); if(m)m.remove(); _scCleanup(); }
+
+function _scError(msg) {
+  var el = document.getElementById('sc-error');
+  if (el) { el.textContent = msg; el.style.display = ''; }
+  else { try { toast(msg || 'Error', 'error'); } catch(_){} }
+}
+
+// ── mnemonic -> private key ─────────────────────────────────────────────
+function _scMnemonicToKey(mnemonic) {
+  try { return ethers.Wallet.fromPhrase(mnemonic).privateKey; }
+  catch(e) { return ethers.HDNodeWallet.fromPhrase(mnemonic).privateKey; }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  CREATE FLOW  (modal — 4 steps)
+// ═══════════════════════════════════════════════════════════════════════
+async function prfCreateLocalWallet() {
+  if (typeof WalletManager === 'undefined' || typeof ethers === 'undefined') { try{toast('Wallet system not loaded','error');}catch(_){} return; }
+  _scCleanup();
+  var w = ethers.Wallet.createRandom();
+  _scMnemonic = w.mnemonic ? w.mnemonic.phrase : null;
+  if (!_scMnemonic) { try{toast('Could not generate recovery phrase','error');}catch(_){} return; }
+  _scPrivateKey = w.privateKey;
+  _scStep = 1;
+  _scRenderCreateStep();
+}
+
+function _scRenderCreateStep() {
+  var title = '', body = '', footer = '';
+  var words = _scMnemonic ? _scMnemonic.split(' ') : [];
+
+  if (_scStep === 1) {
+    title = '<i class="ti ti-shield-lock" style="color:#22c55e;font-size:20px;vertical-align:middle"></i> <span style="color:#22c55e">Self-Custody Wallet</span>';
+    body = '<div style="font-size:10.5px;color:var(--text);line-height:1.7;margin:18px 0;text-align:center">'
+      + '<p>You control your keys. No server, no login, no third party.</p>'
+      + '<div style="background:rgba(34,197,94,.07);border:1px solid rgba(34,197,94,.22);border-radius:10px;padding:14px;margin:14px 0;font-size:10px;color:var(--muted2);line-height:1.7">'
+        + 'Your wallet is encrypted on <b style="color:var(--text)">this device only</b>. '
+        + 'You\'ll receive a <b style="color:#22c55e">12-word recovery phrase</b>'
+        + ' \u2014 the <b style="color:var(--text)">ONLY way</b> to restore your wallet on another device or after clearing browser data.'
+      + '</div>'
+      + '<div style="background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.25);border-radius:10px;padding:12px;font-size:10px;color:#f59e0b;line-height:1.7">'
+        + '<b><i class="ti ti-alert-triangle"></i> Write it on paper.</b> Do not store it digitally. Do not share it. <b>Anyone with these words controls your wallet and all its funds.</b>'
+      + '</div></div>';
+    footer = '<button onclick="_scStep=2;_scRenderCreateStep()" class="btn" style="width:auto;min-width:220px;margin:0 auto;padding:11px 20px;font-size:11px;font-weight:700;border-color:rgba(34,197,94,.4);color:#22c55e"><i class="ti ti-arrow-right"></i> Get Started</button>';
+  }
+  else if (_scStep === 2) {
+    title = '<i class="ti ti-file-text" style="color:#f59e0b;font-size:18px;vertical-align:middle"></i> Your Recovery Phrase';
+    var grid = '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:16px 0">';
+    for (var i = 0; i < 12; i++) {
+      grid += '<div style="background:rgba(0,0,0,.25);border:1px solid var(--border);border-radius:8px;padding:8px 4px;text-align:center;font-size:9.5px;color:var(--text);font-weight:600"><span style="color:var(--muted2);font-size:8px">'+(i+1)+'</span>&#160;' + (words[i]||'\u2014') + '</div>';
+    }
+    grid += '</div>';
+    body = '<div style="font-size:10px;color:var(--text);font-weight:700;margin-bottom:4px;text-align:center">Write these words down <span style="color:#f59e0b">in order</span></div>'
+      + grid
+      + '<div style="display:flex;gap:8px;margin:10px 0">'
+        + '<button onclick="_scCopyPhrase()" class="btn" style="width:auto;min-width:220px;margin:0 auto;font-size:10px;padding:7px 16px;justify-content:center"><i class="ti ti-copy"></i> Copy to clipboard</button>'
+      + '</div>'
+      + '<div style="font-size:9.5px;color:var(--muted2);line-height:1.6;margin-bottom:14px">Keep it safe and <b style="color:#ef4444">offline</b>. Never share it.</div>'
+      + '<label style="display:flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;font-size:10px;color:var(--text);margin-bottom:14px">'
+        + '<input type="checkbox" id="sc-saved-check" style="width:15px;height:15px;cursor:pointer" onchange="var b=document.getElementById(\'sc-next-btn\');if(b)b.disabled=!this.checked"> '
+        + 'I have safely stored my recovery phrase'
+      + '</label>';
+    footer = '<button id="sc-next-btn" disabled onclick="_scStep=3;_scRenderCreateStep()" class="btn" style="width:auto;min-width:220px;margin:0 auto;padding:11px 20px;font-size:11px;font-weight:700;border-color:rgba(34,197,94,.4);color:#22c55e"><i class="ti ti-arrow-right"></i> Next</button>';
+  }
+  else if (_scStep === 3) {
+    var idxs = [];
+    while (idxs.length < 4) { var r = Math.floor(Math.random() * 12); if (idxs.indexOf(r) < 0) idxs.push(r); }
+    idxs.sort(function(a,b){return a-b;});
+    title = '<i class="ti ti-clipboard-check" style="color:#4f8ef7;font-size:18px;vertical-align:middle"></i> Confirm Your Phrase';
+    body = '<div style="font-size:10px;color:var(--muted2);margin:10px 0 14px;text-align:center">Enter the words at these positions to verify you saved them:</div>';
+    for (var i = 0; i < idxs.length; i++) {
+      body += '<div style="margin-bottom:10px">'
+        + '<span style="font-size:9px;color:var(--muted2)">Word #' + (idxs[i]+1) + '</span>'
+        + '<input id="sc-verify-' + i + '" data-idx="' + idxs[i] + '" class="cinput" placeholder="word ' + (idxs[i]+1) + '" style="margin-top:4px;font-size:12px;padding:8px 10px" oninput="_scCheckVerify()" autocomplete="off" spellcheck="false">'
+        + '</div>';
+    }
+    body += '<div id="sc-error" style="display:none;font-size:9px;color:#ef4444;margin-top:4px"></div>';
+    footer = '<button id="sc-confirm-btn" disabled onclick="_scStep=4;_scRenderCreateStep()" class="btn primary" style="width:auto;min-width:220px;margin:0 auto;padding:11px 20px;font-size:11px;font-weight:700">Confirm</button>';
+  }
+  else if (_scStep === 4) {
+    title = '<i class="ti ti-circle-check" style="color:#22c55e;font-size:20px;vertical-align:middle"></i> <span style="color:#22c55e">Wallet Ready!</span>';
+    body = '<div style="background:rgba(34,197,94,.06);border:1px solid rgba(34,197,94,.2);border-radius:10px;padding:14px;margin:16px 0;text-align:center">'
+      + '<div style="font-size:9px;color:var(--muted2);margin-bottom:6px">Your address</div>'
+      + '<div style="font-family:monospace;font-size:12px;font-weight:700;color:var(--text);word-break:break-all" id="sc-final-addr">loading\u2026</div>'
+      + '</div>'
+      + '<div style="font-size:9.5px;color:var(--muted2);line-height:1.7;text-align:center">'
+        + 'Your wallet key is encrypted on this device.<br>'
+        + 'Use the <b style="color:#f59e0b">recovery phrase</b> to restore this wallet on any other device or browser.'
+      + '</div>';
+    footer = '<button onclick="_scFinalizeWallet()" class="btn primary" style="width:auto;min-width:220px;margin:0 auto;padding:11px 20px;font-size:11px;font-weight:700"><i class="ti ti-check"></i> Finish</button>';
+  }
+
+  var html = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">'
+    + '<h3 style="margin:0;font-size:14px;font-weight:700">' + title + '</h3>'
+    + '<button onclick="_scClose()" style="background:none;border:none;color:var(--muted2);cursor:pointer;font-size:18px;line-height:1">&times;</button>'
+    + '</div>' + body + '<div style="margin-top:18px">' + footer + '</div>';
+
+  _scModal(html);
+
+  if (_scStep === 3) { setTimeout(function(){ var inp = document.getElementById('sc-verify-0'); if(inp)inp.focus(); }, 100); }
+}
+
+function _scCopyPhrase() {
+  if (!_scMnemonic) return;
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(_scMnemonic).then(function(){try{toast('Recovery phrase copied','success');}catch(_){}}).catch(function(){try{prompt('Recovery phrase:',_scMnemonic);}catch(_){}});
+    } else { try{prompt('Recovery phrase:',_scMnemonic);}catch(_){} }
+  } catch(_) {}
+}
+
+function _scCheckVerify() {
+  var allCorrect = true;
+  for (var i = 0; i < 4; i++) {
+    var inp = document.getElementById('sc-verify-' + i);
+    if (!inp) { allCorrect = false; continue; }
+    var idx = parseInt(inp.getAttribute('data-idx'));
+    var expected = _scMnemonic ? _scMnemonic.split(' ')[idx] : '';
+    if (inp.value.trim().toLowerCase() !== expected.toLowerCase()) { allCorrect = false; }
+  }
+  var btn = document.getElementById('sc-confirm-btn');
+  if (btn) btn.disabled = !allCorrect;
+}
+
+async function _scFinalizeWallet() {
+  try {
+    var wallet = await WalletManager.importLocalWallet(_scPrivateKey);
+    WalletManager.activateInternalWallet(wallet);
+    if (typeof _adoptInternalWalletGlobals === 'function') _adoptInternalWalletGlobals();
+    if (typeof prfRefreshProfile === 'function') prfRefreshProfile();
+    if (typeof refreshBalance === 'function') refreshBalance().catch(function(){});
+    _scClose();
+    try { toast('Self-custody wallet ready \u2014 bridge cross-chain freely!', 'success'); } catch(_){}
+  } catch(e) {
+    _scError('Failed to create wallet: ' + (e.shortMessage || e.message));
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  IMPORT FLOW  (modal with tabs)
+// ═══════════════════════════════════════════════════════════════════════
+async function prfImportLocalWallet() {
+  if (typeof WalletManager === 'undefined' || typeof ethers === 'undefined') { try{toast('Wallet system not loaded','error');}catch(_){} return; }
+  _scCleanup();
+  _scRenderImportStep(1);
+}
+
+function _scRenderImportStep(tab) {
+  tab = tab || 1;
+  var title = '<i class="ti ti-file-import" style="color:#f59e0b;font-size:18px;vertical-align:middle"></i> Restore';
+  var tabsHtml = '<div style="display:flex;gap:0;margin:14px 0;border:1px solid var(--border);border-radius:8px;overflow:hidden">'
+    + '<button id="sc-tab-1" onclick="_scRenderImportStep(1)" style="flex:1;padding:9px 0;font-size:10px;font-weight:700;background:'+(tab===1?'var(--card2)':'transparent')+';color:'+(tab===1?'var(--text)':'var(--muted2)')+';border:none;cursor:pointer;font-family:inherit;transition:.15s">Recovery Phrase</button>'
+    + '<button id="sc-tab-2" onclick="_scRenderImportStep(2)" style="flex:1;padding:9px 0;font-size:10px;font-weight:700;background:'+(tab===2?'var(--card2)':'transparent')+';color:'+(tab===2?'var(--text)':'var(--muted2)')+';border:none;cursor:pointer;font-family:inherit;transition:.15s">Private Key</button>'
+    + '</div>';
+  var body = tabsHtml
+    + '<div style="background:rgba(34,197,94,.06);border:1px solid rgba(34,197,94,.2);border-radius:8px;padding:10px 12px;font-size:9.5px;color:#22c55e;line-height:1.6;margin-bottom:12px;text-align:center"><i class="ti ti-shield-lock"></i> Your key never leaves this device. Everything is processed locally. No data is sent anywhere.</div>';
+  var footer = '';
+  if (tab === 1) {
+    body += '<textarea id="sc-import-mnemonic" class="cinput" placeholder="Enter your 12-word recovery phrase (separated by spaces)..." style="min-height:80px;resize:vertical;font-size:11px;line-height:1.6;font-family:inherit" autocomplete="off" spellcheck="false"></textarea>'
+      + '<div id="sc-error" style="display:none;font-size:9px;color:#ef4444;margin-top:4px"></div>';
+    footer = '<button id="sc-import-btn" disabled onclick="_scDoImportMnemonic()" class="btn primary" style="width:auto;min-width:220px;margin:0 auto;padding:11px 20px;font-size:11px;font-weight:700;justify-content:center">Restore</button>';
+  } else {
+    body += '<input id="sc-import-pk" class="cinput" placeholder="0x..." style="font-family:monospace;font-size:11px;padding:9px" autocomplete="off" spellcheck="false">'
+      + '<div id="sc-error" style="display:none;font-size:9px;color:#ef4444;margin-top:4px"></div>';
+    footer = '<button id="sc-import-btn" disabled onclick="_scDoImportPK()" class="btn primary" style="width:auto;min-width:220px;margin:0 auto;padding:11px 20px;font-size:11px;font-weight:700;justify-content:center">Restore</button>';
+  }
+  body += '<label style="display:flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;font-size:10px;color:var(--text);margin-top:10px"><input type="checkbox" id="sc-import-consent" style="width:20px;height:20px;cursor:pointer" onchange="var b=document.getElementById(\'sc-import-btn\');if(b)b.disabled=!this.checked"> I understand: my key is never sent anywhere</label>';
+  var html = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">'
+    + '<h3 style="margin:0;font-size:14px;font-weight:700">' + title + '</h3>'
+    + '<button onclick="_scClose()" style="background:none;border:none;color:var(--muted2);cursor:pointer;font-size:18px;line-height:1">&times;</button>'
+    + '</div>' + body + '<div style="margin-top:14px;text-align:center">' + footer + '</div>';
+  _scModal(html);
+  if (tab === 1) { setTimeout(function(){ var t = document.getElementById('sc-import-mnemonic'); if(t)t.focus(); }, 100); }
+  else { setTimeout(function(){ var t = document.getElementById('sc-import-pk'); if(t)t.focus(); }, 100); }
+}
+
+async function _scDoImportMnemonic() {
+  var ta = document.getElementById('sc-import-mnemonic');
+  if (!ta) return;
+  var mnemo = ta.value.trim();
+  var words = mnemo.split(/\s+/).filter(function(w){return w.length > 0;});
+  if (words.length !== 12) { _scError('Enter exactly 12 words, separated by spaces'); return; }
+  try {
+    var pk = _scMnemonicToKey(mnemo);
+    await _scImportKey(pk);
+  } catch(e) { _scError('Invalid recovery phrase: ' + (e.shortMessage || e.message)); }
+}
+
+async function _scDoImportPK() {
+  var inp = document.getElementById('sc-import-pk');
+  if (!inp) return;
+  var pk = inp.value.trim();
+  if (!/^0x[0-9a-fA-F]{64}$/.test(pk)) { _scError('Invalid private key (0x + 64 hex chars)'); return; }
+  await _scImportKey(pk);
+}
+
+async function _scImportKey(privateKey) {
+  try {
+    var wallet = await WalletManager.importLocalWallet(privateKey);
+    WalletManager.activateInternalWallet(wallet);
+    if (typeof _adoptInternalWalletGlobals === 'function') _adoptInternalWalletGlobals();
+    if (typeof prfRefreshProfile === 'function') prfRefreshProfile();
+    if (typeof refreshBalance === 'function') refreshBalance().catch(function(){});
+    _scClose();
+    try { toast('Wallet imported: ' + wallet.address.slice(0,8) + '...', 'success'); } catch(_){}
+  } catch(e) { _scError('Import failed: ' + (e.shortMessage || e.message)); }
+}
 
 async function prfSignIn(authProvider) {
   if (typeof ProfileManager === 'undefined') return;
@@ -24686,33 +25031,62 @@ async function prfRefreshAssets() {
   const tbody = document.getElementById('prf-assets-tbody');
   if (!tbody) return;
   const addr = (typeof walletAddress !== 'undefined' && walletAddress) ? walletAddress : (typeof ProfileManager !== 'undefined' && ProfileManager.isSignedIn() ? ProfileManager.get().wallet.address : null);
-  if (!addr || typeof ARC_READ_PROVIDER === 'undefined' || typeof ethers === 'undefined') {
+  if (!addr || typeof ethers === 'undefined') {
     tbody.innerHTML = '<tr><td colspan="4" style="padding:18px;text-align:center;color:var(--muted2);font-size:10px"><i class="ti ti-coins" style="font-size:16px;display:block;margin-bottom:4px;opacity:.3"></i>Connect wallet to view assets</td></tr>';
     const _hb0 = document.getElementById('prf-hero-balance'); if (_hb0) _hb0.textContent = '$0.00';
     return;
   }
   tbody.innerHTML = '<tr><td colspan="4" style="padding:12px;text-align:center;color:var(--muted2);font-size:9px"><i class="ti ti-loader" style="animation:spin 1s linear infinite"></i> Loading balances...</td></tr>';
+
+  // The internal (and external) wallet uses ONE EVM address valid on every chain.
+  // Read-only, multi-chain asset view: ARC assets (USDC/EURC/cirBTC) as before, plus
+  // USDC held on the other supported networks. No signer / no logic change.
+  const ERC20_ABI = ['function balanceOf(address) view returns (uint256)'];
+  const rows = [];
+
+  // ── ARC assets (unchanged source) ──
   try {
-    const assets = await ProfileManager.fetchAssetBalances(ARC_READ_PROVIDER, addr);
-    if (assets.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="4" style="padding:18px;text-align:center;color:var(--muted2);font-size:10px">No assets found</td></tr>';
-      return;
+    if (typeof ARC_READ_PROVIDER !== 'undefined' && typeof ProfileManager !== 'undefined') {
+      const arcAssets = await ProfileManager.fetchAssetBalances(ARC_READ_PROVIDER, addr);
+      arcAssets.forEach(a => {
+        const usd = a.symbol === 'cirBTC' ? a.balance * 67000 : a.balance;
+        rows.push({ symbol: a.symbol, balance: a.balance, decimals: a.decimals, color: a.color, chainName: 'Arc Testnet', usd });
+      });
     }
-    tbody.innerHTML = assets.map(a => {
-      const val = a.symbol === 'cirBTC' ? (a.balance * 67000).toFixed(2) : a.balance.toFixed(2);
-      return '<tr style="border-bottom:1px solid var(--border)">'
-        + '<td style="padding:8px 12px"><div style="display:flex;align-items:center;gap:6px"><div style="width:22px;height:22px;border-radius:50%;background:' + a.color + ';display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:800;color:#fff">' + a.symbol.charAt(0) + '</div><span style="font-weight:600">' + a.symbol + '</span></div></td>'
-        + '<td style="padding:8px;text-align:right;font-weight:600;font-family:monospace">' + a.balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: a.decimals === 8 ? 8 : 6 }) + '</td>'
-        + '<td style="padding:8px;text-align:right;color:#22c55e">$' + parseFloat(val).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '</td>'
-        + '<td style="padding:8px;text-align:center"><span style="font-size:8px;padding:2px 6px;border-radius:6px;background:rgba(34,197,94,.1);color:#22c55e">Arc Testnet</span></td>'
-        + '</tr>';
-    }).join('');
-    const _total = assets.reduce((s, a) => s + (a.symbol === 'cirBTC' ? a.balance * 67000 : a.balance), 0);
-    const _hb = document.getElementById('prf-hero-balance');
-    if (_hb) _hb.textContent = '$' + _total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  } catch (e) {
-    tbody.innerHTML = '<tr><td colspan="4" style="padding:12px;text-align:center;color:var(--red);font-size:9px">Error loading balances</td></tr>';
+  } catch (_) {}
+
+  // ── USDC on the other supported chains (read-only, parallel, fault-tolerant) ──
+  try {
+    const others = (typeof CHAINS !== 'undefined' ? CHAINS : []).filter(c =>
+      c && c.chainId !== 5042002 && c.rpc && c.tokens && c.tokens.USDC && c.tokens.USDC.address);
+    await Promise.all(others.map(async (c) => {
+      try {
+        const prov = getCachedProvider(c.rpc);
+        const dec = c.tokens.USDC.decimals || 6;
+        const bal = await new ethers.Contract(c.tokens.USDC.address, ERC20_ABI, prov).balanceOf(addr);
+        const formatted = parseFloat(ethers.formatUnits(bal, dec));
+        if (formatted > 0) rows.push({ symbol: 'USDC', balance: formatted, decimals: dec, color: '#2775ca', chainName: c.name, usd: formatted });
+      } catch (_) {}
+    }));
+  } catch (_) {}
+
+  if (rows.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="4" style="padding:18px;text-align:center;color:var(--muted2);font-size:10px">No assets found</td></tr>';
+    const _hb1 = document.getElementById('prf-hero-balance'); if (_hb1) _hb1.textContent = '$0.00';
+    return;
   }
+
+  tbody.innerHTML = rows.map(a => {
+    return '<tr style="border-bottom:1px solid var(--border)">'
+      + '<td style="padding:8px 12px"><div style="display:flex;align-items:center;gap:6px"><div style="width:22px;height:22px;border-radius:50%;background:' + a.color + ';display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:800;color:#fff">' + a.symbol.charAt(0) + '</div><span style="font-weight:600">' + a.symbol + '</span></div></td>'
+      + '<td style="padding:8px;text-align:right;font-weight:600;font-family:monospace">' + a.balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: a.decimals === 8 ? 8 : 6 }) + '</td>'
+      + '<td style="padding:8px;text-align:right;color:#22c55e">$' + a.usd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '</td>'
+      + '<td style="padding:8px;text-align:center"><span style="font-size:8px;padding:2px 6px;border-radius:6px;background:rgba(34,197,94,.1);color:#22c55e">' + a.chainName + '</span></td>'
+      + '</tr>';
+  }).join('');
+  const _total = rows.reduce((s, a) => s + (a.usd || 0), 0);
+  const _hb = document.getElementById('prf-hero-balance');
+  if (_hb) _hb.textContent = '$' + _total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function prfShowReceive() {
@@ -24901,6 +25275,23 @@ function authSkipPassword() {
   _authCompleteLogin(profile);
 }
 
+// Bridge the internal (Intelligent) wallet into the app-wide lexical globals
+// (walletAddress/signer/provider) so EVERY module — balance, send, bridge, swap,
+// payments — recognizes it, exactly like the external-wallet flow. Visual sync is
+// handled by WalletManager._syncUI; this only wires the shared transaction state.
+// External wallet is never touched (this runs only on internal-wallet activation).
+function _adoptInternalWalletGlobals() {
+  try {
+    if (typeof window.walletAddress !== 'string' || !window.walletAddress) return false;
+    walletAddress    = window.walletAddress;
+    signer           = window.signer || signer;
+    provider         = window.provider || provider;
+    activeChainId    = window.activeChainId || 5042002;
+    activeWalletType = window.activeWalletType || 'intelligent';
+    return true;
+  } catch (_) { return false; }
+}
+
 function _authCompleteLogin(profile) {
   if (!profile) return;
 
@@ -24910,6 +25301,10 @@ function _authCompleteLogin(profile) {
   if (typeof WalletManager !== 'undefined') {
     WalletManager.activateFromAuth();
   }
+  // Make the internal wallet recognized app-wide, then load balances.
+  _adoptInternalWalletGlobals();
+  if (typeof refreshBalance === 'function') refreshBalance().catch(() => {});
+  if (typeof _refreshAllSurfaceBalances === 'function') _refreshAllSurfaceBalances();
 
   const addrEl = document.getElementById('auth-success-addr');
   const emailEl = document.getElementById('auth-success-email');
@@ -24966,7 +25361,31 @@ async function authLoginPw() {
       _authCompleteLogin(result.profile);
     }
   } catch (e) {
-    errEl.textContent = e.message || 'Login failed';
+    // Distinguish a brand-new email (→ create account) from an existing user with
+    // a wrong password (→ "Invalid credentials"). Never block new-account creation.
+    try {
+      const chk = await AuthManager.requestCode(email);
+      if (chk && chk.isNewUser) {
+        _authEmail = email;
+        _authIsNewUser = true;
+        // Carry the typed password into the create-password step.
+        const p1 = document.getElementById('auth-pw1'); if (p1) p1.value = pw;
+        const p2 = document.getElementById('auth-pw2'); if (p2) p2.value = pw;
+        const ce = document.getElementById('auth-code-email'); if (ce) ce.textContent = email;
+        if (chk._testCode) {
+          _authTestCode = chk._testCode;
+          const td = document.getElementById('auth-test-code-display');
+          const tv = document.getElementById('auth-test-code-val');
+          if (td) td.style.display = 'block';
+          if (tv) tv.textContent = chk._testCode;
+        }
+        _authShowStep('auth-step-code');
+        _authClearCodeInputs();
+        setTimeout(() => { const a0 = document.getElementById('ac0'); if (a0) a0.focus(); }, 200);
+        return;
+      }
+    } catch (_) { /* fall through to the credentials error below */ }
+    errEl.textContent = (e && e.message) ? e.message : 'Invalid credentials';
   }
 }
 
@@ -25256,6 +25675,16 @@ function toggleMobileRoute() {
   //  Intent Processing + Card Rendering
   // ══════════════════════════════════════════
   async function autProcess(msg) {
+    // ── Autonoma Agent layer (Planner / Tool Router / Memory / Scheduler / Safety / modes) ──
+    // Intercepts agent-level commands only; returns null for everything else so the
+    // existing assistant behaviour is fully preserved (no existing flow changed).
+    try {
+      if (typeof AutonomaAgent !== 'undefined' && typeof AutonomaAgent.tryHandle === 'function') {
+        const _agentResp = await AutonomaAgent.tryHandle(msg);
+        if (_agentResp) return _agentResp;
+      }
+    } catch (e) { try { _warn && _warn('[AutonomaAgent]', e && e.message); } catch(_){} }
+
     const low = msg.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
     const has = (...w) => w.some(x => low.includes(x));
 
@@ -25596,6 +26025,909 @@ function toggleMobileRoute() {
         '• <strong style="color:var(--text)">Help</strong> — "What can you do?"</div>');
   }
 })();
+
+// ══════════════════════════════════════════════════════════
+//  AUTONOMA AGENT — Phase 1 intelligence layer (SAFE · Manual default)
+//  Planner + Tool Router + Memory + Scheduler + Safety Layer + Autonomy modes.
+//  Tools call ONLY existing app functions. Money operations are NEVER auto-fired
+//  in Phase 1 (AUTO_EXECUTE_ENABLED = false): write tools route the operator to
+//  the existing page so the human finalizes it (wallet/confirmation intact).
+//  Nothing in contracts/Treasury/Bridge/Swap/Wallet/payments/flows is changed.
+// ══════════════════════════════════════════════════════════
+const AutonomaAgent = (() => {
+  'use strict';
+  const MEM_KEY = 'elligentt_autonoma_agent';
+  const AUTO_EXECUTE_ENABLED = false;   // Phase 1: money ops never auto-execute
+  const DEDUPE_WINDOW_MS = 90000;       // never run the same action twice within 90s
+  let _pending = {};
+
+  // ── Memory ──────────────────────────────────────────────
+  const _defaults = { mode:'manual', preferences:{}, history:[], tasks:[], permissions:{}, limits:{ maxUsd:0 } };
+  function _load(){ try{ const r=localStorage.getItem(MEM_KEY); return r? Object.assign({}, _defaults, JSON.parse(r)) : Object.assign({}, _defaults); }catch(_){ return Object.assign({}, _defaults); } }
+  function _persist(){ try{ localStorage.setItem(MEM_KEY, JSON.stringify(mem)); }catch(_){} }
+  let mem = _load();
+  const memory = {
+    get: () => mem,
+    setMode: (m) => { if(['manual','semi','autonomous'].includes(m)){ mem.mode=m; _persist(); } return mem.mode; },
+    setPref: (k,v) => { mem.preferences[k]=v; _persist(); },
+    addHistory: (e) => { mem.history.unshift(Object.assign({ ts: Date.now() }, e)); mem.history = mem.history.slice(0,200); _persist(); },
+    addTask: (t) => { mem.tasks.push(t); _persist(); },
+    removeTask: (id) => { mem.tasks = mem.tasks.filter(t => t.id !== id); _persist(); },
+  };
+
+  // ── Card helpers (reuse the chat's existing CSS classes) ──
+  const esc = (s) => { const d=document.createElement('div'); d.textContent = String(s==null?'':s); return d.innerHTML; };
+  const intro = (t) => '<div class="aut-intro">'+t+'</div>';
+  const head = (icon,title,badge) => '<div class="aut-rc-head"><i class="ti ti-'+icon+'"></i><span class="aut-rc-title">'+esc(title)+'</span>'+(badge?'<span class="aut-rc-badge '+badge.cls+'">'+esc(badge.text)+'</span>':'')+'</div>';
+  const row = (l,v,c) => '<div class="aut-rc-row"><span class="aut-rl">'+esc(l)+'</span><span class="aut-rv'+(c?' style="color:var(--'+c+')"':'')+'">'+v+'</span></div>';
+  const acts = (...b) => '<div class="aut-act-bar">'+b.map(x=>'<button class="aut-act '+(x.cls||'')+'" onclick="'+x.action+'"><i class="ti ti-'+x.icon+'"></i>'+esc(x.label)+'</button>').join('')+'</div>';
+  const card = (h,body,a) => '<div class="aut-rc">'+h+'<div class="aut-rc-body">'+body+'</div>'+(a||'')+'</div>';
+
+  function _log2(action, result, err){
+    try { if (typeof _log==='function') _log('[Autonoma Agent] '+new Date().toISOString()+' | '+action+' | '+(err?('ERROR: '+(err.message||err)):(result||'ok'))); } catch(_){}
+  }
+
+  // ── Safety Layer ────────────────────────────────────────
+  // Validates wallet/address/network/limits/duplicity before any write op.
+  function _actionKey(tool, params){ return tool+':'+JSON.stringify(params||{}); }
+  function safetyCheck(tool, params, opts){
+    opts = opts || {};
+    if (opts.needsWallet !== false) {
+      if (typeof walletAddress === 'undefined' || !walletAddress) return { ok:false, reason:'No wallet connected' };
+      if (!/^0x[0-9a-fA-F]{40}$/.test(String(walletAddress))) return { ok:false, reason:'Invalid wallet address' };
+    }
+    if (opts.needsNetwork) {
+      const cid = (typeof activeChainId !== 'undefined') ? activeChainId : null;
+      if (!cid) return { ok:false, reason:'No active network' };
+    }
+    if (opts.amountUsd != null && mem.limits && mem.limits.maxUsd > 0 && opts.amountUsd > mem.limits.maxUsd) {
+      return { ok:false, reason:'Amount $'+opts.amountUsd+' exceeds configured limit $'+mem.limits.maxUsd };
+    }
+    // Duplicity guard — never run the same action twice within the window.
+    const key = _actionKey(tool, params);
+    const dup = (mem.history||[]).find(h => h.key === key && (Date.now() - h.ts) < DEDUPE_WINDOW_MS && h.status === 'done');
+    if (dup) return { ok:false, reason:'Duplicate action blocked (same operation just ran)' };
+    return { ok:true, key };
+  }
+
+  // ── Tool Router — calls ONLY existing functions ─────────
+  const tools = {
+    async checkBalance(){
+      try { if (typeof refreshBalance==='function') await refreshBalance(); } catch(_){}
+      const addr = (typeof walletAddress!=='undefined') ? walletAddress : null;
+      const chain = (typeof getActiveChain==='function') ? getActiveChain() : null;
+      _log2('tool:checkBalance','ok');
+      if (!addr) return intro('No wallet connected. Connect a wallet to read balances.');
+      const sb = document.getElementById('sb-bal'); const bal = sb ? sb.textContent : '—';
+      return card(head('wallet','checkBalance',{text:'read-only',cls:'live'}),
+        row('Address', esc(addr.slice(0,6)+'...'+addr.slice(-4)),'teal') +
+        row('Network', esc(chain?chain.name:'—'),'') +
+        row('Balance (active chain)', esc(bal)+' USDC','green'),
+        acts({icon:'wallet',label:'Open Profile',cls:'',action:"showPage('profile')"}));
+    },
+    async checkTransaction(params){
+      const chain = (typeof getActiveChain==='function') ? getActiveChain() : null;
+      const tx = (params && params.txHash) ? params.txHash : '';
+      _log2('tool:checkTransaction','ok');
+      const url = chain && chain.explorer ? chain.explorer.replace(/\/$/,'')+'/tx/'+tx : '';
+      return card(head('file-search','checkTransaction',{text:'read-only',cls:'live'}),
+        row('Tx', tx ? esc(tx.slice(0,18)+'…') : 'provide a tx hash','') +
+        (url? '<div style="font-size:9px;margin-top:6px"><a href="'+esc(url)+'" target="_blank" style="color:var(--teal)">Open in explorer</a></div>':''), '');
+    },
+    async treasuryRecovery(){
+      // Read-only: reuses the existing Settlement Recovery engine.
+      try {
+        window.__SETTLEMENT_RECOVERY_READONLY = true;
+        if (typeof SettlementModule!=='undefined' && SettlementModule.runRecovery) await SettlementModule.runRecovery();
+        if (typeof stlRefreshAll==='function') stlRefreshAll();
+      } catch(e){ _log2('tool:treasuryRecovery',null,e); }
+      finally { setTimeout(()=>{ window.__SETTLEMENT_RECOVERY_READONLY=false; }, 100); }
+      _log2('tool:treasuryRecovery','ok');
+      return card(head('tools','treasuryRecovery',{text:'read-only',cls:'live'}),
+        row('Action','Re-ran read-only settlement recovery','') +
+        row('Writes','none (read-only)','green'),
+        acts({icon:'building-bank',label:'Open Treasury',cls:'',action:"showPage('treasury')"}));
+    },
+    // Money tools — Phase 1: plan + route to the existing page (human finalizes).
+    executeSwap(params){ return _planWrite('executeSwap','arrows-exchange','Swap','swap',params); },
+    executeBridge(params){ return _planWrite('executeBridge','topology-star-3','Bridge','bridge',params); },
+    executePayment(params){ return _planWrite('executePayment','send','Payment','send',params); },
+  };
+
+  function _planWrite(tool, icon, title, page, params){
+    const chk = safetyCheck(tool, params, { needsWallet:true, needsNetwork:true, amountUsd: params && params.amountUsd });
+    if (!chk.ok) {
+      _log2('plan:'+tool,'blocked: '+chk.reason);
+      return card(head('shield-x',title+' — blocked',{text:'safety',cls:'pending'}),
+        row('Tool', tool,'') + row('Reason', esc(chk.reason),'yellow'), '');
+    }
+    const token = 'ag_'+Date.now()+'_'+Math.random().toString(36).slice(2,6);
+    _pending[token] = { tool, params: params||{}, page, key: chk.key };
+    const detail = params ? Object.keys(params).map(k=>row(k, esc(params[k]),'')).join('') : '';
+    return card(head(icon, title+' — plan',{text:mem.mode,cls:'live'}),
+      intro('Manual mode: review and confirm. The operation will open on its page for you to finalize (wallet confirmation stays in your hands). Nothing is auto-executed.') +
+      row('Tool', tool,'') + detail +
+      row('Safety','passed (wallet, network, limits, no duplicate)','green'),
+      acts(
+        {icon:'check',label:'Confirm',cls:'primary',action:"AutonomaAgent.confirm('"+token+"')"},
+        {icon:'x',label:'Cancel',cls:'',action:"AutonomaAgent.cancel('"+token+"')"}
+      ));
+  }
+
+  function confirm(token){
+    const op = _pending[token]; if (!op) return;
+    delete _pending[token];
+    const chk = safetyCheck(op.tool, op.params, { needsWallet:true });
+    if (!chk.ok) { try{ toast && toast('Agent: '+chk.reason,'warning'); }catch(_){}; _log2('confirm:'+op.tool,'blocked: '+chk.reason); return; }
+    // Phase 1: route to the existing page; the human finalizes (no auto money move).
+    memory.addHistory({ key: op.key, tool: op.tool, params: op.params, status:'done', mode: mem.mode });
+    _log2('confirm:'+op.tool,'routed to page '+op.page);
+    try { if (typeof showPage==='function') showPage(op.page); } catch(_){}
+    try { toast && toast('Agent: opening '+op.tool+' — finish it on the page','info'); } catch(_){}
+  }
+  function cancel(token){ delete _pending[token]; }
+
+  // ── Planner — text → intent/tool ────────────────────────
+  function plan(text){
+    const low = String(text||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+    const amt = (low.match(/(\d+(?:\.\d+)?)/)||[])[1];
+    if (/\b(swap|trocar)\b/.test(low)) return { tool:'executeSwap', params:{ amount: amt||'' } };
+    if (/\b(bridge|ponte)\b/.test(low)) return { tool:'executeBridge', params:{ amount: amt||'' } };
+    if (/\b(pay|payment|send|enviar|pagar|transfer)\b/.test(low)) return { tool:'executePayment', params:{ amount: amt||'' } };
+    if (/\b(balance|saldo|portfolio)\b/.test(low)) return { tool:'checkBalance', params:{} };
+    if (/\b(tx|transaction|transac)\b/.test(low)) return { tool:'checkTransaction', params:{} };
+    if (/\b(recover|recovery|treasury|tesouro)\b/.test(low)) return { tool:'treasuryRecovery', params:{} };
+    return null;
+  }
+
+  // ── Scheduler — "tomorrow at 10", "every day", "todo dia" ─
+  function _parseSchedule(low){
+    let when = null, type = 'once';
+    if (/\b(every day|daily|todo dia|diariamente)\b/.test(low)) type = 'daily';
+    else if (/\b(every week|weekly|toda semana|semanal|semanalmente)\b/.test(low)) type = 'weekly';
+    else if (/\b(every month|monthly|todo mes|mensal|mensalmente)\b/.test(low)) type = 'monthly';
+    const at = (low.match(/(\d{1,2})\s*(?:h|:00|hours|horas|am|pm)?/)||[])[1];
+    const d = new Date();
+    if (/\b(tomorrow|amanha)\b/.test(low)) d.setDate(d.getDate()+1);
+    if (at != null) { d.setHours(parseInt(at,10)%24, 0, 0, 0); }
+    if (d.getTime() <= Date.now()) {
+      if (type==='weekly') d.setDate(d.getDate()+7);
+      else if (type==='monthly') d.setMonth(d.getMonth()+1);
+      else d.setDate(d.getDate()+1);
+    }
+    when = d.getTime();
+    return { type, when };
+  }
+  function _runScheduler(){
+    try {
+      const now = Date.now();
+      let changed = false;
+      for (const t of (mem.tasks||[]).slice()) {
+        if (t.when && now >= t.when) {
+          // Phase 1: NEVER auto-execute money. Notify the operator instead.
+          _log2('scheduler:due', 'task '+t.id+' ('+t.tool+')');
+          try { toast && toast('Autonoma: scheduled task due — open Autonoma to run "'+t.tool+'"','info'); } catch(_){}
+          if (t.type === 'daily')        { t.when = now + 86400000;   changed = true; }
+          else if (t.type === 'weekly')  { t.when = now + 7*86400000; changed = true; }
+          else if (t.type === 'monthly') { const dd=new Date(now); dd.setMonth(dd.getMonth()+1); t.when = dd.getTime(); changed = true; }
+          else { memory.removeTask(t.id); changed = true; }
+        }
+      }
+      if (changed) _persist();
+    } catch(e){ _log2('scheduler',null,e); }
+  }
+
+  // ── tryHandle — agent-level command interception ────────
+  async function tryHandle(msg){
+    const raw = String(msg||'');
+    const low = raw.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+    try { _learnContext(low); } catch(_){}   // Phase 8: passive, read-only behavioral learning
+
+    // Mode switching
+    let mm = low.match(/\b(mode|modo)\s+(manual|semi|autonomous|autonomo)\b/);
+    if (mm){ const m = mm[2]==='autonomo'?'autonomous':mm[2]; memory.setMode(m);
+      return card(head('settings','Autonomy Mode',{text:m,cls:'live'}),
+        row('Mode', m,'teal') +
+        row('Auto-execute money', (m!=='manual' && AUTO_EXECUTE_ENABLED)?'enabled':'disabled (Phase 1)', (m!=='manual'&&AUTO_EXECUTE_ENABLED)?'yellow':'green'),
+        ''); }
+
+    // Agent status
+    if (/\b(agent status|status do agente|autonoma status|agent info)\b/.test(low) || low.trim()==='agent'){
+      return card(head('brain','Autonoma Agent',{text:'Phase 1',cls:'live'}),
+        row('Mode', mem.mode,'teal') +
+        row('Auto-execute money','disabled (Phase 1)','green') +
+        row('Memory','prefs:'+Object.keys(mem.preferences).length+' · history:'+mem.history.length,'') +
+        row('Scheduled tasks', String((mem.tasks||[]).length),'') +
+        row('Tools','checkBalance · checkTransaction · treasuryRecovery · executeSwap · executeBridge · executePayment',''),
+        acts({icon:'list',label:'My tasks',cls:'',action:"autonomaSendQuick('agent tasks')"}));
+    }
+
+    // List tools
+    if (/\b(agent tools|ferramentas do agente|list tools)\b/.test(low)){
+      return card(head('tools','Tool Router',{text:'6 tools',cls:'live'}),
+        '<div style="font-size:9.5px;color:var(--muted2);line-height:2">'+
+        '• <strong>checkBalance</strong> — read balances<br>'+
+        '• <strong>checkTransaction</strong> — read a tx<br>'+
+        '• <strong>treasuryRecovery</strong> — read-only recovery<br>'+
+        '• <strong>executeSwap / executeBridge / executePayment</strong> — Manual: opens the page to finalize</div>','');
+    }
+
+    // List / cancel tasks
+    if (/\b(agent tasks|my tasks|minhas tarefas|scheduled tasks|tarefas agendadas)\b/.test(low)){
+      if (!mem.tasks.length) return card(head('calendar','Scheduled Tasks'), row('Tasks','none scheduled',''),'');
+      const body = mem.tasks.map(t => row(new Date(t.when).toLocaleString(), esc(t.tool)+(t.type==='daily'?' (daily)':''),'')).join('');
+      return card(head('calendar','Scheduled Tasks',{text:String(mem.tasks.length),cls:'live'}), body, '');
+    }
+    let ct = low.match(/\b(cancel task|cancelar tarefa)\s+(\S+)/);
+    if (ct){ memory.removeTask(ct[2]); return intro('Task cancelled.'); }
+
+    // Scheduling: "schedule/agendar ... tomorrow at 10 / every day"
+    if (/\b(schedule|agendar|agende)\b/.test(low) || (/\b(tomorrow|amanha|every day|todo dia|daily)\b/.test(low) && plan(low))){
+      const p = plan(low);
+      if (!p) return card(head('calendar','Schedule'), intro('Tell me WHAT to schedule (swap, bridge, payment, balance, recovery) and WHEN (e.g., "tomorrow at 10", "every day").'),'');
+      const sch = _parseSchedule(low);
+      const id = 'task_'+Date.now()+'_'+Math.random().toString(36).slice(2,5);
+      memory.addTask({ id, text: raw, tool: p.tool, params: p.params, when: sch.when, type: sch.type, createdAt: Date.now() });
+      _log2('schedule', p.tool+' @ '+new Date(sch.when).toISOString());
+      return card(head('calendar-plus','Task Scheduled',{text:sch.type,cls:'live'}),
+        row('Tool', p.tool,'teal') +
+        row('When', new Date(sch.when).toLocaleString(),'') +
+        row('Repeat', sch.type==='daily'?'every day':'once','') +
+        intro('Manual mode: when due I will notify you to run it (money is never auto-executed in Phase 1).'),
+        acts({icon:'x',label:'Cancel',cls:'',action:"autonomaSendQuick('cancel task "+id+"')"}));
+    }
+
+    // Explicit agent command channel: "agent <command>"
+    let am = low.match(/^\s*\/?agent[:\s]+(.+)/);
+    if (am){
+      const p = plan(am[1]);
+      if (!p) return card(head('brain','Autonoma Agent'), intro('I can plan: swap, bridge, payment, balance, transaction, treasury recovery. Try "agent check balance" or "agent swap 100".'),'');
+      return await tools[p.tool](p.params);
+    }
+
+    // Read-only recovery tool by name
+    if (/\b(run recovery|recover treasury|treasury recovery|recuperar treasury)\b/.test(low)){
+      return await tools.treasuryRecovery();
+    }
+
+    // ── Phase 2: Execution Layer commands (DORMANT by default) ──
+    if (/\b(agent queue|execution queue|fila)\b/.test(low)){
+      if (!_queue.length) return card(head('list','Execution Queue'), row('Items','empty',''),'');
+      const body = _queue.slice(-8).map(it => row(it.intent.type+' · '+it.intent.intentId.slice(-6), it.state, it.state==='failed'?'yellow':(it.state==='completed'?'green':''))).join('');
+      return card(head('list','Execution Queue',{text:String(_queue.length),cls:'live'}), body, '');
+    }
+    if (/\b(agent permissions|agent limits|permissoes|limites)\b/.test(low)){
+      const sl = low.match(/(max|per[- ]?op|daily|diario)\D+(\d+(?:\.\d+)?)/);
+      if (sl){ const v=Number(sl[2]); if(/daily|diario/.test(sl[1])) setPermissions({dailyLimitUsd:v}); else setPermissions({maxPerOpUsd:v}); }
+      const p=_perm();
+      return card(head('shield-lock','Permission System',{text:'limits',cls:'live'}),
+        row('Max per op (USD)', String(p.maxPerOpUsd||'unlimited'),'') +
+        row('Daily limit (USD)', String(p.dailyLimitUsd||'unlimited'),'') +
+        row('Allowed ops', esc(p.allowedOps.join(', ')),'') +
+        row('Allowed networks', esc(p.allowedNetworks.length?p.allowedNetworks.join(', '):'all'),'') +
+        row('Spent today (USD)', _dailySpentUsd().toFixed(2),''), '');
+    }
+    let im = low.match(/\b(agent intent|intent|intencao)\s+(swap|bridge|payment|pay|recovery)\b/);
+    if (im){ let t=im[2]; if(t==='pay')t='payment'; const amt=(low.match(/(\d+(?:\.\d+)?)/)||[])[1]; const item=enqueueIntent(t,{ amount:amt||null, amountUsd:Number(amt)||0 }); return approvalCard(item); }
+
+    // ── Phase 3: Supervised execution commands (DORMANT by default) ──
+    if (/\b(agent pause|kill switch|pausar agente|emergency stop)\b/.test(low)){ pause(); return card(head('player-pause','Global Kill Switch',{text:'PAUSED',cls:'pending'}), row('AUTONOMA_GLOBAL_PAUSE','true','yellow')+row('Execution','blocked','yellow'),''); }
+    if (/\b(agent resume|retomar agente|unpause)\b/.test(low)){ resume(); return card(head('player-play','Global Kill Switch',{text:'resumed',cls:'live'}), row('AUTONOMA_GLOBAL_PAUSE','false','green'),''); }
+    if (/\b(agent policy|policies|politicas)\b/.test(low)){
+      const sm = low.match(/\b(swap|payment|bridge|treasury|recovery)\b[^\d]*\b(auto|approval|manual)\b(?:\D+(\d+(?:\.\d+)?))?/);
+      if (sm){ const p={mode:sm[2]}; if(sm[3]) p.autoMaxUsd=Number(sm[3]); setPolicy(sm[1], p); }
+      const P=_policies(); const body=Object.keys(P).map(k=>row(k, P[k].mode+(P[k].autoMaxUsd?(' ≤ $'+P[k].autoMaxUsd):''),'')).join('');
+      return card(head('shield-cog','Policy Engine',{text:'config',cls:'live'}), body, '');
+    }
+    let rm = low.match(/\b(agent risk|risco)\s+(swap|bridge|payment|pay|recovery)\b/);
+    if (rm){ let t=rm[2]; if(t==='pay')t='payment'; const amt=(low.match(/(\d+(?:\.\d+)?)/)||[])[1]; const i=buildIntent(t,{amount:amt||null,amountUsd:Number(amt)||0}); const rk=classifyRisk(i); return card(head('alert-triangle','Risk Engine',{text:rk,cls:rk==='HIGH'?'pending':'live'}), row('Type',t,'')+row('Amount (USD)',String(i.amountUsd),'')+row('Network',esc(i.network||'—'),'')+row('Risk',rk, rk==='HIGH'?'yellow':'green'),''); }
+    let smm = low.match(/\b(agent simulate|simulate|simular)\s+(swap|bridge|payment|pay|recovery)\b/);
+    if (smm){ let t=smm[2]; if(t==='pay')t='payment'; const amt=(low.match(/(\d+(?:\.\d+)?)/)||[])[1]; const i=buildIntent(t,{amount:amt||null,amountUsd:Number(amt)||0}); const s=simulate(i); return card(head('flask','Simulation (no TX sent)',{text:'read-only',cls:'live'}), row('Type',t,'')+row('Route',esc(s.route),'')+row('Gas',esc(s.gas),'')+row('Impact',esc(s.impact),'')+row('Expected',esc(s.expected),'')+row('TX sent','no','green'),''); }
+    if (/\b(agent watch|watch mode|monitor)\b/.test(low)){ const w=watch(); return card(head('eye','Watch Mode',{text:'read-only',cls:'live'}), row('Pending', w.pending.length?esc(w.pending.join(', ')):'none','')+row('Bridge',esc(w.bridgeStatus),'')+row('Attestation',esc(w.attestation),'')+row('Recovery',esc(w.recovery),''),''); }
+
+    // ── Phase 8: Knowledge & Learning ──
+    if (/\b(knowledge graph|grafo|relacionamentos|graph)\b/.test(low)){
+      const g=graph(); return card(head('hierarchy','Knowledge Graph',{text:'read-only',cls:'live'}),
+        row('Customers',String(g.customers),'')+row('Modules',String(g.modules),'')+row('Operations',String(g.operations),'')+row('History entries',String(g.historyEntries),'')+row('Tasks',String(g.tasks),'')+row('Favorite module',esc(g.favorites.favoriteModule||'—'),''),''); }
+    if (/\b(o que voce aprendeu|o que você aprendeu|learning|aprendizado|padroes|padrões|patterns)\b/.test(low)){
+      const l=learn(); return card(head('brain','Behavioral Learning',{text:l.totalActions+' actions',cls:'live'}),
+        row('Top flows', esc(l.topFlows.join(', ')||'—'),'')+row('Favorite module', esc(l.favoriteModule||'—'),'')+row('Favorite token', esc(l.favoriteToken||'—'),'')+row('Favorite network', esc(l.favoriteNetwork||'—'),''),''); }
+    if (/\b(monitoring|monitor|monitoramento|painel)\b/.test(low)){
+      const m=monitor(); return card(head('dashboard','Monitoring Layer',{text:'read-only',cls:'live'}),
+        row('Invoices',esc(m.invoices),'')+row('Payments',esc(m.payments),'')+row('Bridges',esc(m.bridges),'')+row('Treasury',esc(m.treasury),''),''); }
+    if (/\b(agent health|saude do agente|saúde do agente|agent diagnostics|diagnostico|diagnóstico)\b/.test(low)){
+      const hh=health(); const qs=Object.keys(hh.queueStates).map(k=>k+':'+hh.queueStates[k]).join(' ')||'empty';
+      return card(head('heartbeat','Agent Health',{text:hh.mode,cls:'live'}),
+        row('Tools',String(hh.tools),'')+row('Events',String(hh.events),'')+row('Queue',hh.queueTotal+' ('+esc(qs)+')','')+
+        row('Permissions','maxOp $'+(hh.permissions.maxPerOpUsd||0)+' · daily $'+(hh.permissions.dailyLimitUsd||0),'')+
+        row('Kill switch', hh.paused?'PAUSED':'active', hh.paused?'yellow':'green')+
+        row('Auto-execute', (hh.flags.AUTO_EXECUTE_ENABLED||hh.flags.AUTONOMA_EXECUTION_PREVIEW||hh.flags.AUTONOMA_SUPERVISED_MODE)?'ENABLED':'disabled', 'green'),''); }
+    let llmp = (low.match(/\b(connect|conectar|usar|use)\b[^]*?\b(gpt|claude|deepseek)\b/)||[])[2];
+    if (llmp){ llm.configure(llmp); return card(head('plug','External LLM',{text:llmp,cls:'live'}), row('Provider',llmp,'teal')+row('Access','read + propose only','green')+row('Funds','NO direct access','green')+intro('Ready (dormant). Any LLM-proposed action still passes Risk/Policy/Approval + flags (off).'),''); }
+    if (/\b(external llm|llm|inteligencia externa|gpt|claude|deepseek|conectar ia)\b/.test(low)){
+      return card(head('robot','External LLM (ready)',{text: llm.configured? (mem.llm&&mem.llm.provider) : 'not configured', cls:'live'}),
+        row('Providers', esc(llm.providers.join(', ')),'')+row('Capabilities', esc(llm.capabilities),'')+row('Fund access','none (read + propose only)','green'),''); }
+    const _ref = resolveRef(low);
+    if (_ref.customer || _ref.payment || _ref.operation || _ref.module){
+      let body='';
+      if (_ref.customer) body+=row('that customer', esc((_ref.customer.name||_ref.customer.id)),'teal');
+      if (_ref.payment) body+=row('last payment', esc((_ref.payment.amountUsd!=null?('$'+_ref.payment.amountUsd):(_ref.payment.result||'tracked'))),'');
+      if (_ref.operation) body+=row('my operation', esc(_ref.operation.intent.type+' · '+_ref.operation.state),'');
+      if (_ref.module) body+=row('last module', esc(KNOWLEDGE[_ref.module]?KNOWLEDGE[_ref.module].label:_ref.module),'');
+      return card(head('link','Context resolved',{text:'memory',cls:'live'}), body||row('Context','nothing to reference yet',''),''); }
+
+    // ── Phase 7: Orchestration (workflows / events / suggestions / roles) ──
+    let role = (low.match(/\b(payment|treasury|finance|security)\s+agent\b/)||[])[1];
+    if (role){ return roleCard(role); }
+    if (/\b(internal agents|agent roles|os agentes|agentes internos|list roles)\b/.test(low)){
+      const rs=roles(); return card(head('robot','Internal Agent Roles',{text:String(rs.length),cls:'live'}), rs.map(r=>row(r.label, esc(r.scope),'')).join(''), ''); }
+    if (/\b(workflow|workflows|fluxo de trabalho)\b/.test(low)){
+      if (/\b(receive payment|receber pagament|recebimento)\b/.test(low)) return runWorkflow('receive_payments');
+      const ws=workflows(); return card(head('sitemap','Workflows',{text:String(ws.length),cls:'live'}), ws.map(w=>row(w.label, w.steps+' steps','')).join(''), acts({icon:'player-play',label:'Receive Payments',cls:'primary',action:"autonomaSendQuick('workflow receive payments')"})); }
+    if (/\b(agent events|event log|eventos|últimos eventos|ultimos eventos)\b/.test(low)){
+      const ev=detectEvents(); return card(head('timeline','Event Log',{text:String(ev.length),cls:'live'}), ev.length?ev.map(e=>row(e.type, esc(e.msg)+' · '+new Date(e.ts).toLocaleTimeString(),'')).join(''):row('Events','none yet','green'), ''); }
+    if (/\b(suggestions|sugest[oõ]es|o que devo fazer|what should i do|recommend)\b/.test(low)){
+      const sg=suggestions(); return card(head('bulb','Smart Suggestions',{text:String(sg.length),cls:'live'}), sg.map(s=>row('•', esc(s),'')).join(''), ''); }
+    // Financial Intelligence
+    if (/\b(receita|revenue|faturamento)\b/.test(low)){
+      return card(head('chart-line','Revenue',{text:'read-only',cls:'live'}), row('Revenue (tracked)','$'+_received().toFixed(2),'green'), acts({icon:'history',label:'Reports',cls:'',action:"showPage('reports')"})); }
+    if (/\b(clientes ativos|active customers)\b/.test(low)){
+      const since=Date.now()-30*86400000; const act=customers().filter(c=>c.lastCharge&&c.lastCharge>=since);
+      return card(head('users','Active Customers',{text:String(act.length),cls:'live'}), act.length?act.map(c=>row(esc(c.name||c.id), new Date(c.lastCharge).toLocaleDateString(),'')).join(''):row('Active (30d)','none',''), ''); }
+    if (/\b(pagamentos pendentes|pending payments)\b/.test(low)){
+      const ns=detectNotifications().filter(n=>/pending|bridge/i.test(n.type)); return card(head('clock-exclamation','Pending Payments',{text:String(ns.length),cls: ns.length?'pending':'live'}), ns.length?ns.map(n=>row(n.type,esc(n.msg),'yellow')).join(''):row('Pending','none','green'), acts({icon:'file-invoice',label:'Invoices',cls:'',action:"showPage('invoices')"})); }
+    if (/\b(historico financeiro|histórico financeiro|financial history)\b/.test(low)){
+      const a=_activityList(); return card(head('history','Financial History',{text:'recent',cls:'live'}), a.length?a.map(x=>row(esc(x.type||'activity'), esc((x.amount!=null?x.amount:'')),'')).join(''):row('History','none yet',''), acts({icon:'history',label:'Reports',cls:'',action:"showPage('reports')"})); }
+
+    // ── Phase 6: Business Intelligence (read-only) ──
+    if (/\b(quanto recebi|total recebido|how much (have i )?(received|got paid|earned))\b/.test(low)){
+      return card(head('coins','Received',{text:'read-only',cls:'live'}), row('Total received (tracked)','$'+_received().toFixed(2),'green')+intro('Based on tracked activity (ProfileManager). For full detail open Reports/Invoices.'), acts({icon:'history',label:'Reports',cls:'',action:"showPage('reports')"})); }
+    if (/\b(quem (esta|está) pendente|who('s| is) pending|pendentes|clientes pendentes|pending (invoices|payments))\b/.test(low)){
+      const notes=detectNotifications().filter(n=>/pending|due|bridge/i.test(n.type));
+      const cust=customers().filter(c=>c.lastCharge);
+      const body=(notes.length?notes.map(n=>row(n.type, esc(n.msg),'yellow')).join(''):row('Queue/Settlements','none pending','green'))+(cust.length?row('Customers',cust.length+' with charges',''):'');
+      return card(head('clock-exclamation','Pending',{text:'read-only',cls:'live'}), body, acts({icon:'file-invoice',label:'Invoices',cls:'',action:"showPage('invoices')"})); }
+    if (/\b(qual (a )?minha atividade|minha atividade|my activity|recent activity|atividade recente)\b/.test(low)){
+      const a=_activityList(); const body=a.length?a.map(x=>row(esc(x.type||'activity'), esc((x.amount!=null?x.amount:'')+' '+(x.ts?new Date(x.ts).toLocaleDateString():'')),'')).join(''):row('Activity','none yet','');
+      return card(head('activity','Your activity',{text:'recent',cls:'live'}), body, acts({icon:'history',label:'Full history',cls:'',action:"showPage('reports')"})); }
+    if (/\b(qual meu saldo|meu saldo|my balance|what(')?s my balance)\b/.test(low)){
+      const sb=document.getElementById('sb-bal'); return card(head('wallet','Balance',{text:'active chain',cls:'live'}), row('Balance', esc(sb?sb.textContent:'—')+' USDC','green'), acts({icon:'refresh',label:'Wallet summary',cls:'',action:"autonomaSendQuick('Show my wallet summary')"})); }
+    if (/\b(notifications?|notificacoes|notificações|alertas|smart notifications)\b/.test(low)){
+      const ns=detectNotifications(); return card(head('bell','Smart Notifications',{text:String(ns.length),cls: ns.length?'pending':'live'}), ns.length?ns.map(n=>row(n.type, esc(n.msg),'yellow')).join(''):row('Status','all clear','green'), ''); }
+    if (/\b(capabilities|capacidades|agent capabilities|o que voce consegue|o que você consegue)\b/.test(low)){
+      const cs=capabilities(); return card(head('cpu','Capability Registry',{text:String(cs.length),cls:'live'}), cs.map(c=>row(c.label, c.type, c.type==='financial'?'yellow':'')).join(''), ''); }
+    if (/\b(meus clientes|my customers|customers|clientes(\b|$))\b/.test(low) && !/\bcobr/.test(low)){
+      const cs=customers(); return card(head('users','Customers',{text:String(cs.length),cls:'live'}), cs.length?cs.map(c=>row(esc(c.name||c.id), c.lastCharge?new Date(c.lastCharge).toLocaleDateString():'no charges','')).join(''):row('Customers','none saved yet',''), ''); }
+
+    // ── Phase 5: App Intelligence (Q&A) ──
+    if (/\b(o que posso fazer|what can i do|quais (as )?op[cç]oes|capabilities)\b/.test(low)){
+      const body = knowledge().map(m => row(m.label, m.page,'')).join('');
+      return card(head('bulb','What you can do',{text:String(knowledge().length)+' modules',cls:'live'}),
+        intro('I can help across every Elligentt module. Just say it in plain words:')+body, '');
+    }
+    if (/\b(como funciona|how does (it|this) work|how do you work|como voce funciona|você funciona)\b/.test(low)){
+      return card(head('help-circle','How the Copilot works',{text:'safe',cls:'live'}),
+        intro('I read your intent, plan steps, and route you to the existing modules. I <strong>never auto-execute money</strong> — financial actions are gated by flags + permissions + your approval (Risk/Policy/Simulation/Kill-switch active).'),
+        acts({icon:'list',label:'My status',cls:'',action:"autonomaSendQuick('my status')"}));
+    }
+    if (/\b(qual (a )?minha situacao|minha situacao|my status|my situation|status da conta|how am i doing)\b/.test(low)){
+      const sb = document.getElementById('sb-bal'); const bal = sb? sb.textContent : '—';
+      const fav = favorites();
+      return card(head('gauge','Your situation',{text:mem.mode,cls:'live'}),
+        row('Wallet', (typeof walletAddress!=='undefined'&&walletAddress)?'connected':'not connected', (typeof walletAddress!=='undefined'&&walletAddress)?'green':'yellow') +
+        row('Balance (active chain)', esc(bal)+' USDC','') +
+        row('Agent mode', mem.mode,'teal') +
+        row('Queue', String(_queue.length),'') +
+        row('Scheduled tasks', String((mem.tasks||[]).length),'') +
+        row('Favorite module', esc(fav.favoriteModule||'—'),''),
+        acts({icon:'wallet',label:'Profile',cls:'',action:"showPage('profile')"}));
+    }
+    // ── Phase 5: Goal Planner (multi-step objectives) ──
+    const _goal = planGoal(low);
+    if (_goal){ _log2('goal:plan', _goal.goal); return _goalCard(_goal); }
+
+    // ── Phase 4: App-brain NLU — module knowledge + natural-language routing ──
+    if (/\b(agent modules|app modules|o que voce faz|o que você faz|what can you do as|list modules)\b/.test(low)){
+      const body = knowledge().map(m => row(m.label, m.page,'')).join('');
+      return card(head('brain','App Knowledge',{text:String(knowledge().length)+' modules',cls:'live'}), body, '');
+    }
+    const _mod = _nluRoute(low);
+    if (_mod){ _log2('nlu:route', _mod); try { memory.setPref('lastModule', _mod); recordUsage(_mod); } catch(_){}; return _moduleCard(_mod); }
+
+    return null; // not an agent-level command → existing assistant handles it
+  }
+
+  // ════════════════════════════════════════════════════════
+  //  Phase 2 — Execution Layer (DORMANT by default · gated)
+  //  Builds structured intents, enforces permissions, runs an execution queue
+  //  with an approval flow, audit log, and — ONLY when a flag is enabled — calls
+  //  the EXISTING executeSwap / executeBridgeOrTurbo / executeSingleSend /
+  //  SettlementModule.runRecovery. No logic duplicated; nothing auto-activated.
+  // ════════════════════════════════════════════════════════
+  const AUTONOMA_EXECUTION_PREVIEW = false;            // Phase 2 flag — NOT auto-enabled in production
+  const AUTONOMA_SUPERVISED_MODE   = false;            // Phase 3 flag — preview-only supervised execution
+  let   AUTONOMA_GLOBAL_PAUSE      = false;            // Phase 3 kill switch — when true, NO execution at all
+  function _executionAllowed(){
+    if (AUTONOMA_GLOBAL_PAUSE === true) return false;  // global kill switch overrides everything
+    return AUTO_EXECUTE_ENABLED === true || AUTONOMA_EXECUTION_PREVIEW === true || AUTONOMA_SUPERVISED_MODE === true;
+  }
+  function pause(){ AUTONOMA_GLOBAL_PAUSE = true; _audit('kill-switch', null, 'PAUSED — all execution blocked'); return true; }
+  function resume(){ AUTONOMA_GLOBAL_PAUSE = false; _audit('kill-switch', null, 'resumed'); return false; }
+  function isPaused(){ return AUTONOMA_GLOBAL_PAUSE === true; }
+
+  // ── Risk Engine — LOW / MEDIUM / HIGH ──
+  function classifyRisk(intent){
+    const a = (intent && intent.amountUsd) || 0;
+    const type = intent && intent.type;
+    let s = 0;
+    if (a > 0) s += 1;
+    if (a >= 100) s += 1;
+    if (a >= 1000) s += 1;
+    if (type === 'payment' || type === 'bridge') s += 1;            // external value movement
+    if (intent && intent.network && intent.network !== 'Arc_Testnet') s += 1; // cross-network
+    return s >= 3 ? 'HIGH' : (s >= 1 ? 'MEDIUM' : 'LOW');
+  }
+
+  // ── Policy Engine — configurable per operation type ──
+  const _defaultPolicies = {
+    swap:     { mode:'auto',     autoMaxUsd: 0 },   // auto up to autoMaxUsd (0 = none configured)
+    payment:  { mode:'approval' },                  // approval required
+    bridge:   { mode:'approval' },                  // approval required
+    recovery: { mode:'auto',     autoMaxUsd: 0 },   // read-only
+    treasury: { mode:'manual'  },                   // manual only
+  };
+  function _policies(){ return Object.assign({}, _defaultPolicies, mem.policies||{}); }
+  function setPolicy(type, p){ const cur=_policies(); cur[type]=Object.assign({}, cur[type]||{}, p||{}); mem.policies=cur; _persist(); return cur[type]; }
+  function policyCheck(intent){
+    const pol = _policies()[intent.type] || { mode:'approval' };
+    const risk = classifyRisk(intent);
+    if (pol.mode === 'manual')   return { decision:'manual',   risk, reason:'policy: manual only' };
+    if (pol.mode === 'approval') return { decision:'approval', risk, reason:'policy: approval required' };
+    if (pol.mode === 'auto'){
+      if (risk === 'HIGH') return { decision:'approval', risk, reason:'risk HIGH → approval required' };
+      if (pol.autoMaxUsd > 0 && (intent.amountUsd||0) <= pol.autoMaxUsd) return { decision:'auto', risk, reason:'auto under $'+pol.autoMaxUsd };
+      return { decision:'approval', risk, reason:'over auto limit → approval required' };
+    }
+    return { decision:'approval', risk, reason:'default approval' };
+  }
+
+  // ── Simulation Mode — read-only, never sends a TX ──
+  function simulate(intent){
+    const out = { intentId: intent.intentId, type: intent.type, route:'—', gas:'estimated at execution', impact:'—', expected:'—', txSent:false };
+    try {
+      const amt = Number(intent.amount) || 0;
+      if (intent.type === 'swap')      { out.route=(intent.token||'token')+' → pool'; out.expected='rate read at execution'; out.impact='subject to slippage'; }
+      else if (intent.type === 'bridge'){ const fee=amt*0.0005; out.route=(intent.network||'src')+' → dest (CCTP)'; out.expected='~'+(amt-fee).toFixed(4)+' received'; out.impact='~'+fee.toFixed(4)+' fee'; }
+      else if (intent.type === 'payment'){ out.route='direct transfer'; out.expected=amt+' → '+(intent.address?intent.address.slice(0,10)+'…':'recipient'); out.impact='gas only'; }
+      else if (intent.type === 'recovery'){ out.route='read-only recovery'; out.expected='re-verify pending settlements'; out.impact='none (read-only)'; }
+    } catch(_){}
+    return out;
+  }
+
+  // ── Watch Mode — read-only monitoring ──
+  function watch(){
+    const w = { pending:[], bridgeStatus:'monitored (read-only)', attestation:'monitored (read-only)', recovery:'—' };
+    try { w.pending = _queue.filter(it => it.state==='executing' || it.state==='approved').map(it => it.intent.type+':'+it.intent.intentId.slice(-6)); } catch(_){}
+    try { if (typeof SettlementModule!=='undefined' && typeof SettlementModule.getIntents==='function'){ const n=(SettlementModule.getIntents()||[]).length; w.recovery=n+' settlement intent(s) tracked'; } } catch(_){}
+    return w;
+  }
+  const _queue = [];
+  const QUEUE_STATES = ['pending','validated','approved','executing','completed','failed'];
+
+  // Permission System
+  function _perm(){ return Object.assign({ maxPerOpUsd:0, dailyLimitUsd:0, allowedOps:['swap','bridge','payment','recovery'], allowedNetworks:[] }, mem.permissions||{}); }
+  function setPermissions(p){ mem.permissions = Object.assign(_perm(), p||{}); _persist(); return mem.permissions; }
+  function _dailySpentUsd(){ const since=Date.now()-86400000; return (mem.history||[]).filter(h=>h.status==='completed'&&h.ts>=since).reduce((s,h)=>s+(h.amountUsd||0),0); }
+  function permissionCheck(intent){
+    const p=_perm();
+    if (p.allowedOps.length && !p.allowedOps.includes(intent.type)) return {ok:false, reason:'Operation "'+intent.type+'" not permitted'};
+    if (p.allowedNetworks.length && intent.network && !p.allowedNetworks.includes(intent.network)) return {ok:false, reason:'Network "'+intent.network+'" not permitted'};
+    if (p.maxPerOpUsd>0 && (intent.amountUsd||0)>p.maxPerOpUsd) return {ok:false, reason:'$'+(intent.amountUsd||0)+' exceeds per-op limit $'+p.maxPerOpUsd};
+    if (p.dailyLimitUsd>0 && (_dailySpentUsd()+(intent.amountUsd||0))>p.dailyLimitUsd) return {ok:false, reason:'Daily limit $'+p.dailyLimitUsd+' would be exceeded'};
+    return {ok:true};
+  }
+
+  // Intent Engine — structured intent
+  function buildIntent(type, params){
+    params = params||{};
+    const chain = (typeof getActiveChain==='function') ? (getActiveChain()||{}) : {};
+    return { intentId:'int_'+Date.now()+'_'+Math.random().toString(36).slice(2,6), type,
+      token: params.token||null, amount: params.amount!=null?params.amount:null, amountUsd: Number(params.amountUsd||0)||0,
+      network: params.network||chain.id||null, address: params.address||null, timestamp: Date.now(), params };
+  }
+
+  // Audit Log
+  function _audit(stage, intent, result, err){
+    const r = err ? ('ERROR: '+(err.message||err)) : (result||'ok');
+    _log2('audit:'+stage+(intent?(' '+intent.type+' '+intent.intentId):''), r);
+    try { memory.addHistory({ key: intent?(intent.type+':'+intent.intentId):stage, status:(stage==='execute:completed')?'completed':'audit', stage, intentId: intent&&intent.intentId, amountUsd: intent&&intent.amountUsd, result:r }); } catch(_){}
+  }
+
+  // Execution Queue
+  function _qItem(id){ return _queue.find(x=>x.intent.intentId===id); }
+  function _setState(item, s, extra){ item.state=s; if(extra) Object.assign(item, extra); _audit('state:'+s, item.intent, s); }
+  function enqueueIntent(type, params){
+    const intent = buildIntent(type, params);
+    const item = { intent, state:'pending', createdAt:Date.now(), result:null, error:null };
+    _queue.push(item); _audit('enqueue', intent, 'pending');
+    const perm = permissionCheck(intent);
+    if (!perm.ok) _setState(item,'failed',{error:perm.reason}); else _setState(item,'validated');
+    return item;
+  }
+
+  // Executor Layer — calls ONLY existing functions; gated by flags.
+  async function executeIntent(intentId){
+    const item = _qItem(intentId); if(!item) return {ok:false, reason:'intent not found'};
+    if (item.state==='completed') return {ok:false, reason:'already completed (no re-execution)'};
+    if (isPaused()){ _setState(item,'failed',{error:'global pause active'}); _audit('execute:blocked', item.intent, 'AUTONOMA_GLOBAL_PAUSE active'); return {ok:false, reason:'Global kill switch active — execution paused'}; }
+    if (!_executionAllowed()){ _setState(item,'approved'); _audit('execute:skipped', item.intent, 'execution disabled (flags off)'); return {ok:false, reason:'Execution disabled — AUTO_EXECUTE_ENABLED / AUTONOMA_EXECUTION_PREVIEW / AUTONOMA_SUPERVISED_MODE are false'}; }
+    // Policy Engine + Risk Engine gating.
+    const pol = policyCheck(item.intent);
+    if (pol.decision === 'manual'){ _setState(item,'failed',{error:pol.reason}); _audit('execute:policy', item.intent, 'blocked: '+pol.reason); return {ok:false, reason:pol.reason}; }
+    if (pol.decision === 'approval' && !item._approvedByOperator){ _setState(item,'approved'); _audit('execute:policy', item.intent, 'approval required ('+pol.risk+')'); return {ok:false, reason:'Approval required ('+pol.reason+', risk '+pol.risk+')'}; }
+    const perm = permissionCheck(item.intent); if(!perm.ok){ _setState(item,'failed',{error:perm.reason}); return {ok:false, reason:perm.reason}; }
+    const sc = safetyCheck(item.intent.type, item.intent.params, { needsWallet:true, amountUsd:item.intent.amountUsd }); if(!sc.ok){ _setState(item,'failed',{error:sc.reason}); return {ok:false, reason:sc.reason}; }
+    _setState(item,'executing');
+    try {
+      let res=null;
+      if (item.intent.type==='swap' && typeof executeSwap==='function') res=await executeSwap();
+      else if (item.intent.type==='bridge' && typeof executeBridgeOrTurbo==='function') res=executeBridgeOrTurbo();
+      else if (item.intent.type==='payment' && typeof executeSingleSend==='function') res=await executeSingleSend();
+      else if (item.intent.type==='recovery' && typeof SettlementModule!=='undefined' && SettlementModule.runRecovery) res=await SettlementModule.runRecovery();
+      else throw new Error('no executor for type '+item.intent.type);
+      _setState(item,'completed',{ result:res, txHash:(res&&res.hash)||null });
+      _audit('execute:completed', item.intent, 'completed');
+      return {ok:true, result:res};
+    } catch(e){ _setState(item,'failed',{error:e.message||String(e)}); _audit('execute:failed', item.intent, null, e); return {ok:false, reason:e.message}; }
+  }
+
+  // Approval Flow
+  function _risk(intent){ const a=intent.amountUsd||0; const p=_perm(); if(p.maxPerOpUsd&&a>p.maxPerOpUsd*0.8) return 'high'; if(a>0) return 'medium'; return 'low'; }
+  function approvalCard(item){
+    const i=item.intent;
+    return card(head('shield-check','Approval Required — '+i.type,{text:item.state,cls:item.state==='failed'?'pending':'live'}),
+      row('Action', i.type,'teal') + row('Amount', (i.amount!=null?esc(i.amount):'—')+(i.token?(' '+esc(i.token)):''),'') +
+      row('Network', esc(i.network||'—'),'') + row('Destination', i.address?esc(i.address.slice(0,10)+'…'):'—','') +
+      row('Gas', 'estimated at execution','') + row('Risk', _risk(i), _risk(i)==='high'?'yellow':'green') +
+      row('IntentId', esc(i.intentId),'') +
+      (item.state==='failed' ? row('Blocked', esc(item.error),'yellow')
+        : intro('Execution is '+(_executionAllowed()?'ENABLED (preview)':'DISABLED (flags off → nothing will move)')+'.')),
+      (item.state==='validated' ? acts(
+        {icon:'check',label:'Approve',cls:'primary',action:"AutonomaAgent.approve('"+i.intentId+"')"},
+        {icon:'x',label:'Reject',cls:'',action:"AutonomaAgent.reject('"+i.intentId+"')"}
+      ) : ''));
+  }
+  async function approve(intentId){
+    const item=_qItem(intentId); if(!item) return;
+    if (item.state!=='validated' && item.state!=='approved'){ try{toast&&toast('Agent: intent not approvable ('+item.state+')','warning');}catch(_){ } return; }
+    item._approvedByOperator = true;
+    _setState(item,'approved');
+    const r = await executeIntent(intentId);
+    try { toast && toast('Agent: '+(r.ok?'executed':(r.reason||'not executed')), r.ok?'success':'info'); } catch(_){}
+  }
+  function reject(intentId){ const item=_qItem(intentId); if(item) _setState(item,'failed',{error:'rejected by operator'}); }
+
+  // ════════════════════════════════════════════════════════
+  //  Phase 4 — App Knowledge Layer + Natural-Language Understanding
+  //  Knows every module + routes natural phrases to them. NLU intercepts ONLY
+  //  phrases the base assistant does NOT already cover (new modules + PT/EN
+  //  synonyms), so all existing chat behaviour is preserved. Tools navigate to
+  //  the EXISTING module pages (human finalizes) — no money auto-executed.
+  // ════════════════════════════════════════════════════════
+  const KNOWLEDGE = {
+    wallet:       { label:'Wallet',       page:'profile',  icon:'wallet',          kw:null },
+    send:         { label:'Send Assets',  page:'send',     icon:'send',            kw:/\b(mande|manda|mandar)\b/ },
+    payment_link: { label:'Payment Link', page:'links',    icon:'link',            kw:/\b(payment link|link de pagamento|cobre|cobrar|gerar link|charge (a )?(client|customer)|receber de)\b/ },
+    invoice:      { label:'Invoice',      page:'invoices', icon:'file-invoice',    kw:/\b(invoice|fatura|cobranca|cobrança|nota fiscal|\bbill\b)\b/ },
+    qrcode:       { label:'QR Code',      page:'links',    icon:'qrcode',          kw:/\b(qr ?code|qrcode|\bqr\b)\b/ },
+    swap:         { label:'Swap',         page:'swap',     icon:'arrows-exchange', kw:/\b(troque|trocar|converter)\b/ },
+    bridge:       { label:'Bridge',       page:'bridge',   icon:'topology-star-3', kw:null },
+    multisend:    { label:'Multisend',    page:'batch',    icon:'stack',           kw:/\b(em massa|lote|varios destinat|vários destinat|multiplos destinat|múltiplos destinat)\b/ },
+    treasury:     { label:'Treasury',     page:'treasury', icon:'building-bank',   kw:null },
+    history:      { label:'History',      page:'reports',  icon:'history',         kw:null },
+  };
+  function knowledge(){ return Object.keys(KNOWLEDGE).map(k => ({ key:k, label:KNOWLEDGE[k].label, page:KNOWLEDGE[k].page })); }
+
+  function _moduleCard(key, msg){
+    const m = KNOWLEDGE[key]; if(!m) return null;
+    return card(head(m.icon, m.label, {text:'module',cls:'live'}),
+      intro(msg || ('Understood — opening <strong>'+m.label+'</strong>. You finalize it on the page (nothing is auto-executed).')),
+      acts({icon:'arrow-right',label:'Open '+m.label,cls:'primary',action:"showPage('"+m.page+"')"}));
+  }
+
+  // NLU — maps natural phrases to a module, ONLY for cases the base assistant misses.
+  function _nluRoute(low){
+    const order = ['payment_link','invoice','qrcode','multisend','swap','send'];
+    for (const k of order){ const m=KNOWLEDGE[k]; if (m.kw && m.kw.test(low)) return k; }
+    return null;
+  }
+
+  // New tools — call/route to EXISTING module pages (reuse existing flows).
+  function _go(page){ try{ if(typeof showPage==='function') showPage(page); }catch(_){ } }
+  Object.assign(tools, {
+    createPaymentLink: () => { _go('links');    _log2('tool:createPaymentLink','opened links page'); return _moduleCard('payment_link'); },
+    createInvoice:     () => { _go('invoices'); _log2('tool:createInvoice','opened invoices page'); return _moduleCard('invoice'); },
+    generateQRCode:    () => { _go('links');    _log2('tool:generateQRCode','opened QR/links page'); return _moduleCard('qrcode'); },
+    sendPayment:       () => { _log2('tool:sendPayment','plan'); return _planWrite('executePayment','send','Payment','send',{}); },
+    multisend:         () => { _go('batch');    _log2('tool:multisend','opened batch page'); return _moduleCard('multisend'); },
+  });
+
+  // Context memory helpers
+  function setContext(k,v){ memory.setPref(k,v); }
+  function getContext(k){ return (mem.preferences||{})[k]; }
+
+  // ════════════════════════════════════════════════════════
+  //  Phase 5 — Autonomous App Copilot (Goal Planner / Explain / Intelligence)
+  //  Reuses Phases 1-4. No money auto-executed; financial steps need approval.
+  // ════════════════════════════════════════════════════════
+  // Enhanced Memory — usage patterns + favorites (derived, read-only insight).
+  function recordUsage(key){ mem.patterns = mem.patterns||{}; mem.patterns[key] = (mem.patterns[key]||0)+1; _persist(); }
+  function favorites(){
+    const p = mem.patterns||{}; const top = Object.keys(p).sort((a,b)=>p[b]-p[a]);
+    return { favoriteModule: top[0]||null, favoriteToken: (mem.preferences||{}).favoriteToken || (mem.preferences||{}).lastToken || null, favoriteNetwork: (mem.preferences||{}).favoriteNetwork || (mem.preferences||{}).preferredNetwork || null };
+  }
+
+  // Goal Planner — interprets a full objective into an ordered, multi-step plan.
+  function planGoal(text){
+    const low = String(text||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+    if (/\b(receber pagament|recebimento|get paid|receive payment|aceitar pagament|comecar a (receber|cobrar)|set ?up payments?)\b/.test(low)){
+      return { goal:'Receive payments', steps:[
+        { key:'invoice',      label:'Create an Invoice',      financial:false },
+        { key:'payment_link', label:'Create a Payment Link',  financial:false },
+        { key:'qrcode',       label:'Generate a QR Code',     financial:false },
+      ]};
+    }
+    if (/\b(pagar (varios|vários|todos|muitos)|pay (many|everyone|multiple)|folha de pagamento|payroll)\b/.test(low)){
+      return { goal:'Pay multiple recipients', steps:[ { key:'multisend', label:'Open Multisend (add recipients)', financial:true } ]};
+    }
+    return null;
+  }
+
+  // Explain Mode — what will be done, modules, values, risk (no execution).
+  function explain(key, params){
+    const m = KNOWLEDGE[key] || { label:key, page:key };
+    const financial = ['swap','bridge','send','payment','multisend'].includes(key);
+    let risk = 'LOW';
+    if (financial){ try { risk = classifyRisk(buildIntent(key==='send'?'payment':key, { amountUsd: Number(params&&params.amount)||0 })); } catch(_){} }
+    return { what:'Use '+m.label, modules:[m.label], page:m.page, values:(params&&params.amount)?String(params.amount):'—', risk, financial };
+  }
+
+  // Multi-step plan card (Explain Mode) — financial steps flagged; nothing auto-runs.
+  function _goalCard(plan){
+    const body = plan.steps.map((s,i)=>{
+      const p = KNOWLEDGE[s.key] ? KNOWLEDGE[s.key].page : s.key;
+      return '<div class="aut-rc-row"><span class="aut-rl">'+(i+1)+'. '+esc(s.label)+(s.financial?' <span style="color:var(--yellow)">(needs approval)</span>':'')+'</span>'+
+        '<span class="aut-rv"><button class="aut-act" onclick="showPage(\''+p+'\')"><i class="ti ti-arrow-right"></i>Open</button></span></div>';
+    }).join('');
+    const first = KNOWLEDGE[plan.steps[0].key] ? KNOWLEDGE[plan.steps[0].key].page : plan.steps[0].key;
+    return card(head('route','Goal Plan — '+esc(plan.goal),{text:plan.steps.length+' steps',cls:'live'}),
+      intro('Plan to achieve <strong>'+esc(plan.goal)+'</strong>. Financial steps require approval — nothing is auto-executed.')+body,
+      acts({icon:'player-play',label:'Start step 1',cls:'primary',action:"showPage('"+first+"')"}));
+  }
+
+  // ════════════════════════════════════════════════════════
+  //  Phase 6 — Business Automation (customers / notifications / BI / capabilities)
+  //  Recurring tasks handled above (daily/weekly/monthly). All read-only insight;
+  //  no financial operation runs automatically without permission (Phases 2/3 apply).
+  // ════════════════════════════════════════════════════════
+  // Customer Context Memory
+  function customers(){ return mem.customers || []; }
+  function addCustomer(c){
+    mem.customers = mem.customers || [];
+    const id = (c&&c.id) || (c&&c.name) || ('cust_'+Date.now());
+    const ex = mem.customers.find(x=>x.id===id);
+    if (ex) Object.assign(ex, c, {id}); else mem.customers.push(Object.assign({ id, createdAt:Date.now(), charges:[] }, c));
+    _persist(); return id;
+  }
+  function recordCharge(custId, charge){ const c=(mem.customers||[]).find(x=>x.id===custId); if(c){ c.charges=c.charges||[]; c.charges.unshift(Object.assign({ ts:Date.now() }, charge||{})); c.lastCharge=Date.now(); _persist(); } }
+
+  // Capability Registry — modules as capabilities.
+  const CAPABILITIES = {
+    wallet:   { label:'Wallet',       type:'read',      module:'wallet' },
+    payment:  { label:'Payment',      type:'financial', module:'send' },
+    invoice:  { label:'Invoice',      type:'create',    module:'invoice' },
+    link:     { label:'Payment Link', type:'create',    module:'payment_link' },
+    qr:       { label:'QR Code',      type:'create',    module:'qrcode' },
+    swap:     { label:'Swap',         type:'financial', module:'swap' },
+    bridge:   { label:'Bridge',       type:'financial', module:'bridge' },
+    treasury: { label:'Treasury',     type:'read',      module:'treasury' },
+  };
+  function capabilities(){ return Object.keys(CAPABILITIES).map(k=>({ key:k, label:CAPABILITIES[k].label, type:CAPABILITIES[k].type })); }
+
+  // Smart Notifications — read-only detection of important conditions.
+  function detectNotifications(){
+    const n = [];
+    try { const due=(mem.tasks||[]).filter(t=>t.when&&Date.now()>=t.when); if(due.length) n.push({ type:'task_due', msg:due.length+' scheduled task(s) due' }); } catch(_){}
+    try { const pend=_queue.filter(it=>it.state==='approved'||it.state==='executing'); if(pend.length) n.push({ type:'pending_op', msg:pend.length+' operation(s) pending in queue' }); } catch(_){}
+    try { const failed=_queue.filter(it=>it.state==='failed'); if(failed.length) n.push({ type:'failed_op', msg:failed.length+' operation(s) failed' }); } catch(_){}
+    try { if (typeof SettlementModule!=='undefined' && typeof SettlementModule.getIntents==='function'){ const st=(SettlementModule.getIntents()||[]).filter(i=>/Pending|Awaiting|Settling/i.test(i.status||'')); if(st.length) n.push({ type:'bridge_pending', msg:st.length+' settlement/bridge intent(s) pending' }); } } catch(_){}
+    return n;
+  }
+
+  // Business Intelligence — read-only, from confirmed sources (ProfileManager + UI).
+  function _received(){ try { const a=(typeof ProfileManager!=='undefined'&&ProfileManager.getActivity)?ProfileManager.getActivity():[]; return a.filter(x=>/receiv|paid|incoming|invoice/i.test(x.type||'')).reduce((s,x)=>s+(parseFloat(x.amount)||0),0); } catch(_){ return 0; } }
+  function _activityList(){ try { return (typeof ProfileManager!=='undefined'&&ProfileManager.getActivity)?ProfileManager.getActivity().slice(0,5):[]; } catch(_){ return []; } }
+
+  // ════════════════════════════════════════════════════════
+  //  Phase 7 — Agent Orchestration (workflows / events / suggestions / roles)
+  //  Coordinates the existing modules. All read-only/insight; financial steps
+  //  still need approval and the Phase 2/3 flags stay off (no auto-execution).
+  // ════════════════════════════════════════════════════════
+  // Workflow Engine — named multi-step flows that reuse existing modules.
+  const WORKFLOWS = {
+    receive_payments: { label:'Receive Payments', steps:[
+      { kind:'module', key:'invoice',      label:'Create Invoice',          financial:false },
+      { kind:'module', key:'payment_link', label:'Create Payment Link',     financial:false },
+      { kind:'notify',                     label:'Set up notifications',    financial:false },
+      { kind:'monitor',                    label:'Monitor incoming payments',financial:false },
+    ]},
+  };
+  function workflows(){ return Object.keys(WORKFLOWS).map(k=>({ key:k, label:WORKFLOWS[k].label, steps:WORKFLOWS[k].steps.length })); }
+  function runWorkflow(name){
+    const wf = WORKFLOWS[name]; if(!wf) return null;
+    const body = wf.steps.map((s,i)=>{
+      const action = s.kind==='module' ? "showPage('"+(KNOWLEDGE[s.key]?KNOWLEDGE[s.key].page:s.key)+"')"
+        : s.kind==='notify' ? "autonomaSendQuick('notifications')"
+        : "autonomaSendQuick('agent watch')";
+      return '<div class="aut-rc-row"><span class="aut-rl">'+(i+1)+'. '+esc(s.label)+(s.financial?' <span style="color:var(--yellow)">(approval)</span>':'')+'</span>'+
+        '<span class="aut-rv"><button class="aut-act" onclick="'+action+'"><i class="ti ti-arrow-right"></i>Run</button></span></div>';
+    }).join('');
+    return card(head('sitemap','Workflow — '+esc(wf.label),{text:wf.steps.length+' steps',cls:'live'}),
+      intro('Multi-step workflow across existing modules. Financial steps need approval — nothing auto-executes.')+body, '');
+  }
+
+  // Event Engine — read-only detection + log (no money action; deduped).
+  const _events = [];
+  function _pushEvent(type,msg){ _events.unshift({ type, msg, ts:Date.now() }); if(_events.length>100) _events.length=100; _log2('event:'+type, msg); }
+  function emitEvent(type,msg){ _pushEvent(type,msg); return _events[0]; }
+  function events(){ return _events.slice(0,20); }
+  const _qSnap = {};
+  function detectEvents(){
+    try {
+      for (const it of _queue){ const id=it.intent.intentId; if(_qSnap[id]!==it.state){ if(it.state==='completed') _pushEvent('operation_completed', it.intent.type+' completed'); else if(it.state==='failed') _pushEvent('operation_failed', it.intent.type+' failed'); _qSnap[id]=it.state; } }
+    } catch(_){}
+    return events();
+  }
+
+  // Smart Suggestions — based on activity, history, customers, tasks.
+  function suggestions(){
+    const out = [];
+    try { const f=favorites(); if(f.favoriteModule) out.push('Quick access your most-used: '+(KNOWLEDGE[f.favoriteModule]?KNOWLEDGE[f.favoriteModule].label:f.favoriteModule)); } catch(_){}
+    try { const due=(mem.tasks||[]).filter(t=>t.when&&Date.now()>=t.when); if(due.length) out.push(due.length+' scheduled task(s) are due — review them'); } catch(_){}
+    try { const failed=_queue.filter(it=>it.state==='failed'); if(failed.length) out.push(failed.length+' operation(s) failed — check the queue'); } catch(_){}
+    try { const c=customers(); out.push(c.length? ('You have '+c.length+' customer(s) — send a Payment Link or Invoice') : 'Add customers to track charges'); } catch(_){}
+    if (!out.length) out.push('Try "quero receber pagamentos" to set up incoming payments.');
+    return out;
+  }
+
+  // Internal Agent Roles — specialized views over the same tools/data.
+  const ROLES = {
+    payment:  { label:'Payment Agent',  scope:'payments · invoices · payment links' },
+    treasury: { label:'Treasury Agent', scope:'treasury recovery · settlements (read-only)' },
+    finance:  { label:'Finance Agent',  scope:'revenue · customers · financial history' },
+    security: { label:'Security Agent', scope:'risk · policy · kill switch' },
+  };
+  function roles(){ return Object.keys(ROLES).map(k=>({ key:k, label:ROLES[k].label, scope:ROLES[k].scope })); }
+  function roleCard(key){
+    const r = ROLES[key]; if(!r) return null;
+    const a = key==='payment'  ? acts({icon:'file-invoice',label:'Invoices',cls:'',action:"showPage('invoices')"},{icon:'link',label:'Payment Links',cls:'',action:"showPage('links')"})
+            : key==='treasury' ? acts({icon:'building-bank',label:'Treasury',cls:'',action:"showPage('treasury')"},{icon:'refresh',label:'Run recovery',cls:'',action:"autonomaSendQuick('run recovery')"})
+            : key==='finance'  ? acts({icon:'coins',label:'Revenue',cls:'',action:"autonomaSendQuick('quanto recebi')"},{icon:'users',label:'Customers',cls:'',action:"autonomaSendQuick('meus clientes')"})
+            :                    acts({icon:'player-pause',label:'Pause',cls:'',action:"autonomaSendQuick('agent pause')"},{icon:'shield-cog',label:'Policy',cls:'',action:"autonomaSendQuick('agent policy')"});
+    return card(head('robot', r.label, {text:'role',cls:'live'}), row('Scope', esc(r.scope),''), a);
+  }
+
+  // ════════════════════════════════════════════════════════
+  //  Phase 8 — Knowledge & Learning (graph / learning / context / monitor / health / LLM)
+  //  All read-only/insight. The LLM adapter can only READ + PROPOSE (intents still
+  //  pass through Risk/Policy/Approval/flags) — never direct access to funds.
+  // ════════════════════════════════════════════════════════
+  // Knowledge Graph — relates customers / operations / preferences / modules / history.
+  function graph(){
+    return {
+      customers: customers().length,
+      modules: Object.keys(KNOWLEDGE).length,
+      operations: _queue.length,
+      historyEntries: (mem.history||[]).length,
+      tasks: (mem.tasks||[]).length,
+      favorites: favorites(),
+    };
+  }
+
+  // Behavioral Learning — patterns from usage; derives favorites (read-only learning).
+  function learn(){
+    const p = mem.patterns||{}; const total = Object.values(p).reduce((s,n)=>s+(n||0),0);
+    const top = Object.keys(p).sort((a,b)=>p[b]-p[a]).slice(0,3);
+    const f = favorites();
+    return { totalActions: total, topFlows: top, favoriteModule:f.favoriteModule, favoriteToken:f.favoriteToken, favoriteNetwork:f.favoriteNetwork };
+  }
+  function _learnContext(text){
+    try {
+      const low = String(text||'').toLowerCase();
+      const tk = (low.match(/\b(usdc|eurc|cirbtc|eth|matic)\b/)||[])[1];
+      if (tk) memory.setPref('favoriteToken', tk.toUpperCase());
+      const net = (low.match(/\b(arc|sepolia|base|arbitrum|optimism|polygon)\b/)||[])[1];
+      if (net) memory.setPref('favoriteNetwork', net);
+    } catch(_){}
+  }
+
+  // Contextual Memory — resolves references like "aquele cliente", "último pagamento".
+  function resolveRef(text){
+    const low = String(text||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+    const out = {};
+    if (/\b(aquele cliente|esse cliente|that customer|the customer|ultimo cliente)\b/.test(low)){ out.customer = customers().slice().sort((a,b)=>(b.lastCharge||0)-(a.lastCharge||0))[0]||null; }
+    if (/\b(o ultimo pagamento|last payment|esse pagamento|aquele pagamento)\b/.test(low)){ out.payment = (mem.history||[]).find(h=>/payment|received/i.test(h.type||h.stage||''))||null; }
+    if (/\b(minha operacao|my operation|essa operacao|a ultima operacao)\b/.test(low)){ out.operation = _queue[_queue.length-1]||null; }
+    if (/\b(meu modulo|ultimo modulo|last module)\b/.test(low)){ out.module = (mem.preferences||{}).lastModule||null; }
+    return out;
+  }
+
+  // Monitoring Layer — read-only status of invoices / payments / bridges / treasury.
+  function monitor(){
+    const m = { invoices:'open Invoices to view', payments:'none pending', bridges:'monitored (read-only)', treasury:'monitored (read-only)' };
+    try { const w=watch(); m.payments = (w.pending&&w.pending.length)? (w.pending.length+' pending in queue') : 'none pending'; if(w.recovery&&w.recovery!=='—') m.bridges = w.recovery; } catch(_){}
+    try { const t=detectNotifications().find(n=>n.type==='bridge_pending'); if(t) m.bridges = t.msg; } catch(_){}
+    try { if (typeof SettlementModule==='undefined') m.treasury='—'; } catch(_){}
+    return m;
+  }
+
+  // Agent Health — tools / events / permissions / queues / mode / flags.
+  function health(){
+    const states={}; for(const it of _queue){ states[it.state]=(states[it.state]||0)+1; }
+    return {
+      tools: Object.keys(tools).length,
+      events: _events.length,
+      permissions: _perm(),
+      queueTotal: _queue.length, queueStates: states,
+      mode: mem.mode, paused: isPaused(),
+      flags: { AUTO_EXECUTE_ENABLED, AUTONOMA_EXECUTION_PREVIEW, AUTONOMA_SUPERVISED_MODE, AUTONOMA_GLOBAL_PAUSE },
+    };
+  }
+
+  // External LLM adapter — READY but dormant. Read + propose only; NEVER funds.
+  const llm = {
+    providers: ['gpt','claude','deepseek'],
+    get configured(){ return !!(mem.llm && mem.llm.provider); },
+    configure(provider, opts){
+      if (!['gpt','claude','deepseek'].includes(String(provider))) return false;
+      // SECURITY: never store the API key; only a flag. No network call here.
+      mem.llm = { provider:String(provider), endpoint:(opts&&opts.endpoint)||null, hasKey: !!(opts&&opts.apiKey), ts:Date.now() };
+      _persist(); return true;
+    },
+    // The LLM may only build a plan via the local planner; any resulting intent
+    // still goes through enqueueIntent → policy → approval → flags (off). No funds.
+    plan(text){ return plan(text); },
+    capabilities: 'read + propose (Risk/Policy/Approval/flags apply; no direct fund access)',
+  };
+
+  // Start scheduler tick (every 60s) after load + read-only event poll.
+  try {
+    const iv = (typeof _setInterval==='function') ? _setInterval : setInterval;
+    iv(_runScheduler, 60000);
+    iv(()=>{ try { detectEvents(); } catch(_){} }, 60000);
+  } catch(_){}
+
+  return {
+    tryHandle, plan, tools, safetyCheck, memory, confirm, cancel, setMode: memory.setMode,
+    // Phase 2 (dormant by default)
+    buildIntent, enqueueIntent, executeIntent, approve, reject, permissionCheck, setPermissions,
+    queue: _queue, AUTO_EXECUTE_ENABLED, AUTONOMA_EXECUTION_PREVIEW,
+    // Phase 3 (dormant by default)
+    classifyRisk, policyCheck, setPolicy, simulate, watch, pause, resume, isPaused,
+    AUTONOMA_SUPERVISED_MODE,
+    // Phase 4 (App Knowledge Layer + NLU)
+    knowledge, KNOWLEDGE, setContext, getContext,
+    // Phase 5 (Copilot: goals / explain / enhanced memory)
+    planGoal, explain, recordUsage, favorites,
+    // Phase 6 (Business automation: customers / notifications / BI / capabilities)
+    customers, addCustomer, recordCharge, capabilities, CAPABILITIES, detectNotifications,
+    // Phase 7 (Orchestration: workflows / events / suggestions / roles)
+    workflows, runWorkflow, WORKFLOWS, events, emitEvent, detectEvents, suggestions, roles, roleCard, ROLES,
+    // Phase 8 (Knowledge & Learning: graph / learn / context / monitor / health / LLM)
+    graph, learn, resolveRef, monitor, health, llm
+  };
+})();
+if (typeof window !== 'undefined') window.AutonomaAgent = AutonomaAgent;
 
 </script>
 

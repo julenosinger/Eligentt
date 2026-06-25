@@ -12,9 +12,9 @@ const AuthManager = (() => {
 
   function _loadSession() {
     try {
-      const raw = sessionStorage.getItem(SESSION_KEY);
+      const raw = localStorage.getItem(SESSION_KEY);
       if (raw) _session = JSON.parse(raw);
-      const pRaw = sessionStorage.getItem(PROFILE_KEY);
+      const pRaw = localStorage.getItem(PROFILE_KEY);
       if (pRaw) _profile = JSON.parse(pRaw);
     } catch (_) {}
   }
@@ -23,8 +23,8 @@ const AuthManager = (() => {
     _session = { token, ts: Date.now() };
     _profile = profile;
     try {
-      sessionStorage.setItem(SESSION_KEY, JSON.stringify(_session));
-      sessionStorage.setItem(PROFILE_KEY, JSON.stringify(_profile));
+      localStorage.setItem(SESSION_KEY, JSON.stringify(_session));
+      localStorage.setItem(PROFILE_KEY, JSON.stringify(_profile));
     } catch (_) {}
   }
 
@@ -34,8 +34,8 @@ const AuthManager = (() => {
     _remoteSigner = null;
     _remoteProvider = null;
     try {
-      sessionStorage.removeItem(SESSION_KEY);
-      sessionStorage.removeItem(PROFILE_KEY);
+      localStorage.removeItem(SESSION_KEY);
+      localStorage.removeItem(PROFILE_KEY);
     } catch (_) {}
   }
 
@@ -80,7 +80,7 @@ const AuthManager = (() => {
       const data = await _api('/session', null, 'GET');
       if (data.ok && data.profile) {
         _profile = data.profile;
-        try { sessionStorage.setItem(PROFILE_KEY, JSON.stringify(_profile)); } catch (_) {}
+        try { localStorage.setItem(PROFILE_KEY, JSON.stringify(_profile)); } catch (_) {}
         _buildRemoteSigner();
         return true;
       }

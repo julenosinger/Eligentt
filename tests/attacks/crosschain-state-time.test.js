@@ -141,6 +141,7 @@ describe('6.8 — Time-Based Attacks', () => {
     const msg = 'Elligentt Relayer Authorization\nTimestamp: ' + ts + '\nNonce: ';
     const sig = await wallet.signMessage(msg);
     const r = await verifyRelayerAuth({ auth: { address: wallet.address, message: msg, signature: sig, timestamp: ts, nonce: '' } }, kv);
-    expect(r.valid).toBe(true);
+    // Nonce is REQUIRED: an empty nonce must be rejected even with a valid timestamp.
+    expect(r.valid).toBe(false);
   });
 });

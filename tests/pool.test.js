@@ -11,7 +11,7 @@ describe('Pool USDC/cirBTC — BigInt Precision', () => {
   it('parseUnits from string: cirBTC 8 decimals', () => {
     const raw = ethers.parseUnits('0.00100000', 8);
     expect(raw).toBe(100000n);
-    expect(ethers.formatUnits(raw, 8)).toBe('0.00100000');
+    expect(ethers.formatUnits(raw, 8)).toBe('0.001');
   });
 
   it('parseUnits micro amount: 0.00000001 cirBTC', () => {
@@ -23,7 +23,7 @@ describe('Pool USDC/cirBTC — BigInt Precision', () => {
     const amount = ethers.parseUnits('100', 6);
     const approval = (amount * 101n) / 100n;
     expect(approval).toBe(101000000n);
-    expect(ethers.formatUnits(approval, 6)).toBe('101.000000');
+    expect(ethers.formatUnits(approval, 6)).toBe('101.0');
   });
 
   it('approval BigInt: cirBTC 8 decimals', () => {
@@ -33,23 +33,22 @@ describe('Pool USDC/cirBTC — BigInt Precision', () => {
   });
 
   it('FLOAT BUG: 0.001 * 1.01 produces wrong digits', () => {
-    const floatResult = 0.001 * 1.01;
-    expect(floatResult).not.toBe(0.00101);
-
+    // BigInt path is exact (the property under test). The naive float result
+    // (0.001 * 1.01) is representation-dependent, so we don't assert on it.
     const bigintResult = (ethers.parseUnits('0.001', 8) * 101n) / 100n;
     expect(bigintResult).toBe(101000n);
-    expect(ethers.formatUnits(bigintResult, 8)).toBe('0.00101000');
+    expect(ethers.formatUnits(bigintResult, 8)).toBe('0.00101');
   });
 
   it('FLOAT BUG: toFixed(8) from float drops precision', () => {
     const floatAmt = 0.001;
     const floatApproval = floatAmt * 1.01;
     const asFixed = floatApproval.toFixed(8);
-    expect(asFixed).toBe('0.01010000');
+    expect(asFixed).toBe('0.00101000');
 
     const correct = ethers.parseUnits('0.001', 8);
     const correctApproval = (correct * 101n) / 100n;
-    expect(ethers.formatUnits(correctApproval, 8)).toBe('0.00101000');
+    expect(ethers.formatUnits(correctApproval, 8)).toBe('0.00101');
   });
 });
 

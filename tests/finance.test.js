@@ -40,7 +40,7 @@ describe('USDC Fee Calculation (BigInt precision)', () => {
     const fee = (amount * feeBps) / 10000n;
     const total = amount + fee;
     expect(total).toBe(amount + fee);
-    expect(ethers.formatUnits(total, USDC_DECIMALS)).toBe('33.996600');
+    expect(ethers.formatUnits(total, USDC_DECIMALS)).toBe('33.9966');
   });
 
   it('parseUnits/formatUnits roundtrip is lossless', () => {
@@ -48,7 +48,9 @@ describe('USDC Fee Calculation (BigInt precision)', () => {
     for (const v of values) {
       const raw = ethers.parseUnits(v, USDC_DECIMALS);
       const formatted = ethers.formatUnits(raw, USDC_DECIMALS);
-      expect(formatted).toBe(v);
+      // ethers v6 trims trailing zeros ('1.000000' -> '1.0'); a truly lossless
+      // roundtrip is proven by re-parsing the formatted value back to the same raw.
+      expect(ethers.parseUnits(formatted, USDC_DECIMALS)).toBe(raw);
     }
   });
 
@@ -56,6 +58,6 @@ describe('USDC Fee Calculation (BigInt precision)', () => {
     const amount = ethers.parseUnits('0.5', 8);
     const feeBps = 100n;
     const fee = (amount * feeBps) / 10000n;
-    expect(ethers.formatUnits(fee, 8)).toBe('0.00500000');
+    expect(ethers.formatUnits(fee, 8)).toBe('0.005');
   });
 });

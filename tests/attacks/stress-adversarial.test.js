@@ -128,7 +128,7 @@ describe('6.7 — Adversarial Frontend Input', () => {
       expect(escaped).not.toContain('<script');
       expect(escaped).not.toContain('<img');
       expect(escaped).not.toContain('<svg');
-      expect(escaped).not.toContain('onerror');
+      expect(escaped).not.toContain('<');
       expect(escaped).not.toContain('<iframe');
     }
   });

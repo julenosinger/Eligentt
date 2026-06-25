@@ -25,9 +25,12 @@ describe('5.7 — Frontend XSS Attack Surface', () => {
     }
     for (const v of vectors) {
       const escaped = escHtml(v.input);
-      expect(escaped).not.toContain('<script>');
-      expect(escaped).not.toContain('onerror=');
-      expect(escaped).not.toContain('onload=');
+      // The XSS neutralization guarantee is that raw < and > are escaped, so the
+      // input can never form executable HTML. Inert escaped text such as "onerror="
+      // may remain inside &lt;...&gt; and is harmless.
+      expect(escaped).not.toContain('<');
+      expect(escaped).not.toContain('>');
+      if (v.input.includes('<')) expect(escaped).toContain('&lt;');
     }
   });
 

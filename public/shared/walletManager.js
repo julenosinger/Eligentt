@@ -2,6 +2,7 @@ const WalletManager = (() => {
   'use strict';
 
   const VAULT_KEY = 'elligente_ew_vault';
+  const LOCAL_ID_KEY = 'elligente_local_wallet_id';
   const DEVICE_SECRET_KEY = 'elligente_device_secret';
   const ARC_RPC = 'https://rpc.testnet.arc.network';
   const ARC_CHAIN_ID = 5042002;
@@ -106,6 +107,17 @@ const WalletManager = (() => {
     return Array.from(arr, b => b.toString(16).padStart(2, '0')).join('');
   }
 
+  function _getLocalId() {
+    let id = null;
+    try { id = localStorage.getItem(LOCAL_ID_KEY); } catch (_) {}
+    if (!id) {
+      const r = crypto.getRandomValues(new Uint8Array(8));
+      id = 'local-' + Array.from(r, b => b.toString(16).padStart(2, '0')).join('');
+      try { localStorage.setItem(LOCAL_ID_KEY, id); } catch (_) {}
+    }
+    return id;
+  }
+
   // ── Wallet creation / restore ──────────────────────────────
   async function createOrRestoreWallet(email, userId) {
     if (typeof ethers === 'undefined') throw new Error('ethers.js not loaded');
@@ -161,6 +173,32 @@ const WalletManager = (() => {
     _internalWallet = wallet.connect(_internalProvider);
     _accountType = 'internal';
     return _internalWallet;
+  }
+
+  // ── Self-custody (local key) — user holds the key, encrypted on this device ──
+  // Stores a given private key in the encrypted vault (no auth/server) and loads
+  // it as the active internal wallet. Used for "create" (random key) and "import".
+  async function importLocalWallet(privateKey) {
+    if (typeof ethers === 'undefined') throw new Error('ethers.js not loaded');
+    const w = new ethers.Wallet(privateKey); // throws if invalid
+    const id = _getLocalId();
+    const salt = _generateSalt();
+    const derivedKey = await _deriveKey(id + '|' + id, salt);
+    const encrypted = await _encrypt(w.privateKey, derivedKey);
+    localStorage.setItem(VAULT_KEY, JSON.stringify({ ...encrypted, salt, v: 2 }));
+    _internalProvider = new ethers.JsonRpcProvider(ARC_RPC);
+    _internalWallet = w.connect(_internalProvider);
+    _accountType = 'internal';
+    return _internalWallet;
+  }
+
+  // Restore a previously-created local (self-custody) wallet from the vault.
+  // Returns the wallet, or null if no local wallet exists on this device.
+  async function restoreLocalWallet() {
+    let id = null;
+    try { id = localStorage.getItem(LOCAL_ID_KEY); } catch (_) {}
+    if (!id) return null;
+    try { return await createOrRestoreWallet(id, id); } catch (_) { return null; }
   }
 
   // ── Universal getters — always use these, never access globals directly ──
@@ -289,6 +327,39 @@ const WalletManager = (() => {
     return _activeSource;
   }
 
+  /**
+   * Switch the INTERNAL (Intelligent) wallet to another EVM chain.
+   * The internal wallet is a local key bound to a fixed JsonRpcProvider, so we
+   * re-point its provider (and reconnect the local signer) to the target chain's
+   * RPC. No injected wallet / no wallet_switchEthereumChain involved.
+   * Returns true on success, false if not applicable or RPC is unavailable.
+   */
+  async function switchInternalChain(chainId) {
+    if (_activeSource !== 'internal') return false;
+    if (typeof ethers === 'undefined') return false;
+    let rpc = null;
+    try {
+      const ci = (typeof getChainById === 'function' && getChainById(chainId))
+        || (typeof CHAINS !== 'undefined' && CHAINS.find && CHAINS.find(c => c && c.chainId === chainId))
+        || null;
+      if (ci && ci.rpc) rpc = ci.rpc;
+    } catch (_) {}
+    if (!rpc && chainId === ARC_CHAIN_ID) rpc = ARC_RPC;
+    if (!rpc) return false;
+    const newProvider = (typeof getCachedProvider === 'function')
+      ? getCachedProvider(rpc)
+      : new ethers.JsonRpcProvider(rpc);
+    if (!newProvider) return false;
+    _internalProvider = newProvider;
+    if (_internalWallet && !_internalWallet._isRemoteSigner && typeof _internalWallet.connect === 'function') {
+      _internalWallet = _internalWallet.connect(newProvider);
+      window.signer = _internalWallet;
+    }
+    window.provider = newProvider;
+    window.activeChainId = chainId;
+    return true;
+  }
+
   // ── Deactivation ───────────────────────────────────────────
 
   function deactivateInternalWallet() {
@@ -393,12 +464,13 @@ const WalletManager = (() => {
     if (scoreEl) scoreEl.style.display = address ? '' : 'none';
     if (typeof updateNetworkBadge === 'function') { try { updateNetworkBadge(); } catch (_) {} }
     if (address && typeof refreshBalance === 'function') { refreshBalance().catch(() => {}); }
+    if (typeof prfRefreshProfile === 'function') { try { var _pp = document.getElementById('page-profile'); if (_pp && _pp.classList.contains('active')) prfRefreshProfile(); } catch (_) {} }
   }
 
   // ── Public API ─────────────────────────────────────────────
   return {
     // Creation / restore
-    createOrRestoreWallet,
+    createOrRestoreWallet, importLocalWallet, restoreLocalWallet,
 
     // Universal getters
     getAddress, getSigner, getProvider, getType,
@@ -410,7 +482,7 @@ const WalletManager = (() => {
     cacheExternalProvider,
 
     // Switching
-    switchToInternal, switchToExternal, getActiveSource,
+    switchToInternal, switchToExternal, getActiveSource, switchInternalChain,
 
     // Deactivation
     deactivateInternalWallet, clearVault,
