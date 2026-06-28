@@ -12639,12 +12639,15 @@ async function fetchMessageAndAttestation(intentId, txHash, srcDomain){
     var data = await resp.json();
     if(data && data.messages && data.messages.length > 0){
       var msg = data.messages[0];
+      // Iris V2 'message' is the canonical bytes for receiveMessage (754 bytes, includes encoding)
+      // Iris V2 'attestation' is the signature over keccak256(message)
       updateBridgeHistory(intentId, {
         attestationSig: msg.attestation,
+        irisMessage: msg.message,
         irisStatus: msg.status,
         destDomainIris: msg.destinationDomain
       });
-      console.log('[V4] Attestation cached from Iris');
+      console.log('[V4] Iris fetched — message:', (msg.message?.length || 0), 'attestation:', (msg.attestation?.length || 0), 'status:', msg.status);
     }
   } catch(e){ console.warn('[V4] Iris fetch failed:', e.message); }
 }
@@ -12666,8 +12669,9 @@ async function executeMint(intentId){
   }
 
   // ── Validate message data ──────────────────────────────
-  if(!entry.messageBytesRaw || entry.messageBytesRaw === '0x'){
-    toast('Missing CCTP message data — must be captured during burn', 'error');
+  // receiveMessage needs the Iris V2 message (canonical CCTP bytes), attestation from Iris
+  if(!entry.irisMessage || entry.irisMessage === '0x'){
+    toast('Missing Iris CCTP message — attestation not yet fetched from Circle', 'error');
     return;
   }
   if(!entry.attestationSig || entry.attestationSig === '0x'){
@@ -12675,23 +12679,22 @@ async function executeMint(intentId){
     return;
   }
 
-  // Ensure messageBytesRaw is a proper hex string
-  var msgBytes = entry.messageBytesRaw;
-  if(typeof msgBytes !== 'string' || !msgBytes.startsWith('0x')){
-    try { msgBytes = ethers.hexlify(msgBytes); } catch(e){ toast('Invalid message bytes format', 'error'); return; }
-  }
+  var msgBytes = entry.irisMessage;
   var attSig = entry.attestationSig;
-  if(typeof attSig !== 'string' || !attSig.startsWith('0x')){
-    try { attSig = ethers.hexlify(attSig); } catch(e){ toast('Invalid attestation format', 'error'); return; }
+
+  // Validate messageHash if we have the on-chain hash
+  if(entry.messageHash){
+    var calcHash = ethers.keccak256(msgBytes);
+    console.log('[V4] messageHash check:', { stored: entry.messageHash?.slice(0,20), calculated: calcHash.slice(0,20), match: calcHash === entry.messageHash });
   }
 
   // Debug log
   console.log('[V4] executeMint debug:', {
     intentId: intentId.slice(0,20),
-    messageLength: (msgBytes.length - 2) / 2 + ' bytes',
-    attestationLength: (attSig.length - 2) / 2 + ' bytes',
-    destDomain: entry.destDomainIris || entry.destDomain,
-    hasSignature: !!entry.attestationSig
+    irisMessageLen: (msgBytes.length - 2) / 2 + ' bytes',
+    attestationLen: (attSig.length - 2) / 2 + ' bytes',
+    attestationPrefix: attSig.slice(0, 30),
+    destDomain: entry.destDomainIris || entry.destDomain
   });
 
   // ── Resolve destination chain ──────────────────────────
