@@ -7876,7 +7876,7 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
     <!-- PAGE: CROSSCHAIN DASHBOARD -->
     <div class="page" id="page-xcdashboard">
       <div class="page-header"><div class="page-title">MultiSend CrossChain</div><div class="page-sub">E2E Bridge Lifecycle · CCTP Message Inspector · Mint Execution</div></div>
-      <div class="xd-layout" style="display:flex;flex-direction:column;gap:14px;padding:0 16px 24px">
+      <div class="xd-layout" style="flex:1;overflow-y:auto;min-height:0;display:flex;flex-direction:column;gap:14px;padding:0 16px 32px">
 
         <!-- Row 1: E2E Metric Cards -->
         <div class="xd-cards" style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px" id="xd-cards">
@@ -7949,10 +7949,21 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
           </div>
         </div>
 
+        <!-- Section: CrossChain Execution (Multi-Destination) -->
+        <div class="card" style="padding:14px"><div style="font-size:12px;font-weight:700;margin-bottom:8px">CrossChain Execution — Multi Destination</div>
+          <div style="font-size:8.5px;color:var(--muted2);margin-bottom:8px">Cross-chain transfers require one mint transaction per destination chain. Burn creates the CCTP message, mint releases USDC on the selected destination.</div>
+          <div id="xd-batches" style="font-size:9px">
+            <div style="text-align:center;padding:12px;color:var(--muted2)">Loading batch data...</div>
+          </div>
+        </div>
+
         <!-- Section: Recovery -->
         <div class="card" style="padding:14px"><div style="font-size:12px;font-weight:700;margin-bottom:8px">Recovery Center</div>
           <div style="font-size:9px;color:var(--muted2)" id="xd-recovery">Loading pending intents...</div>
-          <button class="btn" onclick="xdRefreshAll()" style="margin-top:8px;font-size:10px"><i class="ti ti-refresh"></i> Retry Sync &amp; Recover</button>
+          <div style="display:flex;gap:8px;margin-top:8px">
+            <button class="btn" onclick="xdRefreshAll()" style="font-size:10px"><i class="ti ti-refresh"></i> Retry Sync &amp; Recover</button>
+            <button class="btn" id="xd-mint-all-btn" onclick="xdMintAllReady()" style="font-size:10px;background:var(--green);color:#fff;border:none;display:none"><i class="ti ti-send"></i> Mint All Ready</button>
+          </div>
         </div>
       </div>
     </div><!-- end page-xcdashboard -->
@@ -12141,6 +12152,11 @@ function prepareCrossChainBatch(){
   // V4 route
   if(useV4Bridge){
     if(!walletAddress){ toast('Connect wallet first', 'error'); return; }
+    // V4 executor + adapter are deployed ONLY on Arc Testnet
+    if(activeChainId !== 5042002){
+      toast('Bridge V4 burn requires Arc Testnet (chain 5042002). Switch to Arc first.', 'error');
+      return;
+    }
     const crossChainRecipients = recipients.filter(r => getRecipientRoute(r) === 'bridge');
     if(crossChainRecipients.length === 0){
       toast('Add at least one recipient on a different chain (not Arc)', 'warning');
@@ -12397,6 +12413,11 @@ async function executeCrossChainBatch(crossRcpts, useHook = false){
 // ── V4 + CCTPAdapterV2 Bridge Intent Flow ──────────────────────
 async function executeBridgeIntentV4(){
   if(!signer || !walletAddress){ toast('Connect wallet first', 'error'); return; }
+  // MultiSendExecutorV4 + CCTPAdapterV2 are deployed ONLY on Arc Testnet
+  if(activeChainId !== 5042002){
+    toast('Bridge V4 requires Arc Testnet (chain 5042002). Please switch network.', 'error');
+    return;
+  }
   const crossRcpts = recipients.filter(r => getRecipientRoute(r) === 'bridge');
   if(crossRcpts.length === 0){ toast('Add at least one cross-chain recipient', 'warning'); return; }
 
@@ -12435,6 +12456,8 @@ async function executeBridgeIntentV4(){
       }
     }
 
+    console.log('[V4 BRIDGE STEP] Resolved:', JSON.stringify({chainName:chainName, destChainNum:destChainNum, destDomain:destDomain}));
+
     toast('Creating route intent...', 'info');
     const tx1 = await executorV4.createRouteIntent(destChainNum, usdcAddr, recipsAddr, amounts, { gasLimit: 400000 });
     const r1 = await tx1.wait();
@@ -12442,6 +12465,7 @@ async function executeBridgeIntentV4(){
     const intentId = evt?.args?.intentId;
     if(!intentId) throw new Error('Failed to capture intentId from event');
     console.log('[V4] intentId:', intentId);
+    console.log('[V4 BRIDGE STEP 1 OK] createRouteIntent — intentId:', intentId?.slice(0,20));
     try { localStorage.setItem('arcpay_last_intent', intentId); } catch(e) {}
 
     saveBridgeHistory({
@@ -12456,15 +12480,43 @@ async function executeBridgeIntentV4(){
     if(allowance < total){
       const apTx = await usdcContract.approve(CCTP_ADAPTER_V2, total);
       await apTx.wait();
+      console.log('[V4 BRIDGE STEP 2 OK] approve:', total.toString(), 'USDC to CCTPAdapterV2');
+    } else {
+      console.log('[V4 BRIDGE STEP 2 SKIP] allowance sufficient:', allowance.toString());
     }
 
     const mintRecipient = mintRecipientBytes32For(crossRcpts[0]);
+
+    // ── BURN DEBUG: log domains before configure ──────────────
+    const srcChainName = (function(){
+      for(var cid of Object.keys(CHAIN_REGISTRY)){
+        if(Number(cid) === activeChainId) return CHAIN_REGISTRY[cid].id || CHAIN_REGISTRY[cid].name;
+      }
+      return 'Arc_Testnet';
+    })();
+    const srcDomainNum = (function(){
+      for(var cid of Object.keys(CHAIN_REGISTRY)){
+        if(Number(cid) === activeChainId) return CHAIN_REGISTRY[cid].cctp?.domain;
+      }
+      return 26;
+    })();
+    console.log('[V4 BURN DEBUG]', JSON.stringify({
+      sourceChain: srcChainName,
+      sourceDomain: srcDomainNum,
+      destinationChain: chainName,
+      destinationDomain: destDomain,
+      amount: ethers.formatUnits(total, 6) + ' USDC'
+    }));
+
     toast('Configuring bridge intent...', 'info');
     const cfgTx = await adapterV2.configureIntent(intentId, destDomain, mintRecipient, ethers.ZeroHash);
     await cfgTx.wait();
+    console.log('[V4 BRIDGE STEP 3 OK] configureIntent — intentId:', intentId?.slice(0,20), 'destDomain:', destDomain);
 
     toast('Executing bridge intent...', 'info');
+    console.log('[V4 BRIDGE STEP 4] executeBridgeIntent about to send — intentId:', intentId?.slice(0,20), 'adapter:', CCTP_ADAPTER_V2);
     const tx4 = await executorV4.executeBridgeIntent(intentId, CCTP_ADAPTER_V2, { gasLimit: 800000 });
+    console.log('[V4 BRIDGE STEP 4] executeBridgeIntent TX sent:', tx4.hash);
     const r4 = await tx4.wait();
 
     updateBridgeHistory(intentId, { executeTx: tx4.hash });
@@ -12493,6 +12545,26 @@ async function executeBridgeIntentV4(){
           messageBytesRaw = ethers.hexlify(decoded[0]);
           messageHash = ethers.keccak256(messageBytesRaw);
           console.log('[V4] MessageSent hash:', messageHash, 'bytesLen:', ethers.dataLength(messageBytesRaw));
+
+          // ── Decode message to verify domains ───────────────
+          try {
+            const msgBody = ethers.dataSlice(messageBytesRaw, 4);
+            const domainDecoded = ethers.AbiCoder.defaultAbiCoder().decode(['uint32','uint32','uint64'], msgBody);
+            const srcDomainFromMsg = Number(domainDecoded[0]);
+            const dstDomainFromMsg = Number(domainDecoded[1]);
+            console.log('[V4 MSG DECODE]', JSON.stringify({
+              sourceDomainFromMessage: srcDomainFromMsg,
+              destinationDomainFromMessage: dstDomainFromMsg,
+              expectedDestDomain: destDomain,
+              destDomainMatches: dstDomainFromMsg === destDomain,
+              nonce: domainDecoded[2].toString()
+            }));
+            if(dstDomainFromMsg !== destDomain){
+              console.error('[V4] DOMAIN MISMATCH! Message destinationDomain=' + dstDomainFromMsg + ' but configured destDomain=' + destDomain);
+            }
+          } catch(decodeErr){
+            console.warn('[V4] Message domain decode failed:', decodeErr.message);
+          }
         } catch(e){ console.warn('[V4] Failed to decode MessageSent:', e.message); }
       }
     }
@@ -12540,6 +12612,24 @@ async function executeBridgeIntentV4(){
 
   } catch(e){
     console.error('[V4] Bridge error:', e);
+    // ── Full revert reason extraction ──────────────────────
+    try {
+      console.error('[V4 BRIDGE ERROR DUMP]', JSON.stringify({
+        shortMessage: e.shortMessage || null,
+        message: e.message || null,
+        code: e.code || null,
+        reason: e.reason || null,
+        data: e.data ? (typeof e.data === 'string' ? e.data.slice(0,200) : String(e.data).slice(0,200)) : null,
+        dataSelector: e.data ? (typeof e.data === 'string' ? e.data.slice(0,10) : null) : null,
+        errorName: e.errorName || null,
+        errorArgs: e.errorArgs ? JSON.stringify(e.errorArgs) : null,
+        action: e.action || null,
+        invocation: e.invocation || null,
+        transaction: e.transaction ? { to: e.transaction.to, from: e.transaction.from, dataPreview: e.transaction.data?.slice(0,50), value: e.transaction.value?.toString() } : null,
+        receipt: e.receipt ? { status: e.receipt.status, gasUsed: e.receipt.gasUsed?.toString(), blockNumber: e.receipt.blockNumber } : null,
+        fullError: String(e).slice(0,600)
+      }));
+    } catch(_dumpErr){ console.warn('Error dump failed:', _dumpErr); }
     recordMetric('failed', Date.now() - (bridgeStart || Date.now()));
     const msg = e.shortMessage || e.message || 'Unknown error';
     if(msg.includes('user rejected') || msg.includes('ACTION_REJECTED')){
@@ -12578,49 +12668,140 @@ const _attestationTimers = {};
 
 async function checkIrisAttestation(messageHash, srcDomain, txHash){
   if(!messageHash || messageHash === ethers.ZeroHash) return null;
-  // Primary: Iris V2 messages by txHash (Arc Testnet reliable path)
+
+  // ── Validation ────────────────────────────────────────
+  if(srcDomain === null || srcDomain === undefined){
+    console.warn('[V4 IRIS] srcDomain is null/undefined — using Arc Testnet default 26');
+    srcDomain = 26;
+  }
+  if(typeof srcDomain === 'number' && isNaN(srcDomain)){
+    console.warn('[V4 IRIS] srcDomain is NaN — using Arc Testnet default 26');
+    srcDomain = 26;
+  }
+  if(txHash && (typeof txHash !== 'string' || txHash.length !== 66 || !txHash.startsWith('0x'))){
+    console.warn('[V4 IRIS] Invalid txHash format:', typeof txHash, txHash?.length);
+    txHash = null;
+  }
+
+  // Primary: Iris V2 messages by txHash
   if(txHash && srcDomain){
     try {
       var v2url = 'https://iris-api-sandbox.circle.com/v2/messages/' + srcDomain + '?transactionHash=' + txHash;
+      console.log('[V4 IRIS] V2 check — srcDomain:', srcDomain, 'msgHash:', messageHash?.slice(0,20) + '...');
       var resp = await fetch(v2url);
       if(resp.ok){
         var data = await resp.json();
         if(data && data.messages && data.messages.length > 0){
           var msg = data.messages[0];
+          console.log('[V4 IRIS] V2 response — status:', msg.status, 'hasAttestation:', !!msg.attestation);
           if(msg.status === 'complete' && msg.attestation && msg.attestation !== 'PENDING'){
             return 'ATTESTATION_READY';
           }
           return msg.status === 'complete' ? 'ATTESTATION_READY' : 'PENDING';
         }
+      } else {
+        console.warn('[V4 IRIS] V2 HTTP', resp.status, '— falling back to attestations endpoint');
       }
-    } catch(e){}
+    } catch(e){ console.warn('[V4 IRIS] V2 fetch error:', e.message); }
   }
+
   // Fallback: attestations by messageHash
-  try {
-    var attUrl = 'https://iris-api-sandbox.circle.com/attestations/' + messageHash;
-    var attResp = await fetch(attUrl);
-    if(!attResp.ok){ if(attResp.status === 404) return 'PENDING'; return null; }
-    var attData = await attResp.json();
-    if(attData && attData.status === 'complete') return 'ATTESTATION_READY';
-    return 'PENDING';
-  } catch(e){ return null; }
+  if(messageHash){
+    try {
+      var attUrl = 'https://iris-api-sandbox.circle.com/attestations/' + messageHash;
+      console.log('[V4 IRIS] Attestation fallback — msgHash:', messageHash?.slice(0,20) + '...');
+      var attResp = await fetch(attUrl);
+      if(!attResp.ok){ console.log('[V4 IRIS] Attestation HTTP', attResp.status); if(attResp.status === 404) return 'PENDING'; return null; }
+      var attData = await attResp.json();
+      console.log('[V4 IRIS] Attestation response — status:', attData?.status);
+      if(attData && attData.status === 'complete') return 'ATTESTATION_READY';
+      return 'PENDING';
+    } catch(e){ console.warn('[V4 IRIS] Attestation fetch error:', e.message); return null; }
+  }
+  return null;
 }
 
 function startAttestationPolling(intentId, messageHash, srcDomain, txHash){
   if(!messageHash || _attestationTimers[intentId]) return;
   var attempts = 0;
   var maxAttempts = 60;
+  console.log('[V4 IRIS POLLING] Starting — intentId:', (intentId||'').slice(0,16), 'messageHash:', messageHash?.slice(0,20)+'...', 'maxAttempts:', maxAttempts);
   _attestationTimers[intentId] = setInterval(async function(){
     if(attempts >= maxAttempts){ stopAttestationPolling(intentId); return; }
     attempts++;
+    console.log('[V4 IRIS POLLING] attempt', attempts + '/' + maxAttempts, '— intentId:', (intentId||'').slice(0,16));
+
+    // First try V2 by txHash if available — MATCH to this intent's messageHash
+    var irisV2Result = null;
+    if(txHash && srcDomain){
+      try {
+        var v2url = 'https://iris-api-sandbox.circle.com/v2/messages/' + srcDomain + '?transactionHash=' + txHash;
+        var v2resp = await fetch(v2url);
+        if(v2resp.ok){
+          var v2data = await v2resp.json();
+          if(v2data && v2data.messages && v2data.messages.length > 0){
+            // Match by messageHash, not index [0]
+            for(var _mi = 0; _mi < v2data.messages.length; _mi++){
+              var _candidate = v2data.messages[_mi];
+              if(_candidate.message){
+                var _candHash = ethers.keccak256(_candidate.message);
+                if(_candHash === messageHash){
+                  irisV2Result = _candidate;
+                  console.log('[V4 IRIS POLLING] matched message by hash — index:', _mi, 'of', v2data.messages.length);
+                  break;
+                }
+              }
+            }
+            // Fallback: if no hash match, use first message (legacy)
+            if(!irisV2Result){
+              console.warn('[V4 IRIS POLLING] No hash match among', v2data.messages.length, 'messages — using [0] as fallback');
+              irisV2Result = v2data.messages[0];
+            }
+          }
+        }
+      } catch(_v2e){}
+    }
+
+    // Check attestation endpoint
     var result = await checkIrisAttestation(messageHash, srcDomain, txHash);
-    if(result === 'PENDING' || result === null) return;
+
+    console.log('[V4 IRIS POLLING] status:', result, 'signatureAvailable:', !!(irisV2Result && irisV2Result.attestation));
+
+    if(result === 'PENDING' || result === null){
+      updateBridgeHistory(intentId, { irisStatus: 'pending_attestation' });
+      return;
+    }
     if(result === 'ATTESTATION_READY'){
-      updateBridgeHistory(intentId, { finalStatus: 'ATTESTATION_READY', attestation: 'complete' });
+      if(irisV2Result && irisV2Result.attestation && irisV2Result.message){
+        // Validate: this attestation belongs to this intent's messageHash
+        var _v2MsgHash = ethers.keccak256(irisV2Result.message);
+        if(_v2MsgHash !== messageHash){
+          console.error('[V4 IRIS POLLING] ATTESTATION MISMATCH — Iris V2 message hash', _v2MsgHash, 'does not match intent hash', messageHash);
+          // DO NOT save — attestation belongs to different message
+        } else {
+          updateBridgeHistory(intentId, {
+            attestationSig: irisV2Result.attestation,
+            irisMessage: irisV2Result.message,
+            irisStatus: 'complete',
+            destDomainIris: irisV2Result.destinationDomain,
+            attestationHash: messageHash
+          });
+          console.log('[V4 ATTESTATION SAVE]', JSON.stringify({
+            intentId: (intentId||'').slice(0,16),
+            messageHash: messageHash?.slice(0,20)+'...',
+            signatureHash: _v2MsgHash?.slice(0,20)+'...',
+            irisStatus: 'complete',
+            signatureLength: (irisV2Result.attestation?.length || 0)
+          }));
+        }
+      }
+      updateBridgeHistory(intentId, { finalStatus: 'ATTESTATION_READY', attestation: 'complete', irisStatus: 'complete' });
       stopAttestationPolling(intentId);
       toast('CCTP attestation ready for intent ' + shortAddr(intentId) + ' — ready to mint on destination', 'success');
       // Fetch & cache message + attestation for minting
       fetchMessageAndAttestation(intentId, txHash, srcDomain);
+      // Auto-refresh the dashboard
+      setTimeout(function(){ if(typeof xdRefreshAll === 'function') xdRefreshAll(); }, 1000);
     }
   }, 5000);
 }
@@ -12631,28 +12812,118 @@ function stopAttestationPolling(intentId){
 
 // ── Mint / ReceiveMessage (destination chain) ──────────────────
 async function fetchMessageAndAttestation(intentId, txHash, srcDomain){
-  if(!txHash || !srcDomain) return;
+  if(!txHash || srcDomain === null || srcDomain === undefined){ console.warn('[V4 IRIS] fetch skipped — invalid params:', { txHash: !!txHash, srcDomain }); return; }
+  console.log('[V4 IRIS DEBUG] fetch — txHash:', txHash?.slice(0,20) + '...', 'srcDomain:', srcDomain);
   try {
     var v2url = 'https://iris-api-sandbox.circle.com/v2/messages/' + srcDomain + '?transactionHash=' + txHash;
     var resp = await fetch(v2url);
     if(!resp.ok) return;
     var data = await resp.json();
     if(data && data.messages && data.messages.length > 0){
-      var msg = data.messages[0];
-      // Iris V2 'message' is the canonical bytes for receiveMessage (754 bytes, includes encoding)
-      // Iris V2 'attestation' is the signature over keccak256(message)
+      // Match message by hash to this intent, not index [0]
+      var entry = (loadBridgeHistory()).find(function(h){ return h.intentId === intentId; });
+      var targetHash = (entry && entry.messageHash) ? entry.messageHash : null;
+      var matchedMsg = null;
+      for(var _fi = 0; _fi < data.messages.length; _fi++){
+        var _fcand = data.messages[_fi];
+        if(_fcand.message && targetHash){
+          if(ethers.keccak256(_fcand.message) === targetHash){
+            matchedMsg = _fcand;
+            break;
+          }
+        }
+      }
+      if(!matchedMsg) matchedMsg = data.messages[0]; // fallback
       updateBridgeHistory(intentId, {
-        attestationSig: msg.attestation,
-        irisMessage: msg.message,
-        irisStatus: msg.status,
-        destDomainIris: msg.destinationDomain
+        attestationSig: matchedMsg.attestation,
+        irisMessage: matchedMsg.message,
+        irisStatus: matchedMsg.status,
+        destDomainIris: matchedMsg.destinationDomain
       });
-      console.log('[V4] Iris fetched — message:', (msg.message?.length || 0), 'attestation:', (msg.attestation?.length || 0), 'status:', msg.status);
+      console.log('[V4] Iris fetched — message:', (matchedMsg.message?.length || 0), 'attestation:', (matchedMsg.attestation?.length || 0), 'status:', matchedMsg.status);
     }
   } catch(e){ console.warn('[V4] Iris fetch failed:', e.message); }
 }
 
+// ── Attestation validation: re-fetch from Iris using messageHash ──
+async function validateAttestation(intentId){
+  var history = loadBridgeHistory();
+  var entry = history.find(function(h){ return h.intentId === intentId; });
+  if(!entry){ console.warn('[V4 ATTESTATION] intent not found'); return {status:'error'}; }
+
+  var msgBytesRaw = entry.messageBytesRaw;
+  if(!msgBytesRaw || msgBytesRaw === '0x' || msgBytesRaw.length < 10){
+    msgBytesRaw = entry.irisMessage;
+    if(!msgBytesRaw) return {status:'error'};
+  }
+
+  var calculatedHash = ethers.keccak256(msgBytesRaw);
+  var storedHash = entry.messageHash;
+
+  console.log('[V4 ATTESTATION CHECK]', JSON.stringify({
+    messageHashCalculated: calculatedHash,
+    messageHashStored: storedHash || '(none)',
+    hashMatch: storedHash ? (calculatedHash === storedHash) : '(no stored hash)',
+    signatureLength: entry.attestationSig ? (entry.attestationSig.length - 2) / 2 : 0,
+    signatureSource: entry.attestationSig ? 'localStorage' : 'none',
+    attestationStored: !!entry.attestationSig,
+    irisStatus: entry.irisStatus || 'unknown'
+  }));
+
+  if(storedHash && calculatedHash !== storedHash){
+    console.error('[V4 ATTESTATION] HASH MISMATCH — stored attestation does NOT match messageBytesRaw!');
+    console.error('[V4 ATTESTATION] calculated:', calculatedHash);
+    console.error('[V4 ATTESTATION] stored:', storedHash);
+  }
+
+  // Re-fetch attestation from Iris using the calculated hash
+  try {
+    var attUrl = 'https://iris-api-sandbox.circle.com/attestations/' + calculatedHash;
+    console.log('[V4 ATTESTATION] Fetching from Iris:', attUrl.slice(0,80) + '...');
+    var resp = await fetch(attUrl);
+    if(!resp.ok){
+      console.warn('[V4 ATTESTATION] Iris HTTP', resp.status);
+      if(resp.status === 404){
+        console.warn('[V4 ATTESTATION] Attestation not yet available — Circle still signing (pending)');
+        updateBridgeHistory(intentId, { irisStatus: 'pending_attestation' });
+        return {status:'pending', retry:true};
+      }
+      return {status:'error'};
+    }
+    var attData = await resp.json();
+    if(attData && attData.attestation && attData.attestation !== 'PENDING' && attData.status === 'complete'){
+      var freshAttestation = attData.attestation;
+      console.log('[V4 ATTESTATION] Iris returned attestation — length:', freshAttestation.length);
+      if(entry.attestationSig && entry.attestationSig !== freshAttestation){
+        console.warn('[V4 ATTESTATION] Stored attestation DIFFERS from Iris! Updating localStorage...');
+        updateBridgeHistory(intentId, {
+          attestationSig: freshAttestation,
+          irisStatus: 'complete',
+          attestationFetchedAt: Date.now(),
+          attestationHash: calculatedHash
+        });
+      } else if(!entry.attestationSig){
+        updateBridgeHistory(intentId, {
+          attestationSig: freshAttestation,
+          irisStatus: 'complete',
+          attestationFetchedAt: Date.now(),
+          attestationHash: calculatedHash
+        });
+      }
+      console.log('[V4 ATTESTATION] READY — attestation valid for mint');
+      return {status:'ready'};
+    }
+    console.warn('[V4 ATTESTATION] Iris attestation not complete — status:', attData?.status);
+    updateBridgeHistory(intentId, { irisStatus: 'pending_attestation' });
+    return {status:'pending', retry:true};
+  } catch(e){
+    console.warn('[V4 ATTESTATION] Iris fetch error:', e.message);
+    return {status:'pending', retry:true};
+  }
+}
+
 async function executeMint(intentId){
+  console.log('[V4] executeMint called — intentId:', intentId?.slice(0,20), 'signer:', !!signer, 'wallet:', !!walletAddress);
   if(!signer || !walletAddress){ toast('Connect wallet first', 'error'); return; }
   var history = loadBridgeHistory();
   var entry = history.find(function(h){ return h.intentId === intentId; });
@@ -12668,110 +12939,475 @@ async function executeMint(intentId){
     return;
   }
 
-  // ── Validate message data ──────────────────────────────
-  // receiveMessage needs the Iris V2 message (canonical CCTP bytes), attestation from Iris
-  if(!entry.irisMessage || entry.irisMessage === '0x'){
-    toast('Missing Iris CCTP message — attestation not yet fetched from Circle', 'error');
-    return;
-  }
+  // ── Guard: Must have attestation signature ─────────────
   if(!entry.attestationSig || entry.attestationSig === '0x'){
-    toast('Missing attestation signature — wait for Iris confirmation', 'warning');
+    // No attestation yet — try to fetch from Iris, then poll
+    if(entry.executeTx && entry.srcDomain){
+      toast('Fetching attestation from Iris...', 'info');
+      await fetchMessageAndAttestation(intentId, entry.executeTx, entry.srcDomain);
+      entry = loadBridgeHistory().find(function(h){ return h.intentId === intentId; }) || entry;
+    }
+    if(!entry.attestationSig || entry.attestationSig === '0x'){
+      // Still no attestation — start polling
+      var pollMsgBytes2 = entry.messageBytesRaw || entry.irisMessage;
+      if(!pollMsgBytes2){ toast('Missing CCTP message bytes', 'error'); return; }
+      var pollMsgHash2 = ethers.keccak256(pollMsgBytes2);
+      toast('Waiting Circle attestation... (polling every 5s, max 60 attempts)', 'info');
+      startAttestationPolling(intentId, pollMsgHash2, entry.srcDomain || 26, entry.executeTx);
+      return;
+    }
+  }
+
+  // ── Guard: Must have message bytes to proceed ───────────
+  if((!entry.messageBytesRaw || entry.messageBytesRaw === '0x') && (!entry.irisMessage || entry.irisMessage === '0x')){
+    toast('Missing CCTP message bytes — run a fresh burn to populate', 'error');
     return;
   }
 
-  var msgBytes = entry.irisMessage;
+  // ── Use PERSISTED data (do NOT re-call Iris if already cached) ──
+  // The polling already saved messageBytesRaw + attestationSig from Iris V2
+  var msgBytes = null;
+  if(entry.messageBytesRaw && entry.messageBytesRaw !== '0x' && entry.messageBytesRaw.length > 10){
+    msgBytes = entry.messageBytesRaw;
+    console.log('[V4] Using messageBytesRaw from burn event — length:', (msgBytes.length-2)/2);
+  } else if(entry.irisMessage && entry.irisMessage !== '0x'){
+    msgBytes = entry.irisMessage;
+    console.warn('[V4] FALLBACK to irisMessage — messageBytesRaw not available');
+  }
   var attSig = entry.attestationSig;
 
-  // Validate messageHash if we have the on-chain hash
-  if(entry.messageHash){
-    var calcHash = ethers.keccak256(msgBytes);
-    console.log('[V4] messageHash check:', { stored: entry.messageHash?.slice(0,20), calculated: calcHash.slice(0,20), match: calcHash === entry.messageHash });
+  if(!msgBytes){
+    toast('Missing CCTP message bytes — run a fresh burn', 'error');
+    return;
   }
 
-  // Debug log
-  console.log('[V4] executeMint debug:', {
-    intentId: intentId.slice(0,20),
-    irisMessageLen: (msgBytes.length - 2) / 2 + ' bytes',
-    attestationLen: (attSig.length - 2) / 2 + ' bytes',
-    attestationPrefix: attSig.slice(0, 30),
-    destDomain: entry.destDomainIris || entry.destDomain
-  });
+  // ── [V4 FINAL MINT DEBUG] — mostra exatamente o que vai ser usado ─
+  var debugCalcHash = ethers.keccak256(msgBytes);
+  console.log('[V4 FINAL MINT DEBUG]', JSON.stringify({
+    intentId: (intentId||'').slice(0,20),
+    messageHashUsed: debugCalcHash,
+    storedMessageHash: entry.messageHash || '(none)',
+    messageBytesHashRecalculated: debugCalcHash,
+    attestationSigLength: attSig ? (attSig.length - 2) / 2 : 0,
+    attestationStatus: entry.irisStatus || 'unknown',
+    dataSource: entry.messageBytesRaw ? 'messageBytesRaw (burn event)' : 'irisMessage (Iris API)',
+    isPersisted: !!entry.attestationSig
+  }));
 
-  // ── Resolve destination chain ──────────────────────────
+  // Force hex string conversion (fixes Uint8Array/Object from corrupted localStorage)
+  try {
+    if(typeof msgBytes !== 'string' || !msgBytes.startsWith('0x')) msgBytes = ethers.hexlify(msgBytes);
+    if(typeof attSig !== 'string' || !attSig.startsWith('0x')) attSig = ethers.hexlify(attSig);
+  } catch(e){
+    console.error('[V4] hexlify failed:', e.message, 'msgBytes type:', typeof msgBytes);
+    toast('Invalid message format — re-run burn to regenerate data', 'error');
+    return;
+  }
+
+  // ── Validate messageHash ───────────────────────────────
+  var calcHash = ethers.keccak256(msgBytes);
+  var storedHash = entry.messageHash;
+  var attHash = entry.attestationHash;
+
+  // ── [V4 FINAL MINT CHECK] — last validation before send ──
+  console.log('[V4 FINAL MINT CHECK]', JSON.stringify({
+    messageHashCalculated: calcHash,
+    messageHashStored: storedHash || '(none)',
+    hashMatch: storedHash ? (calcHash === storedHash) : '(no stored hash)',
+    attestationHash: attHash || '(none)',
+    attestationMatchesMessage: attHash ? (attHash === calcHash) : '(no att hash)',
+    attestationSource: entry.attestationFetchedAt ? ('Iris V2 (' + new Date(entry.attestationFetchedAt).toISOString() + ')') : (entry.attestationSig ? 'localStorage (old)' : 'none'),
+    signatureLength: entry.attestationSig ? (entry.attestationSig.length - 2) / 2 : 0
+  }));
+
+  // Block if hash mismatch (attestation was fetched for different message)
+  if(storedHash && calcHash !== storedHash){
+    console.error('[V4] HASH MISMATCH — refusing mint. calculated:', calcHash, 'stored:', storedHash);
+    toast('Message hash mismatch — attestation may be for a different intent. Re-run burn.', 'error');
+    return;
+  }
+  if(attHash && attHash !== calcHash){
+    console.error('[V4] ATTESTATION HASH MISMATCH — attestation is for different message. attHash:', attHash, 'calcHash:', calcHash);
+    toast('Attestation hash mismatch — re-run attestation fetch.', 'error');
+    return;
+  }
+
+  // ── DECODE CCTP MessageV1 with CORRECT offsets ──────────────────
+  // CCTP MessageV1 layout (376 bytes):
+  //   bytes 0-3:   version (uint32)
+  //   bytes 4-35:  nonce (bytes32)
+  //   bytes 36-39: sourceDomain (uint32)
+  //   bytes 40-43: destinationDomain (uint32)
+  //   bytes 44-75: sender (bytes32)
+  //   bytes 76-107: recipient (bytes32)
+  //   bytes 108-139: destinationCaller (bytes32)
+  //   bytes 140+:  messageBody
+  var decodedSrcDomain = null, decodedDstDomain = null, decodedNonce = null;
+  try {
+    var hex = msgBytes.startsWith('0x') ? msgBytes.slice(2) : msgBytes;
+
+    var versionSlice = hex.slice(0, 8);
+    var nonceSlice = hex.slice(8, 72);
+    var srcDomainSlice = hex.slice(72, 80);
+    var dstDomainSlice = hex.slice(80, 88);
+    var senderSlice = hex.slice(88, 152);
+    var recipientSlice = hex.slice(152, 216);
+    var callerSlice = hex.slice(216, 280);
+
+    decodedSrcDomain = Number(BigInt('0x' + srcDomainSlice));
+    decodedDstDomain = Number(BigInt('0x' + dstDomainSlice));
+    decodedNonce = BigInt('0x' + nonceSlice);
+
+    console.log('[V4 CCTP DECODE FIXED]', JSON.stringify({
+      version: BigInt('0x' + versionSlice).toString(),
+      nonce: decodedNonce.toString(),
+      sourceDomain: decodedSrcDomain,
+      destinationDomain: decodedDstDomain,
+      sender: '0x' + senderSlice.slice(senderSlice.length - 40),
+      recipient: '0x' + recipientSlice.slice(recipientSlice.length - 40)
+    }));
+  } catch(_derr){
+    console.error('[V4] Failed to decode messageBytes:', _derr.message);
+    toast('Invalid CCTP message format — re-run burn', 'error');
+    return;
+  }
+
+  // ── [V4 MINT PAYLOAD DEBUG] ──────────────────────────────
+  var currentChainDomainDecoded = null;
+  if(typeof activeChainId === 'number' && typeof CHAIN_REGISTRY !== 'undefined'){
+    for(var _dccid of Object.keys(CHAIN_REGISTRY)){
+      if(Number(_dccid) === activeChainId){ currentChainDomainDecoded = CHAIN_REGISTRY[_dccid].cctp?.domain; break; }
+    }
+  }
+  console.log('[V4 MINT PAYLOAD DEBUG]', JSON.stringify({
+    currentChainId: activeChainId,
+    currentCCTPDomain: (currentChainDomainDecoded !== null && currentChainDomainDecoded !== undefined) ? currentChainDomainDecoded : 'unknown',
+    decodedSourceDomain: decodedSrcDomain,
+    decodedDestinationDomain: decodedDstDomain,
+    recalculatedMessageHash: calcHash,
+    storedMessageHash: entry.messageHash || '(none)',
+    messageBytesLength: (msgBytes.length - 2) / 2,
+    attestationSigLength: (attSig.length - 2) / 2,
+    decodedNonce: decodedNonce ? decodedNonce.toString() : 'unknown'
+  }));
+
+  // ── Resolve destination chain FROM DECODED domain ──────
   var destChainId = null;
+  var destChainCfg = null;
   if(typeof CHAIN_REGISTRY !== 'undefined'){
-    for(var cid of Object.keys(CHAIN_REGISTRY)){
-      var ch = CHAIN_REGISTRY[cid];
-      if(ch && ch.cctp && Number(ch.cctp.domain) === Number(entry.destDomainIris || entry.destDomain)){
-        destChainId = Number(ch.chainId || cid); break;
+    for(var dcid of Object.keys(CHAIN_REGISTRY)){
+      var dch = CHAIN_REGISTRY[dcid];
+      if(dch && dch.cctp && Number(dch.cctp.domain) === decodedDstDomain){
+        destChainId = Number(dch.chainId || dcid);
+        destChainCfg = dch;
+        break;
       }
     }
   }
-  if(!destChainId){ destChainId = entry.destChain || 84532; }
+  if(destChainId === null || destChainId === undefined){
+    console.error('[V4] Cannot resolve chain for domain ' + decodedDstDomain + ' — CHAIN_REGISTRY missing entry');
+    toast('Unknown destination domain ' + decodedDstDomain + '. Add the chain to CHAIN_REGISTRY.', 'error');
+    return;
+  }
+  console.log('[V4] Mint chain resolved:', { decodedDstDomain: decodedDstDomain, destChainId: destChainId, chainName: (destChainCfg && (destChainCfg.id || destChainCfg.name)) || 'unknown' });
 
-  var chainName = 'destination chain (domain ' + (entry.destDomainIris || entry.destDomain || '?') + ', chainId ' + destChainId + ')';
-  var switchMsg = 'Switch your wallet to the ' + chainName + ' to mint USDC.\n\nAfter switching, click OK to proceed.';
-  if(!confirm(switchMsg)){ toast('Mint cancelled', 'warning'); return; }
+  // ── Get destMT from chain config ──────────────────────
+  var destMT = (destChainCfg && destChainCfg.cctp && destChainCfg.cctp.messageTransmitter) ? destChainCfg.cctp.messageTransmitter : '0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275';
 
+  // ── Switch to destination chain ────────────────────────────
+  var chainHex = '0x' + destChainId.toString(16);
   try {
-    var chainHex = '0x' + destChainId.toString(16);
-    if(window.ethereum){
-      try { await window.ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: chainHex }] }); }
-      catch(swErr){ if(swErr.code === 4902){ toast('Please add the destination network to your wallet first', 'error'); } return; }
+    var eth = (typeof _safeEth === 'function' && _safeEth()) || window.ethereum;
+    if(eth && eth.request && typeof activeChainId === 'number' && activeChainId !== destChainId){
+      toast('Switching to destination chain (chainId ' + destChainId + ')...', 'info');
+      try { await eth.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: chainHex }] }); }
+      catch(swErr){ if(swErr.code === 4902){ toast('Please add the destination network to your wallet first', 'error'); return; } }
+      try { if(typeof refreshProviderState === 'function') await refreshProviderState(); } catch(e){}
     }
-    await refreshProviderState();
   } catch(e){ toast('Could not switch network: ' + (e.shortMessage || e.message), 'error'); return; }
 
+  // ── DOMAIN MATCH GUARD: block if current chain domain !== decoded destinationDomain ─
+  if(typeof activeChainId === 'number'){
+    var currentChainDomainBlock = null;
+    if(typeof CHAIN_REGISTRY !== 'undefined'){
+      for(var _ccid of Object.keys(CHAIN_REGISTRY)){
+        if(Number(_ccid) === activeChainId){ currentChainDomainBlock = CHAIN_REGISTRY[_ccid].cctp?.domain; break; }
+      }
+    }
+    if(currentChainDomainBlock !== null && currentChainDomainBlock !== undefined && currentChainDomainBlock !== decodedDstDomain){
+      console.error('[V4] DOMAIN MISMATCH — message destinationDomain=' + decodedDstDomain + ' current chain domain=' + currentChainDomainBlock);
+      toast('Domain mismatch: message destination is ' + decodedDstDomain + ', but wallet is on chain domain ' + currentChainDomainBlock + '. Switch to the correct chain.', 'error');
+      return;
+    }
+  }
+
   // ── Build and send receiveMessage transaction ──────────
-  var destMT = '0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275';
   try {
-    toast('Calling receiveMessage on destination chain...', 'info');
-    updateBridgeHistory(intentId, { finalStatus: 'MINT_SUBMITTED' });
-
-    // Use ethers Interface to properly encode the function call
-    var mtIface = new ethers.Interface(['function receiveMessage(bytes message, bytes attestation) returns (bool)']);
-    var calldata = mtIface.encodeFunctionData('receiveMessage', [msgBytes, attSig]);
-
-    if(!calldata || calldata === '0x'){
-      toast('Failed to encode receiveMessage calldata', 'error');
+    // ── 1. Data validation guard ────────────────────────────
+    if(msgBytes === undefined || attSig === undefined){
+      console.error('[V4] Mint blocked: undefined messageBytes or attestationSig');
+      toast('Mint data corrupted — undefined data. Re-run burn to regenerate.', 'error');
+      return;
+    }
+    if(typeof msgBytes !== 'string' || msgBytes.length === 0 || msgBytes === '0x'){
+      console.error('[V4] Mint blocked: empty messageBytes. type:', typeof msgBytes, 'len:', msgBytes?.length);
+      toast('Mint data corrupted — empty message. Re-run burn.', 'error');
+      return;
+    }
+    if(typeof attSig !== 'string' || attSig.length === 0 || attSig === '0x'){
+      console.error('[V4] Mint blocked: empty attestationSig. type:', typeof attSig, 'len:', attSig?.length);
+      toast('Mint data corrupted — empty attestation. Wait for Iris confirmation.', 'error');
       return;
     }
 
-    console.log('[V4] Sending receiveMessage:', {
-      to: destMT,
-      dataLength: calldata.length,
-      dataPrefix: calldata.slice(0, 20)
-    });
+    // ── 2. Verify signer is fresh (global, refreshed after chain switch) ─
+    if(!signer || !provider){
+      console.error('[V4] signer/provider not available — try reconnecting wallet');
+      toast('Wallet not ready for destination chain. Reconnect and retry.', 'error');
+      return;
+    }
 
-    var tx = await signer.sendTransaction({ to: destMT, data: calldata, gasLimit: 300000 });
-    var receipt = await tx.wait();
+    // ── 3. MINT TARGET log ─────────────────────────────────
+    console.log('[MINT TARGET]', JSON.stringify({
+      address: destMT,
+      chainId: destChainId,
+      destDomain: decodedDstDomain
+    }));
 
-    if(receipt.status === 1){
+    // ── 4. Byte validation ─────────────────────────────────
+    var msgLen = (msgBytes.length - 2) / 2;
+    var attLen = (attSig.length - 2) / 2;
+    console.log('[V4 BYTE VALIDATION]', JSON.stringify({
+      messageLength: msgLen,
+      attestationLength: attLen,
+      messageHash: calcHash,
+      storedMsgHash: entry.messageHash || '(none)',
+      hashMatches: entry.messageHash ? (calcHash === entry.messageHash) : '(no stored hash)'
+    }));
+
+    // ── 5. ABI check ───────────────────────────────────────
+    var destMtAbi = ['function receiveMessage(bytes message, bytes attestation) returns (bool)'];
+    var destMtContract = new ethers.Contract(destMT, destMtAbi, signer);
+    console.log('[MINT ABI CHECK]', destMtContract.interface.fragments.map(function(f){ return f.format(); }));
+
+    // ── 5b. [V4 MINT TRACE START] — full diagnostic dump ──
+    var mtIface = new ethers.Interface(destMtAbi);
+    var fullCalldata = mtIface.encodeFunctionData('receiveMessage', [msgBytes, attSig]);
+    console.log('[V4 MINT TRACE START]', JSON.stringify({
+      targetContract: destMT,
+      targetChainId: destChainId,
+      functionSignature: 'receiveMessage(bytes,bytes) returns (bool)',
+      calldataFull: fullCalldata,
+      calldataLength: fullCalldata.length,
+      messageBytesLength: (msgBytes.length - 2) / 2,
+      attestationLength: (attSig.length - 2) / 2,
+      messageHash: calcHash,
+      storedMsgHash: entry.messageHash || '(none)',
+      decodedSourceDomain: decodedSrcDomain,
+      decodedDestinationDomain: decodedDstDomain,
+      decodedNonce: decodedNonce ? decodedNonce.toString() : 'unknown',
+      walletChainId: activeChainId,
+      walletCCTPDomain: currentChainDomainBlock,
+      messageTransmitterUsed: destMT,
+      cctpAdapterAddress: typeof CCTP_ADAPTER_V2 !== 'undefined' ? CCTP_ADAPTER_V2 : 'unknown',
+      executorAddress: typeof EXECUTOR_V4_ADDRESS !== 'undefined' ? EXECUTOR_V4_ADDRESS : 'unknown',
+      msgBytesSource: msgBytes === entry.irisMessage ? 'entry.irisMessage' : 're-fetched',
+      attSigSource: attSig === entry.attestationSig ? 'entry.attestationSig' : 're-fetched'
+    }));
+
+    // ── 5c. PASSO 1: eth_call direto no MessageTransmitter (read-only, sem signer) ─
+    console.log('[V4 DIAG] ——— PASSO 1: eth_call MessageTransmitter.receiveMessage ———');
+    try {
+      var mtReadProvider = provider;
+      if(!mtReadProvider && typeof getWriteProvider === 'function'){
+        try { mtReadProvider = getWriteProvider(); } catch(_){ mtReadProvider = provider; }
+      }
+      if(mtReadProvider){
+        var rawCalldata = fullCalldata;
+        try {
+          var simResult = await mtReadProvider.call({ to: destMT, data: rawCalldata });
+          console.log('[V4] ETH_CALL [MessageTransmitter] PASSED:', simResult);
+        } catch(mtCallErr){
+          console.error('[V4] ETH_CALL [MessageTransmitter] REVERTED:', JSON.stringify({
+            shortMessage: mtCallErr.shortMessage || mtCallErr.message || String(mtCallErr),
+            reason: mtCallErr.reason || null,
+            code: mtCallErr.code || null,
+            data: mtCallErr.data || null,
+            dataSelector: mtCallErr.data ? (typeof mtCallErr.data === 'string' ? mtCallErr.data.slice(0,10) : String(mtCallErr.data).slice(0,10)) : null,
+            selectorName: null,
+            errorName: mtCallErr.errorName || null,
+            errorArgs: mtCallErr.errorArgs || null,
+            action: mtCallErr.action || null,
+            invocation: mtCallErr.invocation || null,
+            fullError: String(mtCallErr)
+          }));
+        }
+      } else {
+        console.warn('[V4] ETH_CALL skipped — no provider available for read-only call');
+      }
+    } catch(_step1Outer){ console.warn('[V4] PASSO 1 outer error:', _step1Outer?.message); }
+
+    // ── 5d. PASSO 2: verificar se o contrato destino é realmente MessageTransmitter ─
+    console.log('[V4 DIAG] ——— PASSO 2: Contract verification ———');
+    try {
+      if(provider){
+        var bytecode = await provider.getCode(destMT);
+        console.log('[V4] PASSO 2A — destMT bytecode length:', (bytecode || '').length);
+        if(!bytecode || bytecode === '0x' || bytecode.length < 10){
+          console.error('[V4] PASSO 2A — DESTINATION CONTRACT NOT DEPLOYED! No bytecode at', destMT, 'on chain', destChainId);
+        }
+      }
+    } catch(_bcErr){ console.warn('[V4] PASSO 2A bytecode check failed:', _bcErr.message); }
+    try {
+      var mcCheckAbi = ['function localDomain() view returns (uint32)'];
+      var mcCheck = new ethers.Contract(destMT, mcCheckAbi, provider);
+      var localDom = await mcCheck.localDomain();
+      console.log('[V4] PASSO 2B — MessageTransmitter.localDomain():', Number(localDom), '| expecting:', decodedDstDomain, '| match:', Number(localDom) === decodedDstDomain);
+      if(Number(localDom) !== decodedDstDomain){
+        console.error('[V4] PASSO 2B — FATAL: MessageTransmitter localDomain=' + Number(localDom) + ' but message destinationDomain=' + decodedDstDomain);
+      }
+    } catch(_ldErr){ console.warn('[V4] PASSO 2B localDomain failed:', _ldErr.message); }
+    try {
+      if(provider){
+        var msgHashCheck = ethers.keccak256(msgBytes);
+        var nonceCheckAbi = ['function usedNonces(bytes32) view returns (uint256)'];
+        var nonceCheck = new ethers.Contract(destMT, nonceCheckAbi, provider);
+        var nonceVal = await nonceCheck.usedNonces(msgHashCheck);
+        console.log('[V4] PASSO 2C — usedNonces(' + msgHashCheck.slice(0,10) + '...):', nonceVal.toString(), '(0=available, >0=already consumed)');
+        if(Number(nonceVal) > 0){
+          console.warn('[V4] PASSO 2C — Nonce already consumed! This mint was already processed on-chain.');
+        }
+      }
+    } catch(_ncErr){ console.warn('[V4] PASSO 2C usedNonces failed:', _ncErr.message); }
+
+    // ── 5e. Diagnostic: check for common data corruption ──
+    if(entry.destDomainIris){ console.log('[V4 DIAG] entry.destDomainIris:', entry.destDomainIris, '(should match decodedDstDomain:', decodedDstDomain, ')'); }
+    if(entry.destDomain){ console.log('[V4 DIAG] entry.destDomain:', entry.destDomain); }
+    if(entry.srcDomain){ console.log('[V4 DIAG] entry.srcDomain:', entry.srcDomain); }
+    if(entry.executeTx){ console.log('[V4 DIAG] entry.executeTx:', entry.executeTx); }
+    console.log('[V4 DIAG] entry.irisMessage === msgBytes:', entry.irisMessage === msgBytes);
+    console.log('[V4 DIAG] entry.attestationSig === attSig:', entry.attestationSig === attSig);
+    console.log('[V4 DIAG] entry.irisStatus:', entry.irisStatus);
+    console.log('[V4 DIAG] entry.messageBytesRaw exists:', !!entry.messageBytesRaw);
+    console.log('[V4 DIAG] entry.messageHash:', entry.messageHash);
+    console.log('[V4 DIAG] entry.attestationSig length:', entry.attestationSig ? entry.attestationSig.length : 'missing');
+
+    // ── 6. V4 MINT CALL log ────────────────────────────────
+    console.log('[V4 MINT CALL]', JSON.stringify({
+      contract: destMT,
+      destination: destChainId,
+      messageBytesLength: msgLen,
+      attestationLength: attLen,
+      function: 'receiveMessage(bytes,bytes)',
+      paramOrder: 'messageBytesRaw, attestationSig'
+    }));
+
+    // ── [V4 MINT VERIFY] — final attestation validation ──
+    var _verifyCalcHash = ethers.keccak256(msgBytes);
+    console.log('[V4 MINT VERIFY]', JSON.stringify({
+      messageHashStored: entry.messageHash || '(none)',
+      messageHashCalculated: _verifyCalcHash,
+      hashMatch: entry.messageHash ? (_verifyCalcHash === entry.messageHash) : '(no stored hash)',
+      signaturePresent: !!(attSig && attSig !== '0x' && attSig.length > 10),
+      signatureLength: attSig ? (attSig.length - 2) / 2 : 0,
+      attestationSource: entry.attestationHash ? ('Iris V2 (hash ' + entry.attestationHash.slice(0,10) + '...)') : 'unknown'
+    }));
+
+    if(entry.messageHash && _verifyCalcHash !== entry.messageHash){
+      console.error('[V4 MINT VERIFY] HASH MISMATCH — aborting mint');
+      toast('Message hash mismatch. Refetch Iris attestation.', 'error');
+      return;
+    }
+
+    // ── 7. Preflight staticCall (diagnostic only, not blocking) ─
+    try {
+      await destMtContract.receiveMessage.staticCall(msgBytes, attSig);
+      console.log('[V4] staticCall receiveMessage PASSED');
+    } catch(preflightErr){
+      var pfMsg = preflightErr.shortMessage || preflightErr.message || String(preflightErr);
+      console.warn('[V4] staticCall reverted:', pfMsg);
+      if(pfMsg.includes('duplicate') || pfMsg.includes('nonce') || pfMsg.includes('already')){
+        toast('Mint already processed on-chain (duplicate nonce). Marking as completed.', 'info');
+        updateBridgeHistory(intentId, {
+          finalStatus: 'COMPLETED', mintTx: 'already-processed',
+          mintChainId: destChainId, completedAt: Date.now()
+        });
+        return;
+      }
+      // Block on signature errors — do NOT proceed
+      if(pfMsg.includes('signature') || pfMsg.includes('attester') || pfMsg.includes('not attester')){
+        console.error('[V4] staticCall SIGNATURE ERROR — aborting mint. The attestation does not match this message.');
+        toast('Invalid attestation signature — attestation does not match this message. Wait for Iris to update.', 'error');
+        return;
+      }
+      console.warn('[V4] Proceeding despite staticCall revert — reason: ' + pfMsg.slice(0,200));
+    }
+
+    // ── 8. Send receiveMessage() via contract ABI ──────────
+    updateBridgeHistory(intentId, { finalStatus: 'MINT_SUBMITTED' });
+    var mintTx = await destMtContract.receiveMessage(msgBytes, attSig);
+    console.log('[V4] Mint TX sent:', mintTx.hash);
+
+    // ── 9. Minting... during confirmation ──────────────────
+    toast('Minting...', 'info');
+    var mintReceipt = await mintTx.wait();
+    console.log('[V4] Mint receipt:', { status: mintReceipt.status, block: mintReceipt.blockNumber });
+
+    // ── 10. Confirmation ───────────────────────────────────
+    if(mintReceipt.status === 1){
       updateBridgeHistory(intentId, {
-        finalStatus: 'MINT_CONFIRMED', mintTx: tx.hash,
-        mintChainId: destChainId, completedAt: Date.now()
+        mintTx: mintTx.hash,
+        mintChainId: destChainId,
+        mintStatus: 'COMPLETED',
+        finalStatus: 'COMPLETED',
+        mintBlockNumber: mintReceipt.blockNumber,
+        completedAt: Date.now()
       });
       try {
         var usdcAddr = getTokenAddress('USDC') || '0x3600000000000000000000000000000000000000';
-        var usdc = new ethers.Contract(usdcAddr, ['function balanceOf(address) view returns (uint256)'], provider);
-        var bal = await usdc.balanceOf(walletAddress);
-        updateBridgeHistory(intentId, { mintBalance: bal.toString(), finalStatus: 'COMPLETED' });
-        toast('USDC minted! Balance: ' + ethers.formatUnits(bal, 6) + ' USDC', 'success');
-      } catch(e){
-        updateBridgeHistory(intentId, { finalStatus: 'COMPLETED' });
-        toast('Mint confirmed! TX: ' + shortAddr(tx.hash), 'success');
+        var usdcBalance = await (new ethers.Contract(usdcAddr, ['function balanceOf(address) view returns (uint256)'], provider)).balanceOf(walletAddress);
+        updateBridgeHistory(intentId, { mintBalance: usdcBalance.toString() });
+        toast('USDC minted! Balance: ' + ethers.formatUnits(usdcBalance, 6) + ' USDC', 'success');
+      } catch(balErr){
+        console.log('[V4] Balance check skipped:', balErr.message);
+        toast('Mint confirmed! TX: ' + shortAddr(mintTx.hash), 'success');
       }
     } else {
-      updateBridgeHistory(intentId, { finalStatus: 'MINT_FAILED', mintTx: tx.hash });
-      toast('Mint transaction failed. Check explorer.', 'error');
+      updateBridgeHistory(intentId, { finalStatus: 'MINT_FAILED', mintTx: mintTx.hash });
+      toast('Mint transaction reverted on-chain. Check explorer.', 'error');
     }
   } catch(e){
     console.error('[V4] Mint error:', e);
-    updateBridgeHistory(intentId, { finalStatus: 'MINT_FAILED', mintError: (e.shortMessage || e.message || 'unknown') });
-    var msg = e.shortMessage || e.message || 'Unknown error';
-    if(msg.includes('user rejected')){ toast('Mint rejected by user', 'warning'); }
-    else if(msg.includes('insufficient funds')){ toast('Insufficient gas on destination chain', 'error'); }
-    else { toast('Mint failed: ' + msg, 'error'); }
+    // ── Full error dump for diagnostic ────────────────────
+    console.error('[V4 MINT ERROR DUMP]', JSON.stringify({
+      shortMessage: e.shortMessage || null,
+      message: e.message || null,
+      code: e.code || null,
+      reason: e.reason || null,
+      data: e.data ? (typeof e.data === 'string' ? e.data.slice(0,200) : String(e.data).slice(0,200)) : null,
+      dataSelector: e.data ? (typeof e.data === 'string' ? e.data.slice(0,10) : String(e.data).slice(0,10)) : null,
+      errorName: e.errorName || null,
+      errorArgs: e.errorArgs || null,
+      action: e.action || null,
+      invocation: e.invocation || null,
+      transaction: e.transaction ? {
+        to: e.transaction.to,
+        from: e.transaction.from,
+        data: e.transaction.data ? e.transaction.data.slice(0,50) + '...' : null
+      } : null,
+      receipt: e.receipt ? { status: e.receipt.status, gasUsed: e.receipt.gasUsed?.toString() } : null,
+      fullError: String(e).slice(0,500)
+    }));
+    var errMsg = e.shortMessage || e.message || 'Unknown error';
+    updateBridgeHistory(intentId, { finalStatus: 'MINT_FAILED', mintError: errMsg });
+    if(errMsg.includes('user rejected')){ toast('Mint rejected by user', 'warning'); }
+    else if(errMsg.includes('insufficient funds')){ toast('Insufficient gas on destination chain', 'error'); }
+    else { toast('Mint failed: ' + errMsg.slice(0, 150), 'error'); }
+  } finally {
+    var mintAllBtn = document.getElementById('xd-mint-all-btn');
+    if(mintAllBtn && mintAllBtn.disabled){ mintAllBtn.disabled = false; mintAllBtn.textContent = 'Mint All Ready'; }
+    var mintBtn = document.getElementById('xd-mint-btn');
+    if(mintBtn && !mintBtn.disabledByUser){ mintBtn.disabled = false; mintBtn.textContent = 'Execute Mint'; }
   }
 }
 
@@ -12912,13 +13548,13 @@ function xdRefreshAll(){
         var attIcon = h.attestationSig ? '<span style=color:#22c55e title=\"Attested\">✓</span>' : (h.messageHash ? '<span style=color:#eab308 title=\"Pending attestation\">⏳</span>' : '—');
         var actionHtml = '';
         if(h.messageHash && !h.attestationSig){
-          actionHtml = '<button onclick=\"event.stopPropagation();xdInspectIntent(\\\'' + h.intentId + '\\\')\" style=\"font-size:7px;padding:2px 5px;background:var(--blue);color:#fff;border:none;border-radius:3px;cursor:pointer\">View</button>';
+          actionHtml = '<button onclick=\"event.stopPropagation();xdInspectIntent(\x27' + h.intentId + '\x27)\" style=\"font-size:7px;padding:2px 5px;background:var(--blue);color:#fff;border:none;border-radius:3px;cursor:pointer\">View</button>';
         } else if(h.messageBytesRaw && h.attestationSig && st !== 'COMPLETED' && st !== 'MINT_CONFIRMED' && st !== 'MINT_SUBMITTED'){
-          actionHtml = '<button onclick=\"event.stopPropagation();xdExecuteMint(\\\'' + h.intentId + '\\\')\" style=\"font-size:7px;padding:2px 5px;background:#22c55e;color:#fff;border:none;border-radius:3px;cursor:pointer\">Mint</button>';
+          actionHtml = '<button onclick=\"event.stopPropagation();xdExecuteMint(\x27' + h.intentId + '\x27)\" style=\"font-size:7px;padding:2px 5px;background:#22c55e;color:#fff;border:none;border-radius:3px;cursor:pointer\">Mint</button>';
         } else if(h.mintTx){
           actionHtml = mintLink;
         }
-        html += '<tr style=\"border-bottom:1px solid var(--bg2);cursor:pointer\" onclick=\"xdInspectIntent(\\\'' + h.intentId + '\\\');xdHighlightFlow(\\\'' + st + '\\\')\">' +
+        html += '<tr style=\"border-bottom:1px solid var(--bg2);cursor:pointer\" onclick=\"xdInspectIntent(\x27' + h.intentId + '\x27);xdHighlightFlow(\x27' + st + '\x27)\">' +
           '<td style=padding:3px;font-family:monospace;font-size:7px title=\"' + (h.intentId||'') + '\">' + (h.intentId ? h.intentId.slice(0,12) + '...' : '—') + '</td>' +
           '<td>' + burnLink + '</td>' +
           '<td>' + (Number(h.amount||0)/1e6).toFixed(4) + '</td>' +
@@ -12970,6 +13606,7 @@ function xdRefreshAll(){
     var recPending = intents.filter(function(h){ return h.messageHash && (!h.attestationSig || h.irisStatus !== 'complete'); });
     recEl.innerHTML = recPending.length + ' intent(s) pending attestation. Last check: ' + new Date().toLocaleTimeString() + (recPending.length > 0 ? ' — auto-recovery polls Iris' : ' — all resolved ✓');
   }
+  xdRenderBatches();
 }
 
 function xdInspectIntent(intentId){
@@ -13061,6 +13698,77 @@ function xdExecuteMint(intentId){
     if(statusEl) statusEl.innerHTML = '<span style=color:#ef4444>✗ Mint failed: ' + (e.shortMessage || e.message) + '</span>';
     if(btn){ btn.disabled = false; btn.textContent = 'Execute Mint'; btn.disabledByUser = false; }
   });
+}
+
+// ── Multi-Destination Batch View ────────────────────────────
+function xdRenderBatches(){
+  if(typeof loadBridgeHistory !== 'function') return;
+  var intents = loadBridgeHistory().filter(function(h){ return h.intentId && h.token; });
+  var container = document.getElementById('xd-batches');
+  if(!container) return;
+
+  if(intents.length === 0){
+    container.innerHTML = '<div style=\"text-align:center;padding:20px;color:var(--muted2)\">No bridge intents yet. Execute a cross-chain payment to populate.</div>';
+    var mb = document.getElementById('xd-mint-all-btn'); if(mb) mb.style.display = 'none';
+    return;
+  }
+
+  var batches = {};
+  for(var i = 0; i < intents.length; i++){
+    var h = intents[i]; var key = h.createTx || h.intentId;
+    if(!batches[key]) batches[key] = { intents: [], totalAmount: 0, destinations: [] };
+    batches[key].intents.push(h); batches[key].totalAmount += Number(h.amount || 0);
+    var dest = h.destDomain || h.destDomainIris || '?';
+    if(batches[key].destinations.indexOf(dest) < 0) batches[key].destinations.push(dest);
+  }
+
+  var html = ''; var batchKeys = Object.keys(batches);
+  for(var b = 0; b < Math.min(batchKeys.length, 10); b++){
+    var batch = batches[batchKeys[b]];
+    html += '<div style=\"background:var(--bg2);border-radius:6px;padding:10px;margin-bottom:8px\">';
+    html += '<div style=\"display:flex;justify-content:space-between;align-items:center;margin-bottom:6px\">';
+    html += '<span style=\"font-weight:600;font-size:10px\">Batch ' + (batchKeys[b] ? batchKeys[b].slice(0,12) + '...' : '—') + '</span>';
+    html += '<span style=\"font-size:8px;color:var(--muted2)\">' + batch.intents.length + ' recipient(s) · ' + (batch.totalAmount / 1e6).toFixed(4) + ' USDC · ' + batch.destinations.length + ' destination(s)</span></div>';
+    for(var j = 0; j < batch.intents.length; j++){
+      var h = batch.intents[j]; var st = h.finalStatus || (h.status === 1 ? 'BRIDGE_PENDING' : 'CREATED');
+      var sc = {CREATED:'#6b7280',BRIDGE_PENDING:'#eab308',BURN_CONFIRMED:'#f97316',WAITING_ATTESTATION:'#3b82f6',ATTESTATION_READY:'#14b8a6',MINT_SUBMITTED:'#a855f7',COMPLETED:'#22c55e',FAILED:'#ef4444'};
+      var color = sc[st] || '#6b7280';
+      var burnIcon = h.status >= 1 ? '✓' : '⏳'; var attIcon = h.attestationSig ? '✓' : (h.messageHash ? '⏳' : '—'); var mintIcon = h.finalStatus === 'COMPLETED' ? '✓' : (h.mintTx ? '⏳' : '—');
+      var actionBtn = '';
+      if(h.irisMessage && h.attestationSig && st !== 'COMPLETED' && st !== 'MINT_SUBMITTED'){
+        actionBtn = '<button onclick=\"xdExecuteMint(\x27' + h.intentId + '\x27)\" style=\"font-size:7px;padding:2px 5px;background:#22c55e;color:#fff;border:none;border-radius:3px;cursor:pointer\">Mint</button>';
+      }
+      html += '<div style=\"display:flex;align-items:center;justify-content:space-between;padding:6px 8px;border-radius:4px;font-size:8.5px;' + (j % 2 === 0 ? 'background:var(--bg)' : '') + '\">';
+      html += '<span style=\"font-family:monospace;font-size:7.5px;max-width:100px;overflow:hidden\" title=\"' + (h.intentId||'') + '\">' + (h.intentId ? h.intentId.slice(0,10) + '...' : '—') + '</span>';
+      html += '<span style=\"color:var(--muted2)\">Dest: ' + (h.destDomain || '?') + '</span>';
+      html += '<span style=\"display:flex;gap:6px;align-items:center\">' + burnIcon + ' ' + attIcon + ' ' + mintIcon + '</span>';
+      html += '<span style=\"color:' + color + ';font-weight:600\">' + st + '</span>' + actionBtn + '</div>';
+    }
+    html += '</div>';
+  }
+  container.innerHTML = html;
+  var readyToMint = intents.filter(function(h){ return h.irisMessage && h.attestationSig && h.finalStatus !== 'COMPLETED' && h.finalStatus !== 'MINT_SUBMITTED'; });
+  var mintAllBtn = document.getElementById('xd-mint-all-btn');
+  if(mintAllBtn){ mintAllBtn.style.display = readyToMint.length > 0 ? '' : 'none'; mintAllBtn.textContent = 'Mint All Ready (' + readyToMint.length + ')'; }
+}
+
+function xdMintAllReady(){
+  if(typeof executeMint !== 'function'){ toast('Mint not available', 'error'); return; }
+  var intents = loadBridgeHistory().filter(function(h){ return h.irisMessage && h.attestationSig && h.finalStatus !== 'COMPLETED' && h.finalStatus !== 'MINT_SUBMITTED'; });
+  if(intents.length === 0){ toast('No intents ready to mint', 'warning'); return; }
+  if(!confirm('Mint all ' + intents.length + ' ready intents? Each requires switching to its destination chain.')) return;
+  var btn = document.getElementById('xd-mint-all-btn');
+  if(btn){ btn.disabled = true; btn.textContent = 'Minting ' + intents.length + '...'; }
+  (async function(){
+    var ok = 0, fail = 0;
+    for(var i = 0; i < intents.length; i++){
+      try { await executeMint(intents[i].intentId); ok++; } catch(e){ fail++; }
+      await new Promise(function(r){ setTimeout(r, 2000); });
+    }
+    toast('Batch complete: ' + ok + ' OK, ' + fail + ' failed', ok === intents.length ? 'success' : 'warning');
+    xdRefreshAll();
+    if(btn){ btn.disabled = false; btn.textContent = 'Mint All Ready'; }
+  })();
 }
 
 function xdOnShow(){
