@@ -4586,6 +4586,7 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
       <div class="nav-item" id="nav-autonoma" onclick="showPage('autonoma')"><i class="ti ti-brain"></i>Autonoma<span class="nav-kit" style="background:rgba(6,247,233,.12);color:#06F7E9;border:1px solid rgba(6,247,233,.25)">AI</span></div>
       <div class="nav-group" style="margin-top:4px">Protocol</div>
       <div class="nav-item" id="nav-treasury" onclick="showPage('treasury')"><i class="ti ti-vault"></i>Treasury<span class="nav-kit" style="background:rgba(79,142,247,.12);color:#7b9ef7;border:1px solid rgba(79,142,247,.25)">Vault</span></div>
+      <div class="nav-item" id="nav-xcdashboard" onclick="showPage('xcdashboard')" style="padding-left:28px;font-size:10px"><i class="ti ti-topology-star-3"></i>CrossChain</div>
       <div class="nav-group" style="margin-top:4px">Manage</div>
       <div class="nav-item" id="nav-recipients" onclick="showPage('recipients')"><i class="ti ti-users"></i>Recipients</div>
       <div class="nav-item" id="nav-templates" onclick="showPage('templates')"><i class="ti ti-template"></i>Templates</div>
@@ -7872,6 +7873,90 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
       </div><!-- end trs-layout -->
     </div><!-- end page-treasury -->
 
+    <!-- PAGE: CROSSCHAIN DASHBOARD -->
+    <div class="page" id="page-xcdashboard">
+      <div class="page-header"><div class="page-title">MultiSend CrossChain</div><div class="page-sub">E2E Bridge Lifecycle · CCTP Message Inspector · Mint Execution</div></div>
+      <div class="xd-layout" style="display:flex;flex-direction:column;gap:14px;padding:0 16px 24px">
+
+        <!-- Row 1: E2E Metric Cards -->
+        <div class="xd-cards" style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px" id="xd-cards">
+          <div class="card" style="padding:14px"><div style="font-size:10px;color:var(--muted2)">Total Burn</div><div style="font-size:20px;font-weight:700" id="xd-e2e-burn">—</div><div style="font-size:9px;color:var(--muted2)" id="xd-e2e-burncnt">0 intents</div></div>
+          <div class="card" style="padding:14px"><div style="font-size:10px;color:var(--muted2)">Total Mint</div><div style="font-size:20px;font-weight:700" id="xd-e2e-mint">—</div><div style="font-size:9px;color:var(--muted2)" id="xd-e2e-mintcnt">0 completed</div></div>
+          <div class="card" style="padding:14px"><div style="font-size:10px;color:var(--muted2)">Pending Attestation</div><div style="font-size:20px;font-weight:700" id="xd-e2e-pending">0</div><div style="font-size:9px;color:var(--muted2)">waiting Iris</div></div>
+          <div class="card" style="padding:14px"><div style="font-size:10px;color:var(--muted2)">Avg Full Bridge Time</div><div style="font-size:20px;font-weight:700" id="xd-e2e-avg">—</div><div style="font-size:9px;color:var(--muted2)">burn → attestation → mint</div></div>
+        </div>
+
+        <!-- Section: Active Intents E2E Table -->
+        <div class="card" style="padding:14px"><div style="font-size:12px;font-weight:700;margin-bottom:8px">Bridge Lifecycle — Active Intents</div>
+          <div style="overflow-x:auto"><table style="width:100%;font-size:9px;border-collapse:collapse" id="xd-intents-table">
+            <thead><tr style="color:var(--muted2);text-align:left"><th>Intent ID</th><th>Burn TX</th><th>Amount</th><th>Dest</th><th>msgHash</th><th>Attestation</th><th>Mint TX</th><th>Status</th><th>Action</th></tr></thead>
+            <tbody id="xd-intents-body"><tr><td colspan="9" style="color:var(--muted2);text-align:center;padding:20px">No bridge intents recorded yet</td></tr></tbody>
+          </table></div>
+        </div>
+
+        <!-- Section: CCTP Message Inspector -->
+        <div class="card" style="padding:14px"><div style="font-size:12px;font-weight:700;margin-bottom:8px">CCTP Message Inspector</div>
+          <div id="xd-inspector" style="font-size:9px;color:var(--muted2)">
+            <div style="display:flex;gap:4px;align-items:center;margin-bottom:6px">
+              <select id="xd-inspector-select" onchange="xdInspectIntent(this.value)" style="background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-size:9px;flex:1"><option value="">— Select an intent with messageHash —</option></select>
+              <button class="btn" onclick="xdInspectRefresh()" style="font-size:9px;padding:4px 8px;white-space:nowrap">↻ Refresh</button>
+            </div>
+            <div id="xd-inspector-loading" style="text-align:center;padding:12px;display:none">Loading message data...</div>
+            <div id="xd-inspector-detail" style="display:none;display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:8.5px">
+              <div><b>Intent ID</b><br><code id="xd-imsg-iid" style="font-size:7.5px;word-break:break-all"></code></div>
+              <div><b>Message Hash</b><br><code id="xd-imsg-hash" style="font-size:7.5px;word-break:break-all"></code></div>
+              <div><b>Nonce</b><br><span id="xd-imsg-nonce">—</span></div>
+              <div><b>Source Domain</b><br><span id="xd-imsg-src">26 (Arc Testnet)</span></div>
+              <div><b>Destination Domain</b><br><span id="xd-imsg-dest">—</span></div>
+              <div><b>Iris Status</b><br><span id="xd-imsg-iris" style="font-weight:600">—</span></div>
+              <div style="grid-column:1/-1"><b>Raw Message Bytes</b> <span id="xd-imsg-bytes-len" style="color:var(--muted2)"></span> <button onclick="xdToggleBytes()" style="font-size:7px;padding:1px 4px;background:var(--bg2);color:var(--blue);border:1px solid var(--border);border-radius:3px;cursor:pointer" id="xd-bytes-toggle">Expand ▾</button>
+                <pre id="xd-imsg-bytes-full" style="display:none;font-size:7px;background:var(--bg);padding:6px;border-radius:4px;max-height:150px;overflow:auto;word-break:break-all;margin-top:4px;white-space:pre-wrap"></pre>
+              </div>
+              <div><b>Attestation Sig</b> <button onclick=\"xdCopyToClipboard(document.getElementById('xd-imsg-att').textContent)\" style=\"font-size:7px;padding:1px 4px;margin-left:4px;background:var(--bg2);color:var(--blue);border:1px solid var(--border);border-radius:3px;cursor:pointer\">📋 Copy</button><br><code id="xd-imsg-att" style="font-size:7px;word-break:break-all">—</code></div>
+              <div><b>Iris V2</b><br><a id="xd-imsg-irislink" href="#" target="_blank" style="color:var(--blue);font-size:8px">Open Iris ↗</a></div>
+              <div><b>ArcScan Burn TX</b><br><a id="xd-imsg-explorer" href="#" target="_blank" style="color:var(--blue);font-size:8px">View Burn TX ↗</a></div>
+              <div><b>Mint TX</b><br><a id="xd-imsg-mintlink" href="#" target="_blank" style="color:var(--teal);font-size:8px;display:none">View Mint TX ↗</a></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Section: Mint Execution -->
+        <div class="card" style="padding:14px"><div style="font-size:12px;font-weight:700;margin-bottom:8px">Mint Execution</div>
+          <div id="xd-mint-area" style="font-size:9px;color:var(--muted2)">
+            <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
+              <select id="xd-mint-select" onchange="xdMintUpdateUI(this.value)" style="background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-size:9px;flex:1"><option value="">— Select a ready intent —</option></select>
+              <button class="btn" id="xd-mint-btn" onclick="xdExecuteMint()" disabled style="font-size:9px;padding:4px 12px;background:var(--blue);color:#fff;border:none;border-radius:4px;cursor:pointer">Execute Mint</button>
+            </div>
+            <div id="xd-mint-detail" style="font-size:8.5px;margin-top:6px;display:none;display:grid;grid-template-columns:1fr 1fr;gap:4px">
+              <div><b>Amount</b><br><span id="xd-mint-amt">—</span></div>
+              <div><b>Destination Chain</b><br><span id="xd-mint-chain">—</span></div>
+              <div><b>Message Hash</b><br><code style="font-size:7px" id="xd-mint-msg">—</code></div>
+              <div><b>Attestation</b><br><span id="xd-mint-att-status">—</span></div>
+            </div>
+            <div id="xd-mint-status" style="font-size:8.5px;margin-top:6px"></div>
+          </div>
+        </div>
+
+        <!-- Section: Flow Visual with state -->
+        <div class="card" style="padding:14px"><div style="font-size:12px;font-weight:700;margin-bottom:8px">Bridge Flow — Select an intent to highlight</div>
+          <div style="display:flex;align-items:center;justify-content:space-between;font-size:9px;gap:3px;flex-wrap:wrap" id="xd-flow-steps">
+            <span style="padding:4px 7px;border-radius:4px;background:var(--bg2);color:var(--muted2);transition:all .2s" data-step="0">① Intent Created</span><span style="color:var(--muted2);font-size:7px">→</span>
+            <span style="padding:4px 7px;border-radius:4px;background:var(--bg2);color:var(--muted2);transition:all .2s" data-step="1">② Burn Confirmed</span><span style="color:var(--muted2);font-size:7px">→</span>
+            <span style="padding:4px 7px;border-radius:4px;background:var(--bg2);color:var(--muted2);transition:all .2s" data-step="2">③ Message Sent</span><span style="color:var(--muted2);font-size:7px">→</span>
+            <span style="padding:4px 7px;border-radius:4px;background:var(--bg2);color:var(--muted2);transition:all .2s" data-step="3">④ Attestation Ready</span><span style="color:var(--muted2);font-size:7px">→</span>
+            <span style="padding:4px 7px;border-radius:4px;background:var(--bg2);color:var(--muted2);transition:all .2s" data-step="4">⑤ Mint Submitted</span><span style="color:var(--muted2);font-size:7px">→</span>
+            <span style="padding:4px 7px;border-radius:4px;background:var(--bg2);color:var(--muted2);transition:all .2s" data-step="5">⑥ Completed</span>
+          </div>
+        </div>
+
+        <!-- Section: Recovery -->
+        <div class="card" style="padding:14px"><div style="font-size:12px;font-weight:700;margin-bottom:8px">Recovery Center</div>
+          <div style="font-size:9px;color:var(--muted2)" id="xd-recovery">Loading pending intents...</div>
+          <button class="btn" onclick="xdRefreshAll()" style="margin-top:8px;font-size:10px"><i class="ti ti-refresh"></i> Retry Sync &amp; Recover</button>
+        </div>
+      </div>
+    </div><!-- end page-xcdashboard -->
+
 
     <!-- PAGE: SETTINGS -->
     <div class="page" id="page-settings">
@@ -9071,7 +9156,8 @@ const AMM_FACTORY_ABI = [
 
 // Elligentt owner wallet (used for platform fees and cross-chain operations)
 const OWNER_WALLET = '0xc2be29e58f05ba8279bd800b8b6a3790233f2426'; // corrected to valid 20-byte address (was 32-byte by mistake before)
-const PLATFORM_FEE_BPS = 100; // 1% = 100 basis points. This is the actual on-chain platform fee charged for using the app (Multisend convenience fee etc). Goes to OWNER_WALLET.
+const PLATFORM_FEE_BPS = 100; // 1% generic platform fee → OWNER_WALLET. NOTE: Multisend charges MULTISEND_FEE_BPS (0.2%), not this value.
+const MULTISEND_FEE_RATE = (((typeof ElligenteFees !== 'undefined' && ElligenteFees.MULTISEND_FEE_BPS) || 20)) / 10000;
 // Force the deployed address early so the script picks it up correctly on load
 // SWAP router not deployed separately — swap executes directly against ElligentPool
 window.__SWAP_ADDRESS__  = '0x0000000000000000000000000000000000000001';
@@ -9079,6 +9165,30 @@ window.__POOL_ADDRESS__  = '0x18076d992005186AeB13AC5270CaD6E27DB95247';
 
 const SWAP_ROUTER_ADDRESS  = window.__SWAP_ADDRESS__  || '0x0000000000000000000000000000000000000001';
 const POOL_CONTRACT_ADDRESS = window.__POOL_ADDRESS__ || '0x0000000000000000000000000000000000000002'; 
+
+// ── V4 Executor + CCTPAdapterV2 (Bridge V4) ─────────────────
+const EXECUTOR_V4_ADDRESS = '0x0a127252248ded4499C910e7E187E77C804CF19A';
+const CCTP_ADAPTER_V2 = '0x4a0FA5928C50F23B0fbDC312434Aef41B1B1b8f2';
+const EXECUTOR_V4_ABI = [
+  'function createRouteIntent(uint256 destinationChain, address token, address[] recipients, uint256[] amounts) returns (bytes32 intentId)',
+  'function executeBridgeIntent(bytes32 intentId, address adapter) payable returns (bytes32 messageId)',
+  'function getRouteIntent(bytes32 intentId) view returns (tuple(uint256 sourceChain, uint256 destinationChain, address token, address creator, uint256 amount, uint256 nonce))',
+  'function getIntentStatus(bytes32 intentId) view returns (uint8)',
+  'function getBatch(uint256 batchId) view returns (tuple(uint256 chainId, uint256 amount, address token, uint256 status, uint256 destinationChain))',
+  'function version() view returns (string)',
+  'event RouteIntentCreated(bytes32 indexed intentId, address indexed sender, uint256 indexed destinationChain)',
+  'event BridgeMessageSent(bytes32 indexed intentId, address indexed adapter, bytes32 messageId)',
+  'event IntentFailed(bytes32 indexed intentId)'
+];
+const CCTP_ADAPTER_V2_ABI = [
+  'function configureIntent(bytes32 intentId, uint32 destinationDomain, bytes32 mintRecipient, bytes32 destinationCaller)',
+  'function clearIntent(bytes32 intentId)',
+  'function intentConfigs(bytes32) view returns (uint32 destinationDomain, bytes32 mintRecipient, bytes32 destinationCaller, address funder)',
+  'function sendMessage(uint256,bytes) payable returns (bytes32)',
+  'function tokenMessenger() view returns (address)',
+  'event BridgeInitiated(bytes32 indexed intentId, uint32 indexed destinationDomain, bytes32 indexed messageId)',
+  'event CCTPDepositCalled(bytes32 indexed intentId, uint256 amount, uint32 domain)'
+];
 
 // ── Freeze ABIs — immutable protection (only internal arrays, never passed to external APIs) ──
 Object.freeze(USDC_ABI);
@@ -9097,7 +9207,7 @@ window.__App = { get walletAddress() { return walletAddress; }, get provider() {
 // Hardcoded contract addresses (managed in code / "backend", not user-configurable in UI)
 // These replace the removed UI sections for ElligentBatch and Cross-Chain Batcher.
 let batchContractAddr = '0x...';           // <-- Paste your deployed ElligentBatch address here (or leave empty for direct transfers)
-let crossChainBatcherAddr = '0x...';       // <-- Paste your deployed ElligentCrossChainBatcher address here (for Arc → Others)
+let crossChainBatcherAddr = (typeof ElligenteContracts !== 'undefined' && ElligenteContracts.CROSSCHAIN_BATCH_ADDRESS) || '0x17cFB1AACbc64D0F0c247ED261b66C3d56e3EB16'; // ElligentCrossChainBatcher (CCTP batchDepositForBurn)
 let batchCount = 0, successCount = 0;
 // Recipients are persisted in localStorage — loaded at init
 const recipients = [];
@@ -9287,6 +9397,14 @@ let activeChainId = 5042002; // default: Arc Testnet
 function getChainById(id) { return CHAIN_REGISTRY[id] || null; }
 function getActiveChain() { return getChainById(activeChainId) || CHAIN_REGISTRY[5042002]; }
 function getTokenAddress(sym) { return getActiveChain()?.tokens?.[sym]?.address || null; }
+function getTokenAddressForChain(chainId, sym) { return getChainById(chainId)?.tokens?.[sym]?.address || null; }
+function cctpDomainForChain(key) {
+  if (key === null || key === undefined) return null;
+  let c = (typeof CHAIN_REGISTRY !== 'undefined' && CHAIN_REGISTRY[key]) ? CHAIN_REGISTRY[key] : null;
+  if (!c && typeof CHAINS !== 'undefined') c = CHAINS.find(x => String(x.id) === String(key) || String(x.chainId) === String(key)) || null;
+  const d = c && c.cctp ? c.cctp.domain : undefined;
+  return (typeof d === 'number') ? d : null;
+}
 function getTokenDecimals(sym) { return getActiveChain()?.tokens?.[sym]?.decimals ?? 6; }
 
 // Backward-compat alias — CCTP_CONFIG[chainId] used by executeBridge / xcExecuteSend
@@ -10711,6 +10829,72 @@ const fromUsdc = bn => (Number(bn)/1e6).toFixed(2);
 const shortAddr= a  => a?a.slice(0,6)+'...'+a.slice(-4):'—';
 const isAddr   = a  => /^0x[0-9a-fA-F]{40}$/.test(a);
 const isEns    = a  => typeof a==='string'&&a.endsWith('.eth');
+function normalizeEvmAddress(address){
+  if (address === null || address === undefined || address === '') {
+    throw new Error(`normalizeEvmAddress: missing/empty address (${address === '' ? 'empty string' : String(address)})`);
+  }
+  if (typeof address !== 'string' || !ethers.isAddress(address)) {
+    throw new Error(`normalizeEvmAddress: not a valid EVM address — ENS/resolution not allowed: ${String(address)}`);
+  }
+  return ethers.getAddress(address);
+}
+function normalizeAddress(value){ return normalizeEvmAddress(value); }
+async function isContract(address, runner){
+  try {
+    if (!ethers.isAddress(address)) return false;
+    const prov = (runner && runner.provider) ? runner.provider : (runner || (typeof provider !== 'undefined' ? provider : null));
+    if (!prov || typeof prov.getCode !== 'function') return false;
+    const code = await prov.getCode(address);
+    return !!code && code !== '0x';
+  } catch (e) { _warn('[isContract] check failed:', e?.shortMessage || e?.message || e); return false; }
+}
+async function safeAllowance(token, owner, spender, runner){
+  try {
+    const t = normalizeAddress(token);
+    const o = normalizeAddress(owner);
+    const s = normalizeAddress(spender);
+    const prov = (runner && runner.provider) ? runner.provider : (runner || (typeof provider !== 'undefined' ? provider : null));
+    if (!(await isContract(t, prov))) { _warn('[safeAllowance] token has no bytecode on current network:', t); return 0n; }
+    const erc20 = new ethers.Contract(t, ['function allowance(address,address) view returns (uint256)'], prov);
+    return await erc20.allowance(o, s);
+  } catch (e) { _warn('[safeAllowance] failed (treated as 0):', e?.shortMessage || e?.message || e); return 0n; }
+}
+const CROSSCHAIN_SOURCE_CHAIN_ID = 5042002;
+const CROSSCHAIN_SOURCE_DOMAIN = (typeof cctpDomainForChain === 'function') ? cctpDomainForChain(CROSSCHAIN_SOURCE_CHAIN_ID) : 26;
+async function getSignerChainId(runner){
+  try {
+    const prov = (runner && runner.provider) ? runner.provider : (runner || (typeof provider !== 'undefined' ? provider : null));
+    if (!prov || typeof prov.getNetwork !== 'function') return null;
+    const net = await prov.getNetwork();
+    return Number(net.chainId);
+  } catch { return null; }
+}
+async function assertOnSourceChain(runner, sourceChainId){
+  const cid = await getSignerChainId(runner);
+  if (cid === null || cid !== Number(sourceChainId)) {
+    const name = (typeof CHAIN_REGISTRY !== 'undefined' && CHAIN_REGISTRY[sourceChainId] && CHAIN_REGISTRY[sourceChainId].name) || ('chain ' + sourceChainId);
+    toast(`Switch wallet to source chain (${name})`, 'error');
+    return false;
+  }
+  return true;
+}
+const CROSSCHAIN_CUSTOM_ERRORS = [
+  'error InvalidBatch()','error LengthMismatch()','error InvalidRecipient()',
+  'error ZeroToken()','error TransferFailed()','error InvalidDestination()'
+];
+function decodeCrossChainRevert(err){
+  let raw = err?.data ?? err?.info?.error?.data ?? err?.error?.data ?? null;
+  if (raw && typeof raw === 'object' && typeof raw.data === 'string') raw = raw.data;
+  if (typeof raw === 'string' && raw.startsWith('0x') && raw.length >= 10){
+    try { const p = new ethers.Interface(CROSSCHAIN_CUSTOM_ERRORS).parseError(raw); if (p) return p.name; } catch {}
+    if (raw.slice(0,10).toLowerCase() === '0x08c379a0'){ try { return ethers.AbiCoder.defaultAbiCoder().decode(['string'], '0x'+raw.slice(10))[0]; } catch {} }
+    if (raw.slice(0,10).toLowerCase() === '0x4e487b71'){ try { return 'Panic(0x'+ethers.AbiCoder.defaultAbiCoder().decode(['uint256'], '0x'+raw.slice(10))[0].toString(16)+')'; } catch {} }
+  }
+  if ((raw === null || raw === undefined || raw === '0x') && (err?.code === 'CALL_EXCEPTION' || /missing revert data/i.test(err?.message || ''))) {
+    return 'execution reverted with no data — function may not exist on this contract (selector/ABI mismatch) or wrong contract/chain';
+  }
+  return err?.shortMessage || err?.reason || err?.message || 'execution reverted (no decodable data)';
+}
 const escHtml  = s  => { if (typeof s !== 'string') return s; return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); };
 
 // Global error handler to help debug broken buttons
@@ -10822,7 +11006,10 @@ function showPage(id) {
       }, 50);
     }
     if (id === 'reports') {
-      renderReports(); // Ensure reports capture latest app data (batches, crosschain, etc.)
+      renderReports();
+    }
+    if (id === 'xcdashboard') {
+      setTimeout(function(){ if(typeof xdOnShow === 'function') xdOnShow(); }, 100);
     }
     if (id === 'recipients') {
       renderContacts();
@@ -11167,6 +11354,7 @@ async function finalizeConnection(raw, walletType) {
   closeWalletModal();
   setupProviderEvents(raw);
   toast(`✓ ${badges[walletType]||walletType}: ${short} | ${chain.name}`, 'success');
+  recoverPendingIntents().catch(function(e){ console.log('[V4] Recovery skipped:', e.message); });
   return true;
 }
 
@@ -11862,6 +12050,40 @@ function setContract(val){
   else{st.textContent='Not configured';st.style.color='var(--muted2)';}
   saveBatcherAddresses();
 }
+
+let useV4Bridge = true;
+
+async function verifyV4Contracts(){
+  if(!provider){ toast('Connect wallet first','error'); return; }
+  try{
+    toast('Verifying V4 Bridge contracts...','info');
+    const v4 = new ethers.Contract(EXECUTOR_V4_ADDRESS, EXECUTOR_V4_ABI, provider);
+    const v = await v4.version();
+    toast('ExecutorV4: ' + v, 'success');
+    const a2 = new ethers.Contract(CCTP_ADAPTER_V2, CCTP_ADAPTER_V2_ABI, provider);
+    const tm = await a2.tokenMessenger();
+    toast('AdapterV2 TM: ' + shortAddr(tm), 'success');
+  }catch(e){
+    toast('V4 verification failed: ' + (e.shortMessage || e.message), 'error');
+  }
+}
+
+function toggleV4Bridge(){
+  useV4Bridge = !useV4Bridge;
+  const tgl = document.getElementById('tgl-v4');
+  if(tgl){ tgl.classList.toggle('on', useV4Bridge); tgl.classList.toggle('off', !useV4Bridge); }
+  toast('Bridge mode: ' + (useV4Bridge ? 'V4 Executor' : 'Legacy Batcher'), 'info');
+  try { localStorage.setItem('arcpay_use_v4', useV4Bridge ? '1' : '0'); } catch(e) {}
+}
+
+try {
+  const v4pref = localStorage.getItem('arcpay_use_v4');
+  if(v4pref === '0'){ useV4Bridge = false;
+    const tgl = document.getElementById('tgl-v4');
+    if(tgl){ tgl.classList.remove('on'); tgl.classList.add('off'); }
+  }
+} catch(e) {}
+
 async function verifyContract(){
   if(!batchContractAddr){toast('Paste a valid address first','error');return;}
   if(!provider){toast('Connect wallet first','error');return;}
@@ -11916,7 +12138,24 @@ async function verifyCrossChainBatcher(){
 
 // ── NEW: Cross-Chain Batch Execution (Arc → other chains) ───
 function prepareCrossChainBatch(){
-  if(!crossChainBatcherAddr){
+  // V4 route
+  if(useV4Bridge){
+    if(!walletAddress){ toast('Connect wallet first', 'error'); return; }
+    const crossChainRecipients = recipients.filter(r => getRecipientRoute(r) === 'bridge');
+    if(crossChainRecipients.length === 0){
+      toast('Add at least one recipient on a different chain (not Arc)', 'warning');
+      return;
+    }
+    const total = crossChainRecipients.reduce((s, r) => s + Number(toUsdc(r.amount)), 0);
+    const msg = 'Send cross-chain batch to ' + crossChainRecipients.length + ' recipients via V4 Executor?' +
+                '\n\nAmount: ' + (total / 1e6).toFixed(4) + ' USDC' +
+                '\n\nThis will create a bridge intent and execute via CCTPAdapterV2.';
+    if(!confirm(msg)) return;
+    executeBridgeIntentV4();
+    return;
+  }
+  // Legacy route
+  if(!isAddr(crossChainBatcherAddr)){
     toast('Please configure the Cross-Chain Batcher contract address first', 'error');
     return;
   }
@@ -11946,16 +12185,27 @@ function prepareCrossChainBatch(){
 
 async function executeCrossChainBatch(crossRcpts, useHook = false){
   if(!signer || !walletAddress){ toast('Connect wallet first', 'error'); return; }
-  if(!crossChainBatcherAddr){ toast('Cross-Chain Batcher not configured', 'error'); return; }
+  if(!isAddr(crossChainBatcherAddr)){ toast('Cross-Chain Batcher not configured', 'error'); return; }
 
-  const usdcOnArc = '0x3600000000000000000000000000000000000000';
+  let senderAddr, batcherAddr;
+  try {
+    _log('[Cross-chain batch] validating addresses — ENS resolution skipped');
+    senderAddr  = normalizeEvmAddress(walletAddress);
+    batcherAddr = normalizeEvmAddress(crossChainBatcherAddr);
+    _log('[Cross-chain batch] contract address OK:', batcherAddr);
+  } catch (addrErr) {
+    toast('Cross-chain batch: invalid address — ' + (addrErr.message || addrErr), 'error');
+    return;
+  }
+
+  const usdcOnArc = normalizeEvmAddress(getTokenAddressForChain(CROSSCHAIN_SOURCE_CHAIN_ID, 'USDC'));
   const usdcContract = new ethers.Contract(usdcOnArc, [
     'function approve(address,uint256) returns (bool)',
     'function allowance(address,address) view returns (uint256)',
     'function transferFrom(address,address,uint256) returns (bool)'
   ], signer);
 
-  const batcher = new ethers.Contract(crossChainBatcherAddr, [
+  const batcher = new ethers.Contract(batcherAddr, [
     'function batchDepositForBurn(uint256[] amounts, uint32[] destinationDomains, bytes32[] mintRecipients, uint256 maxFee, uint32 minFinalityThreshold) returns (uint64[] nonces)',
     'function batchDepositForBurnWithHook(uint256[] amounts, uint32[] destinationDomains, bytes32[] mintRecipients, bytes[] hookDatas, uint256 maxFee, uint32 minFinalityThreshold) returns (uint64[] nonces)',
     'function addressToBytes32(address) pure returns (bytes32)'
@@ -11968,9 +12218,13 @@ async function executeCrossChainBatch(crossRcpts, useHook = false){
 
     for(const r of crossRcpts){
       const amt = toUsdc(r.amount);
-      const destChain = CHAINS.find(c => c.id === r.chainId) || null;
-      const domain = destChain?.cctp?.domain ?? 0;
-      const mintRecipient = addrToBytes32(r._resolved || r.addr);
+      const domain = cctpDomainForChain(r.chainId);
+      if (domain === null) { toast(`Cross-chain failed: InvalidDestination — no CCTP domain for ${r.chainId}`, 'error'); return; }
+      if (domain === CROSSCHAIN_SOURCE_DOMAIN) { toast(`Cross-chain failed: InvalidDestination — destination equals source domain (${domain})`, 'error'); return; }
+      let recipAddr;
+      try { recipAddr = normalizeAddress(r._resolved || r.addr); }
+      catch(e){ toast(`Invalid address for cross-chain: ${r.addr}`, 'error'); return; }
+      const mintRecipient = addrToBytes32(recipAddr);
       if (!mintRecipient) {
         toast(`Invalid address for cross-chain: ${r.addr}`, 'error');
         return;
@@ -11980,13 +12234,19 @@ async function executeCrossChainBatch(crossRcpts, useHook = false){
       domains.push(domain);
       mintRecips.push(mintRecipient);
     }
+    _log('[Cross-chain batch] recipient validation OK');
 
     const total = amounts.reduce((a,b)=>a+b, 0n);
 
+    if (!(await assertOnSourceChain(signer, CROSSCHAIN_SOURCE_CHAIN_ID))) return;
+    if (!(await isContract(usdcOnArc, signer)) || !(await isContract(batcherAddr, signer))) {
+      toast('Cross-chain source contracts not found on the connected network — switch your wallet to the source chain.', 'error');
+      return;
+    }
     toast(`Approving USDC for Cross-Chain Batcher...`, 'info');
-    const allowance = await usdcContract.allowance(walletAddress, crossChainBatcherAddr);
+    const allowance = await safeAllowance(usdcOnArc, senderAddr, batcherAddr, signer);
     if(allowance < total){
-      const approveTx = await usdcContract.approve(crossChainBatcherAddr, total * 110n / 100n);
+      const approveTx = await usdcContract.approve(batcherAddr, total * 110n / 100n);
       await approveTx.wait();
       toast('Approval confirmed', 'success');
     }
@@ -11994,6 +12254,54 @@ async function executeCrossChainBatch(crossRcpts, useHook = false){
     // Recommended params for sending FROM Arc (Standard transfer)
     const maxFee = 0n;
     const minFinality = 2000; // Standard
+
+    const _xcSrcChainId = await getSignerChainId(signer);
+    const _xcDestChainIds = crossRcpts.map(r => r.chainId);
+    let _xcTokenCode = '0x', _xcCtrCode = '0x', _xcBal = null, _xcFreshAllow = 0n;
+    try { _xcTokenCode = await (signer.provider || provider).getCode(usdcOnArc); } catch (e) { _warn('[Cross-chain batch][DEBUG] token getCode failed', e?.message||e); }
+    try { _xcCtrCode   = await (signer.provider || provider).getCode(batcherAddr); } catch (e) { _warn('[Cross-chain batch][DEBUG] contract getCode failed', e?.message||e); }
+    try { const _ro = new ethers.Contract(usdcOnArc, ['function balanceOf(address) view returns (uint256)'], signer); _xcBal = await _ro.balanceOf(senderAddr); } catch (e) { _warn('[Cross-chain batch][DEBUG] balanceOf failed', e?.message||e); }
+    try { _xcFreshAllow = await safeAllowance(usdcOnArc, senderAddr, batcherAddr, signer); } catch (e) { _warn('[Cross-chain batch][DEBUG] allowance failed', e?.message||e); }
+    _log('[Cross-chain batch][DEBUG]', {
+      sourceChainId: _xcSrcChainId,
+      destinationChainIds: _xcDestChainIds,
+      destinationDomains: domains.map(Number),
+      token: usdcOnArc,
+      tokenBytecode: _xcTokenCode === '0x' ? 'MISSING' : (_xcTokenCode.length + ' chars'),
+      contract: batcherAddr,
+      contractBytecode: _xcCtrCode === '0x' ? 'MISSING' : (_xcCtrCode.length + ' chars'),
+      allowance: _xcFreshAllow.toString(),
+      balance: _xcBal === null ? 'n/a' : _xcBal.toString(),
+      total: total.toString(),
+      sourceDomain: CROSSCHAIN_SOURCE_DOMAIN
+    });
+    _log('[Cross-chain batch] allowance check', { currentAllowance: _xcFreshAllow.toString(), requiredAmount: total.toString() });
+
+    if (usdcOnArc === ethers.ZeroAddress) { toast('Cross-chain failed: ZeroToken (token address is 0x0)', 'error'); return; }
+    if (_xcTokenCode === '0x') { toast('Cross-chain failed: token has no bytecode on the connected network (wrong chain?)', 'error'); return; }
+    if (_xcCtrCode === '0x') { toast('Cross-chain failed: contract has no bytecode on the connected network (wrong chain/address?)', 'error'); return; }
+    {
+      let _erc20Ok = true;
+      try { const _ro = new ethers.Contract(usdcOnArc, ['function balanceOf(address) view returns (uint256)','function allowance(address,address) view returns (uint256)'], signer); await _ro.balanceOf(senderAddr); await _ro.allowance(senderAddr, batcherAddr); } catch { _erc20Ok = false; }
+      if (!_erc20Ok) { toast('Cross-chain failed: token is not a valid ERC20 (balanceOf/allowance unreadable)', 'error'); return; }
+    }
+    if (_xcBal !== null && _xcBal < total) { toast('Cross-chain failed: insufficient balance for batch total', 'error'); return; }
+    if (_xcFreshAllow < total) { toast('Cross-chain failed: allowance < amount (approve did not stick)', 'error'); return; }
+
+    try {
+      if (useHook) {
+        const _simHook = amounts.map(() => '0x');
+        await batcher.batchDepositForBurnWithHook.staticCall(amounts, domains, mintRecips, _simHook, maxFee, minFinality, { from: senderAddr });
+      } else {
+        await batcher.batchDepositForBurn.staticCall(amounts, domains, mintRecips, maxFee, minFinality, { from: senderAddr });
+      }
+      _log('[Cross-chain batch] simulation OK');
+    } catch (simErr) {
+      const reason = decodeCrossChainRevert(simErr);
+      _err('[Cross-chain batch] simulation reverted:', reason, simErr);
+      toast('Cross-chain failed: ' + reason, 'error');
+      return;
+    }
 
     toast(`Sending ${crossRcpts.length} cross-chain transfers in ONE transaction...`, 'info');
 
@@ -12086,16 +12394,702 @@ async function executeCrossChainBatch(crossRcpts, useHook = false){
   }
 }
 
+// ── V4 + CCTPAdapterV2 Bridge Intent Flow ──────────────────────
+async function executeBridgeIntentV4(){
+  if(!signer || !walletAddress){ toast('Connect wallet first', 'error'); return; }
+  const crossRcpts = recipients.filter(r => getRecipientRoute(r) === 'bridge');
+  if(crossRcpts.length === 0){ toast('Add at least one cross-chain recipient', 'warning'); return; }
+
+  const usdcAddr = activeUSDC();
+  const usdcContract = new ethers.Contract(usdcAddr, [
+    'function approve(address,uint256) returns (bool)',
+    'function allowance(address,address) view returns (uint256)',
+    'function decimals() view returns (uint8)'
+  ], signer);
+
+  const executorV4 = new ethers.Contract(EXECUTOR_V4_ADDRESS, EXECUTOR_V4_ABI, signer);
+  const adapterV2 = new ethers.Contract(CCTP_ADAPTER_V2, CCTP_ADAPTER_V2_ABI, signer);
+
+  let bridgeStart = Date.now();
+  try {
+    const amounts = [], recipsAddr = [];
+    for(const r of crossRcpts){
+      const amt = toUsdc(r.amount);
+      amounts.push(amt);
+      recipsAddr.push(r._resolved || r.addr);
+    }
+    const total = amounts.reduce((a,b)=>a+b, 0n);
+
+    // Resolve destination chain: recipients store string name like "Base_Sepolia"
+    const chainName = crossRcpts[0]?.chainId || 'Base_Sepolia';
+    let destChainNum = 84532; // default Base Sepolia
+    let destDomain = 6;
+    if (typeof CHAIN_REGISTRY !== 'undefined') {
+      for (const cid of Object.keys(CHAIN_REGISTRY)) {
+        const entry = CHAIN_REGISTRY[cid];
+        if (entry && (entry.id === chainName || String(entry.chainId) === String(chainName))) {
+          destChainNum = Number(entry.chainId || cid);
+          destDomain = entry.cctp?.domain ?? 6;
+          break;
+        }
+      }
+    }
+
+    toast('Creating route intent...', 'info');
+    const tx1 = await executorV4.createRouteIntent(destChainNum, usdcAddr, recipsAddr, amounts, { gasLimit: 400000 });
+    const r1 = await tx1.wait();
+    const evt = r1.logs.map(l => { try { return executorV4.interface.parseLog(l); } catch(e){} }).find(p => p && p.name === 'RouteIntentCreated');
+    const intentId = evt?.args?.intentId;
+    if(!intentId) throw new Error('Failed to capture intentId from event');
+    console.log('[V4] intentId:', intentId);
+    try { localStorage.setItem('arcpay_last_intent', intentId); } catch(e) {}
+
+    saveBridgeHistory({
+      intentId, token: usdcAddr, amount: total.toString(),
+      destChain: destChainNum, destDomain, recipients: crossRcpts.length,
+      createTx: tx1.hash, timestamp: Date.now(),
+      status: 0, finalStatus: 'CREATED'
+    });
+
+    toast('Approving USDC...', 'info');
+    const allowance = await usdcContract.allowance(walletAddress, CCTP_ADAPTER_V2);
+    if(allowance < total){
+      const apTx = await usdcContract.approve(CCTP_ADAPTER_V2, total);
+      await apTx.wait();
+    }
+
+    const mintRecipient = mintRecipientBytes32For(crossRcpts[0]);
+    toast('Configuring bridge intent...', 'info');
+    const cfgTx = await adapterV2.configureIntent(intentId, destDomain, mintRecipient, ethers.ZeroHash);
+    await cfgTx.wait();
+
+    toast('Executing bridge intent...', 'info');
+    const tx4 = await executorV4.executeBridgeIntent(intentId, CCTP_ADAPTER_V2, { gasLimit: 800000 });
+    const r4 = await tx4.wait();
+
+    updateBridgeHistory(intentId, { executeTx: tx4.hash });
+
+    // ── Parse CCTP events for messageHash + nonce ─────────────────
+    let messageHash = null, messageBytesRaw = null, burnNonce = null, srcDomain = 26;
+    const MT = '0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275'.toLowerCase();
+    const TM = '0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA'.toLowerCase();
+    let bridgeComplete = false;
+
+    for(const log of r4.logs){
+      const addr = log.address.toLowerCase();
+
+      if(addr === CCTP_ADAPTER_V2.toLowerCase()){
+        try { const p = adapterV2.interface.parseLog(log); if(p && p.name === 'BridgeInitiated') bridgeComplete = true; } catch(e) {}
+      }
+
+      if(addr === TM && log.topics[0] === '0x0c8c1cbdc5190613ebd485511d4e2812cfa45eecb79d845893331fedad5130a5'){
+        burnNonce = ethers.toBigInt(log.topics[3] || '0x00');
+      }
+
+      // MessageTransmitter MessageSent → save raw bytes (used by receiveMessage)
+      if(addr === MT && log.topics[0] === '0x8c5261668696ce22758910d05bab8f186d6eb247ceac2af2e82c7dc17669b036'){
+        try {
+          const decoded = ethers.AbiCoder.defaultAbiCoder().decode(['bytes'], log.data);
+          messageBytesRaw = ethers.hexlify(decoded[0]);
+          messageHash = ethers.keccak256(messageBytesRaw);
+          console.log('[V4] MessageSent hash:', messageHash, 'bytesLen:', ethers.dataLength(messageBytesRaw));
+        } catch(e){ console.warn('[V4] Failed to decode MessageSent:', e.message); }
+      }
+    }
+
+    const status = await executorV4.getIntentStatus(intentId);
+    const statusNames = {0:'CREATED',1:'BRIDGE_PENDING',2:'EXECUTED',3:'FAILED'};
+    const statusStr = statusNames[status] || 'UNKNOWN';
+
+    // ── Determine post-burn state ──────────────────────────────────
+    let burnState = 'UNKNOWN';
+    if(messageHash) burnState = 'BURN_CONFIRMED';
+    else if(bridgeComplete || status === 1) burnState = 'BRIDGE_PENDING';
+
+    if(status === 1 || bridgeComplete){
+      const elapsed = Date.now() - bridgeStart;
+      recordMetric('success', elapsed);
+      updateBridgeHistory(intentId, {
+        finalStatus: burnState, status: 1, completedAt: Date.now(),
+        messageHash: messageHash, messageBytesRaw: messageBytesRaw,
+        burnNonce: burnNonce ? burnNonce.toString() : null,
+        srcDomain: srcDomain
+      });
+
+      if(messageHash){
+        toast('Bridge sent! CCTP message: ' + shortAddr(messageHash) + ' — attestation pending (' + (elapsed/1000).toFixed(1) + 's)', 'success');
+        startAttestationPolling(intentId, messageHash, srcDomain, tx4.hash);
+      } else {
+        toast('Bridge sent! Status: ' + statusStr + ' — CCTP attestation in progress (' + (elapsed/1000).toFixed(1) + 's)', 'success');
+      }
+      console.log('[V4] Bridge complete. TX:', tx4.hash, 'intentId:', intentId, 'messageHash:', messageHash);
+    } else if(status === 3){
+      recordMetric('failed', Date.now() - bridgeStart);
+      updateBridgeHistory(intentId, { finalStatus: 'FAILED', status: 3, completedAt: Date.now() });
+      toast('Bridge execution failed. Check explorer for details. TX: ' + shortAddr(tx4.hash), 'error');
+      console.error('[V4] IntentFailed:', tx4.hash, intentId);
+    } else {
+      toast('Bridge submitted. Status: ' + statusStr, 'info');
+    }
+
+    for(let i = recipients.length - 1; i >= 0; i--){
+      if(getRecipientRoute(recipients[i]) === 'bridge') recipients.splice(i, 1);
+    }
+    saveRecipients();
+    renderRecipients();
+
+  } catch(e){
+    console.error('[V4] Bridge error:', e);
+    recordMetric('failed', Date.now() - (bridgeStart || Date.now()));
+    const msg = e.shortMessage || e.message || 'Unknown error';
+    if(msg.includes('user rejected') || msg.includes('ACTION_REJECTED')){
+      toast('User rejected the signature — bridge cancelled', 'warning');
+    } else if(msg.includes('insufficient funds')){
+      toast('Insufficient USDC balance — add funds and try again', 'error');
+    } else if(msg.includes('network') || msg.includes('NETWORK_ERROR')){
+      toast('Network error — check your connection and try again', 'error');
+    } else if(msg.includes('CALL_EXCEPTION') || msg.includes('execution reverted')){
+      toast('Transaction reverted — the bridge contract rejected the call', 'error');
+    } else {
+      toast('Bridge failed: ' + msg, 'error');
+    }
+  }
+}
+
+function mintRecipientBytes32For(r){
+  const addr = r._resolved || r.addr;
+  if(!addr || !isAddr(addr)) return ethers.ZeroHash;
+  return ethers.zeroPadValue(addr, 32);
+}
+
+async function pollIntentStatus(intentId, maxAttempts, intervalMs){
+  maxAttempts = maxAttempts || 30; intervalMs = intervalMs || 5000;
+  const executorV4 = new ethers.Contract(EXECUTOR_V4_ADDRESS, EXECUTOR_V4_ABI, provider);
+  for(let i = 0; i < maxAttempts; i++){
+    await new Promise(r => setTimeout(r, intervalMs));
+    const status = await executorV4.getIntentStatus(intentId);
+    if(status !== 0) return status;
+  }
+  return 0;
+}
+
+// ── CCTP Attestation Polling (Iris API) ──────────────────────────
+const _attestationTimers = {};
+
+async function checkIrisAttestation(messageHash, srcDomain, txHash){
+  if(!messageHash || messageHash === ethers.ZeroHash) return null;
+  // Primary: Iris V2 messages by txHash (Arc Testnet reliable path)
+  if(txHash && srcDomain){
+    try {
+      var v2url = 'https://iris-api-sandbox.circle.com/v2/messages/' + srcDomain + '?transactionHash=' + txHash;
+      var resp = await fetch(v2url);
+      if(resp.ok){
+        var data = await resp.json();
+        if(data && data.messages && data.messages.length > 0){
+          var msg = data.messages[0];
+          if(msg.status === 'complete' && msg.attestation && msg.attestation !== 'PENDING'){
+            return 'ATTESTATION_READY';
+          }
+          return msg.status === 'complete' ? 'ATTESTATION_READY' : 'PENDING';
+        }
+      }
+    } catch(e){}
+  }
+  // Fallback: attestations by messageHash
+  try {
+    var attUrl = 'https://iris-api-sandbox.circle.com/attestations/' + messageHash;
+    var attResp = await fetch(attUrl);
+    if(!attResp.ok){ if(attResp.status === 404) return 'PENDING'; return null; }
+    var attData = await attResp.json();
+    if(attData && attData.status === 'complete') return 'ATTESTATION_READY';
+    return 'PENDING';
+  } catch(e){ return null; }
+}
+
+function startAttestationPolling(intentId, messageHash, srcDomain, txHash){
+  if(!messageHash || _attestationTimers[intentId]) return;
+  var attempts = 0;
+  var maxAttempts = 60;
+  _attestationTimers[intentId] = setInterval(async function(){
+    if(attempts >= maxAttempts){ stopAttestationPolling(intentId); return; }
+    attempts++;
+    var result = await checkIrisAttestation(messageHash, srcDomain, txHash);
+    if(result === 'PENDING' || result === null) return;
+    if(result === 'ATTESTATION_READY'){
+      updateBridgeHistory(intentId, { finalStatus: 'ATTESTATION_READY', attestation: 'complete' });
+      stopAttestationPolling(intentId);
+      toast('CCTP attestation ready for intent ' + shortAddr(intentId) + ' — ready to mint on destination', 'success');
+      // Fetch & cache message + attestation for minting
+      fetchMessageAndAttestation(intentId, txHash, srcDomain);
+    }
+  }, 5000);
+}
+
+function stopAttestationPolling(intentId){
+  if(_attestationTimers[intentId]){ clearInterval(_attestationTimers[intentId]); delete _attestationTimers[intentId]; }
+}
+
+// ── Mint / ReceiveMessage (destination chain) ──────────────────
+async function fetchMessageAndAttestation(intentId, txHash, srcDomain){
+  if(!txHash || !srcDomain) return;
+  try {
+    var v2url = 'https://iris-api-sandbox.circle.com/v2/messages/' + srcDomain + '?transactionHash=' + txHash;
+    var resp = await fetch(v2url);
+    if(!resp.ok) return;
+    var data = await resp.json();
+    if(data && data.messages && data.messages.length > 0){
+      var msg = data.messages[0];
+      updateBridgeHistory(intentId, {
+        attestationSig: msg.attestation,
+        irisStatus: msg.status,
+        destDomainIris: msg.destinationDomain
+      });
+      console.log('[V4] Attestation cached from Iris');
+    }
+  } catch(e){ console.warn('[V4] Iris fetch failed:', e.message); }
+}
+
+async function executeMint(intentId){
+  if(!signer || !walletAddress){ toast('Connect wallet first', 'error'); return; }
+  var history = loadBridgeHistory();
+  var entry = history.find(function(h){ return h.intentId === intentId; });
+  if(!entry){ toast('Intent not found in history', 'error'); return; }
+
+  // ── Anti-duplicate ─────────────────────────────────────
+  if(entry.finalStatus === 'COMPLETED' || entry.finalStatus === 'MINT_CONFIRMED'){
+    toast('Mint already completed. TX: ' + (entry.mintTx ? shortAddr(entry.mintTx) : 'unknown'), 'warning');
+    return;
+  }
+  if(entry.finalStatus === 'MINT_SUBMITTED'){
+    toast('Mint already submitted. TX: ' + (entry.mintTx ? shortAddr(entry.mintTx) : 'pending'), 'info');
+    return;
+  }
+
+  // ── Validate message data ──────────────────────────────
+  if(!entry.messageBytesRaw || entry.messageBytesRaw === '0x'){
+    toast('Missing CCTP message data — must be captured during burn', 'error');
+    return;
+  }
+  if(!entry.attestationSig || entry.attestationSig === '0x'){
+    toast('Missing attestation signature — wait for Iris confirmation', 'warning');
+    return;
+  }
+
+  // Ensure messageBytesRaw is a proper hex string
+  var msgBytes = entry.messageBytesRaw;
+  if(typeof msgBytes !== 'string' || !msgBytes.startsWith('0x')){
+    try { msgBytes = ethers.hexlify(msgBytes); } catch(e){ toast('Invalid message bytes format', 'error'); return; }
+  }
+  var attSig = entry.attestationSig;
+  if(typeof attSig !== 'string' || !attSig.startsWith('0x')){
+    try { attSig = ethers.hexlify(attSig); } catch(e){ toast('Invalid attestation format', 'error'); return; }
+  }
+
+  // Debug log
+  console.log('[V4] executeMint debug:', {
+    intentId: intentId.slice(0,20),
+    messageLength: (msgBytes.length - 2) / 2 + ' bytes',
+    attestationLength: (attSig.length - 2) / 2 + ' bytes',
+    destDomain: entry.destDomainIris || entry.destDomain,
+    hasSignature: !!entry.attestationSig
+  });
+
+  // ── Resolve destination chain ──────────────────────────
+  var destChainId = null;
+  if(typeof CHAIN_REGISTRY !== 'undefined'){
+    for(var cid of Object.keys(CHAIN_REGISTRY)){
+      var ch = CHAIN_REGISTRY[cid];
+      if(ch && ch.cctp && Number(ch.cctp.domain) === Number(entry.destDomainIris || entry.destDomain)){
+        destChainId = Number(ch.chainId || cid); break;
+      }
+    }
+  }
+  if(!destChainId){ destChainId = entry.destChain || 84532; }
+
+  var chainName = 'destination chain (domain ' + (entry.destDomainIris || entry.destDomain || '?') + ', chainId ' + destChainId + ')';
+  var switchMsg = 'Switch your wallet to the ' + chainName + ' to mint USDC.\n\nAfter switching, click OK to proceed.';
+  if(!confirm(switchMsg)){ toast('Mint cancelled', 'warning'); return; }
+
+  try {
+    var chainHex = '0x' + destChainId.toString(16);
+    if(window.ethereum){
+      try { await window.ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: chainHex }] }); }
+      catch(swErr){ if(swErr.code === 4902){ toast('Please add the destination network to your wallet first', 'error'); } return; }
+    }
+    await refreshProviderState();
+  } catch(e){ toast('Could not switch network: ' + (e.shortMessage || e.message), 'error'); return; }
+
+  // ── Build and send receiveMessage transaction ──────────
+  var destMT = '0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275';
+  try {
+    toast('Calling receiveMessage on destination chain...', 'info');
+    updateBridgeHistory(intentId, { finalStatus: 'MINT_SUBMITTED' });
+
+    // Use ethers Interface to properly encode the function call
+    var mtIface = new ethers.Interface(['function receiveMessage(bytes message, bytes attestation) returns (bool)']);
+    var calldata = mtIface.encodeFunctionData('receiveMessage', [msgBytes, attSig]);
+
+    if(!calldata || calldata === '0x'){
+      toast('Failed to encode receiveMessage calldata', 'error');
+      return;
+    }
+
+    console.log('[V4] Sending receiveMessage:', {
+      to: destMT,
+      dataLength: calldata.length,
+      dataPrefix: calldata.slice(0, 20)
+    });
+
+    var tx = await signer.sendTransaction({ to: destMT, data: calldata, gasLimit: 300000 });
+    var receipt = await tx.wait();
+
+    if(receipt.status === 1){
+      updateBridgeHistory(intentId, {
+        finalStatus: 'MINT_CONFIRMED', mintTx: tx.hash,
+        mintChainId: destChainId, completedAt: Date.now()
+      });
+      try {
+        var usdcAddr = getTokenAddress('USDC') || '0x3600000000000000000000000000000000000000';
+        var usdc = new ethers.Contract(usdcAddr, ['function balanceOf(address) view returns (uint256)'], provider);
+        var bal = await usdc.balanceOf(walletAddress);
+        updateBridgeHistory(intentId, { mintBalance: bal.toString(), finalStatus: 'COMPLETED' });
+        toast('USDC minted! Balance: ' + ethers.formatUnits(bal, 6) + ' USDC', 'success');
+      } catch(e){
+        updateBridgeHistory(intentId, { finalStatus: 'COMPLETED' });
+        toast('Mint confirmed! TX: ' + shortAddr(tx.hash), 'success');
+      }
+    } else {
+      updateBridgeHistory(intentId, { finalStatus: 'MINT_FAILED', mintTx: tx.hash });
+      toast('Mint transaction failed. Check explorer.', 'error');
+    }
+  } catch(e){
+    console.error('[V4] Mint error:', e);
+    updateBridgeHistory(intentId, { finalStatus: 'MINT_FAILED', mintError: (e.shortMessage || e.message || 'unknown') });
+    var msg = e.shortMessage || e.message || 'Unknown error';
+    if(msg.includes('user rejected')){ toast('Mint rejected by user', 'warning'); }
+    else if(msg.includes('insufficient funds')){ toast('Insufficient gas on destination chain', 'error'); }
+    else { toast('Mint failed: ' + msg, 'error'); }
+  }
+}
+
+// ── Bridge History & Monitoring ─────────────────────────────────
+const BRIDGE_HISTORY_KEY = 'arcpay_bridge_history';
+const BRIDGE_METRICS_KEY = 'arcpay_bridge_metrics';
+
+function loadBridgeHistory(){
+  try { return JSON.parse(localStorage.getItem(BRIDGE_HISTORY_KEY) || '[]'); } catch(e) { return []; }
+}
+function saveBridgeHistory(entry){
+  const history = loadBridgeHistory();
+  history.unshift(entry);
+  if(history.length > 100) history.length = 100;
+  try { localStorage.setItem(BRIDGE_HISTORY_KEY, JSON.stringify(history)); } catch(e) {}
+}
+function updateBridgeHistory(intentId, updates){
+  const history = loadBridgeHistory();
+  const idx = history.findIndex(h => h.intentId === intentId);
+  if(idx >= 0) Object.assign(history[idx], updates);
+  else history.unshift({ intentId: intentId, ...updates });
+  try { localStorage.setItem(BRIDGE_HISTORY_KEY, JSON.stringify(history)); } catch(e) {}
+}
+
+function loadMetrics(){
+  try { return JSON.parse(localStorage.getItem(BRIDGE_METRICS_KEY) || '{"success":0,"failed":0,"totalAttempts":0,"totalTimeMs":0}'); } catch(e) { return {success:0,failed:0,totalAttempts:0,totalTimeMs:0}; }
+}
+function recordMetric(type, durationMs){
+  const m = loadMetrics();
+  m.totalAttempts++;
+  if(type === 'success') m.success++;
+  if(type === 'failed') m.failed++;
+  if(durationMs) m.totalTimeMs += durationMs;
+  try { localStorage.setItem(BRIDGE_METRICS_KEY, JSON.stringify(m)); } catch(e) {}
+}
+
+async function recoverPendingIntents(){
+  if(!provider || !walletAddress) return;
+  var history = loadBridgeHistory();
+  var pending = history.filter(function(h){ return h.messageHash && (!h.finalStatus || h.finalStatus === 'BURN_CONFIRMED' || h.finalStatus === 'WAITING_ATTESTATION'); });
+  if(pending.length === 0) return;
+  var executorV4 = new ethers.Contract(EXECUTOR_V4_ADDRESS, EXECUTOR_V4_ABI, provider);
+  for(var i = 0; i < pending.length; i++){
+    var h = pending[i];
+    try {
+      var status = await executorV4.getIntentStatus(h.intentId);
+      updateBridgeHistory(h.intentId, { finalStatus: {0:'CREATED',1:'BRIDGE_PENDING',2:'EXECUTED',3:'FAILED'}[status]||'UNKNOWN', status: Number(status), lastChecked: Date.now() });
+      if(h.messageHash && (status === 1 || status === 0)){
+        startAttestationPolling(h.intentId, h.messageHash, h.srcDomain || 26);
+      }
+    } catch(e){}
+  }
+}
+
+// ── CrossChain Dashboard E2E ──────────────────────────────────
+var _xdCurrentIntent = null;
+
+function xdSetLoading(id, show){
+  var el = document.getElementById(id);
+  if(el) el.style.display = show ? 'block' : 'none';
+}
+
+function xdFmtLabel(h){
+  var id = (h.intentId || '').slice(0,10) + '...';
+  var amt = (Number(h.amount || 0) / 1e6).toFixed(4) + ' USDC';
+  var dom = (h.srcDomain || '26') + ' → ' + (h.destDomain || h.destDomainIris || '?');
+  var att = h.attestationSig ? '✓ Attested' : (h.messageHash ? '⏳ Pending' : '—');
+  return id + ' | ' + amt + ' | ' + dom + ' | ' + att;
+}
+
+function xdCopyToClipboard(text){
+  if(!text || text === '—') return;
+  try { navigator.clipboard.writeText(text).then(function(){ toast('Copied to clipboard', 'success'); }); } catch(e){ toast('Copy failed', 'error'); }
+}
+
+function xdToggleBytes(){
+  var pre = document.getElementById('xd-imsg-bytes-full');
+  var btn = document.getElementById('xd-bytes-toggle');
+  if(!pre || !btn) return;
+  var isHidden = pre.style.display === 'none' || !pre.style.display;
+  pre.style.display = isHidden ? 'block' : 'none';
+  btn.textContent = isHidden ? '▲ Collapse' : '▼ Expand';
+  var lenEl = document.getElementById('xd-imsg-bytes-len');
+  if(lenEl && isHidden) lenEl.textContent = '';
+  if(lenEl && !isHidden){
+    var h = _xdCurrentIntent;
+    if(h && h.messageBytesRaw) lenEl.textContent = '(' + ((h.messageBytesRaw.length - 2) / 2) + ' bytes) [Collapse ▲]';
+  }
+}
+
+function xdHighlightFlow(status){
+  var steps = document.getElementById('xd-flow-steps');
+  if(!steps) return;
+  var all = steps.querySelectorAll('[data-step]');
+  all.forEach(function(s){ s.style.background = 'var(--bg2)'; s.style.color = 'var(--muted2)'; s.style.fontWeight = 'normal'; s.textContent = s.textContent.replace('✓ ','').replace('● ',''); });
+  var stepMap = {CREATED:0,BRIDGE_PENDING:1,BURN_CONFIRMED:1,WAITING_ATTESTATION:2,MESSAGE_SENT:2,ATTESTATION_READY:3,MINT_SUBMITTED:4,MINT_CONFIRMED:5,COMPLETED:5,FAILED:-1};
+  var step = stepMap[status] !== undefined ? stepMap[status] : -1;
+  for(var i = 0; i <= (step >= 0 ? step : -1); i++){
+    var target = steps.querySelector('[data-step=\"' + i + '\"]');
+    if(target){ target.style.background = 'rgba(34,197,94,.12)'; target.style.color = '#22c55e'; target.style.fontWeight = '600'; target.textContent = '✓ ' + target.textContent.replace('✓ ',''); }
+  }
+  if(step >= 0){
+    var current = steps.querySelector('[data-step=\"' + step + '\"]');
+    if(current){ current.style.background = 'rgba(79,142,247,.2)'; current.style.color = '#4f8ef7'; current.textContent = '● ' + current.textContent.replace('● ','').replace('✓ ',''); }
+  }
+}
+
+function xdRefreshAll(){
+  if(typeof loadBridgeHistory !== 'function'){ console.warn('[XD] Bridge history not available'); return; }
+  var history = loadBridgeHistory();
+  var m = loadMetrics();
+  var intents = history.filter(function(h){ return h.intentId && h.token; });
+  var el = function(id,val){ var e = document.getElementById(id); if(e) e.textContent = val || '—'; };
+
+  // E2E Metrics
+  var burned = intents.filter(function(h){ return h.status === 1 || (h.finalStatus && h.finalStatus !== 'CREATED'); });
+  var minted = intents.filter(function(h){ return h.finalStatus === 'COMPLETED' || h.mintTx; });
+  var pendingAtt = intents.filter(function(h){ return h.messageHash && (!h.attestationSig || h.irisStatus !== 'complete'); });
+  el('xd-e2e-burn', (burned.reduce(function(s,h){ return s + (Number(h.amount)||0); },0) / 1e6).toFixed(4) + ' USDC');
+  el('xd-e2e-burncnt', burned.length + ' intents');
+  el('xd-e2e-mint', (minted.reduce(function(s,h){ return s + (Number(h.amount)||0); },0) / 1e6).toFixed(4) + ' USDC');
+  el('xd-e2e-mintcnt', minted.length + ' completed');
+  el('xd-e2e-pending', pendingAtt.length.toString());
+  el('xd-e2e-avg', ((m.avgTimeMs || 0) / 1000).toFixed(1) + 's');
+
+  // E2E Table
+  var tbody = document.getElementById('xd-intents-body');
+  if(tbody){
+    if(intents.length > 0){
+      var html = '';
+      var sc = {CREATED:'#6b7280',BRIDGE_PENDING:'#eab308',BURN_CONFIRMED:'#f97316',WAITING_ATTESTATION:'#3b82f6',MESSAGE_SENT:'#3b82f6',ATTESTATION_READY:'#14b8a6',MINT_SUBMITTED:'#a855f7',MINT_CONFIRMED:'#06b6d4',COMPLETED:'#22c55e',FAILED:'#ef4444'};
+      for(var i = 0; i < Math.min(intents.length, 30); i++){
+        var h = intents[i];
+        var st = h.finalStatus || (h.status === 1 ? 'BRIDGE_PENDING' : 'CREATED');
+        var color = sc[st] || '#6b7280';
+        var burnLink = h.executeTx ? '<a href=\"https://testnet.arcscan.app/tx/' + h.executeTx + '\" target=_blank style=color:var(--blue);font-size:7.5px>' + h.executeTx.slice(0,10) + '...</a>' : (h.createTx ? '<a href=\"https://testnet.arcscan.app/tx/' + h.createTx + '\" target=_blank style=color:var(--blue);font-size:7.5px>' + h.createTx.slice(0,10) + '...</a>' : '—');
+        var mintLink = h.mintTx ? '<a href=\"https://testnet.arcscan.app/tx/' + h.mintTx + '\" target=_blank style=color:var(--teal);font-size:7.5px>' + h.mintTx.slice(0,10) + '...</a>' : '—';
+        var attIcon = h.attestationSig ? '<span style=color:#22c55e title=\"Attested\">✓</span>' : (h.messageHash ? '<span style=color:#eab308 title=\"Pending attestation\">⏳</span>' : '—');
+        var actionHtml = '';
+        if(h.messageHash && !h.attestationSig){
+          actionHtml = '<button onclick=\"event.stopPropagation();xdInspectIntent(\\\'' + h.intentId + '\\\')\" style=\"font-size:7px;padding:2px 5px;background:var(--blue);color:#fff;border:none;border-radius:3px;cursor:pointer\">View</button>';
+        } else if(h.messageBytesRaw && h.attestationSig && st !== 'COMPLETED' && st !== 'MINT_CONFIRMED' && st !== 'MINT_SUBMITTED'){
+          actionHtml = '<button onclick=\"event.stopPropagation();xdExecuteMint(\\\'' + h.intentId + '\\\')\" style=\"font-size:7px;padding:2px 5px;background:#22c55e;color:#fff;border:none;border-radius:3px;cursor:pointer\">Mint</button>';
+        } else if(h.mintTx){
+          actionHtml = mintLink;
+        }
+        html += '<tr style=\"border-bottom:1px solid var(--bg2);cursor:pointer\" onclick=\"xdInspectIntent(\\\'' + h.intentId + '\\\');xdHighlightFlow(\\\'' + st + '\\\')\">' +
+          '<td style=padding:3px;font-family:monospace;font-size:7px title=\"' + (h.intentId||'') + '\">' + (h.intentId ? h.intentId.slice(0,12) + '...' : '—') + '</td>' +
+          '<td>' + burnLink + '</td>' +
+          '<td>' + (Number(h.amount||0)/1e6).toFixed(4) + '</td>' +
+          '<td style=font-size:7px>' + (h.srcDomain||'26') + '</td>' +
+          '<td style=font-size:7px>' + (h.destDomain||'—') + '</td>' +
+          '<td style=font-family:monospace;font-size:6.5px>' + (h.messageHash ? h.messageHash.slice(0,8) + '...' : '—') + '</td>' +
+          '<td>' + attIcon + '</td>' +
+          '<td>' + mintLink + '</td>' +
+          '<td><span style=color:' + color + ';font-weight:600;font-size:7px>' + st + '</span></td>' +
+          '<td>' + actionHtml + '</td></tr>';
+      }
+      tbody.innerHTML = html;
+    } else {
+      tbody.innerHTML = '<tr><td colspan=10 style=color:var(--muted2);text-align:center;padding:20px>No bridge intents recorded yet. Execute a bridge to populate.</td></tr>';
+    }
+  }
+
+  // Inspector select with rich labels
+  var inspSel = document.getElementById('xd-inspector-select');
+  if(inspSel){
+    var msgs = intents.filter(function(h){ return h.messageHash; });
+    var curVal = inspSel.value;
+    var opts = '<option value=\"\">— ' + msgs.length + ' intent(s) with messageHash —</option>';
+    for(var j = 0; j < msgs.length; j++){
+      opts += '<option value=\"' + msgs[j].intentId + '\">' + xdFmtLabel(msgs[j]) + '</option>';
+    }
+    inspSel.innerHTML = opts;
+    if(curVal && msgs.some(function(m){ return m.intentId === curVal; })) inspSel.value = curVal;
+  }
+
+  // Mint select with rich labels
+  var mintSel = document.getElementById('xd-mint-select');
+  if(mintSel){
+    var ready = intents.filter(function(h){ return h.messageBytesRaw && h.attestationSig && h.finalStatus !== 'COMPLETED' && h.finalStatus !== 'MINT_CONFIRMED' && h.finalStatus !== 'MINT_SUBMITTED'; });
+    var curMintVal = mintSel.value;
+    var mopts = '<option value=\"\">— ' + ready.length + ' intent(s) ready to mint —</option>';
+    for(var k = 0; k < ready.length; k++){
+      mopts += '<option value=\"' + ready[k].intentId + '\">' + xdFmtLabel(ready[k]) + '</option>';
+    }
+    mintSel.innerHTML = mopts;
+    if(curMintVal && ready.some(function(r){ return r.intentId === curMintVal; })) mintSel.value = curMintVal;
+    var mintBtn = document.getElementById('xd-mint-btn');
+    if(mintBtn && !mintBtn.disabledByUser){ mintBtn.disabled = ready.length === 0; }
+  }
+
+  // Recovery
+  var recEl = document.getElementById('xd-recovery');
+  if(recEl){
+    var recPending = intents.filter(function(h){ return h.messageHash && (!h.attestationSig || h.irisStatus !== 'complete'); });
+    recEl.innerHTML = recPending.length + ' intent(s) pending attestation. Last check: ' + new Date().toLocaleTimeString() + (recPending.length > 0 ? ' — auto-recovery polls Iris' : ' — all resolved ✓');
+  }
+}
+
+function xdInspectIntent(intentId){
+  if(!intentId) return;
+  xdSetLoading('xd-inspector-loading', true);
+  var detail = document.getElementById('xd-inspector-detail');
+  if(detail) detail.style.display = 'grid';
+  var history = loadBridgeHistory();
+  var h = history.find(function(e){ return e.intentId === intentId; });
+  if(!h){ xdSetLoading('xd-inspector-loading', false); return; }
+  _xdCurrentIntent = h;
+  var sf = function(id,val){ var e = document.getElementById(id); if(e) e.textContent = val || '—'; };
+  var sa = function(id,val,href){ var e = document.getElementById(id); if(e){ e.textContent = val || '—'; if(href) e.href = href; e.style.display = href && href !== '#' ? '' : 'none'; } };
+  sf('xd-imsg-iid', h.intentId || '—');
+  sf('xd-imsg-hash', h.messageHash || '—');
+  sf('xd-imsg-nonce', h.burnNonce || '—');
+  sf('xd-imsg-dest', (h.destDomain || h.destDomainIris || '—') + ' (' + (h.destDomain === '6' ? 'Base' : h.destDomain === '3' ? 'Arbitrum' : '?') + ')');
+  sf('xd-imsg-bytes-len', h.messageBytesRaw ? ((h.messageBytesRaw.length - 2) / 2) + ' bytes [▼ Expand]' : '—');
+  var bytesPre = document.getElementById('xd-imsg-bytes-full');
+  if(bytesPre){ bytesPre.textContent = h.messageBytesRaw || '—'; bytesPre.style.display = 'none'; }
+  var bytesToggle = document.getElementById('xd-bytes-toggle');
+  if(bytesToggle) bytesToggle.textContent = '▼ Expand';
+  sf('xd-imsg-att', h.attestationSig ? h.attestationSig.slice(0,60) + '...' : '—');
+  var irisEl = document.getElementById('xd-imsg-iris');
+  var irisColor = h.irisStatus === 'complete' ? '#22c55e' : (h.attestationSig ? '#14b8a6' : '#eab308');
+  var irisLabel = h.irisStatus === 'complete' ? 'COMPLETE' : (h.attestationSig ? 'COMPLETE (cached)' : 'PENDING');
+  if(irisEl){ irisEl.textContent = irisLabel; irisEl.style.color = irisColor; }
+  sa('xd-imsg-irislink', 'Open Iris V2 ↗', h.executeTx ? 'https://iris-api-sandbox.circle.com/v2/messages/26?transactionHash=' + h.executeTx : '#');
+  sa('xd-imsg-explorer', 'View Burn TX ↗', h.executeTx ? 'https://testnet.arcscan.app/tx/' + h.executeTx : (h.createTx ? 'https://testnet.arcscan.app/tx/' + h.createTx : '#'));
+  sa('xd-imsg-mintlink', 'View Mint TX ↗', h.mintTx ? 'https://testnet.arcscan.app/tx/' + h.mintTx : '');
+  var st = h.finalStatus || (h.status === 1 ? 'BRIDGE_PENDING' : 'CREATED');
+  xdHighlightFlow(st);
+  xdSetLoading('xd-inspector-loading', false);
+}
+
+function xdInspectRefresh(){
+  xdRefreshAll();
+  var sel = document.getElementById('xd-inspector-select');
+  if(sel && sel.value) xdInspectIntent(sel.value);
+}
+
+function xdMintUpdateUI(intentId){
+  var btn = document.getElementById('xd-mint-btn');
+  if(!intentId){ if(btn){ btn.disabled = true; btn.textContent = 'Execute Mint'; } return; }
+  var history = loadBridgeHistory();
+  var h = history.find(function(e){ return e.intentId === intentId; });
+  if(!h) return;
+  var sf = function(id,val){ var e = document.getElementById(id); if(e) e.textContent = val || '—'; };
+  sf('xd-mint-amt', (Number(h.amount || 0) / 1e6).toFixed(4) + ' USDC');
+  sf('xd-mint-chain', 'Domain ' + (h.destDomain || h.destDomainIris || '?') + ' (' + (h.destDomain === '6' ? 'Base Sepolia' : h.destDomain === '3' ? 'Arbitrum Sepolia' : '?') + ')');
+  sf('xd-mint-msg', h.messageHash ? h.messageHash.slice(0,20) + '...' : '—');
+  sf('xd-mint-att-status', h.attestationSig ? '<span style=color:#22c55e>✓ Ready</span>' : '<span style=color:#eab308>⏳ Pending</span>');
+  var mintDetail = document.getElementById('xd-mint-detail');
+  if(mintDetail) mintDetail.style.display = 'grid';
+  var statusEl = document.getElementById('xd-mint-status');
+  if(statusEl){
+    if(h.finalStatus === 'COMPLETED' || h.finalStatus === 'MINT_CONFIRMED'){
+      statusEl.innerHTML = '<span style=color:#22c55e>✓ Mint already processed. TX: ' + (h.mintTx ? h.mintTx.slice(0,14) + '...' : 'unknown') + '</span>';
+      if(btn){ btn.disabled = true; btn.textContent = 'Mint Completed ✓'; btn.disabledByUser = false; }
+    } else if(h.finalStatus === 'MINT_SUBMITTED'){
+      statusEl.innerHTML = '<span style=color:#a855f7>⏳ Mint submitted. TX: ' + (h.mintTx ? h.mintTx.slice(0,14) + '...' : 'pending') + '</span>';
+      if(btn){ btn.disabled = true; btn.textContent = 'Minting...'; btn.disabledByUser = false; }
+    } else if(h.messageBytesRaw && h.attestationSig){
+      statusEl.innerHTML = '<span style=color:#22c55e>✓ Ready to mint</span>';
+      if(btn){ btn.disabled = false; btn.textContent = 'Execute Mint'; btn.disabledByUser = false; }
+    } else {
+      statusEl.innerHTML = '<span style=color:#eab308>Waiting for ' + (!h.messageBytesRaw ? 'message bytes' : 'attestation') + '</span>';
+      if(btn){ btn.disabled = true; btn.textContent = 'Execute Mint'; btn.disabledByUser = false; }
+    }
+  }
+}
+
+function xdExecuteMint(intentId){
+  var id = intentId || (document.getElementById('xd-mint-select')?.value);
+  if(!id){ toast('No intent selected', 'warning'); return; }
+  if(typeof executeMint !== 'function'){ toast('Mint function not available', 'error'); return; }
+  var btn = document.getElementById('xd-mint-btn');
+  if(btn){ btn.disabled = true; btn.textContent = 'Minting...'; btn.disabledByUser = true; }
+  var statusEl = document.getElementById('xd-mint-status');
+  if(statusEl) statusEl.innerHTML = '<span style=color:#a855f7>⏳ Minting in progress...</span>';
+  executeMint(id).then(function(){
+    if(statusEl) statusEl.innerHTML = '<span style=color:#22c55e>✓ Mint completed!</span>';
+    setTimeout(function(){
+      xdRefreshAll();
+      if(btn && !btn.disabledByUser){ btn.disabled = false; btn.textContent = 'Execute Mint'; }
+    }, 3000);
+  }).catch(function(e){
+    toast('Mint failed: ' + (e.shortMessage || e.message), 'error');
+    if(statusEl) statusEl.innerHTML = '<span style=color:#ef4444>✗ Mint failed: ' + (e.shortMessage || e.message) + '</span>';
+    if(btn){ btn.disabled = false; btn.textContent = 'Execute Mint'; btn.disabledByUser = false; }
+  });
+}
+
+function xdOnShow(){
+  xdSetLoading('xd-inspector-loading', false);
+  if(typeof recoverPendingIntents === 'function'){
+    recoverPendingIntents().then(function(){
+      setTimeout(function(){ xdRefreshAll(); }, 500);
+    }).catch(function(){ xdRefreshAll(); });
+  } else {
+    xdRefreshAll();
+  }
+  if(window._xdInterval) clearInterval(window._xdInterval);
+  window._xdInterval = setInterval(function(){
+    if(document.getElementById('page-xcdashboard')?.classList.contains('active')) xdRefreshAll();
+  }, 15000);
+}
+
 // ── Recipients ─────────────────────────────────────────────
 const GRAD=['linear-gradient(135deg,#4f8ef7,#a78bfa)','linear-gradient(135deg,#f59e0b,#ef4444)','linear-gradient(135deg,#22c55e,#4f8ef7)','linear-gradient(135deg,#a78bfa,#ef4444)','linear-gradient(135deg,#4f8ef7,#22c55e)'];
 function getRecipientRoute(r) {
   const destId = r.chainId || 'Arc_Testnet';
-  const srcId  = 'Arc_Testnet'; // we always send from Arc Testnet
-  return destId === srcId ? 'direct' : 'bridge';
+  const srcId  = (typeof activeChainId !== 'undefined' && activeChainId) ? activeChainId : 'Arc_Testnet';
+  if (String(srcId) === String(5042002)) return destId === 'Arc_Testnet' ? 'direct' : 'bridge';
+  return String(destId) === String(srcId) ? 'direct' : 'bridge';
 }
 
 // ── Color palette for recipient avatars ────────────────────
 const RCPT_COLORS = ['#4f8ef7','#a78bfa','#22c55e','#f59e0b','#ef4444','#2dd4bf','#ec4899','#6366f1','#14b8a6','#f97316'];
+
+function renderRecipients(){
+  try { if(typeof renderTable === 'function') renderTable(); } catch(e){ console.warn('[Bridge] renderRecipients fallback:', e.message); }
+}
 
 function renderTable(){
   const tbody = document.getElementById('tbody');
@@ -12995,77 +13989,146 @@ async function signTx(){
         }
       }
 
-      // ── Bridge recipients (cross-chain) via Crosschain Batch Contract ───────
-      // ── Crosschain recipients via Crosschain Batch Contract ────────────────
-      const CROSSCHAIN_BATCH_ADDRESS_2 = (typeof ElligenteContracts !== 'undefined' && ElligenteContracts.CROSSCHAIN_BATCH_ADDRESS) || '0x17cFB1AACbc64D0F0c247ED261b66C3d56e3EB16';
-      const XCHAIN_BATCH_ABI = [
-        'function batchBridge(address token, address[] recipients, uint256[] amounts, uint32[] destDomains) external',
-        'function approve(address spender, uint256 amount) external returns (bool)'
-      ];
+      // ── Cross-chain recipients via MultiSendExecutorV7 ────────────────
+      const MULTISEND_CROSSCHAIN_CONTRACT = normalizeEvmAddress((typeof ElligenteContracts !== 'undefined' && ElligenteContracts.MULTISEND_CROSSCHAIN_CONTRACT) || '0xdDF1346222ea1b6ad824430de2C4B9DB458FbFA9');
 
-      for (const [chainId, group] of Object.entries(bridgeGroups)) {
-        const chain      = CHAINS.find(c => c.id === chainId) || null;
+      const _xcOnSource = Object.keys(bridgeGroups).length === 0 ? true : await assertOnSourceChain(signer, CROSSCHAIN_SOURCE_CHAIN_ID);
+      for (const [chainKey, group] of Object.entries(bridgeGroups)) {
+        if (!_xcOnSource) break;
+        const chainObj   = CHAINS.find(c => String(c.id) === String(chainKey)) || null;
+        const chainName  = chainObj?.name || chainObj?.shortName || String(chainKey);
+        const destChainNumeric = chainObj?.chainId ? Number(chainObj.chainId) : null;
+        const chainDomain = chainObj?.cctp?.domain ?? null;
         const groupTotal = group.reduce((s,r) => s+(parseFloat(r.amount)||0), 0);
-        toast(`Routing ${groupTotal.toFixed(2)} USDC → ${chain.name} (${group.length} recipient${group.length>1?'s':''}) via Crosschain Batch...`,'info');
 
-        const recipients  = group.map(r => r._resolved || r.addr);
-        const amounts     = group.map(r => toUsdc(r.amount));
-        const destDomains = group.map(() => chain.cctpDomain ?? 0);
-        const totalAmt    = amounts.reduce((a,b) => a+b, 0n);
-
-        if (recipients.some(a => !isAddr(a))) {
-          toast(`Invalid address in ${chain.name} group — skipping`,'error');
+        if (!chainObj || destChainNumeric === null || chainDomain === null) {
+          toast(`Unknown destination chain "${chainName}" — skipping ${group.length} recipient(s)`, 'error');
+          continue;
+        }
+        if (destChainNumeric === 5042002) {
+          toast(`Destination is the source chain (Arc) — use direct send. Skipping ${group.length} recipient(s).`, 'error');
           continue;
         }
 
+        let recipients, tokenAddr;
         try {
-          // Approve Crosschain Batch Contract
-          const approveTx = await usdcContract.approve(CROSSCHAIN_BATCH_ADDRESS_2, (totalAmt * 105n) / 100n);
+          recipients = group.map(r => normalizeEvmAddress(r._resolved || r.addr));
+          tokenAddr  = normalizeEvmAddress(getTokenAddressForChain(CROSSCHAIN_SOURCE_CHAIN_ID, 'USDC'));
+        } catch (e) {
+          toast(`Invalid address in ${chainName} group — skipping (${e.message || e})`,'error');
+          continue;
+        }
+        const amounts     = group.map(r => toUsdc(r.amount));
+        const totalAmt    = amounts.reduce((a,b) => a+b, 0n);
+        _log('[Cross-chain batch] recipient validation OK');
+
+        _log(`[MultiSendExecutorV7] destChain: ${destChainNumeric} | recipients: ${recipients.length}`);
+
+        try {
+          toast(`Routing ${groupTotal.toFixed(2)} USDC → ${chainName} (${group.length}) via V7...`,'info');
+
+          const v7Need  = (totalAmt * 105n) / 100n;
+          const v7Allow = await safeAllowance(tokenAddr, walletAddress, MULTISEND_CROSSCHAIN_CONTRACT, signer);
+          if (v7Allow < v7Need) {
+            toast(`Approving USDC for V7 router...`, 'info');
+            const v7Approve = await usdcContract.approve(MULTISEND_CROSSCHAIN_CONTRACT, v7Need);
+            lastHash = v7Approve.hash;
+            await v7Approve.wait();
+            _log(`[MultiSendExecutorV7] Approve confirmed: ${v7Approve.hash}`);
+          }
+
+          const v7Iface = new ethers.Interface([
+            'function createRouteIntent(uint256 destinationChain, address token, address[] recipients, uint256[] amounts) external returns (bytes32 intentId)'
+          ]);
+
+          const calldata = v7Iface.encodeFunctionData('createRouteIntent', [
+            destChainNumeric,
+            tokenAddr,
+            recipients,
+            amounts
+          ]);
+
+          _log(`[MultiSendExecutorV7] Calldata: ${calldata.slice(0, 66)}...`);
+
+          let v7IntentId = null;
+          try {
+            _log('[Cross-chain batch] contract address OK:', MULTISEND_CROSSCHAIN_CONTRACT, '— ENS resolution skipped');
+            const v7Contract = new ethers.Contract(MULTISEND_CROSSCHAIN_CONTRACT, v7Iface, signer);
+            v7IntentId = await v7Contract.createRouteIntent.staticCall(destChainNumeric, tokenAddr, recipients, amounts);
+            _log(`[MultiSendExecutorV7] intentId (pre-computed): ${v7IntentId}`);
+          } catch (idErr) {
+            _warn('[MultiSendExecutorV7] could not pre-compute intentId:', idErr.shortMessage || idErr.message || idErr);
+          }
+
+          const tx = await signer.sendTransaction({
+            to: MULTISEND_CROSSCHAIN_CONTRACT,
+            data: calldata
+          });
+
+          lastHash = tx.hash;
+          _log(`[MultiSendExecutorV7] Tx sent: ${tx.hash}`);
+          await tx.wait();
+          _log(`[MultiSendExecutorV7] Confirmed`);
+
+          try {
+            const _v7Intents = JSON.parse(localStorage.getItem('arcpay_v7_intents') || '[]');
+            _v7Intents.push({ intentId: v7IntentId, txHash: tx.hash, destChain: destChainNumeric, chainName, recipients: recipients.length, total: groupTotal, ts: Date.now() });
+            localStorage.setItem('arcpay_v7_intents', JSON.stringify(_v7Intents));
+          } catch (_) {}
+
+          const _intentSuffix = v7IntentId ? ` · intent ${String(v7IntentId).slice(0,10)}…` : '';
+          toast(`✓ Cross-chain batch to ${chainName} confirmed — ${group.length} recipient${group.length>1?'s':''} via V7${_intentSuffix}`, 'success');
+          continue;
+        } catch(v7Err) {
+          const rej = v7Err.code===4001||(v7Err.message||'').includes('rejected');
+          if (rej) { toast('Rejected by user','error'); continue; }
+          _warn(`[MultiSendExecutorV7] V7 failed:`, v7Err.shortMessage || v7Err.message || v7Err);
+        }
+
+        // ── Fallback: legacy Crosschain Batch ─────────────────────
+        const CROSSCHAIN_BATCH_ADDRESS = normalizeAddress((typeof ElligenteContracts !== 'undefined' && ElligenteContracts.CROSSCHAIN_BATCH_ADDRESS) || '0x17cFB1AACbc64D0F0c247ED261b66C3d56e3EB16');
+        const XCHAIN_BATCH_ABI = ['function batchBridge(address token, address[] recipients, uint256[] amounts, uint32[] destDomains) external'];
+        const destDomains = group.map(() => chainDomain);
+
+        try {
+          toast(`Falling back to Crosschain Batch for ${chainName}...`,'warning');
+          const approveTx = await usdcContract.approve(CROSSCHAIN_BATCH_ADDRESS, (totalAmt * 105n) / 100n);
           lastHash = approveTx.hash;
           await approveTx.wait();
 
-          // Simulate
-          try {
-            const xBatchRead = new ethers.Contract(CROSSCHAIN_BATCH_ADDRESS_2, XCHAIN_BATCH_ABI, provider);
-            await xBatchRead.batchBridge.staticCall(activeUSDC(), recipients, amounts, destDomains);
-          } catch(_) { /* simulation errors are non-fatal for crosschain */ }
-
-          // Execute
           let gasLimit;
           try {
-            const xBatch = new ethers.Contract(CROSSCHAIN_BATCH_ADDRESS_2, XCHAIN_BATCH_ABI, signer);
-            const est    = await xBatch.batchBridge.estimateGas(activeUSDC(), recipients, amounts, destDomains);
+            const xBatch = new ethers.Contract(CROSSCHAIN_BATCH_ADDRESS, XCHAIN_BATCH_ABI, signer);
+            const est    = await xBatch.batchBridge.estimateGas(tokenAddr, recipients, amounts, destDomains);
             gasLimit     = (est * 130n) / 100n;
           } catch(_) {
             gasLimit = BigInt(400_000 + group.length * 80_000);
           }
 
-          const xBatch  = new ethers.Contract(CROSSCHAIN_BATCH_ADDRESS_2, XCHAIN_BATCH_ABI, signer);
-          const batchTx = await xBatch.batchBridge(activeUSDC(), recipients, amounts, destDomains, { gasLimit });
+          const xBatch  = new ethers.Contract(CROSSCHAIN_BATCH_ADDRESS, XCHAIN_BATCH_ABI, signer);
+          const batchTx = await xBatch.batchBridge(tokenAddr, recipients, amounts, destDomains, { gasLimit });
           lastHash = batchTx.hash;
           await batchTx.wait();
-          toast(`✓ Crosschain batch to ${chain.name} confirmed — ${group.length} recipient${group.length>1?'s':''}`, 'success');
-        } catch(bridgeErr) {
-          // Fallback: try ElligentBridge if Crosschain Batch reverts
-          const rej = bridgeErr.code===4001||(bridgeErr.message||'').includes('rejected');
-          if (rej) {
-            toast('Rejected by user','error');
-            continue;
-          }
-          toast(`Crosschain Batch failed for ${chain.name}, falling back to direct bridge...`,'warning');
+          toast(`✓ Crosschain batch to ${chainName} confirmed — ${group.length} recipient${group.length>1?'s':''}`, 'success');
+        } catch(fbErr) {
+          if (fbErr.code===4001 || (fbErr.message||'').includes('rejected')) { toast('Rejected by user','error'); continue; }
+          toast(`Crosschain batch failed for ${chainName}, falling back to direct bridge...`,'warning');
           const bridgeDeployed = window.__BRIDGE_ADDRESS__
             && window.__BRIDGE_ADDRESS__ !== '0x0000000000000000000000000000000000000000';
           for (const r of group) {
-            const toAddr = r._resolved || r.addr;
+            let toAddr;
+            try { toAddr = normalizeAddress(r._resolved || r.addr); }
+            catch(e){ toast(`Invalid address for cross-chain: ${r.addr}`, 'error'); continue; }
             const amt    = toUsdc(r.amount);
             try {
               let tx;
               if (bridgeDeployed) {
+                const adapterAddr = normalizeAddress(window.__BRIDGE_ADDRESS__);
                 const bridgeAbi = ['function bridge(address,uint256,uint32,bytes32) returns (uint64)','function addressToBytes32(address) pure returns (bytes32)'];
-                const bridgeCtr = new ethers.Contract(window.__BRIDGE_ADDRESS__, bridgeAbi, signer);
+                const bridgeCtr = new ethers.Contract(adapterAddr, bridgeAbi, signer);
                 const dest32    = await bridgeCtr.addressToBytes32(toAddr);
-                await usdcContract.approve(window.__BRIDGE_ADDRESS__, amt);
-                tx = await bridgeCtr.bridge(activeUSDC(), amt, chain.cctpDomain??0, dest32);
+                await usdcContract.approve(adapterAddr, amt);
+                tx = await bridgeCtr.bridge(tokenAddr, amt, chainDomain, dest32);
               } else {
                 tx = await usdcContract.transfer(toAddr, amt);
               }
@@ -13096,8 +14159,8 @@ async function signTx(){
 
       // Ensure Multisend always appears in Reports (local + onchain)
       try {
-        logToReports('Batch (Multisend)', total, rcptCount, lastHash, { fee: +(total*0.002).toFixed(2) });
-        if (typeof logFeeEvent === 'function') logFeeEvent({ module:'MultiSend', amount:total, feeAmount:+(total*0.002).toFixed(4), asset:'USDC', txHash:lastHash });
+        logToReports('Batch (Multisend)', total, rcptCount, lastHash, { fee: +(total*MULTISEND_FEE_RATE).toFixed(2) });
+        if (typeof logFeeEvent === 'function') logFeeEvent({ module:'MultiSend', amount:total, feeAmount:+(total*MULTISEND_FEE_RATE).toFixed(4), asset:'USDC', txHash:lastHash });
       } catch (e) { _warn('silent-catch', e?.message||e); }
 
       try {
@@ -15075,8 +16138,8 @@ let currentPayLink = null;
 // sync txHistory from batchCount changes
 function syncHistoryFromBatch(batchId, total, rcptCount, txHash, blockNumber) {
   // Centralized logger (keeps exact previous behavior for Multisend)
-  logToReports('Batch', total, rcptCount, txHash, { id: batchId, fee: +(total*0.002).toFixed(2) });
-  if (typeof logFeeEvent === 'function') logFeeEvent({ module:'MultiSend', amount:total, feeAmount:+(total*0.002).toFixed(4), asset:'USDC', txHash:txHash });
+  logToReports('Batch', total, rcptCount, txHash, { id: batchId, fee: +(total*MULTISEND_FEE_RATE).toFixed(2) });
+  if (typeof logFeeEvent === 'function') logFeeEvent({ module:'MultiSend', amount:total, feeAmount:+(total*MULTISEND_FEE_RATE).toFixed(4), asset:'USDC', txHash:txHash });
   syncQueueFromBatch(batchId, total, rcptCount);
 }
 
@@ -21901,6 +22964,10 @@ const FulfillerEngine = (() => {
       try {
         // Prefer transaction hash for Iris V2 (cctpMsgHash may contain a message hash)
         const _irisTxHash = intent.txHash || burnTxHash || intent.cctpMsgHash;
+        if (!_irisTxHash || _irisTxHash === '0x' || _irisTxHash === '0x0' || (_irisTxHash.length && _irisTxHash.length < 66)) {
+          _log('[CCTP] Skipping Iris — invalid txHash:', _irisTxHash);
+          return;
+        }
         _log('[CCTP] Fetching attestation from Iris — domain:', domain, 'txHash:', _irisTxHash, '(burnTxHash=', burnTxHash, 'intent.txHash=', intent.txHash, 'intent.cctpMsgHash=', intent.cctpMsgHash, ')');
         _log('[CCTP DEBUG] Iris called — intent=' + intentId + ' hasMessage=' + !!(intent._attestationMsg) + ' hasSignature=' + !!(intent._attestationSig) + ' hasSubmitted=' + !!(intent._attestationSubmitted) + ' domain=' + domain);
         const irisUrl = 'https://iris-api-sandbox.circle.com/v2/messages/' + domain + '?transactionHash=' + _irisTxHash;
@@ -26928,6 +27995,26 @@ const AutonomaAgent = (() => {
   };
 })();
 if (typeof window !== 'undefined') window.AutonomaAgent = AutonomaAgent;
+
+// ── Global error handler & V4 Bridge safety net ────────────────
+window.addEventListener('unhandledrejection', function(e) {
+  var reason = e.reason || {};
+  var msg = reason.shortMessage || reason.message || String(reason);
+  if (msg.includes('user rejected') || msg.includes('ACTION_REJECTED')) return;
+  console.error('[GLOBAL UNHANDLED]', msg.slice(0, 200));
+});
+(function initSafeDOM(){
+  document.addEventListener('DOMContentLoaded', function(){
+    var safeGet = function(id){ var el = document.getElementById(id); if(!el) console.warn('[DOM] Missing element:', id); return el; };
+    window._safeEl = safeGet;
+    try {
+      var v4tgl = document.getElementById('tgl-v4');
+      if(v4tgl && typeof useV4Bridge !== 'undefined' && useV4Bridge === false){
+        v4tgl.classList.remove('on'); v4tgl.classList.add('off');
+      }
+    } catch(e){}
+  });
+})();
 
 </script>
 
