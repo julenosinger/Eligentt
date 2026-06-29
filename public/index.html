@@ -1443,9 +1443,9 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
 .swap-col.op-exec-active{transition:gap .3s ease}
 @media (min-width:1080px){
   .swap-col.op-exec-active{display:grid;grid-template-columns:minmax(0,480px) minmax(0,1fr);align-items:start;gap:18px}
-  .swap-col.op-exec-active > .swap-card{grid-column:1;animation:opCardAside .4s ease both}
+  .swap-col.op-exec-active > .swap-card{grid-column:1}
   .swap-col.op-exec-active > #bridge-steps-card,
-  .swap-col.op-exec-active > #xc-steps-card{grid-column:2;grid-row:1 / -1;align-self:start;margin:0;animation:opStepsIn .42s ease both}
+  .swap-col.op-exec-active > #xc-steps-card{grid-column:2;grid-row:1 / -1;align-self:start;margin:0;animation:opStepsIn .5s cubic-bezier(.4,0,.2,1) both}
   #page-bridge .swap-col.op-exec-active > #bridge-steps-card{border-color:rgba(45,212,191,.35);box-shadow:0 0 0 1px rgba(45,212,191,.12),0 12px 32px rgba(0,0,0,.35)}
   #page-xchain .swap-col.op-exec-active > #xc-steps-card{border-color:rgba(245,158,11,.35);box-shadow:0 0 0 1px rgba(245,158,11,.12),0 12px 32px rgba(0,0,0,.35)}
   /* Fix alignment: Transaction Steps must be content-height and top-aligned without
@@ -1454,7 +1454,6 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
   .swap-col.op-exec-active > #xc-steps-card{grid-row:1 / span 2;height:fit-content;align-self:start}
 }
 @keyframes opStepsIn{from{opacity:0;transform:translateX(16px)}to{opacity:1;transform:none}}
-@keyframes opCardAside{from{opacity:.55;transform:translateX(-10px)}to{opacity:1;transform:none}}
 .info-card{background:var(--card);border:1px solid var(--border);border-radius:7px;padding:12px}
 .info-title{font-size:10px;font-weight:600;color:var(--text);margin-bottom:7px;display:flex;align-items:center;gap:5px}
 .info-title i{font-size:12px}
@@ -15514,7 +15513,7 @@ function renderSwapTokenList() {
   if (!container) return;
   container.innerHTML = TOKEN_LIST.map(t => `
     <div style="display:flex;align-items:center;gap:7px;padding:6px 8px;background:rgba(0,0,0,.12);border:1px solid rgba(${t.color.slice(1).match(/.{2}/g).map(h=>parseInt(h,16)).join(',')},.15);border-radius:6px;font-size:10px">
-      <div style="width:20px;height:20px;border-radius:50%;background:${t.color};display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:800;color:#fff;box-shadow:0 2px 6px ${t.color}55">${t.icon}</div>
+      <div class="tkn-logo-ico" style="width:20px;height:20px;border-radius:50%;background:${t.color};display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:800;color:#fff;box-shadow:0 2px 6px ${t.color}55">${t.icon}</div>
       <div style="flex:1"><div style="font-weight:700">${t.sym}</div><div style="font-size:8px;color:var(--muted2);font-family:monospace;margin-top:1px">${shortAddr(t.address)}</div></div>
       <div style="font-size:8.5px;color:var(--green);display:flex;align-items:center;gap:3px"><span style="width:5px;height:5px;border-radius:50%;background:var(--green);display:inline-block"></span>${t.sym === 'ETH' ? 'Native' : 'Active'}</div>
     </div>
@@ -27401,14 +27400,56 @@ function toggleMobileRoute() {
 //  bridge/CCTP/payment logic, state, contracts or routes. Reverts on finish.
 // ============================================================
 (function(){
+  // FLIP animation: smoothly slide the form card(s) between the centered (idle) and
+  // side (running) positions instead of an instant grid swap. Pure visual — measures
+  // rects before/after the class change and transitions the transform delta back to 0.
+  // The steps card keeps its CSS fade/slide entrance (not FLIPped: width differs).
+  function flipLayout(col, mutate){
+    var reduce = false, wide = false;
+    try { reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch(_){}
+    try { wide = window.matchMedia && window.matchMedia('(min-width:1080px)').matches; } catch(_){}
+    if (reduce || !wide) { mutate(); return; }
+    var kids = Array.prototype.filter.call(col.children, function(el){
+      return el.classList && el.classList.contains('swap-card');
+    });
+    var first = kids.map(function(el){ return el.getBoundingClientRect(); });
+    mutate();
+    kids.forEach(function(el, i){
+      var f = first[i]; if (!f) return;
+      var l = el.getBoundingClientRect();
+      if ((f.width === 0 && f.height === 0) || (l.width === 0 && l.height === 0)) return;
+      var dx = f.left - l.left, dy = f.top - l.top;
+      if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) return;
+      el.style.transition = 'none';
+      el.style.transform = 'translate(' + dx + 'px,' + dy + 'px)';
+      el.style.willChange = 'transform';
+      void el.offsetWidth; // commit the inverted position before animating
+      var clear = function(ev){
+        if (ev && ev.propertyName && ev.propertyName !== 'transform') return;
+        el.style.transition = ''; el.style.transform = ''; el.style.willChange = '';
+        el.removeEventListener('transitionend', clear);
+      };
+      requestAnimationFrame(function(){
+        el.style.transition = 'transform 460ms cubic-bezier(.4,0,.2,1)';
+        el.style.transform = 'translate(0,0)';
+        el.addEventListener('transitionend', clear);
+        setTimeout(clear, 640);
+      });
+    });
+  }
   function sync(btnId, stepsId){
     var btn = document.getElementById(btnId); if(!btn || !btn.closest) return;
     var col = btn.closest('.swap-col'); if(!col) return;
     var steps = document.getElementById(stepsId);
     var processing = btn.disabled === true;
     var stepsVisible = !!steps && steps.style && steps.style.display !== 'none';
-    if (processing && stepsVisible) col.classList.add('op-exec-active');
-    else col.classList.remove('op-exec-active');
+    var want = processing && stepsVisible;
+    var have = col.classList.contains('op-exec-active');
+    if (want === have) return;
+    flipLayout(col, function(){
+      if (want) col.classList.add('op-exec-active');
+      else col.classList.remove('op-exec-active');
+    });
   }
   function watch(btnId, stepsId){
     var btn = document.getElementById(btnId); if(!btn) return;
@@ -27425,6 +27466,44 @@ function toggleMobileRoute() {
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initOpExecLayout);
   else initOpExecLayout();
+})();
+
+// ============================================================
+//  Token logos (USDC / EURC / BTC) - UI ONLY
+//  Replaces the placeholder letter inside the existing token-icon badges with the
+//  real coin logo, across the whole app. Idempotent + MutationObserver so dynamically
+//  rendered icons get it automatically. Never touches token registries, selection,
+//  balances, contracts, APIs or any business flow — it only restyles icon badges.
+// ============================================================
+(function(){
+  var LOGO = { usdc:'/assets/tokens/usdc.svg', eurc:'/assets/tokens/eurc.svg', btc:'/assets/tokens/btc.svg' };
+  var MAP = { 'U':'usdc', 'USDC':'usdc', 'E':'eurc', 'EURC':'eurc', '\u20bf':'btc', 'B':'btc', 'BTC':'btc', 'cirBTC':'btc', 'CIRBTC':'btc' };
+  var SEL = '.token-icon,.sa-asset-icon,.aut-tk-icon,.swp-tok-icon,.pool-detail-icon,.tkn-logo-ico,#xc-token-icon,#reserve-icon-a,#reserve-icon-b,#pool-add-icon-a,#pool-add-icon-b';
+  function decorate(el){
+    if (!el || !el.style) return;
+    var sym = MAP[(el.textContent || '').trim()];
+    if (!sym) return;                                  // not a USDC/EURC/BTC glyph -> leave untouched
+    if (el.getAttribute('data-tlogo') === sym) return; // already correct -> idempotent
+    el.setAttribute('data-tlogo', sym);
+    el.style.background = "transparent url('" + LOGO[sym] + "') center / contain no-repeat";
+    el.style.color = 'transparent';                    // hide placeholder glyph (kept in DOM)
+    el.setAttribute('aria-label', sym.toUpperCase());
+  }
+  function scan(root){
+    try {
+      var r = root || document;
+      if (r.querySelectorAll){ var els = r.querySelectorAll(SEL); for (var i=0;i<els.length;i++) decorate(els[i]); }
+      if (r.matches && r.matches(SEL)) decorate(r);
+    } catch(_){}
+  }
+  var pending = false;
+  function schedule(){ if (pending) return; pending = true; requestAnimationFrame(function(){ pending = false; scan(document); }); }
+  function init(){
+    scan(document);
+    try { new MutationObserver(function(){ schedule(); }).observe(document.body, { childList:true, subtree:true }); } catch(_){}
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+  else init();
 })();
 
 (function(){
