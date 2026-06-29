@@ -593,6 +593,11 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
   background-position:right 6px center;
 }
 .ms-token-select:focus{border-color:var(--blue)}
+/* Dark dropdown popup for MultiSend selects (native <select> list was rendering white
+   in the dark theme). Uses the same color-scheme:dark approach already used on the
+   settings/schedule pages. Scoped to MultiSend selects only — no global/theme change. */
+.ms-chain-select, .ms-token-select { color-scheme: dark; }
+.ms-chain-select option, .ms-token-select option { background:#161a24; color:#dde2f0; }
 .ms-chain-dot{
   width:8px; height:8px; border-radius:50%;
   flex-shrink:0; margin-right:4px;
@@ -1430,6 +1435,26 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
 .page-content{flex:1;overflow-y:auto;padding:16px;display:flex;gap:16px}
 .swap-col{flex:1;display:flex;flex-direction:column;gap:12px;min-width:0}
 .info-col{width:240px;flex-shrink:0;display:flex;flex-direction:column;gap:8px}
+/* ── Dynamic execution layout (Bridge / Cross-Chain Payments) — UI ONLY ──
+   While an operation runs, the EXISTING form card(s) shift to a side column and the
+   EXISTING steps card takes the focus. Driven only by the visual class .op-exec-active
+   (no operation logic/state/contracts touched). Reverts automatically when the op ends.
+   Scoped to >=1080px so idle and small screens keep the original stacked layout. */
+.swap-col.op-exec-active{transition:gap .3s ease}
+@media (min-width:1080px){
+  .swap-col.op-exec-active{display:grid;grid-template-columns:minmax(0,480px) minmax(0,1fr);align-items:start;gap:18px}
+  .swap-col.op-exec-active > .swap-card{grid-column:1;animation:opCardAside .4s ease both}
+  .swap-col.op-exec-active > #bridge-steps-card,
+  .swap-col.op-exec-active > #xc-steps-card{grid-column:2;grid-row:1 / -1;align-self:start;margin:0;animation:opStepsIn .42s ease both}
+  #page-bridge .swap-col.op-exec-active > #bridge-steps-card{border-color:rgba(45,212,191,.35);box-shadow:0 0 0 1px rgba(45,212,191,.12),0 12px 32px rgba(0,0,0,.35)}
+  #page-xchain .swap-col.op-exec-active > #xc-steps-card{border-color:rgba(245,158,11,.35);box-shadow:0 0 0 1px rgba(245,158,11,.12),0 12px 32px rgba(0,0,0,.35)}
+  /* Fix alignment: Transaction Steps must be content-height and top-aligned without
+     inflating the form column. Span the two form rows (Payment Route + Payment Details)
+     so Payment Details stays directly under Payment Route. Layout/CSS only. */
+  .swap-col.op-exec-active > #xc-steps-card{grid-row:1 / span 2;height:fit-content;align-self:start}
+}
+@keyframes opStepsIn{from{opacity:0;transform:translateX(16px)}to{opacity:1;transform:none}}
+@keyframes opCardAside{from{opacity:.55;transform:translateX(-10px)}to{opacity:1;transform:none}}
 .info-card{background:var(--card);border:1px solid var(--border);border-radius:7px;padding:12px}
 .info-title{font-size:10px;font-weight:600;color:var(--text);margin-bottom:7px;display:flex;align-items:center;gap:5px}
 .info-title i{font-size:12px}
@@ -3949,6 +3974,17 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
 .aut-hist-item.active{background:rgba(6,247,233,.1);border:1px solid rgba(6,247,233,.15)}
 .aut-hist-title{font-size:10px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .aut-hist-preview{font-size:8px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.aut-hist-menu-btn{position:absolute;top:6px;right:6px;width:20px;height:20px;display:flex;align-items:center;justify-content:center;padding:0;background:transparent;border:none;border-radius:5px;color:var(--muted);font-size:13px;cursor:pointer;opacity:0;transition:opacity .15s,background .15s,color .15s;font-family:inherit}
+.aut-hist-item:hover .aut-hist-menu-btn{opacity:.65}
+.aut-hist-menu-btn:hover{opacity:1!important;background:rgba(6,247,233,.12);color:#06F7E9}
+.aut-hist-menu{position:absolute;top:26px;right:6px;min-width:142px;background:var(--surface);border:1px solid rgba(6,247,233,.2);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.45);padding:4px;z-index:50;display:none}
+.aut-hist-menu.open{display:block}
+.aut-hist-menu-row{display:flex;align-items:center;gap:7px;padding:7px 9px;border-radius:6px;font-size:9.5px;font-weight:600;color:var(--text);cursor:pointer;transition:background .12s;white-space:nowrap}
+.aut-hist-menu-row i{font-size:12px;color:var(--muted2)}
+.aut-hist-menu-row:hover{background:rgba(6,247,233,.08)}
+.aut-hist-menu-row.danger{color:#ef4444}
+.aut-hist-menu-row.danger i{color:#ef4444}
+.aut-hist-menu-row.danger:hover{background:rgba(239,68,68,.1)}
 .aut-main{flex:1;display:flex;flex-direction:column;min-width:0;background:var(--bg)}
 .aut-messages{flex:1;overflow-y:auto;padding:20px 24px;display:flex;flex-direction:column;gap:16px}
 .aut-welcome{display:flex;flex-direction:column;align-items:center;justify-content:center;flex:1;padding:40px 20px;text-align:center}
@@ -8128,18 +8164,9 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
             <div class="ch"><i class="ti ti-lock" style="font-size:14px;color:#f59e0b"></i><span class="ct">Profile Locked</span></div>
             <div class="cb">
               <div style="text-align:center;padding:28px 20px">
-                <div style="font-size:10px;color:var(--muted2);margin-bottom:18px;line-height:1.6">Connect your wallet or create an account to access your profile</div>
+                <div style="font-size:10px;color:var(--muted2);margin-bottom:18px;line-height:1.6">Connect your wallet to access your profile</div>
                 <div style="display:flex;flex-direction:column;gap:8px;max-width:280px;margin:0 auto">
                   <button onclick="connectWallet()" class="btn" style="padding:10px 0;font-size:11px;justify-content:center;border-color:rgba(79,142,247,.4);color:#4f8ef7"><i class="ti ti-wallet"></i> Connect Wallet</button>
-                  <button onclick="authOpen()" class="btn" style="padding:10px 0;font-size:11px;justify-content:center;border-color:rgba(167,139,250,.4);color:#a78bfa"><i class="ti ti-mail"></i> Create Account with Email</button>
-                  <button onclick="prfSignIn('google')" class="btn" style="padding:10px 0;font-size:11px;justify-content:center;border-color:rgba(79,142,247,.4);color:#7b9ef7"><i class="ti ti-brand-google"></i> Sign in with Google</button>
-                </div>
-                <div style="margin-top:20px;padding-top:14px;border-top:1px solid var(--border)">
-                  <div style="font-size:9px;color:var(--muted2);margin-bottom:8px">Self-Custody</div>
-                  <div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap">
-                    <button onclick="prfCreateLocalWallet()" class="btn" style="padding:8px 16px;font-size:10px;justify-content:center;border-color:rgba(34,197,94,.35);color:#22c55e"><i class="ti ti-key"></i> Create Local Wallet</button>
-                    <button onclick="prfImportLocalWallet()" class="btn" style="padding:8px 16px;font-size:10px;justify-content:center;border-color:rgba(245,158,11,.35);color:#f59e0b"><i class="ti ti-file-import"></i> Restore</button>
-                  </div>
                 </div>
               </div>
             </div>
@@ -12147,6 +12174,49 @@ async function verifyCrossChainBatcher(){
   }
 }
 
+// ── In-app dark confirm modal (replaces the native browser confirm() popup) ──
+// UI ONLY: shows an app-styled dialog and runs the SAME callbacks. Falls back to
+// native confirm() if DOM building fails, so the operation flow is never blocked.
+function appConfirm(message, onConfirm, onCancel){
+  try {
+    var prev = document.getElementById('app-confirm-overlay'); if (prev) prev.remove();
+    var ov = document.createElement('div');
+    ov.id = 'app-confirm-overlay'; ov.setAttribute('role','dialog'); ov.setAttribute('aria-modal','true');
+    ov.style.cssText = 'position:fixed;inset:0;z-index:1000000;display:flex;align-items:center;justify-content:center;background:rgba(2,6,15,.66);backdrop-filter:blur(3px);padding:20px';
+    var box = document.createElement('div');
+    box.style.cssText = 'width:100%;max-width:380px;background:var(--card,#11151f);border:1px solid var(--border,#222a3a);border-radius:12px;box-shadow:0 18px 50px rgba(0,0,0,.6);overflow:hidden;font-family:inherit';
+    var head = document.createElement('div');
+    head.style.cssText = 'display:flex;align-items:center;gap:8px;padding:14px 16px;border-bottom:1px solid var(--border,#222a3a)';
+    head.innerHTML = '<i class="ti ti-topology-star-3" style="color:var(--teal,#2dd4bf);font-size:16px"></i><span style="font-size:12px;font-weight:700;color:var(--text,#dde2f0)">Confirm Cross-Chain Batch</span>';
+    var body = document.createElement('div');
+    body.style.cssText = 'padding:14px 16px;font-size:11px;line-height:1.6;color:var(--muted2,#aeb6c8);white-space:pre-line';
+    body.textContent = message;
+    var foot = document.createElement('div');
+    foot.style.cssText = 'display:flex;gap:8px;justify-content:flex-end;padding:12px 16px;border-top:1px solid var(--border,#222a3a)';
+    var cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button'; cancelBtn.textContent = 'Cancel';
+    cancelBtn.style.cssText = 'padding:8px 16px;border-radius:7px;border:1px solid var(--border2,#2e3548);background:transparent;color:var(--muted2,#aeb6c8);font-size:11px;font-weight:600;cursor:pointer;font-family:inherit';
+    var okBtn = document.createElement('button');
+    okBtn.type = 'button'; okBtn.textContent = 'Confirm';
+    okBtn.style.cssText = 'padding:8px 18px;border-radius:7px;border:1px solid rgba(45,212,191,.4);background:rgba(45,212,191,.16);color:var(--teal,#2dd4bf);font-size:11px;font-weight:700;cursor:pointer;font-family:inherit';
+    foot.appendChild(cancelBtn); foot.appendChild(okBtn);
+    box.appendChild(head); box.appendChild(body); box.appendChild(foot); ov.appendChild(box);
+    document.body.appendChild(ov);
+    function cleanup(){ try{ document.removeEventListener('keydown', onKey); }catch(_){} if (ov && ov.parentNode) ov.parentNode.removeChild(ov); }
+    function doCancel(){ cleanup(); try{ if (onCancel) onCancel(); }catch(e){} }
+    function doOk(){ cleanup(); try{ if (onConfirm) onConfirm(); }catch(e){} }
+    function onKey(e){ if (e.key === 'Escape') doCancel(); else if (e.key === 'Enter') doOk(); }
+    cancelBtn.addEventListener('click', doCancel);
+    okBtn.addEventListener('click', doOk);
+    ov.addEventListener('click', function(e){ if (e.target === ov) doCancel(); });
+    document.addEventListener('keydown', onKey);
+    setTimeout(function(){ try{ okBtn.focus(); }catch(_){} }, 0);
+  } catch(err){
+    if (window.confirm(message)) { try{ if (onConfirm) onConfirm(); }catch(e){} }
+    else { try{ if (onCancel) onCancel(); }catch(e){} }
+  }
+}
+
 // ── NEW: Cross-Chain Batch Execution (Arc → other chains) ───
 function prepareCrossChainBatch(){
   // V4 route
@@ -12166,8 +12236,7 @@ function prepareCrossChainBatch(){
     const msg = 'Send cross-chain batch to ' + crossChainRecipients.length + ' recipients via V4 Executor?' +
                 '\n\nAmount: ' + (total / 1e6).toFixed(4) + ' USDC' +
                 '\n\nThis will create a bridge intent and execute via CCTPAdapterV2.';
-    if(!confirm(msg)) return;
-    executeBridgeIntentV4();
+    appConfirm(msg, function(){ executeBridgeIntentV4(); });
     return;
   }
   // Legacy route
@@ -12186,17 +12255,18 @@ function prepareCrossChainBatch(){
     return ch?.cctp?.domain ?? 0;
   }));
 
-  let useHook = false;
   let msg = `Send cross-chain batch to ${crossChainRecipients.length} recipients using ElligentCrossChainBatcher?`;
 
   if (uniqueDomains.size === 1) {
     msg += `\n\nAll recipients are on the SAME destination — would you like to use depositForBurnWithHook mode? (recommended)`;
-    useHook = confirm(msg + `\n\nClick OK to use Hook mode, Cancel for regular batch.`);
+    appConfirm(msg + `\n\nClick Confirm to use Hook mode, Cancel for regular batch.`,
+      function(){ executeCrossChainBatch(crossChainRecipients, true); },
+      function(){ executeCrossChainBatch(crossChainRecipients, false); });
   } else {
-    if (!confirm(msg + `\n\nNote: Each will generate its own CCTP message.`)) return;
+    appConfirm(msg + `\n\nNote: Each will generate its own CCTP message.`,
+      function(){ executeCrossChainBatch(crossChainRecipients, false); });
   }
-
-  executeCrossChainBatch(crossChainRecipients, useHook);
+  return;
 }
 
 async function executeCrossChainBatch(crossRcpts, useHook = false){
@@ -27323,9 +27393,43 @@ function toggleMobileRoute() {
 // ══════════════════════════════════════════════════════════
 //  AUTONOMA — AI Agent Engine (v3) + AIResponseRenderer
 // ══════════════════════════════════════════════════════════
+// ============================================================
+//  Dynamic execution layout controller (Bridge / Cross-Chain) - UI ONLY
+//  Adds/removes the visual class .op-exec-active on the operation's .swap-col
+//  based on the EXISTING operation button's disabled state + steps-card
+//  visibility. It only toggles a CSS class for layout; it never touches
+//  bridge/CCTP/payment logic, state, contracts or routes. Reverts on finish.
+// ============================================================
+(function(){
+  function sync(btnId, stepsId){
+    var btn = document.getElementById(btnId); if(!btn || !btn.closest) return;
+    var col = btn.closest('.swap-col'); if(!col) return;
+    var steps = document.getElementById(stepsId);
+    var processing = btn.disabled === true;
+    var stepsVisible = !!steps && steps.style && steps.style.display !== 'none';
+    if (processing && stepsVisible) col.classList.add('op-exec-active');
+    else col.classList.remove('op-exec-active');
+  }
+  function watch(btnId, stepsId){
+    var btn = document.getElementById(btnId); if(!btn) return;
+    try { new MutationObserver(function(){ sync(btnId, stepsId); })
+            .observe(btn, { attributes:true, attributeFilter:['disabled'] }); } catch(_){}
+    var steps = document.getElementById(stepsId);
+    if (steps){ try { new MutationObserver(function(){ sync(btnId, stepsId); })
+            .observe(steps, { attributes:true, attributeFilter:['style'] }); } catch(_){} }
+    sync(btnId, stepsId);
+  }
+  function initOpExecLayout(){
+    watch('bridge-btn','bridge-steps-card');
+    watch('xc-send-btn','xc-steps-card');
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initOpExecLayout);
+  else initOpExecLayout();
+})();
+
 (function(){
   const AUT_KEY = 'elligentt_autonoma_chats';
-  let autChats = [], autCurId = null, autReady = false, autPendingOps = {};
+  let autChats = [], autCurId = null, autReady = false, autPendingOps = {}, autOpenMenuId = null, autMenuListenerInstalled = false;
 
   // ── AIResponseRenderer ──
   const R = {
@@ -27388,7 +27492,14 @@ function toggleMobileRoute() {
   function autHideTyping() { const e=document.getElementById('aut-typing'); if(e)e.remove(); }
 
   // ── Init / Chat Management ──
-  window.autonomaInit = function() { if(!autReady){autLoad();autReady=true;} autRenderSidebar(); };
+  window.autonomaInit = function() {
+    if(!autReady){autLoad();autReady=true;}
+    if(!autMenuListenerInstalled){
+      document.addEventListener('click', function(){ if(autOpenMenuId!==null){ autOpenMenuId=null; autRenderSidebar(); } });
+      autMenuListenerInstalled=true;
+    }
+    autRenderSidebar();
+  };
   window.autonomaNewChat = function() {
     const id='aut_'+Date.now();
     autChats.unshift({id,title:'New chat',messages:[],ts:Date.now()});
@@ -27435,15 +27546,28 @@ function toggleMobileRoute() {
     return d;
   }
 
-  window.autSelectChat = function(id) { autCurId=id; autRenderSidebar(); autRenderChat(); };
-  window.autDeleteChat = function(id,ev) { ev.stopPropagation(); autChats=autChats.filter(c=>c.id!==id); if(autCurId===id)autCurId=autChats.length?autChats[0].id:null; autSave();autRenderSidebar();autRenderChat(); };
+  window.autSelectChat = function(id) { autOpenMenuId=null; autCurId=id; autRenderSidebar(); autRenderChat(); };
+  window.autToggleMenu = function(id,ev) { if(ev){ev.stopPropagation();} autOpenMenuId=(autOpenMenuId===id)?null:id; autRenderSidebar(); };
+  // Close conversation: remove only from the current view (no data deleted, reopenable from history).
+  window.autCloseChat = function(id,ev) { if(ev){ev.stopPropagation();} autOpenMenuId=null; if(autCurId===id){ autCurId=null; autRenderChat(); } autRenderSidebar(); };
+  // Delete history: removes only this conversation, after confirmation.
+  window.autDeleteChat = function(id,ev) { if(ev){ev.stopPropagation();} autOpenMenuId=null; if(!confirm('Delete this conversation? This action cannot be undone.')){ autRenderSidebar(); return; } autChats=autChats.filter(c=>c.id!==id); if(autCurId===id)autCurId=autChats.length?autChats[0].id:null; autSave();autRenderSidebar();autRenderChat(); };
   function autRenderSidebar() {
     const list=document.getElementById('aut-history-list'); if(!list) return;
-    if(!autChats.length){list.innerHTML='<div style="text-align:center;padding:20px;font-size:9px;color:var(--muted)">No conversations yet</div>';return;}
+    if(!autChats.length){list.innerHTML='<div style="text-align:center;padding:20px;font-size:9px;color:var(--muted)">No conversations yet</div>';autOpenMenuId=null;return;}
     list.innerHTML=autChats.map(c=>{
       const last=c.messages.length?c.messages[c.messages.length-1]:null;
       const preview=last?(last.role==='user'?'You: ':'Autonoma: ')+(last.role==='user'?last.content:'Response...').substring(0,50):'';
-      return '<div class="aut-hist-item'+(c.id===autCurId?' active':'')+'" onclick="autSelectChat(\''+c.id+'\')" style="position:relative"><div class="aut-hist-title">'+esc(c.title)+'</div><div class="aut-hist-preview">'+esc(preview)+'</div><i class="ti ti-x" onclick="autDeleteChat(\''+c.id+'\',event)" style="position:absolute;top:8px;right:8px;font-size:10px;color:var(--muted);cursor:pointer;opacity:0;transition:opacity .15s" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0"></i></div>';
+      const open=c.id===autOpenMenuId?' open':'';
+      return '<div class="aut-hist-item'+(c.id===autCurId?' active':'')+'" onclick="autSelectChat(\''+c.id+'\')" style="position:relative">'+
+        '<div class="aut-hist-title">'+esc(c.title)+'</div>'+
+        '<div class="aut-hist-preview">'+esc(preview)+'</div>'+
+        '<button class="aut-hist-menu-btn" onclick="autToggleMenu(\''+c.id+'\',event)" title="Options"><i class="ti ti-dots"></i></button>'+
+        '<div class="aut-hist-menu'+open+'">'+
+          '<div class="aut-hist-menu-row" onclick="autCloseChat(\''+c.id+'\',event)"><i class="ti ti-x"></i>Close conversation</div>'+
+          '<div class="aut-hist-menu-row danger" onclick="autDeleteChat(\''+c.id+'\',event)"><i class="ti ti-trash"></i>Delete history</div>'+
+        '</div>'+
+      '</div>';
     }).join('');
   }
   function autSave(){try{localStorage.setItem(AUT_KEY,JSON.stringify(autChats))}catch(e){}}
