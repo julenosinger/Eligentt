@@ -3712,8 +3712,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
 /* ══════════════════════════════════════════════════════════
    UB REVIEW CARD — Inline panel next to modal, flex layout
    ══════════════════════════════════════════════════════════ */
-@keyframes ub-result-in { from { opacity:0; transform:translate(-50%,-50%) scale(.9); } to { opacity:1; transform:translate(-50%,-50%) scale(1); } }
-@keyframes ub-result-out { from { opacity:1; transform:translate(-50%,-50%) scale(1); } to { opacity:0; transform:translate(-50%,-50%) scale(.9); } }
+@keyframes ub-review-slide-in { from { opacity:0; transform:translateX(20px); } to { opacity:1; transform:translateX(0); } }
 @keyframes ub-review-slide-out { from { opacity:1; transform:translateX(0); } to { opacity:0; transform:translateX(20px); } }
 .ub-review-card {
   background:var(--card); border:1px solid var(--border2); border-radius:10px;
@@ -30598,6 +30597,24 @@ const UBAction = (function() {
     return '';
   }
 
+  function _showResult(data) {
+    var el = null;
+    // Try current review id first, then fallback to any visible review card
+    if (_currentReviewId) el = document.getElementById(_currentReviewId);
+    if (!el) {
+      var cards = document.querySelectorAll('.ub-review-card.show');
+      if (cards.length > 0) el = cards[cards.length - 1];
+    }
+    if (el) {
+      data.title = (data.prefix || '') + ' Completed';
+      data.icon = 'circle-check';
+      data.iconColor = 'var(--green)';
+      _renderReviewContent(el, data, 'result');
+    }
+    if (typeof ubRefresh === 'function') setTimeout(function(){ ubRefresh(); }, 2000);
+    setTimeout(function(){ hideReview(); }, 8000);
+  }
+
   // ═══════════════════════ SWAP ═══════════════════════
   var _swapModalId = null;
   function openSwap(prefillIn,prefillOut,prefillAmt){
@@ -30621,107 +30638,9 @@ const UBAction = (function() {
 
   function _refreshSwap(){ var ae=document.getElementById('ub-swap-amt'),qe=document.getElementById('ub-swap-q'),re=document.getElementById('ub-swap-r'),ee=document.getElementById('ub-swap-e'); if(!ae)return; var amt=parseFloat(ae.value)||0; if(amt<=0||SWP.tokenInIdx===SWP.tokenOutIdx){if(qe)qe.textContent='—';hideReview();return;} try{var ti2=TOKEN_LIST[SWP.tokenInIdx],to2=TOKEN_LIST[SWP.tokenOutIdx];var rt=typeof findBestRouteForAmount==='function'?findBestRouteForAmount(ti2.sym,to2.sym,amt):null;if(!rt){if(qe)qe.textContent='No route';hideReview();return;}var out=typeof calcRouteOutput==='function'?calcRouteOutput(amt,rt):0;if(qe)qe.textContent=out.toFixed(4)+' '+to2.sym;if(re)re.textContent='1 '+ti2.sym+' ≈ '+(out/amt).toFixed(4)+' '+to2.sym;SWP.lastRoute=rt;SWP.lastQuote={amtIn:amt,amtOut:out,tIn:ti2,tOut:to2,route:rt}; var imp=typeof calcRoutePriceImpact==='function'?calcRoutePriceImpact(amt,rt):0; var fee='~0.3%'; showReview({title:'Swap Review',icon:'arrows-exchange',iconColor:'var(--teal)',rows:[['From',amt.toFixed(4)+' '+ti2.sym],['To',out.toFixed(4)+' '+to2.sym],['Rate','1 '+ti2.sym+' ≈ '+(out/amt).toFixed(4)+' '+to2.sym],['Min Received',(out*0.995).toFixed(4)+' '+to2.sym],['Price Impact',(imp*100).toFixed(2)+'%'],['Fee',fee],['Route',(rt.pools&&rt.pools.length?rt.pools.length+' hop(s)':'Direct')]],confirmFn:'UBAction._execSwap()'}); }catch(e){if(ee){ee.style.display='';ee.textContent=e.message||'Quote failed';}} }
 
-  function _showResult(data) {
-    if (_currentReviewId) {
-      var el = document.getElementById(_currentReviewId);
-      if (el) {
-        el.querySelector('.ub-rev-status').className = 'ub-rev-status success';
-        el.querySelector('.ub-rev-status').innerHTML = '<i class="ti ti-circle-check"></i>Completed';
-      }
-    }
-    if (typeof ubRefresh === 'function') setTimeout(function(){ ubRefresh(); }, 2000);
-    setTimeout(hideReview, 5000);
-  }
+  async function _execSwap(){ if(!_ensure())return; var q=SWP.lastQuote;if(!q||!q.amtIn){toast('No quote','warning');return;} updateReviewState('executing','Executing swap...'); var ha=document.getElementById('swap-amount-in');if(!ha){ha=document.createElement('input');ha.id='swap-amount-in';ha.type='hidden';document.body.appendChild(ha);} ha.value=q.amtIn.toString(); var t0=Date.now(); try{await executeSwap(); var tx=_getTxHashFromHistory(); var dur=((Date.now()-t0)/1000).toFixed(1); _showResult({prefix:'Swap',txHash:tx,explorer:_getExplorer(),rows:[['From',q.amtIn.toFixed(4)+' '+q.tIn.sym],['To',q.amtOut.toFixed(4)+' '+q.tOut.sym],['Fee','~0.3%'],['Duration',dur+'s'],['Network',(typeof getActiveChain==='function'?getActiveChain():{}).name||'Arc Testnet'],['Tx Hash',tx?tx.slice(0,10)+'...'+tx.slice(-6):'Confirming...']]}); }catch(e){updateReviewState('error',e.shortMessage||e.message||'Swap failed');} }
 
-  async function _execSwap(){
-    console.log('[UBAction] REVIEW → PROCESSING: Swap');
-    if(!_ensure())return;
-    var q=SWP.lastQuote;
-    if(!q||!q.amtIn){toast('No quote','warning');return;}
-    // Pin card reference before execution
-    var cardEl = _currentReviewId ? document.getElementById(_currentReviewId) : null;
-    if (!cardEl) { var cs = document.querySelectorAll('.ub-review-card'); if (cs.length) cardEl = cs[cs.length-1]; }
-    var stEl = cardEl ? cardEl.querySelector('.ub-rev-status') : null;
-    if (stEl) { stEl.className = 'ub-rev-status loading'; stEl.innerHTML = '<i class="ti ti-loader"></i>Processing...'; }
-    var btnEl = cardEl ? cardEl.querySelector('.btn.primary') : null;
-    if (btnEl) btnEl.style.display = 'none';
-    var ha=document.getElementById('swap-amount-in');
-    if(!ha){ha=document.createElement('input');ha.id='swap-amount-in';ha.type='hidden';document.body.appendChild(ha);}
-    ha.value=q.amtIn.toString();
-    try {
-      var t0=Date.now();
-      await executeSwap();
-      var dur=((Date.now()-t0)/1000).toFixed(1);
-      console.log('[UBAction] PROCESSING → RESULT: Swap ('+dur+'s)');
-      _showResult({});
-    } catch(e) {
-      console.log('[UBAction] Swap FAILED:', e.shortMessage || e.message);
-      if (stEl) { stEl.className = 'ub-rev-status error'; stEl.innerHTML = '<i class="ti ti-x"></i>' + (e.shortMessage || e.message || 'Failed'); }
-    }
-  }
-
-  async function _execBridge(){
-    console.log('[UBAction] REVIEW → PROCESSING: Bridge');
-    if(!_ensure())return;
-    var a=parseFloat((document.getElementById('ub-bridge-amt')||{}).value)||0;
-    if(a<=0){toast('Enter amount','warning');return;}
-    var cardEl = _currentReviewId ? document.getElementById(_currentReviewId) : null;
-    if (!cardEl) { var cs = document.querySelectorAll('.ub-review-card'); if (cs.length) cardEl = cs[cs.length-1]; }
-    var stEl = cardEl ? cardEl.querySelector('.ub-rev-status') : null;
-    if (stEl) { stEl.className = 'ub-rev-status loading'; stEl.innerHTML = '<i class="ti ti-loader"></i>Processing...'; }
-    var btnEl = cardEl ? cardEl.querySelector('.btn.primary') : null;
-    if (btnEl) btnEl.style.display = 'none';
-    var ha=document.getElementById('bridge-amount');
-    if(!ha){ha=document.createElement('input');ha.id='bridge-amount';ha.type='hidden';document.body.appendChild(ha);}
-    ha.value=a.toString();
-    if(typeof applyBridgeChains==='function')applyBridgeChains();
-    var cs=typeof CHAINS!=='undefined'?CHAINS:[], fc=cs[bridgeFromIdx], tc=cs[bridgeToIdx];
-    var feeAmt=a*(bridgeToIdx===0?0.01:0.0005), recv=a-feeAmt;
-    try {
-      var t0=Date.now();
-      if(typeof executeBridgeOrTurbo==='function')await executeBridgeOrTurbo();
-      else if(typeof executeBridge==='function')await executeBridge();
-      else { if(stEl){stEl.className='ub-rev-status error';stEl.innerHTML='<i class="ti ti-x"></i>Bridge unavailable';} return; }
-      var dur=((Date.now()-t0)/1000).toFixed(1);
-      console.log('[UBAction] PROCESSING → RESULT: Bridge ('+dur+'s)');
-      _showResult({});
-    } catch(e) {
-      console.log('[UBAction] Bridge FAILED:', e.shortMessage || e.message);
-      if (stEl) { stEl.className = 'ub-rev-status error'; stEl.innerHTML = '<i class="ti ti-x"></i>' + (e.shortMessage || e.message || 'Failed'); }
-    }
-  }
-
-  async function _execSend(){
-    console.log('[UBAction] REVIEW → PROCESSING: Send');
-    if(!_ensure())return;
-    var ad=(document.getElementById('ub-send-addr')||{}).value||'';
-    var a=parseFloat((document.getElementById('ub-send-amt')||{}).value)||0;
-    if(!/^0x[0-9a-fA-F]{40}$/.test(ad)){toast('Enter valid 0x address','warning');return;}
-    if(a<=0){toast('Enter amount','warning');return;}
-    var cardEl = _currentReviewId ? document.getElementById(_currentReviewId) : null;
-    if (!cardEl) { var cs = document.querySelectorAll('.ub-review-card'); if (cs.length) cardEl = cs[cs.length-1]; }
-    var stEl = cardEl ? cardEl.querySelector('.ub-rev-status') : null;
-    if (stEl) { stEl.className = 'ub-rev-status loading'; stEl.innerHTML = '<i class="ti ti-loader"></i>Processing...'; }
-    var btnEl = cardEl ? cardEl.querySelector('.btn.primary') : null;
-    if (btnEl) btnEl.style.display = 'none';
-    var hr=document.getElementById('sa-recipient');
-    if(!hr){hr=document.createElement('input');hr.id='sa-recipient';hr.type='hidden';document.body.appendChild(hr);}
-    hr.value=ad;
-    var ha=document.getElementById('sa-amount');
-    if(!ha){ha=document.createElement('input');ha.id='sa-amount';ha.type='hidden';document.body.appendChild(ha);}
-    ha.value=a.toString();
-    var feeAmt=a*0.002, total=a+feeAmt;
-    try {
-      var t0=Date.now();
-      await saExecuteSend();
-      var dur=((Date.now()-t0)/1000).toFixed(1);
-      console.log('[UBAction] PROCESSING → RESULT: Send ('+dur+'s)');
-      _showResult({});
-    } catch(e) {
-      console.log('[UBAction] Send FAILED:', e.shortMessage || e.message);
-      if (stEl) { stEl.className = 'ub-rev-status error'; stEl.innerHTML = '<i class="ti ti-x"></i>' + (e.shortMessage || e.message || 'Failed'); }
-    }
-  }
+  // ═══════════════════════ BRIDGE ═══════════════════════
   function openBridge(pfFrom,pfTo,pfAmt){
     if(!_ensure())return;
     var cs=typeof CHAINS!=='undefined'?CHAINS:[];
@@ -30745,6 +30664,8 @@ const UBAction = (function() {
 
   function _refreshBridge(){ var ae=document.getElementById('ub-bridge-amt'); if(!ae)return; var a=parseFloat(ae.value)||0; if(a<=0){hideReview();return;} var cs=typeof CHAINS!=='undefined'?CHAINS:[]; var fc=cs[bridgeFromIdx],tc=cs[bridgeToIdx]; if(!fc||!tc)return; var fee=tc.id==='Arc_Testnet'?'1.00%':'0.05%'; var feeAmt=a*(bridgeToIdx===0?0.01:0.0005); var recv=a-feeAmt; showReview({title:'Bridge Review',icon:'topology-star-3',iconColor:'var(--purple)',rows:[['Token','USDC'],['Amount',a.toFixed(4)+' USDC'],['From',fc.shortName||fc.name],['To',tc.shortName||tc.name],['You receive',recv.toFixed(4)+' USDC'],['Fee',fee+' (~'+feeAmt.toFixed(4)+' USDC)'],['Time',tc.id==='Arc_Testnet'?'~30s (Turbo)':'~5-15 min (CCTP)'],['Security',tc.id==='Arc_Testnet'?'Turbo Bridge secured by relayer':'CCTP — Circle verified']],confirmFn:'UBAction._execBridge()'}); }
 
+  async function _execBridge(){ if(!_ensure())return;var a=parseFloat((document.getElementById('ub-bridge-amt')||{}).value)||0;if(a<=0){toast('Enter amount','warning');return;} updateReviewState('executing','Bridging...');var ha=document.getElementById('bridge-amount');if(!ha){ha=document.createElement('input');ha.id='bridge-amount';ha.type='hidden';document.body.appendChild(ha);}ha.value=a.toString();if(typeof applyBridgeChains==='function')applyBridgeChains(); var cs=typeof CHAINS!=='undefined'?CHAINS:[]; var fc=cs[bridgeFromIdx],tc=cs[bridgeToIdx]; var feeAmt=a*(bridgeToIdx===0?0.01:0.0005); var recv=a-feeAmt; var t0=Date.now(); try{if(typeof executeBridgeOrTurbo==='function')await executeBridgeOrTurbo();else if(typeof executeBridge==='function')await executeBridge();else{toast('Bridge unavailable','error');updateReviewState('error','Bridge unavailable');return;} var tx=_getTxHashFromHistory(); var dur=((Date.now()-t0)/1000).toFixed(1); _showResult({prefix:'Bridge',txHash:tx,explorer:_getExplorer(),rows:[['Token','USDC'],['Sent',a.toFixed(4)+' USDC'],['Received',recv.toFixed(4)+' USDC'],['From',fc?fc.shortName||fc.name:'?'],['To',tc?tc.shortName||tc.name:'?'],['Fee','~'+feeAmt.toFixed(4)+' USDC'],['Duration',dur+'s'],['Tx Hash',tx?tx.slice(0,10)+'...'+tx.slice(-6):'Confirming...']]}); }catch(e){updateReviewState('error',e.shortMessage||e.message||'Bridge failed');} }
+
   // ═══════════════════════ SEND ═══════════════════════
   function openSend(pfToken,pfAmt){
     if(!_ensure())return;
@@ -30760,6 +30681,8 @@ const UBAction = (function() {
   }
 
   function _refreshSend(){ var ae=document.getElementById('ub-send-amt'),ad=document.getElementById('ub-send-addr'); if(!ae||!ad)return; var a=parseFloat(ae.value)||0,addr=ad.value||''; if(a<=0||!/^0x[0-9a-fA-F]{40}$/.test(addr)){hideReview();return;} var fee=a*0.002;var total=a+fee; showReview({title:'Send Review',icon:'send',iconColor:'var(--blue)',rows:[['Token',saCurrentAsset||'USDC'],['Amount',a.toFixed(4)+' '+(saCurrentAsset||'USDC')],['Recipient',addr.slice(0,8)+'...'+addr.slice(-4)],['Network','Arc Testnet'],['Fee','0.20% (~'+fee.toFixed(4)+' '+(saCurrentAsset||'USDC')+')'],['Total',total.toFixed(4)+' '+(saCurrentAsset||'USDC')]],confirmFn:'UBAction._execSend()'}); }
+
+  async function _execSend(){ if(!_ensure())return;var ad=(document.getElementById('ub-send-addr')||{}).value||'';var a=parseFloat((document.getElementById('ub-send-amt')||{}).value)||0;if(!/^0x[0-9a-fA-F]{40}$/.test(ad)){toast('Enter valid 0x address','warning');return;}if(a<=0){toast('Enter amount','warning');return;}updateReviewState('executing','Sending...');var hr=document.getElementById('sa-recipient');if(!hr){hr=document.createElement('input');hr.id='sa-recipient';hr.type='hidden';document.body.appendChild(hr);}hr.value=ad;var ha=document.getElementById('sa-amount');if(!ha){ha=document.createElement('input');ha.id='sa-amount';ha.type='hidden';document.body.appendChild(ha);}ha.value=a.toString(); var feeAmt=a*0.002; var total=a+feeAmt; var t0=Date.now(); try{await saExecuteSend(); var tx=_getTxHashFromHistory(); var dur=((Date.now()-t0)/1000).toFixed(1); _showResult({prefix:'Send',txHash:tx,explorer:_getExplorer(),rows:[['Token',saCurrentAsset||'USDC'],['Sent',a.toFixed(4)+' '+(saCurrentAsset||'USDC')],['Recipient',ad.slice(0,8)+'...'+ad.slice(-4)],['Network','Arc Testnet'],['Fee','~'+feeAmt.toFixed(4)+' '+(saCurrentAsset||'USDC')],['Total',total.toFixed(4)+' '+(saCurrentAsset||'USDC')],['Duration',dur+'s'],['Tx Hash',tx?tx.slice(0,10)+'...'+tx.slice(-6):'Confirming...']]}); }catch(e){updateReviewState('error',e.shortMessage||e.message||'Send failed');} }
 
   // ═══════════════════════ HELPERS ═══════════════════════
   function _modalWrap(title,icon,color,body,onClose){
