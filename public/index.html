@@ -3668,9 +3668,12 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
 }
 .sch-select-option:hover { background: rgba(79,142,247,.12); color: #fff; }
 .sch-select-option.selected { background: rgba(79,142,247,.22); color: #fff; font-weight: 600; }
-/* Extra safety for any remaining native selects in these two pages only */
+/* Extra safety for any remaining native selects — dark dropdowns across all pages */
 #page-schedule select.cinput,
-#page-settings select.cinput { color-scheme: dark; }
+#page-settings select.cinput,
+#page-unified-balance select.cinput,
+select.cinput { color-scheme: dark; }
+select.cinput option { background: #161a24; color: #dde2f0; }
 /* ── Schedule Type Selector Buttons ─── */
 .sch-type-btn{padding:6px 12px;border-radius:6px;font-size:9px;font-weight:600;cursor:pointer;font-family:inherit;border:1px solid var(--border);background:rgba(0,0,0,.2);color:var(--muted2);display:flex;align-items:center;gap:5px;transition:all .15s;white-space:nowrap}
 .sch-type-btn i{font-size:12px}
@@ -3705,6 +3708,39 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
 /* ══════════════════════════════════════════════════════════
    MOBILE RESPONSIVE — Mobile-first for 320px–768px
    ══════════════════════════════════════════════════════════ */
+
+/* ══════════════════════════════════════════════════════════
+   UB REVIEW CARD — Inline panel next to modal, flex layout
+   ══════════════════════════════════════════════════════════ */
+@keyframes ub-result-in { from { opacity:0; transform:translate(-50%,-50%) scale(.9); } to { opacity:1; transform:translate(-50%,-50%) scale(1); } }
+@keyframes ub-result-out { from { opacity:1; transform:translate(-50%,-50%) scale(1); } to { opacity:0; transform:translate(-50%,-50%) scale(.9); } }
+@keyframes ub-review-slide-out { from { opacity:1; transform:translateX(0); } to { opacity:0; transform:translateX(20px); } }
+.ub-review-card {
+  background:var(--card); border:1px solid var(--border2); border-radius:10px;
+  padding:14px; opacity:0; transform:translateX(20px); display:none;
+  animation-fill-mode:forwards;
+}
+.ub-review-card.show { display:block; animation:ub-review-slide-in .22s ease-out forwards; }
+.ub-review-card.hide { animation:ub-review-slide-out .18s ease-in forwards; }
+.ub-review-card .ub-rev-row { display:flex; justify-content:space-between; align-items:center; padding:4px 0; font-size:9.5px; border-bottom:1px solid var(--border); }
+.ub-review-card .ub-rev-row:last-child { border-bottom:none; }
+.ub-review-card .ub-rev-label { color:var(--muted2); }
+.ub-review-card .ub-rev-value { color:var(--text); font-weight:600; font-family:'JetBrains Mono',monospace; font-size:9px; }
+.ub-review-card .ub-rev-status { display:flex; align-items:center; gap:6px; padding:6px 8px; border-radius:4px; font-size:8.5px; margin-top:6px; }
+.ub-review-card .ub-rev-status.loading { background:rgba(79,142,247,.08); color:var(--blue); }
+.ub-review-card .ub-rev-status.success { background:rgba(34,197,94,.08); color:var(--green); }
+.ub-review-card .ub-rev-status.error { background:rgba(239,68,68,.08); color:var(--red); }
+/* When review card is present, expand modal panel to fit both */
+.ub-modal-flex .ub-review-card { display:none; }
+.ub-modal-flex .ub-review-card.show { display:block; }
+/* Expand the modal panel width when there's both panel + review */
+.ub-modal-flex .ub-modal-panel { width:440px; flex-shrink:0; }
+/* Responsive: stack on mobile */
+@media (max-width: 768px) {
+  .ub-modal-flex { flex-direction:column !important; align-items:stretch !important; }
+  .ub-modal-flex .ub-modal-panel { width:100% !important; }
+  .ub-review-card { max-width:100% !important; min-width:unset !important; }
+}
 
 .mobile-hamburger{display:none;width:34px;height:34px;border:1px solid var(--border2);border-radius:6px;background:transparent;color:var(--muted2);cursor:pointer;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;transition:all .15s}
 .mobile-hamburger:hover{border-color:var(--blue);color:var(--blue)}
@@ -4656,6 +4692,7 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
       <div class="nav-item" id="nav-recipients" onclick="showPage('recipients')"><i class="ti ti-users"></i>Recipients</div>
       <div class="nav-item" id="nav-templates" onclick="showPage('templates')"><i class="ti ti-template"></i>Templates</div>
       <div class="nav-item" id="nav-reports" onclick="showPage('reports')"><i class="ti ti-chart-bar"></i>Reports</div>
+      <div class="nav-item" id="nav-unified-balance" onclick="showPage('unified-balance')"><i class="ti ti-chart-donut-3"></i>Balance<span class="nav-kit" style="background:rgba(6,247,233,.12);color:#06F7E9;border:1px solid rgba(6,247,233,.25)">Unified</span></div>
       <div class="nav-item" id="nav-settings" onclick="showPage('settings')"><i class="ti ti-settings"></i>Settings</div>
       <div class="nav-group" style="margin-top:4px">Account</div>
       <div class="nav-item" id="nav-profile" onclick="showPage('profile')"><i class="ti ti-user-circle"></i>Profile<span class="nav-kit" style="background:rgba(167,139,250,.12);color:#a78bfa;border:1px solid rgba(167,139,250,.25)">ID</span></div>
@@ -8461,6 +8498,123 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
     </div>
 
     <!-- ══════════════════════════════════════
+         PAGE: UNIFIED BALANCE
+    ══════════════════════════════════════ -->
+    <div class="page" id="page-unified-balance">
+      <div class="page-header">
+        <div class="page-icon" style="background:rgba(6,247,233,.1);color:#06F7E9"><i class="ti ti-chart-donut-3"></i></div>
+        <div><div class="page-title">Unified Balance</div><div class="page-sub">Multi-chain portfolio, analytics and smart actions</div></div>
+        <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+          <button class="btn" onclick="ubRefresh()"><i class="ti ti-refresh"></i>Refresh</button>
+        </div>
+      </div>
+      <div style="flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:12px">
+        <div id="ub-loading" style="display:flex;align-items:center;justify-content:center;padding:60px 20px;flex-direction:column;gap:12px">
+          <div class="aut-typing"><span></span><span></span><span></span></div>
+          <div style="font-size:10px;color:var(--muted2)">Loading portfolio data...</div>
+        </div>
+        <div id="ub-error" style="display:none;text-align:center;padding:60px 20px">
+          <i class="ti ti-alert-triangle" style="font-size:36px;color:var(--yellow);display:block;margin-bottom:10px"></i>
+          <div style="font-size:12px;color:var(--text);margin-bottom:6px">Failed to load portfolio data</div>
+          <div id="ub-error-msg" style="font-size:9px;color:var(--muted2);margin-bottom:12px"></div>
+          <button class="btn primary" onclick="ubRefresh()"><i class="ti ti-refresh"></i>Retry</button>
+        </div>
+        <div id="ub-empty" style="display:none;text-align:center;padding:60px 20px">
+          <i class="ti ti-wallet-off" style="font-size:40px;color:var(--muted2);display:block;margin-bottom:10px;opacity:.3"></i>
+          <div style="font-size:12px;color:var(--muted2);margin-bottom:12px">Connect your wallet to view portfolio</div>
+          <button class="btn primary" onclick="openWalletModal()"><i class="ti ti-wallet"></i>Connect Wallet</button>
+        </div>
+        <div id="ub-content" style="display:none;flex-direction:column;gap:12px">
+          <div class="card" id="ub-hero-card" style="padding:0;overflow:hidden">
+            <div style="background:linear-gradient(135deg,rgba(6,247,233,.08),rgba(79,142,247,.06),rgba(167,139,250,.04));padding:18px 20px;position:relative">
+              <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:14px">
+                <div>
+                  <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.8px;margin-bottom:6px">Total Portfolio Value</div>
+                  <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap">
+                    <div id="ub-hero-total" style="font-size:32px;font-weight:800;color:var(--text)">$0.00</div>
+                    <div id="ub-hero-change" style="font-size:11px;padding:2px 6px;border-radius:4px;display:none">+0.00%</div>
+                  </div>
+                  <div style="display:flex;gap:16px;margin-top:10px;flex-wrap:wrap">
+                    <div><span style="font-size:8px;color:var(--muted)">NETWORKS</span><br><span id="ub-hero-nets" style="font-size:13px;font-weight:700;color:var(--teal)">0</span></div>
+                    <div><span style="font-size:8px;color:var(--muted)">TOKENS</span><br><span id="ub-hero-tokens" style="font-size:13px;font-weight:700;color:var(--blue)">0</span></div>
+                    <div><span style="font-size:8px;color:var(--muted)">24H ACTIVITY</span><br><span id="ub-hero-activity" style="font-size:13px;font-weight:700;color:var(--purple)">0</span></div>
+                  </div>
+                </div>
+                <div style="display:flex;gap:6px;flex-wrap:wrap">
+                  <button class="btn primary" onclick="UBAction.openSend()" style="padding:6px 12px;font-size:9px"><i class="ti ti-send"></i>Send</button>
+                  <button class="btn purple" onclick="UBAction.openSwap()" style="padding:6px 12px;font-size:9px"><i class="ti ti-arrows-exchange"></i>Swap</button>
+                  <button class="btn teal" onclick="UBAction.openBridge()" style="padding:6px 12px;font-size:9px"><i class="ti ti-topology-star-3"></i>Bridge</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="ch"><i class="ti ti-coins" style="font-size:13px;color:var(--yellow)"></i><span class="ct">Assets</span><span id="ub-asset-count" style="font-size:9px;color:var(--muted2);margin-left:auto">0 tokens</span></div>
+            <div style="overflow-x:auto">
+              <table class="btable">
+                <thead><tr><th>Token</th><th>Network</th><th>Balance</th><th>Value (USD)</th><th style="text-align:right">Actions</th></tr></thead>
+                <tbody id="ub-asset-tbody"><tr><td colspan="5" style="text-align:center;color:var(--muted2);padding:24px">Loading assets...</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+          <!-- ── PORTFOLIO HEALTH SCORE ── -->
+          <div class="card" id="ub-health-card">
+            <div class="ch"><i class="ti ti-heartbeat" style="font-size:13px;color:var(--teal)"></i><span class="ct">Portfolio Health Score</span><span id="ub-health-grade" style="font-size:9px;margin-left:auto;padding:3px 8px;border-radius:3px;font-weight:600">—</span></div>
+            <div class="cb" id="ub-health-body" style="display:flex;flex-direction:column;gap:10px"></div>
+          </div>
+          <!-- ── SMART RECOMMENDATIONS ── -->
+          <div class="card" id="ub-recommendations-card">
+            <div class="ch"><i class="ti ti-bulb" style="font-size:13px;color:var(--yellow)"></i><span class="ct">AI Recommendations</span><span id="ub-rec-count" style="font-size:9px;color:var(--muted2);margin-left:auto">0 actions</span></div>
+            <div class="cb" id="ub-recommendations" style="display:flex;flex-direction:column;gap:6px"><div style="text-align:center;color:var(--muted2);font-size:9.5px;padding:12px">Analyzing portfolio...</div></div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div class="card">
+              <div class="ch"><i class="ti ti-brain" style="font-size:13px;color:#06F7E9"></i><span class="ct">AI Intelligence</span></div>
+              <div class="cb" id="ub-intelligence" style="display:flex;flex-direction:column;gap:10px"><div style="text-align:center;color:var(--muted2);font-size:9.5px;padding:20px">Analyzing portfolio...</div></div>
+            </div>
+            <div class="card">
+              <div class="ch"><i class="ti ti-activity" style="font-size:13px;color:var(--teal)"></i><span class="ct">Unified Activity</span></div>
+              <div class="cb" id="ub-activity" style="display:flex;flex-direction:column;gap:6px;max-height:300px;overflow-y:auto"><div style="text-align:center;color:var(--muted2);font-size:9.5px;padding:20px">No recent activity</div></div>
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div class="card">
+              <div class="ch"><i class="ti ti-robot" style="font-size:13px;color:#06F7E9"></i><span class="ct">Autonomous Finance</span><span id="af-permission-badge" style="font-size:8px;margin-left:auto;padding:2px 6px;border-radius:3px;background:rgba(34,197,94,.12);color:var(--green);display:none">Approval Required</span></div>
+              <div class="cb" id="ub-autonomous-actions" style="display:flex;flex-direction:column;gap:8px"><div style="text-align:center;color:var(--muted2);font-size:9.5px;padding:20px">No data yet — connect wallet to generate plans</div></div>
+            </div>
+            <div class="card" id="ub-goals-card" style="display:none">
+              <div class="ch"><i class="ti ti-target-arrow" style="font-size:13px;color:var(--purple)"></i><span class="ct">AI Goals</span><button class="btn" style="padding:2px 8px;font-size:8px;margin-left:auto" onclick="AF.Goals.addGoalPrompt()"><i class="ti ti-plus"></i>New Goal</button></div>
+              <div class="cb" id="ub-goals" style="display:flex;flex-direction:column;gap:6px"><div style="text-align:center;color:var(--muted2);font-size:9.5px;padding:12px">No goals set</div></div>
+            </div>
+            <div class="card">
+              <div class="ch"><i class="ti ti-wallet" style="font-size:13px;color:var(--blue)"></i><span class="ct">Connected Wallets</span></div>
+              <div class="cb" id="ub-wallets" style="display:flex;flex-direction:column;gap:8px"><div style="text-align:center;color:var(--muted2);font-size:9.5px;padding:20px">No wallet connected</div></div>
+            </div>
+            <div class="card" id="ub-agents-card" style="display:none">
+              <div class="ch"><i class="ti ti-users-group" style="font-size:13px;color:#06F7E9"></i><span class="ct">Agent Economy</span><span id="ag-active-count" style="font-size:8px;color:var(--muted2);margin-left:auto">0 active</span></div>
+              <div class="cb" id="ub-agents" style="display:flex;flex-direction:column;gap:8px"><div style="text-align:center;color:var(--muted2);font-size:9.5px;padding:12px">No agents initialized — connect wallet to activate</div></div>
+            </div>
+            <!-- ── AI COMMAND CENTER ── -->
+            <div class="card" id="ub-aos-card" style="display:none">
+              <div class="ch"><i class="ti ti-cpu" style="font-size:13px;color:#06F7E9"></i><span class="ct">AI Command Center</span><span id="aos-status-badge" style="font-size:8px;margin-left:auto;padding:2px 6px;border-radius:3px">Idle</span></div>
+              <div class="cb" id="ub-aos-body" style="display:flex;flex-direction:column;gap:10px"><div style="text-align:center;color:var(--muted2);font-size:9.5px;padding:16px">Initializing cognitive network...</div></div>
+            </div>
+            <!-- ── AUTOMATION RULES ── -->
+            <div class="card" id="ub-automation-card" style="display:none">
+              <div class="ch"><i class="ti ti-automation" style="font-size:13px;color:var(--yellow)"></i><span class="ct">Automation Rules</span><span id="ar-rule-count" style="font-size:8px;color:var(--muted2);margin-left:auto">0 rules</span></div>
+              <div class="cb" id="ub-automation-body" style="display:flex;flex-direction:column;gap:6px"><div style="text-align:center;color:var(--muted2);font-size:9.5px;padding:12px">No rules — connect wallet to activate</div></div>
+            </div>
+            <!-- ── SYSTEM CENTER ── -->
+            <div class="card" id="ub-system-card" style="display:none">
+              <div class="ch"><i class="ti ti-cpu" style="font-size:13px;color:var(--teal)"></i><span class="ct">System Center</span><span id="sys-health-badge" style="font-size:8px;margin-left:auto;padding:2px 6px;border-radius:3px">—</span></div>
+              <div class="cb" id="ub-system-body" style="display:flex;flex-direction:column;gap:8px"><div style="text-align:center;color:var(--muted2);font-size:9.5px;padding:12px">Initializing system monitor...</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════
          PAGE: AUTONOMA AI AGENT
     ══════════════════════════════════════ -->
     <div class="page" id="page-autonoma">
@@ -11140,8 +11294,10 @@ function showPage(id) {
       }, 120);
     }
 
-    // === SCHEDULE PAGE ONLY: Force en-US locale to disable browser locale detection ===
+    // === SCHEDULE PAGE ONLY: Force en-US locale + render table from engine ===
     if (id === 'schedule') {
+      schedules = ScheduleEngine.getAll();
+      if (typeof renderSchedules === 'function') renderSchedules();
       const schPage = document.getElementById('page-schedule');
       if (schPage) schPage.lang = 'en-US';
       const schCreate = document.getElementById('sch-create-panel');
@@ -11154,6 +11310,9 @@ function showPage(id) {
     }
     if (id === 'autonoma') {
       setTimeout(() => { if (typeof autonomaInit === 'function') autonomaInit(); }, 50);
+    }
+    if (id === 'unified-balance') {
+      setTimeout(() => { if (typeof ubInit === 'function') ubInit(); }, 50);
     }
     updateMobileNav(id);
   } catch (err) {
@@ -11458,6 +11617,8 @@ async function finalizeConnection(raw, walletType) {
   setupProviderEvents(raw);
   toast(`✓ ${badges[walletType]||walletType}: ${short} | ${chain.name}`, 'success');
   recoverPendingIntents().catch(function(e){ console.log('[V4] Recovery skipped:', e.message); });
+  // Notify Unified Balance page of wallet connection
+  try { document.dispatchEvent(new CustomEvent('WALLET_CONNECTED', { detail: { address: walletAddress, chainId: activeChainId } })); } catch(_) {}
   return true;
 }
 
@@ -11526,6 +11687,8 @@ function disconnectWallet() {
   const pill = document.getElementById('active-network-pill');
   if(pill) { pill.textContent='No wallet'; pill.style.cssText=''; }
   toast('Wallet disconnected', 'info');
+  // Notify UB page
+  try { document.dispatchEvent(new CustomEvent('WALLET_DISCONNECTED')); } catch(_) {}
 }
 
 setInterval(() => {
@@ -17310,6 +17473,22 @@ document.addEventListener('DOMContentLoaded',()=>{
   renderSchedules();
   setTimeout(checkDueSchedules, 2000);
 
+  // ScheduleEngine real-time auto-update listener
+  // When Autonoma creates a schedule, the Schedule page refreshes instantly
+  ScheduleEngine.on('CREATED', function() {
+    schedules = ScheduleEngine.getAll();
+    renderSchedules();
+    setTimeout(checkDueSchedules, 500);
+  });
+  ScheduleEngine.on('UPDATED', function() {
+    schedules = ScheduleEngine.getAll();
+    renderSchedules();
+  });
+  ScheduleEngine.on('DELETED', function() {
+    schedules = ScheduleEngine.getAll();
+    renderSchedules();
+  });
+
   (function detectSharedPaymentLink() {
     var path = window.location.pathname || '';
     var payMatch = path.match(/^\/pay\/(.+)$/);
@@ -21419,29 +21598,160 @@ function enhanceSelectToPortal(select) {
   setTimeout(syncLabel, 0);
 }
 
-
 // ══════════════════════════════════════════════════════════
-//  MULTI-SCHEDULE ENGINE  (Global Automation Center)
+//  RECIPIENT RESOLVER — Read-only contact lookup for Autonoma
+//  Never modifies contacts. Used to resolve names to addresses.
 // ══════════════════════════════════════════════════════════
-let schedules = Store.load('schedules', []);
-let schCurrentType = 'payment';
+const RecipientResolver = (function() {
+  'use strict';
 
-// Migrate old schedules to new format on load
-(function _schMigrate(){
-  let migrated = false;
-  for(const s of schedules){
-    if(!s.type){ s.type = 'payment'; migrated = true; }
-    if(!s.executionHistory) s.executionHistory = [];
-    if(!s.createdBy) s.createdBy = 'user';
-    if(!s.network) s.network = 'Arc_Testnet';
-    // Convert old single-recipient data to new universal format
-    if(s.type === 'payment' && s.recipients && s.recipients.length === 1){
-      if(!s.address) s.address = s.recipients[0].addr || '';
-      if(!s.amount) s.amount = s.recipients[0].amount || s.total || 0;
-    }
+  function _contacts() {
+    return (typeof contacts !== 'undefined' && Array.isArray(contacts)) ? contacts : [];
   }
-  if(migrated) Store.save('schedules', schedules);
+
+  // Exact name match (case-insensitive)
+  function resolve(name) {
+    if (!name) return null;
+    var n = String(name).toLowerCase().trim();
+    if (!n) return null;
+    var exact = _contacts().filter(function(c) { return String(c.name || '').toLowerCase() === n; });
+    if (exact.length === 1) return { name: exact[0].name, address: exact[0].addr, chainId: exact[0].chainId || 'Arc_Testnet', exact: true };
+    if (exact.length > 1) return { name: n, addresses: exact.map(function(c) { return c.addr; }), matches: exact, exact: true, multiple: true };
+    // Fuzzy: name contains search OR search contains name
+    var fuzzy = _contacts().filter(function(c) {
+      var cn = String(c.name || '').toLowerCase();
+      return cn.indexOf(n) !== -1 || n.indexOf(cn) !== -1;
+    });
+    if (fuzzy.length === 1) return { name: fuzzy[0].name, address: fuzzy[0].addr, chainId: fuzzy[0].chainId || 'Arc_Testnet', exact: false };
+    if (fuzzy.length > 1) return { name: n, addresses: fuzzy.map(function(c) { return c.addr; }), matches: fuzzy, exact: false, multiple: true };
+    return null;
+  }
+
+  function fuzzySearch(name) {
+    var n = String(name || '').toLowerCase().trim();
+    if (!n) return [];
+    return _contacts().filter(function(c) {
+      var cn = String(c.name || '').toLowerCase();
+      return cn.indexOf(n) !== -1 || n.indexOf(cn) !== -1;
+    });
+  }
+
+  function all() { return _contacts(); }
+
+  function count() { return _contacts().length; }
+
+  // Extract recipient name from a message and resolve it
+  function extractFromMessage(msg) {
+    var low = String(msg || '').toLowerCase();
+    // Skip common chain/network words
+    var chainWords = /^(ethereum|sepolia|base|arbitrum|optimism|polygon|amoy|arc|solana|devnet|testnet|mainnet)$/i;
+    // PT: "para {name}", "pro {name}", "à {name}", "ao {name}"
+    // EN: "for {name}", "to {name}"
+    var m = low.match(/\b(?:para|pro|for|send\s+to|pay\s+to|to)\s+([a-záàâãéêíóôõúüç]{2,30})\b/i);
+    if (m) {
+      var candidate = m[1].trim();
+      if (chainWords.test(candidate)) return null;
+      var r = resolve(candidate);
+      if (r && !r.multiple) return r;
+      return r; // may be multiple-match result
+    }
+    return null;
+  }
+
+  return { resolve: resolve, fuzzySearch: fuzzySearch, all: all, count: count, extractFromMessage: extractFromMessage };
 })();
+
+// ══════════════════════════════════════════════════════════
+//  SCHEDULE ENGINE — Single Source of Truth
+//  Central data service used by both Autonoma AI and Schedule page.
+//  All schedule CRUD MUST go through this engine.
+// ══════════════════════════════════════════════════════════
+const ScheduleEngine = (() => {
+  'use strict';
+
+  let _schedules = Store.load('schedules', []);
+  let _listeners = {};
+
+  function _persist() { Store.save('schedules', _schedules); }
+
+  function _emit(event, data) {
+    try {
+      document.dispatchEvent(new CustomEvent('SCHEDULE_' + event, { detail: data }));
+    } catch (_) {}
+  }
+
+  // ── Public API ──────────────────────────────────────────
+
+  function create(scheduleData) {
+    const sched = Object.assign({
+      id: 'SCH' + Date.now(),
+      type: 'payment', name: '', token: 'USDC', amount: 0, total: 0,
+      network: 'Arc_Testnet', fromNetwork: 'Arc_Testnet', toNetwork: 'Base_Sepolia',
+      swapToToken: undefined, recipients: [], address: '',
+      freq: 'monthly', maxEx: 0, gas: 0.10,
+      nextRun: new Date(Date.now() + 86400000).toISOString(),
+      execCount: 0, executionHistory: [], status: 'Active',
+      created: new Date().toISOString(), createdBy: 'user',
+      walletAddress: (typeof walletAddress !== 'undefined') ? (walletAddress || '') : ''
+    }, scheduleData);
+    _schedules.unshift(sched);
+    _persist();
+    _emit('CREATED', sched);
+    return sched;
+  }
+
+  function getAll() { return _schedules; }
+
+  function getById(id) { return _schedules.find(function(s) { return s.id === id; }); }
+
+  function update(id, changes) {
+    var idx = _schedules.findIndex(function(s) { return s.id === id; });
+    if (idx < 0) return null;
+    Object.assign(_schedules[idx], changes);
+    _persist();
+    _emit('UPDATED', { id: id, changes: changes, item: _schedules[idx] });
+    return _schedules[idx];
+  }
+
+  function remove(id) {
+    var idx = _schedules.findIndex(function(s) { return s.id === id; });
+    if (idx < 0) return null;
+    var sched = _schedules[idx];
+    _schedules.splice(idx, 1);
+    _persist();
+    _emit('DELETED', sched || { id: id });
+    return sched;
+  }
+
+  function on(event, callback) {
+    var handler = function(e) { callback(e.detail); };
+    document.addEventListener('SCHEDULE_' + event, handler);
+    return function() { document.removeEventListener('SCHEDULE_' + event, handler); };
+  }
+
+  // ── Migration on load ───────────────────────────────────
+  (function _migrate() {
+    var changed = false;
+    for (var i = 0; i < _schedules.length; i++) {
+      var s = _schedules[i];
+      if (!s.type) { s.type = 'payment'; changed = true; }
+      if (!s.executionHistory) s.executionHistory = [];
+      if (!s.createdBy) s.createdBy = 'user';
+      if (!s.network) s.network = 'Arc_Testnet';
+      if (s.type === 'payment' && s.recipients && s.recipients.length === 1) {
+        if (!s.address) s.address = s.recipients[0].addr || '';
+        if (!s.amount) s.amount = s.recipients[0].amount || s.total || 0;
+      }
+    }
+    if (changed) _persist();
+  })();
+
+  return { create: create, getAll: getAll, getById: getById, update: update, remove: remove, on: on };
+})();
+
+// Legacy alias — keep global `schedules` pointing to engine data for backward compat
+var schedules = ScheduleEngine.getAll();
+var schCurrentType = 'payment';
 
 // ── Type selector ─────────────────────────────────────────
 function schSelectType(type, btn){
@@ -21510,7 +21820,7 @@ function schPrefill(params){
 }
 
 function scheduleSubmit(){
-  const name = document.getElementById('sch-name')?.value.trim() || 'Schedule ' + (schedules.length+1);
+  const name = document.getElementById('sch-name')?.value.trim() || 'Schedule ' + (ScheduleEngine.getAll().length+1);
   const token = document.getElementById('sch-token')?.value || 'USDC';
   const amount = parseFloat(document.getElementById('sch-amount')?.value) || 0;
   const date = document.getElementById('sch-date')?.value;
@@ -21561,7 +21871,7 @@ function scheduleSubmit(){
   const nextRunDate = parseDateTimeAsUTC(date);
   const nextRunIso = nextRunDate ? nextRunDate.toISOString() : new Date(date).toISOString();
 
-  const sched = {
+  const sched = ScheduleEngine.create({
     id: 'SCH' + Date.now(),
     type, name, token, amount, total,
     network: type === 'bridge' || type === 'crosschain' ? (fromNetwork + ' → ' + toNetwork) : 'Arc_Testnet',
@@ -21575,10 +21885,8 @@ function scheduleSubmit(){
     created: new Date().toISOString(),
     createdBy,
     walletAddress: walletAddress || ''
-  };
-
-  schedules.unshift(sched);
-  Store.save('schedules', schedules);
+  });
+  schedules = ScheduleEngine.getAll();
   renderSchedules();
   document.getElementById('sch-create-panel').style.display = 'none';
   toast('Schedule "' + name + '" created — next run: ' + formatUSDateTime(nextRunIso), 'success');
@@ -21632,7 +21940,7 @@ function scheduleNextDate(freq, from){
 
 // ── Execute Now (manual trigger) ──────────────────────────
 async function scheduleRun(id){
-  const sch = schedules.find(s => s.id === id);
+  const sch = ScheduleEngine.getById(id);
   if(!sch) return;
 
   // Record execution
@@ -21725,24 +22033,27 @@ async function scheduleRun(id){
   }
 
   schLogEntry(sch.id, 'executed', '"' + sch.name + '" executed (' + schTypeLabel(sch.type) + ' · ' + (sch.amount||sch.total||0).toFixed(2) + ' ' + sch.token + ')');
-  Store.save('schedules', schedules);
+  ScheduleEngine.update(sch.id, {});
+  schedules = ScheduleEngine.getAll();
   renderSchedules();
 }
 
 // ── Execute Now (manual trigger) ──────────────────────────
 function schedulePause(id){
-  const s = schedules.find(x => x.id === id);
+  const s = ScheduleEngine.getById(id);
   if(!s) return;
-  s.status = s.status === 'Active' ? 'Paused' : 'Active';
-  Store.save('schedules', schedules); renderSchedules();
-  schLogEntry(id, s.status === 'Paused' ? 'paused' : 'resumed', '"' + s.name + '" ' + s.status.toLowerCase());
-  toast('Schedule "' + s.name + '" ' + s.status.toLowerCase(), 'info');
+  const newStatus = s.status === 'Active' ? 'Paused' : 'Active';
+  ScheduleEngine.update(id, { status: newStatus });
+  schedules = ScheduleEngine.getAll();
+  renderSchedules();
+  schLogEntry(id, newStatus === 'Paused' ? 'paused' : 'resumed', '"' + s.name + '" ' + newStatus.toLowerCase());
+  toast('Schedule "' + s.name + '" ' + newStatus.toLowerCase(), 'info');
 }
 
 function scheduleDelete(id){
-  const s = schedules.find(x => x.id === id);
-  schedules = schedules.filter(s => s.id !== id);
-  Store.save('schedules', schedules); renderSchedules();
+  const s = ScheduleEngine.remove(id);
+  schedules = ScheduleEngine.getAll();
+  renderSchedules();
   if(s) schLogEntry(id, 'deleted', '"' + s.name + '" removed');
   toast('Schedule removed', 'info');
 }
@@ -21752,24 +22063,25 @@ function renderSchedules(){
   const empty = document.getElementById('sch-empty');
   if(!tbody) return;
 
-  const active = schedules.filter(s => s.status === 'Active').length;
-  const pending = schedules.filter(s => s.status === 'Paused').length;
-  const done = schedules.filter(s => s.status === 'Completed').length;
-  const vol = schedules.reduce((s, x) => s + (x.amount || x.total || 0) * (x.execCount || 0), 0);
-  const set = (id, v) => { const el = document.getElementById(id); if(el) el.textContent = v; };
+  const all = ScheduleEngine.getAll();
+  const active = all.filter(function(s){ return s.status === 'Active'; }).length;
+  const pending = all.filter(function(s){ return s.status === 'Paused'; }).length;
+  const done = all.filter(function(s){ return s.status === 'Completed'; }).length;
+  const vol = all.reduce(function(s, x){ return s + (x.amount || x.total || 0) * (x.execCount || 0); }, 0);
+  var set = function(id, v){ var el = document.getElementById(id); if(el) el.textContent = v; };
   set('sch-stat-active', active); set('sch-stat-pending', pending);
   set('sch-stat-done', done); set('sch-stat-vol', '$' + vol.toFixed(2));
-  set('sch-count', schedules.length + ' automations');
+  set('sch-count', all.length + ' automations');
 
-  if(!schedules.length){ tbody.innerHTML = ''; empty.style.display = ''; return; }
+  if(!all.length){ tbody.innerHTML = ''; empty.style.display = ''; return; }
   empty.style.display = 'none';
 
-  const freqLabel = {once:'One-time', daily:'Daily', weekly:'Weekly', biweekly:'Bi-weekly', monthly:'Monthly'};
-  tbody.innerHTML = schedules.map(s => {
-    const sc = {Active:'green', Paused:'yellow', Completed:'blue'}[s.status] || 'muted2';
-    const nextRun = formatUSDateTime(s.nextRun);
-    const isDue = s.nextRun && new Date(s.nextRun) <= new Date() && s.status === 'Active';
-    const assetInfo = (s.amount || 0) > 0 ? (s.amount || 0).toFixed(2) + ' ' + s.token : (s.recipients && s.recipients.length ? s.recipients.length + ' rcpts' : '—');
+  var freqLabel = {once:'One-time', daily:'Daily', weekly:'Weekly', biweekly:'Bi-weekly', monthly:'Monthly'};
+  tbody.innerHTML = all.map(function(s){
+    var sc = {Active:'green', Paused:'yellow', Completed:'blue'}[s.status] || 'muted2';
+    var nextRun = formatUSDateTime(s.nextRun);
+    var isDue = s.nextRun && new Date(s.nextRun) <= new Date() && s.status === 'Active';
+    var assetInfo = (s.amount || 0) > 0 ? (s.amount || 0).toFixed(2) + ' ' + s.token : (s.recipients && s.recipients.length ? s.recipients.length + ' rcpts' : '—');
     return '<tr' + (isDue ? ' style="background:rgba(245,158,11,.05)"' : '') + '>' +
       '<td style="font-weight:600">' + s.name + (isDue ? '<span style="font-size:8px;margin-left:5px;color:var(--yellow)">DUE</span>' : '') + '</td>' +
       '<td><span class="sch-type-badge ' + s.type + '"><i class="ti ti-' + schTypeIcon(s.type) + '" style="font-size:9px"></i>' + schTypeLabel(s.type) + '</span></td>' +
@@ -21789,7 +22101,8 @@ function renderSchedules(){
 
 // Check due schedules on init
 function checkDueSchedules(){
-  const due = schedules.filter(s => s.status === 'Active' && s.nextRun && new Date(s.nextRun) <= new Date());
+  const all = ScheduleEngine.getAll();
+  const due = all.filter(function(s){ return s.status === 'Active' && s.nextRun && new Date(s.nextRun) <= new Date(); });
   if(due.length) toast(due.length + ' scheduled automation(s) due for execution — check Multi Schedule page', 'warning');
 }
 
@@ -28078,6 +28391,2395 @@ function toggleMobileRoute() {
 })();
 
 // ══════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════
+//  UNIFIED BALANCE — Multi-chain portfolio & analytics
+// ══════════════════════════════════════════════════════════
+const UB = {
+  state: { assets: [], totalUSD: 0 },
+  loading: false,
+  memory: null, // FinancialMemory singleton
+  recs: []      // computed recommendations
+};
+
+const UB_TOKEN_META = {
+  USDC:   { name:'USD Coin',    icon:'U', color:'#2775ca', rate:1.00 },
+  EURC:   { name:'Euro Coin',    icon:'E', color:'#2562de', rate:1.08 },
+  cirBTC: { name:'Circle BTC',   icon:'₿', color:'#f7931a', rate:0 },
+  ETH:    { name:'Ether',        icon:'Ξ', color:'#627eea', rate:0 }
+};
+const UB_FREQ_LABELS = { once:'One-time', daily:'Daily', weekly:'Weekly', biweekly:'Bi-weekly', monthly:'Monthly' };
+
+// ══════════════════════════════════════════════════════════
+//  PORTFOLIO ANALYZER — Risk, Health, Concentration Engine
+// ══════════════════════════════════════════════════════════
+UB.analyze = function() {
+  var assets = UB.state.assets;
+  var total = UB.state.totalUSD;
+  var result = { risk: 0, health: 0, grade: 'N/A', concentration: {}, diversity: 0, metrics: [] };
+
+  if (!assets.length || total <= 0) return result;
+
+  // ── Concentration by token and chain ──
+  var byToken = {}, byChain = {};
+  for (var i = 0; i < assets.length; i++) {
+    var a = assets[i];
+    byToken[a.token] = (byToken[a.token] || 0) + a.usd;
+    byChain[a.chainId] = (byChain[a.chainId] || 0) + a.usd;
+  }
+
+  // Top concentration
+  var maxTokenVal = 0, maxTokenSym = '';
+  for (var tk in byToken) { if (byToken[tk] > maxTokenVal) { maxTokenVal = byToken[tk]; maxTokenSym = tk; } }
+  var maxChainVal = 0, maxChainId = '';
+  for (var ck in byChain) { if (byChain[ck] > maxChainVal) { maxChainVal = byChain[ck]; maxChainId = ck; } }
+
+  var concPct = total > 0 ? (maxTokenVal / total) * 100 : 0;
+  var chainPct = total > 0 ? (maxChainVal / total) * 100 : 0;
+  var netCount = Object.keys(byChain).length;
+  var tokCount = Object.keys(byToken).length;
+
+  // ── Risk Score (0-100, higher = riskier) ──
+  var risk = 0;
+  if (concPct >= 90) risk += 40;
+  else if (concPct >= 70) risk += 25;
+  else if (concPct >= 50) risk += 10;
+  if (chainPct >= 90) risk += 30;
+  else if (chainPct >= 70) risk += 15;
+  if (netCount === 1) risk += 20;
+  else if (netCount === 2) risk += 8;
+  if (tokCount === 1) risk += 10;
+  if (total < 10) risk += 5;
+
+  risk = Math.min(risk, 100);
+
+  // ── Health Score (0-100, higher = healthier) ──
+  var health = 100 - risk;
+  if (netCount >= 3) health += 5;
+  if (tokCount >= 2) health += 5;
+  if (total >= 100) health += 3;
+  health = Math.min(Math.max(health, 1), 100);
+
+  // ── Grade ──
+  var grade = health >= 80 ? 'A' : health >= 65 ? 'B' : health >= 50 ? 'C' : health >= 35 ? 'D' : 'F';
+  var gradeColor = grade === 'A' ? 'var(--green)' : grade === 'B' ? 'var(--teal)' : grade === 'C' ? 'var(--yellow)' : grade === 'D' ? 'var(--orange)' : 'var(--red)';
+
+  // ── Detailed metrics ──
+  var metrics = [];
+  metrics.push({ label: 'Concentration Risk', value: concPct.toFixed(0) + '% in ' + maxTokenSym, status: concPct >= 80 ? 'warn' : concPct >= 50 ? 'ok' : 'good' });
+  metrics.push({ label: 'Chain Centralization', value: chainPct.toFixed(0) + '% on ' + (maxChainId || '—'), status: chainPct >= 80 ? 'warn' : chainPct >= 50 ? 'ok' : 'good' });
+  metrics.push({ label: 'Network Diversity', value: netCount + ' network' + (netCount !== 1 ? 's' : ''), status: netCount >= 3 ? 'good' : netCount >= 2 ? 'ok' : 'warn' });
+  metrics.push({ label: 'Asset Count', value: assets.length + ' holding' + (assets.length !== 1 ? 's' : ''), status: assets.length >= 3 ? 'good' : 'ok' });
+  metrics.push({ label: 'Portfolio Size', value: '$' + total.toFixed(0), status: total >= 100 ? 'good' : total >= 10 ? 'ok' : 'warn' });
+
+  result.risk = risk;
+  result.health = health;
+  result.grade = grade;
+  result.gradeColor = gradeColor;
+  result.concentration = { token: maxTokenSym, tokenPct: concPct, chain: maxChainId, chainPct: chainPct };
+  result.diversity = { networks: netCount, tokens: tokCount };
+  result.metrics = metrics;
+
+  return result;
+};
+
+// ══════════════════════════════════════════════════════════
+//  FINANCIAL MEMORY — Snapshot engine (localStorage, read-only)
+// ══════════════════════════════════════════════════════════
+const FinancialMemory = (function() {
+  'use strict';
+  var KEY = 'arcpay_ub_memory';
+  var MAX_SNAPS = 30;
+
+  function load() {
+    try { return JSON.parse(localStorage.getItem(KEY) || '[]'); } catch(e) { return []; }
+  }
+
+  function save(snaps) { try { localStorage.setItem(KEY, JSON.stringify(snaps)); } catch(e) {} }
+
+  function takeSnapshot() {
+    var snaps = load();
+    var snap = {
+      ts: new Date().toISOString(),
+      totalUSD: UB.state.totalUSD,
+      assets: UB.state.assets.length,
+      networks: Object.keys(UB.state.assets.reduce(function(m, a) { m[a.chainId] = true; return m; }, {})).length,
+      tokens: Object.keys(UB.state.assets.reduce(function(m, a) { m[a.token] = true; return m; }, {})).length
+    };
+    snaps.unshift(snap);
+    if (snaps.length > MAX_SNAPS) snaps.length = MAX_SNAPS;
+    save(snaps);
+    return snaps;
+  }
+
+  function getHistory() { return load(); }
+
+  function getTrend() {
+    var snaps = load();
+    if (snaps.length < 2) return { direction: 'stable', change: 0, label: 'No trend data yet' };
+    var prev = snaps[1].totalUSD;
+    var curr = snaps[0].totalUSD;
+    if (prev <= 0) return { direction: 'stable', change: 0, label: 'Baseline established' };
+    var change = ((curr - prev) / prev) * 100;
+    var dir = change > 5 ? 'up' : change < -5 ? 'down' : 'stable';
+    var color = dir === 'up' ? 'var(--green)' : dir === 'down' ? 'var(--red)' : 'var(--muted2)';
+    return { direction: dir, change: change, label: (change >= 0 ? '+' : '') + change.toFixed(1) + '% vs last session', color: color };
+  }
+
+  function clear() { try { localStorage.removeItem(KEY); } catch(e) {} }
+
+  return { takeSnapshot: takeSnapshot, getHistory: getHistory, getTrend: getTrend, clear: clear };
+})();
+
+// ══════════════════════════════════════════════════════════
+//  SMART RECOMMENDER — Actionable suggestions from real data
+// ══════════════════════════════════════════════════════════
+UB.getRecommendations = function() {
+  var analysis = UB.analyze();
+  var assets = UB.state.assets;
+  var recs = [];
+
+  if (!assets.length) {
+    recs.push({ icon: 'wallet', color: 'var(--blue)', title: 'Connect Wallet', desc: 'Connect your wallet to start receiving personalized recommendations.', action: "openWalletModal()", actionLabel: 'Connect' });
+    return recs;
+  }
+
+  // 1. High concentration → diversify
+  if (analysis.concentration && analysis.concentration.tokenPct >= 80) {
+    recs.push({
+      icon: 'arrows-exchange', color: 'var(--teal)',
+      title: 'High ' + analysis.concentration.token + ' concentration (' + analysis.concentration.tokenPct.toFixed(0) + '%)',
+      desc: 'Consider swapping some ' + analysis.concentration.token + ' to diversify your portfolio and reduce risk.',
+      action: "showPage('swap')", actionLabel: 'Swap Now'
+    });
+  }
+
+  // 2. Single network → bridge
+  if (analysis.diversity && analysis.diversity.networks === 1 && assets.length > 0) {
+    recs.push({
+      icon: 'topology-star-3', color: 'var(--purple)',
+      title: 'Single network exposure',
+      desc: 'All your assets are on the same network. Bridge to distribute risk and access more opportunities.',
+      action: "showPage('bridge')", actionLabel: 'Bridge Assets'
+    });
+  }
+
+  // 3. Idle stablecoins → schedule recurring
+  if (UB.state.totalUSD >= 10 && assets.length >= 1) {
+    var schedCount = 0;
+    try { if (typeof ScheduleEngine !== 'undefined') schedCount = ScheduleEngine.getAll().length; } catch(_) {}
+    if (schedCount === 0) {
+      recs.push({
+        icon: 'calendar-plus', color: 'var(--blue)',
+        title: 'No active automations',
+        desc: 'You have $' + UB.state.totalUSD.toFixed(0) + ' with no scheduled tasks. Set up recurring payments or transfers.',
+        action: "showPage('schedule')", actionLabel: 'Create Schedule'
+      });
+    }
+  }
+
+  // 4. Low portfolio → deposit/earn suggestion
+  if (UB.state.totalUSD < 5 && UB.state.totalUSD > 0) {
+    recs.push({
+      icon: 'plus', color: 'var(--green)',
+      title: 'Small portfolio balance',
+      desc: 'Add more funds to unlock cross-chain operations, swaps, and automated scheduling.',
+      action: "showPage('send')", actionLabel: 'Add Funds'
+    });
+  }
+
+  // 5. Has contacts but no schedules → suggest payment links
+  var hasContacts = false;
+  try { hasContacts = (typeof contacts !== 'undefined' && contacts.length > 0); } catch(_) {}
+  if (hasContacts && UB.state.totalUSD > 0) {
+    recs.push({
+      icon: 'link', color: 'var(--teal)',
+      title: 'Send payment links to ' + contacts.length + ' contact' + (contacts.length !== 1 ? 's' : ''),
+      desc: 'You have contacts saved. Create payment links for fast invoicing.',
+      action: "showPage('links')", actionLabel: 'Create Link'
+    });
+  }
+
+  // Cap at 6 recommendations
+  if (recs.length > 6) recs.length = 6;
+
+  // Add general tip if too few recs
+  if (recs.length < 2) {
+    recs.push({ icon: 'brain', color: '#06F7E9', title: 'Ask Autonoma AI', desc: 'Type "analyze my portfolio" to get AI-powered insights from Autonoma.', action: "showPage('autonoma')", actionLabel: 'Open Autonoma' });
+  }
+
+  return recs;
+};
+
+function ubInit() {
+  if (typeof walletAddress !== 'undefined' && walletAddress) {
+    ubRefresh();
+  } else {
+    ubShowState('empty');
+  }
+}
+
+// Auto-refresh when wallet connects/disconnects while UB page is open
+document.addEventListener('WALLET_CONNECTED', function() {
+  var page = document.getElementById('page-unified-balance');
+  if (page && page.classList.contains('active')) {
+    ubRefresh();
+  }
+});
+document.addEventListener('WALLET_DISCONNECTED', function() {
+  var page = document.getElementById('page-unified-balance');
+  if (page && page.classList.contains('active')) {
+    ubShowState('empty');
+  }
+});
+
+function ubRefresh() {
+  if (UB.loading) return;
+  ubShowState('loading');
+  var emptyEl = document.getElementById('ub-empty');
+  if (emptyEl) emptyEl.style.display = 'none';
+  ubFetchAllBalances()
+    .then(function() { ubRenderAll(); ubShowState('content'); })
+    .catch(function(e) {
+      var errEl = document.getElementById('ub-error-msg');
+      if (errEl) errEl.textContent = (e && e.message) || 'Unknown error';
+      ubShowState('error');
+    });
+}
+
+function ubShowState(state) {
+  var ids = ['ub-loading', 'ub-error', 'ub-empty', 'ub-content'];
+  for (var i = 0; i < ids.length; i++) {
+    var el = document.getElementById(ids[i]);
+    if (el) el.style.display = (ids[i] === 'ub-' + state) ? '' : 'none';
+  }
+  if (state === 'content') {
+    var contentEl = document.getElementById('ub-content');
+    if (contentEl) contentEl.style.display = 'flex';
+  }
+}
+
+function ubFetchAllBalances() {
+  UB.loading = true;
+  UB.state.assets = [];
+  UB.state.totalUSD = 0;
+
+  var chains = (typeof CHAINS !== 'undefined') ? CHAINS : [];
+  if (!chains.length) { UB.loading = false; return Promise.resolve(); }
+
+  if (typeof walletAddress === 'undefined' || !walletAddress) {
+    UB.loading = false; return Promise.resolve();
+  }
+
+  var TOKENS = ['USDC', 'EURC', 'cirBTC'];
+  var promises = [];
+
+  for (var ci = 0; ci < chains.length; ci++) {
+    var chain = typeof CHAINS === 'object' && CHAINS[ci] ? CHAINS[ci] : chains[ci];
+    if (!chain || !chain.rpc) continue;
+    for (var ti = 0; ti < TOKENS.length; ti++) {
+      var sym = TOKENS[ti];
+      var tokenAddr = chain.tokens && chain.tokens[sym] ? chain.tokens[sym].address : null;
+      if (!tokenAddr || tokenAddr === '0x0000000000000000000000000000000000000000') continue;
+      promises.push(ubFetchOne(chain, sym, tokenAddr));
+    }
+  }
+
+  return Promise.all(promises).then(function() { UB.loading = false; });
+}
+
+function ubFetchOne(chain, sym, tokenAddr) {
+  return new Promise(function(resolve) {
+    var rpc = chain.rpc;
+    var meta = UB_TOKEN_META[sym] || { name:sym, icon:'?', color:'#888', rate:0 };
+    try {
+      if (typeof ethers === 'undefined') { resolve(); return; }
+      var prov = null;
+      try {
+        if (typeof getCachedProvider === 'function') {
+          prov = getCachedProvider(rpc);
+        }
+      } catch(e) {}
+      if (!prov) {
+        try { prov = new ethers.JsonRpcProvider(rpc); } catch(e2) {}
+      }
+      if (!prov) { resolve(); return; }
+      var contract = new ethers.Contract(tokenAddr, (typeof USDC_ABI !== 'undefined' ? USDC_ABI : ['function balanceOf(address) view returns (uint256)']), prov);
+      contract.balanceOf(walletAddress).then(function(bal) {
+        var decimals = (chain.tokens && chain.tokens[sym]) ? (chain.tokens[sym].decimals || 6) : 6;
+        var amount = Number(bal) / Math.pow(10, decimals);
+        if (amount <= 0) { resolve(); return; }
+        var usd = amount * meta.rate;
+        var asset = {
+          token: sym, tokenName: meta.name, icon: meta.icon, color: meta.color,
+          chainId: chain.id || chain.name, chainName: chain.shortName || chain.name,
+          balance: amount, usd: usd, address: tokenAddr
+        };
+        UB.state.assets.push(asset);
+        UB.state.totalUSD += usd;
+        resolve();
+      }).catch(function() { resolve(); });
+    } catch(e) { resolve(); }
+  });
+}
+
+function ubRenderAll() {
+  ubRenderHero();
+  ubRenderAssets();
+  ubRenderHealth();
+  ubRenderRecommendations();
+  ubRenderIntelligence();
+  ubRenderActivity();
+  ubRenderWallets();
+  // Take financial memory snapshot
+  try { FinancialMemory.takeSnapshot(); } catch(_) {}
+}
+
+function ubRenderHero() {
+  var assets = UB.state.assets;
+  var total = UB.state.totalUSD;
+  var chains = {}; var tokens = {};
+  for (var i = 0; i < assets.length; i++) {
+    chains[assets[i].chainId] = true;
+    tokens[assets[i].token] = true;
+  }
+  var netCount = Object.keys(chains).length;
+  var tokCount = Object.keys(tokens).length;
+
+  var elTotal = document.getElementById('ub-hero-total');
+  if (elTotal) elTotal.textContent = '$' + total.toFixed(2);
+
+  // Trend indicator from financial memory
+  var trend = null;
+  try { trend = FinancialMemory.getTrend(); } catch(_) {}
+  var elChange = document.getElementById('ub-hero-change');
+  if (elChange && trend && trend.direction !== 'stable') {
+    elChange.style.display = '';
+    elChange.textContent = trend.label;
+    elChange.style.background = trend.direction === 'up' ? 'rgba(34,197,94,.15)' : 'rgba(239,68,68,.15)';
+    elChange.style.color = trend.color;
+  } else if (elChange) {
+    elChange.style.display = 'none';
+  }
+
+  var elNets = document.getElementById('ub-hero-nets');
+  if (elNets) elNets.textContent = String(netCount);
+  var elTokens = document.getElementById('ub-hero-tokens');
+  if (elTokens) elTokens.textContent = String(tokCount);
+
+  var actCount = 0;
+  try { if (typeof txHistory !== 'undefined' && Array.isArray(txHistory)) actCount += txHistory.length; } catch(_) {}
+  try { if (typeof ScheduleEngine !== 'undefined') actCount += ScheduleEngine.getAll().length; } catch(_) {}
+  var elAct = document.getElementById('ub-hero-activity');
+  if (elAct) elAct.textContent = String(actCount);
+}
+
+function ubRenderAssets() {
+  var tbody = document.getElementById('ub-asset-tbody');
+  if (!tbody) return;
+  var assets = UB.state.assets;
+  var countEl = document.getElementById('ub-asset-count');
+  if (countEl) countEl.textContent = assets.length + ' holdings';
+
+  if (!assets.length) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--muted2);padding:24px">No assets found. Connect wallet or switch networks.</td></tr>';
+    return;
+  }
+
+  // Sort by USD value desc
+  assets.sort(function(a, b) { return b.usd - a.usd; });
+
+  var rows = '';
+  for (var i = 0; i < assets.length; i++) {
+    var a = assets[i];
+    var tokenInfo = UB_TOKEN_META[a.token] || { name:a.token, icon:'?', color:'#888' };
+    var perc = UB.state.totalUSD > 0 ? ((a.usd / UB.state.totalUSD) * 100).toFixed(1) : '0.0';
+    rows += '<tr>' +
+      '<td><div style="display:flex;align-items:center;gap:6px"><div style="width:22px;height:22px;border-radius:50%;background:' + tokenInfo.color + ';display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:#fff;flex-shrink:0">' + tokenInfo.icon + '</div><div><div style="font-weight:600;font-size:10px">' + a.token + '</div><div style="font-size:8px;color:var(--muted2)">' + a.tokenName + '</div></div></div></td>' +
+      '<td><div style="display:flex;align-items:center;gap:4px"><div style="width:7px;height:7px;border-radius:50%;background:' + (getChainColor(a.chainId)) + '"></div><span style="font-size:9px">' + a.chainName + '</span></div></td>' +
+      '<td style="font-family:\'JetBrains Mono\',monospace;font-size:10px">' + a.balance.toFixed(4) + '</td>' +
+      '<td style="font-family:\'JetBrains Mono\',monospace;font-size:10px"><span style="color:var(--green)">$' + a.usd.toFixed(2) + '</span><span style="font-size:8px;color:var(--muted2);margin-left:4px">(' + perc + '%)</span></td>' +
+      '<td style="text-align:right"><div style="display:flex;gap:3px;justify-content:flex-end">' +
+        '<button class="btn" style="padding:2px 7px;font-size:8px" onclick="UBAction.openSend(\'' + a.token + '\',' + a.balance + ')" title="Send"><i class="ti ti-send"></i></button>' +
+        '<button class="btn" style="padding:2px 7px;font-size:8px" onclick="UBAction.openSwap(\'' + a.token + '\',\'' + (a.token === 'USDC' ? 'EURC' : 'USDC') + '\',' + a.balance + ')" title="Swap"><i class="ti ti-arrows-exchange"></i></button>' +
+        '<button class="btn" style="padding:2px 7px;font-size:8px" onclick="UBAction.openBridge(\'Ethereum_Sepolia\',\'Arc_Testnet\',' + a.balance + ')" title="Bridge"><i class="ti ti-topology-star-3"></i></button>' +
+      '</div></td></tr>';
+  }
+  tbody.innerHTML = rows;
+}
+
+function getChainColor(chainId) {
+  var map = { 'Arc_Testnet':'#ff0202', 'Ethereum_Sepolia':'#627eea', 'Base_Sepolia':'#0052ff', 'Arbitrum_Sepolia':'#28a0f0', 'Optimism_Sepolia':'#ff0420', 'Polygon_Amoy':'#8247e5', 'Solana_Devnet':'#9945ff' };
+  return map[chainId] || '#888';
+}
+
+function ubRenderIntelligence() {
+  var el = document.getElementById('ub-intelligence');
+  if (!el) return;
+  var analysis = UB.analyze();
+  var assets = UB.state.assets;
+
+  if (!assets.length) {
+    el.innerHTML = '<div style="text-align:center;color:var(--muted2);font-size:9.5px;padding:20px">Connect wallet to enable AI analysis</div>';
+    return;
+  }
+
+  // Risk Score visualization
+  var risk = analysis.risk;
+  var riskColor = risk >= 60 ? 'var(--red)' : risk >= 35 ? 'var(--yellow)' : 'var(--green)';
+  var riskLabel = risk >= 60 ? 'High Risk' : risk >= 35 ? 'Moderate' : 'Low Risk';
+
+  var total = UB.state.totalUSD;
+  var byChain = analysis.concentration || {};
+  var div = analysis.diversity || {};
+
+  var html = '';
+  // Risk score bar
+  html += '<div style="margin-bottom:4px"><div style="display:flex;justify-content:space-between;font-size:9px;margin-bottom:3px"><span style="color:var(--muted2)">Risk Score</span><span style="color:' + riskColor + ';font-weight:600">' + risk + '/100 — ' + riskLabel + '</span></div>';
+  html += '<div style="height:6px;background:var(--border);border-radius:3px;overflow:hidden"><div style="height:100%;width:' + risk + '%;background:' + riskColor + ';border-radius:3px;transition:width .3s"></div></div></div>';
+
+  // Health score bar
+  var health = analysis.health;
+  var healthColor = analysis.gradeColor || 'var(--teal)';
+  html += '<div style="margin-bottom:6px"><div style="display:flex;justify-content:space-between;font-size:9px;margin-bottom:3px"><span style="color:var(--muted2)">Health Score</span><span style="color:' + healthColor + ';font-weight:600">' + health + '/100 — Grade ' + (analysis.grade || 'N/A') + '</span></div>';
+  html += '<div style="height:6px;background:var(--border);border-radius:3px;overflow-hidden"><div style="height:100%;width:' + health + '%;background:' + healthColor + ';border-radius:3px;transition:width .3s"></div></div></div>';
+
+  // Concentration breakdown
+  html += '<div style="border-top:1px solid var(--border);padding-top:8px;margin-top:2px">';
+  html += '<div style="font-size:9px;color:var(--muted2);margin-bottom:6px">Concentration Breakdown</div>';
+
+  var byToken = {};
+  for (var i = 0; i < assets.length; i++) {
+    byToken[assets[i].token] = (byToken[assets[i].token] || 0) + assets[i].usd;
+  }
+  var tokens = Object.keys(byToken);
+  for (var j = 0; j < tokens.length; j++) {
+    var tk = tokens[j];
+    var tkPct = total > 0 ? ((byToken[tk] / total) * 100).toFixed(0) : 0;
+    var meta = UB_TOKEN_META[tk] || { color:'#888', icon:'?' };
+    html += '<div style="display:flex;align-items:center;justify-content:space-between;font-size:9px;margin-bottom:3px">';
+    html += '<span style="display:flex;align-items:center;gap:4px"><div style="width:8px;height:8px;border-radius:2px;background:' + meta.color + '"></div>' + tk + '</span>';
+    html += '<span style="color:var(--muted2)">$' + byToken[tk].toFixed(2) + ' <span style="color:var(--text)">(' + tkPct + '%)</span></span></div>';
+  }
+  html += '</div>';
+
+  // Intelligence insight
+  html += '<div style="border-top:1px solid var(--border);padding-top:8px;margin-top:4px">';
+  var insight = '';
+  if (div.networks === 1) {
+    insight = 'Your full portfolio lives on a single network. Bridging to 1-2 more chains would reduce centralized risk.';
+  } else if (div.networks >= 3) {
+    insight = 'Well diversified across ' + div.networks + ' networks. Consider consolidating small balances to reduce gas costs.';
+  } else {
+    insight = 'Moderately distributed. Adding 1 more network would improve resilience.';
+  }
+  html += '<div style="font-size:9px;color:var(--muted2);margin-bottom:3px">AI Insight</div>';
+  html += '<div style="font-size:9.5px;color:var(--teal)"><i class="ti ti-bulb" style="margin-right:4px;font-size:10px"></i>' + insight + '</div>';
+  html += '</div>';
+
+  el.innerHTML = html;
+}
+
+// ── Portfolio Health Score Card ──────────────────────────
+function ubRenderHealth() {
+  var card = document.getElementById('ub-health-card');
+  var body = document.getElementById('ub-health-body');
+  var gradeEl = document.getElementById('ub-health-grade');
+  if (!card || !body) return;
+
+  var analysis = UB.analyze();
+  if (!UB.state.assets.length) {
+    card.style.display = 'none';
+    return;
+  }
+  card.style.display = '';
+
+  var grade = analysis.grade || 'N/A';
+  var gradeColor = analysis.gradeColor || 'var(--muted2)';
+  if (gradeEl) {
+    gradeEl.textContent = 'Grade ' + grade;
+    gradeEl.style.background = grade === 'A' ? 'rgba(34,197,94,.15)' : grade === 'B' ? 'rgba(45,212,191,.15)' : grade === 'C' ? 'rgba(245,158,11,.15)' : grade === 'D' ? 'rgba(249,115,22,.15)' : 'rgba(239,68,68,.15)';
+    gradeEl.style.color = gradeColor;
+  }
+
+  var metrics = analysis.metrics || [];
+  var html = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px">';
+
+  // Health score big number
+  html += '<div class="card" style="padding:10px;text-align:center;grid-column:span 1"><div style="font-size:8px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Health</div><div style="font-size:28px;font-weight:800;color:' + gradeColor + '">' + (analysis.health || 0) + '</div><div style="font-size:8px;color:var(--muted2)">out of 100</div></div>';
+
+  // Risk score small card
+  var riskColor = (analysis.risk || 0) >= 60 ? 'var(--red)' : (analysis.risk || 0) >= 35 ? 'var(--yellow)' : 'var(--green)';
+  html += '<div class="card" style="padding:10px;text-align:center;grid-column:span 1"><div style="font-size:8px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Risk</div><div style="font-size:28px;font-weight:800;color:' + riskColor + '">' + (analysis.risk || 0) + '</div><div style="font-size:8px;color:var(--muted2)">out of 100</div></div>';
+
+  for (var i = 0; i < metrics.length; i++) {
+    var m = metrics[i];
+    var sColor = m.status === 'good' ? 'var(--green)' : m.status === 'warn' ? 'var(--yellow)' : 'var(--teal)';
+    var sIcon = m.status === 'good' ? 'circle-check' : m.status === 'warn' ? 'alert-triangle' : 'circle';
+    html += '<div style="display:flex;align-items:center;gap:6px;padding:4px 0;font-size:9px"><i class="ti ti-' + sIcon + '" style="color:' + sColor + ';font-size:10px;flex-shrink:0"></i><span style="color:var(--muted2);margin-right:auto">' + m.label + '</span><span style="font-weight:600">' + m.value + '</span></div>';
+  }
+  html += '</div>';
+  body.innerHTML = html;
+}
+
+// ── Smart Recommendations ──────────────────────────────
+function ubRenderRecommendations() {
+  var card = document.getElementById('ub-recommendations-card');
+  var body = document.getElementById('ub-recommendations');
+  var countEl = document.getElementById('ub-rec-count');
+  if (!card || !body) return;
+
+  var recs = UB.getRecommendations();
+
+  if (recs.length) card.style.display = '';
+  else { card.style.display = 'none'; return; }
+
+  if (countEl) countEl.textContent = recs.length + ' action' + (recs.length !== 1 ? 's' : '');
+
+  var html = '';
+  for (var i = 0; i < recs.length; i++) {
+    var r = recs[i];
+    html += '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);cursor:pointer" onclick="' + (r.action || '') + '" onmouseenter="this.style.background=\'rgba(255,255,255,.02)\'" onmouseleave="this.style.background=\'\'">';
+    html += '<div style="width:30px;height:30px;border-radius:50%;background:' + (r.color === 'var(--blue)' ? 'rgba(79,142,247,.12)' : r.color === 'var(--teal)' ? 'rgba(45,212,191,.12)' : r.color === 'var(--purple)' ? 'rgba(167,139,250,.12)' : r.color === 'var(--green)' ? 'rgba(34,197,94,.12)' : r.color === '#06F7E9' ? 'rgba(6,247,233,.12)' : 'rgba(245,158,11,.12)') + ';display:flex;align-items:center;justify-content:center;flex-shrink:0"><i class="ti ti-' + r.icon + '" style="color:' + r.color + ';font-size:13px"></i></div>';
+    html += '<div style="flex:1"><div style="font-size:10px;font-weight:600">' + r.title + '</div><div style="font-size:8.5px;color:var(--muted2)">' + r.desc + '</div></div>';
+    html += '<button class="btn primary" style="padding:4px 10px;font-size:8.5px;flex-shrink:0" onclick="event.stopPropagation();' + (r.action || '') + '">' + r.actionLabel + '</button>';
+    html += '</div>';
+  }
+  body.innerHTML = html;
+}
+
+function ubRenderActivity() {
+  var el = document.getElementById('ub-activity');
+  if (!el) return;
+  var items = [];
+
+  // Transaction history
+  try {
+    if (typeof txHistory !== 'undefined' && Array.isArray(txHistory)) {
+      for (var i = 0; i < txHistory.length && i < 25; i++) {
+        var tx = txHistory[i];
+        items.push({
+          type: tx.type || 'payment',
+          label: (tx.type || 'Transaction') + (tx.amount ? ' $' + parseFloat(tx.amount).toFixed(2) : ''),
+          status: tx.status || tx.state || 'completed',
+          ts: tx.ts || tx.created || '',
+          icon: ubActivityIcon(tx.type || 'payment'),
+          color: ubActivityColor(tx.status || tx.state || 'completed')
+        });
+      }
+    }
+  } catch(_) {}
+
+  // Schedules
+  try {
+    if (typeof ScheduleEngine !== 'undefined') {
+      var schs = ScheduleEngine.getAll();
+      for (var j = 0; j < schs.length && items.length < 50; j++) {
+        var s = schs[j];
+        items.push({
+          type: s.type || 'payment',
+          label: (s.name || 'Schedule') + ' · ' + (UB_FREQ_LABELS[s.freq] || s.freq),
+          status: s.status === 'Active' ? 'active' : s.status === 'Paused' ? 'paused' : 'completed',
+          ts: s.created || '',
+          icon: ubSchedIcon(s.type || 'payment'),
+          color: s.status === 'Active' ? 'var(--green)' : s.status === 'Paused' ? 'var(--yellow)' : 'var(--blue)'
+        });
+      }
+    }
+  } catch(_) {}
+
+  if (!items.length) {
+    el.innerHTML = '<div style="text-align:center;color:var(--muted2);font-size:9.5px;padding:20px">No recent activity</div>';
+    return;
+  }
+
+  // Sort by ts desc
+  items.sort(function(a, b) { return (b.ts || '').localeCompare(a.ts || ''); });
+  var html = '';
+  for (var k = 0; k < items.length && k < 30; k++) {
+    var it = items[k];
+    var timeStr = it.ts ? ubTimeAgo(it.ts) : '';
+    html += '<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border);font-size:9px">' +
+      '<i class="ti ti-' + it.icon + '" style="color:' + it.color + ';font-size:11px"></i>' +
+      '<span style="flex:1">' + it.label + '</span>' +
+      '<span style="color:var(--muted2);font-size:8px">' + timeStr + '</span>' +
+      '</div>';
+  }
+  el.innerHTML = html;
+}
+
+function ubActivityIcon(type) {
+  var m = { payment:'send', bridge:'topology-star-3', swap:'arrows-exchange', multisend:'stack', link_payment:'link', crosschain:'world-share' };
+  return m[type] || 'activity';
+}
+function ubActivityColor(status) {
+  if (status === 'completed' || status === 'success') return 'var(--green)';
+  if (status === 'pending' || status === 'paused') return 'var(--yellow)';
+  if (status === 'failed') return 'var(--red)';
+  return 'var(--teal)';
+}
+function ubSchedIcon(type) {
+  var m = { payment:'calendar-dollar', bridge:'topology-star-3', swap:'arrows-exchange', crosschain:'world-share', multisend:'stack-2', link_payment:'link' };
+  return m[type] || 'calendar-event';
+}
+function ubTimeAgo(iso) {
+  try {
+    var diff = Date.now() - new Date(iso).getTime();
+    if (diff < 60000) return 'just now';
+    if (diff < 3600000) return Math.floor(diff / 60000) + 'm ago';
+    if (diff < 86400000) return Math.floor(diff / 3600000) + 'h ago';
+    return Math.floor(diff / 86400000) + 'd ago';
+  } catch(e) { return ''; }
+}
+
+function ubRenderWallets() {
+  var el = document.getElementById('ub-wallets');
+  if (!el) return;
+  if (typeof walletAddress === 'undefined' || !walletAddress) {
+    el.innerHTML = '<div style="text-align:center;color:var(--muted2);font-size:9.5px;padding:20px">No wallet connected</div>';
+    return;
+  }
+  var chain = typeof getActiveChain === 'function' ? getActiveChain() : null;
+  var chainName = chain ? chain.name : 'Unknown';
+  var chainColor = chain ? chain.color : '#888';
+  var addrShort = walletAddress ? walletAddress.slice(0, 6) + '...' + walletAddress.slice(-4) : '—';
+  var networks = (typeof CHAINS !== 'undefined') ? CHAINS : [];
+
+  var html = '<div class="card" style="padding:10px;border:1px solid var(--border)">';
+  html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">';
+  html += '<div style="width:28px;height:28px;border-radius:50%;background:' + chainColor + ';display:flex;align-items:center;justify-content:center;font-size:11px;color:#fff;font-weight:700">' + (chain ? chain.symbol : 'W') + '</div>';
+  html += '<div style="flex:1"><div style="font-size:10px;font-weight:600">' + chainName + '</div><div style="font-family:\'JetBrains Mono\',monospace;font-size:8px;color:var(--muted2)">' + addrShort + '</div></div>';
+  html += '<span class="status-badge-pb" style="font-size:8px;padding:2px 6px;border-radius:3px">Active</span>';
+  html += '</div>';
+  html += '<div style="display:flex;flex-wrap:wrap;gap:4px;font-size:8px;color:var(--muted2)">';
+  for (var i = 0; i < networks.length; i++) {
+    html += '<span style="display:inline-flex;align-items:center;gap:3px;padding:2px 6px;background:rgba(0,0,0,.15);border-radius:3px"><div style="width:6px;height:6px;border-radius:50%;background:' + (networks[i].color || '#888') + '"></div>' + (networks[i].shortName || networks[i].name) + '</span>';
+  }
+  html += '</div></div>';
+  el.innerHTML = html;
+}
+
+window.ubInit = ubInit;
+window.ubRefresh = ubRefresh;
+
+// ══════════════════════════════════════════════════════════
+//  AUTONOMOUS FINANCE LAYER — Action Planning + Permissions + Goals
+//  All data from UB.state / RPC / localStorage. Zero auto-execution.
+// ══════════════════════════════════════════════════════════
+const AF = (function() {
+  'use strict';
+
+  // ── Activity Log ─────────────────────────────────────────
+  var ACTIVITY_KEY = 'arcpay_af_log';
+  var _log = [];
+  function _loadLog() { try { _log = JSON.parse(localStorage.getItem(ACTIVITY_KEY) || '[]'); } catch(_) { _log = []; } }
+  function _saveLog() { try { localStorage.setItem(ACTIVITY_KEY, JSON.stringify(_log)); } catch(_) {} }
+  _loadLog();
+
+  function logActivity(type, detail, result) {
+    _log.unshift({ ts: new Date().toISOString(), type: type, detail: detail, result: result || 'logged' });
+    if (_log.length > 100) _log.length = 100;
+    _saveLog();
+  }
+
+  function getActivityLog(n) { return _log.slice(0, n || 50); }
+
+  // ── Permission Layer ──────────────────────────────────
+  var _pendingApproval = null;
+  function requestApproval(plan) {
+    _pendingApproval = plan;
+    return plan;
+  }
+  function isApprovalPending() { return _pendingApproval !== null; }
+  function getPendingApproval() { return _pendingApproval; }
+  function approve() {
+    if (!_pendingApproval) return null;
+    var p = _pendingApproval; _pendingApproval = null;
+    logActivity('approved', p.title || p.type, 'approved');
+    return p;
+  }
+  function reject() {
+    if (!_pendingApproval) return null;
+    var p = _pendingApproval; _pendingApproval = null;
+    logActivity('rejected', p.title || p.type, 'rejected');
+    return null;
+  }
+
+  // ── Action Planner — transforms recommendations into detailed plans ──
+  function buildPlans() {
+    var plans = [];
+    var recommendations = typeof UB !== 'undefined' && UB.getRecommendations ? UB.getRecommendations() : [];
+    var assets = typeof UB !== 'undefined' && UB.state ? UB.state.assets : [];
+    var totalUSD = typeof UB !== 'undefined' ? UB.state.totalUSD : 0;
+    var analysis = typeof UB !== 'undefined' && UB.analyze ? UB.analyze() : {};
+
+    if (!assets.length) return plans;
+
+    for (var i = 0; i < recommendations.length; i++) {
+      var r = recommendations[i];
+      var plan = {
+        id: 'af_' + Date.now() + '_' + i,
+        title: r.title,
+        desc: r.desc,
+        icon: r.icon, color: r.color,
+        action: r.action,
+        type: 'route',
+        steps: [],
+        cost: { estimated: 0, token: 'USDC', note: '' },
+        impact: { riskChange: 0, healthChange: 0, diversion: '' },
+        routeTo: r.actionLabel
+      };
+
+      if (r.title.indexOf('Swap') > -1 || (r.action && r.action.indexOf('swap') > -1)) {
+        plan.type = 'swap';
+        plan.steps = buildSwapSteps(assets, analysis);
+        plan.cost = { estimated: 0.02, token: 'USDC', note: 'Estimated gas on Arc Testnet' };
+        plan.impact = { riskChange: -10, healthChange: 8, diversion: 'Reduces single-token concentration risk' };
+      } else if (r.title.indexOf('Bridge') > -1 || (r.action && r.action.indexOf('bridge') > -1)) {
+        plan.type = 'bridge';
+        plan.steps = buildBridgeSteps(assets);
+        plan.cost = { estimated: 0.05, token: 'USDC', note: 'Gas × 2 (source + destination chain)' };
+        plan.impact = { riskChange: -15, healthChange: 12, diversion: 'Distributes assets across chains for resilience' };
+      } else if (r.title.indexOf('schedule') > -1 || r.title.indexOf('automation') > -1 || (r.action && r.action.indexOf('schedule') > -1)) {
+        plan.type = 'schedule';
+        plan.steps = [{ step: 1, label: 'Create a recurring automation via Schedule Engine', detail: 'Define frequency, amount, and recipient' }, { step: 2, label: 'Autonoma AI will execute when due (manual confirmation)', detail: 'Phase 1: human confirmation required' }];
+        plan.cost = { estimated: 0, token: 'USDC', note: 'No cost to create schedule; gas on execution' };
+        plan.impact = { riskChange: 0, healthChange: 5, diversion: 'Automates recurring operations' };
+      } else if (r.title.indexOf('contact') > -1 || r.title.indexOf('payment link') > -1) {
+        plan.type = 'payment';
+        plan.steps = buildPaymentSteps(totalUSD);
+        plan.cost = { estimated: 0, token: 'USDC', note: 'Creating payment link is free' };
+        plan.impact = { riskChange: 0, healthChange: 3, diversion: 'Enables fast invoicing from saved contacts' };
+      } else if (r.title.indexOf('Small portfolio') > -1 || r.title.indexOf('funds') > -1) {
+        plan.type = 'deposit';
+        plan.steps = [{ step: 1, label: 'Navigate to Send page to add funds', detail: 'Deposit USDC or EURC to increase portfolio' }, { step: 2, label: 'After deposit, refresh to see updated recommendations', detail: 'More funds unlock swaps, bridges, and automations' }];
+        plan.cost = { estimated: 0.01, token: 'USDC', note: 'Gas for deposit transaction' };
+        plan.impact = { riskChange: -5, healthChange: 10, diversion: 'Larger portfolio = more options for diversification' };
+      }
+
+      plans.push(plan);
+    }
+    return plans;
+  }
+
+  function buildSwapSteps(assets, analysis) {
+    var steps = [];
+    if (!assets.length) return [{ step: 1, label: 'Select asset to diversify', detail: 'No assets detected' }];
+    var top = assets[0];
+    for (var i = 1; i < assets.length; i++) { if (assets[i].usd > top.usd) top = assets[i]; }
+    var conc = analysis.concentration || {};
+    var pct = conc.tokenPct || 100;
+    var suggestAmt = top.usd * 0.2;
+    var target = top.token === 'USDC' ? 'EURC' : 'USDC';
+    steps.push({ step: 1, label: 'Review current concentration: ' + top.token + ' at ' + pct.toFixed(0) + '%', detail: 'Total: $' + top.usd.toFixed(2) + ' in ' + top.token });
+    steps.push({ step: 2, label: 'Suggested action: Swap ~$' + suggestAmt.toFixed(2) + ' ' + top.token + ' → ' + target, detail: 'Reduces concentration from ' + pct.toFixed(0) + '% to ~' + ((top.usd - suggestAmt) / UB.state.totalUSD * 100).toFixed(0) + '%' });
+    steps.push({ step: 3, label: 'Swap page will auto-fill tokens and amount', detail: 'Confirm transaction in wallet — you finalize the swap' });
+    return steps;
+  }
+
+  function buildBridgeSteps(assets) {
+    var steps = [];
+    steps.push({ step: 1, label: 'Select asset to bridge', detail: 'Current assets on single network — bridging distributes risk' });
+    steps.push({ step: 2, label: 'Choose destination network (Base, Arbitrum, Polygon)', detail: 'Different networks = different DeFi opportunities' });
+    steps.push({ step: 3, label: 'Bridge page auto-fills from current network', detail: 'Select amount and destination, then confirm via wallet' });
+    return steps;
+  }
+
+  function buildPaymentSteps(totalUSD) {
+    var steps = [];
+    var contactCount = 0;
+    try { if (typeof contacts !== 'undefined') contactCount = contacts.length; } catch(_) {}
+    steps.push({ step: 1, label: 'Open Payment Links page', detail: 'You have ' + contactCount + ' contact(s) saved' });
+    steps.push({ step: 2, label: 'Select a saved contact or create new link', detail: 'Set amount, label, and expiration' });
+    steps.push({ step: 3, label: 'Share the link with recipient', detail: 'They can pay with any supported wallet' });
+    return steps;
+  }
+
+  // ── Execution Preview (simulation, never auto-executes) ──
+  function previewAction(plan) {
+    if (!plan) return { ok: false, reason: 'No plan provided' };
+    var assets = typeof UB !== 'undefined' && UB.state ? UB.state.assets : [];
+    var total = typeof UB !== 'undefined' ? UB.state.totalUSD : 0;
+    var analysis = typeof UB !== 'undefined' && UB.analyze ? UB.analyze() : {};
+    var walletOk = (typeof walletAddress !== 'undefined' && walletAddress);
+    var preview = { ok: true, plan: plan.type, walletConnected: walletOk, warnings: [], estimates: {} };
+
+    if (!walletOk) {
+      preview.ok = false;
+      preview.warnings.push('Wallet not connected — connect to execute');
+    }
+
+    if (plan.type === 'swap' || plan.type === 'bridge' || plan.type === 'payment') {
+      if (total < 1) preview.warnings.push('Low balance — transaction may fail due to gas');
+      if (plan.type === 'swap' && assets.length < 2) preview.warnings.push('Only 1 asset — swap requires at least 2 token types');
+      if (plan.type === 'bridge' && assets.length === 0) preview.warnings.push('No assets to bridge');
+    }
+
+    preview.estimates = {
+      gasFee: plan.cost ? (plan.cost.estimated.toFixed(2) + ' ' + (plan.cost.token || 'USDC')) : 'N/A',
+      timeEst: '~30 seconds (Arc Testnet)',
+      riskBefore: analysis.risk || 0,
+      riskAfter: Math.max(0, (analysis.risk || 0) + (plan.impact ? plan.impact.riskChange : 0)),
+      healthBefore: analysis.health || 0,
+      healthAfter: Math.min(100, (analysis.health || 0) + (plan.impact ? plan.impact.healthChange : 0))
+    };
+
+    if (plan.type === 'deposit' && total < 1) {
+      preview.warnings.push('Deposit needed before other operations become available');
+    }
+
+    return preview;
+  }
+
+  // ── Smart Rules Engine ───────────────────────────────
+  function evaluateRules() {
+    var rules = [];
+    var analysis = typeof UB !== 'undefined' && UB.analyze ? UB.analyze() : {};
+    var total = typeof UB !== 'undefined' ? UB.state.totalUSD : 0;
+    var assets = typeof UB !== 'undefined' && UB.state ? UB.state.assets : [];
+    var trend = null;
+    try { trend = FinancialMemory.getTrend(); } catch(_) {}
+
+    // Rule 1: Risk threshold
+    if (analysis.risk >= 60) {
+      rules.push({ name: 'High Risk Alert', trigger: 'risk >= 60', value: analysis.risk, status: 'triggered', color: 'var(--red)', action: 'Diversify immediately — review recommendations' });
+    } else {
+      rules.push({ name: 'Risk Threshold', trigger: 'risk < 60', value: analysis.risk, status: 'ok', color: 'var(--green)', action: 'Risk level acceptable' });
+    }
+
+    // Rule 2: Concentration guard
+    var conc = analysis.concentration || {};
+    if (conc.tokenPct >= 80) {
+      rules.push({ name: 'Concentration Guard', trigger: '>80% in single token', value: conc.tokenPct.toFixed(0) + '% in ' + (conc.token || '—'), status: 'triggered', color: 'var(--yellow)', action: 'Swap to diversify' });
+    } else {
+      rules.push({ name: 'Concentration Guard', trigger: '<80% concentration', value: (conc.tokenPct || 0).toFixed(0) + '% max', status: 'ok', color: 'var(--green)', action: 'Concentration within limits' });
+    }
+
+    // Rule 3: Balance floor
+    if (total < 1) {
+      rules.push({ name: 'Balance Floor', trigger: 'total < $1', value: '$' + total.toFixed(2), status: 'triggered', color: 'var(--orange)', action: 'Add funds to enable operations' });
+    } else {
+      rules.push({ name: 'Balance Floor', trigger: 'total >= $1', value: '$' + total.toFixed(2), status: 'ok', color: 'var(--green)', action: 'Sufficient balance' });
+    }
+
+    // Rule 4: Trend direction
+    if (trend && trend.direction === 'down') {
+      rules.push({ name: 'Portfolio Trend', trigger: 'value decreasing', value: trend.label, status: 'triggered', color: 'var(--red)', action: 'Review recent activity and transactions' });
+    } else {
+      rules.push({ name: 'Portfolio Trend', trigger: 'stable or increasing', value: trend ? trend.label : 'N/A', status: 'ok', color: 'var(--green)', action: 'Portfolio trending positively' });
+    }
+
+    return rules;
+  }
+
+  // ── Goals Engine ────────────────────────────────────
+  var GOALS_KEY = 'arcpay_af_goals';
+  var _goals = [];
+  function _loadGoals() { try { _goals = JSON.parse(localStorage.getItem(GOALS_KEY) || '[]'); } catch(_) { _goals = []; } }
+  function _saveGoals() { try { localStorage.setItem(GOALS_KEY, JSON.stringify(_goals)); } catch(_) {} }
+  _loadGoals();
+
+  function addGoal(name, targetUSD, targetDate) {
+    var g = { id: 'g_' + Date.now(), name: name, targetUSD: parseFloat(targetUSD) || 0, targetDate: targetDate || '', currentUSD: 0, progress: 0, created: new Date().toISOString(), status: 'active' };
+    _goals.unshift(g);
+    _saveGoals();
+    logActivity('goal_created', name + ' ($' + g.targetUSD.toFixed(0) + ' target)', 'created');
+    return g;
+  }
+
+  function updateGoalProgress() {
+    var total = typeof UB !== 'undefined' ? UB.state.totalUSD : 0;
+    for (var i = 0; i < _goals.length; i++) {
+      _goals[i].currentUSD = total;
+      _goals[i].progress = _goals[i].targetUSD > 0 ? Math.min(100, (total / _goals[i].targetUSD) * 100) : 0;
+      if (_goals[i].progress >= 100 && _goals[i].status === 'active') {
+        _goals[i].status = 'achieved';
+        logActivity('goal_achieved', _goals[i].name + ' — reached $' + _goals[i].targetUSD.toFixed(0), 'achieved');
+      }
+    }
+    _saveGoals();
+  }
+
+  function getGoals() { return _goals; }
+
+  function removeGoal(id) { _goals = _goals.filter(function(g) { return g.id !== id; }); _saveGoals(); }
+
+  function addGoalPrompt() {
+    var name = prompt('Goal name (e.g. "Save $500 for bridge fees"):');
+    if (!name) return;
+    var target = parseFloat(prompt('Target USD amount:'));
+    if (!target || target <= 0) return;
+    addGoal(name, target, '');
+    updateGoalProgress();
+    ubRenderGoals();
+  }
+
+  window.AF = {
+    Plans: { build: buildPlans, preview: previewAction },
+    Permissions: { requestApproval: requestApproval, isPending: isApprovalPending, getPending: getPendingApproval, approve: approve, reject: reject },
+    Rules: { evaluate: evaluateRules },
+    Goals: { add: addGoal, get: getGoals, remove: removeGoal, updateProgress: updateGoalProgress, addGoalPrompt: addGoalPrompt },
+    Activity: { log: logActivity, getAll: getActivityLog }
+  };
+  return window.AF;
+})();
+
+// ── UB render extensions for Autonomous Finance ────────────
+function ubRenderAutonomous() {
+  var el = document.getElementById('ub-autonomous-actions');
+  if (!el) return;
+  var plans = AF.Plans.build();
+  if (!plans.length) {
+    el.innerHTML = '<div style="text-align:center;color:var(--muted2);font-size:9.5px;padding:20px">No data — connect wallet to generate plans</div>';
+    return;
+  }
+
+  var badgeEl = document.getElementById('af-permission-badge');
+  if (badgeEl) badgeEl.style.display = '';
+
+  var html = '';
+  for (var i = 0; i < plans.length; i++) {
+    var p = plans[i];
+    var stepsHtml = '';
+    for (var s = 0; s < p.steps.length; s++) {
+      stepsHtml += '<div style="display:flex;gap:6px;padding:2px 0;font-size:8.5px"><span style="color:var(--blue);font-weight:700;min-width:16px">' + p.steps[s].step + '.</span><span style="color:var(--text)">' + p.steps[s].label + '</span></div>';
+    }
+
+    html += '<div class="card" style="padding:10px;border:1px solid var(--border);transition:border .15s">' +
+      '<div style="display:flex;align-items:flex-start;gap:10px">' +
+      '<div style="width:30px;height:30px;border-radius:50%;background:' + (p.color === 'var(--blue)' ? 'rgba(79,142,247,.12)' : p.color === 'var(--teal)' ? 'rgba(45,212,191,.12)' : p.color === 'var(--purple)' ? 'rgba(167,139,250,.12)' : p.color === 'var(--green)' ? 'rgba(34,197,94,.12)' : 'rgba(6,247,233,.12)') + ';display:flex;align-items:center;justify-content:center;flex-shrink:0"><i class="ti ti-' + p.icon + '" style="color:' + p.color + ';font-size:13px"></i></div>' +
+      '<div style="flex:1;min-width:0">' +
+      '<div style="display:flex;align-items:center;gap:8px"><div style="font-size:10.5px;font-weight:700">' + p.title + '</div><span class="chip chip-b" style="font-size:7px">' + p.type.toUpperCase() + '</span></div>' +
+      '<div style="font-size:8.5px;color:var(--muted2);margin:3px 0 6px">' + p.desc + '</div>' +
+      '<div style="background:rgba(0,0,0,.15);border-radius:4px;padding:6px 8px;margin-bottom:6px">' + stepsHtml + '</div>' +
+      '<div style="display:flex;gap:12px;font-size:8px;flex-wrap:wrap;margin-bottom:6px">' +
+      '<span style="color:var(--muted2)">Cost: <span style="color:var(--text)">~$' + (p.cost ? p.cost.estimated.toFixed(3) : '0') + ' ' + (p.cost ? p.cost.token : 'USDC') + '</span></span>' +
+      '<span style="color:var(--muted2)">Impact: <span style="color:' + ((p.impact ? p.impact.healthChange : 0) >= 0 ? 'var(--green)' : 'var(--red)') + '">' + ((p.impact ? p.impact.healthChange : 0) >= 0 ? '+' : '') + (p.impact ? p.impact.healthChange : 0) + ' health pts</span></span>' +
+      '<span style="color:var(--muted2)">' + (p.impact ? p.impact.diversion : '') + '</span></div>' +
+      '<div style="display:flex;gap:6px">' +
+      '<button class="btn primary" style="padding:4px 10px;font-size:8.5px" onclick="AF.Permissions.requestApproval(' + JSON.stringify(p).replace(/"/g, '&quot;') + '); ubRenderPermissions();">Review & Approve</button>' +
+      '<button class="btn" style="padding:4px 10px;font-size:8.5px" onclick="' + (p.action || '') + '">' + (p.routeTo || 'Open') + '</button>' +
+      '</div></div></div></div>';
+  }
+  el.innerHTML = html;
+}
+
+function ubRenderPermissions() {
+  if (!AF.Permissions.isPending()) return;
+  var p = AF.Permissions.getPending();
+  var preview = AF.Plans.preview(p);
+  var permHtml = '<div style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.8);z-index:99999;display:flex;align-items:center;justify-content:center" onclick="document.getElementById(\'af-perm-modal\').remove()">' +
+    '<div id="af-perm-modal" style="background:var(--card);border:1px solid var(--border2);border-radius:12px;width:460px;max-width:94vw;max-height:90vh;overflow-y:auto;padding:0" onclick="event.stopPropagation()">' +
+    '<div style="height:60px;background:linear-gradient(135deg,rgba(6,247,233,.15),rgba(167,139,250,.1));display:flex;align-items:center;justify-content:center"><i class="ti ti-shield-check" style="font-size:28px;color:#06F7E9"></i></div>' +
+    '<div style="padding:0 20px 16px"><div style="font-size:13px;font-weight:700;margin:-8px 0 4px">Execution Preview</div>' +
+    '<div style="font-size:9px;color:var(--muted2);margin-bottom:12px">' + (p.title || 'Action') + ' — ' + (p.desc || '') + '</div>' +
+    '<div style="display:flex;flex-direction:column;gap:5px;font-size:9px;margin-bottom:12px">' +
+    '<div style="display:flex;justify-content:space-between"><span style="color:var(--muted2)">Type</span><span class="chip chip-b">' + (p.type || 'action').toUpperCase() + '</span></div>' +
+    '<div style="display:flex;justify-content:space-between"><span style="color:var(--muted2)">Gas Fee</span><span style="color:var(--text)">~' + (preview.estimates ? preview.estimates.gasFee : 'N/A') + '</span></div>' +
+    '<div style="display:flex;justify-content:space-between"><span style="color:var(--muted2)">Risk</span><span style="color:var(--text)">' + (preview.estimates ? preview.estimates.riskBefore : '?') + ' → ' + (preview.estimates ? preview.estimates.riskAfter : '?') + '</span></div>' +
+    '<div style="display:flex;justify-content:space-between"><span style="color:var(--muted2)">Health</span><span style="color:var(--text)">' + (preview.estimates ? preview.estimates.healthBefore : '?') + ' → ' + (preview.estimates ? preview.estimates.healthAfter : '?') + '</span></div>' +
+    '<div style="display:flex;justify-content:space-between"><span style="color:var(--muted2)">Wallet</span><span style="color:' + (preview.walletConnected ? 'var(--green)' : 'var(--yellow)') + '">' + (preview.walletConnected ? 'Connected' : 'Not connected') + '</span></div>' +
+    (preview.warnings && preview.warnings.length ? '<div style="margin-top:4px;padding:6px 8px;background:rgba(245,158,11,.08);border-radius:4px;font-size:8px;color:var(--yellow)">' + preview.warnings.map(function(w){ return '<div><i class="ti ti-alert-triangle" style="font-size:9px"></i> ' + w + '</div>'; }).join('') + '</div>' : '') +
+    '</div>' +
+    '<div style="display:flex;gap:8px">' +
+    '<button class="btn primary" style="flex:1;padding:8px;font-size:10px" onclick="AF.Permissions.approve();' + (p.action || '') + ';document.getElementById(\'af-perm-modal\').parentElement.remove();AF.Activity.log(\'executed\',\'' + (p.title || 'action') + '\',\'approved\');ubRefresh();">Approve & Execute</button>' +
+    '<button class="btn" style="flex:1;padding:8px;font-size:10px;color:var(--red)" onclick="AF.Permissions.reject();document.getElementById(\'af-perm-modal\').parentElement.remove();AF.Activity.log(\'rejected\',\'' + (p.title || 'action') + '\',\'cancelled\');">Cancel</button>' +
+    '</div></div></div></div>';
+  var div = document.createElement('div');
+  div.innerHTML = permHtml;
+  document.body.appendChild(div.firstElementChild);
+}
+
+function ubRenderGoals() {
+  var card = document.getElementById('ub-goals-card');
+  var el = document.getElementById('ub-goals');
+  if (!card || !el) return;
+  AF.Goals.updateProgress();
+  var goals = AF.Goals.get();
+  if (!goals.length) { el.innerHTML = '<div style="text-align:center;color:var(--muted2);font-size:9.5px;padding:12px">No goals set — click "+ New Goal"</div>'; card.style.display = ''; return; }
+  card.style.display = '';
+
+  var html = '';
+  for (var i = 0; i < goals.length; i++) {
+    var g = goals[i];
+    var prog = g.progress || 0;
+    var progColor = prog >= 80 ? 'var(--green)' : prog >= 40 ? 'var(--teal)' : 'var(--blue)';
+    var statusBadge = g.status === 'achieved' ? '<span class="chip chip-g" style="font-size:7px">Achieved</span>' : (prog >= 80 ? '<span class="chip chip-p" style="font-size:7px">Almost</span>' : '<span class="chip chip-b" style="font-size:7px">Active</span>');
+    html += '<div style="display:flex;align-items:center;gap:8px;font-size:9px;padding:4px 0;border-bottom:1px solid var(--border)">' +
+      '<i class="ti ti-target-arrow" style="color:' + progColor + ';font-size:11px;flex-shrink:0"></i>' +
+      '<div style="flex:1;min-width:0">' +
+      '<div style="display:flex;align-items:center;gap:6px"><span style="font-weight:600">' + (g.name || 'Goal') + '</span>' + statusBadge + '<span style="font-size:8px;color:var(--muted2);margin-left:auto">$' + g.currentUSD.toFixed(0) + ' / $' + g.targetUSD.toFixed(0) + '</span></div>' +
+      '<div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden;margin-top:3px"><div style="height:100%;width:' + prog + '%;background:' + progColor + ';border-radius:2px;transition:width .4s"></div></div>' +
+      '</div>' +
+      '<button class="btn" style="padding:2px 6px;font-size:7px;color:var(--red);flex-shrink:0" onclick="AF.Goals.remove(\'' + g.id + '\');ubRenderGoals();"><i class="ti ti-x"></i></button>' +
+      '</div>';
+  }
+  el.innerHTML = html;
+}
+
+// Extend ubRenderAll to include autonomous finance
+var _ubRenderAll_original = ubRenderAll;
+ubRenderAll = function() {
+  _ubRenderAll_original();
+  ubRenderAutonomous();
+  ubRenderGoals();
+  ubRenderAgents();
+};
+
+// ══════════════════════════════════════════════════════════
+//  AGENT ECONOMY LAYER — Specialized financial agents
+//  All data from UB.state / RPC / AF / FinancialMemory
+// ══════════════════════════════════════════════════════════
+const AgentManager = (function() {
+  'use strict';
+  var MEM_KEY = 'arcpay_agent_memory';
+  var _agents = {};
+  var _memory = {};
+
+  function _load() { try { _memory = JSON.parse(localStorage.getItem(MEM_KEY) || '{}'); } catch(_) { _memory = {}; } }
+  function _save() { try { localStorage.setItem(MEM_KEY, JSON.stringify(_memory)); } catch(_) {} }
+  _load();
+
+  // ── Agent memory helpers ───────────────────────────────
+  function mem(agentId, key, value) {
+    if (!_memory[agentId]) _memory[agentId] = { history: [], preferences: {}, decisions: [], lastRun: null };
+    if (value !== undefined) { _memory[agentId][key] = value; _save(); }
+    return _memory[agentId][key];
+  }
+  function addDecision(agentId, decision) {
+    if (!_memory[agentId]) _memory[agentId] = { history: [], preferences: {}, decisions: [], lastRun: null };
+    _memory[agentId].decisions.unshift({ ts: new Date().toISOString(), decision: decision });
+    if (_memory[agentId].decisions.length > 50) _memory[agentId].decisions.length = 50;
+    _save();
+  }
+  function addHistory(agentId, entry) {
+    if (!_memory[agentId]) _memory[agentId] = { history: [], preferences: {}, decisions: [], lastRun: null };
+    _memory[agentId].history.unshift({ ts: new Date().toISOString(), entry: entry });
+    if (_memory[agentId].history.length > 50) _memory[agentId].history.length = 50;
+    _memory[agentId].lastRun = new Date().toISOString();
+    _save();
+  }
+
+  // ── Base agent factory ─────────────────────────────────
+  function _getAnalysis() { return typeof UB !== 'undefined' && UB.analyze ? UB.analyze() : {}; }
+  function _getTotal() { return typeof UB !== 'undefined' ? UB.state.totalUSD : 0; }
+  function _getAssets() { return typeof UB !== 'undefined' && UB.state ? UB.state.assets : []; }
+  function _getTrend() { try { return FinancialMemory.getTrend(); } catch(_) { return {}; } }
+  function _getGoals() { return typeof AF !== 'undefined' && AF.Goals ? AF.Goals.get() : []; }
+  function _getSchedules() { try { if (typeof ScheduleEngine !== 'undefined') return ScheduleEngine.getAll().length; } catch(_) { return 0; } }
+  function _getContacts() { try { return (typeof contacts !== 'undefined' && contacts.length) || 0; } catch(_) { return 0; } }
+  function _getTxCount() { try { if (typeof txHistory !== 'undefined' && Array.isArray(txHistory)) return txHistory.length; } catch(_) { return 0; } }
+
+  // ── Agent definitions ─────────────────────────────────
+  var AGENT_DEFS = {
+    portfolio: {
+      id: 'portfolio', name: 'Portfolio Agent', icon: 'chart-donut-3', color: '#06F7E9',
+      desc: 'Monitors risk, concentration, and financial health of your multi-chain portfolio.',
+      scope: 'risk · concentration · health',
+      analyze: function() {
+        var a = _getAnalysis(); var total = _getTotal(); var trend = _getTrend();
+        var insights = [];
+        if (a.risk >= 60) insights.push({ level: 'warn', msg: 'Risk at ' + a.risk + '/100 — consider diversification' });
+        else if (a.risk >= 30) insights.push({ level: 'ok', msg: 'Moderate risk at ' + a.risk + '/100 — monitor regularly' });
+        else insights.push({ level: 'good', msg: 'Low risk at ' + a.risk + '/100 — portfolio well balanced' });
+
+        var conc = a.concentration || {};
+        if (conc.tokenPct >= 80) insights.push({ level: 'warn', msg: conc.tokenPct.toFixed(0) + '% concentrated in ' + (conc.token || '—') });
+        else insights.push({ level: 'good', msg: 'Concentration at ' + (conc.tokenPct || 0).toFixed(0) + '% — within safe limits' });
+
+        if (trend.direction === 'down') insights.push({ level: 'warn', msg: 'Portfolio trending down ' + trend.label });
+        else if (trend.direction === 'up') insights.push({ level: 'good', msg: 'Portfolio growing ' + trend.label });
+        return insights;
+      },
+      plan: function() {
+        var recs = typeof UB !== 'undefined' && UB.getRecommendations ? UB.getRecommendations() : [];
+        var plans = [];
+        for (var i = 0; i < recs.length && i < 2; i++) {
+          if (recs[i].title.indexOf('Swap') > -1 || recs[i].title.indexOf('Bridge') > -1) {
+            plans.push(recs[i]);
+          }
+        }
+        if (!plans.length && recs[0]) plans.push(recs[0]);
+        return plans;
+      }
+    },
+    payment: {
+      id: 'payment', name: 'Payment Agent', icon: 'send', color: 'var(--blue)',
+      desc: 'Manages payments, invoices, payment links, and recurring schedules.',
+      scope: 'payments · invoices · schedules · links',
+      analyze: function() {
+        var insights = [];
+        var sched = _getSchedules();
+        var contacts = _getContacts();
+        var tx = _getTxCount();
+        if (sched === 0) insights.push({ level: 'warn', msg: 'No active automations — set up recurring payments' });
+        else insights.push({ level: 'good', msg: sched + ' active schedule(s) running' });
+        if (contacts === 0) insights.push({ level: 'warn', msg: 'No contacts saved — add recipients for faster payments' });
+        else insights.push({ level: 'good', msg: contacts + ' saved contact(s) ready for payments' });
+        if (tx > 0) insights.push({ level: 'good', msg: tx + ' transaction(s) in history' });
+        else insights.push({ level: 'ok', msg: 'No transactions yet — start by sending a payment' });
+        return insights;
+      },
+      plan: function() {
+        var plans = [];
+        var sched = _getSchedules();
+        var contacts = _getContacts();
+        if (sched === 0) plans.push({ title: 'Create first automation', desc: 'Set up a recurring payment schedule', icon: 'calendar-plus', color: 'var(--blue)', action: "showPage('schedule')", actionLabel: 'Open Schedule' });
+        if (contacts > 0) plans.push({ title: 'Send payment to contacts', desc: 'Use batch payment for ' + contacts + ' saved contact(s)', icon: 'users', color: 'var(--purple)', action: "showPage('send')", actionLabel: 'Send Payment' });
+        if (!plans.length) plans.push({ title: 'Explore payment options', desc: 'Create payment links, invoices, or batch payments', icon: 'link', color: 'var(--teal)', action: "showPage('links')", actionLabel: 'Payment Links' });
+        return plans;
+      }
+    },
+    treasury: {
+      id: 'treasury', name: 'Treasury Agent', icon: 'vault', color: 'var(--purple)',
+      desc: 'Monitors reserves, goals, and multi-chain asset distribution.',
+      scope: 'reserves · goals · distribution',
+      analyze: function() {
+        var insights = [];
+        var total = _getTotal();
+        var goals = _getGoals();
+        var assets = _getAssets();
+        var byChain = {};
+        for (var i = 0; i < assets.length; i++) { byChain[assets[i].chainId] = (byChain[assets[i].chainId] || 0) + assets[i].usd; }
+        var netCount = Object.keys(byChain).length;
+
+        if (total < 1) insights.push({ level: 'warn', msg: 'Treasury empty — deposit funds to activate' });
+        else insights.push({ level: 'good', msg: 'Treasury: $' + total.toFixed(2) + ' across ' + netCount + ' network(s)' });
+
+        var achievedGoals = goals.filter(function(g) { return g.status === 'achieved'; }).length;
+        var activeGoals = goals.filter(function(g) { return g.status === 'active'; }).length;
+        if (activeGoals > 0) insights.push({ level: 'good', msg: activeGoals + ' active goal(s), ' + achievedGoals + ' achieved' });
+        else insights.push({ level: 'ok', msg: 'No goals set — define savings targets' });
+
+        if (netCount > 1) insights.push({ level: 'good', msg: 'Distributed across ' + netCount + ' networks — resilient' });
+        else insights.push({ level: 'warn', msg: 'All funds on single network — consider bridging' });
+        return insights;
+      },
+      plan: function() {
+        var plans = [];
+        var total = _getTotal();
+        var goals = _getGoals().filter(function(g) { return g.status === 'active'; });
+        if (goals.length > 0) plans.push({ title: 'Track goal progress', desc: goals.length + ' active goal(s) — ' + (goals[0].name || ''), icon: 'target-arrow', color: 'var(--purple)', action: "document.getElementById('ub-goals-card').scrollIntoView({behavior:'smooth'})", actionLabel: 'View Goals' });
+        if (total < 1) plans.push({ title: 'Fund your treasury', desc: 'Deposit USDC to enable all agent operations', icon: 'plus', color: 'var(--green)', action: "showPage('send')", actionLabel: 'Deposit' });
+        if (total >= 10 && total < 100) plans.push({ title: 'Grow to $100', desc: 'Reach $100 to unlock advanced treasury strategies', icon: 'trending-up', color: 'var(--teal)', action: "AF.Goals.addGoalPrompt()", actionLabel: 'Set Goal' });
+        return plans;
+      }
+    },
+    optimization: {
+      id: 'optimization', name: 'Optimization Agent', icon: 'bolt', color: 'var(--yellow)',
+      desc: 'Optimizes costs, network routes, and operational efficiency.',
+      scope: 'costs · networks · efficiency',
+      analyze: function() {
+        var insights = [];
+        var assets = _getAssets();
+        var analysis = _getAnalysis();
+        var byChain = {};
+        for (var i = 0; i < assets.length; i++) { byChain[assets[i].chainId] = (byChain[assets[i].chainId] || 0) + assets[i].usd; }
+
+        if (!assets.length) { insights.push({ level: 'ok', msg: 'No assets to optimize — connect wallet' }); return insights; }
+
+        var netCount = Object.keys(byChain).length;
+        if (netCount === 1 && assets.length >= 3) {
+          insights.push({ level: 'warn', msg: assets.length + ' holdings on 1 network — gas-inefficient. Bridge to reduce costs' });
+        } else {
+          insights.push({ level: 'good', msg: assets.length + ' holdings across ' + netCount + ' network(s)' });
+        }
+
+        // Find dust balances
+        var dust = assets.filter(function(a) { return a.usd < 0.5; });
+        if (dust.length > 0) insights.push({ level: 'warn', msg: dust.length + ' dust holding(s) < $0.50 — consolidate or swap' });
+
+        // Gas optimization tip (Arc Testnet = free/near-free gas)
+        insights.push({ level: 'good', msg: 'Arc Testnet has near-zero gas — operations are efficient' });
+        return insights;
+      },
+      plan: function() {
+        var plans = [];
+        var assets = _getAssets();
+        var byChain = {};
+        for (var i = 0; i < assets.length; i++) { byChain[assets[i].chainId] = (byChain[assets[i].chainId] || 0) + assets[i].usd; }
+        var netCount = Object.keys(byChain).length;
+
+        if (netCount === 1 && assets.length >= 3) {
+          plans.push({ title: 'Optimize network usage', desc: 'All assets on 1 network — bridging improves cost efficiency', icon: 'topology-star-3', color: 'var(--purple)', action: "showPage('bridge')", actionLabel: 'Bridge Now' });
+        }
+        if (assets.length >= 2) {
+          plans.push({ title: 'Consolidate dust balances', desc: 'Merge small holdings to save on future gas costs', icon: 'arrows-exchange', color: 'var(--teal)', action: "showPage('swap')", actionLabel: 'Swap & Merge' });
+        }
+        if (!plans.length) plans.push({ title: 'Monitor gas efficiency', desc: 'Use Arc Testnet for operations — zero gas cost', icon: 'chart-line', color: 'var(--green)', action: "showPage('bridge')", actionLabel: 'Explore Networks' });
+        return plans;
+      }
+    }
+  };
+
+  // ── Agent Manager API ──────────────────────────────────
+  function getAgent(id) { return _agents[id] || null; }
+  function getAllAgents() { return Object.keys(AGENT_DEFS).map(function(k) { return _agents[k] || null; }).filter(Boolean); }
+  function getAgentDefs() { return AGENT_DEFS; }
+
+  function activate(id) {
+    if (!AGENT_DEFS[id]) return null;
+    var def = AGENT_DEFS[id];
+    _agents[id] = { id: def.id, name: def.name, icon: def.icon, color: def.color, desc: def.desc, scope: def.scope, active: true, activatedAt: new Date().toISOString() };
+    if (typeof AF !== 'undefined' && AF.Activity) AF.Activity.log('agent_activated', def.name, 'activated');
+    addHistory(id, 'Agent activated');
+    return _agents[id];
+  }
+
+  function deactivate(id) {
+    if (!_agents[id]) return null;
+    _agents[id].active = false;
+    addHistory(id, 'Agent deactivated');
+    if (typeof AF !== 'undefined' && AF.Activity) AF.Activity.log('agent_deactivated', _agents[id].name, 'deactivated');
+    return _agents[id];
+  }
+
+  function toggle(id) {
+    if (_agents[id] && _agents[id].active) return deactivate(id);
+    return activate(id);
+  }
+
+  function activateAll() {
+    var ids = Object.keys(AGENT_DEFS);
+    for (var i = 0; i < ids.length; i++) { if (!_agents[ids[i]] || !_agents[ids[i]].active) activate(ids[i]); }
+  }
+
+  function runAnalysis(id) {
+    var def = AGENT_DEFS[id];
+    if (!def || !def.analyze) return [];
+    var insights = def.analyze();
+    addHistory(id, 'Analysis ran: ' + insights.length + ' insight(s)');
+    return insights;
+  }
+
+  function buildPlans(id) {
+    var def = AGENT_DEFS[id];
+    if (!def || !def.plan) return [];
+    var plans = def.plan();
+    addDecision(id, plans.length + ' plan(s) generated');
+    return plans;
+  }
+
+  function getHistory(id, n) {
+    if (!_memory[id]) return [];
+    return (_memory[id].history || []).slice(0, n || 20);
+  }
+
+  function getDecisions(id, n) {
+    if (!_memory[id]) return [];
+    return (_memory[id].decisions || []).slice(0, n || 20);
+  }
+
+  function getStatus() {
+    var ids = Object.keys(AGENT_DEFS);
+    var status = { total: ids.length, active: 0, agents: [] };
+    for (var i = 0; i < ids.length; i++) {
+      var a = _agents[ids[i]];
+      var insights = runAnalysis(ids[i]);
+      status.agents.push({
+        id: ids[i], name: AGENT_DEFS[ids[i]].name, icon: AGENT_DEFS[ids[i]].icon, color: AGENT_DEFS[ids[i]].color,
+        active: a ? a.active : false, insights: insights, plans: buildPlans(ids[i])
+      });
+      if (a && a.active) status.active++;
+    }
+    return status;
+  }
+
+  // ── Auto-activate all agents on wallet connect ──────────
+  function autoInit() {
+    if (typeof walletAddress === 'undefined' || !walletAddress) return;
+    var ids = Object.keys(AGENT_DEFS);
+    var anyActive = false;
+    for (var i = 0; i < ids.length; i++) { if (_agents[ids[i]] && _agents[ids[i]].active) anyActive = true; }
+    if (!anyActive) activateAll();
+  }
+
+  return {
+    activate: activate, deactivate: deactivate, toggle: toggle, activateAll: activateAll,
+    getAgent: getAgent, getAll: getAllAgents, getDefs: getAgentDefs, getStatus: getStatus,
+    analyze: runAnalysis, buildPlans: buildPlans,
+    history: getHistory, decisions: getDecisions,
+    mem: mem, addHistory: addHistory, addDecision: addDecision,
+    autoInit: autoInit
+  };
+})();
+
+// ── Agent Dashboard render ─────────────────────────────
+function ubRenderAgents() {
+  var card = document.getElementById('ub-agents-card');
+  var el = document.getElementById('ub-agents');
+  var countEl = document.getElementById('ag-active-count');
+  if (!card || !el) return;
+
+  if (typeof walletAddress === 'undefined' || !walletAddress) {
+    card.style.display = 'none';
+    return;
+  }
+  card.style.display = '';
+
+  // Auto-init if no agents active
+  if (!AgentManager.getAll().length) AgentManager.autoInit();
+
+  var status = AgentManager.getStatus();
+  if (countEl) countEl.textContent = status.active + ' / ' + status.total + ' active';
+
+  var html = '';
+  for (var i = 0; i < status.agents.length; i++) {
+    var a = status.agents[i];
+    var colorRaw = a.color;
+    var bgColor = colorRaw === '#06F7E9' ? 'rgba(6,247,233,.1)' : colorRaw === 'var(--blue)' ? 'rgba(79,142,247,.12)' : colorRaw === 'var(--purple)' ? 'rgba(167,139,250,.12)' : 'rgba(245,158,11,.12)';
+    var activeBg = a.active ? 'rgba(34,197,94,.08)' : 'rgba(239,68,68,.05)';
+    var activeDot = a.active ? 'var(--green)' : 'var(--red)';
+    var activeLabel = a.active ? 'Active' : 'Paused';
+
+    // Insights
+    var insHtml = '';
+    for (var j = 0; j < a.insights.length && j < 3; j++) {
+      var ins = a.insights[j];
+      var insIcon = ins.level === 'good' ? 'circle-check' : ins.level === 'warn' ? 'alert-triangle' : 'circle';
+      var insColor = ins.level === 'good' ? 'var(--green)' : ins.level === 'warn' ? 'var(--yellow)' : 'var(--teal)';
+      insHtml += '<div style="font-size:8px;padding:1px 0;display:flex;align-items:center;gap:3px"><i class="ti ti-' + insIcon + '" style="color:' + insColor + ';font-size:7px;flex-shrink:0"></i><span style="color:var(--muted2)">' + ins.msg + '</span></div>';
+    }
+
+    // Plans
+    var plnHtml = '';
+    for (var k = 0; k < a.plans.length && k < 1; k++) {
+      var p = a.plans[k];
+      plnHtml += '<button class="btn" style="padding:3px 8px;font-size:7.5px;margin-top:4px" onclick="AF.Permissions.requestApproval({title:\'' + (p.title || '').replace(/'/g, '\\\'') + '\',desc:\'' + (p.desc || '').replace(/'/g, '\\\'') + '\',type:\'agent_action\',action:\'' + (p.action || '').replace(/'/g, '\\\'') + '\'});ubRenderPermissions();AgentManager.addHistory(\'' + a.id + '\',\'Plan executed: ' + (p.title || '').replace(/'/g, '\\\'') + '\');">' + (p.actionLabel || 'Execute') + '</button>';
+    }
+
+    html += '<div class="card" style="padding:10px;border:1px solid var(--border);transition:border .15s;background:' + activeBg + '" onmouseenter="this.style.borderColor=\'' + a.color + '\'" onmouseleave="this.style.borderColor=\'var(--border)\'">' +
+      '<div style="display:flex;align-items:flex-start;gap:8px">' +
+      '<div style="width:32px;height:32px;border-radius:50%;background:' + bgColor + ';display:flex;align-items:center;justify-content:center;flex-shrink:0;position:relative"><i class="ti ti-' + a.icon + '" style="color:' + a.color + ';font-size:14px"></i><div style="position:absolute;bottom:-1px;right:-1px;width:9px;height:9px;border-radius:50%;background:' + activeDot + ';border:2px solid var(--card)"></div></div>' +
+      '<div style="flex:1;min-width:0">' +
+      '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><div style="font-size:11px;font-weight:600">' + a.name + '</div><span style="font-size:7px;padding:1px 5px;border-radius:3px;color:' + activeDot + ';background:' + (a.active ? 'rgba(34,197,94,.1)' : 'rgba(239,68,68,.1)') + '">' + activeLabel + '</span></div>' +
+      '<div style="font-size:8px;color:var(--muted2);margin-bottom:6px">' + AGENT_DEFS_MAP[a.id].scope + '</div>' +
+      insHtml +
+      plnHtml +
+      '</div>' +
+      '<button class="btn" style="padding:3px 8px;font-size:7px;flex-shrink:0;color:' + (a.active ? 'var(--red)' : 'var(--green)') + '" onclick="AgentManager.toggle(\'' + a.id + '\');ubRenderAgents();">' + (a.active ? 'Pause' : 'Activate') + '</button>' +
+      '</div></div>';
+  }
+  el.innerHTML = html;
+}
+
+// Agent defs reference map for the dashboard
+var AGENT_DEFS_MAP = {};
+(function() {
+  var defs = AgentManager.getDefs();
+  for (var dk in defs) { AGENT_DEFS_MAP[defs[dk].id] = { scope: defs[dk].scope }; }
+})();
+
+// ══════════════════════════════════════════════════════════
+//  AOS — AUTONOMOUS OPERATING SYSTEM
+//  Multi-agent orchestration: Detect→Analyze→Strategy→Execute
+// ══════════════════════════════════════════════════════════
+const AOS = (function() {
+  'use strict';
+
+  // ── State ────────────────────────────────────────────
+  var _strategies = [], _bus = {}, _events = [], _rules = [];
+  var MEM_KEY = 'arcpay_cfn_memory';
+  var _memory = { decisions: [], simulations: [], predictions: [], preferences: {} };
+  function _loadMem() { try { _memory = JSON.parse(localStorage.getItem(MEM_KEY) || JSON.stringify(_memory)); } catch(_) {} }
+  function _saveMem() { try { localStorage.setItem(MEM_KEY, JSON.stringify(_memory)); } catch(_) {} }
+  _loadMem();
+  function publish(channel, data) {
+    _bus[channel] = { ts: new Date().toISOString(), data: data };
+    if (typeof AF !== 'undefined' && AF.Activity) AF.Activity.log('aos_bus', channel, 'published');
+  }
+  function read(channel) { return _bus[channel] || null; }
+  function listChannels() { return Object.keys(_bus); }
+
+  // ── Data collectors ──────────────────────────────────
+  function _data() {
+    return {
+      total: (typeof UB !== 'undefined' ? UB.state.totalUSD : 0),
+      assets: (typeof UB !== 'undefined' && UB.state ? UB.state.assets : []),
+      analysis: (typeof UB !== 'undefined' && UB.analyze ? UB.analyze() : {}),
+      trend: (function(){ try { return FinancialMemory.getTrend(); } catch(_) { return {}; } })(),
+      goals: (typeof AF !== 'undefined' && AF.Goals ? AF.Goals.get() : []),
+      schedules: (function(){ try { if (typeof ScheduleEngine !== 'undefined') return ScheduleEngine.getAll().length; } catch(_) { return 0; } })(),
+      contacts: (function(){ try { return (typeof contacts !== 'undefined' && contacts.length) || 0; } catch(_) { return 0; } })(),
+      txs: (function(){ try { if (typeof txHistory !== 'undefined' && Array.isArray(txHistory)) return txHistory.length; } catch(_) { return 0; } })(),
+      wallet: (typeof walletAddress !== 'undefined' && walletAddress) ? true : false
+    };
+  }
+
+  // ── Priority Engine ──────────────────────────────────
+  function classifyPriority(item) {
+    var score = 0;
+    if (item.riskImpact >= 60) score += 40;
+    else if (item.riskImpact >= 30) score += 20;
+    if (item.urgency === 'immediate') score += 30;
+    else if (item.urgency === 'soon') score += 15;
+    if (item.financialImpact >= 50) score += 20;
+    else if (item.financialImpact >= 10) score += 10;
+    if (item.blockedCount >= 2) score += 10;
+    if (score >= 60) return 'critical';
+    if (score >= 35) return 'high';
+    if (score >= 15) return 'medium';
+    return 'low';
+  }
+
+  function priorityColor(p) {
+    return p === 'critical' ? 'var(--red)' : p === 'high' ? 'var(--yellow)' : p === 'medium' ? 'var(--blue)' : 'var(--teal)';
+  }
+
+  function priorityBadge(p) {
+    return '<span style="display:inline-block;padding:1px 5px;border-radius:3px;font-size:7px;font-weight:600;color:' +
+      (p === 'critical' ? 'var(--red)' : p === 'high' ? 'var(--yellow)' : p === 'medium' ? 'var(--blue)' : 'var(--teal)') +
+      ';background:' + (p === 'critical' ? 'rgba(239,68,68,.12)' : p === 'high' ? 'rgba(245,158,11,.12)' : p === 'medium' ? 'rgba(79,142,247,.12)' : 'rgba(45,212,191,.08)') + '">' +
+      p.toUpperCase() + '</span>';
+  }
+
+  // ── Strategy Engine — combine agent insights into multi-step strategies ──
+  function buildStrategies() {
+    var d = _data();
+    if (!d.wallet || !d.assets.length) return [];
+    var strategies = [];
+
+    // Run all agent analyses
+    var agentInsights = {};
+    var agentIds = ['portfolio', 'payment', 'treasury', 'optimization'];
+    for (var i = 0; i < agentIds.length; i++) {
+      try { agentInsights[agentIds[i]] = AgentManager.analyze(agentIds[i]) || []; } catch(_) { agentInsights[agentIds[i]] = []; }
+    }
+    publish('agent_insights', agentInsights);
+
+    // Flatten all insights with severity
+    var allWarnings = [];
+    for (var ai in agentInsights) {
+      for (var j = 0; j < agentInsights[ai].length; j++) {
+        var ins = agentInsights[ai][j];
+        if (ins.level === 'warn') allWarnings.push({ agent: ai, msg: ins.msg, severity: 'warn' });
+      }
+    }
+
+    // Strategy 1: All Clear
+    if (allWarnings.length === 0) {
+      strategies.push({
+        id: 'cfn_' + Date.now() + '_0', title: 'Portfolio Healthy', type: 'status',
+        desc: 'All agents report normal. No critical risks detected.',
+        icon: 'circle-check', iconColor: 'var(--green)',
+        steps: [{ label: 'Continue monitoring — agents watch 24/7', detail: 'Next auto-scan on page refresh' }],
+        riskImpact: 0, urgency: 'normal', financialImpact: 0,
+        priority: 'low', agentCount: 4,
+        confidence: { level: 'high', pct: 100, agents: 4 }
+      });
+      return strategies;
+    }
+
+    // Strategy 2: Risk Mitigation (if Portfolio Agent warns)
+    var pfWarnings = allWarnings.filter(function(w) { return w.agent === 'portfolio' || w.agent === 'optimization'; });
+    if (pfWarnings.length >= 2) {
+      var riskScore = d.analysis.risk || 0;
+      var conc = d.analysis.concentration || {};
+      var s1 = {
+        id: 'cfn_' + Date.now() + '_1', title: 'Risk Mitigation Strategy', type: 'strategy',
+        desc: pfWarnings.length + ' risk-related alerts. Risk: ' + riskScore + '/100. Concentration: ' + (conc.tokenPct || 0).toFixed(0) + '% in ' + (conc.token || '—'),
+        icon: 'shield-alert', iconColor: 'var(--yellow)',
+        steps: [
+          { label: 'Step 1: Review concentration', detail: (conc.tokenPct >= 80 ? 'Critical: ' + conc.tokenPct.toFixed(0) + '%' : 'Moderate — monitor') },
+          { label: 'Step 2: Diversify via swap or bridge', detail: 'Portfolio + Optimization agents aligned' },
+          { label: 'Step 3: Confirm in Permission modal', detail: 'AF.Permissions guards all execution' }
+        ],
+        riskImpact: riskScore, urgency: riskScore >= 60 ? 'immediate' : 'soon',
+        financialImpact: conc.tokenPct || 0, agentCount: 2,
+        cost: { estimated: 0.02, token: 'USDC', note: 'Swap/bridge gas' },
+        impact: { riskChange: -15, healthChange: 10, diversion: 'Reduces single-asset concentration risk' }
+      };
+      s1.priority = classifyPriority(s1);
+      s1.confidence = consensus(s1);
+      strategies.push(s1);
+    }
+
+    // Strategy 3: Operations Gap (if Payment Agent warns)
+    var payWarnings = allWarnings.filter(function(w) { return w.agent === 'payment'; });
+    if (payWarnings.length > 0) {
+      var s2 = {
+        id: 'cfn_' + Date.now() + '_2', title: 'Operations Optimization', type: 'strategy',
+        desc: 'Payment Agent detected gaps: ' + payWarnings.length + ' warning(s). ' + payWarnings.map(function(w){return w.msg;}).join('. '),
+        icon: 'calendar-plus', iconColor: 'var(--blue)',
+        steps: [{ label: 'Set up automations', detail: d.schedules === 0 ? 'Create first schedule' : d.schedules + ' active' }, { label: 'Add contacts', detail: d.contacts + ' contact(s)' }, { label: 'Execute via Schedule/Send', detail: 'Open page to complete' }],
+        riskImpact: 10, urgency: 'soon', financialImpact: d.total, agentCount: 1,
+        cost: { estimated: 0, token: 'USDC', note: 'Free to create schedule' },
+        impact: { riskChange: 0, healthChange: 5, diversion: 'Automates recurring operations' }
+      };
+      s2.priority = classifyPriority(s2);
+      s2.confidence = consensus(s2);
+      strategies.push(s2);
+    }
+
+    // Strategy 4: Treasury Health
+    var treWarnings = allWarnings.filter(function(w) { return w.agent === 'treasury'; });
+    if (treWarnings.length > 0 && d.total < 100) {
+      var s3 = {
+        id: 'cfn_' + Date.now() + '_3', title: 'Treasury Growth Plan', type: 'strategy',
+        desc: 'Treasury at $' + d.total.toFixed(2) + ' — below $100 threshold for full capability.',
+        icon: 'target-arrow', iconColor: 'var(--purple)',
+        steps: [{ label: 'Set savings goal', detail: 'Target $100' }, { label: 'Deposit USDC', detail: 'Add funds via Send' }, { label: 'Track progress', detail: 'Treasury Agent + Goals monitor' }],
+        riskImpact: 5, urgency: 'normal', financialImpact: 100 - d.total, agentCount: 1,
+        cost: { estimated: 0.01, token: 'USDC', note: 'Gas for deposit' },
+        impact: { riskChange: -5, healthChange: 8, diversion: 'Growth unlocks all agent capabilities' }
+      };
+      s3.priority = classifyPriority(s3);
+      s3.confidence = consensus(s3);
+      strategies.push(s3);
+    }
+
+    if (!strategies.length) {
+      strategies.push({
+        id: 'aos_' + Date.now() + '_dflt', title: 'System Nominal', type: 'status',
+        desc: 'Cross-agent scan complete. No actionable strategies generated.',
+        icon: 'circle-check', iconColor: 'var(--teal)',
+        steps: [{ label: 'Monitor active', detail: 'Agents continue scanning portfolio health' }],
+        riskImpact: 0, urgency: 'normal', financialImpact: 0,
+        priority: 'low', agentCount: 4
+      });
+    }
+
+    // Sort by priority
+    var order = { critical: 0, high: 1, medium: 2, low: 3 };
+    strategies.sort(function(a, b) { return (order[a.priority] || 99) - (order[b.priority] || 99); });
+
+    _strategies = strategies;
+    publish('strategies', strategies);
+    return strategies;
+  }
+
+  function getStrategies() { return _strategies; }
+
+  // ── Monitoring Engine ────────────────────────────────
+  function monitor() {
+    var d = _data();
+    var alerts = [];
+    var status = 'healthy';
+
+    // Balance monitoring
+    if (!d.wallet) alerts.push({ type: 'connection', priority: 'critical', msg: 'Wallet disconnected' });
+    if (d.total <= 0 && d.wallet) alerts.push({ type: 'balance', priority: 'high', msg: 'Zero balance — deposit to activate' });
+    if (d.total < 5 && d.total > 0) alerts.push({ type: 'balance', priority: 'medium', msg: 'Low balance: $' + d.total.toFixed(2) });
+
+    // Risk monitoring
+    var risk = d.analysis.risk || 0;
+    if (risk >= 60) { alerts.push({ type: 'risk', priority: 'critical', msg: 'High risk: ' + risk + '/100' }); status = 'critical'; }
+    else if (risk >= 30) { alerts.push({ type: 'risk', priority: 'high', msg: 'Moderate risk: ' + risk + '/100' }); if (status === 'healthy') status = 'warning'; }
+
+    // Trend monitoring
+    if (d.trend.direction === 'down') { alerts.push({ type: 'trend', priority: 'high', msg: 'Portfolio declining: ' + d.trend.label }); if (status === 'healthy') status = 'warning'; }
+
+    // Schedule monitoring
+    if (d.wallet && d.total > 0 && d.schedules === 0) alerts.push({ type: 'automation', priority: 'medium', msg: 'No scheduled automations' });
+
+    publish('monitor', { alerts: alerts, status: status, ts: new Date().toISOString() });
+    return { alerts: alerts, status: status, total: d.total, risk: risk, trend: d.trend };
+  }
+
+  // ── Execute a strategy (via AF.Permissions) ────────
+  function executeStrategy(strategyId) {
+    var strats = _strategies.length ? _strategies : buildStrategies();
+    var strat = null;
+    for (var i = 0; i < strats.length; i++) { if (strats[i].id === strategyId) { strat = strats[i]; break; } }
+    if (!strat) return null;
+
+    var action = (strat.title.indexOf('Risk') > -1 ? "showPage('swap')" : strat.title.indexOf('Operation') > -1 ? "showPage('schedule')" : strat.title.indexOf('Treasury') > -1 ? "showPage('send')" : "showPage('unified-balance')");
+
+    var sim = simulate(strat);
+    var execPlan = {
+      title: strat.title, desc: strat.desc, type: 'cfn_strategy', steps: strat.steps, action: action,
+      cost: strat.cost || { estimated: 0.01, token: 'USDC', note: 'Estimated gas' },
+      impact: strat.impact || {}, simulation: sim, confidence: strat.confidence || {}
+    };
+
+    if (typeof AF !== 'undefined' && AF.Permissions) {
+      AF.Permissions.requestApproval(execPlan);
+      if (typeof AF !== 'undefined' && AF.Activity) AF.Activity.log('cfn_strategy', strat.title + ' (conf: ' + ((strat.confidence || {}).pct || '?') + '%)', 'queued');
+    }
+    memLog('strategy', strat.title);
+    emitEvent('strategy_executed', { title: strat.title, confidence: (strat.confidence || {}).pct || 0 });
+    return execPlan;
+  }
+
+  // ── Full scan (called on page load) ───────────────
+  function fullScan() {
+    if (typeof walletAddress === 'undefined' || !walletAddress) return null;
+    var m = monitor();
+    var s = buildStrategies();
+    var p = predict();
+    var r = evaluateRules();
+    publish('full_scan_complete', { monitor: m, strategies: s.length });
+    return { monitor: m, strategies: s, prediction: p, rules: r };
+  }
+
+  // ═══════════════════════════════════════════════
+  //  MEMORY ENGINE
+  function memStore(key, val) { _memory[key] = val; _saveMem(); return val; }
+  function memGet(key) { return _memory[key] || null; }
+  function memLog(type, detail) { _memory.decisions.unshift({ ts: Date.now(), type: type, detail: detail }); if (_memory.decisions.length > 100) _memory.decisions.length = 100; _saveMem(); }
+
+  // ═══════════════════════════════════════════════
+  //  EVENT ENGINE
+  function emitEvent(type, data) { var ev = { ts: Date.now(), type: type, data: data }; _events.unshift(ev); if (_events.length > 200) _events.length = 200; _bus[type] = { ts: new Date().toISOString(), data: data }; }
+  function getEvents(n) { return _events.slice(0, n || 20); }
+
+  // ═══════════════════════════════════════════════
+  //  SCENARIO SIMULATOR
+  function simulate(strategy) {
+    var d = _data(), a = d.analysis;
+    var sim = { strategy: (strategy.title || 'Unknown'), before: { total: d.total, risk: a.risk || 0, health: a.health || 0 }, after: { total: d.total, risk: a.risk || 0, health: a.health || 0 }, warnings: [], viable: true };
+    var imp = strategy.impact || {};
+    sim.after.risk = Math.max(0, sim.before.risk + (imp.riskChange || 0));
+    sim.after.health = Math.min(100, sim.before.health + (imp.healthChange || 0));
+    if (!d.wallet) { sim.viable = false; sim.warnings.push('Wallet disconnected'); }
+    if (sim.before.total < 0.5) { sim.viable = false; sim.warnings.push('Insufficient balance'); }
+    memStore('last_simulation', { ts: Date.now(), result: sim });
+    _memory.simulations.unshift({ ts: Date.now(), summary: sim.strategy + ' viable:' + sim.viable });
+    if (_memory.simulations.length > 50) _memory.simulations.length = 50; _saveMem();
+    return sim;
+  }
+
+  // ═══════════════════════════════════════════════
+  //  PREDICTIVE INTELLIGENCE
+  function predict() {
+    var d = _data(), pred = { horizon: '7-day', confidence: 0, projections: [], factors: [] };
+    if (!d.wallet || !d.assets.length) { pred.factors.push('Insufficient data'); return pred; }
+    if (d.trend.direction === 'up') { pred.projections.push({ label: 'Growth', value: 'Positive trend' }); pred.confidence += 25; }
+    else if (d.trend.direction === 'down') { pred.projections.push({ label: 'Decline', value: 'Review positions' }); pred.confidence += 10; }
+    else { pred.projections.push({ label: 'Stable', value: 'No change expected' }); pred.confidence += 15; }
+    var risk = d.analysis.risk || 0;
+    if (risk <= 20) { pred.projections.push({ label: 'Risk', value: 'Low — stable' }); pred.confidence += 25; }
+    else if (risk <= 50) { pred.projections.push({ label: 'Risk', value: 'Moderate — monitor' }); pred.confidence += 20; }
+    else { pred.projections.push({ label: 'Risk', value: 'High — act within 48h' }); pred.confidence += 10; }
+    if (d.txs > 0) pred.confidence += 10;
+    if (d.schedules > 0) pred.confidence += 10;
+    _memory.predictions.unshift({ ts: Date.now(), confidence: pred.confidence });
+    if (_memory.predictions.length > 20) _memory.predictions.length = 20; _saveMem();
+    return pred;
+  }
+
+  // ═══════════════════════════════════════════════
+  //  AUTOMATION CENTER — IF→THEN rules
+  function evaluateRules() {
+    var d = _data(), rules = [];
+    rules.push({ id: 'r1', condition: 'Balance < $1', met: d.total < 1, priority: 'critical', title: 'Low Balance', suggestion: 'Deposit to enable ops', action: "showPage('send')", actionLabel: 'Deposit' });
+    rules.push({ id: 'r2', condition: 'Risk ≥ 60', met: (d.analysis.risk || 0) >= 60, priority: 'high', title: 'High Risk', suggestion: 'Swap/bridge to diversify', action: "showPage('swap')", actionLabel: 'Diversify' });
+    rules.push({ id: 'r3', condition: 'No schedules + $10+', met: d.schedules === 0 && d.total >= 10, priority: 'medium', title: 'Automation Gap', suggestion: 'Set up recurring schedule', action: "showPage('schedule')", actionLabel: 'Schedule' });
+    var nearGoal = d.goals.filter(function(g) { return g.progress >= 80 && g.status === 'active'; });
+    rules.push({ id: 'r4', condition: 'Goal ≥ 80%', met: nearGoal.length > 0, priority: 'medium', title: nearGoal.length + ' goal(s) near', suggestion: 'Keep going!', action: "document.getElementById('ub-goals-card').scrollIntoView({behavior:'smooth'})", actionLabel: 'View' });
+    rules.push({ id: 'r5', condition: 'Trend declining', met: d.trend.direction === 'down', priority: 'high', title: 'Portfolio Down', suggestion: 'Review activity', action: "showPage('reports')", actionLabel: 'Review' });
+    _rules = rules; return rules;
+  }
+  function getTriggeredRules() { return _rules.filter(function(r) { return r.met; }); }
+
+  // ═══════════════════════════════════════════════
+  //  MULTI-AGENT CONSENSUS
+  function consensus(strategy) {
+    var ids = ['portfolio', 'payment', 'treasury', 'optimization'];
+    var v = { approve: 0, neutral: 0, reject: 0, details: [], total: ids.length };
+    for (var i = 0; i < ids.length; i++) {
+      var vote = 'neutral', reason = ids[i] + ': no opinion';
+      if (ids[i] === 'portfolio' && (strategy.riskImpact || 0) >= 30) { vote = 'approve'; reason = 'portfolio: risk mitigation needed'; }
+      else if (ids[i] === 'payment' && (strategy.title || '').indexOf('Operation') > -1) { vote = 'approve'; reason = 'payment: gap detected'; }
+      else if (ids[i] === 'treasury' && (strategy.title || '').indexOf('Treasury') > -1) { vote = 'approve'; reason = 'treasury: plan aligned'; }
+      else if (ids[i] === 'optimization' && strategy.steps && strategy.steps.length >= 2) { vote = 'approve'; reason = 'optimization: efficient plan'; }
+      v[vote]++; v.details.push({ agent: ids[i], vote: vote, reason: reason });
+    }
+    var pct = parseInt(((v.approve / v.total) * 100).toFixed(0));
+    return { approve: v.approve, neutral: v.neutral, reject: v.reject, total: v.total, confidence: pct >= 75 ? 'high' : pct >= 50 ? 'medium' : 'low', pct: pct, details: v.details };
+  }
+
+  return {
+    buildStrategies: buildStrategies, getStrategies: getStrategies, monitor: monitor, executeStrategy: executeStrategy,
+    fullScan: fullScan, bus: { publish: publish, read: read, list: listChannels },
+    simulate: simulate, predict: predict, evaluateRules: evaluateRules, getTriggeredRules: getTriggeredRules,
+    consensus: consensus, emit: emitEvent, events: getEvents,
+    classifyPriority: classifyPriority, priorityColor: priorityColor, priorityBadge: priorityBadge,
+    memory: { store: memStore, get: memGet, log: memLog }
+  };
+})();
+
+// ── AI COMMAND CENTER + AUTOMATION RENDER ─────────────
+function ubRenderAOS() {
+  var card = document.getElementById('ub-aos-card');
+  var body = document.getElementById('ub-aos-body');
+  var badgeEl = document.getElementById('aos-status-badge');
+  if (!card || !body) return;
+  if (typeof walletAddress === 'undefined' || !walletAddress) { card.style.display = 'none'; return; }
+  card.style.display = '';
+
+  var scan = AOS.fullScan();
+  if (!scan) { body.innerHTML = '<div style="text-align:center;color:var(--muted2);font-size:9.5px;padding:16px">No data — connect wallet</div>'; return; }
+
+  var mon = scan.monitor || {};
+  var pred = scan.prediction || {};
+  var stColor = mon.status === 'critical' ? 'var(--red)' : mon.status === 'warning' ? 'var(--yellow)' : 'var(--green)';
+  var stLabel = mon.status === 'critical' ? 'Critical' : mon.status === 'warning' ? 'Warning' : 'Healthy';
+  if (badgeEl) { badgeEl.textContent = stLabel; badgeEl.style.background = mon.status === 'critical' ? 'rgba(239,68,68,.12)' : mon.status === 'warning' ? 'rgba(245,158,11,.12)' : 'rgba(34,197,94,.1)'; badgeEl.style.color = stColor; }
+
+  var html = '';
+  html += '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:6px;font-size:8px;color:var(--muted2)">';
+  html += '<span><i class="ti ti-shield" style="color:' + stColor + ';font-size:9px"></i> ' + stLabel + '</span><span>Risk: ' + (mon.risk || 0) + '/100</span><span>Predict: ' + (pred.confidence || 0) + '% conf</span>';
+  html += '<span><i class="ti ti-brain" style="color:#06F7E9;font-size:9px"></i> ' + (scan.strategies ? scan.strategies.length : 0) + ' strat</span></div>';
+
+  var alerts = mon.alerts || [];
+  if (alerts.length > 0) {
+    html += '<div style="padding:6px 8px;background:rgba(0,0,0,.1);border-radius:4px;margin-bottom:6px">';
+    for (var a = 0; a < alerts.length && a < 4; a++) {
+      html += '<div style="display:flex;align-items:center;gap:5px;font-size:8px;padding:1px 0"><i class="ti ti-' + (alerts[a].priority === 'critical' ? 'alert-triangle' : 'info-circle') + '" style="color:' + AOS.priorityColor(alerts[a].priority) + ';font-size:8px"></i><span style="color:var(--muted2)">' + alerts[a].msg + '</span>' + AOS.priorityBadge(alerts[a].priority) + '</div>';
+    }
+    html += '</div>';
+  }
+
+  var strats = scan.strategies || [];
+  html += '<div style="font-size:8px;color:var(--muted2);margin-bottom:3px">Strategies (' + strats.length + ')</div>';
+  for (var s = 0; s < strats.length && s < 2; s++) {
+    var st = strats[s];
+    var conf = st.confidence || {};
+    var confColor = conf.level === 'high' ? 'var(--green)' : conf.level === 'medium' ? 'var(--teal)' : 'var(--yellow)';
+    var stepsHtml = '';
+    for (var sti = 0; sti < st.steps.length; sti++) { stepsHtml += '<div style="font-size:8px;padding:1px 0;display:flex;gap:4px"><span style="color:' + AOS.priorityColor(st.priority) + ';font-weight:600;min-width:12px">' + (sti + 1) + '.</span><span style="color:var(--text)">' + st.steps[sti].label + '</span></div>'; }
+    html += '<div class="card" style="padding:8px;border:1px solid var(--border)" onmouseenter="this.style.borderColor=\'' + AOS.priorityColor(st.priority) + '\'" onmouseleave="this.style.borderColor=\'var(--border)\'">';
+    html += '<div style="display:flex;align-items:flex-start;gap:8px"><div style="width:26px;height:26px;border-radius:50%;background:' + (st.priority === 'critical' ? 'rgba(239,68,68,.12)' : 'rgba(79,142,247,.1)') + ';display:flex;align-items:center;justify-content:center;flex-shrink:0"><i class="ti ti-' + st.icon + '" style="color:' + st.iconColor + ';font-size:11px"></i></div>';
+    html += '<div style="flex:1;min-width:0"><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:3px"><div style="font-size:10px;font-weight:600">' + st.title + '</div>' + AOS.priorityBadge(st.priority) + '<span style="font-size:7px;color:' + confColor + ';display:flex;align-items:center;gap:2px"><i class="ti ti-' + (conf.level === 'high' ? 'checks' : 'check') + '" style="font-size:7px"></i>' + (conf.pct || '?') + '%</span></div>';
+    html += '<div style="font-size:8.5px;color:var(--muted2);margin-bottom:4px">' + st.desc + '</div><div style="background:rgba(0,0,0,.12);border-radius:4px;padding:5px 8px;margin-bottom:4px">' + stepsHtml + '</div>';
+    html += '<div style="display:flex;gap:4px"><button class="btn primary" style="padding:3px 10px;font-size:8px" onclick="AOS.executeStrategy(\'' + st.id + '\');setTimeout(function(){if(typeof ubRenderPermissions===\'function\')ubRenderPermissions();},100);">Execute</button></div></div></div></div>';
+  }
+  body.innerHTML = html;
+}
+
+function ubRenderAutomation() {
+  var card = document.getElementById('ub-automation-card');
+  var body = document.getElementById('ub-automation-body');
+  var countEl = document.getElementById('ar-rule-count');
+  if (!card || !body) return;
+  if (typeof walletAddress === 'undefined' || !walletAddress) { card.style.display = 'none'; return; }
+  card.style.display = '';
+  var rules = AOS.evaluateRules();
+  if (countEl) countEl.textContent = rules.length + ' rules';
+  var html = '';
+  var triggered = rules.filter(function(r) { return r.met; });
+  if (triggered.length === 0) html += '<div style="font-size:8px;color:var(--green);padding:4px 0"><i class="ti ti-circle-check" style="margin-right:4px"></i>All ' + rules.length + ' rules normal — no triggers</div>';
+  for (var i = 0; i < rules.length; i++) {
+    var r = rules[i];
+    html += '<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:8.5px;border-bottom:1px solid var(--border);opacity:' + (r.met ? '1' : '.55') + '">';
+    html += '<i class="ti ti-' + (r.met ? 'bell-ringing' : 'bell') + '" style="color:' + (r.met ? 'var(--yellow)' : 'var(--muted2)') + ';font-size:9px;flex-shrink:0"></i>';
+    html += '<span style="flex:1"><span style="font-weight:600">' + r.title + '</span> <span style="color:var(--muted2)">IF ' + r.condition + '</span></span>';
+    html += AOS.priorityBadge(r.priority);
+    if (r.met) html += '<button class="btn primary" style="padding:2px 7px;font-size:7px" onclick="' + (r.action || '') + '">' + (r.actionLabel || 'Go') + '</button>';
+    html += '</div>';
+  }
+  body.innerHTML = html;
+}
+
+var _ubRenderAll_aos = ubRenderAll;
+ubRenderAll = function() {
+  _ubRenderAll_aos();
+  if (typeof ubRenderAOS === 'function') ubRenderAOS();
+  if (typeof ubRenderAutomation === 'function') ubRenderAutomation();
+  if (typeof ubRenderSystem === 'function') ubRenderSystem();
+};
+
+// ══════════════════════════════════════════════════════════
+//  RELIABILITY + SELF-HEALING LAYER (Fase 7)
+//  Module isolation · Health monitor · Recovery · Audit
+// ══════════════════════════════════════════════════════════
+const ReliabilityLayer = (function() {
+  'use strict';
+  var RL_KEY = 'arcpay_reliability';
+  var _state = {
+    modules: {},
+    errors: [],
+    events: [],
+    performance: {},
+    snapshots: [],
+    uptime: Date.now()
+  };
+
+  function _load() { try { _state = JSON.parse(localStorage.getItem(RL_KEY) || JSON.stringify(_state)); _state.uptime = Date.now(); } catch(_) {} }
+  function _save() { try { localStorage.setItem(RL_KEY, JSON.stringify(_state)); } catch(_) {} }
+  _load();
+
+  // ═══════════════════════════════════════════════════
+  //  MODULE ISOLATION — wrap any function with error guard
+  // ═══════════════════════════════════════════════════
+  function isolate(moduleName, fn, fallback) {
+    return function() {
+      var t0 = performance.now();
+      try {
+        var result = fn.apply(this, arguments);
+        var elapsed = performance.now() - t0;
+        _recordModule(moduleName, 'ok', elapsed);
+        return result;
+      } catch(e) {
+        var elapsed = performance.now() - t0;
+        _recordModule(moduleName, 'error', elapsed);
+        _logError(moduleName, e.message || String(e), 'isolate');
+        _recover(moduleName, e);
+        return typeof fallback === 'function' ? fallback() : fallback;
+      }
+    };
+  }
+
+  function _recordModule(name, status, elapsedMs) {
+    if (!_state.modules[name]) _state.modules[name] = { status: 'unknown', errors: 0, calls: 0, totalMs: 0, lastCheck: null };
+    _state.modules[name].calls++;
+    _state.modules[name].totalMs += elapsedMs;
+    _state.modules[name].lastCheck = new Date().toISOString();
+    if (status === 'error') _state.modules[name].errors++;
+    _state.modules[name].status = _state.modules[name].errors > 3 ? 'degraded' : status;
+    if (_state.modules[name].calls % 10 === 0) _save();
+  }
+
+  // ═══════════════════════════════════════════════════
+  //  SYSTEM HEALTH MONITOR
+  // ═══════════════════════════════════════════════════
+  function healthCheck() {
+    var checks = [];
+    var ok = 0, warn = 0, err = 0;
+
+    // Wallet
+    var w = (typeof walletAddress !== 'undefined' && walletAddress);
+    checks.push({ module: 'Wallet', status: w ? 'ok' : 'warn', detail: w ? ('Connected: ' + (typeof walletAddress === 'string' ? walletAddress.slice(0,6)+'...' : 'yes')) : 'Not connected' });
+    if (w) ok++; else warn++;
+
+    // RPC
+    var rpc = 'unknown';
+    try { if (typeof getActiveChain === 'function') { var c = getActiveChain(); rpc = c ? (c.rpc || c.name) : 'unknown'; } } catch(_) {}
+    var rpcOk = rpc !== 'unknown' && rpc.indexOf('http') > -1;
+    checks.push({ module: 'RPC', status: rpcOk ? 'ok' : 'warn', detail: rpcOk ? rpc : 'No RPC configured' });
+    if (rpcOk) ok++; else warn++;
+
+    // Modules
+    var mods = ['UB', 'AF', 'AgentManager', 'AOS', 'FinancialMemory', 'ScheduleEngine', 'RecipientResolver'];
+    for (var i = 0; i < mods.length; i++) {
+      var m = mods[i];
+      var exists = typeof window !== 'undefined' && window[m] !== undefined;
+      var ms = _state.modules[m] || {};
+      var status = exists ? 'ok' : 'error';
+      if (ms.errors > 0) status = 'warn';
+      checks.push({ module: m, status: status, detail: (exists ? (ms.calls > 0 ? ms.calls + ' calls, ' + ms.errors + ' errs' : 'Loaded') : 'Missing'), calls: ms.calls || 0, errors: ms.errors || 0 });
+      if (status === 'ok') ok++; else if (status === 'warn') warn++; else err++;
+    }
+
+    // Storage
+    var storageOk = _testStorage();
+    checks.push({ module: 'localStorage', status: storageOk ? 'ok' : 'error', detail: storageOk ? 'Available' : 'Blocked/Full' });
+
+    var overall = err > 0 ? 'critical' : warn >= 3 ? 'warning' : 'healthy';
+    return { checks: checks, overall: overall, ok: ok, warn: warn, err: err, ts: new Date().toISOString() };
+  }
+
+  function _testStorage() { try { var k='__rltest__'; localStorage.setItem(k,'1'); localStorage.removeItem(k); return true; } catch(_) { return false; } }
+
+  // ═══════════════════════════════════════════════════
+  //  RECOVERY ENGINE
+  // ═══════════════════════════════════════════════════
+  function _recover(module, error) {
+    var recovery = { module: module, error: (error.message || String(error)), ts: Date.now(), action: 'log_only' };
+    // Simple recovery actions
+    if (module === 'UB' || module === 'ubRefresh') { recovery.action = 'retry_next_page_load'; }
+    if (module === 'AOS' || module === 'AF') { recovery.action = 'reset_strategies'; try { AOS.buildStrategies(); } catch(_) {} }
+    if (module === 'ScheduleEngine') { recovery.action = 'reload_from_storage'; try { if (typeof schedules !== 'undefined') schedules = Store.load('schedules', []); } catch(_) {} }
+    _state.events.unshift({ type: 'recovery', data: recovery, ts: new Date().toISOString() });
+    if (_state.events.length > 100) _state.events.length = 100;
+    _save();
+    return recovery;
+  }
+
+  function forceRecover(module) {
+    _recover(module, { message: 'Manual recovery triggered' });
+    _state.modules[module].errors = Math.max(0, (_state.modules[module].errors || 1) - 1);
+    _state.modules[module].status = 'ok';
+    _save();
+  }
+
+  // ═══════════════════════════════════════════════════
+  //  RUNTIME AUDIT
+  // ═══════════════════════════════════════════════════
+  function _logError(module, msg, type) {
+    _state.errors.unshift({ ts: new Date().toISOString(), module: module, msg: msg, type: type || 'runtime' });
+    if (_state.errors.length > 200) _state.errors.length = 200;
+  }
+
+  function auditLog(entry) {
+    _state.events.unshift({ ts: new Date().toISOString(), type: 'audit', data: entry });
+    if (_state.events.length > 200) _state.events.length = 200;
+    _save();
+  }
+
+  function getErrors(n) { return _state.errors.slice(0, n || 50); }
+  function getEvents(n) { return _state.events.slice(0, n || 50); }
+
+  // ═══════════════════════════════════════════════════
+  //  PERFORMANCE MONITOR
+  // ═══════════════════════════════════════════════════
+  function perfSnapshot() {
+    var snap = { ts: Date.now(), modules: {}, pageLoad: 0, rpcLatency: 0 };
+    for (var m in _state.modules) {
+      var md = _state.modules[m];
+      snap.modules[m] = { calls: md.calls, totalMs: md.totalMs, avgMs: md.calls > 0 ? (md.totalMs / md.calls).toFixed(2) : 0, errors: md.errors };
+    }
+    // RPC latency test (async, fire-and-forget)
+    try {
+      if (typeof getActiveChain === 'function') {
+        var chain = getActiveChain();
+        if (chain && chain.rpc && typeof ethers !== 'undefined') {
+          var prov = new ethers.JsonRpcProvider(chain.rpc);
+          var t0 = performance.now();
+          prov.getBlockNumber().then(function() { snap.rpcLatency = (performance.now() - t0).toFixed(0); _state.performance = snap; _save(); }).catch(function() { snap.rpcLatency = -1; _state.performance = snap; });
+        }
+      }
+    } catch(_) {}
+    _state.performance = snap;
+    _save();
+    return snap;
+  }
+
+  // ═══════════════════════════════════════════════════
+  //  DATA INTEGRITY
+  // ═══════════════════════════════════════════════════
+  function validateIntegrity() {
+    var results = [];
+    // Validate UB state
+    try {
+      if (typeof UB !== 'undefined' && UB.state) {
+        var assets = UB.state.assets || [];
+        var total = UB.state.totalUSD || 0;
+        var calcTotal = assets.reduce(function(s, a) { return s + (a.usd || 0); }, 0);
+        if (Math.abs(calcTotal - total) > 0.01) results.push({ check: 'UB totalUSD', status: 'warn', detail: 'Computed $' + calcTotal.toFixed(2) + ' vs stored $' + total.toFixed(2) });
+        else results.push({ check: 'UB totalUSD', status: 'ok', detail: 'Consistent ($' + total.toFixed(2) + ')' });
+        // Check all assets have required fields
+        var missing = assets.filter(function(a) { return !a.token || !a.chainId; });
+        if (missing.length) results.push({ check: 'UB asset fields', status: 'warn', detail: missing.length + ' asset(s) missing fields' });
+        else results.push({ check: 'UB asset fields', status: 'ok', detail: 'All valid' });
+      } else {
+        results.push({ check: 'UB state', status: 'ok', detail: 'No data loaded' });
+      }
+    } catch(e) { results.push({ check: 'UB state', status: 'error', detail: e.message }); }
+
+    // Validate schedules
+    try {
+      if (typeof ScheduleEngine !== 'undefined') {
+        var schs = ScheduleEngine.getAll();
+        results.push({ check: 'Schedules', status: 'ok', detail: schs.length + ' entries' });
+      }
+    } catch(e) { results.push({ check: 'Schedules', status: 'error', detail: e.message }); }
+
+    // Validate AOS strategies
+    try {
+      if (typeof AOS !== 'undefined') {
+        var str = AOS.getStrategies();
+        results.push({ check: 'AOS strategies', status: 'ok', detail: (str || []).length + ' cached' });
+      }
+    } catch(e) { results.push({ check: 'AOS strategies', status: 'error', detail: e.message }); }
+
+    auditLog({ type: 'integrity_check', results: results });
+    return results;
+  }
+
+  // ═══════════════════════════════════════════════════
+  //  SNAPSHOT BACKUP
+  // ═══════════════════════════════════════════════════
+  function snapshot() {
+    var snap = {
+      ts: new Date().toISOString(),
+      wallet: (typeof walletAddress !== 'undefined' && walletAddress) ? walletAddress.slice(0, 6) + '...' : null,
+      totalUSD: typeof UB !== 'undefined' ? UB.state.totalUSD : 0,
+      assets: typeof UB !== 'undefined' ? (UB.state.assets || []).length : 0,
+      schedules: (function(){ try { if (typeof ScheduleEngine !== 'undefined') return ScheduleEngine.getAll().length; } catch(_) { return 0; } })(),
+      strategies: (function(){ try { if (typeof AOS !== 'undefined') return AOS.getStrategies().length; } catch(_) { return 0; } })(),
+      health: healthCheck().overall,
+      errors: _state.errors.length
+    };
+    _state.snapshots.unshift(snap);
+    if (_state.snapshots.length > 50) _state.snapshots.length = 50;
+    _save();
+    return snap;
+  }
+
+  function getSnapshots(n) { return _state.snapshots.slice(0, n || 10); }
+
+  // ═══════════════════════════════════════════════════
+  //  GLOBAL ERROR GUARD — catch unhandled errors
+  // ═══════════════════════════════════════════════════
+  function installGlobalGuard() {
+    window.addEventListener('error', function(e) {
+      _logError('global', (e.message || String(e)) + ' @ ' + (e.filename || '') + ':' + (e.lineno || ''), 'unhandled');
+    });
+    auditLog({ type: 'global_guard_installed', ts: Date.now() });
+  }
+
+  // Auto-install on load
+  installGlobalGuard();
+
+  return {
+    isolate: isolate, healthCheck: healthCheck, forceRecover: forceRecover,
+    audit: auditLog, getErrors: getErrors, getEvents: getEvents,
+    perfSnapshot: perfSnapshot, performance: function() { return _state.performance; },
+    validate: validateIntegrity, snapshot: snapshot, getSnapshots: getSnapshots,
+    state: function() { return _state; }
+  };
+})();
+
+// ── System Center render ────────────────────────────
+function ubRenderSystem() {
+  var card = document.getElementById('ub-system-card');
+  var body = document.getElementById('ub-system-body');
+  var badgeEl = document.getElementById('sys-health-badge');
+  if (!card || !body) return;
+  card.style.display = '';
+
+  // Take snapshot
+  var snap = ReliabilityLayer.snapshot();
+  var health = ReliabilityLayer.healthCheck();
+
+  if (badgeEl) {
+    badgeEl.textContent = health.overall === 'healthy' ? 'Healthy' : health.overall === 'warning' ? 'Warning' : 'Critical';
+    badgeEl.style.background = health.overall === 'healthy' ? 'rgba(34,197,94,.1)' : health.overall === 'warning' ? 'rgba(245,158,11,.12)' : 'rgba(239,68,68,.12)';
+    badgeEl.style.color = health.overall === 'healthy' ? 'var(--green)' : health.overall === 'warning' ? 'var(--yellow)' : 'var(--red)';
+  }
+
+  var html = '';
+  // ── Module health grid ──
+  html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:6px;margin-bottom:8px">';
+  var checks = health.checks || [];
+  for (var c = 0; c < checks.length && c < 9; c++) {
+    var ch = checks[c];
+    var dot = ch.status === 'ok' ? 'var(--green)' : ch.status === 'warn' ? 'var(--yellow)' : 'var(--red)';
+    html += '<div style="padding:6px 8px;background:rgba(0,0,0,.08);border-radius:4px;font-size:8px">' +
+      '<div style="display:flex;align-items:center;gap:4px;margin-bottom:2px"><div style="width:6px;height:6px;border-radius:50%;background:' + dot + '"></div><span style="font-weight:600">' + ch.module + '</span></div>' +
+      '<div style="color:var(--muted2);font-size:7px">' + ch.detail + '</div>' +
+      (ch.errors ? '<div style="color:var(--red);font-size:7px">' + ch.errors + ' errs</div>' : '') +
+      '</div>';
+  }
+  html += '</div>';
+
+  // ── Performance strip ──
+  var perf = ReliabilityLayer.performance();
+  html += '<div style="font-size:8px;color:var(--muted2);display:flex;gap:12px;flex-wrap:wrap;margin-bottom:4px">';
+  html += '<span>Uptime: ' + Math.floor((Date.now() - ReliabilityLayer.state().uptime) / 60000) + 'm</span>';
+  html += '<span>Errors: ' + ReliabilityLayer.getErrors().length + '</span>';
+  html += '<span>RPC: ' + (perf && perf.rpcLatency ? perf.rpcLatency + 'ms' : '—') + '</span>';
+  html += '<span>Snapshots: ' + ReliabilityLayer.getSnapshots().length + '</span>';
+  html += '</div>';
+
+  // ── Latest errors ──
+  var errs = ReliabilityLayer.getErrors(3);
+  if (errs.length > 0) {
+    html += '<div style="font-size:7px;color:var(--muted2);margin-bottom:2px">Recent errors</div>';
+    for (var e = 0; e < errs.length; e++) {
+      html += '<div style="font-size:7px;padding:2px 4px;background:rgba(239,68,68,.04);border-radius:3px;margin-bottom:2px;display:flex;align-items:center;gap:6px">' +
+        '<span style="color:var(--red);flex-shrink:0">' + (new Date(errs[e].ts).toLocaleTimeString()) + '</span>' +
+        '<span style="color:var(--muted2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + errs[e].module + ': ' + errs[e].msg + '</span></div>';
+    }
+  }
+
+  // ── Integrity + Recovery buttons ──
+  html += '<div style="display:flex;gap:4px;margin-top:4px">';
+  html += '<button class="btn" style="padding:2px 8px;font-size:7px" onclick="var r=ReliabilityLayer.validate();var s=\'\';for(var i=0;i<r.length;i++)s+=r[i].check+\': \'+r[i].status+\'\\n\';alert(\'Integrity:\\n\'+s);">Validate</button>';
+  html += '<button class="btn" style="padding:2px 8px;font-size:7px" onclick="ReliabilityLayer.perfSnapshot();if(typeof ubRenderSystem===\'function\')ubRenderSystem();">Benchmark</button>';
+  html += '<button class="btn" style="padding:2px 8px;font-size:7px" onclick="ReliabilityLayer.snapshot();if(typeof ubRenderSystem===\'function\')ubRenderSystem();">Snapshot</button>';
+  html += '<button class="btn" style="padding:2px 8px;font-size:7px;color:var(--yellow)" onclick="ubRefresh();if(typeof ubRenderSystem===\'function\')setTimeout(function(){ubRenderSystem();},800);">Repair</button>';
+  html += '</div>';
+
+  body.innerHTML = html;
+}
+
+// ══════════════════════════════════════════════════════════
+//  UB ACTION LAYER — Inline Swap/Bridge/Send modals + Review Card
+//  Reuses existing logic; never navigates away from UB page
+// ══════════════════════════════════════════════════════════
+const UBAction = (function() {
+  'use strict';
+  var _currentReviewId = null;
+  var _currentModalId = null;
+  function _ensure(){if(typeof walletAddress==='undefined'||!walletAddress||!signer){toast('Connect wallet first','warning');return false;}return true;}
+
+  // ═══════════════════════ REVIEW CARD ═══════════════════
+  function showReview(data) {
+    hideReview();
+    if (!_currentModalId) return;
+    var modal = document.getElementById(_currentModalId);
+    if (!modal) { _currentModalId = null; return; }
+    // Find or create the flex wrapper inside modal
+    var wrapper = modal.querySelector('.ub-modal-flex');
+    if (!wrapper) {
+      // Wrap the existing single panel into a flex container
+      var inner = modal.querySelector('div[style]') || modal.firstElementChild;
+      wrapper = document.createElement('div');
+      wrapper.className = 'ub-modal-flex';
+      wrapper.style.cssText = 'display:flex;gap:20px;align-items:flex-start;width:100%;max-width:800px;';
+      while (modal.firstChild) wrapper.appendChild(modal.firstChild);
+      modal.appendChild(wrapper);
+    }
+    // Create review card
+    var card = document.createElement('div');
+    card.id = 'ub-review-' + Date.now();
+    card.className = 'ub-review-card';
+    card.style.cssText = 'flex-shrink:0;min-width:280px;max-width:340px;';
+    wrapper.appendChild(card);
+    _renderReviewContent(card, data, 'review');
+    setTimeout(function(){ card.classList.add('show'); }, 10);
+    _currentReviewId = card.id;
+  }
+
+  function hideReview() {
+    if (!_currentReviewId) return;
+    var el = document.getElementById(_currentReviewId);
+    if (el) { el.classList.add('hide'); setTimeout(function(){ if(el.parentNode)el.remove(); _currentReviewId=null; _currentModalId=null; }, 200); }
+    else { _currentReviewId = null; _currentModalId = null; }
+  }
+
+  function updateReviewState(state, msg) {
+    var el = null;
+    if (_currentReviewId) el = document.getElementById(_currentReviewId);
+    if (!el) { var cards = document.querySelectorAll('.ub-review-card.show'); if (cards.length > 0) el = cards[cards.length - 1]; }
+    if (!el) return;
+    if (!_currentReviewId && el.id) _currentReviewId = el.id;
+    var statusEl = el.querySelector('.ub-rev-status');
+    if (statusEl) { statusEl.className = 'ub-rev-status ' + state; statusEl.innerHTML = '<i class="ti ti-' + (state==='success'?'circle-check':state==='error'?'x':'loader') + '"></i>' + (msg||state); }
+    // Also update button area to show processing
+    if (state === 'executing') {
+      var btn = el.querySelector('.btn.primary');
+      if (btn) btn.style.display = 'none';
+    }
+  }
+
+  function _renderReviewContent(card, data, state) {
+    var rows = '';
+    for (var i = 0; i < data.rows.length; i++) {
+      rows += '<div class="ub-rev-row"><span class="ub-rev-label">' + data.rows[i][0] + '</span><span class="ub-rev-value">' + data.rows[i][1] + '</span></div>';
+    }
+    var title = data.title || 'Action Preview';
+    var icon = data.icon || 'checks';
+    var iconColor = data.iconColor || 'var(--teal)';
+    var actionsHtml = '';
+
+    if (state === 'review') {
+      actionsHtml = '<button class="btn primary" style="width:100%;margin-top:8px;padding:8px;font-size:9px" onclick="' + (data.confirmFn||'') + '">Confirm & Execute</button>';
+    } else if (state === 'result') {
+      var txHash = data.txHash || '';
+      var explorer = data.explorer || '';
+      if (txHash) {
+        actionsHtml = '<div style="margin-top:8px;display:flex;flex-direction:column;gap:4px">' +
+          '<div style="display:flex;gap:4px">' +
+          (explorer ? '<a href="' + explorer + '/tx/' + txHash + '" target="_blank" class="btn" style="flex:1;padding:6px;font-size:8px;justify-content:center"><i class="ti ti-external-link"></i>Explorer</a>' : '') +
+          '<button class="btn" style="flex:1;padding:6px;font-size:8px;justify-content:center" onclick="navigator.clipboard.writeText(\'' + txHash + '\');toast(\'Tx hash copied\',\'info\')"><i class="ti ti-copy"></i>Copy Hash</button>' +
+          '</div></div>';
+      }
+    }
+
+    var statusMsg = state === 'executing' ? 'Processing...' : state === 'success' ? 'Completed' : state === 'result' ? 'Operation Successful' : state === 'error' ? 'Failed' : 'Review';
+    var statusCls = state === 'executing' || state === 'loading' ? 'loading' : state === 'success' || state === 'result' ? 'success' : state === 'error' ? 'error' : '';
+    var statusIcon = state === 'executing' || state === 'loading' ? 'loader' : state === 'success' || state === 'result' ? 'circle-check' : state === 'error' ? 'x' : 'search';
+
+    card.innerHTML = '<div style="font-size:11px;font-weight:700;margin-bottom:8px;display:flex;align-items:center;gap:6px"><i class="ti ti-' + icon + '" style="color:' + iconColor + ';font-size:13px"></i>' + title + '</div>' +
+      '<div style="display:flex;flex-direction:column">' + rows + '</div>' +
+      '<div class="ub-rev-status ' + statusCls + '"><i class="ti ti-' + statusIcon + '"></i>' + statusMsg + '</div>' + actionsHtml;
+  }
+
+  function _getTxHashFromHistory() {
+    try {
+      if (typeof txHistory !== 'undefined' && Array.isArray(txHistory) && txHistory.length > 0) {
+        var last = txHistory[0];
+        return last.hash || last.txHash || last.tx || '';
+      }
+    } catch(_) {}
+    return '';
+  }
+
+  function _getExplorer() {
+    try {
+      if (typeof getActiveChain === 'function') {
+        var c = getActiveChain();
+        return (c && c.explorer) ? c.explorer.replace(/\/$/, '') : '';
+      }
+    } catch(_) {}
+    return '';
+  }
+
+  // ═══════════════════════ SWAP ═══════════════════════
+  var _swapModalId = null;
+  function openSwap(prefillIn,prefillOut,prefillAmt){
+    if(!_ensure())return;
+    if(typeof SWP==='undefined'||typeof TOKEN_LIST==='undefined'){toast('Swap unavailable','error');return;}
+    var tks=TOKEN_LIST,ti=0,to=1,i;
+    for(i=0;i<tks.length;i++){if(tks[i].sym===(prefillIn||'USDC'))ti=i;if(tks[i].sym===(prefillOut||'EURC'))to=i;}
+    SWP.tokenInIdx=ti;SWP.tokenOutIdx=to;
+    var a=prefillAmt?prefillAmt.toFixed(2):'';
+    var op=tks.map(function(t,i){return'<option value="'+i+'"'+(i===ti?' selected':'')+'>'+t.sym+'</option>';}).join('');
+    var op2=tks.map(function(t,i){return'<option value="'+i+'"'+(i===to?' selected':'')+'>'+t.sym+'</option>';}).join('');
+    var b='<div style="font-size:13px;font-weight:700;margin-bottom:12px">Swap</div>'+
+      '<div style="display:flex;flex-direction:column;gap:10px">'+
+      '<div><div style="font-size:8px;color:var(--muted2);margin-bottom:2px">From</div><div style="display:flex;gap:6px;align-items:center"><select class="cinput" style="width:90px;cursor:pointer" onchange="SWP.tokenInIdx=parseInt(this.value);UBAction._refreshSwap();">'+op+'</select><input id="ub-swap-amt" class="cinput" type="number" placeholder="0.00" value="'+a+'" oninput="UBAction._refreshSwap()" style="flex:1;font-family:\'JetBrains Mono\',monospace"/></div></div>'+
+      '<div style="text-align:center"><i class="ti ti-arrow-down" style="color:var(--muted2);font-size:14px"></i></div>'+
+      '<div><div style="font-size:8px;color:var(--muted2);margin-bottom:2px">To (estimated)</div><div style="display:flex;gap:6px;align-items:center"><select class="cinput" style="width:90px;cursor:pointer" onchange="SWP.tokenOutIdx=parseInt(this.value);UBAction._refreshSwap();">'+op2+'</select><div id="ub-swap-q" class="cinput" style="flex:1;font-family:\'JetBrains Mono\',monospace;display:flex;align-items:center;color:var(--muted2);font-size:10px">—</div></div></div>'+
+      '<div id="ub-swap-r" style="font-size:8px;color:var(--muted2)"></div><div id="ub-swap-e" style="font-size:8px;color:var(--red);display:none"></div></div>';
+    _modalWrap('Swap','arrows-exchange','var(--teal)',b,'SWP.lastQuote=null;UBAction._hideReview();');
+    if(prefillAmt) setTimeout(function(){ _refreshSwap(); },200);
+  }
+
+  function _refreshSwap(){ var ae=document.getElementById('ub-swap-amt'),qe=document.getElementById('ub-swap-q'),re=document.getElementById('ub-swap-r'),ee=document.getElementById('ub-swap-e'); if(!ae)return; var amt=parseFloat(ae.value)||0; if(amt<=0||SWP.tokenInIdx===SWP.tokenOutIdx){if(qe)qe.textContent='—';hideReview();return;} try{var ti2=TOKEN_LIST[SWP.tokenInIdx],to2=TOKEN_LIST[SWP.tokenOutIdx];var rt=typeof findBestRouteForAmount==='function'?findBestRouteForAmount(ti2.sym,to2.sym,amt):null;if(!rt){if(qe)qe.textContent='No route';hideReview();return;}var out=typeof calcRouteOutput==='function'?calcRouteOutput(amt,rt):0;if(qe)qe.textContent=out.toFixed(4)+' '+to2.sym;if(re)re.textContent='1 '+ti2.sym+' ≈ '+(out/amt).toFixed(4)+' '+to2.sym;SWP.lastRoute=rt;SWP.lastQuote={amtIn:amt,amtOut:out,tIn:ti2,tOut:to2,route:rt}; var imp=typeof calcRoutePriceImpact==='function'?calcRoutePriceImpact(amt,rt):0; var fee='~0.3%'; showReview({title:'Swap Review',icon:'arrows-exchange',iconColor:'var(--teal)',rows:[['From',amt.toFixed(4)+' '+ti2.sym],['To',out.toFixed(4)+' '+to2.sym],['Rate','1 '+ti2.sym+' ≈ '+(out/amt).toFixed(4)+' '+to2.sym],['Min Received',(out*0.995).toFixed(4)+' '+to2.sym],['Price Impact',(imp*100).toFixed(2)+'%'],['Fee',fee],['Route',(rt.pools&&rt.pools.length?rt.pools.length+' hop(s)':'Direct')]],confirmFn:'UBAction._execSwap()'}); }catch(e){if(ee){ee.style.display='';ee.textContent=e.message||'Quote failed';}} }
+
+  function _showResult(data) {
+    if (_currentReviewId) {
+      var el = document.getElementById(_currentReviewId);
+      if (el) {
+        el.querySelector('.ub-rev-status').className = 'ub-rev-status success';
+        el.querySelector('.ub-rev-status').innerHTML = '<i class="ti ti-circle-check"></i>Completed';
+      }
+    }
+    if (typeof ubRefresh === 'function') setTimeout(function(){ ubRefresh(); }, 2000);
+    setTimeout(hideReview, 5000);
+  }
+
+  async function _execSwap(){
+    console.log('[UBAction] REVIEW → PROCESSING: Swap');
+    if(!_ensure())return;
+    var q=SWP.lastQuote;
+    if(!q||!q.amtIn){toast('No quote','warning');return;}
+    // Pin card reference before execution
+    var cardEl = _currentReviewId ? document.getElementById(_currentReviewId) : null;
+    if (!cardEl) { var cs = document.querySelectorAll('.ub-review-card'); if (cs.length) cardEl = cs[cs.length-1]; }
+    var stEl = cardEl ? cardEl.querySelector('.ub-rev-status') : null;
+    if (stEl) { stEl.className = 'ub-rev-status loading'; stEl.innerHTML = '<i class="ti ti-loader"></i>Processing...'; }
+    var btnEl = cardEl ? cardEl.querySelector('.btn.primary') : null;
+    if (btnEl) btnEl.style.display = 'none';
+    var ha=document.getElementById('swap-amount-in');
+    if(!ha){ha=document.createElement('input');ha.id='swap-amount-in';ha.type='hidden';document.body.appendChild(ha);}
+    ha.value=q.amtIn.toString();
+    try {
+      var t0=Date.now();
+      await executeSwap();
+      var dur=((Date.now()-t0)/1000).toFixed(1);
+      console.log('[UBAction] PROCESSING → RESULT: Swap ('+dur+'s)');
+      _showResult({});
+    } catch(e) {
+      console.log('[UBAction] Swap FAILED:', e.shortMessage || e.message);
+      if (stEl) { stEl.className = 'ub-rev-status error'; stEl.innerHTML = '<i class="ti ti-x"></i>' + (e.shortMessage || e.message || 'Failed'); }
+    }
+  }
+
+  async function _execBridge(){
+    console.log('[UBAction] REVIEW → PROCESSING: Bridge');
+    if(!_ensure())return;
+    var a=parseFloat((document.getElementById('ub-bridge-amt')||{}).value)||0;
+    if(a<=0){toast('Enter amount','warning');return;}
+    var cardEl = _currentReviewId ? document.getElementById(_currentReviewId) : null;
+    if (!cardEl) { var cs = document.querySelectorAll('.ub-review-card'); if (cs.length) cardEl = cs[cs.length-1]; }
+    var stEl = cardEl ? cardEl.querySelector('.ub-rev-status') : null;
+    if (stEl) { stEl.className = 'ub-rev-status loading'; stEl.innerHTML = '<i class="ti ti-loader"></i>Processing...'; }
+    var btnEl = cardEl ? cardEl.querySelector('.btn.primary') : null;
+    if (btnEl) btnEl.style.display = 'none';
+    var ha=document.getElementById('bridge-amount');
+    if(!ha){ha=document.createElement('input');ha.id='bridge-amount';ha.type='hidden';document.body.appendChild(ha);}
+    ha.value=a.toString();
+    if(typeof applyBridgeChains==='function')applyBridgeChains();
+    var cs=typeof CHAINS!=='undefined'?CHAINS:[], fc=cs[bridgeFromIdx], tc=cs[bridgeToIdx];
+    var feeAmt=a*(bridgeToIdx===0?0.01:0.0005), recv=a-feeAmt;
+    try {
+      var t0=Date.now();
+      if(typeof executeBridgeOrTurbo==='function')await executeBridgeOrTurbo();
+      else if(typeof executeBridge==='function')await executeBridge();
+      else { if(stEl){stEl.className='ub-rev-status error';stEl.innerHTML='<i class="ti ti-x"></i>Bridge unavailable';} return; }
+      var dur=((Date.now()-t0)/1000).toFixed(1);
+      console.log('[UBAction] PROCESSING → RESULT: Bridge ('+dur+'s)');
+      _showResult({});
+    } catch(e) {
+      console.log('[UBAction] Bridge FAILED:', e.shortMessage || e.message);
+      if (stEl) { stEl.className = 'ub-rev-status error'; stEl.innerHTML = '<i class="ti ti-x"></i>' + (e.shortMessage || e.message || 'Failed'); }
+    }
+  }
+
+  async function _execSend(){
+    console.log('[UBAction] REVIEW → PROCESSING: Send');
+    if(!_ensure())return;
+    var ad=(document.getElementById('ub-send-addr')||{}).value||'';
+    var a=parseFloat((document.getElementById('ub-send-amt')||{}).value)||0;
+    if(!/^0x[0-9a-fA-F]{40}$/.test(ad)){toast('Enter valid 0x address','warning');return;}
+    if(a<=0){toast('Enter amount','warning');return;}
+    var cardEl = _currentReviewId ? document.getElementById(_currentReviewId) : null;
+    if (!cardEl) { var cs = document.querySelectorAll('.ub-review-card'); if (cs.length) cardEl = cs[cs.length-1]; }
+    var stEl = cardEl ? cardEl.querySelector('.ub-rev-status') : null;
+    if (stEl) { stEl.className = 'ub-rev-status loading'; stEl.innerHTML = '<i class="ti ti-loader"></i>Processing...'; }
+    var btnEl = cardEl ? cardEl.querySelector('.btn.primary') : null;
+    if (btnEl) btnEl.style.display = 'none';
+    var hr=document.getElementById('sa-recipient');
+    if(!hr){hr=document.createElement('input');hr.id='sa-recipient';hr.type='hidden';document.body.appendChild(hr);}
+    hr.value=ad;
+    var ha=document.getElementById('sa-amount');
+    if(!ha){ha=document.createElement('input');ha.id='sa-amount';ha.type='hidden';document.body.appendChild(ha);}
+    ha.value=a.toString();
+    var feeAmt=a*0.002, total=a+feeAmt;
+    try {
+      var t0=Date.now();
+      await saExecuteSend();
+      var dur=((Date.now()-t0)/1000).toFixed(1);
+      console.log('[UBAction] PROCESSING → RESULT: Send ('+dur+'s)');
+      _showResult({});
+    } catch(e) {
+      console.log('[UBAction] Send FAILED:', e.shortMessage || e.message);
+      if (stEl) { stEl.className = 'ub-rev-status error'; stEl.innerHTML = '<i class="ti ti-x"></i>' + (e.shortMessage || e.message || 'Failed'); }
+    }
+  }
+  function openBridge(pfFrom,pfTo,pfAmt){
+    if(!_ensure())return;
+    var cs=typeof CHAINS!=='undefined'?CHAINS:[];
+    if(!cs.length){toast('No chains','error');return;}
+    var fi=1,ti3=0,i;
+    for(i=0;i<cs.length;i++){if(cs[i]&&cs[i].id===(pfFrom||'Ethereum_Sepolia'))fi=i;if(cs[i]&&cs[i].id===(pfTo||'Arc_Testnet'))ti3=i;}
+    if(typeof bridgeFromIdx!=='undefined')bridgeFromIdx=fi;if(typeof bridgeToIdx!=='undefined')bridgeToIdx=ti3;
+    var co=cs.map(function(c,i){return'<option value="'+i+'"'+(i===fi?' selected':'')+'>'+(c?c.shortName||c.name:'?')+'</option>';}).join('');
+    var co2=cs.map(function(c,i){return'<option value="'+i+'"'+(i===ti3?' selected':'')+'>'+(c?c.shortName||c.name:'?')+'</option>';}).join('');
+    var a=pfAmt?pfAmt.toFixed(2):'',fee=ti3===0?'1.00%':'0.05%';
+    var b='<div style="font-size:13px;font-weight:700;margin-bottom:12px">Bridge</div>'+
+      '<div style="display:flex;flex-direction:column;gap:10px">'+
+      '<div><div style="font-size:8px;color:var(--muted2);margin-bottom:2px">From</div><select class="cinput" style="cursor:pointer" onchange="bridgeFromIdx=parseInt(this.value);if(typeof applyBridgeChains===\'function\')applyBridgeChains();UBAction._refreshBridge();">'+co+'</select></div>'+
+      '<div style="text-align:center"><i class="ti ti-arrow-down" style="color:var(--muted2);font-size:14px"></i></div>'+
+      '<div><div style="font-size:8px;color:var(--muted2);margin-bottom:2px">To</div><select class="cinput" style="cursor:pointer" onchange="bridgeToIdx=parseInt(this.value);if(typeof applyBridgeChains===\'function\')applyBridgeChains();UBAction._refreshBridge();">'+co2+'</select></div>'+
+      '<div><div style="font-size:8px;color:var(--muted2);margin-bottom:2px">Amount</div><input id="ub-bridge-amt" class="cinput" type="number" placeholder="0.00" value="'+a+'" oninput="UBAction._refreshBridge()" style="font-family:\'JetBrains Mono\',monospace"/></div>'+
+      '<div style="font-size:8px;color:var(--muted2)">Fee: '+fee+'</div><div id="ub-bridge-e" style="font-size:8px;color:var(--red);display:none"></div></div>';
+    _modalWrap('Bridge','topology-star-3','var(--purple)',b,'UBAction._hideReview();');
+    if(pfAmt) setTimeout(function(){ _refreshBridge(); },200);
+  }
+
+  function _refreshBridge(){ var ae=document.getElementById('ub-bridge-amt'); if(!ae)return; var a=parseFloat(ae.value)||0; if(a<=0){hideReview();return;} var cs=typeof CHAINS!=='undefined'?CHAINS:[]; var fc=cs[bridgeFromIdx],tc=cs[bridgeToIdx]; if(!fc||!tc)return; var fee=tc.id==='Arc_Testnet'?'1.00%':'0.05%'; var feeAmt=a*(bridgeToIdx===0?0.01:0.0005); var recv=a-feeAmt; showReview({title:'Bridge Review',icon:'topology-star-3',iconColor:'var(--purple)',rows:[['Token','USDC'],['Amount',a.toFixed(4)+' USDC'],['From',fc.shortName||fc.name],['To',tc.shortName||tc.name],['You receive',recv.toFixed(4)+' USDC'],['Fee',fee+' (~'+feeAmt.toFixed(4)+' USDC)'],['Time',tc.id==='Arc_Testnet'?'~30s (Turbo)':'~5-15 min (CCTP)'],['Security',tc.id==='Arc_Testnet'?'Turbo Bridge secured by relayer':'CCTP — Circle verified']],confirmFn:'UBAction._execBridge()'}); }
+
+  // ═══════════════════════ SEND ═══════════════════════
+  function openSend(pfToken,pfAmt){
+    if(!_ensure())return;
+    if(typeof saCurrentAsset!=='undefined')saCurrentAsset=pfToken||'USDC';
+    var a=pfAmt?pfAmt.toFixed(2):'',tk=pfToken||'USDC';
+    var b='<div style="font-size:13px;font-weight:700;margin-bottom:12px">Send</div>'+
+      '<div style="display:flex;flex-direction:column;gap:10px">'+
+      '<div><div style="font-size:8px;color:var(--muted2);margin-bottom:2px">Token</div><select class="cinput" style="cursor:pointer" onchange="saCurrentAsset=this.value;UBAction._refreshSend();"><option value="USDC"'+(tk==='USDC'?' selected':'')+'>USDC</option><option value="EURC"'+(tk==='EURC'?' selected':'')+'>EURC</option></select></div>'+
+      '<div><div style="font-size:8px;color:var(--muted2);margin-bottom:2px">Recipient</div><input id="ub-send-addr" class="cinput" type="text" placeholder="0x..." oninput="UBAction._refreshSend()" style="font-family:\'JetBrains Mono\',monospace"/></div>'+
+      '<div><div style="font-size:8px;color:var(--muted2);margin-bottom:2px">Amount</div><input id="ub-send-amt" class="cinput" type="number" placeholder="0.00" value="'+a+'" oninput="UBAction._refreshSend()" style="font-family:\'JetBrains Mono\',monospace"/></div>'+
+      '<div style="font-size:8px;color:var(--muted2)">Network: Arc Testnet | Fee: 0.20%</div><div id="ub-send-e" style="font-size:8px;color:var(--red);display:none"></div></div>';
+    _modalWrap('Send','send','var(--blue)',b,'UBAction._hideReview();');
+  }
+
+  function _refreshSend(){ var ae=document.getElementById('ub-send-amt'),ad=document.getElementById('ub-send-addr'); if(!ae||!ad)return; var a=parseFloat(ae.value)||0,addr=ad.value||''; if(a<=0||!/^0x[0-9a-fA-F]{40}$/.test(addr)){hideReview();return;} var fee=a*0.002;var total=a+fee; showReview({title:'Send Review',icon:'send',iconColor:'var(--blue)',rows:[['Token',saCurrentAsset||'USDC'],['Amount',a.toFixed(4)+' '+(saCurrentAsset||'USDC')],['Recipient',addr.slice(0,8)+'...'+addr.slice(-4)],['Network','Arc Testnet'],['Fee','0.20% (~'+fee.toFixed(4)+' '+(saCurrentAsset||'USDC')+')'],['Total',total.toFixed(4)+' '+(saCurrentAsset||'USDC')]],confirmFn:'UBAction._execSend()'}); }
+
+  // ═══════════════════════ HELPERS ═══════════════════════
+  function _modalWrap(title,icon,color,body,onClose){
+    var id='ub-m'+Date.now();
+    _currentModalId = id;
+    var h='<div id="'+id+'" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.8);z-index:99999;display:flex;align-items:center;justify-content:center" onclick="UBAction._hideReview();document.getElementById(\''+id+'\').remove();'+(onClose||'')+'">'+
+      '<div style="background:var(--card);border:1px solid var(--border2);border-radius:12px;width:440px;max-width:94vw;max-height:90vh;overflow-y:auto;padding:0;transition:width .2s" onclick="event.stopPropagation()" class="ub-modal-panel">'+
+      '<div style="height:52px;background:linear-gradient(135deg,'+(color==='var(--teal)'?'rgba(45,212,191,.15)':color==='var(--purple)'?'rgba(167,139,250,.15)':'rgba(79,142,247,.12)')+','+(color==='var(--teal)'?'rgba(79,142,247,.06)':'rgba(167,139,250,.06)')+');display:flex;align-items:center;justify-content:center;position:relative"><i class="ti ti-'+icon+'" style="font-size:24px;color:'+color+'"></i><button style="position:absolute;top:8px;right:8px;background:none;border:none;color:var(--muted2);cursor:pointer;font-size:16px" onclick="UBAction._hideReview();document.getElementById(\''+id+'\').remove();'+(onClose||'')+'"><i class="ti ti-x"></i></button></div>'+
+      '<div style="padding:0 20px 16px">'+body+'</div></div></div>';
+    var d=document.createElement('div');d.innerHTML=h;document.body.appendChild(d.firstElementChild);return id;
+  }
+
+  return {
+    openSwap:openSwap,openBridge:openBridge,openSend:openSend,
+    _refreshSwap:_refreshSwap,_refreshBridge:_refreshBridge,_refreshSend:_refreshSend,
+    _execSwap:_execSwap,_execBridge:_execBridge,_execSend:_execSend,
+    _hideReview:hideReview,_showResult:_showResult,_modalWrap:_modalWrap
+  };
+})();
+
 //  AUTONOMA — AI Agent Engine (v3) + AIResponseRenderer
 // ══════════════════════════════════════════════════════════
 // ============================================================
@@ -28777,27 +31479,47 @@ function toggleMobileRoute() {
     const d=new Date();
     d.setUTCDate(d.getUTCDate()+1); d.setUTCHours(0,0,0,0);
     const nextRunIso=d.toISOString();
-    const name=typeLabel+' — '+((amount>0?(amount+' '+token):schType))+(' · '+freqLabels[freq]);
+    let schName=typeLabel+' — '+((amount>0?(amount+' '+token):schType))+(' · '+freqLabels[freq]);
+
+    // ── Recipient Resolver: detect named contact in message ──
+    let rcptName='', rcptAddr='', rcptChainId='Arc_Testnet';
+    try {
+      if (typeof RecipientResolver !== 'undefined') {
+        const rcpt = RecipientResolver.extractFromMessage(msg);
+        if (rcpt && !rcpt.multiple) {
+          rcptName = rcpt.name || '';
+          rcptAddr = rcpt.address || '';
+          rcptChainId = rcpt.chainId || 'Arc_Testnet';
+          if (rcptAddr) {
+            schName = typeLabel + ' for ' + rcptName + ' — ' + (amount > 0 ? (amount + ' ' + token) : schType) + ' · ' + freqLabels[freq];
+          }
+        }
+      }
+    } catch(e) {}
+
+    const rcptArr = (rcptAddr && amount > 0)
+      ? [{ addr: rcptAddr, amount: amount, note: rcptName, chainId: rcptChainId, token: token }]
+      : [];
 
     const sched={
       id:'SCH'+Date.now(),
-      type:schType, name, token, amount, total:amount||0,
+      type:schType, name:schName, token, amount, total:amount||0,
       network:(schType==='bridge'||schType==='crosschain')?(params.fromChain||'Arc_Testnet')+' → '+(params.toChain||'Base_Sepolia'):'Arc_Testnet',
       fromNetwork:params.fromChain||'Arc_Testnet', toNetwork:params.toChain||'Base_Sepolia',
       swapToToken:schType==='swap'?(params.swapToToken||token):undefined,
-      recipients:[], address:params.address||'',
+      recipients:rcptArr, address:rcptAddr || params.address||'',
       freq, maxEx:0, gas:0.10,
       nextRun:nextRunIso,
       execCount:0, executionHistory:[],
       status:'Active',
       created:new Date().toISOString(),
       createdBy:'autonoma',
-      walletAddress:walletAddress||''
+      walletAddress:walletAddress||'',
+      recipientName: rcptName, recipientAddress: rcptAddr
     };
 
-    // Persist directly
-    schedules.unshift(sched);
-    Store.save('schedules',schedules);
+    // Persist via ScheduleEngine (single source of truth)
+    ScheduleEngine.create(sched);
 
     // Log creation
     try{
@@ -28807,17 +31529,18 @@ function toggleMobileRoute() {
         if(empty)empty.remove();
         const entry=document.createElement('div');
         entry.style.cssText='display:flex;align-items:center;gap:6px;font-size:9px;padding:5px 0;border-bottom:1px solid var(--border)';
-        entry.innerHTML='<i class="ti ti-robot" style="color:var(--purple);font-size:10px"></i><span style="flex:1">"'+name+'" created by Autonoma ('+typeLabel+' · '+freqLabels[freq]+')</span><span style="color:var(--muted2)">'+new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})+'</span>';
+        entry.innerHTML='<i class="ti ti-robot" style="color:var(--purple);font-size:10px"></i><span style="flex:1">"'+schName+'" created by Autonoma ('+typeLabel+' · '+freqLabels[freq]+')</span><span style="color:var(--muted2)">'+new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})+'</span>';
         logEl.prepend(entry);
       }
     }catch(_){}
 
-    // Re-render if schedule page is visible
-    try{if(typeof renderSchedules==='function' && document.getElementById('page-schedule')?.classList.contains('active'))renderSchedules();}catch(_){}
+    // Update legacy reference — ScheduleEngine fires SCHEDULE_CREATED event automatically
+    schedules = ScheduleEngine.getAll();
 
     return R.intro('Schedule created successfully!')+
       R.card(R.head('calendar-check','Schedule '+typeLabel,{text:'Created',cls:'live'}),
         R.row('Type',typeLabel,'yellow')+
+        (rcptName ? R.row('Recipient',rcptName,'purple')+R.row('Address',rcptAddr?rcptAddr.slice(0,8)+'...'+rcptAddr.slice(-4):'—','teal') : '')+
         R.row('Amount',(amount||0).toFixed(2)+' '+token,'green')+
         R.row('Frequency',freqLabels[freq]||freq,'teal')+
         R.row('Next Run',formatUSDateTime(nextRunIso),'')+
@@ -29463,13 +32186,111 @@ const AutonomaAgent = (() => {
       const sch = _parseSchedule(low);
       const id = 'task_'+Date.now()+'_'+Math.random().toString(36).slice(2,5);
       memory.addTask({ id, text: raw, tool: p.tool, params: p.params, when: sch.when, type: sch.type, createdAt: Date.now() });
+
+      // ── Also create via ScheduleEngine for Multi-Schedule page ──
+      var rcptResolved = null, rcptAddress = '', rcptName = '';
+      (function _agentScheduleToEngine(){
+        try {
+          var schType = 'payment';
+          if (/\b(bridge|ponte)\b/.test(low)) schType = 'bridge';
+          else if (/\b(swap|troc[ae]r?|convert)\b/.test(low)) schType = 'swap';
+          else if (/\b(cross[ -]?chain|crosschain)\b/.test(low)) schType = 'crosschain';
+          else if (/\b(multi[ -]?send|batch|lote|v[áa]rios)\b/.test(low)) schType = 'multisend';
+          else if (/\b(link|payment link)\b/.test(low)) schType = 'link_payment';
+
+          var freq = 'monthly';
+          if (/\b(daily|diario|diário|todo dia|every day)\b/.test(low)) freq = 'daily';
+          else if (/\b(weekly|semanal|toda semana|every week)\b/.test(low)) freq = 'weekly';
+          else if (/\b(bi[ -]?weekly|quinzenal|cada 15)\b/.test(low)) freq = 'biweekly';
+          else if (/\b(monthly|mensal|todo m[êe]s|every month)\b/.test(low)) freq = 'monthly';
+          else if (/\b(once|uma vez|tomorrow|amanhã|one[ -]?time)\b/.test(low)) freq = 'once';
+
+          var token = 'USDC';
+          if (/\beurc\b/i.test(raw)) token = 'EURC';
+          else if (/\bcirbtc\b/i.test(raw)) token = 'cirBTC';
+
+          var amount = parseFloat(p.params.amount) || 0;
+          var typeLabels = {payment:'Payment',bridge:'Bridge',swap:'Swap',crosschain:'CrossChain',multisend:'MultiSend',link_payment:'Payment Link'};
+          var freqLabels = {once:'One-time',daily:'Daily',weekly:'Weekly',biweekly:'Bi-weekly',monthly:'Monthly'};
+          var typeLabel = typeLabels[schType] || schType;
+
+          // Detect network for bridge/crosschain
+          var network = 'Arc_Testnet';
+          var fromNet = 'Arc_Testnet';
+          var toNet = 'Base_Sepolia';
+          function _detectChain(n) {
+            if (/ethereum|sepolia/.test(n)) return 'Ethereum_Sepolia';
+            if (/base/.test(n)) return 'Base_Sepolia';
+            if (/arbitrum/.test(n)) return 'Arbitrum_Sepolia';
+            if (/polygon|amoy/.test(n)) return 'Polygon_Amoy';
+            return null;
+          }
+          var toMM = low.match(/to\s+(\w+)/);
+          if (toMM) { var tc2 = _detectChain(toMM[1]); if (tc2) toNet = tc2; }
+          var fromMM = low.match(/(?:from\s+)?(\w+)\s+to\b/) || low.match(/from\s+(\w+)/);
+          if (fromMM) { var fc2 = _detectChain(fromMM[1]); if (fc2) fromNet = fc2; }
+          if (!fromMM && !toMM) {
+            if (/\bethereum\b/.test(low)) fromNet = 'Ethereum_Sepolia';
+            else if (/\bbase\b/.test(low)) fromNet = 'Base_Sepolia';
+            else if (/\barbitrum\b/.test(low)) fromNet = 'Arbitrum_Sepolia';
+            else if (/\bpolygon\b/.test(low)) fromNet = 'Polygon_Amoy';
+          }
+          network = fromNet;
+          if (schType === 'bridge' || schType === 'crosschain') network = fromNet + ' → ' + toNet;
+
+          var name = typeLabel + ' — ' + (amount > 0 ? (amount + ' ' + token) : '') + ' · ' + (freqLabels[freq] || freq);
+
+          // ── Recipient Resolver: detect named contact in message ──
+          rcptResolved = null; rcptAddress = ''; rcptName = '';
+          try {
+            if (typeof RecipientResolver !== 'undefined') {
+              rcptResolved = RecipientResolver.extractFromMessage(raw);
+              if (rcptResolved && !rcptResolved.multiple) {
+                rcptName = rcptResolved.name;
+                rcptAddress = rcptResolved.address || '';
+                if (rcptAddress) {
+                  var name = typeLabel + ' for ' + rcptName + ' — ' + (amount > 0 ? (amount + ' ' + token) : '') + ' · ' + (freqLabels[freq] || freq);
+                }
+              }
+            }
+          } catch(e) {}
+
+          var rcptList = [];
+          if (rcptAddress && amount > 0) {
+            rcptList = [{ addr: rcptAddress, amount: amount, note: rcptName, chainId: rcptResolved.chainId || 'Arc_Testnet', token: token }];
+          }
+
+          if (typeof ScheduleEngine !== 'undefined' && ScheduleEngine.create) {
+            ScheduleEngine.create({
+              type: schType, name: name, token: token, amount: amount, total: amount,
+              network: network, fromNetwork: fromNet, toNetwork: toNet,
+              swapToToken: schType === 'swap' ? (token === 'USDC' ? 'EURC' : 'USDC') : undefined,
+              recipients: rcptList, address: rcptAddress,
+              freq: freq, maxEx: 0, gas: 0.10,
+              nextRun: new Date(sch.when).toISOString(),
+              execCount: 0, executionHistory: [],
+              status: 'Active',
+              created: new Date().toISOString(),
+              createdBy: 'autonoma',
+              walletAddress: (typeof walletAddress !== 'undefined') ? (walletAddress || '') : '',
+              recipientName: rcptName, recipientAddress: rcptAddress
+            });
+            _log2('schedule:engine', schType + ' ' + (amount||0) + ' ' + token + ' @ ' + freq + (rcptName ? (' for ' + rcptName) : ''));
+          }
+        } catch(e) { _log2('schedule:engine:error', null, e); }
+      })();
+
       _log2('schedule', p.tool+' @ '+new Date(sch.when).toISOString());
-      return card(head('calendar-plus','Task Scheduled',{text:sch.type,cls:'live'}),
-        row('Tool', p.tool,'teal') +
+      return card(head('calendar-plus','Schedule Created',{text:sch.type,cls:'live'}),
+        row('Type', (function(){var m={payment:'Payment',bridge:'Bridge',swap:'Swap',crosschain:'CrossChain',multisend:'MultiSend',link_payment:'Payment Link'}; var t='payment'; if(/\b(bridge|ponte)\b/.test(low))t='bridge';else if(/\b(swap|troc)\b/.test(low))t='swap';else if(/\b(cross[ -]?chain)\b/.test(low))t='crosschain';else if(/\b(multi[ -]?send|batch|lote|vários)\b/.test(low))t='multisend';else if(/\b(link|payment link)\b/.test(low))t='link_payment';return m[t]||t;})(),'yellow') +
+        (rcptName ? row('Recipient', rcptName, 'purple') + row('Address', rcptAddress ? rcptAddress.slice(0,8)+'...'+rcptAddress.slice(-4) : '—', 'teal') : '') +
+        row('Amount', (parseFloat(p.params.amount)||0).toFixed(2)+' '+(/\beurc\b/i.test(raw)?'EURC':/\bcirbtc\b/i.test(raw)?'cirBTC':'USDC'),'green') +
+        row('Frequency', sch.type==='daily'?'Daily':sch.type==='weekly'?'Weekly':sch.type==='monthly'?'Monthly':sch.type==='biweekly'?'Bi-weekly':'One-time','teal') +
         row('When', new Date(sch.when).toLocaleString(),'') +
-        row('Repeat', sch.type==='daily'?'every day':'once','') +
+        row('Status','Active — view in Schedule page','green') +
         intro('Manual mode: when due I will notify you to run it (money is never auto-executed in Phase 1).'),
-        acts({icon:'x',label:'Cancel',cls:'',action:"autonomaSendQuick('cancel task "+id+"')"}));
+        acts({icon:'external-link',label:'View Schedules',cls:'primary',action:"showPage('schedule')"},
+             {icon:'x',label:'Cancel',cls:'',action:"autonomaSendQuick('cancel task "+id+"')"}));
     }
 
     // Explicit agent command channel: "agent <command>"
