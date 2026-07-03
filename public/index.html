@@ -1776,6 +1776,15 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
 .swp-pool-label{font-size:9.5px;color:var(--muted2);flex:1}
 .swp-pool-val{font-size:10px;font-weight:600;color:var(--text)}
 
+/* Rate bar (inline between input and button) */
+.swp-rate-bar{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:8px 16px;margin:0 12px;
+  background:rgba(79,142,247,.06);border:1px solid rgba(79,142,247,.15);border-radius:8px;
+}
+.swp-rate-bar span{font-size:10px;font-weight:600}
+.swp-rate-bar .yellow{color:var(--yellow)}
+
 /* Quote loading state in details */
 .swp-quote-loading{
   display:flex;align-items:center;gap:6px;
@@ -5457,285 +5466,133 @@ select.cinput option { background: #161a24; color: #dde2f0; }
           <div class="page-sub"><span class="swp-live-dot"></span>Live · Multi-Token DEX · Arc Testnet</div>
         </div>
         <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
-          <div class="kit-badge"><i class="ti ti-arrows-exchange" style="font-size:9px"></i>DEX Swap</div>
+          <button class="swp-settings-btn" onclick="swpToggleSettings()" title="Slippage settings" style="position:static;background:rgba(255,255,255,.06);border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:11px;color:var(--muted2)"><i class="ti ti-settings" id="swp-settings-icon"></i></button>
           <a href="https://docs.arc.network/app-kit/quickstarts/swap-tokens-same-chain" target="_blank" class="btn" style="font-size:9px"><i class="ti ti-book"></i>Docs</a>
         </div>
       </div>
+      <div class="swp-settings-panel" id="swp-settings-panel">
+        <div class="swp-slip-label">Max Slippage</div>
+        <div class="swp-slip-btns">
+          <button class="swp-slip-btn" onclick="swpSetSlippage(0.1,this)">0.1%</button>
+          <button class="swp-slip-btn active" onclick="swpSetSlippage(0.5,this)">0.5%</button>
+          <button class="swp-slip-btn" onclick="swpSetSlippage(1.0,this)">1.0%</button>
+          <button class="swp-slip-btn" onclick="swpSetSlippage(3.0,this)">3.0%</button>
+          <input class="swp-slip-custom" id="swp-slip-custom" type="number" min="0.01" max="50" step="0.1" placeholder="Custom" oninput="swpSetCustomSlippage(this.value)"/>
+        </div>
+        <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between">
+          <span style="font-size:9px;color:var(--muted2)">Transaction deadline</span>
+          <span style="font-size:9px;color:var(--text);font-weight:600">20 minutes</span>
+        </div>
+      </div>
       <div class="page-content" style="display:block;padding:16px">
-        <!-- ═══════════════ SWAP UI 2.0 LAYOUT ═══════════════ -->
         <div class="swap-page-layout">
-
-          <!-- ── LEFT: Swap Card Column ── -->
           <div class="swap-main-col">
-
-            <!-- PRO SWAP WIDGET -->
             <div class="swp-widget" id="swp-widget">
-
-              <!-- Tabs: Swap / Limit Order -->
               <div class="swp-tabs">
                 <span class="swp-tab active">Swap</span>
                 <span class="swp-tab">Limit Order <span class="swp-tab-soon">Soon</span></span>
               </div>
-
-              <!-- Header -->
-              <div class="swp-header">
-                <span class="swp-title"><i class="ti ti-arrows-exchange" style="color:var(--purple);margin-right:5px"></i><span class="swp-title"><i class="ti ti-arrows-exchange" style="color:var(--purple);margin-right:5px"></i>Swap</span>
-              <button class="swp-settings-btn" onclick="swpToggleSettings()" title="Slippage settings">
-                <i class="ti ti-settings" id="swp-settings-icon"></i>
-              </button>
-            </div>
-
-            <!-- Slippage settings panel -->
-            <div class="swp-settings-panel" id="swp-settings-panel">
-              <div class="swp-slip-label">Max Slippage</div>
-              <div class="swp-slip-btns">
-                <button class="swp-slip-btn" onclick="swpSetSlippage(0.1,this)">0.1%</button>
-                <button class="swp-slip-btn active" onclick="swpSetSlippage(0.5,this)">0.5%</button>
-                <button class="swp-slip-btn" onclick="swpSetSlippage(1.0,this)">1.0%</button>
-                <button class="swp-slip-btn" onclick="swpSetSlippage(3.0,this)">3.0%</button>
-                <input class="swp-slip-custom" id="swp-slip-custom" type="number" min="0.01" max="50" step="0.1" placeholder="Custom" oninput="swpSetCustomSlippage(this.value)"/>
-              </div>
-              <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between">
-                <span style="font-size:9px;color:var(--muted2)">Transaction deadline</span>
-                <span style="font-size:9px;color:var(--text);font-weight:600">20 minutes</span>
-              </div>
-            </div>
-
-            <!-- YOU PAY panel -->
-            <div class="swp-panel" id="swp-panel-in">
-              <div class="swp-panel-label">
-                <span>You Pay</span>
-                <span class="swp-bal-hint" id="swp-bal-in" onclick="swpSetMax()">
-                  Balance: <span id="swp-bal-in-val">—</span>
-                </span>
-              </div>
-              <div class="swp-input-row">
-                <input class="swp-input" id="swap-amount-in" type="number" min="0" step="any"
-                  placeholder="0.00" oninput="updateSwapRate()" autocomplete="off" spellcheck="false"/>
-                <div class="swp-token-pill" onclick="cycleTokenIn()">
-                  <div class="swp-tok-icon" id="swap-icon-in" style="background:#2775ca">U</div>
-                  <span class="swp-tok-name" id="swap-token-in">USDC</span>
-                  <i class="ti ti-chevron-down swp-tok-chevron"></i>
+              <div class="swp-panel" id="swp-panel-in">
+                <div class="swp-panel-label">
+                  <span>You Pay</span>
+                  <span class="swp-bal-hint" id="swp-bal-in" onclick="swpSetMax()">Balance: <span id="swp-bal-in-val">—</span></span>
                 </div>
-              </div>
-              <div style="display:flex;align-items:center;justify-content:space-between;margin-top:4px">
-                <div class="swp-usd" id="swap-usd-in"></div>
-                <button class="swp-max-btn" onclick="swpSetMax()" id="swp-max-btn">MAX</button>
-              </div>
-            </div>
-
-            <!-- Flip button -->
-            <div class="swp-flip-wrap">
-              <button class="swp-flip-btn" onclick="swapTokens()" title="Flip tokens">
-                <i class="ti ti-arrows-up-down"></i>
-              </button>
-            </div>
-
-            <!-- YOU RECEIVE panel -->
-            <div class="swp-panel" id="swp-panel-out" style="margin-top:0">
-              <div class="swp-panel-label">
-                <span>You Receive</span>
-                <span class="swp-bal-hint" id="swp-bal-out">
-                  Balance: <span id="swp-bal-out-val">—</span>
-                </span>
-              </div>
-              <div class="swp-input-row">
-                <input class="swp-input" id="swap-amount-out" type="number"
-                  placeholder="0.00" readonly style="color:var(--muted2)" autocomplete="off"/>
-                <div class="swp-token-pill" onclick="cycleTokenOut()">
-                  <div class="swp-tok-icon" id="swap-icon-out" style="background:#2562de">E</div>
-                  <span class="swp-tok-name" id="swap-token-out">EURC</span>
-                  <i class="ti ti-chevron-down swp-tok-chevron"></i>
-                </div>
-              </div>
-              <div class="swp-usd" id="swap-usd-out" style="margin-top:4px"></div>
-            </div>
-
-            <!-- Quote details accordion -->
-            <div class="swp-details" id="swp-details" style="display:none">
-              <div class="swp-details-header" onclick="swpToggleDetails()">
-                <span class="swp-details-rate" id="swap-rate">—</span>
-                <span class="swp-details-toggle" id="swp-details-toggle">
-                  <i class="ti ti-chevron-down" id="swp-chevron"></i>
-                </span>
-              </div>
-              <div class="swp-details-body" id="swp-details-body">
-                <div class="swp-detail-row" style="padding-top:8px">
-                  <span>Exchange Rate</span>
-                  <span class="swp-detail-val" id="swp-rate-detail">—</span>
-                </div>
-                <div class="swp-detail-row">
-                  <span>Price Impact</span>
-                  <span class="swp-detail-val" id="swp-impact-val">—</span>
-                </div>
-                <div class="swp-detail-row">
-                  <span>Minimum Received</span>
-                  <span class="swp-detail-val green" id="swp-min-received">—</span>
-                </div>
-                <div class="swp-detail-row" id="swp-fee-row">
-                  <span>LP Fee</span>
-                  <span class="swp-detail-val" id="swp-fee-val">—</span>
-                </div>
-                <div class="swp-detail-row">
-                  <span>Quote Source</span>
-                  <span class="swp-detail-val" id="swp-source-val">—</span>
-                </div>
-                <div class="swp-detail-row">
-                  <span>Route</span>
-                  <div id="swp-route" class="swp-route">
-                    <span class="swp-route-hop" id="swp-route-in">—</span>
-                    <span class="swp-route-arrow">→</span>
-                    <span class="swp-route-hop" style="font-size:8px;color:var(--muted2)" id="swp-route-pool">Pool</span>
-                    <span class="swp-route-arrow">→</span>
-                    <span class="swp-route-hop" id="swp-route-out">—</span>
+                <div class="swp-input-row">
+                  <input class="swp-input" id="swap-amount-in" type="number" min="0" step="any" placeholder="0.00" oninput="updateSwapRate()" autocomplete="off" spellcheck="false"/>
+                  <div class="swp-token-pill" onclick="cycleTokenIn()">
+                    <div class="swp-tok-icon" id="swap-icon-in" style="background:#2775ca">U</div>
+                    <span class="swp-tok-name" id="swap-token-in">USDC</span>
+                    <i class="ti ti-chevron-down swp-tok-chevron"></i>
                   </div>
                 </div>
-                <div class="swp-detail-row">
-                  <span>Slippage Tolerance</span>
-                  <span class="swp-detail-val yellow" id="swp-slip-display">0.5%</span>
-                </div>
-                <div class="swp-detail-row">
-                  <span>Network</span>
-                  <span class="swp-detail-val" style="color:var(--green)">Arc Testnet (5042002)</span>
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-top:4px">
+                  <div class="swp-usd" id="swap-usd-in"></div>
+                  <button class="swp-max-btn" onclick="swpSetMax()" id="swp-max-btn">MAX</button>
                 </div>
               </div>
+              <div class="swp-flip-wrap">
+                <button class="swp-flip-btn" onclick="swapTokens()" title="Flip tokens"><i class="ti ti-arrows-up-down"></i></button>
+              </div>
+              <div class="swp-panel swp-panel-out" id="swp-panel-out" style="margin-top:0">
+                <div class="swp-panel-label">
+                  <span>You Receive</span>
+                  <span class="swp-bal-hint" id="swp-bal-out">Balance: <span id="swp-bal-out-val">—</span></span>
+                </div>
+                <div class="swp-input-row">
+                  <input class="swp-input" id="swap-amount-out" type="number" placeholder="0.00" readonly autocomplete="off"/>
+                  <div class="swp-token-pill" onclick="cycleTokenOut()">
+                    <div class="swp-tok-icon" id="swap-icon-out" style="background:#2562de">E</div>
+                    <span class="swp-tok-name" id="swap-token-out">EURC</span>
+                    <i class="ti ti-chevron-down swp-tok-chevron"></i>
+                  </div>
+                </div>
+                <div class="swp-usd" id="swap-usd-out" style="margin-top:4px"></div>
+              </div>
+              <div class="swp-rate-bar" id="swp-rate-bar" style="display:none">
+                <span id="swap-rate">—</span>
+                <span id="swp-slip-display" class="yellow">0.5%</span>
+              </div>
+              <div class="swp-precheck" id="swp-precheck">
+                <i class="ti ti-alert-circle" id="swp-precheck-icon" style="font-size:14px;flex-shrink:0"></i>
+                <span id="swp-precheck-msg"></span>
+              </div>
+              <button class="swp-btn swp-btn-disabled" id="swap-btn" onclick="executeSwap()" disabled>
+                <i class="ti ti-arrows-exchange" id="swp-btn-icon"></i>
+                <span id="swp-btn-label">Enter an amount</span>
+              </button>
+              <div class="swp-pool-status" id="swp-pool-status" style="display:none">
+                <div class="swp-pool-dot" id="swp-pool-dot" style="background:var(--muted2)"></div>
+                <span class="swp-pool-label" id="swp-pool-label">Loading pools...</span>
+                <span class="swp-pool-val" id="swp-pool-tvl"></span>
+              </div>
             </div>
-
-            <!-- Precheck banner -->
-            <div class="swp-precheck" id="swp-precheck">
-              <i class="ti ti-alert-circle" id="swp-precheck-icon" style="font-size:14px;flex-shrink:0"></i>
-              <span id="swp-precheck-msg"></span>
-            </div>
-
-            <!-- SWAP BUTTON -->
-            <button class="swp-btn swp-btn-disabled" id="swap-btn" onclick="executeSwap()" disabled>
-              <i class="ti ti-arrows-exchange" id="swp-btn-icon"></i>
-              <span id="swp-btn-label">Enter an amount</span>
-            </button>
-
-
-            </div><!-- /swp-widget -->
-
-            <!-- Pool Status (kept from original) -->
-            <div class="swp-pool-status" id="swp-pool-status" style="display:none">
-              <div class="swp-pool-dot" id="swp-pool-dot" style="background:var(--muted2)"></div>
-              <span class="swp-pool-label" id="swp-pool-label">Loading pools…</span>
-              <span class="swp-pool-val" id="swp-pool-tvl"></span>
-            </div>
-
-          </div><!-- /swap-main-col -->
-
-          <!-- ── RIGHT: Analytics Panel ── -->
+          </div>
           <div class="swap-analytics-col">
-
-            <!-- 1) Market Overview -->
-            <div class="swa-card" id="swa-market">
+            <div class="swa-card" id="swa-summary">
               <div class="swa-head">
-                <div class="swa-title">
-                  <i class="ti ti-chart-bar" style="color:var(--blue)"></i>Market Overview
-                </div>
-                <span class="swa-badge swa-badge-live"><span class="swa-live-dot"></span>Live</span>
+                <div class="swa-title"><i class="ti ti-file-invoice" style="color:var(--purple)"></i>Swap Summary</div>
+                <span class="swa-badge" id="swp-source-val" style="background:rgba(167,139,250,.1);color:var(--purple);border-color:rgba(167,139,250,.25)">—</span>
               </div>
-              <div class="swa-overview-grid">
-                <div class="swa-ov-box">
-                  <div class="swa-ov-val" id="swa-vol24h">—</div>
-                  <div class="swa-ov-label">24h Volume</div>
-                </div>
-                <div class="swa-ov-box">
-                  <div class="swa-ov-val" id="swa-liquidity">—</div>
-                  <div class="swa-ov-label">Liquidity</div>
-                </div>
-                <div class="swa-ov-box">
-                  <div class="swa-ov-val" id="swa-active-pairs">—</div>
-                  <div class="swa-ov-label">Pairs</div>
-                </div>
-              </div>
-              <div class="swa-metric-row">
-                <span class="swa-metric-label">Exchange Rate</span>
-                <span class="swa-metric-val blue" id="swa-mkt-rate">—</span>
-              </div>
-              <div class="swa-metric-row">
-                <span class="swa-metric-label">Price Impact (est.)</span>
-                <span class="swa-metric-val" id="swa-mkt-impact">—</span>
-              </div>
-              <div class="swa-metric-row">
-                <span class="swa-metric-label">Network Fee</span>
-                <span class="swa-metric-val yellow" id="swa-mkt-fee">—</span>
-              </div>
+              <div class="swa-metric-row"><span class="swa-metric-label">Exchange Rate</span><span class="swa-metric-val blue" id="swp-rate-detail">—</span></div>
+              <div class="swa-metric-row"><span class="swa-metric-label">Price Impact</span><span class="swa-metric-val" id="swp-impact-val">—</span></div>
+              <div class="swa-metric-row"><span class="swa-metric-label">Minimum Received</span><span class="swa-metric-val green" id="swp-min-received">—</span></div>
+              <div class="swa-metric-row" id="swp-fee-row"><span class="swa-metric-label">LP Fee</span><span class="swa-metric-val" id="swp-fee-val">—</span></div>
+              <div class="swa-metric-row"><span class="swa-metric-label">Route</span><span class="swa-metric-val" id="swp-route-pool" style="font-size:9px">—</span></div>
+              <div class="swa-metric-row"><span class="swa-metric-label">Network</span><span class="swa-metric-val green">Arc Testnet (5042002)</span></div>
             </div>
-
-            <!-- 3) Route Preview -->
             <div class="swa-card" id="swa-route-card">
               <div class="swa-head">
-                <div class="swa-title">
-                  <i class="ti ti-route" style="color:var(--yellow)"></i>Route Preview
-                </div>
+                <div class="swa-title"><i class="ti ti-route" style="color:var(--yellow)"></i>Route Preview</div>
                 <span class="swa-badge" style="background:rgba(245,158,11,.1);color:var(--yellow);border-color:rgba(245,158,11,.25)" id="swa-route-type-badge">Direct</span>
               </div>
               <div class="swa-route-preview" id="swa-route-preview">
-                <div class="swa-route-node">
-                  <div class="swa-route-node-icon" id="swa-rp-icon-in" style="background:#2775ca">U</div>
-                  <div class="swa-route-node-label" id="swa-rp-tok-in">USDC</div>
-                </div>
-                <div class="swa-route-line">
-                  <div class="swa-route-line-bar"></div>
-                  <div class="swa-route-line-label" id="swa-rp-pool-label">Pool</div>
-                </div>
-                <div class="swa-route-node">
-                  <div class="swa-route-node-icon" style="background:rgba(255,255,255,.1);color:var(--muted2);font-size:12px"><i class="ti ti-droplet"></i></div>
-                  <div class="swa-route-node-label">AMM</div>
-                </div>
-                <div class="swa-route-line">
-                  <div class="swa-route-line-bar"></div>
-                  <div class="swa-route-line-label" id="swa-rp-impact">—</div>
-                </div>
-                <div class="swa-route-node">
-                  <div class="swa-route-node-icon" id="swa-rp-icon-out" style="background:#2562de">E</div>
-                  <div class="swa-route-node-label" id="swa-rp-tok-out">EURC</div>
-                </div>
+                <div class="swa-route-node"><div class="swa-route-node-icon" id="swa-rp-icon-in" style="background:#2775ca">U</div><div class="swa-route-node-label" id="swa-rp-tok-in">USDC</div></div>
+                <div class="swa-route-line"><div class="swa-route-line-bar"></div><div class="swa-route-line-label" id="swa-rp-pool-label">Pool</div></div>
+                <div class="swa-route-node"><div class="swa-route-node-icon" style="background:rgba(255,255,255,.1);color:var(--muted2);font-size:12px"><i class="ti ti-droplet"></i></div><div class="swa-route-node-label">AMM</div></div>
+                <div class="swa-route-line"><div class="swa-route-line-bar"></div><div class="swa-route-line-label" id="swa-rp-impact">—</div></div>
+                <div class="swa-route-node"><div class="swa-route-node-icon" id="swa-rp-icon-out" style="background:#2562de">E</div><div class="swa-route-node-label" id="swa-rp-tok-out">EURC</div></div>
               </div>
               <div style="margin-top:10px;display:flex;gap:8px">
-                <div class="swa-ov-box" style="flex:1">
-                  <div class="swa-ov-val" id="swa-rp-best-price" style="font-size:11px">—</div>
-                  <div class="swa-ov-label">Best Price</div>
-                </div>
-                <div class="swa-ov-box" style="flex:1">
-                  <div class="swa-ov-val" id="swa-rp-impact2" style="font-size:11px">—</div>
-                  <div class="swa-ov-label">Price Impact</div>
-                </div>
-                <div class="swa-ov-box" style="flex:1">
-                  <div class="swa-ov-val" style="font-size:11px;color:var(--teal)">~1-3s</div>
-                  <div class="swa-ov-label">Est. Time</div>
-                </div>
+                <div class="swa-ov-box" style="flex:1"><div class="swa-ov-val" id="swa-rp-best-price" style="font-size:11px">—</div><div class="swa-ov-label">Best Price</div></div>
+                <div class="swa-ov-box" style="flex:1"><div class="swa-ov-val" id="swa-rp-impact2" style="font-size:11px">—</div><div class="swa-ov-label">Price Impact</div></div>
+                <div class="swa-ov-box" style="flex:1"><div class="swa-ov-val" id="swa-rp-eta" style="font-size:11px;color:var(--teal)">~1-3s</div><div class="swa-ov-label">Est. Time</div></div>
               </div>
             </div>
-
-            <!-- 4) Recent Swaps -->
             <div class="swa-card" id="swa-recent">
               <div class="swa-head">
-                <div class="swa-title">
-                  <i class="ti ti-history" style="color:var(--muted2)"></i>Recent Swaps
-                </div>
-                <span style="font-size:8px;color:var(--muted2)">session</span>
+                <div class="swa-title"><i class="ti ti-history" style="color:var(--muted2)"></i>Recent Swaps</div>
+                <button class="btn" onclick="swpSyncRecentSwaps()" style="font-size:8px;padding:2px 6px" title="Refresh"><i class="ti ti-refresh"></i></button>
               </div>
-              <div id="swa-hist-list">
-                <div class="swa-empty">
-                  <i class="ti ti-arrows-exchange"></i>
-                  Recent swaps will appear here
-                </div>
-              </div>
-              <!-- hidden original swap-history kept for JS compat -->
-              <div id="swap-history" style="display:none"></div>
+              <div id="swa-hist-list"><div class="swa-empty"><i class="ti ti-arrows-exchange"></i><span>No recent swaps</span></div></div>
             </div>
-
-          </div><!-- /swap-analytics-col -->
-
-        </div><!-- /swap-page-layout -->
+          </div>
+        </div>
       </div>
-    </div>
-
-    <!-- Token Selector Modal (shared between Swap in/out) -->
-    <div class="tok-modal-overlay" id="tok-modal-overlay" onclick="closeTokenSelector(event)">
+      <div id="swp-details" style="display:none"><div id="swp-details-body" style="display:none"></div></div>
+      <div id="swap-history" style="display:none"></div>
+      <div id="swa-market" style="display:none"><div id="swa-vol24h" style="display:none">—</div><div id="swa-liquidity" style="display:none">—</div><div id="swa-active-pairs" style="display:none">—</div><div id="swa-mkt-rate" style="display:none">—</div><div id="swa-mkt-impact" style="display:none">—</div><div id="swa-mkt-fee" style="display:none">—</div></div>
+      <div id="swp-route" style="display:none"><span id="swp-route-in"></span><span id="swp-route-out"></span></div>
+    </div><div class="tok-modal-overlay" id="tok-modal-overlay" onclick="closeTokenSelector(event)">
       <div class="tok-modal" id="tok-modal" onclick="event.stopPropagation()">
         <div class="tok-modal-head">
           <span class="tok-modal-title" id="tok-modal-title">Select Token</span>
@@ -16840,6 +16697,8 @@ async function signTx(){
         try {
           receipt = await batchTx.wait();
           _log(`[Multisend] batch confirmed in block ${receipt.blockNumber}`);
+          // Wait for explorer indexer to catch up
+          await new Promise(function(r) { setTimeout(r, 3000); });
         } catch(waitErr) {
           _err('[Multisend] Error waiting for receipt:', waitErr);
           // Still try to return the hash so the UI can show success
@@ -17465,6 +17324,39 @@ function swpToggleDetails() {
   if (chevron) chevron.className = SWP.detailOpen ? 'ti ti-chevron-up' : 'ti ti-chevron-down';
 }
 
+function swpSyncRecentSwaps() {
+  var list = document.getElementById('swa-hist-list');
+  if (!list) return;
+  var histEl = document.getElementById('swap-history');
+  if (!histEl || !histEl.children.length) {
+    // Try ExecutionEngine task history
+    if (typeof ExecutionEngine !== 'undefined' && ExecutionEngine.getTasks) {
+      var tasks = ExecutionEngine.getTasks();
+      var swapTasks = tasks.filter(function(t) { return t.type === 'swap' && t.status === 'completed'; }).slice(-5).reverse();
+      if (swapTasks.length) {
+        list.innerHTML = swapTasks.map(function(t) {
+          var amt = (t.metadata && t.metadata.amtIn) ? t.metadata.amtIn.toFixed(2) : '?';
+          var tIn = (t.metadata && t.metadata.tIn) ? t.metadata.tIn : '?';
+          var tOut = (t.metadata && t.metadata.tOut) ? t.metadata.tOut : '?';
+          var time = t.completedAt ? new Date(t.completedAt).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}) : '';
+          return '<div class="swa-hist-item"><div class="swa-hist-status ok"></div><div><div class="swa-hist-tokens">' + tIn + ' <span style="color:var(--muted2);font-size:9px">→</span> ' + tOut + '</div><div class="swa-hist-amt">' + amt + ' ' + tIn + '</div></div><div class="swa-hist-time">' + time + '</div></div>';
+        }).join('');
+        return;
+      }
+    }
+    list.innerHTML = '<div class="swa-empty"><i class="ti ti-arrows-exchange"></i><span>No recent swaps</span></div>';
+    return;
+  }
+  var items = histEl.querySelectorAll('.swp-hist-item');
+  if (!items.length) { list.innerHTML = '<div class="swa-empty"><i class="ti ti-arrows-exchange"></i><span>No recent swaps</span></div>'; return; }
+  var html = '';
+  for (var i = Math.max(0, items.length - 5); i < items.length; i++) {
+    var item = items[i];
+    html += '<div class="swa-hist-item">' + item.innerHTML + '</div>';
+  }
+  list.innerHTML = html || '<div class="swa-empty"><i class="ti ti-arrows-exchange"></i><span>No recent swaps</span></div>';
+}
+
 function swpSetMax() {
   if (!walletAddress) { toast('Connect wallet first', 'warning'); return; }
   const balText = document.getElementById('swp-bal-in-val')?.textContent || '0';
@@ -17821,6 +17713,8 @@ async function updateSwapRate() {
       }
     }
     if (detailEl) detailEl.style.display = 'none';
+    var rateBar = document.getElementById('swp-rate-bar');
+    if (rateBar) rateBar.style.display = 'none';
     swpHidePrecheck();
     SWP.lastQuote = null;
     if (!walletAddress) swpSetBtn('nowallt', 'Connect Wallet');
@@ -17832,6 +17726,8 @@ async function updateSwapRate() {
   if (rateEl) rateEl.textContent = 'Finding route…';
   if (outEl)  outEl.value = '';
   if (detailEl) detailEl.style.display = '';
+  var rateBar = document.getElementById('swp-rate-bar');
+  if (rateBar) rateBar.style.display = '';
   swpHidePrecheck();
 
   swapRateTimer = setTimeout(async () => {
@@ -18295,6 +18191,8 @@ async function executeSwap() {
         throw new Error('Swap transaction not confirmed on-chain (receipt status: ' + (swapReceipt ? swapReceipt.status : 'null') + ')');
       }
       _log('[swap] hop', i + 1, 'confirmed:', swapTx.hash, 'block:', swapReceipt.blockNumber);
+      // Wait for explorer indexer
+      await new Promise(function(r) { setTimeout(r, 3000); });
       SwapEngine.notifyExecutionComplete(swapReceipt);
 
       // Track volume for APR
@@ -18687,6 +18585,8 @@ async function executeBridge(){
     renderBridgeStep(1,'active',burnTx.hash);
     const burnReceipt = await burnTx.wait();
     if (!burnReceipt || burnReceipt.status !== 1) throw new Error("depositForBurn transaction failed (status=0)");
+    _log("[Bridge] depositForBurn confirmed ✓");
+    await new Promise(function(r) { setTimeout(r, 3000); });
     _log("[Bridge] Burn confirmed. Logs:", burnReceipt.logs.length);
     renderBridgeStep(1,'success',burnTx.hash);
 
@@ -18848,6 +18748,7 @@ async function executeBridge(){
       throw new Error(`receiveMessage() failed on-chain (status=0). Tx: ${mintTx.hash}`);
     }
     _log("[Bridge] receiveMessage() confirmed ✓ USDC minted on destination.");
+    await new Promise(function(r) { setTimeout(r, 3000); });
     renderBridgeStep(4,'success',mintTx.hash);
 
     document.getElementById('bridge-step-status').textContent='Success ✓';
@@ -18857,7 +18758,7 @@ async function executeBridge(){
       icon:'ti-topology-star-3', color:'var(--teal)',
       label:`${amt} USDC: ${fromChain.name} → ${toChain.name}`,
       sub:`CCTP v2 · ${new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})}`,
-      txHash: mintTx.hash, dotColor:'#2dd4bf'
+      txHash: mintTx.hash, dotColor:'#2dd4bf', explorer: toConfig.explorer
     });
     toast(`✓ Bridged ${amt} USDC from ${fromChain.name} to ${toChain.name}`,'success');
     // Log to Reports (local + onchain)
@@ -18883,13 +18784,15 @@ async function executeBridge(){
 }
 
 // ── History helper ─────────────────────────────────────────
-function addToHistory(containerId,{icon,color,label,sub,txHash,dotColor}){
+function addToHistory(containerId,{icon,color,label,sub,txHash,dotColor,explorer}){
   const c=document.getElementById(containerId);
+  if(!c)return;
   const empty=c.querySelector('[style*="text-align"]');
   if(empty)empty.remove();
   const div=document.createElement('div');
   div.className='tx-item';
-  setSafeHTML(div, `<div class="tx-dot" style="background:${dotColor}"></div><div style="flex:1"><div style="font-weight:600;font-size:9px">${_safePurify(label)}</div><div style="font-size:8px;color:var(--muted2)">${_safePurify(sub)}</div></div><a href="https://testnet.arcscan.app/tx/${escHtml(txHash)}" target="_blank" style="color:var(--blue);font-size:8px;text-decoration:none;flex-shrink:0"><i class="ti ti-external-link" style="font-size:9px"></i></a>`);
+  const explorerBase = explorer || 'https://testnet.arcscan.app';
+  setSafeHTML(div, `<div class="tx-dot" style="background:${dotColor}"></div><div style="flex:1"><div style="font-weight:600;font-size:9px">${_safePurify(label)}</div><div style="font-size:8px;color:var(--muted2)">${_safePurify(sub)}</div></div><a href="${escHtml(explorerBase.replace(/\/$/,''))}/tx/${escHtml(txHash)}" target="_blank" style="color:var(--blue);font-size:8px;text-decoration:none;flex-shrink:0"><i class="ti ti-external-link" style="font-size:9px"></i></a>`);
   c.prepend(div);
 }
 
@@ -25218,6 +25121,9 @@ async function saExecuteSend() {
       throw new Error('Batch transaction not confirmed on-chain');
     }
     _log('[SendAssets] Batch confirmed in block', receipt.blockNumber, '| hash:', tx.hash);
+
+    // Wait for explorer indexer to catch up (ArcScan needs ~3s after confirmation)
+    await new Promise(function(r) { setTimeout(r, 3000); });
 
     if (btnContent) btnContent.innerHTML = '<i class="ti ti-check-circle"></i> Sent!';
     const feeUsd = Number(feeRaw) / Math.pow(10, saGetTokenDecimals());
@@ -36170,11 +36076,11 @@ window.addEventListener('unhandledrejection', function(e) {
     }
   };
 
-  // Observer: watch swp-detail changes to sync analytics
+  // Observer: watch summary card changes to sync analytics
   function startObserver() {
-    const target = document.getElementById('swp-details');
+    var target = document.getElementById('swa-summary') || document.getElementById('swp-details');
     if (!target) { setTimeout(startObserver, 500); return; }
-    const obs = new MutationObserver(function() {
+    var obs = new MutationObserver(function() {
       syncMarketOverview();
       syncRoutePreview();
       syncSwapHistory();
