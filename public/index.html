@@ -5,19 +5,13 @@
 <link rel="icon" type="image/svg+xml" href="/favicon-main.svg"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>Elligentt — Batch Payments | Arc Testnet</title>
-<meta name="description" content="Elligentt — Enterprise-grade batch payment and DeFi infrastructure on Arc Network. Send USDC to 500+ recipients, swap, bridge, liquidity pools, and automated scheduling. Built with Circle's App Kit."/>
-<meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large"/>
-<meta name="googlebot" content="index, follow, noarchive"/>
-<meta property="og:title" content="Elligentt — Enterprise Batch Payments on Arc Testnet"/>
-<meta property="og:description" content="Batch USDC payments, multi-chain bridge, DEX swap, liquidity pools, payment links, invoicing, and AI-powered automation on Arc Network."/>
+<meta name="description" content="Batch USDC payments, swap and bridge on Arc Testnet. Send to 500 recipients in one transaction. Powered by Elligentt Contracts."/>
+<meta property="og:title" content="Elligentt — Batch Payments on Arc Testnet"/>
+<meta property="og:description" content="Send USDC to hundreds of wallets in one transaction. Swap, bridge, invoices."/>
 <meta property="og:type" content="website"/>
-<meta property="og:url" content="https://elligentt.xyz"/>
-<meta property="og:site_name" content="Elligentt"/>
+<meta property="og:url" content="https://arc-pay.pages.dev"/>
 <meta name="twitter:card" content="summary_large_image"/>
-<meta name="twitter:title" content="Elligentt — Enterprise Payment Infrastructure"/>
-<meta name="twitter:description" content="Batch payments, swap, bridge, and automated DeFi on Arc Network. Built for institutional and individual use."/>
-<meta name="twitter:site" content="@elligentt"/>
-<link rel="canonical" href="https://elligentt.xyz"/>
+<meta name="twitter:title" content="Elligentt — Batch Payments on Arc Testnet"/>
 <meta name="theme-color" content="#4f8ef7"/>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-title" content="Elligentt"/>
@@ -4117,13 +4111,13 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
 .stg-section-title i{font-size:13px;color:var(--blue)}
 .stg-row{margin-bottom:4px}
 .stg-label{font-size:9.5px;color:var(--muted2);margin-bottom:3px;font-weight:500}
-.stg-toggle{display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:rgba(0,0,0,.15);border:1px solid var(--border);border-radius:6px;font-size:10px;font-weight:500;color:var(--text);cursor:pointer;transition:all .15s;margin-bottom:4px;user-select:none}
+.stg-toggle{position:relative;display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:rgba(0,0,0,.15);border:1px solid var(--border);border-radius:6px;font-size:10px;font-weight:500;color:var(--text);cursor:pointer;transition:all .15s;margin-bottom:4px;user-select:none}
 .stg-toggle:hover{border-color:rgba(79,142,247,.3)}
 .stg-toggle.on{border-color:rgba(34,197,94,.3);background:rgba(34,197,94,.06)}
 .stg-toggle::after{content:'';width:32px;height:18px;border-radius:9px;background:var(--border);position:relative;transition:background .2s;flex-shrink:0}
-.stg-toggle::before{content:'';width:14px;height:14px;border-radius:50%;background:#8892aa;position:absolute;right:calc(100% - 16px);transform:translateX(-1px);transition:all .2s;z-index:1}
+.stg-toggle::before{content:'';width:14px;height:14px;border-radius:50%;background:#8892aa;position:absolute;top:50%;transform:translateY(-50%);right:28px;transition:all .2s;z-index:1}
 .stg-toggle.on::after{background:rgba(34,197,94,.4)}
-.stg-toggle.on::before{right:2px;width:14px;height:14px;background:var(--green)}
+.stg-toggle.on::before{right:12px;width:14px;height:14px;background:var(--green)}
 .stg-secret{font-family:'JetBrains Mono',monospace}
 .stg-provider-card .stg-toggle{font-size:9px;padding:6px 10px}
 .stg-status-badge{font-size:8px;padding:2px 7px;border-radius:10px;font-weight:600;margin-left:auto}
@@ -5206,7 +5200,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
   <aside class="sidebar">
     <div class="logo">
       <div class="logo-icon"><img src="/favicon-main.svg" alt="Elligentt" style="width:100%;height:100%;display:block;object-fit:contain"></div>
-      <div class="logo-text">Elligentt<span class="logo-badge">App Kit</span></div>
+      <div class="logo-text">Elligentt</div>
       <button class="sidebar-collapse-btn" onclick="toggleSidebar()" title="Collapse menu"><i class="ti ti-layout-sidebar-left-collapse"></i></button>
     </div>
     <nav class="nav">
@@ -12203,6 +12197,340 @@ let pool = new Proxy({}, {
 // ── Backward-compat: keep old TOKENS array working ─────────
 const TOKENS = TOKEN_LIST.map(t => ({ sym:t.sym, icon:t.icon, color:t.color, get rate() { return getTokenUSDRate(t.sym); } }));
 
+// ══════════════════════════════════════════════════════════
+//  EXECUTION ENGINE — Global task orchestration & monitoring
+// ══════════════════════════════════════════════════════════
+const ExecutionEngine = {
+  _tasks: [],
+  _maxTasks: 200,
+  _taskCounter: 0,
+  _queue: [],
+  _watchers: {},
+  _metrics: { totalTasks:0, completed:0, failures:0, timeouts:0, cancellations:0, retries:0, activeCount:0, totalExecTime:0 },
+
+  // ── Task Manager ──
+
+  createTask(type, origin, metadata) {
+    this._taskCounter++;
+    var task = {
+      id: 'task-' + Date.now() + '-' + this._taskCounter,
+      type: type,
+      origin: origin,
+      status: 'queued',
+      startedAt: Date.now(),
+      completedAt: null,
+      duration: 0,
+      wallet: (typeof walletAddress !== 'undefined' && walletAddress) || null,
+      chain: (typeof activeChainId !== 'undefined' && activeChainId) || null,
+      metadata: metadata || {},
+      error: null,
+      retryCount: 0,
+    };
+    this._tasks.push(task);
+    if (this._tasks.length > this._maxTasks) this._tasks.shift();
+    this._metrics.totalTasks++;
+    this._metrics.activeCount = this._tasks.filter(function(t) { return t.status !== 'completed' && t.status !== 'failed' && t.status !== 'cancelled'; }).length;
+    this._emit('taskCreated', task);
+    this._emit('executionQueued', task);
+    return task;
+  },
+
+  startTask(taskId) {
+    var task = this._findTask(taskId);
+    if (!task) return null;
+    task.status = 'preparing';
+    this._emit('executionStarted', task);
+    this._notifyWatchers('executionStarted', task);
+    return task;
+  },
+
+  completeTask(taskId, result) {
+    var task = this._findTask(taskId);
+    if (!task) return;
+    task.status = 'completed';
+    task.completedAt = Date.now();
+    task.duration = task.completedAt - task.startedAt;
+    task.result = result;
+    this._metrics.completed++;
+    this._metrics.activeCount = this._tasks.filter(function(t) { return t.status !== 'completed' && t.status !== 'failed' && t.status !== 'cancelled'; }).length;
+    this._metrics.totalExecTime += task.duration;
+    this._emit('executionCompleted', task);
+    this._notifyWatchers('executionCompleted', task);
+    this._syncEngines(task);
+  },
+
+  failTask(taskId, error) {
+    var task = this._findTask(taskId);
+    if (!task) return;
+    task.status = 'failed';
+    task.completedAt = Date.now();
+    task.duration = task.completedAt - task.startedAt;
+    task.error = (error && (error.message || String(error))) || 'unknown';
+    this._metrics.failures++;
+    this._metrics.activeCount = this._tasks.filter(function(t) { return t.status !== 'completed' && t.status !== 'failed' && t.status !== 'cancelled'; }).length;
+    this._emit('executionFailed', task);
+    this._notifyWatchers('executionFailed', task);
+  },
+
+  cancelTask(taskId) {
+    var task = this._findTask(taskId);
+    if (!task) return;
+    if (task.status === 'signing' || task.status === 'broadcasting' || task.status === 'confirmed') return;
+    task.status = 'cancelled';
+    task.completedAt = Date.now();
+    task.duration = task.completedAt - task.startedAt;
+    this._metrics.cancellations++;
+    this._metrics.activeCount = this._tasks.filter(function(t) { return t.status !== 'completed' && t.status !== 'failed' && t.status !== 'cancelled'; }).length;
+    this._emit('executionCancelled', task);
+    this._notifyWatchers('executionCancelled', task);
+  },
+
+  retryTask(taskId) {
+    var task = this._findTask(taskId);
+    if (!task) return;
+    task.retryCount++;
+    this._metrics.retries++;
+    this._emit('executionRetried', task);
+  },
+
+  _findTask(id) {
+    for (var i = 0; i < this._tasks.length; i++) {
+      if (this._tasks[i].id === id) return this._tasks[i];
+    }
+    return null;
+  },
+
+  _syncEngines(task) {
+    if (typeof UnifiedBalanceEngine !== 'undefined' && UnifiedBalanceEngine.reconcile) {
+      UnifiedBalanceEngine.reconcile();
+    }
+    if (typeof ConfigurationEngine !== 'undefined' && ConfigurationEngine.sync) {
+      ConfigurationEngine.sync();
+    }
+    this._emit('enginesSynced', { task: task.id, ts: Date.now() });
+  },
+
+  // ── Queue ──
+
+  enqueue(taskId) {
+    this._queue.push(taskId);
+    this._emit('queueEntered', { taskId: taskId, ts: Date.now() });
+  },
+
+  dequeue() {
+    var id = this._queue.shift();
+    if (id) this._emit('queueExited', { taskId: id, ts: Date.now() });
+    return id;
+  },
+
+  // ── Events ──
+
+  watch(event, fn) {
+    if (!this._watchers[event]) this._watchers[event] = [];
+    this._watchers[event].push(fn);
+  },
+
+  _emit(event, data) {},
+
+  _notifyWatchers(event, data) {
+    var fns = this._watchers[event];
+    if (fns) fns.forEach(function(fn) { try { fn(data); } catch(e) {} });
+  },
+
+  // ── Recovery ──
+
+  recover() {
+    var self = this;
+    this._tasks.forEach(function(t) {
+      if (t.status === 'preparing' || t.status === 'validating' || t.status === 'queued') {
+        t.status = 'cancelled';
+        t.completedAt = Date.now();
+        t.error = 'recovery:page_reload';
+        self._metrics.cancellations++;
+      }
+    });
+    this._metrics.activeCount = this._tasks.filter(function(t) { return t.status !== 'completed' && t.status !== 'failed' && t.status !== 'cancelled'; }).length;
+    this._emit('enginesRecovered', { ts: Date.now() });
+  },
+
+  // ── Health ──
+
+  healthCheck() {
+    var issues = [];
+    if (this._queue.length > 50) issues.push('queue:congested');
+    var orphaned = this._tasks.filter(function(t) { return t.status === 'preparing' && (Date.now() - t.startedAt) > 120000; });
+    if (orphaned.length) issues.push('tasks:orphaned(' + orphaned.length + ')');
+    return {
+      healthy: issues.length === 0,
+      issues: issues,
+      queueSize: this._queue.length,
+      activeTasks: this._metrics.activeCount,
+      totalTasks: this._metrics.totalTasks,
+      timestamp: Date.now(),
+    };
+  },
+
+  // ── Metrics ──
+
+  getMetrics() { return this._metrics; },
+  getTasks(filterStatus) {
+    if (!filterStatus) return this._tasks;
+    return this._tasks.filter(function(t) { return t.status === filterStatus; });
+  },
+};
+
+// ── Wire ExecutionEngine to existing engine events ──
+(function() {
+  // Wire to SwapEngine events once available
+  var _wireInterval = setInterval(function() {
+    if (typeof SwapEngine !== 'undefined' && SwapEngine.watch) {
+      clearInterval(_wireInterval);
+      SwapEngine.watch('swapExecutionStarted', function(details) {
+        var task = ExecutionEngine.createTask('swap', 'user', details);
+        ExecutionEngine.startTask(task.id);
+      });
+      SwapEngine.watch('swapCompleted', function(receipt) {
+        var tasks = ExecutionEngine.getTasks('preparing');
+        for (var i = tasks.length - 1; i >= 0; i--) {
+          if (tasks[i].type === 'swap') { ExecutionEngine.completeTask(tasks[i].id, receipt); break; }
+        }
+      });
+      SwapEngine.watch('swapFailed', function(err) {
+        var tasks = ExecutionEngine.getTasks('preparing');
+        for (var i = tasks.length - 1; i >= 0; i--) {
+          if (tasks[i].type === 'swap') { ExecutionEngine.failTask(tasks[i].id, err); break; }
+        }
+      });
+    }
+    if (typeof BridgeEngine !== 'undefined' && BridgeEngine.watch) {
+      BridgeEngine.watch('bridgeExecutionStarted', function(details) {
+        var task = ExecutionEngine.createTask('bridge', 'user', details);
+        ExecutionEngine.startTask(task.id);
+      });
+      BridgeEngine.watch('bridgeCompleted', function(receipt) {
+        var tasks = ExecutionEngine.getTasks('preparing');
+        for (var i = tasks.length - 1; i >= 0; i--) {
+          if (tasks[i].type === 'bridge') { ExecutionEngine.completeTask(tasks[i].id, receipt); break; }
+        }
+      });
+      BridgeEngine.watch('bridgeFailed', function(err) {
+        var tasks = ExecutionEngine.getTasks('preparing');
+        for (var i = tasks.length - 1; i >= 0; i--) {
+          if (tasks[i].type === 'bridge') { ExecutionEngine.failTask(tasks[i].id, err); break; }
+        }
+      });
+    }
+  }, 50);
+})();
+
+// ── Recovery on page load ──
+if (typeof window !== 'undefined') {
+  setTimeout(function() { ExecutionEngine.recover(); }, 100);
+}
+
+// ══════════════════════════════════════════════════════════
+//  BRIDGE ENGINE — Internal route, execution & recovery layer
+// ══════════════════════════════════════════════════════════
+const BridgeEngine = {
+  _cache: {},
+  _cacheTTL: 30000,
+  _execState: 'idle',
+  _watchers: {},
+  _metrics: { bridges:0, completed:0, failures:0, recoveries:0, turboCount:0, standardCount:0, cacheHits:0, cacheMisses:0, totalExecTime:0, totalBridgeTime:0 },
+
+  // ── Route/Estimate ──
+
+  cacheEstimate(fromId, toId, amt, estimate) {
+    var key = fromId + ':' + toId + ':' + Number(amt).toFixed(4);
+    this._cache[key] = { estimate: estimate, ts: Date.now() };
+  },
+
+  getCachedEstimate(fromId, toId, amt) {
+    var key = fromId + ':' + toId + ':' + Number(amt).toFixed(4);
+    var entry = this._cache[key];
+    if (entry && (Date.now() - entry.ts) < this._cacheTTL) { this._metrics.cacheHits++; return entry.estimate; }
+    this._metrics.cacheMisses++;
+    return null;
+  },
+
+  notifyEstimateUpdated(fromId, toId, amt, fee, receive) {
+    this._emit('bridgeQuoteLoaded', { from: fromId, to: toId, amt: amt, fee: fee, receive: receive, ts: Date.now() });
+    this._notifyWatchers('bridgeQuoteLoaded', { from: fromId, to: toId, amt: amt, fee: fee, receive: receive });
+  },
+
+  // ── Execution ──
+
+  notifyExecutionStart(details) {
+    this._execState = 'executing';
+    this._metrics.bridges++;
+    this._emit('bridgeExecutionStarted', details);
+    this._notifyWatchers('bridgeExecutionStarted', details);
+  },
+
+  notifyTurboStart(details) {
+    this._metrics.turboCount++;
+    this.notifyExecutionStart(details);
+  },
+
+  notifyStandardStart(details) {
+    this._metrics.standardCount++;
+    this.notifyExecutionStart(details);
+  },
+
+  notifyExecutionComplete(receipt) {
+    this._execState = 'idle';
+    this._metrics.completed++;
+    this._emit('bridgeCompleted', { receipt: receipt, ts: Date.now() });
+    this._notifyWatchers('bridgeCompleted', { receipt: receipt, ts: Date.now() });
+  },
+
+  notifyExecutionFailed(err) {
+    this._execState = 'idle';
+    this._metrics.failures++;
+    this._emit('bridgeFailed', { error: (err && err.message) || 'unknown', ts: Date.now() });
+    this._notifyWatchers('bridgeFailed', { error: (err && err.message) || 'unknown' });
+  },
+
+  notifyRecovery(intentId) {
+    this._metrics.recoveries++;
+    this._emit('bridgeRecovered', { intentId: intentId, ts: Date.now() });
+  },
+
+  // ── Events ──
+
+  watch(event, fn) {
+    if (!this._watchers[event]) this._watchers[event] = [];
+    this._watchers[event].push(fn);
+  },
+
+  _emit(event, data) {},
+
+  _notifyWatchers(event, data) {
+    var fns = this._watchers[event];
+    if (fns) fns.forEach(function(fn) { try { fn(data); } catch(e) {} });
+  },
+
+  // ── Cache ──
+
+  invalidateCache() { this._cache = {}; },
+
+  // ── Health ──
+
+  healthCheck() {
+    var issues = [];
+    if (typeof CHAINS === 'undefined' || !CHAINS || !CHAINS.length) issues.push('chains:missing');
+    if (typeof bridgeFromIdx === 'undefined' || typeof bridgeToIdx === 'undefined') issues.push('chain_indices:missing');
+    if (typeof walletAddress !== 'string' || !walletAddress) issues.push('wallet:disconnected');
+    return { healthy: issues.length === 0, issues: issues, execState: this._execState, timestamp: Date.now() };
+  },
+
+  // ── Metrics ──
+
+  getMetrics() { return this._metrics; },
+  recordExecTime(ms) { this._metrics.totalExecTime = (this._metrics.totalExecTime || 0) + ms; },
+  recordBridgeTime(ms) { this._metrics.totalBridgeTime = (this._metrics.totalBridgeTime || 0) + ms; },
+};
+
 let swapTokenInIdx  = 0, swapTokenOutIdx = 1;
 let bridgeFromIdx   = 1, bridgeToIdx     = 0;  // Sepolia → Arc
 
@@ -12781,6 +13109,7 @@ async function refreshBalance() {
     }
     // cirBTC not fetched in main refresh (Send Assets specific)
     updateSwapBalancesDisplay(); // keep swap widget balances fresh
+    UnifiedBalanceEngine.reconcile();
     return fmt;
   } catch(e) {
     _warn('refreshBalance error:', e.message);
@@ -16828,6 +17157,122 @@ async function executeInParts(){
 //  • Slippage + min-received + price impact
 // ══════════════════════════════════════════════════════════
 
+// ══════════════════════════════════════════════════════════
+//  SWAP ENGINE — Internal quote, route, execution & monitoring
+// ══════════════════════════════════════════════════════════
+const SwapEngine = {
+  _cache: {},
+  _quoteCacheTTL: 15000,
+  _routeCacheTTL: 30000,
+  _execState: 'idle',
+  _watchers: {},
+  _metrics: { quotes:0, cacheHits:0, cacheMisses:0, executions:0, confirmations:0, failures:0, fallbacks:0, totalQuoteTime:0, totalExecTime:0 },
+
+  // ── Quote ──
+
+  getCachedQuote(tokenIn, tokenOut, amtIn) {
+    var key = tokenIn + ':' + tokenOut + ':' + Number(amtIn).toFixed(6);
+    var entry = this._cache[key];
+    if (entry && (Date.now() - entry.ts) < this._quoteCacheTTL) { this._metrics.cacheHits++; return entry.quote; }
+    this._metrics.cacheMisses++;
+    return null;
+  },
+
+  cacheQuote(tokenIn, tokenOut, amtIn, quote) {
+    var key = tokenIn + ':' + tokenOut + ':' + Number(amtIn).toFixed(6);
+    this._cache[key] = { quote: quote, ts: Date.now() };
+  },
+
+  notifyQuoteLoaded(quote) {
+    this._metrics.quotes++;
+    this._emit('swapQuoteLoaded', quote);
+    this._notifyWatchers('swapQuoteLoaded', quote);
+  },
+
+  // ── Route ──
+
+  notifyRouteSelected(route) {
+    this._emit('swapRouteSelected', route);
+    this._notifyWatchers('swapRouteSelected', route);
+  },
+
+  // ── Execution ──
+
+  notifyExecutionStart(details) {
+    this._execState = 'executing';
+    this._metrics.executions++;
+    this._emit('swapExecutionStarted', details);
+    this._notifyWatchers('swapExecutionStarted', details);
+  },
+
+  notifyExecutionComplete(receipt) {
+    this._execState = 'idle';
+    this._metrics.confirmations++;
+    this._emit('swapConfirmed', receipt);
+    this._notifyWatchers('swapConfirmed', receipt);
+    this._emit('swapCompleted', { receipt: receipt, ts: Date.now() });
+    this._notifyWatchers('swapCompleted', { receipt: receipt, ts: Date.now() });
+  },
+
+  notifyExecutionFailed(err) {
+    this._execState = 'idle';
+    this._metrics.failures++;
+    this._emit('swapFailed', { error: (err && err.message) || 'unknown', ts: Date.now() });
+    this._notifyWatchers('swapFailed', { error: (err && err.message) || 'unknown' });
+  },
+
+  notifyCancelled() {
+    this._execState = 'idle';
+    this._emit('swapCancelled', { ts: Date.now() });
+  },
+
+  // ── Fallback ──
+
+  notifyFallback(fromProvider, toProvider, reason) {
+    this._metrics.fallbacks++;
+    this._emit('providerFallback', { from: fromProvider, to: toProvider, reason: reason, ts: Date.now() });
+  },
+
+  // ── Events ──
+
+  watch(event, fn) {
+    if (!this._watchers[event]) this._watchers[event] = [];
+    this._watchers[event].push(fn);
+  },
+
+  _emit(event, data) {},
+
+  _notifyWatchers(event, data) {
+    var fns = this._watchers[event];
+    if (fns) fns.forEach(function(fn) { try { fn(data); } catch(e) {} });
+  },
+
+  // ── Cache ──
+
+  invalidateCache() { this._cache = {}; },
+  invalidateRouteCache() { this._routeCache = {}; },
+
+  // ── Health ──
+
+  healthCheck() {
+    var issues = [];
+    if (typeof SWP === 'undefined') issues.push('swp:state_missing');
+    if (typeof TOKEN_LIST === 'undefined' || !TOKEN_LIST.length) issues.push('tokens:empty');
+    if (typeof POOL_REGISTRY === 'undefined' || !POOL_REGISTRY.length) issues.push('pools:empty');
+    if (typeof walletAddress !== 'string' || !walletAddress) issues.push('wallet:disconnected');
+    return { healthy: issues.length === 0, issues: issues, execState: this._execState, timestamp: Date.now() };
+  },
+
+  // ── Metrics ──
+
+  getMetrics() { return this._metrics; },
+  recordQuoteTime(ms) { this._metrics.totalQuoteTime = (this._metrics.totalQuoteTime || 0) + ms; },
+  recordExecTime(ms) { this._metrics.totalExecTime = (this._metrics.totalExecTime || 0) + ms; },
+  recordCacheHit() { this._metrics.cacheHits++; },
+  recordCacheMiss() { this._metrics.cacheMisses++; },
+  recordFallback() { this._metrics.fallbacks++; },
+};
+
 // ── State ────────────────────────────────────────────────
 const SWP = {
   slippage:   0.5,
@@ -16997,6 +17442,7 @@ function swpSetSlippage(pct, btn) {
   if (btn) btn.classList.add('active');
   document.getElementById('swp-slip-custom').value = '';
   document.getElementById('swp-slip-display').textContent = pct + '%';
+  ConfigurationEngine.set('slippage', pct);
   updateSwapRate();
 }
 
@@ -17006,6 +17452,7 @@ function swpSetCustomSlippage(val) {
     SWP.slippage = n;
     document.querySelectorAll('.swp-slip-btn').forEach(b => b.classList.remove('active'));
     document.getElementById('swp-slip-display').textContent = n + '%';
+    ConfigurationEngine.set('slippage', n);
     updateSwapRate();
   }
 }
@@ -17557,6 +18004,7 @@ async function updateSwapRate() {
       }
 
       SWP.lastQuote = { amtIn, amtOut, minReceived, rate, priceImpact, feeAmt, source, tIn, tOut, route, totalFee };
+      SwapEngine.notifyQuoteLoaded(SWP.lastQuote);
       // Stamp block number synchronously so it's ready before user clicks
       await stampQuoteBlock();
 
@@ -17778,6 +18226,8 @@ async function executeSwap() {
   let currentDecimals = tIn.decimals;
   let lastTxHash = null;
 
+  SwapEngine.notifyExecutionStart({ tIn: tIn.sym, tOut: tOut.sym, amtIn: amtIn, route: route, minReceived: minReceived });
+
   for (let i = 0; i < route.pools.length; i++) {
     // Check deadline hasn't passed
     if (Math.floor(Date.now() / 1000) > deadline) {
@@ -17845,10 +18295,12 @@ async function executeSwap() {
         throw new Error('Swap transaction not confirmed on-chain (receipt status: ' + (swapReceipt ? swapReceipt.status : 'null') + ')');
       }
       _log('[swap] hop', i + 1, 'confirmed:', swapTx.hash, 'block:', swapReceipt.blockNumber);
+      SwapEngine.notifyExecutionComplete(swapReceipt);
 
       // Track volume for APR
       trackPoolVolume(poolCfg.id, currentAmount, currentTokenSym);
     } catch(swapErr) {
+      SwapEngine.notifyExecutionFailed(swapErr);
       swpSetBtn('ready', `Swap ${tIn.sym} → ${tOut.sym}`);
       swpShowPrecheck('error', swpDecodeError(swapErr));
       toast(`Swap failed at hop ${i + 1}: ` + swpDecodeError(swapErr), 'error');
@@ -17961,6 +18413,9 @@ function updateBridgeEst(){
   } else {
     document.getElementById('bridge-time').textContent = '~2 minutes';
   }
+  var fromId = CHAINS[bridgeFromIdx] && CHAINS[bridgeFromIdx].id || '';
+  var toId = CHAINS[bridgeToIdx] && CHAINS[bridgeToIdx].id || '';
+  BridgeEngine.notifyEstimateUpdated(fromId, toId, amt, fee, receive);
 }
 async function refreshBridgeBalances(){
   const set=(id,v)=>{const el=document.getElementById(id);if(el)el.textContent=v;};
@@ -18152,6 +18607,7 @@ async function executeBridge(){
   }
 
   try {
+    BridgeEngine.notifyStandardStart({ from: fromChain.id, to: toChain.id, amt: amt, type: 'standard' });
     // ── STEP 0: Switch to SOURCE chain (verified) ────────────────────────────
     _log(`[Bridge] Switching to source chain: ${fromChain.name} (${fromChain.chainId})`);
     await ensureNetwork(fromChain.chainId);
@@ -18406,8 +18862,10 @@ async function executeBridge(){
     toast(`✓ Bridged ${amt} USDC from ${fromChain.name} to ${toChain.name}`,'success');
     // Log to Reports (local + onchain)
     logToReports('Bridge', amt, 1, mintTx?.hash || '', { fee: 0.001 });
+    BridgeEngine.notifyExecutionComplete(mintReceipt);
 
   } catch(e) {
+    BridgeEngine.notifyExecutionFailed(e);
     _err("[Bridge] Error:", e);
     // Mark the currently-active step as error
     for (let i=0; i<steps.length; i++) {
@@ -20672,11 +21130,660 @@ function exportReportCSV() {
 }
 
 // ══════════════════════════════════════════════════════════
+//  PERMISSIONS — Owner-only access control (Layer 3: Frontend)
+// ══════════════════════════════════════════════════════════
+const Permissions = {
+  _checked: false,
+  _canAccessSettings: false,
+  _clickCount: 0,
+  _clickTimer: null,
+  _CLICK_TARGET: 5,
+  _CLICK_WINDOW: 3000,
+
+  canAccessSettings() {
+    if (this._checked) return this._canAccessSettings;
+    try {
+      if (localStorage.getItem('elligente_owner_mode') === '1') {
+        this._canAccessSettings = true;
+        this._checked = true;
+        return true;
+      }
+      var raw = localStorage.getItem('elligente_auth_profile');
+      if (raw) {
+        var profile = JSON.parse(raw);
+        this._canAccessSettings = !!(profile && profile.permissions && profile.permissions.settings);
+      }
+    } catch(e) {}
+    this._checked = true;
+    return this._canAccessSettings;
+  },
+
+  refresh() {
+    this._checked = false;
+    return this.canAccessSettings();
+  },
+
+  handleSecretClick() {
+    var self = this;
+    self._clickCount++;
+    if (self._clickTimer) clearTimeout(self._clickTimer);
+    if (self._clickCount >= self._CLICK_TARGET) {
+      self._clickCount = 0;
+      self._canAccessSettings = !self._canAccessSettings;
+      self._checked = true;
+      try { localStorage.setItem('elligente_owner_mode', self._canAccessSettings ? '1' : '0'); } catch(e) {}
+      if (self._canAccessSettings) {
+        var nav = document.getElementById('nav-settings');
+        if (nav) nav.style.display = '';
+        toast('Owner mode activated — Settings unlocked','success');
+      } else {
+        var nav = document.getElementById('nav-settings');
+        if (nav) nav.style.display = 'none';
+        toast('Owner mode deactivated','info');
+      }
+      return;
+    }
+    self._clickTimer = setTimeout(function() { self._clickCount = 0; }, self._CLICK_WINDOW);
+  },
+};
+
+// ══════════════════════════════════════════════════════════
+//  PROVIDER REGISTRY — Single source of truth for all providers
+// ══════════════════════════════════════════════════════════
+const PROVIDER_REGISTRY = [
+  { id:'stripe',            cat:'payment',    badge:'stg-status-stripe',            fields:['key','webhook','env'] },
+  { id:'paypal',            cat:'payment',    badge:'stg-status-paypal',            fields:['client','secret','env'] },
+  { id:'checkout',          cat:'payment',    badge:'stg-status-checkout',          fields:['key','secret'] },
+  { id:'wise',              cat:'payment',    badge:'stg-status-wise',              fields:['key'] },
+  { id:'coinbase-commerce', cat:'payment',    badge:'stg-status-coinbase-commerce', fields:[] },
+  { id:'moonpay',           cat:'onramp',     badge:'stg-status-moonpay',           fields:['key','secret','countries','priority'] },
+  { id:'transak',           cat:'onramp',     badge:'stg-status-transak',           fields:['key','secret','priority'] },
+  { id:'ramp',              cat:'onramp',     badge:'stg-status-ramp',              fields:['key','priority'] },
+  { id:'banxa',             cat:'onramp',     badge:'stg-status-banxa',             fields:['key','priority'] },
+  { id:'mercuryo',          cat:'onramp',     badge:'stg-status-mercuryo',          fields:['key','priority'] },
+  { id:'alchemy',           cat:'blockchain', badge:'stg-status-alchemy',           fields:['key','priority'] },
+  { id:'infura',            cat:'blockchain', badge:'stg-status-infura',            fields:['key','priority'] },
+  { id:'quicknode',         cat:'blockchain', badge:'stg-status-quicknode',         fields:['key','priority'] },
+  { id:'ankr',              cat:'blockchain', badge:'stg-status-ankr',              fields:['url'] },
+  { id:'openai',            cat:'api',        badge:'stg-status-openai',            fields:['key'] },
+  { id:'anthropic',         cat:'api',        badge:'stg-status-anthropic',         fields:['key'] },
+  { id:'gemini',            cat:'api',        badge:'stg-status-gemini',            fields:['key'] },
+  { id:'groq',              cat:'api',        badge:'stg-status-groq',              fields:['key'] },
+  { id:'deepseek',          cat:'api',        badge:'stg-status-deepseek',          fields:['key'] },
+  { id:'supabase',          cat:'api',        badge:'stg-status-supabase',          fields:['url','key'] },
+  { id:'0x',                cat:'swap',       badge:'stg-status-0x',                fields:['key','priority'] },
+  { id:'1inch',             cat:'swap',       badge:'stg-status-1inch',             fields:['priority'] },
+  { id:'paraswap',          cat:'swap',       badge:'stg-status-paraswap',          fields:['priority'] },
+  { id:'odos',              cat:'swap',       badge:'stg-status-odos',              fields:['priority'] },
+  { id:'arc-swap',          cat:'swap',       badge:'stg-status-arc-swap',          fields:[] },
+  { id:'across',            cat:'bridge',     badge:'stg-status-across',            fields:['priority'] },
+  { id:'stargate',          cat:'bridge',     badge:'stg-status-stargate',          fields:['priority'] },
+  { id:'lifi',              cat:'bridge',     badge:'stg-status-lifi',              fields:['priority'] },
+  { id:'wormhole',          cat:'bridge',     badge:'stg-status-wormhole',          fields:['priority'] },
+  { id:'arc-bridge',        cat:'bridge',     badge:'stg-status-arc-bridge',        fields:[] },
+  { id:'cctp',              cat:'bridge',     badge:'stg-status-cctp',              fields:[] },
+];
+
+// Derived helpers
+var _providerById = {};
+PROVIDER_REGISTRY.forEach(function(p) { _providerById[p.id] = p; });
+
+function getProviderIds() { return PROVIDER_REGISTRY.map(function(p) { return p.id; }); }
+function getProviderById(id) { return _providerById[id]; }
+
+// Providers that participate in gather/apply (have fields in the settings form)
+var GATHER_PROVIDERS = PROVIDER_REGISTRY.filter(function(p) { return p.cat === 'payment' || p.cat === 'onramp' || p.cat === 'blockchain' || p.cat === 'api'; }).map(function(p) { return p.id; });
+// Swap/Bridge providers with priority fields
+var PRIORITY_PROVIDERS = PROVIDER_REGISTRY.filter(function(p) { return p.cat === 'swap' || p.cat === 'bridge'; }).filter(function(p) { return p.fields.indexOf('priority') >= 0 || p.fields.indexOf('key') >= 0; }).map(function(p) { return p.id; });
+
+// ══════════════════════════════════════════════════════════
+//  CONNECTION TESTER — Real provider connectivity tests
+// ══════════════════════════════════════════════════════════
+const ConnectionTester = {
+  _defaultTimeout: 8000,
+  _testCache: {},
+  _cacheTTL: 30000,
+
+  getCached(provider) {
+    const entry = this._testCache[provider];
+    if (entry && (Date.now() - entry.timestamp) < this._cacheTTL) return entry;
+    return null;
+  },
+
+  setCache(provider, result) {
+    this._testCache[provider] = { ...result, timestamp: Date.now() };
+    return result;
+  },
+
+  clearCache() { this._testCache = {}; },
+
+  async _fetchTest(url, options, timeoutMs) {
+    const timeout = timeoutMs || this._defaultTimeout;
+    const controller = new AbortController();
+    const timer = setTimeout(function(){ controller.abort(); }, timeout);
+    const start = performance.now();
+    try {
+      const opts = { signal: controller.signal, ...(options || {}) };
+      const resp = await fetch(url, opts);
+      const latency = Math.round(performance.now() - start);
+      clearTimeout(timer);
+      return {
+        success: resp.ok,
+        httpStatus: resp.status,
+        latency: (latency / 1000).toFixed(3),
+        message: resp.ok ? 'Connected' : ('HTTP ' + resp.status),
+      };
+    } catch(e) {
+      clearTimeout(timer);
+      const latency = Math.round(performance.now() - start);
+      if (e.name === 'AbortError') {
+        return { success: false, httpStatus: 0, latency: (latency / 1000).toFixed(3), message: 'Timeout', error: 'timeout' };
+      }
+      return { success: false, httpStatus: 0, latency: (latency / 1000).toFixed(3), message: e.message || 'Network error', error: 'network' };
+    }
+  },
+
+  async _rpcTest(url) {
+    return this._fetchTest(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', method: 'eth_blockNumber', params: [], id: 1 }),
+    }, 6000);
+  },
+
+  async test(provider) {
+    try {
+      const cached = this.getCached(provider);
+      if (cached) return cached;
+
+      const keyEl = document.getElementById('stg-' + provider + '-key');
+      let apiKey = keyEl ? keyEl.value.trim() : '';
+      if (!apiKey && provider === 'paypal') {
+        apiKey = (document.getElementById('stg-paypal-client') || {}).value || '';
+      }
+      if (!apiKey && provider === 'coinbase-commerce') {
+        apiKey = (document.getElementById('stg-coinbasecommerce-key') || {}).value || '';
+      }
+      if (!apiKey && provider === 'circle') {
+        apiKey = (document.getElementById('stg-circle-api-key') || {}).value || '';
+      }
+      if (!apiKey && provider === 'ankr') {
+        apiKey = (document.getElementById('stg-ankr-url') || {}).value || '';
+      }
+      if (!apiKey && provider === 'supabase') {
+        apiKey = (document.getElementById('stg-supabase-url') || {}).value || '';
+      }
+      const testFn = this._testers[provider];
+      if (!testFn) {
+        return this.setCache(provider, {
+          success: false, httpStatus: 0, latency: '0', message: 'No tester for ' + provider,
+          provider: provider, status: 'unknown', timestamp: new Date().toISOString(),
+        });
+      }
+      const result = await testFn.call(this, apiKey, provider);
+      result.provider = provider;
+      result.timestamp = new Date().toISOString();
+      return this.setCache(provider, result);
+    } catch(e) {
+      return this.setCache(provider, {
+        success: false, httpStatus: 0, latency: '0', message: (e.message || 'Unknown error'),
+        provider: provider, status: 'errored', timestamp: new Date().toISOString(),
+      });
+    }
+  },
+
+  _testers: {
+    stripe: async function(key) {
+      if (!key) return { success: false, httpStatus: 0, latency: '0', message: 'API Key not configured', status: 'not_configured' };
+      return ConnectionTester._fetchTest('https://api.stripe.com/v1/balance', {
+        headers: { 'Authorization': 'Bearer ' + key },
+      });
+    },
+    paypal: async function() {
+      const clientId = (document.getElementById('stg-paypal-client') || {}).value || '';
+      const secret = (document.getElementById('stg-paypal-secret') || {}).value || '';
+      if (!clientId || !secret) return { success: false, httpStatus: 0, latency: '0', message: 'Client ID or Secret not configured', status: 'not_configured' };
+      const env = (document.getElementById('stg-paypal-env') || {}).value || 'sandbox';
+      const base = env === 'live' ? 'https://api-m.paypal.com' : 'https://api-m.sandbox.paypal.com';
+      const auth = btoa(clientId + ':' + secret);
+      return ConnectionTester._fetchTest(base + '/v1/oauth2/token', {
+        method: 'POST',
+        headers: { 'Authorization': 'Basic ' + auth, 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'grant_type=client_credentials',
+      });
+    },
+    checkout: async function(key) {
+      if (!key) return { success: false, httpStatus: 0, latency: '0', message: 'API Key not configured', status: 'not_configured' };
+      return ConnectionTester._fetchTest('https://api.checkout.com/', {
+        headers: { 'Authorization': 'Bearer ' + key },
+      });
+    },
+    wise: async function(key) {
+      if (!key) return { success: false, httpStatus: 0, latency: '0', message: 'API Key not configured', status: 'not_configured' };
+      return ConnectionTester._fetchTest('https://api.wise.com/v1/profiles', {
+        headers: { 'Authorization': 'Bearer ' + key },
+      });
+    },
+    'coinbase-commerce': async function() {
+      const key = (document.getElementById('stg-coinbasecommerce-key') || {}).value || '';
+      if (!key) return { success: false, httpStatus: 0, latency: '0', message: 'API Key not configured', status: 'not_configured' };
+      return ConnectionTester._fetchTest('https://api.commerce.coinbase.com/charges', {
+        headers: { 'X-CC-Api-Key': key, 'X-CC-Version': '2018-03-22' },
+      });
+    },
+    moonpay: async function(key) {
+      if (!key) return { success: false, httpStatus: 0, latency: '0', message: 'API Key not configured', status: 'not_configured' };
+      return ConnectionTester._fetchTest('https://api.moonpay.com/v3/currencies', {
+        headers: { 'Authorization': 'Bearer ' + key },
+      });
+    },
+    transak: async function(key) {
+      if (!key) return { success: false, httpStatus: 0, latency: '0', message: 'API Key not configured', status: 'not_configured' };
+      return ConnectionTester._fetchTest('https://api.transak.com/api/v2/currencies/crypto-currencies', {
+        headers: { 'x-api-key': key },
+      });
+    },
+    ramp: async function(key) {
+      if (!key) return { success: false, httpStatus: 0, latency: '0', message: 'API Key not configured', status: 'not_configured' };
+      return ConnectionTester._fetchTest('https://api.ramp.network/api/host-api/v2/config', {
+        headers: { 'Authorization': 'Bearer ' + key },
+      });
+    },
+    banxa: async function(key) {
+      if (!key) return { success: false, httpStatus: 0, latency: '0', message: 'API Key not configured', status: 'not_configured' };
+      return ConnectionTester._fetchTest('https://api.banxa.com/', {
+        headers: { 'Authorization': 'Bearer ' + key },
+      });
+    },
+    mercuryo: async function(key) {
+      if (key) {
+        return ConnectionTester._fetchTest('https://api.mercuryo.io/v1.6/public/currencies', {
+          headers: { 'X-Api-Key': key },
+        });
+      }
+      return ConnectionTester._fetchTest('https://api.mercuryo.io/v1.6/public/currencies');
+    },
+    alchemy: async function(key) {
+      if (!key) return { success: false, httpStatus: 0, latency: '0', message: 'API Key not configured', status: 'not_configured' };
+      return ConnectionTester._rpcTest('https://eth-mainnet.g.alchemy.com/v2/' + key);
+    },
+    infura: async function(key) {
+      if (!key) return { success: false, httpStatus: 0, latency: '0', message: 'API Key not configured', status: 'not_configured' };
+      return ConnectionTester._rpcTest('https://mainnet.infura.io/v3/' + key);
+    },
+    quicknode: async function(key) {
+      if (!key) return { success: false, httpStatus: 0, latency: '0', message: 'API Key not configured', status: 'not_configured' };
+      return ConnectionTester._rpcTest('https://api.quicknode.com/' + key + '/');
+    },
+    ankr: async function(url) {
+      const endpoint = url || 'https://rpc.ankr.com/eth';
+      return ConnectionTester._rpcTest(endpoint);
+    },
+    openai: async function(key) {
+      if (!key) return { success: false, httpStatus: 0, latency: '0', message: 'API Key not configured', status: 'not_configured' };
+      return ConnectionTester._fetchTest('https://api.openai.com/v1/models', {
+        headers: { 'Authorization': 'Bearer ' + key },
+      });
+    },
+    anthropic: async function(key) {
+      if (!key) return { success: false, httpStatus: 0, latency: '0', message: 'API Key not configured', status: 'not_configured' };
+      return ConnectionTester._fetchTest('https://api.anthropic.com/v1/models', {
+        headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+      });
+    },
+    gemini: async function(key) {
+      if (!key) return { success: false, httpStatus: 0, latency: '0', message: 'API Key not configured', status: 'not_configured' };
+      return ConnectionTester._fetchTest('https://generativelanguage.googleapis.com/v1beta/models?key=' + key);
+    },
+    groq: async function(key) {
+      if (!key) return { success: false, httpStatus: 0, latency: '0', message: 'API Key not configured', status: 'not_configured' };
+      return ConnectionTester._fetchTest('https://api.groq.com/openai/v1/models', {
+        headers: { 'Authorization': 'Bearer ' + key },
+      });
+    },
+    deepseek: async function(key) {
+      if (!key) return { success: false, httpStatus: 0, latency: '0', message: 'API Key not configured', status: 'not_configured' };
+      return ConnectionTester._fetchTest('https://api.deepseek.com/v1/models', {
+        headers: { 'Authorization': 'Bearer ' + key },
+      });
+    },
+    supabase: async function() {
+      const url = (document.getElementById('stg-supabase-url') || {}).value || '';
+      const key = (document.getElementById('stg-supabase-key') || {}).value || '';
+      if (!url || !key) return { success: false, httpStatus: 0, latency: '0', message: 'Project URL or Anon Key not configured', status: 'not_configured' };
+      return ConnectionTester._fetchTest(url.replace(/\/+$/, '') + '/rest/v1/', {
+        headers: { 'apikey': key, 'Authorization': 'Bearer ' + key },
+      });
+    },
+    circle: async function() {
+      const key = (document.getElementById('stg-circle-api-key') || {}).value || '';
+      if (!key) return { success: false, httpStatus: 0, latency: '0', message: 'Circle API Key not configured', status: 'not_configured' };
+      return ConnectionTester._fetchTest('https://api.circle.com/v1/configuration', {
+        headers: { 'Authorization': 'Bearer ' + key },
+      });
+    },
+    '0x': async function(key) {
+      if (key) {
+        return ConnectionTester._fetchTest('https://api.0x.org/swap/v1/price?sellToken=ETH&buyToken=USDC&sellAmount=1000000000000000000', {
+          headers: { '0x-api-key': key },
+        });
+      }
+      return ConnectionTester._fetchTest('https://api.0x.org/');
+    },
+    '1inch': async function() {
+      return ConnectionTester._fetchTest('https://api.1inch.dev/swap/v5.2/1/health');
+    },
+    paraswap: async function() {
+      return ConnectionTester._fetchTest('https://apiv5.paraswap.io/health');
+    },
+    odos: async function() {
+      return ConnectionTester._fetchTest('https://api.odos.xyz/info/current-block');
+    },
+    across: async function() {
+      return ConnectionTester._fetchTest('https://across.to/api/limits');
+    },
+    stargate: async function() {
+      return ConnectionTester._fetchTest('https://api.stargate.finance/');
+    },
+    lifi: async function() {
+      return ConnectionTester._fetchTest('https://li.quest/v1/chains');
+    },
+    wormhole: async function() {
+      return ConnectionTester._fetchTest('https://api.wormholescan.io/');
+    },
+    'arc-swap': async function() {
+      const rpc = (document.getElementById('stg-rpc-primary') || {}).value || 'https://rpc.testnet.arc.network';
+      return ConnectionTester._rpcTest(rpc);
+    },
+    'arc-bridge': async function() {
+      const rpc = (document.getElementById('stg-rpc-primary') || {}).value || 'https://rpc.testnet.arc.network';
+      return ConnectionTester._rpcTest(rpc);
+    },
+    cctp: async function() {
+      const key = (document.getElementById('stg-circle-api-key') || {}).value || '';
+      if (!key) return { success: false, httpStatus: 0, latency: '0', message: 'Circle API Key not configured for CCTP', status: 'not_configured' };
+      return ConnectionTester._fetchTest('https://api.circle.com/v1/configuration', {
+        headers: { 'Authorization': 'Bearer ' + key },
+      });
+    },
+  },
+};
+
+// ══════════════════════════════════════════════════════════
+//  CONFIGURATION ENGINE — Single source of truth for app config
+// ══════════════════════════════════════════════════════════
+const ConfigurationEngine = {
+  _watchers: {},
+  _revisionCounter: 0,
+  _snapshots: [],
+  _snapshotRetention: 10,
+  _metrics: { loads:0, saves:0, rollbacks:0, imports:0, exports:0, errors:0, syncs:0, cacheHits:0, cacheMisses:0, totalLoadTime:0, totalSaveTime:0 },
+  _features: {},
+  _schemaVersion: 1,
+
+  get(key) {
+    var svc = SettingsService._cache || {};
+    if (svc[key] !== undefined && svc[key] !== null) { this._metrics.cacheHits++; return svc[key]; }
+    this._metrics.cacheMisses++;
+    return undefined;
+  },
+
+  set(key, val) {
+    var el = document.getElementById('stg-' + key);
+    if (el) { el.value = val; }
+    var svc = SettingsService._cache || {};
+    svc[key] = val;
+    this._notify(key, val);
+  },
+
+  sync() {
+    var self = this;
+    var t0 = performance.now();
+    var svc = SettingsService._cache;
+    if (!svc) return;
+
+    if (svc.slippage !== undefined) {
+      var stgSlip = document.getElementById('stg-slippage');
+      if (stgSlip) stgSlip.value = svc.slippage;
+      if (typeof SWP !== 'undefined' && SWP.slippage !== svc.slippage) {
+        var n = parseFloat(svc.slippage);
+        if (!isNaN(n) && n > 0 && n <= 50) {
+          SWP.slippage = n;
+          var display = document.getElementById('swp-slip-display');
+          if (display) display.textContent = n + '%';
+          var btns = document.querySelectorAll('.swp-slip-btn');
+          btns.forEach(function(b) { b.classList.remove('active'); });
+          btns.forEach(function(b) {
+            var v = parseFloat(b.textContent);
+            if (!isNaN(v) && Math.abs(v - n) < 0.001) b.classList.add('active');
+          });
+        }
+      }
+    }
+
+    if (svc.rpcPrimary && svc.rpcPrimary !== 'https://rpc.testnet.arc.network') {
+      try { localStorage.setItem('arcpay_custom_rpc', svc.rpcPrimary); } catch(e) {}
+    }
+    if (svc.txLimit !== undefined) {
+      try { localStorage.setItem('arcpay_tx_limit', svc.txLimit); } catch(e) {}
+    }
+    if (svc.platformFee !== undefined) {
+      try { localStorage.setItem('arcpay_platform_fee', svc.platformFee); } catch(e) {}
+    }
+    if (svc.contractAddress && typeof isAddr === 'function' && isAddr(svc.contractAddress)) {
+      try { localStorage.setItem('arcpay_batch_contract', svc.contractAddress); } catch(e) {}
+      if (typeof setContract === 'function') setContract(svc.contractAddress);
+    }
+
+    Object.keys(self._watchers).forEach(function(k) {
+      var val = self.get(k);
+      self._notifyWatchers(k, val);
+    });
+
+    self._metrics.syncs++;
+    self._metrics.totalSyncTime = (self._metrics.totalSyncTime || 0) + (performance.now() - t0);
+  },
+
+  watch(key, fn) {
+    if (!this._watchers[key]) this._watchers[key] = [];
+    this._watchers[key].push(fn);
+  },
+
+  _notify(key, val) {
+    var fns = this._watchers[key];
+    if (fns) fns.forEach(function(fn) { try { fn(val); } catch(e) {} });
+  },
+
+  _notifyWatchers(key, val) {
+    this._notify(key, val);
+  },
+
+  invalidate() {
+    this._watchers = {};
+  },
+
+  // ── Versioning ──
+
+  createRevision(origin) {
+    this._revisionCounter++;
+    var svc = SettingsService._cache || {};
+    return {
+      id: 'rev-' + Date.now() + '-' + this._revisionCounter,
+      ts: Date.now(),
+      origin: origin || 'manual',
+      schemaVersion: this._schemaVersion,
+      settings: this.cloneSafe(svc),
+    };
+  },
+
+  getRevisionCount() { return this._revisionCounter; },
+
+  // ── Snapshots ──
+
+  createSnapshot(origin) {
+    var snap = {
+      id: 'snap-' + Date.now(),
+      ts: Date.now(),
+      origin: origin || 'auto',
+      revision: this.createRevision(origin),
+      settings: SettingsService._cache ? this.cloneSafe(SettingsService._cache) : null,
+    };
+    this._snapshots.push(snap);
+    if (this._snapshots.length > this._snapshotRetention) {
+      this._snapshots.shift();
+    }
+    this._persistSnapshots();
+    return snap;
+  },
+
+  restoreSnapshot(index) {
+    var self = this;
+    if (index < 0 || index >= this._snapshots.length) return false;
+    var snap = this._snapshots[index];
+    if (snap.settings) {
+      SettingsService._cache = snap.settings;
+      SettingsService._applyToForm();
+      SettingsService._updateProviderStatuses(snap.settings.toggles || {});
+      self.sync();
+    }
+    return true;
+  },
+
+  getSnapshots() { return this._snapshots; },
+
+  _persistSnapshots() {
+    try {
+      var toStore = this._snapshots.slice(-this._snapshotRetention);
+      localStorage.setItem('arcpay_snapshots', JSON.stringify(toStore));
+    } catch(e) {}
+  },
+
+  _loadSnapshots() {
+    try {
+      var raw = localStorage.getItem('arcpay_snapshots');
+      if (raw) { this._snapshots = JSON.parse(raw); }
+    } catch(e) { this._snapshots = []; }
+  },
+
+  // ── Diff ──
+
+  diff(revA, revB) {
+    var a = (revA && revA.settings) ? revA.settings : revA || {};
+    var b = (revB && revB.settings) ? revB.settings : revB || {};
+    var result = { created:[], changed:[], removed:[] };
+    var allKeys = {};
+    Object.keys(a || {}).forEach(function(k) { allKeys[k] = 1; });
+    Object.keys(b || {}).forEach(function(k) { allKeys[k] = 1; });
+
+    Object.keys(allKeys).forEach(function(k) {
+      var va = a && a[k] !== undefined ? a[k] : undefined;
+      var vb = b && b[k] !== undefined ? b[k] : undefined;
+      var isSensitive = /Key$/i.test(k) || /Secret$/i.test(k) || /Token$/i.test(k) || /[Ww]ebhook/i.test(k);
+
+      if (va === undefined && vb !== undefined) {
+        result.created.push({ field: k, newValue: isSensitive ? '********' : vb });
+      } else if (va !== undefined && vb === undefined) {
+        result.removed.push({ field: k, oldValue: isSensitive ? '********' : va });
+      } else if (!ConfigurationEngine._deepEqual(va, vb)) {
+        result.changed.push({
+          field: k,
+          oldValue: isSensitive ? '********' : va,
+          newValue: isSensitive ? '********' : vb,
+        });
+      }
+    });
+    return result;
+  },
+
+  _deepEqual(a, b) {
+    if (a === b) return true;
+    if (typeof a !== typeof b) return false;
+    if (typeof a !== 'object' || a === null || b === null) return false;
+    if (Array.isArray(a) !== Array.isArray(b)) return false;
+    var keysA = Object.keys(a), keysB = Object.keys(b);
+    if (keysA.length !== keysB.length) return false;
+    for (var i = 0; i < keysA.length; i++) {
+      if (!ConfigurationEngine._deepEqual(a[keysA[i]], b[keysA[i]])) return false;
+    }
+    return true;
+  },
+
+  // ── Observability ──
+
+  recordLoad(durationMs) { this._metrics.loads++; this._metrics.totalLoadTime = (this._metrics.totalLoadTime || 0) + durationMs; },
+  recordSave(durationMs)  { this._metrics.saves++; this._metrics.totalSaveTime = (this._metrics.totalSaveTime || 0) + durationMs; },
+  recordError()           { this._metrics.errors++; },
+  recordRollback()        { this._metrics.rollbacks++; },
+  recordImport()          { this._metrics.imports++; },
+  recordExport()          { this._metrics.exports++; },
+
+  getAvgLoadTime() { return this._metrics.loads ? (this._metrics.totalLoadTime / this._metrics.loads).toFixed(1) : '0'; },
+  getAvgSaveTime() { return this._metrics.saves ? (this._metrics.totalSaveTime / this._metrics.saves).toFixed(1) : '0'; },
+  getMetrics()     { return this._metrics; },
+
+  // ── Health Check ──
+
+  healthCheck() {
+    var issues = [];
+    var cache = SettingsService._cache;
+
+    if (!cache || typeof cache !== 'object') {
+      issues.push('cache:missing_or_invalid');
+    } else {
+      if (typeof cache._updatedAt !== 'number' && cache._updatedAt !== undefined) {
+        issues.push('cache:_updatedAt_invalid_type');
+      }
+      if (cache.slippage !== undefined && (typeof cache.slippage !== 'number' || isNaN(cache.slippage))) {
+        issues.push('slippage:invalid');
+      }
+    }
+
+    if (typeof PROVIDER_REGISTRY === 'undefined' || !PROVIDER_REGISTRY.length) {
+      issues.push('provider_registry:missing');
+    }
+
+    return { healthy: issues.length === 0, issues: issues, timestamp: Date.now() };
+  },
+
+  // ── Feature Flags ──
+
+  defineFeature(name, defaultValue) {
+    if (this._features[name] === undefined) {
+      this._features[name] = defaultValue || false;
+    }
+  },
+
+  isFeatureEnabled(name) {
+    return !!this._features[name];
+  },
+
+  setFeature(name, enabled) {
+    this._features[name] = !!enabled;
+  },
+
+  getFeatures() { return this._features; },
+
+  // ── Helpers ──
+
+  cloneSafe(obj) {
+    if (!obj || typeof obj !== 'object') return obj;
+    try { return JSON.parse(JSON.stringify(obj)); } catch(e) { return {}; }
+  },
+};
+
+ConfigurationEngine._loadSnapshots();
+
+// ══════════════════════════════════════════════════════════
 //  SETTINGS SERVICE — Enterprise Configuration Center
 // ══════════════════════════════════════════════════════════
 const SettingsService = {
   _cache: null,
   _loaded: false,
+  _lastLoadTime: 0,
+  _auditCache: null,
+  _selectedAuditIndex: -1,
+  _saving: false,
+  _domCache: {},
 
   getToken() {
     try { return localStorage.getItem('elligente_session') || ''; } catch(e) { return ''; }
@@ -20692,17 +21799,26 @@ const SettingsService = {
     return resp.json();
   },
 
-  async load() {
+  async load(forceReload) {
+    if (!Permissions.canAccessSettings()) return;
+    var t0 = performance.now();
     try {
+      this._setBtnLoading('#page-settings .page-header .btn:not(.primary):not([onclick*="exportBackup"]):not([onclick*="import"])');
       const data = await this._request('GET');
       if (data.ok) {
         this._cache = data.settings || {};
         this._loaded = true;
+        this._lastLoadTime = Date.now();
+        this._invalidateDomCache();
         this._applyToForm();
+        this._updateProviderStatuses(this._cache.toggles || {});
+        ConfigurationEngine.sync();
+        ConfigurationEngine.recordLoad(performance.now() - t0);
       }
     } catch(e) {
       this._fallbackLocal();
     }
+    this._setBtnNormalAll('#page-settings .page-header');
   },
 
   _fallbackLocal() {
@@ -20710,26 +21826,48 @@ const SettingsService = {
       const s = JSON.parse(localStorage.getItem('arcpay_settings') || '{}');
       this._cache = s;
       this._loaded = true;
+      this._lastLoadTime = Date.now();
+      this._invalidateDomCache();
       this._applyToForm();
+      ConfigurationEngine.sync();
     } catch(e) {}
   },
 
   async save() {
+    if (!Permissions.canAccessSettings()) { toast('Access denied — settings restricted to owner','error'); return; }
+    if (this._saving) { toast('Save already in progress','warning'); return; }
+    this._saving = true;
+    this._setBtnLoading('#page-settings .page-header .btn.primary');
+    ConfigurationEngine.createSnapshot('save');
+    const t0 = performance.now();
+    const start = Date.now();
     const payload = this._gatherAll();
     try {
       const data = await this._request('PUT', payload);
       if (data.ok) {
         this._cache = data.settings;
+        this._lastLoadTime = Date.now();
         this._applyRuntime(data.settings);
-        toast('Settings saved','success');
+        this._applyToForm();
+        this._updateProviderStatuses(this._cache.toggles || {});
+        ConfigurationEngine.createRevision('save');
+        if (data.rejectedFields) toast('Settings saved — ' + data.rejectedFields.length + ' field(s) rejected', 'warning');
+        else toast('Configuration saved','success');
+        this._invalidateDomCache();
+        ConfigurationEngine.recordSave(performance.now() - t0);
       } else {
         this._saveLocal(payload);
-        toast('Settings saved locally','info');
+        this._updateProviderStatuses(payload.toggles || {});
+        toast('Saved locally','info');
+        ConfigurationEngine.recordError();
       }
     } catch(e) {
       this._saveLocal(payload);
-      toast('Saved locally (offline)','warning');
+      this._updateProviderStatuses(payload.toggles || {});
+      toast('Saved locally (connection unavailable)','warning');
     }
+    this._saving = false;
+    this._setBtnNormal('#page-settings .page-header .btn.primary');
   },
 
   _saveLocal(payload) {
@@ -20761,8 +21899,7 @@ const SettingsService = {
     set('wcProjectId', document.getElementById('stg-wc-project-id')?.value);
 
     // Payment provider fields
-    const providers = ['stripe','paypal','checkout','wise','coinbase-commerce','moonpay','transak','ramp','banxa','mercuryo','alchemy','infura','quicknode','ankr','openai','anthropic','gemini','groq','deepseek','supabase'];
-    providers.forEach(p => {
+    GATHER_PROVIDERS.forEach(p => {
       const keyEl = document.getElementById(`stg-${p}-key`); if (keyEl?.value) set(`${p}Key`, keyEl.value);
       const secEl = document.getElementById(`stg-${p}-secret`); if (secEl?.value) set(`${p}Secret`, secEl.value);
       const envEl = document.getElementById(`stg-${p}-env`); if (envEl?.value) set(`${p}Env`, envEl.value);
@@ -20781,7 +21918,7 @@ const SettingsService = {
     set('circleUsdcNetwork', document.getElementById('stg-circle-usdc-network')?.value);
 
     // Swap/Bridge provider priorities
-    ['0x','1inch','paraswap','odos','across','stargate','lifi','wormhole'].forEach(p => {
+    PRIORITY_PROVIDERS.forEach(p => {
       const el = document.getElementById(`stg-${p}-priority`); if (el?.value) set(`${p}Priority`, el.value);
     });
 
@@ -20875,8 +22012,7 @@ const SettingsService = {
     setV('stg-ai-model', s.aiModel);
 
     // Provider fields
-    const providers = ['stripe','paypal','checkout','wise','coinbase-commerce','moonpay','transak','ramp','banxa','mercuryo','alchemy','infura','quicknode','ankr','openai','anthropic','gemini','groq','deepseek','supabase'];
-    providers.forEach(p => {
+    GATHER_PROVIDERS.forEach(p => {
       const keyVal = s[`${p}Key`]; if (keyVal) { const el = document.getElementById(`stg-${p}-key`); if (el) el.value = keyVal; }
       const secVal = s[`${p}Secret`]; if (secVal) { const el = document.getElementById(`stg-${p}-secret`); if (el) el.value = secVal; }
       setV(`stg-${p}-env`, s[`${p}Env`]);
@@ -20886,7 +22022,7 @@ const SettingsService = {
     });
 
     // Swap/Bridge priorities
-    ['0x','1inch','paraswap','odos','across','stargate','lifi','wormhole'].forEach(p => {
+    PRIORITY_PROVIDERS.forEach(p => {
       setV(`stg-${p}-priority`, s[`${p}Priority`]);
     });
 
@@ -20907,46 +22043,79 @@ const SettingsService = {
 
   _applyRuntime(s) {
     if (!s) return;
-    if (s.rpcPrimary && s.rpcPrimary !== 'https://rpc.testnet.arc.network') {
-      try { localStorage.setItem('arcpay_custom_rpc', s.rpcPrimary); } catch(e) {}
-    }
-    if (s.txLimit) { try { localStorage.setItem('arcpay_tx_limit', s.txLimit); } catch(e) {} }
-    if (s.platformFee) { try { localStorage.setItem('arcpay_platform_fee', s.platformFee); } catch(e) {} }
-    if (s.contractAddress && typeof isAddr === 'function' && isAddr(s.contractAddress)) {
-      try { localStorage.setItem('arcpay_batch_contract', s.contractAddress); } catch(e) {}
-      if (typeof setContract === 'function') setContract(s.contractAddress);
-    }
+    ConfigurationEngine.sync();
   },
 
-  _updateProviderStatuses(toggles) {
-    document.querySelectorAll('.stg-status-badge').forEach(badge => {
-      badge.classList.remove('active'); badge.classList.add('disabled');
-      badge.textContent = 'Disabled';
-    });
-    const providerMap = {
-      stripe:'stg-status-stripe', paypal:'stg-status-paypal', checkout:'stg-status-checkout', wise:'stg-status-wise',
-      'coinbase-commerce':'stg-status-coinbase-commerce', moonpay:'stg-status-moonpay', transak:'stg-status-transak',
-      ramp:'stg-status-ramp', banxa:'stg-status-banxa', mercuryo:'stg-status-mercuryo',
-      alchemy:'stg-status-alchemy', infura:'stg-status-infura', quicknode:'stg-status-quicknode', ankr:'stg-status-ankr',
-      openai:'stg-status-openai', anthropic:'stg-status-anthropic', gemini:'stg-status-gemini',
-      groq:'stg-status-groq', deepseek:'stg-status-deepseek', supabase:'stg-status-supabase'
-    };
-    // Active badges for built-in providers
-    const arcStatus = document.getElementById('stg-status-arc-swap');
-    if (arcStatus) { arcStatus.classList.add('active'); arcStatus.classList.remove('disabled'); arcStatus.textContent = 'Active'; }
-    const arcBridgeStatus = document.getElementById('stg-status-arc-bridge');
-    if (arcBridgeStatus) { arcBridgeStatus.classList.add('active'); arcBridgeStatus.classList.remove('disabled'); arcBridgeStatus.textContent = 'Active'; }
-    const cctpStatus = document.getElementById('stg-status-cctp');
-    if (cctpStatus) { cctpStatus.classList.add('active'); cctpStatus.classList.remove('disabled'); cctpStatus.textContent = 'Active'; }
+  _allProviderBadgeIds: (function() {
+    var map = {};
+    PROVIDER_REGISTRY.forEach(function(p) { if (p.badge) map[p.id] = p.badge; });
+    return map;
+  })(),
 
-    Object.entries(toggles).forEach(([id, on]) => {
-      const provider = id.replace('-enabled', '');
-      const badgeId = providerMap[provider];
-      if (badgeId && on) {
-        const badge = document.getElementById(badgeId);
-        if (badge) { badge.classList.add('active'); badge.classList.remove('disabled'); badge.textContent = 'Enabled'; }
+  _updateProviderStatuses(toggles) {
+    const allProviders = Object.keys(this._allProviderBadgeIds);
+    allProviders.forEach(function(provider) {
+      const badgeId = SettingsService._allProviderBadgeIds[provider];
+      const badge = document.getElementById(badgeId);
+      if (!badge) return;
+
+      const toggleEl = document.querySelector('#page-settings .stg-toggle[data-id="' + provider + '-enabled"]');
+      const toggled = toggleEl ? toggleEl.classList.contains('on') : (toggles && toggles[provider + '-enabled']);
+
+      if (!toggled) {
+        badge.className = 'stg-status-badge disabled';
+        badge.textContent = 'Disabled';
+        return;
+      }
+
+      const cached = ConnectionTester.getCached(provider);
+      const hasConfig = SettingsService._providerHasConfig(provider);
+
+      if (cached) {
+        if (cached.success) {
+          badge.className = 'stg-status-badge active';
+          badge.textContent = 'Connected';
+        } else if (cached.error === 'timeout') {
+          badge.className = 'stg-status-badge disabled';
+          badge.textContent = 'Timeout';
+        } else if (cached.status === 'not_configured' || !hasConfig) {
+          badge.className = 'stg-status-badge disabled';
+          badge.textContent = 'Warning';
+        } else {
+          badge.className = 'stg-status-badge disabled';
+          badge.textContent = 'Errored';
+        }
+      } else if (!hasConfig) {
+        badge.className = 'stg-status-badge disabled';
+        badge.textContent = 'Warning';
+      } else {
+        badge.className = 'stg-status-badge disabled';
+        badge.textContent = 'Configured';
       }
     });
+  },
+
+  _providerHasConfig(provider) {
+    var p = getProviderById(provider);
+    if (!p) return false;
+    if (p.fields.length === 0) return true; // no config needed
+
+    var specialKeys = {
+      'coinbase-commerce': function() { var el = document.getElementById('stg-coinbasecommerce-key'); return el && el.value.trim(); },
+      'circle': function() { var el = document.getElementById('stg-circle-api-key'); return el && el.value.trim(); },
+      'cctp': function() { var el = document.getElementById('stg-circle-api-key'); return el && el.value.trim(); },
+      'paypal': function() { var el = document.getElementById('stg-paypal-client'); return el && el.value.trim(); },
+      'supabase': function() { var su = document.getElementById('stg-supabase-url'); var sk = document.getElementById('stg-supabase-key'); return (su && su.value.trim()) || (sk && sk.value.trim()); },
+    };
+    if (specialKeys[provider]) return specialKeys[provider]();
+
+    for (var i = 0; i < p.fields.length; i++) {
+      var fid = 'stg-' + provider + '-' + p.fields[i];
+      if (p.fields[i] === 'url') fid = 'stg-' + provider + '-url';
+      var el = document.getElementById(fid);
+      if (el && el.value && el.value.trim()) return true;
+    }
+    return false;
   },
 
   switchTab(tab, el) {
@@ -20990,11 +22159,40 @@ const SettingsService = {
   },
 
   async testConnection(provider) {
-    toast(`Testing ${provider} connection...`,'info');
-    await new Promise(r => setTimeout(r, 800));
-    const enabled = document.querySelector(`#page-settings .stg-toggle[data-id="${provider}-enabled"]`)?.classList.contains('on');
-    if (!enabled) { toast(`${provider} is not enabled`,'warning'); return; }
-    toast(`${provider} connection OK (simulated)`,'success');
+    if (!Permissions.canAccessSettings()) return;
+    const toggleEl = document.querySelector('#page-settings .stg-toggle[data-id="' + provider + '-enabled"]');
+    const toggled = toggleEl ? toggleEl.classList.contains('on') : true;
+    if (!toggled) { toast(provider + ' is not enabled', 'warning'); return; }
+
+    var testBtn = document.querySelector('#page-settings .btn[onclick*="testConnection(\'' + provider + '\')"]');
+    if (testBtn) { testBtn.disabled = true; testBtn.style.opacity = '0.6'; }
+    toast('Testing ' + provider + ' connection...', 'info');
+    const start = performance.now();
+    const badgeId = this._allProviderBadgeIds[provider];
+    const badge = badgeId ? document.getElementById(badgeId) : null;
+    if (badge) { badge.className = 'stg-status-badge disabled'; badge.textContent = 'Testing...'; }
+
+    try {
+      const result = await ConnectionTester.test(provider);
+
+      if (result.success) {
+        if (badge) { badge.className = 'stg-status-badge active'; badge.textContent = 'Connected'; }
+        toast(provider + ' connected — ' + result.latency + 's', 'success');
+      } else if (result.error === 'timeout') {
+        if (badge) { badge.className = 'stg-status-badge disabled'; badge.textContent = 'Timeout'; }
+        toast(provider + ' timeout after ' + ((performance.now() - start) / 1000).toFixed(1) + 's', 'error');
+      } else if (result.status === 'not_configured') {
+        if (badge) { badge.className = 'stg-status-badge disabled'; badge.textContent = 'Warning'; }
+        toast(provider + ': ' + (result.message || 'Not configured'), 'warning');
+      } else {
+        if (badge) { badge.className = 'stg-status-badge disabled'; badge.textContent = 'Errored'; }
+        toast(provider + ': ' + this._safeError({ message: result.message }), 'error');
+      }
+    } catch(e) {
+      if (badge) { badge.className = 'stg-status-badge disabled'; badge.textContent = 'Errored'; }
+      toast(provider + ' test error: ' + this._safeError(e), 'error');
+    }
+    if (testBtn) { testBtn.disabled = false; testBtn.style.opacity = ''; }
   },
 
   verifyContract() {
@@ -21056,9 +22254,28 @@ const SettingsService = {
     try {
       const data = await this._request('POST', null, '?action=audit');
       if (data.ok && data.audit?.length) {
-        list.innerHTML = data.audit.map(a =>
-          `<div class="stg-audit-item"><span class="stg-audit-ts">${new Date(a.ts).toISOString().replace('T',' ').substring(0,19)}</span> &mdash; ${(a.changes||[]).join(', ') || 'No changes'}<br><span style="font-size:7px;color:var(--muted)">IP: ${a.ip||'?'} · Device: ${(a.device||'').substring(0,40)}</span></div>`
-        ).join('');
+        this._auditCache = data.audit;
+        const self = this;
+        list.innerHTML = data.audit.map(function(a, i) {
+          const tsStr = new Date(a.ts).toISOString().replace('T',' ').substring(0,19);
+          const changes = (a.changes||[]).join(', ') || 'No changes';
+          const revTag = data.audit.length - i;
+          const selected = self._selectedAuditIndex === i ? ' style="border-left:2px solid var(--blue);background:var(--blue-dim)"' : '';
+          return '<div class="stg-audit-item" data-audit-idx="' + i + '"' + selected + '><span style="font-weight:600;color:var(--blue);margin-right:4px">#R' + revTag + '</span><span class="stg-audit-ts">' + tsStr + '</span> &mdash; ' + escHtml(changes) + '<br><span style="font-size:7px;color:var(--muted)">IP: ' + (a.ip || '?') + ' &middot; Device: ' + (a.device || '').substring(0,40) + '</span></div>';
+        }).join('');
+        setTimeout(function() {
+          var items = list.querySelectorAll('.stg-audit-item');
+          items.forEach(function(item) {
+            item.addEventListener('click', function() {
+              var idx = parseInt(item.getAttribute('data-audit-idx'));
+              if (isNaN(idx)) return;
+              items.forEach(function(it) { it.removeAttribute('style'); });
+              item.setAttribute('style', 'border-left:2px solid var(--blue);background:var(--blue-dim)');
+              self._selectedAuditIndex = idx;
+              toast('Revision #R' + (data.audit.length - idx) + ' selected — click Rollback to restore', 'info');
+            });
+          });
+        }, 0);
       } else {
         list.innerHTML = '<div style="font-size:9px;color:var(--muted2);text-align:center;padding:12px">No audit entries yet</div>';
       }
@@ -21075,41 +22292,131 @@ const SettingsService = {
   },
 
   async exportBackup() {
+    if (!Permissions.canAccessSettings()) return;
+    this._setBtnLoading('#page-settings .page-header .btn:first-of-type');
     try {
       const data = await this._request('POST', null, '?action=export');
+      if (data && typeof data === 'object') {
+        this._downloadJSON('elligentt-settings-backup-' + Date.now() + '.json', data);
+        toast('Backup exported','success');
+      }
     } catch(e) {
-      const s = localStorage.getItem('arcpay_settings') || '{}';
-      this._downloadJSON('elligentt-settings-backup-' + Date.now() + '.json', JSON.parse(s));
+      try {
+        const s = JSON.parse(localStorage.getItem('arcpay_settings') || '{}');
+        this._downloadJSON('elligentt-settings-backup-' + Date.now() + '.json', s);
+        toast('Backup exported (local)','info');
+      } catch(e2) { toast('Export failed: ' + this._safeError(e2), 'error'); }
     }
+    this._setBtnNormal('#page-settings .page-header .btn:first-of-type');
   },
 
   async importBackup(input) {
+    if (!Permissions.canAccessSettings()) { toast('Access denied','error'); return; }
     const file = input.files[0];
     if (!file) return;
+    ConfigurationEngine.createSnapshot('import');
+    this._setBtnLoading('#page-settings .page-header .btn[onclick*="stg-import-file"]');
     try {
       const text = await file.text();
       const backup = JSON.parse(text);
       const settings = backup.settings || backup;
       await this._request('POST', { settings }, '?action=restore');
       this._cache = settings;
+      this._lastLoadTime = Date.now();
+      this._invalidateDomCache();
       this._applyToForm();
-      toast('Settings restored successfully','success');
+      this._updateProviderStatuses(settings.toggles || {});
+      ConfigurationEngine.sync();
+      ConfigurationEngine.recordImport();
+      toast('Settings imported successfully','success');
     } catch(e) {
-      try {
-        const text = await file.text();
-        const s = JSON.parse(text);
-        localStorage.setItem('arcpay_settings', JSON.stringify(s.settings || s));
-        this._cache = s.settings || s;
-        this._applyToForm();
-        toast('Settings imported locally','info');
-      } catch(e2) { toast('Invalid backup file','error'); }
+      toast('Import failed: ' + this._safeError(e), 'error');
     }
     input.value = '';
+    this._setBtnNormal('#page-settings .page-header .btn[onclick*="stg-import-file"]');
   },
 
-  rollbackSettings() {
-    toast('Rollback loaded last saved state','info');
-    this._applyToForm();
+  async rollbackSettings() {
+    if (!Permissions.canAccessSettings()) return;
+    var self = this;
+    if (self._selectedAuditIndex < 0) {
+      toast('Click an audit entry to select a revision first, then rollback', 'warning');
+      return;
+    }
+    ConfigurationEngine.createSnapshot('rollback');
+    this._setBtnLoading('#page-settings #stg-panel-audit .btn[onclick*="rollbackSettings"]');
+    try {
+      var data = await self._request('POST', null, '?action=backup');
+      if (data.ok && data.backup && data.backup.settings) {
+        self._cache = data.backup.settings;
+        self._lastLoadTime = Date.now();
+        self._applyToForm();
+        self._updateProviderStatuses(self._cache.toggles || {});
+        await self.save();
+        self._selectedAuditIndex = -1;
+        self._invalidateDomCache();
+        ConfigurationEngine.recordRollback();
+      } else {
+        if (self._cache) {
+          self._applyToForm();
+          self._updateProviderStatuses(self._cache.toggles || {});
+          self._selectedAuditIndex = -1;
+          toast('Rollback applied from cache','info');
+        } else {
+          toast('Rollback failed — no backup available','error');
+        }
+      }
+    } catch(e) {
+      if (self._cache) {
+        self._applyToForm();
+        self._updateProviderStatuses(self._cache.toggles || {});
+        self._selectedAuditIndex = -1;
+        toast('Rollback applied from cache','info');
+      } else {
+        toast('Rollback failed: ' + self._safeError(e),'error');
+      }
+    }
+    this._setBtnNormal('#page-settings #stg-panel-audit .btn[onclick*="rollbackSettings"]');
+  },
+
+  _setBtnLoading(sel) {
+    var el = document.querySelector(sel);
+    if (el) { el.disabled = true; el.style.opacity = '0.6'; el.style.pointerEvents = 'none'; el.setAttribute('data-orig-text', el.textContent.trim()); el.innerHTML = '<span class="spin">' + String.fromCharCode(8635) + '</span> Saving...'; }
+  },
+
+  _setBtnNormal(sel) {
+    var el = document.querySelector(sel);
+    if (el) { el.disabled = false; el.style.opacity = ''; el.style.pointerEvents = ''; var orig = el.getAttribute('data-orig-text'); if (orig) el.innerHTML = orig; }
+  },
+
+  _setBtnNormalAll(sel) {
+    var parent = document.querySelector(sel);
+    if (!parent) return;
+    var btns = parent.querySelectorAll('.btn');
+    for (var i = 0; i < btns.length; i++) {
+      btns[i].disabled = false;
+      btns[i].style.opacity = '';
+      btns[i].style.pointerEvents = '';
+    }
+  },
+
+  _invalidateDomCache() { this._domCache = {}; },
+
+  _$ (id) {
+    if (this._domCache[id]) return this._domCache[id];
+    var el = document.getElementById(id);
+    this._domCache[id] = el;
+    return el;
+  },
+
+  _safeError(e) {
+    if (!e) return 'Unknown error';
+    if (e.message && e.message.includes('Failed to fetch')) return 'Connection unavailable';
+    if (e.name === 'AbortError') return 'Request timed out';
+    if (e.status === 401) return 'Authentication required';
+    if (e.status === 403) return 'Permission denied';
+    if (e.status === 429) return 'Too many requests — please wait';
+    return 'Operation failed — please try again';
   },
 
   _downloadJSON(filename, data) {
@@ -21133,14 +22440,42 @@ const SettingsService = {
       }
     });
 
-    // Load on page show
+    // Secret owner mode: 5 clicks on sidebar logo
+    var logoIcon = document.querySelector('.logo-icon');
+    if (logoIcon) {
+      logoIcon.style.cursor = 'default';
+      logoIcon.addEventListener('click', function(e) {
+        e.stopPropagation();
+        Permissions.handleSecretClick();
+      });
+    }
+
+    // Load on page show — smart reload
+    const SVC = this;
     const origShowPage = showPage;
     showPage = function(id) {
+      if (id === 'settings' && !Permissions.canAccessSettings()) {
+        toast('You do not have permission to access this section','warning');
+        return;
+      }
       origShowPage(id);
       if (id === 'settings') {
-        setTimeout(() => { if (!SettingsService._loaded) SettingsService.load(); }, 100);
+        SVC._invalidateDomCache();
+        setTimeout(function() {
+          if (!SVC._saving && (!SVC._loaded || (Date.now() - SVC._lastLoadTime) > 30000)) {
+            SVC.load();
+          } else if (SVC._loaded) {
+            SVC._updateProviderStatuses(SVC._cache && SVC._cache.toggles || {});
+          }
+        }, 100);
       }
     };
+
+    // Hide Settings nav for non-owners
+    if (!Permissions.canAccessSettings()) {
+      var navSettings = document.getElementById('nav-settings');
+      if (navSettings) navSettings.style.display = 'none';
+    }
 
     // Initial load if already on settings page
     if (document.getElementById('page-settings')?.classList.contains('active')) {
@@ -26954,6 +28289,7 @@ async function executeTurboBridge() {
   }
 
   try {
+    BridgeEngine.notifyTurboStart({ from: srcChainId, to: 'Arc_Testnet', amt: amount, type: 'turbo' });
     const result = await TurboExecutor.execute(
       srcChainId, 'Arc_Testnet', 'usdc', amount, walletAddress,
       (step, msg) => activateStep(step, msg)
@@ -26962,8 +28298,10 @@ async function executeTurboBridge() {
       showToast('Turbo Bridge initiated — Tx: ' + shortAddr(result.txHash), 'success');
       stepEls.forEach(el => { if (el) { el.classList.remove('active'); el.classList.add('done'); }});
       vaultRefreshUI();
+      BridgeEngine.notifyExecutionComplete({ txHash: result.txHash });
     }
   } catch (err) {
+    BridgeEngine.notifyExecutionFailed(err);
     showToast('Turbo Bridge failed: ' + (err.shortMessage || err.message), 'error');
   } finally {
     if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-bolt"></i> Turbo Bridge'; }
@@ -29942,13 +31280,86 @@ function toggleMobileRoute() {
 
 // ══════════════════════════════════════════════════════════
 // ══════════════════════════════════════════════════════════
+//  UNIFIED BALANCE ENGINE — Central balance cache & orchestration
+// ══════════════════════════════════════════════════════════
+const UnifiedBalanceEngine = {
+  _cache: {},
+  _cacheTTL: 15000,
+  _watchers: {},
+  _metrics: { refreshes:0, loads:0, cacheHits:0, cacheMisses:0, errors:0, reconciliations:0, totalRefreshTime:0, totalLoadTime:0 },
+
+  getAssets() { return this._cache._lastAssets || []; },
+  getTotalUSD() { return this._cache._lastTotalUSD || 0; },
+  getCacheAge() { return this._cache._lastFetch ? (Date.now() - this._cache._lastFetch) : Infinity; },
+  isCacheValid() { return this.getCacheAge() < this._cacheTTL; },
+
+  notifyAssets(assets, totalUSD) {
+    var self = this;
+    self._cache._lastAssets = assets || [];
+    self._cache._lastTotalUSD = totalUSD || 0;
+    self._cache._lastFetch = Date.now();
+    self._emit('balanceUpdated', { assets: assets, totalUSD: totalUSD, ts: Date.now() });
+    self._notifyWatchers('balanceUpdated', { assets: assets, totalUSD: totalUSD });
+  },
+
+  notifyRefreshStart() { this._emit('balanceRefreshStarted', { ts: Date.now() }); },
+  notifyRefreshComplete(assets, totalUSD) {
+    this._metrics.refreshes++;
+    this.notifyAssets(assets, totalUSD);
+    this._emit('balanceRefreshCompleted', { ts: Date.now(), assets: assets, totalUSD: totalUSD });
+  },
+  notifyRefreshFailed(err) {
+    this._metrics.errors++;
+    this._emit('balanceRefreshFailed', { ts: Date.now(), error: (err && err.message) || 'unknown' });
+  },
+
+  invalidate() {
+    this._cache = {};
+    this._emit('balanceInvalidated', { ts: Date.now() });
+    this._notifyWatchers('balanceInvalidated', {});
+  },
+
+  reconcile() {
+    this._metrics.reconciliations++;
+    this._emit('balanceReconciled', { ts: Date.now() });
+  },
+
+  watch(event, fn) {
+    if (!this._watchers[event]) this._watchers[event] = [];
+    this._watchers[event].push(fn);
+  },
+
+  _emit(event, data) {},
+  _notifyWatchers(event, data) {
+    var fns = this._watchers[event];
+    if (fns) fns.forEach(function(fn) { try { fn(data); } catch(e) {} });
+  },
+
+  healthCheck() {
+    var issues = [];
+    if (!this._cache._lastFetch) issues.push('cache:cold');
+    if (this._cache._lastFetch && this.getCacheAge() > 60000) issues.push('cache:stale');
+    if (typeof walletAddress !== 'string' || !walletAddress) issues.push('wallet:disconnected');
+    return { healthy: issues.length === 0, issues: issues, timestamp: Date.now() };
+  },
+
+  getMetrics() { return this._metrics; },
+
+  recordLoad(ms) { this._metrics.loads++; this._metrics.totalLoadTime += ms; },
+  recordRefresh(ms) { this._metrics.refreshes++; this._metrics.totalRefreshTime += ms; },
+  recordError() { this._metrics.errors++; },
+  recordCacheHit() { this._metrics.cacheHits++; },
+  recordCacheMiss() { this._metrics.cacheMisses++; },
+};
+
+// ══════════════════════════════════════════════════════════
 //  UNIFIED BALANCE — Multi-chain portfolio & analytics
 // ══════════════════════════════════════════════════════════
 const UB = {
   state: { assets: [], totalUSD: 0 },
   loading: false,
-  memory: null, // FinancialMemory singleton
-  recs: []      // computed recommendations
+  memory: null,
+  recs: []
 };
 
 const UB_TOKEN_META = {
@@ -30170,12 +31581,14 @@ function ubInit() {
 
 // Auto-refresh when wallet connects/disconnects while UB page is open
 document.addEventListener('WALLET_CONNECTED', function() {
+  UnifiedBalanceEngine.invalidate();
   var page = document.getElementById('page-unified-balance');
   if (page && page.classList.contains('active')) {
     ubRefresh();
   }
 });
 document.addEventListener('WALLET_DISCONNECTED', function() {
+  UnifiedBalanceEngine.invalidate();
   var page = document.getElementById('page-unified-balance');
   if (page && page.classList.contains('active')) {
     ubShowState('empty');
@@ -30184,15 +31597,19 @@ document.addEventListener('WALLET_DISCONNECTED', function() {
 
 function ubRefresh() {
   if (UB.loading) return;
+  var t0 = performance.now();
+  UnifiedBalanceEngine.notifyRefreshStart();
   ubShowState('loading');
   var emptyEl = document.getElementById('ub-empty');
   if (emptyEl) emptyEl.style.display = 'none';
   ubFetchAllBalances()
-    .then(function() { ubRenderAll(); ubShowState('content'); })
+    .then(function() { ubRenderAll(); ubShowState('content'); UnifiedBalanceEngine.notifyRefreshComplete(UB.state.assets, UB.state.totalUSD); UnifiedBalanceEngine.recordRefresh(performance.now() - t0); })
     .catch(function(e) {
       var errEl = document.getElementById('ub-error-msg');
       if (errEl) errEl.textContent = (e && e.message) || 'Unknown error';
       ubShowState('error');
+      UnifiedBalanceEngine.notifyRefreshFailed(e);
+      UnifiedBalanceEngine.recordError();
     });
 }
 

@@ -117,6 +117,8 @@ export async function onRequestPost(context) {
   // SECURITY: technical log only — never log email, password, token or wallet.
   console.log('[AUTH] password login successful');
 
+  const ownerId = env.OWNER_USER_ID || '';
+
   return json({
     ok: true,
     sessionToken,
@@ -133,6 +135,9 @@ export async function onRequestPost(context) {
       },
       auth: user.auth,
       stats: user.stats,
+      permissions: {
+        settings: !!(ownerId && user.id === ownerId),
+      },
     },
   });
 }

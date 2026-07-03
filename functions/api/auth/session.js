@@ -34,6 +34,7 @@ export async function onRequestGet(context) {
   }
 
   const user = JSON.parse(userRaw);
+  const ownerId = env.OWNER_USER_ID || '';
 
   return json({
     ok: true,
@@ -50,6 +51,9 @@ export async function onRequestGet(context) {
       },
       auth: user.auth,
       stats: user.stats,
+      permissions: {
+        settings: !!(ownerId && user.id === ownerId),
+      },
     },
   });
 }

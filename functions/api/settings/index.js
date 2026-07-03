@@ -1,4 +1,11 @@
 import { getAuthCors } from '../auth/_cors.mjs';
+import {
+  validateAndSanitize,
+  maskSensitiveForBackup,
+  decryptSettingsForRead,
+  encryptSettingsForWrite,
+  autoMigrateIfNeeded,
+} from './_validation.mjs';
 
 function mkJson(headers) {
   return (data, status = 200) => new Response(JSON.stringify(data), { status, headers });
@@ -14,7 +21,7 @@ function redactSensitive(obj) {
   const out = {};
   for (const [k, v] of Object.entries(obj)) {
     if (SENSITIVE_FIELDS.some(f => k.toLowerCase().includes(f.toLowerCase()))) {
-      out[k] = v ? '••••••' : '';
+      out[k] = v ? '\u2022\u2022\u2022\u2022\u2022\u2022' : '';
     } else if (typeof v === 'object' && v !== null && !Array.isArray(v)) {
       out[k] = redactSensitive(v);
     } else {
@@ -35,7 +42,17 @@ async function getSessionUser(request, env) {
   const session = JSON.parse(sessionRaw);
   const userRaw = await KV.get(`user:${session.email}`);
   if (!userRaw) return null;
-  return { ...JSON.parse(userRaw), sessionToken: token };
+  const user = JSON.parse(userRaw);
+  const ownerId = env.OWNER_USER_ID || '';
+  return { ...user, sessionToken: token, isOwner: !!(ownerId && user.id === ownerId), _ownerId: ownerId };
+}
+
+function checkOwner(user, json) {
+  if (!user || !user._ownerId) return null; // No OWNER_USER_ID configured — allow all
+  if (!user.isOwner) {
+    return json({ error: 'Access denied — settings are restricted to the application owner' }, 403);
+  }
+  return null;
 }
 
 export async function onRequestOptions(context) {
@@ -51,9 +68,34 @@ export async function onRequestGet(context) {
 
   const user = await getSessionUser(request, env);
   if (!user) return json({ error: 'Authentication required' }, 401);
+  const denied = checkOwner(user, json); if (denied) return denied;
 
   const settingsRaw = await KV.get(`settings:${user.id}`);
-  const settings = settingsRaw ? JSON.parse(settingsRaw) : {};
+  let settings = settingsRaw ? JSON.parse(settingsRaw) : {};
+
+  const migrationAudit = [];
+  const migrated = await autoMigrateIfNeeded(settings, env, migrationAudit);
+  if (migrated.needsSave) {
+    settings = migrated.settings;
+    settings._updatedAt = Date.now();
+    await KV.put(`settings:${user.id}`, JSON.stringify(settings));
+    if (migrationAudit.length) {
+      const historyKey = `settings-audit:${user.id}`;
+      const history = await KV.get(historyKey);
+      const auditEntries = history ? JSON.parse(history) : [];
+      auditEntries.push({
+        ts: Date.now(),
+        userId: user.id,
+        device: request.headers.get('User-Agent') || '',
+        ip: request.headers.get('CF-Connecting-IP') || '',
+        changes: migrationAudit,
+      });
+      if (auditEntries.length > 200) auditEntries.splice(0, auditEntries.length - 200);
+      await KV.put(historyKey, JSON.stringify(auditEntries));
+    }
+  }
+
+  settings = await decryptSettingsForRead(settings, env, null);
 
   return json({
     ok: true,
@@ -72,37 +114,53 @@ export async function onRequestPut(context) {
 
   const user = await getSessionUser(request, env);
   if (!user) return json({ error: 'Authentication required' }, 401);
+  const denied = checkOwner(user, json); if (denied) return denied;
 
   let body;
   try { body = await request.json(); } catch (e) {
     return json({ error: 'Invalid JSON body' }, 400);
   }
 
+  const auditFields = [];
+  const { result: validatedBody, ignored, rejected } = validateAndSanitize(body, auditFields);
+
+  const changes = Object.keys(validatedBody).filter(k =>
+    k !== '_updatedAt' && k !== '_updatedBy' && k !== '_restoredAt'
+  );
+  if (ignored.length) changes.push(...ignored.map(f => `ignored:${f}`));
+  if (rejected.length) changes.push(...rejected.map(f => `rejected:${f}`));
+
   const existingRaw = await KV.get(`settings:${user.id}`);
   const existing = existingRaw ? JSON.parse(existingRaw) : {};
 
-  const merged = { ...existing, ...body, _updatedAt: Date.now(), _updatedBy: user.id };
+  const merged = { ...existing, ...validatedBody, _updatedAt: Date.now(), _updatedBy: user.id };
 
-  await KV.put(`settings:${user.id}`, JSON.stringify(merged));
+  const encrypted = await encryptSettingsForWrite(merged, env, auditFields);
+
+  await KV.put(`settings:${user.id}`, JSON.stringify(encrypted));
 
   const historyKey = `settings-audit:${user.id}`;
   const history = await KV.get(historyKey);
   const auditEntries = history ? JSON.parse(history) : [];
+  const allChanges = [...changes, ...auditFields];
   auditEntries.push({
     ts: Date.now(),
     userId: user.id,
     device: request.headers.get('User-Agent') || '',
     ip: request.headers.get('CF-Connecting-IP') || '',
-    changes: Object.keys(body).filter(k => !['_updatedAt', '_updatedBy'].includes(k)),
+    changes: allChanges.length ? allChanges : ['settings updated'],
   });
   if (auditEntries.length > 200) auditEntries.splice(0, auditEntries.length - 200);
   await KV.put(historyKey, JSON.stringify(auditEntries));
 
+  const responseSettings = await decryptSettingsForRead(encrypted, env, null);
+
   return json({
     ok: true,
     userId: user.id,
-    updatedAt: merged._updatedAt,
-    settings: redactSensitive(merged),
+    updatedAt: encrypted._updatedAt,
+    ...(rejected.length ? { rejectedFields: rejected, warning: 'Some fields were rejected due to validation' } : {}),
+    settings: redactSensitive(responseSettings),
   });
 }
 
@@ -115,6 +173,7 @@ export async function onRequestDelete(context) {
 
   const user = await getSessionUser(request, env);
   if (!user) return json({ error: 'Authentication required' }, 401);
+  const denied = checkOwner(user, json); if (denied) return denied;
 
   const url = new URL(request.url);
   const key = url.searchParams.get('key');
@@ -140,6 +199,7 @@ export async function onRequestPost(context) {
 
   const user = await getSessionUser(request, env);
   if (!user) return json({ error: 'Authentication required' }, 401);
+  const denied = checkOwner(user, json); if (denied) return denied;
 
   const url = new URL(request.url);
   const action = url.searchParams.get('action');
@@ -153,10 +213,17 @@ export async function onRequestPost(context) {
 
   if (action === 'backup') {
     const settingsRaw = await KV.get(`settings:${user.id}`);
-    const settings = settingsRaw ? JSON.parse(settingsRaw) : {};
+    let settings = settingsRaw ? JSON.parse(settingsRaw) : {};
+
+    settings = await decryptSettingsForRead(settings, env, null);
+
+    const includeSecrets = url.searchParams.get('includeSecrets') === 'true';
+
+    const exportSettings = includeSecrets ? settings : maskSensitiveForBackup(settings);
+
     return json({
       ok: true,
-      backup: { settings, exportedAt: Date.now(), userId: user.id },
+      backup: { settings: exportSettings, exportedAt: Date.now(), userId: user.id },
     });
   }
 
@@ -166,15 +233,41 @@ export async function onRequestPost(context) {
       return json({ error: 'Invalid JSON body' }, 400);
     }
     if (!body.settings) return json({ error: 'Missing settings field' }, 400);
-    const restored = { ...body.settings, _updatedAt: Date.now(), _restoredAt: Date.now() };
-    await KV.put(`settings:${user.id}`, JSON.stringify(restored));
-    return json({ ok: true, message: 'Settings restored' });
+
+    const { result: validated } = validateAndSanitize(body.settings, null);
+    const restored = { ...validated, _updatedAt: Date.now(), _restoredAt: Date.now() };
+
+    const encrypted = await encryptSettingsForWrite(restored, env, null);
+
+    await KV.put(`settings:${user.id}`, JSON.stringify(encrypted));
+
+    const responseSettings = await decryptSettingsForRead(encrypted, env, null);
+
+    return json({
+      ok: true,
+      message: 'Settings restored',
+      settings: redactSensitive(responseSettings),
+    });
   }
 
   if (action === 'export') {
     const settingsRaw = await KV.get(`settings:${user.id}`);
-    const settings = settingsRaw ? JSON.parse(settingsRaw) : {};
-    const exported = { settings, exportedAt: Date.now(), userId: user.id, version: '1.0' };
+    let settings = settingsRaw ? JSON.parse(settingsRaw) : {};
+
+    settings = await decryptSettingsForRead(settings, env, null);
+
+    const includeSecrets = url.searchParams.get('includeSecrets') === 'true';
+
+    const exportSettings = includeSecrets ? settings : maskSensitiveForBackup(settings);
+
+    const exported = {
+      settings: exportSettings,
+      exportedAt: Date.now(),
+      userId: user.id,
+      version: '1.0',
+      secretsMasked: !includeSecrets,
+    };
+
     return new Response(JSON.stringify(exported, null, 2), {
       status: 200,
       headers: {
