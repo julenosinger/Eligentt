@@ -15,6 +15,43 @@ export const RELAYER_CONFIG = {
   SEND_ASSETS_FEE_BPS: 20,
   MULTISEND_FEE_BPS: 20,
 
+  // ── Bridge fee references (Phase 2 Quote engine — mirror public/config/fees.js).
+  // Additive only: no existing consumer reads these; they give the Treasury Core
+  // Quote endpoint a single server-side source of truth instead of duplicating
+  // financial logic.
+  TURBO_FEE_BPS:            100,     // 1.00% Turbo Bridge liquidity fee → Treasury
+  SETTLE_FEE_BPS:           5,       // 0.05% settlement rebate → Treasury
+  STANDARD_BRIDGE_FEE_RATE: 0.0005,  // 0.05% standard CCTP bridge
+  XC_STANDARD_FEE_RATE:     0.001,   // 0.10% cross-chain standard
+
+  // CCTP chain/domain map (mirror of public/config/cctp.js CCTP_CONFIG). Used by
+  // the Quote engine to describe routes; NOT used to move funds.
+  CCTP_DOMAINS: {
+    '5042002':  { domain: 26, name: 'Arc_Testnet',       explorer: 'https://testnet.arcscan.app' },
+    '11155111': { domain: 0,  name: 'Ethereum_Sepolia',  explorer: 'https://sepolia.etherscan.io' },
+    '84532':    { domain: 6,  name: 'Base_Sepolia',      explorer: 'https://sepolia.basescan.org' },
+    '421614':   { domain: 3,  name: 'Arbitrum_Sepolia',  explorer: 'https://sepolia.arbiscan.io' },
+    '11155420': { domain: 2,  name: 'Optimism_Sepolia',  explorer: 'https://sepolia-optimism.etherscan.io' },
+    '80002':    { domain: 7,  name: 'Polygon_Amoy',      explorer: 'https://amoy.polygonscan.com' },
+  },
+
+  // ── Multi-Application Core (Phase 1) ─────────────────────────────────
+  // The Elligentt infrastructure operates as a shared Liquidity Core that
+  // serves multiple consumer applications (ELLIGENT today, EXECDAAT next)
+  // over the SAME Vault + Treasury. Liquidity stays centralized; only the
+  // accounting/attribution is segregated per Application + Client.
+  // These are DEFAULTS ONLY — every field is optional on the wire so that
+  // every existing integration keeps working unchanged.
+  APPLICATION: {
+    MODE:                'CORE',        // Elligentt is the central infrastructure
+    DEFAULT_APP:         'ELLIGENT',    // application identifier fallback
+    DEFAULT_CLIENT:      'default',     // client identifier fallback
+    DEFAULT_VERSION:     '1',           // API/intent version fallback
+    DEFAULT_ENVIRONMENT: 'production',  // environment fallback
+    KNOWN_APPS:          ['ELLIGENT', 'EXECDAAT', 'FUTURE_APP'],
+    MAX_FIELD_LEN:       32,            // memo-safe token length cap
+  },
+
   ASSETS: {
     usdc:   '0x3600000000000000000000000000000000000000',
     eurc:   '0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a',

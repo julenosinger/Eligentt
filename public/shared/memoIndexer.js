@@ -40,8 +40,15 @@ const MemoIndexer = (() => {
     try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (_) {}
   }
 
-  function generate(action, intentId, asset, amount) {
-    return `${PREFIX}|${action}|${intentId}|${(asset ?? 'USDC').toUpperCase()}|${amount}`;
+  function generate(action, intentId, asset, amount, application, client) {
+    const base = `${PREFIX}|${action}|${intentId}|${(asset ?? 'USDC').toUpperCase()}|${amount}`;
+    // Multi-application (Phase 1): append Application + Client, keeping the first
+    // five positional fields byte-identical to the legacy format. Only appended
+    // when provided so legacy call sites emit the exact same string as before.
+    if (application === undefined && client === undefined) return base;
+    const app = String(application ?? 'ELLIGENT').toUpperCase();
+    const cli = String(client ?? 'default');
+    return `${base}|${app}|${cli}`;
   }
 
   function parse(memoStr) {
@@ -55,6 +62,10 @@ const MemoIndexer = (() => {
       intentId: parts[2],
       asset: parts[3] ?? null,
       amount: parts[4] ? parseFloat(parts[4]) : null,
+      // Optional multi-application fields (backward compatible: legacy memos omit
+      // them and fall back to the ELLIGENT / default attribution).
+      application: parts[5] ? parts[5].toUpperCase() : 'ELLIGENT',
+      client: parts[6] ?? 'default',
     };
   }
 
@@ -109,6 +120,8 @@ const MemoIndexer = (() => {
               action: parsed.action,
               asset: parsed.asset,
               amount: parsed.amount,
+              application: parsed.application,
+              client: parsed.client,
               memo: memoStr,
               txHash: ev.transactionHash,
               blockNumber: ev.blockNumber,

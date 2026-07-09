@@ -23,6 +23,8 @@ import { ethers } from 'ethers';
 import { checkRelayLimit } from './rate-limit.mjs';
 import { RELAYER_CONFIG } from './shared-config.mjs';
 import { verifyRelayerAuth, relayerConfigError } from './relayer-auth.mjs';
+import { resolveApplicationContext } from './application-context.mjs';
+import { recordLedgerEntry, LEDGER_STAGES, LEDGER_STATUS } from './ledger.mjs';
 
 // SECURITY: structured, safe telemetry only — never logs signature, token, key,
 // OTP, session or intent payload. Fields are limited to operational metadata.
@@ -97,6 +99,11 @@ export async function onRequest(context) {
     return json({ error: 'Invalid JSON' }, 400);
   }
 
+  // MULTI-APPLICATION (Phase 1): attribute this operation to an Application +
+  // Client + Version. All fields are OPTIONAL — when omitted they default to
+  // ELLIGENT / default / 1 so every existing caller is unaffected.
+  const appCtx = resolveApplicationContext(body, env, request);
+
   // Fulfillment authorization: when an `auth` object is present it is verified and
   // bound to userAddress (legacy/EIP-712). When absent, the backend operator relayer
   // fulfills the intent directly — automatic / popup-free for any wallet — with the
@@ -143,7 +150,7 @@ export async function onRequest(context) {
   }
 
   // OBSERVABILITY: authorization accepted (no sensitive data).
-  relayerEvent('relayer_auth_success', { endpoint: 'relayer', mode: (authResult && authResult.scheme) || 'open' });
+  relayerEvent('relayer_auth_success', { endpoint: 'relayer', mode: (authResult && authResult.scheme) || 'open', application: appCtx.application, client: appCtx.client });
 
   const rpc = env.ARC_RPC_URL || 'https://rpc.testnet.arc.network';
 
@@ -193,7 +200,24 @@ export async function onRequest(context) {
     console.log('[RELAYER] TX:', tx.hash);
     console.log('[RELAYER] Block:', rc.blockNumber);
 
-    return json({ success: true, txHash: tx.hash, blockNumber: rc.blockNumber });
+    // LEDGER (accounting-only, best-effort, KV-optional): record the Vault debit
+    // and Treasury payment attributed to this Application + Client. Never blocks
+    // or alters the on-chain flow.
+    try {
+      const ledgerBase = {
+        context: appCtx,
+        intentId: intentBytes32,
+        amount: grossAmount,
+        asset,
+        txHash: tx.hash,
+        status: LEDGER_STATUS.SUCCESS,
+      };
+      const ledgerKv = env.LEDGER_KV || env.PAYMENT_LINKS || null;
+      await recordLedgerEntry(ledgerKv, { ...ledgerBase, stage: LEDGER_STAGES.VAULT_DEBIT });
+      await recordLedgerEntry(ledgerKv, { ...ledgerBase, stage: LEDGER_STAGES.TREASURY_PAYMENT });
+    } catch (_) {}
+
+    return json({ success: true, txHash: tx.hash, blockNumber: rc.blockNumber, application: appCtx.application, client: appCtx.client });
   } catch (e) {
     console.error('[RELAYER] Fail:', e.shortMessage || e.message || e);
     return json({ success: false, error: e.shortMessage || e.message || 'Unknown' }, 500);

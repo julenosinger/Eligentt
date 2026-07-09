@@ -38,8 +38,10 @@
 <script src="/config/fees.js"></script>
 <script src="/config/slippage.js"></script>
 <script src="/config/runtime.js"></script>
+<script src="/config/application.js"></script>
 <script src="/shared/memoIndexer.js"></script>
 <script src="/shared/treasuryIndexer.js"></script>
+<script src="/shared/applicationLedger.js"></script>
 <script src="/shared/profile.js"></script>
 <script src="/shared/walletManager.js"></script>
 <script src="/shared/auth.js"></script>
@@ -10119,8 +10121,12 @@ const ElligenteMemo = (() => {
   const VALID_ACTIONS = ['REPAY', 'BRIDGE', 'INVOICE', 'BATCH'];
   const STORE_KEY = 'elligente_memo_index';
 
-  function generate(action, intentId, asset, amount) {
-    return `${PREFIX}|${action}|${intentId}|${(asset ?? 'USDC').toUpperCase()}|${amount}`;
+  function generate(action, intentId, asset, amount, application, client) {
+    const base = `${PREFIX}|${action}|${intentId}|${(asset ?? 'USDC').toUpperCase()}|${amount}`;
+    // Multi-application (Phase 1): append Application + Client. Only appended when
+    // provided, so legacy call sites emit the exact same legacy string.
+    if (application === undefined && client === undefined) return base;
+    return `${base}|${String(application ?? 'ELLIGENT').toUpperCase()}|${String(client ?? 'default')}`;
   }
 
   function parse(memoStr) {
@@ -10134,6 +10140,8 @@ const ElligenteMemo = (() => {
       intentId: parts[2],
       asset: parts[3] ?? null,
       amount: parts[4] ? parseFloat(parts[4]) : null,
+      application: parts[5] ? parts[5].toUpperCase() : 'ELLIGENT',
+      client: parts[6] ?? 'default',
     };
   }
 
@@ -10220,6 +10228,8 @@ const ElligenteMemo = (() => {
           action: parsed.action,
           asset: parsed.asset,
           amount: parsed.amount,
+          application: parsed.application,
+          client: parsed.client,
           memo: memoStr,
           txHash: ev.transactionHash,
           blockNumber: ev.blockNumber,
@@ -10293,6 +10303,8 @@ const ElligenteMemo = (() => {
             netAmount: m.amount ?? 0,
             feeAmount: 0,
             userAddress: m.sender ?? null,
+            application: (m.application || 'ELLIGENT'),
+            client: (m.client || 'default'),
             srcChain: null,
             dstChain: 'Arc_Testnet',
             status: 'Settled',
@@ -10331,6 +10343,8 @@ const ElligenteMemo = (() => {
         action: m.action,
         asset: m.asset,
         amount: m.amount,
+        application: (m.application || 'ELLIGENT'),
+        client: (m.client || 'default'),
         memo: m.memo,
         txHash: m.txHash,
         blockNumber: m.blockNumber,
@@ -26465,11 +26479,18 @@ const RepaymentContract = (() => {
 
   function _genId() { const r = crypto.getRandomValues(new Uint8Array(4)); return 'INT-' + Date.now().toString(36).toUpperCase() + '-' + Array.from(r, b => b.toString(16).padStart(2,'0')).join('').toUpperCase(); }
 
-  function createIntent({ asset, amount, userAddress, srcChain, dstChain, txHash, sourceDomain }) {
+  function createIntent({ asset, amount, userAddress, srcChain, dstChain, txHash, sourceDomain, application, client, environment, origin, version }) {
     if (!amount || amount <= 0) throw new Error('INTENT_INVALID_AMOUNT');
     if (!userAddress)           throw new Error('INTENT_INVALID_USER');
     if (!txHash)                throw new Error('INTENT_MISSING_TXHASH');
     VaultSecurity.requireUnlocked();
+
+    // MULTI-APPLICATION (Phase 1): attribute the intent to an Application + Client
+    // (+ environment/origin/version). Optional — defaults to ELLIGENT / default / 1
+    // so every existing flow is unchanged.
+    const _appCtx = (typeof ApplicationContext !== 'undefined')
+      ? ApplicationContext.normalizeContext({ application, client, environment, origin, version })
+      : { application: (application || 'ELLIGENT'), client: (client || 'default'), version: (version || '1'), environment: (environment || 'production'), origin: origin || null };
 
     const id = _genId();
     VaultStore.registerIntent(id);
@@ -26485,6 +26506,11 @@ const RepaymentContract = (() => {
       grossAmount, feeAmount, netAmount,          // fee accounting
       amount,                                       // backward compat
       userAddress, srcChain, dstChain,
+      application: _appCtx.application,             // multi-application attribution
+      client: _appCtx.client,
+      environment: _appCtx.environment,
+      origin: _appCtx.origin,
+      version: _appCtx.version,
       status: 'Created', txHash,
       sourceDomain: sourceDomain ?? null,
       createdAt: Date.now(), updatedAt: Date.now(),
@@ -26503,6 +26529,15 @@ const RepaymentContract = (() => {
       mintBlockNumber: null,
     };
     VaultStore.upsertIntent(intent);
+    try {
+      if (typeof ApplicationLedger !== 'undefined') {
+        ApplicationLedger.record({
+          application: intent.application, client: intent.client, version: intent.version,
+          intentId: id, stage: ApplicationLedger.STAGES.INTENT,
+          amount: intent.grossAmount, asset: intent.asset, status: 'Pending',
+        });
+      }
+    } catch (_) {}
     return id;
   }
 
@@ -27220,6 +27255,9 @@ const FulfillerEngine = (() => {
           grossAmount: intent.grossAmount,
           feeAmount: intent.feeAmount,
           userAddress: intent.userAddress,
+          applicationId: intent.application || 'ELLIGENT',
+          clientId: intent.client || 'default',
+          version: intent.version || '1',
         }),
       });
       const data = await resp.json();
@@ -27871,6 +27909,9 @@ const TreasurySettlementExecutor = (() => {
               asset: intent?.asset ?? 'usdc',
               amount: intent?.amount ?? 0,
               userAddress: intent?.userAddress,
+              applicationId: intent?.application || 'ELLIGENT',
+              clientId: intent?.client || 'default',
+              version: intent?.version || '1',
             }),
           });
 
@@ -27907,8 +27948,19 @@ const TreasurySettlementExecutor = (() => {
                 mintTxHash: verifiedTxHash, blockNumber: data.blockNumber,
                 amount: intent?.amount, asset: intent?.asset, timestamp: Date.now(),
                 memoOnChain: data.memoOnChain ?? false,
+                application: data.application ?? intent?.application ?? 'ELLIGENT',
+                client: data.client ?? intent?.client ?? 'default',
               });
             }
+            try {
+              if (typeof ApplicationLedger !== 'undefined') {
+                const _amt = intent?.amount ?? 0;
+                const _app = data.application ?? intent?.application ?? 'ELLIGENT';
+                const _cli = data.client ?? intent?.client ?? 'default';
+                ApplicationLedger.record({ application: _app, client: _cli, intentId: task.intentId, stage: ApplicationLedger.STAGES.SETTLEMENT, amount: _amt, asset: intent?.asset, status: 'Success', txHash: verifiedTxHash, bridge: 'CCTP' });
+                ApplicationLedger.record({ application: _app, client: _cli, intentId: task.intentId, stage: ApplicationLedger.STAGES.VAULT_CREDIT, amount: _amt, asset: intent?.asset, status: 'Success', txHash: verifiedTxHash, bridge: 'CCTP' });
+              }
+            } catch (_) {}
             try {
               await RepaymentContract.verifyAndSettle(task.intentId, { attestation: task.attestationSig, mintTxHash: verifiedTxHash });
               _log('[SETTLEMENT] Marking Treasury reimbursed — intent=' + task.intentId);
@@ -28850,6 +28902,8 @@ const SettlementModule = (() => {
         return !!(i._treasuryReimbursed || (i._reimbursementProof && i._reimbursementProof.onChainVerified));
       }).map(i => ({
         intentId:        i.intentId || i.id || '—',
+        application:     (i.application || 'ELLIGENT'),
+        client:         (i.client || 'default'),
         burnTxHash:      i.srcTx || i.burnTx || i.txHash || i.cctpMsgHash || '—',
         attestationHash: (typeof i.attestation === 'string' ? i.attestation : (i.attestation?.attestation||i.cctpMsgHash||i._reimbursementProof?.attestationData||'—')),
         settlementTx:    i.settlementTxHash || i.settlementTx || '—',

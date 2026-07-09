@@ -25,6 +25,9 @@ import { ethers } from 'ethers';
 import { checkMintLimit } from '../rate-limit.mjs';
 import { RELAYER_CONFIG } from '../shared-config.mjs';
 import { verifyRelayerAuth, relayerConfigError } from '../relayer-auth.mjs';
+import { resolveApplicationContext } from '../application-context.mjs';
+import { recordLedgerEntry, LEDGER_STAGES, LEDGER_STATUS } from '../ledger.mjs';
+import { generateMemo } from '../memo.mjs';
 
 // SECURITY: structured, safe telemetry only — never logs signature, token, key,
 // OTP, session or intent payload. Fields are limited to operational metadata.
@@ -56,11 +59,12 @@ const MT_ABI = RELAYER_CONFIG.MT_ABI;
 const MEMO_ABI = RELAYER_CONFIG.MEMO_ABI;
 
 const ARC_CHAIN_ID = RELAYER_CONFIG.ARC_CHAIN_ID;
-const MEMO_PREFIX = 'ELLIGENTE';
 
-function generateMemo(action, intentId, asset, amount) {
-  return `${MEMO_PREFIX}|${action}|${intentId}|${(asset ?? 'USDC').toUpperCase()}|${amount}`;
-}
+// The on-chain memo grammar lives in ../memo.mjs (single source of truth). It is
+// EXPANDED — backward compatibly — to carry Application + Client. The first five
+// positional fields are byte-identical to the legacy format, so every existing
+// indexer/parser keeps working. Format stays compact:
+//   ELLIGENTE|REPAY|INT-XXXX|USDC|100|ELLIGENT|default
 
 export async function onRequest(context) {
   const { request, env } = context;
@@ -109,6 +113,11 @@ export async function onRequest(context) {
     return json({ error: 'Invalid JSON' }, 400);
   }
 
+  // MULTI-APPLICATION (Phase 1): attribute this reimbursement to an Application +
+  // Client + Version. All fields are OPTIONAL — defaults keep legacy callers
+  // working (ELLIGENT / default / 1).
+  const appCtx = resolveApplicationContext(body, env, request);
+
   // The CCTP mint/reimbursement is authorized on-chain by the MessageTransmitter:
   // it only accepts a valid Circle-attested message, and that message mints USDC to
   // the TreasuryVault (reimbursement) — it cannot pay anyone else and cannot drain
@@ -139,7 +148,7 @@ export async function onRequest(context) {
   }
 
   // OBSERVABILITY: authorization accepted. mint_path reflects which scheme bound it.
-  relayerEvent('relayer_auth_success', { endpoint: 'mint', mode: mintPath, mint_path: mintPath });
+  relayerEvent('relayer_auth_success', { endpoint: 'mint', mode: mintPath, mint_path: mintPath, application: appCtx.application, client: appCtx.client });
 
   const { messageBytes, attestationSignature, intentId, asset, amount } = body;
   if (!messageBytes || !attestationSignature) {
@@ -215,7 +224,7 @@ export async function onRequest(context) {
   }
 
   // ── Generate Elligente Transaction Memo ──
-  const memoStr = generateMemo('REPAY', intentId ?? 'UNKNOWN', asset ?? 'USDC', amount ?? 0);
+  const memoStr = generateMemo('REPAY', intentId ?? 'UNKNOWN', asset ?? 'USDC', amount ?? 0, appCtx.application, appCtx.client);
   const memoId = ethers.id(intentId ?? 'UNKNOWN');
   const memoData = ethers.toUtf8Bytes(memoStr);
   console.log('[RELAYER] Generated memo:', memoStr);
@@ -259,7 +268,26 @@ export async function onRequest(context) {
     }
 
     console.log('[RELAYER] Treasury mint confirmed — TX:', tx.hash, 'Block:', rc.blockNumber, 'Memo:', memoStr, 'OnChain:', memoOnChain);
-    relayerEvent('mint_success', { endpoint: 'mint', mode: mintPath });
+    relayerEvent('mint_success', { endpoint: 'mint', mode: mintPath, application: appCtx.application, client: appCtx.client });
+
+    // LEDGER (accounting-only, best-effort, KV-optional): record the Settlement
+    // and the Vault credit (reimbursement) attributed to this Application + Client.
+    try {
+      const ledgerBase = {
+        context: appCtx,
+        intentId: intentId ?? null,
+        amount: (typeof amount === 'number') ? amount : null,
+        asset: asset ?? 'usdc',
+        txHash: tx.hash,
+        memo: memoStr,
+        bridge: 'CCTP',
+        status: LEDGER_STATUS.SUCCESS,
+      };
+      const ledgerKv = env.LEDGER_KV || env.PAYMENT_LINKS || null;
+      await recordLedgerEntry(ledgerKv, { ...ledgerBase, stage: LEDGER_STAGES.SETTLEMENT });
+      await recordLedgerEntry(ledgerKv, { ...ledgerBase, stage: LEDGER_STAGES.VAULT_CREDIT });
+    } catch (_) {}
+
     return json({
       success: true,
       txHash: tx.hash,
@@ -267,6 +295,8 @@ export async function onRequest(context) {
       verified: true,
       memo: memoStr,
       memoOnChain,
+      application: appCtx.application,
+      client: appCtx.client,
     });
   } catch (e) {
     console.error('[RELAYER] Mint failed:', e.shortMessage || e.message || e);

@@ -78,6 +78,10 @@ const TreasuryIndexer = (() => {
         intentId: parts[2],
         asset: parts[3],
         amount: amt,
+        // Optional multi-application fields (backward compatible: legacy memos
+        // omit them → ELLIGENT / default attribution).
+        application: parts[5] ? parts[5].toUpperCase() : 'ELLIGENT',
+        client: parts[6] ?? 'default',
         raw: str,
       };
     } catch (_) { return null; }
@@ -103,6 +107,8 @@ const TreasuryIndexer = (() => {
               action: parsed.action,
               asset: parsed.asset.toLowerCase(),
               amount: parsed.amount,
+              application: parsed.application,
+              client: parsed.client,
               memo: parsed.raw,
               memoOnChain: true,
               txHash: ev.transactionHash,
@@ -183,6 +189,8 @@ const TreasuryIndexer = (() => {
       netAmount: settlement.amount,
       feeAmount: 0,
       userAddress: settlement.sender ?? null,
+      application: settlement.application ?? 'ELLIGENT',
+      client: settlement.client ?? 'default',
       srcChain: null,
       dstChain: 'Arc_Testnet',
       status: 'Settled',
