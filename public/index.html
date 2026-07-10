@@ -2154,6 +2154,19 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
   .xc-content .info-col{display:flex !important}
   .xc-swap-dir{transform:rotate(90deg)}
   .xc-swap-dir:hover{transform:rotate(270deg)}
+  /* Mobile: show classic layout, hide premium left column */
+  .xc-mobile-chains{display:block}
+  .xc-left-col{display:none !important}
+  .xc-content{grid-template-columns:1fr !important;gap:10px;padding:8px}
+  .xc-content .swap-col{order:1}
+  .xc-content .info-col{order:2;display:flex !important;flex-direction:column;gap:8px;width:100% !important}
+  .xc-premium-card{max-width:100% !important;margin:0 !important}
+  /* Hide premium-only elements on mobile */
+  #xc-path-viz,#xc-ai-card,#xc-gas-card{display:none}
+}
+/* ═══ Desktop: hide mobile chain selectors ═══ */
+@media(min-width:769px){
+  .xc-mobile-chains{display:none !important}
 }
 /* ═══════════════════════════════════════════════════════
    UNIFIED BALANCE — LIVE SCREEN
@@ -2223,10 +2236,46 @@ select.ub-op-input{cursor:pointer;-webkit-appearance:none;appearance:none;backgr
 .ub-op-step.error .dot{background:rgba(239,68,68,.15);color:var(--red)}
 
 @media(max-width:768px){
-  #ub-live-screen{min-height:220px}
-  .ub-dash-bal-val{font-size:20px}
-  .ub-dash-chain-pill{min-width:70px;padding:4px 6px}
-  .ub-op-panel{width:100%;min-width:0;max-width:100%}
+  /* UB Screen: full width, prominent */
+  #ub-live-screen{min-height:380px;height:50vh;max-height:500px}
+  .ub-screen-dash{padding:10px 12px;gap:8px}
+  .ub-dash-top{flex-direction:column;gap:8px}
+  .ub-dash-bal-val{font-size:22px}
+  .ub-dash-bal-label{font-size:7px}
+  .ub-dash-chains{flex-wrap:nowrap;overflow-x:auto;gap:4px;padding-bottom:4px;-webkit-overflow-scrolling:touch}
+  .ub-dash-chain-pill{min-width:80px;flex-shrink:0;padding:4px 6px;font-size:7.5px}
+  .ub-dash-chain-pill .bal{font-size:8.5px}
+  .ub-dash-feed{max-height:100px}
+  .ub-dash-feed-body{font-size:7.5px}
+  .ub-dash-feed-line{font-size:7px}
+  .ub-dash-feed-line .t{font-size:6.5px;min-width:36px}
+  /* Hide grid cards on mobile — screen + assets only */
+  #ub-health-card,#ub-recommendations-card,
+  #ub-content > div[style*="grid-template-columns"]{display:none !important}
+  /* Operation panel OFF the screen — modal overlay */
+  .ub-op-panel{
+    position:fixed !important;top:0 !important;left:0 !important;right:0 !important;bottom:0 !important;
+    width:100vw !important;min-width:100vw !important;max-width:100vw !important;
+    height:100vh !important;z-index:10000 !important;
+    border-radius:0 !important;border:none !important;
+    animation:none !important;flex-shrink:initial !important;
+  }
+  .ub-op-panel-header{padding:16px 18px;font-size:13px;border-bottom:1px solid rgba(6,247,233,.12)}
+  .ub-op-close{width:32px;height:32px;font-size:18px}
+  .ub-op-panel-form{padding:16px 18px;gap:14px;flex:1;overflow-y:auto}
+  .ub-op-input{padding:12px 14px;font-size:14px;border-radius:6px}
+  .ub-op-field-label{font-size:9px}
+  .ub-op-btn{padding:14px;font-size:12px;border-radius:8px}
+  .ub-scr-swap-side{padding:12px}
+  .ub-scr-bridge-chains{gap:6px}
+  .ub-scr-bridge-chain{padding:8px 10px}
+  .ub-op-step{padding:6px 8px;font-size:9px}
+  .ub-screen-footer{padding:5px 10px;font-size:7px}
+  /* Screen header bar: stacked on mobile */
+  #ub-hero-card>div:first-child{padding:8px 10px !important;gap:4px}
+  #ub-hero-card>div:first-child>div:first-child{width:100%}
+  #ub-hero-card>div:first-child>div:nth-child(2){width:100%;justify-content:space-between}
+  #ub-hero-card>div:first-child>div:last-child{width:100%;justify-content:flex-start}
 }
 /* ── Batch Cross-Chain table ────────────────────────────────── */
 .rtable select.ni{background:var(--card2);color:var(--text);border:1px solid var(--border2);border-radius:4px;font-family:'JetBrains Mono',monospace;cursor:pointer;appearance:none;-webkit-appearance:none;padding-right:12px}
@@ -6772,6 +6821,54 @@ select.cinput option { background: #161a24; color: #dde2f0; }
 
           <!-- Payment Details Card -->
           <div class="swap-card xc-premium-card">
+            <!-- Mobile-only chain selectors -->
+            <div class="xc-mobile-chains">
+              <div style="display:flex;align-items:center;gap:8px">
+                <div style="flex:1">
+                  <div class="swap-label">From Chain</div>
+                  <div class="chain-sel" id="xc-from-sel" onclick="xcCycleFrom()" style="width:100%;justify-content:space-between;padding:8px 10px">
+                    <div style="display:flex;align-items:center;gap:6px">
+                      <div class="chain-dot" id="xc-from-dot-m" style="background:#627eea"></div>
+                      <span id="xc-from-name-m" style="font-size:10px">Ethereum Sepolia</span>
+                    </div>
+                    <i class="ti ti-chevron-down" style="font-size:9px;color:var(--muted2)"></i>
+                  </div>
+                </div>
+                <div style="padding-top:16px">
+                  <div onclick="xcSwapChains()" style="width:28px;height:28px;background:var(--card2);border:1px solid var(--border2);border-radius:6px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--yellow);font-size:14px" onmouseover="this.style.borderColor='var(--yellow)'" onmouseout="this.style.borderColor='var(--border2)'">
+                    <i class="ti ti-arrows-exchange"></i>
+                  </div>
+                </div>
+                <div style="flex:1">
+                  <div class="swap-label">To Chain</div>
+                  <div class="chain-sel" id="xc-to-sel" onclick="xcCycleTo()" style="width:100%;justify-content:space-between;padding:8px 10px">
+                    <div style="display:flex;align-items:center;gap:6px">
+                      <div class="chain-dot" id="xc-to-dot-m" style="background:#ff0202"></div>
+                      <span id="xc-to-name-m" style="font-size:10px">Arc Testnet</span>
+                    </div>
+                    <i class="ti ti-chevron-down" style="font-size:9px;color:var(--muted2)"></i>
+                  </div>
+                </div>
+              </div>
+              <!-- Mobile route viz -->
+              <div id="xc-path-viz-m" style="margin-top:8px;display:flex;align-items:center;gap:0;background:rgba(0,0,0,.2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;overflow:hidden">
+                <div style="display:flex;align-items:center;gap:5px;flex-shrink:0">
+                  <div id="xc-path-from-dot-m" style="width:11px;height:11px;border-radius:50%;background:#627eea;box-shadow:0 0 5px #627eea66"></div>
+                  <span id="xc-path-from-label-m" style="font-size:8px;font-weight:600">Polygon</span>
+                </div>
+                <div style="flex:1;position:relative;height:2px;margin:0 6px">
+                  <div style="position:absolute;inset:0;background:linear-gradient(90deg,#627eea,var(--yellow),#ff0202);border-radius:2px;opacity:.6"></div>
+                  <div id="xc-packet-m" style="position:absolute;top:-4px;left:0;width:10px;height:10px;background:var(--yellow);border-radius:50%;box-shadow:0 0 8px var(--yellow);animation:xc-travel 2.2s linear infinite">
+                    <i class="ti ti-currency-dollar" style="font-size:6px;color:#000;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%)"></i>
+                  </div>
+                </div>
+                <div style="display:flex;align-items:center;gap:5px;flex-shrink:0">
+                  <div id="xc-path-to-dot-m" style="width:11px;height:11px;border-radius:50%;background:#ff0202;box-shadow:0 0 5px #ff020266"></div>
+                  <span id="xc-path-to-label-m" style="font-size:8px;font-weight:600">Arc</span>
+                </div>
+              </div>
+            </div>
+
             <div class="xc-card-section-label"><i class="ti ti-send"></i> Payment Details <span id="xc-mode-badge">Cross-Chain Payment</span></div>
             <div id="xc-route-reason" style="display:none;font-size:8px;color:var(--muted2);margin:-8px 0 10px;letter-spacing:.2px"></div>
             <div id="xc-exec-status" style="display:none;font-size:8px;color:var(--teal);margin:-6px 0 10px;letter-spacing:.2px"></div>
@@ -24151,6 +24248,24 @@ function xcApplyChains() {
   if(pFromLbl) pFromLbl.textContent = from.name.split(" ")[0];
   if(pToLbl)   pToLbl.textContent = to.name.split(" ")[0];
 
+  // Mobile elements
+  var _m = function(id, val, prop) {
+    var el = document.getElementById(id); if (!el) return;
+    if (prop === 'bg') el.style.background = val;
+    else if (prop === 'shadow') el.style.boxShadow = val;
+    else el.textContent = val;
+  };
+  _m('xc-from-dot-m', from.color, 'bg');
+  _m('xc-from-name-m', from.name);
+  _m('xc-to-dot-m', to.color, 'bg');
+  _m('xc-to-name-m', to.name);
+  _m('xc-path-from-dot-m', from.color, 'bg');
+  _m('xc-path-from-dot-m', `0 0 5px ${from.color}88`, 'shadow');
+  _m('xc-path-to-dot-m', to.color, 'bg');
+  _m('xc-path-to-dot-m', `0 0 5px ${to.color}88`, 'shadow');
+  _m('xc-path-from-label-m', from.name.split(" ")[0]);
+  _m('xc-path-to-label-m', to.name.split(" ")[0]);
+
   // Update route stage labels for first and last stages
   const routeStage0 = document.getElementById("xc-route-stage-0");
   const routeStage4 = document.getElementById("xc-route-stage-4");
@@ -34367,16 +34482,17 @@ const UBScreen = (function() {
           var html = '';
           try {
             if (typeof txHistory !== 'undefined' && Array.isArray(txHistory) && txHistory.length > 0) {
-              var recent = txHistory.slice(-6).reverse();
+              var recent = txHistory.slice(0, 8);
               html = recent.map(function(tx) {
-                var t = tx.time ? new Date(tx.time).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}) : '—';
-                var label = tx.type || tx.label || 'Tx';
-                var addr = tx.txHash ? tx.txHash.slice(0,8)+'...' : '';
-                return '<div class="ub-dash-feed-line"><span class="t">'+t+'</span><span class="n">'+label+'</span><span>'+addr+'</span></div>';
+                var t = tx.date ? new Date(tx.date).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}) : '—';
+                var label = tx.type || 'Tx';
+                var amt = tx.amount ? tx.amount.toFixed(2) + ' USDC' : '';
+                var hash = tx.txHash ? tx.txHash.slice(0,6) + '...' : '';
+                return '<div class="ub-dash-feed-line"><span class="t">'+t+'</span><span class="n">'+label+'</span><span>'+amt+'</span><span style="margin-left:auto;color:var(--green);font-size:7px">'+ (tx.status || '') +'</span></div>';
               }).join('');
             }
           } catch(_) {}
-          if (!html) html = '<div style="color:var(--muted)">No transactions yet</div>';
+          if (!html) html = '<div style="color:var(--muted);font-size:8px">No transactions yet</div>';
           feedEl.innerHTML = html;
         }
         if (statusEl) statusEl.textContent = keys.length + ' chains · ' + UB.state.assets.length + ' assets';
@@ -34392,7 +34508,29 @@ const UBScreen = (function() {
   // ═══════════════ OPERATIONS ═══════════════
   function showOperation(op) {
     _currentOp = op;
+    var isMobile = window.innerWidth <= 768;
     var panel = document.getElementById('ub-op-panel');
+    // Mobile: full-screen overlay with backdrop
+    if (isMobile) {
+      var backdrop = document.getElementById('ub-op-backdrop');
+      if (!backdrop) {
+        backdrop = document.createElement('div');
+        backdrop.id = 'ub-op-backdrop';
+        backdrop.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:9999';
+        backdrop.onclick = function(){ UBScreen.hideOperation(); };
+        document.body.appendChild(backdrop);
+      }
+      backdrop.style.display = '';
+      // Add inert style to prevent body scroll if not already added
+      if (!document.getElementById('ub-op-lock-style')) {
+        var lockStyle = document.createElement('style');
+        lockStyle.id = 'ub-op-lock-style';
+        lockStyle.textContent = 'body.ub-op-locked{overflow:hidden !important}';
+        document.head.appendChild(lockStyle);
+      }
+      document.body.classList.add('ub-op-locked');
+    }
+    panel.style.display = 'flex';
     panel.style.display = 'flex';
     var form = document.getElementById('ub-op-panel-form');
     var title = document.getElementById('ub-op-panel-title');
@@ -34471,6 +34609,9 @@ const UBScreen = (function() {
 
   function hideOperation() {
     _currentOp = null;
+    var backdrop = document.getElementById('ub-op-backdrop');
+    if (backdrop) backdrop.style.display = 'none';
+    document.body.classList.remove('ub-op-locked');
     document.getElementById('ub-op-panel').style.display = 'none';
     document.getElementById('ub-op-panel-progress').style.display = 'none';
     document.getElementById('ub-op-steps').innerHTML = '';
