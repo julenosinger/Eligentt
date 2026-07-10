@@ -1946,8 +1946,10 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
   .swap-col.op-exec-active{display:grid;grid-template-columns:minmax(0,480px) minmax(0,1fr);align-items:start;gap:18px}
   .swap-col.op-exec-active > .swap-card{grid-column:1}
   .swap-col.op-exec-active > #bridge-steps-card,
+  .swap-col.op-exec-active > #swap-steps-card,
   .swap-col.op-exec-active > #xc-steps-card{grid-column:2;grid-row:1 / -1;align-self:start;margin:0;animation:opStepsIn .5s cubic-bezier(.4,0,.2,1) both}
   #page-bridge .swap-col.op-exec-active > #bridge-steps-card{border-color:rgba(45,212,191,.35);box-shadow:0 0 0 1px rgba(45,212,191,.12),0 12px 32px rgba(0,0,0,.35)}
+  #page-swap .swap-col.op-exec-active > #swap-steps-card{border-color:rgba(167,139,250,.35);box-shadow:0 0 0 1px rgba(167,139,250,.12),0 12px 32px rgba(0,0,0,.35)}
   #page-xchain .swap-col.op-exec-active > #xc-steps-card{border-color:rgba(245,158,11,.35);box-shadow:0 0 0 1px rgba(245,158,11,.12),0 12px 32px rgba(0,0,0,.35)}
   /* Fix alignment: Transaction Steps must be content-height and top-aligned without
      inflating the form column. Span the two form rows (Payment Route + Payment Details)
@@ -4609,12 +4611,22 @@ select.cinput option { background: #161a24; color: #dde2f0; }
 .aut-typing span:nth-child(2){animation-delay:.2s}
 .aut-typing span:nth-child(3){animation-delay:.4s}
 @keyframes autTyping{0%,100%{opacity:.3;transform:scale(.8)}50%{opacity:1;transform:scale(1)}}
-.aut-input-area{padding:14px 20px;border-top:1px solid var(--border);background:var(--surface);display:flex;align-items:center;gap:10px}
-.aut-input{flex:1;background:rgba(0,0,0,.25);border:1px solid var(--border);border-radius:8px;padding:10px 14px;color:var(--text);font-size:11px;font-family:inherit;outline:none;resize:none;min-height:20px;max-height:120px;transition:border .2s}
+.aut-input-area{position:relative;padding:14px 20px;border-top:1px solid var(--border);background:var(--surface);display:flex;align-items:flex-end;gap:10px}
+.aut-input{flex:1;background:rgba(0,0,0,.25);border:1px solid var(--border);border-radius:8px;padding:10px 14px;color:var(--text);font-size:11px;line-height:1.5;font-family:inherit;outline:none;resize:none;min-height:20px;max-height:220px;overflow-y:hidden;transition:height .18s cubic-bezier(.4,0,.2,1),border .2s}
 .aut-input:focus{border-color:rgba(6,247,233,.4)}
 .aut-input::placeholder{color:var(--muted)}
 .aut-send-btn{width:36px;height:36px;border-radius:8px;background:rgba(6,247,233,.12);border:1px solid rgba(6,247,233,.25);color:#06F7E9;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:15px;transition:all .2s;flex-shrink:0}
 .aut-send-btn:hover{background:rgba(6,247,233,.22)}
+/* Voice input microphone (idle / listening / processing) */
+.aut-mic-btn{background:rgba(255,255,255,.05);border:1px solid var(--border);color:var(--muted2)}
+.aut-mic-btn:hover{background:rgba(255,255,255,.1);color:var(--text)}
+.aut-mic-btn.listening{background:rgba(6,247,233,.18);border-color:rgba(6,247,233,.55);color:#06F7E9;animation:autMicPulse 1.25s ease-in-out infinite}
+.aut-mic-btn.processing{color:#06F7E9;border-color:rgba(6,247,233,.4)}
+.aut-mic-btn.disabled{opacity:.5;cursor:not-allowed}
+@keyframes autMicPulse{0%,100%{box-shadow:0 0 0 0 rgba(6,247,233,.45)}50%{box-shadow:0 0 0 7px rgba(6,247,233,0)}}
+.aut-listening-hint{position:absolute;top:-14px;left:20px;display:none;align-items:center;gap:6px;font-size:9px;font-weight:700;letter-spacing:.3px;color:#06F7E9;background:var(--surface);border:1px solid rgba(6,247,233,.35);border-radius:999px;padding:3px 10px;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+.aut-listening-hint.show{display:inline-flex}
+.aut-listening-hint .dot{width:6px;height:6px;border-radius:50%;background:#06F7E9;animation:autMicPulse 1.25s ease-in-out infinite}
 @media(max-width:768px){.aut-side{display:none}.aut-cards{grid-template-columns:1fr}}
 
 /* ── Autonoma Response Cards ──────────── */
@@ -5217,6 +5229,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
     <nav class="nav">
       <div class="nav-group">Payments</div>
       <div class="nav-item" id="nav-send" onclick="showPage('send')"><i class="ti ti-send"></i>Send Assets</div>
+      <div class="nav-item" id="nav-xchain" onclick="showPage('xchain')"><i class="ti ti-world-share"></i>Cross-Chain<span class="nav-kit">Pay</span></div>
       <div class="nav-item" id="nav-batch" onclick="showPage('batch')"><i class="ti ti-stack"></i>Batch Payments</div>
       <div class="nav-item" id="nav-queue" onclick="showPage('queue')"><i class="ti ti-list-check"></i>Payment Queue</div>
       <div class="nav-item" id="nav-links" onclick="showPage('links')"><i class="ti ti-link"></i>Payment Links</div>
@@ -5226,7 +5239,6 @@ select.cinput option { background: #161a24; color: #dde2f0; }
       <div class="nav-item" id="nav-swap" onclick="showPage('swap')"><i class="ti ti-arrows-exchange"></i>Swap<span class="nav-kit">Kit</span></div>
       <div class="nav-item" id="nav-bridge" onclick="showPage('bridge')"><i class="ti ti-topology-star-3"></i>Bridge<span class="nav-kit">Kit</span></div>
       <div class="nav-item" id="nav-pool" onclick="showPage('pool')"><i class="ti ti-droplet"></i>Liquidity<span class="nav-kit">Pool</span></div>
-      <div class="nav-item" id="nav-xchain" onclick="showPage('xchain')"><i class="ti ti-world-share"></i>Cross-Chain<span class="nav-kit">Pay</span></div>
       <div class="nav-item" id="nav-autonoma" onclick="showPage('autonoma')"><i class="ti ti-brain"></i>Autonoma<span class="nav-kit" style="background:rgba(6,247,233,.12);color:#06F7E9;border:1px solid rgba(6,247,233,.25)">AI</span></div>
       <div class="nav-group" style="margin-top:4px">Protocol</div>
       <div class="nav-item" id="nav-treasury" onclick="showPage('treasury')"><i class="ti ti-vault"></i>Treasury<span class="nav-kit" style="background:rgba(79,142,247,.12);color:#7b9ef7;border:1px solid rgba(79,142,247,.25)">Vault</span></div>
@@ -5486,108 +5498,108 @@ select.cinput option { background: #161a24; color: #dde2f0; }
           <span style="font-size:9px;color:var(--text);font-weight:600">20 minutes</span>
         </div>
       </div>
-      <div class="page-content" style="display:block;padding:16px">
-        <div class="swap-page-layout">
-          <div class="swap-main-col">
-            <div class="swp-widget" id="swp-widget">
-              <div class="swp-tabs">
-                <span class="swp-tab active">Swap</span>
-                <span class="swp-tab">Limit Order <span class="swp-tab-soon">Soon</span></span>
+      <div class="page-content">
+        <div class="swap-col">
+
+          <!-- Swap card -->
+          <div class="swap-card">
+            <div class="swap-label">You Pay</div>
+            <div class="chain-row" style="margin-bottom:8px">
+              <div style="flex:1;min-width:0">
+                <input class="token-amt" id="swap-amount-in" type="number" min="0" step="any" placeholder="0.00" oninput="updateSwapRate()" autocomplete="off" spellcheck="false" style="font-size:18px"/>
+                <div class="token-usd" id="swap-usd-in"></div>
               </div>
-              <div class="swp-panel" id="swp-panel-in">
-                <div class="swp-panel-label">
-                  <span>You Pay</span>
-                  <span class="swp-bal-hint" id="swp-bal-in" onclick="swpSetMax()">Balance: <span id="swp-bal-in-val">—</span></span>
-                </div>
-                <div class="swp-input-row">
-                  <input class="swp-input" id="swap-amount-in" type="number" min="0" step="any" placeholder="0.00" oninput="updateSwapRate()" autocomplete="off" spellcheck="false"/>
-                  <div class="swp-token-pill" onclick="cycleTokenIn()">
-                    <div class="swp-tok-icon" id="swap-icon-in" style="background:#2775ca">U</div>
-                    <span class="swp-tok-name" id="swap-token-in">USDC</span>
-                    <i class="ti ti-chevron-down swp-tok-chevron"></i>
-                  </div>
-                </div>
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-top:4px">
-                  <div class="swp-usd" id="swap-usd-in"></div>
-                  <button class="swp-max-btn" onclick="swpSetMax()" id="swp-max-btn">MAX</button>
-                </div>
+              <div class="token-sel" onclick="cycleTokenIn()">
+                <div class="token-icon" id="swap-icon-in" style="background:#2775ca">U</div>
+                <span class="token-name" id="swap-token-in">USDC</span>
+                <i class="ti ti-chevron-down" style="font-size:10px;color:var(--muted2)"></i>
               </div>
-              <div class="swp-flip-wrap">
-                <button class="swp-flip-btn" onclick="swapTokens()" title="Flip tokens"><i class="ti ti-arrows-up-down"></i></button>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-top:4px">
+              <span style="display:flex;align-items:center;gap:3px;font-size:8.5px;color:var(--muted2)"><i class="ti ti-wallet" style="font-size:9px"></i>Balance: <span id="swp-bal-in-val" style="color:var(--text);font-weight:600">—</span></span>
+              <button id="swp-max-btn" onclick="swpSetMax()" style="background:rgba(167,139,250,.12);border:1px solid rgba(167,139,250,.3);color:var(--purple);border-radius:5px;padding:2px 9px;font-size:9px;font-weight:700;cursor:pointer;font-family:inherit">MAX</button>
+            </div>
+
+            <div class="swap-arrow" style="color:var(--purple)" onclick="swapTokens()" title="Flip tokens"><i class="ti ti-arrows-up-down"></i></div>
+
+            <div class="swap-label">You Receive</div>
+            <div class="chain-row">
+              <div style="flex:1;min-width:0">
+                <input class="token-amt" id="swap-amount-out" type="number" placeholder="0.00" readonly autocomplete="off" style="font-size:18px"/>
+                <div class="token-usd" id="swap-usd-out"></div>
               </div>
-              <div class="swp-panel swp-panel-out" id="swp-panel-out" style="margin-top:0">
-                <div class="swp-panel-label">
-                  <span>You Receive</span>
-                  <span class="swp-bal-hint" id="swp-bal-out">Balance: <span id="swp-bal-out-val">—</span></span>
-                </div>
-                <div class="swp-input-row">
-                  <input class="swp-input" id="swap-amount-out" type="number" placeholder="0.00" readonly autocomplete="off"/>
-                  <div class="swp-token-pill" onclick="cycleTokenOut()">
-                    <div class="swp-tok-icon" id="swap-icon-out" style="background:#2562de">E</div>
-                    <span class="swp-tok-name" id="swap-token-out">EURC</span>
-                    <i class="ti ti-chevron-down swp-tok-chevron"></i>
-                  </div>
-                </div>
-                <div class="swp-usd" id="swap-usd-out" style="margin-top:4px"></div>
+              <div class="token-sel" onclick="cycleTokenOut()">
+                <div class="token-icon" id="swap-icon-out" style="background:#2562de">E</div>
+                <span class="token-name" id="swap-token-out">EURC</span>
+                <i class="ti ti-chevron-down" style="font-size:10px;color:var(--muted2)"></i>
               </div>
-              <div class="swp-rate-bar" id="swp-rate-bar" style="display:none">
-                <span id="swap-rate">—</span>
-                <span id="swp-slip-display" class="yellow">0.5%</span>
-              </div>
-              <div class="swp-precheck" id="swp-precheck">
-                <i class="ti ti-alert-circle" id="swp-precheck-icon" style="font-size:14px;flex-shrink:0"></i>
-                <span id="swp-precheck-msg"></span>
-              </div>
-              <button class="swp-btn swp-btn-disabled" id="swap-btn" onclick="executeSwap()" disabled>
-                <i class="ti ti-arrows-exchange" id="swp-btn-icon"></i>
-                <span id="swp-btn-label">Enter an amount</span>
-              </button>
-              <div class="swp-pool-status" id="swp-pool-status" style="display:none">
-                <div class="swp-pool-dot" id="swp-pool-dot" style="background:var(--muted2)"></div>
-                <span class="swp-pool-label" id="swp-pool-label">Loading pools...</span>
-                <span class="swp-pool-val" id="swp-pool-tvl"></span>
-              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:3px;margin-top:4px;font-size:8.5px;color:var(--muted2)"><i class="ti ti-wallet" style="font-size:9px"></i>Balance: <span id="swp-bal-out-val" style="color:var(--text);font-weight:600">—</span></div>
+
+            <!-- Rate & details -->
+            <div class="rate-box" id="swp-rate-bar" style="margin-top:12px;display:none">
+              <div class="rate-row"><span>Rate</span><span class="rate-val blue" id="swap-rate">—</span></div>
+              <div class="rate-row"><span>Max Slippage</span><span class="rate-val yellow" id="swp-slip-display">0.5%</span></div>
+              <div class="rate-row"><span>Price Impact</span><span class="rate-val" id="swp-impact-val">—</span></div>
+              <div class="rate-row"><span>Minimum Received</span><span class="rate-val green" id="swp-min-received">—</span></div>
+              <div class="rate-row" id="swp-fee-row"><span>LP Fee</span><span class="rate-val" id="swp-fee-val">—</span></div>
+              <div class="rate-row"><span>Route</span><span class="rate-val" id="swp-route-pool" style="font-size:9px">—</span></div>
+            </div>
+
+            <div class="swp-precheck" id="swp-precheck">
+              <i class="ti ti-alert-circle" id="swp-precheck-icon" style="font-size:14px;flex-shrink:0"></i>
+              <span id="swp-precheck-msg"></span>
+            </div>
+
+            <button class="swp-btn swp-btn-disabled" style="margin:12px 0 0;width:100%" id="swap-btn" onclick="executeSwap()" disabled>
+              <i class="ti ti-arrows-exchange" id="swp-btn-icon"></i><span id="swp-btn-label">Enter an amount</span>
+            </button>
+
+            <div class="swp-pool-status" id="swp-pool-status" style="display:none">
+              <div class="swp-pool-dot" id="swp-pool-dot" style="background:var(--muted2)"></div>
+              <span class="swp-pool-label" id="swp-pool-label">Loading pools...</span>
+              <span class="swp-pool-val" id="swp-pool-tvl"></span>
             </div>
           </div>
-          <div class="swap-analytics-col">
-            <div class="swa-card" id="swa-summary">
-              <div class="swa-head">
-                <div class="swa-title"><i class="ti ti-file-invoice" style="color:var(--purple)"></i>Swap Summary</div>
-                <span class="swa-badge" id="swp-source-val" style="background:rgba(167,139,250,.1);color:var(--purple);border-color:rgba(167,139,250,.25)">—</span>
-              </div>
-              <div class="swa-metric-row"><span class="swa-metric-label">Exchange Rate</span><span class="swa-metric-val blue" id="swp-rate-detail">—</span></div>
-              <div class="swa-metric-row"><span class="swa-metric-label">Price Impact</span><span class="swa-metric-val" id="swp-impact-val">—</span></div>
-              <div class="swa-metric-row"><span class="swa-metric-label">Minimum Received</span><span class="swa-metric-val green" id="swp-min-received">—</span></div>
-              <div class="swa-metric-row" id="swp-fee-row"><span class="swa-metric-label">LP Fee</span><span class="swa-metric-val" id="swp-fee-val">—</span></div>
-              <div class="swa-metric-row"><span class="swa-metric-label">Route</span><span class="swa-metric-val" id="swp-route-pool" style="font-size:9px">—</span></div>
-              <div class="swa-metric-row"><span class="swa-metric-label">Network</span><span class="swa-metric-val green">Arc Testnet (5042002)</span></div>
-            </div>
-            <div class="swa-card" id="swa-route-card">
-              <div class="swa-head">
-                <div class="swa-title"><i class="ti ti-route" style="color:var(--yellow)"></i>Route Preview</div>
-                <span class="swa-badge" style="background:rgba(245,158,11,.1);color:var(--yellow);border-color:rgba(245,158,11,.25)" id="swa-route-type-badge">Direct</span>
-              </div>
-              <div class="swa-route-preview" id="swa-route-preview">
-                <div class="swa-route-node"><div class="swa-route-node-icon" id="swa-rp-icon-in" style="background:#2775ca">U</div><div class="swa-route-node-label" id="swa-rp-tok-in">USDC</div></div>
-                <div class="swa-route-line"><div class="swa-route-line-bar"></div><div class="swa-route-line-label" id="swa-rp-pool-label">Pool</div></div>
-                <div class="swa-route-node"><div class="swa-route-node-icon" style="background:rgba(255,255,255,.1);color:var(--muted2);font-size:12px"><i class="ti ti-droplet"></i></div><div class="swa-route-node-label">AMM</div></div>
-                <div class="swa-route-line"><div class="swa-route-line-bar"></div><div class="swa-route-line-label" id="swa-rp-impact">—</div></div>
-                <div class="swa-route-node"><div class="swa-route-node-icon" id="swa-rp-icon-out" style="background:#2562de">E</div><div class="swa-route-node-label" id="swa-rp-tok-out">EURC</div></div>
-              </div>
-              <div style="margin-top:10px;display:flex;gap:8px">
-                <div class="swa-ov-box" style="flex:1"><div class="swa-ov-val" id="swa-rp-best-price" style="font-size:11px">—</div><div class="swa-ov-label">Best Price</div></div>
-                <div class="swa-ov-box" style="flex:1"><div class="swa-ov-val" id="swa-rp-impact2" style="font-size:11px">—</div><div class="swa-ov-label">Price Impact</div></div>
-                <div class="swa-ov-box" style="flex:1"><div class="swa-ov-val" id="swa-rp-eta" style="font-size:11px;color:var(--teal)">~1-3s</div><div class="swa-ov-label">Est. Time</div></div>
-              </div>
-            </div>
-            <div class="swa-card" id="swa-recent">
-              <div class="swa-head">
-                <div class="swa-title"><i class="ti ti-history" style="color:var(--muted2)"></i>Recent Swaps</div>
-                <button class="btn" onclick="swpSyncRecentSwaps()" style="font-size:8px;padding:2px 6px" title="Refresh"><i class="ti ti-refresh"></i></button>
-              </div>
-              <div id="swa-hist-list"><div class="swa-empty"><i class="ti ti-arrows-exchange"></i><span>No recent swaps</span></div></div>
+
+          <!-- Transaction steps -->
+          <div class="card" id="swap-steps-card" style="display:none">
+            <div class="ch"><i class="ti ti-list-check" style="font-size:13px;color:var(--purple)"></i><span class="ct">Swap Steps</span><span id="swap-step-status" style="margin-left:auto;font-size:9px;color:var(--muted2)">Pending</span></div>
+            <div class="cb" style="padding:10px;display:flex;flex-direction:column;gap:6px" id="swap-step-list"></div>
+          </div>
+
+        </div>
+
+        <!-- Info column -->
+        <div class="info-col">
+
+          <!-- Swap summary -->
+          <div class="info-card" id="swa-summary">
+            <div class="info-title"><i class="ti ti-file-invoice" style="color:var(--purple)"></i>Swap Summary<span class="swa-badge" id="swp-source-val" style="margin-left:auto;font-size:8px;font-weight:700;padding:2px 7px;border-radius:999px;background:rgba(167,139,250,.12);border:1px solid rgba(167,139,250,.25);color:var(--purple)">—</span></div>
+            <div class="rate-box" style="margin-top:0">
+              <div class="rate-row"><span>Exchange Rate</span><span class="rate-val blue" id="swp-rate-detail">—</span></div>
+              <div class="rate-row"><span>Route Type</span><span class="rate-val" id="swp-route-type">Direct</span></div>
+              <div class="rate-row"><span>Network</span><span class="rate-val green">Arc Testnet</span></div>
             </div>
           </div>
+
+          <!-- How swap works -->
+          <div class="info-card" style="background:rgba(167,139,250,.04);border-color:rgba(167,139,250,.18)">
+            <div class="info-title"><i class="ti ti-route" style="color:var(--purple)"></i>How Swap Works</div>
+            <ul class="flist" style="--blue:var(--purple)">
+              <li>Select tokens &amp; amount</li>
+              <li>Best route via ElligentPool AMM</li>
+              <li>Approve token spend (first swap)</li>
+              <li>Settles on Arc in ~1-3s</li>
+            </ul>
+          </div>
+
+          <!-- Recent swaps -->
+          <div class="info-card">
+            <div class="info-title"><i class="ti ti-history" style="color:var(--muted2)"></i>Recent Swaps<button class="btn" onclick="swpSyncRecentSwaps()" style="margin-left:auto;font-size:8px;padding:2px 6px" title="Refresh"><i class="ti ti-refresh"></i></button></div>
+            <div id="swa-hist-list"><div class="swa-empty"><i class="ti ti-arrows-exchange"></i><span>No recent swaps</span></div></div>
+          </div>
+
         </div>
       </div>
       <div id="swp-details" style="display:none"><div id="swp-details-body" style="display:none"></div></div>
@@ -9686,10 +9698,12 @@ select.cinput option { background: #161a24; color: #dde2f0; }
             </div>
           </div>
           <div class="aut-input-area">
+            <div class="aut-listening-hint" id="aut-listening-hint" role="status" aria-live="polite"><span class="dot"></span>Listening…</div>
             <input type="file" id="aut-csv-input" accept=".csv,.txt" style="display:none" onchange="autonomaHandleCSV(this)"/>
-            <button class="aut-send-btn" onclick="document.getElementById('aut-csv-input').click()" title="Upload CSV" style="background:rgba(167,139,250,.12);border-color:rgba(167,139,250,.25);color:#a78bfa"><i class="ti ti-file-upload"></i></button>
-            <textarea class="aut-input" id="aut-input" placeholder="Ask Autonoma anything..." rows="1" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();autonomaSend()}"></textarea>
-            <button class="aut-send-btn" onclick="autonomaSend()" title="Send"><i class="ti ti-send"></i></button>
+            <button class="aut-send-btn" onclick="document.getElementById('aut-csv-input').click()" title="Upload CSV" aria-label="Upload CSV file" style="background:rgba(167,139,250,.12);border-color:rgba(167,139,250,.25);color:#a78bfa"><i class="ti ti-file-upload"></i></button>
+            <textarea class="aut-input" id="aut-input" placeholder="Type or speak your request..." rows="1" aria-label="Message Autonoma" aria-multiline="true" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();autonomaSend()}"></textarea>
+            <button class="aut-send-btn aut-mic-btn" id="aut-mic-btn" type="button" title="Voice input" aria-label="Start voice input"><i class="ti ti-microphone"></i></button>
+            <button class="aut-send-btn" onclick="autonomaSend()" title="Send" aria-label="Send message"><i class="ti ti-send"></i></button>
           </div>
         </div>
       </div>
@@ -18138,10 +18152,57 @@ async function executeSwap() {
 
   SwapEngine.notifyExecutionStart({ tIn: tIn.sym, tOut: tOut.sym, amtIn: amtIn, route: route, minReceived: minReceived });
 
+  // ── Transaction steps (side card, same UX as Bridge / Cross-Chain) ──
+  const swpStepsCard = document.getElementById('swap-steps-card');
+  const swpStepList  = document.getElementById('swap-step-list');
+  const swpStepStatus = document.getElementById('swap-step-status');
+  const SWP_EXPLORER = 'https://testnet.arcscan.app';
+  if (swpStepsCard && swpStepList) {
+    swpStepList.innerHTML = '';
+    const swpSteps = [];
+    route.pools.forEach((p, i) => {
+      const hop = route.pools.length > 1 ? ` (hop ${i + 1}/${route.pools.length})` : '';
+      swpSteps.push({ label: `Approve ${route.hops[i]}${hop}`, detail: `Allow ${p.tokenA}/${p.tokenB} pool to spend` });
+      swpSteps.push({ label: `Swap ${route.hops[i]} → ${route.hops[i + 1]}${hop}`, detail: `ElligentPool ${p.tokenA}/${p.tokenB} AMM` });
+    });
+    swpSteps.push({ label: 'Complete', detail: `Receive ${tOut.sym} on Arc Testnet` });
+    swpSteps.forEach((s, i) => {
+      const el = document.createElement('div');
+      el.className = 'step-item'; el.id = `swap-step-el-${i}`;
+      el.innerHTML = '<div class="step-ico" style="background:rgba(255,255,255,.05);color:var(--muted2)">…</div>' +
+        '<div style="flex:1"><div style="font-size:10px;font-weight:600">' + s.label + '</div>' +
+        '<div class="swp-step-sub" style="font-size:8.5px;color:var(--muted2)">' + s.detail + '</div></div>';
+      swpStepList.appendChild(el);
+    });
+    swpStepsCard.style.display = '';
+    if (swpStepStatus) { swpStepStatus.textContent = 'In Progress'; swpStepStatus.style.color = 'var(--purple)'; }
+  }
+  function swpSetStep(idx, state, txHash) {
+    const el = document.getElementById(`swap-step-el-${idx}`); if (!el) return;
+    const ico = el.querySelector('.step-ico'); if (!ico) return;
+    if (state === 'active') {
+      ico.innerHTML = '<span class="spin" style="display:inline-block">↻</span>';
+      ico.style.background = 'rgba(167,139,250,.15)'; ico.style.color = 'var(--purple)';
+    } else if (state === 'success') {
+      ico.innerHTML = '✓'; ico.style.background = 'rgba(34,197,94,.15)'; ico.style.color = 'var(--green)';
+    } else if (state === 'skipped') {
+      ico.innerHTML = '✓'; ico.style.background = 'rgba(255,255,255,.05)'; ico.style.color = 'var(--muted2)';
+    } else if (state === 'error') {
+      ico.innerHTML = '✕'; ico.style.background = 'rgba(239,68,68,.15)'; ico.style.color = 'var(--red)';
+    }
+    if (txHash) {
+      const sub = el.querySelector('.swp-step-sub');
+      if (sub) sub.innerHTML = 'Tx: <a href="' + SWP_EXPLORER + '/tx/' + txHash + '" target="_blank" style="color:var(--purple);text-decoration:none">' + txHash.slice(0, 14) + '…' + txHash.slice(-6) + '</a>';
+    }
+  }
+  const swpDoneIdx = route.pools.length * 2;
+
   for (let i = 0; i < route.pools.length; i++) {
     // Check deadline hasn't passed
     if (Math.floor(Date.now() / 1000) > deadline) {
       toast('Transaction deadline exceeded — please retry', 'error');
+      swpSetStep(i * 2, 'error');
+      if (swpStepStatus) { swpStepStatus.textContent = 'Failed'; swpStepStatus.style.color = 'var(--red)'; }
       swpSetBtn('ready', `Swap ${tIn.sym} → ${tOut.sym}`);
       return;
     }
@@ -18156,6 +18217,7 @@ async function executeSwap() {
     // Approve pool to spend current token (skip for native ETH)
     const isNative = !currentTokenAddr || currentTokenAddr === '0x0000000000000000000000000000000000000000';
     if (!isNative) {
+    swpSetStep(i * 2, 'active');
     swpSetBtn('approving', `Approving ${currentTokenSym} for ${poolCfg.tokenA}/${poolCfg.tokenB}…`);
     try {
       const tokenContract = new ethers.Contract(currentTokenAddr, USDC_ABI, signer);
@@ -18168,16 +18230,24 @@ async function executeSwap() {
         const tx = await tokenContract.approve(poolAddr, amtBig * 2n, { gasLimit: gas });
         toast(`Approve ${currentTokenSym} submitted...`, 'info');
         await tx.wait();
+        swpSetStep(i * 2, 'success', tx.hash);
+      } else {
+        swpSetStep(i * 2, 'skipped');
       }
     } catch(approveErr) {
+      swpSetStep(i * 2, 'error');
+      if (swpStepStatus) { swpStepStatus.textContent = 'Failed'; swpStepStatus.style.color = 'var(--red)'; }
       swpSetBtn('ready', `Swap ${tIn.sym} → ${tOut.sym}`);
       toast(swpDecodeError(approveErr), 'error');
       return;
     }
+    } else {
+      swpSetStep(i * 2, 'skipped');
     }
 
     // Execute swap on this pool
     const hopLabel = route.pools.length > 1 ? ` (hop ${i + 1}/${route.pools.length})` : '';
+    swpSetStep(i * 2 + 1, 'active');
     swpSetBtn('swapping', `Swapping ${currentTokenSym} → ${nextTokenSym}${hopLabel}…`);
     try {
       const poolCtr = new ethers.Contract(poolAddr, POOL_CONTRACT_ABI, signer);
@@ -18205,6 +18275,7 @@ async function executeSwap() {
         throw new Error('Swap transaction not confirmed on-chain (receipt status: ' + (swapReceipt ? swapReceipt.status : 'null') + ')');
       }
       _log('[swap] hop', i + 1, 'confirmed:', swapTx.hash, 'block:', swapReceipt.blockNumber);
+      swpSetStep(i * 2 + 1, 'success', swapTx.hash);
       // Wait for explorer indexer
       await new Promise(function(r) { setTimeout(r, 3000); });
       SwapEngine.notifyExecutionComplete(swapReceipt);
@@ -18213,6 +18284,8 @@ async function executeSwap() {
       trackPoolVolume(poolCfg.id, currentAmount, currentTokenSym);
     } catch(swapErr) {
       SwapEngine.notifyExecutionFailed(swapErr);
+      swpSetStep(i * 2 + 1, 'error');
+      if (swpStepStatus) { swpStepStatus.textContent = 'Failed'; swpStepStatus.style.color = 'var(--red)'; }
       swpSetBtn('ready', `Swap ${tIn.sym} → ${tOut.sym}`);
       swpShowPrecheck('error', swpDecodeError(swapErr));
       toast(`Swap failed at hop ${i + 1}: ` + swpDecodeError(swapErr), 'error');
@@ -18230,6 +18303,8 @@ async function executeSwap() {
   }
 
   swpHidePrecheck();
+  swpSetStep(swpDoneIdx, 'success');
+  if (swpStepStatus) { swpStepStatus.textContent = 'Complete'; swpStepStatus.style.color = 'var(--green)'; }
   const amtOut = parseFloat(document.getElementById('swap-amount-out').value) || SWP.lastQuote?.amtOut || 0;
   loadAllPools();
   updateSwapRate();
@@ -33704,9 +33779,1079 @@ const UBAction = (function() {
   function initOpExecLayout(){
     watch('bridge-btn','bridge-steps-card');
     watch('xc-send-btn','xc-steps-card');
+    watch('swap-btn','swap-steps-card');
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initOpExecLayout);
   else initOpExecLayout();
+})();
+
+// ============================================================
+//  DESTINATION GAS SAFETY CHECK  —  Bridge & Cross-Chain Payments
+//  ----------------------------------------------------------------
+//  Pure PRE-FLIGHT validation layer. It NEVER touches the bridge /
+//  cross-chain execution flow, routing, CCTP, quotes, fees, gas
+//  estimation, approvals, signing, broadcasting, history or any
+//  backend/contract. It only:
+//    (a) reads the destination wallet's LIVE native balance via RPC,
+//    (b) renders a status/preview panel below the destination selector,
+//    (c) gates the existing Bridge / Send buttons via a capture-phase
+//        click interceptor (block when destination has no gas).
+//  Scoped exclusively to #page-bridge and #page-xchain. Modular by
+//  design so Gas Station / Paymaster / AA sponsors can be plugged in
+//  later without refactoring either flow.
+// ============================================================
+(function(){
+  'use strict';
+  if (typeof window === 'undefined') return;
+
+  // ── Configurable per-chain minimum safe gas thresholds (native units) ──
+  // exempt:true → destination's incoming asset IS the native gas token
+  // (Arc uses USDC as gas), so receiving funds guarantees gas → never block.
+  var THRESHOLDS = {
+    5042002:  { req: 0,       warn: 0,      exempt: true },  // Arc Testnet (USDC = gas)
+    11155111: { req: 0.003,   warn: 0.005 },                 // Ethereum Sepolia (ETH)
+    84532:    { req: 0.001,   warn: 0.002 },                 // Base Sepolia (ETH)
+    421614:   { req: 0.0008,  warn: 0.0015 },                // Arbitrum Sepolia (ETH)
+    11155420: { req: 0.0008,  warn: 0.0015 },                // Optimism Sepolia (ETH)
+    80002:    { req: 0.15,    warn: 0.30 },                  // Polygon Amoy (POL/MATIC)
+    _default: { req: 0.001,   warn: 0.002 }
+  };
+  function thresholdFor(chainId){ return THRESHOLDS[chainId] || THRESHOLDS._default; }
+
+  function chainByChainId(chainId){
+    try { if (typeof CHAIN_REGISTRY !== 'undefined') {
+      for (var k in CHAIN_REGISTRY){ if (CHAIN_REGISTRY[k] && CHAIN_REGISTRY[k].chainId === chainId) return CHAIN_REGISTRY[k]; }
+    }} catch(_){}
+    try { if (typeof CHAINS !== 'undefined') return CHAINS.filter(function(c){return c.chainId===chainId;})[0]||null; } catch(_){}
+    return null;
+  }
+
+  // ── Standalone modular service (exposed for future integrations) ──
+  var DestinationGasValidator = {
+    thresholds: THRESHOLDS,
+    getThreshold: thresholdFor,
+    // Live RPC balance read with graceful retry. Never uses cached balances.
+    getNativeBalance: async function(chain, address){
+      var attempts = 3, lastErr;
+      for (var i = 0; i < attempts; i++){
+        try {
+          var provider = (typeof getCachedProvider === 'function')
+            ? getCachedProvider(chain.rpc)
+            : new ethers.JsonRpcProvider(chain.rpc);
+          return await provider.getBalance(address); // bigint (wei) — live
+        } catch(e){
+          lastErr = e;
+          await new Promise(function(r){ setTimeout(r, 300 * (i + 1)); });
+        }
+      }
+      throw lastErr || new Error('RPC balance query failed');
+    },
+    validate: async function(chainId, address){
+      var chain = chainByChainId(chainId);
+      if (!chain) return { state: 'UNKNOWN', reason: 'chain-unknown' };
+      if (chain.isEvm === false) return { state: 'UNKNOWN', reason: 'non-evm' };
+      var t = thresholdFor(chainId);
+      var dec = (chain.nativeCurrency && chain.nativeCurrency.decimals) || 18;
+      var native = (chain.nativeCurrency && chain.nativeCurrency.symbol) || 'ETH';
+      var raw = await this.getNativeBalance(chain, address);
+      var bal = parseFloat(ethers.formatUnits(raw, dec));
+      var state;
+      if (t.exempt) state = 'SAFE';
+      else if (bal <= 0) state = 'BLOCKED';
+      else if (bal < t.req) state = 'WARNING';
+      else state = 'SAFE';
+      return {
+        state: state, balance: bal, required: t.req, warnAt: t.warn,
+        native: native, chainName: chain.name, chainId: chainId,
+        address: address, explorer: chain.explorer || '', exempt: !!t.exempt
+      };
+    },
+    suggestions: function(res){
+      var n = (res && res.native) || 'native gas';
+      return [
+        'Send a small amount of ' + n + ' to this wallet from another account.',
+        'Use a supported Gas Station / faucet to top up ' + n + '.',
+        'Bridge a little ' + n + ' to the destination chain first.',
+        'Use a sponsored transaction / paymaster service (coming soon).'
+      ];
+    }
+  };
+  window.DestinationGasValidator = DestinationGasValidator;
+
+  function notify(msg, type){
+    try { if (typeof toast === 'function') { toast(msg, type); return; } } catch(_){}
+    try { if (typeof showToast === 'function') { showToast(msg, type); } } catch(_){}
+  }
+  function safeGet(fn){ try { return fn(); } catch(_){ return null; } }
+  function shortAddr(a){ return a ? (a.slice(0,6) + '…' + a.slice(-4)) : '—'; }
+  function fmt(n, d){ if (n === null || n === undefined || isNaN(n)) return '—'; return Number(n).toFixed(d); }
+
+  var DOT = { SAFE: '#22c55e', WARNING: '#f59e0b', BLOCKED: '#ef4444', UNKNOWN: '#7b8291', CHECKING: '#7b8291' };
+  var LABEL = { SAFE: '🟢 Ready', WARNING: '🟡 Low Gas', BLOCKED: '🔴 No Gas', UNKNOWN: '⚪ —', CHECKING: '⏳ Checking…' };
+
+  // ── Per-page controller ──────────────────────────────────
+  function createController(cfg){
+    var seq = 0;
+    var state = 'UNKNOWN';
+    var acknowledged = false;
+    var lastKey = '__init__';
+    var lastResult = null;
+    var els = null;
+
+    function buildPanel(){
+      var btn = document.getElementById(cfg.buttonId);
+      if (!btn || !btn.parentNode) return false;
+      if (document.getElementById(cfg.panelId)) { cacheEls(); return true; }
+      var wrap = document.createElement('div');
+      wrap.id = cfg.panelId;
+      wrap.className = 'dgv-panel';
+      wrap.style.cssText = 'box-sizing:border-box;width:100%;margin:10px 0 0;border:1px solid var(--border);border-radius:8px;padding:9px 11px;background:rgba(0,0,0,.18);font-size:9.5px;line-height:1.45';
+      wrap.innerHTML =
+        '<div style="display:flex;align-items:center;gap:7px;margin-bottom:6px">' +
+          '<span class="dgv-dot" style="width:9px;height:9px;border-radius:50%;background:' + DOT.UNKNOWN + ';flex-shrink:0;box-shadow:0 0 6px ' + DOT.UNKNOWN + '88"></span>' +
+          '<span style="font-weight:700;color:var(--text)">Destination Gas Check</span>' +
+          '<span class="dgv-badge" style="margin-left:auto;font-size:8px;font-weight:700;padding:2px 8px;border-radius:999px;background:rgba(255,255,255,.06);border:1px solid var(--border);color:var(--muted2)">Checking…</span>' +
+        '</div>' +
+        '<div class="dgv-rows" style="display:flex;flex-direction:column;gap:2px">' +
+          row('Destination Wallet', 'dgv-wallet') +
+          row('Network', 'dgv-network') +
+          row('Native Token', 'dgv-native') +
+          row('Current Balance', 'dgv-balance') +
+          row('Estimated Required', 'dgv-required') +
+          row('Validation Status', 'dgv-status') +
+        '</div>' +
+        '<div class="dgv-msg" style="display:none;margin-top:9px;padding:8px 10px;border-radius:7px;font-size:9px"></div>' +
+        '<ul class="dgv-suggest" style="display:none;margin:8px 0 0;padding-left:16px;color:var(--muted2);font-size:8.5px"></ul>' +
+        '<label class="dgv-ack" style="display:none;align-items:center;gap:6px;margin-top:9px;font-size:9px;color:var(--yellow);cursor:pointer">' +
+          '<input type="checkbox" class="dgv-ack-cb" style="cursor:pointer"/> I understand my funds may be unusable until I add native gas.' +
+        '</label>';
+      btn.parentNode.insertBefore(wrap, btn);
+
+      // Compact status pill (placement is fully controlled per-page via cfg.mountPill).
+      // Bridge intentionally has NO pill (the panel below already shows the status).
+      if (typeof cfg.mountPill === 'function' && !document.getElementById(cfg.pillId)){
+        var pill = document.createElement('div');
+        pill.id = cfg.pillId;
+        pill.className = 'dgv-pill';
+        pill.style.cssText = 'display:inline-flex;align-items:center;gap:5px;font-size:8.5px;font-weight:700;padding:3px 10px;border-radius:999px;background:rgba(255,255,255,.05);border:1px solid var(--border);color:var(--muted2)';
+        pill.textContent = LABEL.UNKNOWN;
+        var ok = cfg.mountPill(pill);
+        if (ok === false && pill.parentNode) pill.parentNode.removeChild(pill);
+      }
+      cacheEls();
+      var cb = wrap.querySelector('.dgv-ack-cb');
+      if (cb) cb.addEventListener('change', function(){
+        acknowledged = !!cb.checked;
+        applyButtonState();
+      });
+      return true;
+
+      function row(label, cls){
+        return '<div style="display:flex;justify-content:space-between;gap:10px">' +
+          '<span style="color:var(--muted2)">' + label + '</span>' +
+          '<span class="' + cls + '" style="color:var(--text);font-weight:600;text-align:right">—</span></div>';
+      }
+    }
+
+    function cacheEls(){
+      var p = document.getElementById(cfg.panelId);
+      if (!p) { els = null; return; }
+      els = {
+        panel: p,
+        dot: p.querySelector('.dgv-dot'),
+        badge: p.querySelector('.dgv-badge'),
+        wallet: p.querySelector('.dgv-wallet'),
+        network: p.querySelector('.dgv-network'),
+        native: p.querySelector('.dgv-native'),
+        balance: p.querySelector('.dgv-balance'),
+        required: p.querySelector('.dgv-required'),
+        status: p.querySelector('.dgv-status'),
+        msg: p.querySelector('.dgv-msg'),
+        suggest: p.querySelector('.dgv-suggest'),
+        ack: p.querySelector('.dgv-ack'),
+        ackCb: p.querySelector('.dgv-ack-cb'),
+        pill: document.getElementById(cfg.pillId)
+      };
+    }
+
+    function setPill(s){
+      if (!els || !els.pill) return;
+      els.pill.textContent = LABEL[s] || LABEL.UNKNOWN;
+      var c = DOT[s] || DOT.UNKNOWN;
+      els.pill.style.color = (s === 'UNKNOWN' || s === 'CHECKING') ? 'var(--muted2)' : c;
+      els.pill.style.borderColor = (s === 'UNKNOWN' || s === 'CHECKING') ? 'var(--border)' : c + '55';
+    }
+
+    function setDot(s){
+      if (!els) return;
+      var c = DOT[s] || DOT.UNKNOWN;
+      if (els.dot){ els.dot.style.background = c; els.dot.style.boxShadow = '0 0 6px ' + c + '88'; }
+    }
+
+    function applyButtonState(){
+      var btn = document.getElementById(cfg.buttonId);
+      if (!btn) return;
+      var blocked = (state === 'BLOCKED') || (state === 'WARNING' && !acknowledged);
+      // Visual-only dim (opacity/filter are NOT managed by the execution flow,
+      // so this is fully reversible and never conflicts with it).
+      if (blocked){ btn.style.opacity = '0.5'; btn.style.filter = 'grayscale(0.4)'; }
+      else { btn.style.opacity = ''; btn.style.filter = ''; }
+    }
+
+    function render(res){
+      if (!els) return;
+      state = res.state;
+      setDot(res.state); setPill(res.state);
+      var badgeText = { SAFE: 'Ready', WARNING: 'Low Gas', BLOCKED: 'No Gas', UNKNOWN: 'Unavailable', CHECKING: 'Checking…' }[res.state] || '—';
+      var c = DOT[res.state] || DOT.UNKNOWN;
+      if (els.badge){
+        els.badge.textContent = badgeText;
+        els.badge.style.color = (res.state==='UNKNOWN'||res.state==='CHECKING') ? 'var(--muted2)' : c;
+        els.badge.style.borderColor = (res.state==='UNKNOWN'||res.state==='CHECKING') ? 'var(--border)' : c + '55';
+        els.badge.style.background = (res.state==='UNKNOWN'||res.state==='CHECKING') ? 'rgba(255,255,255,.06)' : c + '1f';
+      }
+      if (els.wallet)  els.wallet.textContent  = res.address ? shortAddr(res.address) : '—';
+      if (els.network) els.network.textContent = res.chainName || '—';
+      if (els.native)  els.native.textContent  = res.native || '—';
+      if (els.balance){
+        els.balance.textContent = (res.balance === undefined || res.balance === null) ? '—' : (fmt(res.balance, 4) + ' ' + (res.native||''));
+        els.balance.style.color = res.state==='BLOCKED' ? DOT.BLOCKED : (res.state==='WARNING' ? DOT.WARNING : 'var(--text)');
+      }
+      if (els.required) els.required.textContent = res.exempt ? 'N/A (gas token = asset)' : ((res.required!=null? fmt(res.required,4):'—') + ' ' + (res.native||''));
+      if (els.status){
+        var st = { SAFE: '✅ Destination wallet ready', WARNING: '⚠ Low gas balance', BLOCKED: '❌ Cannot proceed', UNKNOWN: '— Not validated', CHECKING: '⏳ Checking…' }[res.state] || '—';
+        els.status.textContent = st;
+        els.status.style.color = (res.state==='UNKNOWN'||res.state==='CHECKING') ? 'var(--muted2)' : c;
+      }
+
+      // message + suggestions + acknowledge
+      if (els.msg){
+        if (res.state === 'SAFE'){
+          els.msg.style.display = 'none';
+        } else if (res.state === 'WARNING'){
+          els.msg.style.display = 'block';
+          els.msg.style.background = 'rgba(245,158,11,.08)';
+          els.msg.style.border = '1px solid rgba(245,158,11,.3)';
+          els.msg.style.color = 'var(--yellow)';
+          els.msg.innerHTML = '<strong>⚠ Low gas balance detected on the destination chain.</strong><br>Your funds will arrive, but you may not be able to use them until additional native gas is added.';
+        } else if (res.state === 'BLOCKED'){
+          els.msg.style.display = 'block';
+          els.msg.style.background = 'rgba(239,68,68,.08)';
+          els.msg.style.border = '1px solid rgba(239,68,68,.3)';
+          els.msg.style.color = 'var(--red)';
+          els.msg.innerHTML = '<strong>⚠ Destination Network Has No Gas</strong><br>This wallet has no native gas token on the destination network. Receiving ' +
+            'USDC alone is not enough to perform transactions. To protect your funds, this transfer has been blocked before execution.';
+        } else if (res.state === 'UNKNOWN'){
+          els.msg.style.display = 'block';
+          els.msg.style.background = 'rgba(255,255,255,.04)';
+          els.msg.style.border = '1px solid var(--border)';
+          els.msg.style.color = 'var(--muted2)';
+          els.msg.innerHTML = 'Could not read the destination gas balance right now. The transfer is not blocked — proceed with caution.';
+        } else {
+          els.msg.style.display = 'none';
+        }
+      }
+      if (els.suggest){
+        if (res.state === 'BLOCKED'){
+          els.suggest.style.display = 'block';
+          els.suggest.innerHTML = DestinationGasValidator.suggestions(res).map(function(s){ return '<li>' + s + '</li>'; }).join('');
+        } else { els.suggest.style.display = 'none'; els.suggest.innerHTML = ''; }
+      }
+      if (els.ack){
+        if (res.state === 'WARNING'){ els.ack.style.display = 'flex'; }
+        else { els.ack.style.display = 'none'; if (els.ackCb) els.ackCb.checked = false; }
+      }
+      applyButtonState();
+    }
+
+    function renderIdle(){
+      state = 'UNKNOWN';
+      if (!els) return;
+      render({ state: 'UNKNOWN', address: null, chainName: null, native: null });
+      if (els.status) els.status.textContent = '— Awaiting destination';
+      if (els.msg) els.msg.style.display = 'none';
+    }
+
+    function renderChecking(res){
+      if (!els) return;
+      setDot('CHECKING'); setPill('CHECKING');
+      if (els.badge){ els.badge.textContent = 'Checking…'; els.badge.style.color = 'var(--muted2)'; els.badge.style.borderColor='var(--border)'; els.badge.style.background='rgba(255,255,255,.06)'; }
+      if (els.wallet)  els.wallet.textContent  = res.address ? shortAddr(res.address) : '—';
+      if (els.network) els.network.textContent = res.chainName || '—';
+      if (els.native)  els.native.textContent  = res.native || '—';
+      if (els.status){ els.status.textContent = '⏳ Checking…'; els.status.style.color = 'var(--muted2)'; }
+    }
+
+    async function run(){
+      if (!els) { if (!buildPanel()) return; }
+      var chainId = cfg.getChainId();
+      var address = cfg.getAddress();
+      var key = String(chainId) + ':' + String(address);
+      if (key !== lastKey){ acknowledged = false; if (els && els.ackCb) els.ackCb.checked = false; lastKey = key; }
+
+      if (!chainId || !address){ renderIdle(); return; }
+
+      var ch = chainByChainId(chainId);
+      renderChecking({ address: address, chainName: ch ? ch.name : null, native: ch && ch.nativeCurrency ? ch.nativeCurrency.symbol : null });
+
+      var mySeq = ++seq;
+      try {
+        var res = await DestinationGasValidator.validate(chainId, address);
+        if (mySeq !== seq) return; // superseded by a newer request (race guard)
+        res.address = address;
+        lastResult = res;
+        render(res);
+      } catch(e){
+        if (mySeq !== seq) return;
+        render({ state: 'UNKNOWN', address: address, chainName: ch ? ch.name : null, native: ch && ch.nativeCurrency ? ch.nativeCurrency.symbol : null });
+      }
+    }
+
+    function isActive(){
+      var pg = document.getElementById(cfg.pageId);
+      return !!(pg && pg.classList.contains('active'));
+    }
+
+    // Click gate is installed globally (capture phase) — see installGate().
+    function gate(e){
+      if (state === 'BLOCKED'){
+        e.preventDefault(); e.stopImmediatePropagation();
+        notify('Destination wallet has no native gas — transfer blocked to protect your funds.', 'error');
+        if (els && els.panel) els.panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        return false;
+      }
+      if (state === 'WARNING' && !acknowledged){
+        e.preventDefault(); e.stopImmediatePropagation();
+        notify('Low destination gas — tick the acknowledgement box to continue.', 'warning');
+        if (els && els.ack) els.ack.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        return false;
+      }
+      return true;
+    }
+
+    return {
+      cfg: cfg,
+      run: run,
+      isActive: isActive,
+      keyNow: function(){ return String(cfg.getChainId()) + ':' + String(cfg.getAddress()); },
+      lastKey: function(){ return lastKey; },
+      gate: gate,
+      ensure: function(){ if (!document.getElementById(cfg.panelId)) buildPanel(); }
+    };
+  }
+
+  // ── Controllers for the two allowed pages ──
+  var bridgeCtl = createController({
+    pageId: 'page-bridge',
+    buttonId: 'bridge-btn',
+    panelId: 'dgv-panel-bridge',
+    pillId: 'dgv-pill-bridge',
+    mountPill: null, // Bridge: no pill — status is shown in the panel below the form.
+    getChainId: function(){ return safeGet(function(){ return CHAINS[bridgeToIdx].chainId; }); },
+    getAddress: function(){ return safeGet(function(){ return (typeof walletAddress !== 'undefined' && walletAddress) ? walletAddress : null; }); }
+  });
+
+  var xcCtl = createController({
+    pageId: 'page-xchain',
+    buttonId: 'xc-send-btn',
+    panelId: 'dgv-panel-xchain',
+    pillId: 'dgv-pill-xchain',
+    // Cross-Chain: no pill — status is shown in the panel below the form.
+    mountPill: null,
+    getChainId: function(){ return safeGet(function(){ return CHAINS[xcToIdx].chainId; }); },
+    getAddress: function(){ return safeGet(function(){
+      var c = CHAINS[xcToIdx];
+      if (c && c.id === 'Arc_Testnet') return (typeof walletAddress !== 'undefined' && walletAddress) ? walletAddress : null;
+      var el = document.getElementById('xc-recipient');
+      var v = el ? (el.value || '').trim() : '';
+      return /^0x[0-9a-fA-F]{40}$/.test(v) ? v : null;
+    }); }
+  });
+
+  var controllers = [bridgeCtl, xcCtl];
+
+  // ── Global capture-phase click gate (runs BEFORE the button's onclick) ──
+  function installGate(){
+    document.addEventListener('click', function(e){
+      var t = e.target;
+      if (!t || !t.closest) return;
+      if (t.closest('#bridge-btn')) { bridgeCtl.gate(e); return; }
+      if (t.closest('#xc-send-btn')) { xcCtl.gate(e); return; }
+    }, true);
+  }
+
+  // ── Live update orchestration ──
+  function refreshActive(force){
+    controllers.forEach(function(c){
+      c.ensure();
+      if (c.isActive()) c.run();
+    });
+  }
+
+  function initDGV(){
+    // Bridge-only compacting so the card (now with the gas-check panel) fits the
+    // viewport neatly. Scoped strictly to #page-bridge — does not affect Swap,
+    // Cross-Chain, or any shared styling, and changes no behaviour.
+    if (!document.getElementById('dgv-bridge-fit-style')){
+      var st = document.createElement('style');
+      st.id = 'dgv-bridge-fit-style';
+      st.textContent =
+        '#page-bridge .page-content{align-items:flex-start}' +
+        '#page-bridge .swap-card{padding:16px;max-width:460px}' +
+        '#page-bridge .chain-row{padding:8px 12px}' +
+        '#page-bridge #bridge-rate-box{margin-top:8px}' +
+        '#page-bridge #dgv-panel-bridge{margin-top:9px}';
+      document.head.appendChild(st);
+    }
+    controllers.forEach(function(c){ c.ensure(); });
+    installGate();
+
+    // (1) Chain change → re-validate (observe destination name text)
+    ['to-chain-name','xc-to-name'].forEach(function(id){
+      var el = document.getElementById(id);
+      if (el){ try { new MutationObserver(function(){ refreshActive(); }).observe(el, { childList:true, characterData:true, subtree:true }); } catch(_){} }
+    });
+    // (2) Destination wallet (recipient) change → re-validate
+    var rec = document.getElementById('xc-recipient');
+    if (rec) rec.addEventListener('input', function(){ if (xcCtl.isActive()) xcCtl.run(); });
+
+    // (3) Fast local poll (no RPC): detect chain / wallet / recipient key change
+    //     → instantaneous re-validate. Covers wallet reconnection & rapid switches.
+    setInterval(function(){
+      controllers.forEach(function(c){
+        if (!c.isActive()) return;
+        if (c.keyNow() !== c.lastKey()) c.run();
+      });
+    }, 2500);
+
+    // (4) Mandatory periodic live refresh every 15 seconds while page is open
+    setInterval(function(){ refreshActive(true); }, 15000);
+
+    // (5) Re-validate when a page becomes visible (nav switch)
+    ['nav-bridge','nav-xchain'].forEach(function(id){
+      var n = document.getElementById(id);
+      if (n) n.addEventListener('click', function(){ setTimeout(function(){ refreshActive(true); }, 120); });
+    });
+
+    // (6) After a successful Bridge / Cross-Chain Payment (steps card shown),
+    //     balances change → re-validate. Observe the existing steps cards' text.
+    ['bridge-steps-card','xc-steps-card'].forEach(function(id){
+      var el = document.getElementById(id);
+      if (el){ try { new MutationObserver(function(){ setTimeout(function(){ refreshActive(true); }, 4000); }).observe(el, { childList:true, subtree:true, characterData:true }); } catch(_){} }
+    });
+
+    // initial paint
+    setTimeout(function(){ refreshActive(true); }, 400);
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initDGV);
+  else initDGV();
+})();
+
+// ============================================================
+//  AUTONOMA CHAT COMPOSER  —  Auto-expanding input + Voice (Web Speech)
+//  ----------------------------------------------------------------
+//  UI/UX ONLY. Enhances just the Autonoma message composer:
+//    • ChatGPT-style upward auto-expansion (bottom edge fixed, internal
+//      scroll after ~11 lines) with a smooth height transition.
+//    • Microphone voice-to-text (Web Speech API) in EN/PT, inserting
+//      editable text WITHOUT auto-sending.
+//  It NEVER touches the AI agent, prompts, execution engine, memory,
+//  tools, history, wallet, backend or any business logic. `autonomaSend`
+//  and `autonomaSendQuick` remain exactly as-is.
+// ============================================================
+(function(){
+  'use strict';
+  if (typeof window === 'undefined') return;
+
+  function notify(msg, type){
+    try { if (typeof toast === 'function') { toast(msg, type || 'info'); return; } } catch(_){}
+    try {
+      var t = document.getElementById('toast');
+      if (t){ t.textContent = msg; t.classList.add('show'); setTimeout(function(){ t.classList.remove('show'); }, 2200); }
+    } catch(_){}
+  }
+
+  function init(){
+    var ta = document.getElementById('aut-input');
+    if (!ta) return;
+    var area = ta.closest('.aut-input-area');
+    if (!area) return;
+    var MAX = 220; // ≈ 11–12 lines
+
+    // ── Auto-expanding textarea (grows upward; bottom stays fixed) ──
+    function grow(){
+      ta.style.height = 'auto';
+      var h = Math.min(ta.scrollHeight, MAX);
+      ta.style.height = h + 'px';
+      ta.style.overflowY = (ta.scrollHeight > MAX) ? 'auto' : 'hidden';
+    }
+    ta.addEventListener('input', grow);
+    // Re-measure after programmatic clears/sends (value set doesn't fire 'input')
+    ta.addEventListener('keydown', function(e){
+      if (e.key === 'Enter' && !e.shiftKey){ setTimeout(grow, 0); }
+    });
+    // Expose so other UI paths can keep the height in sync if needed.
+    window.autGrowComposer = grow;
+    // Keep composer sized correctly whenever the page becomes visible.
+    var navA = document.getElementById('nav-autonoma');
+    if (navA) navA.addEventListener('click', function(){ setTimeout(grow, 60); });
+    setTimeout(grow, 200);
+
+    // ── Voice input (Web Speech API) ──
+    var mic  = document.getElementById('aut-mic-btn');
+    var hint = document.getElementById('aut-listening-hint');
+    if (!mic) return;
+
+    var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR){
+      mic.classList.add('disabled');
+      mic.setAttribute('aria-disabled', 'true');
+      mic.addEventListener('click', function(){ notify('Voice input is not supported in this browser.', 'warning'); });
+      return;
+    }
+
+    var rec = new SR();
+    // Auto language: Portuguese if the browser is PT, otherwise English.
+    var uiLang = (navigator.language || 'en').toLowerCase();
+    rec.lang = uiLang.indexOf('pt') === 0 ? 'pt-BR' : 'en-US';
+    rec.interimResults = true;
+    rec.continuous = false;
+    rec.maxAlternatives = 1;
+
+    var listening = false;
+    var baseText = '';
+
+    function setIcon(name){ mic.innerHTML = '<i class="ti ' + name + '"></i>'; }
+    function setState(state){
+      mic.classList.remove('listening', 'processing');
+      if (state === 'listening'){ mic.classList.add('listening'); setIcon('ti-microphone'); mic.setAttribute('aria-label','Stop voice input'); }
+      else if (state === 'processing'){ mic.classList.add('processing'); mic.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 0.9s linear infinite"></i>'; }
+      else { setIcon('ti-microphone'); mic.setAttribute('aria-label','Start voice input'); }
+      if (hint) hint.classList.toggle('show', state === 'listening');
+    }
+
+    function startRec(){
+      if (listening) return;
+      baseText = (ta.value || '').trim();
+      try { rec.start(); } catch(_){ /* start() throws if already running */ }
+    }
+    function stopRec(){ try { rec.stop(); } catch(_){} }
+
+    mic.addEventListener('click', function(){ listening ? stopRec() : startRec(); });
+
+    rec.onstart = function(){ listening = true; setState('listening'); };
+    rec.onspeechend = function(){ setState('processing'); };
+    rec.onresult = function(e){
+      var txt = '';
+      for (var i = e.resultIndex; i < e.results.length; i++){ txt += e.results[i][0].transcript; }
+      txt = txt.trim();
+      var joined = baseText ? (baseText + (txt ? ' ' + txt : '')) : txt;
+      ta.value = joined;
+      grow();
+    };
+    rec.onerror = function(e){
+      listening = false; setState('idle');
+      var err = e && e.error;
+      if (err === 'not-allowed' || err === 'service-not-allowed') notify('Microphone permission denied.', 'error');
+      else if (err === 'no-speech') { /* silent — user said nothing */ }
+      else if (err !== 'aborted') notify('Voice input error. Please try again.', 'warning');
+    };
+    rec.onend = function(){
+      listening = false; setState('idle');
+      try { ta.focus(); } catch(_){}
+    };
+
+    // Escape cancels an active recording (does not affect text input otherwise).
+    function escHandler(e){ if (e.key === 'Escape' && listening){ e.preventDefault(); stopRec(); } }
+    ta.addEventListener('keydown', escHandler);
+    document.addEventListener('keydown', function(e){ if (e.key === 'Escape' && listening) stopRec(); });
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+  else init();
+})();
+
+// ============================================================
+//  AUTONOMA INTELLIGENCE LAYER  (pre-interpretation only)
+//  ----------------------------------------------------------------
+//  Sits ABOVE the existing Autonoma engine. It does NOT change the
+//  agent, prompts, execution engine, memory, tools, handlers or any
+//  business logic. It only makes the raw user text easier for the
+//  EXISTING classifier to understand — typo tolerance, synonyms,
+//  natural phrasing, PT/EN mixing, light contextual pronoun expansion,
+//  confidence-based "did you mean" clarifications, and temporary
+//  in-session vocabulary learning.
+//
+//  Safety contract (guarantees zero regressions):
+//    • Numbers, 0x addresses, token symbols and chain names are NEVER
+//      altered (parameter extraction stays intact).
+//    • A message that the existing classifier ALREADY recognises is
+//      passed through UNCHANGED.
+//    • The enhanced text is only used when the original was NOT
+//      recognised AND the enhanced version becomes recognisable.
+//    • Only additive: exposes window.AutonomaIntelligence and is
+//      invoked from a single guarded hook at the top of autProcess.
+// ============================================================
+(function(){
+  'use strict';
+  if (typeof window === 'undefined') return;
+
+  // Words that must never be touched (params / identifiers).
+  var TOKENS = ['usdc','eurc','cirbtc','ubtc','btc','eth','usd','eur','sol','matic','pol','avax','bnb','lp'];
+  var CHAINS = ['arc','ethereum','sepolia','base','arbitrum','optimism','polygon','amoy','solana','avalanche','bnb'];
+  var PROTECT = {};
+  TOKENS.concat(CHAINS).forEach(function(w){ PROTECT[w] = 1; });
+
+  // Canonical keywords the existing classifier keys on (fuzzy targets).
+  var CANON = ['swap','bridge','send','pay','payment','transfer','invoice','balance','wallet',
+    'treasury','vault','liquidity','pool','history','contract','profile','help','schedule',
+    'multisend','crosschain','exchange','trade','convert','portfolio','recipient'];
+
+  // Explicit typo → canonical (exact, zero false positives).
+  var TYPO = {
+    swpa:'swap', swop:'swap', sawp:'swap', swaap:'swap', swp:'swap', swapp:'swap', swep:'swap', sqap:'swap',
+    brigde:'bridge', bridg:'bridge', bridhe:'bridge', brige:'bridge', brdige:'bridge', briidge:'bridge', briadge:'bridge', bridgee:'bridge',
+    paymant:'payment', pyament:'payment', payement:'payment', paymnt:'payment', paymen:'payment', payemnt:'payment',
+    croshchain:'crosschain', croschain:'crosschain', crooschain:'crosschain', crosschian:'crosschain', crosshain:'crosschain',
+    treasry:'treasury', tresury:'treasury', treasary:'treasury', treaury:'treasury',
+    walet:'wallet', wallett:'wallet', walllet:'wallet', waller:'wallet', wallt:'wallet',
+    balnce:'balance', balace:'balance', balanc:'balance', ballance:'balance', balence:'balance', blance:'balance',
+    invioce:'invoice', invoce:'invoice', invoic:'invoice', invboice:'invoice', invroice:'invoice', invoice:'invoice',
+    snd:'send', sedn:'send', sned:'send', sennd:'send',
+    tranfer:'transfer', trasnfer:'transfer', transferr:'transfer', transfere:'transfer', trnasfer:'transfer',
+    exchnage:'exchange', exchang:'exchange', excange:'exchange', exhange:'exchange',
+    liquidty:'liquidity', liqudity:'liquidity', liquidiy:'liquidity', liqidity:'liquidity',
+    tresaury:'treasury', hisotry:'history', histroy:'history', contrat:'contract', contarct:'contract'
+  };
+
+  // Synonyms / inflections → canonical (safe, one-directional).
+  var SYN = {
+    exchange:'swap', trade:'swap', convert:'swap', swapping:'swap', trading:'swap', converting:'swap', exchanging:'swap',
+    troca:'swap', trocar:'swap', trocar:'swap',
+    dispatch:'send', forward:'send', sending:'send', paying:'pay', transferring:'transfer', transferindo:'transfer',
+    enviando:'send', mandando:'send',
+    bill:'invoice', billing:'invoice', fatura:'invoice',
+    checkout:'payment link',
+    payments:'payment'
+  };
+
+  // Generic/ambiguous words → candidate intents (used only for "did you mean").
+  var HINT = {
+    swap:['SWAP'], exchange:['SWAP'], trade:['SWAP'], convert:['SWAP'],
+    bridge:['BRIDGE'], crosschain:['BRIDGE'], 'cross-chain':['BRIDGE'],
+    send:['SEND'], pay:['SEND'], transfer:['SEND'], payment:['LINK','SEND'], link:['LINK'],
+    invoice:['INVOICE'], bill:['INVOICE'],
+    balance:['BALANCE'], wallet:['BALANCE'], portfolio:['BALANCE'], holdings:['BALANCE'],
+    treasury:['TREASURY'], vault:['TREASURY'],
+    liquidity:['LIQUIDITY'], pool:['LIQUIDITY'],
+    history:['HISTORY'], contract:['CONTRACT'], schedule:['SCHEDULE'], multisend:['MULTISEND'],
+    // ambiguous natural words
+    money:['SEND','BRIDGE','BALANCE'], funds:['BALANCE','SEND','BRIDGE'], assets:['BALANCE','SEND'],
+    move:['BRIDGE','SEND'], dinheiro:['SEND','BALANCE'], grana:['SEND','BALANCE'], saldo:['BALANCE'],
+    dollars:['SEND','BALANCE'], dollar:['SEND','BALANCE']
+  };
+
+  var INTENT_META = {
+    SWAP:{label:'Swap tokens', phrase:'swap'},
+    BRIDGE:{label:'Bridge assets', phrase:'bridge'},
+    SEND:{label:'Send a payment', phrase:'send payment'},
+    LINK:{label:'Create a payment link', phrase:'create a payment link'},
+    INVOICE:{label:'Create an invoice', phrase:'create an invoice'},
+    BALANCE:{label:'Check my balance', phrase:'show my balance'},
+    TREASURY:{label:'View treasury', phrase:'treasury'},
+    LIQUIDITY:{label:'Manage liquidity', phrase:'liquidity'},
+    HISTORY:{label:'Transaction history', phrase:'history'},
+    CONTRACT:{label:'Contract info', phrase:'contract'},
+    SCHEDULE:{label:'Schedule automation', phrase:'schedule a payment'},
+    MULTISEND:{label:'Multi-send', phrase:'multisend'}
+  };
+
+  // Temporary in-session vocabulary the user teaches us implicitly.
+  var sessionMap = Object.create(null);
+
+  function lev(a, b){
+    if (a === b) return 0;
+    var al = a.length, bl = b.length;
+    if (!al) return bl; if (!bl) return al;
+    var prev = new Array(bl + 1), cur = new Array(bl + 1), i, j;
+    for (j = 0; j <= bl; j++) prev[j] = j;
+    for (i = 1; i <= al; i++){
+      cur[0] = i;
+      for (j = 1; j <= bl; j++){
+        var cost = a.charCodeAt(i - 1) === b.charCodeAt(j - 1) ? 0 : 1;
+        cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost);
+      }
+      var t = prev; prev = cur; cur = t;
+    }
+    return prev[bl];
+  }
+
+  // Common English/PT function words we must not mangle via fuzzy matching.
+  var STOP = {};
+  ('the a an of to in on for from into with your my our their this that these those and or but if then else how what when where which who why me you it its is are was were be been being do does did done have has had will would can could should may might want wanted need needs please pls let lets make made give gimme show tell about some more most all any each every into onto over under out off up down back again also just now here there yes no ok okay thanks thank hello hi hey ola oi para por com sem meu minha meus minhas seu sua eu voce vc quero preciso quero fazer faz favor agora aqui isso isto aquele aquela eles elas them from move sell hold cost cast card cart send help swap pay bill link pool').split(' ').forEach(function(w){ if(w) STOP[w] = 1; });
+
+  function isPreserved(key, coreOriginal){
+    if (!key) return true;
+    if (/\d/.test(coreOriginal)) return true;                 // numbers / amounts / ids
+    if (/^0x[0-9a-f]+$/i.test(coreOriginal)) return true;      // addresses / hashes
+    if (PROTECT[key]) return true;                             // token / chain symbols
+    if (key.length < 4) return true;                           // too short to fuzz safely
+    return false;
+  }
+
+  function fuzzy(key){
+    if (key.length < 5) return null;
+    if (STOP[key]) return null;
+    var best = null, bestD = 99;
+    for (var i = 0; i < CANON.length; i++){
+      var c = CANON[i];
+      if (Math.abs(c.length - key.length) > 2) continue;
+      var d = lev(key, c);
+      if (d < bestD){ bestD = d; best = c; }
+    }
+    // Require close match and avoid trivial over-correction.
+    if (best && bestD <= 2 && bestD < key.length - 2) return best;
+    return null;
+  }
+
+  function canonicalize(word){
+    // word: lowercase core. Returns canonical replacement or null.
+    if (sessionMap[word]) return sessionMap[word];
+    if (TYPO[word]) return TYPO[word];
+    if (SYN[word]) return SYN[word];
+    var f = fuzzy(word);
+    if (f){
+      var mapped = SYN[f] || f;
+      sessionMap[word] = mapped;      // learn within the session
+      return mapped;
+    }
+    return null;
+  }
+
+  function correctToken(tok){
+    var lead = (tok.match(/^[^0-9A-Za-z\u00C0-\u024F]+/) || [''])[0];
+    var trail = (tok.match(/[^0-9A-Za-z\u00C0-\u024F]+$/) || [''])[0];
+    var core = tok.slice(lead.length, tok.length - (trail.length || 0));
+    if (trail.length === 0) core = tok.slice(lead.length);
+    if (!core) return tok;
+    var key = core.toLowerCase();
+    if (isPreserved(key, core)) return tok;
+    var rep = canonicalize(key);
+    if (rep && rep !== key) return lead + rep + trail;
+    return tok;
+  }
+
+  function normalize(msg){
+    if (!msg || typeof msg !== 'string') return msg;
+    var s = msg;
+    // Collapse "cross chain" / "croos chain" variants → crosschain
+    s = s.replace(/\bcro+s+\s*[-\s]?\s*chai?n\b/gi, 'crosschain');
+    // De-duplicate accidental repeated words ("swap swap 100")
+    s = s.replace(/\b(\w{3,})\s+\1\b/gi, '$1');
+    var parts = s.split(/(\s+)/);
+    for (var i = 0; i < parts.length; i++){
+      if (/^\s+$/.test(parts[i]) || parts[i] === '') continue;
+      parts[i] = correctToken(parts[i]);
+    }
+    return parts.join('');
+  }
+
+  // Light contextual pronoun expansion for short follow-ups ("bridge it").
+  var lastCtx = { token:null, amount:null, chain:null };
+  function rememberFrom(text){
+    try {
+      var m = text.match(/\b(usdc|eurc|cirbtc|eth|btc)\b/i); if (m) lastCtx.token = m[1].toUpperCase();
+      var n = text.match(/(\d+(?:\.\d+)?)/); if (n) lastCtx.amount = n[1];
+      var c = text.match(/\b(arc|base|ethereum|arbitrum|optimism|polygon|sepolia|amoy)\b/i); if (c) lastCtx.chain = c[1];
+    } catch(_){}
+  }
+  function expandPronoun(text){
+    // Only when there's a pronoun and no explicit token in the message.
+    if (!/\b(it|them|isso|isto|aquilo|elas?|eles?|that|these|those)\b/i.test(text)) return text;
+    if (/\b(usdc|eurc|cirbtc|eth|btc)\b/i.test(text)) return text;
+    if (lastCtx.token) return text + ' ' + lastCtx.token;
+    return text;
+  }
+
+  function scoreSuggestions(normText){
+    var low = normText.toLowerCase();
+    var scores = {};
+    Object.keys(HINT).forEach(function(word){
+      var re = new RegExp('\\b' + word.replace(/[-]/g,'[- ]?') + '\\b');
+      if (re.test(low)){
+        HINT[word].forEach(function(intent, idx){
+          scores[intent] = (scores[intent] || 0) + (1 / (idx + 1));
+        });
+      }
+    });
+    var arr = Object.keys(scores).map(function(k){ return { intent:k, score:scores[k] }; });
+    arr.sort(function(a, b){ return b.score - a.score; });
+    return arr.slice(0, 3).map(function(x){
+      var meta = INTENT_META[x.intent] || { label:x.intent, phrase:x.intent };
+      return { intent:x.intent, label:meta.label, phrase:meta.phrase, score:x.score };
+    });
+  }
+
+  function buildClarify(cands){
+    var btns = cands.map(function(c){
+      return '<button type="button" onclick="autonomaSendQuick(\'' + c.phrase.replace(/'/g,"\\'") + '\')" ' +
+        'style="background:rgba(6,247,233,.1);border:1px solid rgba(6,247,233,.28);color:#06F7E9;border-radius:8px;padding:7px 12px;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit">' +
+        c.label + '</button>';
+    }).join('');
+    return '<div class="aut-intro">I want to make sure I got that right. Did you mean:</div>' +
+      '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">' + btns + '</div>' +
+      '<div style="font-size:9px;color:var(--muted2);margin-top:8px">Tip: you can also just tell me the details, e.g. <em>"swap 100 USDC for EURC"</em>.</div>';
+  }
+
+  var AutonomaIntelligence = {
+    version: '1.0',
+    normalize: normalize,
+    suggest: function(msg){ return scoreSuggestions(normalize(msg || '')); },
+    // Main hook. `opts.classify` is the existing _classifyIntent (passed in).
+    preprocess: function(msg, opts){
+      opts = opts || {};
+      if (!msg || typeof msg !== 'string') return { text: msg };
+      var classify = typeof opts.classify === 'function' ? opts.classify : null;
+
+      var withPron = expandPronoun(msg);
+      var enhanced = normalize(withPron);
+
+      // Active multi-turn context: never gate, just help (params preserved).
+      if (opts.ctxActive){ rememberFrom(enhanced); return { text: enhanced }; }
+
+      // Preserve anything the existing classifier already understands.
+      if (classify){
+        var origIntent = 'DEFAULT';
+        try { origIntent = (classify(msg) || {}).intent || 'DEFAULT'; } catch(_){}
+        if (origIntent !== 'DEFAULT'){ rememberFrom(msg); return { text: msg }; }
+
+        var enhIntent = 'DEFAULT';
+        try { enhIntent = (classify(enhanced) || {}).intent || 'DEFAULT'; } catch(_){}
+        if (enhIntent !== 'DEFAULT' && enhanced !== msg){ rememberFrom(enhanced); return { text: enhanced }; }
+        if (enhIntent !== 'DEFAULT'){ rememberFrom(enhanced); return { text: enhanced }; }
+
+        // Still unrecognised → offer smart clarification instead of a hard "no".
+        var cands = scoreSuggestions(enhanced);
+        if (cands.length >= 2) return { clarify: buildClarify(cands) };
+        if (cands.length === 1){
+          // Single strong guess → nudge toward it but let the engine run it.
+          return { text: cands[0].phrase };
+        }
+        return { text: enhanced !== msg ? enhanced : msg };
+      }
+
+      return { text: enhanced };
+    }
+  };
+  window.AutonomaIntelligence = AutonomaIntelligence;
+})();
+
+// ============================================================
+//  AUTONOMA TEMPORAL NLU  (Time & Recurrence Understanding)
+//  ---------------------------------------------------------------
+//  Pre-interpretation layer dedicated to frequency / recurrence /
+//  schedule time. Runs BEFORE the existing scheduler engines —
+//  canonicalises the message so that ALL three frequency parsers
+//  (AutonomaAgent._parseSchedule, AutonomaAgent._agentSchedule-
+//  ToEngine, and _handleCreateSchedule) see the same unambiguous
+//  keyword. NEVER changes execution logic, dates, amounts,
+//  addresses, tokens or chains. Only rewrites the message text.
+//
+//  Supported outputs: once | daily | weekly | biweekly | monthly
+//  Unsupported cadences (yearly, hourly, every 3 days, etc.)
+//  trigger a polite clarification instead of guessing.
+// ============================================================
+(function(){
+  'use strict';
+  if (typeof window === 'undefined') return;
+
+  // ── Frequency patterns (regex has accent-tolerant variants) ──
+  var SUPPORTED = [
+    { freq:'once',    re:/\b(once|one[ -]?time|uma[ -]?vez|[uú]nica[ -]?vez|amanh[aã]|tomorrow|now|hoje|today|agora)\b/i },
+    { freq:'daily',   re:/\b(daily|every[ -]?day|each[ -]?day|di[aá]ri[ao]|diariamente|cada[ -]?dia|todo[ -]?dia|once a day|per day|a day|todas as noites)\b/i },
+    { freq:'weekly',  re:/\b(weekly|every[ -]?week|each[ -]?week|semanal|semanalmente|cada[ -]?semana|toda[ -]?semana|once a week|per week|a week|every monday|every tuesday|every wednesday|every thursday|every friday|every saturday|every sunday|toda segunda|toda ter[cç]a|toda quarta|toda quinta|toda sexta|toda quinta-feira|toda sexta-feira|cada semana|por semana|every 7 days|every seven days)\b/i },
+    { freq:'biweekly',re:/\b(bi[ -]?weekly|fortnightly|every[ -]?(two|2)[ -]?weeks|every[ -]?other[ -]?week|quinzenal|cada[ -]?15|cada quinze|cada duas semanas|every 14 days|every fourteen days|twice[ -]?monthly|two times a month|cada duas semanas)\b/i },
+    { freq:'monthly', re:/\b(monthly|every[ -]?month|each[ -]?month|mensal|mensalmente|cada[ -]?m[eê]s|todo[ -]?m[eê]s|uma vez por mes|once a month|per month|a month|todo mes)\b/i }
+  ];
+
+  var UNSUPPORTED = [
+    { re:/\b(yearly|annually|anual|anualmente|cada[ -]?ano|every[ -]?year|once a year|per year)\b/i, suggest:['monthly','weekly'] },
+    { re:/\b(quarterly|trimestral|cada[ -]?trimestre|every[ -]?quarter|trimes\b)\b/i, suggest:['monthly','weekly'] },
+    { re:/\b(hourly|cada[ -]?hora|every[ -]?hour|de hora em hora|hora em hora)\b/i, suggest:['daily'] },
+    { re:/\b(twice[ -]?a[ -]?day|cada[ -]?12.horas|every 12 hours|every 6 hours|every 8 hours|duas vezes por dia)\b/i, suggest:['daily'] }
+  ];
+
+  // Custom interval regex: "every N days/weeks/months/years" or "a cada N dias/semanas/meses"
+  var CUST = /(\d+)\s*(day|week|month|dias?|semanas?|meses?|month)s?\b|\b(cada|every|a cada)\s*(\d+)\s*(dias?|semanas?|meses?|day|week|month)s?\b/gi;
+
+  var FREQ_LABELS = { once:'One-time', daily:'Daily', weekly:'Weekly', biweekly:'Bi-weekly', monthly:'Monthly' };
+
+  // Typo-tolerant alias map for common misspellings (normalise BEFORE regex match).
+  var TYPO = {
+    daiy:'daily', dailly:'daily', daly:'daily', dialy:'daily', dayly:'daily', daiily:'daily',
+    weeky:'weekly', weekley:'weekly', weeklly:'weekly', wekly:'weekly', wekkly:'weekly', wekkley:'weekly', weeekly:'weekly',
+    biweeky:'biweekly', biwekly:'biweekly', biweekley:'biweekly',
+    mothly:'monthly', montly:'monthly', monthley:'monthly', monhtly:'monthly', montly:'monthly', monthlyy:'monthly',
+    quaterly:'quarterly', quartely:'quarterly', quaterley:'quarterly',
+    yeary:'yearly', annally:'annually',
+    oncee:'once'
+  };
+
+  function fixTypos(text){
+    return text.replace(/\b([a-z]{4,})\b/gi, function(w){
+      var k = TYPO[w.toLowerCase()];
+      return k ? (w[0] === w[0].toUpperCase() ? k.charAt(0).toUpperCase() + k.slice(1) : k) : w;
+    });
+  }
+
+  function stripAccents(s){ return (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, ''); }
+
+  // Return { freq (string|null), unsupported (string[]), customInterval (string|null) }
+  function detect(msg){
+    var low = stripAccents(msg.toLowerCase());
+    var found = {}, unsp = [];
+    SUPPORTED.forEach(function(s){
+      if (s.re.test(low)) found[s.freq] = (found[s.freq] || 0) + 1;
+    });
+    UNSUPPORTED.forEach(function(u){
+      if (u.re.test(low)) unsp.push(u.suggest.join('|'));
+    });
+    var custom = null;
+    var cm; var cleanAccent = stripAccents(msg);
+    while ((cm = CUST.exec(cleanAccent)) !== null){
+      var n = parseInt(cm[1] || cm[4], 10);
+      var unit = (cm[2] || cm[5] || '').toLowerCase().replace(/s$/g, '');
+      if (unit === 'day' || unit === 'dia' || unit === 'dias'){
+        if (n === 1) found.daily = (found.daily || 0) + 1;
+        else if (n === 2) { found.daily = (found.daily || 0) + 1; /* flag as ambiguous */ }
+        else { custom = 'every '+n+' days'; unsp.push('daily|weekly'); }
+      } else if (unit === 'week' || unit === 'semana' || unit === 'semanas'){
+        if (n === 1) found.weekly = (found.weekly || 0) + 1;
+        else if (n === 2) found.biweekly = (found.biweekly || 0) + 1;
+        else if (n === 4) found.monthly = (found.monthly || 0) + 1;
+        else { custom = 'every '+n+' weeks'; unsp.push('weekly|monthly'); }
+      } else if (unit === 'month' || unit === 'mes' || unit === 'meses' || unit === 'mês'){
+        if (n === 1) found.monthly = (found.monthly || 0) + 1;
+        else { custom = 'every '+n+' months'; unsp.push('monthly|weekly'); }
+      }
+    }
+    var keys = Object.keys(found);
+    if (keys.length === 1 && unsp.length === 0) return { freq: keys[0] };
+    if (keys.length === 0 && unsp.length === 0) return {};
+    // Multiple distinct supported freqs, or any unsupported — clarify.
+    return { ambiguous: keys, unsupported: unsp, custom: custom };
+  }
+
+  // Remove frequency-related words from text so injected keyword wins.
+  function stripFreq(text){
+    var re = [
+      /\b(once|one[ -]?time|uma[ -]?vez|[uú]nica[ -]?vez)\b/gi,
+      /\b(daily|every[ -]?day|each[ -]?day|di[aá]ri[ao]|diariamente|cada[ -]?dia|todo[ -]?dia|once a day|per day|a day)\b/gi,
+      /\b(weekly|every[ -]?week|each[ -]?week|semanal|semanalmente|cada[ -]?semana|toda[ -]?semana|once a week|per week|a week)\b/gi,
+      /\b(every (monday|tuesday|wednesday|thursday|friday|saturday|sunday)|toda (segunda|ter[cç]a|quarta|quinta|sexta))\b/gi,
+      /\b(bi[ -]?weekly|fortnightly|every[ -]?(two|2)[ -]?weeks|quinzenal|cada[ -]?15|cada quinze|every other week)\b/gi,
+      /\b(monthly|every[ -]?month|each[ -]?month|mensal|mensalmente|cada[ -]?m[eê]s|todo[ -]?m[eê]s|once a month|per month|a month)\b/gi,
+      /\b(yearly|annually|anual|anualmente|cada[ -]?ano|every[ -]?year|once a year)\b/gi,
+      /\b(quarterly|trimestral|cada[ -]?trimestre|every[ -]?quarter)\b/gi,
+      /\b(hourly|cada[ -]?hora|every[ -]?hour|de hora em hora)\b/gi,
+      /\b(twice[ -]?a[ -]?day|cada[ -]?12.horas|every 12 hours|every 6 hours|every 8 hours)\b/gi,
+      /\b(twice monthly|two times? a month|duas? vezes por mes|duas? vezes ao m[eê]s)\b/gi,
+      /(cada|every|a cada)\s*\d+\s*(dias?|semanas?|meses?|day|week|month)s?\b/gi,
+      /\b(weeky|weekley|weeklly|wekly|montly|monthley|montly|monhtly|dialy|dayly|daiy|daly|mothly)\b/gi
+    ];
+    var s = text;
+    re.forEach(function(r){ s = s.replace(r, ''); });
+    return s.replace(/\s{2,}/g, ' ').replace(/^[,\s]+|[,\s]+$/g, '');
+  }
+
+  // Detect scheduling intent (verb or recurrence + action).
+  var SCH_CTX = /\b(schedul|agend|program|automati[sz]|recurring|recurrence|recorr[eê]nt?e)\b/i;
+  var RECUR_ACT = /\b(every|each|daily|weekly|monthly|yearly|bi[ -]?weekly|semanal|mensal|quinzenal|di[aá]rio|todo|toda|cada|custom interval|recorrente)\b.*\b(pay|send|transf|bridge|swap|envia|pag|manda)\b/i;
+  function isScheduleContext(msg){
+    return SCH_CTX.test(msg) || RECUR_ACT.test(msg);
+  }
+
+  function buildClarify(baseText, freqs, label, fallbackFreqs){
+    var items = [];
+    var seen = {};
+    (freqs || []).forEach(function(f){
+      if (!seen[f] && FREQ_LABELS[f]){ seen[f] = 1; items.push({ freq:f, label:FREQ_LABELS[f] }); }
+    });
+    if (items.length < 2 && fallbackFreqs){
+      fallbackFreqs.forEach(function(f){ if (!seen[f] && FREQ_LABELS[f]){ seen[f] = 1; items.push({ freq:f, label:FREQ_LABELS[f] }); } });
+    }
+    // Only available frequencies
+    items = items.filter(function(x){ return ['once','daily','weekly','biweekly','monthly'].indexOf(x.freq) >= 0; });
+    if (items.length < 2) items = [{freq:'monthly',label:'Monthly'},{freq:'weekly',label:'Weekly'},{freq:'daily',label:'Daily'}];
+
+      var btns = items.slice(0, 4).map(function(c){
+      var cmd = (baseText || 'schedule') + ' ' + c.freq;
+      return '<button type="button" onclick="autonomaSendQuick(\'' + cmd.replace(/'/g,"\\'") + '\')" ' +
+        'style="background:rgba(6,247,233,.1);border:1px solid rgba(6,247,233,.28);color:#06F7E9;border-radius:8px;padding:7px 12px;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit">' +
+        c.label + '</button>';
+    }).join('');
+    return '<div class="aut-intro">' + (label || 'What recurrence did you mean?') + '</div>' +
+      '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">' + btns + '</div>';
+  }
+
+  function canonicalize(msg){
+    if (!msg || typeof msg !== 'string') return msg;
+    // Schedule context guard
+    if (!isScheduleContext(msg)) return msg;
+
+    var original = msg;
+    var typoFixed = fixTypos(msg);
+    var detected = detect(typoFixed);
+
+    // Exactly one supported — rewrite cleanly
+    if (detected.freq && !detected.ambiguous && !detected.unsupported){
+      var base = stripFreq(typoFixed);
+      return (base || 'schedule') + ' ' + detected.freq;
+    }
+
+    // Ambiguous / unsupported — clarify
+    if (detected.ambiguous || detected.unsupported){
+      var base = stripFreq(typoFixed);
+      // "sch base" clause
+      if (!SCH_CTX.test(base)) base = 'schedule ' + (base || '');
+      var cands = detected.ambiguous || [];
+      var fallback = (detected.unsupported && detected.unsupported.length)
+        ? (detected.unsupported[0].split('|') || []) : [];
+      var label = detected.custom ? ('"' + detected.custom + '" is not currently supported.') : '';
+      return buildClarify(base, cands, label, fallback);
+    }
+
+    // No frequency detected but schedule context — pass through unchanged.
+    return msg;
+  }
+
+  // ── Semantic double-check: re-run detection after canonicalisation.
+  //    If a word was injected that contradicts, log it — never block the user.
+  function verify(msg, expectedFreq){
+    var actual = detect(fixTypos(msg));
+    if (actual.freq && actual.freq !== expectedFreq){
+      try { console.warn('[temporal] semantic mismatch — expected "'+expectedFreq+'", detected "'+actual.freq+'"'); } catch(_){}
+    }
+    return msg;
+  }
+
+  var AutonomaTemporal = {
+    version: '1.0',
+    detect: function(msg){ return detect(fixTypos(msg)); },
+    canonicalize: function(msg){
+      var s = canonicalize(msg);
+      return (s && s.charAt(0) === '<') ? s : verify(s, null);
+    },
+    // Full processing hook: returns { text } or { clarify } or the original.
+    preprocess: function(msg){
+      if (!msg || !isScheduleContext(msg)) return { text: msg };
+      var result = canonicalize(msg);
+      if (result && result.charAt(0) === '<') return { clarify: result };
+      return { text: result || msg };
+    }
+  };
+  window.AutonomaTemporal = AutonomaTemporal;
 })();
 
 // ============================================================
@@ -34072,6 +35217,18 @@ const UBAction = (function() {
 
     // CSV detection (preserved)
     if(low.startsWith('[csv]')) return autProcessCSV(msg);
+
+    // ── Intelligence Layer (pre-interpretation ONLY; never alters recognised
+    //    commands, numbers, addresses, tokens or chains). Sits above the engine. ──
+    try{
+      if(typeof AutonomaIntelligence!=='undefined' && AutonomaIntelligence && typeof AutonomaIntelligence.preprocess==='function'){
+        const _ir=AutonomaIntelligence.preprocess(msg, { ctxActive:_ctxActive(), classify:_classifyIntent });
+        if(_ir){
+          if(_ir.clarify) return _ir.clarify;
+          if(typeof _ir.text==='string' && _ir.text) msg=_ir.text;
+        }
+      }
+    }catch(e){}
 
     // ── Check conversation context (multi-turn) ──
     if(_ctxActive()){
