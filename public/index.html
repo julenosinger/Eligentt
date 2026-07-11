@@ -49,6 +49,7 @@
 <script src="/shared/eventIndexer.js"></script>
 <script src="/shared/treasuryGuard.js"></script>
 <script src="/shared/multicall.js"></script>
+<script src="/shared/robinhoodTokenRegistry.js"></script>
 <script src="/shared/securityAttackLab.js"></script>
 <script src="/shared/invariantEngine.js"></script>
 <style>
@@ -2144,22 +2145,16 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
 }
 /* ── Responsive: Mobile (1 col) ─────────── */
 @media(max-width:768px){
-  .xc-content{grid-template-columns:1fr !important;gap:10px;padding:8px}
-  .xc-left-col{order:2}
+  .xc-content{grid-template-columns:1fr !important;gap:10px;padding:8px;overflow-x:hidden}
+  .xc-left-col{display:none !important}
   .xc-content .swap-col{order:1}
-  .xc-content .info-col{order:3;grid-template-columns:1fr;display:flex;flex-direction:column;gap:8px}
+  .xc-content .info-col{display:none !important}
   .xc-net-card,.xc-route-viz,.xc-ai-card,.xc-premium-card,.xc-right-card{border-radius:8px}
   .xc-amount-input{font-size:22px !important}
   .xc-send-btn-v2{padding:12px;font-size:12px;border-radius:8px}
-  .xc-content .info-col{display:flex !important}
   .xc-swap-dir{transform:rotate(90deg)}
   .xc-swap-dir:hover{transform:rotate(270deg)}
-  /* Mobile: show classic layout, hide premium left column */
   .xc-mobile-chains{display:block}
-  .xc-left-col{display:none !important}
-  .xc-content{grid-template-columns:1fr !important;gap:10px;padding:8px}
-  .xc-content .swap-col{order:1}
-  .xc-content .info-col{order:2;display:flex !important;flex-direction:column;gap:8px;width:100% !important}
   .xc-premium-card{max-width:100% !important;margin:0 !important}
   /* Hide premium-only elements on mobile */
   #xc-path-viz,#xc-ai-card,#xc-gas-card{display:none}
@@ -2259,6 +2254,8 @@ select.ub-op-input{cursor:pointer;-webkit-appearance:none;appearance:none;backgr
     height:100vh !important;z-index:10000 !important;
     border-radius:0 !important;border:none !important;
     animation:none !important;flex-shrink:initial !important;
+    background:var(--surface) !important;pointer-events:auto !important;
+    will-change:transform;transform:translateZ(0);
   }
   .ub-op-panel-header{padding:16px 18px;font-size:13px;border-bottom:1px solid rgba(6,247,233,.12)}
   .ub-op-close{width:32px;height:32px;font-size:18px}
@@ -2268,6 +2265,9 @@ select.ub-op-input{cursor:pointer;-webkit-appearance:none;appearance:none;backgr
   .ub-op-btn{padding:14px;font-size:12px;border-radius:8px}
   .ub-scr-swap-side{padding:12px}
   .ub-scr-bridge-chains{gap:6px}
+  /* UB mobile backdrop — smooth fade */
+  #ub-op-backdrop{transition:opacity .25s ease;opacity:0 !important;pointer-events:none !important}
+  #ub-op-backdrop.ub-op-visible{opacity:1 !important;pointer-events:all !important}
   .ub-scr-bridge-chain{padding:8px 10px}
   .ub-op-step{padding:6px 8px;font-size:9px}
   .ub-screen-footer{padding:5px 10px;font-size:7px}
@@ -6413,9 +6413,9 @@ select.cinput option { background: #161a24; color: #dde2f0; }
           <div class="sa-header-icon"><i class="ti ti-send"></i></div>
           <div class="sa-header-text">
             <div class="sa-header-title">Send Assets</div>
-            <div class="sa-header-sub">Transfer USDC, EURC and cirBTC to any wallet on Arc Testnet</div>
+            <div class="sa-header-sub">Transfer assets to any wallet on supported networks</div>
           </div>
-          <div class="sa-network-badge"><span style="width:6px;height:6px;border-radius:50%;background:var(--green);display:inline-block"></span>Arc Testnet</div>
+          <div class="sa-network-badge" id="sa-network-badge"><span style="width:6px;height:6px;border-radius:50%;background:var(--green);display:inline-block"></span><span id="sa-network-badge-text">Arc Testnet</span></div>
         </div>
 
         <!-- Body -->
@@ -6443,6 +6443,11 @@ select.cinput option { background: #161a24; color: #dde2f0; }
                   <div class="sa-asset-symbol">cirBTC</div>
                   <div class="sa-asset-name">Circle BTC</div>
                 </button>
+                <button class="sa-asset-btn" data-asset="ETH" onclick="saSelectAsset('ETH',this)" style="display:none">
+                  <div class="sa-asset-icon" style="background:linear-gradient(135deg,#627eea,#3a55c0)"><svg viewBox="0 0 32 32" width="14" height="14"><path d="M16 4v10l-8 4 8-4 8 4-8-4V4zM16 20l-8-4 8 10 8-10-8 4z" fill="white"/></svg></div>
+                  <div class="sa-asset-symbol">ETH</div>
+                  <div class="sa-asset-name">Ether (Native)</div>
+                </button>
               </div>
             </div>
 
@@ -6455,7 +6460,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
                 <label class="sa-label">From Network</label>
                 <div class="sa-input-wrap">
                   <i class="ti ti-topology-star-3 sa-input-icon"></i>
-                  <input class="sa-input" value="Arc Testnet (Chain ID: 5042002)" readonly style="color:var(--blue);background:rgba(79,142,247,.04)">
+                  <input id="sa-network-display" class="sa-input" value="Arc Testnet (Chain ID: 5042002)" readonly style="color:var(--blue);background:rgba(79,142,247,.04)">
                 </div>
               </div>
 
@@ -6643,8 +6648,8 @@ select.cinput option { background: #161a24; color: #dde2f0; }
               </select>
             </div>
             <!-- Bridge / CrossChain fields -->
-            <div id="sch-from-network-wrap" style="display:none"><div class="swap-label">From Network</div><select id="sch-from-network" class="cinput"><option value="Arc_Testnet">Arc Testnet</option><option value="Ethereum_Sepolia">Ethereum Sepolia</option><option value="Base_Sepolia">Base Sepolia</option><option value="Arbitrum_Sepolia">Arbitrum Sepolia</option><option value="Optimism_Sepolia">Optimism Sepolia</option></select></div>
-            <div id="sch-to-network-wrap" style="display:none"><div class="swap-label">To Network</div><select id="sch-to-network" class="cinput"><option value="Base_Sepolia">Base Sepolia</option><option value="Arbitrum_Sepolia">Arbitrum Sepolia</option><option value="Optimism_Sepolia">Optimism Sepolia</option><option value="Arc_Testnet">Arc Testnet</option><option value="Ethereum_Sepolia">Ethereum Sepolia</option></select></div>
+            <div id="sch-from-network-wrap" style="display:none"><div class="swap-label">From Network</div><select id="sch-from-network" class="cinput"><option value="Arc_Testnet">Arc Testnet</option><option value="Ethereum_Sepolia">Ethereum Sepolia</option><option value="Base_Sepolia">Base Sepolia</option><option value="Arbitrum_Sepolia">Arbitrum Sepolia</option><option value="Optimism_Sepolia">Optimism Sepolia</option><option value="Polygon_Amoy">Polygon Amoy</option><option value="Robinhood_Mainnet">Robinhood Chain</option><option value="Robinhood_Testnet">Robinhood Testnet</option></select></div>
+            <div id="sch-to-network-wrap" style="display:none"><div class="swap-label">To Network</div><select id="sch-to-network" class="cinput"><option value="Base_Sepolia">Base Sepolia</option><option value="Arbitrum_Sepolia">Arbitrum Sepolia</option><option value="Optimism_Sepolia">Optimism Sepolia</option><option value="Arc_Testnet">Arc Testnet</option><option value="Ethereum_Sepolia">Ethereum Sepolia</option><option value="Polygon_Amoy">Polygon Amoy</option><option value="Robinhood_Mainnet">Robinhood Chain</option><option value="Robinhood_Testnet">Robinhood Testnet</option></select></div>
             <!-- Swap fields -->
             <div id="sch-swap-to-token-wrap" style="display:none"><div class="swap-label">To Token</div><select id="sch-swap-to-token" class="cinput"><option>USDC</option><option>EURC</option><option>cirBTC</option><option>ETH</option></select></div>
             <!-- Payment / MultiSend / Link fields -->
@@ -10033,12 +10038,43 @@ select.cinput option { background: #161a24; color: #dde2f0; }
             </div>
           </div>
           <div class="card">
-            <div class="ch"><i class="ti ti-coins" style="font-size:13px;color:var(--yellow)"></i><span class="ct">Assets</span><span id="ub-asset-count" style="font-size:9px;color:var(--muted2);margin-left:auto">0 tokens</span></div>
+            <div class="ch"><i class="ti ti-coins" style="font-size:13px;color:var(--yellow)"></i><span class="ct">Assets</span><span id="ub-asset-count" style="font-size:9px;color:var(--muted2);margin-left:auto">0 tokens</span><button id="ub-import-token-btn" class="btn" style="padding:2px 8px;font-size:8px;margin-left:6px;display:none" onclick="showImportTokenModal()" title="Import custom ERC-20 token on Robinhood Chain"><i class="ti ti-plus"></i>Import</button></div>
             <div style="overflow-x:auto">
               <table class="btable">
                 <thead><tr><th>Token</th><th>Network</th><th>Balance</th><th>Value (USD)</th><th style="text-align:right">Actions</th></tr></thead>
                 <tbody id="ub-asset-tbody"><tr><td colspan="5" style="text-align:center;color:var(--muted2);padding:24px">Loading assets...</td></tr></tbody>
               </table>
+            </div>
+          </div>
+          <!-- Import Token Modal -->
+          <div class="modal-ov" id="import-token-modal" style="z-index:10500">
+            <div class="modal" style="width:380px;max-width:92vw">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+                <div class="mt" style="margin-bottom:0">Import Custom Token</div>
+                <button onclick="closeImportTokenModal()" style="width:28px;height:28px;border-radius:6px;border:1px solid var(--border2);background:transparent;color:var(--muted2);cursor:pointer;font-size:15px">&times;</button>
+              </div>
+              <div class="ms">Add any ERC-20 token on Robinhood Chain.<br>Token address will be validated on-chain.</div>
+              <label style="font-size:9px;color:var(--muted2);display:block;margin-bottom:4px">Network</label>
+              <select id="import-token-chain" class="cinput" onchange="previewImportToken()" style="margin-bottom:8px;cursor:pointer">
+                <option value="4663">Robinhood Mainnet</option>
+                <option value="46630">Robinhood Testnet</option>
+              </select>
+              <label style="font-size:9px;color:var(--muted2);display:block;margin-bottom:4px">Token Contract Address</label>
+              <input id="import-token-addr" class="cinput" placeholder="0x..." oninput="previewImportToken()" style="margin-bottom:8px"/>
+              <div id="import-token-feedback" style="display:none;font-size:9px;padding:6px 8px;border-radius:4px;margin-bottom:8px"></div>
+              <div id="import-token-preview" style="display:none;margin-bottom:10px">
+                <div style="display:flex;align-items:center;gap:8px;background:rgba(0,0,0,.15);border:1px solid var(--border);border-radius:6px;padding:8px 10px">
+                  <div id="import-token-icon" style="width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#fff;flex-shrink:0"></div>
+                  <div>
+                    <div id="import-token-name" style="font-size:10px;font-weight:600;color:var(--text)"></div>
+                    <div id="import-token-detail" style="font-size:8px;color:var(--muted2)"></div>
+                  </div>
+                </div>
+              </div>
+              <div style="display:flex;gap:6px">
+                <button onclick="closeImportTokenModal()" class="mcancel">Cancel</button>
+                <button id="import-token-submit" onclick="executeImportToken()" class="mconfirm" style="background:var(--green)">Import Token</button>
+              </div>
             </div>
           </div>
           <!-- ── PORTFOLIO HEALTH SCORE ── -->
@@ -10515,6 +10551,14 @@ function _setInterval(fn, ms) {
 function _clearAllIntervals() {
   _intervals.forEach(id => clearInterval(id));
   _intervals.length = 0;
+  // Clean up any orphaned UB operation overlay
+  try {
+    var bd = document.getElementById('ub-op-backdrop');
+    if (bd) { bd.classList.remove('ub-op-visible'); setTimeout(function(){ try { if (bd.parentNode) bd.parentNode.removeChild(bd); } catch(_) {} }, 200); }
+    var pn = document.getElementById('ub-op-panel');
+    if (pn && pn.style.display !== 'none') { pn.style.display = 'none'; try { var orig = document.getElementById('ub-screen-inner'); if (orig && pn.parentNode === document.body) orig.appendChild(pn); } catch(_) {} }
+    document.body.classList.remove('ub-op-locked');
+  } catch(_) {}
 }
 window.addEventListener('beforeunload', _clearAllIntervals);
 window.addEventListener('pagehide', _clearAllIntervals);
@@ -11115,6 +11159,34 @@ const CHAIN_REGISTRY = {
       messageTransmitter: '0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275' },
     isEvm: true,
   },
+  4663: {
+    id: 'Robinhood_Mainnet', name: 'Robinhood Chain', shortName: 'Robinhood',
+    color: '#00e054', symbol: 'R', testnet: false,
+    chainId: 4663, chainHex: '0x1237',
+    rpc: 'https://rpc.mainnet.chain.robinhood.com',
+    explorer: 'https://robinhoodchain.blockscout.com',
+    nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+    tokens: {
+      ETH: { address: '0x0000000000000000000000000000000000000000', decimals: 18 },
+      USDG: { address: null, decimals: 18 },
+      WBTC: { address: null, decimals: 8 },
+    },
+    cctp: null,
+    isEvm: true,
+  },
+  46630: {
+    id: 'Robinhood_Testnet', name: 'Robinhood Chain Testnet', shortName: 'Robinhood Test',
+    color: '#66ff99', symbol: 'R', testnet: true,
+    chainId: 46630, chainHex: '0xb626',
+    rpc: 'https://rpc.testnet.chain.robinhood.com',
+    explorer: 'https://explorer.testnet.chain.robinhood.com',
+    nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+    tokens: {
+      ETH: { address: '0x0000000000000000000000000000000000000000', decimals: 18 },
+    },
+    cctp: null,
+    isEvm: true,
+  },
   // Solana Devnet — non-EVM, handled separately via Phantom
   solana_devnet: {
     id: 'Solana_Devnet', name: 'Solana Devnet', shortName: 'Solana',
@@ -11142,6 +11214,7 @@ const CHAINS = [
   CHAIN_REGISTRY[421614],    // 3: Arbitrum Sepolia
   CHAIN_REGISTRY[11155420],  // 4: Optimism Sepolia
   CHAIN_REGISTRY[80002],     // 5: Polygon Amoy
+  CHAIN_REGISTRY[46630],     // 6: Robinhood Testnet
 ].filter(Boolean);
 // All chains including Solana
 const ALL_CHAINS = [...CHAINS, CHAIN_REGISTRY.solana_devnet];
@@ -11186,9 +11259,31 @@ const TOKEN_REGISTRY = {
   USDC:   { sym:'USDC',   name:'USD Coin',    decimals:6,  address:'0x3600000000000000000000000000000000000000', icon:'U', color:'#2775ca' },
   EURC:   { sym:'EURC',   name:'Euro Coin',    decimals:6,  address:'0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a', icon:'E', color:'#2562de' },
   cirBTC: { sym:'cirBTC', name:'Circle BTC',   decimals:8,  address:'0xf0C4a4CE82A5746AbAAd9425360Ab04fbBA432BF', icon:'₿', color:'#f7931a' },
-  ETH:    { sym:'ETH',    name:'Ether',         decimals:18, address:'0x0000000000000000000000000000000000000000', icon:'Ξ', color:'#627eea' },
+  ETH:    { sym:'ETH',    name:'Ether',         decimals:18, address:'0x0000000000000000000000000000000000000000', icon:'<svg viewBox="0 0 32 32" width="12" height="12"><path d="M16 4v10l-8 4 8-4 8 4-8-4V4zM16 20l-8-4 8 10 8-10-8 4z" fill="white"/></svg>', color:'#627eea' },
 };
 const TOKEN_LIST = Object.keys(TOKEN_REGISTRY).map(k => TOKEN_REGISTRY[k]);
+
+// ── Token deduplication — ensures no duplicates by (chainId, address) ──
+function normalizeTokenList(tokens, chainId) {
+  if (!tokens || !tokens.length) return [];
+  var seen = {};
+  var result = [];
+  for (var i = 0; i < tokens.length; i++) {
+    var t = tokens[i];
+    var addr = (t.address || '').toLowerCase();
+    var cid = t.chainId || chainId || 'default';
+    var key = cid + ':' + addr;
+    if (!seen[key]) {
+      seen[key] = true;
+      result.push(t);
+    }
+  }
+  return result;
+}
+
+function getUniqueTokenList(chainId) {
+  return normalizeTokenList(TOKEN_LIST, chainId || 5042002);
+}
 
 // ── Dynamic USD Rate Engine ──────────────────────────────────
 // Computes token USD rate from onchain pool reserves.
@@ -11883,6 +11978,64 @@ const TX = {
     const { tx } = await TX.estimateAndSend(c, method, args, TX.FALLBACK_GAS);
     return tx;
   }
+};
+
+// ═══════════════════════════════════════════════════════════
+//  CONTRACT REGISTRY + RESOLVER — chain-aware contract infra
+//  Every contract lookup respects activeChainId.
+// ═══════════════════════════════════════════════════════════
+const ContractResolver = {
+  MULTICALL3: '0xcA11bde05977b3631167028862bE2a173976CA11',
+
+  _registry: {
+    5042002: {
+      MEMO: '0x5294E9927c3306DcBaDb03fe70b92e01cCede505',
+      TREASURY_VAULT: '0xbfC9E8F79bd30b912081ae88F9ad0A515F08c2F1',
+      CROSSCHAIN_BATCH: '0x17cFB1AACbc64D0F0c247ED261b66C3d56e3EB16',
+      CCTP_MESSENGER: '0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA',
+      CCTP_TRANSMITTER: '0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275',
+    },
+    4663: {},
+    46630: {},
+  },
+
+  resolve(contractName, chainId) {
+    var cid = chainId || (typeof activeChainId !== 'undefined' ? activeChainId : 5042002);
+    var reg = this._registry[cid];
+    if (reg && reg[contractName]) return reg[contractName];
+    if (contractName === 'MULTICALL3') return this.MULTICALL3;
+    return null;
+  },
+
+  getReadProvider(chainId) {
+    var cid = chainId || (typeof activeChainId !== 'undefined' ? activeChainId : 5042002);
+    var chain = null;
+    try {
+      if (typeof getChainById === 'function') chain = getChainById(cid);
+      if (!chain && typeof CHAINS !== 'undefined') chain = CHAINS.find(function(c) { return c.chainId === cid; }) || null;
+    } catch (_) {}
+    if (chain && chain.rpc && typeof getCachedProvider === 'function') return getCachedProvider(chain.rpc);
+    if (chain && chain.rpc) return new ethers.JsonRpcProvider(chain.rpc);
+    if (typeof provider !== 'undefined' && provider) return provider;
+    return null;
+  },
+
+  createReadContract(addr, abi, chainId) {
+    var prov = this.getReadProvider(chainId);
+    if (!prov || !addr) return null;
+    try { return new ethers.Contract(addr, abi, prov); } catch (_) { return null; }
+  },
+
+  createWriteContract(addr, abi) {
+    if (typeof signer === 'undefined' || !signer || !addr) return null;
+    try { return new ethers.Contract(addr, abi, signer); } catch (_) { return null; }
+  },
+
+  async contractExists(addr, chainId) {
+    var prov = this.getReadProvider(chainId);
+    if (!prov || !addr) return false;
+    try { var code = await prov.getCode(addr); return code && code !== '0x'; } catch (_) { return false; }
+  },
 };
 
 // ═══════════════════════════════════════════════════════════
@@ -13059,6 +13212,10 @@ const showToast = toast; // Treasury functions alias — resolves showToast→to
 // ── Page navigation ────────────────────────────────────────
 function showPage(id) {
   try {
+    // Close any open UB operation panel when navigating away
+    if (id !== 'xchain' && typeof UBScreen !== 'undefined' && UBScreen.hideOperation) {
+      try { UBScreen.hideOperation(); } catch(_) {}
+    }
     document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
     const pageEl = document.getElementById('page-'+id);
     if (pageEl) pageEl.classList.add('active');
@@ -13086,6 +13243,7 @@ function showPage(id) {
       setTimeout(() => {
         saRefreshBalance && saRefreshBalance();
         saUpdateRoute && saUpdateRoute();
+        saUpdateNetwork && saUpdateNetwork();
         saRenderActivity && saRenderActivity();
       }, 50);
     }
@@ -13541,6 +13699,7 @@ function _refreshAllSurfaceBalances() {
   if (typeof saRefreshBalance === 'function') safe(() => saRefreshBalance());
   if (typeof loadSendAssetBalance === 'function') safe(() => loadSendAssetBalance());
   if (typeof refreshBridgeBalances === 'function') safe(() => refreshBridgeBalances());
+  if (typeof ubRefresh === 'function') safe(() => ubRefresh());
 }
 
 function setupProviderEvents(raw) {
@@ -13576,6 +13735,7 @@ function setupProviderEvents(raw) {
       updateNetworkBadge();
       await refreshBalance();
       _refreshAllSurfaceBalances();
+      try { if (typeof saUpdateNetwork === 'function') saUpdateNetwork(); } catch(_) {}
       const knownChain = getChainById(newChainId);
       toast('Network: ' + (knownChain ? knownChain.name : 'chain ' + newChainId), 'info');
       // NO automatic write-triggering on chain change.
@@ -17915,7 +18075,7 @@ async function renderTokenList(filterText) {
   const search = (filterText || document.getElementById('tok-search')?.value || '').toLowerCase();
   const otherIdx = SWP.tokSelectorTarget === 'in' ? SWP.tokenOutIdx : SWP.tokenInIdx;
 
-  let tokens = TOKEN_LIST;
+  let tokens = getUniqueTokenList(activeChainId).filter(function(t) { return t.sym !== 'ETH'; });
   if (search) {
     tokens = tokens.filter(t =>
       t.sym.toLowerCase().includes(search) || t.name.toLowerCase().includes(search)
@@ -18150,7 +18310,7 @@ function applySwapTokens() {
 function renderSwapTokenList() {
   const container = document.getElementById('swp-token-list');
   if (!container) return;
-  container.innerHTML = TOKEN_LIST.map(t => `
+  container.innerHTML = getUniqueTokenList(activeChainId).map(t => `
     <div style="display:flex;align-items:center;gap:7px;padding:6px 8px;background:rgba(0,0,0,.12);border:1px solid rgba(${t.color.slice(1).match(/.{2}/g).map(h=>parseInt(h,16)).join(',')},.15);border-radius:6px;font-size:10px">
       <div class="tkn-logo-ico" style="width:20px;height:20px;border-radius:50%;background:${t.color};display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:800;color:#fff;box-shadow:0 2px 6px ${t.color}55">${t.icon}</div>
       <div style="flex:1"><div style="font-weight:700">${t.sym}</div><div style="font-size:8px;color:var(--muted2);font-family:monospace;margin-top:1px">${shortAddr(t.address)}</div></div>
@@ -25560,7 +25720,7 @@ async function scheduleRun(id){
     case 'bridge':
     case 'crosschain':
       if(!walletAddress){ toast('Connect wallet to execute','warning'); openWalletModal(); return; }
-      const chainMap = {Arc_Testnet:0, Ethereum_Sepolia:1, Base_Sepolia:2, Arbitrum_Sepolia:3, Optimism_Sepolia:4};
+      const chainMap = {Arc_Testnet:0, Ethereum_Sepolia:1, Base_Sepolia:2, Arbitrum_Sepolia:3, Optimism_Sepolia:4, Polygon_Amoy:5, Robinhood_Mainnet:6, Robinhood_Testnet:7};
       bridgeFromIdx = chainMap[sch.fromNetwork] || 0;
       bridgeToIdx = chainMap[sch.toNetwork] || 2;
       showPage('bridge');
@@ -25673,10 +25833,13 @@ let saRecentTxs = []; // in-memory tx log for this session
 
 // ── Token config (from existing chain registry) ─────────
 const SA_TOKENS = {
-  USDC:  { symbol: 'USDC',  name: 'USD Coin',    decimals: 6,  icon: 'U', color: '#2775ca', address: () => activeUSDC() },
-  EURC:  { symbol: 'EURC',  name: 'Euro Coin',    decimals: 6,  icon: 'E', color: '#1a56a0', address: () => activeEURC() },
+  USDC:  { symbol: 'USDC',  name: 'USD Coin',    decimals: 6,  icon: 'U', color: '#2775ca', address: () => activeUSDC(),   isNative: false },
+  EURC:  { symbol: 'EURC',  name: 'Euro Coin',    decimals: 6,  icon: 'E', color: '#1a56a0', address: () => activeEURC(),   isNative: false },
   cirBTC:{ symbol: 'cirBTC',name: 'Circle BTC',   decimals: 8,  icon: '₿', color: '#f7931a',
-    address: () => getTokenAddress('cirBTC') || '0xf0C4a4CE82A5746AbAAd9425360Ab04fbBA432BF'
+    address: () => getTokenAddress('cirBTC') || '0xf0C4a4CE82A5746AbAAd9425360Ab04fbBA432BF', isNative: false
+  },
+  ETH:   { symbol: 'ETH',   name: 'Ether',         decimals: 18, icon: '<svg viewBox="0 0 32 32" width="12" height="12"><path d="M16 4v10l-8 4 8-4 8 4-8-4V4zM16 20l-8-4 8 10 8-10-8 4z" fill="white"/></svg>', color: '#627eea',
+    address: () => '0x0000000000000000000000000000000000000000', isNative: true
   }
 };
 
@@ -25692,17 +25855,60 @@ function saToRaw(amount) {
 }
 
 // ── Asset selection ───────────────────────────────────────
+function saUpdateNetwork() {
+  var chain = getActiveChain();
+  var netDisplay = document.getElementById('sa-network-display');
+  var netBadgeText = document.getElementById('sa-network-badge-text');
+  if (netDisplay) netDisplay.value = (chain ? chain.name : 'Arc Testnet') + ' (Chain ID: ' + (activeChainId || '5042002') + ')';
+  if (netBadgeText) netBadgeText.textContent = chain ? chain.shortName || chain.name : 'Arc Testnet';
+
+  // Show/hide asset buttons based on chain
+  var grid = document.getElementById('sa-asset-grid');
+  if (grid) {
+    var buttons = grid.querySelectorAll('.sa-asset-btn');
+    buttons.forEach(function(b) {
+      var asset = b.getAttribute('data-asset');
+      if (saIsRobinhood()) {
+        // On Robinhood: only show ETH (native)
+        b.style.display = (asset === 'ETH') ? '' : 'none';
+      } else {
+        // On Arc/other EVM: hide ETH, show USDC/EURC/cirBTC
+        b.style.display = (asset === 'ETH') ? 'none' : '';
+      }
+    });
+  }
+
+  // Auto-select appropriate asset
+  if (saIsRobinhood()) {
+    if (saCurrentAsset === 'USDC' || saCurrentAsset === 'EURC' || saCurrentAsset === 'cirBTC') {
+      saCurrentAsset = 'ETH';
+      var badge = document.getElementById('sa-amount-badge');
+      if (badge) badge.textContent = 'ETH';
+      var rtAsset = document.getElementById('sa-rt-asset');
+      if (rtAsset) rtAsset.textContent = 'ETH';
+    }
+  }
+  saRefreshBalance();
+  saUpdateRoute();
+}
+
+function saIsRobinhood() {
+  return activeChainId === 46630;
+}
+
+function saGetExplorer() {
+  var chain = getActiveChain();
+  return chain ? chain.explorer : 'https://testnet.arcscan.app';
+}
+
 function saSelectAsset(asset, btn) {
   saCurrentAsset = asset;
   document.querySelectorAll('.sa-asset-btn').forEach(b => b.classList.remove('selected'));
   if (btn) btn.classList.add('selected');
-  // Update amount badge
-  const badge = document.getElementById('sa-amount-badge');
+  var badge = document.getElementById('sa-amount-badge');
   if (badge) badge.textContent = asset;
-  // Update route preview
-  const rtAsset = document.getElementById('sa-rt-asset');
+  var rtAsset = document.getElementById('sa-rt-asset');
   if (rtAsset) rtAsset.textContent = asset;
-  // Refresh balance
   saRefreshBalance();
   saUpdateRoute();
   _log('[SendAssets] Asset selected:', asset, '| address:', saGetTokenAddr());
@@ -25710,222 +25916,287 @@ function saSelectAsset(asset, btn) {
 
 // ── Balance refresh ───────────────────────────────────────
 async function saRefreshBalance() {
-  const balEl = document.getElementById('sa-balance-val');
+  var balEl = document.getElementById('sa-balance-val');
   if (!balEl) return;
-  if (!walletAddress || !provider) { balEl.textContent = '—'; return; }
+  if (!walletAddress) { balEl.textContent = '—'; return; }
   try {
-    const tokenAddr = saGetTokenAddr();
-    // DEBUG LOGS for Sepolia (and all) balance audit - uses current chainId via activeUSDC etc.
-    // Flow identical to refreshBalance for USDC/EURC; cirBTC now resolves via getTokenAddress (current chainId) instead of pure hardcoded.
-    const chain = getActiveChain();
-    _log('[saRefreshBalance] detected chainId:', activeChainId, 'chain:', chain?.id || chain?.name);
-    _log('[saRefreshBalance] selected token address for', saCurrentAsset + ':', tokenAddr, 'wallet:', walletAddress, 'RPC used via provider');
-    const contract  = new ethers.Contract(tokenAddr, USDC_ABI, provider);
-    const bal       = await contract.balanceOf(walletAddress);
-    const dec       = saGetTokenDecimals();
-    const human     = (Number(bal) / Math.pow(10, dec)).toFixed(dec === 6 ? 2 : 6);
+    var isRH = saIsRobinhood();
+    var human;
+    if (saCurrentAsset === 'ETH' && isRH) {
+      // Native ETH balance — use chain RPC directly for reliable cross-chain reads
+      var chain = getActiveChain();
+      if (!chain || !chain.rpc) { balEl.textContent = '—'; return; }
+      var readProv = null;
+      try { if (typeof getCachedProvider === 'function') readProv = getCachedProvider(chain.rpc); } catch(_) {}
+      if (!readProv) readProv = new ethers.JsonRpcProvider(chain.rpc);
+      var rawBal = await readProv.getBalance(walletAddress);
+      human = parseFloat(ethers.formatEther(rawBal)).toFixed(6);
+    } else {
+      var tokenAddr = saGetTokenAddr();
+      if (!tokenAddr) { balEl.textContent = '—'; return; }
+      // Use chain RPC for reads, fall back to BrowserProvider
+      var chain = getActiveChain();
+      var readProv = null;
+      if (chain && chain.rpc) { try { if (typeof getCachedProvider === 'function') readProv = getCachedProvider(chain.rpc); } catch(_) {} }
+      if (!readProv) readProv = provider;
+      if (!readProv) { balEl.textContent = '—'; return; }
+      var contract = new ethers.Contract(tokenAddr, USDC_ABI, readProv);
+      var bal = await contract.balanceOf(walletAddress);
+      var dec = saGetTokenDecimals();
+      human = (Number(bal) / Math.pow(10, dec)).toFixed(dec === 6 ? 2 : 6);
+    }
     balEl.textContent = human + ' ' + saCurrentAsset;
-    _log('[saRefreshBalance] fetched balance:', bal.toString(), 'formatted:', human, saCurrentAsset);
   } catch(e) {
-    _warn('[SendAssets] Balance fetch error:', e.message);
     balEl.textContent = '—';
   }
 }
 
 // ── Set MAX ───────────────────────────────────────────────
 async function saSetMax() {
-  const balEl = document.getElementById('sa-balance-val');
-  const amtEl = document.getElementById('sa-amount');
+  var balEl = document.getElementById('sa-balance-val');
+  var amtEl = document.getElementById('sa-amount');
   if (!balEl || !amtEl) return;
-  const txt = balEl.textContent.replace(/[^0-9.]/g, '');
+  var txt = balEl.textContent.replace(/[^0-9.]/g, '');
   if (txt && parseFloat(txt) > 0) {
-    amtEl.value = txt;
+    var val = parseFloat(txt);
+    // For native ETH on Robinhood: reserve 0.001 ETH for gas
+    if (saCurrentAsset === 'ETH' && saIsRobinhood()) {
+      val = Math.max(0, val - 0.001);
+    }
+    amtEl.value = val.toFixed(saGetTokenDecimals() > 8 ? 6 : 4);
     saUpdateRoute();
   }
 }
 
 // ── Route preview update ──────────────────────────────────
 function saUpdateRoute() {
-  const recipient = document.getElementById('sa-recipient')?.value.trim() || '';
-  const amount    = parseFloat(document.getElementById('sa-amount')?.value) || 0;
-  const tokenAddr = saGetTokenAddr();
+  var recipient = document.getElementById('sa-recipient')?.value.trim() || '';
+  var amount    = parseFloat(document.getElementById('sa-amount')?.value) || 0;
+  var tokenAddr = saGetTokenAddr();
+  var isRH = saIsRobinhood();
+  var explorer = saGetExplorer();
+  var chain = getActiveChain();
+  var chainName = chain ? chain.name : 'Arc Testnet';
 
-  // Route fields
-  const set = (id,v) => { const el=document.getElementById(id); if(el) el.innerHTML=v; };
+  var set = function(id,v) { var el=document.getElementById(id); if(el) el.innerHTML=v; };
   set('sa-rt-asset',    saCurrentAsset);
-  set('sa-rt-amount',   amount > 0 ? amount.toFixed(saGetTokenDecimals() === 6 ? 2 : 8) + ' ' + saCurrentAsset : '—');
-  set('sa-rt-dest',     recipient ? `<a href="https://testnet.arcscan.app/address/${recipient}" target="_blank" style="color:var(--blue);text-decoration:none">${shortAddr(recipient)}</a>` : '—');
-  set('sa-rt-contract', `<a href="https://testnet.arcscan.app/address/${tokenAddr}" target="_blank" style="color:var(--blue);text-decoration:none">${shortAddr(tokenAddr)}</a> (${saGetTokenDecimals()} dec)`);
-  set('sa-rt-network',  'Arc Testnet (5042002)');
-  set('sa-rt-type',     'Multicall3 Batch Transfer');
-  const saFeeBps  = (typeof ElligenteFees !== 'undefined' && ElligenteFees.SEND_ASSETS_FEE_BPS) || 20;
-  const feeAmt    = amount > 0 ? (amount * saFeeBps / 10000) : 0;
-  const totalAmt  = amount + feeAmt;
-  set('sa-rt-fee', amount > 0
-    ? `<span style="color:var(--yellow)">${feeAmt.toFixed(saGetTokenDecimals() === 6 ? 4 : 8)} ${saCurrentAsset}</span> <span style="color:var(--muted2)">(${(saFeeBps/100).toFixed(1)}% Elligentt Fee)</span><br><span style="font-weight:700;color:var(--text)">Total: ${totalAmt.toFixed(saGetTokenDecimals() === 6 ? 2 : 8)} ${saCurrentAsset}</span>`
-    : '—');
+  set('sa-rt-amount',   amount > 0 ? amount.toFixed(saGetTokenDecimals() > 8 ? 6 : 4) + ' ' + saCurrentAsset : '—');
+  set('sa-rt-dest',     recipient ? '<a href="' + explorer + '/address/' + recipient + '" target="_blank" style="color:var(--blue);text-decoration:none">' + shortAddr(recipient) + '</a>' : '—');
+  set('sa-rt-contract', saCurrentAsset === 'ETH' && isRH ? 'Native ETH (no contract)' : '<a href="' + explorer + '/address/' + tokenAddr + '" target="_blank" style="color:var(--blue);text-decoration:none">' + shortAddr(tokenAddr) + '</a> (' + saGetTokenDecimals() + ' dec)');
+  set('sa-rt-network',  chainName + ' (' + (activeChainId || '5042002') + ')');
 
-  // Validation status
-  const statusEl = document.getElementById('sa-rt-status');
-  const btn       = document.getElementById('sa-send-btn');
-  let status = '', isReady = false;
+  if (isRH) {
+    set('sa-rt-type', saCurrentAsset === 'ETH' ? 'Native ETH Transfer' : 'ERC-20 Transfer');
+    set('sa-rt-fee', 'Estimated gas fee (paid in ETH)');
+  } else {
+    set('sa-rt-type', 'Multicall3 Batch Transfer');
+    var saFeeBps = (typeof ElligenteFees !== 'undefined' && ElligenteFees.SEND_ASSETS_FEE_BPS) || 20;
+    var feeAmt   = amount > 0 ? (amount * saFeeBps / 10000) : 0;
+    var totalAmt = amount + feeAmt;
+    set('sa-rt-fee', amount > 0
+      ? '<span style="color:var(--yellow)">' + feeAmt.toFixed(saGetTokenDecimals() === 6 ? 4 : 8) + ' ' + saCurrentAsset + '</span> <span style="color:var(--muted2)">(' + (saFeeBps/100).toFixed(1) + '% Elligentt Fee)</span><br><span style="font-weight:700;color:var(--text)">Total: ' + totalAmt.toFixed(saGetTokenDecimals() === 6 ? 2 : 8) + ' ' + saCurrentAsset + '</span>'
+      : '—');
+  }
+
+  var statusEl = document.getElementById('sa-rt-status');
+  var btn      = document.getElementById('sa-send-btn');
+  var status = '', isReady = false;
 
   if (!walletAddress) {
-    status = '⚠ Connect wallet to send';
+    status = 'Connect wallet to send';
+  } else if (!signer && !isRH) {
+    status = 'Wallet not ready';
   } else if (!recipient) {
     status = 'Enter recipient address';
   } else if (!isAddr(recipient)) {
-    status = '✗ Invalid address format';
+    status = 'Invalid address format';
   } else if (recipient === '0x0000000000000000000000000000000000000000') {
-    status = '✗ Zero address not allowed';
+    status = 'Zero address not allowed';
   } else if (amount <= 0) {
     status = 'Enter amount';
   } else {
-    status = '✓ Ready to send';
+    status = 'Ready to send';
     isReady = true;
   }
 
   if (statusEl) {
     statusEl.textContent = status;
-    statusEl.style.color = isReady ? 'var(--green)' : (status.startsWith('✗') ? 'var(--red)' : 'var(--muted2)');
+    statusEl.style.color = isReady ? 'var(--green)' : (status.startsWith('Invalid') || status.startsWith('Zero') ? 'var(--red)' : 'var(--muted2)');
   }
   if (btn) btn.disabled = !isReady;
 }
 
 // ── Execute send ──────────────────────────────────────────
 async function saExecuteSend() {
-  const recipient = document.getElementById('sa-recipient')?.value.trim() || '';
-  const amount    = parseFloat(document.getElementById('sa-amount')?.value) || 0;
-  const memo      = document.getElementById('sa-memo')?.value.trim() || '';
-
-  _log('[SendAssets] Execute send start');
-  _log('[SendAssets] Asset:', saCurrentAsset);
-  _log('[SendAssets] Token address:', saGetTokenAddr());
-  _log('[SendAssets] Recipient:', recipient);
-  _log('[SendAssets] Amount:', amount);
-  _log('[SendAssets] Wallet:', walletAddress);
-  _log('[SendAssets] Chain:', activeChainId);
+  var recipient = document.getElementById('sa-recipient')?.value.trim() || '';
+  var amount    = parseFloat(document.getElementById('sa-amount')?.value) || 0;
+  var memo      = document.getElementById('sa-memo')?.value.trim() || '';
+  var isRH = saIsRobinhood();
 
   // Validation
-  if (!walletAddress || !signer) {
-    toast('Connect your wallet first', 'error');
-    _warn('[SendAssets] No wallet connected');
-    return;
-  }
-  if (!isAddr(recipient)) {
-    toast('Invalid recipient address', 'error');
-    _warn('[SendAssets] Invalid recipient:', recipient);
-    return;
-  }
-  if (recipient === '0x0000000000000000000000000000000000000000') {
-    toast('Zero address not allowed', 'error'); return;
-  }
-  if (amount <= 0) {
-    toast('Amount must be greater than 0', 'error'); return;
-  }
-  if (recipient.toLowerCase() === walletAddress.toLowerCase()) {
-    toast('Recipient is your own address — are you sure?', 'warning');
-  }
+  if (!walletAddress || !signer) { toast('Connect your wallet first', 'error'); return; }
+  if (!isAddr(recipient)) { toast('Invalid recipient address', 'error'); return; }
+  if (recipient === '0x0000000000000000000000000000000000000000') { toast('Zero address not allowed', 'error'); return; }
+  if (amount <= 0) { toast('Amount must be greater than 0', 'error'); return; }
+  if (recipient.toLowerCase() === walletAddress.toLowerCase()) { toast('Recipient is your own address — are you sure?', 'warning'); }
 
-  // Ensure Arc Testnet
-  if (activeChainId !== 5042002) {
+  // For non-Robinhood chains: ensure on Arc Testnet
+  if (!isRH && activeChainId !== 5042002) {
     toast('Switching to Arc Testnet...', 'info');
-    _log('[SendAssets] Switching chain from', activeChainId, 'to 5042002');
-    try {
-      await window.ethereum?.request({ method:'wallet_switchEthereumChain', params:[{chainId:'0x4cef52'}] });
-    } catch(e) {
-      toast('Please switch to Arc Testnet manually', 'error');
-      _err('[SendAssets] Chain switch failed:', e.message);
-      return;
-    }
+    try { await window.ethereum?.request({ method:'wallet_switchEthereumChain', params:[{chainId:'0x4cef52'}] }); }
+    catch(e) { toast('Please switch to Arc Testnet manually', 'error'); return; }
   }
 
-  // Balance check (includes 0.2% protocol fee)
-  const tokenAddr = saGetTokenAddr();
-  const rawAmt    = saToRaw(amount);
-  const saFeeBps  = (typeof ElligenteFees !== 'undefined' && ElligenteFees.SEND_ASSETS_FEE_BPS) || 20;
-  const feeRaw    = (rawAmt * BigInt(saFeeBps)) / 10000n;
-  const totalNeed = rawAmt + feeRaw;
-  try {
-    const tc  = new ethers.Contract(tokenAddr, USDC_ABI, provider);
-    const bal = await tc.balanceOf(walletAddress);
-    if (bal < totalNeed) {
-      const have = (Number(bal) / Math.pow(10, saGetTokenDecimals())).toFixed(2);
-      const need = (Number(totalNeed) / Math.pow(10, saGetTokenDecimals())).toFixed(2);
-      toast(`Insufficient ${saCurrentAsset}. Have: ${have}, Need: ${need} (incl. fee)`, 'error');
-      return;
-    }
-  } catch(e) {
-    _warn('[SendAssets] Balance check error:', e.message);
+  // For Robinhood: ensure correct chain
+  if (isRH && activeChainId !== 46630) {
+    toast('Please switch to a Robinhood Chain first (Mainnet 4663 or Testnet 46630)', 'error'); return;
   }
+
+  // Balance check
+  var balOk = false;
+  try {
+    if (saCurrentAsset === 'ETH' && isRH) {
+      var prov = (typeof ContractResolver !== 'undefined' ? ContractResolver.getReadProvider(activeChainId) : null) || provider;
+      if (!prov) { prov = new ethers.JsonRpcProvider((getActiveChain() || {}).rpc || 'https://rpc.mainnet.chain.robinhood.com'); }
+      var rawBal = await prov.getBalance(walletAddress);
+      var humanBal = parseFloat(ethers.formatEther(rawBal));
+      if (humanBal >= amount) balOk = true;
+      else toast('Insufficient ETH. Have: ' + humanBal.toFixed(6) + ', Need: ' + amount.toFixed(6), 'error');
+    } else {
+      var tokenAddr = saGetTokenAddr();
+      var rawAmt = saToRaw(amount);
+      var saFeeBps = (typeof ElligenteFees !== 'undefined' && ElligenteFees.SEND_ASSETS_FEE_BPS) || 20;
+      var feeRaw = isRH ? 0n : (rawAmt * BigInt(saFeeBps)) / 10000n;
+      var totalNeed = rawAmt + feeRaw;
+      var tc = new ethers.Contract(tokenAddr, USDC_ABI, provider);
+      var bal = await tc.balanceOf(walletAddress);
+      if (bal >= totalNeed) balOk = true;
+      else {
+        var have = (Number(bal) / Math.pow(10, saGetTokenDecimals())).toFixed(4);
+        var need = (Number(totalNeed) / Math.pow(10, saGetTokenDecimals())).toFixed(4);
+        toast('Insufficient ' + saCurrentAsset + '. Have: ' + have + ', Need: ' + need, 'error');
+      }
+    }
+  } catch(e) { _warn('[SendAssets] Balance check error:', e.message); balOk = true; }
+  if (!balOk) return;
 
   // Update button
-  const btn = document.getElementById('sa-send-btn');
-  const btnContent = document.getElementById('sa-send-btn-content');
+  var btn = document.getElementById('sa-send-btn');
+  var btnContent = document.getElementById('sa-send-btn-content');
   if (btn) btn.disabled = true;
   if (btnContent) btnContent.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i> Sending...';
 
+  // ── Robinhood path: native ETH or ERC20 transfer ──
+  if (isRH) {
+    try {
+      var explorer = saGetExplorer();
+      if (saCurrentAsset === 'ETH') {
+        // Native ETH transfer
+        if (btnContent) btnContent.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i> Broadcasting...';
+        toast('Sending ' + amount + ' ETH to ' + shortAddr(recipient) + '...', 'info');
+        var tx = await signer.sendTransaction({ to: recipient, value: ethers.parseEther(amount.toFixed(6)) });
+        if (btnContent) btnContent.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i> Confirming...';
+        var receipt = await tx.wait(1, 30000);
+        if (!receipt || receipt.status !== 1) throw new Error('Transaction not confirmed');
+      } else {
+        // ERC20 transfer on Robinhood
+        var rhtokenAddr = saGetTokenAddr();
+        if (btnContent) btnContent.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i> Broadcasting...';
+        toast('Sending ' + amount + ' ' + saCurrentAsset + ' to ' + shortAddr(recipient) + '...', 'info');
+        var rhContract = new ethers.Contract(rhtokenAddr, USDC_ABI, signer);
+        var rhRaw = saToRaw(amount);
+        tx = await rhContract.transfer(recipient, rhRaw);
+        if (btnContent) btnContent.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i> Confirming...';
+        receipt = await tx.wait(1, 30000);
+        if (!receipt || receipt.status !== 1) throw new Error('Transaction not confirmed');
+      }
+
+      if (btnContent) btnContent.innerHTML = '<i class="ti ti-check-circle"></i> Sent!';
+      toast(amount + ' ' + saCurrentAsset + ' sent to ' + shortAddr(recipient) + ' | Tx: ' + shortAddr(tx.hash), 'success');
+
+      // Log to activity
+      saLogTx({ hash: tx.hash, amount: amount, asset: saCurrentAsset, recipient: recipient, memo: memo, block: receipt.blockNumber, explorer: explorer });
+
+      // Refresh
+      setTimeout(function() {
+        if (btnContent) btnContent.innerHTML = '<i class="ti ti-send"></i> Send Asset';
+        if (btn) btn.disabled = false;
+        document.getElementById('sa-amount').value = '';
+        document.getElementById('sa-recipient').value = '';
+        document.getElementById('sa-memo').value = '';
+        saUpdateRoute();
+        saRefreshBalance();
+        if (typeof refreshBalance === 'function') refreshBalance();
+        if (typeof ubRefresh === 'function') ubRefresh();
+        try { if (typeof RobinhoodTokenRegistry !== 'undefined') RobinhoodTokenRegistry.onTransactionComplete({ chainId: activeChainId, from: walletAddress, tokenAddr: saCurrentAsset === 'ETH' ? '0x0000000000000000000000000000000000000000' : saGetTokenAddr() }); } catch(_) {}
+      }, 2000);
+
+    } catch(e) {
+      _err('[SendAssets] Robinhood send error:', e);
+      if (btnContent) btnContent.innerHTML = '<i class="ti ti-send"></i> Send Asset';
+      if (btn) btn.disabled = false;
+      if (e.code === 4001 || (e.message||'').includes('rejected')) toast('Transaction rejected by user', 'error');
+      else toast('Send failed: ' + (e.shortMessage || e.message || 'unknown error'), 'error');
+    }
+    return;
+  }
+
+  // ── Original Arc Testnet path (Multicall3 + Memo) ──
+  var tokenAddr = saGetTokenAddr();
+  var rawAmt    = saToRaw(amount);
+  var saFeeBps  = (typeof ElligenteFees !== 'undefined' && ElligenteFees.SEND_ASSETS_FEE_BPS) || 20;
+  var feeRaw    = (rawAmt * BigInt(saFeeBps)) / 10000n;
+  var totalNeed = rawAmt + feeRaw;
+
   try {
-    const contract = new ethers.Contract(tokenAddr, USDC_ABI, signer);
-    const MC3_ADDR = (typeof ElligenteContracts !== 'undefined' && ElligenteContracts.MULTICALL3_ADDRESS) || '0xcA11bde05977b3631167028862bE2a173976CA11';
-    const mc3Abi   = ['function aggregate3(tuple(address target, bool allowFailure, bytes callData)[] calls) payable returns (tuple(bool success, bytes returnData)[])'];
-    const erc20If  = new ethers.Interface(USDC_ABI);
+    var contract = new ethers.Contract(tokenAddr, USDC_ABI, signer);
+    var MC3_ADDR = (typeof ElligenteContracts !== 'undefined' && ElligenteContracts.MULTICALL3_ADDRESS) || '0xcA11bde05977b3631167028862bE2a173976CA11';
+    var mc3Abi   = ['function aggregate3(tuple(address target, bool allowFailure, bytes callData)[] calls) payable returns (tuple(bool success, bytes returnData)[])'];
+    var erc20If  = new ethers.Interface(USDC_ABI);
 
-    _log('[SendAssets] Multicall3 batch:', amount, saCurrentAsset, '→', recipient, '+ fee →', TREASURY_VAULT_ADDRESS);
-
-    const allowance = await contract.allowance(walletAddress, MC3_ADDR);
+    var allowance = await contract.allowance(walletAddress, MC3_ADDR);
     if (allowance < totalNeed) {
       if (btnContent) btnContent.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i> Approving...';
-      toast(`Approving ${saCurrentAsset} for batch transfer...`, 'info');
-      const appTx = await contract.approve(MC3_ADDR, ethers.MaxUint256);
+      toast('Approving ' + saCurrentAsset + ' for batch transfer...', 'info');
+      var appTx = await contract.approve(MC3_ADDR, ethers.MaxUint256);
       await appTx.wait();
-      _log('[SendAssets] Multicall3 approved');
     }
 
     if (btnContent) btnContent.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i> Sending...';
-    toast(`Sending ${amount} ${saCurrentAsset} → ${shortAddr(recipient)} (+ ${(Number(feeRaw) / Math.pow(10, saGetTokenDecimals())).toFixed(4)} fee)...`, 'info');
+    toast('Sending ' + amount + ' ' + saCurrentAsset + ' to ' + shortAddr(recipient) + ' (+ ' + (Number(feeRaw) / Math.pow(10, saGetTokenDecimals())).toFixed(4) + ' fee)...', 'info');
 
-    const callData1 = erc20If.encodeFunctionData('transferFrom', [walletAddress, recipient, rawAmt]);
-    const callData2 = erc20If.encodeFunctionData('transferFrom', [walletAddress, TREASURY_VAULT_ADDRESS, feeRaw]);
-
-    const mc3 = new ethers.Contract(MC3_ADDR, mc3Abi, signer);
-    const aggCalls = [
+    var callData1 = erc20If.encodeFunctionData('transferFrom', [walletAddress, recipient, rawAmt]);
+    var callData2 = erc20If.encodeFunctionData('transferFrom', [walletAddress, TREASURY_VAULT_ADDRESS, feeRaw]);
+    var mc3 = new ethers.Contract(MC3_ADDR, mc3Abi, signer);
+    var aggCalls = [
       { target: tokenAddr, allowFailure: false, callData: callData1 },
       { target: tokenAddr, allowFailure: false, callData: callData2 }
     ];
-    let tx;
+    var tx;
     if (activeChainId === 5042002) {
-      const memoText = memo || ('ELLIGENTE|SEND|' + recipient.slice(0, 8) + '|' + saCurrentAsset.toUpperCase() + '|' + amount);
-      _log('[SendAssets] Wrapping via Arc Memo contract:', memoText);
-      const mc3Iface = new ethers.Interface(mc3Abi);
-      const aggData = mc3Iface.encodeFunctionData('aggregate3', [aggCalls]);
-      const memoC = new ethers.Contract(MEMO_CONTRACT_ADDRESS, MEMO_ABI, signer);
+      var memoText = memo || ('ELLIGENTE|SEND|' + recipient.slice(0, 8) + '|' + saCurrentAsset.toUpperCase() + '|' + amount);
+      var mc3Iface = new ethers.Interface(mc3Abi);
+      var aggData = mc3Iface.encodeFunctionData('aggregate3', [aggCalls]);
+      var memoC = new ethers.Contract(MEMO_CONTRACT_ADDRESS, MEMO_ABI, signer);
       tx = await memoC.memo(MC3_ADDR, aggData, ethers.id(memoText.slice(0, 64)), ethers.toUtf8Bytes(memoText));
     } else {
       tx = await mc3.aggregate3(aggCalls);
     }
 
-    _log('[SendAssets] Batch tx submitted:', tx.hash);
     if (btnContent) btnContent.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i> Confirming...';
+    var receipt = await tx.wait(1, 25000);
+    if (!receipt || receipt.status !== 1) throw new Error('Batch transaction not confirmed on-chain');
 
-    const receipt = await tx.wait(1, 25000);
-    if (!receipt || receipt.status !== 1) {
-      throw new Error('Batch transaction not confirmed on-chain');
-    }
-    _log('[SendAssets] Batch confirmed in block', receipt.blockNumber, '| hash:', tx.hash);
-
-    // Wait for explorer indexer to catch up (ArcScan needs ~3s after confirmation)
     await new Promise(function(r) { setTimeout(r, 3000); });
 
     if (btnContent) btnContent.innerHTML = '<i class="ti ti-check-circle"></i> Sent!';
-    const feeUsd = Number(feeRaw) / Math.pow(10, saGetTokenDecimals());
-    toast(`${amount} ${saCurrentAsset} sent → ${shortAddr(recipient)} + ${feeUsd.toFixed(4)} fee | Tx: ${shortAddr(tx.hash)}`, 'success');
+    var feeUsd = Number(feeRaw) / Math.pow(10, saGetTokenDecimals());
+    toast(amount + ' ' + saCurrentAsset + ' sent to ' + shortAddr(recipient) + ' + ' + feeUsd.toFixed(4) + ' fee | Tx: ' + shortAddr(tx.hash), 'success');
 
-    if (typeof logFeeEvent === 'function') logFeeEvent({ module:'Send Assets', amount, feeAmount:feeUsd, asset:saCurrentAsset, txHash:tx.hash, feeTxHash:tx.hash });
+    if (typeof logFeeEvent === 'function') logFeeEvent({ module:'Send Assets', amount: amount, feeAmount: feeUsd, asset: saCurrentAsset, txHash: tx.hash, feeTxHash: tx.hash });
+    saLogTx({ hash: tx.hash, amount: amount, asset: saCurrentAsset, recipient: recipient, memo: memo, block: receipt.blockNumber });
 
-    saLogTx({ hash: tx.hash, amount, asset: saCurrentAsset, recipient, memo, block: receipt.blockNumber });
-
-    setTimeout(() => {
+    setTimeout(function() {
       if (btnContent) btnContent.innerHTML = '<i class="ti ti-send"></i> Send Asset';
       if (btn) btn.disabled = false;
       document.getElementById('sa-amount').value = '';
@@ -25940,11 +26211,8 @@ async function saExecuteSend() {
     _err('[SendAssets] Send error:', e);
     if (btnContent) btnContent.innerHTML = '<i class="ti ti-send"></i> Send Asset';
     if (btn) btn.disabled = false;
-    if (e.code === 4001 || (e.message||'').includes('rejected')) {
-      toast('Transaction rejected by user', 'error');
-    } else {
-      toast('Send failed: ' + (e.shortMessage || e.message || 'unknown error'), 'error');
-    }
+    if (e.code === 4001 || (e.message||'').includes('rejected')) toast('Transaction rejected by user', 'error');
+    else toast('Send failed: ' + (e.shortMessage || e.message || 'unknown error'), 'error');
   }
 }
 
@@ -25974,18 +26242,19 @@ function saRenderActivity() {
   existing.forEach(el => el.remove());
 
   allTxs.forEach(tx => {
-    const item = document.createElement('div');
+    var item = document.createElement('div');
+    var explorer = tx.explorer || 'https://testnet.arcscan.app';
     item.className = 'sa-activity-item';
-    item.innerHTML = `
-      <div class="sa-activity-icon out"><i class="ti ti-send"></i></div>
-      <div class="sa-activity-detail">
-        <div class="sa-activity-label">${tx.asset} → ${shortAddr(tx.recipient)}</div>
-        <div class="sa-activity-sub">${tx.memo || 'Direct transfer'} · Block ${tx.block||'—'}</div>
-      </div>
-      <div>
-        <div class="sa-activity-amount">-${tx.amount} ${tx.asset}</div>
-        <div class="sa-tx-hash" onclick="window.open('https://testnet.arcscan.app/tx/${tx.hash}','_blank')" title="${tx.hash}">${shortAddr(tx.hash)}</div>
-      </div>`;
+    item.innerHTML =
+      '<div class="sa-activity-icon out"><i class="ti ti-send"></i></div>' +
+      '<div class="sa-activity-detail">' +
+        '<div class="sa-activity-label">' + tx.asset + ' \u2192 ' + shortAddr(tx.recipient) + '</div>' +
+        '<div class="sa-activity-sub">' + (tx.memo || 'Direct transfer') + ' \u00b7 Block ' + (tx.block || '\u2014') + '</div>' +
+      '</div>' +
+      '<div>' +
+        '<div class="sa-activity-amount">-' + tx.amount + ' ' + tx.asset + '</div>' +
+        '<div class="sa-tx-hash" onclick="window.open(\'' + explorer + '/tx/' + tx.hash + '\',\'_blank\')" title="' + tx.hash + '">' + shortAddr(tx.hash) + '</div>' +
+      '</div>';
     logEl.appendChild(item);
   });
 }
@@ -31985,6 +32254,17 @@ function toggleMobileRoute() {
       const sidebar = document.querySelector('.sidebar');
       if (sidebar) sidebar.classList.remove('mobile-open');
     }
+    // Clean up UB operation panel if orphaned during resize
+    try {
+      if (typeof UBScreen !== 'undefined' && UBScreen.hideOperation) {
+        var panel = document.getElementById('ub-op-panel');
+        var backdrop = document.getElementById('ub-op-backdrop');
+        // If backdrop exists but panel is hidden or off-body, force cleanup
+        if (backdrop && (!panel || panel.style.display === 'none' || panel.offsetParent === null)) {
+          UBScreen.hideOperation();
+        }
+      }
+    } catch(_) {}
   });
 })();
 
@@ -32104,7 +32384,7 @@ const UB_TOKEN_META = {
   USDC:   { name:'USD Coin',    icon:'U', color:'#2775ca', rate:1.00 },
   EURC:   { name:'Euro Coin',    icon:'E', color:'#2562de', rate:1.08 },
   cirBTC: { name:'Circle BTC',   icon:'₿', color:'#f7931a', rate:0 },
-  ETH:    { name:'Ether',        icon:'Ξ', color:'#627eea', rate:0 }
+  ETH:    { name:'Ether',        icon:'<svg viewBox="0 0 32 32" width="12" height="12"><path d="M16 4v10l-8 4 8-4 8 4-8-4V4zM16 20l-8-4 8 10 8-10-8 4z" fill="white"/></svg>', color:'#627eea', rate:0 }
 };
 const UB_FREQ_LABELS = { once:'One-time', daily:'Daily', weekly:'Weekly', biweekly:'Bi-weekly', monthly:'Monthly' };
 
@@ -32350,6 +32630,12 @@ function ubRefresh() {
   var emptyEl = document.getElementById('ub-empty');
   if (emptyEl) emptyEl.style.display = 'none';
   ubFetchAllBalances()
+    .then(function() {
+      // Inject Robinhood Chain discovered ERC-20 tokens
+      if (typeof RobinhoodTokenRegistry !== 'undefined') {
+        return RobinhoodTokenRegistry.injectIntoUnifiedBalance().catch(function(){});
+      }
+    })
     .then(function() { ubRenderAll(); ubShowState('content'); UnifiedBalanceEngine.notifyRefreshComplete(UB.state.assets, UB.state.totalUSD); UnifiedBalanceEngine.recordRefresh(performance.now() - t0); try { UBScreen.refreshDashboard(); } catch(_) {} })
     .catch(function(e) {
       var errEl = document.getElementById('ub-error-msg');
@@ -32384,21 +32670,52 @@ function ubFetchAllBalances() {
     UB.loading = false; return Promise.resolve();
   }
 
-  var TOKENS = ['USDC', 'EURC', 'cirBTC'];
+  var TOKENS = ['USDC', 'EURC', 'cirBTC', 'ETH'];
   var promises = [];
 
   for (var ci = 0; ci < chains.length; ci++) {
     var chain = typeof CHAINS === 'object' && CHAINS[ci] ? CHAINS[ci] : chains[ci];
-    if (!chain || !chain.rpc) continue;
+    if (!chain || !chain.rpc || chain.isEvm === false) continue;
+    // ERC20 token balances
     for (var ti = 0; ti < TOKENS.length; ti++) {
       var sym = TOKENS[ti];
       var tokenAddr = chain.tokens && chain.tokens[sym] ? chain.tokens[sym].address : null;
       if (!tokenAddr || tokenAddr === '0x0000000000000000000000000000000000000000') continue;
       promises.push(ubFetchOne(chain, sym, tokenAddr));
     }
+    // Native ETH balance for non-Arc EVM chains
+    if (chain.chainId !== 5042002 && chain.nativeCurrency && chain.nativeCurrency.symbol === 'ETH') {
+      promises.push(ubFetchNativeBalance(chain));
+    }
   }
 
   return Promise.all(promises).then(function() { UB.loading = false; });
+}
+
+function ubFetchNativeBalance(chain) {
+  return new Promise(function(resolve) {
+    try {
+      if (typeof ethers === 'undefined') { resolve(); return; }
+      var prov = null;
+      try { if (typeof getCachedProvider === 'function') prov = getCachedProvider(chain.rpc); } catch(e) {}
+      if (!prov) { try { prov = new ethers.JsonRpcProvider(chain.rpc); } catch(e2) {} }
+      if (!prov) { resolve(); return; }
+      prov.getBalance(walletAddress).then(function(bal) {
+        var amount = Number(bal) / 1e18;
+        if (amount <= 0) { resolve(); return; }
+        var meta = UB_TOKEN_META['ETH'] || { name:'Ether', icon:'<svg viewBox="0 0 32 32" width="12" height="12"><path d="M16 4v10l-8 4 8-4 8 4-8-4V4zM16 20l-8-4 8 10 8-10-8 4z" fill="white"/></svg>', color:'#627eea', rate:0 };
+        var usd = amount * (meta.rate || 0);
+        var asset = {
+          token: 'ETH', tokenName: meta.name, icon: meta.icon, color: meta.color,
+          chainId: chain.id || chain.name, chainName: chain.shortName || chain.name,
+          balance: amount, usd: usd, address: '0x0000000000000000000000000000000000000000'
+        };
+        UB.state.assets.push(asset);
+        UB.state.totalUSD += usd;
+        resolve();
+      }).catch(function() { resolve(); });
+    } catch(e) { resolve(); }
+  });
 }
 
 function ubFetchOne(chain, sym, tokenAddr) {
@@ -32490,7 +32807,7 @@ function ubRenderHero() {
 function ubRenderAssets() {
   var tbody = document.getElementById('ub-asset-tbody');
   if (!tbody) return;
-  var assets = UB.state.assets;
+  var assets = normalizeTokenList(UB.state.assets, activeChainId);
   var countEl = document.getElementById('ub-asset-count');
   if (countEl) countEl.textContent = assets.length + ' holdings';
 
@@ -32507,22 +32824,28 @@ function ubRenderAssets() {
     var a = assets[i];
     var tokenInfo = UB_TOKEN_META[a.token] || { name:a.token, icon:'?', color:'#888' };
     var perc = UB.state.totalUSD > 0 ? ((a.usd / UB.state.totalUSD) * 100).toFixed(1) : '0.0';
+    var isArcAsset = a.chainId === 'Arc_Testnet';
+    var isRHAsset = a.chainId === 'Robinhood_Mainnet' || a.chainId === 'Robinhood_Testnet';
+    // Build action buttons: Send always available, Swap/Bridge only for Arc assets
+    var actions =
+      '<button class="btn" style="padding:2px 7px;font-size:8px" onclick="UBAction.openSend(\'' + a.token + '\',' + a.balance + ')" title="Send"><i class="ti ti-send"></i></button>';
+    if (isArcAsset) {
+      actions +=
+        '<button class="btn" style="padding:2px 7px;font-size:8px" onclick="UBAction.openSwap(\'' + a.token + '\',\'' + (a.token === 'USDC' ? 'EURC' : 'USDC') + '\',' + a.balance + ')" title="Swap"><i class="ti ti-arrows-exchange"></i></button>' +
+        '<button class="btn" style="padding:2px 7px;font-size:8px" onclick="UBAction.openBridge(\'Ethereum_Sepolia\',\'Arc_Testnet\',' + a.balance + ')" title="Bridge"><i class="ti ti-topology-star-3"></i></button>';
+    }
     rows += '<tr>' +
       '<td><div style="display:flex;align-items:center;gap:6px"><div style="width:22px;height:22px;border-radius:50%;background:' + tokenInfo.color + ';display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:#fff;flex-shrink:0">' + tokenInfo.icon + '</div><div><div style="font-weight:600;font-size:10px">' + a.token + '</div><div style="font-size:8px;color:var(--muted2)">' + a.tokenName + '</div></div></div></td>' +
       '<td><div style="display:flex;align-items:center;gap:4px"><div style="width:7px;height:7px;border-radius:50%;background:' + (getChainColor(a.chainId)) + '"></div><span style="font-size:9px">' + a.chainName + '</span></div></td>' +
       '<td style="font-family:\'JetBrains Mono\',monospace;font-size:10px">' + a.balance.toFixed(4) + '</td>' +
       '<td style="font-family:\'JetBrains Mono\',monospace;font-size:10px"><span style="color:var(--green)">$' + a.usd.toFixed(2) + '</span><span style="font-size:8px;color:var(--muted2);margin-left:4px">(' + perc + '%)</span></td>' +
-      '<td style="text-align:right"><div style="display:flex;gap:3px;justify-content:flex-end">' +
-        '<button class="btn" style="padding:2px 7px;font-size:8px" onclick="UBAction.openSend(\'' + a.token + '\',' + a.balance + ')" title="Send"><i class="ti ti-send"></i></button>' +
-        '<button class="btn" style="padding:2px 7px;font-size:8px" onclick="UBAction.openSwap(\'' + a.token + '\',\'' + (a.token === 'USDC' ? 'EURC' : 'USDC') + '\',' + a.balance + ')" title="Swap"><i class="ti ti-arrows-exchange"></i></button>' +
-        '<button class="btn" style="padding:2px 7px;font-size:8px" onclick="UBAction.openBridge(\'Ethereum_Sepolia\',\'Arc_Testnet\',' + a.balance + ')" title="Bridge"><i class="ti ti-topology-star-3"></i></button>' +
-      '</div></td></tr>';
+      '<td style="text-align:right"><div style="display:flex;gap:3px;justify-content:flex-end">' + actions + '</div></td></tr>';
   }
   tbody.innerHTML = rows;
 }
 
 function getChainColor(chainId) {
-  var map = { 'Arc_Testnet':'#ff0202', 'Ethereum_Sepolia':'#627eea', 'Base_Sepolia':'#0052ff', 'Arbitrum_Sepolia':'#28a0f0', 'Optimism_Sepolia':'#ff0420', 'Polygon_Amoy':'#8247e5', 'Solana_Devnet':'#9945ff' };
+  var map = { 'Arc_Testnet':'#ff0202', 'Ethereum_Sepolia':'#627eea', 'Base_Sepolia':'#0052ff', 'Arbitrum_Sepolia':'#28a0f0', 'Optimism_Sepolia':'#ff0420', 'Polygon_Amoy':'#8247e5', 'Solana_Devnet':'#9945ff', 'Robinhood_Mainnet':'#00e054', 'Robinhood_Testnet':'#66ff99' };
   return map[chainId] || '#888';
 }
 
@@ -32771,6 +33094,129 @@ function ubRenderWallets() {
   html += '</div></div>';
   el.innerHTML = html;
 }
+
+// ══════════════════════════════════════════════════════════
+//  IMPORT CUSTOM TOKEN — Robinhood Chain ERC-20 Import
+// ══════════════════════════════════════════════════════════
+function showImportTokenModal() {
+  var btn = document.getElementById('ub-import-token-btn');
+  if (btn) btn.style.display = 'none';
+  var form = document.getElementById('ub-op-panel-form');
+  if (form) form.style.display = 'none';
+  var addrInput = document.getElementById('import-token-addr');
+  if (addrInput) addrInput.value = '';
+  var feedback = document.getElementById('import-token-feedback');
+  if (feedback) { feedback.style.display = 'none'; feedback.textContent = ''; }
+  var preview = document.getElementById('import-token-preview');
+  if (preview) preview.style.display = 'none';
+  var modal = document.getElementById('import-token-modal');
+  if (modal) modal.classList.add('open');
+}
+
+function closeImportTokenModal() {
+  var modal = document.getElementById('import-token-modal');
+  if (modal) modal.classList.remove('open');
+}
+
+async function executeImportToken() {
+  if (typeof RobinhoodTokenRegistry === 'undefined') {
+    _importFeedback('Robinhood Token Registry not loaded', 'error');
+    return;
+  }
+  var addr = document.getElementById('import-token-addr').value.trim();
+  var chainId = parseInt(document.getElementById('import-token-chain').value) || 4663;
+
+  if (!addr) { _importFeedback('Enter a token address', 'error'); return; }
+  if (!/^0x[0-9a-fA-F]{40}$/.test(addr)) { _importFeedback('Invalid Ethereum address', 'error'); return; }
+
+  var submitBtn = document.getElementById('import-token-submit');
+  if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Validating...'; }
+
+  try {
+    var result = await RobinhoodTokenRegistry.importToken(addr, chainId);
+    if (result.success) {
+      _importFeedback('Token imported: ' + result.token.symbol + ' (' + result.token.name + ')', 'success');
+      if (submitBtn) { submitBtn.textContent = 'Imported!'; submitBtn.style.background = 'var(--green)'; }
+      // Refresh UB balances to show the new token
+      setTimeout(function() {
+        if (typeof ubRefresh === 'function') ubRefresh();
+        closeImportTokenModal();
+        if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Import Token'; submitBtn.style.background = 'var(--green)'; }
+      }, 1500);
+    } else {
+      _importFeedback(result.error || 'Import failed', 'error');
+      if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Import Token'; }
+    }
+  } catch (e) {
+    _importFeedback('Error: ' + (e.message || 'Unknown'), 'error');
+    if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Import Token'; }
+  }
+}
+
+function _importFeedback(msg, type) {
+  var el = document.getElementById('import-token-feedback');
+  if (!el) return;
+  el.style.display = '';
+  el.textContent = msg;
+  el.style.background = type === 'success' ? 'rgba(34,197,94,.1)' : 'rgba(239,68,68,.1)';
+  el.style.border = '1px solid ' + (type === 'success' ? 'rgba(34,197,94,.25)' : 'rgba(239,68,68,.25)');
+  el.style.color = type === 'success' ? 'var(--green)' : 'var(--red)';
+}
+
+var _importPreviewTimer = null;
+async function previewImportToken() {
+  clearTimeout(_importPreviewTimer);
+  var addr = document.getElementById('import-token-addr').value.trim();
+  var chainId = parseInt(document.getElementById('import-token-chain').value) || 4663;
+  var preview = document.getElementById('import-token-preview');
+  if (!preview) return;
+  if (!/^0x[0-9a-fA-F]{40}$/.test(addr)) {
+    preview.style.display = 'none';
+    return;
+  }
+  _importPreviewTimer = setTimeout(async function() {
+    if (typeof RobinhoodTokenRegistry === 'undefined') return;
+    try {
+      var meta = await RobinhoodTokenRegistry.fetchTokenMetadata(addr, chainId);
+      if (meta && meta.symbol) {
+        var icon = RobinhoodTokenRegistry.resolveLogo(meta.symbol, addr);
+        var iconEl = document.getElementById('import-token-icon');
+        if (iconEl) { iconEl.style.background = icon.color; iconEl.textContent = icon.value; }
+        var nameEl = document.getElementById('import-token-name');
+        if (nameEl) nameEl.textContent = meta.name + ' (' + meta.symbol + ')';
+        var detailEl = document.getElementById('import-token-detail');
+        if (detailEl) detailEl.textContent = 'Decimals: ' + meta.decimals + ' · ' + addr.substring(0, 10) + '...';
+        preview.style.display = '';
+      } else {
+        preview.style.display = 'none';
+      }
+    } catch(_) { preview.style.display = 'none'; }
+  }, 600);
+}
+
+// Show import button when Robinhood assets exist or when active chain is Robinhood
+(function _importBtnWatcher() {
+  var origRender = ubRenderAll;
+  ubRenderAll = function() {
+    origRender();
+    try {
+      var btn = document.getElementById('ub-import-token-btn');
+      if (!btn) return;
+      var hasRH = false;
+      if (typeof RobinhoodTokenRegistry !== 'undefined') {
+        if (typeof activeChainId !== 'undefined') {
+          hasRH = RobinhoodTokenRegistry.isRobinhood(activeChainId);
+        }
+        if (!hasRH && UB.state.assets) {
+          hasRH = UB.state.assets.some(function(a) {
+            return a.chainId === 'Robinhood_Mainnet' || a.chainId === 'Robinhood_Testnet';
+          });
+        }
+      }
+      btn.style.display = hasRH ? '' : 'none';
+    } catch(_) {}
+  };
+})();
 
 window.ubInit = ubInit;
 window.ubRefresh = ubRefresh;
@@ -34506,116 +34952,190 @@ const UBScreen = (function() {
   }
 
   // ═══════════════ OPERATIONS ═══════════════
+  var _opPanelOriginalParent = null;
   function showOperation(op) {
     _currentOp = op;
     var isMobile = window.innerWidth <= 768;
     var panel = document.getElementById('ub-op-panel');
-    // Mobile: full-screen overlay with backdrop
+    if (!panel) return;
+    var backdrop = null;
+    // Mobile: full-screen overlay — prepare backdrop BEFORE touching the panel
     if (isMobile) {
-      var backdrop = document.getElementById('ub-op-backdrop');
-      if (!backdrop) {
-        backdrop = document.createElement('div');
-        backdrop.id = 'ub-op-backdrop';
-        backdrop.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:9999';
-        backdrop.onclick = function(){ UBScreen.hideOperation(); };
-        document.body.appendChild(backdrop);
-      }
-      backdrop.style.display = '';
-      // Add inert style to prevent body scroll if not already added
-      if (!document.getElementById('ub-op-lock-style')) {
-        var lockStyle = document.createElement('style');
-        lockStyle.id = 'ub-op-lock-style';
-        lockStyle.textContent = 'body.ub-op-locked{overflow:hidden !important}';
-        document.head.appendChild(lockStyle);
-      }
-      document.body.classList.add('ub-op-locked');
+      try {
+        backdrop = document.getElementById('ub-op-backdrop');
+        if (!backdrop) {
+          backdrop = document.createElement('div');
+          backdrop.id = 'ub-op-backdrop';
+          backdrop.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.82);z-index:9999;opacity:0;pointer-events:none;transition:opacity .22s;backdrop-filter:blur(4px)';
+          backdrop.addEventListener('click', function(e){ e.stopPropagation(); UBScreen.hideOperation(); });
+          document.body.appendChild(backdrop);
+        }
+        // Reveal backdrop with opacity transition
+        backdrop.classList.add('ub-op-visible');
+        // Lock body scroll
+        if (!document.getElementById('ub-op-lock-style')) {
+          var lockStyle = document.createElement('style');
+          lockStyle.id = 'ub-op-lock-style';
+          lockStyle.textContent = 'body.ub-op-locked{overflow:hidden !important}';
+          document.head.appendChild(lockStyle);
+        }
+        document.body.classList.add('ub-op-locked');
+      } catch(e) { /* backdrop optional — continue to panel */ }
     }
-    panel.style.display = 'flex';
-    panel.style.display = 'flex';
-    var form = document.getElementById('ub-op-panel-form');
-    var title = document.getElementById('ub-op-panel-title');
-    var colors = { send: 'var(--blue)', swap: 'var(--purple)', bridge: 'var(--teal)' };
-    document.getElementById('ub-op-panel-progress').style.display = 'none';
+    try {
+      // On mobile, reparent panel to body so it escapes any overflow:hidden ancestors
+      if (isMobile && panel.parentNode && panel.parentNode !== document.body) {
+        _opPanelOriginalParent = panel.parentNode;
+        document.body.appendChild(panel);
+      }
+      panel.style.display = 'flex';
+      var form = document.getElementById('ub-op-panel-form');
+      var title = document.getElementById('ub-op-panel-title');
+      if (!form || !title) throw new Error('Panel elements missing');
+      document.getElementById('ub-op-panel-progress').style.display = 'none';
 
     if (op === 'send') {
+      var isRHsend = (activeChainId === 46630);
+      var sendToken = isRHsend ? 'ETH' : 'USDC';
+      var sendNetwork = isRHsend ? 'Robinhood Chain' : 'Arc Testnet';
+      var sendFee = isRHsend ? 'Gas only (paid in ETH)' : '0.20%';
       title.innerHTML = '<i class="ti ti-send" style="color:var(--blue);margin-right:4px"></i>Send Assets';
       form.innerHTML =
         '<div class="ub-op-field-label">Recipient Address</div>' +
         '<div class="ub-scr-input-row"><i class="ti ti-wallet" style="color:var(--muted2);font-size:12px"></i><input class="ub-op-input ub-scr-plain" id="ub-scr-send-addr" type="text" placeholder="0x..." style="font-size:9px;flex:1"/></div>' +
         '<div class="ub-op-row">' +
-        '<div style="flex:1"><div class="ub-op-field-label">Token</div><select class="ub-op-input" id="ub-scr-send-token" style="cursor:pointer;font-size:9px"><option>USDC</option><option>EURC</option></select></div>' +
+        '<div style="flex:1"><div class="ub-op-field-label">Token</div><select class="ub-op-input" id="ub-scr-send-token" style="cursor:pointer;font-size:9px">' + (isRHsend ? '<option>ETH</option>' : '<option>USDC</option><option>EURC</option>') + '</select></div>' +
         '<div style="flex:1"><div class="ub-op-field-label">Amount</div><div class="ub-scr-input-row"><span style="color:var(--muted2);font-size:12px;font-weight:700">$</span><input class="ub-op-input ub-scr-plain" id="ub-scr-send-amt" type="number" placeholder="0.00" style="font-size:14px;font-weight:700"/></div></div>' +
         '</div>' +
-        '<div class="ub-scr-info-row"><span>Network</span><span style="color:var(--text)">Arc Testnet</span></div>' +
-        '<div class="ub-scr-info-row"><span>Fee</span><span style="color:var(--yellow)">0.20%</span></div>' +
-        '<div class="ub-scr-info-row" style="font-weight:600"><span>Total</span><span id="ub-scr-send-total" style="color:var(--blue)">—</span></div>' +
+        '<div class="ub-scr-info-row"><span>Network</span><span style="color:var(--text)">' + sendNetwork + '</span></div>' +
+        '<div class="ub-scr-info-row"><span>Fee</span><span style="color:var(--yellow)">' + sendFee + '</span></div>' +
+        (isRHsend ? '' : '<div class="ub-scr-info-row" style="font-weight:600"><span>Total</span><span id="ub-scr-send-total" style="color:var(--blue)">—</span></div>') +
         '<button class="ub-op-btn send" onclick="UBScreen.execSend()">Send</button>';
-      // Bind amount change to update total
-      setTimeout(function(){
-        var amtEl = document.getElementById('ub-scr-send-amt');
-        if (amtEl) amtEl.addEventListener('input', function(){
-          var a = parseFloat(this.value) || 0;
-          var t = document.getElementById('ub-scr-send-total');
-          if (t) t.textContent = (a * 1.002).toFixed(4) + ' USDC';
-        });
-      }, 50);
+      // Bind amount change to update total (Arc only)
+      if (!isRHsend) {
+        setTimeout(function(){
+          var amtEl = document.getElementById('ub-scr-send-amt');
+          if (amtEl) amtEl.addEventListener('input', function(){
+            var a = parseFloat(this.value) || 0;
+            var t = document.getElementById('ub-scr-send-total');
+            if (t) t.textContent = (a * 1.002).toFixed(4) + ' USDC';
+          });
+        }, 50);
+      }
     } else if (op === 'swap') {
-      title.innerHTML = '<i class="ti ti-arrows-exchange" style="color:var(--purple);margin-right:4px"></i>Swap Tokens';
-      form.innerHTML =
-        '<div class="ub-scr-swap-box">' +
-        '<div class="ub-scr-swap-side"><div class="ub-op-field-label">You Pay</div>' +
-        '<div class="ub-scr-input-row"><input class="ub-op-input ub-scr-plain" id="ub-scr-swap-amt" type="number" placeholder="0.00" style="font-size:16px;font-weight:700"/><select class="ub-op-input" id="ub-scr-swap-from" style="cursor:pointer;font-size:9px;width:auto;flex-shrink:0"><option>USDC</option><option>EURC</option></select></div>' +
-        '<div style="font-size:8px;color:var(--muted);margin-top:2px" id="ub-scr-swap-bal">Balance: —</div></div>' +
-        '<div class="ub-scr-swap-arrow" onclick="UBScreen._flipSwap()"><i class="ti ti-arrow-down"></i></div>' +
-        '<div class="ub-scr-swap-side"><div class="ub-op-field-label">You Receive</div>' +
-        '<div class="ub-scr-input-row"><input class="ub-op-input ub-scr-plain" id="ub-scr-swap-out" type="text" placeholder="0.00" readonly style="font-size:16px;font-weight:700;color:var(--teal)"/><select class="ub-op-input" id="ub-scr-swap-to" style="cursor:pointer;font-size:9px;width:auto;flex-shrink:0"><option>EURC</option><option>USDC</option></select></div>' +
-        '<div style="font-size:8px;color:var(--muted);margin-top:2px" id="ub-scr-swap-rate">Rate: —</div></div>' +
-        '</div>' +
-        '<div class="ub-scr-info-row"><span>Slippage</span><span style="color:var(--text)">0.5%</span></div>' +
-        '<div class="ub-scr-info-row"><span>Route</span><span style="color:var(--teal)">Direct Pool</span></div>' +
-        '<button class="ub-op-btn swap" onclick="UBScreen.execSwap()">Swap</button>';
-      setTimeout(function(){
-        var amtEl = document.getElementById('ub-scr-swap-amt');
-        if (amtEl) amtEl.addEventListener('input', UBScreen._refreshSwap);
-      }, 50);
+      var isRHswap = (activeChainId === 46630);
+      if (isRHswap) {
+        title.innerHTML = '<i class="ti ti-arrows-exchange" style="color:var(--purple);margin-right:4px"></i>Swap Tokens';
+        form.innerHTML =
+          '<div style="text-align:center;padding:20px 0;color:var(--muted2);font-size:10px">' +
+          '<i class="ti ti-info-circle" style="font-size:24px;display:block;margin-bottom:8px;color:var(--yellow)"></i>' +
+          'Swap is not available on Robinhood Chain.<br><br>' +
+          '<span style="font-size:9px">Switch to Arc Testnet to use the swap pools with USDC, EURC, cirBTC, and ETH.</span>' +
+          '</div>';
+      } else {
+        title.innerHTML = '<i class="ti ti-arrows-exchange" style="color:var(--purple);margin-right:4px"></i>Swap Tokens';
+        form.innerHTML =
+          '<div class="ub-scr-swap-box">' +
+          '<div class="ub-scr-swap-side"><div class="ub-op-field-label">You Pay</div>' +
+          '<div class="ub-scr-input-row"><input class="ub-op-input ub-scr-plain" id="ub-scr-swap-amt" type="number" placeholder="0.00" style="font-size:16px;font-weight:700"/><select class="ub-op-input" id="ub-scr-swap-from" style="cursor:pointer;font-size:9px;width:auto;flex-shrink:0"><option>USDC</option><option>EURC</option></select></div>' +
+          '<div style="font-size:8px;color:var(--muted);margin-top:2px" id="ub-scr-swap-bal">Balance: —</div></div>' +
+          '<div class="ub-scr-swap-arrow" onclick="UBScreen._flipSwap()"><i class="ti ti-arrow-down"></i></div>' +
+          '<div class="ub-scr-swap-side"><div class="ub-op-field-label">You Receive</div>' +
+          '<div class="ub-scr-input-row"><input class="ub-op-input ub-scr-plain" id="ub-scr-swap-out" type="text" placeholder="0.00" readonly style="font-size:16px;font-weight:700;color:var(--teal)"/><select class="ub-op-input" id="ub-scr-swap-to" style="cursor:pointer;font-size:9px;width:auto;flex-shrink:0"><option>EURC</option><option>USDC</option></select></div>' +
+          '<div style="font-size:8px;color:var(--muted);margin-top:2px" id="ub-scr-swap-rate">Rate: —</div></div>' +
+          '</div>' +
+          '<div class="ub-scr-info-row"><span>Slippage</span><span style="color:var(--text)">0.5%</span></div>' +
+          '<div class="ub-scr-info-row"><span>Route</span><span style="color:var(--teal)">Direct Pool</span></div>' +
+          '<button class="ub-op-btn swap" onclick="UBScreen.execSwap()">Swap</button>';
+        setTimeout(function(){
+          var amtEl = document.getElementById('ub-scr-swap-amt');
+          if (amtEl) amtEl.addEventListener('input', UBScreen._refreshSwap);
+        }, 50);
+      }
     } else if (op === 'bridge') {
-      title.innerHTML = '<i class="ti ti-topology-star-3" style="color:var(--teal);margin-right:4px"></i>Move Cross-Chain <span id="ub-scr-br-badge" style="font-size:7.5px;padding:2px 6px;border-radius:3px;margin-left:4px"></span>';
-      form.innerHTML =
-        '<div class="ub-scr-bridge-chains">' +
-        '<div class="ub-scr-bridge-chain" id="ub-scr-bridge-from-card"><div class="ub-op-field-label">From</div><select class="ub-op-input" id="ub-scr-bridge-from" style="cursor:pointer;font-size:9px"></select><div style="font-size:7.5px;color:var(--muted);margin-top:3px" id="ub-scr-bf-bal">—</div></div>' +
-        '<div style="display:flex;align-items:center;padding-top:14px"><div onclick="UBScreen._flipBridge()" style="width:24px;height:24px;border-radius:50%;background:var(--card2);border:1px solid var(--border2);display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--teal);font-size:12px" title="Swap chains"><i class="ti ti-arrows-exchange"></i></div></div>' +
-        '<div class="ub-scr-bridge-chain" id="ub-scr-bridge-to-card"><div class="ub-op-field-label">To</div><select class="ub-op-input" id="ub-scr-bridge-to" style="cursor:pointer;font-size:9px"></select><div style="font-size:7.5px;color:var(--muted);margin-top:3px" id="ub-scr-bt-bal">—</div></div>' +
-        '</div>' +
-        '<div class="ub-scr-bridge-route" id="ub-scr-br-route" style="display:flex;align-items:center;gap:6px;padding:6px 8px;background:rgba(0,0,0,.12);border:1px solid var(--border);border-radius:5px;font-size:8px;color:var(--muted2)"><span id="ub-scr-br-from-lbl">Sepolia</span><i class="ti ti-arrow-right" style="font-size:8px;color:var(--teal)"></i><span id="ub-scr-br-to-lbl">Arc</span><span id="ub-scr-br-engine" style="margin-left:auto;font-size:7.5px;padding:1px 5px;border-radius:3px"></span></div>' +
-        '<div class="ub-op-field-label">Amount (USDC)</div>' +
-        '<div class="ub-scr-input-row"><span style="color:var(--muted2);font-size:12px;font-weight:700">$</span><input class="ub-op-input ub-scr-plain" id="ub-scr-bridge-amt" type="number" placeholder="0.00" style="font-size:14px;font-weight:700"/></div>' +
-        '<div class="ub-scr-quick-row">' +
-        '<button onclick="UBScreen._setBridgeAmt(25)" class="xc-quick-btn-v2" style="font-size:8px;padding:4px">25%</button>' +
-        '<button onclick="UBScreen._setBridgeAmt(50)" class="xc-quick-btn-v2" style="font-size:8px;padding:4px">50%</button>' +
-        '<button onclick="UBScreen._setBridgeAmt(75)" class="xc-quick-btn-v2" style="font-size:8px;padding:4px">75%</button>' +
-        '<button onclick="UBScreen._setBridgeAmt(100)" class="xc-quick-btn-v2" style="font-size:8px;padding:4px;background:rgba(245,158,11,.14);border-color:rgba(245,158,11,.35);color:var(--yellow)">MAX</button>' +
-        '</div>' +
-        '<div class="ub-scr-info-row"><span>Fee</span><span id="ub-scr-br-fee" style="color:var(--yellow)">—</span></div>' +
-        '<div class="ub-scr-info-row"><span>Est. Time</span><span id="ub-scr-br-time" style="color:var(--teal)">—</span></div>' +
-        '<div class="ub-scr-info-row" style="font-weight:600"><span>You Receive</span><span id="ub-scr-br-recv" style="color:var(--green)">—</span></div>' +
-        '<button class="ub-op-btn bridge" onclick="UBScreen.execBridge()">Move</button>';
-      setTimeout(function(){
-        UBScreen._populateBridge();
-        var amtEl = document.getElementById('ub-scr-bridge-amt');
-        if (amtEl) amtEl.addEventListener('input', UBScreen._refreshBridge);
-      }, 80);
+        title.innerHTML = '<i class="ti ti-topology-star-3" style="color:var(--teal);margin-right:4px"></i>Move Cross-Chain <span id="ub-scr-br-badge" style="font-size:7.5px;padding:2px 6px;border-radius:3px;margin-left:4px"></span>';
+        form.innerHTML =
+          '<div class="ub-scr-bridge-chains">' +
+          '<div class="ub-scr-bridge-chain" id="ub-scr-bridge-from-card"><div class="ub-op-field-label">From</div><select class="ub-op-input" id="ub-scr-bridge-from" style="cursor:pointer;font-size:9px"></select><div style="font-size:7.5px;color:var(--muted);margin-top:3px" id="ub-scr-bf-bal">—</div></div>' +
+          '<div style="display:flex;align-items:center;padding-top:14px"><div onclick="UBScreen._flipBridge()" style="width:24px;height:24px;border-radius:50%;background:var(--card2);border:1px solid var(--border2);display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--teal);font-size:12px" title="Swap chains"><i class="ti ti-arrows-exchange"></i></div></div>' +
+          '<div class="ub-scr-bridge-chain" id="ub-scr-bridge-to-card"><div class="ub-op-field-label">To</div><select class="ub-op-input" id="ub-scr-bridge-to" style="cursor:pointer;font-size:9px"></select><div style="font-size:7.5px;color:var(--muted);margin-top:3px" id="ub-scr-bt-bal">—</div></div>' +
+          '</div>' +
+          '<div class="ub-scr-bridge-route" id="ub-scr-br-route" style="display:flex;align-items:center;gap:6px;padding:6px 8px;background:rgba(0,0,0,.12);border:1px solid var(--border);border-radius:5px;font-size:8px;color:var(--muted2)"><span id="ub-scr-br-from-lbl">Sepolia</span><i class="ti ti-arrow-right" style="font-size:8px;color:var(--teal)"></i><span id="ub-scr-br-to-lbl">Arc</span><span id="ub-scr-br-engine" style="margin-left:auto;font-size:7.5px;padding:1px 5px;border-radius:3px"></span></div>' +
+          '<div class="ub-op-field-label">Amount (USDC)</div>' +
+          '<div class="ub-scr-input-row"><span style="color:var(--muted2);font-size:12px;font-weight:700">$</span><input class="ub-op-input ub-scr-plain" id="ub-scr-bridge-amt" type="number" placeholder="0.00" style="font-size:14px;font-weight:700"/></div>' +
+          '<div class="ub-scr-quick-row">' +
+          '<button onclick="UBScreen._setBridgeAmt(25)" class="xc-quick-btn-v2" style="font-size:8px;padding:4px">25%</button>' +
+          '<button onclick="UBScreen._setBridgeAmt(50)" class="xc-quick-btn-v2" style="font-size:8px;padding:4px">50%</button>' +
+          '<button onclick="UBScreen._setBridgeAmt(75)" class="xc-quick-btn-v2" style="font-size:8px;padding:4px">75%</button>' +
+          '<button onclick="UBScreen._setBridgeAmt(100)" class="xc-quick-btn-v2" style="font-size:8px;padding:4px;background:rgba(245,158,11,.14);border-color:rgba(245,158,11,.35);color:var(--yellow)">MAX</button>' +
+          '</div>' +
+          '<div class="ub-scr-info-row"><span>Fee</span><span id="ub-scr-br-fee" style="color:var(--yellow)">—</span></div>' +
+          '<div class="ub-scr-info-row"><span>Est. Time</span><span id="ub-scr-br-time" style="color:var(--teal)">—</span></div>' +
+          '<div class="ub-scr-info-row" style="font-weight:600"><span>You Receive</span><span id="ub-scr-br-recv" style="color:var(--green)">—</span></div>' +
+          '<button class="ub-op-btn bridge" onclick="UBScreen.execBridge()">Move</button>';
+        setTimeout(function(){
+          UBScreen._populateBridge();
+          var amtEl = document.getElementById('ub-scr-bridge-amt');
+          if (amtEl) amtEl.addEventListener('input', UBScreen._refreshBridge);
+        }, 80);
+      }
+    } catch(e) {
+      // Exception while setting up panel — clean up everything
+      console.error('UB showOperation failed:', e);
+      _cleanupAll();
     }
   }
 
-  function hideOperation() {
+  function _cleanupAll() {
     _currentOp = null;
-    var backdrop = document.getElementById('ub-op-backdrop');
-    if (backdrop) backdrop.style.display = 'none';
-    document.body.classList.remove('ub-op-locked');
-    document.getElementById('ub-op-panel').style.display = 'none';
-    document.getElementById('ub-op-panel-progress').style.display = 'none';
-    document.getElementById('ub-op-steps').innerHTML = '';
-    refreshDashboard();
+    // Remove backdrop with opacity fade
+    try {
+      var backdrop = document.getElementById('ub-op-backdrop');
+      if (backdrop) {
+        backdrop.classList.remove('ub-op-visible');
+        // Remove after transition completes (or immediately if not visible)
+        setTimeout(function(){
+          if (backdrop && !backdrop.classList.contains('ub-op-visible')) {
+            try { backdrop.parentNode && backdrop.parentNode.removeChild(backdrop); } catch(_) {}
+          }
+        }, 300);
+      }
+    } catch(_) {}
+    // Unlock body scroll
+    try { document.body.classList.remove('ub-op-locked'); } catch(_) {}
+    // Reparent panel back to original container
+    try {
+      var panel = document.getElementById('ub-op-panel');
+      if (panel) {
+        panel.style.display = 'none';
+        if (_opPanelOriginalParent && panel.parentNode === document.body) {
+          _opPanelOriginalParent.appendChild(panel);
+          _opPanelOriginalParent = null;
+        }
+        // Also hide progress display
+        var prog = document.getElementById('ub-op-panel-progress');
+        if (prog) prog.style.display = 'none';
+        // Reset form display
+        var form = document.getElementById('ub-op-panel-form');
+        if (form) form.style.display = '';
+        // Clear steps
+        var steps = document.getElementById('ub-op-steps');
+        if (steps) steps.innerHTML = '';
+      }
+    } catch(_) {}
+    // Ensure body overflow is restored
+    try {
+      if (!document.body.classList.contains('ub-op-locked')) {
+        // Remove the lock style if body is unlocked and no other overlay needs it
+        var lockStyle = document.getElementById('ub-op-lock-style');
+        if (lockStyle) lockStyle.parentNode && lockStyle.parentNode.removeChild(lockStyle);
+      }
+    } catch(_) {}
+    try { refreshDashboard(); } catch(_) {}
+  }
+
+  function hideOperation() {
+    _cleanupAll();
   }
 
   function showProgress(title) {
@@ -35064,6 +35584,8 @@ const UBScreen = (function() {
     421614:   { req: 0.0008,  warn: 0.0015 },                // Arbitrum Sepolia (ETH)
     11155420: { req: 0.0008,  warn: 0.0015 },                // Optimism Sepolia (ETH)
     80002:    { req: 0.15,    warn: 0.30 },                  // Polygon Amoy (POL/MATIC)
+    4663:     { req: 0.0005,  warn: 0.001 },                 // Robinhood Mainnet (ETH)
+    46630:    { req: 0.001,   warn: 0.003 },                 // Robinhood Testnet (ETH)
     _default: { req: 0.001,   warn: 0.002 }
   };
   function thresholdFor(chainId){ return THRESHOLDS[chainId] || THRESHOLDS._default; }
@@ -36897,6 +37419,8 @@ const UBScreen = (function() {
           R.actions({icon:'plug',label:'Connect',cls:'primary',action:"document.getElementById('wchip')?.click()"}));
     }
     let tokenRows='', totalUsd=0;
+    var activeNetworkName = (typeof getActiveChain === 'function' ? getActiveChain() : CHAINS[0])?.name || 'Arc Testnet';
+    var activeNetworkColor = (typeof getActiveChain === 'function' ? getActiveChain() : CHAINS[0])?.color || '#ff0202';
     const prov=getCachedProvider('https://rpc.testnet.arc.network');
     for(const sym of ['USDC','EURC','cirBTC']){
       const tok=TOKEN_REGISTRY[sym]; if(!tok||!tok.address) continue;
@@ -36913,7 +37437,7 @@ const UBScreen = (function() {
       R.card(
         R.head('wallet','Wallet Summary',{text:'Connected',cls:'live'}),
         R.row('Address','<span style="cursor:pointer" onclick="autCopyText(\''+walletAddress+'\')">'+short+' <i class="ti ti-copy" style="font-size:9px;color:var(--muted)"></i></span>','teal') +
-        R.row('Network',R.chainPill('Arc Testnet','#ff0202'),'') +
+        R.row('Network',R.chainPill(activeNetworkName,activeNetworkColor),'') +
         R.row('Portfolio','$'+totalUsd.toFixed(2),'green') +
         R.sep()+R.section('Assets')+tokenRows,
         R.actions(
@@ -36970,8 +37494,8 @@ const UBScreen = (function() {
   // ── BRIDGE CARD ──
   function autBridge(msg) {
     if(!walletAddress) return R.intro('Connect your wallet first to use the bridge.')+R.card(R.head('topology-star-3','Bridge',{text:'Wallet Required',cls:'pending'}),R.row('Status','Not connected','yellow'));
-    const chainMap={arc:0,ethereum:1,sepolia:1,eth:1,base:2,arbitrum:3,arb:3,optimism:4,op:4,polygon:5,poly:5,amoy:5};
-    const chainColors={0:'#ff0202',1:'#627eea',2:'#0052ff',3:'#28a0f0',4:'#ff0420',5:'#8247e5'};
+    const chainMap={arc:0,ethereum:1,sepolia:1,eth:1,base:2,arbitrum:3,arb:3,optimism:4,op:4,polygon:5,poly:5,amoy:5,robinhood:6,robin:6,rh:6,robinhoodtest:7,rhtest:7};
+    const chainColors={0:'#ff0202',1:'#627eea',2:'#0052ff',3:'#28a0f0',4:'#ff0420',5:'#8247e5',6:'#00e054',7:'#66ff99'};
     const amtM=msg.match(/(\d+(?:\.\d+)?)/); const amt=amtM?parseFloat(amtM[1]):0;
     if(amt<=0) return autBridgeGuide();
     let fromIdx=0,toIdx=2; const low=msg.toLowerCase();
@@ -37000,8 +37524,8 @@ const UBScreen = (function() {
   function autBridgeGuide() {
     return R.intro('I can prepare cross-chain bridge transfers via Circle CCTP.') +
       R.card(R.head('topology-star-3','Bridge — Supported Chains'),
-        R.row('Arc Testnet ↔ Base Sepolia','USDC','')+R.row('Arc Testnet ↔ Ethereum Sepolia','USDC','')+R.row('Arc Testnet ↔ Arbitrum Sepolia','USDC','')+
-        '<div style="font-size:9px;color:var(--muted2);margin-top:8px">Try: <em>"Bridge 500 USDC from Arc to Base"</em> or <em>"Envie 100 USDC para Arbitrum"</em></div>');
+        R.row('Arc Testnet ↔ Base Sepolia','USDC','')+R.row('Arc Testnet ↔ Ethereum Sepolia','USDC','')+R.row('Arc Testnet ↔ Arbitrum Sepolia','USDC','')+R.row('Arbitrum Sepolia ↔ Robinhood','ETH','')+
+        '<div style="font-size:9px;color:var(--muted2);margin-top:8px">Try: <em>"Bridge 500 USDC from Arc to Base"</em> or <em>"Bridge 0.01 ETH from Arbitrum to Robinhood"</em></div>');
   }
 
   // ── LIQUIDITY CARD ──
