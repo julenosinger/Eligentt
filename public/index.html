@@ -230,15 +230,15 @@
   display:flex;align-items:center;gap:6px;
   font-size:10px;color:#d8dce8;
   text-decoration:none;padding:4px 0;
-  cursor:pointer;transition:color .15s;
+  cursor:pointer;transition:none;
   border:none;background:none;font-family:inherit;text-align:left;
 }
-.footer-col a:hover,.footer-col span:hover,.footer-col button:hover{color:#dde2f0;}
+.footer-col a:hover,.footer-col span:hover{color:#dde2f0}
 .footer-col button{
   display:flex;align-items:center;gap:6px;
   font-size:10px;color:#d8dce8;
   text-decoration:none;padding:4px 0;
-  cursor:pointer;transition:color .15s;
+  cursor:pointer;transition:none;
   border:none;background:none;font-family:inherit;text-align:left;
   width:100%;
 }
@@ -1967,6 +1967,14 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
 /* ── Steps card fade out ── */
 #xc-steps-card.xc-fade-out{opacity:0;transform:translateY(8px);transition:opacity .45s ease,transform .45s ease}
 @keyframes opStepsIn{from{opacity:0;transform:translateX(16px)}to{opacity:1;transform:none}}
+/* Mobile: disable execution layout animation — steps stay below, no card movement */
+@media(max-width:1080px){
+  .swap-col.op-exec-active{display:flex !important;flex-direction:column !important;grid-template-columns:none !important}
+  .swap-col.op-exec-active > .swap-card{grid-column:auto !important}
+  .swap-col.op-exec-active > #xc-steps-card{grid-column:auto !important;grid-row:auto !important;animation:none !important;margin-top:8px !important}
+  .xc-content.swap-col-has-exec{grid-template-columns:1fr !important;transition:none !important}
+  .xc-content.swap-col-has-exec .swap-col{transition:none !important}
+}
 .info-card{background:var(--card);border:1px solid var(--border);border-radius:7px;padding:12px}
 .info-title{font-size:10px;font-weight:600;color:var(--text);margin-bottom:7px;display:flex;align-items:center;gap:5px}
 .info-title i{font-size:12px}
@@ -13211,34 +13219,31 @@ const showToast = toast; // Treasury functions alias — resolves showToast→to
 
 // ── Page navigation ────────────────────────────────────────
 function showPage(id) {
+  // Immediate visual switch — no delay
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  var pageEl = document.getElementById('page-'+id);
+  if (pageEl) pageEl.classList.add('active');
+  document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
+  var navEl = document.getElementById('nav-'+id);
+  if (navEl) navEl.classList.add('active');
+  updateMobileNav(id);
+  // Defer heavy ops to let the UI paint first
+  setTimeout(function() {
+    try {
+      if (id !== 'xchain' && typeof UBScreen !== 'undefined' && UBScreen.hideOperation) {
+        try { UBScreen.hideOperation(); } catch(_) {}
+      }
+      try { localStorage.setItem('elligente_current_page', id); } catch(_) {}
+      try { if (window.location.pathname.indexOf('/pay/') !== 0 && window.location.pathname !== '/' + id) history.replaceState(null, '', '/' + id); } catch(_) {}
+    } catch(_) {}
+  }, 0);
   try {
-    // Close any open UB operation panel when navigating away
-    if (id !== 'xchain' && typeof UBScreen !== 'undefined' && UBScreen.hideOperation) {
-      try { UBScreen.hideOperation(); } catch(_) {}
-    }
-    document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
-    const pageEl = document.getElementById('page-'+id);
-    if (pageEl) pageEl.classList.add('active');
-    document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
-    const navEl = document.getElementById('nav-'+id);
-    if(navEl) navEl.classList.add('active');
-    // Persist current page so refresh stays on same page
-    try { localStorage.setItem('elligente_current_page', id); } catch(_) {}
-    // Set URL path (Browser Routing via History API).
-    // Never rewrite the public /pay/:token checkout path (preserves the token).
-    try { if (window.location.pathname.indexOf('/pay/') !== 0 && window.location.pathname !== '/' + id) history.replaceState(null, '', '/' + id); } catch(_) {}
-    // Refresh pool state when navigating to Pool or Swap pages
     if (id === 'pool' || id === 'swap') {
       loadAllPools().then(() => {
-        if (id === 'pool') {
-          showPoolList();
-          renderPoolList();
-          updatePoolStats();
-        }
+        if (id === 'pool') { showPoolList(); renderPoolList(); updatePoolStats(); }
         if (id === 'swap') updateSwapRate();
       });
     }
-    // Refresh Send Assets balance when navigating to send page
     if (id === 'send') {
       setTimeout(() => {
         saRefreshBalance && saRefreshBalance();
@@ -13248,66 +13253,33 @@ function showPage(id) {
       }, 50);
     }
     if (id === 'treasury') {
-      setTimeout(() => {
-        if (typeof vaultRefreshUI === 'function') vaultRefreshUI();
-      }, 50);
+      setTimeout(() => { if (typeof vaultRefreshUI === 'function') vaultRefreshUI(); }, 50);
     }
-    if (id === 'reports') {
-      renderReports();
-    }
+    if (id === 'reports') { renderReports(); }
     if (id === 'xcdashboard') {
       setTimeout(function(){ if(typeof xdOnShow === 'function') xdOnShow(); }, 100);
     }
-    if (id === 'recipients') {
-      renderContacts();
-      updateSelectedCount();
-    }
-    if (id === 'batch') {
-      setTimeout(() => {
-        renderTable();
-        updateBottomBar();
-      }, 50);
-    }
-    if (id === 'bridge') {
-      setTimeout(() => { refreshBridgeBalances(); }, 50);
-    }
-    if (id === 'xchain') {
-      setTimeout(() => { xcApplyChains(); xcRefreshOriginBalance(); }, 100);
-    }
-    if (id === 'links') {
-      // Sync payment-link statuses from the backend so links paid on the public
-      // /pay/:token page reflect as "Paid" here.
-      setTimeout(() => { if (typeof plSyncStatuses === 'function') plSyncStatuses(); }, 50);
-    }
+    if (id === 'recipients') { renderContacts(); updateSelectedCount(); }
+    if (id === 'batch') { setTimeout(() => { renderTable(); updateBottomBar(); }, 50); }
+    if (id === 'bridge') { setTimeout(() => { refreshBridgeBalances(); }, 50); }
+    if (id === 'xchain') { setTimeout(() => { xcApplyChains(); xcRefreshOriginBalance(); }, 100); }
+    if (id === 'links') { setTimeout(() => { if (typeof plSyncStatuses === 'function') plSyncStatuses(); }, 50); }
     if (id === 'send') {
-      // Refresh Send Assets page data when user navigates to it
       setTimeout(() => {
         if (typeof refreshSendRecentActivity === 'function') refreshSendRecentActivity();
         if (typeof loadSendAssetBalance === 'function') loadSendAssetBalance();
       }, 120);
     }
-
-    // === SCHEDULE PAGE ONLY: Force en-US locale + render table from engine ===
     if (id === 'schedule') {
       schedules = ScheduleEngine.getAll();
       if (typeof renderSchedules === 'function') renderSchedules();
-      const schPage = document.getElementById('page-schedule');
-      if (schPage) schPage.lang = 'en-US';
-      const schCreate = document.getElementById('sch-create-panel');
-      if (schCreate) schCreate.lang = 'en-US';
-      const dateInput = document.getElementById('sch-date');
-      if (dateInput) dateInput.lang = 'en-US';
+      var schPage = document.getElementById('page-schedule'); if (schPage) schPage.lang = 'en-US';
+      var schCreate = document.getElementById('sch-create-panel'); if (schCreate) schCreate.lang = 'en-US';
+      var dateInput = document.getElementById('sch-date'); if (dateInput) dateInput.lang = 'en-US';
     }
-    if (id === 'profile') {
-      setTimeout(() => { if (typeof prfRefreshProfile === 'function') prfRefreshProfile(); }, 50);
-    }
-    if (id === 'autonoma') {
-      setTimeout(() => { if (typeof autonomaInit === 'function') autonomaInit(); }, 50);
-    }
-    if (id === 'unified-balance') {
-      setTimeout(() => { if (typeof ubInit === 'function') ubInit(); }, 50);
-    }
-    updateMobileNav(id);
+    if (id === 'profile') { setTimeout(() => { if (typeof prfRefreshProfile === 'function') prfRefreshProfile(); }, 50); }
+    if (id === 'autonoma') { setTimeout(() => { if (typeof autonomaInit === 'function') autonomaInit(); }, 50); }
+    if (id === 'unified-balance') { setTimeout(() => { if (typeof ubInit === 'function') ubInit(); }, 50); }
   } catch (err) {
     _err('showPage error for id:', id, err);
   }
