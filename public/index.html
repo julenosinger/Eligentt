@@ -904,6 +904,27 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
 .cinput{width:100%;background:rgba(0,0,0,.2);border:1px solid var(--border);border-radius:5px;padding:7px 10px;color:var(--text);font-size:10.5px;font-family:'JetBrains Mono',monospace;outline:none;transition:border .15s}
 .cinput:focus{border-color:var(--blue)}
 
+/* ── Custom English Date Picker (locale-independent, always en-US MM/DD/YYYY) ── */
+.eldp-pop{position:fixed;z-index:100050;background:var(--card);border:1px solid var(--border2);border-radius:8px;padding:8px;box-shadow:0 12px 34px rgba(0,0,0,.55);width:236px;font-family:'JetBrains Mono',monospace;color:var(--text);display:none}
+.eldp-pop.open{display:block}
+.eldp-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+.eldp-title{font-size:11px;font-weight:700;color:var(--text)}
+.eldp-nav{width:24px;height:24px;border-radius:5px;border:1px solid var(--border);background:transparent;color:var(--muted2);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:13px}
+.eldp-nav:hover{border-color:var(--blue);color:var(--blue)}
+.eldp-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px}
+.eldp-dow{font-size:8px;color:var(--muted2);text-align:center;padding:3px 0;font-weight:700;text-transform:uppercase}
+.eldp-day{font-size:10px;text-align:center;padding:5px 0;border-radius:5px;cursor:pointer;color:var(--text);border:1px solid transparent;transition:background .12s}
+.eldp-day:hover{background:rgba(79,142,247,.16)}
+.eldp-day.eldp-muted{color:var(--muted);opacity:.4}
+.eldp-day.eldp-today{border-color:var(--border2)}
+.eldp-day.eldp-sel{background:var(--blue);color:#fff;font-weight:700}
+.eldp-time{display:flex;align-items:center;gap:5px;margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:9px;color:var(--muted2)}
+.eldp-time select{background:rgba(0,0,0,.25);border:1px solid var(--border);border-radius:5px;color:var(--text);font-size:10px;font-family:'JetBrains Mono',monospace;padding:4px 5px;cursor:pointer;outline:none}
+.eldp-foot{display:flex;justify-content:space-between;margin-top:8px}
+.eldp-btn{font-size:9px;padding:5px 10px;border-radius:5px;border:1px solid var(--border);background:transparent;color:var(--muted2);cursor:pointer;font-family:'JetBrains Mono',monospace}
+.eldp-btn:hover{border-color:var(--blue);color:var(--blue)}
+.eldp-btn.primary{background:var(--blue);border-color:var(--blue);color:#fff}
+
 .setup-banner{background:rgba(245,158,11,.06);border:1px solid rgba(245,158,11,.22);border-radius:6px;padding:10px 13px;display:flex;align-items:flex-start;gap:8px;font-size:9.5px;color:var(--yellow);line-height:1.6}
 .setup-banner a{color:var(--blue);text-decoration:none}
 .setup-banner a:hover{text-decoration:underline}
@@ -6642,7 +6663,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
             <div><div class="swap-label">Amount</div><input id="sch-amount" class="cinput" type="number" placeholder="0.00" step="0.01" min="0"/></div>
             <div lang="en-US">
               <div class="swap-label">First Execution (UTC)</div>
-              <input id="sch-date" class="cinput" type="datetime-local" lang="en-US" style="color-scheme:dark" onchange="updateScheduleDatePreview()"/>
+              <input id="sch-date" class="cinput" type="text" readonly data-eldp="datetime" placeholder="MM/DD/YYYY HH:mm" style="color-scheme:dark;cursor:pointer" onchange="updateScheduleDatePreview()"/>
               <div id="sch-date-preview" style="font-size:9.5px;color:#a8b0d0;margin-top:3px;min-height:14px"></div>
               <div style="font-size:8px;color:#7C89B8;margin-top:1px">All scheduled executions are stored and processed in UTC.</div>
             </div>
@@ -7576,7 +7597,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
               </div>
               <!-- ROW: date + currency -->
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-                <div><div class="swap-label">Due Date</div><input id="inv-due" class="cinput" type="date" style="color-scheme:dark" oninput="invPreviewUpdate()"/></div>
+                <div><div class="swap-label">Due Date</div><input id="inv-due" class="cinput" type="text" readonly data-eldp="date" placeholder="MM/DD/YYYY" style="color-scheme:dark;cursor:pointer" oninput="invPreviewUpdate()" onchange="invPreviewUpdate()"/></div>
                 <div><div class="swap-label">Currency</div>
                   <select id="inv-currency" class="cinput" style="cursor:pointer" onchange="invPreviewUpdate()"><option>USDC</option><option>EURC</option></select>
                 </div>
@@ -7721,8 +7742,8 @@ select.cinput option { background: #161a24; color: #dde2f0; }
             <option value="">All Chains</option>
             <option>Arc Testnet</option>
           </select>
-          <input id="inv-filter-date-from" class="cinput" type="date" style="font-size:10px;color-scheme:dark;min-width:110px" onchange="renderInvoices()" title="From date"/>
-          <input id="inv-filter-date-to" class="cinput" type="date" style="font-size:10px;color-scheme:dark;min-width:110px" onchange="renderInvoices()" title="To date"/>
+          <input id="inv-filter-date-from" class="cinput" type="text" readonly data-eldp="date" placeholder="MM/DD/YYYY" style="font-size:10px;color-scheme:dark;min-width:110px;cursor:pointer" onchange="renderInvoices()" title="From date"/>
+          <input id="inv-filter-date-to" class="cinput" type="text" readonly data-eldp="date" placeholder="MM/DD/YYYY" style="font-size:10px;color-scheme:dark;min-width:110px;cursor:pointer" onchange="renderInvoices()" title="To date"/>
           <select id="inv-sort" class="cinput" style="font-size:10px;min-width:100px;cursor:pointer" onchange="renderInvoices()">
             <option value="newest">Newest</option>
             <option value="oldest">Oldest</option>
@@ -8643,8 +8664,8 @@ select.cinput option { background: #161a24; color: #dde2f0; }
                   <option value="Ethereum→ARC">Ethereum → ARC</option>
                   <option value="Arbitrum→ARC">Arbitrum → ARC</option>
                 </select>
-                <input type="date" id="stl-filter-date-from" onchange="stlApplyFilters()" style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:5px 8px;font-size:11px;color:var(--text);">
-                <input type="date" id="stl-filter-date-to" onchange="stlApplyFilters()" style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:5px 8px;font-size:11px;color:var(--text);">
+                <input type="text" readonly data-eldp="date" placeholder="MM/DD/YYYY" id="stl-filter-date-from" onchange="stlApplyFilters()" style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:5px 8px;font-size:11px;color:var(--text);cursor:pointer;">
+                <input type="text" readonly data-eldp="date" placeholder="MM/DD/YYYY" id="stl-filter-date-to" onchange="stlApplyFilters()" style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:5px 8px;font-size:11px;color:var(--text);cursor:pointer;">
                 <input type="text" id="stl-filter-intent" placeholder="Search Intent ID..." oninput="stlApplyFilters()" style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:5px 8px;font-size:11px;color:var(--text);flex:1;min-width:150px;">
                 <input type="text" id="stl-filter-memo" placeholder="Search Memo..." oninput="stlApplyFilters()" style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:5px 8px;font-size:11px;color:var(--text);flex:1;min-width:150px;">
                 <button onclick="stlClearFilters()" style="background:transparent;border:1px solid var(--border);border-radius:6px;padding:5px 10px;font-size:11px;color:var(--muted2);cursor:pointer;">Clear</button>
@@ -32226,13 +32247,16 @@ function toggleMobileRoute() {
       const sidebar = document.querySelector('.sidebar');
       if (sidebar) sidebar.classList.remove('mobile-open');
     }
-    // Clean up UB operation panel if orphaned during resize
+    // Clean up UB operation panel if orphaned during resize.
+    // NOTE: never test offsetParent here — the mobile panel is position:fixed, so
+    // offsetParent is always null even when open, and the mobile soft-keyboard fires
+    // a resize event that would otherwise close the panel mid-input. Only clean up a
+    // genuinely orphaned backdrop (backdrop present while the panel is truly hidden).
     try {
       if (typeof UBScreen !== 'undefined' && UBScreen.hideOperation) {
         var panel = document.getElementById('ub-op-panel');
         var backdrop = document.getElementById('ub-op-backdrop');
-        // If backdrop exists but panel is hidden or off-body, force cleanup
-        if (backdrop && (!panel || panel.style.display === 'none' || panel.offsetParent === null)) {
+        if (backdrop && (!panel || panel.style.display === 'none')) {
           UBScreen.hideOperation();
         }
       }
@@ -35645,19 +35669,15 @@ const UBScreen = (function() {
     function buildPanel(){
       var btn = document.getElementById(cfg.buttonId);
       if (!btn || !btn.parentNode) return false;
-      if (document.getElementById(cfg.panelId)) { cacheEls(); return true; }
-      var wrap = document.createElement('div');
-      wrap.id = cfg.panelId;
-      wrap.className = 'dgv-panel';
-      wrap.style.cssText = 'box-sizing:border-box;width:100%;margin:10px 0 0;border:1px solid var(--border);border-radius:8px;padding:9px 11px;background:rgba(0,0,0,.18);font-size:9.5px;line-height:1.45';
-      wrap.innerHTML =
+
+      var panelHTML =
         '<div style="display:flex;align-items:center;gap:7px;margin-bottom:6px">' +
           '<span class="dgv-dot" style="width:9px;height:9px;border-radius:50%;background:' + DOT.UNKNOWN + ';flex-shrink:0;box-shadow:0 0 6px ' + DOT.UNKNOWN + '88"></span>' +
           '<span style="font-weight:700;color:var(--text)">Destination Gas Check</span>' +
           '<span class="dgv-badge" style="margin-left:auto;font-size:8px;font-weight:700;padding:2px 8px;border-radius:999px;background:rgba(255,255,255,.06);border:1px solid var(--border);color:var(--muted2)">Checking…</span>' +
         '</div>' +
         '<div class="dgv-rows" style="display:flex;flex-direction:column;gap:2px">' +
-          row('Destination Wallet', 'dgv-wallet') +
+          row(cfg.walletLabel || 'Destination Wallet', 'dgv-wallet') +
           row('Network', 'dgv-network') +
           row('Native Token', 'dgv-native') +
           row('Current Balance', 'dgv-balance') +
@@ -35669,26 +35689,49 @@ const UBScreen = (function() {
         '<label class="dgv-ack" style="display:none;align-items:center;gap:6px;margin-top:9px;font-size:9px;color:var(--yellow);cursor:pointer">' +
           '<input type="checkbox" class="dgv-ack-cb" style="cursor:pointer"/> I understand my funds may be unusable until I add native gas.' +
         '</label>';
-      btn.parentNode.insertBefore(wrap, btn);
 
-      // Compact status pill (placement is fully controlled per-page via cfg.mountPill).
-      // Bridge intentionally has NO pill (the panel below already shows the status).
-      if (typeof cfg.mountPill === 'function' && !document.getElementById(cfg.pillId)){
-        var pill = document.createElement('div');
-        pill.id = cfg.pillId;
-        pill.className = 'dgv-pill';
-        pill.style.cssText = 'display:inline-flex;align-items:center;gap:5px;font-size:8.5px;font-weight:700;padding:3px 10px;border-radius:999px;background:rgba(255,255,255,.05);border:1px solid var(--border);color:var(--muted2)';
-        pill.textContent = LABEL.UNKNOWN;
-        var ok = cfg.mountPill(pill);
-        if (ok === false && pill.parentNode) pill.parentNode.removeChild(pill);
+      // A pre-placed container may already exist in the markup (e.g. Cross-Chain's
+      // #dgv-panel-xchain lives inside the "Destination Gas" card). If so, populate
+      // it IN PLACE so it renders exactly like the Bridge panel — without moving it
+      // or changing the surrounding layout. Only fill it once (when still empty).
+      var existing = document.getElementById(cfg.panelId);
+      if (existing){
+        if (!existing.querySelector('.dgv-dot')){
+          existing.classList.add('dgv-panel');
+          existing.innerHTML = panelHTML;
+        }
+        finishPanel(existing);
+        return true;
       }
-      cacheEls();
-      var cb = wrap.querySelector('.dgv-ack-cb');
-      if (cb) cb.addEventListener('change', function(){
-        acknowledged = !!cb.checked;
-        applyButtonState();
-      });
+
+      var wrap = document.createElement('div');
+      wrap.id = cfg.panelId;
+      wrap.className = 'dgv-panel';
+      wrap.style.cssText = 'box-sizing:border-box;width:100%;margin:10px 0 0;border:1px solid var(--border);border-radius:8px;padding:9px 11px;background:rgba(0,0,0,.18);font-size:9.5px;line-height:1.45';
+      wrap.innerHTML = panelHTML;
+      btn.parentNode.insertBefore(wrap, btn);
+      finishPanel(wrap);
       return true;
+
+      function finishPanel(container){
+        // Compact status pill (placement is fully controlled per-page via cfg.mountPill).
+        // Bridge/Cross-Chain intentionally have NO injected pill (the panel below shows status).
+        if (typeof cfg.mountPill === 'function' && !document.getElementById(cfg.pillId)){
+          var pill = document.createElement('div');
+          pill.id = cfg.pillId;
+          pill.className = 'dgv-pill';
+          pill.style.cssText = 'display:inline-flex;align-items:center;gap:5px;font-size:8.5px;font-weight:700;padding:3px 10px;border-radius:999px;background:rgba(255,255,255,.05);border:1px solid var(--border);color:var(--muted2)';
+          pill.textContent = LABEL.UNKNOWN;
+          var ok = cfg.mountPill(pill);
+          if (ok === false && pill.parentNode) pill.parentNode.removeChild(pill);
+        }
+        cacheEls();
+        var cb = container.querySelector('.dgv-ack-cb');
+        if (cb) cb.addEventListener('change', function(){
+          acknowledged = !!cb.checked;
+          applyButtonState();
+        });
+      }
 
       function row(label, cls){
         return '<div style="display:flex;justify-content:space-between;gap:10px">' +
@@ -35880,7 +35923,11 @@ const UBScreen = (function() {
       keyNow: function(){ return String(cfg.getChainId()) + ':' + String(cfg.getAddress()); },
       lastKey: function(){ return lastKey; },
       gate: gate,
-      ensure: function(){ if (!document.getElementById(cfg.panelId)) buildPanel(); }
+      ensure: function(){
+        var p = document.getElementById(cfg.panelId);
+        // Build when missing, OR populate a pre-placed empty container (Cross-Chain).
+        if (!p || !p.querySelector('.dgv-dot')) buildPanel();
+      }
     };
   }
 
@@ -35902,14 +35949,12 @@ const UBScreen = (function() {
     pillId: 'dgv-pill-xchain',
     // Cross-Chain: no pill — status is shown in the panel below the form.
     mountPill: null,
+    walletLabel: 'Your Wallet (gas payer)',
     getChainId: function(){ return safeGet(function(){ return CHAINS[xcToIdx].chainId; }); },
-    getAddress: function(){ return safeGet(function(){
-      var c = CHAINS[xcToIdx];
-      if (c && c.id === 'Arc_Testnet') return (typeof walletAddress !== 'undefined' && walletAddress) ? walletAddress : null;
-      var el = document.getElementById('xc-recipient');
-      var v = el ? (el.value || '').trim() : '';
-      return /^0x[0-9a-fA-F]{40}$/.test(v) ? v : null;
-    }); }
+    // Gas on the destination chain is paid by the CONNECTED wallet (the sender),
+    // not by the recipient — so validate the connected wallet's native balance on
+    // the destination network, exactly like the Bridge does.
+    getAddress: function(){ return safeGet(function(){ return (typeof walletAddress !== 'undefined' && walletAddress) ? walletAddress : null; }); }
   });
 
   var controllers = [bridgeCtl, xcCtl];
@@ -37927,7 +37972,7 @@ const AutonomaAgent = (() => {
     // List / cancel tasks
     if (/\b(agent tasks|my tasks|minhas tarefas|scheduled tasks|tarefas agendadas)\b/.test(low)){
       if (!mem.tasks.length) return card(head('calendar','Scheduled Tasks'), row('Tasks','none scheduled',''),'');
-      const body = mem.tasks.map(t => row(new Date(t.when).toLocaleString(), esc(t.tool)+(t.type==='daily'?' (daily)':''),'')).join('');
+      const body = mem.tasks.map(t => row(new Date(t.when).toLocaleString('en-US',{month:'2-digit',day:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit',hour12:true}), esc(t.tool)+(t.type==='daily'?' (daily)':''),'')).join('');
       return card(head('calendar','Scheduled Tasks',{text:String(mem.tasks.length),cls:'live'}), body, '');
     }
     let ct = low.match(/\b(cancel task|cancelar tarefa)\s+(\S+)/);
@@ -38040,7 +38085,7 @@ const AutonomaAgent = (() => {
         (rcptName ? row('Recipient', rcptName, 'purple') + row('Address', rcptAddress ? rcptAddress.slice(0,8)+'...'+rcptAddress.slice(-4) : '—', 'teal') : '') +
         row('Amount', (parseFloat(p.params.amount)||0).toFixed(2)+' '+(/\beurc\b/i.test(raw)?'EURC':/\bcirbtc\b/i.test(raw)?'cirBTC':'USDC'),'green') +
         row('Frequency', sch.type==='daily'?'Daily':sch.type==='weekly'?'Weekly':sch.type==='monthly'?'Monthly':sch.type==='biweekly'?'Bi-weekly':'One-time','teal') +
-        row('When', new Date(sch.when).toLocaleString(),'') +
+        row('When', new Date(sch.when).toLocaleString('en-US',{month:'2-digit',day:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit',hour12:true}),'') +
         row('Status','Active — view in Schedule page','green') +
         intro('Manual mode: when due I will notify you to run it (money is never auto-executed in Phase 1).'),
         acts({icon:'external-link',label:'View Schedules',cls:'primary',action:"showPage('schedule')"},
@@ -38135,7 +38180,7 @@ const AutonomaAgent = (() => {
       if (/\b(receive payment|receber pagament|recebimento)\b/.test(low)) return runWorkflow('receive_payments');
       const ws=workflows(); return card(head('sitemap','Workflows',{text:String(ws.length),cls:'live'}), ws.map(w=>row(w.label, w.steps+' steps','')).join(''), acts({icon:'player-play',label:'Receive Payments',cls:'primary',action:"autonomaSendQuick('workflow receive payments')"})); }
     if (/\b(agent events|event log|eventos|últimos eventos|ultimos eventos)\b/.test(low)){
-      const ev=detectEvents(); return card(head('timeline','Event Log',{text:String(ev.length),cls:'live'}), ev.length?ev.map(e=>row(e.type, esc(e.msg)+' · '+new Date(e.ts).toLocaleTimeString(),'')).join(''):row('Events','none yet','green'), ''); }
+      const ev=detectEvents(); return card(head('timeline','Event Log',{text:String(ev.length),cls:'live'}), ev.length?ev.map(e=>row(e.type, esc(e.msg)+' · '+new Date(e.ts).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true}),'')).join(''):row('Events','none yet','green'), ''); }
     if (/\b(suggestions|sugest[oõ]es|o que devo fazer|what should i do|recommend)\b/.test(low)){
       const sg=suggestions(); return card(head('bulb','Smart Suggestions',{text:String(sg.length),cls:'live'}), sg.map(s=>row('•', esc(s),'')).join(''), ''); }
     // Financial Intelligence
@@ -38143,7 +38188,7 @@ const AutonomaAgent = (() => {
       return card(head('chart-line','Revenue',{text:'read-only',cls:'live'}), row('Revenue (tracked)','$'+_received().toFixed(2),'green'), acts({icon:'history',label:'Reports',cls:'',action:"showPage('reports')"})); }
     if (/\b(clientes ativos|active customers)\b/.test(low)){
       const since=Date.now()-30*86400000; const act=customers().filter(c=>c.lastCharge&&c.lastCharge>=since);
-      return card(head('users','Active Customers',{text:String(act.length),cls:'live'}), act.length?act.map(c=>row(esc(c.name||c.id), new Date(c.lastCharge).toLocaleDateString(),'')).join(''):row('Active (30d)','none',''), ''); }
+      return card(head('users','Active Customers',{text:String(act.length),cls:'live'}), act.length?act.map(c=>row(esc(c.name||c.id), new Date(c.lastCharge).toLocaleDateString('en-US',{month:'2-digit',day:'2-digit',year:'numeric'}),'')).join(''):row('Active (30d)','none',''), ''); }
     if (/\b(pagamentos pendentes|pending payments)\b/.test(low)){
       const ns=detectNotifications().filter(n=>/pending|bridge/i.test(n.type)); return card(head('clock-exclamation','Pending Payments',{text:String(ns.length),cls: ns.length?'pending':'live'}), ns.length?ns.map(n=>row(n.type,esc(n.msg),'yellow')).join(''):row('Pending','none','green'), acts({icon:'file-invoice',label:'Invoices',cls:'',action:"showPage('invoices')"})); }
     if (/\b(historico financeiro|histórico financeiro|financial history)\b/.test(low)){
@@ -38158,7 +38203,7 @@ const AutonomaAgent = (() => {
       const body=(notes.length?notes.map(n=>row(n.type, esc(n.msg),'yellow')).join(''):row('Queue/Settlements','none pending','green'))+(cust.length?row('Customers',cust.length+' with charges',''):'');
       return card(head('clock-exclamation','Pending',{text:'read-only',cls:'live'}), body, acts({icon:'file-invoice',label:'Invoices',cls:'',action:"showPage('invoices')"})); }
     if (/\b(qual (a )?minha atividade|minha atividade|my activity|recent activity|atividade recente)\b/.test(low)){
-      const a=_activityList(); const body=a.length?a.map(x=>row(esc(x.type||'activity'), esc((x.amount!=null?x.amount:'')+' '+(x.ts?new Date(x.ts).toLocaleDateString():'')),'')).join(''):row('Activity','none yet','');
+      const a=_activityList(); const body=a.length?a.map(x=>row(esc(x.type||'activity'), esc((x.amount!=null?x.amount:'')+' '+(x.ts?new Date(x.ts).toLocaleDateString('en-US',{month:'2-digit',day:'2-digit',year:'numeric'}):'')),'')).join(''):row('Activity','none yet','');
       return card(head('activity','Your activity',{text:'recent',cls:'live'}), body, acts({icon:'history',label:'Full history',cls:'',action:"showPage('reports')"})); }
     if (/\b(qual meu saldo|meu saldo|my balance|what(')?s my balance)\b/.test(low)){
       const sb=document.getElementById('sb-bal'); return card(head('wallet','Balance',{text:'active chain',cls:'live'}), row('Balance', esc(sb?sb.textContent:'—')+' USDC','green'), acts({icon:'refresh',label:'Wallet summary',cls:'',action:"autonomaSendQuick('Show my wallet summary')"})); }
@@ -38167,7 +38212,7 @@ const AutonomaAgent = (() => {
     if (/\b(capabilities|capacidades|agent capabilities|o que voce consegue|o que você consegue)\b/.test(low)){
       const cs=capabilities(); return card(head('cpu','Capability Registry',{text:String(cs.length),cls:'live'}), cs.map(c=>row(c.label, c.type, c.type==='financial'?'yellow':'')).join(''), ''); }
     if (/\b(meus clientes|my customers|customers|clientes(\b|$))\b/.test(low) && !/\bcobr/.test(low)){
-      const cs=customers(); return card(head('users','Customers',{text:String(cs.length),cls:'live'}), cs.length?cs.map(c=>row(esc(c.name||c.id), c.lastCharge?new Date(c.lastCharge).toLocaleDateString():'no charges','')).join(''):row('Customers','none saved yet',''), ''); }
+      const cs=customers(); return card(head('users','Customers',{text:String(cs.length),cls:'live'}), cs.length?cs.map(c=>row(esc(c.name||c.id), c.lastCharge?new Date(c.lastCharge).toLocaleDateString('en-US',{month:'2-digit',day:'2-digit',year:'numeric'}):'no charges','')).join(''):row('Customers','none saved yet',''), ''); }
 
     // ── Phase 5: App Intelligence (Q&A) ──
     if (/\b(o que posso fazer|what can i do|quais (as )?op[cç]oes|capabilities)\b/.test(low)){
@@ -38719,6 +38764,207 @@ window.addEventListener('unhandledrejection', function(e) {
       }
     } catch(e){}
   });
+})();
+
+// ══════════════════════════════════════════════════════════
+//  ENGLISH DATE PICKER (locale-independent)
+//  Replaces native date/datetime inputs so the UI always shows
+//  English month names and the US MM/DD/YYYY format regardless
+//  of the browser's UI locale. The element's .value is preserved
+//  as ISO (YYYY-MM-DD or YYYY-MM-DDTHH:mm) so all existing
+//  read/write logic keeps working unchanged.
+// ══════════════════════════════════════════════════════════
+(function(){
+  'use strict';
+  var MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  var DOW = ['Su','Mo','Tu','We','Th','Fr','Sa'];
+  var nativeDesc = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+  var pop = null, cur = null;
+
+  function pad(n){ return (n < 10 ? '0' : '') + n; }
+
+  function isoToDisplay(iso, mode){
+    if(!iso) return '';
+    if(mode === 'datetime'){
+      var m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(iso);
+      return m ? (m[2] + '/' + m[3] + '/' + m[1] + ' ' + m[4] + ':' + m[5]) : '';
+    }
+    var d = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
+    return d ? (d[2] + '/' + d[3] + '/' + d[1]) : '';
+  }
+
+  function applyDisplay(el){
+    if(nativeDesc && nativeDesc.set) nativeDesc.set.call(el, isoToDisplay(el._eldpIso || '', el.getAttribute('data-eldp')));
+  }
+
+  function fire(el){
+    try { el.dispatchEvent(new Event('input', { bubbles: true })); } catch(_){}
+    try { el.dispatchEvent(new Event('change', { bubbles: true })); } catch(_){}
+  }
+
+  function upgrade(el){
+    if(el._eldpReady) return;
+    el._eldpReady = true;
+    var existing = (nativeDesc && nativeDesc.get) ? nativeDesc.get.call(el) : '';
+    el._eldpIso = /^\d{4}-\d{2}-\d{2}/.test(existing) ? existing : '';
+    Object.defineProperty(el, 'value', {
+      configurable: true,
+      get: function(){ return this._eldpIso || ''; },
+      set: function(v){ this._eldpIso = (v == null ? '' : String(v)); applyDisplay(this); }
+    });
+    applyDisplay(el);
+    el.addEventListener('mousedown', function(e){ e.preventDefault(); openPicker(el); });
+    el.addEventListener('keydown', function(e){ if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); openPicker(el); } });
+  }
+
+  function ensurePop(){
+    if(pop) return pop;
+    pop = document.createElement('div');
+    pop.className = 'eldp-pop';
+    pop.addEventListener('mousedown', function(e){ e.stopPropagation(); });
+    document.body.appendChild(pop);
+    document.addEventListener('mousedown', function(e){ if(cur && pop.classList.contains('open') && e.target !== cur.el) closePicker(); });
+    document.addEventListener('keydown', function(e){ if(e.key === 'Escape') closePicker(); });
+    window.addEventListener('resize', closePicker);
+    window.addEventListener('scroll', closePicker, true);
+    return pop;
+  }
+
+  function closePicker(){ if(pop) pop.classList.remove('open'); cur = null; }
+
+  function openPicker(el){
+    ensurePop();
+    var mode = el.getAttribute('data-eldp');
+    var base = null;
+    if(el._eldpIso){ base = parseIso(el._eldpIso); }
+    if(!base){ base = new Date(); base.setHours(0,0,0,0); }
+    cur = { el: el, mode: mode, viewY: base.getFullYear(), viewM: base.getMonth(),
+            selIso: el._eldpIso || '', hh: base.getHours(), mm: base.getMinutes() };
+    render();
+    pop.classList.add('open');
+    position(el);
+  }
+
+  function parseIso(iso){
+    var m = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}))?/.exec(iso);
+    if(!m) return null;
+    return new Date(+m[1], +m[2]-1, +m[3], m[4]?+m[4]:0, m[5]?+m[5]:0, 0, 0);
+  }
+
+  function position(el){
+    var r = el.getBoundingClientRect();
+    var pw = pop.offsetWidth || 236, ph = pop.offsetHeight || 280;
+    var left = r.left, top = r.bottom + 4;
+    if(left + pw > window.innerWidth - 8) left = Math.max(8, window.innerWidth - pw - 8);
+    if(top + ph > window.innerHeight - 8) top = Math.max(8, r.top - ph - 4);
+    pop.style.left = left + 'px';
+    pop.style.top = top + 'px';
+  }
+
+  function commit(){
+    var sel = cur.selIso ? parseIso(cur.selIso) : null;
+    if(!sel) return;
+    var iso;
+    if(cur.mode === 'datetime'){
+      iso = sel.getFullYear() + '-' + pad(sel.getMonth()+1) + '-' + pad(sel.getDate()) + 'T' + pad(cur.hh) + ':' + pad(cur.mm);
+    } else {
+      iso = sel.getFullYear() + '-' + pad(sel.getMonth()+1) + '-' + pad(sel.getDate());
+    }
+    cur.el._eldpIso = iso;
+    applyDisplay(cur.el);
+    fire(cur.el);
+  }
+
+  function render(){
+    var y = cur.viewY, m = cur.viewM;
+    var first = new Date(y, m, 1);
+    var startDow = first.getDay();
+    var daysInMonth = new Date(y, m+1, 0).getDate();
+    var prevDays = new Date(y, m, 0).getDate();
+    var today = new Date(); today.setHours(0,0,0,0);
+    var selDate = cur.selIso ? parseIso(cur.selIso) : null;
+
+    var html = '';
+    html += '<div class="eldp-head">';
+    html += '<button type="button" class="eldp-nav" data-nav="-1">&#8249;</button>';
+    html += '<div class="eldp-title">' + MONTHS[m] + ' ' + y + '</div>';
+    html += '<button type="button" class="eldp-nav" data-nav="1">&#8250;</button>';
+    html += '</div><div class="eldp-grid">';
+    for(var d0=0; d0<7; d0++) html += '<div class="eldp-dow">' + DOW[d0] + '</div>';
+    var cell = 0;
+    for(var i=0; i<42; i++){
+      var dayNum, cellY = y, cellM = m, muted = false;
+      if(i < startDow){ dayNum = prevDays - startDow + 1 + i; cellM = m-1; muted = true; if(cellM<0){cellM=11;cellY--;} }
+      else if(i >= startDow + daysInMonth){ dayNum = i - startDow - daysInMonth + 1; cellM = m+1; muted = true; if(cellM>11){cellM=0;cellY++;} }
+      else { dayNum = i - startDow + 1; }
+      var cellDate = new Date(cellY, cellM, dayNum);
+      var cls = 'eldp-day';
+      if(muted) cls += ' eldp-muted';
+      if(cellDate.getTime() === today.getTime()) cls += ' eldp-today';
+      if(selDate && cellDate.getFullYear()===selDate.getFullYear() && cellDate.getMonth()===selDate.getMonth() && cellDate.getDate()===selDate.getDate()) cls += ' eldp-sel';
+      html += '<div class="' + cls + '" data-y="' + cellY + '" data-m="' + cellM + '" data-d="' + dayNum + '">' + dayNum + '</div>';
+    }
+    html += '</div>';
+
+    if(cur.mode === 'datetime'){
+      html += '<div class="eldp-time"><span>Time (UTC)</span><select data-th>';
+      for(var h=0; h<24; h++) html += '<option value="' + h + '"' + (h===cur.hh?' selected':'') + '>' + pad(h) + '</option>';
+      html += '</select><span>:</span><select data-tm>';
+      for(var mn=0; mn<60; mn++) html += '<option value="' + mn + '"' + (mn===cur.mm?' selected':'') + '>' + pad(mn) + '</option>';
+      html += '</select></div>';
+    }
+
+    html += '<div class="eldp-foot">';
+    html += '<button type="button" class="eldp-btn" data-act="clear">Clear</button>';
+    if(cur.mode === 'datetime') html += '<button type="button" class="eldp-btn primary" data-act="done">Done</button>';
+    else html += '<button type="button" class="eldp-btn" data-act="today">Today</button>';
+    html += '</div>';
+
+    pop.innerHTML = html;
+    bind();
+  }
+
+  function bind(){
+    pop.querySelectorAll('.eldp-nav').forEach(function(b){
+      b.addEventListener('click', function(){
+        cur.viewM += parseInt(b.getAttribute('data-nav'),10);
+        if(cur.viewM < 0){ cur.viewM = 11; cur.viewY--; }
+        if(cur.viewM > 11){ cur.viewM = 0; cur.viewY++; }
+        render(); position(cur.el);
+      });
+    });
+    pop.querySelectorAll('.eldp-day').forEach(function(c){
+      c.addEventListener('click', function(){
+        var yy = +c.getAttribute('data-y'), mm = +c.getAttribute('data-m'), dd = +c.getAttribute('data-d');
+        cur.selIso = yy + '-' + pad(mm+1) + '-' + pad(dd) + (cur.mode==='datetime' ? 'T'+pad(cur.hh)+':'+pad(cur.mm) : '');
+        commit();
+        if(cur.mode === 'datetime'){ cur.viewY = yy; cur.viewM = mm; render(); position(cur.el); }
+        else closePicker();
+      });
+    });
+    var th = pop.querySelector('[data-th]'), tm = pop.querySelector('[data-tm]');
+    if(th) th.addEventListener('change', function(){ cur.hh = +th.value; if(cur.selIso) commit(); });
+    if(tm) tm.addEventListener('change', function(){ cur.mm = +tm.value; if(cur.selIso) commit(); });
+    pop.querySelectorAll('[data-act]').forEach(function(b){
+      b.addEventListener('click', function(){
+        var act = b.getAttribute('data-act');
+        if(act === 'clear'){ cur.el._eldpIso = ''; applyDisplay(cur.el); fire(cur.el); closePicker(); }
+        else if(act === 'today'){
+          var t = new Date();
+          cur.selIso = t.getFullYear() + '-' + pad(t.getMonth()+1) + '-' + pad(t.getDate());
+          commit(); closePicker();
+        } else if(act === 'done'){ closePicker(); }
+      });
+    });
+  }
+
+  function upgradeAll(){
+    document.querySelectorAll('input[data-eldp]').forEach(upgrade);
+  }
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', upgradeAll);
+  else upgradeAll();
+  // Re-scan in case inputs are added later
+  window.EnglishDatePicker = { refresh: upgradeAll };
 })();
 
 </script>
