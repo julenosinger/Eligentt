@@ -14082,7 +14082,7 @@ async function connectTrustWallet() {
     }
     showInstallPanel(
       'Trust Wallet', 'https://trustwallet.com/download',
-      '<svg viewBox="0 0 40 40" fill="none" style="width:44px;height:44px"><rect width="40" height="40" rx="10" fill="#0500FF"/><path d="M20 8C14 8 10 12 10 12s4 12 10 18c6-6 10-18 10-18s-4-4-10-4z" fill="white"/></svg>',
+      '<img src="/assets/wallets/trust-wallet.svg" alt="Trust Wallet" style="width:44px;height:44px;border-radius:10px"/>',
       '<strong style="color:#dde2f0">Trust Wallet not detected.</strong><br/>1. Install Trust Wallet<br/>2. Open this page in Trust Wallet browser<br/>3. Connect'
     );
     return;
@@ -14142,7 +14142,7 @@ async function connectCoinbase() {
     }
     showInstallPanel(
       'Coinbase Wallet', 'https://www.coinbase.com/wallet/downloads',
-      `<svg viewBox="0 0 40 40" fill="none" style="width:44px;height:44px"><circle cx="20" cy="20" r="20" fill="#1652F0"/><path fill-rule="evenodd" clip-rule="evenodd" d="M20 8C13.37 8 8 13.37 8 20s5.37 12 12 12 12-5.37 12-12S26.63 8 20 8zm-2.5 8.5h5a.5.5 0 01.5.5v6a.5.5 0 01-.5.5h-5a.5.5 0 01-.5-.5V17a.5.5 0 01.5-.5z" fill="white"/></svg>`,
+      `<img src="/assets/wallets/coinbase-wallet.svg" alt="Coinbase Wallet" style="width:44px;height:44px;border-radius:10px"/>`,
       `<strong style="color:#dde2f0">Coinbase Wallet not installed.</strong><br/>
        1. Copy URL → open in a new tab<br/>
        2. Install <strong>Coinbase Wallet</strong> extension<br/>
@@ -14174,7 +14174,7 @@ async function connectRabby() {
     }
     showInstallPanel(
       'Rabby Wallet', 'https://rabby.io/',
-      `<svg viewBox="0 0 40 40" fill="none" style="width:44px;height:44px"><rect width="40" height="40" rx="10" fill="#7B5CF5"/><path d="M20 10c-5.52 0-10 4.48-10 10s4.48 10 10 10 10-4.48 10-10S25.52 10 20 10zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z" fill="white"/></svg>`,
+      `<img src="/assets/wallets/rabby.svg" alt="Rabby Wallet" style="width:44px;height:44px;border-radius:10px"/>`,
       `<strong style="color:#dde2f0">Rabby Wallet not installed.</strong><br/>
        1. Copy URL → open in a new tab<br/>
        2. Install <strong>Rabby</strong> extension<br/>
@@ -24446,8 +24446,9 @@ function xcApplyChains() {
     fromHealth.style.background = isActive ? 'var(--green)' : 'var(--muted2)';
   }
 
-  // Fetch origin chain balance
+  // Fetch origin & destination chain balance
   xcRefreshOriginBalance();
+  xcRefreshDestBalance();
 
   xcUpdateFees();
   xcUpdateRouteUI();
@@ -24524,6 +24525,31 @@ async function xcRefreshOriginBalance() {
   } catch(e) {
     if(usdcEl) usdcEl.textContent = '—';
     if(gasEl)  gasEl.textContent  = '—';
+  }
+}
+
+// ── Fetch destination chain USDC balance ──
+async function xcRefreshDestBalance() {
+  const to = CHAINS[xcToIdx];
+  const cfg = CCTP_CONFIG[to.chainId];
+  const usdcEl = document.getElementById("xc-to-usdc");
+  if(!usdcEl) return;
+  if(!cfg || !walletAddress) {
+    usdcEl.textContent = '—';
+    return;
+  }
+  try {
+    const prov = (typeof getCachedProvider === 'function') ? getCachedProvider(cfg.rpc || to.rpc) : null;
+    if(!prov) { usdcEl.textContent = '—'; return; }
+    if(cfg.usdc) {
+      const usdc = new ethers.Contract(cfg.usdc, ['function balanceOf(address) view returns (uint256)'], prov);
+      const bal = await usdc.balanceOf(walletAddress);
+      usdcEl.textContent = parseFloat(ethers.formatUnits(bal, 6)).toLocaleString('en-US',{maximumFractionDigits:2}) + ' USDC';
+    } else {
+      usdcEl.textContent = '—';
+    }
+  } catch(e) {
+    usdcEl.textContent = '—';
   }
 }
 
