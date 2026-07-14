@@ -207,6 +207,144 @@
   load();
   start();
 
+  /* ════════════════════════════════════════
+     AGENT WALLET & IDENTITY INTEGRATION
+  ════════════════════════════════════════ */
+  function getAgentIdentityCard(R){
+    if(!R) R={row:function(l,v,c){return '<div class="aut-rc-row"><span class="aut-rl">'+l+'</span><span class="aut-rv" style="color:var(--'+(c||'text')+')">'+v+'</span></div>';},head:function(i,t,b){return '<div class="aut-rc-head"><i class="ti ti-'+i+'"></i><span class="aut-rc-title">'+t+'</span>'+(b?'<span class="aut-rc-badge '+b.cls+'">'+b.text+'</span>':'')+'</div>';},sep:function(){return '<div class="aut-rc-sep"></div>';}};
+    var identity=typeof AgentIdentity!=='undefined'?AgentIdentity.getDisplayIdentity():null;
+    var state=typeof AgentWalletManager!=='undefined'?AgentWalletManager.getSecureWalletSummary():null;
+    var reputation=typeof AgentReputation!=='undefined'?AgentReputation.getReputationGrade():null;
+    var session=typeof AgentSession!=='undefined'?AgentSession.getSessionSummary():null;
+    var authSummary=typeof AgentAuthorization!=='undefined'?AgentAuthorization.getAuthSummary():null;
+
+    if(!identity && !state) return '';
+
+    var agentName=identity?identity.name:'Autonoma';
+    var walletAddr=state?state.walletAddress:(identity?identity.wallet:null);
+    var shortAddr=walletAddr?walletAddr.slice(0,6)+'...'+walletAddr.slice(-4):'—';
+
+    return '<div class="aut-rc" style="border-color:rgba(167,139,250,.25);margin-top:8px">'+
+      R.head('robot',agentName,reputation?{text:reputation.grade+' '+reputation.label,cls:'live'}:{text:'Active',cls:'live'})+
+      '<div class="aut-rc-body">'+
+      R.row('Wallet',shortAddr,'purple')+
+      (identity&&identity.tokenId?R.row('ERC-8004 ID','Token #'+identity.tokenId,'green'):R.row('ERC-8004',identity&&identity.verificationStatus==='registered'?'Registered':'Not registered','yellow'))+
+      R.row('Reputation',(state?state.reputationScore:'—')+'/100','purple')+
+      R.sep()+
+      R.row('Version',identity?identity.version:'1.0.0','muted')+
+      R.row('Developer',identity?identity.developer:'Elligentt','muted')+
+      (state&&state.identityRegistered?R.row('Registration',new Date(state.registrationDate).toLocaleDateString(),'muted'):'')+
+      R.sep()+
+      R.row('Status',state&&state.status==='active'?'<span style="color:#22c55e">Active</span>':'<span style="color:#f59e0b">'+((state&&state.status)||'Unknown')+'</span>','muted')+
+      R.row('Executions',String(state?state.executionCount||0:0),'muted')+
+      (authSummary?R.row('Authorizations',String(authSummary.count)+' active','green'):'')+
+      (session&&session.isPaused?R.row('Paused','<span style="color:#f59e0b">Yes</span>','yellow'):'')+
+      R.sep()+
+      R.row('Capabilities',(identity&&identity.capabilities?identity.capabilities.slice(0,5).join(', '):'—'),'muted')+
+      '</div></div>';
+  }
+
+  function getAgentAuthorizationCard(R){
+    if(!R) R={row:function(l,v,c){return '<div class="aut-rc-row"><span class="aut-rl">'+l+'</span><span class="aut-rv" style="color:var(--'+(c||'text')+')">'+v+'</span></div>';},head:function(i,t,b){return '<div class="aut-rc-head"><i class="ti ti-'+i+'"></i><span class="aut-rc-title">'+t+'</span>'+(b?'<span class="aut-rc-badge '+b.cls+'">'+b.text+'</span>':'')+'</div>';},sep:function(){return '<div class="aut-rc-sep"></div>';}};
+    if(typeof AgentAuthorization==='undefined') return '';
+    var active=AgentAuthorization.getActive();
+    if(active.length===0){
+      return '<div class="aut-rc" style="border-color:rgba(245,158,11,.2);margin-top:8px">'+
+        R.head('shield-off','Agent Permissions',{text:'None',cls:'danger'})+
+        '<div class="aut-rc-body">'+
+        '<div style="font-size:9px;color:var(--muted)">No agent authorization active.</div>'+
+        '<div style="font-size:9px;color:var(--muted2);margin-top:4px">Enable autonomous execution to grant the Agent Wallet permission to operate on your behalf.</div>'+
+        '</div></div>';
+    }
+    var rows='';
+    for(var i=0;i<active.length;i++){
+      var a=active[i];
+      rows+=R.head('shield-check',a.purpose||'Authorization',{text:a.status.toUpperCase(),cls:a.status==='active'?'live':'pending'})+
+        R.row('Max Spending','$'+String(a.maxSpending||'999999'),'green')+
+        (a.dailyLimit?R.row('Daily Limit','$'+String(a.dailyLimit),'green'):'')+
+        R.row('Tokens',(a.allowedTokens||['*']).join(', '),'muted')+
+        R.row('Networks',(a.allowedNetworks||['*']).join(', '),'muted')+
+        R.row('Allowed Ops',typeof AgentAuthorization!=='undefined'?AgentAuthorization.fmtAllowedOps(a):'',a.allowSwap?'green':'muted')+
+        R.row('Expires',typeof AgentAuthorization!=='undefined'?AgentAuthorization.fmtTimeLeft(a.expiresAt):'','muted')+
+        R.sep();
+    }
+    return '<div class="aut-rc" style="border-color:rgba(34,197,94,.2);margin-top:8px">'+
+      R.head('shield-check','Agent Permissions',{text:active.length+' active',cls:'live'})+
+      '<div class="aut-rc-body">'+rows+'</div></div>';
+  }
+
+  function getAgentReply(query){
+    if(typeof AgentIdentity==='undefined') return null;
+    var q=query.toLowerCase();
+
+    if(/\bwho are you\b/i.test(q)||/\bquem [eé] voc[eê]/i.test(q)){
+      return {type:'agent',card:'identity'};
+    }
+    if(/\bshow your wallet\b/i.test(q)||/\bmostr[ae] sua carteira\b/i.test(q)||/\bagent wallet\b/i.test(q)){
+      return {type:'agent',card:'wallet'};
+    }
+    if(/\bwhat permissions\b/i.test(q)||/\bquais permiss[oõ]es\b/i.test(q)||/\bshow.*permissions\b/i.test(q)||/\bmostr.*permiss[oõ]es\b/i.test(q)){
+      return {type:'agent',card:'authorization'};
+    }
+    if(/\bpause.*autonomous\b/i.test(q)||/\bpausar.*aut[oô]nomo\b/i.test(q)||/\bpause agent\b/i.test(q)||/\bpausar agente\b/i.test(q)){
+      return {type:'agent',action:'pause'};
+    }
+    if(/\bresume.*autonomous\b/i.test(q)||/\bretomar.*aut[oô]nomo\b/i.test(q)||/\bresume agent\b/i.test(q)||/\bretomar agente\b/i.test(q)){
+      return {type:'agent',action:'resume'};
+    }
+    if(/\brevoke.*authorization\b/i.test(q)||/\brevogar.*autoriza[cç][aã]o\b/i.test(q)||/\brevoke agent\b/i.test(q)){
+      return {type:'agent',action:'revoke'};
+    }
+    if(/\bincrease daily limit\b/i.test(q)||/\baumentar limite di[aá]rio\b/i.test(q)){
+      return {type:'agent',action:'increase_daily_limit'};
+    }
+    if(/\bdisable bridge\b/i.test(q)||/\bdesabilitar bridge\b/i.test(q)){
+      return {type:'agent',action:'disable_bridge'};
+    }
+    if(/\ballow treasury only\b/i.test(q)||/\bpermitir apenas treasury\b/i.test(q)){
+      return {type:'agent',action:'treasury_only'};
+    }
+    if(/\ballow only arc\b/i.test(q)||/\bpermitir apenas arc\b/i.test(q)){
+      return {type:'agent',action:'arc_only'};
+    }
+    if(/\bextend authorization\b/i.test(q)||/\bextender autoriza[cç][aã]o\b/i.test(q)){
+      return {type:'agent',action:'extend'};
+    }
+    if(/\blimit swaps to\b/i.test(q)||/\blimitar swaps\b/i.test(q)){
+      return {type:'agent',action:'limit_swaps'};
+    }
+    if(/\bcan you execute swaps automatically\b/i.test(q)||/\bvoc[eê] pode executar swaps automaticamente\b/i.test(q)){
+      return {type:'agent',card:'authorization'};
+    }
+    if(/\bshow.*reputation\b/i.test(q)||/\bmostr.*reputa[cç][aã]o\b/i.test(q)){
+      return {type:'agent',card:'reputation'};
+    }
+    return null;
+  }
+
+  function getReputationCard(R){
+    if(!R) R={row:function(l,v,c){return '<div class="aut-rc-row"><span class="aut-rl">'+l+'</span><span class="aut-rv" style="color:var(--'+(c||'text')+')">'+v+'</span></div>';},head:function(i,t,b){return '<div class="aut-rc-head"><i class="ti ti-'+i+'"></i><span class="aut-rc-title">'+t+'</span>'+(b?'<span class="aut-rc-badge '+b.cls+'">'+b.text+'</span>':'')+'</div>';},sep:function(){return '<div class="aut-rc-sep"></div>';}};
+    var rep=typeof AgentReputation!=='undefined'?AgentReputation.getReputation():null;
+    if(!rep) return '';
+    var grade=typeof AgentReputation!=='undefined'?AgentReputation.getReputationGrade():{grade:'C',label:'Average',color:'#f59e0b'};
+    return '<div class="aut-rc" style="border-color:rgba(167,139,250,.2);margin-top:8px">'+
+      R.head('stars',grade.label,{text:'Grade '+grade.grade,cls:'live'})+
+      '<div class="aut-rc-body">'+
+      R.row('Score',String(rep.reputationScore)+'/100','purple')+
+      R.row('Completion Rate',String(rep.completionRate)+'%','green')+
+      R.row('Success',String(rep.successfulExecutions),'green')+
+      R.row('Failed',String(rep.failedExecutions),'red')+
+      R.row('Cancelled',String(rep.cancelledOperations),'yellow')+
+      R.row('Avg Execution',String(rep.averageExecutionTime)+'ms','muted')+
+      R.row('Avg Planning',String(rep.averagePlanningTime)+'ms','muted')+
+      R.sep()+
+      R.row('Swap Rate',String(rep.swapSuccessRate)+'%','muted')+
+      R.row('Bridge Rate',String(rep.bridgeSuccessRate)+'%','muted')+
+      R.row('Treasury Rate',String(rep.treasurySuccessRate)+'%','muted')+
+      R.row('Payment Rate',String(rep.paymentSuccessRate)+'%','muted')+
+      '</div></div>';
+  }
+
   window.AutonomaAgent = {
     createWorkflow: createWorkflow,
     updateStep: updateStep,
@@ -218,6 +356,11 @@
     checkAlerts: checkAlerts,
     injectAlerts: injectAlerts,
     getAlertHtml: getAlertHtml,
-    start: start
+    start: start,
+    // Agent identity & authorization
+    getAgentIdentityCard: getAgentIdentityCard,
+    getAgentAuthorizationCard: getAgentAuthorizationCard,
+    getAgentReply: getAgentReply,
+    getReputationCard: getReputationCard
   };
 })();

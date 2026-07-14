@@ -92,6 +92,27 @@ const SystemConfig = Object.freeze({
 
   APP_NAME:           'Elligentt',
   APP_URL:            'https://elligente.pages.dev',
+
+  // ── ERC-8004 Identity Contracts (Arc Testnet) ──
+  ERC8004_IDENTITY_REGISTRY:    '0x8004A818BFB912233c491871b3d84c89A494BD9e',
+  ERC8004_REPUTATION_REGISTRY:  '0x8004B663056A597Dffe9eCcC1965A193B7388713',
+  ERC8004_VALIDATION_REGISTRY:  '0x8004Cb1BF31DAf7788923b405b754f57acEB4272',
+
+  // ── Agent Configuration ──
+  AGENT_NAME:                'Autonoma',
+  AGENT_DESCRIPTION:         'AI-powered autonomous execution agent for Elligentt',
+  AGENT_DEVELOPER:           'Elligentt',
+  AGENT_VERSION:             '1.0.0',
+  AGENT_METADATA_URI:        'ipfs://bafkreibdi6623n3xpf7ymk62ckb4bo75o3qemwkpfvp5i25j66itxvsoei',
+
+  // ── Agent Policy Defaults ──
+  AGENT_MAX_GAS_USD:           5,
+  AGENT_MAX_SLIPPAGE_BPS:    100,
+  AGENT_MIN_CONTRACT_TRUST:   'medium',
+  AGENT_MAX_DAILY_OPS:        50,
+  AGENT_RETRY_MAX:             3,
+  AGENT_RETRY_DELAY_MS:    30000,
+  AGENT_SESSION_IDLE_MS: 86400000,
 });
 
 if (typeof window !== 'undefined') window.SystemConfig = SystemConfig;

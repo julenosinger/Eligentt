@@ -24,7 +24,21 @@
     hello: { aliases: ['hello','hi','hey','ola','olá','oi','bom dia','boa tarde','boa noite','good morning','good afternoon','good evening','hey there','eai','e aí'], goal: 'greeting', module: null },
     liquidity: { aliases: ['liquidity','liquidez','pool','lp','posição','position','add liquidity','adicionar liquidez','remove liquidity','remover liquidez','withdraw liquidity','sacar liquidez'], goal: 'liquidity', module: 'pool' },
     invoice: { aliases: ['invoice','fatura','bill','cobrança','cobranca','billing','nota fiscal','receipt','recibo'], goal: 'invoice', module: 'invoices' },
-    multisend: { aliases: ['multisend','batch','lote','em massa','múltiplos','multiplos','vários','varios','diversos','many','multiple','csv'], goal: 'multisend', module: 'batch' }
+    multisend: { aliases: ['multisend','batch','lote','em massa','múltiplos','multiplos','vários','varios','diversos','many','multiple','csv'], goal: 'multisend', module: 'batch' },
+    // Agent identity & authorization
+    agent_identity: { aliases: ['who are you','quem é você','quem e voce','what are you','o que você é','o que voce e','tell me about yourself','me fale sobre você','me fale sobre voce','show your identity','sua identidade','seu registro','seja apresentado','se apresente','se apresentar'], goal: 'agent_identity', module: null },
+    agent_wallet: { aliases: ['show your wallet','mostre sua carteira','mostrar sua carteira','your wallet address','seu endereço','seu endereco','agent wallet','carteira do agente','qual sua carteira'], goal: 'agent_wallet', module: null },
+    agent_auth: { aliases: ['what permissions','quais permissões','quais permissoes','suas permissões','suas permissoes','what can you execute','o que você pode executar','can you execute','pode executar','your permissions','agent permissions','show permissions agent','autorizações','autorizacoes','your limits'], goal: 'agent_auth', module: null },
+    agent_pause: { aliases: ['pause agent','pausar agente','pause autonomous','pausar autônomo','pausar autonomo','stop agent','parar agente','disable autonomous','desabilitar autônomo','desabilitar autonomo','pause execution','pausar execução'], goal: 'agent_pause', module: null },
+    agent_resume: { aliases: ['resume agent','retomar agente','resume autonomous','retomar autônomo','retomar autonomo','enable autonomous','habilitar autônomo','habilitar autonomo','resume execution','retomar execução','ativar agente','activate agent'], goal: 'agent_resume', module: null },
+    agent_revoke: { aliases: ['revoke authorization','revogar autorização','revogar autorizacao','revoke agent','revogar agente','cancel authorization','cancelar autorização','cancelar autorizacao','remove permissions','remover permissões','remover permissoes'], goal: 'agent_revoke', module: null },
+    agent_reputation: { aliases: ['show reputation','mostrar reputação','mostrar reputacao','your reputation','sua reputação','sua reputacao','reputation score','pontuação de reputação','agent stats','estatísticas do agente','agent history'], goal: 'agent_reputation', module: null },
+    agent_allow: { aliases: ['allow agent','permitir agente','authorize agent','autorizar agente','allow swaps','permitir swaps','allow bridge','permitir bridge','allow payments','permitir pagamentos','grant permission','conceder permissão','conceder permissao','enable agent','ativar agente','allow treasury','permitir tesouraria'], goal: 'agent_allow', module: null },
+    agent_limit: { aliases: ['increase daily limit','aumentar limite diário','aumentar limite diario','increase limit','aumentar limite','set max spending','definir gasto máximo','definir gasto maximo','change limit','mudar limite','update limit','atualizar limite'], goal: 'agent_limit', module: null },
+    agent_disable_op: { aliases: ['disable bridge','desabilitar bridge','disable swap','desabilitar swap','disable swaps','disable treasury','disable payments','desabilitar pagamentos','desabilitar tesouraria','allow only','permitir apenas','restrict to','restringir para'], goal: 'agent_disable_op', module: null },
+    agent_extend: { aliases: ['extend authorization','extender autorização','extender autorizacao','prolongar autorização','renew authorization','renovar autorização'], goal: 'agent_extend', module: null },
+    agent_mission: { aliases: ['create mission','criar missão','criar missao','set up mission','configurar missão','new mission','nova missão','add mission','adicionar missão','keep treasury','manter tesouraria','pay suppliers','pagar fornecedores','bridge idle','bridge liquidity','reimburse failed','reembolsar falhas','swap rewards','trocar recompensas','liquidity ratio','taxa de liquidez','deposit excess','depositar excesso','my missions','minhas missões','show missions','mostrar missões','pause mission','pausar missão','resume mission','retomar missão','cancel mission','cancelar missão'], goal: 'agent_mission', module: null },
+    agent_treasury: { aliases: ['allocate','alocar','treasury allocation','alocação de tesouraria','allocate usdc','alocar usdc','allocate funds','alocar fundos','agent treasury','tesouraria do agente','show treasury','mostrar tesouraria','treasury balance','saldo da tesouraria','treasury budget','orçamento da tesouraria','treasury limit','limite da tesouraria','pause treasury','pausar tesouraria','resume treasury','retomar tesouraria','withdraw treasury','sacar tesouraria','withdraw unused','sacar não usado','sacar nao usado','create budget','criar orçamento','criar orcamento','treasury report','relatório de tesouraria','treasury performance'], goal: 'agent_treasury', module: null }
   };
 
   /* ════════════════════════════════════════
@@ -255,7 +269,14 @@
       balance: 'QUERY_BALANCE', permission: 'PERM_QUERY', schedule: 'CREATE_SCHEDULE',
       treasury: 'QUERY_TREASURY', history: 'QUERY_HISTORY', help: 'HELP',
       greeting: 'GREETING', liquidity: 'QUERY_LIQUIDITY', invoice: 'CREATE_INVOICE',
-      multisend: 'MULTISEND'
+      multisend: 'MULTISEND',
+      agent_identity: 'AGENT_IDENTITY', agent_wallet: 'AGENT_WALLET',
+      agent_auth: 'AGENT_AUTH', agent_pause: 'AGENT_PAUSE',
+      agent_resume: 'AGENT_RESUME', agent_revoke: 'AGENT_REVOKE',
+      agent_reputation: 'AGENT_REPUTATION',
+      agent_allow: 'AGENT_ALLOW', agent_limit: 'AGENT_LIMIT',
+      agent_disable_op: 'AGENT_DISABLE_OP', agent_extend: 'AGENT_EXTEND',
+      agent_mission: 'AGENT_MISSION', agent_treasury: 'AGENT_TREASURY'
     };
     return map[goal] || 'DEFAULT';
   }
