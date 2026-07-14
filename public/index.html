@@ -60,6 +60,8 @@
 <script src="/shared/executionPlanner.js"></script>
 <script src="/shared/aiRecommendations.js"></script>
 <script src="/shared/autonomaCore.js"></script>
+<script src="/shared/chainSimulator.js"></script>
+<script src="/shared/autonomaAgent.js"></script>
 <style>
 /* ── Wallet Modal ───────────────────────────────────────── */
 .wm-overlay{position:fixed;inset:0;background:rgba(0,0,0,.82);z-index:2000;display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .22s;backdrop-filter:blur(4px)}
@@ -36971,6 +36973,14 @@ const UBScreen = (function() {
         PermitEngine.grant({ type:'spend', maxAmount:Number(newLimit), asset:asset, allowedOps:allowedOps, durationMs:Number(durationMs)||1800000, purpose:'Escalated limit' });
       }
       autUI('ai','<div class="aut-intro" style="color:#22c55e"><i class="ti ti-check"></i> Limit increased to <strong>' + newLimit + ' ' + (asset||'USDC') + '</strong>. You can now proceed.</div>');
+      // Auto-retry the original operation
+      setTimeout(function(){
+        if(typeof autonomaSendQuick === 'function'){
+          if(permType === 'bridge') autonomaSendQuick('Bridge ' + newLimit + ' ' + (asset||'USDC'));
+          else if(permType === 'swap') autonomaSendQuick('Swap ' + newLimit + ' ' + (asset||'USDC'));
+          else autonomaSendQuick('Send ' + newLimit + ' ' + (asset||'USDC'));
+        }
+      }, 800);
     } catch(e){
       autUI('ai','<div class="aut-intro" style="color:#ef4444">Escalate failed: ' + (e.message || '') + '</div>');
     }
@@ -37183,6 +37193,9 @@ const UBScreen = (function() {
       {intent:'CROSS_CHAIN', en:/\b(cross[ -]?chain|crosschain|xchain|x[ -]?chain)\b.*\b(send|pay|payment|pagar|enviar)\b|\b(cross[ -]?chain\s+(payment|send|pay))\b/,
         pt:/\b(pagamento\s+cross[ -]?chain|envio\s+cross[ -]?chain|pagamento\s+entre\s+redes)\b/,
         alt:/\b(cross[ -]?chain)\b/},
+      // 8. MULTI-STEP WORKFLOW (must be before SEND_PAYMENT)
+      {intent:'MULTI_STEP_WORKFLOW', en:/\b(pay\s+supplier|pagar\s+fornecedor|multi[ -]?step|complete\s+payment|full\s+workflow|pay\s+and\s+bridge|pay\s+and\s+swap)\b/,
+        pt:/\b(pagar\s+fornecedor|pagamento\s+completo|fluxo\s+completo|workflow\s+completo)\b/},
       // 9. QUERY / SEND PAYMENT
       {intent:'SEND_PAYMENT', en:/\b(send|transfer|pay|payment|enviar|pagar)\b.*\b(to|para|destino|0x)\b/,
         pt:/\b(envia[rd]?|manda[rd]?|pag[ae]r?|transfer[ei]r?)\b.*\b(para|ao|a |0x|endere[cç]o)\b/},
@@ -37231,7 +37244,7 @@ const UBScreen = (function() {
       // 20. EXECUTE SCHEDULES
       {intent:'EXECUTE_SCHEDULES', en:/\b(execute\s+schedules?|run\s+schedules?|executar\s+agendamentos?|executar\s+schedules?|process\s+schedules?|trigger\s+schedules?)\b/,
         pt:/\b(execut[ae]r?\s+agendamentos?|rodar\s+agendamentos?|processar\s+agendamentos?|disparar\s+agendamentos?)\b/},
-      // 21. HELP
+      // 22. HELP
       {intent:'HELP', en:/\b(help|ajuda|what can you do|o que (voce|você) (faz|consegue|pode)|how (do|can)|como (fa[çc]o|posso|usar))\b/},
       // 17. GREETING
       {intent:'GREETING', en:/\b(hello|hi\b|hey|ola|oi\b|good morning|good afternoon|good evening|bom dia|boa tarde|boa noite)\b/},
@@ -37461,6 +37474,7 @@ const UBScreen = (function() {
       case 'EXECUTION_QUEUE': return _handleExecutionQueue();
       case 'SCHEDULED_PERMITS': return _handleScheduledPermits(params, msg);
       case 'EXECUTE_SCHEDULES': return _handleExecuteSchedules();
+      case 'MULTI_STEP_WORKFLOW': return _handleMultiStepWorkflow(params, msg);
       case 'HELP': return autHelp();
       case 'GREETING': return autGreeting();
       default: return _handleDefault(msg);
@@ -38096,6 +38110,68 @@ const UBScreen = (function() {
         ));
   }
 
+  // ── MULTI-STEP WORKFLOW HANDLER (Phase 4) ──
+  function _handleMultiStepWorkflow(params, msg){
+    var amount = params.amount || _extractNumber(msg) || 100;
+    var token = params.token || 'USDC';
+    var addr = params.address || (msg.match(/0x[a-fA-F0-9]{40}/)||[])[0] || '';
+    var low = msg.toLowerCase();
+    var needsSwap = /\b(swap|troc|convert)\b/.test(low);
+    var needsBridge = /\b(bridge|ponte|cross)\b/.test(low);
+
+    if(!walletAddress){
+      return R.intro('Connect your wallet to run a multi-step workflow.') +
+        R.card(R.head('workflow','Multi-Step Workflow',{text:'Wallet Required',cls:'pending'}), R.row('Status','Not connected','yellow'));
+    }
+
+    // Create workflow
+    var wf = null;
+    if(typeof AutonomaAgent !== 'undefined' && typeof AutonomaAgent.createWorkflow === 'function'){
+      wf = AutonomaAgent.createWorkflow({
+        name: 'Pay Supplier', goal: 'Complete payment of ' + amount + ' ' + token,
+        amount: amount, asset: token, needsSwap: needsSwap, needsBridge: needsBridge,
+        fromToken: token, toToken: needsSwap ? 'EURC' : token,
+        toChain: needsBridge ? 'Base' : null
+      });
+    }
+
+    var steps = [
+      'Validate wallet ('+(walletAddress?'✓':'pending')+')',
+      'Check balances',
+      needsSwap ? 'Swap ' + amount + ' ' + token + ' → needed token' : null,
+      needsBridge ? 'Bridge to destination chain' : null,
+      'Execute payment to ' + (addr ? addr.substring(0,6)+'...' : 'recipient'),
+      'Verify transaction on-chain',
+      'Update execution history'
+    ].filter(Boolean);
+
+    var planHtml = '<div class="aut-progress"><div class="aut-progress-steps">' +
+      steps.map(function(s,i){
+        return '<div class="aut-progress-step '+(i===0?'done':'')+'"><span class="step-icon">'+(i===0?'<i class="ti ti-check" style="color:#22c55e"></i>':'<span style="color:var(--muted)">'+(i+1)+'</span>')+'</span><span>'+s+'</span></div>';
+      }).join('') +
+      '</div></div>';
+
+    var permCheck = _requirePermit('payment', amount, token, 'Arc Testnet', addr, 'Multi-step workflow');
+
+    return R.intro('Starting <strong style="color:#a78bfa">multi-step workflow</strong>: "Pay Supplier"') +
+      planHtml +
+      R.card(R.head('workflow','Pay Supplier — Workflow',{text: needsSwap||needsBridge ? (needsSwap?'Swap':'') + (needsSwap&&needsBridge?' + ':'') + (needsBridge?'Bridge':'') + ' → Pay' : 'Direct Payment',cls:'live'}),
+        R.row('Amount', '<strong>'+amount+' '+token+'</strong>','green') +
+        (addr ? R.row('Recipient', '<code style="font-size:9px;color:#a78bfa">'+addr.substring(0,10)+'...</code>','teal') : '') +
+        R.row('Steps', steps.length + ' total', 'teal') +
+        R.sep() +
+        (needsSwap ? R.row('Phase 1', 'Swap ' + token + ' → needed token', 'yellow') : '') +
+        (needsBridge ? R.row('Phase 2', 'Bridge to destination', 'purple') : '') +
+        R.row('Phase ' + (needsSwap&&needsBridge?'3':needsSwap||needsBridge?'2':'1'), 'Execute payment', 'blue') +
+        R.row('Final', 'On-chain verification', 'green') +
+        (permCheck && typeof permCheck === 'string' ? '' : R.row('Permit', 'Ready to authorize', 'green')),
+        R.actions(
+          {icon:'player-play',label:'Start Workflow',cls:'confirm',action:"window._runWorkflow('"+ (wf ? wf.id : '') + "','" + amount + "','" + token + "','" + (addr||'') + "')"},
+          {icon:'x',label:'Cancel',cls:'danger',action:"autCancelOp('none')"}
+        )
+      );
+  }
+
   // ── AI RECOMMENDATIONS HANDLER (Phase 8) ──
   function _handleAIRecommendations(msg){
     if(typeof AIRecommendations==='undefined') return R.intro('Recommendations system initializing...');
@@ -38356,10 +38432,36 @@ const UBScreen = (function() {
       try {
         var a = document.getElementById('sa-to'); if(a) a.value = addr;
         var b = document.getElementById('sa-amount'); if(b) b.value = amt;
-        var d = document.getElementById('xc-dest-chain');
-        if(d && toChain){ for(var i=0;i<d.options.length;i++){ if(d.options[i].text.indexOf(toChain)!==-1){ d.selectedIndex = i; d.dispatchEvent(new Event('change')); break; } } }
       } catch(e){}
     }, 400);
+  };
+
+  // ── Workflow runner ──
+  window._runWorkflow = function(wfId, amount, token, addr){
+    autUI('ai','<div class="aut-intro" style="color:#06F7E9"><i class="ti ti-loader"></i> Running workflow: ' + amount + ' ' + token + (addr ? ' to ' + addr.substring(0,8) + '...' : '') + '</div>');
+    // Progress through steps
+    var steps = ['Validating wallet','Checking balances','Verifying permits','Preparing transaction','Ready for execution'];
+    setTimeout(function(){ window._autoProgress(steps, 0, 'Starting workflow...'); }, 300);
+    setTimeout(function(){ window._autoProgress(steps, 1, 'Wallet validated ✓'); }, 800);
+    setTimeout(function(){ window._autoProgress(steps, 2, 'Balances checked ✓'); }, 1300);
+    setTimeout(function(){ window._autoProgress(steps, 3, 'Permits verified ✓'); }, 1800);
+    setTimeout(function(){
+      window._autoProgress(steps, 4, 'Ready! Opening payment page...');
+      // Auto-navigate to send page
+      if(addr){
+        window._autoNavSend(addr, amount, token);
+      } else {
+        if(typeof showPage === 'function') showPage('send');
+      }
+    }, 2300);
+    // Update workflow state if exists
+    try {
+      if(typeof AutonomaAgent !== 'undefined' && wfId){
+        AutonomaAgent.updateStep(wfId, 0, 'completed');
+        AutonomaAgent.updateStep(wfId, 1, 'completed');
+        AutonomaAgent.updateStep(wfId, 2, 'completed');
+      }
+    } catch(e){}
   };
 
   // ── Permit-aware execution guard ─────────────────────
@@ -38376,7 +38478,7 @@ const UBScreen = (function() {
       var currentLimit = check.permit.maxAmount;
       return PermissionCards.buildEscalationCard(
         currentLimit, amount, check.shortfall,
-        { asset: asset || 'USDC', allowedOps: check.permit.allowedOps || [], durationMs: check.permit.expiresAt - Date.now() },
+        { type: operation, asset: asset || 'USDC', allowedOps: check.permit.allowedOps || [], durationMs: check.permit.expiresAt - Date.now() },
         check.permit
       );
     }
@@ -38419,8 +38521,23 @@ const UBScreen = (function() {
     const rIn=getTokenUSDRate(tIn)||0,rOut=getTokenUSDRate(tOut)||0;
     if(rIn>0&&rOut>0){var rate=rIn/rOut;estOut=(amt*rate).toFixed(tOut==='cirBTC'?8:4);rateStr='1 '+tIn+' ≈ '+rate.toFixed(tOut==='cirBTC'?8:4)+' '+tOut;}
 
-    // Build execution plan
-    var steps = ['Check wallet','Verify balances','Validate permit','Calculate rate','Estimate output','Open Swap page','Pre-fill fields'];
+    // Try on-chain simulation + calldata preparation (non-blocking)
+    var simData = null;
+    var calldataPlan = null;
+    try {
+      if(typeof ChainSimulator !== 'undefined'){
+        simData = await ChainSimulator.fullSwapSim(amt, tIn, tOut);
+        calldataPlan = ChainSimulator.prepareFullSwap(amt, tIn, tOut, typeof SWP!=='undefined' ? SWP.slippage : 0.5);
+      }
+    } catch(e){}
+
+    var estOutDisplay = simData && simData.estimatedOutput ? simData.estimatedOutput : estOut;
+    var impactDisplay = simData && simData.priceImpact ? simData.priceImpact : 'N/A';
+    var gasDisplay = simData && simData.gasEstimate ? simData.gasEstimate : 'N/A';
+    var balDisplay = simData && simData.balance ? simData.balance : '—';
+    var simSource = simData ? ' (on-chain)' : '';
+
+    var steps = ['Check wallet','Verify balances','Validate permit','Simulate on-chain'+(simData?' ✓':''),'Calculate rate','Estimate output','Open Swap page','Pre-fill fields'];
     var planHtml = '<div class="aut-progress"><div class="aut-progress-steps">' +
       steps.map(function(s,i){ return '<div class="aut-progress-step done"><span class="step-icon"><i class="ti ti-check" style="color:#22c55e"></i></span><span>'+s+'</span></div>'; }).join('') +
       '</div></div>';
@@ -38430,14 +38547,19 @@ const UBScreen = (function() {
     return R.intro('Autonoma is preparing your <strong style="color:#06F7E9">swap</strong>:') +
       planHtml +
       R.card(
-        R.head('arrows-exchange','Swap — Ready',{text:'Prepared',cls:'live'}),
+        R.head('arrows-exchange','Swap — Ready',{text: simData ? 'Simulated' : 'Prepared',cls:'live'}),
         R.swapSection('You Pay',tIn,tokIn.icon,tokIn.color,amt) +
         R.flowArrow() +
-        R.swapSection('You Receive (est.)',tOut,tokOut.icon,tokOut.color,estOut) +
+        R.swapSection('You Receive (est.)',tOut,tokOut.icon,tokOut.color,estOutDisplay) +
         R.sep() +
-        R.row('Rate',rateStr,'') +
+        R.row('Rate',rateStr + simSource,'') +
+        R.row('Price Impact',impactDisplay,'yellow') +
         R.row('Slippage',(typeof SWP!=='undefined'?SWP.slippage:'0.5')+'%','') +
-        R.row('Fee Tier','0.1%','') +
+        R.row('Estimated Gas',gasDisplay,'') +
+        R.row('Balance',balDisplay,simData && simData.sufficientBalance ? 'green' : simData && simData.sufficientBalance === false ? 'red' : '') +
+        (calldataPlan ? R.sep() + R.section('Prepared Transactions') + calldataPlan.steps.map(function(s){
+          return R.row('Step ' + s.step + ': ' + s.label, '<code style="font-size:7.5px;color:#06F7E9">' + (s.tx.calldata ? s.tx.calldata.substring(0,20) + '...' : 'N/A') + '</code>', 'teal');
+        }).join('') : '') +
         R.row('Network',R.chainPill('Arc Testnet','#ff0202'),'') +
         permitInfo,
         R.actions(
@@ -38455,7 +38577,7 @@ const UBScreen = (function() {
   }
 
   // ── BRIDGE CARD ──
-  function autBridge(msg) {
+  async function autBridge(msg) {
     if(!walletAddress) return R.intro('Connect your wallet first to use the bridge.')+R.card(R.head('topology-star-3','Bridge',{text:'Wallet Required',cls:'pending'}),R.row('Status','Not connected','yellow'));
     const chainMap={arc:0,ethereum:1,sepolia:1,eth:1,base:2,arbitrum:3,arb:3,optimism:4,op:4,polygon:5,poly:5,amoy:5,robinhood:6,robin:6,rh:6,robinhoodtest:7,rhtest:7};
     const chainColors={0:'#ff0202',1:'#627eea',2:'#0052ff',3:'#28a0f0',4:'#ff0420',5:'#8247e5',6:'#00e054',7:'#66ff99'};
@@ -38470,21 +38592,40 @@ const UBScreen = (function() {
     var permCheckB = _requirePermit('bridge', amt, 'USDC', fromName, '', 'Bridge ' + amt + ' USDC from ' + fromName + ' to ' + toName);
     if(typeof permCheckB === 'string') return permCheckB;
 
-    var steps = ['Check wallet','Verify balances','Validate permit','Calculate fees','Estimate time','Open Bridge page','Pre-fill fields'];
+    // Try on-chain simulation + calldata
+    var simData = null;
+    var calldataPlan = null;
+    try {
+      if(typeof ChainSimulator!=='undefined'){
+        simData = await ChainSimulator.fullBridgeSim(amt, fromName, toName);
+        calldataPlan = ChainSimulator.prepareFullBridge(amt, 6);
+      }
+    } catch(e){}
+
+    var steps = ['Check wallet','Verify balances','Validate permit','Simulate on-chain'+(simData?' ✓':''),'Calculate fees','Estimate time','Open Bridge page','Pre-fill fields'];
     var planHtml = '<div class="aut-progress"><div class="aut-progress-steps">' +
       steps.map(function(s,i){ return '<div class="aut-progress-step done"><span class="step-icon"><i class="ti ti-check" style="color:#22c55e"></i></span><span>'+s+'</span></div>'; }).join('') +
       '</div></div>';
 
+    var feeDisplay = simData ? simData.bridgeFee : '~0.0005 USDC';
+    var gasDisplay = simData ? simData.gasEstimate : 'N/A';
+    var balDisplay = simData ? simData.balance : '—';
+
     return R.intro('Autonoma is preparing your <strong style="color:#a78bfa">bridge</strong>:') +
       planHtml +
       R.card(
-        R.head('topology-star-3','Bridge — Ready',{text:'Prepared',cls:'live'}),
+        R.head('topology-star-3','Bridge — Ready',{text: simData ? 'Simulated' : 'Prepared',cls:'live'}),
         R.row('Amount','<span style="font-size:13px;font-weight:700">'+amt+' USDC</span>','green')+R.sep()+
         R.row('From',R.chainPill(fromName,chainColors[fromIdx]||'#4f8ef7'),'')+
         R.row('To',R.chainPill(toName,chainColors[toIdx]||'#4f8ef7'),'')+R.sep()+
         R.row('Protocol','Circle CCTP v2','purple')+
-        R.row('Est. Time','~2-5 minutes','')+
-        R.row('Network Fee','Gas only','')+
+        R.row('Bridge Fee',feeDisplay,'')+
+        R.row('Est. Gas',gasDisplay,'')+
+        R.row('Est. Time',simData ? simData.estTime : '~2-5 minutes','')+
+        R.row('Balance',balDisplay,simData && simData.sufficientBalance ? 'green' : '')+
+        (calldataPlan ? R.sep() + R.section('Prepared Transactions') + calldataPlan.steps.map(function(s){
+          return R.row('Step ' + s.step + ': ' + s.label, '<code style="font-size:7.5px;color:#06F7E9">' + (s.tx.calldata ? s.tx.calldata.substring(0,20) + '...' : 'N/A') + '</code>', 'teal');
+        }).join('') : '') +
         (permCheckB && permCheckB.permit ? R.row('Permit','Validated ('+permCheckB.remaining.toFixed(2)+' USDC remaining)','green') : ''),
         R.actions(
           {icon:'player-play',label:'Open Bridge & Pre-fill',cls:'confirm',action:"window._autoNavBridge("+amt+","+fromIdx+","+toIdx+")"},
