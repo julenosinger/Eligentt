@@ -52,6 +52,14 @@
 <script src="/shared/robinhoodTokenRegistry.js"></script>
 <script src="/shared/securityAttackLab.js"></script>
 <script src="/shared/invariantEngine.js"></script>
+<script src="/shared/permitEngine.js"></script>
+<script src="/shared/permissionCards.js"></script>
+<script src="/shared/contractRegistry.js"></script>
+<script src="/shared/riskEngine.js"></script>
+<script src="/shared/executionQueue.js"></script>
+<script src="/shared/executionPlanner.js"></script>
+<script src="/shared/aiRecommendations.js"></script>
+<script src="/shared/autonomaCore.js"></script>
 <style>
 /* ── Wallet Modal ───────────────────────────────────────── */
 .wm-overlay{position:fixed;inset:0;background:rgba(0,0,0,.82);z-index:2000;display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .22s;backdrop-filter:blur(4px)}
@@ -5028,6 +5036,35 @@ select.cinput option { background: #161a24; color: #dde2f0; }
 .aut-result-title{font-size:10px;font-weight:700;color:#22c55e;margin-bottom:4px}
 .aut-result-body{font-size:9px;color:var(--text);line-height:1.6}
 .aut-result-body code{background:rgba(0,0,0,.3);padding:1px 5px;border-radius:3px;font-size:8.5px;color:#06F7E9}
+/* ── Permission Cards ────────────────────── */
+.perm-card{border-color:rgba(167,139,250,.18)!important;background:linear-gradient(135deg,rgba(167,139,250,.03),rgba(6,247,233,.02))!important}
+.perm-card .aut-rc-head{background:rgba(167,139,250,.06)!important;border-bottom-color:rgba(167,139,250,.12)!important}
+.perm-card .aut-rc-head i{color:#a78bfa!important}
+.esc-card{background:rgba(245,158,11,.06);border:1px solid rgba(245,158,11,.2);border-radius:10px;padding:12px 14px;margin-top:8px;font-size:10px}
+.perm-active-item{background:rgba(0,0,0,.15);border:1px solid rgba(167,139,250,.1);border-radius:8px;padding:10px;margin-bottom:6px;transition:border-color .2s}
+.perm-active-item:hover{border-color:rgba(167,139,250,.25)}
+.perm-active-item .aut-act{font-size:8px!important;padding:3px 8px!important}
+/* ── Execution Plan / Preview / Queue / History ── */
+.exec-plan-card .aut-rc-head{background:rgba(167,139,250,.08)!important}
+.exec-plan-card .aut-rc-body{font-size:10px}
+/* ── Execution Preview ── */
+.exec-preview-card{border-color:rgba(34,197,94,.25)!important}
+/* ── Risk Analysis ── */
+.risk-card .aut-rc-head{background:rgba(245,158,11,.06)!important}
+/* ── Queue item ── */
+.q-item{padding:6px 8px;border-radius:6px;margin-bottom:3px;font-size:9px;border:1px solid var(--border);transition:border .2s}
+.q-item.running{border-color:rgba(6,247,233,.3)!important}
+.q-item.completed{border-color:rgba(34,197,94,.3)!important}
+.q-item.failed{border-color:rgba(239,68,68,.3)!important}
+/* ── AI Recommendations ── */
+.ai-rec-item{background:rgba(245,158,11,.04);border:1px solid rgba(245,158,11,.12);border-radius:8px;padding:10px;margin-bottom:6px}
+/* ── Progress bar ── */
+.aut-progress-bar{height:3px;border-radius:2px;background:rgba(255,255,255,.06);margin:6px 0;overflow:hidden}
+.aut-progress-bar .fill{height:100%;border-radius:2px;background:linear-gradient(90deg,#06F7E9,#4f8ef7);transition:width .5s}
+/* ── Safety check ── */
+.safety-item{display:flex;align-items:center;gap:6px;padding:3px 0;font-size:9px;background:rgba(0,0,0,.08);border-radius:4px;padding:4px 8px;margin-bottom:2px}
+/* ── Send routing cards ── */
+.send-opt-card:hover{transform:translateY(-1px);filter:brightness(1.2)}
 </style>
 </head>
 <body>
@@ -10251,6 +10288,10 @@ select.cinput option { background: #161a24; color: #dde2f0; }
                 <div class="aut-card" onclick="autonomaSendQuick('Show my transaction history')">
                   <div class="aut-card-title"><i class="ti ti-history"></i> History</div>
                   <div class="aut-card-desc">View your recent transactions.</div>
+                </div>
+                <div class="aut-card" onclick="autonomaSendQuick('show permissions')">
+                  <div class="aut-card-title"><i class="ti ti-shield-lock"></i> Permissions</div>
+                  <div class="aut-card-desc">Manage active permits and allowances.</div>
                 </div>
               </div>
             </div>
@@ -36795,13 +36836,33 @@ const UBScreen = (function() {
     const chat=autChats.find(c=>c.id===autCurId); if(!chat) return;
     const w=document.getElementById('aut-welcome'); if(w) w.style.display='none';
     chat.messages.push({role:'user',content:msg,ts:Date.now()});
-    if(chat.messages.length===1) chat.title=msg.length>40?msg.substring(0,40)+'...':msg;
+    if(chat.messages.length===1){
+      var metaTitle = (chat.meta && chat.meta.title) ? chat.meta.title : (msg.length>35?msg.substring(0,35)+'...':msg);
+      chat.title = metaTitle;
+    }
     autUI('user',esc(msg)); autSave(); autRenderSidebar();
     autShowTyping();
+    // Store intent metadata on chat for sidebar display
+    try {
+      var meta = _extractChatMeta(msg);
+      chat.meta = chat.meta || {};
+      if(meta.op) chat.meta = Object.assign(chat.meta, meta);
+    } catch(e){}
     setTimeout(async()=>{
-      const r=await autProcess(msg); autHideTyping();
-      chat.messages.push({role:'ai',content:r,ts:Date.now()});
-      autUI('ai',r); autSave(); autRenderSidebar();
+      try{
+        const r=await autProcess(msg); autHideTyping();
+        chat.messages.push({role:'ai',content:r,ts:Date.now()});
+        // Update meta after AI response
+        try {
+          var aiMeta = _extractChatMetaFromResponse(r, msg);
+          if(aiMeta.status) chat.meta.status = aiMeta.status;
+        } catch(e){}
+        autUI('ai',r); autSave(); autRenderSidebar();
+      }catch(e){
+        autHideTyping();
+        autUI('ai','<div class="aut-intro" style="color:#ef4444">Error: '+(e&&e.message?e.message:String(e)).substring(0,200)+'</div>');
+        console.error('Autonoma error:', e);
+      }
     },500+Math.random()*600);
   };
   window.autonomaHandleCSV = function(input) {
@@ -36814,6 +36875,107 @@ const UBScreen = (function() {
   window.autCancelOp = function(oid) { delete autPendingOps[oid]; autUI('ai','<div class="aut-intro" style="color:var(--muted2)"><i class="ti ti-x" style="margin-right:4px"></i>Operation cancelled.</div>'); };
   window.autCopyText = function(text) { try{navigator.clipboard.writeText(text);}catch(e){} const t=document.getElementById('toast'); if(t){t.textContent='Copied!';t.classList.add('show');setTimeout(()=>t.classList.remove('show'),1500);} };
 
+  // ── Global permit approve/reject callbacks (reliable inline scope) ──
+  window._approvePermit = function(type, maxAmount, asset, destination, network, allowedOpsJson, contract, durationMs, purpose, estimatedGas){
+    try {
+      var allowedOps = [];
+      try { allowedOps = JSON.parse(allowedOpsJson); } catch(e){ allowedOps = []; }
+      if(typeof PermitEngine === 'undefined'){ autUI('ai','<div class="aut-intro" style="color:#ef4444">Permit engine not loaded.</div>'); return; }
+      var permit = PermitEngine.grant({
+        type: type, maxAmount: Number(maxAmount), asset: asset,
+        destination: destination, network: network,
+        allowedOps: allowedOps, contract: contract || '',
+        durationMs: Number(durationMs) || 1800000, purpose: purpose
+      });
+      if(typeof PermissionCards !== 'undefined'){
+        var card = PermissionCards.buildGrantedCard(permit);
+        var c = document.getElementById('aut-messages');
+        if(c){ var lastAi = c.querySelector('.aut-msg.ai:last-child .aut-msg-body'); if(lastAi){ lastAi.innerHTML += card; c.scrollTop = c.scrollHeight; } }
+      } else {
+        autUI('ai','<div class="aut-intro" style="color:#22c55e"><i class="ti ti-check"></i> Permission granted: ' + maxAmount + ' ' + asset + ' until ' + PermitEngine.fmtTimeLeft(permit.expiresAt) + '</div>');
+      }
+    } catch(e){
+      autUI('ai','<div class="aut-intro" style="color:#ef4444">Approve failed: ' + (e.message || String(e)).substring(0,100) + '</div>');
+    }
+  };
+  window._rejectPermit = function(){
+    autUI('ai','<div class="aut-intro" style="color:var(--muted2)"><i class="ti ti-x" style="margin-right:4px"></i>Permission denied. Operation cancelled.</div>');
+  };
+  // Recipient selection for multisend
+  window._toggleRecipient = function(el, addr){
+    var cb = el.querySelector('.rcp-check');
+    if(cb){ cb.checked = !cb.checked; }
+    window._updateSelectedCount();
+  };
+  window._selectAllRecipients = function(){
+    var cbs = document.querySelectorAll('.rcp-check');
+    for(var i=0;i<cbs.length;i++){ cbs[i].checked = true; }
+    window._updateSelectedCount();
+  };
+  window._updateSelectedCount = function(){
+    var cbs = document.querySelectorAll('.rcp-check:checked');
+    var el = document.getElementById('rcp-selected-count');
+    if(el) el.textContent = cbs.length + ' selected';
+  };
+  window._buildMultiSend = function(){
+    var cbs = document.querySelectorAll('.rcp-check:checked');
+    var addrs = [];
+    for(var i=0;i<cbs.length;i++){
+      var a = cbs[i].getAttribute('data-addr');
+      if(a) addrs.push(a);
+    }
+    if(addrs.length === 0){ autUI('ai','<div class="aut-intro" style="color:#f59e0b">Please select at least one recipient.</div>'); return; }
+    autonomaSendQuick('batch send to ' + addrs.length + ' recipients');
+  };
+  window._approvePermitEl = function(el){
+    try {
+      var type = el.getAttribute('data-ptype') || 'spend';
+      var maxAmount = Number(el.getAttribute('data-pamt')) || 0;
+      var asset = el.getAttribute('data-passet') || 'USDC';
+      var destination = el.getAttribute('data-pdest') || '*';
+      var network = el.getAttribute('data-pnet') || 'Arc Testnet';
+      var contract = el.getAttribute('data-pcontract') || '';
+      var durationMs = Number(el.getAttribute('data-pdur')) || 1800000;
+      var purpose = el.getAttribute('data-ppurpose') || '';
+      var retryPhrase = el.getAttribute('data-pretry') || '';
+      var allowedOps = [type];
+      if(typeof PermitEngine === 'undefined'){ autUI('ai','<div class="aut-intro" style="color:#ef4444">Permit engine not loaded.</div>'); return; }
+      var permit = PermitEngine.grant({
+        type: type, maxAmount: maxAmount, asset: asset,
+        destination: destination, network: network,
+        allowedOps: allowedOps, contract: contract,
+        durationMs: durationMs, purpose: purpose
+      });
+      if(typeof PermissionCards !== 'undefined'){
+        var card = PermissionCards.buildGrantedCard(permit);
+        var c = document.getElementById('aut-messages');
+        if(c){ var lastAi = c.querySelector('.aut-msg.ai:last-child .aut-msg-body'); if(lastAi){ lastAi.innerHTML += card; c.scrollTop = c.scrollHeight; } }
+      } else {
+        autUI('ai','<div class="aut-intro" style="color:#22c55e"><i class="ti ti-check"></i> Permission granted: ' + maxAmount + ' ' + asset + ' until ' + PermitEngine.fmtTimeLeft(permit.expiresAt) + '</div>');
+      }
+      // Auto-retry the original operation now that permit is active
+      if(retryPhrase && typeof autonomaSendQuick === 'function'){
+        setTimeout(function(){ autonomaSendQuick(retryPhrase); }, 800);
+      }
+    } catch(e){
+      autUI('ai','<div class="aut-intro" style="color:#ef4444">Approve error: ' + (e.message || String(e)).substring(0,100) + '</div>');
+    }
+  };
+  window._approveEscalation = function(permitId, newLimit, asset, permType, durationMs){
+    try {
+      var allowedOps = [permType || 'spend'];
+      if(typeof PermitEngine === 'undefined') return;
+      if(permitId && permitId !== 'null' && permitId !== ''){
+        PermitEngine.increaseLimit(permitId, Number(newLimit));
+      } else {
+        PermitEngine.grant({ type:'spend', maxAmount:Number(newLimit), asset:asset, allowedOps:allowedOps, durationMs:Number(durationMs)||1800000, purpose:'Escalated limit' });
+      }
+      autUI('ai','<div class="aut-intro" style="color:#22c55e"><i class="ti ti-check"></i> Limit increased to <strong>' + newLimit + ' ' + (asset||'USDC') + '</strong>. You can now proceed.</div>');
+    } catch(e){
+      autUI('ai','<div class="aut-intro" style="color:#ef4444">Escalate failed: ' + (e.message || '') + '</div>');
+    }
+  };
+
   function autRenderChat() {
     const c=document.getElementById('aut-messages'); if(!c) return; c.innerHTML='';
     const chat=autChats.find(x=>x.id===autCurId);
@@ -36822,7 +36984,7 @@ const UBScreen = (function() {
   }
   function mkWelcome() {
     const d=document.createElement('div');d.className='aut-welcome';d.id='aut-welcome';
-    d.innerHTML='<svg class="aut-welcome-avatar" viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg" fill="none"><defs><linearGradient id="autGW2" x1="0" y1="0" x2="120" y2="120" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#06F7E9"/><stop offset="50%" stop-color="#4f8ef7"/><stop offset="100%" stop-color="#a78bfa"/></linearGradient></defs><circle cx="60" cy="60" r="56" fill="#0c1222" stroke="url(#autGW2)" stroke-opacity=".14" stroke-width="1.5"/><circle cx="60" cy="60" r="10" fill="#06F7E9" opacity=".9"/><ellipse cx="60" cy="60" rx="36" ry="14" fill="none" stroke="url(#autGW2)" stroke-width="2" opacity=".5"/><ellipse cx="60" cy="60" rx="36" ry="14" fill="none" stroke="url(#autGW2)" stroke-width="2" opacity=".5" transform="rotate(60 60 60)"/><ellipse cx="60" cy="60" rx="36" ry="14" fill="none" stroke="url(#autGW2)" stroke-width="2" opacity=".5" transform="rotate(120 60 60)"/></svg><h2>Hello! I\'m Autonoma v4</h2><p>Your AI agent for all operations on Elligentt — English &amp; Portuguese.</p><p style="color:var(--muted);font-size:10px">How can I help you today?</p><div class="aut-cards"><div class="aut-card" onclick="autonomaSendQuick(\'Create a payment link for 100 USDC\')"><div class="aut-card-title"><i class="ti ti-link"></i> Payment Link</div><div class="aut-card-desc">Create a payment link to receive payments.</div></div><div class="aut-card" onclick="autonomaSendQuick(\'Show my wallet summary\')"><div class="aut-card-title"><i class="ti ti-wallet"></i> Wallet Summary</div><div class="aut-card-desc">View your balances, tokens and networks.</div></div><div class="aut-card" onclick="autonomaSendQuick(\'Swap 100 USDC for EURC\')"><div class="aut-card-title"><i class="ti ti-arrows-exchange"></i> Swap Tokens</div><div class="aut-card-desc">Execute a token swap directly from chat.</div></div><div class="aut-card" onclick="autonomaSendQuick(\'Bridge 500 USDC from Arc to Base\')"><div class="aut-card-title"><i class="ti ti-topology-star-3"></i> Bridge Assets</div><div class="aut-card-desc">Move assets across networks via CCTP.</div></div><div class="aut-card" onclick="autonomaSendQuick(\'What can you do?\')"><div class="aut-card-title"><i class="ti ti-brain"></i> What can you do?</div><div class="aut-card-desc">See all capabilities — EN &amp; PT.</div></div><div class="aut-card" onclick="autonomaSendQuick(\'Show my transaction history\')"><div class="aut-card-title"><i class="ti ti-history"></i> History</div><div class="aut-card-desc">View your recent transactions.</div></div></div>';
+    d.innerHTML='<svg class="aut-welcome-avatar" viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg" fill="none"><defs><linearGradient id="autGW2" x1="0" y1="0" x2="120" y2="120" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#06F7E9"/><stop offset="50%" stop-color="#4f8ef7"/><stop offset="100%" stop-color="#a78bfa"/></linearGradient></defs><circle cx="60" cy="60" r="56" fill="#0c1222" stroke="url(#autGW2)" stroke-opacity=".14" stroke-width="1.5"/><circle cx="60" cy="60" r="10" fill="#06F7E9" opacity=".9"/><ellipse cx="60" cy="60" rx="36" ry="14" fill="none" stroke="url(#autGW2)" stroke-width="2" opacity=".5"/><ellipse cx="60" cy="60" rx="36" ry="14" fill="none" stroke="url(#autGW2)" stroke-width="2" opacity=".5" transform="rotate(60 60 60)"/><ellipse cx="60" cy="60" rx="36" ry="14" fill="none" stroke="url(#autGW2)" stroke-width="2" opacity=".5" transform="rotate(120 60 60)"/></svg><h2>Hello! I\'m Autonoma v4</h2><p>Your AI agent for all operations on Elligentt — English &amp; Portuguese.</p><p style="color:var(--muted);font-size:10px">How can I help you today?</p><div class="aut-cards" id="aut-cards"><div class="aut-card" onclick="autonomaSendQuick(\'Create a payment link for 100 USDC\')"><div class="aut-card-title"><i class="ti ti-link"></i> Payment Link</div><div class="aut-card-desc">Create a payment link to receive payments.</div></div><div class="aut-card" onclick="autonomaSendQuick(\'Show my wallet summary\')"><div class="aut-card-title"><i class="ti ti-wallet"></i> Wallet Summary</div><div class="aut-card-desc">View your balances, tokens and networks.</div></div><div class="aut-card" onclick="autonomaSendQuick(\'Swap 100 USDC for EURC\')"><div class="aut-card-title"><i class="ti ti-arrows-exchange"></i> Swap Tokens</div><div class="aut-card-desc">Execute a token swap directly from chat.</div></div><div class="aut-card" onclick="autonomaSendQuick(\'Bridge 500 USDC from Arc to Base\')"><div class="aut-card-title"><i class="ti ti-topology-star-3"></i> Bridge Assets</div><div class="aut-card-desc">Move assets across networks via CCTP.</div></div><div class="aut-card" onclick="autonomaSendQuick(\'What can you do?\')"><div class="aut-card-title"><i class="ti ti-brain"></i> What can you do?</div><div class="aut-card-desc">See all capabilities — in English or Portuguese.</div></div><div class="aut-card" onclick="autonomaSendQuick(\'Show my transaction history\')"><div class="aut-card-title"><i class="ti ti-history"></i> History</div><div class="aut-card-desc">View your recent transactions.</div></div><div class="aut-card" onclick="autonomaSendQuick(\'show permissions\')"><div class="aut-card-title"><i class="ti ti-shield-lock"></i> Permissions</div><div class="aut-card-desc">Manage active permits and allowances.</div></div></div>';
     return d;
   }
 
@@ -36835,13 +36997,17 @@ const UBScreen = (function() {
   function autRenderSidebar() {
     const list=document.getElementById('aut-history-list'); if(!list) return;
     if(!autChats.length){list.innerHTML='<div style="text-align:center;padding:20px;font-size:9px;color:var(--muted)">No conversations yet</div>';autOpenMenuId=null;return;}
-    list.innerHTML=autChats.map(c=>{
-      const last=c.messages.length?c.messages[c.messages.length-1]:null;
-      const preview=last?(last.role==='user'?'You: ':'Autonoma: ')+(last.role==='user'?last.content:'Response...').substring(0,50):'';
-      const open=c.id===autOpenMenuId?' open':'';
+    list.innerHTML=autChats.map(function(c){
+      var meta = c.meta || {};
+      var opIcon = _sidebarIcon(meta.op);
+      var opColor = _sidebarColor(meta.op, meta.status);
+      var statusBadge = meta.status ? _sidebarStatusBadge(meta.status) : '';
+      var title = meta.title || c.title || 'Chat';
+      var preview = _sidebarPreview(c, meta);
+      var open = c.id===autOpenMenuId?' open':'';
       return '<div class="aut-hist-item'+(c.id===autCurId?' active':'')+'" onclick="autSelectChat(\''+c.id+'\')" style="position:relative">'+
-        '<div class="aut-hist-title">'+esc(c.title)+'</div>'+
-        '<div class="aut-hist-preview">'+esc(preview)+'</div>'+
+        '<div class="aut-hist-title"><i class="ti ti-'+opIcon+'" style="color:'+opColor+';font-size:11px;margin-right:4px;flex-shrink:0"></i>'+esc(title)+statusBadge+'</div>'+
+        '<div class="aut-hist-preview">'+preview+'</div>'+
         '<button class="aut-hist-menu-btn" onclick="autToggleMenu(\''+c.id+'\',event)" title="Options"><i class="ti ti-dots"></i></button>'+
         '<div class="aut-hist-menu'+open+'">'+
           '<div class="aut-hist-menu-row" onclick="autCloseChat(\''+c.id+'\',event)"><i class="ti ti-x"></i>Close conversation</div>'+
@@ -36849,6 +37015,76 @@ const UBScreen = (function() {
         '</div>'+
       '</div>';
     }).join('');
+  }
+
+  function _sidebarIcon(op){
+    var map = {swap:'arrows-exchange',bridge:'topology-star-3',payment:'send',permission:'shield-lock',schedule:'calendar-event',treasury:'building-bank',balance:'wallet',history:'history',help:'help-circle',invoice:'file-invoice',multisend:'users-group',liquid:'droplet'};
+    return map[op] || 'message-circle';
+  }
+
+  function _sidebarColor(op, status){
+    if(status==='completed') return '#22c55e';
+    if(status==='failed') return '#ef4444';
+    if(status==='pending') return '#f59e0b';
+    var map = {swap:'#f59e0b',bridge:'#a78bfa',payment:'#4f8ef7',permission:'#a78bfa',schedule:'#f59e0b',treasury:'#7b9ef7',balance:'#22c55e',history:'#22c55e'};
+    return map[op] || '#06F7E9';
+  }
+
+  function _sidebarStatusBadge(status){
+    var map = {completed:'<span class="aut-rc-badge live" style="font-size:6.5px;padding:1px 5px;margin-left:4px">Done</span>',failed:'<span class="aut-rc-badge pending" style="font-size:6.5px;padding:1px 5px;margin-left:4px">Failed</span>',pending:'<span class="aut-rc-badge pending" style="font-size:6.5px;padding:1px 5px;margin-left:4px">Pending</span>',active:'<span class="aut-rc-badge live" style="font-size:6.5px;padding:1px 5px;margin-left:4px">Active</span>'};
+    return map[status] || '';
+  }
+
+  function _sidebarPreview(c, meta){
+    if(meta.amount && meta.asset) return meta.amount + ' ' + meta.asset + (meta.network ? ' · ' + meta.network : '');
+    var last = c.messages.length ? c.messages[c.messages.length-1] : null;
+    if(!last) return '';
+    if(last.role==='user') return last.content.substring(0,45);
+    return '';
+  }
+
+  /* ── Extract chat metadata from user message ── */
+  function _extractChatMeta(msg){
+    var meta = {title: msg.length > 35 ? msg.substring(0,35) + '...' : msg};
+    var low = msg.toLowerCase();
+    var amt = _extractNumber(msg);
+    if(amt) meta.amount = amt;
+    var token = _fuzzyTokenFromMsg(msg);
+    if(token) meta.asset = token;
+    // Determine operation type
+    if(/\b(swap|troc[ae]r?|convert)\b/.test(low)) meta.op = 'swap';
+    else if(/\b(bridge|ponte|cross[ -]?chain)\b/.test(low)) meta.op = 'bridge';
+    else if(/\b(send|enviar|pagar|pagamento|pay|transfer)\b/.test(low)) meta.op = 'payment';
+    else if(/\b(permission|permiss|permit|revoke|show perm)\b/.test(low)) meta.op = 'permission';
+    else if(/\b(schedule|agendar|recurring|semanal|diario|mensal)\b/.test(low)) meta.op = 'schedule';
+    else if(/\b(treasury|tesouro|vault)\b/.test(low)) meta.op = 'treasury';
+    else if(/\b(balance|saldo|carteira|wallet|quanto)\b/.test(low)) meta.op = 'balance';
+    else if(/\b(history|hist[oó]rico|transaction)\b/.test(low)) meta.op = 'history';
+    else if(/\b(help|ajuda|what can)\b/.test(low)) meta.op = 'help';
+    else if(/\b(invoice|fatura)\b/.test(low)) meta.op = 'invoice';
+    else if(/\b(multisend|batch|em massa|lote)\b/.test(low)) meta.op = 'multisend';
+    meta.status = 'pending';
+    return meta;
+  }
+
+  function _fuzzyTokenFromMsg(msg){
+    var low = msg.toLowerCase();
+    if(/\b(usdc|usd|dollar)\b/.test(low)) return 'USDC';
+    if(/\b(eurc|eur|euro)\b/.test(low)) return 'EURC';
+    if(/\b(cirbtc|btc|bitcoin)\b/.test(low)) return 'cirBTC';
+    if(/\b(eth|ether)\b/.test(low)) return 'ETH';
+    return null;
+  }
+
+  /* ── Extract status from AI response ── */
+  function _extractChatMetaFromResponse(r, userMsg){
+    if(!r) return {};
+    if(r.indexOf('Permission granted') !== -1) return {status:'active'};
+    if(r.indexOf('created') !== -1 || r.indexOf('Created') !== -1) return {status:'completed'};
+    if(r.indexOf('executed') !== -1 || r.indexOf('sent') !== -1) return {status:'completed'};
+    if(r.indexOf('Error') !== -1 || r.indexOf('error') !== -1) return {status:'failed'};
+    if(r.indexOf('connected') !== -1 || r.indexOf('balance') !== -1) return {status:'completed'};
+    return {status:'completed'};
   }
   function autSave(){try{localStorage.setItem(AUT_KEY,JSON.stringify(autChats))}catch(e){}}
   function autLoad(){try{const r=localStorage.getItem(AUT_KEY);if(r){autChats=JSON.parse(r);if(autChats.length)autCurId=autChats[0].id;}}catch(e){autChats=[];}}
@@ -36928,8 +37164,8 @@ const UBScreen = (function() {
         en:/\b(schedul|automate|automati[sz]e|recurring)\b.*\b(payment|pay|send|bridge|swap|link|transfer)\b/,
         alt:/\b(todo dia|toda semana|todo m[êe]s|every day|every week|every month|every monday|every friday|weekly|daily|monthly|recurring|repetir)\b.*\b(pag|pay|send|bridge|swap|envia|transfer|link)\b/},
       // 4. MULTISEND
-      {intent:'MULTISEND', en:/\bmultisend\b|\b(batch|multi)\b.*\b(send|payment|destinat|recipient|address|endere[cç]o)\b/,
-        pt:/\b(envia[rd]?|manda[rd]?)\b.*\b(v[áa]rios|m[úu]ltiplos|diversos|para esses|em massa|lote|em lote)\b/,
+      {intent:'MULTISEND', en:/\bmultisend\b|\b(batch|multi|bulk)\b.*\b(send|payment|destinat|recipient|address|endere[cç]o)\b/,
+        pt:/\b(envia[rd]?|envie|manda[rd]?|enviei|mand[eo])\b.*\b(v[áa]rios|m[úu]ltiplos|diversos|para esses|em massa|lote|em lote|para muitos|para varias|para v[áa]rios)\b/,
         alt:/\b(v[áa]rios destinat[áa]rios|envio em massa|pagamento em lote|batch payment)\b/},
       // 4. SWAP with params
       {intent:'SWAP_EXECUTE', en:/\b(swap|trade|exchange|convert)\b.*\b(for|to|into|→)\b/,
@@ -36943,7 +37179,11 @@ const UBScreen = (function() {
       {intent:'QUERY_BALANCE', en:/\b(balance|portfolio|wallet|carteira|holdings|how much|what('?s| is) my)\b/,
         pt:/\b(saldo|carteira|quanto (eu )?tenho|meu saldo|minha carteira|minha posi[cç][aã]o|balan[cç]o)\b/,
         alt:/\b(show my|mostr[ae]r? meus?|veja meus?|qual (o )?meu)\b.*\b(balance|saldo|carteira)\b/},
-      // 8. QUERY / SEND PAYMENT
+      // 8. CROSS-CHAIN PAYMENT
+      {intent:'CROSS_CHAIN', en:/\b(cross[ -]?chain|crosschain|xchain|x[ -]?chain)\b.*\b(send|pay|payment|pagar|enviar)\b|\b(cross[ -]?chain\s+(payment|send|pay))\b/,
+        pt:/\b(pagamento\s+cross[ -]?chain|envio\s+cross[ -]?chain|pagamento\s+entre\s+redes)\b/,
+        alt:/\b(cross[ -]?chain)\b/},
+      // 9. QUERY / SEND PAYMENT
       {intent:'SEND_PAYMENT', en:/\b(send|transfer|pay|payment|enviar|pagar)\b.*\b(to|para|destino|0x)\b/,
         pt:/\b(envia[rd]?|manda[rd]?|pag[ae]r?|transfer[ei]r?)\b.*\b(para|ao|a |0x|endere[cç]o)\b/},
       // 9. ADD LIQUIDITY
@@ -36960,7 +37200,38 @@ const UBScreen = (function() {
       {intent:'CONTRACT_INFO', en:/\b(contract|contrato|abi|smart contract)\b/},
       // 15. PROFILE / SETTINGS
       {intent:'QUERY_PROFILE', en:/\b(profile|perfil|settings|config|customiz|preferências|preferences)\b/},
-      // 16. HELP
+      // 16. PERMISSION MANAGEMENT (in-chat)
+      {intent:'PERM_QUERY', en:/\b(what\s+permissions|show\s+permissions|list\s+permissions|active\s+permits?|my\s+permits?|permissions\s+you\s+have|show\s+my\s+permits?)\b/,
+        pt:/\b(quais\s+(s[ãa]o\s+)?(minhas\s+)?permis|mostr[ae]r?\s+permis|lista\s+de\s+permis|permis\s+ativa|minhas\s+permis)\b/,
+        alt:/\b(permis|permit)\b/},
+      {intent:'PERM_REVOKE', en:/\b(revoke|cancel|disable|remove)\b.*\b(permission|permit|bridge|treasury|swap|payment|allowance)\b/,
+        pt:/\b(revoga[rd]?|cancela[rd]?|remov[ae]r?|desativa[rd]?|desliga[rd]?)\b.*\b(permis|permit|ponte|bridge|tesouro|treasury|swap|pagamento|limite|acesso)\b/},
+      {intent:'PERM_INCREASE', en:/\b(increase|raise|bump|extend|allow|enable)\b.*\b(limit|allowance|permit|permission|for|to)\b.*\d+/,
+        pt:/\b(aumenta[rd]?|eleva[rd]?|sobe|permitir|autorizar|habilitar)\b.*\b(limite|permiss[aã]o|para|por)\b.*\d+/,
+        alt:/\b(allow\s+(payments|bridge|swap)(\s+for\s+\d+)?|permitir\s+pagamentos?\s+(por|para)\s+\d+)\b/},
+      {intent:'PERM_CANCEL_ALL', en:/\b(cancel\s+(all|every)\s+permission|revoke\s+all|remove\s+all\s+permits?)\b/,
+        pt:/\b(cancela[rd]?\s+tod[ao]s?\s+(as\s+)?permis|revoga[rd]?\s+tod|remove[rd]?\s+tod)/,
+        alt:/\b(clear\s+permissions|limpar\s+permis|reset\s+permits?)\b/},
+      {intent:'PERM_AUDIT', en:/\b(audit\s+log|permit\s+log|usage\s+log|permission\s+history)\b/,
+        pt:/\b(log\s+de\s+audit|hist[oó]rico\s+de\s+permis|registro\s+de\s+uso)\b/},
+      {intent:'PERM_SESSION_WALLET', en:/\b(session\s+wallet|agent\s+wallet)\b/,
+        pt:/\b(carteira\s+de\s+sess[aã]o|carteira\s+do\s+agente)\b/},
+      // 17. EXECUTION PLAN / WORKFLOW
+      {intent:'EXECUTION_PLAN', en:/\b(execution\s+plan|workflow|autonomous\s+execution)\b/,
+        pt:/\b(plano\s+de\s+execu[cç][aã]o|fluxo\s+de\s+trabalho|execu[cç][aã]o\s+aut[ôo]noma)\b/},
+      // 18. EXECUTION HISTORY
+      {intent:'EXECUTION_HISTORY', en:/\b(execution\s+history|what\s+failed|executed\s+(yesterday|today|this\s+(week|month)))\b/,
+        pt:/\b(hist[oó]rico\s+de\s+execu[cç][aã]o|o\s+que\s+falhou|executado\s+(ontem|hoje|essa\s+semana|esse\s+m[êe]s))\b/},
+      // 19. EXECUTION QUEUE
+      {intent:'EXECUTION_QUEUE', en:/\b(execution\s+queue|task\s+queue|pending\s+tasks|my\s+tasks)\b/,
+        pt:/\b(fila\s+de\s+execu[cç][aã]o|fila\s+de\s+tarefas|tarefas\s+pendentes|minhas\s+tarefas)\b/},
+      // 20. SCHEDULED PERMITS
+      {intent:'SCHEDULED_PERMITS', en:/\b(scheduled\s+permit|recurring\s+permit|recurring\s+(payment|bridge|swap)|pay\s+salaries|bridge\s+profits)\b/,
+        pt:/\b(permis\s+agendada|permis\s+recorrente|pagar\s+sal[áa]rios)\b/},
+      // 20. EXECUTE SCHEDULES
+      {intent:'EXECUTE_SCHEDULES', en:/\b(execute\s+schedules?|run\s+schedules?|executar\s+agendamentos?|executar\s+schedules?|process\s+schedules?|trigger\s+schedules?)\b/,
+        pt:/\b(execut[ae]r?\s+agendamentos?|rodar\s+agendamentos?|processar\s+agendamentos?|disparar\s+agendamentos?)\b/},
+      // 21. HELP
       {intent:'HELP', en:/\b(help|ajuda|what can you do|o que (voce|você) (faz|consegue|pode)|how (do|can)|como (fa[çc]o|posso|usar))\b/},
       // 17. GREETING
       {intent:'GREETING', en:/\b(hello|hi\b|hey|ola|oi\b|good morning|good afternoon|good evening|bom dia|boa tarde|boa noite)\b/},
@@ -37032,6 +37303,70 @@ const UBScreen = (function() {
 
     // CSV detection (preserved)
     if(low.startsWith('[csv]')) return autProcessCSV(msg);
+
+    // ── Smart send routing — detect "send/pay" without specific method ──
+    var sendLow = low;
+    var isSendOnly = /\b(send|pay|enviar|pagar|mandar|transferir|transfer|remeter|depositar|pagamento|payment)\b/.test(sendLow);
+    var hasMethod = /\b(bridge|ponte|cross|chain|swap|troc|schedule|agendar|recurring|direct send|via arc|send via|multi|batch|bulk|lote|massa|csv)\b/.test(sendLow);
+    var hasAddr = /0x[a-fA-F0-9]{40}/.test(msg);
+    var isShortMsg = msg.trim().split(/\s+/).length <= 4;
+    if(isSendOnly && !hasMethod && (!hasAddr || isShortMsg)){
+      var sendAmt = _extractNumber(msg);
+      var sendToken = _fuzzyTokenFromMsg(msg) || 'USDC';
+      var sendAddr = (msg.match(/0x[a-fA-F0-9]{40}/)||[])[0] || '';
+      var amtDisplay = sendAmt ? sendAmt + ' ' + sendToken : '';
+      var amtParam = sendAmt || '';
+      var addrParam = sendAddr || '';
+      return R.intro('How would you like to <strong style="color:#4f8ef7">send' + (amtDisplay ? ' ' + amtDisplay : '') + '</strong>?') +
+        R.card(R.head('send','Choose Send Method',{text:'Select one',cls:'live'}),
+          '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px">' +
+          '<div class="send-opt-card" onclick="autonomaSendQuick(\'cross-chain payment' + (amtParam ? ' ' + amtParam + ' ' + sendToken : '') + (addrParam ? ' to ' + addrParam : '') + '\')" style="background:rgba(6,247,233,.06);border:1px solid rgba(6,247,233,.2);border-radius:8px;padding:12px;cursor:pointer;text-align:center;transition:all .15s">' +
+            '<i class="ti ti-world" style="font-size:20px;color:#06F7E9;display:block;margin-bottom:6px"></i>' +
+            '<div style="font-weight:700;font-size:10px;color:#06F7E9">Cross-Chain</div>' +
+            '<div style="font-size:8px;color:var(--muted2);margin-top:2px">Send across networks</div>' +
+          '</div>' +
+          '<div class="send-opt-card" onclick="autonomaSendQuick(\'bridge' + (amtParam ? ' ' + amtParam + ' ' + sendToken : '') + (addrParam ? ' to ' + addrParam : '') + '\')" style="background:rgba(167,139,250,.06);border:1px solid rgba(167,139,250,.2);border-radius:8px;padding:12px;cursor:pointer;text-align:center;transition:all .15s">' +
+            '<i class="ti ti-topology-star-3" style="font-size:20px;color:#a78bfa;display:block;margin-bottom:6px"></i>' +
+            '<div style="font-weight:700;font-size:10px;color:#a78bfa">Bridge</div>' +
+            '<div style="font-size:8px;color:var(--muted2);margin-top:2px">Move assets via CCTP</div>' +
+          '</div>' +
+          '<div class="send-opt-card" onclick="autonomaSendQuick(\'direct send' + (amtParam ? ' ' + amtParam + ' ' + sendToken : '') + (addrParam ? ' to ' + addrParam : '') + '\')" style="background:rgba(79,142,247,.06);border:1px solid rgba(79,142,247,.2);border-radius:8px;padding:12px;cursor:pointer;text-align:center;transition:all .15s">' +
+            '<i class="ti ti-send" style="font-size:20px;color:#4f8ef7;display:block;margin-bottom:6px"></i>' +
+            '<div style="font-weight:700;font-size:10px;color:#4f8ef7">Send via Arc</div>' +
+            '<div style="font-size:8px;color:var(--muted2);margin-top:2px">Direct on-chain transfer</div>' +
+          '</div>' +
+          '<div class="send-opt-card" onclick="autonomaSendQuick(\'schedule' + (amtParam ? ' a payment of ' + amtParam + ' ' + sendToken : ' a payment') + '\')" style="background:rgba(245,158,11,.06);border:1px solid rgba(245,158,11,.2);border-radius:8px;padding:12px;cursor:pointer;text-align:center;transition:all .15s">' +
+            '<i class="ti ti-calendar-event" style="font-size:20px;color:#f59e0b;display:block;margin-bottom:6px"></i>' +
+            '<div style="font-weight:700;font-size:10px;color:#f59e0b">Schedule</div>' +
+            '<div style="font-size:8px;color:var(--muted2);margin-top:2px">Recurring payment</div>' +
+          '</div></div>' +
+          '<div style="font-size:9px;color:var(--muted2);margin-top:8px;text-align:center">Each option will ask for the recipient address if needed.</div>',
+          R.actions({icon:'x',label:'Cancel',cls:'danger',action:"autonomaSendQuick('cancel')"})
+        );
+    }
+
+    // ── AutonomaCore — AI Agent intelligence layer (sits ABOVE regex engine) ──
+    try{
+      if(typeof AutonomaCore !== 'undefined' && typeof AutonomaCore.process === 'function'){
+        var coreResult = AutonomaCore.process(msg, {
+          R: R, autonomaSendQuick: autonomaSendQuick,
+          _executeIntent: _executeIntent,
+          _ctxActive: _ctxActive, _ctxSet: _ctxSet, _ctxParams: (_ctx.params || {})
+        });
+        if(coreResult){
+          if(typeof coreResult === 'string') return coreResult;
+          if(coreResult.type === 'intent'){
+            // Route through existing engine
+            if(_needsContext(coreResult.intent, coreResult.params)){
+              _ctxSet(coreResult.intent, coreResult.params);
+              return _askMissingParams(coreResult.intent, coreResult.params);
+            }
+            return await _executeIntent(coreResult.intent, coreResult.params, coreResult.msg || msg);
+          }
+          // Fallback — continue to regex engine below
+        }
+      }
+    } catch(e){}
 
     // ── Intelligence Layer (pre-interpretation ONLY; never alters recognised
     //    commands, numbers, addresses, tokens or chains). Sits above the engine. ──
@@ -37105,6 +37440,7 @@ const UBScreen = (function() {
       case 'SWAP_EXECUTE': return await autSwap(msg);
       case 'SWAP_GUIDE': return autSwapGuide();
       case 'BRIDGE': return autBridge(msg);
+      case 'CROSS_CHAIN': return _handleCrossChain(msg, params);
       case 'QUERY_BALANCE': return await autQueryWallet();
       case 'SEND_PAYMENT': return autPayment(msg);
       case 'ADD_LIQUIDITY': return autAddLiq(msg);
@@ -37114,6 +37450,17 @@ const UBScreen = (function() {
       case 'QUERY_TREASURY': return await autQueryTreasury();
       case 'CONTRACT_INFO': return autContractInfo();
       case 'QUERY_PROFILE': return _handleProfile();
+      case 'PERM_QUERY': return _handlePermQuery();
+      case 'PERM_REVOKE': return _handlePermRevoke(params, msg);
+      case 'PERM_INCREASE': return _handlePermIncrease(params, msg);
+      case 'PERM_CANCEL_ALL': return _handlePermCancelAll();
+      case 'PERM_AUDIT': return _handlePermAudit();
+      case 'PERM_SESSION_WALLET': return _handlePermSessionWallet();
+      case 'EXECUTION_PLAN': return _handleExecutionPlan(params, msg);
+      case 'EXECUTION_HISTORY': return _handleExecutionHistory(params, msg);
+      case 'EXECUTION_QUEUE': return _handleExecutionQueue();
+      case 'SCHEDULED_PERMITS': return _handleScheduledPermits(params, msg);
+      case 'EXECUTE_SCHEDULES': return _handleExecuteSchedules();
       case 'HELP': return autHelp();
       case 'GREETING': return autGreeting();
       default: return _handleDefault(msg);
@@ -37380,10 +37727,50 @@ const UBScreen = (function() {
       return R.intro('Connect your wallet first for multi-send.')+
         R.card(R.head('stack','Multi-Send',{text:'Wallet Required',cls:'pending'}),R.row('Status','Not connected','yellow'));
     }
-    const count=params.recipientCount||0;
-    const amount=params.amount||0;
-    const token=params.token||'USDC';
-    const oid=opId();
+
+    // Check for saved recipients — try multiple sources
+    var savedContacts = [];
+    try {
+      if(typeof RecipientResolver !== 'undefined' && typeof RecipientResolver.all === 'function'){
+        savedContacts = RecipientResolver.all();
+      }
+      if(savedContacts.length === 0 && typeof contacts !== 'undefined' && Array.isArray(contacts)){
+        savedContacts = contacts;
+      }
+      if(savedContacts.length === 0 && typeof Store !== 'undefined' && typeof Store.load === 'function'){
+        savedContacts = Store.load('contacts', []);
+      }
+    } catch(e){ savedContacts = []; }
+
+    var count=params.recipientCount||0;
+    var amount=params.amount||0;
+    var token=params.token||'USDC';
+
+    // If we have saved contacts and no specific count/addresses, show them
+    if(savedContacts.length > 0 && count === 0 && !params.address){
+      var contactItems = savedContacts.map(function(c, i){
+        var addr = c.addr || c.address || '';
+        var short = addr ? addr.substring(0,6)+'...'+addr.substring(addr.length-4) : '';
+        var chain = c.chainId || c.chain || 'Arc Testnet';
+        return '<div class="perm-active-item" style="display:flex;align-items:center;gap:8px;cursor:pointer" onclick="window._toggleRecipient(this,\''+addr+'\')">'+
+          '<input type="checkbox" class="rcp-check" style="cursor:pointer;accent-color:#a78bfa" onclick="event.stopPropagation()" data-addr="'+addr+'"/>'+
+          '<div style="width:28px;height:28px;border-radius:50%;background:rgba(167,139,250,.15);display:flex;align-items:center;justify-content:center;flex-shrink:0"><i class="ti ti-user" style="color:#a78bfa;font-size:12px"></i></div>'+
+          '<div style="flex:1"><div style="font-size:10px;font-weight:700;color:var(--text)">'+(c.name||'Unnamed')+'</div><div style="font-size:8px;color:var(--muted)"><code style="font-size:8px;color:#a78bfa">'+short+'</code> · '+chain+'</div></div>'+
+          '</div>';
+      }).join('');
+
+      return R.intro('Your <strong style="color:#a78bfa">saved recipients</strong> ('+savedContacts.length+' total). Select the ones you want:')+
+        '<div style="max-height:300px;overflow-y:auto;margin-top:6px">'+contactItems+'</div>'+
+        '<div style="margin-top:8px;display:flex;gap:6px;align-items:center">'+
+          '<button class="aut-act primary" onclick="window._buildMultiSend()"><i class="ti ti-check"></i>Use Selected</button>'+
+          '<button class="aut-act" onclick="window._selectAllRecipients()"><i class="ti ti-checkbox"></i>Select All</button>'+
+          '<span id="rcp-selected-count" style="font-size:9px;color:var(--muted2);margin-left:4px">0 selected</span>'+
+        '</div>'+
+        '<div style="font-size:9px;color:var(--muted2);margin-top:6px">Or <span style="color:#06F7E9;cursor:pointer" onclick="showPage(\'recipients\')">open the Recipients page</span> to manage contacts.</div>';
+    }
+
+    // No saved contacts or has specific params — existing flow
+    var oid = opId();
     autPendingOps[oid]={execute:()=>{showPage('batch');}};
     return R.intro('Multi-Send operation ready:')+
       R.card(R.head('stack','Multi-Send',{text:'Pending',cls:'pending'}),
@@ -37393,7 +37780,8 @@ const UBScreen = (function() {
         R.row('Action','Add recipients to execute batch transfer',''),
         R.actions(
           {icon:'check',label:'Open Multi-Send',cls:'confirm',action:"autConfirmOp('"+oid+"')"},
-          {icon:'file-upload',label:'Upload CSV',cls:'',action:"document.getElementById('aut-csv-input').click()"}
+          {icon:'file-upload',label:'Upload CSV',cls:'',action:"document.getElementById('aut-csv-input').click()"},
+          {icon:'users',label:'Recipients Page',cls:'',action:"showPage('recipients')"}
         ));
   }
 
@@ -37417,6 +37805,364 @@ const UBScreen = (function() {
           {icon:'user-circle',label:'Full Profile',cls:'',action:"showPage('profile')"},
           {icon:'history',label:'Activity',cls:'',action:"showPage('reports')"}
         ));
+  }
+
+  // ── PERMISSION HANDLERS (in-chat) ────────────────────
+  function _handlePermQuery(){
+    if(typeof PermissionCards==='undefined') return R.intro('Permission system initializing...');
+    return PermissionCards.buildActivePermitsList();
+  }
+
+  function _handlePermRevoke(params, msg){
+    if(typeof PermitEngine==='undefined') return R.intro('Permission system initializing...');
+    var low = msg.toLowerCase();
+    var count = 0;
+    var target = '';
+
+    if(/\b(bridge|ponte)\b/.test(low)){
+      count = PermitEngine.revokeByOperation('bridge', 'Bridge permissions revoked by user');
+      target = 'Bridge';
+    } else if(/\b(treasury|tesouro)\b/.test(low)){
+      count = PermitEngine.revokeByOperation('treasury', 'Treasury permissions revoked by user');
+      target = 'Treasury';
+    } else if(/\b(swap|troc)\b/.test(low)){
+      count = PermitEngine.revokeByOperation('swap', 'Swap permissions revoked by user');
+      target = 'Swap';
+    } else if(/\b(payment|pagamento|pay)\b/.test(low)){
+      count = PermitEngine.revokeByOperation('payment', 'Payment permissions revoked by user');
+      target = 'Payment';
+    } else if(/\b(session|sess[aã]o)\b/.test(low)){
+      count = PermitEngine.revokeByType('session', 'Session permits revoked by user');
+      target = 'Session';
+    } else {
+      count = PermitEngine.getActive().length;
+      if(count > 0){
+        PermitEngine.revokeAll('User requested revoke all');
+        target = 'All';
+      }
+    }
+
+    if(count === 0){
+      var emptyMsg = (typeof PermissionCards!=='undefined') ? PermissionCards.buildActivePermitsList() : R.intro('No active permissions.');
+      return R.intro('No active permissions to revoke.')+emptyMsg;
+    }
+
+    if(typeof PermissionCards!=='undefined') return PermissionCards.buildRevokedCard(count, target);
+    return R.intro('Permissions revoked: '+count+' permit(s).');
+  }
+
+  function _handlePermIncrease(params, msg){
+    if(typeof PermitEngine==='undefined') return R.intro('Permission system initializing...');
+    var amount = _extractNumber(msg) || params.amount || 0;
+    if(amount <= 0) return R.intro('What amount should the limit be increased to? (e.g. "increase limit to 1000 USDC")');
+
+    var token = params.token || 'USDC';
+    var active = PermitEngine.getActive();
+    if(active.length === 0){
+      if(typeof PermissionCards!=='undefined') return PermissionCards.buildRequestCard({
+        type: 'spend', maxAmount: amount, asset: token,
+        destination: '*', network: 'Arc Testnet',
+        allowedOps: ['payment','swap','bridge','treasury'],
+        durationMs: 604800000, purpose: 'Increased spending limit',
+        estimatedGas: 'N/A'
+      });
+      return R.intro('I need a permission to increase the limit. Say "show permissions" to manage.');
+    }
+
+    var permit = active[0];
+    var newMax = amount;
+    var currentMax = permit.maxAmount;
+    var remaining = Math.max(0, permit.maxAmount - (permit.usedAmount || 0));
+    var shortfall = amount - remaining;
+
+    if(shortfall <= 0){
+      return R.intro('Current permit ('+currentMax+' '+token+') already covers '+amount+' '+token+'. No increase needed.');
+    }
+
+    if(typeof PermissionCards!=='undefined') return PermissionCards.buildEscalationCard(
+      currentMax, amount, shortfall,
+      { asset: token, allowedOps: permit.allowedOps, durationMs: permit.expiresAt - Date.now() },
+      permit
+    );
+    return R.intro('Need to increase limit from '+currentMax+' to '+amount+' '+token+'. Please approve a new permit.');
+  }
+
+  function _handlePermCancelAll(){
+    if(typeof PermitEngine==='undefined') return R.intro('Permission system initializing...');
+    var count = PermitEngine.getActive().length;
+    if(count === 0) return R.intro('No active permissions to cancel.');
+    PermitEngine.revokeAll('Cancel all permissions');
+    if(typeof PermissionCards!=='undefined') return PermissionCards.buildRevokedCard(count, 'All');
+    return R.intro('All '+count+' permissions cancelled.');
+  }
+
+  function _handlePermAudit(){
+    if(typeof PermissionCards==='undefined') return R.intro('Permission system initializing...');
+    return PermissionCards.buildAuditLog(20);
+  }
+
+  function _handlePermSessionWallet(){
+    if(typeof PermissionCards==='undefined') return R.intro('Permission system initializing...');
+    return PermissionCards.buildSessionWalletInfo();
+  }
+
+  // ── EXECUTION PLAN / WORKFLOW HANDLER (Phases 1,3,10) ──
+  function _handleExecutionPlan(params, msg){
+    if(typeof ExecutionPlanner==='undefined') return R.intro('Execution Planner initializing...');
+    var amount = params.amount || _extractNumber(msg) || 100;
+    var token = params.token || 'USDC';
+    var goal = 'Execute ' + amount + ' ' + token + ' workflow';
+    if(/\b(pay|pagar|supplier|fornecedor)\b/.test(msg.toLowerCase())) goal = 'Pay supplier ' + amount + ' ' + token;
+    if(/\b(bridge|ponte)\b/.test(msg.toLowerCase())) goal = 'Bridge ' + amount + ' ' + token;
+    if(/\b(swap|troc)\b/.test(msg.toLowerCase())) goal = 'Swap ' + amount + ' ' + token;
+    if(/\b(treasury|tesouro|treasury)\b/.test(msg.toLowerCase())) goal = 'Treasury operation ' + amount + ' ' + token;
+
+    var plan = ExecutionPlanner.buildWorkflow({
+      intent: params.intent || 'payment', amount: amount, asset: token,
+      goal: goal, needsSwap: /\b(swap|troc)\b/.test(msg.toLowerCase()),
+      needsBridge: /\b(bridge|ponte|cross)\b/.test(msg.toLowerCase()),
+      needsTreasury: /\b(treasury|tesouro|deposit)\b/.test(msg.toLowerCase()),
+      purpose: goal
+    });
+
+    window._activePlans = window._activePlans || {};
+    window._activePlans[plan.id] = plan;
+
+    if(typeof PermissionCards==='undefined') return R.intro('Execution plan prepared. Approve to continue.')+
+      R.card(R.head('clipboard-list','Execution Plan',{text:plan.riskLevel,cls:'live'}),R.row('Goal',goal,'purple')+R.row('Steps',plan.steps.length+' steps','teal')+R.row('Est. Time',plan.estimatedTime+'s',''));
+
+    var risk = RiskEngine ? RiskEngine.analyze({operation:'workflow',amount:amount,asset:token,network:'Arc Testnet',purpose:goal}) : null;
+    var riskCard = risk ? PermissionCards.buildRiskAnalysis(risk, goal) : '';
+    return PermissionCards.buildExecutionPlan(plan) + riskCard;
+  }
+
+  // ── EXECUTION HISTORY HANDLER (Phase 9) ──
+  function _handleExecutionHistory(params, msg){
+    if(typeof PermissionCards==='undefined') return R.intro('History system initializing...');
+    var filter = null;
+    if(/\b(yesterday|ontem)\b/.test(msg.toLowerCase())) filter = 'today';
+    if(/\b(this week|weekly|essa semana|semanal)\b/.test(msg.toLowerCase())) filter = 'week';
+    if(/\b(this month|monthly|esse m[êe]s|mensal)\b/.test(msg.toLowerCase())) filter = 'month';
+    if(/\b(failed|falha|falhou)\b/.test(msg.toLowerCase())) filter = 'failed';
+
+    // If asking a specific question, use query executor
+    if(typeof ExecutionHistory !== 'undefined' && /\b(how much|quanto|what did|what executed|o que)\b/.test(msg.toLowerCase())){
+      var answer = ExecutionHistory.queryHistory(msg);
+      return PermissionCards.buildExecutionHistory(filter) +
+        '<div class="aut-intro" style="color:#06F7E9;margin-top:8px"><i class="ti ti-message"></i> ' + answer.answer + '</div>';
+    }
+
+    return PermissionCards.buildExecutionHistory(filter);
+  }
+
+  // ── EXECUTION QUEUE HANDLER (Phase 7) ──
+  function _handleExecutionQueue(){
+    if(typeof PermissionCards==='undefined') return R.intro('Queue system initializing...');
+    return PermissionCards.buildExecutionQueue();
+  }
+
+  // ── SCHEDULED PERMITS HANDLER (Phase 5) ──
+  function _handleScheduledPermits(params, msg){
+    if(typeof PermitEngine==='undefined') return R.intro('Permission system initializing...');
+
+    // Check if user wants to create a scheduled permit
+    var amount = params.amount || _extractNumber(msg) || 100;
+    var token = params.token || 'USDC';
+    var low = msg.toLowerCase();
+
+    // Determine recurrence
+    var recurrence = 'weekly';
+    if(/\b(daily|diario|diário|every\s+day|todo\s+dia)\b/.test(low)) recurrence = 'daily';
+    else if(/\b(weekly|semanal|every\s+week|toda\s+semana)\b/.test(low)) recurrence = 'weekly';
+    else if(/\b(monthly|mensal|every\s+month|todo\s+m[êe]s)\b/.test(low)) recurrence = 'monthly';
+    else if(/\b(biweekly|bi[ -]?weekly|quinzenal|cada\s+15)\b/.test(low)) recurrence = 'biweekly';
+
+    // Determine day of week
+    var dayOfWeek = null;
+    var days = {sunday:0,sun:0,monday:1,mon:1,tuesday:2,tue:2,wednesday:3,wed:3,thursday:4,thu:4,friday:5,fri:5,saturday:6,sat:6,
+      domingo:0,dom:0,segunda:1,seg:1,'terça':2,terca:2,ter:2,quarta:3,qua:3,quinta:4,qui:4,sexta:5,sex:5,'sábado':6,sabado:6,sab:6};
+    for(var d in days){
+      if(low.indexOf(d) !== -1){ dayOfWeek = days[d]; break; }
+    }
+
+    // Determine operation type
+    var opType = 'payment';
+    var purpose = 'Recurring ' + amount + ' ' + token + ' ' + recurrence + ' ' + (opType === 'payment' ? 'payment' : opType);
+    if(/\b(bridge|ponte)\b/.test(low)){ opType = 'bridge'; purpose = 'Bridge profits ' + recurrence; }
+    else if(/\b(swap|troc)\b/.test(low)){ opType = 'swap'; purpose = 'Auto swap ' + recurrence; }
+    else if(/\b(treasury|tesouro)\b/.test(low)){ opType = 'treasury'; purpose = 'Treasury reimbursement ' + recurrence; }
+    else if(/\b(salaries|sal[aá]rios)\b/.test(low)){ purpose = 'Pay salaries ' + recurrence; }
+    else if(/\b(profits|lucros)\b/.test(low)){ purpose = 'Bridge profits ' + recurrence; }
+
+    // If there's a specific creation intent with amount, create it
+    if(amount > 0 && /\b(schedule|agendar|create|recurring|di[áa]rio|semanal|mensal|todo|every)\b/.test(low)){
+      var sched = PermitEngine.createScheduled({
+        name: purpose, type: opType, asset: token, maxAmount: amount,
+        recurrence: recurrence, dayOfWeek: dayOfWeek, allowedOps: [opType],
+        purpose: purpose
+      });
+
+      return R.intro('<strong style="color:#22c55e">Scheduled permit created!</strong>') +
+        '<div class="aut-rc perm-card" style="border-color:rgba(34,197,94,.25)!important">' +
+        '<div class="aut-rc-head"><i class="ti ti-calendar-event"></i><span class="aut-rc-title">'+purpose+'</span><span class="aut-rc-badge live">Active</span></div>' +
+        '<div class="aut-rc-body">' +
+        R.row('Recurrence', PermitEngine.fmtRecurrence(sched), 'teal') +
+        R.row('Amount', amount + ' ' + token, 'green') +
+        R.row('Type', opType, '') +
+        R.row('Next Execution', PermitEngine.fmtDate(sched.nextExecution), '') +
+        '</div>' +
+        '<div class="aut-act-bar">' +
+        '<button class="aut-act" onclick="autonomaSendQuick(\'scheduled permits\')"><i class="ti ti-list"></i>View All</button>' +
+        '</div></div>';
+    }
+
+    // Otherwise show the list
+    if(typeof PermissionCards!=='undefined') return PermissionCards.buildScheduledPermitsList();
+    return R.intro('Scheduled permits list unavailable. Check back later.');
+  }
+
+  // ── EXECUTE SCHEDULES HANDLER ──
+  function _handleExecuteSchedules(){
+    if(typeof PermitEngine==='undefined') return R.intro('Permission system initializing...');
+
+    var allScheduled = PermitEngine.getScheduled ? PermitEngine.getScheduled() : [];
+    var due = PermitEngine.getScheduledDue ? PermitEngine.getScheduledDue() : [];
+
+    // No schedules at all — suggest creating one
+    if(!allScheduled || allScheduled.length === 0){
+      return R.intro('You have no scheduled permits yet. Create one to automate recurring operations.') +
+        R.card(R.head('calendar-plus','No Schedules',{text:'Empty',cls:'pending'}),
+          R.row('Create a schedule','Say: "schedule a daily payment of 100 USDC"','teal') +
+          R.row('Or','"schedule a weekly bridge of 500 USDC"','') +
+          R.row('Or','"pay salaries every Friday"',''),
+          R.actions(
+            {icon:'calendar-event',label:'Open Schedule Page',cls:'primary',action:"showPage('schedule')"},
+            {icon:'plus',label:'Create Now',cls:'',action:"autonomaSendQuick('schedule a daily payment of 100 USDC')"}
+          ));
+    }
+
+    // Has schedules but none due — show all
+    if(!due || due.length === 0){
+      var items = allScheduled.map(function(s){
+        var isDue = s.nextExecution <= Date.now();
+        return R.row(
+          (isDue ? '<span style="color:#22c55e">●</span> ' : '<span style="color:var(--muted2)">○</span> ') + s.name,
+          '<span style="color:'+(isDue?'#22c55e':'var(--muted2)')+'">' + PermitEngine.fmtRecurrence(s) + ' · next: ' + PermitEngine.fmtDate(s.nextExecution) + '</span>',
+          isDue ? 'green' : ''
+        );
+      }).join('');
+
+      return R.intro('You have <strong>' + allScheduled.length + '</strong> scheduled permit(s). None are due yet.') +
+        R.card(R.head('calendar-event','Scheduled Permits',{text: allScheduled.length + ' total',cls:'live'}),
+          items,
+          R.actions(
+            {icon:'calendar-event',label:'Open Schedule Page',cls:'primary',action:"showPage('schedule')"},
+            {icon:'refresh',label:'Check Again',cls:'',action:"autonomaSendQuick('execute schedules')"}
+          ));
+    }
+
+    // Has due schedules — execute them
+    var executed = [];
+    var failed = [];
+    for(var i = 0; i < due.length; i++){
+      try {
+        var permit = PermitEngine.executeScheduled(due[i].id);
+        if(permit){
+          executed.push({name: due[i].name, amount: due[i].basePermit.maxAmount, asset: due[i].basePermit.asset, recurrence: PermitEngine.fmtRecurrence(due[i]), permitId: permit.id});
+        } else {
+          failed.push({name: due[i].name, reason: 'Not yet due or already executed'});
+        }
+      } catch(e){
+        failed.push({name: due[i].name, reason: e.message || 'Unknown error'});
+      }
+    }
+
+    var execHtml = executed.length > 0 ? executed.map(function(e){
+      return R.row(e.name, '<strong style="color:#22c55e">' + e.amount + ' ' + e.asset + '</strong> · ' + e.recurrence, 'green');
+    }).join('') : R.row('Executed','None','');
+
+    var failHtml = failed.length > 0 ? R.sep() + R.section('Failed') + failed.map(function(f){
+      return R.row(f.name, '<span style="color:#ef4444">' + f.reason + '</span>', 'red');
+    }).join('') : '';
+
+    return R.intro('<strong style="color:#22c55e">Schedules executed!</strong> Processed ' + executed.length + ' of ' + due.length + ' due.') +
+      R.card(R.head('calendar-check','Schedule Execution',{text: executed.length + ' done', cls:'live'}),
+        R.row('Due Schedules', due.length + ' found', 'teal') +
+        execHtml + failHtml,
+        R.actions(
+          {icon:'calendar-event',label:'View All Schedules',cls:'primary',action:"autonomaSendQuick('scheduled permits')"},
+          {icon:'layout-dashboard',label:'Schedule Page',cls:'',action:"showPage('schedule')"},
+          {icon:'refresh',label:'Execute Again',cls:'',action:"autonomaSendQuick('execute schedules')"}
+        ));
+  }
+
+  // ── AI RECOMMENDATIONS HANDLER (Phase 8) ──
+  function _handleAIRecommendations(msg){
+    if(typeof AIRecommendations==='undefined') return R.intro('Recommendations system initializing...');
+    var recs = AIRecommendations.getFresh(true);
+    if(!recs || recs.length === 0){
+      return R.intro('I don\'t have specific recommendations right now. As you use more features, I\'ll learn from your patterns and suggest automations.') +
+        R.card(R.head('bulb','AI Recommendations',{text:'No suggestions',cls:'pending'}),
+          R.row('Status','Keep using the app','') +
+          R.row('Learning','I detect patterns over time','teal'));
+    }
+    if(typeof PermissionCards!=='undefined') return PermissionCards.buildRecommendations(recs);
+    return R.intro('Here are my suggestions:')+recs.map(function(r){return R.row(r.text,r.suggestion,'teal');}).join('');
+  }
+
+  // ── CROSS-CHAIN PAYMENT HANDLER ──
+  function _handleCrossChain(msg, params){
+    if(!walletAddress) return R.intro('Connect your wallet first for cross-chain payments.')+R.card(R.head('world','Cross-Chain',{text:'Wallet Required',cls:'pending'}),R.row('Status','Not connected','yellow'));
+
+    var amt = params.amount || _extractNumber(msg) || 0;
+    var token = params.token || 'USDC';
+    var destAddr = params.address || '';
+    var fromChain = params.fromChain || 'Arc Testnet';
+    var toChain = params.toChain || null;
+
+    if(!destAddr){
+      var addrMatch = msg.match(/0x[a-fA-F0-9]{40}/);
+      if(addrMatch) destAddr = addrMatch[0];
+    }
+    if(!toChain){
+      var clow = msg.toLowerCase();
+      var chainMap = { base: 'Base', ethereum: 'Ethereum', polygon: 'Polygon', arbitrum: 'Arbitrum', optimism: 'Optimism', robinhood: 'Robinhood' };
+      var toM = clow.match(/to\s+(\w+)/);
+      if(toM && chainMap[toM[1]]) toChain = chainMap[toM[1]];
+    }
+
+    if(amt <= 0){
+      return R.intro('How much would you like to send via cross-chain?') +
+        R.card(R.head('world','Cross-Chain Payment',{text:'Need amount',cls:'pending'}),
+          R.row('Recipient', destAddr ? destAddr.substring(0,10)+'...' : 'Not specified', destAddr ? 'teal' : 'yellow') +
+          R.row('Amount','Please specify','yellow'));
+    }
+    if(!destAddr){
+      return R.intro('Who is the recipient for this cross-chain payment?') +
+        R.card(R.head('world','Cross-Chain Payment',{text:'Need recipient',cls:'pending'}),
+          R.row('Amount','<strong>' + amt + ' ' + token + '</strong>','green') +
+          R.row('Recipient','Please provide a wallet address (0x...)','yellow'));
+    }
+
+    var short = destAddr.substring(0,6) + '...' + destAddr.substring(destAddr.length-4);
+    var permCheck = _requirePermit('payment', amt, token, fromChain, destAddr, 'Cross-chain ' + amt + ' ' + token + ' to ' + short);
+    if(typeof permCheck === 'string') return permCheck;
+
+    var destinationChain = toChain || 'Base';
+    return R.intro('Autonoma is preparing your <strong style="color:#06F7E9">cross-chain payment</strong>:') +
+      R.card(R.head('world','Cross-Chain Payment — Ready',{text:'Prepared',cls:'live'}),
+        R.row('Amount','<strong style="font-size:13px">' + amt + ' ' + token + '</strong>','green') +
+        R.row('Recipient','<code style="font-size:9px;color:#a78bfa">' + short + '</code>','teal') +
+        R.row('From',R.chainPill(fromChain,'#4f8ef7'),'') +
+        R.row('To',R.chainPill(destinationChain,'#06F7E9'),'') +
+        R.sep() +
+        R.row('Protocol','Cross-Chain Transfer','purple') +
+        (permCheck && permCheck.permit ? R.row('Permit','Validated ('+permCheck.remaining.toFixed(2)+' '+token+' remaining)','green') : ''),
+        R.actions(
+          {icon:'player-play',label:'Open Cross-Chain & Pre-fill',cls:'confirm',action:"window._autoNavXchain('"+destAddr+"',"+amt+",'"+token+"','"+destinationChain+"')"},
+          {icon:'x',label:'Cancel',cls:'danger',action:"autCancelOp('none')"}
+        )
+      );
   }
 
   // ── DEFAULT / FALLBACK ──────────────────────────────────
@@ -37447,6 +38193,7 @@ const UBScreen = (function() {
         '<div style="margin-top:8px;font-size:9px;color:var(--muted)">Também em português. Com contexto de conversa. Sempre seguro.</div></div>',
         R.actions(
           {icon:'link',label:'Create Payment Link',cls:'primary',action:"autonomaSendQuick('create payment link')"},
+          {icon:'shield-lock',label:'Manage Permissions',cls:'',action:"autonomaSendQuick('show permissions')"},
           {icon:'calendar-event',label:'Schedule Task',cls:'',action:"autonomaSendQuick('schedule a payment of 100 USDC every month')"}
         ));
   }
@@ -37491,6 +38238,166 @@ const UBScreen = (function() {
       );
   }
 
+  // ── Safety check helpers (Phase 11) ──────────────────
+  var _lastRecTime = 0;
+  function _isFinancialIntent(intent){
+    var financial = ['SWAP_EXECUTE','BRIDGE','SEND_PAYMENT','MULTISEND','SWAP_GUIDE','ADD_LIQUIDITY','REMOVE_LIQUIDITY'];
+    return financial.indexOf(intent) !== -1;
+  }
+  function _runSafetyChecks(intent, params, msg){
+    var checks = [];
+    var blocked = false;
+    var reason = '';
+    // Check 1: Wallet connected
+    if(typeof walletAddress !== 'undefined' && walletAddress){
+      checks.push({label:'Wallet connected',passed:true});
+    } else {
+      checks.push({label:'Wallet connected',passed:false});
+      blocked = true; reason = 'No wallet connected.';
+    }
+    // Check 2: Permit exists for financial operations
+    if(typeof PermitEngine !== 'undefined'){
+      var pc = PermitEngine.checkCoverage({operation:intent.replace('_EXECUTE','').replace('_GUIDE','').toLowerCase(),amount:params.amount||0,asset:params.token||'USDC'});
+      if(pc.covered){
+        checks.push({label:'Valid permit exists',passed:true});
+      } else if(pc.conditionsFailed && pc.conditionsFailed.length > 0){
+        checks.push({label:'Permit conditions met',passed:false});
+        blocked = true; reason = 'Permit conditions exceeded: ' + pc.conditionsFailed.join(', ');
+      } else if(!params.amount || params.amount <= 0){
+        checks.push({label:'Amount validation',passed:true});
+      } else {
+        checks.push({label:'Permit required',passed:false});
+        // Don't block — let the permit request card handle it
+      }
+    }
+    // Check 3: Contract reputation
+    if(typeof ContractRegistry !== 'undefined' && params.address){
+      var cr = ContractRegistry.lookup(params.address);
+      if(cr && (cr.trust==='high'||cr.trust==='medium')){
+        checks.push({label:'Contract verified — '+cr.name,passed:true});
+      } else if(cr && cr.trust==='unknown'){
+        checks.push({label:'Unknown contract — first interaction',passed:true});
+      } else {
+        checks.push({label:'Contract validation',passed:true});
+      }
+    }
+    // Check 4: Risk analysis
+    if(typeof RiskEngine !== 'undefined'){
+      var risk = RiskEngine.quickAssess(intent.replace('_EXECUTE','').replace('_GUIDE','').toLowerCase(),params.amount||0,params.token||'USDC');
+      if(risk.level === 'CRITICAL'){
+        checks.push({label:'Risk level is CRITICAL — execution blocked',passed:false});
+        blocked = true; reason = 'Risk level is CRITICAL. Cannot proceed.';
+      } else if(risk.level === 'HIGH'){
+        checks.push({label:'Risk level is HIGH — requires confirmation',passed:true});
+      } else {
+        checks.push({label:'Risk level: ' + risk.level,passed:true});
+      }
+    }
+    return {checks:checks,blocked:blocked,reason:reason};
+  }
+
+  // ── Autonomous preparation & progress engine ────────
+  window._autoProgress = function(steps, done, msg){
+    var el = document.getElementById('aut-messages'); if(!el) return;
+    var items = steps.map(function(s,i){
+      var cls = i < done ? 'done' : i === done ? 'active' : '';
+      var icon = i < done ? '<i class="ti ti-check" style="color:#22c55e"></i>' : i === done ? '<i class="ti ti-loader" style="color:#06F7E9;animation:autPulse 1.2s infinite"></i>' : '<span style="color:var(--muted);width:14px;display:inline-block;text-align:center">'+(i+1)+'</span>';
+      return '<div class="aut-progress-step '+cls+'"><span class="step-icon" style="width:18px;height:18px">'+icon+'</span><span>'+s+'</span></div>';
+    }).join('');
+    var html = '<div class="aut-progress"><div class="aut-progress-steps">'+items+'</div></div>';
+    if(msg) html += '<div class="aut-intro" style="font-size:9px;color:var(--muted2)">'+msg+'</div>';
+    var aiMsgs = el.querySelectorAll('.aut-msg.ai');
+    if(aiMsgs.length > 0){
+      var lastBody = aiMsgs[aiMsgs.length-1].querySelector('.aut-msg-body');
+      if(lastBody){
+        var existing = lastBody.querySelector('.aut-progress');
+        if(existing) existing.outerHTML = html;
+        else lastBody.innerHTML += html;
+        el.scrollTop = el.scrollHeight;
+      }
+    }
+  };
+  window._autoNavSwap = function(amt, tIn, tOut, idxIn, idxOut){
+    if(typeof showPage === 'function') showPage('swap');
+    setTimeout(function(){
+      try {
+        if(typeof SWP !== 'undefined'){ SWP.tokenInIdx = idxIn; SWP.tokenOutIdx = idxOut; }
+        var el = document.getElementById('swap-amount-in');
+        if(el){ el.value = amt; el.dispatchEvent(new Event('input')); }
+        if(typeof updateSwapRate === 'function') setTimeout(updateSwapRate, 300);
+      } catch(e){}
+    }, 400);
+  };
+  window._autoNavBridge = function(amt, fromIdx, toIdx){
+    if(typeof showPage === 'function') showPage('bridge');
+    setTimeout(function(){
+      try {
+        if(typeof bridgeFromIdx !== 'undefined') bridgeFromIdx = fromIdx;
+        if(typeof bridgeToIdx !== 'undefined') bridgeToIdx = toIdx;
+        var el = document.getElementById('bridge-amount');
+        if(el){ el.value = amt; el.dispatchEvent(new Event('input')); }
+        if(typeof refreshBridgeBalances === 'function') setTimeout(refreshBridgeBalances, 300);
+      } catch(e){}
+    }, 400);
+  };
+  window._autoNavSend = function(addr, amt, token){
+    if(typeof showPage === 'function') showPage('send');
+    setTimeout(function(){
+      try {
+        var a = document.getElementById('sa-to'); if(a) a.value = addr;
+        var b = document.getElementById('sa-amount'); if(b) b.value = amt;
+      } catch(e){}
+    }, 400);
+  };
+
+  window._autoNavXchain = function(addr, amt, token, toChain){
+    if(typeof showPage === 'function') showPage('xchain');
+    setTimeout(function(){
+      try {
+        var a = document.getElementById('sa-to'); if(a) a.value = addr;
+        var b = document.getElementById('sa-amount'); if(b) b.value = amt;
+        var d = document.getElementById('xc-dest-chain');
+        if(d && toChain){ for(var i=0;i<d.options.length;i++){ if(d.options[i].text.indexOf(toChain)!==-1){ d.selectedIndex = i; d.dispatchEvent(new Event('change')); break; } } }
+      } catch(e){}
+    }, 400);
+  };
+
+  // ── Permit-aware execution guard ─────────────────────
+  function _requirePermit(operation, amount, asset, network, contract, purpose){
+    if(typeof PermitEngine==='undefined') return null;
+    if(!amount || amount <= 0) return null;
+    var check = PermitEngine.checkCoverage({
+      operation: operation, amount: amount,
+      asset: asset || 'USDC', network: network || 'Arc Testnet', contract: contract || ''
+    });
+    if(check.covered) return { permit: check.permit, remaining: check.remaining };
+    if(typeof PermissionCards==='undefined') return null;
+    if(check.needsEscalation){
+      var currentLimit = check.permit.maxAmount;
+      return PermissionCards.buildEscalationCard(
+        currentLimit, amount, check.shortfall,
+        { asset: asset || 'USDC', allowedOps: check.permit.allowedOps || [], durationMs: check.permit.expiresAt - Date.now() },
+        check.permit
+      );
+    }
+    var opTypeMap = { swap: 'swap', payment: 'payment', send: 'payment', bridge: 'bridge', treasury: 'treasury', multisend: 'multisend', contract: 'execution' };
+    var card = PermissionCards.buildRequestCard({
+      type: opTypeMap[operation] || 'spend', maxAmount: amount, asset: asset || 'USDC',
+      destination: contract || '*', network: network || 'Arc Testnet',
+      allowedOps: [operation], durationMs: 1800000,
+      purpose: purpose || (operation + ' ' + amount + ' ' + (asset||'USDC')), estimatedGas: 'N/A',
+      _retryPhrase: _buildRetryPhrase(operation, amount, asset, network, contract)
+    });
+    return card;
+  }
+
+  function _buildRetryPhrase(operation, amount, asset, network, contract){
+    if(operation === 'swap') return 'Swap ' + amount + ' ' + (asset||'USDC') + ' for ' + (network||'');
+    if(operation === 'bridge') return 'Bridge ' + amount + ' ' + (asset||'USDC') + ' from ' + (network||'Arc Testnet');
+    if(operation === 'payment') return 'Send ' + amount + ' ' + (asset||'USDC') + ' to ' + (contract||'recipient');
+    return operation + ' ' + amount + ' ' + (asset||'USDC');
+  }
+
   // ── SWAP CARD ──
   async function autSwap(msg) {
     if(!walletAddress) return R.intro('Connect your wallet first to execute a swap.')+R.card(R.head('arrows-exchange','Swap',{text:'Wallet Required',cls:'pending'}),R.row('Status','Not connected','yellow'));
@@ -37500,29 +38407,42 @@ const UBScreen = (function() {
     const tIn=m[2].toUpperCase()==='CIRBTC'?'cirBTC':m[2].toUpperCase();
     const tOut=m[3].toUpperCase()==='CIRBTC'?'cirBTC':m[3].toUpperCase();
     if(tIn===tOut) return R.intro('Cannot swap a token for itself.');
-    const idxIn=TOKEN_LIST.findIndex(t=>t.sym.toLowerCase()===tIn.toLowerCase());
-    const idxOut=TOKEN_LIST.findIndex(t=>t.sym.toLowerCase()===tOut.toLowerCase());
+    const idxIn=TOKEN_LIST.findIndex(function(t){return t.sym.toLowerCase()===tIn.toLowerCase();});
+    const idxOut=TOKEN_LIST.findIndex(function(t){return t.sym.toLowerCase()===tOut.toLowerCase();});
     if(idxIn<0||idxOut<0) return R.intro('Token not found. Available: USDC, EURC, cirBTC, ETH.');
+
+    var permCheck = _requirePermit('swap', amt, tIn, 'Arc Testnet', '', 'Swap ' + amt + ' ' + tIn + ' for ' + tOut);
+    if(typeof permCheck === 'string') return permCheck;
+
     const tokIn=TOKEN_REGISTRY[tIn]||TOKEN_LIST[idxIn], tokOut=TOKEN_REGISTRY[tOut]||TOKEN_LIST[idxOut];
-    let estOut='—',rateStr='—';
+    var estOut='—',rateStr='—';
     const rIn=getTokenUSDRate(tIn)||0,rOut=getTokenUSDRate(tOut)||0;
-    if(rIn>0&&rOut>0){const rate=rIn/rOut;estOut=(amt*rate).toFixed(tOut==='cirBTC'?8:4);rateStr='1 '+tIn+' ≈ '+rate.toFixed(tOut==='cirBTC'?8:4)+' '+tOut;}
-    const oid=opId();
-    autPendingOps[oid]={execute:()=>{SWP.tokenInIdx=idxIn;SWP.tokenOutIdx=idxOut;showPage('swap');setTimeout(()=>{const el=document.getElementById('swap-amount-in');if(el){el.value=amt;el.dispatchEvent(new Event('input'));}if(typeof updateSwapRate==='function')updateSwapRate();},150);}};
-    return R.intro('Swap operation ready for your review:') +
+    if(rIn>0&&rOut>0){var rate=rIn/rOut;estOut=(amt*rate).toFixed(tOut==='cirBTC'?8:4);rateStr='1 '+tIn+' ≈ '+rate.toFixed(tOut==='cirBTC'?8:4)+' '+tOut;}
+
+    // Build execution plan
+    var steps = ['Check wallet','Verify balances','Validate permit','Calculate rate','Estimate output','Open Swap page','Pre-fill fields'];
+    var planHtml = '<div class="aut-progress"><div class="aut-progress-steps">' +
+      steps.map(function(s,i){ return '<div class="aut-progress-step done"><span class="step-icon"><i class="ti ti-check" style="color:#22c55e"></i></span><span>'+s+'</span></div>'; }).join('') +
+      '</div></div>';
+
+    var permitInfo = permCheck && permCheck.permit ? R.row('Permit', 'Validated ('+permCheck.remaining.toFixed(2)+' '+tIn+' remaining)', 'green') : '';
+
+    return R.intro('Autonoma is preparing your <strong style="color:#06F7E9">swap</strong>:') +
+      planHtml +
       R.card(
-        R.head('arrows-exchange','Swap Preview',{text:'Pending Confirmation',cls:'pending'}),
+        R.head('arrows-exchange','Swap — Ready',{text:'Prepared',cls:'live'}),
         R.swapSection('You Pay',tIn,tokIn.icon,tokIn.color,amt) +
         R.flowArrow() +
         R.swapSection('You Receive (est.)',tOut,tokOut.icon,tokOut.color,estOut) +
         R.sep() +
         R.row('Rate',rateStr,'') +
-        R.row('Slippage',SWP.slippage+'%','') +
+        R.row('Slippage',(typeof SWP!=='undefined'?SWP.slippage:'0.5')+'%','') +
         R.row('Fee Tier','0.1%','') +
-        R.row('Network',R.chainPill('Arc Testnet','#ff0202'),''),
+        R.row('Network',R.chainPill('Arc Testnet','#ff0202'),'') +
+        permitInfo,
         R.actions(
-          {icon:'check',label:'Confirm & Swap',cls:'confirm',action:"autConfirmOp('"+oid+"')"},
-          {icon:'x',label:'Cancel',cls:'danger',action:"autCancelOp('"+oid+"')"}
+          {icon:'player-play',label:'Open Swap & Pre-fill',cls:'confirm',action:"window._autoNavSwap("+amt+",'"+tIn+"','"+tOut+"',"+idxIn+","+idxOut+")"},
+          {icon:'x',label:'Cancel',cls:'danger',action:"autCancelOp('none')"}
         )
       );
   }
@@ -37547,20 +38467,28 @@ const UBScreen = (function() {
     if(toM&&chainMap[toM[1]]!==undefined) toIdx=chainMap[toM[1]];
     if(fromIdx===toIdx) toIdx=fromIdx===0?2:0;
     const fromName=CHAINS[fromIdx]?.name||'Unknown',toName=CHAINS[toIdx]?.name||'Unknown';
-    const oid=opId();
-    autPendingOps[oid]={execute:()=>{bridgeFromIdx=fromIdx;bridgeToIdx=toIdx;showPage('bridge');setTimeout(()=>{const el=document.getElementById('bridge-amount');if(el){el.value=amt;el.dispatchEvent(new Event('input'));}if(typeof refreshBridgeBalances==='function')refreshBridgeBalances();},150);}};
-    return R.intro('Bridge transfer prepared for your review:') +
+    var permCheckB = _requirePermit('bridge', amt, 'USDC', fromName, '', 'Bridge ' + amt + ' USDC from ' + fromName + ' to ' + toName);
+    if(typeof permCheckB === 'string') return permCheckB;
+
+    var steps = ['Check wallet','Verify balances','Validate permit','Calculate fees','Estimate time','Open Bridge page','Pre-fill fields'];
+    var planHtml = '<div class="aut-progress"><div class="aut-progress-steps">' +
+      steps.map(function(s,i){ return '<div class="aut-progress-step done"><span class="step-icon"><i class="ti ti-check" style="color:#22c55e"></i></span><span>'+s+'</span></div>'; }).join('') +
+      '</div></div>';
+
+    return R.intro('Autonoma is preparing your <strong style="color:#a78bfa">bridge</strong>:') +
+      planHtml +
       R.card(
-        R.head('topology-star-3','Bridge Preview',{text:'Pending Confirmation',cls:'pending'}),
+        R.head('topology-star-3','Bridge — Ready',{text:'Prepared',cls:'live'}),
         R.row('Amount','<span style="font-size:13px;font-weight:700">'+amt+' USDC</span>','green')+R.sep()+
         R.row('From',R.chainPill(fromName,chainColors[fromIdx]||'#4f8ef7'),'')+
         R.row('To',R.chainPill(toName,chainColors[toIdx]||'#4f8ef7'),'')+R.sep()+
         R.row('Protocol','Circle CCTP v2','purple')+
         R.row('Est. Time','~2-5 minutes','')+
-        R.row('Network Fee','Gas only',''),
+        R.row('Network Fee','Gas only','')+
+        (permCheckB && permCheckB.permit ? R.row('Permit','Validated ('+permCheckB.remaining.toFixed(2)+' USDC remaining)','green') : ''),
         R.actions(
-          {icon:'check',label:'Confirm & Bridge',cls:'confirm',action:"autConfirmOp('"+oid+"')"},
-          {icon:'x',label:'Cancel',cls:'danger',action:"autCancelOp('"+oid+"')"}
+          {icon:'player-play',label:'Open Bridge & Pre-fill',cls:'confirm',action:"window._autoNavBridge("+amt+","+fromIdx+","+toIdx+")"},
+          {icon:'x',label:'Cancel',cls:'danger',action:"autCancelOp('none')"}
         )
       );
   }
@@ -37651,14 +38579,25 @@ const UBScreen = (function() {
       const addr=addrM[0],amt=amtM[1],token=(amtM[2]||'USDC').toUpperCase();
       const short=addr.substring(0,6)+'...'+addr.substring(addr.length-4);
       const tok=TOKEN_REGISTRY[token]||{icon:'?',color:'#666',name:token};
-      const oid=opId();
-      autPendingOps[oid]={execute:()=>{showPage('send');setTimeout(()=>{const a=document.getElementById('sa-to');if(a)a.value=addr;const b=document.getElementById('sa-amount');if(b)b.value=amt;},150);}};
-      return R.intro('Payment operation ready for your review:')+
-        R.card(R.head('send','Send Assets',{text:'Pending',cls:'pending'}),
+      var permCheckP = _requirePermit('payment', parseFloat(amt), token, 'Arc Testnet', addr, 'Send ' + amt + ' ' + token + ' to ' + short);
+      if(typeof permCheckP === 'string') return permCheckP;
+
+      var steps = ['Check wallet','Verify balances','Validate permit','Validate address','Open Send page','Pre-fill fields'];
+      var planHtml = '<div class="aut-progress"><div class="aut-progress-steps">' +
+        steps.map(function(s,i){ return '<div class="aut-progress-step done"><span class="step-icon"><i class="ti ti-check" style="color:#22c55e"></i></span><span>'+s+'</span></div>'; }).join('') +
+        '</div></div>';
+
+      return R.intro('Autonoma is preparing your <strong style="color:#4f8ef7">payment</strong>:')+
+        planHtml +
+        R.card(R.head('send','Send Assets — Ready',{text:'Prepared',cls:'live'}),
           R.row('Recipient','<span style="cursor:pointer" onclick="autCopyText(\''+addr+'\')">'+short+' <i class="ti ti-copy" style="font-size:9px;color:var(--muted)"></i></span>','teal')+
           R.token(token,tok.name,tok.icon,tok.color,amt,'')+
-          R.sep()+R.row('Network',R.chainPill('Arc Testnet','#ff0202'),''),
-          R.actions({icon:'check',label:'Confirm & Send',cls:'confirm',action:"autConfirmOp('"+oid+"')"},{icon:'x',label:'Cancel',cls:'danger',action:"autCancelOp('"+oid+"')"}));
+          R.sep()+R.row('Network',R.chainPill('Arc Testnet','#ff0202'),'')+
+          (permCheckP && permCheckP.permit ? R.row('Permit','Validated ('+permCheckP.remaining.toFixed(2)+' '+token+' remaining)','green') : ''),
+          R.actions(
+            {icon:'player-play',label:'Open Send & Pre-fill',cls:'confirm',action:"window._autoNavSend('"+addr+"','"+amt+"','"+token+"')"},
+            {icon:'x',label:'Cancel',cls:'danger',action:"autCancelOp('none')"}
+          ));
     }
     return R.intro('I can help you send assets. Provide a recipient address and amount.')+
       R.card(R.head('send','Send Assets'),
