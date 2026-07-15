@@ -174,7 +174,7 @@ export async function onRequest(context) {
     return json({ error: 'Invalid attestationSignature: must be 0x-prefixed hex' }, 400);
   }
 
-  const rpc = env.ARC_RPC_URL || 'https://rpc.testnet.arc.network';
+  const rpc = env.ARC_RPC_URL || 'https://arc-testnet.drpc.org';
 
   let provider, signer;
   try {

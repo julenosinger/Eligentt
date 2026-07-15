@@ -26,7 +26,7 @@ const ElligenteCCTP = Object.freeze({
   ATTEST_FALLBACK_MAX:   60,
 
   CCTP_CONFIG: {
-    5042002:  { domain:26, usdc:'0x3600000000000000000000000000000000000000', eurc:'0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a', tokenMessenger:'0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA', messageTransmitter:'0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275', rpc:'https://rpc.testnet.arc.network', explorer:'https://testnet.arcscan.app' },
+    5042002:  { domain:26, usdc:'0x3600000000000000000000000000000000000000', eurc:'0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a', tokenMessenger:'0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA', messageTransmitter:'0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275', rpc:'https://arc-testnet.drpc.org', explorer:'https://testnet.arcscan.app' },
     11155111: { domain:0,  usdc:'0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238', eurc:null, tokenMessenger:'0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA', messageTransmitter:'0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275', rpc:'https://ethereum-sepolia-rpc.publicnode.com', explorer:'https://sepolia.etherscan.io' },
     84532:    { domain:6,  usdc:'0x036CbD53842c5426634e7929541eC2318f3dCF7e', eurc:null, tokenMessenger:'0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA', messageTransmitter:'0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275', rpc:'https://sepolia.base.org', explorer:'https://sepolia.basescan.org' },
     421614:   { domain:3,  usdc:'0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d', eurc:null, tokenMessenger:'0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA', messageTransmitter:'0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275', rpc:'https://sepolia-rollup.arbitrum.io/rpc', explorer:'https://sepolia.arbiscan.io' },

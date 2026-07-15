@@ -8,7 +8,7 @@ export const RELAYER_CONFIG = {
   MESSAGE_TRANSMITTER: '0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275',
   MEMO_CONTRACT:   '0x5294E9927c3306DcBaDb03fe70b92e01cCede505',
   ARC_CHAIN_ID:    5042002,
-  ARC_RPC_URL:     'https://rpc.testnet.arc.network',
+  ARC_RPC_URL:     'https://arc-testnet.drpc.org',
   ALLOWED_ORIGINS: 'https://elligente.pages.dev',
   PAYLINK_FEE_BPS: 200,
   INVOICE_FEE_BPS: 200,

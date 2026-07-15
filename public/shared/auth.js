@@ -112,7 +112,7 @@ const AuthManager = (() => {
     if (typeof ethers === 'undefined') return;
 
     const addr = _profile.wallet.address;
-    const rpc = 'https://rpc.testnet.arc.network';
+    const rpc = 'https://arc-testnet.drpc.org';
     _remoteProvider = new ethers.JsonRpcProvider(rpc);
 
     _remoteSigner = {
@@ -226,3 +226,4 @@ const AuthManager = (() => {
 if (typeof window !== 'undefined') {
   window.AuthManager = AuthManager;
 }
+

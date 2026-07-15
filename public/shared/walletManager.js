@@ -4,7 +4,7 @@ const WalletManager = (() => {
   const VAULT_KEY = 'elligente_ew_vault';
   const LOCAL_ID_KEY = 'elligente_local_wallet_id';
   const DEVICE_SECRET_KEY = 'elligente_device_secret';
-  const ARC_RPC = 'https://rpc.testnet.arc.network';
+  const ARC_RPC = 'https://arc-testnet.drpc.org';
   const ARC_CHAIN_ID = 5042002;
   const PBKDF2_ITERATIONS = 100000;
   const IDB_NAME = 'elligente_wallet';
@@ -502,3 +502,4 @@ const WalletManager = (() => {
 })();
 
 if (typeof window !== 'undefined') window.WalletManager = WalletManager;
+

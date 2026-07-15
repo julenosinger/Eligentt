@@ -118,7 +118,7 @@ export async function onRequestPost(context) {
     return json({ error: 'Failed to decrypt wallet key' }, 500);
   }
 
-  const rpc = env.ARC_RPC_URL || 'https://rpc.testnet.arc.network';
+  const rpc = env.ARC_RPC_URL || 'https://arc-testnet.drpc.org';
   const provider = new ethers.JsonRpcProvider(rpc);
   const wallet = new ethers.Wallet(privateKey, provider);
 

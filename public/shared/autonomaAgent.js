@@ -102,7 +102,7 @@
   async function pollTx(txHash){
     try {
       if(typeof ethers === 'undefined') return null;
-      var rpc = 'https://rpc.testnet.arc.network';
+      var rpc = 'https://arc-testnet.drpc.org';
       var provider = new ethers.JsonRpcProvider(rpc);
       var receipt = await provider.getTransactionReceipt(txHash);
       return receipt;
@@ -364,3 +364,4 @@
     getReputationCard: getReputationCard
   };
 })();
+

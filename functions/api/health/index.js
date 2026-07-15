@@ -10,7 +10,7 @@ export async function onRequestOptions() {
 
 export async function onRequestGet(context) {
   const { env } = context;
-  const rpcPrimary = env.ARC_RPC_URL || 'https://rpc.testnet.arc.network';
+  const rpcPrimary = env.ARC_RPC_URL || 'https://arc-testnet.drpc.org';
   const rpcFallback = env.ARC_RPC_FALLBACK || null;
   const startTime = Date.now();
 

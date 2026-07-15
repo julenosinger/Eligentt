@@ -7,7 +7,7 @@
 (function(){
   'use strict';
 
-  var ARC_RPC = 'https://rpc.testnet.arc.network';
+  var ARC_RPC = 'https://arc-testnet.drpc.org';
   var readProvider = null;
 
   function getProvider(){
@@ -320,3 +320,4 @@
     CCTP_MESSENGER: CCTP_MESSENGER
   };
 })();
+

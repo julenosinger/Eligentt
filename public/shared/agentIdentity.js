@@ -7,7 +7,7 @@
 (function(){
   'use strict';
 
-  var ARC_RPC = 'https://rpc.testnet.arc.network';
+  var ARC_RPC = 'https://arc-testnet.drpc.org';
   var ARC_CHAIN_ID = 5042002;
 
   // ERC-8004 contract addresses on Arc Testnet
@@ -272,3 +272,4 @@
     ARC_CHAIN_ID:ARC_CHAIN_ID
   };
 })();
+

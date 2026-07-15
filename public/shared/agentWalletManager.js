@@ -10,7 +10,7 @@
 
   var WALLET_KEY = 'elligentt_agent_wallet_v1';
   var SESSION_KEY = 'elligentt_agent_session_v1';
-  var ARC_RPC = 'https://rpc.testnet.arc.network';
+  var ARC_RPC = 'https://arc-testnet.drpc.org';
   var ARC_CHAIN_ID = 5042002;
 
   var agentWallet = null;
@@ -232,28 +232,6 @@
 
   function load(){ 
     loadState();
-    if(!agentState) return agentState;
-    // Auto-create default agent authorization on first init
-    if(!agentState._autoAuthCreated && typeof AgentAuthorization !== 'undefined'){
-      try {
-        AgentAuthorization.createAuthorization({
-          maxSpending: 50000,
-          dailyLimit: 5000,
-          allowedTokens: ['*'],
-          allowedNetworks: ['*'],
-          allowedOperations: ['swap','bridge','payment','crosschain','treasury'],
-          allowSwap: true, allowBridge: true, allowTreasury: true,
-          allowPayments: true, allowContracts: false, allowVault: false,
-          allowCrosschain: true, allowRecurring: true, allowScheduled: true,
-          durationMs: 30 * 24 * 60 * 60 * 1000,
-          maxRiskLevel: 'MEDIUM',
-          purpose: 'Default Agent Authorization',
-          agentWallet: getAgentAddress()
-        });
-        agentState._autoAuthCreated = true;
-        saveState();
-      } catch(e){}
-    }
     return agentState;
   }
 
@@ -320,3 +298,4 @@
     ARC_CHAIN_ID: ARC_CHAIN_ID
   };
 })();
+

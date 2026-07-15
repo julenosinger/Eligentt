@@ -154,7 +154,7 @@
   /* ── On-chain reputation query ── */
   async function queryOnChainReputation(agentId){
     if(typeof ethers==='undefined') throw new Error('ethers.js not loaded');
-    var provider=new ethers.JsonRpcProvider(typeof AgentIdentity!=='undefined'?AgentIdentity.ARC_RPC:'https://rpc.testnet.arc.network');
+    var provider=new ethers.JsonRpcProvider(typeof AgentIdentity!=='undefined'?AgentIdentity.ARC_RPC:'https://arc-testnet.drpc.org');
     var REPUTATION_REGISTRY=typeof AgentIdentity!=='undefined'?AgentIdentity.REPUTATION_REGISTRY:'0x8004B663056A597Dffe9eCcC1965A193B7388713';
     var ABI=typeof AgentIdentity!=='undefined'?AgentIdentity.getReputationRegistryABI():[];
 
@@ -180,3 +180,4 @@
     queryOnChainReputation:queryOnChainReputation
   };
 })();
+

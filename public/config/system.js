@@ -1,7 +1,7 @@
 const SystemConfig = Object.freeze({
   ARC_CHAIN_ID:       5042002,
   ARC_CHAIN_HEX:      '0x4cef52',
-  ARC_RPC_URL:        'https://rpc.testnet.arc.network',
+  ARC_RPC_URL:        'https://arc-testnet.drpc.org',
   ARC_EXPLORER_URL:   'https://testnet.arcscan.app',
   ARC_NATIVE_NAME:    'USDC',
   ARC_NATIVE_SYMBOL:  'USDC',
