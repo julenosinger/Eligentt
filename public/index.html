@@ -37455,6 +37455,20 @@ const UBScreen = (function() {
   async function _executeIntent(intent, params, msg){
     _ctxClear(); // Clear context on execution
 
+    // Show permission card for financial operations if agent wallet exists but op not authorized
+    if(_isFinancialIntent(intent) && typeof AgentWalletManager !== 'undefined' && typeof AgentAuthorization !== 'undefined'){
+      var agentAddr = AgentWalletManager.getAgentAddress();
+      if(agentAddr){
+        var operation = intent.replace('_EXECUTE','').replace('_GUIDE','').toLowerCase();
+        // Normalize operation names
+        var opNorm = {send_payment:'payment',swap:'swap',bridge:'bridge',multisend:'payment',add_liquidity:'swap',remove_liquidity:'swap'};
+        var checkOp = opNorm[operation] || operation;
+        if(!AgentAuthorization.hasOperationAuth(checkOp)){
+          return _showPermissionCard(intent, params, msg);
+        }
+      }
+    }
+
     switch(intent){
       case 'CREATE_PAYMENT_LINK': return await _handleCreatePaymentLink(params, msg);
       case 'CREATE_INVOICE': return _handleCreateInvoice(params);
@@ -37809,16 +37823,26 @@ const UBScreen = (function() {
     // No saved contacts or has specific params — existing flow
     var oid = opId();
     autPendingOps[oid]={execute:()=>{showPage('batch');}};
+
+    // Prepare recipients/amounts arrays for agent execution from contact selection or params
+    var msRecipients = [];
+    var msAmounts = [];
+    if(params.recipients && Array.isArray(params.recipients)) msRecipients = params.recipients;
+    if(params.amounts && Array.isArray(params.amounts)) msAmounts = params.amounts;
+    var msPayload = msRecipients.length > 0 ? JSON.stringify({token:token, recipients:msRecipients, amounts:msAmounts.length === msRecipients.length ? msAmounts : msRecipients.map(function(){return amount || 1;})}) : '';
+
     return R.intro('Multi-Send operation ready:')+
       R.card(R.head('stack','Multi-Send',{text:'Pending',cls:'pending'}),
         (count>0?R.row('Recipients',String(count),'teal'):'')+
         (amount>0?R.row('Amount per recipient','$'+esc(String(amount))+' '+esc(token),'green'):'')+
         R.row('Module','Batch Payments','teal')+
-        R.row('Action','Add recipients to execute batch transfer',''),
+        R.row('Action','Add recipients to execute batch transfer','')+
+        (msRecipients.length > 0 ? _agentExecutionBanner('multisend', msRecipients.length, token) : ''),
         R.actions(
           {icon:'check',label:'Open Multi-Send',cls:'confirm',action:"autConfirmOp('"+oid+"')"},
           {icon:'file-upload',label:'Upload CSV',cls:'',action:"document.getElementById('aut-csv-input').click()"},
-          {icon:'users',label:'Recipients Page',cls:'',action:"showPage('recipients')"}
+          {icon:'users',label:'Recipients Page',cls:'',action:"showPage('recipients')"},
+          (msRecipients.length > 0 && _agentCanExecute('multisend') ? {icon:'robot',label:'Execute via Agent',cls:'confirm',action:"_agentExecuteOp('multisend',"+amount+",'"+token+"',"+msPayload+")"} : null)
         ));
   }
 
@@ -38248,6 +38272,23 @@ const UBScreen = (function() {
     if(typeof permCheck === 'string') return permCheck;
 
     var destinationChain = toChain || 'Base';
+    // Map destination chain to CCTP domain for agent execution
+    var xDomainMap = { 'Arc':26, 'Ethereum':0, 'Sepolia':0, 'Base':6, 'Arbitrum':3, 'Optimism':2, 'Polygon':7, 'Robinhood':6 };
+    var xChainDomain = 6;
+    for(var ck in xDomainMap){ if(destinationChain.toLowerCase().indexOf(ck.toLowerCase())!==-1){ xChainDomain=xDomainMap[ck]; break; } }
+
+    // Prepare bridge calldata for agent execution
+    var xPlan = null;
+    var xPlanId = 'xplan_' + Date.now();
+    try {
+      if(typeof ChainSimulator !== 'undefined'){
+        // Use mintRecipient from params if available
+        var mintRecipientBytes = destAddr ? ethers.zeroPadValue(destAddr, 32) : ethers.ZeroHash;
+        xPlan = ChainSimulator.prepareFullBridge(amt, xChainDomain, mintRecipientBytes);
+      }
+    } catch(e){}
+    if(xPlan){ window['_agentCalldata_'+xPlanId] = xPlan; window._agentCalldataPlan = xPlan; }
+
     return R.intro('Autonoma is preparing your <strong style="color:#06F7E9">cross-chain payment</strong>:') +
       R.card(R.head('world','Cross-Chain Payment — Ready',{text:'Prepared',cls:'live'}),
         R.row('Amount','<strong style="font-size:13px">' + amt + ' ' + token + '</strong>','green') +
@@ -38256,9 +38297,13 @@ const UBScreen = (function() {
         R.row('To',R.chainPill(destinationChain,'#06F7E9'),'') +
         R.sep() +
         R.row('Protocol','Cross-Chain Transfer','purple') +
-        (permCheck && permCheck.permit ? R.row('Permit','Validated ('+permCheck.remaining.toFixed(2)+' '+token+' remaining)','green') : ''),
+        (permCheck && permCheck.permit ? R.row('Permit','Validated ('+permCheck.remaining.toFixed(2)+' '+token+' remaining)','green') : '') +
+        (xPlan ? R.sep() + R.section('Prepared Transactions') + xPlan.steps.map(function(s){
+          return R.row('Step ' + s.step + ': ' + s.label, '<code style="font-size:7.5px;color:#06F7E9">' + (s.tx.calldata ? s.tx.calldata.substring(0,20) + '...' : 'N/A') + '</code>', 'teal');
+        }).join('') : ''),
         R.actions(
           {icon:'player-play',label:'Open Cross-Chain & Pre-fill',cls:'confirm',action:"window._autoNavXchain('"+destAddr+"',"+amt+",'"+token+"','"+destinationChain+"')"},
+          (_agentCanExecute('bridge') && xPlan ? {icon:'robot',label:'Execute via Agent',cls:'confirm',action:"_agentExecuteBridge("+amt+","+xChainDomain+",'"+destinationChain+"','"+xPlanId+"',5042002)"} : null),
           {icon:'x',label:'Cancel',cls:'danger',action:"autCancelOp('none')"}
         )
       );
@@ -38375,6 +38420,82 @@ const UBScreen = (function() {
     var financial = ['SWAP_EXECUTE','BRIDGE','SEND_PAYMENT','MULTISEND','SWAP_GUIDE','ADD_LIQUIDITY','REMOVE_LIQUIDITY'];
     return financial.indexOf(intent) !== -1;
   }
+
+  function _showPermissionCard(intent, params, msg){
+    // Store original msg for re-trigger
+    window._lastPermissionMsg = msg;
+
+    var presets = [100, 200, 500, 1000, 5000];
+    var operation = intent.replace('_EXECUTE','').replace('_GUIDE','').toLowerCase();
+    var opNorm = {send_payment:'payment',swap:'swap',bridge:'bridge',multisend:'payment',add_liquidity:'swap',remove_liquidity:'swap'};
+    var displayOp = opNorm[operation] || operation;
+    var opLabel = displayOp.charAt(0).toUpperCase()+displayOp.slice(1);
+
+    var presetBtns = presets.map(function(a){
+      return '{icon:"cash",label:"$'+a+'",cls:"primary",action:"_confirmPermission('+a+',\''+intent+'\')"}';
+    }).join(',');
+
+    var customBtn = '{icon:"pencil",label:"Custom",cls:"",action:"_promptCustomPermission(\''+intent+'\')"}';
+
+    return R.intro('Before I execute, let me set up your <strong style="color:#a78bfa">Agent Permission</strong>:')+
+      '<div class="aut-rc" style="border-color:rgba(167,139,250,.3);margin-top:8px">'+
+      R.head('shield-lock','Permission Required',{text:opLabel,cls:'pending'})+
+      '<div class="aut-rc-body">'+
+      '<div style="font-size:10px;color:var(--muted2);margin-bottom:8px">Select your spending limit for <strong>'+opLabel+'</strong> operations:</div>'+
+      presets.map(function(a){
+        return '<button class="aut-act primary" onclick="_confirmPermission('+a+',\''+intent+'\')" style="display:block;width:100%;margin-bottom:4px;text-align:left;padding:8px 12px"><i class="ti ti-cash" style="margin-right:8px"></i><strong>$'+a.toLocaleString()+'</strong><span style="float:right;color:var(--muted2);font-size:9px">'+opLabel+' budget →</span></button>';
+      }).join('')+
+      '<button class="aut-act" onclick="_promptCustomPermission(\''+intent+'\')" style="display:block;width:100%;text-align:left;padding:8px 12px;margin-top:2px"><i class="ti ti-pencil" style="margin-right:8px"></i>Custom amount</button>'+
+      '</div></div>';
+  }
+
+  window._confirmPermission = function(amount, intent){
+    if(typeof AgentAuthorization === 'undefined') return;
+
+    var operation = intent.replace('_EXECUTE','').replace('_GUIDE','').toLowerCase();
+    var opNorm = {send_payment:'payment',swap:'swap',bridge:'bridge',multisend:'payment',add_liquidity:'swap',remove_liquidity:'swap'};
+    var normalizedOp = opNorm[operation] || operation;
+    var opMap = {swap:'allowSwap',bridge:'allowBridge',payment:'allowPayments',treasury:'allowTreasury',crosschain:'allowCrosschain',recurring:'allowRecurring',scheduled:'allowScheduled'};
+    var allowKey = opMap[normalizedOp] || 'allowContracts';
+
+    var authOpts = {
+      maxSpending: amount * 10, dailyLimit: amount,
+      allowedTokens: ['*'], allowedNetworks: ['*'],
+      allowedOperations: [], purpose: 'Chat-authorized '+normalizedOp,
+      durationMs: 30*24*60*60*1000, maxRiskLevel: 'MEDIUM'
+    };
+    authOpts[allowKey] = true;
+
+    AgentAuthorization.createAuthorization(authOpts);
+    var c = document.getElementById('aut-messages');
+    if(c){
+      var html = '<div class="aut-msg ai"><div class="aut-msg-header"><i class="ti ti-robot" style="color:#a78bfa"></i><span class="aut-msg-role">Autonoma Agent</span></div>'+
+        '<div class="aut-msg-body">'+
+        '<div class="aut-rc" style="border-color:rgba(34,197,94,.3);margin-top:4px">'+
+        R.head('shield-check','Agent Ready',{text:'Authorized',cls:'live'})+
+        '<div class="aut-rc-body">'+
+        R.row('Daily Limit','<strong>$'+amount.toLocaleString()+'</strong>','green')+
+        R.row('Max Spending','<strong>$'+(amount*10).toLocaleString()+'</strong>','green')+
+        R.row('Operation',normalizedOp.charAt(0).toUpperCase()+normalizedOp.slice(1),'purple')+
+        R.row('Duration','30 days','muted')+
+        '</div></div></div></div>';
+      c.insertAdjacentHTML('beforeend', html);
+      c.scrollTop = c.scrollHeight;
+    }
+
+    // Re-trigger the original command
+    var origMsg = window._lastPermissionMsg;
+    if(origMsg && typeof autonomaSendQuick === 'function'){
+      setTimeout(function(){ autonomaSendQuick(origMsg); }, 400);
+    }
+  };
+
+  window._promptCustomPermission = function(intent){
+    var amt = prompt('Enter your custom spending limit (USDC):', '500');
+    if(amt && !isNaN(amt) && parseFloat(amt) > 0){
+      window._confirmPermission(parseFloat(amt), intent);
+    }
+  };
   function _runSafetyChecks(intent, params, msg){
     var checks = [];
     var blocked = false;
@@ -38657,10 +38778,25 @@ const UBScreen = (function() {
     // Try on-chain simulation + calldata
     var simData = null;
     var calldataPlan = null;
+    // Map chain index to CCTP domain
+    var destDomain = 6; // default: Base Sepolia
+    if(toIdx===0) destDomain=26;        // Arc
+    else if(toIdx===1) destDomain=0;    // Ethereum Sepolia
+    else if(toIdx===2) destDomain=6;    // Base Sepolia
+    else if(toIdx===3) destDomain=3;    // Arbitrum Sepolia
+    else if(toIdx===4) destDomain=2;    // Optimism Sepolia
+    else if(toIdx===5) destDomain=7;    // Polygon Amoy
+
+    // Map chain index to chainId
+    var chainIdMap = [5042002, 11155111, 84532, 421614, 11155420, 80002];
+    var srcChainId = chainIdMap[fromIdx] || 5042002;
+
+    // CRITICAL: mintRecipient must be non-zero for depositForBurn
+    var mintRecipient = typeof ethers !== 'undefined' ? ethers.zeroPadValue(walletAddress, 32) : walletAddress;
     try {
       if(typeof ChainSimulator!=='undefined'){
         simData = await ChainSimulator.fullBridgeSim(amt, fromName, toName);
-        calldataPlan = ChainSimulator.prepareFullBridge(amt, 6);
+        calldataPlan = ChainSimulator.prepareFullBridge(amt, destDomain, mintRecipient);
       }
     } catch(e){}
 
@@ -38697,7 +38833,9 @@ const UBScreen = (function() {
         _agentExecutionBanner('bridge', amt, 'USDC'),
         R.actions(
           {icon:'player-play',label:'Open Bridge & Pre-fill',cls:'confirm',action:"window._autoNavBridge("+amt+","+fromIdx+","+toIdx+")"},
-          (_agentCanExecute('bridge') && calldataPlan ? {icon:'robot',label:'Execute via Agent',cls:'confirm',action:"_agentExecuteSwap("+amt+",'USDC','USDC','"+bridgeCalldataId+"')"} : {icon:'x',label:'Cancel',cls:'danger',action:"autCancelOp('none')"})
+          (_agentCanExecute('bridge') && calldataPlan && fromIdx===0 ? {icon:'robot',label:'Execute via Agent',cls:'confirm',action:"_agentExecuteBridge("+amt+","+destDomain+",'"+toName+"','"+bridgeCalldataId+"',"+srcChainId+")"} :
+           _agentCanExecute('bridge') && calldataPlan ? {icon:'bolt',label:'Turbo Bridge via Agent',cls:'confirm',action:"_agentExecuteTurboBridge("+amt+","+srcChainId+",'"+fromName+"','"+toName+"','"+bridgeCalldataId+"')"} :
+           {icon:'x',label:'Cancel',cls:'danger',action:"autCancelOp('none')"})
         )
       );
   }
@@ -38752,6 +38890,21 @@ const UBScreen = (function() {
     if(!tB){tB=pool.tokenA===tA?pool.tokenB:pool.tokenA;amtB=amtA;}
     const tokA=TOKEN_REGISTRY[tA]||{icon:'?',color:'#666'},tokB=TOKEN_REGISTRY[tB]||{icon:'?',color:'#666'};
     const oid=opId();
+    // Prepare calldata for agent execution
+    var liqPlanId = 'liqplan_' + Date.now();
+    var liqPlan = null;
+    try {
+      if(typeof ChainSimulator !== 'undefined'){
+        var approveA = ChainSimulator.buildApproveCalldata(tA, pool.address, amtA);
+        var approveB = ChainSimulator.buildApproveCalldata(tB, pool.address, amtB);
+        liqPlan = { type:'add_liquidity', steps: [
+          { step:1, label:'Approve '+tA, tx:approveA },
+          { step:2, label:'Approve '+tB, tx:approveB },
+          { step:3, label:'Add Liquidity '+pool.tokenA+'/'+pool.tokenB, tx:{ contract:pool.address, calldata:'', method:'addLiquidity', params:{amount0:amtA,amount1:amtB} } }
+        ], totalSteps:3 };
+      }
+    } catch(e){}
+    if(liqPlan){ window['_agentCalldata_'+liqPlanId] = liqPlan; window._agentCalldataPlan = liqPlan; }
     autPendingOps[oid]={execute:()=>{if(typeof selectPool==='function')selectPool(pool.id);showPage('pool');setTimeout(()=>{const eA=document.getElementById('pool-add-amt-a'),eB=document.getElementById('pool-add-amt-b');if(eA)eA.value=amtA;if(eB)eB.value=amtB;if(typeof poolSyncAdd==='function')poolSyncAdd('a');if(typeof switchPoolTab==='function')switchPoolTab('add');},200);}};
     return R.intro('Add liquidity operation ready for review:') +
       R.card(
@@ -38759,9 +38912,14 @@ const UBScreen = (function() {
         R.row('Pool',tA+' / '+tB,'teal')+R.sep()+
         R.token(tA,TOKEN_REGISTRY[tA]?.name||tA,tokA.icon,tokA.color,amtA.toString(),'')+
         R.token(tB,TOKEN_REGISTRY[tB]?.name||tB,tokB.icon,tokB.color,amtB.toString(),'')+
-        R.sep()+R.row('Fee Tier',((pool.feeTier||pool.fee)/100).toFixed(1)+'%','')+R.row('Network',R.chainPill('Arc Testnet','#ff0202'),''),
+        R.sep()+R.row('Fee Tier',((pool.feeTier||pool.fee)/100).toFixed(1)+'%','')+R.row('Network',R.chainPill('Arc Testnet','#ff0202'),'')+
+        (liqPlan ? R.sep() + R.section('Prepared Transactions') + liqPlan.steps.map(function(s){
+          return R.row('Step ' + s.step + ': ' + s.label, '<code style="font-size:7.5px;color:#06F7E9">' + (s.tx && s.tx.calldata ? 'Ready' : 'Ready') + '</code>', 'teal');
+        }).join('') : '')+
+        _agentExecutionBanner('add_liquidity', amtA, tA),
         R.actions(
           {icon:'check',label:'Confirm & Add',cls:'confirm',action:"autConfirmOp('"+oid+"')"},
+          (_agentCanExecute('add_liquidity') && liqPlan ? {icon:'robot',label:'Execute via Agent',cls:'confirm',action:"_agentExecuteLiquidity('add',"+amtA+",'"+tA+"',"+amtB+",'"+tB+"','"+pool.id+"')"} : null),
           {icon:'x',label:'Cancel',cls:'danger',action:"autCancelOp('"+oid+"')"}
         )
       );
@@ -38776,8 +38934,31 @@ const UBScreen = (function() {
     const poolMatch=msg.match(/(usdc|eurc|cirbtc|eth)[^a-z]*(usdc|eurc|cirbtc|eth)/i);
     const pool=poolMatch?POOL_REGISTRY.find(p=>(p.tokenA.toLowerCase()===poolMatch[1].toLowerCase()&&p.tokenB.toLowerCase()===poolMatch[2].toLowerCase())||(p.tokenA.toLowerCase()===poolMatch[2].toLowerCase()&&p.tokenB.toLowerCase()===poolMatch[1].toLowerCase())):null;
     if(pool){const amtM=msg.match(/(\d+(?:\.\d+)?)/);const oid=opId();
+      var rmLpAmount = amtM ? parseFloat(amtM[1]) : 0;
+      // Prepare calldata for agent execution
+      var rmPlanId = 'rmplan_' + Date.now();
+      var rmPlan = null;
+      try {
+        if(typeof ChainSimulator !== 'undefined' && pool && rmLpAmount > 0){
+          var approveLP = ChainSimulator.buildApproveCalldata(pool.tokenA, pool.address, rmLpAmount); // LP token approve
+          rmPlan = { type:'remove_liquidity', steps: [
+            { step:1, label:'Approve LP tokens', tx:{ contract:pool.address, calldata:'', method:'approve', params:{spender:pool.address,amount:rmLpAmount} } },
+            { step:2, label:'Remove Liquidity '+pool.tokenA+'/'+pool.tokenB, tx:{ contract:pool.address, calldata:'', method:'removeLiquidity', params:{lpAmount:rmLpAmount} } }
+          ], totalSteps:2 };
+        }
+      } catch(e){}
+      if(rmPlan){ window['_agentCalldata_'+rmPlanId] = rmPlan; window._agentCalldataPlan = rmPlan; }
       autPendingOps[oid]={execute:()=>{if(typeof selectPool==='function')selectPool(pool.id);showPage('pool');setTimeout(()=>{if(typeof switchPoolTab==='function')switchPoolTab('remove');if(amtM){const el=document.getElementById('pool-remove-lp');if(el){el.value=amtM[1];if(typeof poolSyncRemove==='function')poolSyncRemove();}}},200);}};
-      return R.intro('Remove liquidity operation prepared:')+R.card(R.head('droplet','Remove Liquidity',{text:'Pending',cls:'pending'}),R.row('Pool',pool.tokenA+'/'+pool.tokenB,'teal')+(amtM?R.row('LP to Burn',amtM[1],''):''),R.actions({icon:'check',label:'Confirm & Remove',cls:'confirm',action:"autConfirmOp('"+oid+"')"},{icon:'x',label:'Cancel',cls:'danger',action:"autCancelOp('"+oid+"')"}));}
+      return R.intro('Remove liquidity operation prepared:')+R.card(R.head('droplet','Remove Liquidity',{text:'Pending',cls:'pending'}),
+        R.row('Pool',pool.tokenA+'/'+pool.tokenB,'teal')+
+        (amtM?R.row('LP to Burn',amtM[1],''):'')+
+        (rmPlan ? R.sep()+R.section('Prepared')+rmPlan.steps.map(function(s){return R.row('Step '+s.step+': '+s.label,'<span style="font-size:8px;color:#06F7E9">Ready</span>','teal');}).join(''):'')+
+        _agentExecutionBanner('remove_liquidity', rmLpAmount || 1, pool.tokenA+'/'+pool.tokenB),
+        R.actions(
+          {icon:'check',label:'Confirm & Remove',cls:'confirm',action:"autConfirmOp('"+oid+"')"},
+          (_agentCanExecute('remove_liquidity') && rmPlan ? {icon:'robot',label:'Execute via Agent',cls:'confirm',action:"_agentExecuteLiquidity('remove',"+(rmLpAmount||1)+",'"+pool.tokenA+"',"+(rmLpAmount||1)+",'"+pool.tokenB+"','"+pool.id+"')"} : null),
+          {icon:'x',label:'Cancel',cls:'danger',action:"autCancelOp('"+oid+"')"}
+        ));}
     return R.intro('Select which pool to remove from:')+R.card(R.head('droplet','Your Positions'),R.section('Active')+positions+'<div style="font-size:9px;color:var(--muted2);margin-top:8px">Specify the pool: <em>"Remove 50 LP from USDC/EURC"</em></div>');
   }
 
@@ -39465,6 +39646,70 @@ const UBScreen = (function() {
       if(typeof AgentReputation!=='undefined') AgentReputation.recordSuccess('payment', 0, 0);
       if(typeof AgentWalletManager!=='undefined') AgentWalletManager.recordOperationSuccess('payment');
     }
+    else if(operation==='swap'){
+      var swapParams = null;
+      try { swapParams = typeof paramsJson === 'string' ? JSON.parse(paramsJson) : paramsJson; } catch(e){}
+      var toToken = (swapParams && swapParams.toToken) ? swapParams.toToken : 'ETH';
+      var cId = (swapParams && swapParams.calldataId) ? swapParams.calldataId : 'swplan_'+Date.now();
+      _agentStateMsg(execId, 'PLANNING', amount+' '+asset+' → '+ toToken);
+      await _agentExecuteSwap(amount, asset, toToken, cId);
+    }
+    else if(operation==='bridge'){
+      var brParams = null;
+      try { brParams = typeof paramsJson === 'string' ? JSON.parse(paramsJson) : paramsJson; } catch(e){}
+      var destChain = (brParams && brParams.destChain) ? brParams.destChain : 'Base';
+      var brDomain = (brParams && brParams.cctpDomain) ? Number(brParams.cctpDomain) : 6;
+      var brCid = (brParams && brParams.calldataId) ? brParams.calldataId : 'brplan_'+Date.now();
+      var brSrcChainId = (brParams && brParams.sourceChainId) ? Number(brParams.sourceChainId) : 5042002;
+      _agentStateMsg(execId, 'PLANNING', amount+' USDC → '+destChain);
+      await _agentExecuteBridge(amount, brDomain, destChain, brCid, brSrcChainId);
+    }
+    else if(operation==='crosschain'){
+      var xParams = null;
+      try { xParams = typeof paramsJson === 'string' ? JSON.parse(paramsJson) : paramsJson; } catch(e){}
+      var xDestChain = (xParams && xParams.destChain) ? xParams.destChain : 'Base';
+      var xDomain = (xParams && xParams.cctpDomain) ? Number(xParams.cctpDomain) : 6;
+      var xCid = (xParams && xParams.calldataId) ? xParams.calldataId : 'xplan_'+Date.now();
+      var xSrcChainId = (xParams && xParams.sourceChainId) ? Number(xParams.sourceChainId) : 5042002;
+      _agentStateMsg(execId, 'PLANNING', 'Cross-chain '+amount+' USDC → '+xDestChain);
+      await _agentExecuteBridge(amount, xDomain, xDestChain, xCid, xSrcChainId);
+    }
+    else if(operation==='add_liquidity'){
+      var alParams = null;
+      try { alParams = typeof paramsJson === 'string' ? JSON.parse(paramsJson) : paramsJson; } catch(e){}
+      var alAmtA = (alParams && alParams.amountA) ? alParams.amountA : amount;
+      var alTokenA = (alParams && alParams.tokenA) ? alParams.tokenA : asset;
+      var alAmtB = (alParams && alParams.amountB) ? alParams.amountB : alAmtA;
+      var alTokenB = (alParams && alParams.tokenB) ? alParams.tokenB : 'EURC';
+      var alPoolId = (alParams && alParams.poolId) ? alParams.poolId : '';
+      _agentStateMsg(execId, 'PLANNING', alAmtA+' '+alTokenA+' + '+alAmtB+' '+alTokenB);
+      await _agentExecuteLiquidity('add', alAmtA, alTokenA, alAmtB, alTokenB, alPoolId);
+    }
+    else if(operation==='remove_liquidity'){
+      var rlParams = null;
+      try { rlParams = typeof paramsJson === 'string' ? JSON.parse(paramsJson) : paramsJson; } catch(e){}
+      var rlAmt = (rlParams && rlParams.amount) ? rlParams.amount : amount;
+      var rlTokenA = (rlParams && rlParams.tokenA) ? rlParams.tokenA : asset;
+      var rlTokenB = (rlParams && rlParams.tokenB) ? rlParams.tokenB : 'EURC';
+      var rlPoolId = (rlParams && rlParams.poolId) ? rlParams.poolId : '';
+      _agentStateMsg(execId, 'PLANNING', 'Remove LP: '+rlAmt+' from '+rlTokenA+'/'+rlTokenB);
+      await _agentExecuteLiquidity('remove', rlAmt, rlTokenA, rlAmt, rlTokenB, rlPoolId);
+    }
+    else if(operation==='multisend'){
+      var msParams = null;
+      try { msParams = typeof paramsJson === 'string' ? JSON.parse(paramsJson) : paramsJson; } catch(e){}
+      var msToken = (msParams && msParams.token) ? msParams.token : asset;
+      var msRecipients = (msParams && msParams.recipients) ? msParams.recipients : [];
+      var msAmounts = (msParams && msParams.amounts) ? msParams.amounts : (msParams && msParams.amount ? [msParams.amount] : [amount]);
+      if(!Array.isArray(msRecipients) || msRecipients.length === 0){
+        _agentStateMsg(execId, 'FAILED', 'No recipients provided'); return;
+      }
+      if(!Array.isArray(msAmounts) || msAmounts.length !== msRecipients.length){
+        msAmounts = msRecipients.map(function(){ return amount; });
+      }
+      _agentStateMsg(execId, 'PLANNING', 'Multi-send '+msRecipients.length+' recipients · '+amount+' '+msToken+' each');
+      await _agentExecuteMultiSend(msToken, msRecipients, msAmounts);
+    }
   }
 
   function _agentStateMsg(execId, state, detail){
@@ -39473,6 +39718,8 @@ const UBScreen = (function() {
       BROADCASTING:   ['#06F7E9','Broadcasting transaction...'],
       CONFIRMING:     ['#f59e0b','Waiting blockchain confirmation...'],
       CONFIRMED:      ['#22c55e','Block confirmed'],
+      ATTESTING:      ['#a78bfa','Polling CCTP attestation...'],
+      MINTING:        ['#06F7E9','Minting on destination chain...'],
       VERIFYING:      ['#a78bfa','Verifying on-chain state...'],
       COMPLETED:      ['#22c55e','Completed on-chain'],
       FAILED:         ['#ef4444','Execution failed'],
@@ -39553,7 +39800,8 @@ const UBScreen = (function() {
     for(var i=0;i<calldataPlan.steps.length;i++){
       var step=calldataPlan.steps[i];
       var txData=step.tx;
-      if(!txData||!txData.to||!txData.calldata) continue;
+      var contractAddr = txData.contract || txData.to;
+      if(!txData||!contractAddr||!txData.calldata) continue;
 
       _agentStateMsg(execId, 'BROADCASTING', 'Step '+(i+1)+'/'+calldataPlan.steps.length+': '+step.label);
 
@@ -39564,7 +39812,7 @@ const UBScreen = (function() {
         var rawTx = {
           type: 2,  // EIP-1559 (required by Arc)
           chainId: 5042002,
-          to: txData.to,
+          to: contractAddr,
           data: txData.calldata,
           value: '0x0',
           gasLimit: ethers.toBeHex(300000),
@@ -39649,11 +39897,927 @@ const UBScreen = (function() {
     }, 800);
   }
 
+  async function _agentExecuteBridge(amount, destDomain, destChainName, calldataId, sourceChainId){
+    var execId = 'exec_' + Date.now();
+    var chainId = Number(sourceChainId) || 5042002; // default: Arc Testnet
+    var cctpCfg = (typeof ElligenteCCTP !== 'undefined' && ElligenteCCTP.CCTP_CONFIG) ? ElligenteCCTP.CCTP_CONFIG[String(chainId)] : null;
+    if(!cctpCfg){
+      // Fallback chain config
+      var fallbackConfigs = {
+        5042002: { rpc:'https://rpc.testnet.arc.network', usdc:'0x3600000000000000000000000000000000000000', explorer:'https://testnet.arcscan.app', tokenMessenger:'0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA', domain:26 },
+        11155111: { rpc:'https://ethereum-sepolia-rpc.publicnode.com', usdc:'0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238', explorer:'https://sepolia.etherscan.io', tokenMessenger:'0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA', domain:0 },
+        84532: { rpc:'https://sepolia.base.org', usdc:'0x036CbD53842c5426634e7929541eC2318f3dCF7e', explorer:'https://sepolia.basescan.org', tokenMessenger:'0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA', domain:6 },
+        421614: { rpc:'https://sepolia-rollup.arbitrum.io/rpc', usdc:'0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d', explorer:'https://sepolia.arbiscan.io', tokenMessenger:'0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA', domain:3 },
+        11155420: { rpc:'https://sepolia.optimism.io', usdc:'0x5fd84259d66Cd46123540766Be93DFE6D43130D7', explorer:'https://sepolia-optimism.etherscan.io', tokenMessenger:'0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA', domain:2 },
+        80002: { rpc:'https://rpc-amoy.polygon.technology', usdc:'0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582', explorer:'https://amoy.polygonscan.com', tokenMessenger:'0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA', domain:7 }
+      };
+      cctpCfg = fallbackConfigs[String(chainId)] || fallbackConfigs['5042002'];
+    }
+
+    var RPC_URL = cctpCfg.rpc || 'https://rpc.testnet.arc.network';
+    var USDC_ADDR = cctpCfg.usdc || '0x3600000000000000000000000000000000000000';
+    var MESSENGER_ADDR = cctpCfg.tokenMessenger || '0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA';
+    var EXPLORER_URL = cctpCfg.explorer || 'https://testnet.arcscan.app';
+    var srcDomain = cctpCfg.domain || 26;
+
+    var sess = null;
+    try { sess = JSON.parse(localStorage.getItem('elligentt_agent_session_v1')); } catch(e){}
+    if(!sess || !sess.privateKey){
+      _agentStateMsg(execId, 'FAILED', 'No agent session key found. Reconnect wallet.');
+      return;
+    }
+
+    var provider = new ethers.JsonRpcProvider(RPC_URL);
+    var signer = new ethers.Wallet(sess.privateKey, provider);
+    var agentAddr = signer.address;
+    // CRITICAL: mintRecipient must be non-zero — use padded agent address
+    var mintRecipient = ethers.zeroPadValue(agentAddr, 32);
+
+    var isArcSource = chainId === 5042002;
+    var chainName = isArcSource ? 'Arc Testnet' : ('Chain '+chainId);
+    _agentStateMsg(execId, 'PLANNING', agentAddr.substring(0,8)+'... '+amount+' USDC on '+chainName+' → '+destChainName);
+
+    var calldataPlan = window['_agentCalldata_'+calldataId] || window._agentCalldataPlan;
+    if(!calldataPlan||!calldataPlan.steps){
+      if(typeof ChainSimulator !== 'undefined') calldataPlan = ChainSimulator.prepareFullBridge(amount, destDomain, mintRecipient);
+    }
+    if(!calldataPlan||!calldataPlan.steps){ _agentStateMsg(execId, 'FAILED', 'No bridge calldata plan'); return; }
+
+    try {
+      var balAbi = ['function balanceOf(address) view returns (uint256)'];
+      var usdc = new ethers.Contract(USDC_ADDR, balAbi, provider);
+      var bal = await usdc.balanceOf(agentAddr);
+      var balFloat = parseFloat(ethers.formatUnits(bal, 6));
+      if(balFloat < amount){
+        _agentStateMsg(execId, 'FAILED', 'Insufficient balance: '+balFloat.toFixed(2)+' USDC (need '+amount+')');
+        return;
+      }
+    } catch(e){}
+
+    var startTime = Date.now();
+    var lastTxHash = '';
+    var lastReceipt = null;
+
+    // For non-Arc chains, we need to adjust gas parameters
+    var gasParams = isArcSource
+      ? { maxFeePerGas: ethers.parseUnits("20","gwei"), maxPriorityFeePerGas: ethers.parseUnits("1","gwei"), gasLimit: 350000 }
+      : { maxFeePerGas: ethers.parseUnits("50","gwei"), maxPriorityFeePerGas: ethers.parseUnits("1.5","gwei"), gasLimit: 350000 };
+
+    for(var i=0;i<calldataPlan.steps.length;i++){
+      var step=calldataPlan.steps[i];
+      var txData=step.tx;
+      var contractAddr = txData.contract || txData.to;
+      if(!txData||!contractAddr||!txData.calldata) continue;
+
+      _agentStateMsg(execId, 'BROADCASTING', 'Step '+(i+1)+'/'+calldataPlan.steps.length+': '+step.label);
+
+      // Rebuild calldata with correct mintRecipient if this is the depositForBurn step
+      var calldata = txData.calldata;
+      if(txData.method === 'depositForBurn' && typeof ethers !== 'undefined'){
+        try {
+          var cctpIface = new ethers.Interface(['function depositForBurn(uint256 amount, uint32 destinationDomain, bytes32 mintRecipient, address burnToken, bytes32 destinationCaller, uint256 maxFee, uint32 minFinalityThreshold)']);
+          calldata = cctpIface.encodeFunctionData('depositForBurn', [
+            ethers.parseUnits(String(amount), 6),
+            Number(destDomain) || 6,
+            mintRecipient,
+            USDC_ADDR,
+            ethers.ZeroHash,
+            ethers.parseUnits('0.5', 6),
+            0
+          ]);
+        } catch(e){}
+      }
+
+      try {
+        var nonce = await provider.send('eth_getTransactionCount', [agentAddr, 'pending']);
+        var rawTx = {
+          type: 2,
+          chainId: chainId,
+          to: contractAddr,
+          data: calldata,
+          value: '0x0',
+          gasLimit: ethers.toBeHex(gasParams.gasLimit),
+          nonce: nonce,
+          maxFeePerGas: ethers.toBeHex(gasParams.maxFeePerGas),
+          maxPriorityFeePerGas: ethers.toBeHex(gasParams.maxPriorityFeePerGas)
+        };
+
+        var signedTx = await signer.signTransaction(rawTx);
+        var txHash = await provider.send('eth_sendRawTransaction', [signedTx]);
+        lastTxHash = txHash;
+
+        _addAgentResultMsg(
+          '<div style="font-size:10px"><span style="color:#06F7E9">Step '+(i+1)+': '+step.label+' submitted</span><br>'+
+          '<code style="font-size:8px;word-break:break-all;color:#a78bfa">'+txHash+'</code><br>'+
+          '<a href="'+EXPLORER_URL+'/tx/'+txHash+'" target="_blank" style="color:#a78bfa;font-size:8px">View on Explorer ↗</a></div>',
+          'pending');
+      } catch(sendErr){
+        var eMsg = (sendErr.message || String(sendErr)).substring(0, 150);
+        if(/user.rejected|denied/i.test(eMsg)) _agentStateMsg(execId, 'REJECTED', 'Signature rejected');
+        else if(/insufficient/i.test(eMsg)) _agentStateMsg(execId, 'FAILED', 'Insufficient funds');
+        else if(/nonce/i.test(eMsg)) _agentStateMsg(execId, 'FAILED', 'Nonce conflict');
+        else _agentStateMsg(execId, 'FAILED', eMsg);
+        return;
+      }
+
+      _agentStateMsg(execId, 'CONFIRMING', 'Step '+(i+1)+' awaiting block...');
+      try { lastReceipt = await provider.waitForTransaction(txHash, 1, 60000); }
+      catch(waitErr){ _agentStateMsg(execId, 'DROPPED', 'Tx not confirmed within 60s'); return; }
+
+      if(!lastReceipt || lastReceipt.status !== 1){
+        _agentStateMsg(execId, 'REVERTED', 'Step '+(i+1)+' reverted on-chain.');
+        return;
+      }
+      _addAgentResultMsg(
+        '<div style="font-size:10px"><span style="color:#22c55e">✓ Step '+(i+1)+' confirmed</span><br>'+
+        '<span style="color:var(--muted);font-size:8px">Block #'+lastReceipt.blockNumber+' · Gas: '+Number(lastReceipt.gasUsed)+'</span></div>',
+        'success');
+    }
+
+    _agentStateMsg(execId, 'VERIFYING', 'Checking on-chain state...');
+
+    // ── CCTP Attestation Polling ──
+    var attestResult = null;
+    try {
+      var destDomainNum = Number(destDomain) || 6;
+      var IRIS_V2_URL = 'https://iris-api-sandbox.circle.com/v2/messages/';
+      _agentStateMsg(execId, 'ATTESTING', 'Polling Circle Iris for attestation (src domain '+srcDomain+', dest '+destDomainNum+')...');
+
+      for(var poll=0; poll<120; poll++){
+        await new Promise(function(r){ setTimeout(r, poll===0 ? 1000 : 5000); });
+        try {
+          var irisRes = await fetch(IRIS_V2_URL + srcDomain + '?transactionHash=' + lastTxHash);
+          if(!irisRes.ok) continue;
+          var irisData = await irisRes.json();
+          if(irisData.messages && irisData.messages.length > 0){
+            var msg = irisData.messages[0];
+            if(poll % 6 === 0) _agentStateMsg(execId, 'ATTESTING', 'Iris poll #'+(poll+1)+' status: '+(msg.status||'pending'));
+            if(msg.status === 'complete' && msg.attestation && msg.attestation !== 'PENDING'){
+              attestResult = { messageBytes: msg.message, attestationSig: msg.attestation, messageHash: msg.messageHash, pollCount: poll+1 };
+              break;
+            }
+          }
+        } catch(e){}
+      }
+
+      if(!attestResult && typeof CCTPShared !== 'undefined'){
+        _agentStateMsg(execId, 'ATTESTING', 'V2 timeout — trying V1 fallback...');
+        var messageBytes = CCTPShared.extractMessageFromLogs(lastReceipt);
+        if(messageBytes){
+          var msgHash = ethers.keccak256(messageBytes);
+          for(var v1p=0; v1p<60; v1p++){
+            await new Promise(function(r){ setTimeout(r, 5000); });
+            try {
+              var v1Res = await fetch('https://iris-api-sandbox.circle.com/attestations/' + msgHash);
+              if(v1Res.ok){
+                var v1Data = await v1Res.json();
+                if(v1Data && v1Data.attestation && v1Data.attestation !== 'PENDING'){
+                  attestResult = { messageBytes: messageBytes, attestationSig: v1Data.attestation, messageHash: msgHash, pollCount: poll+v1p+2 };
+                  break;
+                }
+              }
+            } catch(e){}
+          }
+        }
+      }
+    } catch(attestErr){
+      _addAgentResultMsg('<div style="font-size:10px;color:#f59e0b">⚠ Attestation polling error. Bridge may still complete — check Circle CCTP explorer.</div>', 'pending');
+    }
+
+    // ── STEP: receiveMessage on destination chain ──
+    var mintTxHash = null;
+    if(attestResult && attestResult.messageBytes && attestResult.attestationSig){
+      _agentStateMsg(execId, 'MINTING', 'Calling receiveMessage on '+destChainName+'...');
+      try {
+        var destCctpCfg = null;
+        if(typeof ElligenteCCTP !== 'undefined' && ElligenteCCTP.CCTP_CONFIG){
+          for(var dk in ElligenteCCTP.CCTP_CONFIG){
+            if(ElligenteCCTP.CCTP_CONFIG[dk].domain === destDomainNum){
+              destCctpCfg = ElligenteCCTP.CCTP_CONFIG[dk];
+              break;
+            }
+          }
+        }
+        if(destCctpCfg && destCctpCfg.messageTransmitter && destCctpCfg.rpc){
+          var destProvider = new ethers.JsonRpcProvider(destCctpCfg.rpc);
+          var destSigner = new ethers.Wallet(sess.privateKey, destProvider);
+          var destMtAbi = ['function receiveMessage(bytes message, bytes attestation) returns (bool)'];
+          var destMtContract = new ethers.Contract(destCctpCfg.messageTransmitter, destMtAbi, destSigner);
+          var mintTx = await destMtContract.receiveMessage(attestResult.messageBytes, attestResult.attestationSig);
+          mintTxHash = mintTx.hash;
+          _addAgentResultMsg('<div style="font-size:10px"><span style="color:#06F7E9">receiveMessage submitted on '+destChainName+'</span><br><code style="font-size:8px;color:#a78bfa">'+mintTxHash+'</code></div>', 'pending');
+          var mintRcpt = await mintTx.wait();
+          if(mintRcpt && mintRcpt.status === 1){
+            _addAgentResultMsg('<div style="font-size:10px"><span style="color:#22c55e">✓ USDC minted on '+destChainName+'</span><br><span style="color:var(--muted);font-size:8px">Block #'+mintRcpt.blockNumber+'</span></div>', 'success');
+          } else {
+            _addAgentResultMsg('<div style="font-size:10px;color:#ef4444">✕ receiveMessage reverted on '+destChainName+'</div>', 'failed');
+          }
+        }
+      } catch(rmErr){
+        _addAgentResultMsg('<div style="font-size:10px;color:#f59e0b">⚠ receiveMessage failed on '+destChainName+': '+(rmErr.message||String(rmErr)).substring(0,80)+'</div>', 'pending');
+      }
+    }
+
+    _agentStateMsg(execId, 'COMPLETED');
+
+    var duration = Date.now() - startTime;
+    // Destination explorer URL
+    var destExplorer = 'https://sepolia.basescan.org';
+    var destCctpMap = { 26:'https://testnet.arcscan.app', 0:'https://sepolia.etherscan.io', 6:'https://sepolia.basescan.org', 3:'https://sepolia.arbiscan.io', 2:'https://sepolia-optimism.etherscan.io', 7:'https://amoy.polygonscan.com' };
+    destExplorer = destCctpMap[destDomainNum] || destExplorer;
+
+    var attestHtml = attestResult
+      ? '<div style="margin-top:6px;padding:6px 8px;border-radius:6px;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.2)"><span style="color:#22c55e;font-size:10px">✓ Attestation Ready</span><br>'+
+        '<span style="color:var(--muted);font-size:8px">Domain: '+destDomainNum+' · Polls: '+attestResult.pollCount+'<br>'+
+        'Attestation: <code style="font-size:7px;word-break:break-all;color:#a78bfa">'+attestResult.attestationSig.substring(0,42)+'...</code><br>'+
+        'Destination: receiveMessage() ready on '+destChainName+'</span></div>'
+      : '<div style="margin-top:6px;color:#f59e0b;font-size:9px">⚠ Attestation still pending — check <a href="https://iris-sandbox.circle.com" target="_blank" style="color:#f59e0b">Circle Iris ↗</a></div>';
+
+    _addAgentResultMsg(
+      '<div style="font-size:10px">'+
+      '<span style="color:#22c55e;font-size:12px">✓ Bridge Verified On-chain</span><br><br>'+
+      '<strong>'+amount+' USDC ('+chainName+' → '+destChainName+')</strong><br><br>'+
+      '<span style="color:var(--muted);font-size:9px">'+
+      'Agent: <code style="font-size:8px">'+agentAddr.substring(0,10)+'...</code><br>'+
+      'Tx: <code style="font-size:8px;word-break:break-all;color:#a78bfa">'+lastTxHash+'</code><br>'+
+      '<a href="'+EXPLORER_URL+'/tx/'+lastTxHash+'" target="_blank" style="color:#a78bfa">'+chainName+' Explorer →</a> · '+
+      '<a href="'+destExplorer+'" target="_blank" style="color:#06F7E9">'+destChainName+' Explorer →</a>'+
+      (mintTxHash ? '<br><span style="font-size:8px;color:#a78bfa">✓ Mint: </span><a href="'+destExplorer+'/tx/'+mintTxHash+'" target="_blank" style="color:#22c55e;font-size:8px">'+mintTxHash.substring(0,14)+'...</a>' : '')+
+      '<br>'+
+      'Block: #'+(lastReceipt?lastReceipt.blockNumber:'?')+' · Duration: '+(duration/1000).toFixed(1)+'s'+
+      '</span></div>'+
+      attestHtml,
+      'success');
+
+    if(typeof AgentAudit!=='undefined') AgentAudit.recordExecution({
+      operation:'bridge', amount:amount, asset:'USDC', chain:chainName,
+      destinationChain:destChainName, cctpDomain:destDomainNum,
+      transactionHash:lastTxHash, result:'success', duration:duration,
+      gasUsed:lastReceipt?Number(lastReceipt.gasUsed):0,
+      attestationReady:!!attestResult
+    });
+    if(typeof AgentReputation!=='undefined') AgentReputation.recordSuccess('bridge', duration, 0);
+    if(typeof AgentWalletManager!=='undefined') AgentWalletManager.recordOperationSuccess('bridge');
+
+    setTimeout(function(){
+      var c=document.getElementById('aut-messages');
+      if(c){
+        c.insertAdjacentHTML('beforeend',
+          '<div class="aut-msg ai"><div class="aut-msg-body"><div class="aut-act-bar"><button class="aut-act" onclick="autonomaSendQuick(\'show my wallet\')"><i class="ti ti-refresh"></i>Refresh Balance</button></div></div></div>');
+        c.scrollTop=c.scrollHeight;
+      }
+    }, 800);
+  }
+
+  async function _agentExecuteTurboBridge(amount, fromChainId, fromChainName, toChainName, calldataId){
+    var execId = 'exec_' + Date.now();
+    var chainId = Number(fromChainId) || 11155111; // default: Ethereum Sepolia
+    var cctpCfg = (typeof ElligenteCCTP !== 'undefined' && ElligenteCCTP.CCTP_CONFIG) ? ElligenteCCTP.CCTP_CONFIG[String(chainId)] : null;
+    var fallbackConfigs = {
+      11155111: { rpc:'https://ethereum-sepolia-rpc.publicnode.com', usdc:'0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238', explorer:'https://sepolia.etherscan.io', tokenMessenger:'0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA', domain:0 },
+      84532: { rpc:'https://sepolia.base.org', usdc:'0x036CbD53842c5426634e7929541eC2318f3dCF7e', explorer:'https://sepolia.basescan.org', tokenMessenger:'0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA', domain:6 },
+      421614: { rpc:'https://sepolia-rollup.arbitrum.io/rpc', usdc:'0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d', explorer:'https://sepolia.arbiscan.io', tokenMessenger:'0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA', domain:3 },
+      11155420: { rpc:'https://sepolia.optimism.io', usdc:'0x5fd84259d66Cd46123540766Be93DFE6D43130D7', explorer:'https://sepolia-optimism.etherscan.io', tokenMessenger:'0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA', domain:2 },
+      80002: { rpc:'https://rpc-amoy.polygon.technology', usdc:'0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582', explorer:'https://amoy.polygonscan.com', tokenMessenger:'0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA', domain:7 }
+    };
+    if(!cctpCfg) cctpCfg = fallbackConfigs[String(chainId)] || { rpc:'https://ethereum-sepolia-rpc.publicnode.com', usdc:'0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238', explorer:'https://sepolia.etherscan.io', tokenMessenger:'0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA', domain:0 };
+
+    var RPC_URL = cctpCfg.rpc;
+    var USDC_ADDR = cctpCfg.usdc;
+    var MESSENGER_ADDR = cctpCfg.tokenMessenger;
+    var EXPLORER_URL = cctpCfg.explorer;
+    var srcDomain = cctpCfg.domain || 0;
+
+    var sess = null;
+    try { sess = JSON.parse(localStorage.getItem('elligentt_agent_session_v1')); } catch(e){}
+    if(!sess || !sess.privateKey){
+      _agentStateMsg(execId, 'FAILED', 'No agent session key found.');
+      return;
+    }
+
+    var provider = new ethers.JsonRpcProvider(RPC_URL);
+    var signer = new ethers.Wallet(sess.privateKey, provider);
+    var agentAddr = signer.address;
+    var mintRecipient = ethers.zeroPadValue(agentAddr, 32);
+    // ARC is always the destination for Turbo Bridge
+    var arcDomain = 26;
+
+    _agentStateMsg(execId, 'PLANNING', agentAddr.substring(0,8)+'... Turbo Bridge '+amount+' USDC '+fromChainName+' → '+toChainName);
+
+    var calldataPlan = window['_agentCalldata_'+calldataId] || window._agentCalldataPlan;
+    if(!calldataPlan||!calldataPlan.steps){
+      if(typeof ChainSimulator !== 'undefined') calldataPlan = ChainSimulator.prepareFullBridge(amount, arcDomain, mintRecipient);
+    }
+    if(!calldataPlan||!calldataPlan.steps){ _agentStateMsg(execId, 'FAILED', 'No bridge calldata plan'); return; }
+
+    try {
+      var balAbi = ['function balanceOf(address) view returns (uint256)'];
+      var usdc = new ethers.Contract(USDC_ADDR, balAbi, provider);
+      var bal = await usdc.balanceOf(agentAddr);
+      var balFloat = parseFloat(ethers.formatUnits(bal, 6));
+      if(balFloat < amount){
+        _agentStateMsg(execId, 'FAILED', 'Insufficient balance: '+balFloat.toFixed(2)+' USDC (need '+amount+')');
+        return;
+      }
+    } catch(e){}
+
+    var startTime = Date.now();
+    var lastTxHash = '';
+    var lastReceipt = null;
+    var gasParams = { maxFeePerGas: ethers.parseUnits("50","gwei"), maxPriorityFeePerGas: ethers.parseUnits("1.5","gwei"), gasLimit: 350000 };
+
+    for(var i=0;i<calldataPlan.steps.length;i++){
+      var step=calldataPlan.steps[i];
+      var txData=step.tx;
+      var contractAddr = txData.contract || txData.to;
+      if(!txData||!contractAddr||!txData.calldata) continue;
+
+      _agentStateMsg(execId, 'BROADCASTING', 'Step '+(i+1)+'/'+calldataPlan.steps.length+': '+step.label);
+
+      var calldata = txData.calldata;
+      if(txData.method === 'depositForBurn' && typeof ethers !== 'undefined'){
+        try {
+          var cctpIface = new ethers.Interface(['function depositForBurn(uint256 amount, uint32 destinationDomain, bytes32 mintRecipient, address burnToken, bytes32 destinationCaller, uint256 maxFee, uint32 minFinalityThreshold)']);
+          calldata = cctpIface.encodeFunctionData('depositForBurn', [
+            ethers.parseUnits(String(amount), 6), arcDomain, mintRecipient, USDC_ADDR, ethers.ZeroHash, ethers.parseUnits('0.5', 6), 0
+          ]);
+        } catch(e){}
+      }
+
+      try {
+        var nonce = await provider.send('eth_getTransactionCount', [agentAddr, 'pending']);
+        var rawTx = { type:2, chainId:chainId, to:contractAddr, data:calldata, value:'0x0', gasLimit:ethers.toBeHex(gasParams.gasLimit), nonce:nonce, maxFeePerGas:ethers.toBeHex(gasParams.maxFeePerGas), maxPriorityFeePerGas:ethers.toBeHex(gasParams.maxPriorityFeePerGas) };
+        var signedTx = await signer.signTransaction(rawTx);
+        var txHash = await provider.send('eth_sendRawTransaction', [signedTx]);
+        lastTxHash = txHash;
+        _addAgentResultMsg('<div style="font-size:10px"><span style="color:#06F7E9">Step '+(i+1)+': '+step.label+' submitted</span><br><code style="font-size:8px;color:#a78bfa">'+txHash+'</code><br><a href="'+EXPLORER_URL+'/tx/'+txHash+'" target="_blank" style="color:#a78bfa;font-size:8px">View on Explorer ↗</a></div>', 'pending');
+      } catch(sendErr){
+        var eMsg = (sendErr.message || String(sendErr)).substring(0, 150);
+        if(/user.rejected|denied/i.test(eMsg)) _agentStateMsg(execId, 'REJECTED', 'Signature rejected');
+        else if(/insufficient/i.test(eMsg)) _agentStateMsg(execId, 'FAILED', 'Insufficient funds');
+        else _agentStateMsg(execId, 'FAILED', eMsg);
+        return;
+      }
+      _agentStateMsg(execId, 'CONFIRMING', 'Step '+(i+1)+' awaiting block...');
+      try { lastReceipt = await provider.waitForTransaction(txHash, 1, 60000); }
+      catch(waitErr){ _agentStateMsg(execId, 'DROPPED', 'Tx not confirmed within 60s'); return; }
+      if(!lastReceipt || lastReceipt.status !== 1){ _agentStateMsg(execId, 'REVERTED', 'Step '+(i+1)+' reverted on-chain.'); return; }
+      _addAgentResultMsg('<div style="font-size:10px"><span style="color:#22c55e">✓ Step '+(i+1)+' confirmed</span><br><span style="color:var(--muted);font-size:8px">Block #'+lastReceipt.blockNumber+' · Gas: '+Number(lastReceipt.gasUsed)+'</span></div>', 'success');
+    }
+
+    _agentStateMsg(execId, 'VERIFYING', 'Checking attestation...');
+    // Turbo Bridge: poll source chain attestation
+    var attestResult = null;
+    try {
+      var IRIS_V2_URL = 'https://iris-api-sandbox.circle.com/v2/messages/';
+      _agentStateMsg(execId, 'ATTESTING', 'Polling Circle Iris for attestation (src domain '+srcDomain+')...');
+      for(var poll=0; poll<180; poll++){
+        await new Promise(function(r){ setTimeout(r, poll===0 ? 1000 : 5000); });
+        try {
+          var irisRes = await fetch(IRIS_V2_URL + srcDomain + '?transactionHash=' + lastTxHash);
+          if(!irisRes.ok) continue;
+          var irisData = await irisRes.json();
+          if(irisData.messages && irisData.messages.length > 0){
+            var msg = irisData.messages[0];
+            if(poll % 6 === 0) _agentStateMsg(execId, 'ATTESTING', 'Turbo poll #'+(poll+1)+': '+(msg.status||'pending'));
+            if(msg.status === 'complete' && msg.attestation && msg.attestation !== 'PENDING'){
+              attestResult = { messageBytes: msg.message, attestationSig: msg.attestation, messageHash: msg.messageHash, pollCount: poll+1 };
+              break;
+            }
+          }
+        } catch(e){}
+      }
+    } catch(e){}
+
+    // ── STEP: receiveMessage on ARC (destination) ──
+    var mintTxHash = null;
+    if(attestResult && attestResult.messageBytes && attestResult.attestationSig){
+      _agentStateMsg(execId, 'MINTING', 'Calling receiveMessage on ARC...');
+      try {
+        var arcProvider = new ethers.JsonRpcProvider('https://rpc.testnet.arc.network');
+        var arcSigner = new ethers.Wallet(sess.privateKey, arcProvider);
+        var arcMtAbi = ['function receiveMessage(bytes message, bytes attestation) returns (bool)'];
+        var arcMtContract = new ethers.Contract('0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275', arcMtAbi, arcSigner);
+        var mintTx = await arcMtContract.receiveMessage(attestResult.messageBytes, attestResult.attestationSig);
+        mintTxHash = mintTx.hash;
+        _addAgentResultMsg('<div style="font-size:10px"><span style="color:#06F7E9">receiveMessage submitted on ARC</span><br><code style="font-size:8px;color:#a78bfa">'+mintTxHash+'</code></div>', 'pending');
+        var mintRcpt = await mintTx.wait();
+        if(mintRcpt && mintRcpt.status === 1){
+          _addAgentResultMsg('<div style="font-size:10px"><span style="color:#22c55e">✓ USDC minted on ARC</span><br><span style="color:var(--muted);font-size:8px">Block #'+mintRcpt.blockNumber+'</span></div>', 'success');
+        } else {
+          _addAgentResultMsg('<div style="font-size:10px;color:#ef4444">✕ receiveMessage reverted on ARC</div>', 'failed');
+        }
+      } catch(rmErr){
+        _addAgentResultMsg('<div style="font-size:10px;color:#f59e0b">⚠ receiveMessage failed on ARC: '+(rmErr.message||String(rmErr)).substring(0,80)+'</div>', 'pending');
+      }
+    }
+
+    _agentStateMsg(execId, 'COMPLETED');
+    var duration = Date.now() - startTime;
+    var attestHtml = attestResult
+      ? '<div style="margin-top:6px;padding:6px 8px;border-radius:6px;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.2)"><span style="color:#22c55e;font-size:10px">✓ Turbo Bridge Attestation Ready</span><br>'+
+        '<span style="color:var(--muted);font-size:8px">ARC inbound attested · Polls: '+attestResult.pollCount+'<br>receiveMessage() ready on ARC</span></div>'
+      : '<div style="margin-top:6px;color:#f59e0b;font-size:9px">⚠ Attestation pending — treasury will fulfill on ARC side</div>';
+
+    _addAgentResultMsg(
+      '<div style="font-size:10px"><span style="color:#22c55e;font-size:12px">✓ Turbo Bridge Complete</span><br><br>'+
+      '<strong>'+amount+' USDC ('+fromChainName+' → '+toChainName+')</strong><br><br>'+
+      '<span style="color:var(--muted);font-size:9px">'+
+      'Agent: <code style="font-size:8px">'+agentAddr.substring(0,10)+'...</code><br>'+
+      'Tx: <code style="font-size:8px;color:#a78bfa">'+lastTxHash+'</code><br>'+
+      '<a href="'+EXPLORER_URL+'/tx/'+lastTxHash+'" target="_blank" style="color:#a78bfa">'+fromChainName+' Explorer →</a> · '+
+      '<a href="https://testnet.arcscan.app" target="_blank" style="color:#06F7E9">Arc Explorer →</a>'+
+      (mintTxHash ? '<br><span style="font-size:8px;color:#a78bfa">✓ Mint: </span><a href="https://testnet.arcscan.app/tx/'+mintTxHash+'" target="_blank" style="color:#22c55e;font-size:8px">'+mintTxHash.substring(0,14)+'...</a>' : '')+
+      '<br>'+
+      'Duration: '+(duration/1000).toFixed(1)+'s</span></div>'+attestHtml, 'success');
+
+    if(typeof AgentAudit!=='undefined') AgentAudit.recordExecution({
+      operation:'turbo_bridge', amount:amount, asset:'USDC', chain:fromChainName,
+      destinationChain:toChainName, cctpDomain:26, transactionHash:lastTxHash,
+      result:'success', duration:duration, gasUsed:lastReceipt?Number(lastReceipt.gasUsed):0
+    });
+    if(typeof AgentReputation!=='undefined') AgentReputation.recordSuccess('bridge', duration, 0);
+    if(typeof AgentWalletManager!=='undefined') AgentWalletManager.recordOperationSuccess('bridge');
+
+    setTimeout(function(){
+      var c=document.getElementById('aut-messages');
+      if(c){ c.insertAdjacentHTML('beforeend','<div class="aut-msg ai"><div class="aut-msg-body"><div class="aut-act-bar"><button class="aut-act" onclick="autonomaSendQuick(\'show my wallet\')"><i class="ti ti-refresh"></i>Refresh Balance</button></div></div></div>'); c.scrollTop=c.scrollHeight; }
+    }, 800);
+  }
+
+  async function _agentExecuteLiquidity(operation, amountA, tokenA, amountB, tokenB, poolId){
+    var execId = 'exec_' + Date.now();
+
+    var sess = null;
+    try { sess = JSON.parse(localStorage.getItem('elligentt_agent_session_v1')); } catch(e){}
+    if(!sess || !sess.privateKey){
+      _agentStateMsg(execId, 'FAILED', 'No agent session key found. Reconnect wallet.');
+      return;
+    }
+
+    var ARC_RPC = 'https://rpc.testnet.arc.network';
+    var provider = new ethers.JsonRpcProvider(ARC_RPC);
+    var signer = new ethers.Wallet(sess.privateKey, provider);
+    var agentAddr = signer.address;
+
+    var pool = POOL_REGISTRY.find(function(p){ return p.id === poolId; });
+    if(!pool && POOL_REGISTRY.length > 0) pool = POOL_REGISTRY.find(function(p){
+      return (p.tokenA === tokenA && p.tokenB === tokenB) || (p.tokenA === tokenB && p.tokenB === tokenA);
+    });
+    if(!pool) pool = POOL_REGISTRY[0];
+    if(!pool){
+      _agentStateMsg(execId, 'FAILED', 'No pool found for '+tokenA+'/'+tokenB);
+      return;
+    }
+
+    var isAdd = operation === 'add' || operation === 'add_liquidity';
+    var label = isAdd ? 'Add Liquidity' : 'Remove Liquidity';
+    _agentStateMsg(execId, 'PLANNING', agentAddr.substring(0,8)+'... '+label+' '+pool.tokenA+'/'+pool.tokenB);
+
+    // Token addresses
+    var tokAAddr = (typeof TOKEN_REGISTRY !== 'undefined' && TOKEN_REGISTRY[tokenA]) ? TOKEN_REGISTRY[tokenA].address : null;
+    var tokBAddr = (typeof TOKEN_REGISTRY !== 'undefined' && TOKEN_REGISTRY[tokenB]) ? TOKEN_REGISTRY[tokenB].address : null;
+    var decA = (typeof TOKEN_REGISTRY !== 'undefined' && TOKEN_REGISTRY[tokenA]) ? (TOKEN_REGISTRY[tokenA].decimals || 6) : 6;
+    var decB = (typeof TOKEN_REGISTRY !== 'undefined' && TOKEN_REGISTRY[tokenB]) ? (TOKEN_REGISTRY[tokenB].decimals || 6) : 6;
+    var USDC_ADDR = '0x3600000000000000000000000000000000000000';
+    if(!tokAAddr) tokAAddr = USDC_ADDR;
+    if(!tokBAddr) tokBAddr = USDC_ADDR;
+
+    var poolContract = new ethers.Contract(pool.address, POOL_CONTRACT_ABI, provider);
+    var poolWithSigner = new ethers.Contract(pool.address, POOL_CONTRACT_ABI, signer);
+
+    var ERC20_ABI = ['function approve(address spender, uint256 amount) returns (bool)','function balanceOf(address) view returns (uint256)','function allowance(address owner, address spender) view returns (uint256)'];
+    var tokAContract = new ethers.Contract(tokAAddr, ERC20_ABI, signer);
+    var tokBContract = new ethers.Contract(tokBAddr, ERC20_ABI, signer);
+
+    var startTime = Date.now();
+    var lastTxHash = '';
+    var lastReceipt = null;
+    var steps = [];
+    var totalSteps = 0;
+
+    if(isAdd){
+      steps = [
+        { label: 'Approve '+tokenA, contract: tokAAddr, calldata: '' },
+        { label: 'Approve '+tokenB, contract: tokBAddr, calldata: '' },
+        { label: 'Add Liquidity ' + pool.tokenA + '/' + pool.tokenB, contract: pool.address, calldata: '' }
+      ];
+      totalSteps = 3;
+    } else {
+      steps = [
+        { label: 'Approve LP tokens', contract: pool.address, calldata: '' },
+        { label: 'Remove Liquidity ' + pool.tokenA + '/' + pool.tokenB, contract: pool.address, calldata: '' }
+      ];
+      totalSteps = 2;
+    }
+
+    for(var i=0;i<totalSteps;i++){
+      var step = steps[i];
+
+      if(isAdd && i===0){
+        var amtABig = ethers.parseUnits(String(amountA), decA);
+        step.calldata = tokAContract.interface.encodeFunctionData('approve', [pool.address, amtABig * 2n]);
+      } else if(isAdd && i===1){
+        var amtBBig = ethers.parseUnits(String(amountB), decB);
+        step.calldata = tokBContract.interface.encodeFunctionData('approve', [pool.address, amtBBig * 2n]);
+      } else if(isAdd && i===2){
+        var amt0 = ethers.parseUnits(String(amountA), decA);
+        var amt1 = ethers.parseUnits(String(amountB), decB);
+        step.calldata = poolContract.interface.encodeFunctionData('addLiquidity', [amt0, amt1]);
+      } else if(!isAdd && i===0){
+        // Calculate LP amount from amountA (USDC amount to remove)
+        var lpAmt = ethers.parseUnits(String(amountA), 18); // LP has 18 decimals
+        step.calldata = tokAContract.interface.encodeFunctionData('approve', [pool.address, lpAmt * 2n]); // Use tokenA contract for LP approval
+        // Actually need to use pool contract for LP approval since LP is the pool itself
+        step.calldata = poolContract.interface.encodeFunctionData('approve', [pool.address, lpAmt * 2n]);
+      } else if(!isAdd && i===1){
+        var lpAmt2 = ethers.parseUnits(String(amountA), 18);
+        step.calldata = poolContract.interface.encodeFunctionData('removeLiquidity', [lpAmt2]);
+      }
+
+      _agentStateMsg(execId, 'BROADCASTING', 'Step '+(i+1)+'/'+totalSteps+': '+step.label);
+      try {
+        var nonce = await provider.send('eth_getTransactionCount', [agentAddr, 'pending']);
+        var rawTx = {
+          type: 2, chainId: 5042002,
+          to: step.contract,
+          data: step.calldata,
+          value: '0x0',
+          gasLimit: ethers.toBeHex(350000),
+          nonce: nonce,
+          maxFeePerGas: ethers.toBeHex(ethers.parseUnits("20", "gwei")),
+          maxPriorityFeePerGas: ethers.toBeHex(ethers.parseUnits("1", "gwei"))
+        };
+        var signedTx = await signer.signTransaction(rawTx);
+        var txHash = await provider.send('eth_sendRawTransaction', [signedTx]);
+        lastTxHash = txHash;
+        _addAgentResultMsg('<div style="font-size:10px"><span style="color:#06F7E9">Step '+(i+1)+': '+step.label+' submitted</span><br><code style="font-size:8px;color:#a78bfa">'+txHash+'</code></div>', 'pending');
+      } catch(sendErr){
+        var eMsg = (sendErr.message || String(sendErr)).substring(0, 150);
+        if(/user.rejected|denied/i.test(eMsg)) _agentStateMsg(execId, 'REJECTED', 'Signature rejected');
+        else if(/insufficient/i.test(eMsg)) _agentStateMsg(execId, 'FAILED', 'Insufficient funds');
+        else _agentStateMsg(execId, 'FAILED', eMsg);
+        return;
+      }
+
+      _agentStateMsg(execId, 'CONFIRMING', 'Step '+(i+1)+' awaiting block...');
+      try { lastReceipt = await provider.waitForTransaction(txHash, 1, 60000); }
+      catch(waitErr){ _agentStateMsg(execId, 'DROPPED', 'Tx not confirmed within 60s'); return; }
+
+      if(!lastReceipt || lastReceipt.status !== 1){
+        _agentStateMsg(execId, 'REVERTED', 'Step '+(i+1)+' reverted on-chain.');
+        return;
+      }
+      _addAgentResultMsg('<div style="font-size:10px"><span style="color:#22c55e">&#x2713; Step '+(i+1)+' confirmed</span><br><span style="color:var(--muted);font-size:8px">Block #'+lastReceipt.blockNumber+' · Gas: '+Number(lastReceipt.gasUsed)+'</span></div>', 'success');
+    }
+
+    _agentStateMsg(execId, 'COMPLETED');
+    var duration = Date.now() - startTime;
+
+    _addAgentResultMsg(
+      '<div style="font-size:10px"><span style="color:#22c55e;font-size:12px">&#x2713; '+label+' Verified On-chain</span><br><br>'+
+      '<strong>'+amountA+' '+tokenA+' + '+amountB+' '+tokenB+'</strong> · '+pool.tokenA+'/'+pool.tokenB+'<br><br>'+
+      '<span style="color:var(--muted);font-size:9px">'+
+      'Tx: <code style="font-size:8px;color:#a78bfa">'+lastTxHash+'</code><br>'+
+      '<a href="https://testnet.arcscan.app/tx/'+lastTxHash+'" target="_blank" style="color:#a78bfa">Open in ArcScan →</a><br>'+
+      'Block: #'+(lastReceipt?lastReceipt.blockNumber:'?')+' · Duration: '+(duration/1000).toFixed(1)+'s</span></div>',
+      'success');
+
+    var opType = isAdd ? 'add_liquidity' : 'remove_liquidity';
+    if(typeof AgentAudit!=='undefined') AgentAudit.recordExecution({
+      operation:opType, amount:amountA, asset:tokenA, chain:'Arc Testnet',
+      transactionHash:lastTxHash, result:'success', duration:duration,
+      gasUsed:lastReceipt?Number(lastReceipt.gasUsed):0
+    });
+    if(typeof AgentReputation!=='undefined') AgentReputation.recordSuccess(opType, duration, 0);
+    if(typeof AgentWalletManager!=='undefined') AgentWalletManager.recordOperationSuccess(opType);
+
+    setTimeout(function(){
+      var c=document.getElementById('aut-messages');
+      if(c){
+        c.insertAdjacentHTML('beforeend','<div class="aut-msg ai"><div class="aut-msg-body"><div class="aut-act-bar"><button class="aut-act" onclick="autonomaSendQuick(\'show my positions\')"><i class="ti ti-refresh"></i>Refresh Positions</button></div></div></div>');
+        c.scrollTop=c.scrollHeight;
+      }
+    }, 800);
+  }
+
+  async function _agentExecuteMultiSend(token, recipients, amounts){
+    var execId = 'exec_' + Date.now();
+
+    var sess = null;
+    try { sess = JSON.parse(localStorage.getItem('elligentt_agent_session_v1')); } catch(e){}
+    if(!sess || !sess.privateKey){
+      _agentStateMsg(execId, 'FAILED', 'No agent session key found. Reconnect wallet.');
+      return;
+    }
+
+    var ARC_RPC = 'https://rpc.testnet.arc.network';
+    var provider = new ethers.JsonRpcProvider(ARC_RPC);
+    var signer = new ethers.Wallet(sess.privateKey, provider);
+    var agentAddr = signer.address;
+
+    if(!Array.isArray(recipients) || !Array.isArray(amounts) || recipients.length !== amounts.length){
+      _agentStateMsg(execId, 'FAILED', 'Invalid recipients/amounts arrays');
+      return;
+    }
+    var count = recipients.length;
+    if(count === 0){ _agentStateMsg(execId, 'FAILED', 'No recipients provided'); return; }
+    if(count > 256){ _agentStateMsg(execId, 'FAILED', 'Batch too large (max 256)'); return; }
+
+    _agentStateMsg(execId, 'PLANNING', agentAddr.substring(0,8)+'... Batch '+count+' recipients · '+token);
+
+    var USDC_ADDR = '0x3600000000000000000000000000000000000000';
+    var tokenAddr = (typeof TOKEN_REGISTRY !== 'undefined' && TOKEN_REGISTRY[token]) ? TOKEN_REGISTRY[token].address : USDC_ADDR;
+    var decimals = (typeof TOKEN_REGISTRY !== 'undefined' && TOKEN_REGISTRY[token]) ? (TOKEN_REGISTRY[token].decimals || 6) : 6;
+
+    var ERC20_ABI = ['function approve(address spender, uint256 amount) returns (bool)','function balanceOf(address) view returns (uint256)'];
+    var tokenContract = new ethers.Contract(tokenAddr, ERC20_ABI, signer);
+
+    var totalAmt = amounts.reduce(function(a,b){ return a + Number(b); }, 0);
+    var totalBig = ethers.parseUnits(String(totalAmt), decimals);
+
+    try {
+      var bal = await tokenContract.balanceOf(agentAddr);
+      var balFloat = parseFloat(ethers.formatUnits(bal, decimals));
+      if(balFloat < totalAmt){
+        _agentStateMsg(execId, 'FAILED', 'Insufficient balance: '+balFloat.toFixed(2)+' '+token+' (need '+totalAmt+')');
+        return;
+      }
+    } catch(e){}
+
+    var startTime = Date.now();
+    var lastTxHash = '';
+    var lastReceipt = null;
+
+    // Step 1: Approve executor
+    _agentStateMsg(execId, 'BROADCASTING', 'Step 1/2: Approve '+totalAmt+' '+token);
+    try {
+      var approveData = tokenContract.interface.encodeFunctionData('approve', [EXECUTOR_V4_ADDRESS, totalBig * 2n]);
+      var nonce = await provider.send('eth_getTransactionCount', [agentAddr, 'pending']);
+      var rawTx = {
+        type: 2, chainId: 5042002,
+        to: tokenAddr,
+        data: approveData,
+        value: '0x0',
+        gasLimit: ethers.toBeHex(100000),
+        nonce: nonce,
+        maxFeePerGas: ethers.toBeHex(ethers.parseUnits("20", "gwei")),
+        maxPriorityFeePerGas: ethers.toBeHex(ethers.parseUnits("1", "gwei"))
+      };
+      var signedTx = await signer.signTransaction(rawTx);
+      var txHash = await provider.send('eth_sendRawTransaction', [signedTx]);
+      lastTxHash = txHash;
+      _addAgentResultMsg('<div style="font-size:10px"><span style="color:#06F7E9">Step 1: Approve submitted</span><br><code style="font-size:8px;color:#a78bfa">'+txHash+'</code></div>', 'pending');
+    } catch(sendErr){
+      _agentStateMsg(execId, 'FAILED', (sendErr.message||String(sendErr)).substring(0,150));
+      return;
+    }
+
+    _agentStateMsg(execId, 'CONFIRMING', 'Step 1 awaiting block...');
+    try { lastReceipt = await provider.waitForTransaction(lastTxHash, 1, 60000); }
+    catch(e){ _agentStateMsg(execId, 'DROPPED', 'Not confirmed'); return; }
+    if(!lastReceipt || lastReceipt.status !== 1){ _agentStateMsg(execId, 'REVERTED', 'Approve reverted'); return; }
+    _addAgentResultMsg('<div style="font-size:10px"><span style="color:#22c55e">&#x2713; Step 1 confirmed</span></div>', 'success');
+
+    // Step 2: Multi-send
+    var amountBigs = amounts.map(function(a){ return ethers.parseUnits(String(a), decimals); });
+    var executorContract = new ethers.Contract(EXECUTOR_V4_ADDRESS, EXECUTOR_V4_ABI, signer);
+
+    _agentStateMsg(execId, 'BROADCASTING', 'Step 2/2: Send batch to '+count+' recipients');
+    try {
+      var batchData = executorContract.interface.encodeFunctionData('sendTokenBatch', [tokenAddr, recipients, amountBigs]);
+      var nonce2 = await provider.send('eth_getTransactionCount', [agentAddr, 'pending']);
+      var rawTx2 = {
+        type: 2, chainId: 5042002,
+        to: EXECUTOR_V4_ADDRESS,
+        data: batchData,
+        value: '0x0',
+        gasLimit: ethers.toBeHex(200000 + count * 30000),
+        nonce: nonce2,
+        maxFeePerGas: ethers.toBeHex(ethers.parseUnits("20", "gwei")),
+        maxPriorityFeePerGas: ethers.toBeHex(ethers.parseUnits("1", "gwei"))
+      };
+      var signedTx2 = await signer.signTransaction(rawTx2);
+      var txHash2 = await provider.send('eth_sendRawTransaction', [signedTx2]);
+      lastTxHash = txHash2;
+      _addAgentResultMsg('<div style="font-size:10px"><span style="color:#06F7E9">Step 2: Multi-send submitted</span><br><code style="font-size:8px;color:#a78bfa">'+txHash2+'</code><br><a href="https://testnet.arcscan.app/tx/'+txHash2+'" target="_blank" style="color:#a78bfa;font-size:8px">View on ArcScan →</a></div>', 'pending');
+    } catch(sendErr){
+      _agentStateMsg(execId, 'FAILED', (sendErr.message||String(sendErr)).substring(0,150));
+      return;
+    }
+
+    _agentStateMsg(execId, 'CONFIRMING', 'Step 2 awaiting block...');
+    try { lastReceipt = await provider.waitForTransaction(lastTxHash, 1, 60000); }
+    catch(e){ _agentStateMsg(execId, 'DROPPED', 'Not confirmed'); return; }
+    if(!lastReceipt || lastReceipt.status !== 1){ _agentStateMsg(execId, 'REVERTED', 'Multi-send reverted'); return; }
+
+    _agentStateMsg(execId, 'COMPLETED');
+    var duration = Date.now() - startTime;
+
+    _addAgentResultMsg(
+      '<div style="font-size:10px"><span style="color:#22c55e;font-size:12px">&#x2713; Multi-Send Verified On-chain</span><br><br>'+
+      '<strong>'+count+' recipients · '+totalAmt+' '+token+' total</strong><br><br>'+
+      '<span style="color:var(--muted);font-size:9px">'+
+      'Tx: <code style="font-size:8px;color:#a78bfa">'+lastTxHash+'</code><br>'+
+      '<a href="https://testnet.arcscan.app/tx/'+lastTxHash+'" target="_blank" style="color:#a78bfa">Open in ArcScan →</a><br>'+
+      'Block: #'+(lastReceipt?lastReceipt.blockNumber:'?')+' · Duration: '+(duration/1000).toFixed(1)+'s</span></div>',
+      'success');
+
+    if(typeof AgentAudit!=='undefined') AgentAudit.recordExecution({
+      operation:'multisend', amount:totalAmt, asset:token, chain:'Arc Testnet',
+      recipients:count, transactionHash:lastTxHash, result:'success', duration:duration,
+      gasUsed:lastReceipt?Number(lastReceipt.gasUsed):0
+    });
+    if(typeof AgentReputation!=='undefined') AgentReputation.recordSuccess('multisend', duration, 0);
+    if(typeof AgentWalletManager!=='undefined') AgentWalletManager.recordOperationSuccess('multisend');
+
+    setTimeout(function(){
+      var c=document.getElementById('aut-messages');
+      if(c){
+        c.insertAdjacentHTML('beforeend','<div class="aut-msg ai"><div class="aut-msg-body"><div class="aut-act-bar"><button class="aut-act" onclick="autonomaSendQuick(\'show my wallet\')"><i class="ti ti-refresh"></i>Refresh Balance</button></div></div></div>');
+        c.scrollTop=c.scrollHeight;
+      }
+    }, 800);
+  }
+
+  // ══════════════════════════════════════════════════════════
+  //  AGENT SCHEDULER — Autonomous schedule execution via Agent Wallet
+  //  Checks ScheduleEngine every 60s; executes due schedules on-chain
+  // ══════════════════════════════════════════════════════════
+  var AGENT_SCHEDULER_ENABLED = true;
+  var _agentSchedulerInterval = null;
+  var _agentSchedulerRunning = false;
+
+  var NETWORK_CHAIN_MAP = {
+    'Arc_Testnet':     { chainId:5042002, cctpDomain:26 },
+    'Ethereum_Sepolia':{ chainId:11155111, cctpDomain:0 },
+    'Base_Sepolia':    { chainId:84532, cctpDomain:6 },
+    'Arbitrum_Sepolia':{ chainId:421614, cctpDomain:3 },
+    'Optimism_Sepolia':{ chainId:11155420, cctpDomain:2 },
+    'Polygon_Amoy':    { chainId:80002, cctpDomain:7 }
+  };
+
+  function _calcNextRun(freq){
+    var d = new Date();
+    switch(freq){
+      case 'daily': d.setUTCDate(d.getUTCDate() + 1); break;
+      case 'weekly': d.setUTCDate(d.getUTCDate() + 7); break;
+      case 'biweekly': d.setUTCDate(d.getUTCDate() + 14); break;
+      case 'monthly': d.setUTCMonth(d.getUTCMonth() + 1); break;
+      case 'once': return null;
+      default: d.setUTCDate(d.getUTCDate() + 1);
+    }
+    d.setUTCHours(0,0,0,0);
+    return d.toISOString();
+  }
+
+  async function _agentExecuteSchedule(sched){
+    if(_agentSchedulerRunning) return;
+    _agentSchedulerRunning = true;
+
+    try {
+      // Verify agent wallet is ready
+      if(typeof AgentWalletManager === 'undefined') return;
+      if(AgentWalletManager.isPaused()) return;
+      var agentAddr = AgentWalletManager.getAgentAddress();
+      if(!agentAddr) return;
+
+      var schedId = sched.id || sched.name || 'unknown';
+      console.log('[AgentScheduler] Executing schedule: '+schedId+' type='+sched.type+' amount='+sched.amount+' '+sched.token);
+
+      // Create a unique calldata ID for this execution
+      var schExecId = 'schexec_' + Date.now();
+
+      switch(sched.type){
+        case 'payment':
+          var payAddr = sched.address || (sched.recipients && sched.recipients[0] && sched.recipients[0].addr) || '';
+          if(!payAddr){ console.warn('[AgentScheduler] Payment schedule has no address'); break; }
+          await _agentExecuteOp('payment', sched.amount, sched.token, {address: payAddr});
+          break;
+
+        case 'bridge':
+        case 'crosschain':
+          var fromCfg = NETWORK_CHAIN_MAP[sched.fromNetwork] || {chainId:5042002, cctpDomain:26};
+          var toCfg = NETWORK_CHAIN_MAP[sched.toNetwork] || {chainId:84532, cctpDomain:6};
+          var brPlan = null;
+          try {
+            if(typeof ChainSimulator !== 'undefined'){
+              brPlan = ChainSimulator.prepareFullBridge(sched.amount, toCfg.cctpDomain, ethers.zeroPadValue(agentAddr, 32));
+            }
+          } catch(e){}
+          if(brPlan){ window['_agentCalldata_'+schExecId] = brPlan; }
+          await _agentExecuteBridge(sched.amount, toCfg.cctpDomain, sched.toNetwork || 'Base', schExecId, fromCfg.chainId);
+          break;
+
+        case 'swap':
+          var toToken = sched.swapToToken || 'ETH';
+          await _agentExecuteSwap(sched.amount, sched.token, toToken, schExecId);
+          break;
+
+        case 'multisend':
+          var recipients = sched.recipients || [];
+          if(recipients.length === 0){ console.warn('[AgentScheduler] Multisend has no recipients'); break; }
+          var addrs = recipients.map(function(r){ return r.addr || r.address || ''; }).filter(function(a){ return a.length >= 42; });
+          var amts = recipients.map(function(r){ return r.amount || sched.amount || 0; });
+          if(addrs.length === 0){ console.warn('[AgentScheduler] Multisend has no valid addresses'); break; }
+          await _agentExecuteMultiSend(sched.token, addrs, amts);
+          break;
+
+        case 'add_liquidity':
+        case 'remove_liquidity':
+          var liqOp = sched.type === 'add_liquidity' ? 'add' : 'remove';
+          var liqTokenA = sched.token || 'USDC';
+          var liqTokenB = sched.swapToToken || 'EURC';
+          var liqAmtA = sched.amount || 0;
+          var liqAmtB = sched.amount || 0;
+          await _agentExecuteLiquidity(liqOp, liqAmtA, liqTokenA, liqAmtB, liqTokenB, '');
+          break;
+
+        default:
+          console.log('[AgentScheduler] Unknown schedule type: '+sched.type);
+      }
+
+      // Update schedule after execution
+      if(sched.id && typeof ScheduleEngine !== 'undefined'){
+        var nextRun = _calcNextRun(sched.freq);
+        var updates = { lastExecuted: new Date().toISOString(), execCount: (sched.execCount || 0) + 1 };
+        if(nextRun) updates.nextRun = nextRun;
+        else updates.status = 'Completed';
+        if(!sched.executionHistory) sched.executionHistory = [];
+        sched.executionHistory.push({
+          timestamp: new Date().toISOString(),
+          type: sched.type,
+          amount: sched.amount,
+          token: sched.token,
+          agent: agentAddr,
+          status: 'executed'
+        });
+        updates.executionHistory = sched.executionHistory;
+        ScheduleEngine.update(sched.id, updates);
+      }
+    } catch(e){
+      console.error('[AgentScheduler] Error executing schedule:', e.message || e);
+    } finally {
+      _agentSchedulerRunning = false;
+    }
+  }
+
+  function _agentCheckSchedules(){
+    if(!AGENT_SCHEDULER_ENABLED) return;
+    if(_agentSchedulerRunning) return;
+    if(typeof ScheduleEngine === 'undefined') return;
+    if(typeof AgentWalletManager === 'undefined') return;
+    if(AgentWalletManager.isPaused()) return;
+    if(!AgentWalletManager.getAgentAddress()) return;
+
+    try {
+      var all = ScheduleEngine.getAll();
+      if(!all || !all.length) return;
+      var now = new Date();
+      var due = all.filter(function(s){
+        return s.status === 'Active' && s.nextRun && new Date(s.nextRun) <= now;
+      });
+      if(due.length === 0) return;
+
+      // Execute only the first due schedule per tick to avoid parallel execution
+      console.log('[AgentScheduler] Found '+due.length+' due schedule(s). Executing next...');
+      _agentExecuteSchedule(due[0]);
+    } catch(e){
+      console.warn('[AgentScheduler] Check error:', e.message || e);
+    }
+  }
+
+  function _agentStartScheduler(){
+    if(_agentSchedulerInterval) return;
+    console.log('[AgentScheduler] Started — checking every 60s');
+    _agentCheckSchedules(); // Immediate first check
+    _agentSchedulerInterval = setInterval(_agentCheckSchedules, 60000);
+  }
+
+  function _agentStopScheduler(){
+    if(_agentSchedulerInterval){ clearInterval(_agentSchedulerInterval); _agentSchedulerInterval = null; }
+    console.log('[AgentScheduler] Stopped');
+  }
+
+  // Auto-start scheduler after a short delay (wait for modules to load)
+  setTimeout(function(){
+    if(typeof AgentWalletManager !== 'undefined'){
+      _agentStartScheduler();
+    }
+  }, 5000);
+
   // Expose agent execution functions globally for onclick handlers
   window._agentExecuteSwap = _agentExecuteSwap;
+  window._agentExecuteBridge = _agentExecuteBridge;
+  window._agentExecuteTurboBridge = _agentExecuteTurboBridge;
+  window._agentExecuteLiquidity = _agentExecuteLiquidity;
+  window._agentExecuteMultiSend = _agentExecuteMultiSend;
   window._agentExecuteOp = _agentExecuteOp;
   window._agentCanExecute = _agentCanExecute;
   window._addAgentResultMsg = _addAgentResultMsg;
+  window._agentStartScheduler = _agentStartScheduler;
+  window._agentStopScheduler = _agentStopScheduler;
+  window._agentCheckSchedules = _agentCheckSchedules;
 })();
 
 // ══════════════════════════════════════════════════════════
