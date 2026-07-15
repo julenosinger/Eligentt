@@ -10301,6 +10301,10 @@ select.cinput option { background: #161a24; color: #dde2f0; }
                   <div class="aut-card-title"><i class="ti ti-history"></i> History</div>
                   <div class="aut-card-desc">View your recent transactions.</div>
                 </div>
+                <div class="aut-card" onclick="autonomaSendQuick('agent wallet guide')">
+                  <div class="aut-card-title"><i class="ti ti-help-circle"></i> How to Use</div>
+                  <div class="aut-card-desc">Agent wallet · prompts · funding.</div>
+                </div>
                 <div class="aut-card" onclick="autonomaSendQuick('show permissions')">
                   <div class="aut-card-title"><i class="ti ti-shield-lock"></i> Permissions</div>
                   <div class="aut-card-desc">Manage active permits and allowances.</div>
@@ -37327,6 +37331,9 @@ const UBScreen = (function() {
     // CSV detection (preserved)
     if(low.startsWith('[csv]')) return autProcessCSV(msg);
 
+    // Agent wallet guide
+    if(/\bagent wallet guide\b/i.test(msg)) return autAgentWalletGuide();
+
     // ── Smart send routing — detect "send/pay" without specific method ──
     var sendLow = low;
     var isSendOnly = /\b(send|pay|enviar|pagar|mandar|transferir|transfer|remeter|depositar|pagamento|payment)\b/.test(sendLow);
@@ -39088,6 +39095,47 @@ const UBScreen = (function() {
         '<div><i class="ti ti-history" style="color:#22c55e;margin-right:6px;width:14px;display:inline-block;text-align:center"></i> <strong>History</strong> <span style="color:var(--muted)">— recent transactions</span></div>'+
         '<div><i class="ti ti-calendar-event" style="color:#f59e0b;margin-right:6px;width:14px;display:inline-block;text-align:center"></i> <strong>Schedule</strong> <span style="color:var(--muted)">— "Agende pagamento de 50 USDC todo mês" / "Schedule a bridge every Friday"</span></div>'+
         '<div><i class="ti ti-settings" style="color:var(--muted2);margin-right:6px;width:14px;display:inline-block;text-align:center"></i> <strong>Profile</strong> <span style="color:var(--muted)">— account settings</span></div></div>');
+  }
+
+  function autAgentWalletGuide() {
+    var agentAddr = typeof AgentWalletManager !== 'undefined' ? AgentWalletManager.getAgentAddress() : null;
+    var agentShort = agentAddr ? agentAddr.substring(0,6)+'...'+agentAddr.substring(agentAddr.length-4) : 'Not created';
+    var agentStatus = (typeof AgentWalletManager !== 'undefined' && AgentWalletManager.isPaused()) ? 'Paused' : 'Active';
+    var agentStatusCls = agentStatus === 'Active' ? 'live' : 'pending';
+
+    return R.intro('Welcome to the <strong style="color:#a78bfa">Agent Wallet Guide</strong>. Here is everything you need:') +
+      R.card(R.head('robot','Agent Wallet — Setup & Usage',{text:agentStatus,cls:agentStatusCls}),
+        R.row('Agent Address','<code style="font-size:8px;color:#a78bfa;cursor:pointer" onclick="autCopyText(\''+(agentAddr||'')+'\')">'+agentShort+' <i class="ti ti-copy" style="font-size:8px;color:var(--muted)"></i></code>','purple')+
+        R.row('Status',agentStatus,agentStatus==='Active'?'green':'yellow')+
+        R.sep()+
+        R.section('Adding Funds to Agent Wallet')+
+        R.row('USDC Faucet','<a href="https://faucet.circle.com" target="_blank" style="color:#06F7E9">faucet.circle.com →</a>','green')+
+        R.row('USDC Token','<code style="font-size:7.5px;color:var(--muted)">0x3600...0000</code> (Arc Testnet)','')+
+        R.row('EURC Token','<code style="font-size:7.5px;color:var(--muted)">0x89B5...D72a</code>','')+
+        R.row('cirBTC Token','<code style="font-size:7.5px;color:var(--muted)">0xf0C4...32BF</code>','')+
+        R.row('How to fund','<span style="font-size:8px">1. Go to <a href="https://faucet.circle.com" target="_blank" style="color:#06F7E9">faucet.circle.com</a><br>2. Select Arc Testnet<br>3. Paste agent address<br>4. Receive USDC</span>','')+
+        R.sep()+
+        R.section('Example Prompts')+
+        R.row('Swap','<em style="font-size:9px">"Swap 100 USDC for cirBTC"</em>','')+
+        R.row('Bridge','<em style="font-size:9px">"Bridge 500 USDC from Arc to Base"</em>','')+
+        R.row('Cross-chain','<em style="font-size:9px">"Send 50 USDC to 0x... on Ethereum"</em>','')+
+        R.row('Payment','<em style="font-size:9px">"Send 20 USDC to 0x..."</em>','')+
+        R.row('Multi-Send','<em style="font-size:9px">"Send 10 USDC to multiple recipients"</em>','')+
+        R.row('Add Liquidity','<em style="font-size:9px">"Add liquidity 100 USDC and 100 EURC"</em>','')+
+        R.row('Remove Liquidity','<em style="font-size:9px">"Remove 50 LP from USDC/EURC"</em>','')+
+        R.row('Schedule','<em style="font-size:9px">"Schedule a weekly payment of 50 USDC"</em>','')+
+        R.sep()+
+        R.section('Agent Controls')+
+        R.row('Show wallet','"show my wallet"','')+
+        R.row('Pause agent','"pause agent"','')+
+        R.row('Resume agent','"resume agent"','')+
+        R.row('Permissions','"show permissions"','')+
+        R.row('Schedules','"show my schedules" / "execute schedules"',''),
+        R.actions(
+          {icon:'refresh',label:'Show Agent Wallet',cls:'primary',action:"autonomaSendQuick('show my wallet')"},
+          {icon:'external-link',label:'Circle Faucet',cls:'confirm',action:"window.open('https://faucet.circle.com','_blank')"}
+        )
+      );
   }
 
   function autGreeting() {
