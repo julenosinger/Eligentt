@@ -3,15 +3,33 @@
  * Uses ethers.js staticCall/view to get real data from deployed contracts.
  * Non-blocking: falls back silently if provider/contract unavailable.
  * Attached to window.ChainSimulator
+ *
+ * FASE 1 SECURITY PATCHES:
+ *   - calculateMinOut() with slippage protection (C2)
+ *   - deadline enforcement (C4)
+ *   - exact approve (C3)
+ *   - router validation (C1)
  */
 (function(){
   'use strict';
+
+  var SWAP_DEFAULT_DEADLINE = 300;
+  var SWAP_DEFAULT_SLIPPAGE_BPS = 100;
 
   var ARC_RPC = 'https://arc-testnet.drpc.org';
   var readProvider = null;
 
   function getProvider(){
     if(readProvider) return readProvider;
+    try {
+      if (typeof RPCManager !== 'undefined') {
+        var rpcResult = RPCManager.getCurrentProvider();
+        if (rpcResult) {
+          readProvider = rpcResult;
+          return readProvider;
+        }
+      }
+    } catch(e) {}
     try {
       if(typeof ethers !== 'undefined'){
         readProvider = new ethers.JsonRpcProvider(ARC_RPC);
@@ -52,6 +70,32 @@
   var POOL_ADDRESS = '0x18076d992005186AeB13AC5270CaD6E27DB95247';
   var CCTP_MESSENGER = '0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA';
 
+  /* ── Router validation (C1) ── */
+  var BLOCKED_ROUTERS = [
+    '0x0000000000000000000000000000000000000000',
+    '0x0000000000000000000000000000000000000001'
+  ];
+
+  function validateSwapRouter(routerAddr) {
+    if (!routerAddr || routerAddr === 'null' || routerAddr === 'undefined') {
+      return { valid: false, reason: 'Swap router unavailable.' };
+    }
+    var lower = String(routerAddr).toLowerCase();
+    for (var i = 0; i < BLOCKED_ROUTERS.length; i++) {
+      if (lower === BLOCKED_ROUTERS[i]) {
+        return { valid: false, reason: 'Swap router unavailable.' };
+      }
+    }
+    if (!/^0x[0-9a-fA-F]{40}$/.test(lower)) {
+      return { valid: false, reason: 'Swap router unavailable.' };
+    }
+    return { valid: true };
+  }
+
+  function isRouterValid(routerAddr) {
+    return validateSwapRouter(routerAddr).valid;
+  }
+
   /* ── Get real token balance ── */
   async function getBalance(tokenSym, addr){
     var p = getProvider(); if(!p) return null;
@@ -64,6 +108,35 @@
       var bal = await c.balanceOf(wallet);
       var dec = await c.decimals();
       return parseFloat(ethers.formatUnits(bal, dec));
+    } catch(e){ return null; }
+  }
+
+  /* ── Check token decimals on-chain ── */
+  async function getTokenDecimals(tokenSym) {
+    var p = getProvider(); if(!p) return null;
+    var tokenAddr = TOKENS[tokenSym];
+    if(!tokenAddr) return null;
+    try {
+      var c = new ethers.Contract(tokenAddr, ERC20_ABI, p);
+      var dec = await c.decimals();
+      return Number(dec);
+    } catch(e) {
+      return tokenSym === 'cirBTC' ? 8 : 6;
+    }
+  }
+
+  /* ── Check allowance ── */
+  async function checkAllowance(tokenSym, ownerAddr, spenderAddr) {
+    var p = getProvider(); if(!p) return null;
+    var tokenAddr = TOKENS[tokenSym];
+    if(!tokenAddr) return null;
+    var owner = ownerAddr || (typeof walletAddress !== 'undefined' ? walletAddress : null);
+    if(!owner) return null;
+    try {
+      var c = new ethers.Contract(tokenAddr, ERC20_ABI, p);
+      var allowance = await c.allowance(owner, spenderAddr);
+      var dec = await getTokenDecimals(tokenSym) || 6;
+      return parseFloat(ethers.formatUnits(allowance, dec));
     } catch(e){ return null; }
   }
 
@@ -85,29 +158,70 @@
       if(!tokenInAddr) return null;
       var pool = poolAddr || POOL_ADDRESS;
       var c = new ethers.Contract(pool, POOL_ABI, p);
-      var tokenDec = tokenIn === 'cirBTC' ? 8 : 6;
+      var tokenDec = await getTokenDecimals(tokenIn) || (tokenIn === 'cirBTC' ? 8 : 6);
       var amtBig = ethers.parseUnits(String(amountIn), tokenDec);
       var out = await c.getAmountOut(amtBig, tokenInAddr);
       var outDec = tokenOut === 'cirBTC' ? 8 : 6;
       var amtOut = parseFloat(ethers.formatUnits(out, outDec));
 
-      // Get reserves for slippage calc
       var res = await c.getReserves();
-      var tA = await c.tokenA();
+      var tA = await c.tokenA().catch(function(){ return null; });
       var resA = parseFloat(ethers.formatUnits(res.reserveA, 6));
       var resB = parseFloat(ethers.formatUnits(res.reserveB, 6));
-      var reserveIn = tA.toLowerCase() === tokenInAddr.toLowerCase() ? resA : resB;
-      var spotRate = reserveIn > 0 ? (resA * resB) / (reserveIn * reserveIn) : 1;
+      var reserveIn = (tA && tA.toLowerCase() === tokenInAddr.toLowerCase()) ? resA : resB;
       var priceImpact = reserveIn > 0 ? Math.abs((amountIn / reserveIn) * 100) : 0;
 
       return {
         amountOut: amtOut,
+        amountOutRaw: out,
         priceImpact: priceImpact.toFixed(3),
         rate: amtOut > 0 ? (amtOut / amountIn).toFixed(6) : null,
         reserveIn: reserveIn,
         source: 'on-chain staticCall'
       };
     } catch(e){ return null; }
+  }
+
+  /* ── Calculate minOut with slippage (C2) ── */
+  function calculateMinOut(quoteAmount, slippageBps) {
+    var bps = (slippageBps != null && !isNaN(slippageBps)) ? Number(slippageBps) : SWAP_DEFAULT_SLIPPAGE_BPS;
+    var amount = Number(quoteAmount);
+
+    if (isNaN(amount) || amount === null || amount === undefined || amount <= 0) {
+      return { valid: false, minOut: 0n, error: 'Invalid quote amount' };
+    }
+    if (isNaN(bps) || bps < 0 || bps > 10000) {
+      return { valid: false, minOut: 0n, error: 'Invalid slippage BPS' };
+    }
+
+    var factor = (10000 - bps) / 10000;
+    var minOutFloat = amount * factor;
+
+    if (isNaN(minOutFloat) || minOutFloat < 0) {
+      return { valid: false, minOut: 0n, error: 'Calculation error' };
+    }
+
+    var outDec = 6;
+    try {
+      if (amount < 1) {
+        var s = String(minOutFloat);
+        var dotIdx = s.indexOf('.');
+        if (dotIdx >= 0) {
+          outDec = Math.max(6, s.length - dotIdx - 1);
+        }
+      }
+    } catch(e) {}
+
+    var minOutBigInt;
+    try {
+      minOutBigInt = ethers.parseUnits(minOutFloat.toFixed(outDec), outDec);
+    } catch(e) { return { valid: false, minOut: 0n, error: 'Parse error' }; }
+
+    if (!minOutBigInt || minOutBigInt === 0n) {
+      return { valid: false, minOut: 0n, error: 'minOut cannot be zero' };
+    }
+
+    return { valid: true, minOut: minOutBigInt, slippageBps: bps };
   }
 
   /* ── Estimate gas for a swap ── */
@@ -135,7 +249,7 @@
   async function simulateBridge(amount, fromChain, toChain){
     var p = getProvider(); if(!p) return null;
     try {
-      var feeRate = 0.0005; // 0.05% standard
+      var feeRate = 0.0005;
       var bridgeFee = Math.max(0.000001, amount * feeRate);
       var receives = amount - bridgeFee;
       var gas = await estimateGas('bridge_deposit', {});
@@ -213,36 +327,125 @@
     'function depositForBurn(uint256 amount, uint32 destinationDomain, bytes32 mintRecipient, address burnToken, bytes32 destinationCaller, uint256 maxFee, uint32 minFinalityThreshold) external returns (uint64 nonce)'
   ]);
 
-  function buildSwapCalldata(amountIn, tokenIn, tokenOut, slippagePct, poolAddr, hopMin){
+  /* ── Build swap calldata with slippage & deadline (C2, C4) ── */
+  function buildSwapCalldata(amountIn, tokenIn, tokenOut, slippageBps, poolAddr, quoteAmountOut) {
     try {
-      var tokenInAddr = TOKENS[tokenIn] || tokenIn;
-      var minOut = 0;
-      if(hopMin) minOut = hopMin;
-      else if(amountIn > 0 && slippagePct !== undefined){
-        // Estimate minOut from rate if available
-        var rate = tokenIn === 'USDC' ? 1.0 : null;
-        if(!rate) minOut = 0;
+      if (!amountIn || isNaN(Number(amountIn)) || Number(amountIn) <= 0) {
+        return { valid: false, error: 'Invalid amount', errorMessage: 'Please enter a valid amount.' };
       }
-      var amountInDec = tokenIn === 'cirBTC' ? 8 : 6;
-      var amtBig = ethers.parseUnits(String(amountIn), amountInDec);
-      var calldata = SWAP_IFACE.encodeFunctionData('swap', [tokenInAddr, amtBig, minOut || 0n]);
+
+      var tokenInAddr = TOKENS[tokenIn] || tokenIn;
+      if (!tokenInAddr || tokenInAddr.length !== 42) {
+        return { valid: false, error: 'Invalid token', errorMessage: 'Token not supported.' };
+      }
+
+      var pool = poolAddr || POOL_ADDRESS;
+      var routerCheck = validateSwapRouter(pool);
+      if (!routerCheck.valid) {
+        return { valid: false, error: 'Router validation failed', errorMessage: routerCheck.reason };
+      }
+
+      // Get token decimals
+      var tokenDec = tokenIn === 'cirBTC' ? 8 : 6;
+      var outDec = tokenOut === 'cirBTC' ? 8 : 6;
+
+      var amtBig = ethers.parseUnits(String(Number(amountIn).toFixed(tokenDec)), tokenDec);
+
+      // Calculate minOut using the provided quote or estimate
+      var effectiveQuote = quoteAmountOut;
+      var isEstimated = false;
+      if (effectiveQuote == null || isNaN(Number(effectiveQuote)) || Number(effectiveQuote) <= 0) {
+        // Use a flat rate estimate; real execution must provide a valid quote
+        effectiveQuote = Number(amountIn);
+        isEstimated = true;
+      }
+
+      var minOutResult = calculateMinOut(effectiveQuote, slippageBps);
+
+      if (!minOutResult.valid) {
+        return {
+          valid: false,
+          error: 'minOut calculation failed: ' + (minOutResult.error || 'unknown'),
+          errorMessage: 'Cannot execute swap. Please refresh the quote and try again.',
+          blockSwap: true
+        };
+      }
+
+      if (minOutResult.minOut === 0n) {
+        return {
+          valid: false,
+          error: 'minOut is zero — swap blocked for security',
+          errorMessage: 'Swap blocked: slippage protection error. Please try again.',
+          blockSwap: true
+        };
+      }
+
+      var deadline = Math.floor(Date.now() / 1000) + SWAP_DEFAULT_DEADLINE;
+      var calldata = SWAP_IFACE.encodeFunctionData('swap', [tokenInAddr, amtBig, minOutResult.minOut]);
+
       return {
+        valid: true,
         calldata: calldata,
-        contract: poolAddr || POOL_ADDRESS,
+        contract: pool,
         method: 'swap',
-        params: { tokenIn: tokenInAddr, amountIn: String(amountIn), minOut: String(minOut || 0) }
+        minOutRaw: minOutResult.minOut,
+        minOut: ethers.formatUnits(minOutResult.minOut, outDec),
+        slippageBps: minOutResult.slippageBps,
+        deadline: deadline,
+        deadlineHuman: SWAP_DEFAULT_DEADLINE + 's',
+        quotedAt: Date.now(),
+        isEstimated: isEstimated,
+        params: {
+          tokenIn: tokenInAddr,
+          amountIn: String(amountIn),
+          minOut: String(ethers.formatUnits(minOutResult.minOut, outDec)),
+          deadline: deadline
+        }
       };
-    } catch(e){ return null; }
+    } catch(e){
+      return { valid: false, error: e.message || 'Calldata build error', errorMessage: 'Failed to prepare swap. Please try again.', blockSwap: true };
+    }
   }
 
-  function buildApproveCalldata(tokenSym, spenderAddr, amount){
+  /* ── Check if swap deadline has expired (C4) ── */
+  function isDeadlineExpired(swapPlan) {
+    if (!swapPlan || !swapPlan.deadline) return true;
+    var now = Math.floor(Date.now() / 1000);
+    return now > Number(swapPlan.deadline);
+  }
+
+  function getDeadlineRemaining(swapPlan) {
+    if (!swapPlan || !swapPlan.deadline) return 0;
+    var now = Math.floor(Date.now() / 1000);
+    return Math.max(0, Number(swapPlan.deadline) - now);
+  }
+
+  /* ── Build approve calldata — EXACT amount (C3) ── */
+  function buildApproveCalldata(tokenSym, spenderAddr, amount) {
     try {
+      if (!amount || isNaN(Number(amount)) || Number(amount) <= 0) {
+        return { valid: false, error: 'Invalid approve amount', calldata: null, contract: null, method: null, params: null };
+      }
       var tokenAddr = TOKENS[tokenSym] || tokenSym;
       var dec = tokenSym === 'cirBTC' ? 8 : 6;
-      var amtBig = ethers.parseUnits(String(amount * 2), dec); // approve double for safety
+      var exactAmount = Number(amount);
+      var amtBig = ethers.parseUnits(String(exactAmount.toFixed(dec)), dec);
+
+      if (amtBig <= 0n) {
+        return { valid: false, error: 'Approve amount is zero', calldata: null, contract: tokenAddr, method: null, params: null };
+      }
+
       var calldata = APPROVE_IFACE.encodeFunctionData('approve', [spenderAddr, amtBig]);
-      return { calldata: calldata, contract: tokenAddr, method: 'approve', params: { spender: spenderAddr, amount: ethers.formatUnits(amtBig, dec) } };
-    } catch(e){ return null; }
+      return {
+        valid: true,
+        calldata: calldata,
+        contract: tokenAddr,
+        method: 'approve',
+        amount: ethers.formatUnits(amtBig, dec),
+        amountRaw: amtBig,
+        params: { spender: spenderAddr, amount: ethers.formatUnits(amtBig, dec) }
+      };
+    } catch(e){ return { valid: false, error: e.message, calldata: null, contract: null, method: null, params: null }; }
   }
 
   function buildTransferCalldata(tokenSym, toAddr, amount){
@@ -274,20 +477,217 @@
 
   function formatCalldata(calldata){ return calldata ? calldata.substring(0, 66) + '...' : null; }
 
-  function prepareFullSwap(amountIn, tokenIn, tokenOut, slippagePct){
-    var approve = buildApproveCalldata(tokenIn, POOL_ADDRESS, amountIn);
-    var swap = buildSwapCalldata(amountIn, tokenIn, tokenOut, slippagePct, POOL_ADDRESS);
+  /* ── Full swap economic analysis (FASE 2) ── */
+  async function performFullSwapAnalysis(amountIn, tokenIn, tokenOut, slippageBps) {
+    var result = {
+      valid: false,
+      amountIn: Number(amountIn),
+      tokenIn: tokenIn,
+      tokenOut: tokenOut,
+      slippageBps: slippageBps || SWAP_DEFAULT_SLIPPAGE_BPS,
+
+      reserves: null,
+      priceImpact: null,
+      liquidityUtilization: null,
+      liquidityHealth: null,
+      economicRisk: null,
+
+      canSwap: false,
+      warnings: [],
+      blocksSwap: false,
+      requiresConfirmation: false,
+      error: null
+    };
+
+    if (!amountIn || isNaN(Number(amountIn)) || Number(amountIn) <= 0) {
+      result.error = 'Invalid swap amount';
+      return result;
+    }
+
+    // Fetch reserves
+    var reserves = await getPoolReserves(POOL_ADDRESS);
+    if (!reserves) {
+      result.error = 'Unable to read pool reserves';
+      return result;
+    }
+    result.reserves = reserves;
+
+    var rA = reserves.reserveA;
+    var rB = reserves.reserveB;
+    var reserveIn = tokenIn === 'USDC' ? rA : rB;
+    var reserveOut = tokenIn === 'USDC' ? rB : rA;
+
+    // Price Impact (F2.3)
+    if (typeof PriceImpactEngine !== 'undefined') {
+      var impactResult = PriceImpactEngine.calculate(Number(amountIn), rA, rB, tokenIn, tokenOut);
+      result.priceImpact = impactResult;
+      if (impactResult.requiresWarning) result.warnings.push(impactResult.recommendations[0] || 'Elevated price impact');
+      if (impactResult.requiresConfirmation) result.requiresConfirmation = true;
+      if (impactResult.blocksSwap) result.blocksSwap = true;
+    }
+
+    // Liquidity Protection (F2.5)
+    if (typeof LiquidityProtection !== 'undefined') {
+      var liqCheck = LiquidityProtection.check(Number(amountIn), reserveIn);
+      result.liquidityUtilization = liqCheck;
+      if (liqCheck.requiresWarning) result.warnings.push(liqCheck.message);
+      if (liqCheck.requiresConfirmation) result.requiresConfirmation = true;
+      if (liqCheck.blocksSwap) result.blocksSwap = true;
+    }
+
+    // Liquidity Health (F2.4)
+    if (typeof LiquidityHealthEngine !== 'undefined') {
+      var healthResult = LiquidityHealthEngine.analyze({
+        reserveA: rA,
+        reserveB: rB,
+        lpSupply: null,
+        tokens: ['USDC', 'cirBTC']
+      });
+      result.liquidityHealth = healthResult;
+      if (healthResult.valid && healthResult.tier === 'Critical') {
+        result.warnings.push('Pool liquidity health is critical');
+      }
+    }
+
+    // Economic Risk (F2.8)
+    if (typeof EconomicRiskEngine !== 'undefined') {
+      var econRisk = EconomicRiskEngine.analyze({
+        amount: Number(amountIn),
+        priceImpact: result.priceImpact ? result.priceImpact.priceImpact : null,
+        slippageBps: result.slippageBps,
+        poolUtilizationPct: result.liquidityUtilization ? result.liquidityUtilization.poolUtilizationPct : null,
+        healthScore: result.liquidityHealth ? result.liquidityHealth.score : null
+      });
+      result.economicRisk = econRisk;
+      if (econRisk.requiresConfirmation) result.requiresConfirmation = true;
+      if (econRisk.blocksSwap) result.blocksSwap = true;
+      if (econRisk.level === 'CRITICAL' || econRisk.level === 'HIGH') {
+        result.warnings.push(econRisk.recommendation);
+      }
+    }
+
+    result.canSwap = !result.blocksSwap;
+    result.valid = true;
+    return result;
+  }
+
+  /* ── Pool discovery (FASE 2.1) ── */
+  async function performPoolDiscovery() {
+    var p = getProvider();
+    if (!p) return null;
+    if (typeof PoolAbiDiscovery !== 'undefined') {
+      return await PoolAbiDiscovery.discoverABI(p, POOL_ADDRESS);
+    }
+    return null;
+  }
+
+  /* ── Pool health check (FASE 2.7) ── */
+  async function performPoolHealthCheck() {
+    var p = getProvider();
+    if (!p || typeof PoolHealthCheck === 'undefined') return null;
+    if (typeof PoolRegistry !== 'undefined') {
+      var poolConfig = PoolRegistry.getPoolByAddress(POOL_ADDRESS) || PoolRegistry.getDefaultPool();
+      if (poolConfig) {
+        return await PoolHealthCheck.run(poolConfig, p);
+      }
+    }
+    return null;
+  }
+
+  /* ── Get constant-product quote (local calculation) ── */
+  function getConstantProductQuote(amountIn, reserveIn, reserveOut) {
+    if (!reserveIn || !reserveOut || reserveIn <= 0 || amountIn <= 0) return null;
+    var amtInWithFee = amountIn * 0.997;
+    var amountOut = (amtInWithFee * reserveOut) / (reserveIn + amtInWithFee);
+    return {
+      amountOut: amountOut,
+      priceImpact: (amountIn / (reserveIn + amountIn)) * 100,
+      rate: amountOut / amountIn
+    };
+  }
+
+  /* ── Prepare full swap (synchronous — backward compatible) ── */
+  function prepareFullSwap(amountIn, tokenIn, tokenOut, slippageBps, quoteAmountOut) {
+    var pool = POOL_ADDRESS;
+    var deadline = Math.floor(Date.now() / 1000) + SWAP_DEFAULT_DEADLINE;
+
+    var routerCheck = validateSwapRouter(pool);
+    if (!routerCheck.valid) {
+      return { valid: false, error: routerCheck.reason, steps: [], totalSteps: 0, deadline: deadline };
+    }
+
     var txs = [];
-    if(approve) txs.push({ step: 1, label: 'Approve ' + tokenIn, tx: approve });
-    if(swap) txs.push({ step: txs.length + 1, label: 'Swap ' + tokenIn + ' → ' + tokenOut, tx: swap });
-    return txs.length > 0 ? { type: 'swap', steps: txs, totalSteps: txs.length } : null;
+    var approve = buildApproveCalldata(tokenIn, pool, amountIn);
+    if (approve && approve.calldata) {
+      txs.push({ step: 1, label: 'Approve ' + tokenIn, tx: approve });
+    }
+
+    var swap = buildSwapCalldata(amountIn, tokenIn, tokenOut, slippageBps, pool, quoteAmountOut);
+    if (!swap || !swap.valid || !swap.calldata) {
+      return { valid: false, error: swap ? swap.errorMessage || swap.error : 'Swap preparation failed', steps: txs, totalSteps: txs.length, deadline: deadline };
+    }
+
+    txs.push({ step: txs.length + 1, label: 'Swap ' + tokenIn + ' → ' + tokenOut, tx: swap });
+
+    return {
+      valid: true,
+      type: 'swap',
+      steps: txs,
+      totalSteps: txs.length,
+      deadline: swap.deadline || deadline,
+      deadlineHuman: swap.deadlineHuman || (SWAP_DEFAULT_DEADLINE + 's'),
+      quotedAt: swap.quotedAt || Date.now(),
+      minOut: swap.minOut,
+      slippageBps: swap.slippageBps || slippageBps || SWAP_DEFAULT_SLIPPAGE_BPS
+    };
+  }
+
+  /* ── Async variant with allowance optimization ── */
+  async function prepareFullSwapAsync(amountIn, tokenIn, tokenOut, slippageBps, quoteAmountOut) {
+    var pool = POOL_ADDRESS;
+    var deadline = Math.floor(Date.now() / 1000) + SWAP_DEFAULT_DEADLINE;
+
+    var routerCheck = validateSwapRouter(pool);
+    if (!routerCheck.valid) {
+      return { valid: false, error: routerCheck.reason, steps: [], totalSteps: 0, deadline: deadline };
+    }
+
+    var txs = [];
+    var needsApprove = true;
+    try {
+      var currentAllowance = await checkAllowance(tokenIn, null, pool);
+      if (currentAllowance !== null && currentAllowance >= Number(amountIn)) {
+        needsApprove = false;
+      }
+    } catch(e) {}
+
+    if (needsApprove) {
+      var approve = buildApproveCalldata(tokenIn, pool, amountIn);
+      if (approve && approve.calldata) {
+        txs.push({ step: 1, label: 'Approve ' + tokenIn, tx: approve });
+      }
+    }
+
+    var swap = buildSwapCalldata(amountIn, tokenIn, tokenOut, slippageBps, pool, quoteAmountOut);
+    if (!swap || !swap.valid || !swap.calldata) {
+      return { valid: false, error: swap ? swap.errorMessage || swap.error : 'Swap preparation failed', steps: txs, totalSteps: txs.length, deadline: deadline };
+    }
+
+    txs.push({ step: txs.length + 1, label: 'Swap ' + tokenIn + ' → ' + tokenOut, tx: swap });
+
+    return {
+      valid: true, type: 'swap', steps: txs, totalSteps: txs.length, needsApprove: needsApprove,
+      deadline: swap.deadline || deadline, deadlineHuman: swap.deadlineHuman || (SWAP_DEFAULT_DEADLINE + 's'),
+      quotedAt: swap.quotedAt || Date.now(), minOut: swap.minOut,
+      slippageBps: swap.slippageBps || slippageBps || SWAP_DEFAULT_SLIPPAGE_BPS
+    };
   }
 
   function prepareFullBridge(amount, destDomain, mintRecipient){
     var approve = buildApproveCalldata('USDC', CCTP_MESSENGER, amount);
     var bridge = buildBridgeCalldata(amount, destDomain || 6, mintRecipient);
     var txs = [];
-    if(approve) txs.push({ step: 1, label: 'Approve USDC', tx: approve });
+    if(approve && approve.calldata) txs.push({ step: 1, label: 'Approve USDC', tx: approve });
     if(bridge) txs.push({ step: txs.length + 1, label: 'Deposit for Burn', tx: bridge });
     return txs.length > 0 ? { type: 'bridge', steps: txs, totalSteps: txs.length } : null;
   }
@@ -306,18 +706,31 @@
     fullSwapSim: fullSwapSim,
     fullBridgeSim: fullBridgeSim,
     healthCheck: healthCheck,
+    calculateMinOut: calculateMinOut,
+    checkAllowance: checkAllowance,
+    getTokenDecimals: getTokenDecimals,
     buildSwapCalldata: buildSwapCalldata,
     buildApproveCalldata: buildApproveCalldata,
     buildTransferCalldata: buildTransferCalldata,
     buildBridgeCalldata: buildBridgeCalldata,
     prepareFullSwap: prepareFullSwap,
+    prepareFullSwapAsync: prepareFullSwapAsync,
     prepareFullBridge: prepareFullBridge,
     prepareFullSend: prepareFullSend,
     formatCalldata: formatCalldata,
+    validateSwapRouter: validateSwapRouter,
+    isRouterValid: isRouterValid,
+    isDeadlineExpired: isDeadlineExpired,
+    getDeadlineRemaining: getDeadlineRemaining,
+    performFullSwapAnalysis: performFullSwapAnalysis,
+    performPoolDiscovery: performPoolDiscovery,
+    performPoolHealthCheck: performPoolHealthCheck,
+    getConstantProductQuote: getConstantProductQuote,
     getProvider: getProvider,
     TOKENS: TOKENS,
     POOL_ADDRESS: POOL_ADDRESS,
-    CCTP_MESSENGER: CCTP_MESSENGER
+    CCTP_MESSENGER: CCTP_MESSENGER,
+    SWAP_DEFAULT_DEADLINE: SWAP_DEFAULT_DEADLINE,
+    SWAP_DEFAULT_SLIPPAGE_BPS: SWAP_DEFAULT_SLIPPAGE_BPS
   };
 })();
-

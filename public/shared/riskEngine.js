@@ -114,7 +114,7 @@
 
     // 7. Operation type risk
     var opRisk = {
-      payment: 0, swap: 0, bridge: 1, treasury: 1, contract: 2,
+      payment: 0, swap: 1, bridge: 1, treasury: 1, contract: 2,
       multisend: 1, liquidity: 1, signature: 2
     };
     var opRiskLevel = opRisk[operation] || 0;

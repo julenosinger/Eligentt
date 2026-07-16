@@ -1,39 +1,39 @@
 /**
- * Elligente Slippage Configuration (FUTURE USE)
+ * Elligente Slippage Configuration
  * ═══════════════════════════════════════════════════════
- * INTERNAL ONLY — not enforced in bridge operations yet.
- * Prepared for future mainnet activation:
- *   - set SLIPPAGE_ENABLED = true to activate
- *   - adjust SLIPPAGE_BPS default as needed
+ * FASE 1 — Enabled for swap operations.
  *
- * When active, bridge operations will:
- *   1. Simulate quote before burn
- *   2. Compare received amount against minAmountOut
- *   3. Revert if slippage exceeds threshold
+ * Supported slippage tiers:
+ *   0.50% — Low
+ *   1.00% — Default
+ *   2.00% — High
  */
 const SlippageConfig = Object.freeze({
-  ENABLED: false,
-  DEFAULT_BPS: 50,
+  ENABLED: true,
+  DEFAULT_BPS: 100,
+  LOW_BPS: 50,
+  HIGH_BPS: 200,
   MAX_BPS: 300,
-  DEADLINE_SECONDS: 1200,
+  DEADLINE_SECONDS: 300,
+  SWAP_DEFAULT_DEADLINE: 300,
 });
 
 const SlippageHook = (() => {
   function computeMinAmountOut(amount, bps) {
-    if (!SlippageConfig.ENABLED) return 0n;
-    const rate = BigInt(bps || SlippageConfig.DEFAULT_BPS);
-    const amtBig = typeof amount === 'bigint' ? amount : BigInt(Math.floor(amount * 1e6));
-    return amtBig - (amtBig * rate) / 10000n;
+    if (!amount || amount <= 0) return 0n;
+    var rate = BigInt(bps || SlippageConfig.DEFAULT_BPS);
+    var amtBig = typeof amount === 'bigint' ? amount : BigInt(Math.floor(Number(amount) * 1e6));
+    var minOut = amtBig - (amtBig * rate) / 10000n;
+    return minOut;
   }
 
   function checkDeadline(startTime) {
-    if (!SlippageConfig.ENABLED) return true;
-    return (Date.now() - startTime) < (SlippageConfig.DEADLINE_SECONDS * 1000);
+    var deadlineMs = (SlippageConfig.DEADLINE_SECONDS || 300) * 1000;
+    return (Date.now() - startTime) < deadlineMs;
   }
 
   function validate(amount, minOut, actual) {
-    if (!SlippageConfig.ENABLED) return true;
-    if (minOut === 0n) return true;
+    if (minOut === 0n) return false;
     return actual >= minOut;
   }
 

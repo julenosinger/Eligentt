@@ -60,7 +60,29 @@
 <script src="/shared/executionPlanner.js"></script>
 <script src="/shared/aiRecommendations.js"></script>
 <script src="/shared/autonomaCore.js"></script>
+<script src="/shared/rpcManager.js"></script>
 <script src="/shared/chainSimulator.js"></script>
+<script src="/shared/poolAbiDiscovery.js"></script>
+<script src="/shared/priceImpact.js"></script>
+<script src="/shared/liquidityHealth.js"></script>
+<script src="/shared/liquidityProtection.js"></script>
+<script src="/shared/antiWhaleProtection.js"></script>
+<script src="/shared/poolRegistryModule.js"></script>
+<script src="/shared/poolHealthCheck.js"></script>
+<script src="/shared/economicRisk.js"></script>
+<script src="/shared/poolStateManager.js"></script>
+<script src="/shared/poolDataValidator.js"></script>
+<script src="/shared/poolRetryManager.js"></script>
+<script src="/shared/poolReserveSnapshot.js"></script>
+<script src="/shared/poolWatcher.js"></script>
+<script src="/shared/priceOracleEngine.js"></script>
+<script src="/shared/twapEngine.js"></script>
+<script src="/shared/poolMonitor.js"></script>
+<script src="/shared/anomalyDetection.js"></script>
+<script src="/shared/historicalMetrics.js"></script>
+<script src="/shared/lpAnalytics.js"></script>
+<script src="/shared/poolAlertSystem.js"></script>
+<script src="/shared/economicMonitoring.js"></script>
 <script src="/shared/autonomaAgent.js"></script>
 <script src="/shared/agentIdentity.js"></script>
 <script src="/shared/agentAuthorization.js"></script>
@@ -30888,25 +30910,21 @@ function stlResumeSettlement() {
   // No on-chain writes, no receiveMessage, no signer transactions.
   _stlLog('Recovery: read-only re-verification + Iris poll (no writes)…');
   window.__SETTLEMENT_RECOVERY_READONLY = true;
-  try {
-    SettlementModule.runRecovery().then(() => {
-      _stlLog('Recovery scan complete (read-only).');
-      stlRefreshAll();
-    });
-  } finally {
-    setTimeout(() => { window.__SETTLEMENT_RECOVERY_READONLY = false; }, 100);
-  }
+  SettlementModule.runRecovery().then(() => {
+    _stlLog('Recovery scan complete (read-only).');
+    stlRefreshAll();
+  }).finally(() => {
+    window.__SETTLEMENT_RECOVERY_READONLY = false;
+  });
 }
 
 function stlRecheckAttestation() {
   // READ-ONLY: only re-polls Iris for attestations.
   _stlLog('Recovery: read-only recheck of Circle attestations…');
   window.__SETTLEMENT_RECOVERY_READONLY = true;
-  try {
-    SettlementModule.runRecovery();
-  } finally {
-    setTimeout(() => { window.__SETTLEMENT_RECOVERY_READONLY = false; }, 100);
-  }
+  Promise.resolve().then(() => SettlementModule.runRecovery()).finally(() => {
+    window.__SETTLEMENT_RECOVERY_READONLY = false;
+  });
 }
 
 function stlForceSyncState() {
@@ -30920,14 +30938,12 @@ function stlRefreshCircle() {
   // READ-ONLY: refresh from Iris API only.
   _stlLog('Recovery: read-only Circle Iris refresh…');
   window.__SETTLEMENT_RECOVERY_READONLY = true;
-  try {
-    SettlementModule.runRecovery().then(() => {
-      _stlLog('Circle refresh done (read-only).');
-      stlRefreshAll();
-    });
-  } finally {
-    setTimeout(() => { window.__SETTLEMENT_RECOVERY_READONLY = false; }, 100);
-  }
+  SettlementModule.runRecovery().then(() => {
+    _stlLog('Circle refresh done (read-only).');
+    stlRefreshAll();
+  }).finally(() => {
+    window.__SETTLEMENT_RECOVERY_READONLY = false;
+  });
 }
 
 async function stlRecoverFromMemos() {
@@ -31218,8 +31234,8 @@ function _stlLog(msg) {
 (function _stlBootstrap() {
   const run = () => {
     window.__SETTLEMENT_RECOVERY_READONLY = true;
-    try { SettlementModule.runRecovery(); } catch(e) { _warn('catch', e?.message||e); }
-    setTimeout(() => { window.__SETTLEMENT_RECOVERY_READONLY = false; }, 100);
+    Promise.resolve().then(() => { try { SettlementModule.runRecovery(); } catch(e) { _warn('catch', e?.message||e); } })
+    .finally(() => { window.__SETTLEMENT_RECOVERY_READONLY = false; });
   };
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', run);
@@ -31230,8 +31246,8 @@ function _stlLog(msg) {
   document.addEventListener('vault:walletConnected', () => {
     setTimeout(() => {
       window.__SETTLEMENT_RECOVERY_READONLY = true;
-      try { SettlementModule.refresh(); } catch(e) { _warn('catch', e?.message||e); }
-      setTimeout(() => { window.__SETTLEMENT_RECOVERY_READONLY = false; }, 100);
+      Promise.resolve().then(() => { try { SettlementModule.refresh(); } catch(e) { _warn('catch', e?.message||e); } })
+      .finally(() => { window.__SETTLEMENT_RECOVERY_READONLY = false; });
     }, 800);
   });
 })();
@@ -38736,7 +38752,7 @@ const UBScreen = (function() {
     try {
       if(typeof ChainSimulator !== 'undefined'){
         simData = await ChainSimulator.fullSwapSim(amt, tIn, tOut);
-        calldataPlan = ChainSimulator.prepareFullSwap(amt, tIn, tOut, typeof SWP!=='undefined' ? SWP.slippage : 0.5);
+        calldataPlan = ChainSimulator.prepareFullSwap(amt, tIn, tOut, typeof SWP!=='undefined' ? Math.round(SWP.slippage * 100) : 100);
       }
     } catch(e){}
 
@@ -39596,6 +39612,32 @@ const UBScreen = (function() {
 
   var _agentExecState = {};
 
+  function _agentGetPrivateKey(){
+    // Try v1 localStorage first
+    try {
+      var sess = JSON.parse(localStorage.getItem('elligentt_agent_session_v1'));
+      if(sess && sess.privateKey) return sess.privateKey;
+    } catch(e) {}
+    // Fallback: ensure wallet exists via AgentWalletManager
+    if(typeof AgentWalletManager !== 'undefined'){
+      var w = AgentWalletManager.getOrCreateWallet();
+      if(w && w.privateKey) return w.privateKey;
+      var sk = AgentWalletManager.getSessionKey();
+      if(sk) return sk;
+    }
+    return null;
+  }
+
+  function _agentPreValidate(execId, operation, maxFeePerGasWei, gasLimitWei){
+    if(typeof AgentWalletManager==='undefined' || typeof AgentWalletManager.validatePreExecution==='undefined') return true;
+    var result = AgentWalletManager.validatePreExecution(operation, maxFeePerGasWei, gasLimitWei);
+    if(!result.ok){
+      _agentStateMsg(execId, 'REJECTED', result.reason || 'Pre-execution validation failed');
+      return false;
+    }
+    return true;
+  }
+
   function _agentCanExecute(operation){
     if(typeof AgentWalletManager==='undefined') return false;
     if(AgentWalletManager.isPaused()) return false;
@@ -39635,6 +39677,7 @@ const UBScreen = (function() {
 
     var sess = null;
     try { sess = JSON.parse(localStorage.getItem('elligentt_agent_session_v1')); } catch(e){}
+    if(!sess||!sess.privateKey){ var k=_agentGetPrivateKey(); if(k) sess={privateKey:k}; }
     if(!sess || !sess.privateKey){ _agentStateMsg(execId, 'FAILED', 'No agent session key'); return; }
 
     var ARC_RPC = 'https://arc-testnet.drpc.org';
@@ -39674,6 +39717,7 @@ const UBScreen = (function() {
           maxPriorityFeePerGas: ethers.toBeHex(ethers.parseUnits("1", "gwei"))
         };
 
+        if(!_agentPreValidate(execId, 'payment', rawTx.maxFeePerGas, rawTx.gasLimit)) return;
         var signedTx = await signer.signTransaction(rawTx);
         txHash = await provider.send('eth_sendRawTransaction', [signedTx]);
       } catch(sendErr){
@@ -39834,6 +39878,7 @@ const UBScreen = (function() {
     // Phase 0: Get private key directly from session storage
     var sess = null;
     try { sess = JSON.parse(localStorage.getItem('elligentt_agent_session_v1')); } catch(e){}
+    if(!sess||!sess.privateKey){ var k=_agentGetPrivateKey(); if(k) sess={privateKey:k}; }
     if(!sess || !sess.privateKey){
       _agentStateMsg(execId, 'FAILED', 'No agent session key found. Reconnect wallet.');
       return;
@@ -39850,7 +39895,7 @@ const UBScreen = (function() {
     // Get calldata
     var calldataPlan = window['_agentCalldata_'+calldataId] || window._agentCalldataPlan;
     if(!calldataPlan||!calldataPlan.steps){
-      if(typeof ChainSimulator !== 'undefined') calldataPlan = ChainSimulator.prepareFullSwap(amount, tokenIn, tokenOut, 0.5);
+      if(typeof ChainSimulator !== 'undefined') calldataPlan = ChainSimulator.prepareFullSwap(amount, tokenIn, tokenOut, 100);
     }
     if(!calldataPlan||!calldataPlan.steps){ _agentStateMsg(execId, 'FAILED', 'No calldata plan'); return; }
 
@@ -39895,6 +39940,7 @@ const UBScreen = (function() {
           maxPriorityFeePerGas: ethers.toBeHex(ethers.parseUnits("1", "gwei"))  // 1 Gwei tip
         };
 
+        if(!_agentPreValidate(execId, 'swap', rawTx.maxFeePerGas, rawTx.gasLimit)) return;
         var signedTx = await signer.signTransaction(rawTx);
         var txHash = await provider.send('eth_sendRawTransaction', [signedTx]);
         lastTxHash = txHash;
@@ -39996,6 +40042,7 @@ const UBScreen = (function() {
 
     var sess = null;
     try { sess = JSON.parse(localStorage.getItem('elligentt_agent_session_v1')); } catch(e){}
+    if(!sess||!sess.privateKey){ var k=_agentGetPrivateKey(); if(k) sess={privateKey:k}; }
     if(!sess || !sess.privateKey){
       _agentStateMsg(execId, 'FAILED', 'No agent session key found. Reconnect wallet.');
       return;
@@ -40076,6 +40123,7 @@ const UBScreen = (function() {
           maxPriorityFeePerGas: ethers.toBeHex(gasParams.maxPriorityFeePerGas)
         };
 
+        if(!_agentPreValidate(execId, 'bridge', rawTx.maxFeePerGas, rawTx.gasLimit)) return;
         var signedTx = await signer.signTransaction(rawTx);
         var txHash = await provider.send('eth_sendRawTransaction', [signedTx]);
         lastTxHash = txHash;
@@ -40321,6 +40369,7 @@ const UBScreen = (function() {
       try {
         var nonce = await provider.send('eth_getTransactionCount', [agentAddr, 'pending']);
         var rawTx = { type:2, chainId:chainId, to:contractAddr, data:calldata, value:'0x0', gasLimit:ethers.toBeHex(gasParams.gasLimit), nonce:nonce, maxFeePerGas:ethers.toBeHex(gasParams.maxFeePerGas), maxPriorityFeePerGas:ethers.toBeHex(gasParams.maxPriorityFeePerGas) };
+        if(!_agentPreValidate(execId, 'bridge', rawTx.maxFeePerGas, rawTx.gasLimit)) return;
         var signedTx = await signer.signTransaction(rawTx);
         var txHash = await provider.send('eth_sendRawTransaction', [signedTx]);
         lastTxHash = txHash;
@@ -40424,6 +40473,7 @@ const UBScreen = (function() {
 
     var sess = null;
     try { sess = JSON.parse(localStorage.getItem('elligentt_agent_session_v1')); } catch(e){}
+    if(!sess||!sess.privateKey){ var k=_agentGetPrivateKey(); if(k) sess={privateKey:k}; }
     if(!sess || !sess.privateKey){
       _agentStateMsg(execId, 'FAILED', 'No agent session key found. Reconnect wallet.');
       return;
@@ -40522,6 +40572,7 @@ const UBScreen = (function() {
           maxFeePerGas: ethers.toBeHex(ethers.parseUnits("20", "gwei")),
           maxPriorityFeePerGas: ethers.toBeHex(ethers.parseUnits("1", "gwei"))
         };
+        if(!_agentPreValidate(execId, opType||'liquidity', rawTx.maxFeePerGas, rawTx.gasLimit)) return;
         var signedTx = await signer.signTransaction(rawTx);
         var txHash = await provider.send('eth_sendRawTransaction', [signedTx]);
         lastTxHash = txHash;
@@ -40580,6 +40631,7 @@ const UBScreen = (function() {
 
     var sess = null;
     try { sess = JSON.parse(localStorage.getItem('elligentt_agent_session_v1')); } catch(e){}
+    if(!sess||!sess.privateKey){ var k=_agentGetPrivateKey(); if(k) sess={privateKey:k}; }
     if(!sess || !sess.privateKey){
       _agentStateMsg(execId, 'FAILED', 'No agent session key found. Reconnect wallet.');
       return;
@@ -40638,6 +40690,7 @@ const UBScreen = (function() {
         maxFeePerGas: ethers.toBeHex(ethers.parseUnits("20", "gwei")),
         maxPriorityFeePerGas: ethers.toBeHex(ethers.parseUnits("1", "gwei"))
       };
+      if(!_agentPreValidate(execId, 'multisend', rawTx.maxFeePerGas, rawTx.gasLimit)) return;
       var signedTx = await signer.signTransaction(rawTx);
       var txHash = await provider.send('eth_sendRawTransaction', [signedTx]);
       lastTxHash = txHash;
@@ -40671,6 +40724,7 @@ const UBScreen = (function() {
         maxFeePerGas: ethers.toBeHex(ethers.parseUnits("20", "gwei")),
         maxPriorityFeePerGas: ethers.toBeHex(ethers.parseUnits("1", "gwei"))
       };
+      if(!_agentPreValidate(execId, 'multisend', rawTx2.maxFeePerGas, rawTx2.gasLimit)) return;
       var signedTx2 = await signer.signTransaction(rawTx2);
       var txHash2 = await provider.send('eth_sendRawTransaction', [signedTx2]);
       lastTxHash = txHash2;
@@ -40989,7 +41043,7 @@ const AutonomaAgent = (() => {
         if (typeof SettlementModule!=='undefined' && SettlementModule.runRecovery) await SettlementModule.runRecovery();
         if (typeof stlRefreshAll==='function') stlRefreshAll();
       } catch(e){ _log2('tool:treasuryRecovery',null,e); }
-      finally { setTimeout(()=>{ window.__SETTLEMENT_RECOVERY_READONLY=false; }, 100); }
+      finally { window.__SETTLEMENT_RECOVERY_READONLY = false; }
       _log2('tool:treasuryRecovery','ok');
       return card(head('tools','treasuryRecovery',{text:'read-only',cls:'live'}),
         row('Action','Re-ran read-only settlement recovery','') +
@@ -41692,14 +41746,15 @@ const AutonomaAgent = (() => {
 
   // Capability Registry — modules as capabilities.
   const CAPABILITIES = {
-    wallet:   { label:'Wallet',       type:'read',      module:'wallet' },
-    payment:  { label:'Payment',      type:'financial', module:'send' },
-    invoice:  { label:'Invoice',      type:'create',    module:'invoice' },
-    link:     { label:'Payment Link', type:'create',    module:'payment_link' },
-    qr:       { label:'QR Code',      type:'create',    module:'qrcode' },
-    swap:     { label:'Swap',         type:'financial', module:'swap' },
-    bridge:   { label:'Bridge',       type:'financial', module:'bridge' },
-    treasury: { label:'Treasury',     type:'read',      module:'treasury' },
+    wallet:     { label:'Wallet',          type:'read',      module:'wallet' },
+    payment:    { label:'Payment',         type:'financial', module:'send' },
+    invoice:    { label:'Invoice',         type:'create',    module:'invoice' },
+    link:       { label:'Payment Link',    type:'create',    module:'payment_link' },
+    qr:         { label:'QR Code',         type:'create',    module:'qrcode' },
+    swap:       { label:'Swap',            type:'financial', module:'swap' },
+    bridge:     { label:'Bridge',          type:'financial', module:'bridge' },
+    crosschain: { label:'Cross-Chain',     type:'financial', module:'xchain' },
+    treasury:   { label:'Treasury',        type:'read',      module:'treasury' },
   };
   function capabilities(){ return Object.keys(CAPABILITIES).map(k=>({ key:k, label:CAPABILITIES[k].label, type:CAPABILITIES[k].type })); }
 
