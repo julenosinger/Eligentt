@@ -69,8 +69,8 @@
     }
 
     // 4. Chain risk
-    var mainnetChains = ['Ethereum','Polygon','Arbitrum','Optimism','Base','Robinhood'];
-    var testnetChains = ['Arc Testnet','Sepolia','Base Sepolia','Arbitrum Sepolia','Amoy','Robinhood Testnet'];
+    var mainnetChains = ['Ethereum','Polygon','Arbitrum','Optimism','Base'];
+    var testnetChains = ['Arc Testnet','Sepolia','Base Sepolia','Arbitrum Sepolia','Amoy'];
     if(testnetChains.indexOf(network) >= 0){
       findings.push({ factor: 'Chain Risk', level: 'LOW', detail: 'Testnet — no real value at risk' });
     } else if(mainnetChains.indexOf(network) >= 0){

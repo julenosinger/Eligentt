@@ -132,7 +132,7 @@
     if(addrM) p.address = addrM[0];
 
     // Chain / Network
-    var chainMap = { arc: 'Arc Testnet', base: 'Base', ethereum: 'Ethereum', sepolia: 'Sepolia', arbitrum: 'Arbitrum', optimism: 'Optimism', polygon: 'Polygon', robinhood: 'Robinhood' };
+    var chainMap = { arc: 'Arc Testnet', base: 'Base', ethereum: 'Ethereum', sepolia: 'Sepolia', arbitrum: 'Arbitrum', optimism: 'Optimism', polygon: 'Polygon' };
     var fromM = low.match(/from\s+(\w+)/), toM = low.match(/to\s+(\w+)/), paraM = low.match(/para\s+(?:a\s+)?(\w+)/);
     if(fromM && chainMap[fromM[1]]) p.fromChain = chainMap[fromM[1]];
     if(toM && chainMap[toM[1]]) p.toChain = chainMap[toM[1]];

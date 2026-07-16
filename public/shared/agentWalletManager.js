@@ -265,7 +265,7 @@
       version: '1.0.0',
       metadataURI: null,
       capabilities: ['swap','bridge','treasury','payments','contracts','vault','crosschain','permit','recurring','scheduled','reimbursement','treasury_deposit'],
-      supportedChains: ['Arc Testnet','Base','Ethereum','Arbitrum','Optimism','Polygon','Robinhood'],
+      supportedChains: ['Arc Testnet','Base','Ethereum','Arbitrum','Optimism','Polygon'],
       status: 'active',
       sessionStatus: 'inactive',
       reputationScore: 50,
