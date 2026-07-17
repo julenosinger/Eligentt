@@ -16873,6 +16873,21 @@ async function signTx(){
 
     let lastHash = null;
 
+    // ── Multisend signer integrity check ─────────────────────
+    // If an EXTERNAL wallet is connected but the signer was silently replaced by
+    // the internal (Intelligent) wallet (a local ethers.Wallet with a privateKey),
+    // re-sync the signer from the injected provider so the user's wallet is
+    // always prompted to approve the Multisend transactions.
+    if (activeWalletType && activeWalletType !== 'intelligent' && activeWalletType !== 'preview'
+        && signer && signer.privateKey && typeof refreshProviderState === 'function' && _safeEth()) {
+      try {
+        _warn('[Multisend] Signer hijacked by internal wallet while external wallet is active — re-syncing to injected wallet');
+        await refreshProviderState();
+      } catch (rsErr) {
+        _warn('[Multisend] Signer re-sync failed:', rsErr.message);
+      }
+    }
+
     if(signer){
       updateWorkflowStep(2, 'done');
       updateWorkflowStep(3, 'sending');
@@ -31251,6 +31266,19 @@ function prfEditProfile() {
 }
 
 (async function _prfAutoRestore() {
+  // An EXTERNAL wallet (MetaMask/Rabby/Coinbase/etc.) already connected must NEVER
+  // be silently replaced by the internal (Intelligent) wallet — otherwise sends
+  // get signed locally without ever prompting the user's wallet.
+  const _externalWalletActive = () => {
+    try {
+      if (window.walletAddress && window.activeWalletType
+          && window.activeWalletType !== 'intelligent' && window.activeWalletType !== 'preview') return true;
+      if (typeof walletAddress !== 'undefined' && walletAddress
+          && typeof activeWalletType !== 'undefined' && activeWalletType
+          && activeWalletType !== 'intelligent' && activeWalletType !== 'preview') return true;
+    } catch (_) {}
+    return false;
+  };
   const run = async () => {
     if (typeof AuthManager !== 'undefined' && AuthManager.isAuthenticated()) {
       const valid = await AuthManager.validateSession();
@@ -31258,6 +31286,11 @@ function prfEditProfile() {
         const p = AuthManager.getProfile();
         if (p && typeof ProfileManager !== 'undefined') {
           ProfileManager.signInFromAuth(p);
+        }
+        if (_externalWalletActive()) {
+          console.log('[Profile] Auth session restored (profile only) — external wallet active, keeping its signer');
+          if (typeof prfRefreshProfile === 'function') prfRefreshProfile();
+          return;
         }
         if (typeof WalletManager !== 'undefined') {
           WalletManager.activateFromAuth();
@@ -31273,6 +31306,9 @@ function prfEditProfile() {
     // Self-custody local wallet — restore from encrypted vault (no auth/login required).
     if (typeof WalletManager !== 'undefined' && typeof WalletManager.restoreLocalWallet === 'function') {
       try {
+        if (_externalWalletActive()) {
+          console.log('[Profile] Skipping self-custody auto-restore — external wallet active, keeping its signer');
+        } else {
         const lw = await WalletManager.restoreLocalWallet();
         if (lw) {
           WalletManager.activateInternalWallet(lw);
@@ -31281,6 +31317,7 @@ function prfEditProfile() {
           console.log('[Profile] Auto-restored self-custody wallet:', lw.address);
           if (typeof prfRefreshProfile === 'function') prfRefreshProfile();
           return;
+        }
         }
       } catch (e) { console.warn('[Profile] Self-custody auto-restore failed:', e.message ?? e); }
     }
