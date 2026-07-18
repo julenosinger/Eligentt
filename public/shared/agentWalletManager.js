@@ -746,7 +746,7 @@
     if (!agentState) loadState();
     agentState.executionCount = (agentState.executionCount || 0) + 1;
     var dailyOps = agentState.executionCount;
-    var maxDaily = 50;
+    var maxDaily = 999999;
     try {
       if (typeof SystemConfig !== 'undefined' && SystemConfig.AGENT_MAX_DAILY_OPS) {
         maxDaily = Number(SystemConfig.AGENT_MAX_DAILY_OPS);

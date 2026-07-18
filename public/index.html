@@ -90,6 +90,7 @@
 <script src="/shared/agentSession.js"></script>
 <script src="/shared/policyEngine.js"></script>
 <script src="/shared/agentAudit.js"></script>
+<script src="/shared/agentScheduleExecutor.js"></script>
 <script src="/shared/trustLayer.js"></script>
 <script src="/shared/missionEngine.js"></script>
 <script src="/shared/agentTreasury.js"></script>
@@ -17187,8 +17188,20 @@ async function signTx(){
         toast(`Simulating ${label} batch (${rcpts.length} recipients)...`, 'info');
         try {
           const callsForSim = calls.map(c => ({ ...c, allowFailure: true })); // allow failure for sim
-          const mc3Sim = new ethers.Contract(MULTICALL3_ADDRESS, MULTICALL3_ABI, provider);
-          const simResult = await mc3Sim.aggregate3.staticCall(callsForSim);
+          let simResult;
+          try {
+            const mc3Sim = new ethers.Contract(MULTICALL3_ADDRESS, MULTICALL3_ABI, provider);
+            simResult = await mc3Sim.aggregate3.staticCall(callsForSim);
+          } catch (primarySimErr) {
+            // Known Arc quirk: some wallet RPCs revert this eth_call with NO revert data
+            // ("missing revert data") even when the exact same batch succeeds on the
+            // canonical read RPC. Retry once via the Arc read RPC before failing.
+            _warn('[Multisend] aggregate3.staticCall via wallet provider failed (' + (primarySimErr.shortMessage || primarySimErr.message) + ') — retrying via Arc read RPC...');
+            const simReadProv = getCachedProvider('https://arc-testnet.drpc.org');
+            const mc3SimRetry = new ethers.Contract(MULTICALL3_ADDRESS, MULTICALL3_ABI, simReadProv);
+            simResult = await mc3SimRetry.aggregate3.staticCall(callsForSim);
+            _log('[Multisend] simulation retry via Arc read RPC succeeded — wallet RPC quirk bypassed');
+          }
           const failures = simResult
             .map((r, i) => ({ idx: i, ...r }))
             .filter(r => !r.success);
@@ -25525,6 +25538,7 @@ function scheduleSubmit(){
     status: 'Active',
     created: new Date().toISOString(),
     createdBy,
+    agentExecution: true,
     walletAddress: walletAddress || ''
   });
   schedules = ScheduleEngine.getAll();
@@ -25691,6 +25705,18 @@ function schedulePause(id){
   toast('Schedule "' + s.name + '" ' + newStatus.toLowerCase(), 'info');
 }
 
+function scheduleToggleAgent(id){
+  const s = ScheduleEngine.getById(id);
+  if(!s) return;
+  const turnOn = s.agentExecution === false;
+  ScheduleEngine.update(id, { agentExecution: turnOn });
+  schedules = ScheduleEngine.getAll();
+  renderSchedules();
+  schLogEntry(id, 'info', '"' + s.name + '" agent auto-execution ' + (turnOn ? 'enabled' : 'disabled'));
+  toast('Agent auto-execution ' + (turnOn ? 'enabled' : 'disabled') + ' for "' + s.name + '"', 'info');
+  if(turnOn && typeof AgentScheduleExecutor !== 'undefined'){ try { AgentScheduleExecutor.start(); } catch(_){} }
+}
+
 function scheduleDelete(id){
   const s = ScheduleEngine.remove(id);
   schedules = ScheduleEngine.getAll();
@@ -25722,9 +25748,10 @@ function renderSchedules(){
     var sc = {Active:'green', Paused:'yellow', Completed:'blue'}[s.status] || 'muted2';
     var nextRun = formatUSDateTime(s.nextRun);
     var isDue = s.nextRun && new Date(s.nextRun) <= new Date() && s.status === 'Active';
+    var agentOn = s.agentExecution !== false;
     var assetInfo = (s.amount || 0) > 0 ? (s.amount || 0).toFixed(2) + ' ' + s.token : (s.recipients && s.recipients.length ? s.recipients.length + ' rcpts' : '—');
     return '<tr' + (isDue ? ' style="background:rgba(245,158,11,.05)"' : '') + '>' +
-      '<td style="font-weight:600">' + s.name + (isDue ? '<span style="font-size:8px;margin-left:5px;color:var(--yellow)">DUE</span>' : '') + '</td>' +
+      '<td style="font-weight:600">' + s.name + (isDue ? '<span style="font-size:8px;margin-left:5px;color:var(--yellow)">DUE</span>' : '') + (agentOn && s.status === 'Active' ? '<span style="font-size:8px;margin-left:5px;color:#a78bfa" title="Auto-executed by Agent Wallet">AUTO</span>' : '') + '</td>' +
       '<td><span class="sch-type-badge ' + s.type + '"><i class="ti ti-' + schTypeIcon(s.type) + '" style="font-size:9px"></i>' + schTypeLabel(s.type) + '</span></td>' +
       '<td style="color:var(--text)">' + assetInfo + '</td>' +
       '<td style="font-size:9px;color:var(--muted2)">' + (s.network || '—') + '</td>' +
@@ -25734,6 +25761,7 @@ function renderSchedules(){
       '<td><span style="color:var(--' + sc + ')">' + s.status + '</span></td>' +
       '<td style="display:flex;gap:3px;align-items:center">' +
         '<button class="btn primary" style="padding:2px 7px;font-size:8.5px" onclick="scheduleRun(\'' + s.id + '\')" title="Execute Now"><i class="ti ti-player-play"></i></button>' +
+        '<button class="btn" style="padding:2px 7px;font-size:8.5px;color:' + (agentOn ? '#a78bfa' : 'var(--muted2)') + '" onclick="scheduleToggleAgent(\'' + s.id + '\')" title="' + (agentOn ? 'Agent auto-execution ON — click to disable' : 'Agent auto-execution OFF — click to enable') + '"><i class="ti ti-robot"></i></button>' +
         '<button class="btn" style="padding:2px 7px;font-size:8.5px" onclick="schedulePause(\'' + s.id + '\')" title="' + (s.status === 'Active' ? 'Pause' : 'Resume') + '"><i class="ti ti-' + (s.status === 'Active' ? 'pause' : 'play') + '"></i></button>' +
         '<button class="btn" style="padding:2px 7px;font-size:8.5px;color:var(--red)" onclick="scheduleDelete(\'' + s.id + '\')" title="Delete"><i class="ti ti-trash"></i></button>' +
       '</td></tr>';
@@ -25745,6 +25773,7 @@ function checkDueSchedules(){
   const all = ScheduleEngine.getAll();
   const due = all.filter(function(s){ return s.status === 'Active' && s.nextRun && new Date(s.nextRun) <= new Date(); });
   if(due.length) toast(due.length + ' scheduled automation(s) due for execution — check Multi Schedule page', 'warning');
+  if(typeof AgentScheduleExecutor !== 'undefined'){ try { AgentScheduleExecutor.start(); } catch(_){} }
 }
 
 // ══════════════════════════════════════════════════════════
@@ -37472,10 +37501,85 @@ const UBScreen = (function() {
   }
 
   // ── MULTI-SEND HANDLER ─────────────────────────────────
-  function _handleMultiSend(params, msg){
+   function _handleMultiSend(params, msg){
     if(!walletAddress){
       return R.intro('Connect your wallet first for multi-send.')+
         R.card(R.head('stack','Multi-Send',{text:'Wallet Required',cls:'pending'}),R.row('Status','Not connected','yellow'));
+    }
+
+    // ── Parse recipients directly from the message ────────────────────────
+    var msgRecipients = [];
+    var parsedFromMsg = false;
+    var rawAddrs = msg.match(/0x[a-fA-F0-9]{40}/g);
+    var amountPer = params.amount || _extractNumber(msg) || 0;
+    var msgToken = params.token || 'USDC';
+    // Detect token from message
+    var tknM = msg.match(/(\d+(?:\.\d+)?)\s*(usdc|eurc|cirbtc|USDC|EURC|cirBTC)/);
+    if(tknM){ msgToken = tknM[2].toUpperCase() === 'CIRBTC' ? 'cirBTC' : tknM[2].toUpperCase(); }
+
+    // Detect individual amounts: parse "send 10 to 0xA, 20 to 0xB" or "0xA 10, 0xB 20"
+    if(rawAddrs && rawAddrs.length > 0){
+      var individualAmounts = false;
+      // Try pair pattern: amount before or after each address
+      var pairMatches = [];
+      var re = /(\d+(?:\.\d+)?)\s*(usdc|eurc|cirbtc)?\s*(?:to\s+|[\-–>]+\s*)?(0x[a-fA-F0-9]{40})/gi;
+      var m;
+      while((m = re.exec(msg)) !== null){
+        pairMatches.push({ amount: parseFloat(m[1]), addr: m[3] });
+        individualAmounts = true;
+      }
+      if(!individualAmounts){
+        // Try: 0x... 10, 0x... 20 format
+        var pairs = msg.match(/0x[a-fA-F0-9]{40}\s+(\d+(?:\.\d+)?)/g);
+        if(pairs){
+          pairs.forEach(function(p){
+            var addr = p.match(/0x[a-fA-F0-9]{40}/)[0];
+            var amt = parseFloat(p.match(/(\d+(?:\.\d+)?)/)[1]);
+            if(addr && amt > 0) pairMatches.push({ addr: addr, amount: amt });
+            individualAmounts = true;
+          });
+        }
+      }
+      if(individualAmounts && pairMatches.length > 0){
+        pairMatches.forEach(function(p){ msgRecipients.push(p); });
+        parsedFromMsg = true;
+      } else if(!individualAmounts && amountPer > 0){
+        // Uniform amount per recipient
+        rawAddrs.forEach(function(a){ msgRecipients.push({ addr: a, amount: amountPer }); });
+        parsedFromMsg = true;
+      }
+    }
+
+    // If we have direct recipients from the message, build the execution card
+    if(parsedFromMsg && msgRecipients.length > 0){
+      var msTotal = msgRecipients.reduce(function(s,r){ return s + r.amount; }, 0);
+      var canExec = _agentCanExecute('multisend');
+      var recipientRows = msgRecipients.slice(0, 10).map(function(r, i){
+        var short = r.addr.substring(0,6)+'...'+r.addr.substring(r.addr.length-4);
+        return R.row(
+          (i+1)+'. <code style="font-size:8px;color:#a78bfa">'+short+'</code>',
+          '<strong>'+r.amount.toFixed(2)+' '+msgToken+'</strong>',
+          'teal'
+        );
+      }).join('');
+      if(msgRecipients.length > 10) recipientRows += R.row('','... and '+(msgRecipients.length-10)+' more','muted');
+
+      return R.intro('Multi-Send batch parsed — <strong>'+msgRecipients.length+' recipients</strong> totaling <strong style="color:#22c55e">'+msTotal.toFixed(2)+' '+msgToken+'</strong>:')+
+        R.card(R.head('stack','Multi-Send — Ready',{text:msgRecipients.length+' recipients',cls:'live'}),
+          recipientRows +
+          R.sep() +
+          R.row('Total','<strong>'+msTotal.toFixed(2)+' '+msgToken+'</strong>','green') +
+          R.row('Recipients',String(msgRecipients.length),'teal') +
+          R.row('Token',msgToken,'teal') +
+          R.row('Network',R.chainPill('Arc Testnet','#ff0202'),'') +
+          (canExec ? R.row('Agent','Ready — will broadcast '+msgRecipients.length+' transfers via Agent Wallet','green') :
+            R.row('Agent','Not authorized — say "allow agent to send payments" to enable','yellow')),
+          R.actions(
+            (canExec ? {icon:'robot',label:'Execute via Agent',cls:'confirm',
+              action:"_agentExecuteOp('multisend',"+msTotal+",'"+msgToken+"',"+JSON.stringify({token:msgToken,recipients:msgRecipients.map(function(r){return r.addr;}),amounts:msgRecipients.map(function(r){return r.amount;})})+")"} : null),
+            {icon:'stack',label:'Open Batch Page',cls:'',action:"showPage('batch')"},
+            {icon:'file-upload',label:'Upload CSV',cls:'',action:"document.getElementById('aut-csv-input').click()"}
+          ));
     }
 
     // Check for saved recipients — try multiple sources
@@ -37538,7 +37642,7 @@ const UBScreen = (function() {
         R.row('Action','Add recipients to execute batch transfer','')+
         (msRecipients.length > 0 ? _agentExecutionBanner('multisend', msRecipients.length, token) : ''),
         R.actions(
-          {icon:'check',label:'Open Multi-Send',cls:'confirm',action:"autConfirmOp('"+oid+"')"},
+          {icon:'check',label:'Load & Review Batch',cls:'confirm',action:"autConfirmOp('"+oid+"')"},
           {icon:'file-upload',label:'Upload CSV',cls:'',action:"document.getElementById('aut-csv-input').click()"},
           {icon:'users',label:'Recipients Page',cls:'',action:"showPage('recipients')"},
           (msRecipients.length > 0 && _agentCanExecute('multisend') ? {icon:'robot',label:'Execute via Agent',cls:'confirm',action:"_agentExecuteOp('multisend',"+amount+",'"+token+"',"+msPayload+")"} : null)
@@ -37783,14 +37887,41 @@ const UBScreen = (function() {
 
   // ── EXECUTE SCHEDULES HANDLER ──
   function _handleExecuteSchedules(){
-    if(typeof PermitEngine==='undefined') return R.intro('Permission system initializing...');
+    // Scheduled intents (Schedules tab) — executed on-chain by the Agent Wallet
+    var engineHtml = '';
+    try {
+      if (typeof AgentScheduleExecutor !== 'undefined' && typeof ScheduleEngine !== 'undefined') {
+        var engineDue = AgentScheduleExecutor.getDueSchedules();
+        var schedAuthOk = AgentScheduleExecutor.hasScheduledAuth();
+        if (engineDue.length > 0) {
+          if (schedAuthOk) { AgentScheduleExecutor.start(); AgentScheduleExecutor.tickNow(); }
+          engineHtml = R.card(R.head('robot', 'Agent Wallet — Scheduled Intents', {text: engineDue.length + ' due', cls: schedAuthOk ? 'live' : 'pending'}),
+            engineDue.slice(0, 8).map(function(s){
+              return R.row(s.name, (s.amount || s.total || 0) + ' ' + (s.token || 'USDC') + ' · ' + s.type, schedAuthOk ? 'green' : 'yellow');
+            }).join('') +
+            (schedAuthOk
+              ? R.row('Executor', 'Authorized — executing now via Agent Wallet (validations + simulation + on-chain broadcast)', 'green')
+              : R.row('Executor', 'Blocked — say "allow agent to execute schedules" to authorize delegated execution', 'yellow')));
+        } else {
+          var lastExec = AgentScheduleExecutor.getExecutionLog(3);
+          if (lastExec.length > 0) {
+            engineHtml = R.card(R.head('robot', 'Agent Wallet — Scheduled Intents', {text: 'Up to date', cls: 'live'}),
+              lastExec.map(function(l){
+                return R.row(l.scheduleId, l.status + (l.txHash ? ' · ' + l.txHash.slice(0, 10) + '...' : '') + (l.reason ? ' · ' + String(l.reason).slice(0, 60) : ''), l.status === 'executed' || l.status === 'delegated' ? 'green' : '');
+              }).join(''));
+          }
+        }
+      }
+    } catch(e) {}
+
+    if(typeof PermitEngine==='undefined') return engineHtml + R.intro('Permission system initializing...');
 
     var allScheduled = PermitEngine.getScheduled ? PermitEngine.getScheduled() : [];
     var due = PermitEngine.getScheduledDue ? PermitEngine.getScheduledDue() : [];
 
     // No schedules at all — suggest creating one
     if(!allScheduled || allScheduled.length === 0){
-      return R.intro('You have no scheduled permits yet. Create one to automate recurring operations.') +
+      return engineHtml + R.intro('You have no scheduled permits yet. Create one to automate recurring operations.') +
         R.card(R.head('calendar-plus','No Schedules',{text:'Empty',cls:'pending'}),
           R.row('Create a schedule','Say: "schedule a daily payment of 100 USDC"','teal') +
           R.row('Or','"schedule a weekly bridge of 500 USDC"','') +
@@ -37812,7 +37943,7 @@ const UBScreen = (function() {
         );
       }).join('');
 
-      return R.intro('You have <strong>' + allScheduled.length + '</strong> scheduled permit(s). None are due yet.') +
+      return engineHtml + R.intro('You have <strong>' + allScheduled.length + '</strong> scheduled permit(s). None are due yet.') +
         R.card(R.head('calendar-event','Scheduled Permits',{text: allScheduled.length + ' total',cls:'live'}),
           items,
           R.actions(
@@ -37845,7 +37976,7 @@ const UBScreen = (function() {
       return R.row(f.name, '<span style="color:#ef4444">' + f.reason + '</span>', 'red');
     }).join('') : '';
 
-    return R.intro('<strong style="color:#22c55e">Schedules executed!</strong> Processed ' + executed.length + ' of ' + due.length + ' due.') +
+    return engineHtml + R.intro('<strong style="color:#22c55e">Schedules executed!</strong> Processed ' + executed.length + ' of ' + due.length + ' due.') +
       R.card(R.head('calendar-check','Schedule Execution',{text: executed.length + ' done', cls:'live'}),
         R.row('Due Schedules', due.length + ' found', 'teal') +
         execHtml + failHtml,
@@ -37948,9 +38079,9 @@ const UBScreen = (function() {
     }
     if(!toChain){
       var clow = msg.toLowerCase();
-      var chainMap = { base: 'Base', ethereum: 'Ethereum', polygon: 'Polygon', arbitrum: 'Arbitrum', optimism: 'Optimism' };
-      var toM = clow.match(/to\s+(\w+)/);
-      if(toM && chainMap[toM[1]]) toChain = chainMap[toM[1]];
+      var chainMap = { base: 'Base', ethereum: 'Ethereum', polygon: 'Polygon', arbitrum: 'Arbitrum', optimism: 'Optimism', sepolia: 'Ethereum', amoy: 'Polygon' };
+      var chM = clow.match(/\b(?:on|at|na|no|in|em|para a|pra)\s+(base|arbitrum|optimism|polygon|amoy|ethereum|sepolia)\b/);
+      if(chM && chainMap[chM[1]]) toChain = chainMap[chM[1]];
     }
 
     if(amt <= 0){
@@ -38002,7 +38133,7 @@ const UBScreen = (function() {
         }).join('') : ''),
         R.actions(
           {icon:'player-play',label:'Open Cross-Chain & Pre-fill',cls:'confirm',action:"window._autoNavXchain('"+destAddr+"',"+amt+",'"+token+"','"+destinationChain+"')"},
-          (_agentCanExecute('bridge') && xPlan ? {icon:'robot',label:'Execute via Agent',cls:'confirm',action:"_agentExecuteBridge("+amt+","+xChainDomain+",'"+destinationChain+"','"+xPlanId+"',5042002)"} : null),
+          (_agentCanExecute('bridge') && xPlan ? {icon:'robot',label:'Execute via Agent',cls:'confirm',action:"_agentExecuteBridge("+amt+","+xChainDomain+",'"+destinationChain+"','"+xPlanId+"',5042002,'"+destAddr+"')"} : null),
           {icon:'x',label:'Cancel',cls:'danger',action:"autCancelOp('none')"}
         )
       );
@@ -38665,6 +38796,12 @@ const UBScreen = (function() {
 
   // ── PAYMENT CARD ──
   function autPayment(msg) {
+    // Cross-chain payment: recipient + an explicit destination network in the message
+    var xNet = msg.toLowerCase().match(/\b(?:on|to|at|na|no|em|para a|pra)\s+(base|arbitrum|optimism|polygon|amoy|ethereum|sepolia)\b/);
+    if(xNet && /0x[a-fA-F0-9]{40}/.test(msg)){
+      var cMap = {base:'Base',arbitrum:'Arbitrum',optimism:'Optimism',polygon:'Polygon',amoy:'Polygon',ethereum:'Ethereum',sepolia:'Ethereum'};
+      return _handleCrossChain(msg, {toChain: cMap[xNet[1]] || xNet[1]});
+    }
     const addrM=msg.match(/0x[a-fA-F0-9]{40}/),amtM=msg.match(/(\d+(?:\.\d+)?)\s*(usdc|eurc|cirbtc)?/i);
     if(addrM&&amtM){
       const addr=addrM[0],amt=amtM[1],token=(amtM[2]||'USDC').toUpperCase();
@@ -38964,7 +39101,9 @@ const UBScreen = (function() {
     if(/\b(bridge|ponte)\b/.test(low)) ops.push('bridge');
     if(/\b(payment|pagamento|send|env|transfer)\b/.test(low)) ops.push('payment');
     if(/\b(treasury|tesouraria|tesouro)\b/.test(low)) ops.push('treasury');
-    if(/\b(all|tudo|everything)\b/.test(low)) ops=['swap','bridge','payment','treasury','crosschain','recurring','scheduled'];
+    if(/\b(schedul\w*|agend\w*|recurring|recorrent\w*)\b/.test(low)) ops.push('scheduled');
+    if(/\b(multisend|batch|lote|em massa|m[uú]ltiplos|v[aá]rios|diversos)\b/.test(low)) ops.push('multisend');
+    if(/\b(all|tudo|everything)\b/.test(low)) ops=['swap','bridge','payment','treasury','crosschain','recurring','scheduled','multisend'];
 
     if(ops.length===0){
       return R.intro('What should I allow the Agent to do?')+
@@ -38976,7 +39115,7 @@ const UBScreen = (function() {
           '<div style="font-size:9px;color:var(--muted);margin-top:6px">Try: <em>"Allow agent to swap up to 500 USDC"</em> or <em>"Authorize agent for everything"</em></div>');
     }
 
-    var opMap={swap:'allowSwap',bridge:'allowBridge',treasury:'allowTreasury',payment:'allowPayments',crosschain:'allowCrosschain',recurring:'allowRecurring',scheduled:'allowScheduled'};
+    var opMap={swap:'allowSwap',bridge:'allowBridge',treasury:'allowTreasury',payment:'allowPayments',crosschain:'allowCrosschain',recurring:'allowRecurring',scheduled:'allowScheduled',multisend:'allowPayments'};
     var authOpts={
       maxSpending:amount*10, dailyLimit:amount, allowedTokens:['*'],
       allowedNetworks:['*'], allowedOperations:ops, purpose:'Chat authorization: '+ops.join(', '),
@@ -39441,8 +39580,9 @@ const UBScreen = (function() {
       var xDomain = (xParams && xParams.cctpDomain) ? Number(xParams.cctpDomain) : 6;
       var xCid = (xParams && xParams.calldataId) ? xParams.calldataId : 'xplan_'+Date.now();
       var xSrcChainId = (xParams && xParams.sourceChainId) ? Number(xParams.sourceChainId) : 5042002;
-      _agentStateMsg(execId, 'PLANNING', 'Cross-chain '+amount+' USDC → '+xDestChain);
-      await _agentExecuteBridge(amount, xDomain, xDestChain, xCid, xSrcChainId);
+      var xRecipient = (xParams && (xParams.recipient || xParams.address)) ? (xParams.recipient || xParams.address) : null;
+      _agentStateMsg(execId, 'PLANNING', 'Cross-chain '+amount+' USDC → '+xDestChain+(xRecipient ? ' for '+String(xRecipient).substring(0,8)+'...' : ''));
+      await _agentExecuteBridge(amount, xDomain, xDestChain, xCid, xSrcChainId, xRecipient);
     }
     else if(operation==='add_liquidity'){
       var alParams = null;
@@ -39524,6 +39664,63 @@ const UBScreen = (function() {
     }
   }
 
+  function _agentBuildSwapPlan(amountIn, tokenIn, tokenOut, slippageBps){
+    if (!(amountIn > 0)) return { valid: false, error: 'Invalid amount' };
+    slippageBps = (slippageBps != null && !isNaN(slippageBps)) ? Number(slippageBps) : 100;
+    try {
+      if (typeof loadAllPools === 'function') { try { loadAllPools(); } catch(e){} }
+    } catch(e){}
+    var route = typeof findRoute === 'function' ? findRoute(tokenIn, tokenOut) : null;
+    if (!route || route.noLiq || !route.pools.length) return { valid: false, error: 'No liquidity for ' + tokenIn + ' → ' + tokenOut };
+    var inSym = tokenIn, inAmt = Number(amountIn);
+    var steps = [];
+    for (var i = 0; i < route.pools.length; i++) {
+      var poolCfg = route.pools[i];
+      var poolAddr = poolCfg.address;
+      if (!poolAddr) return { valid: false, error: 'Invalid pool address' };
+      var isLastHop = i === route.pools.length - 1;
+      var nextSym = route.hops[i + 1] || tokenOut;
+      var tokenInDec = (inSym === 'cirBTC' || inSym === 'ETH') ? 8 : 6;
+      var tokenOutDec = (nextSym === 'cirBTC' || nextSym === 'ETH') ? 8 : 6;
+      var hopOut = typeof calcPoolOutput === 'function' ? calcPoolOutput(inAmt, poolCfg, inSym) : 0;
+      if (!(hopOut > 0)) return { valid: false, error: 'Could not compute output for hop ' + (i + 1) };
+      var hopMinOut = isLastHop
+        ? hopOut * (1 - slippageBps / 10000)
+        : hopOut * (1 - (slippageBps / route.pools.length) / 10000);
+      if (inSym !== 'ETH') {
+        var tokenAddr = typeof getTokAddr === 'function' ? getTokAddr(inSym) : '';
+        if (tokenAddr) {
+          var approve = null;
+          try {
+            if (typeof ethers !== 'undefined') {
+              var iface = new ethers.Interface(['function approve(address spender, uint256 amount)']);
+              var approveAmt = ethers.parseUnits(String(inAmt.toFixed(tokenInDec)), tokenInDec);
+              approve = { step: steps.length + 1, label: 'Approve ' + inSym + ' (pool ' + poolCfg.id + ')', tx: { calldata: iface.encodeFunctionData('approve', [poolAddr, approveAmt * 2n]), contract: tokenAddr, method: 'approve', to: tokenAddr } };
+            }
+          } catch(e){}
+          if (approve) steps.push(approve);
+        }
+      }
+      var swapStep = null;
+      try {
+        if (typeof ethers !== 'undefined') {
+          var swapIface = new ethers.Interface(['function swap(address tokenIn, uint256 amountIn, uint256 amountOutMin) returns (uint256 amountOut)']);
+          var minBig = ethers.parseUnits(String(hopMinOut.toFixed(tokenOutDec)), tokenOutDec);
+          var inBig = ethers.parseUnits(String(inAmt.toFixed(tokenInDec)), tokenInDec);
+          var tokenInAddr = typeof getTokAddr === 'function' ? getTokAddr(inSym) : '';
+          swapStep = { step: steps.length + 1, label: 'Swap ' + inSym + ' → ' + nextSym + (route.pools.length > 1 ? ' (hop ' + (i + 1) + ')' : ''), tx: { calldata: swapIface.encodeFunctionData('swap', [tokenInAddr, inBig, minBig]), contract: poolAddr, method: 'swap', to: poolAddr } };
+        }
+      } catch(e){}
+      if (!swapStep) return { valid: false, error: 'Could not build swap calldata' };
+      steps.push(swapStep);
+      inSym = nextSym;
+      inAmt = hopOut;
+    }
+    var estOut = 0;
+    try { estOut = typeof calcRouteOutput === 'function' ? calcRouteOutput(Number(amountIn), route) : 0; } catch(e){}
+    return { valid: true, type: 'swap', steps: steps, totalSteps: steps.length, estimatedOutput: estOut, route: route, quotedAt: Date.now(), slippageBps: slippageBps };
+  }
+
   async function _agentExecuteSwap(amount, tokenIn, tokenOut, calldataId){
     var execId = 'exec_' + Date.now();
 
@@ -39545,11 +39742,10 @@ const UBScreen = (function() {
     _agentStateMsg(execId, 'PLANNING', agentAddr.substring(0,8)+'... '+amount+' '+tokenIn+' → '+tokenOut);
 
     // Get calldata
-    var calldataPlan = window['_agentCalldata_'+calldataId] || window._agentCalldataPlan;
-    if(!calldataPlan||!calldataPlan.steps){
-      if(typeof ChainSimulator !== 'undefined') calldataPlan = ChainSimulator.prepareFullSwap(amount, tokenIn, tokenOut, 100);
-    }
-    if(!calldataPlan||!calldataPlan.steps){ _agentStateMsg(execId, 'FAILED', 'No calldata plan'); return; }
+    var calldataPlan = null;
+    try { calldataPlan = _agentBuildSwapPlan(amount, tokenIn, tokenOut, 100); } catch(e){}
+    if(!calldataPlan||!calldataPlan.valid||!calldataPlan.steps.length){ _agentStateMsg(execId, 'FAILED', calldataPlan ? calldataPlan.error : 'No swap plan — check liquidity for '+tokenIn+' → '+tokenOut); return; }
+    _log('[agent swap] plan built: ' + calldataPlan.steps.length + ' steps, est. output: ' + (calldataPlan.estimatedOutput || 'N/A'));
 
     // Verify balance first
     try {
@@ -39669,7 +39865,7 @@ const UBScreen = (function() {
     }, 800);
   }
 
-  async function _agentExecuteBridge(amount, destDomain, destChainName, calldataId, sourceChainId){
+  async function _agentExecuteBridge(amount, destDomain, destChainName, calldataId, sourceChainId, recipientAddr){
     var execId = 'exec_' + Date.now();
     var chainId = Number(sourceChainId) || 5042002; // default: Arc Testnet
     var cctpCfg = (typeof ElligenteCCTP !== 'undefined' && ElligenteCCTP.CCTP_CONFIG) ? ElligenteCCTP.CCTP_CONFIG[String(chainId)] : null;
@@ -39703,12 +39899,15 @@ const UBScreen = (function() {
     var provider = new ethers.JsonRpcProvider(RPC_URL);
     var signer = new ethers.Wallet(sess.privateKey, provider);
     var agentAddr = signer.address;
-    // CRITICAL: mintRecipient must be non-zero — use padded agent address
-    var mintRecipient = ethers.zeroPadValue(agentAddr, 32);
+    // Cross-chain payment: mint directly to the external recipient when provided.
+    // CRITICAL: mintRecipient must be non-zero — defaults to the agent address (bridge-to-self).
+    var payoutRecipient = (typeof recipientAddr === 'string' && /^0x[a-fA-F0-9]{40}$/.test(recipientAddr) &&
+      recipientAddr.toLowerCase() !== '0x0000000000000000000000000000000000000000') ? recipientAddr : null;
+    var mintRecipient = ethers.zeroPadValue(payoutRecipient || agentAddr, 32);
 
     var isArcSource = chainId === 5042002;
     var chainName = isArcSource ? 'Arc Testnet' : ('Chain '+chainId);
-    _agentStateMsg(execId, 'PLANNING', agentAddr.substring(0,8)+'... '+amount+' USDC on '+chainName+' → '+destChainName);
+    _agentStateMsg(execId, 'PLANNING', agentAddr.substring(0,8)+'... '+amount+' USDC on '+chainName+' → '+destChainName+(payoutRecipient ? ' → recipient '+payoutRecipient.substring(0,8)+'...' : ''));
 
     var calldataPlan = window['_agentCalldata_'+calldataId] || window._agentCalldataPlan;
     if(!calldataPlan||!calldataPlan.steps){
@@ -39913,6 +40112,7 @@ const UBScreen = (function() {
       '<strong>'+amount+' USDC ('+chainName+' → '+destChainName+')</strong><br><br>'+
       '<span style="color:var(--muted);font-size:9px">'+
       'Agent: <code style="font-size:8px">'+agentAddr.substring(0,10)+'...</code><br>'+
+      (payoutRecipient ? 'Recipient: <code style="font-size:8px;color:#06F7E9">'+payoutRecipient+'</code><br>' : '')+
       'Tx: <code style="font-size:8px;word-break:break-all;color:#a78bfa">'+lastTxHash+'</code><br>'+
       '<a href="'+EXPLORER_URL+'/tx/'+lastTxHash+'" target="_blank" style="color:#a78bfa">'+chainName+' Explorer →</a> · '+
       '<a href="'+destExplorer+'" target="_blank" style="color:#06F7E9">'+destChainName+' Explorer →</a>'+
@@ -39926,6 +40126,7 @@ const UBScreen = (function() {
     if(typeof AgentAudit!=='undefined') AgentAudit.recordExecution({
       operation:'bridge', amount:amount, asset:'USDC', chain:chainName,
       destinationChain:destChainName, cctpDomain:destDomainNum,
+      recipient: payoutRecipient || agentAddr,
       transactionHash:lastTxHash, result:'success', duration:duration,
       gasUsed:lastReceipt?Number(lastReceipt.gasUsed):0,
       attestationReady:!!attestResult
@@ -40929,6 +41130,7 @@ const AutonomaAgent = (() => {
               status: 'Active',
               created: new Date().toISOString(),
               createdBy: 'autonoma',
+              agentExecution: true,
               walletAddress: (typeof walletAddress !== 'undefined') ? (walletAddress || '') : '',
               recipientName: rcptName, recipientAddress: rcptAddress
             });
@@ -40945,7 +41147,14 @@ const AutonomaAgent = (() => {
         row('Frequency', sch.type==='daily'?'Daily':sch.type==='weekly'?'Weekly':sch.type==='monthly'?'Monthly':sch.type==='biweekly'?'Bi-weekly':'One-time','teal') +
         row('When', new Date(sch.when).toLocaleString('en-US',{month:'2-digit',day:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit',hour12:true}),'') +
         row('Status','Active — view in Schedule page','green') +
-        intro('Manual mode: when due I will notify you to run it (money is never auto-executed in Phase 1).'),
+        (function(){
+          try {
+            if (typeof AgentScheduleExecutor !== 'undefined' && AgentScheduleExecutor.hasScheduledAuth()) {
+              return intro('Assigned to the Agent Wallet: it will auto-execute on-chain when due, within your authorized limits (revocable anytime).');
+            }
+          } catch(e) {}
+          return intro('Assigned to the Agent Wallet. To enable autonomous execution say "allow agent to execute schedules" — until authorized I will notify you to run it manually.');
+        })(),
         acts({icon:'external-link',label:'View Schedules',cls:'primary',action:"showPage('schedule')"},
              {icon:'x',label:'Cancel',cls:'',action:"autonomaSendQuick('cancel task "+id+"')"}));
     }

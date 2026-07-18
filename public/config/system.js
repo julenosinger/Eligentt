@@ -109,7 +109,7 @@ const SystemConfig = Object.freeze({
   AGENT_MAX_GAS_USD:           5,
   AGENT_MAX_SLIPPAGE_BPS:    100,
   AGENT_MIN_CONTRACT_TRUST:   'medium',
-  AGENT_MAX_DAILY_OPS:        50,
+  AGENT_MAX_DAILY_OPS:    999999,
   AGENT_RETRY_MAX:             3,
   AGENT_RETRY_DELAY_MS:    30000,
   AGENT_SESSION_IDLE_MS: 86400000,

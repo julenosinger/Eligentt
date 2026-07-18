@@ -215,7 +215,8 @@
     var map={
       swap:'allowSwap', bridge:'allowBridge', treasury:'allowTreasury',
       payment:'allowPayments', contract:'allowContracts', vault:'allowVault',
-      crosschain:'allowCrosschain', recurring:'allowRecurring', scheduled:'allowScheduled'
+      crosschain:'allowCrosschain', recurring:'allowRecurring', scheduled:'allowScheduled',
+      multisend:'allowPayments'
     };
     var key=map[operation];
     if(key) return auth[key]===true;
@@ -266,7 +267,8 @@
     var map={
       swap:'allowSwap',bridge:'allowBridge',treasury:'allowTreasury',
       payment:'allowPayments',contract:'allowContracts',vault:'allowVault',
-      crosschain:'allowCrosschain',recurring:'allowRecurring',scheduled:'allowScheduled'
+      crosschain:'allowCrosschain',recurring:'allowRecurring',scheduled:'allowScheduled',
+      multisend:'allowPayments'
     };
     var key=map[operation];
     if(key){ a[key]=false; save(); recordAuthHistory(id,'DISABLED',operation); return true; }
@@ -276,11 +278,12 @@
   function enableOperationOnly(id, operation){
     var a=authorizations.find(function(x){return x.id===id;});
     if(!a||a.status!=='active') return false;
-    var allOps=['swap','bridge','treasury','payment','contract','vault','crosschain','recurring','scheduled'];
+    var allOps=['swap','bridge','treasury','payment','contract','vault','crosschain','recurring','scheduled','multisend'];
     var map={
       swap:'allowSwap',bridge:'allowBridge',treasury:'allowTreasury',
       payment:'allowPayments',contract:'allowContracts',vault:'allowVault',
-      crosschain:'allowCrosschain',recurring:'allowRecurring',scheduled:'allowScheduled'
+      crosschain:'allowCrosschain',recurring:'allowRecurring',scheduled:'allowScheduled',
+      multisend:'allowPayments'
     };
     for(var i=0;i<allOps.length;i++){ a[map[allOps[i]]]=false; }
     var key=map[operation];
@@ -299,7 +302,7 @@
       totalSpendingLimit:active.reduce(function(s,a){return s+(a.maxSpending||0);},0),
       totalDailyLimit:active.reduce(function(s,a){return s+(a.dailyLimit||0);},0),
       allowedOps:active.reduce(function(ops,a){
-        ['swap','bridge','treasury','payment','contract','vault','crosschain','recurring','scheduled'].forEach(function(op){
+        ['swap','bridge','treasury','payment','contract','vault','crosschain','recurring','scheduled','multisend'].forEach(function(op){
           if(checkOperationPermission(a,op)) ops.add(op);
         }); return ops;
       },new Set()),
@@ -331,6 +334,7 @@
     if(auth.allowCrosschain) ops.push('Cross-chain');
     if(auth.allowRecurring) ops.push('Recurring');
     if(auth.allowScheduled) ops.push('Scheduled');
+    if(auth.allowPayments) ops.push('MultiSend');
     return ops.length>0?ops.join(', '):'None';
   }
 
