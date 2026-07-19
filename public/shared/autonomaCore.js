@@ -38,7 +38,26 @@
     agent_disable_op: { aliases: ['disable bridge','desabilitar bridge','disable swap','desabilitar swap','disable swaps','disable treasury','disable payments','desabilitar pagamentos','desabilitar tesouraria','allow only','permitir apenas','restrict to','restringir para'], goal: 'agent_disable_op', module: null },
     agent_extend: { aliases: ['extend authorization','extender autorização','extender autorizacao','prolongar autorização','renew authorization','renovar autorização'], goal: 'agent_extend', module: null },
     agent_mission: { aliases: ['create mission','criar missão','criar missao','set up mission','configurar missão','new mission','nova missão','add mission','adicionar missão','keep treasury','manter tesouraria','pay suppliers','pagar fornecedores','bridge idle','bridge liquidity','reimburse failed','reembolsar falhas','swap rewards','trocar recompensas','liquidity ratio','taxa de liquidez','deposit excess','depositar excesso','my missions','minhas missões','show missions','mostrar missões','pause mission','pausar missão','resume mission','retomar missão','cancel mission','cancelar missão'], goal: 'agent_mission', module: null },
-    agent_treasury: { aliases: ['allocate','alocar','treasury allocation','alocação de tesouraria','allocate usdc','alocar usdc','allocate funds','alocar fundos','agent treasury','tesouraria do agente','show treasury','mostrar tesouraria','treasury balance','saldo da tesouraria','treasury budget','orçamento da tesouraria','treasury limit','limite da tesouraria','pause treasury','pausar tesouraria','resume treasury','retomar tesouraria','withdraw treasury','sacar tesouraria','withdraw unused','sacar não usado','sacar nao usado','create budget','criar orçamento','criar orcamento','treasury report','relatório de tesouraria','treasury performance'], goal: 'agent_treasury', module: null }
+    agent_treasury: { aliases: ['allocate','alocar','treasury allocation','alocação de tesouraria','allocate usdc','alocar usdc','allocate funds','alocar fundos','agent treasury','tesouraria do agente','show treasury','mostrar tesouraria','treasury balance','saldo da tesouraria','treasury budget','orçamento da tesouraria','treasury limit','limite da tesouraria','pause treasury','pausar tesouraria','resume treasury','retomar tesouraria','withdraw treasury','sacar tesouraria','withdraw unused','sacar não usado','sacar nao usado','create budget','criar orçamento','criar orcamento','treasury report','relatório de tesouraria','treasury performance'], goal: 'agent_treasury', module: null },
+    // Financial OS read-only queries
+    portfolio_view: { aliases: ['show portfolio','ver portfolio','mostrar portfolio','portfolio intelligence','portfolio overview','how is my portfolio','como está meu portfolio','minha carteira completa','full portfolio','portfolio total','my holdings','meus ativos','my assets','show all balances','mostrar todos os saldos','total value','valor total'], goal: 'portfolio_view', module: null },
+    vault_view: { aliases: ['show vault','ver vault','mostrar vault','vault allocations','alocações do vault','vault status','status do vault','locked balance','saldo bloqueado','automation balance','saldo automação','treasury allocation','alocação tesouraria','how much is locked','quanto está bloqueado','operational balance','saldo operacional'], goal: 'vault_view', module: null },
+    gas_view: { aliases: ['show gas','ver gas','gas status','status do gas','gas balance','saldo de gas','gas reserve','reserva de gas','gas health','gas manager','how much gas do i have','quanto gas eu tenho','gas fee','taxa de gas','gas left','gas restante'], goal: 'gas_view', module: null },
+    schedule_view: { aliases: ['show schedules','ver agendamentos','mostrar agendamentos','my schedules','meus agendamentos','scheduled payments','pagamentos agendados','what is scheduled','o que está agendado','upcoming payments','próximos pagamentos','pending schedules','agendamentos pendentes','show automations','mostrar automações','automation status','status automação'], goal: 'schedule_view', module: null },
+    report_view: { aliases: ['generate report','gerar relatório','gerar relatorio','show report','ver relatório','daily report','relatório diário','weekly report','relatório semanal','monthly report','relatório mensal','portfolio report','relatório do portfolio','gas report','relatório de gas','security report','relatório de segurança','financial report','relatório financeiro','export report','exportar relatório'], goal: 'report_view', module: null },
+    recommendation_view: { aliases: ['show recommendations','ver recomendações','mostrar recomendações','recommendations','recomendações','what do you recommend','o que você recomenda','what should i do','o que devo fazer','any suggestions','alguma sugestão','insights','análises','analises','what can improve','o que posso melhorar','health score','pontuação','score de saúde'], goal: 'recommendation_view', module: null },
+    workflow_view: { aliases: ['show workflows','ver workflows','mostrar workflows','workflow status','status dos workflows','active workflows','workflows ativos','automation workflows','workflows de automação','my workflows','meus workflows'], goal: 'workflow_view', module: null },
+    transaction_view: { aliases: ['show transactions','ver transações','mostrar transações','transaction history','histórico de transações','recent transactions','transações recentes','on chain history','histórico on chain','where did my money go','pra onde foi meu dinheiro','what did i spend','o que eu gastei'], goal: 'transaction_view', module: null },
+    security_view: { aliases: ['show security','ver segurança','mostrar segurança','security status','status de segurança','permission overview','visão geral de permissões','my permissions','minhas permissões','grants overview','what permissions do i have','quais permissões eu tenho','is my wallet safe','minha carteira está segura','emergency stop','parada de emergência'], goal: 'security_view', module: null },
+    spending_capacity: { aliases: ['how much can i spend','quanto posso gastar','spending capacity','capacidade de gasto','spending limit','limite de gasto','daily limit','limite diário','monthly limit','limite mensal','how much can my wallet spend','quanto minha carteira pode gastar','what can i afford','o que posso pagar'], goal: 'spending_capacity', module: null },
+    // Execute All Schedules (batch schedule execution via Agent Wallet)
+    execute_all_schedules: { aliases: ['execute all schedules','executar todos agendamentos','executar todos os agendamentos','execute all my schedules','execute every schedule','execute pending schedules','executar agendamentos pendentes','run all schedules','rodar todos agendamentos','run all scheduled tasks','execute today schedules','execute today\'s schedules','executar agendamentos de hoje','execute approved schedules','executar agendamentos aprovados','execute failed schedules','executar agendamentos falhos','process all schedules','processar todos agendamentos'], goal: 'execute_all_schedules', module: null },
+    // Bridge Turbo (fast CCTP bridge with vault pre-funding)
+    bridge_turbo: { aliases: ['bridge turbo','turbo bridge','ponte turbo','fast bridge','ponte rápida','ponte rapida','quick bridge','bridge fast','turbo bridging','cctp fast','cross chain turbo','crosschain turbo'], goal: 'bridge_turbo', module: 'bridge' },
+    // Advanced Financial Operations (batch swap + mass payments)
+    batch_swap: { aliases: ['batch swap','swap multiple','multiple swaps','batch de swap','swap batch','swap repeatedly','repeat swap','swaps in batch','trocas em lote','multi swap','executar swaps','execute swaps','executar varias trocas','varios swaps','várias trocas','swaps','trocar varias vezes'], goal: 'batch_swap', module: 'swap' },
+    mass_payment: { aliases: ['mass payment','batch payment','mass send','payroll batch','batch of payments','lote de pagamentos','pagamento em massa','enviar em lote','pagamento em lote','send multiple payments','multiple payments','varios pagamentos','vários pagamentos','batch de pagamentos','mass pay','muitos pagamentos'], goal: 'mass_payment', module: null },
+    crosschain_payroll: { aliases: ['cross chain payroll','crosschain payroll','batch cross chain','cross chain batch','payroll cross chain','folha cross chain','pagamentos cross chain','cross chain mass','mass cross chain','bridge batch','batch bridge','enviar em massa cross','crosschain em massa'], goal: 'crosschain_payroll', module: null }
   };
 
   /* ════════════════════════════════════════
@@ -73,6 +92,26 @@
       var balEl = document.getElementById('sb-bal');
       if(balEl) state.balances.USDC = balEl.textContent || '—';
     }
+    // Enrich with Financial OS context when available
+    try {
+      if (typeof FinancialContext !== 'undefined') {
+        var finCtx = FinancialContext.getSnapshot();
+        state.financialOS = {
+          available: !!finCtx,
+          portfolio: finCtx.portfolio || null,
+          schedules: finCtx.schedules || null,
+          security: finCtx.security || null
+        };
+        if (finCtx.balance) {
+          state.balances.agent = finCtx.balance.agentBalances || {};
+          state.balances.personal = finCtx.balance.personalBalances || {};
+          state.balances.totalUsd = finCtx.balance.totalUsd || 0;
+        }
+        if (finCtx.security) {
+          state.emergencyStop = finCtx.security.emergencyStop || false;
+        }
+      }
+    } catch(e) {}
     return state;
   }
 
@@ -146,6 +185,22 @@
     if(/\b(daily|di[aá]rio|todo dia|every day)\b/.test(low)) p.recurrence = 'daily';
     else if(/\b(weekly|semanal|toda semana|every week)\b/.test(low)) p.recurrence = 'weekly';
     else if(/\b(monthly|mensal|todo m[êe]s|every month)\b/.test(low)) p.recurrence = 'monthly';
+
+    // Count — for batch operations (e.g. "execute 20 swaps", "send 50 payments")
+    var countM = low.match(/\b(\d+)\s*(?:swaps|trocas|times|vezes|payments|pagamentos|ops|executions|operações|operações|operações)\b/);
+    if(countM) p.count = parseInt(countM[1]);
+    // Also detect "N x" or "xN" pattern ("20x", "20 x")
+    if(!p.count){
+      var xM = low.match(/\b(\d+)\s*x\b/);
+      if(xM) p.count = parseInt(xM[1]);
+    }
+
+    // For batch operations, distinguish count from amount:
+    // "swap 25 USDC to EURC 20 times" → count=20, amount=25
+    // "20 swaps of 25 USDC" → count=20, amount=25
+    if(p.count && p.amount && p.count > p.amount && (goal === 'batch_swap' || goal === 'mass_payment' || goal === 'crosschain_payroll')){
+      // The smaller number is likely the per-item amount, count stays
+    }
 
     return p;
   }
@@ -276,7 +331,25 @@
       agent_reputation: 'AGENT_REPUTATION',
       agent_allow: 'AGENT_ALLOW', agent_limit: 'AGENT_LIMIT',
       agent_disable_op: 'AGENT_DISABLE_OP', agent_extend: 'AGENT_EXTEND',
-      agent_mission: 'AGENT_MISSION', agent_treasury: 'AGENT_TREASURY'
+      agent_mission: 'AGENT_MISSION', agent_treasury: 'AGENT_TREASURY',
+      // Financial OS read-only queries
+      portfolio_view: 'FINANCIAL_OS_PORTFOLIO',
+      vault_view: 'FINANCIAL_OS_VAULT',
+      gas_view: 'FINANCIAL_OS_GAS',
+      schedule_view: 'FINANCIAL_OS_SCHEDULE',
+      report_view: 'FINANCIAL_OS_REPORT',
+      recommendation_view: 'FINANCIAL_OS_RECOMMENDATION',
+      workflow_view: 'FINANCIAL_OS_WORKFLOW',
+      transaction_view: 'FINANCIAL_OS_TRANSACTION',
+      security_view: 'FINANCIAL_OS_SECURITY',
+      spending_capacity: 'FINANCIAL_OS_SPENDING',
+      // Execute All Schedules + Bridge Turbo
+      execute_all_schedules: 'EXECUTE_ALL_SCHEDULES',
+      bridge_turbo: 'BRIDGE_TURBO',
+      // Advanced Financial Operations
+      batch_swap: 'BATCH_SWAP',
+      mass_payment: 'MASS_PAYMENT',
+      crosschain_payroll: 'CROSSCHAIN_PAYROLL'
     };
     return map[goal] || 'DEFAULT';
   }

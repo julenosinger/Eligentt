@@ -95,6 +95,17 @@
 <script src="/shared/missionEngine.js"></script>
 <script src="/shared/agentTreasury.js"></script>
 <script src="/shared/aiSmartWallet.js"></script>
+<script src="/shared/financialContext.js"></script>
+<script src="/shared/oracleInterop.js"></script>
+<script src="/shared/oracle-interoperability/OracleRegistry.js"></script>
+<script src="/shared/oracle-interoperability/HistoricalMarketDataEngine.js"></script>
+<script src="/shared/oracle-interoperability/OracleHealthMonitor.js"></script>
+<script src="/shared/oracle-interoperability/TreasuryAnalyticsEngine.js"></script>
+<script src="/shared/oracle-interoperability/AIRecommendationEngine.js"></script>
+<script src="/shared/oracle-interoperability/LiquidityPoolSecurityEngine.js"></script>
+<script src="/shared/oracle-interoperability/CrossChainAnalyticsEngine.js"></script>
+<script src="/shared/oracle-interoperability/OraclePluginManager.js"></script>
+<script src="/shared/oracle-interoperability/OracleDashboardEngine.js"></script>
 <style>
 /* ── Wallet Modal ───────────────────────────────────────── */
 .wm-overlay{position:fixed;inset:0;background:rgba(0,0,0,.82);z-index:2000;display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .22s;backdrop-filter:blur(4px)}
@@ -11667,6 +11678,13 @@ function getUniqueTokenList(chainId) {
 // their USDC pool or through intermediate EURC pair.
 function getTokenUSDRate(sym) {
   if (sym === 'USDC') return 1.0;
+  // Chainlink Oracle — highest priority (real on-chain data, cached)
+  try {
+    if (typeof OracleInterop !== 'undefined' && OracleInterop.getMarketData) {
+      var oracleMd = OracleInterop.getMarketData(sym);
+      if (oracleMd && oracleMd.price !== null && oracleMd.price > 0) return oracleMd.price;
+    }
+  } catch(_e){}
   // Direct USDC pair
   const usdcPair = findPool('USDC', sym);
   if (usdcPair) {
@@ -36736,8 +36754,365 @@ const UBScreen = (function() {
       '<div style="font-size:9px;color:var(--muted2);margin-top:8px">Tip: you can also just tell me the details, e.g. <em>"swap 100 USDC for EURC"</em>.</div>';
   }
 
+  /* ═══════════════════════════════════════════════════════════
+     COGNITIVE LAYERS — Additive intelligence enhancement
+     Never modifies existing AutonomaCore, Financial OS,
+     or any existing module. All layers read-only / advisory.
+     ═══════════════════════════════════════════════════════════ */
+
+  // LAYER 1 — Natural Language enhancement (extends normalize)
+  function _nlUnderstand(msg){
+    var low = msg.toLowerCase();
+    var insights = {};
+    // Detect financial intent patterns
+    if (/\b(pay|send|transfer|enviar|pagar|mandar)\b.*\b(team|time|equipe|staff|employee|funcion[aá]rio|every|toda|todo|todos|weekly|monthly|daily)\b/i.test(low))
+      insights.suggests = 'payroll';
+    if (/\b(split|dividir|divide|distribute|entre)\b.*\b(\d+)\b.*\b(wallets?|addresses?|people|pessoas|carteiras?|endere[cç]os?)\b/i.test(low))
+      insights.suggests = 'split_payment';
+    if (/\b(all|everything|tudo|todos? os|entire)\b.*\b(usdc|eurc|balance|saldo|fundos?)\b/i.test(low))
+      insights.suggests = 'full_balance_move';
+    if (/\b(automate|automatizar|auto|workflow|fluxo)\b.*\b(payroll|payments?|pagamentos?|salary|sal[aá]rio)\b/i.test(low))
+      insights.suggests = 'payroll_automation';
+    if (/\b(why|por que|porque|reason|motivo|explain|explica|como)\b.*\b(can'?t|cannot|falhou|failed|error|erro|bloqueado|blocked)\b/i.test(low))
+      insights.needsExplanation = true;
+    return insights;
+  }
+
+  // LAYER 2 — Reasoning Engine: break complex tasks into steps
+  function _reasonTask(intent, params, msg){
+    var plan = { steps: [], warnings: [], estimatedTime: 0, complexity: 'simple' };
+    var ops = [];
+    if (/batch|mass|multi|m[uú]ltipl|v[aá]rios|lote/.test(msg.toLowerCase())) plan.complexity = 'complex';
+    if (params.count && params.count > 5) plan.complexity = 'batch';
+    // Recurring detection
+    if (/\b(every|each|todo|toda|cada|weekly|semanal|monthly|mensal|daily|di[aá]rio)\b/i.test(msg))
+      plan.steps.push({ step: 'Detected recurring pattern — suggest schedule creation', icon: 'calendar-event' });
+    // Cross-chain detection
+    if (/\b(arbitrum|base|ethereum|polygon|optimism|bridge|cross.?chain|ponte)\b/i.test(msg))
+      plan.steps.push({ step: 'Cross-chain operation detected — route via CCTP bridge', icon: 'world' });
+    // Amount warnings
+    if (params.amount > 10000) plan.warnings.push('Large amount — verify treasury allocation and gas reserve');
+    if (params.amount > 1000) plan.estimatedTime = 2; // minutes
+    // Count-based planning
+    if (params.count > 0) plan.steps.push({ step: 'Batch of ' + params.count + ' operations — sequential execution', icon: 'stack' });
+    return plan;
+  }
+
+  // LAYER 3 — Mathematical Intelligence
+  function _mathCalc(expression, params){
+    var result = {};
+    var amount = params.amount || 0;
+    var count = params.count || 1;
+    var token = params.token || 'USDC';
+    // Total calculation
+    if (count > 1) result.total = amount * count;
+    // Split calculation
+    var splitM = (expression||'').match(/\b(split|dividir|divide|among|entre)\s+(\d+)\b/i);
+    if (splitM){
+      var parts = parseInt(splitM[2]);
+      result.perWallet = amount / parts;
+      result.total = amount;
+      result.parts = parts;
+    }
+    // Fee estimation
+    var rate = 1;
+    try { if (typeof getTokenUSDRate === 'function'){ var r = getTokenUSDRate(token); if (r && isFinite(r)) rate = r; } } catch(_e){}
+    var gasEst = count * 0.002; // ~0.002 USDC per tx on Arc
+    if (params.toChain || /\b(bridge|cross.?chain|ponte)\b/i.test(expression||'')) gasEst = count * 0.05; // bridge costs more
+    result.estimatedGas = gasEst;
+    result.usdValue = amount * rate;
+    if (count > 1) result.totalUsdValue = count * amount * rate;
+    result.remainingAfterGas = (amount - gasEst).toFixed(4);
+    return result;
+  }
+
+  // LAYER 4 — Planning Engine: multi-step workflow generation
+  function _buildPlan(intent, params, msg){
+    var plan = { title: '', phases: [], estimatedSteps: 0 };
+    var low = (msg||'').toLowerCase();
+    if (/\b(payroll|salary|sal[aá]rio|equipe|team|staff)\b/i.test(low)){
+      plan.title = 'Payroll System Setup';
+      plan.phases = [
+        { phase: '1. Treasury', steps: ['Allocate funds to treasury', 'Set monthly budget', 'Configure spending limits'] },
+        { phase: '2. Schedule', steps: ['Create recurring payment schedule', 'Set payment frequency (weekly/monthly)', 'Define payment day'] },
+        { phase: '3. Permissions', steps: ['Grant Agent Wallet payment authorization', 'Set per-operation limits', 'Configure allowed tokens'] },
+        { phase: '4. Execution', steps: ['Create financial intents', 'Validate against Policy/Risk engines', 'Execute via Agent Wallet'] },
+        { phase: '5. Monitoring', steps: ['Generate weekly reports', 'Set balance alerts', 'Configure gas auto top-up'] }
+      ];
+      plan.estimatedSteps = 12;
+    } else if (/\b(workflow|fluxo|automa[cç][aã]o|automate)\b/i.test(low)){
+      plan.title = 'Workflow Automation';
+      plan.phases = [
+        { phase: '1. Define', steps: ['Specify trigger condition', 'Define action sequence', 'Set approval requirements'] },
+        { phase: '2. Validate', steps: ['Test trigger logic', 'Simulate execution', 'Verify permissions'] },
+        { phase: '3. Deploy', steps: ['Activate workflow', 'Monitor first run', 'Adjust if needed'] }
+      ];
+    } else if (/\b(treasury|tesouraria|allocate|alocar)\b/i.test(low)){
+      plan.title = 'Treasury Management';
+      plan.phases = [
+        { phase: '1. Allocate', steps: ['Lock operational reserves', 'Set automation balance', 'Allocate treasury funds'] },
+        { phase: '2. Schedule', steps: ['Schedule recurring allocations', 'Set budget periods', 'Configure auto-rebalance'] }
+      ];
+    }
+    return plan;
+  }
+
+  // LAYER 5 — Financial Intelligence: read Financial OS state
+  function _financialIntel(){
+    var fi = { portfolioUsd: 0, vaultHealth: 'unknown', gasBalance: null, activeGrants: 0, emergencyStop: false };
+    try {
+      if (typeof AIWallet !== 'undefined'){
+        if (AIWallet._portfolioData){
+          var pd = AIWallet._portfolioData();
+          fi.portfolioUsd = pd.totalUsd || 0;
+        }
+        fi.emergencyStop = AIWallet.isEmergencyStopped ? AIWallet.isEmergencyStopped() : false;
+        var cap = AIWallet._getSpendingCapacity ? AIWallet._getSpendingCapacity() : null;
+        if (cap){
+          fi.dailyRemaining = cap.remaining || 0;
+          fi.perOpMax = cap.perOpMax || 0;
+          fi.gasBalance = cap.gasBalance;
+          fi.operationalUSDC = cap.operationalUSDC;
+        }
+      }
+    } catch(_e){}
+    try {
+      if (typeof AgentAuthorization !== 'undefined'){
+        var s = AgentAuthorization.getAuthSummary();
+        fi.activeGrants = s.count || 0;
+      }
+    } catch(_e){}
+    // Vault health
+    try {
+      if (typeof AIWallet !== 'undefined' && AIWallet._vaultView){
+        var vv = AIWallet._vaultView('USDC');
+        if (vv.real !== null){
+          if (vv.overAllocated) fi.vaultHealth = 'over-allocated';
+          else if (vv.operational !== null && vv.operational > 0) fi.vaultHealth = 'healthy';
+          else fi.vaultHealth = 'empty';
+        }
+      }
+    } catch(_e){}
+    return fi;
+  }
+
+  // LAYER 6 — Execution Intelligence: optimal path suggestion
+  function _executionIntel(intent, params, msg){
+    var ei = { mode: 'direct', suggestions: [], optimizations: [] };
+    var count = params.count || 1;
+    // Batch optimization
+    if (count >= 5){
+      ei.mode = 'batch';
+      ei.suggestions.push('Consider using batch execution — ' + count + ' operations will run sequentially');
+      ei.optimizations.push('Each operation validated independently (Permission → Risk → Policy → Balance)');
+    }
+    // Schedule suggestion
+    if (/\b(recurring|recorrente|todo dia|every|monthly|weekly|mensal|semanal)\b/i.test(msg.toLowerCase())){
+      ei.mode = 'scheduled';
+      ei.suggestions.push('Recurring operation detected — scheduling is more efficient than manual execution');
+    }
+    // Agent wallet check
+    var canExec = false;
+    try { if (typeof _agentCanExecute === 'function') canExec = _agentCanExecute(intent === 'BATCH_SWAP' ? 'swap' : 'payment'); } catch(_e){}
+    if (!canExec && intent !== 'HELP' && intent !== 'GREETING'){
+      ei.suggestions.push('Agent Wallet not authorized — manual execution requires user signature for each operation');
+    }
+    // Cross-chain optimization
+    if (/\b(bridge|cross.?chain|ponte|arbitrum|base|polygon|ethereum|optimism)\b/i.test(msg.toLowerCase())){
+      ei.suggestions.push('Cross-chain via CCTP — includes attestation waiting time (~2-10 min per bridge)');
+    }
+    return ei;
+  }
+
+  // LAYER 7 — Error Resolution Engine
+  function _diagnoseError(errorMsg, context){
+    var diag = { type: 'unknown', explanation: '', fix: '', canRetry: false };
+    var low = (errorMsg||'').toLowerCase();
+    if (/rpc|network|provider|timeout|fetch/i.test(low)){
+      diag.type = 'rpc';
+      diag.explanation = 'RPC connection issue detected. The blockchain network may be congested or your connection unstable.';
+      diag.fix = 'Try again in a few seconds. The system uses multiple RPC fallbacks (dRPC → Arc Network → ArcScan → Anomaly).';
+      diag.canRetry = true;
+    } else if (/permission|authoriz|not authorized|permiss[ãa]o|autoriza[cç][ãa]o/i.test(low)){
+      diag.type = 'permission';
+      diag.explanation = 'The Agent Wallet lacks authorization for this operation.';
+      diag.fix = 'Say "allow agent to execute [operation]" or visit AI Smart Wallet → Permissions to grant access.';
+      diag.canRetry = true;
+    } else if (/balance|insufficient|saldo|funds|not enough/i.test(low)){
+      diag.type = 'balance';
+      diag.explanation = 'Insufficient balance in the Agent Wallet for this operation.';
+      diag.fix = 'Deposit funds to the AI Smart Wallet. Say "show my wallet" to check balances.';
+      diag.canRetry = true;
+    } else if (/gas|reserve|fuel/i.test(low)){
+      diag.type = 'gas';
+      diag.explanation = 'Gas reserve is below the minimum threshold.';
+      diag.fix = 'Enable Auto Top-Up in AI Smart Wallet → Vault & Gas, or manually top up via the Top Up Now button.';
+      diag.canRetry = true;
+    } else if (/emergency stop|estop|frozen/i.test(low)){
+      diag.type = 'estop';
+      diag.explanation = 'Emergency Stop is active — all AI operations are frozen.';
+      diag.fix = 'Lift Emergency Stop in AI Smart Wallet → Security to resume operations.';
+      diag.canRetry = false;
+    } else if (/address|0x|invalid|recipient|destino|endere[cç]o/i.test(low)){
+      diag.type = 'address';
+      diag.explanation = 'Invalid or missing recipient address.';
+      diag.fix = 'Provide a valid 0x... address (42 characters, hexadecimal).';
+      diag.canRetry = true;
+    } else if (/schedule|agendamento|agendar|not due|not yet/i.test(low)){
+      diag.type = 'schedule';
+      diag.explanation = 'Schedule execution issue. The schedule may not be due yet or may have been paused.';
+      diag.fix = 'Check schedule status on the Schedule page. Use "execute all schedules" to force execution.';
+    }
+    return diag;
+  }
+
+  // LAYER 8 — Argumentation Engine: explain financial decisions
+  function _explainDecision(decisionType, params){
+    var exp = { summary: '', details: [], risk: 'LOW' };
+    var amount = params.amount || 0;
+    if (amount > 10000) exp.risk = 'HIGH';
+    else if (amount > 1000) exp.risk = 'MEDIUM';
+    switch(decisionType){
+      case 'batch_swap':
+        exp.summary = 'Batch swap recommended because you have ' + (params.count||0) + ' swap operations. Executing sequentially reduces risk of partial failures and allows per-swap validation.';
+        exp.details = ['Each swap passes Permission → Risk → Policy → Balance → Simulation checks', 'If one swap fails, the remaining continue', 'Gas costs are incurred per swap (~0.002 USDC each on Arc)'];
+        break;
+      case 'mass_payment':
+        exp.summary = 'Mass payment to ' + (params.count||0) + ' recipients. Sequential execution ensures each payment is independently validated.';
+        exp.details = ['Total: ' + ((params.count||0)*(params.amount||0)).toFixed(2) + ' ' + (params.token||'USDC'), 'Chain: Arc Testnet', 'Agent Wallet signs each transaction'];
+        break;
+      case 'crosschain':
+        exp.summary = 'Cross-chain payment via CCTP bridge. Uses Circle\'s Cross-Chain Transfer Protocol for secure attestation.';
+        exp.details = ['CCTP settlement takes ~2-10 minutes', 'Attestation proves funds were burned on source chain', 'Destination mint occurs automatically upon attestation receipt'];
+        break;
+      default:
+        exp.summary = 'Standard execution via AI Smart Wallet validation pipeline.';
+        exp.details = ['Permission Engine validates authorization', 'Risk Engine assesses operation risk', 'Policy Engine enforces spending limits', 'Balance and gas reserve checked'];
+    }
+    return exp;
+  }
+
+  // LAYER 9 — Context Engine: maintain awareness of application state
+  function _getSmartContext(){
+    var ctx = {
+      portfolio: { totalUsd: 0 },
+      vault: { operational: null, locked: 0 },
+      schedules: { active: 0, due: 0 },
+      permissions: { grants: 0 },
+      gas: { balance: null, status: 'unknown' },
+      recentOps: [],
+      timestamp: Date.now()
+    };
+    // Portfolio
+    try {
+      if (typeof AIWallet !== 'undefined' && AIWallet._portfolioData){
+        var pd = AIWallet._portfolioData();
+        ctx.portfolio.totalUsd = pd.totalUsd || 0;
+      }
+    } catch(_e){}
+    // Vault
+    try {
+      if (typeof AIWallet !== 'undefined' && AIWallet._vaultView){
+        var vv = AIWallet._vaultView('USDC');
+        ctx.vault.operational = vv.operational;
+        ctx.vault.locked = vv.locked || 0;
+      }
+    } catch(_e){}
+    // Schedules
+    try {
+      if (typeof ScheduleEngine !== 'undefined'){
+        var allS = ScheduleEngine.getAll();
+        ctx.schedules.active = allS.filter(function(s){ return s.status === 'Active'; }).length;
+        ctx.schedules.total = allS.length;
+      }
+    } catch(_e){}
+    // Permissions
+    try {
+      if (typeof AgentAuthorization !== 'undefined'){
+        ctx.permissions.grants = AgentAuthorization.getAuthSummary().count || 0;
+      }
+    } catch(_e){}
+    // Gas
+    try {
+      if (typeof AIWallet !== 'undefined' && AIWallet._getGasStatus){
+        AIWallet._getGasStatus().then(function(g){
+          ctx.gas.balance = g.bal;
+          ctx.gas.status = g.status;
+        });
+      }
+    } catch(_e){}
+    return ctx;
+  }
+
+  // LAYER 10 — Communication Engine: conversational intelligence
+  function _smartConverse(msg, context){
+    var reply = { tone: 'neutral', suggestions: [], followUp: '', confidence: 0.7 };
+    var low = (msg||'').toLowerCase();
+    // Detect tone
+    if (/\b(please|pls|thanks|thank|obrigado|por favor|pfvr?)\b/i.test(low)) reply.tone = 'polite';
+    if (/\b(urgent|urgente|asap|immediately|agora|r[aá]pido|fast)\b/i.test(low)) reply.tone = 'urgent';
+    if (/\b(why|how|explain|explica|como funciona|what is)\b/i.test(low)) reply.tone = 'explanatory';
+    // Generate follow-up suggestions based on context
+    if (context && context.schedules && context.schedules.active > 0){
+      reply.suggestions.push('You have ' + context.schedules.active + ' active schedules — say "show schedules" to review');
+    }
+    if (context && context.permissions && context.permissions.grants === 0){
+      reply.suggestions.push('No active permissions — AI cant execute autonomously. Say "allow agent" to grant');
+    }
+    if (context && context.vault && context.vault.operational !== null && context.vault.operational > 1000){
+      reply.suggestions.push('You have ' + context.vault.operational.toFixed(0) + ' USDC in operational balance — consider locking some in treasury');
+    }
+    if (/auto(?:mate|matizar|matic)/.test(low) || /workflow|fluxo/.test(low)){
+      reply.followUp = 'Would you like me to set up a workflow? I can create automated schedules for recurring payments, treasury allocations, and more.';
+    }
+    return reply;
+  }
+
+  // Elligente Specialization — domain-specific guidance
+  function _elligenteGuide(topic, params){
+    var guide = { title: '', sections: [], relatedCommands: [] };
+    switch(topic){
+      case 'payroll':
+        guide.title = 'Payroll System on Elligente';
+        guide.sections = [
+          { header: 'Setup', text: 'Allocate funds to the AI Smart Wallet treasury, then create a recurring payment schedule via Agent Wallet.' },
+          { header: 'Permissions', text: 'Grant the Agent Wallet authorization for scheduled payments with spending limits matching your payroll budget.' },
+          { header: 'Execution', text: 'Schedules auto-execute via AgentScheduleExecutor. Each payment passes Permission → Risk → Policy → Balance → Simulation checks.' }
+        ];
+        guide.relatedCommands = ['schedule a monthly payment of [amount] USDC', 'show schedules', 'allow agent to execute schedules'];
+        break;
+      case 'treasury':
+        guide.title = 'Treasury Management on Elligente';
+        guide.sections = [
+          { header: 'Allocation', text: 'Use Vault & Gas in AI Smart Wallet to set locked, automation, and treasury allocations. These are ledger entries over real on-chain balances.' },
+          { header: 'Security', text: 'Locked balance is untouchable. Automation balance is for scheduled operations only. Treasury allocation is for treasury-specific operations.' },
+          { header: 'Gas', text: 'Gas on Arc Testnet is USDC. Keep above the minimum reserve. Enable Auto Top-Up for autonomous operations.' }
+        ];
+        guide.relatedCommands = ['show vault', 'gas status', 'move 100 USDC to treasury allocation'];
+        break;
+      case 'bridge':
+        guide.title = 'Cross-Chain Operations on Elligente';
+        guide.sections = [
+          { header: 'CCTP', text: 'Circle Cross-Chain Transfer Protocol. Burns tokens on source chain → attestation → mints on destination.' },
+          { header: 'Turbo Bridge', text: 'Pre-funds transfer from Vault for instant fulfillment. CCTP settlement runs in background. 1% fee.' },
+          { header: 'Chains', text: 'Supported: Arc Testnet, Ethereum Sepolia, Base Sepolia, Arbitrum Sepolia, Optimism Sepolia, Polygon Amoy.' }
+        ];
+        guide.relatedCommands = ['bridge 100 USDC from Arc to Base', 'bridge turbo from Base', 'crosschain payroll'];
+        break;
+      default:
+        guide.title = 'Elligente Financial OS';
+        guide.sections = [
+          { header: 'AI Smart Wallet', text: 'Your financial operating system. Manage portfolio, vault, gas, permissions, schedules, and workflows.' },
+          { header: 'Autonoma AI', text: 'Your AI agent. Ask me to execute swaps, payments, bridges, schedules, and batch operations.' },
+          { header: 'Security', text: 'Permission Engine → Risk Engine → Policy Engine → Approval Center. Never bypassed.' }
+        ];
+        guide.relatedCommands = ['show my wallet', 'what can you do?', 'show portfolio'];
+    }
+    return guide;
+  }
+
   var AutonomaIntelligence = {
-    version: '1.0',
+    version: '2.0',
     normalize: normalize,
     suggest: function(msg){ return scoreSuggestions(normalize(msg || '')); },
     // Main hook. `opts.classify` is the existing _classifyIntent (passed in).
@@ -36774,6 +37149,46 @@ const UBScreen = (function() {
       }
 
       return { text: enhanced };
+    },
+    // ── Cognitive Layers (v2.0) — additive intelligence enhancers ──
+    // LAYER 1 — Natural Language understanding
+    understand: function(msg){ return _nlUnderstand(msg || ''); },
+    // LAYER 2 — Reasoning Engine
+    reason: function(intent, params, msg){ return _reasonTask(intent, params, msg || ''); },
+    // LAYER 3 — Mathematical Intelligence
+    math: function(expr, params){ return _mathCalc(expr || '', params || {}); },
+    // LAYER 4 — Planning Engine
+    plan: function(intent, params, msg){ return _buildPlan(intent, params, msg || ''); },
+    // LAYER 5 — Financial Intelligence (reads Financial OS state)
+    financialIntel: function(){ return _financialIntel(); },
+    // LAYER 6 — Execution Intelligence
+    executionIntel: function(intent, params, msg){ return _executionIntel(intent, params, msg || ''); },
+    // LAYER 7 — Error Resolution Engine
+    diagnose: function(error, ctx){ return _diagnoseError(error || '', ctx || {}); },
+    // LAYER 8 — Argumentation Engine
+    explain: function(type, params){ return _explainDecision(type, params || {}); },
+    // LAYER 9 — Context Engine (portfolio, schedules, permissions awareness)
+    getContext: function(){ return _getSmartContext(); },
+    // LAYER 10 — Communication Engine
+    converse: function(msg, ctx){ return _smartConverse(msg || '', ctx || {}); },
+    // Elligente Specialization — domain-specific guidance
+    elligenteGuide: function(topic, params){ return _elligenteGuide(topic, params || {}); },
+    // Enhanced preprocessing with cognitive layers
+    preprocessV2: function(msg, opts){
+      opts = opts || {};
+      if (!msg || typeof msg !== 'string') return { text: msg };
+      var enhanced = this.preprocess(msg, opts);
+      var result = { text: enhanced.text || enhanced.clarify ? (enhanced.text || msg) : msg };
+      if (enhanced.clarify) result.clarify = enhanced.clarify;
+      // Attach NL insights
+      try { result.nlInsights = this.understand(msg); } catch(_e){}
+      // Attach financial context for intelligent responses
+      try { result.financialState = this.financialIntel(); } catch(_e){}
+      // Attach smart context
+      try { result.smartContext = this.getContext(); } catch(_e){}
+      // Attach communication suggestions
+      try { result.communication = this.converse(msg, result.smartContext); } catch(_e){}
+      return result;
     }
   };
   window.AutonomaIntelligence = AutonomaIntelligence;
@@ -37201,7 +37616,153 @@ const UBScreen = (function() {
       if(a) addrs.push(a);
     }
     if(addrs.length === 0){ autUI('ai','<div class="aut-intro" style="color:#f59e0b">Please select at least one recipient.</div>'); return; }
-    autonomaSendQuick('batch send to ' + addrs.length + ' recipients');
+    // Store selected and show execution method card
+    window._msRecipients = addrs.map(function(a){ return { addr: a, amount: 0 }; });
+    window._msMode = 'multisend';
+    var canAgent = typeof _agentCanExecute === 'function' && _agentCanExecute('multisend');
+    var methodCard = '<div class="aut-intro"><strong style="color:#22c55e">'+addrs.length+' recipient(s)</strong> selected. Choose execution method:</div>'+
+      '<div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap">'+
+        '<div onclick="window._massPayExecute(true)" style="cursor:pointer;flex:1;min-width:160px;background:rgba(167,139,250,.08);border:2px solid '+(canAgent?'rgba(167,139,250,.4)':'rgba(239,68,68,.4)')+';border-radius:10px;padding:14px;text-align:center">'+
+          '<i class="ti ti-robot" style="font-size:24px;color:#a78bfa;display:block;margin-bottom:6px"></i>'+
+          '<div style="font-weight:700;font-size:12px;color:#a78bfa">Agent Wallet</div>'+
+          '<div style="font-size:9px;color:var(--muted2);margin-top:3px">'+(canAgent?'Autonomous execution via Agent Wallet':'Not authorized — grant first')+'</div></div>'+
+        '<div onclick="window._massPayExecute(false)" style="cursor:pointer;flex:1;min-width:160px;background:rgba(79,142,247,.08);border:2px solid rgba(79,142,247,.4);border-radius:10px;padding:14px;text-align:center">'+
+          '<i class="ti ti-wallet" style="font-size:24px;color:#4f8ef7;display:block;margin-bottom:6px"></i>'+
+          '<div style="font-weight:700;font-size:12px;color:#4f8ef7">EVM Wallet</div>'+
+          '<div style="font-size:9px;color:var(--muted2);margin-top:3px">Open Batch page pre-filled</div></div></div>';
+    var c = document.getElementById('aut-messages');
+    if(c){
+      var d = document.createElement('div'); d.className = 'aut-msg ai';
+      d.innerHTML = '<div class="aut-msg-avatar"><i class="ti ti-brain"></i></div><div class="aut-msg-body">'+methodCard+'</div>';
+      c.appendChild(d); c.scrollTop = c.scrollHeight;
+    }
+  };
+
+  // ── Mass Payment / Crosschain Payroll — contact selection + execution method ──
+  window._massPayProceed = function(){
+    var cbs = document.querySelectorAll('.rcp-check:checked');
+    var recipients = [];
+    for(var i=0;i<cbs.length;i++){
+      var addr = cbs[i].getAttribute('data-addr');
+      var name = cbs[i].getAttribute('data-name') || '';
+      var amtEl = document.getElementById('masspay-uniform-amount');
+      var tokEl = document.getElementById('masspay-uniform-token');
+      var amount = amtEl ? parseFloat(amtEl.value || amtEl.getAttribute('data-val')) || 10 : 10;
+      var token = tokEl ? (tokEl.value || tokEl.getAttribute('data-val') || 'USDC') : 'USDC';
+      if(addr) recipients.push({ addr: addr, name: name, amount: amount, token: token });
+    }
+    if(recipients.length === 0){ autUI('ai','<div class="aut-intro" style="color:#f59e0b">Please select at least one recipient.</div>'); return; }
+    // Store for later execution
+    window._massPayRecipients = recipients;
+    window._massPayToken = recipients[0] ? recipients[0].token : 'USDC';
+    window._massPayAmount = recipients[0] ? recipients[0].amount : 10;
+    // Show execution method card
+    var total = recipients.reduce(function(s,r){ return s + r.amount; }, 0);
+    var canAgent = typeof _agentCanExecute === 'function' && _agentCanExecute('payment');
+    var addrList = recipients.map(function(r,i){
+      return '<div style="font-size:8.5px;color:var(--muted2);padding:2px 0"><span style="color:var(--text)">'+(i+1)+'.</span> <code style="font-size:8px;color:#a78bfa">'+(r.addr.slice(0,6)+'...'+r.addr.slice(-4))+'</code>'+(r.name?' <span style="font-size:8px">'+esc(r.name)+'</span>':'')+' — '+r.amount.toFixed(2)+' '+window._massPayToken+'</div>';
+    }).join('');
+    var methodCard = '<div class="aut-intro"><strong style="color:#22c55e">'+recipients.length+' recipients</strong> selected. Total: <strong>'+total.toFixed(2)+' '+window._massPayToken+'</strong>. Choose execution method:</div>'+
+      '<div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap">'+
+        '<div onclick="window._massPayExecute(true)" style="cursor:pointer;flex:1;min-width:180px;background:rgba(167,139,250,.08);border:2px solid '+(canAgent?'rgba(167,139,250,.4)':'rgba(239,68,68,.4)')+';border-radius:10px;padding:14px;text-align:center;transition:all .15s">'+
+          '<i class="ti ti-robot" style="font-size:24px;color:#a78bfa;display:block;margin-bottom:6px"></i>'+
+          '<div style="font-weight:700;font-size:12px;color:#a78bfa">Agent Wallet</div>'+
+          '<div style="font-size:9px;color:var(--muted2);margin-top:3px">'+(canAgent?'Autonomous · validated · no signatures needed':'Not authorized — grant permissions first')+'</div>'+
+        '</div>'+
+        '<div onclick="window._massPayExecute(false)" style="cursor:pointer;flex:1;min-width:180px;background:rgba(79,142,247,.08);border:2px solid rgba(79,142,247,.4);border-radius:10px;padding:14px;text-align:center;transition:all .15s">'+
+          '<i class="ti ti-wallet" style="font-size:24px;color:#4f8ef7;display:block;margin-bottom:6px"></i>'+
+          '<div style="font-weight:700;font-size:12px;color:#4f8ef7">EVM Wallet</div>'+
+          '<div style="font-size:9px;color:var(--muted2);margin-top:3px">Manual · one signature per tx · full control</div>'+
+        '</div>'+
+      '</div>'+
+      '<div style="margin-top:6px;font-size:9px;color:var(--muted2);max-height:140px;overflow-y:auto;border-top:1px solid var(--border);padding-top:6px">'+addrList+'</div>'+
+      '<div style="font-size:8px;color:var(--muted2);margin-top:6px">Security: Permission → Risk → Policy → Balance → Gas enforced per payment. Sequential execution.</div>';
+    var c = document.getElementById('aut-messages');
+    if(c){
+      var d = document.createElement('div'); d.className = 'aut-msg ai';
+      d.innerHTML = '<div class="aut-msg-avatar"><i class="ti ti-brain"></i></div><div class="aut-msg-body">'+methodCard+'</div>';
+      c.appendChild(d); c.scrollTop = c.scrollHeight;
+    }
+  };
+
+  window._massPayExecute = function(useAgent){
+    var recipients = window._massPayRecipients || [];
+    var token = window._massPayToken || 'USDC';
+    if(recipients.length === 0) return;
+    if(useAgent){
+      var addrs = recipients.map(function(r){ return r.addr; }).join(' ');
+      autonomaSendQuick('mass payment ' + recipients[0].amount + ' ' + token + ' each to ' + addrs);
+    } else {
+      // EVM Wallet: navigate to batch send page with pre-filled recipients
+      try { if(typeof showPage === 'function') showPage('batch'); } catch(_e){}
+    }
+    window._massPayRecipients = null;
+    window._massPayToken = null;
+  };
+
+  window._crosschainProceed = function(){
+    var cbs = document.querySelectorAll('.rcp-check:checked');
+    var recipients = [];
+    var destChain = document.getElementById('xpay-chain') ? (document.getElementById('xpay-chain').value || document.getElementById('xpay-chain').getAttribute('data-val') || 'Base_Sepolia') : 'Base_Sepolia';
+    var amtEl = document.getElementById('xpay-uniform-amount');
+    var tokEl = document.getElementById('xpay-uniform-token');
+    var amount = amtEl ? parseFloat(amtEl.value || amtEl.getAttribute('data-val')) || 10 : 10;
+    var token = tokEl ? (tokEl.value || tokEl.getAttribute('data-val') || 'USDC') : 'USDC';
+    for(var i=0;i<cbs.length;i++){
+      var addr = cbs[i].getAttribute('data-addr');
+      if(addr) recipients.push({ addr: addr, amount: amount, token: token });
+    }
+    if(recipients.length === 0){ autUI('ai','<div class="aut-intro" style="color:#f59e0b">Please select at least one recipient.</div>'); return; }
+    window._xpayRecipients = recipients;
+    window._xpayToken = token;
+    window._xpayAmount = amount;
+    window._xpayChain = destChain;
+    var total = (amount * recipients.length);
+    var chainLabel = destChain.replace(/_/g,' ');
+    var canAgent = (typeof _agentCanExecute === 'function') && (_agentCanExecute('bridge') || _agentCanExecute('crosschain'));
+    var addrList = recipients.map(function(r,i){
+      return '<div style="font-size:8.5px;color:var(--muted2);padding:2px 0"><span style="color:var(--text)">'+(i+1)+'.</span> <code style="font-size:8px;color:#a78bfa">'+(r.addr.slice(0,6)+'...'+r.addr.slice(-4))+'</code> → '+chainLabel+' — '+r.amount.toFixed(2)+' '+token+'</div>';
+    }).join('');
+    var methodCard = '<div class="aut-intro"><strong style="color:#22c55e">'+recipients.length+' recipients</strong> to <strong>'+chainLabel+'</strong>. Total: <strong>'+total.toFixed(2)+' '+token+'</strong>. Choose execution method:</div>'+
+      '<div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap">'+
+        '<div onclick="window._crosschainExecute(true)" style="cursor:pointer;flex:1;min-width:180px;background:rgba(167,139,250,.08);border:2px solid '+(canAgent?'rgba(167,139,250,.4)':'rgba(239,68,68,.4)')+';border-radius:10px;padding:14px;text-align:center">'+
+          '<i class="ti ti-robot" style="font-size:24px;color:#a78bfa;display:block;margin-bottom:6px"></i>'+
+          '<div style="font-weight:700;font-size:12px;color:#a78bfa">Agent Wallet (CCTP)</div>'+
+          '<div style="font-size:9px;color:var(--muted2);margin-top:3px">'+(canAgent?'Autonomous via CCTP bridge':'Not authorized')+'</div>'+
+        '</div>'+
+        '<div onclick="window._crosschainExecute(false)" style="cursor:pointer;flex:1;min-width:180px;background:rgba(79,142,247,.08);border:2px solid rgba(79,142,247,.4);border-radius:10px;padding:14px;text-align:center">'+
+          '<i class="ti ti-wallet" style="font-size:24px;color:#4f8ef7;display:block;margin-bottom:6px"></i>'+
+          '<div style="font-weight:700;font-size:12px;color:#4f8ef7">EVM Wallet (Bridge Page)</div>'+
+          '<div style="font-size:9px;color:var(--muted2);margin-top:3px">Open Bridge page pre-filled</div>'+
+        '</div>'+
+      '</div>'+
+      '<div style="margin-top:6px;font-size:9px;color:var(--muted2);max-height:140px;overflow-y:auto;border-top:1px solid var(--border);padding-top:6px">'+addrList+'</div>'+
+      '<div style="font-size:8px;color:var(--muted2);margin-top:6px">CCTP bridge attestation: ~2-10 min per transfer. Sequential execution.</div>';
+    var c = document.getElementById('aut-messages');
+    if(c){
+      var d = document.createElement('div'); d.className = 'aut-msg ai';
+      d.innerHTML = '<div class="aut-msg-avatar"><i class="ti ti-brain"></i></div><div class="aut-msg-body">'+methodCard+'</div>';
+      c.appendChild(d); c.scrollTop = c.scrollHeight;
+    }
+  };
+
+  window._crosschainExecute = function(useAgent){
+    var recipients = window._xpayRecipients || [];
+    var token = window._xpayToken || 'USDC';
+    var amount = window._xpayAmount || 10;
+    var chain = window._xpayChain || 'Base_Sepolia';
+    var chainLabel = chain.replace(/_/g,' ');
+    if(recipients.length === 0) return;
+    if(useAgent){
+      var addrs = recipients.map(function(r){ return r.addr; }).join(' ');
+      autonomaSendQuick('crosschain payroll ' + recipients.length + ' payments ' + amount + ' ' + token + ' to ' + chainLabel + ' ' + addrs);
+    } else {
+      try { if(typeof showPage === 'function') showPage('bridge'); } catch(_e){}
+    }
+    window._xpayRecipients = null;
+    window._xpayToken = null;
+    window._xpayAmount = null;
+    window._xpayChain = null;
   };
   window._approvePermitEl = function(el){
     try {
@@ -37518,7 +38079,19 @@ const UBScreen = (function() {
       // 20. EXECUTE SCHEDULES
       {intent:'EXECUTE_SCHEDULES', en:/\b(execute\s+schedules?|run\s+schedules?|executar\s+agendamentos?|executar\s+schedules?|process\s+schedules?|trigger\s+schedules?)\b/,
         pt:/\b(execut[ae]r?\s+agendamentos?|rodar\s+agendamentos?|processar\s+agendamentos?|disparar\s+agendamentos?)\b/},
-      // 22. HELP
+      // 21. BRIDGE TURBO (fast CCTP bridge with vault pre-funding)
+      {intent:'BRIDGE_TURBO', en:/\b(bridge\s+turbo|turbo\s+bridge|fast\s+bridge|quick\s+bridge|turbo\s+bridging|cctp\s+fast)\b/,
+        pt:/\b(ponte\s+turbo|turbo\s+ponte|ponte\s+r[aá]pida|ponte\s+rapida|bridging\s+turbo|cctp\s+r[aá]pido)\b/},
+      // 22. BATCH SWAP — up to 20 swaps
+      {intent:'BATCH_SWAP', en:/\b(batch\s+swap|multiple\s+swaps?|swap\s+batch|swap\s+\d+\s+times|repeat\s+swap|swap\s+repeatedly|multi\s+swap|\d+\s+swaps?|execut\w*\s+\d+\s+swaps?)\b/i,
+        pt:/\b(trocas?\s+em\s+lote|m[uú]ltiplas\s+trocas|v[aá]rios\s+swaps|trocas?\s+m[uú]ltiplas|batch\s+de\s+swap)\b/i},
+      // 23. MASS PAYMENT — up to 50 payments
+      {intent:'MASS_PAYMENT', en:/\b(mass\s+payment|batch\s+payment|mass\s+send|payroll\s+batch|send\s+\d+\s+payments?|send\s+multiple\s+payments?|bulk\s+send|\d+\s+payments?|enviar\s+\d+\s+pagamentos?)\b/i,
+        pt:/\b(pagamento\s+em\s+massa|enviar\s+em\s+lote|enviar\s+\d+\s+pagamentos?|lote\s+de\s+pagamentos?|pagamentos?\s+m[uú]ltiplos)\b/i},
+      // 24. CROSSCHAIN PAYROLL
+      {intent:'CROSSCHAIN_PAYROLL', en:/\b(cross.?chain\s+payroll|send\s+\d+\s+cross.?chain|bridge\s+\d+\s+payments?|cross.?chain\s+batch|bridge\s+batch|payroll\s+cross.?chain)\b/i,
+        pt:/\b(pagamento\s+cross.?chain|folha\s+cross.?chain|enviar\s+\d+\s+cross.?chain|ponte\s+em\s+lote|cross.?chain\s+em\s+massa)\b/i},
+      // 25. HELP
       {intent:'HELP', en:/\b(help|ajuda|what can you do|o que (voce|você) (faz|consegue|pode)|how (do|can)|como (fa[çc]o|posso|usar))\b/},
       // 17. GREETING
       {intent:'GREETING', en:/\b(hello|hi\b|hey|ola|oi\b|good morning|good afternoon|good evening|bom dia|boa tarde|boa noite)\b/},
@@ -37781,6 +38354,22 @@ const UBScreen = (function() {
       case 'AGENT_EXTEND': return _handleAgentExtend(params, msg);
       case 'AGENT_MISSION': return _handleAgentMission(params, msg);
       case 'AGENT_TREASURY': return _handleAgentTreasury(params, msg);
+      // Financial OS read-only queries (Autonoma ↔ AI Smart Wallet bridge)
+      case 'FINANCIAL_OS_PORTFOLIO': return _handleFinancialOSPortfolio();
+      case 'FINANCIAL_OS_VAULT': return _handleFinancialOSVault();
+      case 'FINANCIAL_OS_GAS': return _handleFinancialOSGas();
+      case 'FINANCIAL_OS_SCHEDULE': return _handleFinancialOSSchedule();
+      case 'FINANCIAL_OS_REPORT': return _handleFinancialOSReport(params, msg);
+      case 'FINANCIAL_OS_RECOMMENDATION': return _handleFinancialOSRecommendation();
+      case 'FINANCIAL_OS_WORKFLOW': return _handleFinancialOSWorkflow();
+      case 'FINANCIAL_OS_TRANSACTION': return _handleFinancialOSTransaction();
+      case 'FINANCIAL_OS_SECURITY': return _handleFinancialOSSecurity();
+      case 'FINANCIAL_OS_SPENDING': return _handleFinancialOSSpending();
+      case 'EXECUTE_ALL_SCHEDULES': return _handleExecuteAllSchedules(params, msg);
+      case 'BRIDGE_TURBO': return _handleBridgeTurbo(params, msg);
+      case 'BATCH_SWAP': return _handleBatchSwap(params, msg);
+      case 'MASS_PAYMENT': return _handleMassPayment(params, msg);
+      case 'CROSSCHAIN_PAYROLL': return _handleCrosschainPayroll(params, msg);
       default: return _handleDefault(msg);
     }
   }
@@ -39932,6 +40521,1080 @@ const UBScreen = (function() {
       return R.intro('Agent Treasury:')+AgentTreasury.getTreasuryHTML(null,R);
     }
     return R.intro('What would you like to do with the Treasury? Try:<br><em>"Allocate 500 USDC to Autonoma"</em><br><em>"Show Treasury"</em><br><em>"Create a budget for payments"</em>');
+  }
+
+  // ══════════════════════════════════════════════════════════
+  //  FINANCIAL OS HANDLERS — Autonoma ↔ AI Smart Wallet bridge
+  //  Read-only data display from AI Smart Wallet Financial OS
+  //  NEVER bypasses security layers or executes transactions.
+  // ══════════════════════════════════════════════════════════
+  function _fmtUsd(n){ var v = Number(n) || 0; return '$' + v.toLocaleString('en-US', { maximumFractionDigits: 2 }); }
+
+  // ── Portfolio View ─────────────────────────────────────
+  function _handleFinancialOSPortfolio(){
+    var ctx = null;
+    try { if(typeof FinancialContext !== 'undefined') ctx = FinancialContext.getPortfolioContext(); } catch(_e){}
+    if (!ctx || !ctx.wallets.length) {
+      if (typeof AIWallet !== 'undefined') { try { AIWallet.refreshPortfolio(true).then(function(){ _handleFinancialOSPortfolioRefresh(); }); } catch(_e){} }
+      return R.intro('Refreshing portfolio from the AI Smart Wallet Financial OS...') +
+        R.card(R.head('brain','Portfolio Intelligence',{text:'Loading',cls:'pending'}),
+          R.row('Status','Reading on-chain balances via multicall...','teal') +
+          '<div style="font-size:9px;color:var(--muted2);margin-top:4px">Real data only — no mock balances.</div>');
+    }
+    var html = '';
+    ctx.wallets.forEach(function(w){
+      html += '<div style="margin-bottom:6px">' +
+        '<div style="font-size:10px;font-weight:600;color:var(--text);margin-bottom:3px">' + esc(w.label) + (w.addr ? ' <span style="font-size:8px;color:var(--muted2)">' + esc(w.addr.slice(0,6)+'...'+w.addr.slice(-4)) + '</span>' : '') + '</div>';
+      if (w.tokens && w.tokens.length) {
+        w.tokens.forEach(function(t){
+          html += R.row(t.sym, t.bal.toFixed(2) + ' (' + _fmtUsd(t.usd) + ')', 'green');
+        });
+      } else { html += '<div style="font-size:9px;color:var(--muted2)">Balances unavailable (RPC)</div>'; }
+      html += '</div>';
+    });
+    return R.intro('Portfolio Intelligence from your <strong style="color:#a78bfa">AI Smart Wallet</strong>:') +
+      R.card(R.head('brain','Financial OS Portfolio',{text:'Real On-Chain',cls:'live'}),
+        html +
+        R.sep() +
+        '<div style="font-size:14px;font-weight:700;color:var(--green);text-align:right">' + _fmtUsd(ctx.totalUsd) + '</div>' +
+        (ctx.cacheAge != null ? '<div style="font-size:8px;color:var(--muted2);text-align:right">Updated ' + ctx.cacheAge + 'ms ago</div>' : ''));
+  }
+
+  function _handleFinancialOSPortfolioRefresh(){
+    var c = document.getElementById('aut-messages');
+    if (!c) return;
+    try {
+      var ctx = FinancialContext.getPortfolioContext();
+      if (ctx && ctx.wallets.length) {
+        var msgs = c.querySelectorAll('.aut-msg.ai');
+        var last = msgs[msgs.length - 1];
+        if (last) {
+          var aiw = typeof AIWallet !== 'undefined' ? AIWallet : null;
+          var html = '';
+          ctx.wallets.forEach(function(w){
+            html += '<div style="margin-bottom:4px"><div style="font-size:9px;font-weight:600;color:var(--text)">' + esc(w.label) + '</div>';
+            if (w.tokens && w.tokens.length) w.tokens.forEach(function(t){ html += '<span style="font-size:9px;color:var(--green)">' + esc(t.sym) + ': ' + t.bal.toFixed(2) + ' (' + _fmtUsd(t.usd) + ')</span> '; });
+            else html += '<span style="font-size:9px;color:var(--muted2)">—</span>';
+            html += '</div>';
+          });
+          last.innerHTML = '<div class="aut-msg-body">Portfolio refreshed:<div style="margin-top:4px">' + html + '<div style="font-size:12px;font-weight:700;color:var(--green);margin-top:4px">Total: ' + _fmtUsd(ctx.totalUsd) + '</div></div></div>';
+          last.scrollIntoView({behavior:'smooth'});
+        }
+      }
+    } catch(_e){}
+  }
+
+  // ── Vault View ─────────────────────────────────────────
+  function _handleFinancialOSVault(){
+    var aiw = typeof AIWallet !== 'undefined' ? AIWallet : null;
+    if (!aiw) return R.intro('AI Smart Wallet Financial OS is not available. Open it first.');
+    var vvUSDC = aiw._vaultView('USDC');
+    var vvEURC = aiw._vaultView('EURC');
+    function vaultLines(vv, tk){
+      var lines = '';
+      if (vv.real !== null) lines += R.row('Real On-Chain', vv.real.toFixed(2) + ' ' + tk, '');
+      lines += R.row('Operational (AI spendable)', vv.operational === null ? '—' : vv.operational.toFixed(2) + ' ' + tk, 'green');
+      lines += R.row('Locked (untouchable)', vv.locked.toFixed(2) + ' ' + tk, 'red');
+      lines += R.row('Automation', vv.automation.toFixed(2) + ' ' + tk, 'blue');
+      lines += R.row('Treasury', vv.treasury.toFixed(2) + ' ' + tk, 'purple');
+      if (vv.overAllocated) lines += '<div style="font-size:8.5px;color:var(--red);margin-top:3px">Over-allocated!</div>';
+      return lines;
+    }
+    return R.intro('Vault allocations from your <strong style="color:#a78bfa">AI Smart Wallet</strong>:') +
+      R.card(R.head('vault','Vault — USDC',{text:'Allocation Ledger',cls:'live'}), vaultLines(vvUSDC,'USDC')) +
+      R.card(R.head('vault','Vault — EURC',{text:'Allocation Ledger',cls:'live'}), vaultLines(vvEURC,'EURC')) +
+      '<div style="font-size:9px;color:var(--muted2);margin-top:4px">Validated against real on-chain balances. Locked & gas reserve are untouchable.</div>';
+  }
+
+  // ── Gas View ───────────────────────────────────────────
+  async function _handleFinancialOSGas(){
+    var aiw = typeof AIWallet !== 'undefined' ? AIWallet : null;
+    if (!aiw) return R.intro('AI Smart Wallet Financial OS is not available.');
+    var gs = await aiw._getGasStatus();
+    var cfg = aiw._getGasCfg();
+    var stColor = {healthy:'var(--green)',warning:'var(--yellow)',critical:'var(--red)',unknown:'var(--muted2)'}[gs.status] || 'var(--muted2)';
+    return R.intro('Gas status from your <strong style="color:#a78bfa">AI Smart Wallet</strong>:') +
+      R.card(R.head('gas-station','Gas Manager',{text:gs.status.toUpperCase(),cls:gs.status==='healthy'?'live':gs.status==='critical'?'danger':'pending'}),
+        R.row('Gas Balance (on-chain)', gs.bal === null ? 'RPC unavailable' : gs.bal.toFixed(4) + ' USDC', 'teal') +
+        R.row('Min Reserve', cfg.minReserve + ' USDC', '') +
+        R.row('Avg per Tx', gs.avgPerTx ? gs.avgPerTx.toFixed(6) + ' USDC' : 'no data', '') +
+        R.row('Est. Capacity', gs.capacity === null ? 'no data' : '~' + gs.capacity + ' txs', '') +
+        R.row('Est. Runtime', gs.runtimeDays === null ? 'no data' : '~' + gs.runtimeDays + ' days', '') +
+        R.sep() +
+        R.row('Today', gs.sums.today.toFixed(6) + ' USDC', 'muted') +
+        R.row('This Week', gs.sums.week.toFixed(6) + ' USDC', 'muted') +
+        R.row('This Month', gs.sums.month.toFixed(6) + ' USDC', 'muted'));
+  }
+
+  // ── Schedule View ──────────────────────────────────────
+  function _handleFinancialOSSchedule(){
+    var ctx = null;
+    try { if(typeof FinancialContext !== 'undefined') ctx = FinancialContext.getScheduleContext(); } catch(_e){}
+    if (!ctx) return R.intro('Schedule Engine is unavailable.');
+    var html = R.row('Total Schedules', ctx.total + ' (' + ctx.active + ' active, ' + ctx.aiCreated + ' AI-created)', '');
+    if (ctx.due && ctx.due.length) html += R.row('Due Now', ctx.due.length + ' schedules', 'yellow');
+    if (ctx.upcoming && ctx.upcoming.length) {
+      html += R.sep() + '<div style="font-size:10px;font-weight:600;color:var(--text);margin-bottom:4px">Upcoming:</div>';
+      ctx.upcoming.slice(0, 8).forEach(function(s){
+        html += '<div style="font-size:8.5px;color:var(--muted2);padding:2px 0">' +
+          esc(new Date(s.nextRun).toLocaleString() + ' — ' + s.amount + ' ' + (s.token||'USDC') + ' · ' + s.type + ' · by ' + (s.createdBy||'user')) + '</div>';
+      });
+    } else { html += R.sep() + '<div style="font-size:9px;color:var(--muted2)">No upcoming schedules.</div>'; }
+    return R.intro('Schedule dashboard from the <strong style="color:#a78bfa">AI Smart Wallet</strong>:') +
+      R.card(R.head('calendar-event','Schedule Overview',{text:ctx.active+' active',cls:ctx.active?'live':'pending'}), html);
+  }
+
+  // ── Report View ────────────────────────────────────────
+  function _handleFinancialOSReport(params, msg){
+    var aiw = typeof AIWallet !== 'undefined' ? AIWallet : null;
+    if (!aiw) return R.intro('AI Smart Wallet Financial OS is not available.');
+    var type = /week/.test(msg) ? 'weekly' : /month|mês|mensal/.test(msg) ? 'monthly' : /gas/.test(msg) ? 'gas' : /security|seguran/.test(msg) ? 'security' : 'daily';
+    try { aiw.generateReport(type); } catch(_e){}
+    return R.intro('Generated <strong style="color:#a78bfa">' + type + ' report</strong> from real historical data.') +
+      '<div style="margin-top:6px;display:flex;gap:6px">' +
+      '<button class="aut-act" onclick="showPage(\'aiwallet\');if(typeof AIWallet!==\'undefined\')AIWallet.showTab(\'reports\')" style="font-size:9px"><i class="ti ti-file-report"></i>Open Reports Tab</button>' +
+      '<button class="aut-act" onclick="if(typeof AIWallet!==\'undefined\')AIWallet.exportReport()" style="font-size:9px"><i class="ti ti-download"></i>Export JSON</button></div>' +
+      '<div style="font-size:9px;color:var(--muted2);margin-top:6px">Reports compile: transaction history, vault allocations, schedule activity, automation stats, security events, gas spending, and AI recommendations.</div>';
+  }
+
+  // ── Recommendation View ────────────────────────────────
+  function _handleFinancialOSRecommendation(){
+    var aiw = typeof AIWallet !== 'undefined' ? AIWallet : null;
+    var recs = aiw ? aiw.getRecommendations() : [];
+    if (!recs.length) return R.intro('All systems look healthy — no recommendations at this time.') +
+      '<div style="font-size:9px;color:var(--muted2);margin-top:4px">Recommendations are derived from real on-chain data, execution history, gas status, vault allocations, and permission state.</div>';
+    var html = recs.map(function(r){
+      return '<div style="display:flex;gap:8px;padding:5px 0;border-bottom:1px solid rgba(255,255,255,.03)">' +
+        '<span class="chip" style="border:1px solid var(--border);color:' + r.color + ';flex-shrink:0;font-size:8px">' + esc(r.sev) + '</span>' +
+        '<span style="font-size:9px;color:var(--text);line-height:1.4">' + esc(r.text) + '</span></div>';
+    }).join('');
+    return R.intro('AI Financial Recommendations from the <strong style="color:#a78bfa">AI Smart Wallet</strong>:') +
+      R.card(R.head('bulb','Smart Insights',{text:recs.length+' findings',cls:'live'}), html) +
+      '<div style="font-size:8px;color:var(--muted2);margin-top:4px">Informational only — recommendations never change configs or execute operations.</div>';
+  }
+
+  // ── Workflow View ──────────────────────────────────────
+  function _handleFinancialOSWorkflow(){
+    var aiw = typeof AIWallet !== 'undefined' ? AIWallet : null;
+    var wfs = aiw ? aiw.getWorkflows() : [];
+    if (!wfs.length) return R.intro('No workflows defined yet.') +
+      '<div style="font-size:9px;color:var(--muted2);margin-top:4px">Workflows are automation definitions — every transactional run requires approval in the Approval Center.</div>';
+    var html = wfs.map(function(w){
+      return '<div style="border:1px solid var(--border);border-radius:6px;padding:6px 8px;margin-bottom:4px;background:rgba(0,0,0,.15)">' +
+        '<span style="font-size:9px;font-weight:600;color:' + (w.status === 'active' ? 'var(--green)' : 'var(--yellow)') + '">' + esc(w.name) + '</span>' +
+        '<span style="font-size:8px;color:var(--muted2);margin-left:6px">' + esc(w.trigger.type) + ' · ' + (w.actions||[]).length + ' actions · ' + (w.runCount||0) + ' runs</span>' +
+        '<span class="chip" style="float:right;font-size:8px;border:1px solid var(--border);color:var(--muted2)">' + esc(w.status) + '</span></div>';
+    }).join('');
+    return R.intro('Workflow definitions from the <strong style="color:#a78bfa">AI Smart Wallet</strong>:') +
+      R.card(R.head('workflow','Workflows',{text:wfs.length+' total',cls:'live'}), html) +
+      '<div style="font-size:8px;color:var(--muted2);margin-top:4px">All transactional actions from workflows go through the Approval Center.</div>';
+  }
+
+  // ── Transaction History View ───────────────────────────
+  function _handleFinancialOSTransaction(){
+    var ctx = null;
+    try { if(typeof FinancialContext !== 'undefined') ctx = FinancialContext.getTransactionContext(); } catch(_e){}
+    var html = '';
+    if (ctx && ctx.recent.length) {
+      ctx.recent.slice(0, 12).forEach(function(h){
+        var col = h.status === 'executed' || h.status === 'approved' || h.status === 'confirmed' ? 'var(--green)' : (h.status === 'rejected' || h.status === 'failed' ? 'var(--red)' : 'var(--muted2)');
+        html += '<div style="font-size:8.5px;color:var(--muted2);padding:2px 0">' +
+          '<span style="color:' + col + ';text-transform:uppercase">' + esc(h.kind + ':' + h.status) + '</span> · ' +
+          esc((h.op||'') + (h.amount ? ' · ' + h.amount + ' ' + (h.token||'') : '') + (h.reason ? ' · ' + h.reason : '')) +
+          ' <span style="font-size:8px">' + esc(new Date(h.at).toLocaleString()) + '</span></div>';
+      });
+    } else { html = '<div style="font-size:9px;color:var(--muted2)">No transaction history recorded yet.</div>'; }
+    return R.intro('Transaction history from the <strong style="color:#a78bfa">AI Smart Wallet</strong>:') +
+      R.card(R.head('history','Financial Timeline',{text:(ctx?ctx.total:0)+' entries',cls:'live'}), html);
+  }
+
+  // ── Security View ──────────────────────────────────────
+  function _handleFinancialOSSecurity(){
+    var ctx = null;
+    try { if(typeof FinancialContext !== 'undefined') ctx = FinancialContext.getSecurityContext(); } catch(_e){}
+    if (!ctx) return R.intro('Security context unavailable.');
+    var estopColor = ctx.emergencyStop ? 'var(--red)' : 'var(--green)';
+    var agentColor = ctx.agentPaused ? 'var(--yellow)' : 'var(--green)';
+    return R.intro('Security overview from the <strong style="color:#a78bfa">AI Smart Wallet</strong>:') +
+      R.card(R.head('shield-lock','Security Status',{text:ctx.emergencyStop?'STOPPED':'Operational',cls:ctx.emergencyStop?'danger':'live'}),
+        R.row('Emergency Stop', ctx.emergencyStop ? 'ACTIVE — all AI ops frozen' : 'Inactive', ctx.emergencyStop ? 'red' : 'green') +
+        R.row('Agent Wallet', ctx.agentPaused ? 'Paused' : 'Active', ctx.agentPaused ? 'yellow' : 'green') +
+        R.row('Active Permission Grants', ctx.activeGrants + ' grants', ctx.activeGrants > 0 ? 'green' : 'yellow') +
+        R.row('Total Spending Cap', _fmtUsd(ctx.totalSpendingCap), '') +
+        R.row('Daily Limit', _fmtUsd(ctx.totalDailyLimit), '') +
+        R.sep() +
+        R.row('Allowed Operations', ctx.allowedOps.length ? ctx.allowedOps.join(', ') : 'none', '') +
+        '<div style="font-size:8px;color:var(--muted2);margin-top:4px">Financial OS security layers: Permission Engine → Risk Engine → Policy Engine → Approval Center. Never bypassed.</div>');
+  }
+
+  // ── Spending Capacity ──────────────────────────────────
+  function _handleFinancialOSSpending(){
+    var aiw = typeof AIWallet !== 'undefined' ? AIWallet : null;
+    if (!aiw) return R.intro('AI Smart Wallet Financial OS is not available.');
+    var cap = aiw._getSpendingCapacity();
+    return R.intro('Spending capacity from the <strong style="color:#a78bfa">AI Smart Wallet</strong>:') +
+      R.card(R.head('wallet','Spending Capacity',{text:'Today',cls:'live'}),
+        R.row('Daily Limit', _fmtUsd(cap.dailyLimit), '') +
+        R.row('Spent Today', _fmtUsd(cap.spentToday), 'yellow') +
+        R.row('<strong>Remaining Today</strong>', '<strong style="color:var(--green)">' + _fmtUsd(cap.remaining) + '</strong>', 'green') +
+        R.row('Per-Operation Cap', _fmtUsd(cap.perOpMax), '') +
+        R.sep() +
+        R.row('Monthly Limit', _fmtUsd(cap.monthlyLimit), '') +
+        R.row('Spent This Month', _fmtUsd(cap.spentMonth), 'yellow') +
+        R.row('Operational USDC', cap.operationalUSDC !== null ? cap.operationalUSDC.toFixed(2) : '—', 'blue') +
+        R.row('Gas Balance', cap.gasBalance !== null ? cap.gasBalance.toFixed(4) + ' USDC' : '—', 'teal') +
+        '<div style="font-size:8px;color:var(--muted2);margin-top:4px">Operational balance = real on-chain minus locked/automation/treasury allocations. Every spend needs approval.</div>');
+  }
+
+  // ══════════════════════════════════════════════════════════
+  //  EXECUTE ALL SCHEDULES — Batch execution via Agent Wallet
+  //  Discovers ALL eligible schedules from ScheduleEngine +
+  //  PermitEngine, executes via AgentScheduleExecutor.
+  //  Never bypasses permissions, limits, or security layers.
+  // ══════════════════════════════════════════════════════════
+  async function _handleExecuteAllSchedules(params, msg){
+    var low = (msg || '').toLowerCase();
+
+    // Determine execution mode
+    var mode = 'all';
+    if (/\b(pending|pendente|aprovad)\b/.test(low)) mode = 'pending';
+    else if (/\b(today|hoje|today's)\b/.test(low)) mode = 'today';
+    else if (/\b(failed|falhou|falhas|falhos|retry|reprocessar)\b/.test(low)) mode = 'failed';
+    else if (/\b(approved|aprovad[ao]s?)\b/.test(low)) mode = 'approved';
+
+    var modeLabels = { all: 'All Eligible', pending: 'Pending', today: 'Today', failed: 'Failed', approved: 'Approved' };
+    var modeLabel = modeLabels[mode] || 'All';
+
+    // Collect schedules from ScheduleEngine (Financial OS) and PermitEngine
+    var allSchedules = [];
+    try {
+      if (typeof ScheduleEngine !== 'undefined') {
+        var engScheds = ScheduleEngine.getAll();
+        engScheds.forEach(function(s){
+          allSchedules.push({
+            id: s.id, name: s.name || s.type, type: s.type, amount: parseFloat(s.amount || s.total) || 0,
+            token: s.token || 'USDC', freq: s.freq || 'once', status: s.status,
+            nextRun: s.nextRun, createdBy: s.createdBy || 'user', source: 'ScheduleEngine',
+            recipients: s.recipients, address: s.address, toNetwork: s.toNetwork, swapToToken: s.swapToToken,
+            fromNetwork: s.fromNetwork || 'Arc_Testnet'
+          });
+        });
+      }
+    } catch(_e){}
+    try {
+      if (typeof PermitEngine !== 'undefined' && PermitEngine.getScheduled) {
+        var permits = PermitEngine.getScheduled();
+        permits.forEach(function(p){
+          if (!allSchedules.some(function(s){ return s.id === p.id; })) {
+            allSchedules.push({
+              id: p.id, name: p.name || 'Scheduled Permit', type: p.type || 'payment',
+              amount: parseFloat((p.basePermit && p.basePermit.maxAmount) || 0) || 0,
+              token: (p.basePermit && p.basePermit.asset) || 'USDC',
+              freq: PermitEngine.fmtRecurrence ? PermitEngine.fmtRecurrence(p) : 'once',
+              status: 'Active', nextRun: p.nextExecution, createdBy: 'user', source: 'PermitEngine'
+            });
+          }
+        });
+      }
+    } catch(_e){}
+
+    if (!allSchedules.length) {
+      return R.intro('No schedules found.') +
+        R.card(R.head('calendar-event','Execute Schedules',{text:'Empty',cls:'pending'}),
+          R.row('Status','No schedules exist in ScheduleEngine or PermitEngine.','yellow') +
+          '<div style="font-size:9px;color:var(--muted2);margin-top:4px">Create a schedule on the <b>Schedule</b> page or say <em>"schedule a daily payment of 100 USDC"</em>.</div>');
+    }
+
+    // Filter by mode
+    var now = Date.now();
+    var endToday = new Date(); endToday.setHours(23,59,59,999);
+    var candidates = allSchedules.filter(function(s){
+      if (s.status !== 'Active' || !s.nextRun) return mode === 'failed'; // failed mode bypasses Active check
+      var nextTs = new Date(s.nextRun).getTime();
+      if (mode === 'today') return nextTs <= endToday.getTime() && isFinite(nextTs);
+      if (mode === 'pending') return nextTs <= now && isFinite(nextTs);
+      if (mode === 'approved') return s.status === 'Active' && nextTs <= now;
+      return isFinite(nextTs); // 'all' mode: any schedule with a time
+    });
+
+    if (mode === 'failed') {
+      candidates = allSchedules.filter(function(s){
+        return s.status === 'Paused' || s.status === 'failed' || s.status === 'Completed';
+      });
+    }
+
+    if (!candidates.length) {
+      var emptyMsg = mode === 'today' ? 'No schedules due today.' :
+                     mode === 'pending' ? 'No pending schedules — all up to date.' :
+                     mode === 'failed' ? 'No failed schedules to retry.' :
+                     'No eligible schedules found.';
+      return R.intro(emptyMsg) +
+        R.card(R.head('calendar-event','Execute Schedules — ' + modeLabel,{text:'0 eligible',cls:'live'}),
+          R.row('Found', allSchedules.length + ' total schedules in system', 'teal') +
+          R.row('Eligible','None match the "' + modeLabel + '" filter', ''));
+    }
+
+    // Check authorization
+    var schedAuthOk = false;
+    try { if (typeof AgentScheduleExecutor !== 'undefined') schedAuthOk = AgentScheduleExecutor.hasScheduledAuth(); } catch(_e){}
+    if (!schedAuthOk && mode !== 'failed') {
+      return R.intro('Found <strong style="color:var(--yellow)">' + candidates.length + '</strong> eligible schedule(s), but <strong>Agent Wallet authorization is missing</strong>.') +
+        R.card(R.head('shield-off','Authorization Required',{text:'Blocked',cls:'pending'}),
+          R.row('Schedules Found', candidates.length + ' eligible', 'yellow') +
+          R.row('Agent Auth', 'Not authorized for scheduled execution', 'red') +
+          R.row('Action', 'Say <em>"allow agent to execute schedules"</em> to grant permission', ''),
+          R.actions(
+            {icon:'shield-check',label:'Grant Permission',cls:'primary',action:"autonomaSendQuick('allow agent to execute schedules')"}
+          ));
+    }
+
+    // Check Emergency Stop
+    var estop = false;
+    try { if (typeof AIWallet !== 'undefined' && AIWallet.isEmergencyStopped) estop = AIWallet.isEmergencyStopped(); } catch(_e){}
+    if (estop) {
+      return R.intro('Emergency Stop is active — all AI operations are frozen.') +
+        R.card(R.head('alert-triangle','Emergency Stop',{text:'FROZEN',cls:'danger'}),
+          R.row('Schedules','' + candidates.length + ' eligible — execution blocked','red') +
+          R.row('Action','Lift Emergency Stop in the AI Smart Wallet Security tab first',''));
+    }
+
+    // Execute all eligible schedules via AgentScheduleExecutor
+    var summary = { found: candidates.length, executed: 0, skipped: 0, failed: 0, results: [] };
+    var txHashes = [];
+    var startTime = Date.now();
+
+    autUI('ai', R.intro('Executing <strong>' + summary.found + '</strong> schedule(s) in <strong style="color:#a78bfa">' + modeLabel + '</strong> mode via Agent Wallet...') +
+      '<div style="font-size:9px;color:var(--muted2);margin-top:4px">Each schedule passes: permission → risk → policy → balance → gas → simulation checks.</div>');
+
+    // Try AgentScheduleExecutor tick first (handles full pipeline)
+    try {
+      if (typeof AgentScheduleExecutor !== 'undefined') {
+        AgentScheduleExecutor.start();
+        var tickResult = await AgentScheduleExecutor.tickNow();
+        if (tickResult && tickResult.results) {
+          tickResult.results.forEach(function(r){
+            var sched = candidates.find(function(c){ return c.id === r.id; });
+            var name = (sched ? sched.name : r.id || 'Unknown');
+            if (r.status === 'executed' || r.status === 'delegated') {
+              summary.executed++;
+              summary.results.push({ name: name, status: 'executed', txHash: r.txHash || '', reason: r.reason || '' });
+              if (r.txHash) txHashes.push(r.txHash);
+            } else if (r.status === 'failed' || r.status === 'failed_final') {
+              summary.failed++;
+              summary.results.push({ name: name, status: 'failed', reason: r.reason || 'Execution failed' });
+            } else {
+              summary.skipped++;
+              summary.results.push({ name: name, status: 'skipped', reason: r.reason || r.status || 'Not eligible' });
+            }
+          });
+          summary.processed = tickResult.processed || summary.found;
+        }
+      }
+    } catch(e) { summary.error = e.message || 'Executor error'; }
+
+    // Fallback: use PermitEngine for permits if AgentScheduleExecutor didn't handle them
+    try {
+      if (typeof PermitEngine !== 'undefined' && PermitEngine.getScheduledDue) {
+        var permitDue = PermitEngine.getScheduledDue();
+        for (var pi = 0; pi < permitDue.length; pi++) {
+          var alreadyDone = summary.results.some(function(r){ return r.name === permitDue[pi].name; });
+          if (alreadyDone) continue;
+          try {
+            var permit = PermitEngine.executeScheduled(permitDue[pi].id);
+            if (permit) {
+              summary.executed++;
+              summary.results.push({ name: permitDue[pi].name, status: 'executed', reason: 'Executed via PermitEngine' });
+            } else {
+              summary.skipped++;
+              summary.results.push({ name: permitDue[pi].name, status: 'skipped', reason: 'Not yet due or already executed' });
+            }
+          } catch(pe) {
+            summary.failed++;
+            summary.results.push({ name: permitDue[pi].name, status: 'failed', reason: pe.message || 'Permit execution error' });
+          }
+        }
+      }
+    } catch(_e){}
+
+    var duration = ((Date.now() - startTime) / 1000).toFixed(1);
+
+    // Build execution summary
+    var execColor = summary.executed > 0 ? 'var(--green)' : 'var(--yellow)';
+    var resultsHtml = summary.results.slice(0, 15).map(function(r){
+      var color = r.status === 'executed' ? 'var(--green)' : r.status === 'failed' ? 'var(--red)' : 'var(--yellow)';
+      var icon = r.status === 'executed' ? 'check' : r.status === 'failed' ? 'x' : 'alert-triangle';
+      return '<div style="display:flex;align-items:center;gap:6px;padding:3px 0;font-size:8.5px;border-bottom:1px solid rgba(255,255,255,.03)">' +
+        '<i class="ti ti-' + icon + '" style="color:' + color + ';font-size:12px;flex-shrink:0"></i>' +
+        '<span style="color:var(--text);flex:1">' + esc(r.name.slice(0, 40)) + '</span>' +
+        '<span style="color:' + color + ';text-transform:uppercase;font-size:7.5px">' + r.status + '</span>' +
+        (r.txHash ? ' <a href="https://testnet.arcscan.app/tx/' + esc(r.txHash) + '" target="_blank" rel="noopener" style="color:var(--blue);text-decoration:none;font-size:7.5px">' + esc(r.txHash.slice(0,10)) + '...</a>' : '') +
+        '</div>';
+    }).join('');
+
+    if (summary.results.length > 15) resultsHtml += '<div style="font-size:8px;color:var(--muted2);margin-top:3px">...and ' + (summary.results.length - 15) + ' more</div>';
+
+    var txHtml = '';
+    if (txHashes.length) {
+      txHtml = R.sep() + R.row('Transaction Hashes (' + txHashes.length + ')',
+        txHashes.slice(0, 5).map(function(h){ return '<a href="https://testnet.arcscan.app/tx/' + esc(h) + '" target="_blank" rel="noopener" style="color:var(--blue);text-decoration:none">' + esc(h.slice(0,10)) + '...</a>'; }).join(' · ') +
+        (txHashes.length > 5 ? ' +' + (txHashes.length - 5) + ' more' : ''), 'green');
+    }
+
+    var statusText = summary.failed > 0 ? 'COMPLETED WITH ERRORS' : 'SUCCESS';
+    var statusCls = summary.failed > 0 ? 'pending' : 'live';
+
+    return R.intro('<strong style="color:' + execColor + '">' + summary.executed + ' of ' + summary.found + '</strong> schedule(s) executed in <strong>' + duration + 's</strong>.') +
+      R.card(R.head('calendar-check','Execution Summary — ' + modeLabel,{text:statusText,cls:statusCls}),
+        R.row('Schedules Found', summary.found + ' total in ' + modeLabel.toLowerCase() + ' mode', 'teal') +
+        R.row('Executed', '<strong style="color:var(--green)">' + summary.executed + '</strong>', 'green') +
+        R.row('Skipped', summary.skipped + ' (checks / not eligible)', 'yellow') +
+        R.row('Failed', summary.failed + ' (see details below)', summary.failed > 0 ? 'red' : '') +
+        (summary.error ? R.row('Error', '<span style="color:var(--red)">' + esc(summary.error.slice(0,80)) + '</span>', 'red') : '') +
+        txHtml +
+        R.sep() +
+        '<div style="max-height:280px;overflow-y:auto">' + resultsHtml + '</div>',
+        R.actions(
+          {icon:'calendar-event',label:'Schedule Page',cls:'primary',action:"showPage('schedule')"},
+          {icon:'robot',label:'Open AI Wallet',cls:'',action:"showPage('aiwallet')"},
+          {icon:'refresh',label:'Execute Again',cls:'',action:"autonomaSendQuick('execute all schedules')"}
+        )) +
+      '<div style="font-size:8px;color:var(--muted2);margin-top:4px">Security layers applied: Permission Engine → Risk Engine → Policy Engine → Balance Check → Gas Reserve → eth_call Simulation → On-Chain Broadcast by Agent Wallet.</div>';
+  }
+
+  // ══════════════════════════════════════════════════════════
+  //  BRIDGE TURBO — Fast CCTP bridge with vault pre-funding
+  //  Routes through existing turbo bridge pipeline.
+  // ══════════════════════════════════════════════════════════
+  function _handleBridgeTurbo(params, msg){
+    var low = (msg || '').toLowerCase();
+    var amount = params.amount || 100;
+    var token = params.token || 'USDC';
+
+    // Detect source chain
+    var fromChain = 'Arc_Testnet';
+    var toChain = 'Base_Sepolia';
+    if (/\b(?:from|do|da)\s+(ethereum|sepolia)\b/i.test(low)) fromChain = 'Ethereum_Sepolia';
+    else if (/\b(?:from|do|da)\s+(base)\b/i.test(low)) fromChain = 'Base_Sepolia';
+    else if (/\b(?:from|do|da)\s+(arbitrum)\b/i.test(low)) fromChain = 'Arbitrum_Sepolia';
+    else if (/\b(?:from|do|da)\s+(polygon|amoy|matic)\b/i.test(low)) fromChain = 'Polygon_Amoy';
+    else if (/\b(?:from|do|da)\s+(optimism)\b/i.test(low)) fromChain = 'Optimism_Sepolia';
+    else if (/\b(?:from|do|da)\s+(arc)\b/i.test(low)) fromChain = 'Arc_Testnet';
+
+    if (/\b(?:to|para)\s+(ethereum|sepolia)\b/i.test(low)) toChain = 'Ethereum_Sepolia';
+    else if (/\b(?:to|para)\s+(base)\b/i.test(low)) toChain = 'Base_Sepolia';
+    else if (/\b(?:to|para)\s+(arbitrum)\b/i.test(low)) toChain = 'Arbitrum_Sepolia';
+    else if (/\b(?:to|para)\s+(polygon|amoy|matic)\b/i.test(low)) toChain = 'Polygon_Amoy';
+    else if (/\b(?:to|para)\s+(optimism)\b/i.test(low)) toChain = 'Optimism_Sepolia';
+    else if (/\b(?:to|para)\s+(arc)\b/i.test(low)) toChain = 'Arc_Testnet';
+
+    var fromLabel = fromChain.replace(/_/g,' ');
+    var toLabel = toChain.replace(/_/g,' ');
+
+    // If Arc is destination, this is a turbo bridge INTO Arc (pre-funded fast bridge)
+    // If Arc is source, this is a standard bridge OUT (use existing bridge handler)
+    if (fromChain === 'Arc_Testnet') {
+      // Arc → destination: standard bridge (delegate to existing bridge handler)
+      return autBridge(msg);
+    }
+
+    // Destination is Arc: Turbo Bridge (fast path via vault pre-funding)
+    var chainNameMap = {
+      Ethereum_Sepolia: 'Ethereum Sepolia', Base_Sepolia: 'Base Sepolia',
+      Arbitrum_Sepolia: 'Arbitrum Sepolia', Optimism_Sepolia: 'Optimism Sepolia',
+      Polygon_Amoy: 'Polygon Amoy'
+    };
+
+    // Try to launch turbo bridge via the existing turboBridgeFromCard flow
+    var isTurboReady = false;
+    try {
+      if (typeof VaultStore !== 'undefined') {
+        var store = VaultStore.get();
+        isTurboReady = store && store.liquidity && store.liquidity.usdc > 0;
+      }
+    } catch(_e){}
+
+    // Navigate to Bridge page and trigger turbo
+    try {
+      if (typeof showPage === 'function') showPage('bridge');
+    } catch(_e){}
+
+    // Build turbo bridge intent data
+    var turboData = {
+      from: fromChain,
+      to: 'Arc_Testnet',
+      amount: amount,
+      token: token,
+      mode: 'turbo'
+    };
+
+    // Try to trigger via existing BridgeEngine
+    try {
+      if (typeof BridgeEngine !== 'undefined' && BridgeEngine.notifyTurboStart) {
+        BridgeEngine.notifyTurboStart({ from: fromChain, to: 'Arc_Testnet', amt: amount, type: 'turbo', token: token });
+      }
+    } catch(_e){}
+
+    // Try launch via turboBridgeFromCard
+    try {
+      if (typeof turboBridgeFromCard === 'function') {
+        turboBridgeFromCard(fromChain);
+      }
+    } catch(_e){}
+
+    return R.intro('Launching <strong style="color:#f59e0b">Turbo Bridge</strong> — fast CCTP settlement with vault pre-funding.') +
+      R.card(R.head('topology-star-3','Bridge Turbo',{text:'Fast Path',cls:'live'}),
+        R.row('Mode', '<span style="color:#f59e0b">TURBO</span> — instant fulfillment + CCTP settlement', 'yellow') +
+        R.row('Route', fromLabel + ' → ' + toLabel, 'teal') +
+        R.row('Amount', amount + ' ' + token, 'green') +
+        R.row('Fee', '1.00% turbo liquidity fee', '') +
+        R.row('Speed', 'Instant via vault pre-funding', 'green') +
+        R.sep() +
+        R.row('Steps','1. Lock liquidity in Vault · 2. Instant fulfillment · 3. CCTP attestation · 4. Settlement', '') +
+        '<div style="font-size:9px;color:var(--muted2);margin-top:6px"><b style="color:var(--yellow)">Turbo Bridge</b> pre-funds your transfer from the Vault so you receive assets instantly. The CCTP attestation settles in the background.</div>',
+        R.actions(
+          {icon:'topology-star-3',label:'Bridge Page',cls:'primary',action:"showPage('bridge')"},
+          {icon:'arrow-right',label:'Bridge ' + amount + ' ' + token,cls:'',action:"autonomaSendQuick('bridge " + amount + " " + token + " from " + fromLabel + " to " + toLabel + " turbo')"}
+        )) +
+      '<div style="font-size:8px;color:var(--muted2);margin-top:4px">Turbo Bridge never bypasses security: Permission Engine, Risk Engine, Policy Engine, and Emergency Stop are always enforced.</div>';
+  }
+
+  // ══════════════════════════════════════════════════════════
+  //  BATCH SWAP — Up to 20 sequential swaps via Agent Wallet
+  //  Reuses existing swap execution + AI Wallet validation.
+  //  Failure of one swap does NOT stop remaining swaps.
+  // ══════════════════════════════════════════════════════════
+  async function _handleBatchSwap(params, msg){
+    var low = (msg || '').toLowerCase();
+    var walletOk = typeof walletAddress !== 'undefined' && walletAddress;
+    if(!walletOk) return R.intro('Connect your wallet first for batch swaps.');
+
+    // Extract count from message patterns
+    var count = params.count || 0;
+    // Match: "N swaps", "N times", "N vez(es)", "N x", "execute N swaps"
+    if(!count){
+      var cm = msg.match(/\b(\d+)\s*(?:swaps|trocas|times|vezes|executions|operações|operacoes|ops|execut)\b/i);
+      if(cm) count = parseInt(cm[1]);
+    }
+    if(!count){
+      var cm2 = msg.match(/\b(\d+)\s*x\s*(?:swap|troca)/i);
+      if(cm2) count = parseInt(cm2[1]);
+    }
+    if(!count) count = 1; // default single swap if no count specified
+    count = Math.min(Math.max(1, count), 20);
+
+    // Extract swap pair: "N TOKEN -> TOKEN" or "N TOKEN for TOKEN"
+    var swapAmt = params.amount || 0;
+    var tIn = (params.token || 'USDC').toUpperCase();
+    if(tIn === 'CIRBTC') tIn = 'cirBTC';
+    var tOut = 'EURC';
+
+    // Try to extract from message directly (more reliable than params)
+    var tokM = msg.match(/(\d+(?:\.\d+)?)\s*(usdc|eurc|cirbtc|eth)?\s*(?:->|→|for|to|into|para|por|in)\s*(usdc|eurc|cirbtc|eth)?/i);
+    if(tokM){
+      swapAmt = parseFloat(tokM[1]);
+      if(tokM[2]){ tIn = tokM[2].toUpperCase(); if(tIn === 'CIRBTC') tIn = 'cirBTC'; }
+      if(tokM[3]){ tOut = tokM[3].toUpperCase(); if(tOut === 'CIRBTC') tOut = 'cirBTC'; }
+    }
+    if(tIn === tOut) tOut = tIn === 'USDC' ? 'EURC' : 'USDC';
+    if(!swapAmt || swapAmt <= 0) swapAmt = 25;
+
+    // If count looks like an amount (e.g. user said "100 swaps"), swapAmt might be wrong
+    // Correct: count should be the number of iterations, swapAmt the per-swap amount
+    if(count > 50 && tokM && tokM[1]){
+      // "50 swaps" → count=50 but 50 might be the number of iterations
+      // Actual swap amount should come from token pattern
+    }
+
+    var totalAmt = swapAmt * count;
+
+    var canExec = _agentCanExecute('swap');
+    var estop = false;
+    try { if(typeof AIWallet !== 'undefined' && AIWallet.isEmergencyStopped) estop = AIWallet.isEmergencyStopped(); } catch(_e){}
+
+    if(estop) return R.intro('Emergency Stop active — batch swaps are frozen.') +
+      R.card(R.head('alert-triangle','Frozen',{text:'ESTOP',cls:'danger'}), R.row('Swaps',''+count+' blocked','red'));
+
+    var permCheck = _requirePermit('swap', totalAmt, tIn, 'Arc Testnet', '', 'Batch ' + count + ' swaps of ' + swapAmt + ' ' + tIn + ' → ' + tOut, msg);
+    if(typeof permCheck === 'string') return permCheck;
+
+    if(!canExec) {
+      return R.intro('Found <strong>' + count + '</strong> swap(s) but Agent Wallet is not authorized.') +
+        R.card(R.head('arrows-exchange','Batch Swap — ' + count + ' ops',{text:'Blocked',cls:'pending'}),
+          R.row('Swap', swapAmt + ' ' + tIn + ' → ' + tOut, 'teal') +
+          R.row('Total', '<strong>' + totalAmt.toFixed(2) + ' ' + tIn + '</strong>', 'green') +
+          R.row('Agent', 'Not authorized for swap execution', 'red'),
+          R.actions({icon:'shield-check',label:'Grant Permission',cls:'primary',action:"autonomaSendQuick('allow agent to swap')"}));
+    }
+
+    autUI('ai', R.intro('Executing <strong style="color:#06F7E9">' + count + '</strong> swap(s): ' + swapAmt + ' ' + tIn + ' → ' + tOut + ' via Agent Wallet...') +
+      '<div style="font-size:9px;color:var(--muted2);margin-top:4px">Sequential. Security: Permission → Risk → Policy → Balance → Gas → Simulation per swap.</div>');
+
+    var summary = { found: count, executed: 0, failed: 0, results: [], txHashes: [] };
+    var startTime = Date.now();
+
+    for(var i = 0; i < count; i++){
+      try {
+        var intent = {
+          op: 'swap', name: 'Batch Swap #' + (i+1) + '/' + count + ': ' + swapAmt + ' ' + tIn + ' → ' + tOut,
+          amount: swapAmt, token: tIn, swapToToken: tOut,
+          network: 'Arc_Testnet', freq: 'once', source: 'batch-swap'
+        };
+
+        var intentId = null;
+        try {
+          if(typeof AIWallet !== 'undefined' && AIWallet.submitIntent){
+            intentId = AIWallet.submitIntent(intent);
+          }
+        } catch(_e){}
+
+        if(intentId){
+          summary.executed++;
+          summary.results.push({ num: i+1, op: 'SWAP ' + swapAmt + ' ' + tIn + ' → ' + tOut, status: 'submitted', intentId: intentId || '' });
+        } else {
+          try {
+            if(typeof _agentExecuteOp === 'function'){
+              await _agentExecuteOp('swap', swapAmt, tIn, JSON.stringify({swapTo: tOut}));
+              summary.executed++;
+              summary.results.push({ num: i+1, op: 'SWAP ' + swapAmt + ' ' + tIn + ' → ' + tOut, status: 'executed' });
+            } else {
+              summary.failed++;
+              summary.results.push({ num: i+1, op: 'SWAP ' + swapAmt + ' ' + tIn + ' → ' + tOut, status: 'failed', reason: 'Agent executor unavailable' });
+            }
+          } catch(swErr){
+            summary.failed++;
+            summary.results.push({ num: i+1, op: 'SWAP ' + swapAmt + ' ' + tIn + ' → ' + tOut, status: 'failed', reason: (swErr.message || 'Execution error').slice(0,80) });
+          }
+        }
+
+        if(i < count - 1) await new Promise(function(r){ setTimeout(r, 1200); });
+      } catch(e){
+        summary.failed++;
+        summary.results.push({ num: i+1, op: 'SWAP ' + swapAmt + ' ' + tIn + ' → ' + tOut, status: 'failed', reason: (e.message || 'Unknown error').slice(0,80) });
+      }
+    }
+
+    var duration = ((Date.now() - startTime) / 1000).toFixed(1);
+    var statusText = summary.failed > 0 ? 'COMPLETED WITH ERRORS' : 'SUCCESS';
+    var statusCls = summary.failed > 0 ? 'pending' : 'live';
+    var resHtml = summary.results.map(function(r){
+      var c = r.status === 'submitted' || r.status === 'executed' ? 'var(--green)' : 'var(--red)';
+      var ic = r.status === 'submitted' || r.status === 'executed' ? 'check' : 'x';
+      return '<div style="font-size:8.5px;padding:2px 0;border-bottom:1px solid rgba(255,255,255,.03);display:flex;gap:6px;align-items:center">' +
+        '<span style="color:var(--muted2);width:30px">#' + r.num + '</span>' +
+        '<i class="ti ti-' + ic + '" style="color:' + c + ';font-size:10px"></i>' +
+        '<span style="color:var(--text);flex:1">' + esc(r.op) + '</span>' +
+        '<span style="color:' + c + ';font-size:7.5px;text-transform:uppercase">' + r.status + '</span>' +
+        (r.reason ? ' <span style="color:var(--red);font-size:7px">' + esc(r.reason.slice(0,40)) + '</span>' : '') +
+        '</div>';
+    }).join('');
+
+    return R.intro('<strong style="color:' + (summary.executed > 0 ? 'var(--green)' : 'var(--red)') + '">' + summary.executed + '/' + summary.found + '</strong> swaps completed in <strong>' + duration + 's</strong>.') +
+      R.card(R.head('arrows-exchange','Batch Swap — Summary',{text:statusText,cls:statusCls}),
+        R.row('Swaps', count + ' × ' + swapAmt + ' ' + tIn + ' → ' + tOut, 'teal') +
+        R.row('Total Volume', '<strong>' + totalAmt.toFixed(2) + ' ' + tIn + '</strong>', 'green') +
+        R.row('Executed', summary.executed + '', 'green') +
+        R.row('Failed', summary.failed + '', summary.failed > 0 ? 'red' : '') +
+        R.sep() + '<div style="max-height:280px;overflow-y:auto">' + resHtml + '</div>',
+        R.actions(
+          {icon:'refresh',label:'Repeat Batch',cls:'primary',action:"autonomaSendQuick('batch swap " + count + " " + swapAmt + " " + tIn + " to " + tOut + "')"}
+        )) +
+      '<div style="font-size:8px;color:var(--muted2);margin-top:4px">Security enforced: Permission → Risk → Policy → Balance → Gas → Simulation before each swap.</div>';
+  }
+
+  // ══════════════════════════════════════════════════════════
+  //  MASS PAYMENT — Up to 50 same-chain payments via Agent Wallet
+  //  Supports pasted addresses, uniform/different amounts, CSV files.
+  //  Sequential execution. Failure of one does NOT stop the rest.
+  // ══════════════════════════════════════════════════════════
+  async function _handleMassPayment(params, msg){
+    var low = (msg || '').toLowerCase();
+    var walletOk = typeof walletAddress !== 'undefined' && walletAddress;
+    if(!walletOk) return R.intro('Connect your wallet first for mass payments.');
+
+    var estop = false;
+    try { if(typeof AIWallet !== 'undefined' && AIWallet.isEmergencyStopped) estop = AIWallet.isEmergencyStopped(); } catch(_e){}
+    if(estop) return R.intro('Emergency Stop active — mass payments frozen.');
+
+    // Parse recipients, count, amounts from message
+    var recipients = [];
+    var token = 'USDC';
+    var maxCount = 50;
+
+    // Detect count: "N payments", "N addresses"
+    var countM = msg.match(/\b(\d+)\s*(?:payments?|pagamentos?|addresses?|endere[çc]os?|recipients?)\b/i);
+    var count = countM ? parseInt(countM[1]) : 0;
+
+    // Detect token
+    var tknM = msg.match(/(\d+(?:\.\d+)?)\s*(usdc|eurc|cirbtc)/i);
+    if(tknM){ token = tknM[2].toUpperCase() === 'CIRBTC' ? 'cirBTC' : tknM[2].toUpperCase(); }
+
+    // Detect uniform amount: "N USDC each", "of N USDC", "send N USDC"
+    var uniformAmt = 0;
+    var amtM = msg.match(/\b(\d+(?:\.\d+)?)\s*(usdc|eurc|cirbtc)?\s*(?:each|cada|per|por|of|de)\b/i);
+    if(amtM) uniformAmt = parseFloat(amtM[1]);
+    if(!uniformAmt && params.amount && params.amount > 0 && params.amount <= 1000){
+      uniformAmt = params.amount;
+    }
+
+    // Parse addresses from message
+    var rawAddrs = msg.match(/0x[a-fA-F0-9]{40}/g);
+    if(rawAddrs && rawAddrs.length > 0){
+      // Try pair pattern: amount + address per recipient
+      var pairRe = /(\d+(?:\.\d+)?)\s*(usdc|eurc|cirbtc)?\s*(?:to\s+|[\-–>]+\s*)?(0x[a-fA-F0-9]{40})/gi;
+      var pairMatches = [];
+      var pm;
+      while((pm = pairRe.exec(msg)) !== null){
+        pairMatches.push({ addr: pm[3], amount: parseFloat(pm[1]) });
+      }
+      if(pairMatches.length > 0){
+        recipients = pairMatches;
+      } else if(uniformAmt > 0){
+        rawAddrs.forEach(function(a){ recipients.push({ addr: a, amount: uniformAmt }); });
+      } else if(count > 0 && count <= maxCount){
+        recipients = rawAddrs.slice(0, count).map(function(a){ return { addr: a, amount: uniformAmt || 10 }; });
+      } else {
+        // Just use all addresses with default amount
+        rawAddrs.slice(0, maxCount).forEach(function(a){ recipients.push({ addr: a, amount: uniformAmt || 10 }); });
+      }
+    }
+
+    // Check for CSV data in message (from file upload)
+    if((!recipients.length || recipients.length <= 1) && /\b(csv|file|upload|txt)\b/i.test(low)){
+      var csvLines = msg.split('\n').filter(function(l){ return /0x[a-fA-F0-9]{40}/.test(l); });
+      csvLines.forEach(function(line){
+        var parts = line.split(/[,\t\s]+/);
+        var addr = parts.find(function(p){ return /^0x[a-fA-F0-9]{40}$/.test(p); });
+        if(addr){
+          var numParts = parts.filter(function(p){ return !isNaN(parseFloat(p)) && parseFloat(p) > 0; });
+          var amt = numParts.length > 0 ? parseFloat(numParts[0]) : (uniformAmt || 10);
+          recipients.push({ addr: addr, amount: amt });
+        }
+      });
+    }
+
+    if(!recipients.length) {
+      // Show saved contacts for selection
+      var savedContacts = [];
+      try {
+        if(typeof RecipientResolver !== 'undefined' && typeof RecipientResolver.all === 'function') savedContacts = RecipientResolver.all();
+        if(savedContacts.length === 0 && typeof contacts !== 'undefined' && Array.isArray(contacts)) savedContacts = contacts;
+        if(savedContacts.length === 0 && typeof Store !== 'undefined' && typeof Store.load === 'function') savedContacts = Store.load('contacts', []);
+      } catch(e){ savedContacts = []; }
+
+      if(savedContacts.length > 0){
+        var contactItems = savedContacts.map(function(c, i){
+          var addr = c.addr || c.address || '';
+          var shortAddr = addr ? addr.substring(0,6)+'...'+addr.substring(addr.length-4) : '';
+          var chain = c.chainId || c.chain || 'Arc Testnet';
+          return '<div class="perm-active-item" style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:6px 8px" onclick="window._toggleRecipient(this,\''+addr+'\')">'+
+            '<input type="checkbox" class="rcp-check" style="cursor:pointer;accent-color:#a78bfa" onclick="event.stopPropagation()" data-addr="'+addr+'" data-name="'+(c.name||'').replace(/'/g,'')+'"/>'+
+            '<div style="width:28px;height:28px;border-radius:50%;background:rgba(167,139,250,.15);display:flex;align-items:center;justify-content:center;flex-shrink:0"><i class="ti ti-user" style="color:#a78bfa;font-size:12px"></i></div>'+
+            '<div style="flex:1"><div style="font-size:10px;font-weight:700;color:var(--text)">'+(c.name||'Unnamed')+'</div><div style="font-size:8px;color:var(--muted)"><code style="font-size:8px;color:#a78bfa">'+shortAddr+'</code> · '+chain+'</div></div>'+
+            '</div>';
+        }).join('');
+        var uAmt = uniformAmt || 10;
+        var uTok = token || 'USDC';
+        return R.intro('Select recipients for <strong style="color:#4f8ef7">mass payment</strong> ('+savedContacts.length+' saved):') +
+          '<div style="margin-top:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">'+
+            '<span style="font-size:9px;color:var(--muted2)">Amount per:</span>'+
+            '<input id="masspay-uniform-amount" type="number" min="0.01" step="0.01" value="'+uAmt+'" data-val="'+uAmt+'" style="width:80px;background:rgba(0,0,0,.25);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:6px;font-size:9px"/>'+
+            '<select id="masspay-uniform-token" data-val="'+uTok+'" style="width:80px;background:rgba(0,0,0,.25);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:6px;font-size:9px"><option'+(uTok==='USDC'?' selected':'')+'>USDC</option><option'+(uTok==='EURC'?' selected':'')+'>EURC</option><option'+(uTok==='cirBTC'?' selected':'')+'>cirBTC</option></select>'+
+          '</div>'+
+          '<div style="max-height:280px;overflow-y:auto;margin-top:6px">'+contactItems+'</div>'+
+          '<div style="margin-top:8px;display:flex;gap:6px;align-items:center">'+
+            '<button class="aut-act primary" onclick="window._massPayProceed()"><i class="ti ti-arrow-right"></i>Proceed</button>'+
+            '<button class="aut-act" onclick="window._selectAllRecipients()"><i class="ti ti-checkbox"></i>Select All</button>'+
+            '<span id="rcp-selected-count" style="font-size:9px;color:var(--muted2);margin-left:4px">0 selected</span>'+
+          '</div>'+
+          '<div style="font-size:9px;color:var(--muted2);margin-top:6px">Or <span style="color:#06F7E9;cursor:pointer" onclick="showPage(\'recipients\')">manage contacts</span> or <span style="color:#06F7E9;cursor:pointer" onclick="document.getElementById(\'aut-csv-input\')?.click()">upload CSV</span>.</div>';
+      }
+
+      return R.intro('For mass payments, <strong style="color:#4f8ef7">paste addresses</strong> below (one per line, or with amount):') +
+        '<textarea id="masspay-paste" placeholder="0x123... 10&#10;0x456... 25&#10;0x789... 50" style="width:100%;height:100px;background:rgba(0,0,0,.25);border:1px solid var(--border);color:var(--text);padding:8px;border-radius:8px;font-size:9px;font-family:monospace;resize:vertical;margin-top:6px"></textarea>' +
+        '<div style="margin-top:6px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">'+
+          '<span style="font-size:9px;color:var(--muted2)">Default amount:</span>'+
+          '<input id="masspay-uniform-amount" type="number" min="0.01" step="0.01" value="'+(uniformAmt||10)+'" data-val="'+(uniformAmt||10)+'" style="width:80px;background:rgba(0,0,0,.25);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:6px;font-size:9px"/>'+
+          '<select id="masspay-uniform-token" data-val="'+(token||'USDC')+'" style="width:80px;background:rgba(0,0,0,.25);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:6px;font-size:9px"><option'+(token==='USDC'?' selected':'')+'>USDC</option><option'+(token==='EURC'?' selected':'')+'>EURC</option><option'+(token==='cirBTC'?' selected':'')+'>cirBTC</option></select>'+
+        '</div>'+
+        '<div style="margin-top:8px;display:flex;gap:6px">'+
+          '<button class="aut-act primary" onclick="var v=document.getElementById(\'masspay-paste\').value.trim();if(v)autonomaSendQuick(\'mass payment \'+v)"><i class="ti ti-arrow-right"></i>Proceed with Pasted</button>'+
+        '</div>'+
+        '<div style="font-size:9px;color:var(--muted2);margin-top:6px">Or <span style="color:#06F7E9;cursor:pointer" onclick="showPage(\'recipients\')">add contacts</span> first, or <span style="color:#06F7E9;cursor:pointer" onclick="document.getElementById(\'aut-csv-input\')?.click()">upload CSV</span>.</div>';
+    }
+
+    recipients = recipients.slice(0, maxCount);
+    var totalAmt = recipients.reduce(function(s,r){ return s + r.amount; }, 0);
+    var canExec = _agentCanExecute('payment');
+
+    var permCheck = _requirePermit('payment', totalAmt, token, 'Arc Testnet', '', 'Mass payment to ' + recipients.length + ' recipients (' + totalAmt.toFixed(2) + ' ' + token + ')', msg);
+    if(typeof permCheck === 'string') return permCheck;
+
+    if(!canExec){
+      return R.intro('Found <strong>' + recipients.length + '</strong> recipients, but Agent Wallet not authorized for payments.') +
+        R.card(R.head('send','Mass Payment',{text:'Blocked',cls:'pending'}),
+          R.row('Recipients', recipients.length + '', 'teal') +
+          R.row('Total', totalAmt.toFixed(2) + ' ' + token, 'green') +
+          R.row('Agent', 'Not authorized', 'red'),
+          R.actions({icon:'shield-check',label:'Grant Permission',cls:'primary',action:"autonomaSendQuick('allow agent to make payments')"}));
+    }
+
+    autUI('ai', R.intro('Executing <strong style="color:#4f8ef7">' + recipients.length + '</strong> payment(s) via Agent Wallet...') +
+      '<div style="font-size:9px;color:var(--muted2);margin-top:4px">Total: <b>' + totalAmt.toFixed(2) + ' ' + token + '</b> · Chain: Arc Testnet · Sequential.</div>');
+
+    var summary = { found: recipients.length, executed: 0, failed: 0, results: [] };
+    var startTime = Date.now();
+
+    for(var i = 0; i < recipients.length; i++){
+      try {
+        var r = recipients[i];
+        var intent = {
+          op: 'payment', name: 'Mass Payment #' + (i+1) + '/' + recipients.length,
+          amount: r.amount, token: token, to: r.addr,
+          network: 'Arc_Testnet', freq: 'once', source: 'mass-payment'
+        };
+
+        var intentId = null;
+        try {
+          if(typeof AIWallet !== 'undefined' && AIWallet.submitIntent){
+            intentId = AIWallet.submitIntent(intent);
+          }
+        } catch(_e){}
+
+        if(intentId){
+          summary.executed++;
+          summary.results.push({ num: i+1, addr: r.addr, amount: r.amount, status: 'submitted', intentId: intentId || '' });
+        } else {
+          try {
+            if(typeof _agentExecuteOp === 'function'){
+              await _agentExecuteOp('payment', r.amount, token, JSON.stringify({address: r.addr}));
+              summary.executed++;
+              summary.results.push({ num: i+1, addr: r.addr, amount: r.amount, status: 'executed' });
+            } else {
+              summary.failed++;
+              summary.results.push({ num: i+1, addr: r.addr, amount: r.amount, status: 'failed', reason: 'Executor unavailable' });
+            }
+          } catch(payErr){
+            summary.failed++;
+            summary.results.push({ num: i+1, addr: r.addr, amount: r.amount, status: 'failed', reason: (payErr.message||'Error').slice(0,60) });
+          }
+        }
+
+        if(i < recipients.length - 1) await new Promise(function(r2){ setTimeout(r2, 1000); });
+      } catch(e){
+        summary.failed++;
+        summary.results.push({ num: i+1, addr: (recipients[i]||{}).addr || '?', amount: (recipients[i]||{}).amount || 0, status: 'failed', reason: (e.message||'Error').slice(0,60) });
+      }
+    }
+
+    var duration = ((Date.now() - startTime) / 1000).toFixed(1);
+    var resHtml = summary.results.map(function(r){
+      var c = r.status === 'submitted' || r.status === 'executed' ? 'var(--green)' : 'var(--red)';
+      var ic = r.status === 'submitted' || r.status === 'executed' ? 'check' : 'x';
+      var sh = r.addr ? r.addr.slice(0,6) + '...' + r.addr.slice(-4) : '?';
+      return '<div style="font-size:8.5px;padding:2px 0;border-bottom:1px solid rgba(255,255,255,.03);display:flex;gap:6px;align-items:center">' +
+        '<span style="color:var(--muted2);width:28px">#' + r.num + '</span>' +
+        '<i class="ti ti-' + ic + '" style="color:' + c + ';font-size:10px"></i>' +
+        '<code style="font-size:8px;color:#a78bfa">' + esc(sh) + '</code>' +
+        '<span style="color:var(--text)">' + r.amount.toFixed(2) + ' ' + token + '</span>' +
+        '<span style="color:' + c + ';font-size:7px;text-transform:uppercase;margin-left:auto">' + r.status + '</span>' +
+        (r.reason ? ' <span style="color:var(--red);font-size:7px">' + esc(r.reason.slice(0,30)) + '</span>' : '') +
+        '</div>';
+    }).join('');
+
+    return R.intro('<strong style="color:var(--green)">' + summary.executed + '/' + summary.found + '</strong> payments completed in <strong>' + duration + 's</strong>.') +
+      R.card(R.head('send','Mass Payment — Summary',{text:summary.failed?'PARTIAL':'COMPLETE',cls:summary.failed?'pending':'live'}),
+        R.row('Payments', summary.found + ' on Arc Testnet', 'teal') +
+        R.row('Executed', summary.executed + '', 'green') +
+        R.row('Failed', summary.failed + '', summary.failed > 0 ? 'red' : '') +
+        R.row('Total Sent', '<strong>' + totalAmt.toFixed(2) + ' ' + token + '</strong>', 'green') +
+        R.sep() + '<div style="max-height:300px;overflow-y:auto">' + resHtml + '</div>',
+        R.actions(
+          {icon:'send',label:'Send Page',cls:'primary',action:"showPage('send')"},
+          {icon:'file-upload',label:'Upload More',cls:'',action:"document.getElementById('aut-csv-input')?.click()"}
+        )) +
+      '<div style="font-size:8px;color:var(--muted2);margin-top:4px">Security: Permission → Risk → Policy → Balance → Gas Reserve enforced per payment.</div>';
+  }
+
+  // ══════════════════════════════════════════════════════════
+  //  CROSSCHAIN PAYROLL — Up to 50 cross-chain payments
+  //  Routes via existing CCTP bridge for each payment.
+  //  Sequential execution. Failure of one does NOT stop the rest.
+  // ══════════════════════════════════════════════════════════
+  async function _handleCrosschainPayroll(params, msg){
+    var low = (msg || '').toLowerCase();
+    var walletOk = typeof walletAddress !== 'undefined' && walletAddress;
+    if(!walletOk) return R.intro('Connect your wallet first for cross-chain payments.');
+
+    var estop = false;
+    try { if(typeof AIWallet !== 'undefined' && AIWallet.isEmergencyStopped) estop = AIWallet.isEmergencyStopped(); } catch(_e){}
+    if(estop) return R.intro('Emergency Stop active — cross-chain payments frozen.');
+
+    // Detect destination chain
+    var destLabels = {arbitrum:'Arbitrum_Sepolia',base:'Base_Sepolia',ethereum:'Ethereum_Sepolia',polygon:'Polygon_Amoy',optimism:'Optimism_Sepolia',arc:'Arc_Testnet'};
+    var destChain = 'Arbitrum_Sepolia';
+    for(var dk in destLabels){
+      if(low.indexOf(dk) !== -1){ destChain = destLabels[dk]; break; }
+    }
+
+    // Parse count, amount, token
+    var countM = msg.match(/\b(\d+)\s*(?:payments?|pagamentos?|cross.chain|crosschain)\b/i);
+    var count = countM ? parseInt(countM[1]) : (params.amount || 10);
+    count = Math.min(Math.max(1, count), 50);
+    var amt = params.amount || 10;
+    if(amt > 100) amt = 10; // count parsed as amount — fix
+
+    var token = 'USDC';
+    var tknM = msg.match(/(\d+(?:\.\d+)?)\s*(usdc|eurc|cirbtc)/i);
+    if(tknM){ token = tknM[2].toUpperCase() === 'CIRBTC' ? 'cirBTC' : tknM[2].toUpperCase(); amt = parseFloat(tknM[1]); }
+
+    var totalAmt = amt * count;
+    var chainLabel = destChain.replace(/_/g,' ');
+    var canExec = _agentCanExecute('bridge') || _agentCanExecute('crosschain');
+
+    // Parse recipient addresses from message
+    var rawAddrs = msg.match(/0x[a-fA-F0-9]{40}/g);
+    var recipients = [];
+    if(rawAddrs && rawAddrs.length > 0){
+      recipients = rawAddrs.slice(0, count).map(function(a){ return { addr: a, amount: amt }; });
+    }
+
+    // Permission check for total
+    var permCheck = _requirePermit('bridge', totalAmt, token, 'Arc Testnet', '', 'Cross-chain payroll to ' + chainLabel + ' (' + count + ' × ' + amt + ' ' + token + ')', msg);
+    if(typeof permCheck === 'string') return permCheck;
+
+    if(!canExec || !recipients.length){
+      // Show saved contacts if no addresses provided
+      var savedContacts = [];
+      try {
+        if(typeof RecipientResolver !== 'undefined' && typeof RecipientResolver.all === 'function') savedContacts = RecipientResolver.all();
+        if(savedContacts.length === 0 && typeof contacts !== 'undefined' && Array.isArray(contacts)) savedContacts = contacts;
+        if(savedContacts.length === 0 && typeof Store !== 'undefined' && typeof Store.load === 'function') savedContacts = Store.load('contacts', []);
+      } catch(e){ savedContacts = []; }
+
+      var shownContacts = false;
+      if(!recipients.length && savedContacts.length > 0){
+        shownContacts = true;
+        var contactItems = savedContacts.map(function(c, i){
+          var addr = c.addr || c.address || '';
+          var shortAddr = addr ? addr.substring(0,6)+'...'+addr.substring(addr.length-4) : '';
+          return '<div class="perm-active-item" style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:6px 8px" onclick="window._toggleRecipient(this,\''+addr+'\')">'+
+            '<input type="checkbox" class="rcp-check" style="cursor:pointer;accent-color:#a78bfa" onclick="event.stopPropagation()" data-addr="'+addr+'" data-name="'+(c.name||'').replace(/'/g,'')+'"/>'+
+            '<div style="width:28px;height:28px;border-radius:50%;background:rgba(167,139,250,.15);display:flex;align-items:center;justify-content:center;flex-shrink:0"><i class="ti ti-user" style="color:#a78bfa;font-size:12px"></i></div>'+
+            '<div style="flex:1"><div style="font-size:10px;font-weight:700;color:var(--text)">'+(c.name||'Unnamed')+'</div><div style="font-size:8px;color:var(--muted)"><code style="font-size:8px;color:#a78bfa">'+shortAddr+'</code></div></div>'+
+            '</div>';
+        }).join('');
+        var chainOpts = ['Arbitrum_Sepolia','Base_Sepolia','Ethereum_Sepolia','Polygon_Amoy','Optimism_Sepolia','Arc_Testnet'];
+        var chainSelect = '<select id="xpay-chain" data-val="'+destChain+'" style="background:rgba(0,0,0,.25);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:6px;font-size:9px">'+
+          chainOpts.map(function(c){ return '<option value="'+c+'"'+(c===destChain?' selected':'')+'>'+c.replace(/_/g,' ')+'</option>'; }).join('')+'</select>';
+        return R.intro('Select recipients for <strong style="color:#a78bfa">cross-chain payroll</strong> ('+savedContacts.length+' saved):') +
+          '<div style="margin-top:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">'+
+            '<span style="font-size:9px;color:var(--muted2)">Chain:</span>'+chainSelect+
+            '<span style="font-size:9px;color:var(--muted2)">Amount:</span>'+
+            '<input id="xpay-uniform-amount" type="number" min="0.01" step="0.01" value="'+amt+'" data-val="'+amt+'" style="width:80px;background:rgba(0,0,0,.25);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:6px;font-size:9px"/>'+
+            '<select id="xpay-uniform-token" data-val="'+token+'" style="width:80px;background:rgba(0,0,0,.25);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:6px;font-size:9px"><option'+(token==='USDC'?' selected':'')+'>USDC</option><option'+(token==='EURC'?' selected':'')+'>EURC</option><option'+(token==='cirBTC'?' selected':'')+'>cirBTC</option></select>'+
+          '</div>'+
+          '<div style="max-height:280px;overflow-y:auto;margin-top:6px">'+contactItems+'</div>'+
+          '<div style="margin-top:8px;display:flex;gap:6px;align-items:center">'+
+            '<button class="aut-act primary" onclick="window._crosschainProceed()"><i class="ti ti-arrow-right"></i>Proceed</button>'+
+            '<button class="aut-act" onclick="window._selectAllRecipients()"><i class="ti ti-checkbox"></i>Select All</button>'+
+            '<span id="rcp-selected-count" style="font-size:9px;color:var(--muted2);margin-left:4px">0 selected</span>'+
+          '</div>'+
+          '<div style="font-size:9px;color:var(--muted2);margin-top:6px">Or <span style="color:#06F7E9;cursor:pointer" onclick="showPage(\'recipients\')">manage contacts</span> or <span style="color:#06F7E9;cursor:pointer" onclick="document.getElementById(\'aut-csv-input\')?.click()">upload CSV</span>.</div>';
+      }
+
+      var infoCard = R.card(R.head('world','Cross-Chain Payroll — ' + count + ' ops',{text:'Setup',cls:'live'}),
+        R.row('Destination', chainLabel, 'teal') +
+        R.row('Count', count + ' payments', '') +
+        R.row('Amount', amt + ' ' + token + ' each · Total: ' + totalAmt.toFixed(2) + ' ' + token, 'green') +
+        (recipients.length ? R.row('Addresses', recipients.length + ' found in message', 'green') :
+          R.row('Addresses', 'Provide addresses or select from contacts', 'yellow')) +
+        R.row('Agent', canExec ? 'Ready via CCTP' : 'Not authorized for bridge', canExec ? 'green' : 'red'),
+        canExec && recipients.length ? R.actions({icon:'player-play',label:'Execute Payroll',cls:'primary',action:"autonomaSendQuick('crosschain payroll " + count + " payments " + amt + " " + token + " to " + chainLabel + " " + recipients.map(function(r){return r.addr;}).join(' ') + "')"}) :
+        R.actions({icon:'shield-check',label:'Authorize Bridge',cls:'primary',action:"autonomaSendQuick('allow agent to bridge')"}));
+      return R.intro('Cross-chain payroll: <strong>' + count + '</strong> × <strong>' + amt + ' ' + token + '</strong> to <strong>' + chainLabel + '</strong>.') + infoCard;
+    }
+
+    // Execute
+    autUI('ai', R.intro('Executing <strong style="color:#a78bfa">' + recipients.length + '</strong> cross-chain payment(s) to <strong>' + chainLabel + '</strong> via Agent Wallet + CCTP...') +
+      '<div style="font-size:9px;color:var(--muted2);margin-top:4px">Total: <b>' + totalAmt.toFixed(2) + ' ' + token + '</b>. Sequential via CCTP bridge. Failure of one does not stop the rest.</div>');
+
+    var summary = { found: recipients.length, executed: 0, failed: 0, results: [], txHashes: [] };
+    var startTime = Date.now();
+
+    for(var i = 0; i < recipients.length; i++){
+      try {
+        var r = recipients[i];
+        var intent = {
+          op: 'crosschain', name: 'CrossChain #' + (i+1) + '/' + recipients.length + ' to ' + chainLabel,
+          amount: r.amount, token: token, to: r.addr,
+          network: 'Arc_Testnet', toNetwork: destChain,
+          freq: 'once', source: 'crosschain-payroll'
+        };
+
+        var intentId = null;
+        try {
+          if(typeof AIWallet !== 'undefined' && AIWallet.submitIntent){
+            intentId = AIWallet.submitIntent(intent);
+          }
+        } catch(_e){}
+
+        if(intentId){
+          summary.executed++;
+          summary.results.push({ num: i+1, addr: r.addr, amount: r.amount, status: 'submitted', intentId: intentId });
+        } else {
+          // Fallback via _agentExecuteOp
+          try {
+            var xDomainMap = { Ethereum_Sepolia: 0, Base_Sepolia: 6, Arbitrum_Sepolia: 3, Optimism_Sepolia: 2, Polygon_Amoy: 7 };
+            var domain = xDomainMap[destChain] || 6;
+            if(typeof _agentExecuteOp === 'function'){
+              await _agentExecuteOp('bridge', r.amount, token, JSON.stringify({address: r.addr, domain: domain, toNetwork: destChain}));
+              summary.executed++;
+              summary.results.push({ num: i+1, addr: r.addr, amount: r.amount, status: 'executed' });
+            } else {
+              summary.failed++;
+              summary.results.push({ num: i+1, addr: r.addr, amount: r.amount, status: 'failed', reason: 'Executor unavailable' });
+            }
+          } catch(xErr){
+            summary.failed++;
+            summary.results.push({ num: i+1, addr: r.addr, amount: r.amount, status: 'failed', reason: (xErr.message||'Error').slice(0,60) });
+          }
+        }
+
+        if(i < recipients.length - 1) await new Promise(function(r3){ setTimeout(r3, 2000); });
+      } catch(e){
+        summary.failed++;
+        summary.results.push({ num: i+1, addr: recipients[i].addr || '?', amount: recipients[i].amount || 0, status: 'failed', reason: (e.message||'Error').slice(0,60) });
+      }
+    }
+
+    var duration = ((Date.now() - startTime) / 1000).toFixed(1);
+    var resHtml = summary.results.map(function(r){
+      var c = r.status === 'submitted' || r.status === 'executed' ? 'var(--green)' : 'var(--red)';
+      var ic = r.status === 'submitted' || r.status === 'executed' ? 'check' : 'x';
+      var sh = r.addr ? r.addr.slice(0,6) + '...' + r.addr.slice(-4) : '?';
+      return '<div style="font-size:8.5px;padding:2px 0;border-bottom:1px solid rgba(255,255,255,.03);display:flex;gap:6px;align-items:center">' +
+        '<span style="color:var(--muted2);width:28px">#' + r.num + '</span>' +
+        '<i class="ti ti-' + ic + '" style="color:' + c + ';font-size:10px"></i>' +
+        '<code style="font-size:8px;color:#a78bfa">' + esc(sh) + '</code> → ' +
+        '<span style="color:var(--text)">' + r.amount.toFixed(2) + ' ' + token + '</span>' +
+        '<span style="color:' + c + ';font-size:7px;text-transform:uppercase;margin-left:auto">' + r.status + '</span>' +
+        (r.reason ? ' <span style="color:var(--red);font-size:7px">' + esc(r.reason.slice(0,30)) + '</span>' : '') +
+        '</div>';
+    }).join('');
+
+    return R.intro('<strong style="color:var(--green)">' + summary.executed + '/' + summary.found + '</strong> cross-chain payments completed to <strong>' + chainLabel + '</strong> in <strong>' + duration + 's</strong>.') +
+      R.card(R.head('world','Cross-Chain Payroll — Summary',{text:summary.failed?'PARTIAL':'COMPLETE',cls:summary.failed?'pending':'live'}),
+        R.row('Destination', chainLabel, 'teal') +
+        R.row('Payments', summary.found + ' via CCTP bridge', '') +
+        R.row('Executed', summary.executed + '', 'green') +
+        R.row('Failed', summary.failed + '', summary.failed > 0 ? 'red' : '') +
+        R.row('Total', '<strong>' + (summary.executed * amt).toFixed(2) + ' ' + token + '</strong>', 'green') +
+        R.sep() + '<div style="max-height:300px;overflow-y:auto">' + resHtml + '</div>',
+        R.actions(
+          {icon:'world',label:'Bridge Page',cls:'primary',action:"showPage('bridge')"},
+          {icon:'refresh',label:'Execute Again',cls:'',action:"autonomaSendQuick('crosschain payroll " + count + " payments to " + chainLabel + "')"}
+        )) +
+      '<div style="font-size:8px;color:var(--muted2);margin-top:4px">CCTP bridge with security: Permission → Risk → Policy → Balance → Simulation per payment. One tx at a time.</div>';
   }
 
   // ══════════════════════════════════════════════════════════

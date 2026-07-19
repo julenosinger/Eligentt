@@ -9,7 +9,7 @@
 (function(){
   'use strict';
 
-  var ORACLE_SOURCES = ['twap', 'pool', 'reserve_ratio'];
+  var ORACLE_SOURCES = ['chainlink', 'twap', 'pool', 'reserve_ratio'];
   var activeSource = 'twap';
 
   function getPoolPrice(reserveA, reserveB, decA, decB) {
@@ -55,8 +55,31 @@
     };
   }
 
+  function getChainlinkPrice(){
+    try {
+      if (typeof OracleInterop === 'undefined' || !OracleInterop.getMarketPrices) return null;
+      var snap = OracleInterop.getMarketPrices();
+      if (!snap || !snap.prices || snap.at === 0) return null;
+      // Use ETH/USD as the primary oracle price, pool as secondary
+      if (snap.prices['ETH'] && snap.prices['ETH'] > 0){
+        return {
+          priceAB: snap.prices['ETH'],
+          priceBA: 1 / snap.prices['ETH'],
+          source: 'chainlink_eth_usd',
+          timestamp: snap.at,
+          feeds: Object.keys(snap.prices)
+        };
+      }
+      return null;
+    } catch(_e){ return null; }
+  }
+
   function getBestPrice(reserveA, reserveB) {
     var sources = [];
+
+    // Chainlink Oracle — highest priority (real on-chain, additive)
+    var chainlink = getChainlinkPrice();
+    if (chainlink) sources.push(chainlink);
 
     var twap = getTWAPPrice(15);
     if (twap) sources.push(twap);
@@ -67,7 +90,7 @@
     var ratio = getReserveRatioPrice(reserveA, reserveB);
     if (ratio) sources.push(ratio);
 
-    var best = twap || pool || ratio || null;
+    var best = chainlink || twap || pool || ratio || null;
     activeSource = best ? best.source : 'unknown';
 
     return {
@@ -131,6 +154,7 @@
     getPoolPrice: getPoolPrice,
     getReserveRatioPrice: getReserveRatioPrice,
     getTWAPPrice: getTWAPPrice,
+    getChainlinkPrice: getChainlinkPrice,
     getBestPrice: getBestPrice,
     comparePrices: comparePrices,
     checkOracleHealth: checkOracleHealth,

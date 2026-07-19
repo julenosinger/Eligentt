@@ -81,6 +81,7 @@
   let stopPausedIds = lsLoad(K.stopPaused, []);
   let portfolioCache = { at: 0, rows: [] };
   let monitorTimer = null;
+  let balanceDedup = {}; // short-lived RPC dedup: addr:token → {promise,at}
 
   /* Vault allocations (internal ledger over REAL balances — never exceeds them) */
   const vault = Object.assign({
@@ -212,6 +213,12 @@
   function getProvider() {
     if (typeof ethers === 'undefined') return null;
     try {
+      if (typeof RPCManager !== 'undefined' && RPCManager.getHealthyRPC) {
+        var r = RPCManager.getCurrentProvider();
+        if (r) return r;
+      }
+    } catch (_e) { /* ignore */ }
+    try {
       if (typeof getCachedProvider === 'function') return getCachedProvider(arcRpc());
     } catch (_e) { /* ignore */ }
     try { return new ethers.JsonRpcProvider(arcRpc()); } catch (_e) { return null; }
@@ -322,9 +329,20 @@
 
     /* 11. Balance validation (agent wallet, on-chain read-only) */
     let onchainBal = null;
+    var needBal = false;
     if (OP_TO_SCHED[it.op] === 'payment' || OP_TO_SCHED[it.op] === 'multisend' || OP_TO_SCHED[it.op] === 'swap') {
-      onchainBal = await tokenBalance(agentAddr(), it.token);
-      const need = Number(it.amount) || 0;
+      needBal = true;
+    }
+
+    /* 11c. Gas reserve check — launch in parallel with balance check for performance */
+    var balPromise = needBal ? tokenBalance(agentAddr(), it.token) : Promise.resolve(null);
+    var gasPromise = nativeBalance(agentAddr(), false);
+    var results = await Promise.allSettled([balPromise, gasPromise]);
+    onchainBal = results[0].status === 'fulfilled' ? results[0].value : null;
+    var gasBal = results[1].status === 'fulfilled' ? results[1].value : null;
+
+    if (needBal) {
+      var need = Number(it.amount) || 0;
       if (onchainBal === null) add('Balance', false, 'Balance check failed (RPC unavailable) — failing closed');
       else add('Balance', onchainBal >= need, 'Agent holds ' + onchainBal.toFixed(2) + ' ' + it.token + ' vs required ' + need);
     } else {
@@ -343,11 +361,10 @@
       add('Vault Allocation', OP_TO_SCHED[it.op] === 'bridge' || OP_TO_SCHED[it.op] === 'crosschain', 'Evaluated with balance at execution time');
     }
 
-    /* 11c. Gas reserve — abort if the agent cannot pay gas safely */
-    const gasBal = await nativeBalance(agentAddr(), false);
+    /* 11c. Gas reserve — abort if the agent cannot pay gas safely (result already fetched) */
     if (gasBal === null) add('Gas Reserve', false, 'Gas balance check failed (RPC) — failing closed');
     else {
-      const gasOk = gasBal >= gasCfg.minReserve;
+      var gasOk = gasBal >= gasCfg.minReserve;
       add('Gas Reserve', gasOk, gasOk ? gasBal.toFixed(4) + ' USDC gas ≥ reserve ' + gasCfg.minReserve : 'Gas ' + gasBal.toFixed(4) + ' below reserve ' + gasCfg.minReserve + ' — use Auto Top-Up (Vault & Gas tab)');
       if (!gasOk) checkAutoTopup();
     }
@@ -366,13 +383,29 @@
   async function tokenBalance(addr, token) {
     try {
       if (!addr || typeof ethers === 'undefined') return null;
-      const meta = arcTokens()[token];
+      var meta = arcTokens()[token];
       if (!meta || !meta.address) return null;
-      const provider = getProvider();
+      // Short-lived dedup cache — avoids duplicate RPC calls within same batch
+      var dedupKey = String(addr).toLowerCase() + ':' + token;
+      var cached = balanceDedup[dedupKey];
+      if (cached && (Date.now() - cached.at) < 15000 && cached.val !== null) return cached.val;
+      var provider = getProvider();
       if (!provider) return null;
-      const c = new ethers.Contract(meta.address, ERC20_ABI, provider);
-      const raw = await c.balanceOf(addr);
-      return Number(ethers.formatUnits(raw, meta.decimals || 6));
+      var c = new ethers.Contract(meta.address, ERC20_ABI, provider);
+      var promise = c.balanceOf(addr);
+      balanceDedup[dedupKey] = { promise: promise, at: Date.now() };
+      var raw = await promise;
+      var val = Number(ethers.formatUnits(raw, meta.decimals || 6));
+      balanceDedup[dedupKey] = { val: val, at: Date.now() };
+      // Cleanup stale entries periodically
+      if (Object.keys(balanceDedup).length > 50) {
+        var cutoff = Date.now() - 30000;
+        var keys = Object.keys(balanceDedup);
+        for (var i = 0; i < keys.length; i++) {
+          if (balanceDedup[keys[i]].at < cutoff) delete balanceDedup[keys[i]];
+        }
+      }
+      return val;
     } catch (_e) { return null; }
   }
 
@@ -586,6 +619,23 @@
         if (settings.autoExecute) { executeIntent(it.id); }
       }
       saveIntents(); renderExecutions(); renderHistory();
+      // Emit status to Autonoma via shared bridge
+      try {
+        if (typeof FinancialContext !== 'undefined' && FinancialContext.emitStatus) {
+          FinancialContext.emitStatus({
+            type: 'intent_validation',
+            intentId: it.id,
+            op: it.op,
+            amount: it.amount,
+            token: it.token,
+            status: it.status,
+            passed: res.checks.filter(function(c){return c.passed;}).length,
+            total: res.checks.length,
+            valid: res.valid,
+            timestamp: Date.now()
+          });
+        }
+      } catch (_e) {}
     });
     return it.id;
   }
@@ -669,9 +719,16 @@
       it.status = 'executed';
       it.executedAt = Date.now();
       saveIntents();
-      pushHistory({ kind: 'execution', status: 'executed', intentId: it.id, schedId: s.id, op: it.op, amount: it.amount, token: it.token, amountUsd: (Number(it.amount) || 0) * usdRate(it.token) });
+      var execEntry = { kind: 'execution', status: 'executed', intentId: it.id, schedId: s.id, op: it.op, amount: it.amount, token: it.token, amountUsd: (Number(it.amount) || 0) * usdRate(it.token) };
+      pushHistory(execEntry);
       notify('Intent ' + it.id + ' executed by Agent Wallet', 'success');
       renderExecutions(); renderHistory();
+      // Emit status update to Autonoma via shared bridge
+      try {
+        if (typeof FinancialContext !== 'undefined' && FinancialContext.emitStatus) {
+          FinancialContext.emitStatus({ type: 'intent_executed', intentId: it.id, schedId: s.id, amount: it.amount, token: it.token, status: 'executed', timestamp: Date.now() });
+        }
+      } catch (_e) {}
     }
     renderScheduled();
   }
@@ -1125,30 +1182,65 @@
      PORTFOLIO (read-only)
      ══════════════════════════════════════════════════════════════════ */
   async function refreshPortfolio(force) {
-    const box = $id('aiw-portfolio-body');
+    var box = $id('aiw-portfolio-body');
     if (!box) return;
     if (!force && Date.now() - portfolioCache.at < 30000 && portfolioCache.rows.length) { renderPortfolio(); return; }
-    box.innerHTML = '<div style="font-size:9.5px;color:var(--muted2)">Loading balances…</div>';
-    const rows = [];
-    const wallets = [
+    if (box) box.innerHTML = '<div style="font-size:9.5px;color:var(--muted2)">Loading balances…</div>';
+    var rows = [];
+    var wallets = [
       { label: 'Personal Wallet', addr: personalAddr(), tag: 'personal' },
       { label: 'AI Agent Wallet', addr: agentAddr(), tag: 'agent' }
     ];
-    for (let w = 0; w < wallets.length; w++) {
-      const entry = { label: wallets[w].label, tag: wallets[w].tag, addr: wallets[w].addr, tokens: [], totalUsd: 0 };
+
+    // Use multicall for batch reads when available (avoids sequential RPC trips)
+    for (var w = 0; w < wallets.length; w++) {
+      var entry = { label: wallets[w].label, tag: wallets[w].tag, addr: wallets[w].addr, tokens: [], totalUsd: 0 };
       if (entry.addr) {
-        const symbols = Object.keys(arcTokens());
-        for (let t = 0; t < symbols.length; t++) {
-          const bal = await tokenBalance(entry.addr, symbols[t]);
-          if (bal !== null) {
-            entry.tokens.push({ sym: symbols[t], bal: bal, usd: bal * usdRate(symbols[t]) });
-            entry.totalUsd += bal * usdRate(symbols[t]);
+        var symbols = Object.keys(arcTokens());
+        var tokenMetas = symbols.map(function(s) { return arcTokens()[s]; });
+        var batchResults = null;
+        try {
+          if (typeof Multicall !== 'undefined' && tokenMetas.length > 1) {
+            var provider = getProvider();
+            if (provider) {
+              batchResults = await Multicall.batchBalances(provider, entry.addr, tokenMetas);
+            }
+          }
+        } catch (_e) { /* fall back to sequential */ }
+        if (batchResults && batchResults.length) {
+          for (var t = 0; t < batchResults.length; t++) {
+            var sym = symbols[t];
+            var bal = batchResults[t].error ? null : batchResults[t].formatted;
+            if (bal !== null) {
+              entry.tokens.push({ sym: sym, bal: bal, usd: bal * usdRate(sym) });
+              entry.totalUsd += bal * usdRate(sym);
+            }
+          }
+        } else {
+          for (var t2 = 0; t2 < symbols.length; t2++) {
+            var bal2 = await tokenBalance(entry.addr, symbols[t2]);
+            if (bal2 !== null) {
+              entry.tokens.push({ sym: symbols[t2], bal: bal2, usd: bal2 * usdRate(symbols[t2]) });
+              entry.totalUsd += bal2 * usdRate(symbols[t2]);
+            }
           }
         }
       }
       rows.push(entry);
     }
     portfolioCache = { at: Date.now(), rows: rows };
+    // Update FinancialContext bridge for Autonoma to read
+    try {
+      var snap = { personal: {}, agent: {}, totalUsd: 0, at: Date.now() };
+      rows.forEach(function(r) {
+        var target = r.tag === 'agent' ? snap.agent : snap.personal;
+        r.tokens.forEach(function(tok) { target[tok.sym] = tok.bal; });
+        snap.totalUsd += r.totalUsd;
+      });
+      if (typeof FinancialContext !== 'undefined' && FinancialContext.updatePortfolioSnapshot) {
+        FinancialContext.updatePortfolioSnapshot(snap);
+      }
+    } catch (_e) {}
     renderPortfolio();
   }
 
@@ -2896,6 +2988,13 @@
         checkWorkflows();
         const pg = $id('page-aiwallet');
         if (pg && pg.classList.contains('active')) { renderExecutions(); renderScheduled(); renderStatus(); renderSchedDash(); }
+        // Sync workflow & recommendation data to FinancialContext bridge
+        try {
+          if (typeof FinancialContext !== 'undefined') {
+            if (FinancialContext.updateWorkflowsList) FinancialContext.updateWorkflowsList(workflows);
+            if (FinancialContext.updateRecommendations) FinancialContext.updateRecommendations(buildRecommendations());
+          }
+        } catch (_e) {}
       }, 60000);
     }
     if (page.classList.contains('active')) onShow();
@@ -2978,12 +3077,41 @@
     generateReport: generateReport,
     exportReport: exportReport,
     /* autonoma bridge (opt-in, additive) */
-    receiveAutonomaIntent: submitIntent,
+    receiveAutonomaIntent: function(intent) {
+      return submitIntent(intent);
+    },
     /* portfolio & misc */
     refreshPortfolio: function () { return refreshPortfolio(true); },
     exportHistory: exportHistory,
     onShow: onShow,
     getIntents: function () { return intents.slice(); },
-    getHistory: function () { return history.slice(); }
+    getHistory: function () { return history.slice(); },
+    getWorkflows: function () { return workflows.slice(); },
+    getRecommendations: function () { return buildRecommendations(); },
+    /* context bridge (read-only for FinancialContext & Autonoma) */
+    _portfolioData: function() {
+      var total = 0; var wals = [];
+      portfolioCache.rows.forEach(function(r) { total += r.totalUsd; wals.push(r); });
+      return { totalUsd: total, wallets: wals, cacheAge: Date.now() - portfolioCache.at };
+    },
+    _vaultView: function(token) { return vaultView(token || 'USDC'); },
+    _getGasCfg: function() { return gasCfg; },
+    _getGasStatus: function() { return gasStatus(false); },
+    _getGasLog: function() { return gasLog.slice(); },
+    _getLimits: function() { return Object.assign({}, limits); },
+    _getSpendingCapacity: function() {
+      var spent = spentUsdSince(86400000);
+      var vv = vaultView('USDC');
+      return {
+        dailyLimit: limits.dailyUsd,
+        spentToday: spent,
+        remaining: Math.max(0, limits.dailyUsd - spent),
+        perOpMax: limits.perOpUsd,
+        monthlyLimit: limits.monthlyUsd,
+        spentMonth: spentUsdSince(2592000000),
+        operationalUSDC: vv.operational,
+        gasBalance: nativeCache.bal
+      };
+    }
   };
 })();
