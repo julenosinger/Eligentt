@@ -39,7 +39,9 @@
     gas: 'elligentt_aiw_gas_v1',
     gaslog: 'elligentt_aiw_gaslog_v1',
     approvals: 'elligentt_aiw_approvals_v1',
-    profile: 'elligentt_aiw_profile_v1'
+    profile: 'elligentt_aiw_profile_v1',
+    workflows: 'elligentt_aiw_workflows_v1',
+    wfstate: 'elligentt_aiw_wfstate_v1'
   };
 
   function lsLoad(key, def) {
@@ -101,6 +103,9 @@
   let topupLastNotify = 0;
   const approvals = lsLoad(K.approvals, []);  // pending user approvals (never auto-applied)
   let activeProfile = lsLoad(K.profile, 'custom');
+  const workflows = lsLoad(K.workflows, []);  // workflow DEFINITIONS only — execution always approval-gated
+  const wfState = Object.assign({ lastBalUSDC: null, lastPortfolioUsd: null, lastAuthCount: null, fired: {} }, lsLoad(K.wfstate, {}));
+  const chatLog = [];                          // assistant conversation (session only)
 
   const NETWORKS = {
     Arc_Testnet: { chainId: 5042002, label: 'Arc Testnet' },
@@ -1477,12 +1482,41 @@
       } else if (a.type === 'intent_execute') {
         executeIntent(a.payload.intentId);
         a.result = 'execution dispatched';
+      } else if (a.type === 'vault_change') {
+        const p = a.payload;
+        vaultApply(p.token, p.changes, 'approved via Approval Center');
+        a.result = 'vault updated';
+      } else if (a.type === 'schedule_create') {
+        if (typeof ScheduleEngine === 'undefined') { notify('ScheduleEngine unavailable', 'error'); return; }
+        const s = ScheduleEngine.create(Object.assign({ createdBy: 'aiwallet' }, a.payload.sched));
+        a.result = 'schedule ' + s.id + ' created';
+        pushHistory({ kind: 'observed', status: 'created', schedId: s.id, source: 'approval-center', op: s.type, amount: s.amount, token: s.token });
+      } else if (a.type === 'pause_automations') {
+        let n = 0;
+        try {
+          ScheduleEngine.getAll().forEach(function (s) {
+            if (s.createdBy === 'aiwallet' && s.status === 'Active') { ScheduleEngine.update(s.id, { status: 'Paused' }); n++; }
+          });
+        } catch (_e) { /* ignore */ }
+        a.result = n + ' automation(s) paused';
+        pushHistory({ kind: 'security', status: 'ai_wallet_paused', reason: 'assistant request — ' + n + ' automations' });
+      } else if (a.type === 'workflow_run') {
+        const acts = a.payload.actions || [];
+        const outs = [];
+        acts.forEach(function (ac) {
+          if (ac.type === 'create_intent') { const iid = submitIntent(ac.intent); outs.push('intent ' + iid); }
+          else if (ac.type === 'vault_allocate') { vaultApply(ac.token, ac.changes, 'workflow ' + a.payload.workflowId); outs.push('vault updated'); }
+          else if (ac.type === 'create_schedule' && typeof ScheduleEngine !== 'undefined') { const ns = ScheduleEngine.create(Object.assign({ createdBy: 'aiwallet' }, ac.sched)); outs.push('schedule ' + ns.id); }
+        });
+        a.result = outs.join(' · ') || 'no transactional actions';
+        wfLog(a.payload.workflowId, 'approved & dispatched: ' + a.result);
       }
       a.status = 'approved'; a.decidedAt = Date.now();
       saveApprovals();
       notify('Request ' + a.id + ' approved', 'success');
     } catch (e) { notify('Approval failed: ' + (e.message || e), 'error'); }
     renderApprovals(); renderPermissions(); renderMission(); renderTimeline(); updatePendingBadge();
+    renderVaultPanel(); renderScheduled(); renderWorkflows();
   }
 
   function rejectRequest(id) {
@@ -1853,6 +1887,528 @@
     });
   }
 
+  /* ══════════════════════════════════════════════════════════════════
+     PHASE 5 · shared helper — programmatic vault change (approval path)
+     ══════════════════════════════════════════════════════════════════ */
+  async function vaultApply(token, changes, why) {
+    const real = await tokenBalance(agentAddr(), token);
+    if (real === null) { notify('Vault change aborted — cannot verify on-chain balance', 'error'); return false; }
+    const v = Object.assign({ locked: 0, automation: 0, treasury: 0 }, vault[token] || {});
+    Object.keys(changes || {}).forEach(function (k) {
+      if (['locked', 'automation', 'treasury'].indexOf(k) !== -1) v[k] = Math.max(0, (v[k] || 0) + Number(changes[k] || 0));
+    });
+    if (v.locked + v.automation + v.treasury > real + 1e-9) { notify('Vault change exceeds real balance — rejected', 'error'); return false; }
+    vault[token] = v;
+    lsSave(K.vault, vault);
+    pushHistory({ kind: 'vault', status: 'allocated', reason: token + ' adjusted (' + (why || 'approved') + ')' });
+    renderVaultPanel(); renderPortfolioIntelligence();
+    return true;
+  }
+
+  /* ══════════════════════════════════════════════════════════════════
+     PHASE 5 · AI FINANCIAL ASSISTANT — financial specialist inside the
+     AI Smart Wallet. Rule-based (same approach as the app). It NEVER
+     executes: every action becomes an intent or an approval request.
+     Autonoma remains the general conversational AI — untouched.
+     ══════════════════════════════════════════════════════════════════ */
+  function asstPush(role, html) {
+    chatLog.push({ role: role, html: html, at: Date.now() });
+    if (chatLog.length > 50) chatLog.shift();
+    renderAssistant();
+  }
+
+  function renderAssistant() {
+    const box = $id('aiw-asst-log');
+    if (!box) return;
+    if (!chatLog.length) {
+      box.innerHTML = '<div style="font-size:9px;color:var(--muted2);line-height:1.7">Financial specialist for your AI Smart Wallet. Try:<br>' +
+        ['How much can I spend today?', 'What payments are scheduled this week?', 'Move 100 USDC to treasury', 'Send 25 USDC to 0x…', 'Simulate a payment of 50 USDC', 'Generate a monthly report', 'Pause all automations', 'Gas status', 'Recommendations']
+          .map(function (s) { return '<span class="chip chip-b" style="cursor:pointer;margin:2px" onclick="AIWallet.asstQuick(this.textContent)">' + esc(s) + '</span>'; }).join(' ') + '</div>';
+      return;
+    }
+    box.innerHTML = chatLog.map(function (m) {
+      return '<div style="display:flex;gap:7px;margin-bottom:7px;' + (m.role === 'user' ? 'flex-direction:row-reverse' : '') + '">' +
+        '<div style="max-width:82%;background:' + (m.role === 'user' ? 'rgba(79,142,247,.12)' : 'rgba(0,0,0,.2)') + ';border:1px solid var(--border);border-radius:8px;padding:7px 9px;font-size:9.5px;color:var(--text);line-height:1.6">' + m.html + '</div></div>';
+    }).join('');
+    box.scrollTop = box.scrollHeight;
+  }
+
+  function asstQuick(msg) { const inp = $id('aiw-asst-input'); if (inp) inp.value = msg; assistantSend(); }
+
+  function assistantSend() {
+    const inp = $id('aiw-asst-input');
+    if (!inp) return;
+    const msg = (inp.value || '').trim();
+    if (!msg) return;
+    inp.value = '';
+    asstPush('user', esc(msg));
+    try { asstProcess(msg); } catch (e) { asstPush('ai', 'Error: ' + esc(e.message || e)); }
+  }
+
+  function asstProcess(msg) {
+    const m = msg.toLowerCase();
+    const amt = (function () { const x = msg.match(/(\d+(?:[.,]\d+)?)/); return x ? parseFloat(x[1].replace(',', '.')) : null; })();
+    const token = /eurc/i.test(msg) ? 'EURC' : /cirbtc/i.test(msg) ? 'cirBTC' : 'USDC';
+    const addr = (function () { const x = msg.match(/0x[a-fA-F0-9]{40}/); return x ? x[0] : null; })();
+
+    /* read-only queries — always available */
+    if (/spend|gastar|quanto posso/.test(m) && /today|hoje|day/.test(m)) {
+      const spent = spentUsdSince(86400000);
+      const left = Math.max(0, limits.dailyUsd - spent);
+      const vv = vaultView('USDC');
+      asstPush('ai', 'Daily limit: <b>' + esc(fmtUsd(limits.dailyUsd)) + '</b> · spent today: <b>' + esc(fmtUsd(spent)) + '</b> · remaining: <b style="color:var(--green)">' + esc(fmtUsd(left)) + '</b>.<br>Per-op cap: ' + esc(fmtUsd(limits.perOpUsd)) + ' · Operational USDC: <b>' + (vv.operational === null ? '—' : esc(vv.operational.toFixed(2))) + '</b> (real on-chain minus locked/automation/treasury).');
+      return;
+    }
+    if (/(scheduled|schedule|agendad)/.test(m) && /(week|semana|this)/.test(m)) {
+      let list = [];
+      try { list = ScheduleEngine.getAll().filter(function (s) { return s.status === 'Active' && s.nextRun && new Date(s.nextRun).getTime() <= Date.now() + 604800000; }); } catch (_e) { /* ignore */ }
+      asstPush('ai', list.length ? 'Scheduled in the next 7 days (' + list.length + '):<br>' + list.slice(0, 8).map(function (s) { return '▸ ' + esc(new Date(s.nextRun).toLocaleString() + ' — ' + s.amount + ' ' + s.token + ' · ' + s.type + ' · by ' + (s.createdBy || 'user')); }).join('<br>') : 'No schedules due in the next 7 days.');
+      return;
+    }
+    if (/portfolio|balance|saldo/.test(m) && !/after|impact/.test(m)) {
+      refreshPortfolio(true).then(function () {
+        let total = 0; const lines = [];
+        portfolioCache.rows.forEach(function (r) {
+          total += r.totalUsd;
+          lines.push('<b>' + esc(r.label) + '</b>: ' + (r.tokens.length ? r.tokens.map(function (t) { return t.bal.toFixed(2) + ' ' + t.sym; }).join(' · ') : '—'));
+        });
+        asstPush('ai', 'Total portfolio: <b style="color:var(--green)">' + esc(fmtUsd(total)) + '</b><br>' + lines.join('<br>'));
+      });
+      asstPush('ai', 'Reading real on-chain balances…');
+      return;
+    }
+    if (/gas/.test(m)) {
+      gasStatus(true).then(function (g) {
+        asstPush('ai', 'Gas (native USDC on Arc): <b>' + (g.bal === null ? 'RPC unavailable' : g.bal.toFixed(4)) + '</b> · health <b style="text-transform:capitalize">' + esc(g.status) + '</b> · reserve ' + gasCfg.minReserve + ' USDC · capacity ' + (g.capacity === null ? 'no data' : '~' + g.capacity + ' txs') + '.');
+      });
+      asstPush('ai', 'Checking gas…');
+      return;
+    }
+    if (/recommend|recomenda|sugest/.test(m)) {
+      const recs = buildRecommendations().slice(0, 5);
+      asstPush('ai', recs.length ? recs.map(function (r) { return '▸ <b style="color:' + r.color + '">[' + esc(r.sev) + ']</b> ' + esc(r.text); }).join('<br>') : 'No recommendations right now — everything looks healthy.');
+      return;
+    }
+    if (/report|relat[oó]rio/.test(m)) {
+      const type = /month|mensal|mês/.test(m) ? 'monthly' : /week|semana/.test(m) ? 'weekly' : /portfolio/.test(m) ? 'portfolio' : /gas/.test(m) ? 'gas' : /security|seguran/.test(m) ? 'security' : 'daily';
+      generateReport(type);
+      asstPush('ai', 'Generated the <b>' + esc(type) + '</b> report from real historical data — open the <b>Reports</b> tab to view and export it.');
+      showTab('reports');
+      return;
+    }
+
+    /* actions — always approval-gated, frozen under Emergency Stop */
+    if (emergencyStop && /(move|mover|send|pay|transfer|pause|aloca)/.test(m)) {
+      asstPush('ai', '<b style="color:var(--red)">Emergency Stop is active</b> — actions are frozen. Read-only queries remain available.');
+      return;
+    }
+    if (/(move|mover|aloca)/.test(m) && /(treasury|tesour|locked|automation|gas reserve)/.test(m) && amt) {
+      const field = /locked/.test(m) ? 'locked' : /automation/.test(m) ? 'automation' : 'treasury';
+      const ch = {}; ch[field] = amt;
+      queueApproval('vault_change', 'Move ' + amt + ' ' + token + ' to ' + field + ' allocation', 'Requested via AI Financial Assistant. Validated against the real on-chain balance on approval.', { token: token, changes: ch });
+      asstPush('ai', 'Queued: move <b>' + amt + ' ' + esc(token) + '</b> → <b>' + field + '</b>. Waiting for your approval in the <b>Approval Center</b>.');
+      return;
+    }
+    if (/(send|pay|enviar|pagar|transfer)/.test(m) && amt) {
+      if (!addr) { asstPush('ai', 'I need a destination address (0x…) to create the payment intent.'); return; }
+      const id = submitIntent({ op: 'payment', name: 'assistant payment', amount: amt, token: token, to: addr, network: 'Arc_Testnet', freq: 'once', source: 'financial-assistant' });
+      asstPush('ai', id ? 'Intent <b>' + esc(id) + '</b> created: ' + amt + ' ' + esc(token) + ' → ' + esc(short(addr)) + '. It is passing the full validation pipeline; execution requires approval in the <b>Approval Center</b>.' : 'Intent rejected (Emergency Stop).');
+      return;
+    }
+    if (/simulat|simular/.test(m) && amt) {
+      const cand = { op: /payroll|multisend/.test(m) ? 'multisend' : 'payment', name: 'assistant simulation', amount: amt, token: token, to: addr || '', recipients: addr ? [{ addr: addr, amount: amt }] : [], network: 'Arc_Testnet', toNetwork: 'Base_Sepolia', freq: 'once', source: 'simulation', nonce: nonceCounter + 1, deadline: Date.now() + 900000 };
+      asstPush('ai', 'Running read-only simulation…');
+      validateIntent(cand).then(function (res) {
+        const failed = res.checks.filter(function (c) { return !c.passed; });
+        asstPush('ai', (res.valid ? '<b style="color:var(--green)">SIMULATION PASSED</b>' : '<b style="color:var(--red)">SIMULATION FAILED</b>') + ' — ' + (res.checks.length - failed.length) + '/' + res.checks.length + ' validations' + (failed.length ? '<br>Failed: ' + esc(failed.map(function (c) { return c.name; }).join(', ')) : '') + '<br>Nothing was executed. Full details in the <b>Simulation</b> tab.');
+      });
+      return;
+    }
+    if (/pause/.test(m) && /(automa|all)/.test(m)) {
+      queueApproval('pause_automations', 'Pause all AI Smart Wallet automations', 'Requested via AI Financial Assistant. Pauses only aiwallet-created schedules — the rest of the app is unaffected.', {});
+      asstPush('ai', 'Queued: pause all AI Smart Wallet automations. Confirm in the <b>Approval Center</b>.');
+      return;
+    }
+    if (/permission|permiss/.test(m)) {
+      try {
+        const s = AgentAuthorization.getAuthSummary();
+        asstPush('ai', 'Active grants: <b>' + s.count + '</b> · total cap ' + esc(fmtUsd(s.totalSpendingLimit)) + ' · daily cap ' + esc(fmtUsd(s.totalDailyLimit)) + ' · ops: ' + esc(Array.from(s.allowedOps || []).join(', ') || 'none') + '. Manage in <b>AI Permissions</b>.');
+      } catch (_e) { asstPush('ai', 'Permission engine unavailable.'); }
+      return;
+    }
+    asstPush('ai', 'I can help with: spending capacity, weekly schedules, portfolio/gas status, vault moves ("move 100 USDC to treasury"), payments ("send 25 USDC to 0x…"), simulations, reports, pausing automations, permissions. Every action goes through the approval pipeline.');
+  }
+
+  /* ══════════════════════════════════════════════════════════════════
+     PHASE 5 · AUTONOMOUS WORKFLOWS + BUILDER — definitions only.
+     Triggers are monitored read-only; matched workflows bundle their
+     transactional actions into ONE Approval Center request.
+     ══════════════════════════════════════════════════════════════════ */
+  function saveWorkflows() { if (workflows.length > 30) workflows.length = 30; lsSave(K.workflows, workflows); }
+  function saveWfState() { lsSave(K.wfstate, wfState); }
+  function wfLog(id, text) {
+    const wf = workflows.find(function (w) { return w.id === id; });
+    if (!wf) return;
+    wf.log = wf.log || [];
+    wf.log.unshift({ at: Date.now(), text: String(text).slice(0, 160) });
+    wf.log = wf.log.slice(0, 20);
+    saveWorkflows();
+  }
+
+  const wfDraft = { conditions: [], actions: [] };
+
+  function wfAddCondition() {
+    const field = ($id('aiw-wf-cond-field') || {}).value || 'amount';
+    const op = ($id('aiw-wf-cond-op') || {}).value || '>';
+    const value = parseFloat(($id('aiw-wf-cond-value') || {}).value);
+    if (!isFinite(value)) { notify('Enter a condition value', 'error'); return; }
+    wfDraft.conditions.push({ field: field, op: op, value: value });
+    renderWfDraft();
+  }
+
+  function wfAddAction() {
+    const type = ($id('aiw-wf-act-type') || {}).value || 'notify';
+    const a = { type: type };
+    const val = parseFloat(($id('aiw-wf-act-value') || {}).value);
+    const dest = (($id('aiw-wf-act-dest') || {}).value || '').trim();
+    const target = ($id('aiw-wf-act-target') || {}).value || 'treasury';
+    const isPct = ($id('aiw-wf-act-mode') || {}).value === 'percent';
+    if (type === 'create_intent') {
+      if (!isFinite(val) || val <= 0) { notify('Action needs an amount', 'error'); return; }
+      if (!/^0x[a-fA-F0-9]{40}$/.test(dest)) { notify('Action needs a valid destination address', 'error'); return; }
+      a.amount = val; a.isPercent = isPct; a.to = dest; a.token = 'USDC';
+    } else if (type === 'vault_allocate') {
+      if (!isFinite(val) || val <= 0) { notify('Action needs an amount', 'error'); return; }
+      a.amount = val; a.isPercent = isPct; a.target = target; a.token = 'USDC';
+    } else if (type === 'create_schedule') {
+      if (!isFinite(val) || val <= 0) { notify('Action needs an amount', 'error'); return; }
+      if (!/^0x[a-fA-F0-9]{40}$/.test(dest)) { notify('Schedule action needs a valid address', 'error'); return; }
+      a.amount = val; a.to = dest; a.token = 'USDC'; a.freq = 'monthly';
+    }
+    wfDraft.actions.push(a);
+    renderWfDraft();
+  }
+
+  function wfRemoveCond(i) { wfDraft.conditions.splice(i, 1); renderWfDraft(); }
+  function wfRemoveAct(i) { wfDraft.actions.splice(i, 1); renderWfDraft(); }
+
+  function renderWfDraft() {
+    const cb = $id('aiw-wf-conds');
+    if (cb) cb.innerHTML = wfDraft.conditions.length ? wfDraft.conditions.map(function (c, i) {
+      return '<span class="chip chip-b" style="margin:2px">' + esc(c.field + ' ' + c.op + ' ' + c.value) + ' <span style="cursor:pointer;color:var(--red)" onclick="AIWallet.wfRemoveCond(' + i + ')">×</span></span>';
+    }).join('') : '<span style="font-size:8.5px;color:var(--muted2)">No conditions (always passes)</span>';
+    const ab = $id('aiw-wf-acts');
+    if (ab) ab.innerHTML = wfDraft.actions.length ? wfDraft.actions.map(function (a, i) {
+      let txt = a.type;
+      if (a.type === 'create_intent') txt = 'pay ' + a.amount + (a.isPercent ? '%' : ' USDC') + ' → ' + short(a.to);
+      if (a.type === 'vault_allocate') txt = 'allocate ' + a.amount + (a.isPercent ? '%' : ' USDC') + ' → ' + a.target;
+      if (a.type === 'create_schedule') txt = 'schedule ' + a.amount + ' USDC monthly → ' + short(a.to);
+      return '<span class="chip chip-p" style="margin:2px">' + esc(txt) + ' <span style="cursor:pointer;color:var(--red)" onclick="AIWallet.wfRemoveAct(' + i + ')">×</span></span>';
+    }).join('') : '<span style="font-size:8.5px;color:var(--muted2)">No actions yet</span>';
+  }
+
+  function wfOnActTypeChange() {
+    const type = ($id('aiw-wf-act-type') || {}).value;
+    const show = function (id, on) { const el = $id(id); if (el) el.style.display = on ? '' : 'none'; };
+    show('aiw-wf-act-value-wrap', ['create_intent', 'vault_allocate', 'create_schedule'].indexOf(type) !== -1);
+    show('aiw-wf-act-mode-wrap', ['create_intent', 'vault_allocate'].indexOf(type) !== -1);
+    show('aiw-wf-act-dest-wrap', ['create_intent', 'create_schedule'].indexOf(type) !== -1);
+    show('aiw-wf-act-target-wrap', type === 'vault_allocate');
+  }
+
+  function wfCreate() {
+    if (emergencyStop) { notify('Emergency Stop active — workflow creation frozen', 'error'); return; }
+    const name = (($id('aiw-wf-name') || {}).value || '').trim();
+    if (!name) { notify('Name your workflow', 'error'); return; }
+    if (!wfDraft.actions.length) { notify('Add at least one action', 'error'); return; }
+    const trigType = ($id('aiw-wf-trigger') || {}).value || 'time_weekly';
+    const trig = { type: trigType };
+    if (trigType === 'time_weekly') trig.day = parseInt(($id('aiw-wf-trig-day') || {}).value, 10) || 5;
+    if (trigType === 'gas_below') trig.threshold = parseFloat(($id('aiw-wf-trig-value') || {}).value) || gasCfg.topupThreshold;
+    if (trigType === 'asset_received') trig.minAmount = parseFloat(($id('aiw-wf-trig-value') || {}).value) || 0;
+    if (trigType === 'portfolio_drop') trig.percent = parseFloat(($id('aiw-wf-trig-value') || {}).value) || 10;
+    const wf = {
+      id: 'WF-' + Date.now().toString(36),
+      name: name.slice(0, 60),
+      trigger: trig,
+      conditions: wfDraft.conditions.slice(),
+      actions: wfDraft.actions.slice(),
+      approvalRequired: true,
+      notifyUser: ($id('aiw-wf-notify') || {}).classList ? $id('aiw-wf-notify').classList.contains('on') : true,
+      status: 'active', createdAt: Date.now(), runCount: 0, log: []
+    };
+    workflows.unshift(wf);
+    saveWorkflows();
+    wfDraft.conditions = []; wfDraft.actions = [];
+    const nameEl = $id('aiw-wf-name'); if (nameEl) nameEl.value = '';
+    pushHistory({ kind: 'workflow', status: 'created', reason: wf.name });
+    notify('Workflow "' + wf.name + '" saved — definition only; every run waits for your approval', 'success');
+    renderWfDraft(); renderWorkflows(); renderTimeline();
+  }
+
+  function wfToggle(id) {
+    const wf = workflows.find(function (w) { return w.id === id; });
+    if (!wf) return;
+    if (wf.status !== 'active' && emergencyStop) { notify('Emergency Stop active — cannot resume workflows', 'error'); return; }
+    wf.status = wf.status === 'active' ? 'paused' : 'active';
+    saveWorkflows(); renderWorkflows();
+  }
+  function wfDelete(id) {
+    const i = workflows.findIndex(function (w) { return w.id === id; });
+    if (i !== -1) { pushHistory({ kind: 'workflow', status: 'deleted', reason: workflows[i].name }); workflows.splice(i, 1); saveWorkflows(); renderWorkflows(); }
+  }
+
+  function wfEvalConditions(wf, ctx) {
+    return (wf.conditions || []).every(function (c) {
+      let actual = null;
+      if (c.field === 'amount') actual = ctx.amount || 0;
+      else if (c.field === 'daily_spent') actual = spentUsdSince(86400000);
+      else if (c.field === 'operational_usdc') { const vv = vaultView('USDC'); actual = vv.operational === null ? 0 : vv.operational; }
+      else if (c.field === 'gas_balance') actual = nativeCache.bal === null ? 0 : nativeCache.bal;
+      else if (c.field === 'active_schedules') { try { actual = ScheduleEngine.getAll().filter(function (s) { return s.status === 'Active'; }).length; } catch (_e) { actual = 0; } }
+      if (actual === null) return false;
+      return c.op === '>' ? actual > c.value : c.op === '<' ? actual < c.value : Math.abs(actual - c.value) < 1e-9;
+    });
+  }
+
+  function wfFire(wf, ctx) {
+    if (emergencyStop) { wfLog(wf.id, 'trigger matched but frozen by Emergency Stop'); return; }
+    if (!wfEvalConditions(wf, ctx)) { wfLog(wf.id, 'trigger matched · conditions failed'); return; }
+    const transactional = [];
+    (wf.actions || []).forEach(function (a) {
+      const base = ctx.amount || 0;
+      const amount = a.isPercent ? +(base * (a.amount / 100)).toFixed(2) : a.amount;
+      if (a.type === 'create_intent') transactional.push({ type: 'create_intent', intent: { op: 'payment', name: 'workflow ' + wf.name, amount: amount, token: a.token || 'USDC', to: a.to, network: 'Arc_Testnet', freq: 'once', source: 'workflow' } });
+      else if (a.type === 'vault_allocate') { const ch = {}; ch[a.target || 'treasury'] = amount; transactional.push({ type: 'vault_allocate', token: a.token || 'USDC', changes: ch }); }
+      else if (a.type === 'create_schedule') transactional.push({ type: 'create_schedule', sched: { type: 'payment', name: 'workflow ' + wf.name, token: a.token || 'USDC', amount: amount, address: a.to, recipients: [{ addr: a.to, amount: amount }], freq: a.freq || 'monthly', nextRun: new Date(Date.now() + 60000).toISOString(), status: 'Active' } });
+      else if (a.type === 'generate_report') { generateReport('daily'); wfLog(wf.id, 'report generated'); }
+      else if (a.type === 'simulate') { wfLog(wf.id, 'simulation requested — open Simulation tab'); }
+      else if (a.type === 'pause_workflow') { wf.status = 'paused'; wfLog(wf.id, 'self-paused'); }
+    });
+    wf.runCount = (wf.runCount || 0) + 1;
+    wf.lastRun = Date.now();
+    if (transactional.length) {
+      queueApproval('workflow_run', 'Workflow: ' + wf.name, 'Trigger fired (' + wf.trigger.type + (ctx.amount ? ' · amount ' + ctx.amount : '') + ') · ' + transactional.length + ' transactional action(s) awaiting your approval.', { workflowId: wf.id, actions: transactional });
+      wfLog(wf.id, 'fired → ' + transactional.length + ' action(s) sent to Approval Center');
+    } else {
+      wfLog(wf.id, 'fired → read-only actions completed');
+    }
+    if (wf.notifyUser) notify('Workflow "' + wf.name + '" fired' + (transactional.length ? ' — waiting in Approval Center' : ''), 'info');
+    saveWorkflows(); renderWorkflows(); renderTimeline();
+  }
+
+  async function checkWorkflows() {
+    if (!workflows.length) return;
+    const active = workflows.filter(function (w) { return w.status === 'active'; });
+    if (!active.length) return;
+    const now = new Date();
+    /* asset_received: real balance delta on agent USDC */
+    let balNow = null;
+    if (active.some(function (w) { return w.trigger.type === 'asset_received'; })) {
+      balNow = await tokenBalance(agentAddr(), 'USDC');
+      if (balNow !== null && wfState.lastBalUSDC !== null && balNow > wfState.lastBalUSDC + 1e-9) {
+        const received = +(balNow - wfState.lastBalUSDC).toFixed(6);
+        active.forEach(function (w) {
+          if (w.trigger.type === 'asset_received' && received >= (w.trigger.minAmount || 0)) wfFire(w, { amount: received });
+        });
+      }
+      if (balNow !== null) { wfState.lastBalUSDC = balNow; saveWfState(); }
+    }
+    active.forEach(function (w) {
+      const t = w.trigger || {};
+      const key = w.id + ':' + t.type;
+      if (t.type === 'time_weekly') {
+        const period = now.getFullYear() + '-w' + Math.floor(now.getTime() / 604800000) + '-d' + t.day;
+        if (now.getDay() === Number(t.day) && wfState.fired[key] !== period) { wfState.fired[key] = period; saveWfState(); wfFire(w, {}); }
+      } else if (t.type === 'time_daily') {
+        const dayKey = now.toISOString().slice(0, 10);
+        if (wfState.fired[key] !== dayKey) { wfState.fired[key] = dayKey; saveWfState(); wfFire(w, {}); }
+      } else if (t.type === 'gas_below') {
+        if (nativeCache.bal !== null && nativeCache.bal < (t.threshold || 0)) {
+          const hourKey = new Date().toISOString().slice(0, 13);
+          if (wfState.fired[key] !== hourKey) { wfState.fired[key] = hourKey; saveWfState(); wfFire(w, { amount: nativeCache.bal }); }
+        }
+      } else if (t.type === 'portfolio_drop') {
+        let total = 0;
+        portfolioCache.rows.forEach(function (r) { total += r.totalUsd; });
+        if (wfState.lastPortfolioUsd && total > 0 && total < wfState.lastPortfolioUsd * (1 - (t.percent || 10) / 100)) {
+          const dayKey2 = new Date().toISOString().slice(0, 10);
+          if (wfState.fired[key] !== dayKey2) { wfState.fired[key] = dayKey2; saveWfState(); wfFire(w, { amount: total }); }
+        }
+        if (total > 0) { wfState.lastPortfolioUsd = total; saveWfState(); }
+      }
+    });
+  }
+
+  function onScheduleExecutedForWorkflows(detail) {
+    if (!detail || !detail.item) return;
+    workflows.filter(function (w) { return w.status === 'active' && w.trigger.type === 'schedule_executed'; })
+      .forEach(function (w) { wfFire(w, { amount: Number(detail.item.amount) || 0 }); });
+  }
+
+  function renderWorkflows() {
+    const box = $id('aiw-wf-list');
+    if (!box) return;
+    if (!workflows.length) { box.innerHTML = '<div style="font-size:9.5px;color:var(--muted2)">No workflows yet — build one below. Workflows are definitions only: every transactional run waits in the Approval Center.</div>'; return; }
+    box.innerHTML = workflows.map(function (w) {
+      const trig = w.trigger.type + (w.trigger.day !== undefined ? ' (day ' + w.trigger.day + ')' : '') + (w.trigger.threshold ? ' < ' + w.trigger.threshold : '') + (w.trigger.minAmount ? ' ≥ ' + w.trigger.minAmount : '');
+      return '<div style="border:1px solid var(--border);border-radius:6px;padding:8px;margin-bottom:6px;background:rgba(0,0,0,.15)">' +
+        '<div style="display:flex;align-items:center;gap:6px">' +
+        '<span style="width:7px;height:7px;border-radius:50%;background:' + (w.status === 'active' ? 'var(--green)' : 'var(--yellow)') + '"></span>' +
+        '<span style="font-size:10px;font-weight:600;color:var(--text)">' + esc(w.name) + '</span>' +
+        '<span class="chip" style="border:1px solid var(--border);color:var(--muted2)">' + esc(trig) + '</span>' +
+        '<span style="margin-left:auto;display:flex;gap:4px">' +
+        '<button class="btn" style="font-size:8px;padding:2px 7px" onclick="AIWallet.wfToggle(\'' + esc(w.id) + '\')">' + (w.status === 'active' ? 'Pause' : 'Resume') + '</button>' +
+        '<button class="btn" style="font-size:8px;padding:2px 7px;border-color:rgba(239,68,68,.4);color:var(--red)" onclick="AIWallet.wfDelete(\'' + esc(w.id) + '\')">Delete</button></span></div>' +
+        '<div style="font-size:8.5px;color:var(--muted2);margin-top:3px">' + (w.conditions || []).length + ' condition(s) · ' + (w.actions || []).length + ' action(s) · approval always required · runs ' + (w.runCount || 0) + (w.lastRun ? ' · last ' + new Date(w.lastRun).toLocaleString() : '') + '</div>' +
+        ((w.log && w.log.length) ? '<div style="font-size:8px;color:var(--muted2);margin-top:3px">' + w.log.slice(0, 3).map(function (l) { return '▸ ' + esc(new Date(l.at).toLocaleTimeString() + ' ' + l.text); }).join('<br>') + '</div>' : '') +
+        '</div>';
+    }).join('');
+  }
+
+  /* ══════════════════════════════════════════════════════════════════
+     PHASE 5 · AI RECOMMENDATIONS — informational only, from real data
+     ══════════════════════════════════════════════════════════════════ */
+  function buildRecommendations() {
+    const recs = [];
+    function add(sev, color, text, tab) { recs.push({ sev: sev, color: color, text: text, tab: tab }); }
+    if (nativeCache.bal !== null) {
+      if (nativeCache.bal < gasCfg.minReserve * 0.5) add('CRITICAL', 'var(--red)', 'Gas balance ' + nativeCache.bal.toFixed(4) + ' USDC is far below your ' + gasCfg.minReserve + ' USDC reserve — executions will abort. Top up now.', 'vault');
+      else if (nativeCache.bal < gasCfg.minReserve) add('WARNING', 'var(--yellow)', 'Gas Reserve is below recommended levels (' + nativeCache.bal.toFixed(4) + ' / ' + gasCfg.minReserve + ' USDC).', 'vault');
+    }
+    const vv = vaultView('USDC');
+    if (vv.real !== null && vv.real > 0) {
+      if (vv.locked + vv.automation + vv.treasury === 0) add('INFO', 'var(--blue)', 'No vault allocations set — 100% of the AI balance is operational. Consider locking a portion.', 'vault');
+      if (vv.treasury === 0 && vv.real >= 100) add('INFO', 'var(--blue)', 'Treasury Allocation is unused with ' + vv.real.toFixed(0) + ' USDC on the agent.', 'vault');
+      if (vv.overAllocated) add('CRITICAL', 'var(--red)', 'Vault allocations exceed the real on-chain balance — fix the allocation.', 'vault');
+    }
+    const thisMonth = spentUsdSince(2592000000);
+    const prevMonth = (function () {
+      const from = Date.now() - 5184000000, to = Date.now() - 2592000000;
+      return history.reduce(function (s, h) { return (h.at >= from && h.at < to && h.kind === 'execution' && h.status === 'executed') ? s + (Number(h.amountUsd) || 0) : s; }, 0);
+    })();
+    if (prevMonth > 0 && thisMonth > prevMonth) add('WARNING', 'var(--yellow)', 'Monthly spending increased by ' + Math.round(((thisMonth - prevMonth) / prevMonth) * 100) + '% (' + fmtUsd(prevMonth) + ' → ' + fmtUsd(thisMonth) + ').', 'history');
+    try {
+      const active = AgentAuthorization.getActive();
+      const expiring = active.filter(function (a) { return a.expiresAt - Date.now() < 604800000; });
+      if (expiring.length) add('WARNING', 'var(--yellow)', expiring.length + ' authorization(s) expiring within 7 days — renew to keep automations running.', 'permissions');
+      if (!active.length && workflows.length + intents.length > 0) add('WARNING', 'var(--yellow)', 'No active permission grants — intents will fail the Permission Engine check.', 'permissions');
+    } catch (_e) { /* ignore */ }
+    try {
+      const scheds = ScheduleEngine.getAll();
+      const stale = scheds.filter(function (s) { return s.status === 'Active' && s.nextRun && new Date(s.nextRun).getTime() < Date.now() - 3600000; });
+      if (stale.length) add('INFO', 'var(--blue)', stale.length + ' schedule(s) past due — the agent scheduler will pick them up, or run them manually.', 'scheduled');
+    } catch (_e) { /* ignore */ }
+    if (emergencyStop) add('CRITICAL', 'var(--red)', 'Emergency Stop is active — all AI operations are frozen.', 'security');
+    let autoScore = 100;
+    const failedRuns = intents.filter(function (i) { return i.status === 'failed'; }).length;
+    const okRuns = intents.filter(function (i) { return i.status === 'executed'; }).length;
+    if (failedRuns + okRuns > 0) autoScore -= Math.round((failedRuns / (failedRuns + okRuns)) * 40);
+    if (nativeCache.bal !== null && nativeCache.bal < gasCfg.minReserve) autoScore -= 25;
+    if (emergencyStop) autoScore -= 20;
+    try { if (!AgentAuthorization.getActive().length) autoScore -= 15; } catch (_e) { /* ignore */ }
+    add(autoScore >= 80 ? 'GOOD' : autoScore >= 50 ? 'WARNING' : 'CRITICAL', autoScore >= 80 ? 'var(--green)' : autoScore >= 50 ? 'var(--yellow)' : 'var(--red)', 'Automation Health Score: ' + Math.max(0, autoScore) + '/100 (derived from real executions, gas, grants and stop state).', 'mission');
+    return recs;
+  }
+
+  function renderRecommendations() {
+    const box = $id('aiw-recs-body');
+    if (!box) return;
+    const recs = buildRecommendations();
+    box.innerHTML = recs.map(function (r) {
+      return '<div style="display:flex;gap:8px;align-items:flex-start;border:1px solid var(--border);border-radius:6px;padding:8px;margin-bottom:6px;background:rgba(0,0,0,.15)">' +
+        '<span class="chip" style="border:1px solid var(--border);color:' + r.color + ';flex-shrink:0">' + esc(r.sev) + '</span>' +
+        '<span style="font-size:9.5px;color:var(--text);line-height:1.5;flex:1">' + esc(r.text) + '</span>' +
+        (r.tab ? '<button class="btn" style="font-size:8px;padding:2px 8px;flex-shrink:0" onclick="AIWallet.showTab(\'' + r.tab + '\')">Open</button>' : '') + '</div>';
+    }).join('') + '<div style="font-size:8px;color:var(--muted2)">Informational only — recommendations never change configurations, grant permissions or execute operations.</div>';
+  }
+
+  /* ══════════════════════════════════════════════════════════════════
+     PHASE 5 · AI REPORTS CENTER — read-only, real historical data
+     ══════════════════════════════════════════════════════════════════ */
+  let lastReport = null;
+
+  function reportWindowMs(type) {
+    return type === 'daily' ? 86400000 : type === 'weekly' ? 604800000 : 2592000000;
+  }
+
+  function generateReport(type) {
+    const since = Date.now() - reportWindowMs(type);
+    const inWindow = history.filter(function (h) { return h.at >= since; });
+    const txs = inWindow.filter(function (h) { return h.txHash; });
+    const schedActivity = [];
+    try {
+      ScheduleEngine.getAll().forEach(function (s) {
+        (s.executionHistory || []).forEach(function (e) {
+          if (new Date(e.timestamp).getTime() >= since) schedActivity.push({ name: s.name || s.type, amount: e.amount, token: e.token, status: e.status, at: e.timestamp, by: s.createdBy });
+        });
+      });
+    } catch (_e) { /* ignore */ }
+    let authChanges = [];
+    try { authChanges = (AgentAuthorization.getAuthHistory(50) || []).filter(function (r) { return r.timestamp >= since; }); } catch (_e) { /* ignore */ }
+    const decisions = inWindow.filter(function (h) { return h.kind === 'validation'; });
+    const security = inWindow.filter(function (h) { return h.kind === 'security'; });
+    const gs = gasSums();
+    const vaultSnap = { USDC: vaultView('USDC'), EURC: vaultView('EURC') };
+    lastReport = {
+      type: type, generatedAt: new Date().toISOString(), window: type,
+      financialSummary: {
+        spentUsd: spentUsdSince(reportWindowMs(type)),
+        fundingOps: inWindow.filter(function (h) { return h.kind === 'funding'; }).length,
+        onchainTxs: txs.length,
+        portfolioUsd: portfolioCache.rows.reduce(function (s, r) { return s + r.totalUsd; }, 0)
+      },
+      transactions: txs.slice(0, 25),
+      vaultAllocations: vaultSnap,
+      scheduleActivity: schedActivity.slice(0, 25),
+      automationActivity: { workflows: workflows.map(function (w) { return { name: w.name, status: w.status, runs: w.runCount || 0 }; }), intentsExecuted: intents.filter(function (i) { return i.status === 'executed' && i.executedAt >= since; }).length },
+      aiDecisions: { approved: decisions.filter(function (d) { return d.status === 'approved'; }).length, rejected: decisions.filter(function (d) { return d.status === 'rejected'; }).length },
+      permissionChanges: authChanges.slice(0, 15),
+      securityEvents: security.slice(0, 15),
+      gas: { today: gs.today, week: gs.week, month: gs.month, balance: nativeCache.bal },
+      healthScores: { ai: null, recommendations: buildRecommendations().map(function (r) { return '[' + r.sev + '] ' + r.text; }) }
+    };
+    renderReports();
+    pushHistory({ kind: 'report', status: 'generated', reason: type });
+    return lastReport;
+  }
+
+  function renderReports() {
+    const box = $id('aiw-reports-body');
+    if (!box) return;
+    if (!lastReport) { box.innerHTML = '<div style="font-size:9.5px;color:var(--muted2)">Pick a report above — assembled read-only from real historical data (module history, schedules, audit, auth history, receipts).</div>'; return; }
+    const r = lastReport;
+    function sec(title, inner) { return '<div class="st-lbl" style="margin-top:8px">' + esc(title) + '</div>' + inner; }
+    let html = '<div style="display:flex;align-items:center;gap:8px"><span style="font-size:11px;font-weight:700;color:var(--text);text-transform:capitalize">' + esc(r.type) + ' Report</span><span style="font-size:8px;color:var(--muted2)">' + esc(new Date(r.generatedAt).toLocaleString()) + '</span>' +
+      '<button class="btn" style="font-size:8px;padding:2px 8px;margin-left:auto" onclick="AIWallet.exportReport()"><i class="ti ti-download"></i>Export JSON</button></div>';
+    html += sec('Financial Summary', '<div style="font-size:9px;color:var(--muted2)">Spent: <b style="color:var(--text)">' + fmtUsd(r.financialSummary.spentUsd) + '</b> · Funding ops: ' + r.financialSummary.fundingOps + ' · On-chain txs: ' + r.financialSummary.onchainTxs + ' · Portfolio: <b style="color:var(--green)">' + fmtUsd(r.financialSummary.portfolioUsd) + '</b></div>');
+    html += sec('Vault Allocations (USDC)', '<div style="font-size:9px;color:var(--muted2)">Operational ' + (r.vaultAllocations.USDC.operational === null ? '—' : r.vaultAllocations.USDC.operational.toFixed(2)) + ' · Locked ' + r.vaultAllocations.USDC.locked.toFixed(2) + ' · Automation ' + r.vaultAllocations.USDC.automation.toFixed(2) + ' · Treasury ' + r.vaultAllocations.USDC.treasury.toFixed(2) + '</div>');
+    html += sec('Transactions (' + r.transactions.length + ')', r.transactions.length ? r.transactions.slice(0, 8).map(function (t) {
+      return '<div style="font-size:8.5px;color:var(--muted2)">▸ ' + esc(new Date(t.at).toLocaleString() + ' · ' + (t.op || t.kind) + ' · ' + (t.amount || '') + ' ' + (t.token || '')) + ' <a href="' + explorerTx(t.txHash) + '" target="_blank" rel="noopener" style="color:var(--blue)">' + esc(short(t.txHash)) + '</a></div>';
+    }).join('') : '<div style="font-size:8.5px;color:var(--muted2)">None in window.</div>');
+    html += sec('Schedule Activity (' + r.scheduleActivity.length + ')', r.scheduleActivity.length ? r.scheduleActivity.slice(0, 6).map(function (s) { return '<div style="font-size:8.5px;color:var(--muted2)">▸ ' + esc(s.name + ' · ' + s.amount + ' ' + s.token + ' · ' + s.status + ' · ' + new Date(s.at).toLocaleString()) + '</div>'; }).join('') : '<div style="font-size:8.5px;color:var(--muted2)">None.</div>');
+    html += sec('Automation & Workflows', '<div style="font-size:8.5px;color:var(--muted2)">Intents executed: ' + r.automationActivity.intentsExecuted + (r.automationActivity.workflows.length ? '<br>' + r.automationActivity.workflows.map(function (w) { return '▸ ' + esc(w.name + ' · ' + w.status + ' · ' + w.runs + ' runs'); }).join('<br>') : '') + '</div>');
+    html += sec('AI Decisions', '<div style="font-size:8.5px;color:var(--muted2)">Approved: <b style="color:var(--green)">' + r.aiDecisions.approved + '</b> · Rejected: <b style="color:var(--red)">' + r.aiDecisions.rejected + '</b></div>');
+    html += sec('Permission Changes (' + r.permissionChanges.length + ')', r.permissionChanges.length ? r.permissionChanges.slice(0, 5).map(function (p) { return '<div style="font-size:8.5px;color:var(--muted2)">▸ ' + esc(new Date(p.timestamp).toLocaleString() + ' · ' + p.action + ' · ' + p.authId) + '</div>'; }).join('') : '<div style="font-size:8.5px;color:var(--muted2)">None.</div>');
+    html += sec('Security Events (' + r.securityEvents.length + ')', r.securityEvents.length ? r.securityEvents.slice(0, 5).map(function (s) { return '<div style="font-size:8.5px;color:var(--muted2)">▸ ' + esc(new Date(s.at).toLocaleString() + ' · ' + s.status + (s.reason ? ' · ' + s.reason : '')) + '</div>'; }).join('') : '<div style="font-size:8.5px;color:var(--muted2)">None.</div>');
+    html += sec('Gas (real receipts)', '<div style="font-size:8.5px;color:var(--muted2)">Today ' + r.gas.today.toFixed(6) + ' · Week ' + r.gas.week.toFixed(6) + ' · Month ' + r.gas.month.toFixed(6) + ' USDC · Balance ' + (r.gas.balance === null ? '—' : r.gas.balance.toFixed(4)) + '</div>');
+    html += sec('Recommendations', r.healthScores.recommendations.slice(0, 5).map(function (t) { return '<div style="font-size:8.5px;color:var(--muted2)">▸ ' + esc(t) + '</div>'; }).join(''));
+    box.innerHTML = html;
+  }
+
+  function exportReport() {
+    if (!lastReport) return;
+    try {
+      const blob = new Blob([JSON.stringify(lastReport, null, 2)], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'aiw-report-' + lastReport.type + '-' + Date.now() + '.json';
+      a.click();
+      setTimeout(function () { URL.revokeObjectURL(a.href); }, 5000);
+    } catch (e) { notify('Export failed: ' + (e.message || e), 'error'); }
+  }
+
+
 
   /* ══════════════════════════════════════════════════════════════════
      RENDERING (all output escaped; renders only inside #page-aiwallet)
@@ -1862,7 +2418,7 @@
   }
 
   /* ── Internal tab menu (scoped to #page-aiwallet) ─────────────────── */
-  const TABS = ['mission', 'overview', 'vault', 'approvals', 'simulate', 'automation', 'executions', 'scheduled', 'permissions', 'limits', 'profiles', 'history', 'timeline', 'security'];
+  const TABS = ['mission', 'assistant', 'overview', 'vault', 'approvals', 'simulate', 'workflows', 'automation', 'executions', 'scheduled', 'permissions', 'limits', 'profiles', 'insights', 'reports', 'history', 'timeline', 'security'];
   function showTab(name) {
     if (TABS.indexOf(name) === -1) name = 'mission';
     TABS.forEach(function (t) {
@@ -1877,6 +2433,10 @@
     if (name === 'vault') renderVaultPanel();
     if (name === 'timeline') renderTimeline();
     if (name === 'approvals') renderApprovals();
+    if (name === 'assistant') renderAssistant();
+    if (name === 'workflows') { renderWorkflows(); renderWfDraft(); }
+    if (name === 'insights') renderRecommendations();
+    if (name === 'reports') renderReports();
   }
 
   function updatePendingBadge() {
@@ -2139,6 +2699,7 @@
     renderWalletManager(); renderReceive(); renderGrantOps(); renderSecurityCenter(); renderHistoryStats();
     renderVaultPanel(); renderPortfolioIntelligence(); renderSchedDash(); renderAutoStats();
     renderMission(); renderApprovals(); renderProfiles(); renderTimeline();
+    renderAssistant(); renderWorkflows(); renderWfDraft(); renderRecommendations(); renderReports();
     renderPortfolio();
   }
 
@@ -2309,7 +2870,10 @@
       });
       obs.observe(page, { attributes: true, attributeFilter: ['class'] });
     } catch (_e) { /* ignore */ }
-    document.addEventListener('SCHEDULE_UPDATED', function (e) { onScheduleUpdated(e.detail); });
+    document.addEventListener('SCHEDULE_UPDATED', function (e) {
+      onScheduleUpdated(e.detail);
+      try { if (e.detail && e.detail.changes && e.detail.changes.execCount !== undefined) onScheduleExecutedForWorkflows(e.detail); } catch (_e) { /* ignore */ }
+    });
     document.addEventListener('SCHEDULE_CREATED', function (e) { onScheduleCreated(e.detail); });
     document.addEventListener('SCHEDULE_DELETED', function () { renderScheduled(); });
     onAutoTypeChange();
@@ -2317,6 +2881,7 @@
     if (!monitorTimer) {
       monitorTimer = setInterval(function () {
         checkAutoTopup();
+        checkWorkflows();
         const pg = $id('page-aiwallet');
         if (pg && pg.classList.contains('active')) { renderExecutions(); renderScheduled(); renderStatus(); renderSchedDash(); }
       }, 60000);
@@ -2387,6 +2952,19 @@
     simToIntent: simToIntent,
     onSimOpChange: onSimOpChange,
     applyProfile: applyProfile,
+    /* phase 5 — assistant, workflows, insights, reports */
+    assistantSend: assistantSend,
+    asstQuick: asstQuick,
+    wfAddCondition: wfAddCondition,
+    wfAddAction: wfAddAction,
+    wfRemoveCond: wfRemoveCond,
+    wfRemoveAct: wfRemoveAct,
+    wfOnActTypeChange: wfOnActTypeChange,
+    wfCreate: wfCreate,
+    wfToggle: wfToggle,
+    wfDelete: wfDelete,
+    generateReport: generateReport,
+    exportReport: exportReport,
     /* autonoma bridge (opt-in, additive) */
     receiveAutonomaIntent: submitIntent,
     /* portfolio & misc */

@@ -10053,16 +10053,20 @@ select.cinput option { background: #161a24; color: #dde2f0; }
         <div class="aiw-shell">
           <div class="aiw-tabs">
             <div class="aiw-tab active" id="aiw-tab-mission" onclick="AIWallet.showTab('mission')"><i class="ti ti-dashboard"></i>Mission Control</div>
+            <div class="aiw-tab" id="aiw-tab-assistant" onclick="AIWallet.showTab('assistant')"><i class="ti ti-message-chatbot"></i>AI Assistant</div>
             <div class="aiw-tab" id="aiw-tab-overview" onclick="AIWallet.showTab('overview')"><i class="ti ti-layout-dashboard"></i>Overview</div>
             <div class="aiw-tab" id="aiw-tab-vault" onclick="AIWallet.showTab('vault')"><i class="ti ti-vault"></i>Vault &amp; Gas</div>
             <div class="aiw-tab" id="aiw-tab-approvals" onclick="AIWallet.showTab('approvals')"><i class="ti ti-checklist"></i>Approvals<span class="aiw-tab-badge" id="aiw-badge-approvals" style="display:none">0</span></div>
             <div class="aiw-tab" id="aiw-tab-simulate" onclick="AIWallet.showTab('simulate')"><i class="ti ti-test-pipe"></i>Simulation</div>
+            <div class="aiw-tab" id="aiw-tab-workflows" onclick="AIWallet.showTab('workflows')"><i class="ti ti-git-branch"></i>Workflows</div>
             <div class="aiw-tab" id="aiw-tab-automation" onclick="AIWallet.showTab('automation')"><i class="ti ti-settings-automation"></i>Automation Center</div>
             <div class="aiw-tab" id="aiw-tab-executions" onclick="AIWallet.showTab('executions')"><i class="ti ti-loader"></i>Executions<span class="aiw-tab-badge" id="aiw-badge-pending" style="display:none">0</span></div>
             <div class="aiw-tab" id="aiw-tab-scheduled" onclick="AIWallet.showTab('scheduled')"><i class="ti ti-calendar-time"></i>Scheduled Tasks</div>
             <div class="aiw-tab" id="aiw-tab-permissions" onclick="AIWallet.showTab('permissions')"><i class="ti ti-key"></i>AI Permissions</div>
             <div class="aiw-tab" id="aiw-tab-limits" onclick="AIWallet.showTab('limits')"><i class="ti ti-gauge"></i>Limits &amp; Policies</div>
             <div class="aiw-tab" id="aiw-tab-profiles" onclick="AIWallet.showTab('profiles')"><i class="ti ti-user-cog"></i>AI Profiles</div>
+            <div class="aiw-tab" id="aiw-tab-insights" onclick="AIWallet.showTab('insights')"><i class="ti ti-bulb"></i>Insights</div>
+            <div class="aiw-tab" id="aiw-tab-reports" onclick="AIWallet.showTab('reports')"><i class="ti ti-report"></i>Reports</div>
             <div class="aiw-tab" id="aiw-tab-history" onclick="AIWallet.showTab('history')"><i class="ti ti-history"></i>History</div>
             <div class="aiw-tab" id="aiw-tab-timeline" onclick="AIWallet.showTab('timeline')"><i class="ti ti-timeline"></i>Timeline</div>
             <div class="aiw-tab" id="aiw-tab-security" onclick="AIWallet.showTab('security')"><i class="ti ti-shield-lock"></i>Security</div>
@@ -10202,6 +10206,119 @@ select.cinput option { background: #161a24; color: #dde2f0; }
             <div class="card">
               <div class="ch"><span class="ct"><i class="ti ti-timeline" style="color:var(--teal);margin-right:5px"></i>AI Financial Timeline</span><span class="chip" style="margin-left:auto;color:var(--muted2)">read-only · chronological</span></div>
               <div class="cb" id="aiw-timeline-body" style="max-height:460px;overflow-y:auto"></div>
+            </div>
+            </div>
+
+            <!-- Panel: AI Assistant -->
+            <div class="aiw-panel" id="aiw-panel-assistant">
+            <div class="card" style="display:flex;flex-direction:column;min-height:420px">
+              <div class="ch"><span class="ct"><i class="ti ti-message-chatbot" style="color:var(--purple);margin-right:5px"></i>AI Financial Assistant</span><span class="chip" style="margin-left:auto;color:var(--muted2)">financial specialist · never executes without approval</span></div>
+              <div class="cb" id="aiw-asst-log" style="flex:1;overflow-y:auto;max-height:380px"></div>
+              <div style="display:flex;gap:6px;padding:9px 12px;border-top:1px solid var(--border)">
+                <input class="cinput" id="aiw-asst-input" placeholder="Ask about spending, schedules, vault, gas… or request an action" style="flex:1" onkeydown="if(event.key==='Enter')AIWallet.assistantSend()"/>
+                <button class="btn primary" style="font-size:9px" onclick="AIWallet.assistantSend()"><i class="ti ti-send"></i>Send</button>
+              </div>
+            </div>
+            <div style="font-size:8px;color:var(--muted2)">Autonoma remains the general AI of Elligente — this assistant is scoped to the AI Smart Wallet. Actions become intents/approvals; nothing bypasses the pipeline.</div>
+            </div>
+
+            <!-- Panel: Workflows -->
+            <div class="aiw-panel" id="aiw-panel-workflows">
+            <div class="card">
+              <div class="ch"><span class="ct"><i class="ti ti-git-branch" style="color:var(--blue);margin-right:5px"></i>Autonomous Workflows</span><span class="chip chip-b" style="margin-left:auto">definitions only · approval-gated</span></div>
+              <div class="cb" id="aiw-wf-list" style="max-height:260px;overflow-y:auto"></div>
+            </div>
+            <div class="card">
+              <div class="ch"><span class="ct"><i class="ti ti-tools" style="color:var(--teal);margin-right:5px"></i>Workflow Builder</span></div>
+              <div class="cb" style="display:flex;flex-direction:column;gap:8px">
+                <div style="display:flex;gap:7px;flex-wrap:wrap">
+                  <div style="flex:1;min-width:150px"><div class="swap-label">Workflow Name</div><input class="cinput" id="aiw-wf-name" placeholder="e.g. Friday payroll routine" style="width:100%"/></div>
+                  <div style="flex:1;min-width:170px"><div class="swap-label">Trigger</div>
+                    <select class="cinput" id="aiw-wf-trigger" style="width:100%;cursor:pointer">
+                      <option value="time_weekly">Every week (day below)</option>
+                      <option value="time_daily">Every day</option>
+                      <option value="asset_received">Asset received (agent USDC)</option>
+                      <option value="gas_below">Gas below threshold</option>
+                      <option value="schedule_executed">Schedule executed</option>
+                      <option value="portfolio_drop">Portfolio drops %</option>
+                    </select></div>
+                  <div style="width:90px"><div class="swap-label">Day (0=Sun)</div><input class="cinput" id="aiw-wf-trig-day" type="number" min="0" max="6" value="5" style="width:100%"/></div>
+                  <div style="width:100px"><div class="swap-label">Trigger Value</div><input class="cinput" id="aiw-wf-trig-value" type="number" min="0" step="0.1" placeholder="amount/%" style="width:100%"/></div>
+                </div>
+                <div>
+                  <div class="swap-label">Conditions (IF)</div>
+                  <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-end">
+                    <select class="cinput" id="aiw-wf-cond-field" style="width:150px;cursor:pointer">
+                      <option value="amount">Trigger amount</option>
+                      <option value="daily_spent">Daily spent (USD)</option>
+                      <option value="operational_usdc">Operational USDC</option>
+                      <option value="gas_balance">Gas balance</option>
+                      <option value="active_schedules">Active schedules</option>
+                    </select>
+                    <select class="cinput" id="aiw-wf-cond-op" style="width:60px;cursor:pointer"><option>&gt;</option><option>&lt;</option><option>=</option></select>
+                    <input class="cinput" id="aiw-wf-cond-value" type="number" step="0.01" placeholder="value" style="width:90px"/>
+                    <button class="btn" style="font-size:8.5px" onclick="AIWallet.wfAddCondition()">+ Add</button>
+                  </div>
+                  <div id="aiw-wf-conds" style="margin-top:5px"></div>
+                </div>
+                <div>
+                  <div class="swap-label">Actions (THEN)</div>
+                  <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-end">
+                    <select class="cinput" id="aiw-wf-act-type" style="width:160px;cursor:pointer" onchange="AIWallet.wfOnActTypeChange()">
+                      <option value="create_intent">Create payment intent</option>
+                      <option value="vault_allocate">Allocate vault funds</option>
+                      <option value="create_schedule">Create schedule</option>
+                      <option value="generate_report">Generate report</option>
+                      <option value="notify">Send notification</option>
+                      <option value="simulate">Trigger simulation</option>
+                      <option value="pause_workflow">Pause workflow</option>
+                    </select>
+                    <div id="aiw-wf-act-value-wrap"><div class="swap-label">Amount</div><input class="cinput" id="aiw-wf-act-value" type="number" min="0" step="0.01" style="width:80px"/></div>
+                    <div id="aiw-wf-act-mode-wrap"><div class="swap-label">Mode</div><select class="cinput" id="aiw-wf-act-mode" style="width:100px;cursor:pointer"><option value="fixed">Fixed USDC</option><option value="percent">% of trigger</option></select></div>
+                    <div id="aiw-wf-act-target-wrap" style="display:none"><div class="swap-label">Target</div><select class="cinput" id="aiw-wf-act-target" style="width:110px;cursor:pointer"><option value="treasury">Treasury</option><option value="locked">Locked</option><option value="automation">Automation</option></select></div>
+                    <div id="aiw-wf-act-dest-wrap"><div class="swap-label">Destination</div><input class="cinput" id="aiw-wf-act-dest" placeholder="0x…" style="width:150px;font-family:monospace"/></div>
+                    <button class="btn" style="font-size:8.5px" onclick="AIWallet.wfAddAction()">+ Add</button>
+                  </div>
+                  <div id="aiw-wf-acts" style="margin-top:5px"></div>
+                </div>
+                <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                  <span style="font-size:9px;color:var(--muted2)">Approvals: <b style="color:var(--green)">always required</b> (WAIT FOR APPROVAL)</span>
+                  <span style="font-size:9px;color:var(--muted2)">Notify user:</span><span class="stg-toggle on" id="aiw-wf-notify" style="min-width:44px" onclick="this.classList.toggle('on')"></span>
+                  <button class="btn primary" style="font-size:9px;margin-left:auto" onclick="AIWallet.wfCreate()"><i class="ti ti-device-floppy"></i>Save Workflow</button>
+                </div>
+                <div style="font-size:8px;color:var(--muted2)">Builder creates definitions only — no code, no execution. Transactional steps are bundled into a single Approval Center request when the trigger fires. Frozen under Emergency Stop.</div>
+              </div>
+            </div>
+            </div>
+
+            <!-- Panel: Insights (Recommendations) -->
+            <div class="aiw-panel" id="aiw-panel-insights">
+            <div class="card">
+              <div class="ch"><span class="ct"><i class="ti ti-bulb" style="color:var(--yellow);margin-right:5px"></i>AI Recommendations Center</span><button class="btn" style="font-size:8.5px;padding:2px 8px;margin-left:auto" onclick="AIWallet.showTab('insights')">Refresh</button></div>
+              <div class="cb" id="aiw-recs-body" style="max-height:440px;overflow-y:auto"></div>
+            </div>
+            </div>
+
+            <!-- Panel: Reports -->
+            <div class="aiw-panel" id="aiw-panel-reports">
+            <div class="card">
+              <div class="ch"><span class="ct"><i class="ti ti-report" style="color:var(--blue);margin-right:5px"></i>AI Reports Center</span><span class="chip" style="margin-left:auto;color:var(--muted2)">read-only · historical</span></div>
+              <div class="cb">
+                <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:9px">
+                  <button class="btn" style="font-size:8.5px" onclick="AIWallet.generateReport('daily')">Daily</button>
+                  <button class="btn" style="font-size:8.5px" onclick="AIWallet.generateReport('weekly')">Weekly</button>
+                  <button class="btn" style="font-size:8.5px" onclick="AIWallet.generateReport('monthly')">Monthly</button>
+                  <button class="btn" style="font-size:8.5px" onclick="AIWallet.generateReport('portfolio')">Portfolio</button>
+                  <button class="btn" style="font-size:8.5px" onclick="AIWallet.generateReport('treasury')">Treasury</button>
+                  <button class="btn" style="font-size:8.5px" onclick="AIWallet.generateReport('vault')">Vault</button>
+                  <button class="btn" style="font-size:8.5px" onclick="AIWallet.generateReport('automation')">Automation</button>
+                  <button class="btn" style="font-size:8.5px" onclick="AIWallet.generateReport('workflow')">Workflows</button>
+                  <button class="btn" style="font-size:8.5px" onclick="AIWallet.generateReport('gas')">Gas</button>
+                  <button class="btn" style="font-size:8.5px" onclick="AIWallet.generateReport('decisions')">AI Decisions</button>
+                  <button class="btn" style="font-size:8.5px" onclick="AIWallet.generateReport('security')">Security</button>
+                </div>
+                <div id="aiw-reports-body" style="max-height:420px;overflow-y:auto"></div>
+              </div>
             </div>
             </div>
 
