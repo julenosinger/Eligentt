@@ -151,6 +151,11 @@
     const a = String(addr || '');
     return a.length > 12 ? a.slice(0, 6) + '…' + a.slice(-4) : a;
   }
+  /* strip HTML-relevant chars from names that flow into OTHER modules'
+     renderers (e.g. Schedule page), which may not escape them */
+  function plain(s) {
+    return String(s == null ? '' : s).replace(/[<>&"'`]/g, '').replace(/[\u0000-\u001f]/g, '').slice(0, 80);
+  }
   function usdRate(token) {
     try {
       if (typeof getTokenUSDRate === 'function') {
@@ -547,7 +552,7 @@
     const it = {
       id: 'AIW-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7),
       op: String(raw.op || 'payment'),
-      name: String(raw.name || '').slice(0, 80),
+      name: plain(raw.name || ''),
       amount: Number(raw.amount) || 0,
       token: String(raw.token || 'USDC').toUpperCase(),
       to: String(raw.to || ''),
@@ -755,30 +760,33 @@
 
   async function depositToAgent(token, amount) {
     const agent = agentAddr();
-    if (!agent) { notify('AI Smart Wallet not created yet', 'error'); return; }
+    if (!agent) { notify('AI Smart Wallet not created yet', 'error'); return false; }
     const from = personalAddr();
     let userSigner = null;
     try { if (typeof signer !== 'undefined') userSigner = signer; } catch (_e) { /* ignore */ }
-    if (!from || !userSigner) { notify('Connect your Personal Wallet first (Connect button in the top bar)', 'error'); return; }
+    if (!from || !userSigner) { notify('Connect your Personal Wallet first (Connect button in the top bar)', 'error'); return false; }
     const meta = arcTokens()[token];
-    if (!meta) { notify('Token not supported on Arc', 'error'); return; }
+    if (!meta) { notify('Token not supported on Arc', 'error'); return false; }
     try {
       try { if (typeof ensureNetwork === 'function') await ensureNetwork(5042002); } catch (_e) { /* wallet may reject */ }
-      try { if (typeof activeChainId !== 'undefined' && Number(activeChainId) !== 5042002) { notify('Switch your wallet to Arc Testnet first', 'error'); return; } } catch (_e) { /* ignore */ }
+      try { if (typeof activeChainId !== 'undefined' && Number(activeChainId) !== 5042002) { notify('Switch your wallet to Arc Testnet first', 'error'); return false; } } catch (_e) { /* ignore */ }
       const c = new ethers.Contract(meta.address, ERC20_ABI, userSigner);
       const tx = await c.transfer(agent, ethers.parseUnits(String(amount), meta.decimals || 6));
       notify('Deposit submitted — waiting for confirmation…', 'info');
       pushHistory({ kind: 'funding', status: 'submitted', op: 'deposit', amount: amount, token: token, txHash: tx.hash });
       renderHistory();
       const rc = await tx.wait();
-      pushHistory({ kind: 'funding', status: rc && rc.status === 1 ? 'confirmed' : 'failed', op: 'deposit', amount: amount, token: token, txHash: tx.hash });
-      notify(rc && rc.status === 1 ? 'Deposit confirmed on-chain' : 'Deposit transaction failed', rc && rc.status === 1 ? 'success' : 'error');
+      const ok = !!(rc && rc.status === 1);
+      pushHistory({ kind: 'funding', status: ok ? 'confirmed' : 'failed', op: 'deposit', amount: amount, token: token, txHash: tx.hash });
+      notify(ok ? 'Deposit confirmed on-chain' : 'Deposit transaction failed', ok ? 'success' : 'error');
       refreshPortfolio(true); renderHistory(); renderHistoryStats();
+      return ok;
     } catch (e) {
       const msg = (e && (e.shortMessage || e.message)) || String(e);
       pushHistory({ kind: 'funding', status: 'failed', op: 'deposit', amount: amount, token: token, reason: msg.slice(0, 120) });
       notify('Deposit failed: ' + msg.slice(0, 90), 'error');
       renderHistory();
+      return false;
     }
   }
 
@@ -1182,16 +1190,20 @@
       wiz.step = 6; renderWizard();
       wiz.busy = true;
       try {
-        await depositToAgent(wiz.asset, wiz.amount);
-        const v = vault[wiz.asset] || { locked: 0, automation: 0, treasury: 0 };
-        vault[wiz.asset] = {
-          locked: (v.locked || 0) + wiz.locked,
-          automation: (v.automation || 0) + wiz.automation,
-          treasury: (v.treasury || 0) + wiz.treasury
-        };
-        lsSave(K.vault, vault);
-        pushHistory({ kind: 'vault', status: 'wizard_funded', reason: wiz.amount + ' ' + wiz.asset + ' → locked ' + wiz.locked + ' / automation ' + wiz.automation + ' / treasury ' + wiz.treasury + ' / operational ' + (wiz.amount - wiz.locked - wiz.automation - wiz.treasury).toFixed(2) });
-        renderVaultPanel(); renderPortfolioIntelligence(); renderHistory();
+        const ok = await depositToAgent(wiz.asset, wiz.amount);
+        if (ok) {
+          const v = vault[wiz.asset] || { locked: 0, automation: 0, treasury: 0 };
+          vault[wiz.asset] = {
+            locked: (v.locked || 0) + wiz.locked,
+            automation: (v.automation || 0) + wiz.automation,
+            treasury: (v.treasury || 0) + wiz.treasury
+          };
+          lsSave(K.vault, vault);
+          pushHistory({ kind: 'vault', status: 'wizard_funded', reason: wiz.amount + ' ' + wiz.asset + ' → locked ' + wiz.locked + ' / automation ' + wiz.automation + ' / treasury ' + wiz.treasury + ' / operational ' + (wiz.amount - wiz.locked - wiz.automation - wiz.treasury).toFixed(2) });
+          renderVaultPanel(); renderPortfolioIntelligence(); renderHistory();
+        } else {
+          notify('Allocation NOT applied — the deposit did not confirm', 'error');
+        }
       } finally { wiz.busy = false; }
       wizClose();
       return;
@@ -2129,7 +2141,7 @@
     if (trigType === 'portfolio_drop') trig.percent = parseFloat(($id('aiw-wf-trig-value') || {}).value) || 10;
     const wf = {
       id: 'WF-' + Date.now().toString(36),
-      name: name.slice(0, 60),
+      name: plain(name),
       trigger: trig,
       conditions: wfDraft.conditions.slice(),
       actions: wfDraft.actions.slice(),
