@@ -94,6 +94,7 @@
 <script src="/shared/trustLayer.js"></script>
 <script src="/shared/missionEngine.js"></script>
 <script src="/shared/agentTreasury.js"></script>
+<script src="/shared/aiSmartWallet.js"></script>
 <style>
 /* ── Wallet Modal ───────────────────────────────────────── */
 .wm-overlay{position:fixed;inset:0;background:rgba(0,0,0,.82);z-index:2000;display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .22s;backdrop-filter:blur(4px)}
@@ -5628,6 +5629,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
       <div class="nav-item" id="nav-bridge" onclick="showPage('bridge')"><i class="ti ti-topology-star-3"></i>Bridge<span class="nav-kit">Kit</span></div>
       <div class="nav-item" id="nav-pool" onclick="showPage('pool')"><i class="ti ti-droplet"></i>Liquidity<span class="nav-kit">Pool</span></div>
       <div class="nav-item" id="nav-autonoma" onclick="showPage('autonoma')"><i class="ti ti-brain"></i>Autonoma<span class="nav-kit" style="background:rgba(6,247,233,.12);color:#06F7E9;border:1px solid rgba(6,247,233,.25)">AI</span></div>
+      <div class="nav-item" id="nav-aiwallet" onclick="showPage('aiwallet')"><i class="ti ti-wallet"></i>AI Smart Wallet<span class="nav-new">New</span></div>
       <div class="nav-group" style="margin-top:4px">Protocol</div>
       <div class="nav-item" id="nav-treasury" onclick="showPage('treasury')"><i class="ti ti-vault"></i>Treasury<span class="nav-kit" style="background:rgba(79,142,247,.12);color:#7b9ef7;border:1px solid rgba(79,142,247,.25)">Vault</span></div>
       <div class="nav-item" id="nav-xcdashboard" onclick="showPage('xcdashboard')" style="padding-left:28px;font-size:10px"><i class="ti ti-topology-star-3"></i>CrossChain</div>
@@ -7035,6 +7037,10 @@ select.cinput option { background: #161a24; color: #dde2f0; }
           <div class="info-card xc-right-card">
             <div class="info-title"><i class="ti ti-topology-star-3" style="color:var(--yellow)"></i>Supported Networks</div>
             <div style="display:flex;flex-direction:column;gap:5px" id="xc-chain-list"><!-- populated by JS --></div>
+            <div style="display:flex;align-items:center;justify-content:center;gap:6px;margin-top:9px;padding-top:8px;border-top:1px solid var(--border)">
+              <span style="font-size:8.5px;color:var(--muted2)">Available on</span>
+              <img src="assets/arc/arc-logo-on-dark.svg" alt="Arc" style="height:10px;width:auto"/>
+            </div>
           </div>
 
           <!-- Network Health -->
@@ -8783,7 +8789,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
                   <i class="ti ti-brand-circle"></i> Refresh Circle Status
                 </button>
                 <button onclick="stlRecoverFromMemos()" class="btn" style="font-size:11px;padding:6px 14px;border-color:#22c55e;color:#22c55e;">
-                  <i class="ti ti-scan"></i> Recover from Arc Memos
+                  <i class="ti ti-scan"></i> Recover from Memos on Arc
                 </button>
               </div>
               <div id="stl-recovery-log" style="margin-top:10px;background:var(--bg2);border-radius:6px;padding:8px;font-size:10px;color:var(--muted2);font-family:monospace;max-height:80px;overflow-y:auto;display:none;"></div>
@@ -9439,9 +9445,9 @@ select.cinput option { background: #161a24; color: #dde2f0; }
             <div class="stg-section-title">Swap Provider Configuration</div>
             <!-- Arc DEX -->
             <div class="card stg-provider-card" data-provider="arc-swap" style="margin-bottom:8px">
-              <div class="ch"><span class="ct">Arc DEX</span><div class="stg-status-badge active" id="stg-status-arc-swap">Active</div></div>
+              <div class="ch"><span class="ct">DEX on Arc</span><div class="stg-status-badge active" id="stg-status-arc-swap">Active</div></div>
               <div class="cb" style="display:flex;flex-direction:column;gap:9px">
-                <div class="stg-toggle" data-id="arc-swap-enabled">Enable Arc DEX (Primary)</div></div>
+                <div class="stg-toggle" data-id="arc-swap-enabled">Enable DEX on Arc (Primary)</div></div>
             </div>
             <!-- 0x -->
             <div class="card stg-provider-card" data-provider="0x" style="margin-bottom:8px">
@@ -9485,9 +9491,9 @@ select.cinput option { background: #161a24; color: #dde2f0; }
             <div class="stg-section-title">Bridge Provider Configuration</div>
             <!-- Arc Bridge -->
             <div class="card stg-provider-card" data-provider="arc-bridge" style="margin-bottom:8px">
-              <div class="ch"><span class="ct">Arc Bridge (Primary)</span><div class="stg-status-badge active" id="stg-status-arc-bridge">Active</div></div>
+              <div class="ch"><span class="ct">Bridge on Arc (Primary)</span><div class="stg-status-badge active" id="stg-status-arc-bridge">Active</div></div>
               <div class="cb" style="display:flex;flex-direction:column;gap:9px">
-                <div class="stg-toggle" data-id="arc-bridge-enabled">Enable Arc Bridge</div>
+                <div class="stg-toggle" data-id="arc-bridge-enabled">Enable Bridge on Arc</div>
               </div>
             </div>
             <!-- Circle CCTP -->
@@ -10001,6 +10007,414 @@ select.cinput option { background: #161a24; color: #dde2f0; }
       </div>
     </div>
 
+    <!-- ═══════════════ AI SMART WALLET (isolated additive feature) ═══════════════ -->
+    <style>
+      /* AI Smart Wallet internal menu — scoped to #page-aiwallet, aiw- namespace only */
+      #page-aiwallet .aiw-wrap{display:flex;flex-direction:column;gap:10px;flex:1;min-width:0}
+      #page-aiwallet .aiw-shell{display:flex;flex:1;min-height:62vh;background:var(--card);border:1px solid var(--border);border-radius:8px;overflow:hidden}
+      #page-aiwallet .aiw-tabs{width:172px;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow-y:auto;flex-shrink:0;padding:6px 0}
+      #page-aiwallet .aiw-tab{display:flex;align-items:center;gap:8px;padding:8px 14px;font-size:10px;color:var(--muted2);cursor:pointer;transition:all .15s;user-select:none;border-left:2px solid transparent}
+      #page-aiwallet .aiw-tab:hover{color:var(--text);background:rgba(167,139,250,.05)}
+      #page-aiwallet .aiw-tab.active{color:var(--purple);background:rgba(167,139,250,.1);border-left-color:var(--purple)}
+      #page-aiwallet .aiw-tab i{font-size:13px;width:16px;flex-shrink:0;text-align:center}
+      #page-aiwallet .aiw-tab-badge{margin-left:auto;font-size:8px;background:rgba(245,158,11,.14);border:1px solid rgba(245,158,11,.3);color:var(--yellow);border-radius:3px;padding:0 4px;font-weight:700}
+      #page-aiwallet .aiw-panels{flex:1;overflow-y:auto;padding:14px;min-width:0}
+      #page-aiwallet .aiw-panel{display:none}
+      #page-aiwallet .aiw-panel.active{display:flex;flex-direction:column;gap:12px}
+      #page-aiwallet .aiw-grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;align-items:start}
+      #page-aiwallet .aiw-mc-tile{background:rgba(0,0,0,.18);border:1px solid var(--border);border-radius:6px;padding:9px;transition:border-color .15s}
+      #page-aiwallet .aiw-mc-tile:hover{border-color:var(--border2)}
+      @media(max-width:760px){
+        #page-aiwallet .aiw-shell{flex-direction:column;min-height:0}
+        #page-aiwallet .aiw-tabs{width:100%;flex-direction:row;overflow-x:auto;border-right:none;border-bottom:1px solid var(--border);padding:4px;gap:2px}
+        #page-aiwallet .aiw-tab{padding:6px 10px;font-size:9px;border-left:none;border-bottom:2px solid transparent;white-space:nowrap;border-radius:4px 4px 0 0}
+        #page-aiwallet .aiw-tab.active{border-left-color:transparent;border-bottom-color:var(--purple)}
+      }
+    </style>
+    <div class="page" id="page-aiwallet" lang="en-US" translate="no">
+      <div class="page-header">
+        <div class="page-icon" style="background:rgba(167,139,250,.12);color:var(--purple)"><i class="ti ti-wallet"></i></div>
+        <div>
+          <div class="page-title">AI Smart Wallet</div>
+          <div class="page-sub">Independent financial execution layer · validates AI intents · executes via Agent Wallet · Arc Testnet</div>
+        </div>
+        <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+          <select class="cinput" id="aiw-mode" style="width:150px;cursor:pointer" onchange="AIWallet.setMode(this.value)" title="Wallet mode">
+            <option value="hybrid">Hybrid Mode (recommended)</option>
+            <option value="ai">AI Smart Wallet</option>
+            <option value="personal">Personal Wallet</option>
+          </select>
+          <button class="btn" style="border-color:rgba(239,68,68,.4);color:var(--red);font-size:9px" onclick="AIWallet.toggleEmergencyStop()"><i class="ti ti-hand-stop"></i>Emergency Stop</button>
+        </div>
+      </div>
+      <div class="page-content">
+        <div class="aiw-wrap">
+        <div id="aiw-status-bar" style="display:flex;gap:6px;flex-wrap:wrap"></div>
+        <div class="aiw-shell">
+          <div class="aiw-tabs">
+            <div class="aiw-tab active" id="aiw-tab-mission" onclick="AIWallet.showTab('mission')"><i class="ti ti-dashboard"></i>Mission Control</div>
+            <div class="aiw-tab" id="aiw-tab-overview" onclick="AIWallet.showTab('overview')"><i class="ti ti-layout-dashboard"></i>Overview</div>
+            <div class="aiw-tab" id="aiw-tab-vault" onclick="AIWallet.showTab('vault')"><i class="ti ti-vault"></i>Vault &amp; Gas</div>
+            <div class="aiw-tab" id="aiw-tab-approvals" onclick="AIWallet.showTab('approvals')"><i class="ti ti-checklist"></i>Approvals<span class="aiw-tab-badge" id="aiw-badge-approvals" style="display:none">0</span></div>
+            <div class="aiw-tab" id="aiw-tab-simulate" onclick="AIWallet.showTab('simulate')"><i class="ti ti-test-pipe"></i>Simulation</div>
+            <div class="aiw-tab" id="aiw-tab-automation" onclick="AIWallet.showTab('automation')"><i class="ti ti-settings-automation"></i>Automation Center</div>
+            <div class="aiw-tab" id="aiw-tab-executions" onclick="AIWallet.showTab('executions')"><i class="ti ti-loader"></i>Executions<span class="aiw-tab-badge" id="aiw-badge-pending" style="display:none">0</span></div>
+            <div class="aiw-tab" id="aiw-tab-scheduled" onclick="AIWallet.showTab('scheduled')"><i class="ti ti-calendar-time"></i>Scheduled Tasks</div>
+            <div class="aiw-tab" id="aiw-tab-permissions" onclick="AIWallet.showTab('permissions')"><i class="ti ti-key"></i>AI Permissions</div>
+            <div class="aiw-tab" id="aiw-tab-limits" onclick="AIWallet.showTab('limits')"><i class="ti ti-gauge"></i>Limits &amp; Policies</div>
+            <div class="aiw-tab" id="aiw-tab-profiles" onclick="AIWallet.showTab('profiles')"><i class="ti ti-user-cog"></i>AI Profiles</div>
+            <div class="aiw-tab" id="aiw-tab-history" onclick="AIWallet.showTab('history')"><i class="ti ti-history"></i>History</div>
+            <div class="aiw-tab" id="aiw-tab-timeline" onclick="AIWallet.showTab('timeline')"><i class="ti ti-timeline"></i>Timeline</div>
+            <div class="aiw-tab" id="aiw-tab-security" onclick="AIWallet.showTab('security')"><i class="ti ti-shield-lock"></i>Security</div>
+          </div>
+          <div class="aiw-panels">
+
+            <!-- Panel: Mission Control -->
+            <div class="aiw-panel active" id="aiw-panel-mission">
+              <div class="card">
+                <div class="ch"><span class="ct"><i class="ti ti-dashboard" style="color:var(--purple);margin-right:5px"></i>AI Mission Control</span><span class="chip" style="margin-left:auto;color:var(--muted2)">read-only · real-time</span><button class="btn primary" style="font-size:8.5px;padding:2px 9px;margin-left:6px" onclick="AIWallet.wizOpen()"><i class="ti ti-coin"></i>Fund AI Wallet</button></div>
+                <div class="cb" id="aiw-mission-body"></div>
+              </div>
+            </div>
+
+            <!-- Panel: Overview -->
+            <div class="aiw-panel" id="aiw-panel-overview">
+              <div class="card">
+                <div class="ch"><span class="ct"><i class="ti ti-brain" style="color:var(--purple);margin-right:5px"></i>Portfolio Intelligence</span><button class="btn primary" style="font-size:8.5px;padding:2px 9px;margin-left:auto" onclick="AIWallet.wizOpen()"><i class="ti ti-coin"></i>Fund AI Wallet</button></div>
+                <div class="cb" id="aiw-pi-body" style="display:flex;gap:8px;flex-wrap:wrap"></div>
+              </div>
+              <div class="aiw-grid2">
+            <div class="card">
+              <div class="ch"><span class="ct"><i class="ti ti-chart-pie" style="color:var(--green);margin-right:5px"></i>Portfolio</span><span class="chip" style="margin-left:auto;color:var(--muted2)">read-only</span><button class="btn" style="font-size:8.5px;padding:2px 8px;margin-left:6px" onclick="AIWallet.refreshPortfolio()">Refresh</button></div>
+              <div class="cb" id="aiw-portfolio-body"></div>
+            </div>
+            <div class="card">
+              <div class="ch"><span class="ct"><i class="ti ti-robot" style="color:var(--purple);margin-right:5px"></i>Agent Wallet Information</span></div>
+              <div class="cb" id="aiw-agent-body"></div>
+            </div>
+            <div class="card">
+              <div class="ch"><span class="ct"><i class="ti ti-wallet" style="color:var(--blue);margin-right:5px"></i>Wallet Manager</span></div>
+              <div class="cb" id="aiw-wm-body"></div>
+            </div>
+            <div class="card">
+              <div class="ch"><span class="ct"><i class="ti ti-arrows-transfer-down" style="color:var(--teal);margin-right:5px"></i>Funding — Deposit · Withdraw · Transfer</span><span class="chip chip-g" style="margin-left:auto">on-chain</span></div>
+              <div class="cb" style="display:flex;flex-direction:column;gap:7px">
+                <div style="display:flex;gap:7px;flex-wrap:wrap">
+                  <div style="flex:1;min-width:170px"><div class="swap-label">Flow</div>
+                    <select class="cinput" id="aiw-fund-flow" style="width:100%;cursor:pointer" onchange="AIWallet.onFundFlowChange()">
+                      <option value="deposit">Deposit — Personal → AI Wallet</option>
+                      <option value="withdraw">Withdraw — AI Wallet → Personal</option>
+                      <option value="transfer">Transfer — AI Wallet → Address</option>
+                      <option value="vault">To Treasury Vault — AI Wallet → Vault</option>
+                    </select></div>
+                  <div style="width:88px"><div class="swap-label">Token</div>
+                    <select class="cinput" id="aiw-fund-token" style="width:100%;cursor:pointer"><option>USDC</option><option>EURC</option><option>cirBTC</option></select></div>
+                  <div style="flex:1;min-width:100px"><div class="swap-label">Amount</div><input class="cinput" id="aiw-fund-amount" type="number" min="0" step="0.01" placeholder="0.00" style="width:100%"/></div>
+                </div>
+                <div id="aiw-fund-dest-wrap" style="display:none"><div class="swap-label">Destination Address</div><input class="cinput" id="aiw-fund-dest" placeholder="0x…" style="width:100%;font-family:monospace"/></div>
+                <div id="aiw-fund-hint" style="font-size:8.5px;color:var(--muted2)"></div>
+                <button class="btn primary" id="aiw-fund-btn" style="align-self:flex-start" onclick="AIWallet.fundingSubmit()"><i class="ti ti-arrows-transfer-down"></i>Execute On-Chain</button>
+              </div>
+            </div>
+            <div class="card">
+              <div class="ch"><span class="ct"><i class="ti ti-qrcode" style="color:var(--purple);margin-right:5px"></i>Receive Assets</span><button class="btn" style="font-size:8.5px;padding:2px 8px;margin-left:auto" onclick="AIWallet.copyAgentAddress()"><i class="ti ti-copy"></i>Copy</button></div>
+              <div class="cb" id="aiw-receive-body" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+                <div id="aiw-receive-qr" style="background:#fff;padding:6px;border-radius:6px;flex-shrink:0;min-width:120px;min-height:120px;display:flex;align-items:center;justify-content:center"></div>
+                <div style="flex:1;min-width:180px">
+                  <div class="swap-label">AI Smart Wallet Address (Arc Testnet)</div>
+                  <div id="aiw-receive-addr" style="font-size:9.5px;font-family:monospace;color:var(--text);word-break:break-all;margin-top:3px"></div>
+                  <div style="font-size:8px;color:var(--muted2);margin-top:6px">Supported: USDC · EURC · cirBTC on Arc Testnet (Chain ID 5042002). Cross-chain deposits route via the existing Bridge.</div>
+                </div>
+              </div>
+            </div>
+              </div>
+            </div>
+
+            <!-- Panel: Vault & Gas -->
+            <div class="aiw-panel" id="aiw-panel-vault">
+              <div class="aiw-grid2">
+            <div class="card">
+              <div class="ch"><span class="ct"><i class="ti ti-vault" style="color:var(--purple);margin-right:5px"></i>AI Wallet Vault</span>
+                <select class="cinput" id="aiw-vault-token" style="width:90px;cursor:pointer;margin-left:auto" onchange="AIWallet.renderVaultPanel()"><option>USDC</option><option>EURC</option><option>cirBTC</option></select></div>
+              <div class="cb" id="aiw-vault-body"></div>
+            </div>
+            <div class="card">
+              <div class="ch"><span class="ct"><i class="ti ti-gas-station" style="color:var(--teal);margin-right:5px"></i>Gas Manager</span><span class="chip chip-g" style="margin-left:auto">USDC is gas on Arc</span></div>
+              <div class="cb" id="aiw-gas-body"></div>
+            </div>
+            <div class="card">
+              <div class="ch"><span class="ct"><i class="ti ti-refresh-dot" style="color:var(--yellow);margin-right:5px"></i>Auto Top-Up Manager</span></div>
+              <div class="cb" id="aiw-topup-body"></div>
+            </div>
+              </div>
+            </div>
+
+            <!-- Panel: Approvals -->
+            <div class="aiw-panel" id="aiw-panel-approvals">
+            <div class="card">
+              <div class="ch"><span class="ct"><i class="ti ti-checklist" style="color:var(--yellow);margin-right:5px"></i>AI Approval Center</span><span class="chip" style="margin-left:auto;color:var(--muted2)">nothing runs without you</span></div>
+              <div class="cb" id="aiw-approvals-body" style="max-height:440px;overflow-y:auto"></div>
+            </div>
+            </div>
+
+            <!-- Panel: Simulation -->
+            <div class="aiw-panel" id="aiw-panel-simulate">
+            <div class="card">
+              <div class="ch"><span class="ct"><i class="ti ti-test-pipe" style="color:var(--teal);margin-right:5px"></i>AI Simulation Center</span><span class="chip chip-g" style="margin-left:auto">dry-run · never executes</span></div>
+              <div class="cb" style="display:flex;flex-direction:column;gap:7px">
+                <div style="display:flex;gap:7px;flex-wrap:wrap">
+                  <div style="flex:1;min-width:140px"><div class="swap-label">Operation</div>
+                    <select class="cinput" id="aiw-sim-op" style="width:100%;cursor:pointer" onchange="AIWallet.onSimOpChange()">
+                      <option value="payment">Payment</option>
+                      <option value="treasury">Treasury Transfer</option>
+                      <option value="recurring">Recurring Payment</option>
+                      <option value="multisend">Multisend</option>
+                      <option value="swap">Swap</option>
+                      <option value="bridge">Bridge</option>
+                      <option value="crosschain">Crosschain Payment</option>
+                    </select></div>
+                  <div style="flex:1;min-width:100px"><div class="swap-label">Amount</div><input class="cinput" id="aiw-sim-amount" type="number" min="0" step="0.01" placeholder="0.00" style="width:100%"/></div>
+                  <div style="width:88px"><div class="swap-label">Token</div><select class="cinput" id="aiw-sim-token" style="width:100%;cursor:pointer"><option>USDC</option><option>EURC</option><option>cirBTC</option></select></div>
+                </div>
+                <div id="aiw-sim-to-wrap"><div class="swap-label">Destination (optional)</div><input class="cinput" id="aiw-sim-to" placeholder="0x…" style="width:100%;font-family:monospace"/></div>
+                <button class="btn primary" style="align-self:flex-start;font-size:9px" onclick="AIWallet.runSimulation()"><i class="ti ti-player-play"></i>Run Simulation</button>
+              </div>
+            </div>
+            <div class="card">
+              <div class="ch"><span class="ct"><i class="ti ti-report-analytics" style="color:var(--blue);margin-right:5px"></i>Simulation Result</span></div>
+              <div class="cb" id="aiw-sim-result" style="max-height:380px;overflow-y:auto"><div style="font-size:9.5px;color:var(--muted2)">Configure an operation above and run the simulation — the full validation pipeline executes in read-only mode.</div></div>
+            </div>
+            </div>
+
+            <!-- Panel: AI Profiles -->
+            <div class="aiw-panel" id="aiw-panel-profiles">
+            <div class="card">
+              <div class="ch"><span class="ct"><i class="ti ti-user-cog" style="color:var(--purple);margin-right:5px"></i>AI Profiles</span><span class="chip chip-p" style="margin-left:auto">templates only</span></div>
+              <div class="cb">
+                <div id="aiw-profiles-note" style="font-size:8.5px;color:var(--muted2);margin-bottom:9px;line-height:1.6"></div>
+                <div id="aiw-profiles-body" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:9px"></div>
+              </div>
+            </div>
+            </div>
+
+            <!-- Panel: Timeline -->
+            <div class="aiw-panel" id="aiw-panel-timeline">
+            <div class="card">
+              <div class="ch"><span class="ct"><i class="ti ti-timeline" style="color:var(--teal);margin-right:5px"></i>AI Financial Timeline</span><span class="chip" style="margin-left:auto;color:var(--muted2)">read-only · chronological</span></div>
+              <div class="cb" id="aiw-timeline-body" style="max-height:460px;overflow-y:auto"></div>
+            </div>
+            </div>
+
+            <!-- Panel: Security -->
+            <div class="aiw-panel" id="aiw-panel-security">
+            <div class="card">
+              <div class="ch"><span class="ct"><i class="ti ti-shield-lock" style="color:var(--red);margin-right:5px"></i>Security Settings</span></div>
+              <div class="cb">
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:5px 0">
+                  <span id="aiw-estop-label" style="font-size:10px;color:var(--muted2)">Emergency Stop (AI Smart Wallet scope only)</span>
+                  <span class="stg-toggle" id="aiw-estop-toggle" style="min-width:44px" onclick="AIWallet.toggleEmergencyStop()"></span>
+                </div>
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:5px 0">
+                  <span style="font-size:10px;color:var(--muted2)">Auto-execute approved intents</span>
+                  <span class="stg-toggle" id="aiw-sec-autoexec" style="min-width:44px" onclick="AIWallet.toggleAutoExec()"></span>
+                </div>
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:5px 0">
+                  <span style="font-size:10px;color:var(--muted2)">Maximum accepted risk</span>
+                  <select class="cinput" id="aiw-sec-maxrisk" style="width:110px;cursor:pointer" onchange="AIWallet.setMaxRisk(this.value)">
+                    <option value="LOW">LOW</option><option value="MEDIUM">MEDIUM</option><option value="HIGH">HIGH</option>
+                  </select>
+                </div>
+                <div style="font-size:8px;color:var(--muted2);margin-top:4px">Every execution passes: permission · balance · risk · policy · schedule · nonce · deadline · chain validation. Any failure aborts.</div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="ch"><span class="ct"><i class="ti ti-radar-2" style="color:var(--blue);margin-right:5px"></i>Security Center — Engine Status</span></div>
+              <div class="cb">
+                <div id="aiw-sec-engines"></div>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:9px">
+                  <button class="btn" id="aiw-sec-pause-btn" style="font-size:9px" onclick="AIWallet.togglePauseAgent()"><i class="ti ti-player-pause"></i>Pause AI Wallet</button>
+                  <button class="btn" style="font-size:9px;border-color:rgba(239,68,68,.4);color:var(--red)" onclick="AIWallet.revokeAllPerms()"><i class="ti ti-shield-off"></i>Revoke All Permissions</button>
+                </div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="ch"><span class="ct"><i class="ti ti-id-badge-2" style="color:var(--purple);margin-right:5px"></i>Wallet Security &amp; Session</span></div>
+              <div class="cb" id="aiw-sec-session"></div>
+            </div>
+            </div>
+
+            <!-- Panel: Automation Center -->
+            <div class="aiw-panel" id="aiw-panel-automation">
+            <div class="card">
+              <div class="ch"><span class="ct"><i class="ti ti-chart-bar" style="color:var(--purple);margin-right:5px"></i>Automation Overview</span></div>
+              <div class="cb" id="aiw-autostats" style="max-height:260px;overflow-y:auto"></div>
+            </div>
+            <div class="card">
+              <div class="ch"><span class="ct"><i class="ti ti-settings-automation" style="color:var(--blue);margin-right:5px"></i>Automation Center</span><span class="chip chip-b" style="margin-left:auto">Agent Wallet executor</span></div>
+              <div class="cb" style="display:flex;flex-direction:column;gap:7px">
+                <div style="display:flex;gap:7px;flex-wrap:wrap">
+                  <div style="flex:1;min-width:130px"><div class="swap-label">Automation Type</div>
+                    <select class="cinput" id="aiw-auto-type" style="width:100%;cursor:pointer" onchange="AIWallet.onAutoTypeChange()">
+                      <option value="payment">Scheduled Payment</option>
+                      <option value="transfer">Scheduled Transfer</option>
+                      <option value="recurring">Recurring Payment</option>
+                      <option value="payroll">Payroll Payment</option>
+                      <option value="swap">Scheduled Swap</option>
+                      <option value="bridge">Scheduled Bridge</option>
+                      <option value="crosschain">Crosschain Transfer</option>
+                      <option value="treasury">Treasury Operation</option>
+                    </select></div>
+                  <div style="width:110px"><div class="swap-label">Frequency</div>
+                    <select class="cinput" id="aiw-auto-freq" style="width:100%;cursor:pointer">
+                      <option value="once">Once</option><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="biweekly">Biweekly</option><option value="monthly">Monthly</option>
+                    </select></div>
+                </div>
+                <div style="display:flex;gap:7px;flex-wrap:wrap">
+                  <div style="flex:1;min-width:110px"><div class="swap-label">Amount</div><input class="cinput" id="aiw-auto-amount" type="number" min="0" step="0.01" placeholder="0.00" style="width:100%"/></div>
+                  <div style="width:90px"><div class="swap-label">Token</div><select class="cinput" id="aiw-auto-token" style="width:100%;cursor:pointer"><option>USDC</option><option>EURC</option></select></div>
+                  <div style="flex:1;min-width:130px"><div class="swap-label">Name (optional)</div><input class="cinput" id="aiw-auto-name" placeholder="e.g. Team payroll" style="width:100%"/></div>
+                </div>
+                <div id="aiw-auto-to-wrap"><div class="swap-label">Recipient Address</div><input class="cinput" id="aiw-auto-to" placeholder="0x…" style="width:100%;font-family:monospace"/></div>
+                <div id="aiw-auto-swap-wrap" style="display:none"><div class="swap-label">Swap To</div><select class="cinput" id="aiw-auto-swapto" style="width:140px;cursor:pointer"><option>EURC</option><option>USDC</option></select></div>
+                <div id="aiw-auto-tonet-wrap" style="display:none"><div class="swap-label">Destination Network</div>
+                  <select class="cinput" id="aiw-auto-tonet" style="width:190px;cursor:pointer">
+                    <option value="Base_Sepolia">Base Sepolia</option><option value="Ethereum_Sepolia">Ethereum Sepolia</option><option value="Arbitrum_Sepolia">Arbitrum Sepolia</option><option value="Optimism_Sepolia">Optimism Sepolia</option><option value="Polygon_Amoy">Polygon Amoy</option>
+                  </select></div>
+                <div lang="en-US">
+                  <div class="swap-label">First Execution (UTC · optional — empty = now)</div>
+                  <input id="aiw-auto-start" class="cinput" type="text" readonly data-eldp="datetime" placeholder="MM/DD/YYYY HH:mm" style="width:210px;color-scheme:dark;cursor:pointer"/>
+                  <div style="font-size:8px;color:var(--muted2);margin-top:1px">Scheduled executions are stored and processed in UTC.</div>
+                </div>
+                <button class="btn primary" style="align-self:flex-start" onclick="AIWallet.createAutomation()"><i class="ti ti-rocket"></i>Submit to Validation Pipeline</button>
+                <div style="font-size:8px;color:var(--muted2)">Intents pass the full validation pipeline, then are handed to the existing Agent Wallet scheduler for on-chain execution.</div>
+              </div>
+            </div>
+            </div>
+
+            <!-- Panel: Executions -->
+            <div class="aiw-panel" id="aiw-panel-executions">
+              <div class="aiw-grid2">
+            <div class="card">
+              <div class="ch"><span class="ct"><i class="ti ti-loader" style="color:var(--yellow);margin-right:5px"></i>Pending Executions</span></div>
+              <div class="cb" id="aiw-pending-body" style="max-height:340px;overflow-y:auto"></div>
+            </div>
+            <div class="card">
+              <div class="ch"><span class="ct"><i class="ti ti-circle-check" style="color:var(--green);margin-right:5px"></i>Completed Executions</span></div>
+              <div class="cb" id="aiw-completed-body" style="max-height:340px;overflow-y:auto"></div>
+            </div>
+              </div>
+            </div>
+
+            <!-- Panel: Scheduled Tasks -->
+            <div class="aiw-panel" id="aiw-panel-scheduled">
+            <div class="card">
+              <div class="ch"><span class="ct"><i class="ti ti-calendar-stats" style="color:var(--yellow);margin-right:5px"></i>Scheduled Tasks Dashboard</span></div>
+              <div class="cb" id="aiw-sched-dash" style="max-height:320px;overflow-y:auto"></div>
+            </div>
+            <div class="card">
+              <div class="ch"><span class="ct"><i class="ti ti-calendar-time" style="color:var(--teal);margin-right:5px"></i>Scheduled Tasks</span></div>
+              <div class="cb" id="aiw-scheduled-body" style="max-height:420px;overflow-y:auto"></div>
+            </div>
+            </div>
+
+            <!-- Panel: AI Permissions -->
+            <div class="aiw-panel" id="aiw-panel-permissions">
+            <div class="card">
+              <div class="ch"><span class="ct"><i class="ti ti-shield-plus" style="color:var(--green);margin-right:5px"></i>Grant Permission</span><span class="chip chip-b" style="margin-left:auto">AgentAuthorization engine</span></div>
+              <div class="cb" style="display:flex;flex-direction:column;gap:7px">
+                <div class="swap-label">Operations</div>
+                <div id="aiw-grant-ops" style="display:flex;gap:5px;flex-wrap:wrap"></div>
+                <div style="display:flex;gap:7px;flex-wrap:wrap">
+                  <div><div class="swap-label">Total Cap (USD)</div><input class="cinput" id="aiw-grant-max" type="number" min="0" placeholder="500" style="width:90px"/></div>
+                  <div><div class="swap-label">Daily Limit (USD)</div><input class="cinput" id="aiw-grant-daily" type="number" min="0" placeholder="500" style="width:90px"/></div>
+                  <div><div class="swap-label">Max Tx (USD)</div><input class="cinput" id="aiw-grant-maxtx" type="number" min="0" placeholder="100" style="width:90px"/></div>
+                  <div><div class="swap-label">Valid For (hours)</div><input class="cinput" id="aiw-grant-hours" type="number" min="1" value="24" style="width:90px"/></div>
+                </div>
+                <div style="font-size:8px;color:var(--muted2)">Allowed tokens and time window follow your Spending Limits settings. Grants are revocable at any time and expire automatically.</div>
+                <button class="btn primary" style="align-self:flex-start;font-size:9px" onclick="AIWallet.grantPermission()"><i class="ti ti-shield-check"></i>Grant to AI Wallet</button>
+              </div>
+            </div>
+            <div class="card">
+              <div class="ch"><span class="ct"><i class="ti ti-key" style="color:var(--blue);margin-right:5px"></i>AI Permissions</span><span class="chip chip-b" style="margin-left:auto">shared engine</span></div>
+              <div class="cb" id="aiw-permissions-body"></div>
+            </div>
+            </div>
+
+            <!-- Panel: Limits & Policies -->
+            <div class="aiw-panel" id="aiw-panel-limits">
+              <div class="aiw-grid2">
+            <div class="card">
+              <div class="ch"><span class="ct"><i class="ti ti-gauge" style="color:var(--yellow);margin-right:5px"></i>Spending Limits</span></div>
+              <div class="cb">
+                <div style="display:flex;gap:7px;flex-wrap:wrap">
+                  <div><div class="swap-label">Per-Op (USD)</div><input class="cinput" id="aiw-lim-perop" type="number" style="width:90px"/></div>
+                  <div><div class="swap-label">Daily (USD)</div><input class="cinput" id="aiw-lim-daily" type="number" style="width:90px"/></div>
+                  <div><div class="swap-label">Monthly (USD)</div><input class="cinput" id="aiw-lim-monthly" type="number" style="width:90px"/></div>
+                </div>
+                <div style="display:flex;gap:7px;margin-top:7px">
+                  <div><div class="swap-label">From Hour</div><input class="cinput" id="aiw-lim-hstart" type="number" min="0" max="23" style="width:70px"/></div>
+                  <div><div class="swap-label">To Hour</div><input class="cinput" id="aiw-lim-hend" type="number" min="1" max="24" style="width:70px"/></div>
+                </div>
+                <div class="swap-label" style="margin-top:8px">Allowed Operations</div>
+                <div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:3px">
+                  <span class="stg-toggle" data-aiw-op="payment" style="font-size:8.5px;padding:4px 8px" onclick="AIWallet.toggleOp(this)">Payments</span>
+                  <span class="stg-toggle" data-aiw-op="swap" style="font-size:8.5px;padding:4px 8px" onclick="AIWallet.toggleOp(this)">Swap</span>
+                  <span class="stg-toggle" data-aiw-op="bridge" style="font-size:8.5px;padding:4px 8px" onclick="AIWallet.toggleOp(this)">Bridge</span>
+                  <span class="stg-toggle" data-aiw-op="crosschain" style="font-size:8.5px;padding:4px 8px" onclick="AIWallet.toggleOp(this)">Crosschain</span>
+                  <span class="stg-toggle" data-aiw-op="multisend" style="font-size:8.5px;padding:4px 8px" onclick="AIWallet.toggleOp(this)">MultiSend</span>
+                  <span class="stg-toggle" data-aiw-op="recurring" style="font-size:8.5px;padding:4px 8px" onclick="AIWallet.toggleOp(this)">Recurring</span>
+                  <span class="stg-toggle" data-aiw-op="payroll" style="font-size:8.5px;padding:4px 8px" onclick="AIWallet.toggleOp(this)">Payroll</span>
+                  <span class="stg-toggle" data-aiw-op="treasury" style="font-size:8.5px;padding:4px 8px" onclick="AIWallet.toggleOp(this)">Treasury</span>
+                </div>
+                <div class="swap-label" style="margin-top:8px">Allowed Tokens</div>
+                <div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:3px">
+                  <span class="stg-toggle" data-aiw-token="USDC" style="font-size:8.5px;padding:4px 8px" onclick="AIWallet.toggleToken(this)">USDC</span>
+                  <span class="stg-toggle" data-aiw-token="EURC" style="font-size:8.5px;padding:4px 8px" onclick="AIWallet.toggleToken(this)">EURC</span>
+                </div>
+                <div id="aiw-lim-spent" style="font-size:8.5px;color:var(--muted2);margin-top:8px"></div>
+                <button class="btn primary" style="font-size:9px;margin-top:7px" onclick="AIWallet.saveLimits()">Save Limits</button>
+              </div>
+            </div>
+            <div class="card">
+              <div class="ch"><span class="ct"><i class="ti ti-gavel" style="color:var(--purple);margin-right:5px"></i>Policy Management</span><span class="chip chip-p" style="margin-left:auto">shared engine</span></div>
+              <div class="cb" id="aiw-policies-body"></div>
+            </div>
+              </div>
+            </div>
+
+            <!-- Panel: History -->
+            <div class="aiw-panel" id="aiw-panel-history">
+            <div id="aiw-hist-stats" style="display:flex;gap:8px;flex-wrap:wrap"></div>
+            <div class="card">
+              <div class="ch"><span class="ct"><i class="ti ti-history" style="color:var(--muted2);margin-right:5px"></i>Transaction History &amp; AI Actions</span><button class="btn" style="font-size:8.5px;padding:2px 8px;margin-left:auto" onclick="AIWallet.exportHistory()">Export</button></div>
+              <div class="cb" id="aiw-history-body" style="max-height:420px;overflow-y:auto"></div>
+            </div>
+            </div>
+
+          </div>
+        </div>
+        </div>
+      </div>
+
+      <!-- Fund AI Wallet Wizard (scoped modal) -->
+      <div class="modal-ov" id="aiw-wiz-modal">
+        <div class="modal" style="max-width:400px" lang="en-US">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+            <div class="mt" style="margin-bottom:0">Fund AI Wallet</div>
+            <span class="chip chip-b" id="aiw-wiz-step" style="margin-left:auto">Step 1 of 6</span>
+            <button onclick="AIWallet.wizClose()" style="width:26px;height:26px;border-radius:6px;border:1px solid var(--border2);background:transparent;color:var(--muted2);cursor:pointer;font-size:14px">×</button>
+          </div>
+          <div class="ms">Personal Wallet → AI Smart Wallet · real on-chain transfer on Arc Testnet</div>
+          <div id="aiw-wiz-body" style="min-height:110px"></div>
+          <div style="display:flex;justify-content:space-between;margin-top:14px">
+            <button class="btn" id="aiw-wiz-back" onclick="AIWallet.wizBack()" style="font-size:9px">Back</button>
+            <button class="btn primary" id="aiw-wiz-next" onclick="AIWallet.wizNext()" style="font-size:9px">Next</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- ═══════════════ /AI SMART WALLET ═══════════════ -->
+
   </div><!-- /main -->
 </div><!-- /app -->
 
@@ -10016,12 +10430,13 @@ select.cinput option { background: #161a24; color: #dde2f0; }
     <div class="footer-brand footer-col">
       <div class="fb-logo">
         <div class="fb-icon"><img src="/favicon-main.svg" alt="Elligentt" style="width:100%;height:100%;display:block;object-fit:contain"></div>
-        <span class="fb-name">Elligentt<span class="fb-kit">App Kit</span></span>
+        <span class="fb-name">Elligentt<span class="fb-kit" style="display:inline-flex;align-items:center;gap:4px;padding:2px 6px">built on <img src="assets/arc/arc-logo-on-dark.svg" alt="Arc" style="height:9px;width:auto;display:block"/></span></span>
       </div>
       <p class="fb-tagline">
-        Production-ready batch payment infrastructure for the Arc Network.
-        Send USDC to hundreds of wallets in a single on-chain transaction —
-        with built-in swap, bridge, invoicing and analytics.
+        Production-ready batch payment infrastructure built on Arc Network,
+        Circle's Layer-1 purpose-built for stablecoin finance. Send USDC to
+        hundreds of wallets in a single on-chain transaction — with USDC gas,
+        near-instant finality and built-in swap, bridge, invoicing and analytics.
       </p>
       <div class="fb-badges">
         <span class="footer-badge green"><i class="ti ti-circle-dot"></i>Arc Testnet Live</span>
@@ -10117,7 +10532,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
         <span style="color:#22c55e;font-weight:600">All systems operational</span>
       </div>
       <span>·</span>
-      <span>© 2025 Elligentt. Built on <a href="https://arc.network" target="_blank" style="color:#4f8ef7;text-decoration:none">Arc Network</a></span>
+      <span>© 2025 Elligentt. Built on <a href="https://arc.network" target="_blank" rel="noopener" style="color:#4f8ef7;text-decoration:none" aria-label="Arc Network"><img src="assets/arc/arc-logo-on-dark.svg" alt="Arc" style="height:11px;width:auto;vertical-align:-2px;margin-left:3px"/></a></span>
       <span>·</span>
       <span>Powered by <a href="https://circle.com" target="_blank" style="color:#4f8ef7;text-decoration:none">Circle</a> USDC &amp; App Kit</span>
     </div>
@@ -10170,6 +10585,13 @@ select.cinput option { background: #161a24; color: #dde2f0; }
         <i class="ti ti-license" style="color:#4f8ef7;margin-right:4px"></i>
         Released under the <strong style="color:var(--text)">MIT License</strong>. Free to use, fork, and deploy.
       </div>
+
+      <!-- Arc attribution (official logo, per Arc partner guidelines) -->
+      <div style="background:rgba(0,0,0,.18);border:1px solid var(--border);border-radius:6px;padding:10px;display:flex;align-items:center;justify-content:space-between;gap:10px">
+        <span style="font-size:10px;color:var(--muted2)">Powered by <strong style="color:var(--text)">Arc Network</strong></span>
+        <a href="https://arc.network" target="_blank" rel="noopener" aria-label="Arc Network"><img src="assets/arc/arc-logo-on-dark.svg" alt="Arc" style="height:14px;width:auto;display:block"/></a>
+      </div>
+      <div style="font-size:8px;color:var(--muted2);line-height:1.5">Arc™ is a trademark of Circle Internet Group, Inc. and/or its affiliates. Elligentt is an independent project built on Arc.</div>
 
       <!-- Solidity Contracts -->
       <div style="background:rgba(0,0,0,.18);border:1px solid var(--border);border-radius:6px;padding:10px">
