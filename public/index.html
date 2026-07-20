@@ -95,6 +95,14 @@
 <script src="/shared/missionEngine.js"></script>
 <script src="/shared/agentTreasury.js"></script>
 <script src="/shared/aiSmartWallet.js"></script>
+<script src="/shared/ExecutionAggregator.js"></script>
+<script src="/shared/CrossChainTransferRouter.js"></script>
+<script src="/shared/CCTPV2InboundEngine.js"></script>
+<script src="/shared/CircleAttestationMonitor.js"></script>
+<script src="/shared/CCTPFinalityEngine.js"></script>
+<script src="/shared/BridgeRecoveryEngine.js"></script>
+<script src="/shared/CCTPHealthMonitor.js"></script>
+<script src="/shared/AutonomaCCTPV2Integration.js"></script>
 <script src="/shared/financialContext.js"></script>
 <script src="/shared/oracleInterop.js"></script>
 <script src="/shared/oracle-interoperability/OracleRegistry.js"></script>
@@ -10104,8 +10112,15 @@ select.cinput option { background: #161a24; color: #dde2f0; }
               <div class="cb" id="aiw-portfolio-body"></div>
             </div>
             <div class="card">
-              <div class="ch"><span class="ct"><i class="ti ti-robot" style="color:var(--purple);margin-right:5px"></i>Agent Wallet Information</span></div>
-              <div class="cb" id="aiw-agent-body"></div>
+              <div class="ch"><span class="ct"><i class="ti ti-qrcode" style="color:var(--purple);margin-right:5px"></i>Receive Assets</span><button class="btn" style="font-size:8.5px;padding:2px 8px;margin-left:auto" onclick="AIWallet.copyAgentAddress()"><i class="ti ti-copy"></i>Copy</button></div>
+              <div class="cb" id="aiw-receive-body" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+                <div id="aiw-receive-qr" style="background:#fff;padding:6px;border-radius:6px;flex-shrink:0;min-width:120px;min-height:120px;display:flex;align-items:center;justify-content:center"></div>
+                <div style="flex:1;min-width:180px">
+                  <div class="swap-label">AI Smart Wallet Address (Arc Testnet)</div>
+                  <div id="aiw-receive-addr" style="font-size:9.5px;font-family:monospace;color:var(--text);word-break:break-all;margin-top:3px"></div>
+                  <div style="font-size:8px;color:var(--muted2);margin-top:6px">Supported: USDC · EURC · cirBTC on Arc Testnet (Chain ID 5042002). Cross-chain deposits route via the existing Bridge.</div>
+                </div>
+              </div>
             </div>
             <div class="card">
               <div class="ch"><span class="ct"><i class="ti ti-wallet" style="color:var(--blue);margin-right:5px"></i>Wallet Manager</span></div>
@@ -10132,15 +10147,8 @@ select.cinput option { background: #161a24; color: #dde2f0; }
               </div>
             </div>
             <div class="card">
-              <div class="ch"><span class="ct"><i class="ti ti-qrcode" style="color:var(--purple);margin-right:5px"></i>Receive Assets</span><button class="btn" style="font-size:8.5px;padding:2px 8px;margin-left:auto" onclick="AIWallet.copyAgentAddress()"><i class="ti ti-copy"></i>Copy</button></div>
-              <div class="cb" id="aiw-receive-body" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
-                <div id="aiw-receive-qr" style="background:#fff;padding:6px;border-radius:6px;flex-shrink:0;min-width:120px;min-height:120px;display:flex;align-items:center;justify-content:center"></div>
-                <div style="flex:1;min-width:180px">
-                  <div class="swap-label">AI Smart Wallet Address (Arc Testnet)</div>
-                  <div id="aiw-receive-addr" style="font-size:9.5px;font-family:monospace;color:var(--text);word-break:break-all;margin-top:3px"></div>
-                  <div style="font-size:8px;color:var(--muted2);margin-top:6px">Supported: USDC · EURC · cirBTC on Arc Testnet (Chain ID 5042002). Cross-chain deposits route via the existing Bridge.</div>
-                </div>
-              </div>
+              <div class="ch"><span class="ct"><i class="ti ti-robot" style="color:var(--purple);margin-right:5px"></i>Agent Wallet Information</span></div>
+              <div class="cb" id="aiw-agent-body"></div>
             </div>
               </div>
             </div>
@@ -41606,12 +41614,18 @@ const UBScreen = (function() {
   var _agentExecState = {};
 
   function _agentGetPrivateKey(){
-    // Try v1 localStorage first
+    // [C1 FIX] Deprecated — use _agentGetSigner() instead which uses encrypted v2 storage.
+    // Kept for backwards compat only.
     try {
       var sess = JSON.parse(localStorage.getItem('elligentt_agent_session_v1'));
-      if(sess && sess.privateKey) return sess.privateKey;
+      if(sess && sess.privateKey) {
+        // Migrate to encrypted v2 if AgentWalletManager is available
+        if(typeof AgentWalletManager !== 'undefined'){
+          try { AgentWalletManager._migrateV1Key(sess.privateKey); } catch(e) {}
+        }
+        return sess.privateKey;
+      }
     } catch(e) {}
-    // Fallback: ensure wallet exists via AgentWalletManager
     if(typeof AgentWalletManager !== 'undefined'){
       var w = AgentWalletManager.getOrCreateWallet();
       if(w && w.privateKey) return w.privateKey;
@@ -41619,6 +41633,59 @@ const UBScreen = (function() {
       if(sk) return sk;
     }
     return null;
+  }
+
+  /**
+   * [C1 FIX] Secure signer retrieval — uses encrypted v2 storage via AgentWalletManager.
+   * Falls back to legacy v1 only if v2 is unavailable.
+   */
+  async function _agentGetSigner(){
+    if(typeof AgentWalletManager !== 'undefined'){
+      try {
+        var signer = await AgentWalletManager.getSessionSigner();
+        if(signer) return signer;
+      } catch(e){}
+      // Sync fallback
+      try {
+        var key = _agentGetPrivateKey();
+        if(key){
+          if(typeof ethers !== 'undefined'){
+            var provider = _agentGetProvider();
+            return new ethers.Wallet(key, provider);
+          }
+        }
+      } catch(e){}
+    }
+    return null;
+  }
+
+  /** [C1+A4 FIX] Get provider using RPCManager when available, with hardcoded fallback */
+  function _agentGetProvider(){
+    try {
+      if(typeof RPCManager !== 'undefined' && typeof RPCManager.getHealthyRPC === 'function'){
+        var rpc = RPCManager.getHealthyRPC(5042002);
+        if(rpc) return new ethers.JsonRpcProvider(rpc);
+      }
+    } catch(e){}
+    try {
+      if(typeof getCachedProvider === 'function') return getCachedProvider('https://rpc.testnet.arc.network');
+    } catch(e){}
+    return new ethers.JsonRpcProvider('https://rpc.testnet.arc.network');
+  }
+
+  /** [C2 FIX] Re-validate authorization immediately before signing — TOCTOU guard */
+  function _agentRevalidateAuth(operation, amount, asset){
+    if(typeof AgentAuthorization === 'undefined') return { ok: true };
+    try {
+      var result = AgentAuthorization.validateExecution({
+        operation: operation, amount: Number(amount) || 0, asset: asset || 'USDC',
+        network: 'Arc Testnet', contract: '', destination: ''
+      });
+      if(!result || !result.valid){
+        return { ok: false, reason: (result && result.reason) || 'Authorization scope denied at signing time' };
+      }
+    } catch(e){ return { ok: false, reason: 'Authorization check error: ' + (e.message || e) }; }
+    return { ok: true };
   }
 
   function _agentPreValidate(execId, operation, maxFeePerGasWei, gasLimitWei){
@@ -41668,14 +41735,11 @@ const UBScreen = (function() {
   async function _agentExecuteOp(operation, amount, asset, paramsJson){
     var execId = 'exec_' + Date.now();
 
-    var sess = null;
-    try { sess = JSON.parse(localStorage.getItem('elligentt_agent_session_v1')); } catch(e){}
-    if(!sess||!sess.privateKey){ var k=_agentGetPrivateKey(); if(k) sess={privateKey:k}; }
-    if(!sess || !sess.privateKey){ _agentStateMsg(execId, 'FAILED', 'No agent session key'); return; }
+    // [C1 FIX] Use encrypted v2 signer via AgentWalletManager instead of plaintext localStorage
+    var signer = await _agentGetSigner();
+    if(!signer){ _agentStateMsg(execId, 'FAILED', 'No agent session key — reconnect or create Agent Wallet'); return; }
 
-    var ARC_RPC = 'https://arc-testnet.drpc.org';
-    var provider = new ethers.JsonRpcProvider(ARC_RPC);
-    var signer = new ethers.Wallet(sess.privateKey, provider);
+    var provider = signer.provider;
     var agentAddr = signer.address;
 
     _agentStateMsg(execId, 'PLANNING', amount+' '+asset+' via '+operation);
@@ -41711,6 +41775,9 @@ const UBScreen = (function() {
         };
 
         if(!_agentPreValidate(execId, 'payment', rawTx.maxFeePerGas, rawTx.gasLimit)) return;
+        // [C2 FIX] TOCTOU: re-validate authorization immediately before signing
+        var recheck = _agentRevalidateAuth('payment', amount, asset);
+        if(!recheck.ok){ _agentStateMsg(execId, 'REJECTED', recheck.reason); return; }
         var signedTx = await signer.signTransaction(rawTx);
         txHash = await provider.send('eth_sendRawTransaction', [signedTx]);
       } catch(sendErr){
@@ -41926,19 +41993,14 @@ const UBScreen = (function() {
   async function _agentExecuteSwap(amount, tokenIn, tokenOut, calldataId){
     var execId = 'exec_' + Date.now();
 
-    // Phase 0: Get private key directly from session storage
-    var sess = null;
-    try { sess = JSON.parse(localStorage.getItem('elligentt_agent_session_v1')); } catch(e){}
-    if(!sess||!sess.privateKey){ var k=_agentGetPrivateKey(); if(k) sess={privateKey:k}; }
-    if(!sess || !sess.privateKey){
+    // [C1 FIX] Use encrypted v2 signer via AgentWalletManager
+    var signer = await _agentGetSigner();
+    if(!signer){
       _agentStateMsg(execId, 'FAILED', 'No agent session key found. Reconnect wallet.');
       return;
     }
 
-    // Create fresh provider — never reuse cached
-    var ARC_RPC = 'https://arc-testnet.drpc.org';
-    var provider = new ethers.JsonRpcProvider(ARC_RPC);
-    var signer = new ethers.Wallet(sess.privateKey, provider);
+    var provider = signer.provider;
     var agentAddr = signer.address;
 
     _agentStateMsg(execId, 'PLANNING', agentAddr.substring(0,8)+'... '+amount+' '+tokenIn+' → '+tokenOut);
@@ -41991,6 +42053,9 @@ const UBScreen = (function() {
         };
 
         if(!_agentPreValidate(execId, 'swap', rawTx.maxFeePerGas, rawTx.gasLimit)) return;
+        // [C2 FIX] TOCTOU: re-validate swap authorization immediately before signing
+        var swapRecheck = _agentRevalidateAuth('swap', amount, tokenIn);
+        if(!swapRecheck.ok){ _agentStateMsg(execId, 'REJECTED', swapRecheck.reason); return; }
         var signedTx = await signer.signTransaction(rawTx);
         var txHash = await provider.send('eth_sendRawTransaction', [signedTx]);
         lastTxHash = txHash;
@@ -42090,16 +42155,14 @@ const UBScreen = (function() {
     var EXPLORER_URL = cctpCfg.explorer || 'https://testnet.arcscan.app';
     var srcDomain = cctpCfg.domain || 26;
 
-    var sess = null;
-    try { sess = JSON.parse(localStorage.getItem('elligentt_agent_session_v1')); } catch(e){}
-    if(!sess||!sess.privateKey){ var k=_agentGetPrivateKey(); if(k) sess={privateKey:k}; }
-    if(!sess || !sess.privateKey){
+    // [C1 FIX] Use encrypted v2 signer via AgentWalletManager
+    var signer = await _agentGetSigner();
+    if(!signer){
       _agentStateMsg(execId, 'FAILED', 'No agent session key found. Reconnect wallet.');
       return;
     }
 
-    var provider = new ethers.JsonRpcProvider(RPC_URL);
-    var signer = new ethers.Wallet(sess.privateKey, provider);
+    var provider = signer.provider;
     var agentAddr = signer.address;
     // Cross-chain payment: mint directly to the external recipient when provided.
     // CRITICAL: mintRecipient must be non-zero — defaults to the agent address (bridge-to-self).
@@ -42365,15 +42428,14 @@ const UBScreen = (function() {
     var EXPLORER_URL = cctpCfg.explorer;
     var srcDomain = cctpCfg.domain || 0;
 
-    var sess = null;
-    try { sess = JSON.parse(localStorage.getItem('elligentt_agent_session_v1')); } catch(e){}
-    if(!sess || !sess.privateKey){
+    // [C1 FIX] Use encrypted v2 signer via AgentWalletManager
+    var signer = await _agentGetSigner();
+    if(!signer){
       _agentStateMsg(execId, 'FAILED', 'No agent session key found.');
       return;
     }
 
-    var provider = new ethers.JsonRpcProvider(RPC_URL);
-    var signer = new ethers.Wallet(sess.privateKey, provider);
+    var provider = signer.provider;
     var agentAddr = signer.address;
     var mintRecipient = ethers.zeroPadValue(agentAddr, 32);
     // ARC is always the destination for Turbo Bridge
@@ -42526,17 +42588,14 @@ const UBScreen = (function() {
   async function _agentExecuteLiquidity(operation, amountA, tokenA, amountB, tokenB, poolId){
     var execId = 'exec_' + Date.now();
 
-    var sess = null;
-    try { sess = JSON.parse(localStorage.getItem('elligentt_agent_session_v1')); } catch(e){}
-    if(!sess||!sess.privateKey){ var k=_agentGetPrivateKey(); if(k) sess={privateKey:k}; }
-    if(!sess || !sess.privateKey){
+    // [C1 FIX] Use encrypted v2 signer via AgentWalletManager
+    var signer = await _agentGetSigner();
+    if(!signer){
       _agentStateMsg(execId, 'FAILED', 'No agent session key found. Reconnect wallet.');
       return;
     }
 
-    var ARC_RPC = 'https://arc-testnet.drpc.org';
-    var provider = new ethers.JsonRpcProvider(ARC_RPC);
-    var signer = new ethers.Wallet(sess.privateKey, provider);
+    var provider = signer.provider;
     var agentAddr = signer.address;
 
     var pool = POOL_REGISTRY.find(function(p){ return p.id === poolId; });
@@ -42684,17 +42743,14 @@ const UBScreen = (function() {
   async function _agentExecuteMultiSend(token, recipients, amounts){
     var execId = 'exec_' + Date.now();
 
-    var sess = null;
-    try { sess = JSON.parse(localStorage.getItem('elligentt_agent_session_v1')); } catch(e){}
-    if(!sess||!sess.privateKey){ var k=_agentGetPrivateKey(); if(k) sess={privateKey:k}; }
-    if(!sess || !sess.privateKey){
+    // [C1 FIX] Use encrypted v2 signer via AgentWalletManager
+    var signer = await _agentGetSigner();
+    if(!signer){
       _agentStateMsg(execId, 'FAILED', 'No agent session key found. Reconnect wallet.');
       return;
     }
 
-    var ARC_RPC = 'https://arc-testnet.drpc.org';
-    var provider = new ethers.JsonRpcProvider(ARC_RPC);
-    var signer = new ethers.Wallet(sess.privateKey, provider);
+    var provider = signer.provider;
     var agentAddr = signer.address;
 
     if(!Array.isArray(recipients) || !Array.isArray(amounts) || recipients.length !== amounts.length){

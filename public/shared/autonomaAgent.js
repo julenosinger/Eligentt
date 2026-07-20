@@ -89,8 +89,24 @@
 
   /* ════════════════════════════════════════
      TX MONITOR — Post-execution verification
+     [A4 FIX] Uses RPCManager with fallback instead of hardcoded RPC
+     [M5 FIX] Retry logic with exponential backoff
   ════════════════════════════════════════ */
   var monitoredTxs = [];
+
+  function _getAgentProvider(){
+    try {
+      if(typeof ethers === 'undefined') return null;
+      if(typeof RPCManager !== 'undefined' && typeof RPCManager.getHealthyRPC === 'function'){
+        var rpc = RPCManager.getHealthyRPC(5042002);
+        if(rpc) return new ethers.JsonRpcProvider(rpc);
+      }
+    } catch(e){}
+    try {
+      if(typeof getCachedProvider === 'function') return getCachedProvider('https://rpc.testnet.arc.network');
+    } catch(e){}
+    return new ethers.JsonRpcProvider('https://rpc.testnet.arc.network');
+  }
 
   function monitorTx(txHash, chainId, callback){
     var id = 'mtx_' + Date.now();
@@ -100,13 +116,22 @@
   }
 
   async function pollTx(txHash){
-    try {
-      if(typeof ethers === 'undefined') return null;
-      var rpc = 'https://arc-testnet.drpc.org';
-      var provider = new ethers.JsonRpcProvider(rpc);
-      var receipt = await provider.getTransactionReceipt(txHash);
-      return receipt;
-    } catch(e){ return null; }
+    // [A4+M5 FIX] Use RPCManager with retry + fallback
+    var retries = 3;
+    for(var attempt = 0; attempt < retries; attempt++){
+      try {
+        if(typeof ethers === 'undefined') return null;
+        var provider = _getAgentProvider();
+        if(!provider) return null;
+        var receipt = await provider.getTransactionReceipt(txHash);
+        if(receipt) return receipt;
+      } catch(e){
+        if(attempt < retries - 1){
+          await new Promise(function(r){ setTimeout(r, 1000 * (attempt + 1)); });
+        }
+      }
+    }
+    return null;
   }
 
   function stopMonitor(id){
@@ -145,14 +170,31 @@
       }
     } catch(e){}
 
-    // 3. Low balance
+    // 3. [M11 FIX] Low balance — use on-chain check when available, fallback to DOM
     try {
-      if(typeof walletAddress !== 'undefined' && walletAddress){
+      var balFloat = null;
+      // Prefer AgentWalletManager on-chain balance if available
+      try {
+        if(typeof AgentWalletManager !== 'undefined' && typeof walletAddress !== 'undefined' && walletAddress){
+          var agentAddr = AgentWalletManager.getAgentAddress();
+          if(agentAddr && typeof ethers !== 'undefined'){
+            var provider = _getAgentProvider();
+            if(provider){
+              var USDC = '0x3600000000000000000000000000000000000000';
+              var c = new ethers.Contract(USDC, ['function balanceOf(address) view returns (uint256)'], provider);
+              try { var rawBal = await c.balanceOf(agentAddr); balFloat = parseFloat(ethers.formatUnits(rawBal, 6)); } catch(e){}
+            }
+          }
+        }
+      } catch(e){}
+      // Fallback to DOM element
+      if(balFloat === null){
         var balEl = document.getElementById('sb-bal');
         var balance = balEl ? parseFloat(balEl.textContent) : null;
-        if(balance !== null && !isNaN(balance) && balance < 10 && balance > 0 && !wasShown('low_bal', 1800000)){
-          alerts.push({ type: 'low_balance', priority: 'medium', text: 'Balance is low: ' + balance.toFixed(2) + ' USDC. Consider topping up.', action: 'show my balance' });
-        }
+        if(balance !== null && !isNaN(balance)) balFloat = balance;
+      }
+      if(balFloat !== null && !isNaN(balFloat) && balFloat < 10 && balFloat > 0 && !wasShown('low_bal', 1800000)){
+        alerts.push({ type: 'low_balance', priority: 'medium', text: 'Balance is low: ' + balFloat.toFixed(2) + ' USDC. Consider topping up.', action: 'show my balance' });
       }
     } catch(e){}
 
@@ -171,10 +213,14 @@
   function getAlertHtml(alert){
     var priorityColor = alert.priority === 'high' ? '#ef4444' : alert.priority === 'medium' ? '#f59e0b' : '#4f8ef7';
     var icon = alert.type === 'permit_expiring' ? 'clock' : alert.type === 'schedule_due' ? 'calendar-event' : alert.type === 'low_balance' ? 'wallet' : 'coins';
+    // [M7 FIX] Use textContent-safe approach — avoid inline onclick with unsanitized values
+    var safeAction = String(alert.action || '').replace(/[\\']/g, '');
     return '<div class="ai-rec-item" style="display:flex;align-items:center;gap:8px">' +
       '<i class="ti ti-' + icon + '" style="color:' + priorityColor + ';font-size:14px;flex-shrink:0"></i>' +
-      '<div style="flex:1"><div style="font-size:9px;color:var(--text)">' + alert.text + '</div></div>' +
-      '<button class="aut-act" onclick="autonomaSendQuick(\'' + alert.action + '\')" style="font-size:8px;padding:2px 8px"><i class="ti ti-arrow-right"></i></button>' +
+      '<div style="flex:1"><div style="font-size:9px;color:var(--text)">' +
+      alert.text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;') +
+      '</div></div>' +
+      '<button class="aut-act" data-alert-action="' + safeAction + '" style="font-size:8px;padding:2px 8px"><i class="ti ti-arrow-right"></i></button>' +
       '</div>';
   }
 
@@ -193,15 +239,24 @@
 
   /* ════════════════════════════════════════
      INIT — Start periodic checks
+     [M6 FIX] Cleanup support for page navigation
   ════════════════════════════════════════ */
   function start(){
     if(monitorInterval) return;
     monitorInterval = setInterval(function(){
       try {
+        // Only run if autonoma page is visible to avoid unnecessary RPC calls
+        var page = document.getElementById('page-autonoma');
+        if(page && !page.classList.contains('active')) return;
         var alerts = checkAlerts();
         if(alerts.length > 0) injectAlerts(alerts);
       } catch(e){}
     }, 45000); // Check every 45 seconds
+  }
+
+  /** [M6 FIX] Stop all intervals and cleanup resources */
+  function stop(){
+    if(monitorInterval){ clearInterval(monitorInterval); monitorInterval = null; }
   }
 
   load();
@@ -357,6 +412,7 @@
     injectAlerts: injectAlerts,
     getAlertHtml: getAlertHtml,
     start: start,
+    stop: stop,
     // Agent identity & authorization
     getAgentIdentityCard: getAgentIdentityCard,
     getAgentAuthorizationCard: getAgentAuthorizationCard,

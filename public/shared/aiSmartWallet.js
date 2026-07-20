@@ -97,7 +97,7 @@
     topupThreshold: 0.5,    // trigger below this
     topupAmount: 5,         // USDC per top-up
     topupSource: 'personal',// personal | vault | reserve
-    topupPolicy: 'manual'   // manual | automatic
+    topupPolicy: 'manual'   // [M8 FIX] manual | notify (never automatic — always requires user action)
   }, lsLoad(K.gas, {}));
   let gasLog = lsLoad(K.gaslog, []);          // [{at, hash, cost}] — real receipts only
   let nativeCache = { at: 0, bal: null };
@@ -486,10 +486,18 @@
      AI may spend ONLY operational + automation. Locked & gas reserve
      are untouchable.
      ══════════════════════════════════════════════════════════════════ */
+  /** [A5 FIX] Get REAL on-chain balance — prefer fresh RPC over portfolio cache */
   function agentRealBal(token) {
-    const row = portfolioCache.rows.find(function (r) { return r.tag === 'agent'; });
+    // Try fresh on-chain via balanceDedup cache first
+    var addr = agentAddr();
+    if (addr && balanceDedup[String(addr).toLowerCase() + ':' + token]) {
+      var dedup = balanceDedup[String(addr).toLowerCase() + ':' + token];
+      if (dedup.val !== undefined && (Date.now() - dedup.at) < 30000) return dedup.val;
+    }
+    // Fallback to portfolio cache
+    var row = portfolioCache.rows.find(function (r) { return r.tag === 'agent'; });
     if (!row) return null;
-    const t = row.tokens.find(function (x) { return x.sym === token; });
+    var t = row.tokens.find(function (x) { return x.sym === token; });
     return t ? t.bal : null;
   }
 
@@ -578,11 +586,14 @@
 
   /* ══════════════════════════════════════════════════════════════════
      INTENT LIFECYCLE
+     [C3 FIX] Nonce with timestamp + random for replay protection
      ══════════════════════════════════════════════════════════════════ */
   function submitIntent(raw) {
     if (emergencyStop) { notify('Emergency Stop active — intent rejected', 'error'); return null; }
+    // [C3 FIX] Nonce with timestamp-derived component for replay protection — survives localStorage clear
     nonceCounter += 1; lsSave(K.nonce, nonceCounter);
-    const it = {
+    var tsNonce = Date.now() * 1000 + (nonceCounter % 1000); // timestamp-based with counter uniqueness
+    var it = {
       id: 'AIW-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7),
       op: String(raw.op || 'payment'),
       name: plain(raw.name || ''),
@@ -596,8 +607,9 @@
       freq: String(raw.freq || 'once'),
       startAt: raw.startAt || null,
       source: String(raw.source || 'user'),
-      nonce: nonceCounter,
-      deadline: Date.now() + (settings.deadlineMinutes * 60000),
+      nonce: tsNonce,                                   // [C3] Timestamp-derived nonce
+      nonceCounter: nonceCounter,                        // [C3] Sequential counter for ordering
+      deadline: Date.now() + (settings.deadlineMinutes * 60000) + tsNonce,
       status: 'validating',
       checks: [],
       schedId: null,
@@ -794,6 +806,32 @@
     return 'https://testnet.arcscan.app/tx/' + hash;
   }
 
+  /** [A6 FIX] Get AGENT_MAX_GAS_USD from system config */
+  function _getMaxGasUsd() {
+    var max = 5;
+    try {
+      if (typeof SystemConfig !== 'undefined' && SystemConfig.AGENT_MAX_GAS_USD) {
+        max = Number(SystemConfig.AGENT_MAX_GAS_USD);
+      }
+    } catch(_e) {}
+    return max;
+  }
+
+  /** [A6 FIX] Estimate gas with AGENT_MAX_GAS_USD enforcement */
+  async function _estimateGasSafe(contract, method, args) {
+    try {
+      var gasEst = await contract[method].estimateGas.apply(contract, args);
+      var maxGasUsd = _getMaxGasUsd();
+      // On Arc, USDC is native (1 USDC ≈ 1 gas unit for estimation)
+      var gasLimit = Number(gasEst);
+      if (gasLimit > maxGasUsd * 1000000) { // heuristic: 1M gas units ≈ 1 USDC on Arc
+        notify('Gas estimate exceeds max allowed (' + maxGasUsd + ' USDC) — transaction aborted', 'error');
+        return { ok: false, gasEst: gasEst };
+      }
+      return { ok: true, gasEst: gasEst };
+    } catch(_e) { return { ok: true, gasEst: null }; } // let ethers handle default
+  }
+
   async function fundingSubmit() {
     if (fundingBusy) { notify('A funding operation is already in progress', 'info'); return; }
     const flow = ($id('aiw-fund-flow') || {}).value || 'deposit';
@@ -828,7 +866,10 @@
       try { if (typeof ensureNetwork === 'function') await ensureNetwork(5042002); } catch (_e) { /* wallet may reject */ }
       try { if (typeof activeChainId !== 'undefined' && Number(activeChainId) !== 5042002) { notify('Switch your wallet to Arc Testnet first', 'error'); return false; } } catch (_e) { /* ignore */ }
       const c = new ethers.Contract(meta.address, ERC20_ABI, userSigner);
-      const tx = await c.transfer(agent, ethers.parseUnits(String(amount), meta.decimals || 6));
+      // [A6 FIX] Gas limit enforcement
+      var gasCheck = await _estimateGasSafe(c, 'transfer', [agent, ethers.parseUnits(String(amount), meta.decimals || 6)]);
+      if(!gasCheck.ok) return false;
+      const tx = await c.transfer(agent, ethers.parseUnits(String(amount), meta.decimals || 6), gasCheck.gasEst ? { gasLimit: gasCheck.gasEst } : {});
       notify('Deposit submitted — waiting for confirmation…', 'info');
       pushHistory({ kind: 'funding', status: 'submitted', op: 'deposit', amount: amount, token: token, txHash: tx.hash });
       renderHistory();
@@ -862,7 +903,10 @@
       const aSigner = AgentWalletManager.getAgentSigner();
       if (!aSigner) { notify('Agent signer unavailable', 'error'); return; }
       const c = new ethers.Contract(meta.address, ERC20_ABI, aSigner);
-      const tx = await c.transfer(to, ethers.parseUnits(String(amount), meta.decimals || 6));
+      // [A6 FIX] Gas limit enforcement
+      var agCheck = await _estimateGasSafe(c, 'transfer', [to, ethers.parseUnits(String(amount), meta.decimals || 6)]);
+      if(!agCheck.ok) return;
+      const tx = await c.transfer(to, ethers.parseUnits(String(amount), meta.decimals || 6), agCheck.gasEst ? { gasLimit: agCheck.gasEst } : {});
       notify(kind.charAt(0).toUpperCase() + kind.slice(1) + ' submitted — waiting for confirmation…', 'info');
       pushHistory({ kind: 'funding', status: 'submitted', op: kind, amount: amount, token: token, to: to, txHash: tx.hash });
       renderHistory();
@@ -1276,6 +1320,12 @@
       const num = function (id) { const v = parseFloat(($id(id) || {}).value); return isFinite(v) && v >= 0 ? v : 0; };
       wiz.locked = num('aiw-wiz-locked'); wiz.automation = num('aiw-wiz-automation'); wiz.treasury = num('aiw-wiz-treasury');
       if (wiz.locked + wiz.automation + wiz.treasury > wiz.amount + 1e-9) { notify('Allocations exceed the deposit amount', 'error'); return; }
+      // [A7 FIX] Validate on-chain personal wallet balance before proceeding to review
+      wiz.step = 4; renderWizard(); // show review while loading
+      var persBal = await tokenBalance(personalAddr(), wiz.asset);
+      if (persBal === null) { notify('Cannot verify Personal Wallet balance (RPC) — try again', 'error'); wiz.step = 3; renderWizard(); return; }
+      if (persBal < wiz.amount) { notify('Insufficient balance: ' + persBal.toFixed(2) + ' ' + wiz.asset + ' in Personal Wallet (need ' + wiz.amount + ')', 'error'); wiz.step = 3; renderWizard(); return; }
+      return; // wizNext will be called again by user clicking Next on review
     }
     if (wiz.step === 5) {
       if (!wiz.approved) { notify('Tick the approval checkbox first', 'error'); return; }
@@ -1406,7 +1456,7 @@
         '<option value="reserve"' + (gasCfg.topupSource === 'reserve' ? ' selected' : '') + '>AI Wallet Reserve</option></select></div>' +
         '<div><div class="swap-label">Policy</div><select class="cinput" id="aiw-topup-policy" style="width:140px;cursor:pointer">' +
         '<option value="manual"' + (gasCfg.topupPolicy === 'manual' ? ' selected' : '') + '>Manual Approval</option>' +
-        '<option value="automatic"' + (gasCfg.topupPolicy === 'automatic' ? ' selected' : '') + '>Automatic (notify)</option></select></div></div>' +
+        '<option value="notify"' + (gasCfg.topupPolicy === 'notify' || gasCfg.topupPolicy === 'automatic' ? ' selected' : '') + '>Notify Only (no auto-move)</option></select></div></div>' +
         '<div style="display:flex;gap:6px;margin-top:8px">' +
         '<button class="btn" style="font-size:9px" onclick="AIWallet.saveGasCfg()">Save Config</button>' +
         '<button class="btn primary" style="font-size:9px" onclick="AIWallet.topupNow()"><i class="ti ti-gas-station"></i>Top Up Now</button></div>' +
@@ -1633,6 +1683,20 @@
   }
 
   function renderApprovals() {
+    // [L5 FIX] Auto-expire pending approvals older than 48 hours
+    var cutoff = Date.now() - 172800000; // 48h
+    var expiredCount = 0;
+    for(var i = approvals.length - 1; i >= 0; i--){
+      if(approvals[i].status === 'pending' && approvals[i].createdAt < cutoff){
+        approvals[i].status = 'expired';
+        approvals[i].decidedAt = Date.now();
+        expiredCount++;
+      }
+    }
+    if(expiredCount > 0){
+      saveApprovals();
+      pushHistory({ kind: 'approval', status: 'auto_expired', reason: expiredCount + ' approval(s) expired (>48h)' });
+    }
     const box = $id('aiw-approvals-body');
     if (!box) return;
     const pendingAppr = approvals.filter(function (a) { return a.status === 'pending'; });
@@ -2984,10 +3048,12 @@
     onFundFlowChange();
     if (!monitorTimer) {
       monitorTimer = setInterval(function () {
+        var pg = $id('page-aiwallet');
+        // [M6 FIX] Only run when the page is active
+        if (!pg || !pg.classList.contains('active')) return;
         checkAutoTopup();
         checkWorkflows();
-        const pg = $id('page-aiwallet');
-        if (pg && pg.classList.contains('active')) { renderExecutions(); renderScheduled(); renderStatus(); renderSchedDash(); }
+        renderExecutions(); renderScheduled(); renderStatus(); renderSchedDash();
         // Sync workflow & recommendation data to FinancialContext bridge
         try {
           if (typeof FinancialContext !== 'undefined') {
@@ -3084,6 +3150,8 @@
     refreshPortfolio: function () { return refreshPortfolio(true); },
     exportHistory: exportHistory,
     onShow: onShow,
+    /* [M6 FIX] Stop monitoring on page unload / navigation */
+    stopMonitor: function() { if(monitorTimer){ clearInterval(monitorTimer); monitorTimer = null; } },
     getIntents: function () { return intents.slice(); },
     getHistory: function () { return history.slice(); },
     getWorkflows: function () { return workflows.slice(); },

@@ -421,9 +421,11 @@
 
     // 4. Low confidence — ask clarification
     if(reasoning.shouldAskClarification){
-      return R.intro('I\'m not sure I understood. Did you mean <strong>' + goal + '</strong>?') +
+      // [M7 FIX] Use data attributes + event delegation instead of inline onclick with unsanitized goal
+      var safeGoal = goal.replace(/["'&<>]/g, '');
+      return R.intro('I\'m not sure I understood. Did you mean <strong>' + safeGoal + '</strong>?') +
         '<div style="display:flex;gap:6px;margin-top:8px">' +
-        '<button class="aut-act confirm" onclick="' + (typeof autonomaSendQuick === 'function' ? "autonomaSendQuick('" + goal.replace(/'/g,"\\'") + "')" : '') + '">Yes, ' + goal + '</button>' +
+        '<button class="aut-act confirm" data-aut-goal="' + safeGoal + '">Yes, ' + safeGoal + '</button>' +
         '<button class="aut-act" onclick="autonomaSendQuick(\'help\')">Something else</button></div>';
     }
 
@@ -453,6 +455,20 @@
 
   loadMem();
 
+  // [M10 FIX] Listen for wallet changes to reset conversation context
+  try {
+    var _prevAutonomaWallet = typeof walletAddress !== 'undefined' ? walletAddress : null;
+    setInterval(function(){
+      var current = typeof walletAddress !== 'undefined' ? walletAddress : null;
+      if(_prevAutonomaWallet && current && _prevAutonomaWallet !== current){
+        resetGoal();
+        memory.userPreferences = {};
+        saveMem();
+      }
+      _prevAutonomaWallet = current || _prevAutonomaWallet;
+    }, 15000);
+  } catch(e){}
+
   window.AutonomaCore = {
     process: process,
     understand: understand,
@@ -466,6 +482,7 @@
     getGoal: getGoal,
     goalActive: goalActive,
     getPreferences: getPreferences,
-    WORD_MAP: WORD_MAP
+    // [L8 FIX] Freeze WORD_MAP to prevent external modification
+    WORD_MAP: Object.freeze(WORD_MAP)
   };
 })();
