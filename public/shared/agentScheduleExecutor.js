@@ -29,6 +29,8 @@
   var TX_GAS_LIMIT = 120000;
   var MAX_FEE_GWEI = '20';
   var PRIORITY_FEE_GWEI = '1';
+  var GAS_MULTIPLIER = 1.5;
+  var GAS_MAX_GWEI = 80;
   var SUPPORTED_TYPES = ['payment', 'multisend', 'swap', 'bridge', 'crosschain'];
   var MANUAL_TYPES = ['link_payment'];
   var RISK_RANK = { LOW: 0, MEDIUM: 1, HIGH: 2, CRITICAL: 3 };
@@ -198,7 +200,13 @@
   function hasScheduledAuth(){
     var az = _authz();
     if (!az) return false;
-    try { return az.hasOperationAuth('scheduled'); } catch(e){ return false; }
+    try {
+      if (az.hasOperationAuth('scheduled')) return true;
+      if (az.hasOperationAuth('payment')) return true;
+      if (az.hasOperationAuth('swap')) return true;
+      if (az.hasOperationAuth('bridge')) return true;
+    } catch(e){ return false; }
+    return false;
   }
 
   /* ── Validation pipeline (returns {ok, reason, auth, transfers, token} ) ── */
@@ -251,7 +259,7 @@
     });
     if (!vres.valid) return { ok: false, reason: 'Authorization: ' + vres.reason, needsAuthorization: !!vres.needsAuthorization };
     var auth = vres.auth;
-    if (!az.checkOperationPermission(auth, underlyingOp)) {
+    if (!az.checkOperationPermission(auth, underlyingOp) && !az.checkOperationPermission(auth, 'scheduled')) {
       return { ok: false, reason: 'Authorization does not permit ' + underlyingOp + ' operations' };
     }
     if (transfers.length > 1 && auth.allowedRecipients && auth.allowedRecipients.indexOf('*') === -1) {
@@ -345,13 +353,31 @@
   /* ── Broadcast one ERC-20 transfer signed by the Agent Wallet ── */
   async function _broadcastTransfer(provider, signer, agentAddr, tokenInfo, transfer){
     var E = _ethers();
+    var feeData;
+    try { feeData = await provider.getFeeData(); } catch(e){}
+    var maxFee = feeData && feeData.maxFeePerGas ? BigInt(feeData.maxFeePerGas) : 0n;
+    var maxPriorityFee = feeData && feeData.maxPriorityFeePerGas ? BigInt(feeData.maxPriorityFeePerGas) : 0n;
+    var fallbackMaxFee = E.parseUnits(MAX_FEE_GWEI, 'gwei');
+    var fallbackPriority = E.parseUnits(PRIORITY_FEE_GWEI, 'gwei');
+    if (!maxFee || maxFee === 0n) {
+      maxFee = fallbackMaxFee;
+      maxPriorityFee = fallbackPriority;
+    } else {
+      maxFee = BigInt(Math.min(Number(E.formatUnits(maxFee * BigInt(Math.round(GAS_MULTIPLIER * 100)) / 100n, 'gwei')), GAS_MAX_GWEI)) > 0n
+        ? (maxFee * BigInt(Math.round(GAS_MULTIPLIER * 100)) / 100n) : maxFee;
+      if (!maxPriorityFee || maxPriorityFee === 0n) maxPriorityFee = fallbackPriority;
+    }
+    try {
+      var gasEst = await provider.estimateGas({ from: agentAddr, to: tokenInfo.address, data: transfer._calldata });
+      if (gasEst) TX_GAS_LIMIT = Math.min(Math.floor(Number(gasEst) * 1.3), 300000);
+    } catch(e){}
     var nonce = await provider.send('eth_getTransactionCount', [agentAddr, 'pending']);
     var rawTx = {
       type: 2, chainId: ARC_CHAIN_ID, to: tokenInfo.address,
       data: transfer._calldata, value: '0x0',
       gasLimit: E.toBeHex(TX_GAS_LIMIT), nonce: nonce,
-      maxFeePerGas: E.toBeHex(E.parseUnits(MAX_FEE_GWEI, 'gwei')),
-      maxPriorityFeePerGas: E.toBeHex(E.parseUnits(PRIORITY_FEE_GWEI, 'gwei'))
+      maxFeePerGas: E.toBeHex(maxFee),
+      maxPriorityFeePerGas: E.toBeHex(maxPriorityFee)
     };
     var signedTx = await signer.signTransaction(rawTx);
     var txHash = await provider.send('eth_sendRawTransaction', [signedTx]);
@@ -458,13 +484,14 @@
           var firstNotice = !prior || prior.status !== 'awaiting_auth';
           ledger[key] = { status: 'awaiting_auth', reason: v.reason, ts: Date.now(), attempts: attempts };
           _saveLedger();
+          _recordOutcome(sched, v.auth, v.total || sched.amount || 0, sched.token || 'USDC', 'unauthorized', null, Date.now() - startTime, 0, v.reason);
           if (firstNotice) _notify(sched, 'blocked', 'Agent cannot execute "' + sched.name + '": ' + v.reason, 'warning');
           return { status: 'awaiting_auth', reason: v.reason };
         }
         ledger[key] = { status: 'retry_pending', reason: v.reason, ts: Date.now(), attempts: attempts, lastAttempt: Date.now() };
         _saveLedger();
+        _recordOutcome(sched, v.auth, v.total || sched.amount || 0, sched.token || 'USDC', 'failed', null, Date.now() - startTime, 0, v.reason);
         if (attempts >= (defaults.retryMax || 3)) {
-          _recordOutcome(sched, v.auth, v.total || sched.amount || 0, sched.token || 'USDC', 'failed', null, Date.now() - startTime, 0, v.reason);
           _notify(sched, 'failed', 'Validation failed for "' + sched.name + '": ' + v.reason, 'error');
         }
         return { status: 'validation_failed', reason: v.reason };
@@ -592,19 +619,55 @@
     }
 
     try { _authz().recordUsage(v.auth.id, v.total, 'scheduled:' + sched.type, 'delegated'); } catch(e){}
+    ledger[key] = { status: 'delegating', ts: Date.now(), attempts: attempts, amount: v.total, asset: v.token };
+    _saveLedger();
+
+    var delResult = null;
+    try {
+      delResult = await fn.apply(null, args);
+    } catch(delErr) {
+      var delFailReason = (delErr.shortMessage || delErr.message || '').substring(0, 140);
+      ledger[key] = { status: 'failed', reason: 'Delegated ' + sched.type + ' execution failed: ' + delFailReason, ts: Date.now(), attempts: attempts };
+      _saveLedger();
+      _recordOutcome(sched, v.auth, v.total, v.token, 'failed', null, Date.now() - startTime, 0, delFailReason);
+      _advanceSchedule(sched, 'Delegated ' + sched.type + ' failed: ' + delFailReason, 'failed');
+      _notify(sched, 'failed', 'Delegated ' + sched.type + ' failed to execute: ' + delFailReason, 'error');
+      return { status: 'failed', reason: delFailReason };
+    }
+
+    if (delResult && (delResult === false || delResult.ok === false || delResult.success === false)) {
+      var failReason = (delResult && (delResult.reason || delResult.error || delResult.message)) || 'Unknown delegation failure';
+      ledger[key] = { status: 'failed', reason: failReason, ts: Date.now(), attempts: attempts };
+      _saveLedger();
+      _recordOutcome(sched, v.auth, v.total, v.token, 'failed', delResult && delResult.txHash || null, Date.now() - startTime, 0, failReason);
+      _advanceSchedule(sched, 'Delegated ' + sched.type + ' returned failure: ' + failReason, 'failed');
+      _notify(sched, 'failed', 'Delegated ' + sched.type + ' returned failure: ' + failReason, 'error');
+      return { status: 'failed', reason: failReason };
+    }
+
     ledger[key] = { status: 'delegated', ts: Date.now(), attempts: attempts, amount: v.total, asset: v.token };
     _saveLedger();
     _advanceSchedule(sched, 'Delegated to Agent Wallet ' + sched.type + ' executor — ' + v.total + ' ' + v.token, 'delegated');
-    _notify(sched, 'executed', 'Schedule "' + sched.name + '" — Agent Wallet is executing the ' + sched.type + ' (' + v.total + ' ' + v.token + ')', 'info');
-    try { fn.apply(null, args); } catch(delErr) {
-      _notify(sched, 'failed', 'Delegated ' + sched.type + ' failed to start: ' + (delErr.message || '').substring(0, 100), 'error');
-    }
+    _notify(sched, 'executed', 'Schedule "' + sched.name + '" — Agent Wallet executed the ' + sched.type + ' (' + v.total + ' ' + v.token + ')', 'info');
     return { status: 'delegated' };
   }
 
   /* ── Tick loop ── */
+  function _isEmergencyStopped(){
+    try {
+      if (typeof AIWallet !== 'undefined' && typeof AIWallet.isEmergencyStopped === 'function') {
+        if (AIWallet.isEmergencyStopped()) return true;
+      }
+      if (typeof window !== 'undefined' && typeof window._isEmergencyStopped === 'function') {
+        if (window._isEmergencyStopped()) return true;
+      }
+    } catch(e){}
+    return false;
+  }
+
   async function _tick(){
     if (_ticking) return { status: 'busy' };
+    if (_isEmergencyStopped()) return { status: 'emergency_stopped' };
     if (!isAutoEnabled()) return { status: 'disabled' };
     var eng = _engine();
     var E = _ethers();
@@ -633,6 +696,7 @@
 
   function start(){
     if (_timer) return false;
+    if (_isEmergencyStopped()) return false;
     _timer = setInterval(function(){ _tick(); }, TICK_MS);
     setTimeout(function(){ _tick(); }, 1500);
     return true;

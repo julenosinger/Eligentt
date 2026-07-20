@@ -83,6 +83,7 @@
 <script src="/shared/poolAlertSystem.js"></script>
 <script src="/shared/economicMonitoring.js"></script>
 <script src="/shared/autonomaAgent.js"></script>
+<script src="/shared/autonomaNlu.js"></script>
 <script src="/shared/agentIdentity.js"></script>
 <script src="/shared/agentAuthorization.js"></script>
 <script src="/shared/agentWalletManager.js"></script>
@@ -25948,6 +25949,11 @@ const ScheduleEngine = (() => {
     return function() { document.removeEventListener('SCHEDULE_' + event, handler); };
   }
 
+  function reload() {
+    _schedules = Store.load('schedules', []);
+    return _schedules;
+  }
+
   // ── Migration on load ───────────────────────────────────
   (function _migrate() {
     var changed = false;
@@ -25965,7 +25971,7 @@ const ScheduleEngine = (() => {
     if (changed) _persist();
   })();
 
-  return { create: create, getAll: getAll, getById: getById, update: update, remove: remove, on: on };
+  return { create: create, getAll: getAll, getById: getById, update: update, remove: remove, on: on, reload: reload };
 })();
 
 // Legacy alias — keep global `schedules` pointing to engine data for backward compat
@@ -26087,11 +26093,10 @@ function scheduleSubmit(){
   const fromNetwork = document.getElementById('sch-from-network')?.value || 'Arc_Testnet';
   const toNetwork = document.getElementById('sch-to-network')?.value || 'Base_Sepolia';
   const swapToToken = document.getElementById('sch-swap-to-token')?.value || 'USDC';
-  const nextRunDate = parseDateTimeAsUTC(date);
-  const nextRunIso = nextRunDate ? nextRunDate.toISOString() : new Date(date).toISOString();
+  var nextRunDate = parseDateTimeAsUTC(date);
+  var nextRunIso = nextRunDate ? nextRunDate.toISOString() : date;
 
   const sched = ScheduleEngine.create({
-    id: 'SCH' + Date.now(),
     type, name, token, amount, total,
     network: type === 'bridge' || type === 'crosschain' ? (fromNetwork + ' → ' + toNetwork) : 'Arc_Testnet',
     fromNetwork, toNetwork,
@@ -26132,27 +26137,33 @@ function schTypeIcon(type){
 }
 
 function schLogEntry(schedId, action, detail){
-  const logEl = document.getElementById('sch-log');
+  var logEl = document.getElementById('sch-log');
   if(!logEl) return;
-  const empty = logEl.querySelector('[style*="text-align"]');
+  var empty = logEl.querySelector('[style*="text-align"]');
   if(empty) empty.remove();
-  const entry = document.createElement('div');
+  var entry = document.createElement('div');
   entry.style.cssText = 'display:flex;align-items:center;gap:6px;font-size:9px;padding:5px 0;border-bottom:1px solid var(--border)';
-  const icon = action === 'created' ? 'plus' : action === 'executed' ? 'check' : action === 'paused' ? 'pause' : action === 'resumed' ? 'play' : 'info-circle';
-  const color = action === 'created' ? 'var(--yellow)' : action === 'executed' ? 'var(--green)' : 'var(--muted2)';
+  var icon = action === 'created' ? 'plus' : action === 'executed' ? 'check' : action === 'paused' ? 'pause' : action === 'resumed' ? 'play' : 'info-circle';
+  var color = action === 'created' ? 'var(--yellow)' : action === 'executed' ? 'var(--green)' : 'var(--muted2)';
   entry.innerHTML = '<i class="ti ti-' + icon + '" style="color:' + color + ';font-size:10px"></i><span style="flex:1">' + detail + '</span><span style="color:var(--muted2)">' + new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true}) + '</span>';
   logEl.prepend(entry);
-  // Keep max 100 entries
   while(logEl.children.length > 101) logEl.lastChild.remove();
 }
 
 function scheduleNextDate(freq, from){
-  const d = new Date(from);
+  var d = new Date(from);
+  if(isNaN(d.getTime())) d = new Date();
   switch(freq){
     case 'daily': d.setUTCDate(d.getUTCDate() + 1); break;
     case 'weekly': d.setUTCDate(d.getUTCDate() + 7); break;
     case 'biweekly': d.setUTCDate(d.getUTCDate() + 14); break;
-    case 'monthly': d.setUTCMonth(d.getUTCMonth() + 1); break;
+    case 'monthly':
+      var currentDay = d.getUTCDate();
+      d.setUTCMonth(d.getUTCMonth() + 1);
+      if(d.getUTCDate() !== currentDay){
+        d.setUTCDate(0);
+      }
+      break;
     default: return null;
   }
   return d.toISOString();
@@ -26160,25 +26171,23 @@ function scheduleNextDate(freq, from){
 
 // ── Execute Now (manual trigger) ──────────────────────────
 async function scheduleRun(id){
-  const sch = ScheduleEngine.getById(id);
+  var sch = ScheduleEngine.getById(id);
   if(!sch) return;
 
-  // Record execution
-  sch.execCount++;
-  const execEntry = {
+  var execEntry = {
     ts: new Date().toISOString(),
     status: 'executed',
     note: sch.type + ' automation triggered manually'
   };
-  sch.executionHistory = sch.executionHistory || [];
-  sch.executionHistory.unshift(execEntry);
-  if(sch.executionHistory.length > 50) sch.executionHistory.length = 50;
+  var history = (sch.executionHistory || []).slice();
+  history.unshift(execEntry);
+  if(history.length > 50) history.length = 50;
 
-  // Update next run
-  sch.nextRun = sch.freq === 'once' ? null : scheduleNextDate(sch.freq, sch.nextRun || new Date().toISOString());
-  if(sch.freq === 'once' || (sch.maxEx > 0 && sch.execCount >= sch.maxEx)){
-    sch.status = 'Completed';
-  }
+  var execCount = (sch.execCount || 0) + 1;
+  var nextRun = sch.freq === 'once' ? null : scheduleNextDate(sch.freq, sch.nextRun || new Date().toISOString());
+  var newStatus = (sch.freq === 'once' || (sch.maxEx > 0 && execCount >= sch.maxEx)) ? 'Completed' : (sch.status || 'Active');
+
+  ScheduleEngine.update(sch.id, { execCount: execCount, executionHistory: history, nextRun: nextRun, status: newStatus });
 
   // Route based on type
   switch(sch.type){
@@ -26187,10 +26196,10 @@ async function scheduleRun(id){
       if(!walletAddress){ toast('Connect wallet to execute','warning'); openWalletModal(); return; }
       recipients.length = 0;
       if(sch.recipients && sch.recipients.length){
-        sch.recipients.forEach(r => recipients.push({
+        sch.recipients.forEach(function(r){ recipients.push({
           addr: r.addr, amount: (r.amount || sch.amount).toFixed(2),
           note: r.note || sch.name, chainId: 'Arc_Testnet', token: sch.token, name: ''
-        }));
+        }); });
       } else if(sch.address && isAddr(sch.address)){
         recipients.push({
           addr: sch.address, amount: (sch.amount || 0).toFixed(2),
@@ -26200,20 +26209,20 @@ async function scheduleRun(id){
       saveRecipients(); renderTable();
       toast('Running schedule "' + sch.name + '"...', 'info');
       showPage('batch');
-      setTimeout(() => { if(typeof openModal === 'function') openModal(); }, 300);
+      setTimeout(function(){ if(typeof openModal === 'function') openModal(); }, 300);
       break;
 
     case 'swap':
       if(!walletAddress){ toast('Connect wallet to execute','warning'); openWalletModal(); return; }
-      const tIn = sch.token || 'USDC';
-      const tOut = sch.swapToToken || 'USDC';
-      const idxIn = TOKEN_LIST.findIndex(t => t.sym.toLowerCase() === tIn.toLowerCase());
-      const idxOut = TOKEN_LIST.findIndex(t => t.sym.toLowerCase() === tOut.toLowerCase());
+      var tIn = sch.token || 'USDC';
+      var tOut = sch.swapToToken || 'USDC';
+      var idxIn = TOKEN_LIST.findIndex(function(t){ return t.sym.toLowerCase() === tIn.toLowerCase(); });
+      var idxOut = TOKEN_LIST.findIndex(function(t){ return t.sym.toLowerCase() === tOut.toLowerCase(); });
       if(idxIn >= 0) SWP.tokenInIdx = idxIn;
       if(idxOut >= 0) SWP.tokenOutIdx = idxOut;
       showPage('swap');
-      setTimeout(() => {
-        const el = document.getElementById('swap-amount-in');
+      setTimeout(function(){
+        var el = document.getElementById('swap-amount-in');
         if(el){ el.value = sch.amount || 0; el.dispatchEvent(new Event('input')); }
         if(typeof updateSwapRate === 'function') updateSwapRate();
       }, 200);
@@ -26222,13 +26231,13 @@ async function scheduleRun(id){
     case 'bridge':
     case 'crosschain':
       if(!walletAddress){ toast('Connect wallet to execute','warning'); openWalletModal(); return; }
-      const chainMap = {Arc_Testnet:0, Ethereum_Sepolia:1, Base_Sepolia:2, Arbitrum_Sepolia:3, Optimism_Sepolia:4, Polygon_Amoy:5};
+      var chainMap = {Arc_Testnet:0, Ethereum_Sepolia:1, Base_Sepolia:2, Arbitrum_Sepolia:3, Optimism_Sepolia:4, Polygon_Amoy:5};
       bridgeFromIdx = chainMap[sch.fromNetwork] || 0;
       bridgeToIdx = chainMap[sch.toNetwork] || 2;
       showPage('bridge');
-      setTimeout(() => {
-        const el = document.getElementById('bridge-amount');
-        if(el){ el.value = sch.amount || 0; el.dispatchEvent(new Event('input')); }
+      setTimeout(function(){
+        var el2 = document.getElementById('bridge-amount');
+        if(el2){ el2.value = sch.amount || 0; el2.dispatchEvent(new Event('input')); }
         if(typeof refreshBridgeBalances === 'function') refreshBridgeBalances();
       }, 200);
       break;
@@ -26236,13 +26245,13 @@ async function scheduleRun(id){
     case 'link_payment':
       if(!walletAddress){ toast('Connect wallet to create link','warning'); openWalletModal(); return; }
       showPage('links');
-      setTimeout(() => {
-        const a = document.getElementById('pl-amount');
+      setTimeout(function(){
+        var a = document.getElementById('pl-amount');
         if(a && sch.amount){ a.value = sch.amount; }
-        const l = document.getElementById('pl-label');
+        var l = document.getElementById('pl-label');
         if(l){ l.value = sch.name; }
         if(typeof createPayLink === 'function'){
-          setTimeout(() => createPayLink(), 150);
+          setTimeout(function(){ createPayLink(); }, 150);
         }
       }, 200);
       break;
@@ -26253,16 +26262,15 @@ async function scheduleRun(id){
   }
 
   schLogEntry(sch.id, 'executed', '"' + sch.name + '" executed (' + schTypeLabel(sch.type) + ' · ' + (sch.amount||sch.total||0).toFixed(2) + ' ' + sch.token + ')');
-  ScheduleEngine.update(sch.id, {});
   schedules = ScheduleEngine.getAll();
   renderSchedules();
 }
 
 // ── Execute Now (manual trigger) ──────────────────────────
 function schedulePause(id){
-  const s = ScheduleEngine.getById(id);
+  var s = ScheduleEngine.getById(id);
   if(!s) return;
-  const newStatus = s.status === 'Active' ? 'Paused' : 'Active';
+  var newStatus = s.status === 'Active' ? 'Paused' : 'Active';
   ScheduleEngine.update(id, { status: newStatus });
   schedules = ScheduleEngine.getAll();
   renderSchedules();
@@ -26271,9 +26279,9 @@ function schedulePause(id){
 }
 
 function scheduleToggleAgent(id){
-  const s = ScheduleEngine.getById(id);
+  var s = ScheduleEngine.getById(id);
   if(!s) return;
-  const turnOn = s.agentExecution === false;
+  var turnOn = s.agentExecution === false;
   ScheduleEngine.update(id, { agentExecution: turnOn });
   schedules = ScheduleEngine.getAll();
   renderSchedules();
@@ -26283,7 +26291,7 @@ function scheduleToggleAgent(id){
 }
 
 function scheduleDelete(id){
-  const s = ScheduleEngine.remove(id);
+  var s = ScheduleEngine.remove(id);
   schedules = ScheduleEngine.getAll();
   renderSchedules();
   if(s) schLogEntry(id, 'deleted', '"' + s.name + '" removed');
@@ -26291,19 +26299,20 @@ function scheduleDelete(id){
 }
 
 function renderSchedules(){
-  const tbody = document.getElementById('sch-tbody');
-  const empty = document.getElementById('sch-empty');
+  var tbody = document.getElementById('sch-tbody');
+  var empty = document.getElementById('sch-empty');
   if(!tbody) return;
 
-  const all = ScheduleEngine.getAll();
-  const active = all.filter(function(s){ return s.status === 'Active'; }).length;
-  const pending = all.filter(function(s){ return s.status === 'Paused'; }).length;
-  const done = all.filter(function(s){ return s.status === 'Completed'; }).length;
-  const vol = all.reduce(function(s, x){ return s + (x.amount || x.total || 0) * (x.execCount || 0); }, 0);
-  var set = function(id, v){ var el = document.getElementById(id); if(el) el.textContent = v; };
-  set('sch-stat-active', active); set('sch-stat-pending', pending);
-  set('sch-stat-done', done); set('sch-stat-vol', '$' + vol.toFixed(2));
-  set('sch-count', all.length + ' automations');
+  var all = ScheduleEngine.getAll();
+  var now = new Date();
+  var active = all.filter(function(s){ return s.status === 'Active'; }).length;
+  var duePending = all.filter(function(s){ return s.status === 'Active' && s.nextRun && new Date(s.nextRun) <= now; }).length;
+  var done = all.filter(function(s){ return s.status === 'Completed'; }).length;
+  var vol = all.reduce(function(s, x){ return s + (x.amount || x.total || 0) * (x.execCount || 0); }, 0);
+  var setFn = function(id, v){ var el = document.getElementById(id); if(el) el.textContent = v; };
+  setFn('sch-stat-active', active); setFn('sch-stat-pending', duePending);
+  setFn('sch-stat-done', done); setFn('sch-stat-vol', '$' + vol.toFixed(2));
+  setFn('sch-count', all.length + ' automations');
 
   if(!all.length){ tbody.innerHTML = ''; empty.style.display = ''; return; }
   empty.style.display = 'none';
@@ -26312,7 +26321,7 @@ function renderSchedules(){
   tbody.innerHTML = all.map(function(s){
     var sc = {Active:'green', Paused:'yellow', Completed:'blue'}[s.status] || 'muted2';
     var nextRun = formatUSDateTime(s.nextRun);
-    var isDue = s.nextRun && new Date(s.nextRun) <= new Date() && s.status === 'Active';
+    var isDue = s.nextRun && new Date(s.nextRun) <= now && s.status === 'Active';
     var agentOn = s.agentExecution !== false;
     var assetInfo = (s.amount || 0) > 0 ? (s.amount || 0).toFixed(2) + ' ' + s.token : (s.recipients && s.recipients.length ? s.recipients.length + ' rcpts' : '—');
     return '<tr' + (isDue ? ' style="background:rgba(245,158,11,.05)"' : '') + '>' +
@@ -34833,7 +34842,7 @@ const ReliabilityLayer = (function() {
     // Simple recovery actions
     if (module === 'UB' || module === 'ubRefresh') { recovery.action = 'retry_next_page_load'; }
     if (module === 'AOS' || module === 'AF') { recovery.action = 'reset_strategies'; try { AOS.buildStrategies(); } catch(_) {} }
-    if (module === 'ScheduleEngine') { recovery.action = 'reload_from_storage'; try { if (typeof schedules !== 'undefined') schedules = Store.load('schedules', []); } catch(_) {} }
+    if (module === 'ScheduleEngine') { recovery.action = 'reload_from_storage'; try { if (typeof ScheduleEngine !== 'undefined' && typeof ScheduleEngine.reload === 'function') { ScheduleEngine.reload(); } if (typeof schedules !== 'undefined') schedules = Store.load('schedules', []); } catch(_) {} }
     _state.events.unshift({ type: 'recovery', data: recovery, ts: new Date().toISOString() });
     if (_state.events.length > 100) _state.events.length = 100;
     _save();
@@ -38154,6 +38163,32 @@ const UBScreen = (function() {
     // Count for multi-send
     const countM=low.match(/(\d+)\s+(addresses?|endere[cç]os?|recipients?|destinat[áa]rios?|people|pessoas)/);
     if(countM) p.recipientCount=parseInt(countM[1]);
+
+    // ── NLU-Enhanced extraction (additive, never replaces existing) ──
+    try {
+      if (typeof AutonomaNLU !== 'undefined' && typeof AutonomaNLU.decompose === 'function') {
+        var _nluEnts = AutonomaNLU.decompose(msg);
+        if (_nluEnts && _nluEnts.entities) {
+          var e = _nluEnts.entities;
+          if (!p.address && e.address) p.address = e.address;
+          if (e.addresses && e.addresses.length > 0 && !p.address) p.address = e.addresses[0];
+          if (e.addresses && e.addresses.length > 0) p.addresses = e.addresses;
+          if (e.addresses && e.addresses.length > 0 && !p.recipientCount) p.recipientCount = e.addresses.length;
+          if (!p.toChain && e.toChain) p.toChain = e.toChain;
+          if (!p.fromChain && e.fromChain) p.fromChain = e.fromChain;
+          if (!p.chain && e.chain) p.chain = e.chain;
+          if (e.date) p.date = e.date;
+          if (e.dateLabel) p.dateLabel = e.dateLabel;
+          if (e.time) p.time = e.time;
+          if (e.timezone) p.timezone = e.timezone;
+          if (e.recurrence && !p.recurrence) p.recurrence = e.recurrence.type;
+          if (e.executionType) p.executionType = e.executionType;
+          if (_nluEnts.intent_scores && _nluEnts.intent_scores.length > 0) p.nluIntentType = _nluEnts.intent_type;
+          p._nluDecomposed = _nluEnts;
+        }
+      }
+    } catch(_nluEx) {}
+
     return p;
   }
 
@@ -38164,6 +38199,27 @@ const UBScreen = (function() {
       if(typeof AutonomaAgent!=='undefined' && typeof AutonomaAgent.tryHandle==='function'){
         const _agentResp=await AutonomaAgent.tryHandle(msg);
         if(_agentResp) return _agentResp;
+      }
+    }catch(e){}
+
+    // ── Autonoma NLU — Enhanced natural language understanding ──
+    //  Runs BEFORE existing pipeline. Only intercepts when it detects a
+    //  clear intent with missing information that warrants clarification.
+    //  Never modifies the message or existing pipelines.
+    try{
+      if(typeof AutonomaNLU!=='undefined' && typeof AutonomaNLU.decompose==='function'){
+        const _nluResult = AutonomaNLU.decompose(msg);
+        if(_nluResult && _nluResult.clarifications && _nluResult.intent_type){
+          const _cl = _nluResult.clarifications;
+          var _nluHtml = R.intro(_cl.intro || 'I need a bit more information to help you.') +
+            R.card(R.head('question', 'Missing Details', { text: 'Clarification', cls: 'pending' }),
+              '<div style="font-size:11px;color:var(--text);margin-bottom:6px"><strong>' + (_cl.question || '') + '</strong></div>' +
+              (_cl.example ? '<div style="font-size:9px;color:var(--muted2);margin-bottom:8px">' + _cl.example + '</div>' : '') +
+              (_cl.missing ? _cl.missing.map(function(f){ return '<span style="display:inline-block;background:rgba(245,158,11,.15);color:#f59e0b;border-radius:4px;padding:2px 8px;margin:2px;font-size:9px">' + f + '</span>'; }).join('') : ''),
+              R.actions({ icon: 'x', label: 'Cancel', cls: 'danger', action: "autonomaSendQuick('cancel')" })
+            );
+          return _nluHtml;
+        }
       }
     }catch(e){}
 
@@ -38599,6 +38655,8 @@ const UBScreen = (function() {
       status:'Active',
       created:new Date().toISOString(),
       createdBy:'autonoma',
+      agentExecution: true,
+      executionMode: 'agent',
       walletAddress:walletAddress||'',
       recipientName: rcptName, recipientAddress: rcptAddr
     };
@@ -38608,11 +38666,11 @@ const UBScreen = (function() {
 
     // Log creation
     try{
-      const logEl=document.getElementById('sch-log');
+      var logEl = document.getElementById('sch-log');
       if(logEl){
-        const empty=logEl.querySelector('[style*="text-align"]');
+        var empty = logEl.querySelector('[style*="text-align"]');
         if(empty)empty.remove();
-        const entry=document.createElement('div');
+        var entry = document.createElement('div');
         entry.style.cssText='display:flex;align-items:center;gap:6px;font-size:9px;padding:5px 0;border-bottom:1px solid var(--border)';
         entry.innerHTML='<i class="ti ti-robot" style="color:var(--purple);font-size:10px"></i><span style="flex:1">"'+schName+'" created by Autonoma ('+typeLabel+' · '+freqLabels[freq]+')</span><span style="color:var(--muted2)">'+new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})+'</span>';
         logEl.prepend(entry);
@@ -40817,7 +40875,7 @@ const UBScreen = (function() {
     var now = Date.now();
     var endToday = new Date(); endToday.setHours(23,59,59,999);
     var candidates = allSchedules.filter(function(s){
-      if (s.status !== 'Active' || !s.nextRun) return mode === 'failed'; // failed mode bypasses Active check
+      if (s.status !== 'Active' || !s.nextRun) return false;
       var nextTs = new Date(s.nextRun).getTime();
       if (mode === 'today') return nextTs <= endToday.getTime() && isFinite(nextTs);
       if (mode === 'pending') return nextTs <= now && isFinite(nextTs);
@@ -40826,8 +40884,15 @@ const UBScreen = (function() {
     });
 
     if (mode === 'failed') {
+      var failedIds = {};
+      try {
+        if (typeof AgentScheduleExecutor !== 'undefined') {
+          var execLog = AgentScheduleExecutor.getExecutionLog(100);
+          execLog.forEach(function(entry){ if (entry.status === 'failed') failedIds[entry.scheduleId] = entry.reason; });
+        }
+      } catch(_e){}
       candidates = allSchedules.filter(function(s){
-        return s.status === 'Paused' || s.status === 'failed' || s.status === 'Completed';
+        return failedIds[s.id] && s.status === 'Active';
       });
     }
 

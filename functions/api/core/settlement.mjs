@@ -329,7 +329,20 @@ export async function driveSettlement(env, intentId, opts) {
 export function scheduleSettlement(context, intentId, opts) {
   const env = context && context.env;
   if (!env || !intentId) return;
-  const p = driveSettlement(env, intentId, opts).catch(() => {});
+  const p = driveSettlement(env, intentId, opts).catch((err) => {
+    console.error('[settlement] driveSettlement failed for ' + intentId, err && err.message ? err.message : String(err || 'unknown'));
+    try {
+      const store = ledgerKv(env);
+      if (store && intentId) {
+        const logKey = 'ledger:' + intentId;
+        store.put(logKey, JSON.stringify({
+          stage: 'settlement_error', status: 'failed',
+          error: err && err.message ? err.message : String(err || 'unknown'),
+          ts: Date.now()
+        })).catch(() => {});
+      }
+    } catch(_) {}
+  });
   if (context.waitUntil && typeof context.waitUntil === 'function') {
     context.waitUntil(p);
   }
