@@ -982,7 +982,8 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
 .eldp-day.eldp-today{border-color:var(--border2)}
 .eldp-day.eldp-sel{background:var(--blue);color:#fff;font-weight:700}
 .eldp-time{display:flex;align-items:center;gap:5px;margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:9px;color:var(--muted2)}
-.eldp-time select{background:rgba(0,0,0,.25);border:1px solid var(--border);border-radius:5px;color:var(--text);font-size:10px;font-family:'JetBrains Mono',monospace;padding:4px 5px;cursor:pointer;outline:none}
+.eldp-time select{background:rgba(0,0,0,.25);border:1px solid var(--border);border-radius:5px;color:var(--text);font-size:10px;font-family:'JetBrains Mono',monospace;padding:4px 5px;cursor:pointer;outline:none;color-scheme:dark}
+.eldp-time select option{background:#1a1a2e;color:#e0e0e0}
 .eldp-foot{display:flex;justify-content:space-between;margin-top:8px}
 .eldp-btn{font-size:9px;padding:5px 10px;border-radius:5px;border:1px solid var(--border);background:transparent;color:var(--muted2);cursor:pointer;font-family:'JetBrains Mono',monospace}
 .eldp-btn:hover{border-color:var(--blue);color:var(--blue)}
@@ -6748,10 +6749,10 @@ select.cinput option { background: #161a24; color: #dde2f0; }
               </select>
             </div>
             <!-- Bridge / CrossChain fields -->
-            <div id="sch-from-network-wrap" style="display:none"><div class="swap-label">From Network</div><select id="sch-from-network" class="cinput"><option value="Arc_Testnet">Arc Testnet</option><option value="Ethereum_Sepolia">Ethereum Sepolia</option><option value="Base_Sepolia">Base Sepolia</option><option value="Arbitrum_Sepolia">Arbitrum Sepolia</option><option value="Optimism_Sepolia">Optimism Sepolia</option><option value="Polygon_Amoy">Polygon Amoy</option></select></div>
-            <div id="sch-to-network-wrap" style="display:none"><div class="swap-label">To Network</div><select id="sch-to-network" class="cinput"><option value="Base_Sepolia">Base Sepolia</option><option value="Arbitrum_Sepolia">Arbitrum Sepolia</option><option value="Optimism_Sepolia">Optimism Sepolia</option><option value="Arc_Testnet">Arc Testnet</option><option value="Ethereum_Sepolia">Ethereum Sepolia</option><option value="Polygon_Amoy">Polygon Amoy</option></select></div>
+            <div id="sch-from-network-wrap" style="display:none"><div class="swap-label">From Network</div><select id="sch-from-network" class="cinput" style="color-scheme:dark"><option value="Arc_Testnet">Arc Testnet</option><option value="Ethereum_Sepolia">Ethereum Sepolia</option><option value="Base_Sepolia">Base Sepolia</option><option value="Arbitrum_Sepolia">Arbitrum Sepolia</option><option value="Optimism_Sepolia">Optimism Sepolia</option><option value="Polygon_Amoy">Polygon Amoy</option></select></div>
+            <div id="sch-to-network-wrap" style="display:none"><div class="swap-label">To Network</div><select id="sch-to-network" class="cinput" style="color-scheme:dark"><option value="Base_Sepolia">Base Sepolia</option><option value="Arbitrum_Sepolia">Arbitrum Sepolia</option><option value="Optimism_Sepolia">Optimism Sepolia</option><option value="Arc_Testnet">Arc Testnet</option><option value="Ethereum_Sepolia">Ethereum Sepolia</option><option value="Polygon_Amoy">Polygon Amoy</option></select></div>
             <!-- Swap fields -->
-            <div id="sch-swap-to-token-wrap" style="display:none"><div class="swap-label">To Token</div><select id="sch-swap-to-token" class="cinput"><option>USDC</option><option>EURC</option><option>cirBTC</option><option>ETH</option></select></div>
+            <div id="sch-swap-to-token-wrap" style="display:none"><div class="swap-label">To Token</div><select id="sch-swap-to-token" class="cinput" style="color-scheme:dark"><option>USDC</option><option>EURC</option><option>cirBTC</option><option>ETH</option></select></div>
             <!-- Payment / MultiSend / Link fields -->
             <div style="grid-column:1/-1" id="sch-recipients-wrap">
               <div class="swap-label">Recipient Address</div>
@@ -38033,8 +38034,9 @@ const UBScreen = (function() {
       {intent:'SWAP_EXECUTE', en:/\b(swap|trade|exchange|convert)\b.*\b(for|to|into|→)\b/,
         pt:/\b(troc[ae]r?|convert[ae]r?|faz swap)\b.*\b(por|para|em|→)\b/,
         alt:/\b(troque|troca|trocar|swap)\b.*\d+/},
-      // 5. SWAP guide only
-      {intent:'SWAP_GUIDE', en:/\bswap\b/, pt:/\btroc[ae]\b|\btrocar\b|\bswap\b/},
+      // 5. SWAP guide only (skip if batch indicators present)
+      {intent:'SWAP_GUIDE', en:/\bswap\b/, pt:/\btroc[ae]\b|\btrocar\b|\bswap\b/,
+        guard: function(m){ return !/\b(\d+\s*(swaps?|times?|vezes|x)\b|swap\s+\d+.*\d+\s+times?)\b/i.test(m); }},
       // 6. BRIDGE
       {intent:'BRIDGE', en:/\b(bridge|cross[ -]?chain)\b/, pt:/\b(ponte|bridge|cross[ -]?chain)\b/},
       // 7. QUERY UNIFIED BALANCE
@@ -38100,8 +38102,8 @@ const UBScreen = (function() {
       {intent:'BRIDGE_TURBO', en:/\b(bridge\s+turbo|turbo\s+bridge|fast\s+bridge|quick\s+bridge|turbo\s+bridging|cctp\s+fast)\b/,
         pt:/\b(ponte\s+turbo|turbo\s+ponte|ponte\s+r[aá]pida|ponte\s+rapida|bridging\s+turbo|cctp\s+r[aá]pido)\b/},
       // 22. BATCH SWAP — up to 20 swaps
-      {intent:'BATCH_SWAP', en:/\b(batch\s+swap|multiple\s+swaps?|swap\s+batch|swap\s+\d+\s+times|repeat\s+swap|swap\s+repeatedly|multi\s+swap|\d+\s+swaps?|execut\w*\s+\d+\s+swaps?)\b/i,
-        pt:/\b(trocas?\s+em\s+lote|m[uú]ltiplas\s+trocas|v[aá]rios\s+swaps|trocas?\s+m[uú]ltiplas|batch\s+de\s+swap)\b/i},
+      {intent:'BATCH_SWAP', en:/\b(batch\s+swap|multiple\s+swaps?|swap\s+batch|swap\s+\d+.*\d+\s+(?:times?|swaps?|vezes|x)\b|repeat\s+swap|swap\s+repeatedly|multi\s+swap|\d+\s*swaps?\s+of\b|\d+\s+swaps?|execut\w*\s+\d+\s+swaps?)\b/i,
+        pt:/\b(trocas?\s+em\s+lote|m[uú]ltiplas\s+trocas|v[aá]rios\s+swaps|trocas?\s+m[uú]ltiplas|batch\s+de\s+swap|\d+\s+trocas?|\d+\s+swaps)\b/i},
       // 23. MASS PAYMENT — up to 50 payments
       {intent:'MASS_PAYMENT', en:/\b(mass\s+payment|batch\s+payment|mass\s+send|payroll\s+batch|send\s+\d+\s+payments?|send\s+multiple\s+payments?|bulk\s+send|\d+\s+payments?|enviar\s+\d+\s+pagamentos?)\b/i,
         pt:/\b(pagamento\s+em\s+massa|enviar\s+em\s+lote|enviar\s+\d+\s+pagamentos?|lote\s+de\s+pagamentos?|pagamentos?\s+m[uú]ltiplos)\b/i},
@@ -38127,6 +38129,7 @@ const UBScreen = (function() {
       if(!matched && p.en && p.en.test(raw)){ matched=true; confidence=0.9; }
 
       if(matched){
+        if(p.guard && !p.guard(msg)){ matched = false; continue; }
         const params=_extractParams(msg, p.intent);
         return {intent:p.intent, confidence, params};
       }
@@ -38237,6 +38240,50 @@ const UBScreen = (function() {
     var hasMethod = /\b(bridge|ponte|cross|chain|swap|troc|schedule|agendar|recurring|direct send|via arc|send via|multi|batch|bulk|lote|massa|csv)\b/.test(sendLow);
     var hasAddr = /0x[a-fA-F0-9]{40}/.test(msg);
     var isShortMsg = msg.trim().split(/\s+/).length <= 4;
+
+    // ── Natural time expression → Schedule routing ──
+    //  "send 10 USDC in 10 minutes", "pay in 1 hour", "manda 1 usdc em 20 minutos"
+    if(isSendOnly && !hasMethod){
+      var timeRelM = low.match(/\bin\s+(\d+)\s*(minute|minuto|hour|hora|min|hr|h)s?\b/i);
+      if(timeRelM){
+        var tNum = parseInt(timeRelM[1]);
+        var tUnit = timeRelM[2].toLowerCase();
+        var tMs = 0;
+        if(tUnit === 'minute' || tUnit === 'minuto' || tUnit === 'min') tMs = tNum * 60000;
+        else if(tUnit === 'hour' || tUnit === 'hora' || tUnit === 'hr' || tUnit === 'h') tMs = tNum * 3600000;
+        if(tMs > 0 && tMs <= 86400000){
+          var sentAmt = _extractNumber(msg);
+          var sentTok = _fuzzyTokenFromMsg(msg) || 'USDC';
+          var sentAddr = (msg.match(/0x[a-fA-F0-9]{40}/)||[])[0] || '';
+          var targetDate = new Date(Date.now() + tMs);
+          var targetIso = targetDate.toISOString();
+          var rcptArr = sentAddr && sentAmt ? [{ addr: sentAddr, amount: sentAmt, note: 'Quick Schedule', chainId: 'Arc_Testnet', token: sentTok }] : [];
+          var schedName = 'Quick ' + sentTok + ' send in ' + tNum + ' ' + (tUnit.indexOf('min')===0 ? 'min' : 'hr') + (sentAddr ? ' to ' + sentAddr.slice(0,6)+'...'+sentAddr.slice(-4) : '');
+          ScheduleEngine.create({
+            type: 'payment', name: schedName, token: sentTok, amount: sentAmt || 0, total: sentAmt || 0,
+            network: 'Arc_Testnet', fromNetwork: 'Arc_Testnet', toNetwork: 'Arc_Testnet',
+            recipients: rcptArr, address: sentAddr,
+            freq: 'once', maxEx: 1, gas: 0.10,
+            nextRun: targetIso, execCount: 0, executionHistory: [],
+            status: 'Active', created: new Date().toISOString(), createdBy: 'autonoma',
+            agentExecution: true, executionMode: 'agent', walletAddress: walletAddress || ''
+          });
+          schedules = ScheduleEngine.getAll();
+          try { if(typeof AgentScheduleExecutor !== 'undefined') AgentScheduleExecutor.start(); } catch(_e){}
+          return R.intro('I scheduled a payment of <strong>' + (sentAmt||'') + ' ' + sentTok + '</strong>' + (sentAddr ? ' to <code style="font-size:9px">' + sentAddr.slice(0,6) + '...' + sentAddr.slice(-4) + '</code>' : '') + '.') +
+            R.card(R.head('clock','Quick Schedule Created',{text:'Auto-execute',cls:'live'}),
+              R.row('Amount', (sentAmt||0).toFixed(2) + ' ' + sentTok, 'green') +
+              (sentAddr ? R.row('To', sentAddr.slice(0,10) + '...' + sentAddr.slice(-6), 'teal') : '') +
+              R.row('Executes in', tNum + ' ' + (tUnit.indexOf('min')===0 ? 'minute'+(tNum>1?'s':'') : 'hour'+(tNum>1?'s':'')), 'yellow') +
+              R.row('ETA', targetDate.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true}), ''),
+              R.actions(
+                {icon:'external-link',label:'View Schedule',cls:'primary',action:"showPage('schedule')"},
+                {icon:'x',label:'Cancel',cls:'danger',action:"autonomaSendQuick('cancel')"}
+              ));
+        }
+      }
+    }
+
     if(isSendOnly && !hasMethod && (!hasAddr || isShortMsg)){
       var sendAmt = _extractNumber(msg);
       var sendToken = _fuzzyTokenFromMsg(msg) || 'USDC';
@@ -41141,35 +41188,43 @@ const UBScreen = (function() {
     var walletOk = typeof walletAddress !== 'undefined' && walletAddress;
     if(!walletOk) return R.intro('Connect your wallet first for batch swaps.');
 
-    // Extract count from message patterns
     var count = params.count || 0;
-    // Match: "N swaps", "N times", "N vez(es)", "N x", "execute N swaps"
-    if(!count){
-      var cm = msg.match(/\b(\d+)\s*(?:swaps|trocas|times|vezes|executions|operações|operacoes|ops|execut)\b/i);
-      if(cm) count = parseInt(cm[1]);
-    }
-    if(!count){
-      var cm2 = msg.match(/\b(\d+)\s*x\s*(?:swap|troca)/i);
-      if(cm2) count = parseInt(cm2[1]);
-    }
-    if(!count) count = 1; // default single swap if no count specified
-    count = Math.min(Math.max(1, count), 20);
-
-    // Extract swap pair: "N TOKEN -> TOKEN" or "N TOKEN for TOKEN"
     var swapAmt = params.amount || 0;
     var tIn = (params.token || 'USDC').toUpperCase();
     if(tIn === 'CIRBTC') tIn = 'cirBTC';
     var tOut = 'EURC';
 
-    // Try to extract from message directly (more reliable than params)
+    // Extract count from message patterns
+    var cmCount = msg.match(/\b(\d+)\s*(?:swaps|trocas|times?|vezes|x)\b/i);
+    if(cmCount) count = Math.max(count, parseInt(cmCount[1]));
+
+    // "N swaps of M TOKEN" → count=N, amount=M
+    var swapsOfM = msg.match(/\b(\d+)\s*swaps?\s+of\s+(\d+(?:\.\d+)?)\s*(usdc|eurc|cirbtc|eth)?/i);
+    if(swapsOfM){
+      count = parseInt(swapsOfM[1]);
+      swapAmt = parseFloat(swapsOfM[2]);
+      if(swapsOfM[3]){ tIn = swapsOfM[3].toUpperCase(); if(tIn === 'CIRBTC') tIn = 'cirBTC'; }
+    }
+
+    // "swap M TOKEN N times" → amount=M, count=N
+    var swapAmtTimes = msg.match(/\bswap\s+(\d+(?:\.\d+)?)\s*(usdc|eurc|cirbtc|eth)?.*\b(\d+)\s*(?:times?|vezes|x)\b/i);
+    if(swapAmtTimes && !swapsOfM){
+      if(!swapAmt || swapAmt === count) swapAmt = parseFloat(swapAmtTimes[1]);
+      if(swapAmtTimes[2]){ tIn = swapAmtTimes[2].toUpperCase(); if(tIn === 'CIRBTC') tIn = 'cirBTC'; }
+      count = Math.max(count, parseInt(swapAmtTimes[3]));
+    }
+
+    // Try to extract swap pair from message
     var tokM = msg.match(/(\d+(?:\.\d+)?)\s*(usdc|eurc|cirbtc|eth)?\s*(?:->|→|for|to|into|para|por|in)\s*(usdc|eurc|cirbtc|eth)?/i);
     if(tokM){
-      swapAmt = parseFloat(tokM[1]);
+      if(!swapAmt || swapAmt === count) swapAmt = parseFloat(tokM[1]);
       if(tokM[2]){ tIn = tokM[2].toUpperCase(); if(tIn === 'CIRBTC') tIn = 'cirBTC'; }
       if(tokM[3]){ tOut = tokM[3].toUpperCase(); if(tOut === 'CIRBTC') tOut = 'cirBTC'; }
     }
     if(tIn === tOut) tOut = tIn === 'USDC' ? 'EURC' : 'USDC';
     if(!swapAmt || swapAmt <= 0) swapAmt = 25;
+    if(!count || count <= 0) count = 1;
+    count = Math.min(Math.max(1, count), 20);
 
     // If count looks like an amount (e.g. user said "100 swaps"), swapAmt might be wrong
     // Correct: count should be the number of iterations, swapAmt the per-swap amount
