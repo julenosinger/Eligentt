@@ -48,16 +48,30 @@
     var lines = text.split(/\r?\n/).filter(function(l){ return l.trim(); });
     if (!lines.length) return { rows: [], errors: ['Empty file'], headers: [] };
 
-    var headers = lines[0].split(',').map(function(h){ return h.trim().toLowerCase().replace(/[^a-z0-9]/gi,'_'); });
+    var firstParts = lines[0].split(',').map(function(p){ return p.trim(); });
+    var hasHeader = true;
+    if (isAddr(firstParts[0]) || /^\d+(\.\d+)?$/.test(firstParts[1] || '')) {
+      hasHeader = false;
+    }
+
+    var headers, dataStart;
+    if (hasHeader) {
+      headers = firstParts.map(function(h){ return h.trim().toLowerCase().replace(/[^a-z0-9]/gi,'_'); });
+      dataStart = 1;
+    } else {
+      headers = ['address', 'amount', 'token', 'chain', 'note'];
+      dataStart = 0;
+    }
+
     var colMap = detectColumns(headers);
     var rows = [];
     var errors = [];
     var seenAddrs = {};
 
-    for (var i = 1; i < lines.length; i++) {
-      var parts = lines[i].split(',').map(function(p){ return p.trim(); });
+    for (var i = dataStart; i < lines.length; i++) {
+      var parts = _splitCSVLine(lines[i]);
       var row = {};
-      for (var c = 0; c < colMap.length; c++) {
+      for (var c = 0; c < colMap.length && c < parts.length; c++) {
         if (colMap[c] && parts[c]) row[colMap[c]] = parts[c];
       }
       var errs = validateRow(row, i + 1);
@@ -76,6 +90,20 @@
     }
 
     return { rows: rows, errors: errors, headers: headers, colMap: colMap, totalPayments: rows.length };
+  }
+
+  function _splitCSVLine(line) {
+    var parts = [];
+    var current = '';
+    var inQuotes = false;
+    for (var i = 0; i < line.length; i++) {
+      var ch = line[i];
+      if (ch === '"') { inQuotes = !inQuotes; }
+      else if (ch === ',' && !inQuotes) { parts.push(current.trim()); current = ''; }
+      else current += ch;
+    }
+    parts.push(current.trim());
+    return parts;
   }
 
   /* ════════════════════════════════════════

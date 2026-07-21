@@ -37790,26 +37790,50 @@ const UBScreen = (function() {
     },500+Math.random()*600);
   };
   window.autonomaHandleFile = function(input) {
-    const file=input.files[0]; if(!file) return;
-    const name=file.name||'';
-    const isXlsx=/\.xlsx?$/i.test(name);
-    const isJson=/\.json$/i.test(name);
-    const reader=new FileReader();
-    reader.onload=function(e){
-      input.value='';
-      var data=e.target.result;
-      var isBinary=isXlsx;
-      if(typeof AutonomaDocIntel === 'undefined'){ autonomaHandleCSV_legacy(input,file,e); return; }
-      var result=AutonomaDocIntel.parseFile(name, data, isBinary, '');
-      if(result.success){ autRenderDocSummary(result); }
-      else { autUI('ai',R.intro('Could not process this file.')+R.card(R.head('alert-triangle','Parse Error'),R.row('Error',result.error||'Unknown error','red')+(result.errors&&result.errors.length?R.sep()+R.section('Details')+'<div style="font-size:8.5px;color:var(--muted2)">'+result.errors.slice(0,5).join('<br>')+'</div>':''))); }
-    };
-    if(isXlsx) reader.readAsArrayBuffer(file);
-    else if(isJson) reader.readAsText(file);
-    else reader.readAsText(file);
-  };
-  window.autonomaHandleCSV_legacy = function(input, file, e) {
-    input.value=''; autonomaSendQuick('[CSV] '+file.name+'\n'+e.target.result);
+    try {
+      var file = input.files && input.files[0];
+      if (!file) return;
+      var name = file.name || '';
+      var ext = name.split('.').pop().toLowerCase();
+      var reader = new FileReader();
+      reader.onload = function(e) {
+        try {
+          input.value = '';
+          var data = e.target.result;
+          var docIntel = (typeof AutonomaDocIntel !== 'undefined') ? AutonomaDocIntel : null;
+          if (!docIntel) {
+            autShowTyping();
+            autUI('user', name);
+            autonomaSendQuick('[CSV] ' + name + '\n' + (typeof data === 'string' ? data : '[binary file - Document Intelligence engine not loaded]'));
+            autHideTyping();
+            return;
+          }
+          var isBinary = ext === 'xlsx' || ext === 'xls';
+          var result = docIntel.parseFile(name, data, isBinary, '');
+          if (result && result.success) {
+            autRenderDocSummary(result);
+          } else {
+            var errMsg = (result && result.error) || 'Unknown parse error';
+            var errDetails = '';
+            if (result && result.errors && result.errors.length) {
+              errDetails = R.sep() + R.section('Details') + '<div style="font-size:8.5px;color:var(--yellow)">' + result.errors.slice(0, 5).join('<br>') + '</div>';
+            }
+            autUI('ai', R.intro('Could not process "' + name + '".') + R.card(R.head('alert-triangle', 'Parse Error'), R.row('Error', errMsg, 'red') + errDetails));
+          }
+        } catch(innerErr) {
+          input.value = '';
+          autUI('ai', R.intro('Error reading file.') + R.card(R.head('alert-triangle', 'Error'), R.row('Details', (innerErr && innerErr.message || String(innerErr)).substring(0, 120), 'red')));
+        }
+      };
+      reader.onerror = function() {
+        input.value = '';
+        autUI('ai', R.intro('Failed to read the file. Please try again.') + R.card(R.head('alert-triangle', 'Read Error'), R.row('File', name, 'red')));
+      };
+      if (ext === 'xlsx' || ext === 'xls') reader.readAsArrayBuffer(file);
+      else reader.readAsText(file);
+    } catch(e) {
+      autUI('ai', R.intro('Upload failed.') + R.card(R.head('alert-triangle', 'Upload Error'), R.row('Reason', (e && e.message || String(e)).substring(0, 120), 'red')));
+    }
   };
   window.autonomaHandleCSV = function(input) {
     const file=input.files[0]; if(!file) return;
