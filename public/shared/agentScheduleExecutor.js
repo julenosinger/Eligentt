@@ -103,12 +103,14 @@
     var sym = symbol || 'USDC';
     try {
       if (typeof ElligenteContracts !== 'undefined') {
-        if (sym === 'USDC') return { address: ElligenteContracts.USDC_ADDRESS, decimals: ElligenteContracts.USDC_DECIMALS || 6 };
-        if (sym === 'EURC') return { address: ElligenteContracts.EURC_ADDRESS, decimals: ElligenteContracts.EURC_DECIMALS || 6 };
-        if (sym === 'cirBTC') return { address: ElligenteContracts.CIRBTC_ADDRESS, decimals: ElligenteContracts.CIRBTC_DECIMALS || 8 };
+        if (sym === 'USDC') return { address: ElligenteContracts.USDC_ADDRESS, decimals: ElligenteContracts.USDC_DECIMALS || 6, symbol: 'USDC' };
+        if (sym === 'EURC') return { address: ElligenteContracts.EURC_ADDRESS, decimals: ElligenteContracts.EURC_DECIMALS || 6, symbol: 'EURC' };
+        if (sym === 'cirBTC') return { address: ElligenteContracts.CIRBTC_ADDRESS, decimals: ElligenteContracts.CIRBTC_DECIMALS || 8, symbol: 'cirBTC' };
       }
     } catch(e){}
-    return FALLBACK_TOKENS[sym] || null;
+    var fallback = FALLBACK_TOKENS[sym];
+    if (fallback) return { address: fallback.address, decimals: fallback.decimals, symbol: sym };
+    return null;
   }
 
   function _policyDefaults(){
@@ -121,6 +123,14 @@
   function _isAddr(a){
     return typeof a === 'string' && /^0x[0-9a-fA-F]{40}$/.test(a) &&
       a.toLowerCase() !== '0x0000000000000000000000000000000000000000';
+  }
+
+  function _toRawAmount(amount, symbol){
+    var symbolStr = String(symbol || 'USDC').toUpperCase();
+    var dec = symbolStr === 'CIRBTC' ? 8 : 6;
+    var floatVal = parseFloat(amount);
+    if (isNaN(floatVal) || floatVal <= 0) return 0n;
+    return BigInt(Math.round(floatVal * Math.pow(10, dec)));
   }
 
   /* ── Notifications ── */
@@ -161,17 +171,22 @@
     return d.toISOString();
   }
 
-  function _advanceSchedule(sched, note, status, txHash){
+  function _advanceSchedule(sched, note, status, txHash, meta){
     var eng = _engine();
     if (!eng) return;
     var execCount = (sched.execCount || 0) + (status === 'executed' || status === 'delegated' ? 1 : 0);
     var history = (sched.executionHistory || []).slice();
     history.unshift({
       ts: new Date().toISOString(), status: status, note: note,
-      txHash: txHash || null, executor: 'agent_wallet'
+      txHash: txHash || null, executor: 'agent_wallet',
+      sender: meta ? meta.sender : null,
+      recipient: meta ? meta.recipient : null,
+      token: meta ? meta.token : sched.token || null,
+      amount: meta ? meta.amount : null,
+      gasUsed: meta ? meta.gasUsed : null,
+      chainId: ARC_CHAIN_ID
     });
     if (history.length > 50) history.length = 50;
-
     var next = sched.freq === 'once' ? null : _nextRunAfter(sched.freq, sched.nextRun || new Date().toISOString());
     while (next && (Date.now() - new Date(next).getTime()) > MISS_WINDOW_MS) {
       next = _nextRunAfter(sched.freq, next);
@@ -319,11 +334,13 @@
     var iface = new E.Interface(['function transfer(address to, uint256 amount) returns (bool)']);
     var artifacts = [];
     for (var i = 0; i < transfers.length; i++) {
-      var data = iface.encodeFunctionData('transfer', [transfers[i].to, E.parseUnits(String(transfers[i].amount), tokenInfo.decimals)]);
+      var rawAmt = _toRawAmount(transfers[i].amount, tokenInfo.symbol || 'USDC');
+      var data = iface.encodeFunctionData('transfer', [transfers[i].to, rawAmt]);
       try {
         var res = await provider.call({ from: agentAddr, to: tokenInfo.address, data: data });
         artifacts.push(data + '::' + res);
         transfers[i]._calldata = data;
+        transfers[i]._rawAmount = rawAmt;
       } catch(simErr) {
         return { ok: false, reason: 'Simulation reverted for transfer #' + (i + 1) + ': ' + (simErr.shortMessage || simErr.message || 'revert').substring(0, 90) };
       }
@@ -333,11 +350,11 @@
     return { ok: true, simulationHash: simHash };
   }
 
-  function _validatePolicy(sched, auth, total, token, simulationHash){
+  function _validatePolicy(sched, auth, total, token, simulationHash, underlyingOp){
     try {
       if (typeof PolicyEngine === 'undefined' || !PolicyEngine.validateExecution) return { ok: true, report: null };
       var report = PolicyEngine.validateExecution({
-        operation: v.underlyingOp || underlyingOp, amount: total, asset: token, network: 'Arc Testnet',
+        operation: underlyingOp || sched.type, amount: total, asset: token, network: 'Arc Testnet',
         contract: '', destination: '', simulationHash: simulationHash,
         authId: auth.id, maxRiskLevel: auth.maxRiskLevel || 'MEDIUM',
         estimatedGas: 0.01, slippage: null
@@ -363,8 +380,10 @@
       maxFee = fallbackMaxFee;
       maxPriorityFee = fallbackPriority;
     } else {
-      maxFee = BigInt(Math.min(Number(E.formatUnits(maxFee * BigInt(Math.round(GAS_MULTIPLIER * 100)) / 100n, 'gwei')), GAS_MAX_GWEI)) > 0n
-        ? (maxFee * BigInt(Math.round(GAS_MULTIPLIER * 100)) / 100n) : maxFee;
+      var maxFeeGweiFloat = parseFloat(E.formatUnits(maxFee, 'gwei'));
+      var scaledGwei = Math.round(maxFeeGweiFloat * GAS_MULTIPLIER);
+      var cappedGwei = Math.min(scaledGwei, GAS_MAX_GWEI);
+      maxFee = E.parseUnits(String(cappedGwei), 'gwei');
       if (!maxPriorityFee || maxPriorityFee === 0n) maxPriorityFee = fallbackPriority;
     }
     try {
@@ -388,7 +407,7 @@
     return { ok: true, txHash: txHash, receipt: receipt };
   }
 
-  function _recordOutcome(sched, auth, total, token, result, txHash, duration, gasUsed, reason){
+  function _recordOutcome(sched, auth, total, token, result, txHash, duration, gasUsed, reason, meta){
     var az = _authz();
     var wm = _wm();
     try { if (az && auth && result === 'success') az.recordUsage(auth.id, total, 'scheduled:' + sched.type, 'success'); } catch(e){}
@@ -397,7 +416,11 @@
         operation: 'scheduled:' + sched.type, amount: total, asset: token, chain: 'Arc Testnet',
         transactionHash: txHash || '', result: result, duration: duration || 0, gasUsed: gasUsed || 0,
         authorizationId: auth ? auth.id : null, error: reason || null,
-        metadata: { scheduleId: sched.id, scheduleName: sched.name, executor: 'AgentScheduleExecutor' }
+        metadata: {
+          scheduleId: sched.id, scheduleName: sched.name, executor: 'AgentScheduleExecutor',
+          sender: meta ? meta.sender : null, recipient: meta ? meta.recipient : null,
+          token: token, amount: total, gasUsed: gasUsed || 0
+        }
       });
     } catch(e){}
     try {
@@ -437,7 +460,7 @@
       if ((prior.attempts || 0) >= (defaults.retryMax || 3)) {
         ledger[key] = { status: 'failed', reason: prior.reason || 'Retries exhausted', ts: Date.now(), attempts: prior.attempts };
         _saveLedger();
-        _advanceSchedule(sched, 'Failed after ' + prior.attempts + ' attempts: ' + (prior.reason || ''), 'failed');
+        _advanceSchedule(sched, 'Failed after ' + prior.attempts + ' attempts: ' + (prior.reason || ''), 'failed', null, { token: sched.token, amount: sched.amount });
         if (defaults.pauseOnFailure) { try { _engine().update(sched.id, { status: 'Paused' }); } catch(e){} }
         _notify(sched, 'failed', 'Schedule "' + sched.name + '" failed after ' + prior.attempts + ' attempts — ' + (defaults.pauseOnFailure ? 'paused' : 'skipped'), 'error');
         return { status: 'failed_final' };
@@ -449,7 +472,7 @@
     if (overdueMs > MISS_WINDOW_MS) {
       ledger[key] = { status: 'skipped_stale', reason: 'Missed execution window (>24h overdue)', ts: Date.now() };
       _saveLedger();
-      _advanceSchedule(sched, 'Skipped: missed execution window by ' + Math.round(overdueMs / 3600000) + 'h', 'skipped');
+      _advanceSchedule(sched, 'Skipped: missed execution window by ' + Math.round(overdueMs / 3600000) + 'h', 'skipped', null, { token: sched.token, amount: sched.amount });
       _notify(sched, 'skipped', 'Schedule "' + sched.name + '" missed its execution window and was skipped (deadline protection)', 'warning');
       return { status: 'skipped_stale' };
     }
@@ -484,13 +507,13 @@
           var firstNotice = !prior || prior.status !== 'awaiting_auth';
           ledger[key] = { status: 'awaiting_auth', reason: v.reason, ts: Date.now(), attempts: attempts };
           _saveLedger();
-          _recordOutcome(sched, v.auth, v.total || sched.amount || 0, sched.token || 'USDC', 'unauthorized', null, Date.now() - startTime, 0, v.reason);
+          _recordOutcome(sched, v.auth, v.total || sched.amount || 0, sched.token || 'USDC', 'unauthorized', null, Date.now() - startTime, 0, v.reason, { sender: agentAddr, token: sched.token || 'USDC', amount: v.total || sched.amount || 0 });
           if (firstNotice) _notify(sched, 'blocked', 'Agent cannot execute "' + sched.name + '": ' + v.reason, 'warning');
           return { status: 'awaiting_auth', reason: v.reason };
         }
         ledger[key] = { status: 'retry_pending', reason: v.reason, ts: Date.now(), attempts: attempts, lastAttempt: Date.now() };
         _saveLedger();
-        _recordOutcome(sched, v.auth, v.total || sched.amount || 0, sched.token || 'USDC', 'failed', null, Date.now() - startTime, 0, v.reason);
+        _recordOutcome(sched, v.auth, v.total || sched.amount || 0, sched.token || 'USDC', 'failed', null, Date.now() - startTime, 0, v.reason, { sender: agentAddr, token: sched.token || 'USDC', amount: v.total || sched.amount || 0 });
         if (attempts >= (defaults.retryMax || 3)) {
           _notify(sched, 'failed', 'Validation failed for "' + sched.name + '": ' + v.reason, 'error');
         }
@@ -509,13 +532,13 @@
         return { status: 'simulation_failed', reason: sim.reason };
       }
 
-      var pol = _validatePolicy(sched, v.auth, v.total, v.token, sim.simulationHash);
+      var pol = _validatePolicy(sched, v.auth, v.total, v.token, sim.simulationHash, v.underlyingOp);
       if (!pol.ok) {
         ledger[key] = { status: 'blocked', reason: pol.reason, ts: Date.now(), attempts: attempts };
         _saveLedger();
-        _advanceSchedule(sched, 'Blocked by policy: ' + pol.reason, 'failed');
+        _advanceSchedule(sched, 'Blocked by policy: ' + pol.reason, 'failed', null, { sender: agentAddr, token: v.token, amount: v.total });
         if (defaults.pauseOnFailure) { try { _engine().update(sched.id, { status: 'Paused' }); } catch(e){} }
-        _recordOutcome(sched, v.auth, v.total, v.token, 'failed', null, Date.now() - startTime, 0, pol.reason);
+        _recordOutcome(sched, v.auth, v.total, v.token, 'failed', null, Date.now() - startTime, 0, pol.reason, { sender: agentAddr, token: v.token, amount: v.total });
         _notify(sched, 'blocked', 'Policy blocked "' + sched.name + '": ' + pol.reason, 'error');
         return { status: 'policy_blocked', reason: pol.reason };
       }
@@ -547,9 +570,9 @@
           ledger[key] = { status: 'failed', reason: failNote, ts: Date.now(), attempts: attempts, txHash: br.txHash || lastHash };
           _saveLedger();
           if (spent > 0) { try { _authz().recordUsage(v.auth.id, spent, 'scheduled:' + sched.type, 'partial'); } catch(e){} }
-          _advanceSchedule(sched, failNote, 'failed', br.txHash || lastHash);
+          _advanceSchedule(sched, failNote, 'failed', br.txHash || lastHash, { sender: agentAddr, recipient: v.transfers[i].to, token: v.token, amount: v.transfers[i].amount, gasUsed: gasUsed });
           if (defaults.pauseOnFailure) { try { _engine().update(sched.id, { status: 'Paused' }); } catch(e){} }
-          _recordOutcome(sched, null, spent, v.token, 'failed', br.txHash || lastHash, Date.now() - startTime, gasUsed, failNote);
+          _recordOutcome(sched, null, spent, v.token, 'failed', br.txHash || lastHash, Date.now() - startTime, gasUsed, failNote, { sender: agentAddr, recipient: v.transfers[i].to, token: v.token, amount: v.transfers[i].amount, gasUsed: gasUsed });
           try { if (task) ExecutionQueue.updateStatus(task.id, 'failed', { error: failNote, txHash: br.txHash || lastHash }); } catch(e){}
           _notify(sched, 'failed', 'Schedule "' + sched.name + '" failed: ' + failNote, 'error');
           return { status: 'failed', reason: failNote };
@@ -563,8 +586,8 @@
       var duration = Date.now() - startTime;
       ledger[key] = { status: 'executed', ts: Date.now(), attempts: attempts, txHash: lastHash, amount: spent, asset: v.token };
       _saveLedger();
-      _advanceSchedule(sched, 'Executed by Agent Wallet — ' + spent.toFixed(2) + ' ' + v.token + ' to ' + confirmed + ' recipient(s)', 'executed', lastHash);
-      _recordOutcome(sched, v.auth, spent, v.token, 'success', lastHash, duration, gasUsed, null);
+      _advanceSchedule(sched, 'Executed by Agent Wallet — ' + spent.toFixed(2) + ' ' + v.token + ' to ' + confirmed + ' recipient(s)', 'executed', lastHash, { sender: agentAddr, recipient: v.transfers.length === 1 ? v.transfers[0].to : (v.transfers.length + ' recipients'), token: v.token, amount: spent, gasUsed: gasUsed });
+      _recordOutcome(sched, v.auth, spent, v.token, 'success', lastHash, duration, gasUsed, null, { sender: agentAddr, recipient: v.transfers.length === 1 ? v.transfers[0].to : (v.transfers.length + ' recipients'), token: v.token, amount: spent, gasUsed: gasUsed });
       try { if (task) ExecutionQueue.updateStatus(task.id, 'completed', { txHash: lastHash, result: 'success', progress: 100 }); } catch(e){}
       _notify(sched, 'executed', 'Schedule "' + sched.name + '" executed by Agent Wallet — ' + spent.toFixed(2) + ' ' + v.token + ' (tx ' + lastHash.slice(0, 10) + '...)', 'success');
       return { status: 'executed', txHash: lastHash };
@@ -629,8 +652,8 @@
       var delFailReason = (delErr.shortMessage || delErr.message || '').substring(0, 140);
       ledger[key] = { status: 'failed', reason: 'Delegated ' + sched.type + ' execution failed: ' + delFailReason, ts: Date.now(), attempts: attempts };
       _saveLedger();
-      _recordOutcome(sched, v.auth, v.total, v.token, 'failed', null, Date.now() - startTime, 0, delFailReason);
-      _advanceSchedule(sched, 'Delegated ' + sched.type + ' failed: ' + delFailReason, 'failed');
+      _recordOutcome(sched, v.auth, v.total, v.token, 'failed', null, Date.now() - startTime, 0, delFailReason, { token: v.token, amount: v.total });
+      _advanceSchedule(sched, 'Delegated ' + sched.type + ' failed: ' + delFailReason, 'failed', null, { token: v.token, amount: v.total });
       _notify(sched, 'failed', 'Delegated ' + sched.type + ' failed to execute: ' + delFailReason, 'error');
       return { status: 'failed', reason: delFailReason };
     }
@@ -639,15 +662,15 @@
       var failReason = (delResult && (delResult.reason || delResult.error || delResult.message)) || 'Unknown delegation failure';
       ledger[key] = { status: 'failed', reason: failReason, ts: Date.now(), attempts: attempts };
       _saveLedger();
-      _recordOutcome(sched, v.auth, v.total, v.token, 'failed', delResult && delResult.txHash || null, Date.now() - startTime, 0, failReason);
-      _advanceSchedule(sched, 'Delegated ' + sched.type + ' returned failure: ' + failReason, 'failed');
+      _recordOutcome(sched, v.auth, v.total, v.token, 'failed', delResult && delResult.txHash || null, Date.now() - startTime, 0, failReason, { token: v.token, amount: v.total });
+      _advanceSchedule(sched, 'Delegated ' + sched.type + ' returned failure: ' + failReason, 'failed', delResult && delResult.txHash || null, { token: v.token, amount: v.total });
       _notify(sched, 'failed', 'Delegated ' + sched.type + ' returned failure: ' + failReason, 'error');
       return { status: 'failed', reason: failReason };
     }
 
     ledger[key] = { status: 'delegated', ts: Date.now(), attempts: attempts, amount: v.total, asset: v.token };
     _saveLedger();
-    _advanceSchedule(sched, 'Delegated to Agent Wallet ' + sched.type + ' executor — ' + v.total + ' ' + v.token, 'delegated');
+    _advanceSchedule(sched, 'Delegated to Agent Wallet ' + sched.type + ' executor — ' + v.total + ' ' + v.token, 'delegated', null, { token: v.token, amount: v.total });
     _notify(sched, 'executed', 'Schedule "' + sched.name + '" — Agent Wallet executed the ' + sched.type + ' (' + v.total + ' ' + v.token + ')', 'info');
     return { status: 'delegated' };
   }

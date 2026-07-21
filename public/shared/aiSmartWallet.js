@@ -731,14 +731,27 @@
       it.status = 'executed';
       it.executedAt = Date.now();
       saveIntents();
-      var execEntry = { kind: 'execution', status: 'executed', intentId: it.id, schedId: s.id, op: it.op, amount: it.amount, token: it.token, amountUsd: (Number(it.amount) || 0) * usdRate(it.token) };
+      var latestHist = (s.executionHistory && s.executionHistory.length) ? s.executionHistory[0] : null;
+      var execEntry = {
+        kind: 'execution', status: 'executed', intentId: it.id, schedId: s.id,
+        op: it.op, amount: it.amount, token: it.token, amountUsd: (Number(it.amount) || 0) * usdRate(it.token),
+        sender: latestHist ? latestHist.sender : null,
+        recipient: latestHist ? latestHist.recipient : (it.to || null),
+        txHash: latestHist ? latestHist.txHash : null,
+        gasUsed: latestHist ? latestHist.gasUsed : null,
+        executor: latestHist ? latestHist.executor : 'agent_wallet',
+        ts: latestHist ? latestHist.ts : null
+      };
       pushHistory(execEntry);
       notify('Intent ' + it.id + ' executed by Agent Wallet', 'success');
       renderExecutions(); renderHistory();
       // Emit status update to Autonoma via shared bridge
       try {
         if (typeof FinancialContext !== 'undefined' && FinancialContext.emitStatus) {
-          FinancialContext.emitStatus({ type: 'intent_executed', intentId: it.id, schedId: s.id, amount: it.amount, token: it.token, status: 'executed', timestamp: Date.now() });
+          FinancialContext.emitStatus({
+            type: 'intent_executed', intentId: it.id, schedId: s.id, amount: it.amount, token: it.token, status: 'executed', timestamp: Date.now(),
+            txHash: latestHist ? latestHist.txHash : null, gasUsed: latestHist ? latestHist.gasUsed : null
+          });
         }
       } catch (_e) {}
     }
@@ -2719,16 +2732,23 @@
     box.innerHTML = all.slice(0, 15).map(function (s) {
       const mine = s.createdBy === 'aiwallet';
       const src = mine ? 'AI Smart Wallet' : (s.createdBy === 'user' ? 'Schedule page' : esc(s.createdBy || 'user'));
+      const latestHist = (s.executionHistory && s.executionHistory.length) ? s.executionHistory[0] : null;
       let actions = '';
       if (mine) {
         if (s.status === 'Active') actions += '<button class="btn" style="font-size:8px;padding:2px 7px" onclick="AIWallet.pauseSchedule(\'' + esc(s.id) + '\')">Pause</button>';
         if (s.status === 'Paused') actions += '<button class="btn" style="font-size:8px;padding:2px 7px" onclick="AIWallet.resumeSchedule(\'' + esc(s.id) + '\')">Resume</button>';
         actions += '<button class="btn" style="font-size:8px;padding:2px 7px" onclick="AIWallet.deleteSchedule(\'' + esc(s.id) + '\')">Delete</button>';
       }
+      var histSuffix = '';
+      if (latestHist && latestHist.txHash) {
+        histSuffix = ' · last tx: <a href="' + explorerTx(latestHist.txHash) + '" target="_blank" rel="noopener" style="color:var(--blue);text-decoration:none">' + esc(short(latestHist.txHash)) + '</a>';
+        if (latestHist.gasUsed) histSuffix += ' · gas: ' + Number(latestHist.gasUsed).toLocaleString();
+        if (latestHist.status) histSuffix += ' · <span style="color:' + (latestHist.status === 'executed' ? 'var(--green)' : 'var(--red)') + '">' + esc(latestHist.status) + '</span>';
+      }
       return '<div style="display:flex;align-items:center;gap:7px;padding:6px 8px;border:1px solid var(--border);border-radius:6px;margin-bottom:5px;background:rgba(0,0,0,.15)">' +
         '<span style="width:7px;height:7px;border-radius:50%;flex-shrink:0;background:' + (s.status === 'Active' ? 'var(--green)' : s.status === 'Paused' ? 'var(--yellow)' : 'var(--muted)') + '"></span>' +
         '<div style="flex:1;min-width:0"><div style="font-size:9.5px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(s.name || s.type) + '</div>' +
-        '<div style="font-size:8px;color:var(--muted2)">' + esc(s.type) + ' · ' + esc(String(s.amount)) + ' ' + esc(s.token) + ' · ' + esc(s.freq) + ' · next ' + (s.nextRun ? esc(new Date(s.nextRun).toLocaleString()) : '—') + ' · by ' + src + ' · runs ' + (s.execCount || 0) + '</div></div>' +
+        '<div style="font-size:8px;color:var(--muted2)">' + esc(s.type) + ' · ' + esc(String(s.amount)) + ' ' + esc(s.token) + ' · ' + esc(s.freq) + ' · next ' + (s.nextRun ? esc(new Date(s.nextRun).toLocaleString()) : '—') + ' · by ' + src + ' · runs ' + (s.execCount || 0) + histSuffix + '</div></div>' +
         '<span style="display:flex;gap:4px">' + actions + '</span></div>';
     }).join('') + '<div style="font-size:8px;color:var(--muted2)">Tasks created elsewhere are shown read-only. Executor: existing Agent Wallet scheduler.</div>';
   }
@@ -2829,10 +2849,16 @@
       const txLink = (h.txHash && /^0x[0-9a-fA-F]{64}$/.test(h.txHash))
         ? ' <a href="' + explorerTx(h.txHash) + '" target="_blank" rel="noopener" style="color:var(--blue);text-decoration:none">' + esc(short(h.txHash)) + '</a>'
         : '';
+      var extraMeta = '';
+      if (h.sender) extraMeta += ' · from ' + esc(short(h.sender));
+      if (h.recipient) extraMeta += ' · to ' + esc(short(String(h.recipient)));
+      if (h.gasUsed != null) extraMeta += ' · gas ' + Number(h.gasUsed).toLocaleString();
+      if (h.executor) extraMeta += ' · ' + esc(h.executor);
+      var tsDisplay = h.ts ? new Date(h.ts).toLocaleString() : new Date(h.at).toLocaleTimeString();
       html += '<div style="display:flex;gap:6px;font-size:8.5px;padding:3px 0;border-bottom:1px solid rgba(255,255,255,.03)">' +
-        '<span style="color:var(--muted2);flex-shrink:0">' + new Date(h.at).toLocaleTimeString() + '</span>' +
+        '<span style="color:var(--muted2);flex-shrink:0">' + tsDisplay + '</span>' +
         '<span style="color:' + col + ';text-transform:uppercase;flex-shrink:0">' + esc(h.kind + ':' + h.status) + '</span>' +
-        '<span style="color:var(--muted2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc((h.intentId || h.schedId || h.op || '') + (h.op && h.intentId ? ' · ' + h.op : '') + (h.amount ? ' · ' + h.amount + ' ' + (h.token || '') : '') + (h.reason ? ' · ' + h.reason : '')) + txLink + '</span></div>';
+        '<span style="color:var(--muted2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc((h.intentId || h.schedId || h.op || '') + (h.op && h.intentId ? ' · ' + h.op : '') + (h.amount ? ' · ' + h.amount + ' ' + (h.token || '') : '') + extraMeta + (h.reason ? ' · ' + h.reason : '')) + txLink + '</span></div>';
     });
     if (!html) html = '<div style="font-size:9.5px;color:var(--muted2)">No AI wallet activity yet.</div>';
     if (audit.length) {

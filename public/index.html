@@ -26500,7 +26500,33 @@ function renderSchedules(){
     var isDue = s.nextRun && new Date(s.nextRun) <= now && s.status === 'Active';
     var agentOn = s.agentExecution !== false;
     var assetInfo = (s.amount || 0) > 0 ? (s.amount || 0).toFixed(2) + ' ' + s.token : (s.recipients && s.recipients.length ? s.recipients.length + ' rcpts' : '—');
-    return '<tr' + (isDue ? ' style="background:rgba(245,158,11,.05)"' : '') + '>' +
+
+    var historyHtml = '';
+    var hist = (s.executionHistory || []).slice(0, 10);
+    if (hist.length) {
+      historyHtml = '<tr class="sch-detail-row" id="sch-detail-' + s.id + '" style="display:none"><td colspan="9" style="padding:0;background:rgba(0,0,0,.15)"><div style="padding:8px 12px;max-height:200px;overflow-y:auto">' +
+        '<div style="font-size:9px;color:var(--muted2);margin-bottom:6px;font-weight:600">Execution History</div>' +
+        '<table style="width:100%;font-size:8.5px;border-collapse:collapse">' +
+        '<tr style="color:var(--muted2);border-bottom:1px solid rgba(255,255,255,.05)"><th style="text-align:left;padding:2px 4px">Date/Time</th><th style="text-align:left;padding:2px 4px">Sender</th><th style="text-align:left;padding:2px 4px">Recipient</th><th style="text-align:left;padding:2px 4px">Token</th><th style="text-align:right;padding:2px 4px">Amount</th><th style="text-align:left;padding:2px 4px">Status</th><th style="text-align:left;padding:2px 4px">Tx Hash</th><th style="text-align:right;padding:2px 4px">Gas</th></tr>' +
+        hist.map(function(h){
+          var statusColor = h.status === 'executed' || h.status === 'delegated' ? 'var(--green)' : h.status === 'failed' ? 'var(--red)' : h.status === 'skipped' ? 'var(--yellow)' : 'var(--muted2)';
+          var execDate = (h.ts || '—').replace('T',' ').replace('Z','').slice(0,19);
+          var sender = h.sender ? shortAddr(h.sender) : '—';
+          var recipient = h.recipient ? (h.recipient.indexOf(' recipients') !== -1 ? h.recipient : shortAddr(h.recipient)) : '—';
+          var token = h.token || s.token || '—';
+          var amount = h.amount != null ? Number(h.amount).toFixed(2) + ' ' + token : '—';
+          var statusLabel = h.status || '—';
+          var txHash = h.txHash ? '<a href="https://testnet.arcscan.app/tx/' + h.txHash + '" target="_blank" style="color:var(--blue);text-decoration:none" title="' + h.txHash + '">' + shortAddr(h.txHash) + '</a>' : '—';
+          var gas = h.gasUsed ? Number(h.gasUsed).toLocaleString() + ' gas' : '—';
+          return '<tr style="border-bottom:1px solid rgba(255,255,255,.02)"><td style="padding:3px 4px;color:var(--muted2)">' + execDate + '</td><td style="padding:3px 4px;color:#a78bfa">' + sender + '</td><td style="padding:3px 4px;color:var(--text)">' + recipient + '</td><td style="padding:3px 4px">' + token + '</td><td style="padding:3px 4px;text-align:right;color:var(--text)">' + amount + '</td><td style="padding:3px 4px;color:' + statusColor + '">' + statusLabel + '</td><td style="padding:3px 4px">' + txHash + '</td><td style="padding:3px 4px;text-align:right;color:var(--muted2)">' + gas + '</td></tr>';
+        }).join('') +
+        '</table></div></td></tr>';
+    }
+
+    var hasHistory = (s.executionHistory || []).length > 0;
+    var historyToggle = hasHistory ? '<button class="btn" style="padding:2px 7px;font-size:8.5px;margin-left:2px" onclick="schToggleHistory(\'' + s.id + '\')" title="Toggle execution history"><i class="ti ti-history"></i></button>' : '';
+
+    var mainRow = '<tr' + (isDue ? ' style="background:rgba(245,158,11,.05)"' : '') + '>' +
       '<td style="font-weight:600">' + s.name + (isDue ? '<span style="font-size:8px;margin-left:5px;color:var(--yellow)">DUE</span>' : '') + (agentOn && s.status === 'Active' ? '<span style="font-size:8px;margin-left:5px;color:#a78bfa" title="Auto-executed by Agent Wallet">AUTO</span>' : '') + '</td>' +
       '<td><span class="sch-type-badge ' + s.type + '"><i class="ti ti-' + schTypeIcon(s.type) + '" style="font-size:9px"></i>' + schTypeLabel(s.type) + '</span></td>' +
       '<td style="color:var(--text)">' + assetInfo + '</td>' +
@@ -26513,9 +26539,18 @@ function renderSchedules(){
         '<button class="btn primary" style="padding:2px 7px;font-size:8.5px" onclick="scheduleRun(\'' + s.id + '\')" title="Execute Now"><i class="ti ti-player-play"></i></button>' +
         '<button class="btn" style="padding:2px 7px;font-size:8.5px;color:' + (agentOn ? '#a78bfa' : 'var(--muted2)') + '" onclick="scheduleToggleAgent(\'' + s.id + '\')" title="' + (agentOn ? 'Agent auto-execution ON — click to disable' : 'Agent auto-execution OFF — click to enable') + '"><i class="ti ti-robot"></i></button>' +
         '<button class="btn" style="padding:2px 7px;font-size:8.5px" onclick="schedulePause(\'' + s.id + '\')" title="' + (s.status === 'Active' ? 'Pause' : 'Resume') + '"><i class="ti ti-' + (s.status === 'Active' ? 'pause' : 'play') + '"></i></button>' +
+        historyToggle +
         '<button class="btn" style="padding:2px 7px;font-size:8.5px;color:var(--red)" onclick="scheduleDelete(\'' + s.id + '\')" title="Delete"><i class="ti ti-trash"></i></button>' +
       '</td></tr>';
+
+    return mainRow + historyHtml;
   }).join('');
+}
+
+function schToggleHistory(id){
+  var el = document.getElementById('sch-detail-' + id);
+  if (!el) return;
+  el.style.display = el.style.display === 'none' ? '' : 'none';
 }
 
 // Check due schedules on init
