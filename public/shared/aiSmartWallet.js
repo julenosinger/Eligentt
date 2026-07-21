@@ -230,94 +230,135 @@
      → chain. Every check runs; execution aborts if ANY check fails.
      ══════════════════════════════════════════════════════════════════ */
   async function validateIntent(it) {
-    const checks = [];
+    var totalStages = 13;
+    var stage = 0;
+    function nextStage(name, detail) {
+      stage++;
+      if (typeof ExecutionWatchdog !== 'undefined' && ExecutionWatchdog.trackStage) {
+        ExecutionWatchdog.trackStage(it, stage, totalStages, name, detail);
+      }
+    }
+    function doneStage(name, passed, reason) {
+      if (typeof ExecutionWatchdog !== 'undefined' && ExecutionWatchdog.markStageComplete) {
+        ExecutionWatchdog.markStageComplete(it, name, passed, reason);
+      }
+    }
+    if (typeof ExecutionWatchdog !== 'undefined' && ExecutionWatchdog.initIntentWatchdog) {
+      ExecutionWatchdog.initIntentWatchdog(it);
+    }
+    var checks = [];
     function add(name, passed, reason) { checks.push({ name: name, passed: !!passed, reason: reason || '' }); }
 
     /* 0. Emergency stop */
+    nextStage('Emergency Stop', 'Checking emergency stop status');
     add('Emergency Stop', !emergencyStop, emergencyStop ? 'Emergency Stop is active — all AI Smart Wallet operations disabled' : 'Inactive');
+    doneStage('Emergency Stop', true, '');
 
     /* 1. Wallet mode */
-    const modeOk = mode === 'ai' || mode === 'hybrid';
+    nextStage('Wallet Mode', 'Checking wallet execution mode');
+    var modeOk = mode === 'ai' || mode === 'hybrid';
     add('Wallet Mode', modeOk, modeOk ? 'Mode "' + mode + '" allows autonomous execution' : 'Personal mode — autonomous execution disabled');
+    doneStage('Wallet Mode', modeOk, '');
 
     /* 2. Chain validation */
-    const net = NETWORKS[it.network];
-    const chainAllowed = !!net && limits.allowedNetworks.indexOf(it.network) !== -1;
+    nextStage('Chain', 'Validating target network');
+    var net = NETWORKS[it.network];
+    var chainAllowed = !!net && limits.allowedNetworks.indexOf(it.network) !== -1;
     add('Chain', chainAllowed, chainAllowed ? net.label + ' (' + net.chainId + ') allowed' : 'Network "' + it.network + '" not in allowed list');
-    const execOnArc = it.network === 'Arc_Testnet';
+    var execOnArc = it.network === 'Arc_Testnet';
     add('Execution Chain', execOnArc || OP_TO_SCHED[it.op] === 'bridge' || OP_TO_SCHED[it.op] === 'crosschain',
       execOnArc ? 'Agent executes on Arc' : 'Cross-chain ops route via existing bridge executor');
+    doneStage('Chain', chainAllowed, '');
 
     /* 3. Token allowlist */
-    const tokenOk = limits.allowedTokens.indexOf(it.token) !== -1;
+    nextStage('Token', 'Checking token allowlist');
+    var tokenOk = limits.allowedTokens.indexOf(it.token) !== -1;
     add('Token', tokenOk, tokenOk ? it.token + ' allowed' : 'Token ' + it.token + ' not allowed');
+    doneStage('Token', tokenOk, '');
 
     /* 4. Operation allowlist */
-    const opOk = limits.allowedOps.indexOf(it.op) !== -1;
+    nextStage('Operation', 'Checking operation allowlist');
+    var opOk = limits.allowedOps.indexOf(it.op) !== -1;
     add('Operation', opOk, opOk ? it.op + ' allowed' : 'Operation "' + it.op + '" not allowed');
+    doneStage('Operation', opOk, '');
 
     /* 5. Time restrictions */
-    const hour = new Date().getHours();
-    const timeOk = limits.hourStart <= hour && hour < (limits.hourEnd === 0 ? 24 : limits.hourEnd);
+    nextStage('Time Window', 'Checking execution hours');
+    var hour = new Date().getHours();
+    var timeOk = limits.hourStart <= hour && hour < (limits.hourEnd === 0 ? 24 : limits.hourEnd);
     add('Time Window', timeOk, timeOk ? 'Within allowed hours (' + limits.hourStart + 'h–' + limits.hourEnd + 'h)' : 'Outside allowed execution hours');
+    doneStage('Time Window', timeOk, '');
 
     /* 6. Spending limits (per-op / daily / monthly) */
-    const amountUsd = (Number(it.amount) || 0) * usdRate(it.token);
+    nextStage('Spending Limits', 'Checking per-op, daily, and monthly limits');
+    var amountUsd = (Number(it.amount) || 0) * usdRate(it.token);
     add('Per-Op Limit', amountUsd <= limits.perOpUsd, fmtUsd(amountUsd) + ' vs max ' + fmtUsd(limits.perOpUsd));
-    const daily = spentUsdSince(86400000);
+    var daily = spentUsdSince(86400000);
     add('Daily Limit', daily + amountUsd <= limits.dailyUsd, fmtUsd(daily + amountUsd) + ' vs ' + fmtUsd(limits.dailyUsd) + '/day');
-    const monthly = spentUsdSince(2592000000);
+    var monthly = spentUsdSince(2592000000);
     add('Monthly Limit', monthly + amountUsd <= limits.monthlyUsd, fmtUsd(monthly + amountUsd) + ' vs ' + fmtUsd(limits.monthlyUsd) + '/month');
+    doneStage('Spending Limits', daily + amountUsd <= limits.dailyUsd, '');
 
-    /* 7. Permission engine (existing AgentAuthorization — reused) */
+    /* 7. Permission engine */
+    nextStage('Permission Engine', 'Checking agent authorization');
     if (settings.requireAgentAuth && typeof AgentAuthorization !== 'undefined') {
       try {
-        const authOp = OP_TO_AUTH[it.op] || 'payment';
-        const hasOp = AgentAuthorization.hasOperationAuth(authOp);
+        var authOp = OP_TO_AUTH[it.op] || 'payment';
+        var hasOp = AgentAuthorization.hasOperationAuth(authOp);
         if (!hasOp) {
           add('Permission Engine', false, 'No active authorization for "' + authOp + '" — grant it in AI Permissions');
+          doneStage('Permission Engine', false, 'No authorization');
         } else {
-          const av = AgentAuthorization.validateExecution({
+          var av = AgentAuthorization.validateExecution({
             operation: authOp, amount: Number(it.amount) || 0, asset: it.token,
             network: (net && net.label) || 'Arc Testnet', contract: '', destination: it.to || ''
           });
           add('Permission Engine', !!(av && av.valid), (av && av.reason) || (av && av.valid ? 'Authorized' : 'Denied by authorization scope'));
+          doneStage('Permission Engine', !!(av && av.valid), av && av.reason ? av.reason : '');
         }
-      } catch (e) { add('Permission Engine', false, 'Permission check error: ' + (e.message || e)); }
+      } catch (e) { add('Permission Engine', false, 'Permission check error: ' + (e.message || e)); doneStage('Permission Engine', false, e.message); }
     } else {
       add('Permission Engine', true, settings.requireAgentAuth ? 'AgentAuthorization unavailable — overlay limits enforced' : 'Agent auth consultation disabled (overlay limits still enforced)');
+      doneStage('Permission Engine', true, '');
     }
 
-    /* 8. Risk engine (existing RiskEngine — reused) */
+    /* 8. Risk engine */
+    nextStage('Risk Engine', 'Analyzing risk profile');
     if (typeof RiskEngine !== 'undefined') {
       try {
-        const risk = RiskEngine.analyze({
+        var risk = RiskEngine.analyze({
           operation: OP_TO_AUTH[it.op] || it.op, amount: Number(it.amount) || 0, asset: it.token,
           contract: '', destination: it.to || '', network: (net && net.label) || 'Arc Testnet', purpose: it.name || ''
         });
-        const order = { LOW: 0, MEDIUM: 1, HIGH: 2, CRITICAL: 3 };
-        const ok = order[risk.level] <= order[settings.maxRisk];
+        var order = { LOW: 0, MEDIUM: 1, HIGH: 2, CRITICAL: 3 };
+        var ok = order[risk.level] <= order[settings.maxRisk];
         it.riskLevel = risk.level;
         add('Risk Engine', ok, 'Risk ' + risk.level + (ok ? ' within max ' : ' exceeds max ') + settings.maxRisk);
-      } catch (e) { add('Risk Engine', false, 'Risk analysis error: ' + (e.message || e)); }
+        doneStage('Risk Engine', ok, '');
+      } catch (e) { add('Risk Engine', false, 'Risk analysis error: ' + (e.message || e)); doneStage('Risk Engine', false, e.message); }
     } else {
-      const heurOk = amountUsd <= limits.perOpUsd;
+      var heurOk = amountUsd <= limits.perOpUsd;
       add('Risk Engine', heurOk, 'RiskEngine unavailable — heuristic amount check');
+      doneStage('Risk Engine', heurOk, '');
     }
 
-    /* 9. Policy engine (existing PolicyEngine — reused) */
+    /* 9. Policy engine */
+    nextStage('Policy Engine', 'Running policy checks');
     if (typeof PolicyEngine !== 'undefined') {
       try {
-        const pv = PolicyEngine.quickCheck(OP_TO_AUTH[it.op] || it.op, Number(it.amount) || 0, it.token, (net && net.label) || 'Arc Testnet');
-        const failed = (pv && pv.failedRules) ? pv.failedRules.map(function (r) { return r.rule; }).join(', ') : '';
+        var pv = PolicyEngine.quickCheck(OP_TO_AUTH[it.op] || it.op, Number(it.amount) || 0, it.token, (net && net.label) || 'Arc Testnet');
+        var failed = (pv && pv.failedRules) ? pv.failedRules.map(function (r) { return r.rule; }).join(', ') : '';
         add('Policy Engine', !!(pv && pv.valid), pv && pv.valid ? 'All policy rules passed' : 'Failed: ' + failed);
-      } catch (e) { add('Policy Engine', false, 'Policy check error: ' + (e.message || e)); }
+        doneStage('Policy Engine', !!(pv && pv.valid), '');
+      } catch (e) { add('Policy Engine', false, 'Policy check error: ' + (e.message || e)); doneStage('Policy Engine', false, e.message); }
     } else {
       add('Policy Engine', true, 'PolicyEngine unavailable — overlay limits enforced');
+      doneStage('Policy Engine', true, '');
     }
 
     /* 10. Schedule / executor readiness */
-    let agentReady = false, agentReason = 'Agent Wallet unavailable';
+    nextStage('Schedule Engine', 'Checking agent executor readiness');
+    var agentReady = false, agentReason = 'Agent Wallet unavailable';
     try {
       if (typeof AgentWalletManager !== 'undefined') {
         if (AgentWalletManager.isPaused && AgentWalletManager.isPaused()) agentReason = 'Agent Wallet is paused';
@@ -326,15 +367,15 @@
       }
     } catch (e) { agentReason = 'Agent check error: ' + (e.message || e); }
     add('Schedule Engine', agentReady && typeof ScheduleEngine !== 'undefined', agentReady ? (typeof ScheduleEngine !== 'undefined' ? agentReason : 'ScheduleEngine unavailable') : agentReason);
+    doneStage('Schedule Engine', agentReady, '');
 
-    /* 11. Balance validation (agent wallet, on-chain read-only) */
-    let onchainBal = null;
+    /* 11. Balance & Gas (RPC calls — wrapped with timeout) */
+    nextStage('Balance & Gas', 'Reading on-chain balances via RPC');
+    var onchainBal = null;
     var needBal = false;
     if (OP_TO_SCHED[it.op] === 'payment' || OP_TO_SCHED[it.op] === 'multisend' || OP_TO_SCHED[it.op] === 'swap') {
       needBal = true;
     }
-
-    /* 11c. Gas reserve check — launch in parallel with balance check for performance */
     var balPromise = needBal ? tokenBalance(agentAddr(), it.token) : Promise.resolve(null);
     var gasPromise = nativeBalance(agentAddr(), false);
     var results = await Promise.allSettled([balPromise, gasPromise]);
@@ -343,39 +384,46 @@
 
     if (needBal) {
       var need = Number(it.amount) || 0;
-      if (onchainBal === null) add('Balance', false, 'Balance check failed (RPC unavailable) — failing closed');
+      if (onchainBal === null) add('Balance', false, 'Balance check failed (RPC timeout or unavailable) — failing closed');
       else add('Balance', onchainBal >= need, 'Agent holds ' + onchainBal.toFixed(2) + ' ' + it.token + ' vs required ' + need);
     } else {
       add('Balance', true, 'Checked by bridge executor at execution time');
     }
 
-    /* 11b. Vault allocation — AI spends ONLY operational/automation buckets */
+    /* 11b. Vault allocation */
+    nextStage('Vault Allocation', 'Checking vault buckets');
     if (onchainBal !== null) {
-      const v = vault[it.token] || { locked: 0, automation: 0, treasury: 0 };
-      const operational = Math.max(0, onchainBal - (v.locked || 0) - (v.automation || 0) - (v.treasury || 0));
-      const bucket = (it.freq && it.freq !== 'once') || it.source === 'automation-center' ? 'automation' : 'operational';
-      const available = bucket === 'automation' ? (v.automation || 0) + operational : operational;
-      const needAmt = Number(it.amount) || 0;
+      var vC = vault[it.token] || { locked: 0, automation: 0, treasury: 0 };
+      var operational = Math.max(0, onchainBal - (vC.locked || 0) - (vC.automation || 0) - (vC.treasury || 0));
+      var bucket = (it.freq && it.freq !== 'once') || it.source === 'automation-center' ? 'automation' : 'operational';
+      var available = bucket === 'automation' ? (vC.automation || 0) + operational : operational;
+      var needAmt = Number(it.amount) || 0;
       add('Vault Allocation', available >= needAmt, 'Bucket "' + bucket + '" has ' + available.toFixed(2) + ' ' + it.token + ' spendable (locked/treasury/gas reserve untouchable)');
     } else {
       add('Vault Allocation', OP_TO_SCHED[it.op] === 'bridge' || OP_TO_SCHED[it.op] === 'crosschain', 'Evaluated with balance at execution time');
     }
 
-    /* 11c. Gas reserve — abort if the agent cannot pay gas safely (result already fetched) */
+    /* 11c. Gas reserve */
+    nextStage('Gas Reserve', 'Checking gas balance');
     if (gasBal === null) add('Gas Reserve', false, 'Gas balance check failed (RPC) — failing closed');
     else {
       var gasOk = gasBal >= gasCfg.minReserve;
       add('Gas Reserve', gasOk, gasOk ? gasBal.toFixed(4) + ' USDC gas ≥ reserve ' + gasCfg.minReserve : 'Gas ' + gasBal.toFixed(4) + ' below reserve ' + gasCfg.minReserve + ' — use Auto Top-Up (Vault & Gas tab)');
       if (!gasOk) checkAutoTopup();
     }
+    doneStage('Balance & Gas', onchainBal !== null && gasBal !== null, '');
 
-    /* 12. Nonce validation (replay protection) */
-    const nonceFree = !usedNonces[String(it.nonce)];
+    /* 12. Nonce validation */
+    nextStage('Nonce', 'Checking replay protection');
+    var nonceFree = !usedNonces[String(it.nonce)];
     add('Nonce', typeof it.nonce === 'number' && nonceFree, nonceFree ? 'Nonce #' + it.nonce + ' unused' : 'Nonce already consumed (replay blocked)');
+    doneStage('Nonce', nonceFree, '');
 
     /* 13. Deadline validation */
-    const deadlineOk = Number(it.deadline) > Date.now();
+    nextStage('Deadline', 'Checking intent expiration');
+    var deadlineOk = Number(it.deadline) > Date.now();
     add('Deadline', deadlineOk, deadlineOk ? 'Valid until ' + new Date(it.deadline).toLocaleTimeString() : 'Intent expired');
+    doneStage('Deadline', deadlineOk, '');
 
     return { valid: checks.every(function (c) { return c.passed; }), checks: checks };
   }
@@ -393,8 +441,15 @@
       if (!provider) return null;
       var c = new ethers.Contract(meta.address, ERC20_ABI, provider);
       var promise = c.balanceOf(addr);
+      if (typeof ExecutionWatchdog !== 'undefined' && ExecutionWatchdog.wrapRPC) {
+        promise = ExecutionWatchdog.wrapRPC(promise, 5000, 'balanceOf:' + token);
+      }
       balanceDedup[dedupKey] = { promise: promise, at: Date.now() };
       var raw = await promise;
+      if (raw === null) {
+        if (cached && cached.val !== null) return cached.val;
+        return null;
+      }
       var val = Number(ethers.formatUnits(raw, meta.decimals || 6));
       balanceDedup[dedupKey] = { val: val, at: Date.now() };
       // Cleanup stale entries periodically
@@ -2715,6 +2770,7 @@
         '<span style="margin-left:auto;display:flex;gap:4px">' + actions + '</span></div>' +
         '<div style="font-size:8.5px;color:var(--muted2);margin-top:3px">' + esc(it.id) + ' · src: ' + esc(it.source) + ' · nonce #' + it.nonce +
         (it.to ? ' · to ' + esc(short(it.to)) : '') + (it.recipients && it.recipients.length > 1 ? ' · ' + it.recipients.length + ' recipients' : '') + '</div>' +
+        (it.status === 'validating' && typeof ExecutionWatchdog !== 'undefined' ? ExecutionWatchdog.buildStageProgressHTML(it) : '') +
         (it.reason ? '<div style="font-size:8px;color:var(--red);margin-top:2px">' + esc(it.reason) + '</div>' : '') +
         checksHtml + timelineHtml(it) + '</div>';
     }
@@ -3054,6 +3110,20 @@
     refreshPortfolio(false);
   }
 
+  function runStuckIntentCheck() {
+    if (typeof ExecutionWatchdog === 'undefined') return;
+    var stuck = ExecutionWatchdog.findStuckIntents(intents);
+    if (!stuck.length) return;
+    stuck.forEach(function(it) {
+      if (!it._watchdog) return;
+      it._watchdog.healthStatus = it._watchdog.healthStatus || 'stuck_validation';
+      if (it._watchdog.stageName && it._watchdog.stageName.indexOf('Balance') !== -1) {
+        it._watchdog.healthStatus = 'rpc_timeout';
+        it._watchdog.lastRPCError = 'RPC unresponsive';
+      }
+    });
+  }
+
   /* ── Init (passive — waits for DOM, never touches other modules) ─── */
   function init() {
     const page = $id('page-aiwallet');
@@ -3075,12 +3145,11 @@
     if (!monitorTimer) {
       monitorTimer = setInterval(function () {
         var pg = $id('page-aiwallet');
-        // [M6 FIX] Only run when the page is active
         if (!pg || !pg.classList.contains('active')) return;
         checkAutoTopup();
         checkWorkflows();
+        runStuckIntentCheck();
         renderExecutions(); renderScheduled(); renderStatus(); renderSchedDash();
-        // Sync workflow & recommendation data to FinancialContext bridge
         try {
           if (typeof FinancialContext !== 'undefined') {
             if (FinancialContext.updateWorkflowsList) FinancialContext.updateWorkflowsList(workflows);
@@ -3088,6 +3157,9 @@
           }
         } catch (_e) {}
       }, 60000);
+    }
+    if (typeof ExecutionWatchdog !== 'undefined' && !ExecutionWatchdog.isHealthCheckRunning()) {
+      ExecutionWatchdog.startHealthCheck(15000, function() { return intents; });
     }
     if (page.classList.contains('active')) onShow();
   }
