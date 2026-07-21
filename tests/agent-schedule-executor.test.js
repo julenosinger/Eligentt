@@ -139,7 +139,7 @@ function grantScheduledAuth(auth, over = {}) {
   return auth.createAuthorization(Object.assign({
     maxSpending: 500, dailyLimit: 200,
     allowedTokens: ['USDC'], allowedNetworks: ['Arc Testnet'],
-    allowedOperations: ['scheduled'], allowScheduled: true,
+    allowedOperations: ['payment'], allowPayments: true, allowScheduled: true,
     durationMs: 3600000, maxRiskLevel: 'MEDIUM',
   }, over));
 }

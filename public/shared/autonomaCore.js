@@ -170,6 +170,14 @@
     var addrM = msg.match(/0x[a-fA-F0-9]{40}/);
     if(addrM) p.address = addrM[0];
 
+    // Contact name resolution — resolve saved recipients by name
+    if(!p.address && typeof RecipientResolver !== 'undefined'){
+      try {
+        var _rcptCore = RecipientResolver.extractFromMessage(msg);
+        if(_rcptCore && _rcptCore.address && !_rcptCore.multiple){ p.address = _rcptCore.address; p.recipientName = _rcptCore.name; }
+      } catch(_rcptEx){}
+    }
+
     // Chain / Network
     var chainMap = { arc: 'Arc Testnet', base: 'Base', ethereum: 'Ethereum', sepolia: 'Sepolia', arbitrum: 'Arbitrum', optimism: 'Optimism', polygon: 'Polygon' };
     var fromM = low.match(/from\s+(\w+)/), toM = low.match(/to\s+(\w+)/), paraM = low.match(/para\s+(?:a\s+)?(\w+)/);

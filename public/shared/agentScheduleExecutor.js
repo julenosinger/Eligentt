@@ -254,7 +254,7 @@
     }
 
     var vres = az.validateExecution({
-      operation: 'scheduled', amount: total, asset: token,
+      operation: underlyingOp, amount: total, asset: token,
       network: 'Arc Testnet', destination: transfers.length === 1 ? transfers[0].to : ''
     });
     if (!vres.valid) return { ok: false, reason: 'Authorization: ' + vres.reason, needsAuthorization: !!vres.needsAuthorization };
@@ -272,7 +272,7 @@
 
     try {
       if (typeof RiskEngine !== 'undefined' && RiskEngine.quickAssess) {
-        var risk = RiskEngine.quickAssess('scheduled', total, token, '', 'Arc Testnet');
+        var risk = RiskEngine.quickAssess(underlyingOp, total, token, '', 'Arc Testnet');
         var maxRisk = auth.maxRiskLevel || 'MEDIUM';
         if (risk && RISK_RANK[risk.level] > RISK_RANK[maxRisk]) {
           return { ok: false, reason: 'Risk ' + risk.level + ' exceeds authorized max ' + maxRisk };
@@ -307,7 +307,7 @@
       }
     } catch(e){}
 
-    var pre = wm.validatePreExecution('scheduled', E.toBeHex(maxFeeWei), E.toBeHex(TX_GAS_LIMIT), agentAddr);
+    var pre = wm.validatePreExecution(underlyingOp, E.toBeHex(maxFeeWei), E.toBeHex(TX_GAS_LIMIT), agentAddr);
     if (!pre || !pre.ok) return { ok: false, reason: (pre && pre.reason) || 'Pre-execution validation failed' };
 
     return { ok: true, auth: auth, transfers: transfers, token: token, tokenInfo: tokenInfo, total: total, underlyingOp: underlyingOp };
@@ -337,7 +337,7 @@
     try {
       if (typeof PolicyEngine === 'undefined' || !PolicyEngine.validateExecution) return { ok: true, report: null };
       var report = PolicyEngine.validateExecution({
-        operation: 'scheduled', amount: total, asset: token, network: 'Arc Testnet',
+        operation: v.underlyingOp || underlyingOp, amount: total, asset: token, network: 'Arc Testnet',
         contract: '', destination: '', simulationHash: simulationHash,
         authId: auth.id, maxRiskLevel: auth.maxRiskLevel || 'MEDIUM',
         estimatedGas: 0.01, slippage: null

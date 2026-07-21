@@ -6762,6 +6762,41 @@ select.cinput option { background: #161a24; color: #dde2f0; }
               <div class="swap-label">Recipients (CSV: address,amount,note — one per line · for MultiSend)</div>
               <textarea id="sch-recipients" class="cinput" rows="4" style="resize:vertical;font-family:'JetBrains Mono',monospace;font-size:9.5px" placeholder="0xAbCd...1234, 100.00, Salary&#10;0xEfGh...5678, 50.00, Bonus"></textarea>
             </div>
+            <!-- CSV Import Section — MultiSend only -->
+            <div style="grid-column:1/-1" id="sch-csv-import-wrap" class="sch-csv-import">
+              <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+                <button class="btn" style="display:flex;align-items:center;gap:5px;padding:6px 12px;font-size:9.5px" onclick="document.getElementById('sch-csv-file').click()">
+                  <i class="ti ti-file-upload"></i>Upload CSV
+                </button>
+                <button class="btn" style="display:flex;align-items:center;gap:5px;padding:6px 12px;font-size:9.5px" onclick="schCsvDownloadTemplate()">
+                  <i class="ti ti-download"></i>Download Template
+                </button>
+                <input type="file" id="sch-csv-file" accept=".csv" style="display:none" onchange="schCsvHandleFile(this)"/>
+                <span id="sch-csv-file-name" style="font-size:9px;color:var(--muted2)"></span>
+              </div>
+              <!-- CSV Summary Panel -->
+              <div id="sch-csv-summary" style="display:none;background:rgba(0,0,0,.15);border:1px solid var(--border);border-radius:6px;padding:10px;font-size:9.5px;margin-top:4px">
+                <div class="swap-label" style="margin-bottom:6px">CSV Summary</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 12px">
+                  <span style="color:var(--muted2)">Recipients:</span><span id="sch-csv-count" style="color:var(--text)">0</span>
+                  <span style="color:var(--muted2)">Valid rows:</span><span id="sch-csv-valid" style="color:var(--green)">0</span>
+                  <span style="color:var(--muted2)">Invalid rows:</span><span id="sch-csv-invalid" style="color:var(--red)">0</span>
+                  <span style="color:var(--muted2)">Duplicated:</span><span id="sch-csv-dupes" style="color:var(--yellow)">0</span>
+                  <span style="color:var(--muted2)">Token:</span><span id="sch-csv-token" style="color:var(--text)">USDC</span>
+                  <span style="color:var(--muted2)">Total Amount:</span><span id="sch-csv-total" style="color:var(--green);font-weight:600">0</span>
+                </div>
+                <div style="margin-top:8px;display:flex;gap:6px">
+                  <button class="btn" style="font-size:8.5px;padding:3px 8px" onclick="schCsvToggleDetails()">View CSV Details</button>
+                  <button class="btn" style="font-size:8.5px;padding:3px 8px;color:var(--red)" onclick="schCsvClear()">Clear</button>
+                </div>
+                <div id="sch-csv-details" style="display:none;margin-top:6px;max-height:180px;overflow-y:auto;background:rgba(0,0,0,.2);border-radius:4px;padding:6px;font-family:'JetBrains Mono',monospace;font-size:8.5px">
+                  <table style="width:100%;border-collapse:collapse">
+                    <thead><tr style="color:var(--muted2);border-bottom:1px solid var(--border)"><th style="text-align:left;padding:2px 4px">#</th><th style="text-align:left;padding:2px 4px">Address</th><th style="text-align:right;padding:2px 4px">Amount</th><th style="text-align:left;padding:2px 4px">Note</th></tr></thead>
+                    <tbody id="sch-csv-details-body"></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
             <div><div class="swap-label">Max Executions (0 = unlimited)</div><input id="sch-max" class="cinput" type="number" value="0" min="0"/></div>
             <div><div class="swap-label">Gas Budget (USDC)</div><input id="sch-gas" class="cinput" type="number" value="0.10" step="0.01"/></div>
             <div style="grid-column:1/-1;display:flex;gap:8px;padding-top:4px">
@@ -25864,17 +25899,24 @@ const RecipientResolver = (function() {
   // Extract recipient name from a message and resolve it
   function extractFromMessage(msg) {
     var low = String(msg || '').toLowerCase();
-    // Skip common chain/network words
     var chainWords = /^(ethereum|sepolia|base|arbitrum|optimism|polygon|amoy|arc|solana|devnet|testnet|mainnet)$/i;
-    // PT: "para {name}", "pro {name}", "à {name}", "ao {name}"
-    // EN: "for {name}", "to {name}"
-    var m = low.match(/\b(?:para|pro|for|send\s+to|pay\s+to|to)\s+([a-záàâãéêíóôõúüç]{2,30})\b/i);
+    // PT: "para {name}", "pro {name}", "à {name}", "ao {name}", "o {name}", "a {name}", "paga o {name}", "envia ao {name}"
+    // EN: "for {name}", "to {name}", "send to {name}", "pay {name}"
+    var m = low.match(/\b(?:para|p(?:ara|ro|aga\s+o)|envia\s+(?:ao|para\s+o|p(?:ro|ara))|send\s+to|pay\s+to|pay|to|for|a[oò]?|o|a)\s+([a-záàâãéêíóôõúüç]{2,30})\b/i);
     if (m) {
       var candidate = m[1].trim();
       if (chainWords.test(candidate)) return null;
       var r = resolve(candidate);
       if (r && !r.multiple) return r;
-      return r; // may be multiple-match result
+      return r;
+    }
+    // Fallback: search all contact names directly in the message
+    var allContacts = _contacts();
+    for (var i = 0; i < allContacts.length; i++) {
+      var cname = String(allContacts[i].name || '').toLowerCase().trim();
+      if (cname.length >= 3 && low.indexOf(cname) !== -1) {
+        return { name: allContacts[i].name, address: allContacts[i].addr, chainId: allContacts[i].chainId || 'Arc_Testnet', exact: true };
+      }
     }
     return null;
   }
@@ -25995,6 +26037,8 @@ function schSelectType(type, btn){
   document.getElementById('sch-swap-to-token-wrap').style.display = isSwap ? '' : 'none';
   document.getElementById('sch-recipients-wrap').style.display = (isPayment || isLink || isMultiSend) ? '' : 'none';
   document.getElementById('sch-csv-wrap').style.display = isMultiSend ? '' : 'none';
+  var csvImport = document.getElementById('sch-csv-import-wrap');
+  if(csvImport) csvImport.style.display = isMultiSend ? '' : 'none';
 }
 
 function scheduleCreateNew(){
@@ -26043,6 +26087,137 @@ function schPrefill(params){
   if(params.toNetwork) document.getElementById('sch-to-network').value = params.toNetwork;
   if(params.toToken) document.getElementById('sch-swap-to-token').value = params.toToken;
   if(params.createdBy) window._schAutonomaCreator = params.createdBy; // flag for submit
+}
+
+// ══════════════════════════════════════════════════════════
+//  CSV IMPORT ENGINE — MultiSend Schedule (additive module)
+//  Only activates when schCurrentType === 'multisend'
+//  Never modifies existing schedule flow or other types
+// ══════════════════════════════════════════════════════════
+var schCsvData = null;
+
+function schCsvDownloadTemplate(){
+  var csv = 'address,amount,note\n0x1234567890abcdef1234567890abcdef12345678,100.00,Salary\n0xabcdef1234567890abcdef1234567890abcdef12,50.00,Bonus\n0x9876543210fedcba9876543210fedcba98765432,250.00,Freelancer';
+  var blob = new Blob([csv], {type: 'text/csv;charset=utf-8'});
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url; a.download = 'multisend_template.csv';
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function schCsvHandleFile(input){
+  var file = input.files && input.files[0];
+  if(!file) return;
+  var nameEl = document.getElementById('sch-csv-file-name');
+  if(nameEl) nameEl.textContent = file.name;
+  var reader = new FileReader();
+  reader.onload = function(e){
+    var text = e.target.result;
+    var result = schCsvParse(text);
+    schCsvData = result;
+    schCsvRenderSummary(result);
+    schCsvFillRecipients(result);
+  };
+  reader.onerror = function(){
+    toast('Failed to read CSV file', 'error');
+  };
+  reader.readAsText(file);
+}
+
+function schCsvParse(text){
+  var lines = text.split(/\r?\n/);
+  var result = { recipients: [], invalid: [], dupes: [], total: 0, count: 0, validCount: 0, token: 'USDC', errors: [] };
+  var seen = {};
+  var hasHeader = lines.length > 0 && /address/i.test(lines[0]) && /amount/i.test(lines[0]);
+  var startIdx = hasHeader ? 1 : 0;
+
+  for(var i = startIdx; i < lines.length; i++){
+    var line = lines[i].trim();
+    if(!line) continue;
+
+    var parts = line.split(',').map(function(s){ return s.trim(); });
+    var addr = (parts[0] || '').trim();
+    var amtStr = (parts[1] || '').trim();
+    var note = (parts[2] || '').trim();
+    var errors = [];
+
+    if(!isAddr(addr)) errors.push('Invalid address');
+    var amt = parseFloat(amtStr.replace(',','.'));
+    if(isNaN(amt)) errors.push('Invalid amount');
+    else if(amt <= 0) errors.push('Amount must be > 0');
+    if(addr && seen[addr.toLowerCase()]) errors.push('Duplicate address');
+
+    if(errors.length){
+      result.invalid.push({ line: i + 1, address: addr, amount: amtStr, note: note, errors: errors });
+    } else {
+      seen[addr.toLowerCase()] = true;
+      result.recipients.push({ addr: addr, amount: amt, note: note });
+      result.total += amt;
+      result.validCount++;
+    }
+    result.count++;
+  }
+
+  var dupeCheck = {};
+  for(var r = 0; r < result.recipients.length; r++){
+    var key = result.recipients[r].addr.toLowerCase();
+    if(dupeCheck[key]) result.dupes.push(result.recipients[r]);
+    dupeCheck[key] = true;
+  }
+
+  return result;
+}
+
+function schCsvRenderSummary(result){
+  var summary = document.getElementById('sch-csv-summary');
+  if(!summary) return;
+  summary.style.display = '';
+  var setEl = function(id, v){ var el = document.getElementById(id); if(el) el.textContent = v; };
+  setEl('sch-csv-count', result.validCount);
+  setEl('sch-csv-valid', result.validCount);
+  setEl('sch-csv-invalid', result.invalid.length);
+  setEl('sch-csv-dupes', result.dupes.length);
+  var tokenEl = document.getElementById('sch-token');
+  var token = tokenEl ? tokenEl.value : 'USDC';
+  setEl('sch-csv-token', token);
+  setEl('sch-csv-total', result.total.toFixed(2) + ' ' + token);
+
+  // Render details table
+  var detailsBody = document.getElementById('sch-csv-details-body');
+  if(detailsBody){
+    detailsBody.innerHTML = result.recipients.map(function(r, i){
+      return '<tr style="border-bottom:1px solid rgba(255,255,255,.03)"><td style="padding:2px 4px;color:var(--muted2)">' + (i+1) + '</td><td style="padding:2px 4px;color:#a78bfa">' + r.addr.slice(0,8) + '...' + r.addr.slice(-6) + '</td><td style="padding:2px 4px;color:var(--green);text-align:right">' + r.amount.toFixed(2) + '</td><td style="padding:2px 4px;color:var(--text)">' + (r.note || '—') + '</td></tr>';
+    }).join('');
+  }
+}
+
+function schCsvFillRecipients(result){
+  var textarea = document.getElementById('sch-recipients');
+  if(!textarea) return;
+  var lines = result.recipients.map(function(r){
+    return r.addr + ', ' + r.amount.toFixed(2) + (r.note ? ', ' + r.note : '');
+  });
+  textarea.value = lines.join('\n');
+  textarea.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+function schCsvToggleDetails(){
+  var details = document.getElementById('sch-csv-details');
+  if(details) details.style.display = details.style.display === 'none' ? '' : 'none';
+}
+
+function schCsvClear(){
+  schCsvData = null;
+  var summary = document.getElementById('sch-csv-summary');
+  if(summary) summary.style.display = 'none';
+  var fileEl = document.getElementById('sch-csv-file');
+  if(fileEl) fileEl.value = '';
+  var nameEl = document.getElementById('sch-csv-file-name');
+  if(nameEl) nameEl.textContent = '';
+  var textarea = document.getElementById('sch-recipients');
+  if(textarea) textarea.value = '';
 }
 
 function scheduleSubmit(){
@@ -38006,6 +38181,85 @@ const UBScreen = (function() {
     return html;
   }
 
+  // ── MultiSend line parser — extracts recipients from raw address lists ──
+  function _parseMultiSendLines(msg){
+    var lines = msg.split(/[\r\n]+/).filter(function(l){ return l.trim(); });
+    var recipients = [];
+    var detectedTokens = {};
+    var globalToken = null;
+
+    // First pass: detect global token
+    var tokenRe = /\b(usdc|eurc|cirbtc|eth)\b/gi;
+    var allTokens = [];
+    var m;
+    while ((m = tokenRe.exec(msg)) !== null) { allTokens.push(m[1].toUpperCase()); }
+    if (allTokens.length > 2) {
+      // Count most frequent token as global
+      var freq = {};
+      allTokens.forEach(function(t){ freq[t] = (freq[t] || 0) + 1; });
+      var best = null, bestN = 0;
+      Object.keys(freq).forEach(function(k){ if (freq[k] > bestN){ bestN = freq[k]; best = k; } });
+      globalToken = best;
+    }
+
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i].trim();
+      if (!line) continue;
+
+      // Find address in this line
+      var addrM = line.match(/0x[a-fA-F0-9]{40}/);
+      if (!addrM) continue;
+      var addr = addrM[0];
+
+      // Find all numbers in the line
+      var nums = line.match(/\d+(?:\.\d+)?/g);
+      var amount = 0;
+      if (nums && nums.length >= 1) {
+        // Amount is typically the first or second number after the address
+        var addrIdx = line.indexOf(addr) + addr.length;
+        var afterAddr = line.substring(addrIdx);
+        var amtM = afterAddr.match(/(\d+(?:\.\d+)?)/);
+        if (amtM) amount = parseFloat(amtM[1]);
+        else if (nums.length >= 2) amount = parseFloat(nums[1]);
+        else if (nums.length === 1) amount = parseFloat(nums[0]);
+      }
+
+      // Detect token in this line
+      var lineToken = null;
+      var tM = line.match(/\b(usdc|eurc|cirbtc|eth)\b/i);
+      if (tM) { lineToken = tM[1].toUpperCase(); if (lineToken === 'CIRBTC') lineToken = 'cirBTC'; }
+      if (lineToken) detectedTokens[lineToken] = (detectedTokens[lineToken] || 0) + 1;
+
+      // Detect memo/note (everything after address, amount, token)
+      var memo = '';
+      var cleanLine = line.replace(addrM[0], '').replace(/\d+(?:\.\d+)?/g, '').replace(/\b(usdc|eurc|cirbtc|eth)\b/gi, '');
+      memo = cleanLine.replace(/^[\s,;:|\-~>]+|[\s,;:|\-~>]+$/g, '').trim();
+      if (!memo || memo.length < 2) {
+        // Try grabbing text between commas as memo
+        var parts = line.split(',');
+        for (var p = 3; p < parts.length; p++) {
+          var part = parts[p].trim();
+          if (part && !/^\d/.test(part) && !/^(usdc|eurc|cirbtc|eth)$/i.test(part) && part.length > 1) {
+            memo = part; break;
+          }
+        }
+      }
+
+      if (addr && amount > 0) {
+        recipients.push({ addr: addr, amount: amount, memo: memo, lineToken: lineToken });
+      }
+    }
+
+    // Resolve token: most frequent per-line token, or global token
+    var finalToken = globalToken;
+    var bestTok = null, bestTokN = 0;
+    Object.keys(detectedTokens).forEach(function(k){ if (detectedTokens[k] > bestTokN){ bestTokN = detectedTokens[k]; bestTok = k; } });
+    if (bestTok) finalToken = bestTok;
+    if (!finalToken) finalToken = 'USDC';
+
+    return { recipients: recipients, token: finalToken, total: recipients.reduce(function(s,r){ return s+r.amount; }, 0) };
+  }
+
   // ── Enhanced Intent Classifier ───────────────────────
   // Returns { intent, confidence, params }
   function _classifyIntent(msg){
@@ -38051,8 +38305,8 @@ const UBScreen = (function() {
       {intent:'MULTI_STEP_WORKFLOW', en:/\b(pay\s+supplier|pagar\s+fornecedor|multi[ -]?step|complete\s+payment|full\s+workflow|pay\s+and\s+bridge|pay\s+and\s+swap)\b/,
         pt:/\b(pagar\s+fornecedor|pagamento\s+completo|fluxo\s+completo|workflow\s+completo)\b/},
       // 9. QUERY / SEND PAYMENT
-      {intent:'SEND_PAYMENT', en:/\b(send|transfer|pay|payment|enviar|pagar)\b.*\b(to|para|destino|0x)\b/,
-        pt:/\b(envia[rd]?|manda[rd]?|pag[ae]r?|transfer[ei]r?)\b.*\b(para|ao|a |0x|endere[cç]o)\b/},
+      {intent:'SEND_PAYMENT', en:/\b(send|transfer|pay|payment|enviar|paga[dr]?)\b.*\b(to|para|destino|0x)\b/,
+        pt:/\b(envia[rd]?|manda[rd]?|pag[ae]r?|transfer[ei]r?)\b.*\b(para|p(?:ara|ro)|ao?|[àa] |0x|endere[cç]o)\b/},
       // 9. ADD LIQUIDITY
       {intent:'ADD_LIQUIDITY', en:/\b(add|adicionar|colocar)\b.*\b(liquidity|liquidez|pool|lp)\b/},
       // 10. REMOVE LIQUIDITY
@@ -38153,6 +38407,13 @@ const UBScreen = (function() {
     if(!p.token && intent==='CREATE_PAYMENT_LINK' && (low.includes('euro')||low.includes('eur'))) p.token='EURC';
     // Recipient address
     const addrM=msg.match(/0x[a-fA-F0-9]{40}/); if(addrM) p.address=addrM[0];
+    // Contact name resolution — resolve saved recipients by name
+    if(!p.address && typeof RecipientResolver !== 'undefined'){
+      try {
+        var _rcpt = RecipientResolver.extractFromMessage(msg);
+        if(_rcpt && _rcpt.address && !_rcpt.multiple){ p.address = _rcpt.address; p.recipientName = _rcpt.name; p._resolvedContact = true; }
+      } catch(_rcptEx){}
+    }
     // Chain/Network
     const chains=['arc','ethereum','sepolia','base','arbitrum','optimism','polygon','amoy'];
     for(const c of chains){ const re=new RegExp('\\b'+c+'\\b','i'); if(re.test(msg)){ const fc=_fuzzyChain(c); if(fc) p.chain=fc; break;} }
@@ -38281,6 +38542,63 @@ const UBScreen = (function() {
                 {icon:'x',label:'Cancel',cls:'danger',action:"autonomaSendQuick('cancel')"}
               ));
         }
+      }
+    }
+
+    // ── MultiSend Intent Detection ──
+    //  Detects raw address lists, CSV-like formats, 2+ recipients BEFORE
+    //  single-payment classifier. Builds a MultiSend approval card directly.
+    var _msAddrList = msg.match(/0x[a-fA-F0-9]{40}/g);
+    if (_msAddrList && _msAddrList.length >= 2 && !/\b(bridge|ponte|swap|troc|cross[ -]?chain|schedule|agendar|invoice|fatura|link de pagamento)\b/i.test(low)) {
+      var _msParsed = _parseMultiSendLines(msg);
+      if (_msParsed && _msParsed.recipients && _msParsed.recipients.length >= 2) {
+        var _msTotal = _msParsed.recipients.reduce(function(s,r){ return s + r.amount; }, 0);
+        var _msToken = _msParsed.token || 'USDC';
+        var _msCanExec = _agentCanExecute('multisend');
+        var _msCount = _msParsed.recipients.length;
+
+        // Recipient preview rows (show first 10)
+        var _msRows = _msParsed.recipients.slice(0, 10).map(function(r, i){
+          var short = r.addr.slice(0,8) + '...' + r.addr.slice(-6);
+          return '<tr style="border-bottom:1px solid rgba(255,255,255,.03)"><td style="padding:3px 6px;color:var(--muted2);font-size:9px">'+(i+1)+'</td><td style="padding:3px 6px;color:#a78bfa;font-size:9px"><code>'+short+'</code></td><td style="padding:3px 6px;color:var(--green);text-align:right;font-size:9px;font-weight:600">'+r.amount.toFixed(2)+' '+_msToken+'</td><td style="padding:3px 6px;color:var(--text);font-size:9px">'+(r.memo ? esc(r.memo.slice(0,30)) : '—')+'</td></tr>';
+        }).join('');
+        if (_msCount > 10) _msRows += '<tr><td colspan="4" style="padding:3px 6px;color:var(--muted2);font-size:8.5px;text-align:center">... and ' + (_msCount - 10) + ' more recipients</td></tr>';
+
+        // Batch strategy
+        var _msBatches = Math.ceil(_msCount / 50);
+        var _msBatchText = _msBatches === 1 ? 'Single batch ('+_msCount+' recipients)' : _msBatches+' batches (max 50 per batch)';
+
+        // Build payload for executor
+        var _msPayload = JSON.stringify({
+          token: _msToken,
+          recipients: _msParsed.recipients.map(function(r){ return r.addr; }),
+          amounts: _msParsed.recipients.map(function(r){ return r.amount; }),
+          memos: _msParsed.recipients.map(function(r){ return r.memo || ''; })
+        });
+
+        var _msExecAction = _msCanExec
+          ? ("_agentExecuteOp('multisend'," + _msTotal + ",'" + _msToken + "'," + _msPayload + ")")
+          : "autonomaSendQuick('allow agent to send payments')";
+
+        return R.intro('I detected a <strong style="color:#a78bfa">MultiSend operation</strong> with <strong>'+_msCount+' recipients</strong> — total <strong style="color:#22c55e">'+_msTotal.toFixed(2)+' '+_msToken+'</strong>.') +
+          R.card(R.head('stack','MultiSend Detected',{text:_msCount+' recipients',cls:'live'}),
+            '<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;font-size:9.5px;margin-bottom:8px">' +
+            '<span style="color:var(--muted2)">Recipients:</span><span style="color:var(--text)">'+_msCount+'</span>' +
+            '<span style="color:var(--muted2)">Token:</span><span style="color:var(--text)">'+_msToken+'</span>' +
+            '<span style="color:var(--muted2)">Total Amount:</span><span style="color:var(--green);font-weight:600">'+_msTotal.toFixed(2)+' '+_msToken+'</span>' +
+            '<span style="color:var(--muted2)">Execution:</span><span style="color:#a78bfa">MultiSend · Agent Wallet</span>' +
+            '<span style="color:var(--muted2)">Strategy:</span><span style="color:var(--text)">'+_msBatchText+'</span>' +
+            '</div>' +
+            '<div class="aut-rc-sep"></div>' +
+            (R.section ? R.section('Recipient List') : '<div style="font-size:9.5px;color:var(--muted2);margin-bottom:4px">Recipient List</div>') +
+            '<div style="max-height:220px;overflow-y:auto"><table style="width:100%;font-size:9px;border-collapse:collapse"><thead><tr style="color:var(--muted2);border-bottom:1px solid var(--border)"><th style="text-align:left;padding:2px 6px">#</th><th style="text-align:left;padding:2px 6px">Address</th><th style="text-align:right;padding:2px 6px">Amount</th><th style="text-align:left;padding:2px 6px">Memo</th></tr></thead><tbody>'+_msRows+'</tbody></table></div>',
+            R.actions(
+              (_msCanExec
+                ? {icon:'robot',label:'Execute via Agent',cls:'confirm',action:_msExecAction}
+                : {icon:'shield-check',label:'Grant Agent Permission',cls:'primary',action:_msExecAction}),
+              {icon:'stack',label:'Open Batch Page',cls:'',action:"showPage('batch')"},
+              {icon:'x',label:'Cancel',cls:'danger',action:"autonomaSendQuick('cancel')"}
+            ));
       }
     }
 
