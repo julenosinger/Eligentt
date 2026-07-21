@@ -59,6 +59,7 @@
 <script src="/shared/executionPlanner.js"></script>
 <script src="/shared/aiRecommendations.js"></script>
 <script src="/shared/autonomaCore.js"></script>
+<script src="/shared/autonomaDocumentIntelligence.js"></script>
 <script src="/shared/rpcManager.js"></script>
 <script src="/shared/chainSimulator.js"></script>
 <script src="/shared/poolAbiDiscovery.js"></script>
@@ -10044,6 +10045,10 @@ select.cinput option { background: #161a24; color: #dde2f0; }
                   <div class="aut-card-title"><i class="ti ti-help-circle"></i> How to Use</div>
                   <div class="aut-card-desc">Agent wallet · prompts · funding.</div>
                 </div>
+                <div class="aut-card" onclick="document.getElementById('aut-csv-input').click()">
+                  <div class="aut-card-title"><i class="ti ti-file-upload"></i> Financial Docs</div>
+                  <div class="aut-card-desc">Upload CSV, XLSX, JSON — I'll process them intelligently.</div>
+                </div>
                 <div class="aut-card" onclick="autonomaSendQuick('show permissions')">
                   <div class="aut-card-title"><i class="ti ti-shield-lock"></i> Permissions</div>
                   <div class="aut-card-desc">Manage active permits and allowances.</div>
@@ -10053,8 +10058,8 @@ select.cinput option { background: #161a24; color: #dde2f0; }
           </div>
           <div class="aut-input-area">
             <div class="aut-listening-hint" id="aut-listening-hint" role="status" aria-live="polite"><span class="dot"></span>Listening…</div>
-            <input type="file" id="aut-csv-input" accept=".csv,.txt" style="display:none" onchange="autonomaHandleCSV(this)"/>
-            <button class="aut-send-btn" onclick="document.getElementById('aut-csv-input').click()" title="Upload CSV" aria-label="Upload CSV file" style="background:rgba(167,139,250,.12);border-color:rgba(167,139,250,.25);color:#a78bfa"><i class="ti ti-file-upload"></i></button>
+            <input type="file" id="aut-csv-input" accept=".csv,.xlsx,.xls,.txt,.json" style="display:none" onchange="autonomaHandleFile(this)"/>
+            <button class="aut-send-btn" onclick="document.getElementById('aut-csv-input').click()" title="Upload Financial File (CSV, XLSX, TXT, JSON)" aria-label="Upload financial file" style="background:rgba(167,139,250,.12);border-color:rgba(167,139,250,.25);color:#a78bfa"><i class="ti ti-file-upload"></i></button>
             <textarea class="aut-input" id="aut-input" placeholder="Type or speak your request..." rows="1" aria-label="Message Autonoma" aria-multiline="true" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();autonomaSend()}"></textarea>
             <button class="aut-send-btn aut-mic-btn" id="aut-mic-btn" type="button" title="Voice input" aria-label="Start voice input"><i class="ti ti-microphone"></i></button>
             <button class="aut-send-btn" onclick="autonomaSend()" title="Send" aria-label="Send message"><i class="ti ti-send"></i></button>
@@ -37784,11 +37789,38 @@ const UBScreen = (function() {
       }
     },500+Math.random()*600);
   };
+  window.autonomaHandleFile = function(input) {
+    const file=input.files[0]; if(!file) return;
+    const name=file.name||'';
+    const isXlsx=/\.xlsx?$/i.test(name);
+    const isJson=/\.json$/i.test(name);
+    const reader=new FileReader();
+    reader.onload=function(e){
+      input.value='';
+      var data=e.target.result;
+      var isBinary=isXlsx;
+      if(typeof AutonomaDocIntel === 'undefined'){ autonomaHandleCSV_legacy(input,file,e); return; }
+      var result=AutonomaDocIntel.parseFile(name, data, isBinary, '');
+      if(result.success){ autRenderDocSummary(result); }
+      else { autUI('ai',R.intro('Could not process this file.')+R.card(R.head('alert-triangle','Parse Error'),R.row('Error',result.error||'Unknown error','red')+(result.errors&&result.errors.length?R.sep()+R.section('Details')+'<div style="font-size:8.5px;color:var(--muted2)">'+result.errors.slice(0,5).join('<br>')+'</div>':''))); }
+    };
+    if(isXlsx) reader.readAsArrayBuffer(file);
+    else if(isJson) reader.readAsText(file);
+    else reader.readAsText(file);
+  };
+  window.autonomaHandleCSV_legacy = function(input, file, e) {
+    input.value=''; autonomaSendQuick('[CSV] '+file.name+'\n'+e.target.result);
+  };
   window.autonomaHandleCSV = function(input) {
     const file=input.files[0]; if(!file) return;
     const reader=new FileReader();
-    reader.onload=e=>{ input.value=''; autonomaSendQuick('[CSV] '+file.name+'\n'+e.target.result); };
-    reader.readAsText(file);
+    if(typeof AutonomaDocIntel !== 'undefined'){
+      reader.onload=function(e){ input.value=''; var r=AutonomaDocIntel.parseFile(file.name,e.target.result,false,''); if(r.success)autRenderDocSummary(r); else autUI('ai',R.intro(r.error||'Parse failed.')); };
+      reader.readAsText(file);
+    } else {
+      reader.onload=function(e){ input.value=''; autonomaSendQuick('[CSV] '+file.name+'\n'+e.target.result); };
+      reader.readAsText(file);
+    }
   };
   window.autConfirmOp = function(oid) { const op=autPendingOps[oid]; if(!op) return; delete autPendingOps[oid]; try{op.execute();}catch(e){} };
   window.autCancelOp = function(oid) { delete autPendingOps[oid]; autUI('ai','<div class="aut-intro" style="color:var(--muted2)"><i class="ti ti-x" style="margin-right:4px"></i>Operation cancelled.</div>'); };
@@ -38523,6 +38555,34 @@ const UBScreen = (function() {
     }catch(e){}
 
     const low=msg.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+
+    // ── Financial Document Intelligence ──
+    if(typeof AutonomaDocIntel !== 'undefined'){
+      var docCmd = AutonomaDocIntel.detectDocumentCommand(msg);
+      if(docCmd && autDocData && autDocData.rows){
+        // User has a document loaded and is giving a command — execute it
+        if(docCmd.action === 'schedule' || docCmd.action === 'recurring'){ autDocExecute(docCmd.action); return; }
+        if(docCmd.action === 'execute'){ autDocExecute('execute'); return; }
+        if(docCmd.bridge){ autDocExecute('crosschain'); return; }
+        if(docCmd.swap){ autDocExecute('swap_pay'); return; }
+        if(docCmd.action === 'workflow'){ autDocExecute('workflow'); return; }
+      }
+      if(docCmd && !autDocData){
+        // User is asking about file operations but no file loaded — prompt upload
+        return R.intro('I can process financial documents (CSV, XLSX, TXT, JSON). Upload a file and I\'ll analyze it automatically.') +
+          R.card(R.head('file-upload','Financial Document Intelligence'),
+            R.row('Supported','CSV, XLSX, TXT, JSON','teal') +
+            R.section('Examples') +
+            '<div style="font-size:9.5px;color:var(--muted2);line-height:1.8">' +
+            '<div><strong style="color:#06F7E9">Upload payroll.csv</strong> — I\'ll auto-detect payments, tokens, chains</div>' +
+            '<div><strong style="color:#06F7E9">Upload and pay everyone now</strong> — instant execution</div>' +
+            '<div><strong style="color:#06F7E9">Upload and schedule for Friday</strong> — scheduled payments</div>' +
+            '<div><strong style="color:#06F7E9">Upload and send all to Arbitrum</strong> — crosschain payments</div>' +
+            '</div>',
+            R.actions({icon:'file-upload',label:'Upload Financial File',cls:'primary',action:"document.getElementById('aut-csv-input').click()"})
+          );
+      }
+    }
 
     // CSV detection (preserved)
     if(low.startsWith('[csv]')) return autProcessCSV(msg);
@@ -40459,6 +40519,168 @@ const UBScreen = (function() {
         )
       );
   }
+
+  // ════════════════════════════════════════
+  //  FINANCIAL DOCUMENT INTELLIGENCE RENDERER
+  // ════════════════════════════════════════
+  var autDocData = null; // current parsed document in session
+
+  function autRenderDocSummary(result) {
+    autDocData = result;
+    var s = result.summary;
+    var c = result.classification;
+    var items = result.rows.slice(0, 5);
+    var more = result.rows.length > 5 ? result.rows.length - 5 : 0;
+
+    var tokenHtml = s.tokenSummary.map(function(t){
+      return '<div class="aut-tk"><div class="aut-tk-icon" style="background:rgba(167,139,250,.15);border:1px solid rgba(167,139,250,.25);color:#a78bfa">' + t.token.slice(0,2) + '</div><div class="aut-tk-info"><div class="aut-tk-sym">' + t.token + '</div><div class="aut-tk-name">' + t.count + ' payment(s)</div></div><div class="aut-tk-bal"><div class="aut-tk-amt">' + t.amount.toLocaleString('en-US',{maximumFractionDigits:2}) + '</div><div class="aut-tk-usd">Total</div></div></div>';
+    }).join('');
+
+    var entryHtml = items.map(function(r,i){
+      var chainName = r._chain.replace('_',' ');
+      return '<tr style="border-bottom:1px solid rgba(255,255,255,.03)"><td style="padding:2px 4px;font-size:8.5px;color:var(--muted2)">'+(i+1)+'</td><td style="padding:2px 4px;font-size:8.5px;color:#a78bfa">'+r.address.slice(0,6)+'...'+r.address.slice(-4)+'</td><td style="padding:2px 4px;font-size:8.5px;color:var(--green);text-align:right">'+r._amount.toFixed(2)+'</td><td style="padding:2px 4px;font-size:8.5px">'+r._token+'</td><td style="padding:2px 4px;font-size:8.5px;color:var(--muted2)">'+chainName+'</td></tr>';
+    }).join('');
+
+    var validLabel = s.totalPayments + ' payments';
+    var validCls = 'green';
+    var errorSection = '';
+    if (s.errors && s.errors.length) {
+      validCls = 'yellow';
+      errorSection = R.sep() + R.section('Warnings') + '<div style="font-size:8.5px;color:var(--yellow)">'+s.errors.slice(0,5).join('<br>')+'</div>';
+    }
+
+    var modeLabel = c.mode === 'recurring' ? 'Recurring Schedule' : c.mode === 'scheduled' ? 'Scheduled' : c.mode === 'crosschain' ? 'Crosschain' : c.mode === 'swap_and_pay' ? 'Swap + Pay' : c.mode === 'workflow_payroll' ? 'Payroll Workflow' : 'Instant Payment';
+    var modeIcon = c.mode === 'recurring' ? 'repeat' : c.mode === 'scheduled' ? 'calendar-event' : c.mode === 'crosschain' ? 'arrows-cross' : c.mode === 'swap_and_pay' ? 'arrows-exchange' : c.mode === 'workflow_payroll' ? 'workflow' : 'bolt';
+
+    var planHtml = '';
+    var plan = result.plan;
+    if (plan && plan.steps) {
+      planHtml = R.sep() + R.section('Execution Plan') +
+        '<div style="font-size:9px;line-height:2">' +
+        plan.steps.map(function(st,idx){
+          return '<div style="display:flex;align-items:center;gap:6px"><span style="color:var(--muted2);min-width:16px">'+(idx+1)+'.</span><span style="color:var(--purple)">'+st.module+'</span><span style="color:var(--muted2)">'+st.desc+'</span></div>';
+        }).join('') + '</div>';
+    }
+
+    autUI('ai',
+      R.intro('Document parsed successfully. Here\'s what I found:') +
+      R.card(
+        R.head('file-upload','Financial Document Analysis',{text:modeLabel,cls:'live'}),
+        R.row('File Type',String(result.type||'—').toUpperCase(),'teal') +
+        R.row('Valid Entries',validLabel,validCls) +
+        R.row('Total Value',s.totalAmount.toLocaleString('en-US',{maximumFractionDigits:2}),'green') +
+        R.row('Suggested Mode', '<i class="ti ti-'+modeIcon+'" style="margin-right:3px;font-size:9px"></i>'+modeLabel, 'purple') +
+        R.sep() + R.section('Token Breakdown') + tokenHtml + errorSection +
+        (items.length ? R.sep() + R.section('Preview ('+(items.length+more)+' entries)') + '<table style="width:100%;font-size:8.5px;border-collapse:collapse">' + entryHtml + (more > 0 ? '<tr><td colspan="5" style="padding:4px;text-align:center;color:var(--muted2);font-size:8.5px">+ '+more+' more entries...</td></tr>' : '') + '</table>' : '') +
+        planHtml,
+        R.actions(
+          {icon:'bolt',label:'Execute Now',cls:'primary',action:"autDocExecute('execute')"},
+          {icon:'calendar-event',label:'Schedule',cls:'',action:"autDocExecute('schedule')"},
+          {icon:'repeat',label:'Recurring',cls:'',action:"autDocExecute('recurring')"},
+          c.isCrosschain ? {icon:'arrows-cross',label:'Crosschain',cls:'',action:"autDocExecute('crosschain')"} : null,
+          c.isMultiToken ? {icon:'arrows-exchange',label:'Swap & Pay',cls:'',action:"autDocExecute('swap_pay')"} : null,
+          {icon:'workflow',label:'Payroll',cls:'',action:"autDocExecute('workflow')"}
+        ).replace(/null/g,'')
+      )
+    );
+  }
+
+  window.autDocExecute = function(mode) {
+    if(!autDocData){ autUI('ai',R.intro('No document data loaded.')); return; }
+    var rows = autDocData.rows;
+    var total = autDocData.summary.totalAmount;
+
+    if(mode === 'schedule' || mode === 'recurring'){
+      if(typeof ScheduleEngine === 'undefined'){ autUI('ai',R.intro('ScheduleEngine unavailable.')); return; }
+      var created = 0;
+      rows.forEach(function(r){
+        try {
+          ScheduleEngine.create({
+            type: 'payment', name: (r.note||'Doc Payment')+' to '+r.address.slice(0,6)+'...', token: r._token,
+            amount: r._amount, total: r._amount,
+            network: r._chain, fromNetwork: 'Arc_Testnet', toNetwork: r._chain,
+            recipients: [{ addr: r.address, amount: r._amount, note: r.note||'', chainId: r._chain, token: r._token }],
+            address: r.address,
+            freq: mode === 'recurring' ? 'monthly' : 'once', maxEx: mode === 'recurring' ? 0 : 1, gas: 0.10,
+            nextRun: new Date(Date.now() + 60000).toISOString(),
+            execCount: 0, executionHistory: [],
+            status: 'Active', created: new Date().toISOString(), createdBy: 'autonoma_doc',
+            agentExecution: true, walletAddress: (typeof walletAddress !== 'undefined' ? walletAddress : '')
+          });
+          created++;
+        } catch(e){}
+      });
+      try { schedules = ScheduleEngine.getAll(); if(typeof renderSchedules === 'function') renderSchedules(); } catch(e){}
+      try { if(typeof AgentScheduleExecutor !== 'undefined') AgentScheduleExecutor.start(); } catch(e){}
+      autUI('ai',
+        R.intro(mode === 'recurring' ? 'Created ' + created + ' recurring schedules.' : 'Scheduled ' + created + ' payments for execution.') +
+        R.card(R.head('check','Operation Complete'),
+          R.row('Payments',created + '/' + rows.length,'green') +
+          R.row('Mode',mode === 'recurring'?'Recurring Monthly':'One-Time Scheduled','purple') +
+          R.row('Total',total.toLocaleString('en-US',{maximumFractionDigits:2}),'green'),
+          R.actions({icon:'external-link',label:'View Schedules',cls:'primary',action:"showPage('schedule')"})
+        )
+      );
+      return;
+    }
+
+    if(mode === 'crosschain'){
+      if(typeof window !== 'undefined' && typeof window._agentExecuteBridge === 'function'){
+        var bridged = 0;
+        rows.forEach(function(r){
+          try {
+            var domain = {Base_Sepolia:6,Arbitrum_Sepolia:3,Ethereum_Sepolia:0,Optimism_Sepolia:2,Polygon_Amoy:7}[r._chain]||6;
+            window._agentExecuteBridge(r._amount,domain,r._chain.replace('_',' '),'doc_xc_'+Date.now(),5042002,r.address);
+            bridged++;
+          } catch(e){}
+        });
+        autUI('ai',
+          R.intro('Initiated ' + bridged + ' crosschain bridge operations.') +
+          R.card(R.head('arrows-cross','Crosschain Bridge'),
+            R.row('Operations',bridged+'/'+rows.length,'green')+
+            R.row('Total',total.toLocaleString('en-US',{maximumFractionDigits:2}),'green'),
+            R.actions({icon:'external-link',label:'View Bridge',cls:'primary',action:"showPage('bridge')"})
+          )
+        );
+      } else {
+        autUI('ai',R.intro('Crosschain engine unavailable. Please open the Bridge page manually.'));
+      }
+      return;
+    }
+
+    if(mode === 'execute' || mode === 'swap_pay' || mode === 'workflow'){
+      if(typeof AIWallet === 'undefined' || !AIWallet.submitIntent){
+        autUI('ai',R.intro('AI Smart Wallet unavailable. Please connect your wallet and try again.'));
+        return;
+      }
+      var dispatched = 0;
+      rows.forEach(function(r){
+        try {
+          AIWallet.submitIntent({
+            op: 'payment', name: (r.note||'Doc Payment'), amount: r._amount,
+            token: r._token, to: r.address, network: r._chain, freq: 'once',
+            source: 'autonoma_doc'
+          });
+          dispatched++;
+        } catch(e){}
+      });
+      try { if(AIWallet.renderExecutions) AIWallet.renderExecutions(); } catch(e){}
+      autUI('ai',
+        R.intro('Dispatched ' + dispatched + ' payments to AI Smart Wallet for ' + (mode === 'workflow' ? 'workflow' : mode === 'swap_pay' ? 'swap+pay' : 'instant') + ' execution.') +
+        R.card(R.head('bolt','Payments Dispatched'),
+          R.row('Payments',dispatched + '/' + rows.length,'green') +
+          R.row('Mode',mode === 'workflow' ? 'Payroll Workflow' : mode === 'swap_pay' ? 'Swap & Pay' : 'Instant','purple') +
+          R.row('Total Value',total.toLocaleString('en-US',{maximumFractionDigits:2}),'green'),
+          R.actions(
+            {icon:'wallet',label:'Open AI Smart Wallet',cls:'primary',action:"showPage('aiwallet')"},
+            {icon:'external-link',label:'View Schedule',cls:'',action:"showPage('schedule')"}
+          )
+        )
+      );
+      return;
+    }
+  };
+
   function autBatchGuide() {
     return R.intro('I can process batch payments from CSV files or natural language.') +
       R.card(R.head('file-upload','CSV Batch Payments'),
@@ -40515,6 +40737,7 @@ const UBScreen = (function() {
         '<div><i class="ti ti-file-invoice" style="color:#a78bfa;margin-right:6px;width:14px;display:inline-block;text-align:center"></i> <strong>Invoices</strong> <span style="color:var(--muted)">— "Crie uma fatura" / "Generate an invoice"</span></div>'+
         '<div><i class="ti ti-send" style="color:#4f8ef7;margin-right:6px;width:14px;display:inline-block;text-align:center"></i> <strong>Send</strong> <span style="color:var(--muted)">— "Send 50 USDC to 0x..."</span></div>'+
         '<div><i class="ti ti-file-upload" style="color:#a78bfa;margin-right:6px;width:14px;display:inline-block;text-align:center"></i> <strong>CSV Batch</strong> <span style="color:var(--muted)">— upload CSV for multi-send</span></div>'+
+        '<div><i class="ti ti-file-upload" style="color:#a78bfa;margin-right:6px;width:14px;display:inline-block;text-align:center"></i> <strong>Financial Docs</strong> <span style="color:var(--muted)">— upload CSV/XLSX/JSON files for intelligent processing</span></div>'+
         '<div><i class="ti ti-droplet" style="color:#2dd4bf;margin-right:6px;width:14px;display:inline-block;text-align:center"></i> <strong>Liquidity</strong> <span style="color:var(--muted)">— add/remove, check positions</span></div>'+
         '<div><i class="ti ti-vault" style="color:#7b9ef7;margin-right:6px;width:14px;display:inline-block;text-align:center"></i> <strong>Treasury</strong> <span style="color:var(--muted)">— vault information</span></div>'+
         '<div><i class="ti ti-history" style="color:#22c55e;margin-right:6px;width:14px;display:inline-block;text-align:center"></i> <strong>History</strong> <span style="color:var(--muted)">— recent transactions</span></div>'+

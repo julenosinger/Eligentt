@@ -57,7 +57,9 @@
     // Advanced Financial Operations (batch swap + mass payments)
     batch_swap: { aliases: ['batch swap','swap multiple','multiple swaps','batch de swap','swap batch','swap repeatedly','repeat swap','swaps in batch','trocas em lote','multi swap','executar swaps','execute swaps','executar varias trocas','varios swaps','várias trocas','swaps','trocar varias vezes'], goal: 'batch_swap', module: 'swap' },
     mass_payment: { aliases: ['mass payment','batch payment','mass send','payroll batch','batch of payments','lote de pagamentos','pagamento em massa','enviar em lote','pagamento em lote','send multiple payments','multiple payments','varios pagamentos','vários pagamentos','batch de pagamentos','mass pay','muitos pagamentos'], goal: 'mass_payment', module: null },
-    crosschain_payroll: { aliases: ['cross chain payroll','crosschain payroll','batch cross chain','cross chain batch','payroll cross chain','folha cross chain','pagamentos cross chain','cross chain mass','mass cross chain','bridge batch','batch bridge','enviar em massa cross','crosschain em massa'], goal: 'crosschain_payroll', module: null }
+    crosschain_payroll: { aliases: ['cross chain payroll','crosschain payroll','batch cross chain','cross chain batch','payroll cross chain','folha cross chain','pagamentos cross chain','cross chain mass','mass cross chain','bridge batch','batch bridge','enviar em massa cross','crosschain em massa'], goal: 'crosschain_payroll', module: null },
+    // Financial Document Intelligence
+    document_intelligence: { aliases: ['upload payroll','upload csv','upload file','upload xlsx','upload json','pay everyone','pagar todos','pay all','enviar todos','send all','process payroll','processar folha','process file','processar arquivo','salary payment','pagamento de salario','pagamento de salário','employee payment','pagamento funcionario','supplier payment','pagamento fornecedor','batch from file','lote do arquivo','read csv','read file','ler arquivo','import payments','importar pagamentos','financial document','documento financeiro','execute payroll','executar folha','schedule payroll','agendar folha'], goal: 'document_intelligence', module: 'document' }
   };
 
   /* ════════════════════════════════════════
@@ -357,7 +359,9 @@
       // Advanced Financial Operations
       batch_swap: 'BATCH_SWAP',
       mass_payment: 'MASS_PAYMENT',
-      crosschain_payroll: 'CROSSCHAIN_PAYROLL'
+      crosschain_payroll: 'CROSSCHAIN_PAYROLL',
+      // Financial Document Intelligence
+      document_intelligence: 'DOCUMENT_INTELLIGENCE'
     };
     return map[goal] || 'DEFAULT';
   }
