@@ -213,6 +213,12 @@
   function getProvider() {
     if (typeof ethers === 'undefined') return null;
     try {
+      if (typeof AgentWalletManager !== 'undefined' && AgentWalletManager.getAgentProvider) {
+        var agentProv = AgentWalletManager.getAgentProvider();
+        if (agentProv) return agentProv;
+      }
+    } catch (_e) { /* ignore */ }
+    try {
       if (typeof RPCManager !== 'undefined' && RPCManager.getHealthyRPC) {
         var r = RPCManager.getCurrentProvider();
         if (r) return r;
@@ -428,31 +434,35 @@
     return { valid: checks.every(function (c) { return c.passed; }), checks: checks };
   }
 
-  async function tokenBalance(addr, token) {
+  async function tokenBalance(addr, token, retryCount) {
+    var maxRetries = retryCount !== undefined ? retryCount : 1;
     try {
       if (!addr || typeof ethers === 'undefined') return null;
       var meta = arcTokens()[token];
       if (!meta || !meta.address) return null;
-      // Short-lived dedup cache — avoids duplicate RPC calls within same batch
       var dedupKey = String(addr).toLowerCase() + ':' + token;
       var cached = balanceDedup[dedupKey];
       if (cached && (Date.now() - cached.at) < 15000 && cached.val !== null) return cached.val;
+      if (cached && cached._promise && (Date.now() - cached.at) < 30000) {
+        try { var existing = await cached._promise; if (existing !== null) return existing; } catch (_e) {}
+      }
       var provider = getProvider();
       if (!provider) return null;
       var c = new ethers.Contract(meta.address, ERC20_ABI, provider);
       var promise = c.balanceOf(addr);
       if (typeof ExecutionWatchdog !== 'undefined' && ExecutionWatchdog.wrapRPC) {
-        promise = ExecutionWatchdog.wrapRPC(promise, 5000, 'balanceOf:' + token);
+        promise = ExecutionWatchdog.wrapRPC(promise, 8000, 'balanceOf:' + token);
       }
-      balanceDedup[dedupKey] = { promise: promise, at: Date.now() };
+      balanceDedup[dedupKey] = { _promise: promise, at: Date.now() };
       var raw = await promise;
       if (raw === null) {
-        if (cached && cached.val !== null) return cached.val;
+        if (cached && cached.val !== null) { delete balanceDedup[dedupKey]._promise; return cached.val; }
+        if (maxRetries > 0) { delete balanceDedup[dedupKey]._promise; return tokenBalance(addr, token, maxRetries - 1); }
+        delete balanceDedup[dedupKey]._promise;
         return null;
       }
       var val = Number(ethers.formatUnits(raw, meta.decimals || 6));
       balanceDedup[dedupKey] = { val: val, at: Date.now() };
-      // Cleanup stale entries periodically
       if (Object.keys(balanceDedup).length > 50) {
         var cutoff = Date.now() - 30000;
         var keys = Object.keys(balanceDedup);
@@ -648,6 +658,13 @@
     // [C3 FIX] Nonce with timestamp-derived component for replay protection — survives localStorage clear
     nonceCounter += 1; lsSave(K.nonce, nonceCounter);
     var tsNonce = Date.now() * 1000 + (nonceCounter % 1000); // timestamp-based with counter uniqueness
+    var instDetect = String(raw.name || '').toLowerCase() + ' ' + String(raw.source || '');
+    var isInstant = /execute now|pay now|immediat|instant|multisend now|crosschain now|batch payment now|payroll now|send now/i.test(instDetect);
+    var batchOps = ['multisend', 'payroll', 'batchPayment', 'crosschainBatch'];
+    var execMode = raw.executionMode || (isInstant ? 'instant' : 'scheduled');
+    if (batchOps.indexOf(String(raw.op || 'payment')) !== -1 && raw.freq === 'once' && !raw.executionMode) {
+      execMode = isInstant ? 'instant' : 'scheduled';
+    }
     var it = {
       id: 'AIW-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7),
       op: String(raw.op || 'payment'),
@@ -661,6 +678,7 @@
       swapToToken: raw.swapToToken || undefined,
       freq: String(raw.freq || 'once'),
       startAt: raw.startAt || null,
+      executionMode: execMode,
       source: String(raw.source || 'user'),
       nonce: tsNonce,                                   // [C3] Timestamp-derived nonce
       nonceCounter: nonceCounter,                        // [C3] Sequential counter for ordering
@@ -683,7 +701,10 @@
         pushHistory({ kind: 'validation', status: 'rejected', intentId: it.id, reason: it.reason });
       } else {
         pushHistory({ kind: 'validation', status: 'approved', intentId: it.id });
-        if (settings.autoExecute) { executeIntent(it.id); }
+        var batchOps = ['multisend', 'payroll', 'batchPayment', 'crosschainBatch'];
+        if (settings.autoExecute || (it.executionMode === 'instant' && batchOps.indexOf(it.op) !== -1)) {
+          executeIntent(it.id);
+        }
       }
       saveIntents(); renderExecutions(); renderHistory();
       // Emit status to Autonoma via shared bridge
@@ -755,6 +776,12 @@
       notify('Intent ' + it.id + ' dispatched to Agent Wallet executor', 'success');
       /* Trigger the existing scheduler tick for immediate pickup */
       try { if (!it.startAt && typeof window._agentCheckSchedules === 'function') setTimeout(window._agentCheckSchedules, 400); } catch (_e) { /* next 60s tick */ }
+      /* Also notify BatchExecutionEngine for instant multisend/batch intents */
+      try {
+        if (it.executionMode === 'instant' && (schedType === 'multisend' || schedType === 'payment') && typeof BatchExecutionEngine !== 'undefined') {
+          setTimeout(function() { BatchExecutionEngine.poll(); }, 600);
+        }
+      } catch (_e) {}
       return true;
     } catch (e) {
       it.status = 'failed';
@@ -1297,7 +1324,8 @@
     var box = $id('aiw-portfolio-body');
     if (!box) return;
     if (!force && Date.now() - portfolioCache.at < 30000 && portfolioCache.rows.length) { renderPortfolio(); return; }
-    if (box) box.innerHTML = '<div style="font-size:9.5px;color:var(--muted2)">Loading balances…</div>';
+    if (portfolioCache.rows.length) renderPortfolio();
+    else if (box) box.innerHTML = '<div style="font-size:9.5px;color:var(--muted2)">Loading portfolio data…</div>';
     var rows = [];
     var wallets = [
       { label: 'Personal Wallet', addr: personalAddr(), tag: 'personal' },
@@ -2716,7 +2744,7 @@
   function renderPortfolio() {
     const box = $id('aiw-portfolio-body');
     if (!box) return;
-    if (!portfolioCache.rows.length) { box.innerHTML = '<div style="font-size:9.5px;color:var(--muted2)">No data — click Refresh.</div>'; return; }
+    if (!portfolioCache.rows.length) { box.innerHTML = '<div style="font-size:9.5px;color:var(--muted2)">No portfolio data yet — loading from chain…</div>'; return; }
     let total = 0;
     let html = '';
     portfolioCache.rows.forEach(function (r) {
