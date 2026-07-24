@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
@@ -39,7 +39,26 @@
 <script src="/config/slippage.js"></script>
 <script src="/config/runtime.js"></script>
 <script src="/config/application.js"></script>
-<script src="/shared/memoIndexer.js"></script>
+<!-- ════════════════════════════════════════
+     Elligentt Remediation v5.0.0
+     Phase 1-11 Security & Architecture Fixes
+     DO NOT REMOVE — load before all shared modules
+════════════════════════════════════════ -->
+<script src="/shared/jsonFix.js"></script>
+<script src="/shared/storageManager.js"></script>
+<script src="/shared/keyMigration.js"></script>
+<script src="/shared/treasurySync.js"></script>
+<script src="/shared/contractRegistryFix.js"></script>
+<script src="/shared/schedulerFix.js"></script>
+<script src="/shared/autonomaConsolidation.js"></script>
+<script src="/shared/swapIsolation.js"></script>
+<script src="/shared/paymentQueueRemediation.js"></script>
+<script src="/shared/multisendDedup.js"></script>
+<script src="/shared/bridgeInboundFix.js"></script>
+<script src="/shared/autonomaScheduleRoute.js"></script>
+<script src="/shared/bridgeRouteSelector.js"></script>
+<script src="/shared/moduleLoader.js"></script>
+<script src="/remediation/bootstrap.js"></script><script src="/shared/memoIndexer.js"></script>
 <script src="/shared/treasuryIndexer.js"></script>
 <script src="/shared/applicationLedger.js"></script>
 <script src="/shared/profile.js"></script>
@@ -10635,7 +10654,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
         <a class="footer-social-btn" href="https://github.com/julenosinger/Eligentt" target="_blank" title="GitHub"><i class="ti ti-brand-github"></i></a>
         <a class="footer-social-btn" href="https://x.com/juleno14" target="_blank" title="X / Twitter @juleno14"><i class="ti ti-brand-x"></i></a>
         <a class="footer-social-btn" href="https://t.me/Julenno" target="_blank" title="Telegram @Julenno"><i class="ti ti-brand-telegram"></i></a>
-        <a class="footer-social-btn" href="mailto:damaskstore14@gmail.com" title="Email damaskstore14@gmail.com"><i class="ti ti-mail"></i></a>
+        <a class="footer-social-btn" href="/cdn-cgi/l/email-protection#85e1e4e8e4f6eef6f1eaf7e0b4b1c5e2e8e4ece9abe6eae8" title="Email damaskstore14@gmail.com"><i class="ti ti-mail"></i></a>
         <a class="footer-social-btn" href="https://docs.arc.network" target="_blank" title="Documentation"><i class="ti ti-book"></i></a>
       </div>
     </div>
@@ -10691,7 +10710,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
       <div class="footer-socials" style="margin-top:4px;margin-bottom:4px">
         <a class="footer-social-btn" href="https://x.com/juleno14" target="_blank" title="X / Twitter @juleno14"><i class="ti ti-brand-x"></i></a>
         <a class="footer-social-btn" href="https://t.me/Julenno" target="_blank" title="Telegram @Julenno"><i class="ti ti-brand-telegram"></i></a>
-        <a class="footer-social-btn" href="mailto:damaskstore14@gmail.com" title="Email damaskstore14@gmail.com"><i class="ti ti-mail"></i></a>
+        <a class="footer-social-btn" href="/cdn-cgi/l/email-protection#afcbcec2cedcc4dcdbc0ddca9e9befc8c2cec6c381ccc0c2" title="Email damaskstore14@gmail.com"><i class="ti ti-mail"></i></a>
       </div>
       <div style="margin-top:14px">
         <div style="font-size:9.5px;font-weight:700;color:#8892aa;margin-bottom:7px;text-transform:uppercase;letter-spacing:.8px">Stay Updated</div>
@@ -10890,7 +10909,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
 </div>
 
 
-<script>
+<script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
 // ── Cloudflare Pages runtime configuration ──────────────────
 // Keys are injected at runtime by the Cloudflare Pages Function
 window.__ARC_PAY_CONFIG__ = window.__ARC_PAY_CONFIG__ || {
@@ -29922,11 +29941,12 @@ function setBridgeMode(mode) {
   }
 }
 
-// ── executeBridgeOrTurbo ─ auto-routing based on chain direction ──────────
-// External chains → ARC = Turbo Bridge (uses Treasury liquidity + real depositForBurn)
-// ARC → External chains = Standard Bridge (real CCTP)
-// No manual mode selection required — routing is fully automatic.
+// ── executeBridgeOrTurbo ─ always CCTP v2 ──────────────────────────────────
+// Turbo Bridge still available via bridgeRouteSelector.js route pill.
 function executeBridgeOrTurbo() {
+  executeBridge();
+}
+function executeBridgeOrTurbo_orig(){
   const toChain = CHAINS[bridgeToIdx];
   if (toChain?.id === 'Arc_Testnet') {
     executeTurboBridge();
@@ -38042,17 +38062,23 @@ const UBScreen = (function() {
     var chain = window._xpayChain || 'Base_Sepolia';
     var chainLabel = chain.replace(/_/g,' ');
     if(recipients.length === 0) return;
-    if(useAgent){
-      var addrs = recipients.map(function(r){ return r.addr; }).join(' ');
-      autonomaSendQuick('crosschain payroll ' + recipients.length + ' payments ' + amount + ' ' + token + ' to ' + chainLabel + ' ' + addrs);
+    var isBatch = recipients.length > 1;
+    if (!isBatch) {
+      if (useAgent) { autonomaSendQuick('crosschain payroll 1 payment '+(recipients[0].amount||amount)+' '+token+' to '+chainLabel+' '+(recipients[0].addr||'')); }
+      else { try { if(typeof showPage==='function') showPage('bridge'); } catch(_e) {} }
     } else {
-      try { if(typeof showPage === 'function') showPage('bridge'); } catch(_e){}
+      if(typeof ScheduleEngine !== 'undefined'){
+        var baseTime = Date.now();
+        recipients.forEach(function(r, i){
+          try { ScheduleEngine.create({ type:'crosschain', name:'['+(i+1)+'/'+recipients.length+'] '+chainLabel+' to '+(r.addr||'').slice(0,8)+'...', token:token, amount:r.amount||amount, total:r.amount||amount, network:'Arc_Testnet', fromNetwork:'Arc_Testnet', toNetwork:r.chain||chain, recipients:[{addr:r.addr,amount:r.amount||amount}], address:r.addr||'', freq:'once', maxEx:1, gas:0.10, nextRun:new Date(baseTime+(i*5000)).toISOString(), execCount:0, executionHistory:[], status:'Active', created:new Date(baseTime).toISOString(), createdBy:'autonoma_seq', agentExecution:true, walletAddress:typeof walletAddress!=='undefined'?walletAddress:'', _batchIndex:i, _batchTotal:recipients.length }); } catch(e) {}
+        });
+        try { if(typeof showPage==='function') showPage('schedule'); } catch(_e) {}
+        try { if(typeof toast==='function') toast('Crosschain Batch: '+recipients.length+' recipients (sequential)','success'); } catch(_e) {}
+      }
     }
-    window._xpayRecipients = null;
-    window._xpayToken = null;
-    window._xpayAmount = null;
-    window._xpayChain = null;
+    window._xpayRecipients = null; window._xpayToken = null; window._xpayAmount = null; window._xpayChain = null;
   };
+
   window._approvePermitEl = function(el){
     try {
       var type = el.getAttribute('data-ptype') || 'spend';
@@ -38919,7 +38945,7 @@ const UBScreen = (function() {
       case 'FINANCIAL_OS_SECURITY': return _handleFinancialOSSecurity();
       case 'FINANCIAL_OS_SPENDING': return _handleFinancialOSSpending();
       case 'EXECUTE_ALL_SCHEDULES': return _handleExecuteAllSchedules(params, msg);
-      case 'BRIDGE_TURBO': return _handleBridgeTurbo(params, msg);
+      case 'BRIDGE_TURBO': return autBridge(msg);  /* CCTP v2 via autBridge */
       case 'BATCH_SWAP': return _handleBatchSwap(params, msg);
       case 'MASS_PAYMENT': return _handleMassPayment(params, msg);
       case 'CROSSCHAIN_PAYROLL': return _handleCrosschainPayroll(params, msg);
@@ -40614,18 +40640,20 @@ const UBScreen = (function() {
     );
   }
 
-  window.autDocExecute = function(mode) {
+  window.autDocExecute = async function(mode) {
     if(!autDocData){ autUI('ai',R.intro('No document data loaded.')); return; }
     var rows = autDocData.rows;
     var total = autDocData.summary.totalAmount;
 
     if(mode === 'schedule' || mode === 'recurring'){
       if(typeof ScheduleEngine === 'undefined'){ autUI('ai',R.intro('ScheduleEngine unavailable.')); return; }
+      var isCrosschain = autDocData && autDocData.classification && autDocData.classification.isCrosschain;
+      var schedType = isCrosschain ? 'crosschain' : 'payment';
       var created = 0;
       rows.forEach(function(r){
         try {
           ScheduleEngine.create({
-            type: 'payment', name: (r.note||'Doc Payment')+' to '+r.address.slice(0,6)+'...', token: r._token,
+            type: schedType, name: (r.note||'Doc Payment')+' to '+r.address.slice(0,6)+'...', token: r._token,
             amount: r._amount, total: r._amount,
             network: r._chain, fromNetwork: 'Arc_Testnet', toNetwork: r._chain,
             recipients: [{ addr: r.address, amount: r._amount, note: r.note||'', chainId: r._chain, token: r._token }],
@@ -40642,10 +40670,10 @@ const UBScreen = (function() {
       try { schedules = ScheduleEngine.getAll(); if(typeof renderSchedules === 'function') renderSchedules(); } catch(e){}
       try { if(typeof AgentScheduleExecutor !== 'undefined') AgentScheduleExecutor.start(); } catch(e){}
       autUI('ai',
-        R.intro(mode === 'recurring' ? 'Created ' + created + ' recurring schedules.' : 'Scheduled ' + created + ' payments for execution.') +
+        R.intro(mode === 'recurring' ? 'Created ' + created + ' recurring schedules.' : 'Scheduled ' + created + ' ' + (isCrosschain ? 'crosschain' : '') + ' payments for execution.') +
         R.card(R.head('check','Operation Complete'),
           R.row('Payments',created + '/' + rows.length,'green') +
-          R.row('Mode',mode === 'recurring'?'Recurring Monthly':'One-Time Scheduled','purple') +
+          R.row('Mode',(isCrosschain?'Crosschain ':'')+(mode === 'recurring'?'Recurring Monthly':'One-Time Scheduled'),'purple') +
           R.row('Total',total.toLocaleString('en-US',{maximumFractionDigits:2}),'green'),
           R.actions({icon:'external-link',label:'View Schedules',cls:'primary',action:"showPage('schedule')"})
         )
@@ -40656,17 +40684,24 @@ const UBScreen = (function() {
     if(mode === 'crosschain'){
       if(typeof window !== 'undefined' && typeof window._agentExecuteBridge === 'function'){
         var bridged = 0;
-        rows.forEach(function(r){
+        var failed = 0;
+        for(var xcIdx = 0; xcIdx < rows.length; xcIdx++){
+          var xcRow = rows[xcIdx];
           try {
-            var domain = {Base_Sepolia:6,Arbitrum_Sepolia:3,Ethereum_Sepolia:0,Optimism_Sepolia:2,Polygon_Amoy:7}[r._chain]||6;
-            window._agentExecuteBridge(r._amount,domain,r._chain.replace('_',' '),'doc_xc_'+Date.now(),5042002,r.address);
+            autUI('ai', R.intro('<strong>Crosschain '+(xcIdx+1)+'/'+rows.length+'</strong>: '+xcRow._amount.toFixed(2)+' '+xcRow._token+' to '+xcRow.address.slice(0,6)+'... → '+xcRow._chain.replace('_',' ')));
+            var domain = {Base_Sepolia:6,Arbitrum_Sepolia:3,Ethereum_Sepolia:0,Optimism_Sepolia:2,Polygon_Amoy:7}[xcRow._chain]||6;
+            await window._agentExecuteBridge(xcRow._amount,domain,xcRow._chain.replace('_',' '),'doc_xc_'+Date.now()+'_'+xcIdx,5042002,xcRow.address);
             bridged++;
-          } catch(e){}
-        });
+            if(xcIdx < rows.length - 1){
+              autUI('ai', R.intro('<span style="color:#22c55e">✓</span> Crosschain '+(xcIdx+1)+' completed. Starting next...'));
+            }
+          } catch(e){ failed++; }
+        }
         autUI('ai',
-          R.intro('Initiated ' + bridged + ' crosschain bridge operations.') +
-          R.card(R.head('arrows-cross','Crosschain Bridge'),
+          R.intro((bridged>0?'Completed ' + bridged + '/' + rows.length:'All ' + rows.length + ' failed') + ' crosschain bridge operations.') +
+          R.card(R.head('arrows-cross','Crosschain Bridge — Sequential'),
             R.row('Operations',bridged+'/'+rows.length,'green')+
+            (failed>0?R.row('Failed',failed+'','red'):'')+
             R.row('Total',total.toLocaleString('en-US',{maximumFractionDigits:2}),'green'),
             R.actions({icon:'external-link',label:'View Bridge',cls:'primary',action:"showPage('bridge')"})
           )
@@ -41690,100 +41725,8 @@ const UBScreen = (function() {
   //  BRIDGE TURBO — Fast CCTP bridge with vault pre-funding
   //  Routes through existing turbo bridge pipeline.
   // ══════════════════════════════════════════════════════════
-  function _handleBridgeTurbo(params, msg){
-    var low = (msg || '').toLowerCase();
-    var amount = params.amount || 100;
-    var token = params.token || 'USDC';
+  function _handleBridgeTurbo(params, msg){ return autBridge(msg); /* CCTP v2 - Turbo Bridge removed */ }
 
-    // Detect source chain
-    var fromChain = 'Arc_Testnet';
-    var toChain = 'Base_Sepolia';
-    if (/\b(?:from|do|da)\s+(ethereum|sepolia)\b/i.test(low)) fromChain = 'Ethereum_Sepolia';
-    else if (/\b(?:from|do|da)\s+(base)\b/i.test(low)) fromChain = 'Base_Sepolia';
-    else if (/\b(?:from|do|da)\s+(arbitrum)\b/i.test(low)) fromChain = 'Arbitrum_Sepolia';
-    else if (/\b(?:from|do|da)\s+(polygon|amoy|matic)\b/i.test(low)) fromChain = 'Polygon_Amoy';
-    else if (/\b(?:from|do|da)\s+(optimism)\b/i.test(low)) fromChain = 'Optimism_Sepolia';
-    else if (/\b(?:from|do|da)\s+(arc)\b/i.test(low)) fromChain = 'Arc_Testnet';
-
-    if (/\b(?:to|para)\s+(ethereum|sepolia)\b/i.test(low)) toChain = 'Ethereum_Sepolia';
-    else if (/\b(?:to|para)\s+(base)\b/i.test(low)) toChain = 'Base_Sepolia';
-    else if (/\b(?:to|para)\s+(arbitrum)\b/i.test(low)) toChain = 'Arbitrum_Sepolia';
-    else if (/\b(?:to|para)\s+(polygon|amoy|matic)\b/i.test(low)) toChain = 'Polygon_Amoy';
-    else if (/\b(?:to|para)\s+(optimism)\b/i.test(low)) toChain = 'Optimism_Sepolia';
-    else if (/\b(?:to|para)\s+(arc)\b/i.test(low)) toChain = 'Arc_Testnet';
-
-    var fromLabel = fromChain.replace(/_/g,' ');
-    var toLabel = toChain.replace(/_/g,' ');
-
-    // If Arc is destination, this is a turbo bridge INTO Arc (pre-funded fast bridge)
-    // If Arc is source, this is a standard bridge OUT (use existing bridge handler)
-    if (fromChain === 'Arc_Testnet') {
-      // Arc → destination: standard bridge (delegate to existing bridge handler)
-      return autBridge(msg);
-    }
-
-    // Destination is Arc: Turbo Bridge (fast path via vault pre-funding)
-    var chainNameMap = {
-      Ethereum_Sepolia: 'Ethereum Sepolia', Base_Sepolia: 'Base Sepolia',
-      Arbitrum_Sepolia: 'Arbitrum Sepolia', Optimism_Sepolia: 'Optimism Sepolia',
-      Polygon_Amoy: 'Polygon Amoy'
-    };
-
-    // Try to launch turbo bridge via the existing turboBridgeFromCard flow
-    var isTurboReady = false;
-    try {
-      if (typeof VaultStore !== 'undefined') {
-        var store = VaultStore.get();
-        isTurboReady = store && store.liquidity && store.liquidity.usdc > 0;
-      }
-    } catch(_e){}
-
-    // Navigate to Bridge page and trigger turbo
-    try {
-      if (typeof showPage === 'function') showPage('bridge');
-    } catch(_e){}
-
-    // Build turbo bridge intent data
-    var turboData = {
-      from: fromChain,
-      to: 'Arc_Testnet',
-      amount: amount,
-      token: token,
-      mode: 'turbo'
-    };
-
-    // Try to trigger via existing BridgeEngine
-    try {
-      if (typeof BridgeEngine !== 'undefined' && BridgeEngine.notifyTurboStart) {
-        BridgeEngine.notifyTurboStart({ from: fromChain, to: 'Arc_Testnet', amt: amount, type: 'turbo', token: token });
-      }
-    } catch(_e){}
-
-    // Try launch via turboBridgeFromCard
-    try {
-      if (typeof turboBridgeFromCard === 'function') {
-        turboBridgeFromCard(fromChain);
-      }
-    } catch(_e){}
-
-    return R.intro('Launching <strong style="color:#f59e0b">Turbo Bridge</strong> — fast CCTP settlement with vault pre-funding.') +
-      R.card(R.head('topology-star-3','Bridge Turbo',{text:'Fast Path',cls:'live'}),
-        R.row('Mode', '<span style="color:#f59e0b">TURBO</span> — instant fulfillment + CCTP settlement', 'yellow') +
-        R.row('Route', fromLabel + ' → ' + toLabel, 'teal') +
-        R.row('Amount', amount + ' ' + token, 'green') +
-        R.row('Fee', '1.00% turbo liquidity fee', '') +
-        R.row('Speed', 'Instant via vault pre-funding', 'green') +
-        R.sep() +
-        R.row('Steps','1. Lock liquidity in Vault · 2. Instant fulfillment · 3. CCTP attestation · 4. Settlement', '') +
-        '<div style="font-size:9px;color:var(--muted2);margin-top:6px"><b style="color:var(--yellow)">Turbo Bridge</b> pre-funds your transfer from the Vault so you receive assets instantly. The CCTP attestation settles in the background.</div>',
-        R.actions(
-          {icon:'topology-star-3',label:'Bridge Page',cls:'primary',action:"showPage('bridge')"},
-          {icon:'arrow-right',label:'Bridge ' + amount + ' ' + token,cls:'',action:"autonomaSendQuick('bridge " + amount + " " + token + " from " + fromLabel + " to " + toLabel + " turbo')"}
-        )) +
-      '<div style="font-size:8px;color:var(--muted2);margin-top:4px">Turbo Bridge never bypasses security: Permission Engine, Risk Engine, Policy Engine, and Emergency Stop are always enforced.</div>';
-  }
-
-  // ══════════════════════════════════════════════════════════
   //  BATCH SWAP — Up to 20 sequential swaps via Agent Wallet
   //  Reuses existing swap execution + AI Wallet validation.
   //  Failure of one swap does NOT stop remaining swaps.
@@ -45384,5 +45327,6 @@ window.addEventListener('unhandledrejection', function(e) {
 // ═══ END SWAP UI 2.0 Analytics ═══════════════════════════════════════════
 
 </script>
+<script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v4513226cdae34746b4dedf0b4dfa099e1781791509496" integrity="sha512-ZE9pZaUXND66v380QUtch/5sE9tPFh2zg45pR2PB0CVkCtOREv2AJKkSidISWkysEuQ0EH8faUU5du78bx87UQ==" data-cf-beacon='{"version":"2024.11.0","token":"f5e4dda1a03749d9a5da52a5007b2fc1","r":1,"server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
 </body>
 </html>

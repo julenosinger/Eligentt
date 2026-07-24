@@ -396,10 +396,10 @@
     if (classification.mode === 'swap_and_pay') {
       plan.steps.push({ module: 'swap', action: 'execute_swap', desc: 'Swap source token to target token before paying' });
     }
-    if (classification.mode === 'crosschain') {
+    if (classification.mode === 'crosschain' || classification.mode === 'scheduled_crosschain' || classification.mode === 'recurring_crosschain') {
       plan.steps.push({ module: 'crosschain', action: 'bridge_payments', desc: 'Bridge payments to destination chain via CrossChain engine' });
     }
-    if (classification.mode === 'scheduled' || classification.mode === 'recurring') {
+    if (classification.mode === 'scheduled' || classification.mode === 'recurring' || classification.mode === 'scheduled_crosschain' || classification.mode === 'recurring_crosschain') {
       plan.steps.push({ module: 'schedule_engine', action: 'create_schedules', desc: 'Create ScheduleEngine entries for each payment' });
     } else if (classification.mode === 'workflow_payroll') {
       plan.steps.push({ module: 'workflow_engine', action: 'create_workflow', desc: 'Create payroll workflow with batch execution' });
@@ -416,17 +416,18 @@
   function executePlan(plan) {
     var results = { success: 0, failed: 0, errors: [] };
 
-    if (plan.mode === 'scheduled' || plan.mode === 'recurring') {
+    if (plan.mode === 'scheduled' || plan.mode === 'recurring' || plan.mode === 'scheduled_crosschain' || plan.mode === 'recurring_crosschain') {
       if (typeof ScheduleEngine === 'undefined') return { success: 0, failed: plan.rows.length, errors: ['ScheduleEngine unavailable'] };
+      var isXc = plan.mode === 'scheduled_crosschain' || plan.mode === 'recurring_crosschain';
       plan.rows.forEach(function(r){
         try {
           var recips = [{ addr: r.address, amount: r._amount, note: r.note || '', chainId: r._chain, token: r._token }];
           ScheduleEngine.create({
-            type: 'payment', name: (r.note || 'Scheduled Payment'), token: r._token,
+            type: isXc ? 'crosschain' : 'payment', name: (r.note || 'Scheduled Payment'), token: r._token,
             amount: r._amount, total: r._amount,
             network: r._chain, fromNetwork: 'Arc_Testnet', toNetwork: r._chain,
             recipients: recips, address: r.address,
-            freq: plan.freq || 'once', maxEx: plan.mode === 'recurring' ? 0 : 1, gas: 0.10,
+            freq: plan.freq || 'once', maxEx: plan.mode === 'recurring' || plan.mode === 'recurring_crosschain' ? 0 : 1, gas: 0.10,
             nextRun: plan.scheduleDate || new Date(Date.now() + 60000).toISOString(),
             execCount: 0, executionHistory: [],
             status: 'Active', created: new Date().toISOString(), createdBy: 'autonoma',
