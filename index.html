@@ -38937,7 +38937,7 @@ const UBScreen = (function() {
       case 'FINANCIAL_OS_SECURITY': return _handleFinancialOSSecurity();
       case 'FINANCIAL_OS_SPENDING': return _handleFinancialOSSpending();
       case 'EXECUTE_ALL_SCHEDULES': return _handleExecuteAllSchedules(params, msg);
-      case 'BRIDGE_TURBO': return _handleBridgeTurbo(params, msg);
+      case 'BRIDGE_TURBO': return autBridge(msg);  /* CCTP v2 via autBridge */
       case 'BATCH_SWAP': return _handleBatchSwap(params, msg);
       case 'MASS_PAYMENT': return _handleMassPayment(params, msg);
       case 'CROSSCHAIN_PAYROLL': return _handleCrosschainPayroll(params, msg);
@@ -41708,100 +41708,8 @@ const UBScreen = (function() {
   //  BRIDGE TURBO — Fast CCTP bridge with vault pre-funding
   //  Routes through existing turbo bridge pipeline.
   // ══════════════════════════════════════════════════════════
-  function _handleBridgeTurbo(params, msg){
-    var low = (msg || '').toLowerCase();
-    var amount = params.amount || 100;
-    var token = params.token || 'USDC';
+  function _handleBridgeTurbo(params, msg){ return autBridge(msg); /* CCTP v2 - Turbo Bridge removed */ }
 
-    // Detect source chain
-    var fromChain = 'Arc_Testnet';
-    var toChain = 'Base_Sepolia';
-    if (/\b(?:from|do|da)\s+(ethereum|sepolia)\b/i.test(low)) fromChain = 'Ethereum_Sepolia';
-    else if (/\b(?:from|do|da)\s+(base)\b/i.test(low)) fromChain = 'Base_Sepolia';
-    else if (/\b(?:from|do|da)\s+(arbitrum)\b/i.test(low)) fromChain = 'Arbitrum_Sepolia';
-    else if (/\b(?:from|do|da)\s+(polygon|amoy|matic)\b/i.test(low)) fromChain = 'Polygon_Amoy';
-    else if (/\b(?:from|do|da)\s+(optimism)\b/i.test(low)) fromChain = 'Optimism_Sepolia';
-    else if (/\b(?:from|do|da)\s+(arc)\b/i.test(low)) fromChain = 'Arc_Testnet';
-
-    if (/\b(?:to|para)\s+(ethereum|sepolia)\b/i.test(low)) toChain = 'Ethereum_Sepolia';
-    else if (/\b(?:to|para)\s+(base)\b/i.test(low)) toChain = 'Base_Sepolia';
-    else if (/\b(?:to|para)\s+(arbitrum)\b/i.test(low)) toChain = 'Arbitrum_Sepolia';
-    else if (/\b(?:to|para)\s+(polygon|amoy|matic)\b/i.test(low)) toChain = 'Polygon_Amoy';
-    else if (/\b(?:to|para)\s+(optimism)\b/i.test(low)) toChain = 'Optimism_Sepolia';
-    else if (/\b(?:to|para)\s+(arc)\b/i.test(low)) toChain = 'Arc_Testnet';
-
-    var fromLabel = fromChain.replace(/_/g,' ');
-    var toLabel = toChain.replace(/_/g,' ');
-
-    // If Arc is destination, this is a turbo bridge INTO Arc (pre-funded fast bridge)
-    // If Arc is source, this is a standard bridge OUT (use existing bridge handler)
-    if (fromChain === 'Arc_Testnet') {
-      // Arc → destination: standard bridge (delegate to existing bridge handler)
-      return autBridge(msg);
-    }
-
-    // Destination is Arc: Turbo Bridge (fast path via vault pre-funding)
-    var chainNameMap = {
-      Ethereum_Sepolia: 'Ethereum Sepolia', Base_Sepolia: 'Base Sepolia',
-      Arbitrum_Sepolia: 'Arbitrum Sepolia', Optimism_Sepolia: 'Optimism Sepolia',
-      Polygon_Amoy: 'Polygon Amoy'
-    };
-
-    // Try to launch turbo bridge via the existing turboBridgeFromCard flow
-    var isTurboReady = false;
-    try {
-      if (typeof VaultStore !== 'undefined') {
-        var store = VaultStore.get();
-        isTurboReady = store && store.liquidity && store.liquidity.usdc > 0;
-      }
-    } catch(_e){}
-
-    // Navigate to Bridge page and trigger turbo
-    try {
-      if (typeof showPage === 'function') showPage('bridge');
-    } catch(_e){}
-
-    // Build turbo bridge intent data
-    var turboData = {
-      from: fromChain,
-      to: 'Arc_Testnet',
-      amount: amount,
-      token: token,
-      mode: 'turbo'
-    };
-
-    // Try to trigger via existing BridgeEngine
-    try {
-      if (typeof BridgeEngine !== 'undefined' && BridgeEngine.notifyTurboStart) {
-        BridgeEngine.notifyTurboStart({ from: fromChain, to: 'Arc_Testnet', amt: amount, type: 'turbo', token: token });
-      }
-    } catch(_e){}
-
-    // Try launch via turboBridgeFromCard
-    try {
-      if (typeof turboBridgeFromCard === 'function') {
-        turboBridgeFromCard(fromChain);
-      }
-    } catch(_e){}
-
-    return R.intro('Launching <strong style="color:#f59e0b">Turbo Bridge</strong> — fast CCTP settlement with vault pre-funding.') +
-      R.card(R.head('topology-star-3','Bridge Turbo',{text:'Fast Path',cls:'live'}),
-        R.row('Mode', '<span style="color:#f59e0b">TURBO</span> — instant fulfillment + CCTP settlement', 'yellow') +
-        R.row('Route', fromLabel + ' → ' + toLabel, 'teal') +
-        R.row('Amount', amount + ' ' + token, 'green') +
-        R.row('Fee', '1.00% turbo liquidity fee', '') +
-        R.row('Speed', 'Instant via vault pre-funding', 'green') +
-        R.sep() +
-        R.row('Steps','1. Lock liquidity in Vault · 2. Instant fulfillment · 3. CCTP attestation · 4. Settlement', '') +
-        '<div style="font-size:9px;color:var(--muted2);margin-top:6px"><b style="color:var(--yellow)">Turbo Bridge</b> pre-funds your transfer from the Vault so you receive assets instantly. The CCTP attestation settles in the background.</div>',
-        R.actions(
-          {icon:'topology-star-3',label:'Bridge Page',cls:'primary',action:"showPage('bridge')"},
-          {icon:'arrow-right',label:'Bridge ' + amount + ' ' + token,cls:'',action:"autonomaSendQuick('bridge " + amount + " " + token + " from " + fromLabel + " to " + toLabel + " turbo')"}
-        )) +
-      '<div style="font-size:8px;color:var(--muted2);margin-top:4px">Turbo Bridge never bypasses security: Permission Engine, Risk Engine, Policy Engine, and Emergency Stop are always enforced.</div>';
-  }
-
-  // ══════════════════════════════════════════════════════════
   //  BATCH SWAP — Up to 20 sequential swaps via Agent Wallet
   //  Reuses existing swap execution + AI Wallet validation.
   //  Failure of one swap does NOT stop remaining swaps.
