@@ -55,6 +55,7 @@
 <script src="/shared/paymentQueueRemediation.js"></script>
 <script src="/shared/multisendDedup.js"></script>
 <script src="/shared/bridgeInboundFix.js"></script>
+<script src="/shared/autonomaScheduleRoute.js"></script>
 <script src="/shared/bridgeRouteSelector.js"></script>
 <script src="/shared/moduleLoader.js"></script>
 <script src="/remediation/bootstrap.js"></script><script src="/shared/memoIndexer.js"></script>
@@ -38060,17 +38061,23 @@ const UBScreen = (function() {
     var chain = window._xpayChain || 'Base_Sepolia';
     var chainLabel = chain.replace(/_/g,' ');
     if(recipients.length === 0) return;
-    if(useAgent){
-      var addrs = recipients.map(function(r){ return r.addr; }).join(' ');
-      autonomaSendQuick('crosschain payroll ' + recipients.length + ' payments ' + amount + ' ' + token + ' to ' + chainLabel + ' ' + addrs);
+    var isBatch = recipients.length > 1;
+    if (!isBatch) {
+      if (useAgent) { autonomaSendQuick('crosschain payroll 1 payment '+(recipients[0].amount||amount)+' '+token+' to '+chainLabel+' '+(recipients[0].addr||'')); }
+      else { try { if(typeof showPage==='function') showPage('bridge'); } catch(_e) {} }
     } else {
-      try { if(typeof showPage === 'function') showPage('bridge'); } catch(_e){}
+      if(typeof ScheduleEngine !== 'undefined'){
+        var baseTime = Date.now();
+        recipients.forEach(function(r, i){
+          try { ScheduleEngine.create({ type:'crosschain', name:'['+(i+1)+'/'+recipients.length+'] '+chainLabel+' to '+(r.addr||'').slice(0,8)+'...', token:token, amount:r.amount||amount, total:r.amount||amount, network:'Arc_Testnet', fromNetwork:'Arc_Testnet', toNetwork:r.chain||chain, recipients:[{addr:r.addr,amount:r.amount||amount}], address:r.addr||'', freq:'once', maxEx:1, gas:0.10, nextRun:new Date(baseTime+(i*5000)).toISOString(), execCount:0, executionHistory:[], status:'Active', created:new Date(baseTime).toISOString(), createdBy:'autonoma_seq', agentExecution:true, walletAddress:typeof walletAddress!=='undefined'?walletAddress:'', _batchIndex:i, _batchTotal:recipients.length }); } catch(e) {}
+        });
+        try { if(typeof showPage==='function') showPage('schedule'); } catch(_e) {}
+        try { if(typeof toast==='function') toast('Crosschain Batch: '+recipients.length+' recipients (sequential)','success'); } catch(_e) {}
+      }
     }
-    window._xpayRecipients = null;
-    window._xpayToken = null;
-    window._xpayAmount = null;
-    window._xpayChain = null;
+    window._xpayRecipients = null; window._xpayToken = null; window._xpayAmount = null; window._xpayChain = null;
   };
+
   window._approvePermitEl = function(el){
     try {
       var type = el.getAttribute('data-ptype') || 'spend';
