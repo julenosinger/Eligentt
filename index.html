@@ -4254,6 +4254,22 @@ select.ub-op-input{cursor:pointer;-webkit-appearance:none;appearance:none;backgr
   .piv-main-grid { padding:12px 12px 6px; gap:12px; }
   .piv-action-bar { grid-template-columns:1fr; }
 }
+
+.invfi-analytics-grid{display:grid;gap:6px;padding:0 14px 10px}
+.invfi-analytics-grid{grid-template-columns:repeat(7,1fr)}
+@media(max-width:1100px){.invfi-analytics-grid{grid-template-columns:repeat(4,1fr)}}
+@media(max-width:600px){.invfi-analytics-grid{grid-template-columns:repeat(2,1fr)}}
+.invfi-chip{display:flex;align-items:center;gap:4px;padding:4px 8px;background:rgba(79,142,247,.06);border:1px solid rgba(79,142,247,.15);border-radius:4px;font-size:9px;cursor:pointer;color:var(--text);transition:all .15s}
+.invfi-chip:hover{background:rgba(79,142,247,.12);border-color:rgba(79,142,247,.3)}
+.invfi-tpl-btn{font-size:8.5px;padding:3px 7px;transition:all .15s}
+.invfi-tpl-btn:hover{background:rgba(45,212,191,.1)!important;color:var(--teal)!important;border-color:rgba(45,212,191,.3)!important}
+#invfi-drawer{animation:invfi-drawer-in .18s ease-out}
+@keyframes invfi-drawer-in{from{transform:translateX(100%)}to{transform:translateX(0)}}
+#invfi-drawer-overlay{animation:invfi-fade-in .12s ease-out}
+@keyframes invfi-fade-in{from{opacity:0}to{opacity:1}}
+@media(max-width:900px){.invfi-analytics-grid{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:540px){.invfi-analytics-grid{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:640px){#invfi-drawer{width:100vw!important}}
 </style>
 
 <style>
@@ -7647,42 +7663,71 @@ select.cinput option { background: #161a24; color: #dde2f0; }
         <div class="page-icon" style="background:rgba(245,158,11,.1);color:var(--yellow)"><i class="ti ti-file-invoice"></i></div>
         <div><div class="page-title">Invoices</div><div class="page-sub">Create, send and track USDC invoices on Arc Testnet</div></div>
         <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+          <button class="btn" onclick="invfiOpenSettings()" title="Invoice Settings" style="font-size:10px"><i class="ti ti-settings"></i></button>
           <button class="btn" onclick="invSwitchTab('list')" id="inv-tab-list" style="font-size:10px"><i class="ti ti-list"></i>All Invoices</button>
           <button class="btn primary" onclick="invSwitchTab('create')" id="inv-tab-create" style="font-size:10px"><i class="ti ti-plus"></i>New Invoice</button>
         </div>
       </div>
 
-      <!-- ANALYTICS STRIP -->
-      <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:8px;padding:0 14px 10px">
-        <div class="card inv-stat-card" style="padding:12px 10px">
-          <div style="font-size:8.5px;color:var(--muted2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Revenue This Month</div>
-          <div class="inv-stat-val" id="inv-stat-revenue" style="color:var(--green)">0.00 USDC</div>
-          <div class="inv-stat-delta" id="inv-stat-revenue-d" style="font-size:8px;color:var(--muted2);margin-top:2px">&nbsp;</div>
+      <!-- ANALYTICS STRIP — InvoiceFi V2 -->
+      <div class="invfi-analytics-grid" style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;padding:0 14px 10px">
+        <div class="card inv-stat-card" style="padding:10px 8px">
+          <div style="font-size:8px;color:var(--muted2);text-transform:uppercase;letter-spacing:.4px;margin-bottom:3px">Total Revenue</div>
+          <div class="inv-stat-val" id="invfi-stat-total-revenue" style="color:var(--green)">0.00</div>
         </div>
-        <div class="card inv-stat-card" style="padding:12px 10px">
-          <div style="font-size:8.5px;color:var(--muted2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Success Rate</div>
-          <div class="inv-stat-val" id="inv-stat-rate" style="color:var(--blue)">—</div>
-          <div class="inv-stat-delta" id="inv-stat-rate-d" style="font-size:8px;color:var(--muted2);margin-top:2px">&nbsp;</div>
+        <div class="card inv-stat-card" style="padding:10px 8px">
+          <div style="font-size:8px;color:var(--muted2);text-transform:uppercase;letter-spacing:.4px;margin-bottom:3px">Total Invoices</div>
+          <div class="inv-stat-val" id="invfi-stat-total-count" style="color:var(--blue)">0</div>
         </div>
-        <div class="card inv-stat-card" style="padding:12px 10px">
-          <div style="font-size:8.5px;color:var(--muted2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Outstanding</div>
-          <div class="inv-stat-val" id="inv-stat-outstanding" style="color:var(--yellow)">0.00 USDC</div>
-          <div class="inv-stat-delta" id="inv-stat-outstanding-d" style="font-size:8px;color:var(--muted2);margin-top:2px">&nbsp;</div>
+        <div class="card inv-stat-card" style="padding:10px 8px">
+          <div style="font-size:8px;color:var(--muted2);text-transform:uppercase;letter-spacing:.4px;margin-bottom:3px">Outstanding</div>
+          <div class="inv-stat-val" id="invfi-stat-outstanding" style="color:var(--yellow)">0.00</div>
         </div>
-        <div class="card inv-stat-card" style="padding:12px 10px">
-          <div style="font-size:8.5px;color:var(--muted2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Overdue</div>
-          <div class="inv-stat-val" id="inv-stat-overdue" style="color:var(--red)">0</div>
-          <div class="inv-stat-delta" id="inv-stat-overdue-d" style="font-size:8px;color:var(--muted2);margin-top:2px">&nbsp;</div>
+        <div class="card inv-stat-card" style="padding:10px 8px">
+          <div style="font-size:8px;color:var(--muted2);text-transform:uppercase;letter-spacing:.4px;margin-bottom:3px">Overdue</div>
+          <div class="inv-stat-val" id="invfi-stat-overdue" style="color:var(--red)">0</div>
         </div>
-        <div class="card inv-stat-card" style="padding:12px 10px">
-          <div style="font-size:8.5px;color:var(--muted2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Paid Total</div>
-          <div class="inv-stat-val" id="inv-stat-paid-total" style="color:var(--green)">0.00 USDC</div>
-          <div class="inv-stat-delta" id="inv-stat-paid-d" style="font-size:8px;color:var(--muted2);margin-top:2px">&nbsp;</div>
+        <div class="card inv-stat-card" style="padding:10px 8px">
+          <div style="font-size:8px;color:var(--muted2);text-transform:uppercase;letter-spacing:.4px;margin-bottom:3px">Paid Total</div>
+          <div class="inv-stat-val" id="invfi-stat-paid-total" style="color:var(--green)">0.00</div>
         </div>
-        <div class="card inv-stat-card" style="padding:12px 10px">
-          <div style="font-size:8.5px;color:var(--muted2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Crosschain Volume</div>
-          <div class="inv-stat-val" id="inv-stat-xchain" style="color:var(--purple)">0.00 USDC</div>
-          <div class="inv-stat-delta" id="inv-stat-xchain-d" style="font-size:8px;color:var(--muted2);margin-top:2px">&nbsp;</div>
+        <div class="card inv-stat-card" style="padding:10px 8px">
+          <div style="font-size:8px;color:var(--muted2);text-transform:uppercase;letter-spacing:.4px;margin-bottom:3px">Success Rate</div>
+          <div class="inv-stat-val" id="invfi-stat-success-rate" style="color:var(--teal)">—</div>
+        </div>
+        <div class="card inv-stat-card" style="padding:10px 8px">
+          <div style="font-size:8px;color:var(--muted2);text-transform:uppercase;letter-spacing:.4px;margin-bottom:3px">Crosschain Vol</div>
+          <div class="inv-stat-val" id="invfi-stat-xchain-vol" style="color:var(--purple)">0.00</div>
+        </div>
+      </div>
+      <div class="invfi-analytics-grid" style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;padding:0 14px 10px">
+        <div class="card inv-stat-card" style="padding:10px 8px">
+          <div style="font-size:8px;color:var(--muted2);text-transform:uppercase;letter-spacing:.4px;margin-bottom:3px">Pending</div>
+          <div class="inv-stat-val" id="invfi-stat-pending" style="color:var(--blue)">0.00</div>
+        </div>
+        <div class="card inv-stat-card" style="padding:10px 8px">
+          <div style="font-size:8px;color:var(--muted2);text-transform:uppercase;letter-spacing:.4px;margin-bottom:3px">Total Clients</div>
+          <div class="inv-stat-val" id="invfi-stat-total-clients" style="color:var(--teal)">0</div>
+        </div>
+        <div class="card inv-stat-card" style="padding:10px 8px">
+          <div style="font-size:8px;color:var(--muted2);text-transform:uppercase;letter-spacing:.4px;margin-bottom:3px">Repeat Clients</div>
+          <div class="inv-stat-val" id="invfi-stat-repeat-clients" style="color:var(--purple)">0</div>
+        </div>
+        <div class="card inv-stat-card" style="padding:10px 8px">
+          <div style="font-size:8px;color:var(--muted2);text-transform:uppercase;letter-spacing:.4px;margin-bottom:3px">Avg Pay Time</div>
+          <div class="inv-stat-val" id="invfi-stat-avg-pay-time" style="color:var(--teal)">—</div>
+        </div>
+        <div class="card inv-stat-card" style="padding:10px 8px">
+          <div style="font-size:8px;color:var(--muted2);text-transform:uppercase;letter-spacing:.4px;margin-bottom:3px">Collection Rate</div>
+          <div class="inv-stat-val" id="invfi-stat-collection-rate" style="color:var(--green)">—</div>
+        </div>
+        <div class="card inv-stat-card" style="padding:10px 8px">
+          <div style="font-size:8px;color:var(--muted2);text-transform:uppercase;letter-spacing:.4px;margin-bottom:3px">Partial Pays</div>
+          <div class="inv-stat-val" id="invfi-stat-partial-pays" style="color:var(--yellow)">0</div>
+        </div>
+        <div class="card inv-stat-card" style="padding:10px 8px">
+          <div style="font-size:8px;color:var(--muted2);text-transform:uppercase;letter-spacing:.4px;margin-bottom:3px">Largest Inv</div>
+          <div class="inv-stat-val" id="invfi-stat-largest" style="color:var(--blue)">0.00</div>
         </div>
       </div>
 
@@ -7690,6 +7735,36 @@ select.cinput option { background: #161a24; color: #dde2f0; }
       <div id="inv-panel-create" style="flex:1;overflow-y:auto;padding:0 14px 14px;display:flex;gap:14px">
         <!-- LEFT: FORM -->
         <div style="width:360px;flex-shrink:0;display:flex;flex-direction:column;gap:10px">
+          <!-- AI Smart Invoice Assistant — InvoiceFi V2 -->
+          <div class="card" id="invfi-ai-card" style="border:1px solid rgba(168,85,247,.15)">
+            <div class="ch"><i class="ti ti-brain" style="font-size:13px;color:var(--purple)"></i><span class="ct">Create with AI</span><span style="margin-left:8px;font-size:8px;background:rgba(168,85,247,.15);color:var(--purple);border:1px solid rgba(168,85,247,.25);border-radius:3px;padding:1px 5px">SMART</span></div>
+            <div class="cb" style="display:flex;flex-direction:column;gap:6px">
+              <textarea id="invfi-ai-input" class="cinput" rows="3" placeholder="Describe your invoice..." style="resize:none;font-family:inherit;font-size:10px"></textarea>
+              <div style="display:flex;gap:6px">
+                <button class="btn" style="font-size:9.5px;background:rgba(168,85,247,.1);border:1px solid rgba(168,85,247,.25);color:var(--purple);flex:1" onclick="invfiAIParse()"><i class="ti ti-sparkles"></i>Generate Invoice</button>
+                <button class="btn" style="font-size:9.5px" onclick="document.getElementById('invfi-ai-input').value='';document.getElementById('invfi-ai-suggest').style.display='none'"><i class="ti ti-x"></i></button>
+              </div>
+              <div id="invfi-ai-suggest" style="display:none;font-size:9px;color:var(--muted2);padding:4px 0"></div>
+            </div>
+          </div>
+
+          <!-- Templates — InvoiceFi V2 -->
+          <div class="card" id="invfi-templates-card">
+            <div class="ch"><i class="ti ti-template" style="font-size:13px;color:var(--teal)"></i><span class="ct">Templates</span></div>
+            <div class="cb" style="padding:6px">
+              <div style="display:flex;gap:4px;flex-wrap:wrap" id="invfi-template-chips">
+                <button class="btn invfi-tpl-btn" style="font-size:8.5px;padding:3px 7px" onclick="invfiLoadTemplate('Freelancer')">Freelancer</button>
+                <button class="btn invfi-tpl-btn" style="font-size:8.5px;padding:3px 7px" onclick="invfiLoadTemplate('Agency')">Agency</button>
+                <button class="btn invfi-tpl-btn" style="font-size:8.5px;padding:3px 7px" onclick="invfiLoadTemplate('Consulting')">Consulting</button>
+                <button class="btn invfi-tpl-btn" style="font-size:8.5px;padding:3px 7px" onclick="invfiLoadTemplate('Subscription')">Subscription</button>
+                <button class="btn invfi-tpl-btn" style="font-size:8.5px;padding:3px 7px" onclick="invfiLoadTemplate('Payroll')">Payroll</button>
+                <button class="btn invfi-tpl-btn" style="font-size:8.5px;padding:3px 7px" onclick="invfiLoadTemplate('DAO Payments')">DAO Payments</button>
+                <button class="btn invfi-tpl-btn" style="font-size:8.5px;padding:3px 7px" onclick="invfiLoadTemplate('Crypto Services')">Crypto Services</button>
+                <button class="btn invfi-tpl-btn" style="font-size:8.5px;padding:3px 7px" onclick="invfiLoadTemplate('NFT Services')">NFT Services</button>
+              </div>
+            </div>
+          </div>
+
           <div class="card">
             <div class="ch"><i class="ti ti-file-invoice" style="font-size:13px;color:var(--yellow)"></i><span class="ct">Create Invoice</span></div>
             <div class="cb" style="display:flex;flex-direction:column;gap:8px">
@@ -7733,7 +7808,55 @@ select.cinput option { background: #161a24; color: #dde2f0; }
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
                 <div><div class="swap-label">Due Date</div><input id="inv-due" class="cinput" type="text" readonly data-eldp="date" placeholder="MM/DD/YYYY" style="color-scheme:dark;cursor:pointer" oninput="invPreviewUpdate()" onchange="invPreviewUpdate()"/></div>
                 <div><div class="swap-label">Currency</div>
-                  <select id="inv-currency" class="cinput" style="cursor:pointer" onchange="invPreviewUpdate()"><option>USDC</option><option>EURC</option></select>
+                  <select id="inv-currency" class="cinput" style="cursor:pointer" onchange="invPreviewUpdate()"><option>USDC</option><option>EURC</option><option>cirBTC</option></select>
+                </div>
+              </div>
+              <!-- Payment Methods — InvoiceFi V2 -->
+              <div><div class="swap-label">Accepted Payment Methods</div>
+                <div style="display:flex;gap:4px;flex-wrap:wrap">
+                  <label class="invfi-chip" style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:rgba(79,142,247,.08);border:1px solid rgba(79,142,247,.2);border-radius:4px;font-size:9px;cursor:pointer;color:var(--text)">
+                    <input type="checkbox" id="inv-pm-usdc" checked onchange="invPreviewUpdate()" style="accent-color:var(--blue)"/> USDC
+                  </label>
+                  <label class="invfi-chip" style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:rgba(79,142,247,.08);border:1px solid rgba(79,142,247,.2);border-radius:4px;font-size:9px;cursor:pointer;color:var(--text)">
+                    <input type="checkbox" id="inv-pm-eurc" onchange="invPreviewUpdate()" style="accent-color:var(--blue)"/> EURC
+                  </label>
+                  <label class="invfi-chip" style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:rgba(79,142,247,.08);border:1px solid rgba(79,142,247,.2);border-radius:4px;font-size:9px;cursor:pointer;color:var(--text)">
+                    <input type="checkbox" id="inv-pm-cirbtc" onchange="invPreviewUpdate()" style="accent-color:var(--blue)"/> cirBTC
+                  </label>
+                  <label class="invfi-chip" style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:rgba(168,85,247,.08);border:1px solid rgba(168,85,247,.2);border-radius:4px;font-size:9px;cursor:pointer;color:var(--text)">
+                    <input type="checkbox" id="inv-pm-xchain" onchange="invToggleCrosschain()" style="accent-color:var(--purple)"/> Crosschain
+                  </label>
+                </div>
+              </div>
+              <div id="invfi-xchain-networks" style="display:none">
+                <div><div class="swap-label">Supported Networks</div>
+                  <div style="display:flex;gap:4px;flex-wrap:wrap" id="invfi-network-chips">
+                    <label class="invfi-chip" style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:rgba(79,142,247,.06);border:1px solid rgba(79,142,247,.15);border-radius:4px;font-size:9px;cursor:pointer;color:var(--muted2)">
+                      <input type="checkbox" class="invfi-net-cb" value="Arc" checked style="accent-color:var(--blue)"/> Arc
+                    </label>
+                    <label class="invfi-chip" style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:rgba(79,142,247,.06);border:1px solid rgba(79,142,247,.15);border-radius:4px;font-size:9px;cursor:pointer;color:var(--muted2)">
+                      <input type="checkbox" class="invfi-net-cb" value="Ethereum" style="accent-color:#627eea"/> Ethereum
+                    </label>
+                    <label class="invfi-chip" style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:rgba(79,142,247,.06);border:1px solid rgba(79,142,247,.15);border-radius:4px;font-size:9px;cursor:pointer;color:var(--muted2)">
+                      <input type="checkbox" class="invfi-net-cb" value="Base" style="accent-color:#0052ff"/> Base
+                    </label>
+                    <label class="invfi-chip" style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:rgba(79,142,247,.06);border:1px solid rgba(79,142,247,.15);border-radius:4px;font-size:9px;cursor:pointer;color:var(--muted2)">
+                      <input type="checkbox" class="invfi-net-cb" value="Polygon" style="accent-color:#8247e5"/> Polygon
+                    </label>
+                    <label class="invfi-chip" style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:rgba(79,142,247,.06);border:1px solid rgba(79,142,247,.15);border-radius:4px;font-size:9px;cursor:pointer;color:var(--muted2)">
+                      <input type="checkbox" class="invfi-net-cb" value="Arbitrum" style="accent-color:#28a0f0"/> Arbitrum
+                    </label>
+                    <label class="invfi-chip" style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:rgba(79,142,247,.06);border:1px solid rgba(79,142,247,.15);border-radius:4px;font-size:9px;cursor:pointer;color:var(--muted2)">
+                      <input type="checkbox" class="invfi-net-cb" value="Optimism" style="accent-color:#ff0420"/> Optimism
+                    </label>
+                    <label class="invfi-chip" style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:rgba(79,142,247,.06);border:1px solid rgba(79,142,247,.15);border-radius:4px;font-size:9px;cursor:pointer;color:var(--muted2)">
+                      <input type="checkbox" class="invfi-net-cb" value="Solana" style="accent-color:#9945ff"/> Solana
+                    </label>
+                  </div>
+                </div>
+                <div id="invfi-route-preview" style="margin-top:6px;font-size:9px;color:var(--muted2);background:rgba(0,0,0,.15);border-radius:5px;padding:6px 8px;display:none">
+                  <span style="color:var(--muted2)">Route: </span>
+                  <span id="invfi-route-text">Arc to CCTP V2 to Arc to Merchant Wallet</span>
                 </div>
               </div>
               <!-- Chain label -->
@@ -7856,50 +7979,50 @@ select.cinput option { background: #161a24; color: #dde2f0; }
         </div>
       </div>
 
-      <!-- LIST PANEL -->
-      <div id="inv-panel-list" style="flex:1;overflow-y:auto;padding:0 14px 14px;display:none;flex-direction:column;gap:10px">
-        <!-- TOOLBAR -->
-        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
-          <div style="position:relative;flex:1;min-width:160px">
-            <i class="ti ti-search" style="position:absolute;left:8px;top:50%;transform:translateY(-50%);color:var(--muted2);font-size:11px;pointer-events:none"></i>
-            <input id="inv-search" class="cinput" placeholder="Search invoice, client, hash..." style="padding-left:26px;font-size:10px" oninput="renderInvoices()"/>
-          </div>
-          <select id="inv-filter-status" class="cinput" style="font-size:10px;min-width:110px;cursor:pointer" onchange="renderInvoices()">
-            <option value="">All Status</option>
-            <option>Outstanding</option>
-            <option>Paid</option>
-            <option>Overdue</option>
-            <option>Processing</option>
-            <option>Cancelled</option>
-          </select>
-          <select id="inv-filter-chain" class="cinput" style="font-size:10px;min-width:110px;cursor:pointer" onchange="renderInvoices()">
-            <option value="">All Chains</option>
-            <option>Arc Testnet</option>
-          </select>
-          <input id="inv-filter-date-from" class="cinput" type="text" readonly data-eldp="date" placeholder="MM/DD/YYYY" style="font-size:10px;color-scheme:dark;min-width:110px;cursor:pointer" onchange="renderInvoices()" title="From date"/>
-          <input id="inv-filter-date-to" class="cinput" type="text" readonly data-eldp="date" placeholder="MM/DD/YYYY" style="font-size:10px;color-scheme:dark;min-width:110px;cursor:pointer" onchange="renderInvoices()" title="To date"/>
-          <select id="inv-sort" class="cinput" style="font-size:10px;min-width:100px;cursor:pointer" onchange="renderInvoices()">
-            <option value="newest">Newest</option>
-            <option value="oldest">Oldest</option>
-            <option value="highest">Highest</option>
-            <option value="lowest">Lowest</option>
-          </select>
-          <span id="inv-count" style="font-size:9px;color:var(--muted2);white-space:nowrap"></span>
+      <!-- LIST PANEL — InvoiceFi V2 Compact -->
+      <div id="inv-panel-list" style="flex:1;overflow-y:auto;padding:0 14px 14px;display:none;flex-direction:column;gap:8px">
+        <div id="invfi-quick-actions" style="display:flex;gap:4px;flex-wrap:wrap;align-items:center">
+          <button class="btn primary" style="font-size:9px;padding:4px 10px" onclick="invSwitchTab('create')"><i class="ti ti-plus"></i>New Invoice</button>
+          <button class="btn" style="font-size:9px;padding:4px 10px" onclick="invSwitchTab('create');setTimeout(function(){var el=document.getElementById('invfi-ai-input');if(el)el.focus()},200)"><i class="ti ti-sparkles" style="color:var(--purple)"></i>AI</button>
+          <button class="btn" style="font-size:9px;padding:4px 10px" onclick="var el=document.getElementById('invfi-templates-card');if(el)el.scrollIntoView({behavior:'smooth'});invSwitchTab('create')"><i class="ti ti-template"></i>Templates</button>
+          <button class="btn" style="font-size:9px;padding:4px 10px" onclick="invExportCSV()"><i class="ti ti-table-export"></i>Export</button>
+          <button class="btn" style="font-size:9px;padding:4px 10px" onclick="invfiOpenSettings()"><i class="ti ti-settings"></i>Settings</button>
+          <span id="inv-count" style="font-size:9px;color:var(--muted2);margin-left:auto;white-space:nowrap"></span>
         </div>
 
-        <!-- TABLE CARD -->
-        <div class="card" style="overflow:hidden">
-          <table class="btable" style="font-size:10px">
+        <div style="display:flex;gap:4px;align-items:center;background:var(--card);border:1px solid var(--border);border-radius:6px;padding:5px 8px;flex-wrap:wrap">
+          <div style="position:relative;flex:1;min-width:140px">
+            <i class="ti ti-search" style="position:absolute;left:7px;top:50%;transform:translateY(-50%);color:var(--muted2);font-size:10px;pointer-events:none"></i>
+            <input id="inv-search" class="cinput" placeholder="Search..." style="padding:3px 6px 3px 22px;font-size:9px;border:none;background:transparent;height:auto" oninput="renderInvoices()"/>
+          </div>
+          <div style="width:1px;height:18px;background:var(--border);flex-shrink:0"></div>
+          <select id="inv-filter-status" class="cinput" style="font-size:9px;min-width:95px;padding:3px 6px;border:none;height:auto;cursor:pointer" onchange="renderInvoices()">
+            <option value="">All Status</option>
+            <option>Draft</option><option>Sent</option><option>Viewed</option><option>Pending</option>
+            <option>Outstanding</option><option>PartialPaid</option><option>Scheduled</option>
+            <option>Paid</option><option>Overdue</option><option>Cancelled</option><option>Refunded</option><option>Disputed</option>
+          </select>
+          <select id="inv-filter-chain" class="cinput" style="font-size:9px;min-width:85px;padding:3px 6px;border:none;height:auto;cursor:pointer" onchange="renderInvoices()">
+            <option value="">All Chains</option><option>Arc Testnet</option>
+          </select>
+          <input id="inv-filter-date-from" class="cinput" type="text" readonly data-eldp="date" placeholder="From" style="font-size:9px;min-width:80px;padding:3px 6px;height:auto;border:none;cursor:pointer" onchange="renderInvoices()" title="From date"/>
+          <input id="inv-filter-date-to" class="cinput" type="text" readonly data-eldp="date" placeholder="To" style="font-size:9px;min-width:80px;padding:3px 6px;height:auto;border:none;cursor:pointer" onchange="renderInvoices()" title="To date"/>
+          <select id="inv-sort" class="cinput" style="font-size:9px;min-width:75px;padding:3px 6px;border:none;height:auto;cursor:pointer" onchange="renderInvoices()">
+            <option value="newest">Newest</option><option value="oldest">Oldest</option><option value="highest">Highest</option><option value="lowest">Lowest</option>
+          </select>
+          <button class="btn" style="font-size:8px;padding:2px 6px;color:var(--muted2)" onclick="document.getElementById('inv-search').value='';document.getElementById('inv-filter-status').value='';document.getElementById('inv-filter-chain').value='';document.getElementById('inv-filter-date-from').value='';document.getElementById('inv-filter-date-to').value='';document.getElementById('inv-sort').value='newest';renderInvoices()"><i class="ti ti-x"></i>Reset</button>
+        </div>
+
+        <div class="card" style="overflow:hidden;flex:1">
+          <table class="btable" style="font-size:9px">
             <thead>
               <tr>
-                <th style="width:80px">Invoice #</th>
+                <th style="width:70px">Invoice</th>
                 <th>Client</th>
-                <th>Amount</th>
-                <th>Due Date</th>
-                <th>Status</th>
-                <th>Chain</th>
-                <th>Tx Hash</th>
-                <th style="width:120px">Actions</th>
+                <th style="width:80px">Amount</th>
+                <th style="width:70px">Due</th>
+                <th style="width:80px">Status</th>
+                <th style="width:150px">Actions</th>
               </tr>
             </thead>
             <tbody id="inv-tbody"></tbody>
@@ -7912,8 +8035,10 @@ select.cinput option { background: #161a24; color: #dde2f0; }
           </div>
         </div>
 
-        <!-- DETAIL PANEL (inline expand) -->
-        <div id="inv-detail-panel" style="display:none"></div>
+        <div id="invfi-drawer-overlay" style="display:none;position:fixed;inset:0;z-index:9990;background:rgba(0,0,0,.6)" onclick="invfiCloseDrawer()"></div>
+        <div id="invfi-drawer" style="display:none;position:fixed;top:0;right:0;width:520px;max-width:100vw;height:100vh;z-index:9991;background:var(--surface);border-left:1px solid var(--border);overflow-y:auto;box-shadow:-8px 0 32px rgba(0,0,0,.5);transition:transform .2s">
+          <div id="invfi-drawer-content" style="padding:16px"></div>
+        </div>
       </div>
     </div>
 
@@ -21077,7 +21202,55 @@ function renderPayLinks() {
 //  INVOICES
 // ══════════════════════════════════════════════════════════
 
-// ── Tab switcher ──────────────────────────────────────────
+// ── InvoiceFi V2 Feature Flags ────────────────────────────
+const INVOICE_V2_ENABLED          = true;
+const INVOICE_CROSSCHAIN_ENABLED  = true;
+const INVOICE_ESCROW_ENABLED      = true;
+const INVOICE_PARTIAL_PAY_ENABLED = true;
+const INVOICE_INSTALLMENTS_ENABLED = true;
+const INVOICE_AI_ENABLED          = true;
+const INVOICE_NFT_ENABLED         = false;
+const INVOICE_REMINDERS_ENABLED   = true;
+const INVOICE_SUBSCRIPTION_ENABLED = true;
+const INVOICE_MULTI_RECIPIENT_ENABLED = true;
+const INVOICE_TEMPLATES_ENABLED   = true;
+const INVOICE_ANALYTICS_ENABLED   = true;
+
+const INVOICEFI_CONFIG = {
+  acceptedCurrencies: ['USDC','EURC','cirBTC'],
+  acceptedNetworks: ['Arc','Ethereum','Base','Polygon','Arbitrum','Optimism','Solana'],
+  defaultCurrency: 'USDC',
+  defaultNetwork: 'Arc',
+  defaultTaxRate: 0,
+  defaultDueDays: 7,
+  templateCategories: ['Freelancer','Agency','Consulting','Subscription','Payroll','DAO Payments','Investment','Crypto Services','NFT Services','Custom'],
+  reminderSchedule: [7, 3, 1, 0, -7, -15, -30],
+  exportFormats: ['PDF','JSON','CSV','Receipt','Report'],
+  statusList: ['Draft','Sent','Viewed','Pending','PartialPaid','Scheduled','Paid','Overdue','Cancelled','Refunded','Disputed'],
+  statusFlowOrder: ['Draft','Sent','Viewed','Pending','Paid'],
+  installmentFrequencies: ['Monthly','Weekly','Quarterly','Yearly','Custom'],
+  chainRouteMap: {
+    'Arc':       { icon:'ti-circuit-cell',  color:'var(--blue)' },
+    'Ethereum':  { icon:'ti-brand-eth',   color:'#627eea' },
+    'Base':      { icon:'ti-brand-base',  color:'#0052ff' },
+    'Polygon':   { icon:'ti-brand-polygon', color:'#8247e5' },
+    'Arbitrum':  { icon:'ti-brand-arbitrum', color:'#28a0f0' },
+    'Optimism':  { icon:'ti-brand-optimism', color:'#ff0420' },
+    'Solana':    { icon:'ti-brand-solana', color:'#9945ff' }
+  }
+};
+
+let invoiceSettings = Store.load('invoiceSettings', {
+  defaultCurrency: 'USDC',
+  defaultDueDays: 7,
+  taxRate: 0,
+  defaultNetworks: ['Arc'],
+  defaultPaymentMethods: ['USDC'],
+  reminderEnabled: false,
+  branding: { logo: '', companyName: 'Elligente User', accentColor: '#f59e0b' }
+});
+
+// ── Tab switcher
 function invSwitchTab(tab) {
   const createPanel = document.getElementById('inv-panel-create');
   const listPanel   = document.getElementById('inv-panel-list');
@@ -21356,7 +21529,18 @@ function createInvoice() {
     status: 'Outstanding',
     txHash: '',
     created: new Date().toISOString(),
-    timeline: [{ event: 'Invoice Created', ts: new Date().toISOString(), detail: 'Invoice was created and sent to client' }]
+    timeline: [{ event: 'Invoice Created', ts: new Date().toISOString(), detail: 'Invoice was created and sent to client' }],
+    acceptedPayments: invfiGetAcceptedPayments(),
+    acceptedNetworks: invfiGetAcceptedNetworks(),
+    crosschainEnabled: (invfiGetAcceptedPayments()).indexOf('Crosschain') >= 0,
+    paidAmount: 0,
+    remainingAmount: total,
+    attachments: [],
+    tags: [],
+    escrowEnabled: false,
+    milestones: [],
+    recurring: null,
+    splitRecipients: []
   };
   invoiceList.unshift(inv);
 
@@ -21471,17 +21655,23 @@ async function payInvoice(id) {
 
 // ── Status badge ───────────────────────────────────────────
 function invStatusBadge(status) {
-  const map = {
-    'Paid':        { bg: 'rgba(34,197,94,.15)',   color: 'var(--green)',  border: 'rgba(34,197,94,.3)',   glow: '0 0 8px rgba(34,197,94,.25)' },
-    'Outstanding': { bg: 'rgba(245,158,11,.15)',  color: 'var(--yellow)', border: 'rgba(245,158,11,.3)',  glow: '0 0 8px rgba(245,158,11,.25)' },
-    'Overdue':     { bg: 'rgba(239,68,68,.15)',   color: 'var(--red)',    border: 'rgba(239,68,68,.3)',   glow: '0 0 8px rgba(239,68,68,.25)' },
-    'Processing':  { bg: 'rgba(79,142,247,.15)',  color: 'var(--blue)',   border: 'rgba(79,142,247,.3)',  glow: '0 0 8px rgba(79,142,247,.25)' },
-    'Cancelled':   { bg: 'rgba(96,104,128,.15)',  color: 'var(--muted2)', border: 'rgba(96,104,128,.3)',  glow: 'none' }
+  var map = {
+    'Paid': { bg: 'rgba(34,197,94,.15)', color: 'var(--green)', border: 'rgba(34,197,94,.3)', glow: '0 0 8px rgba(34,197,94,.25)' },
+    'Outstanding': { bg: 'rgba(245,158,11,.15)', color: 'var(--yellow)', border: 'rgba(245,158,11,.3)', glow: '0 0 8px rgba(245,158,11,.25)' },
+    'Overdue': { bg: 'rgba(239,68,68,.15)', color: 'var(--red)', border: 'rgba(239,68,68,.3)', glow: '0 0 8px rgba(239,68,68,.25)' },
+    'Processing': { bg: 'rgba(79,142,247,.15)', color: 'var(--blue)', border: 'rgba(79,142,247,.3)', glow: '0 0 8px rgba(79,142,247,.25)' },
+    'Cancelled': { bg: 'rgba(96,104,128,.15)', color: 'var(--muted2)', border: 'rgba(96,104,128,.3)', glow: 'none' },
+    'Draft': { bg: 'rgba(148,163,184,.1)', color: '#94a3b8', border: 'rgba(148,163,184,.25)', glow: 'none' },
+    'Sent': { bg: 'rgba(79,142,247,.12)', color: '#60a5fa', border: 'rgba(79,142,247,.25)', glow: '0 0 6px rgba(79,142,247,.15)' },
+    'Viewed': { bg: 'rgba(167,139,250,.12)', color: 'var(--purple)', border: 'rgba(167,139,250,.25)', glow: '0 0 6px rgba(167,139,250,.15)' },
+    'Pending': { bg: 'rgba(245,158,11,.12)', color: 'var(--yellow)', border: 'rgba(245,158,11,.25)', glow: '0 0 6px rgba(245,158,11,.15)' },
+    'PartialPaid': { bg: 'rgba(6,182,212,.12)', color: 'var(--teal)', border: 'rgba(6,182,212,.25)', glow: '0 0 6px rgba(6,182,212,.15)' },
+    'Scheduled': { bg: 'rgba(236,72,153,.1)', color: '#ec4899', border: 'rgba(236,72,153,.2)', glow: '0 0 6px rgba(236,72,153,.12)' },
+    'Refunded': { bg: 'rgba(251,146,60,.12)', color: '#fb923c', border: 'rgba(251,146,60,.25)', glow: 'none' },
+    'Disputed': { bg: 'rgba(239,68,68,.12)', color: '#f87171', border: 'rgba(239,68,68,.25)', glow: '0 0 8px rgba(239,68,68,.2)' }
   };
-  const s = map[status] || map['Outstanding'];
-  return `<span style="display:inline-flex;align-items:center;gap:3px;font-size:8.5px;padding:2px 8px;border-radius:3px;background:${s.bg};color:${s.color};border:1px solid ${s.border};box-shadow:${s.glow};white-space:nowrap;font-weight:600">
-    <span style="width:5px;height:5px;border-radius:50%;background:${s.color};display:inline-block"></span>${status}
-  </span>`;
+  var s = map[status] || map['Outstanding'];
+  return '<span style="display:inline-flex;align-items:center;gap:3px;font-size:8.5px;padding:2px 8px;border-radius:3px;background:'+s.bg+';color:'+s.color+';border:1px solid '+s.border+';box-shadow:'+s.glow+';white-space:nowrap;font-weight:600"><span style="width:5px;height:5px;border-radius:50%;background:'+s.color+';display:inline-block"></span>'+status+'</span>';
 }
 
 // ── Avatar ─────────────────────────────────────────────────
@@ -21494,446 +21684,217 @@ function invAvatar(name, addr) {
 
 // ── Update analytics stats ─────────────────────────────────
 function updateInvStats() {
-  const now   = new Date();
-  const month = now.getMonth();
-  const year  = now.getFullYear();
+  var now = new Date();
+  var month = now.getMonth();
+  var year = now.getFullYear();
+  var totalRevenue = 0, outstandingAmt = 0, overdueCount = 0, paidTotal = 0, xchainVol = 0;
+  var paidCount = 0, totalCount = invoiceList.length, pendingAmt = 0, partialPayCount = 0;
+  var largestInv = 0;
+  var clientMap = new Map();
+  var repeatClients = new Set();
+  var totalPayTimeMs = 0, paidWithTimeCount = 0;
 
-  let revenueMonth = 0, outstanding = 0, overdueCount = 0, paidTotal = 0, xchain = 0;
-  let paidCount = 0, totalCount = invoiceList.length;
-
-  invoiceList.forEach(inv => {
-    const created = new Date(inv.created);
-    const isOverdue = inv.status === 'Outstanding' && inv.due && new Date(inv.due) < now;
+  invoiceList.forEach(function(inv) {
+    var created = new Date(inv.created);
+    var isOverdue = inv.status === 'Outstanding' && inv.due && new Date(inv.due) < now;
     if (isOverdue) { inv.status = 'Overdue'; }
-
+    var clientKey = (inv.toAddr || inv.recipient || '').toLowerCase();
+    if (clientKey) {
+      if (clientMap.has(clientKey)) { clientMap.set(clientKey, clientMap.get(clientKey) + 1); repeatClients.add(clientKey); }
+      else { clientMap.set(clientKey, 1); }
+    }
+    if (inv.total > largestInv) largestInv = inv.total || 0;
     if (inv.status === 'Paid') {
       paidCount++;
       paidTotal += inv.total || 0;
-      if (created.getMonth() === month && created.getFullYear() === year)
-        revenueMonth += inv.total || 0;
-      if (inv.chainName && inv.chainName !== 'Arc Testnet') xchain += inv.total || 0;
-    } else if (inv.status === 'Outstanding' || inv.status === 'Processing') {
-      outstanding += inv.total || 0;
+      totalRevenue += inv.total || 0;
+      if (inv.chainName && inv.chainName !== 'Arc Testnet') xchainVol += inv.total || 0;
+      if (inv.paidOn && inv.created) {
+        var payTime = new Date(inv.paidOn).getTime() - new Date(inv.created).getTime();
+        if (payTime > 0) { totalPayTimeMs += payTime; paidWithTimeCount++; }
+      }
+    } else if (inv.status === 'Pending' || inv.status === 'Processing') {
+      pendingAmt += inv.total || 0;
+      outstandingAmt += inv.total || 0;
+    } else if (inv.status === 'Outstanding') {
+      outstandingAmt += inv.total || 0;
     } else if (inv.status === 'Overdue') {
       overdueCount++;
-      outstanding += inv.total || 0;
+      outstandingAmt += inv.total || 0;
+    } else if (inv.status === 'PartialPaid') {
+      partialPayCount++;
+      var paid = inv.paidAmount || 0;
+      totalRevenue += paid;
+      outstandingAmt += (inv.total || 0) - paid;
     }
   });
 
-  const rate = totalCount > 0 ? ((paidCount / totalCount) * 100).toFixed(1) + '%' : '—';
-
-  const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
-  set('inv-stat-revenue',    revenueMonth.toFixed(2) + ' USDC');
-  set('inv-stat-rate',       rate);
-  set('inv-stat-outstanding', outstanding.toFixed(2) + ' USDC');
-  set('inv-stat-overdue',    String(overdueCount));
+  var rate = totalCount > 0 ? ((paidCount / totalCount) * 100).toFixed(1) + '%' : '—';
+  var avgPayDays = paidWithTimeCount > 0 ? Math.round(totalPayTimeMs / paidWithTimeCount / 86400000) : null;
+  var avgPayTime = avgPayDays !== null ? avgPayDays + 'd' : '—';
+  var collectionRate = totalCount > 0 ? (((paidCount + partialPayCount) / totalCount) * 100).toFixed(1) + '%' : '—';
+  var totalClients = clientMap.size;
+  var repeatClientCount = repeatClients.size;
+  var pendingCount = invoiceList.filter(function(i) { return i.status === 'Pending' || i.status === 'Processing'; }).length;
+  var set = function(id, v) { var el = document.getElementById(id); if (el) el.textContent = v; };
+  var fmt = function(v) { return v.toFixed(2) + ' USDC'; };
+  set('invfi-stat-total-revenue', fmt(totalRevenue));
+  set('invfi-stat-total-count', String(totalCount));
+  set('invfi-stat-outstanding', fmt(outstandingAmt));
+  set('invfi-stat-overdue', String(overdueCount));
+  set('invfi-stat-paid-total', fmt(paidTotal));
+  set('invfi-stat-success-rate', rate);
+  set('invfi-stat-xchain-vol', fmt(xchainVol));
+  set('invfi-stat-pending', fmt(pendingAmt));
+  set('invfi-stat-total-clients', String(totalClients));
+  set('invfi-stat-repeat-clients', String(repeatClientCount));
+  set('invfi-stat-avg-pay-time', avgPayTime);
+  set('invfi-stat-collection-rate', collectionRate);
+  set('invfi-stat-partial-pays', String(partialPayCount));
+  set('invfi-stat-largest', fmt(largestInv));
+  var outstanding_count = invoiceList.filter(function(i) { return i.status === 'Outstanding'; }).length;
+  set('inv-stat-revenue', totalRevenue.toFixed(2) + ' USDC');
+  set('inv-stat-rate', rate);
+  set('inv-stat-outstanding', outstandingAmt.toFixed(2) + ' USDC');
+  set('inv-stat-overdue', String(overdueCount));
   set('inv-stat-paid-total', paidTotal.toFixed(2) + ' USDC');
-  set('inv-stat-xchain',     xchain.toFixed(2) + ' USDC');
-
-  // Legacy IDs
-  const outstanding_count = invoiceList.filter(i => i.status === 'Outstanding').length;
-  set('inv-outstanding',  String(outstanding_count));
-  set('inv-paid-count',   String(paidCount));
-  set('inv-overdue',      String(overdueCount));
+  set('inv-stat-xchain', xchainVol.toFixed(2) + ' USDC');
+  set('inv-outstanding', String(outstanding_count));
+  set('inv-paid-count', String(paidCount));
+  set('inv-overdue', String(overdueCount));
 }
 
 // ── Render invoices table ──────────────────────────────────
 function renderInvoices() {
-  const tbody = document.getElementById('inv-tbody');
+  var tbody = document.getElementById('inv-tbody');
   if (!tbody) return;
-  const empty     = document.getElementById('inv-empty');
-  const countEl   = document.getElementById('inv-count');
-  const search    = (document.getElementById('inv-search')?.value   || '').toLowerCase();
-  const fStatus   = document.getElementById('inv-filter-status')?.value || '';
-  const fDateFrom = document.getElementById('inv-filter-date-from')?.value || '';
-  const fDateTo   = document.getElementById('inv-filter-date-to')?.value   || '';
-  const sortBy    = document.getElementById('inv-sort')?.value || 'newest';
-
-  // Auto-mark overdue
-  const now = new Date();
-  invoiceList.forEach(inv => {
-    if (inv.status === 'Outstanding' && inv.due && new Date(inv.due) < now)
-      inv.status = 'Overdue';
+  var empty = document.getElementById('inv-empty');
+  var countEl = document.getElementById('inv-count');
+  var search = (document.getElementById('inv-search') ? document.getElementById('inv-search').value : '').toLowerCase();
+  var fStatus = document.getElementById('inv-filter-status') ? document.getElementById('inv-filter-status').value : '';
+  var fDateFrom = document.getElementById('inv-filter-date-from') ? document.getElementById('inv-filter-date-from').value : '';
+  var fDateTo = document.getElementById('inv-filter-date-to') ? document.getElementById('inv-filter-date-to').value : '';
+  var sortBy = document.getElementById('inv-sort') ? document.getElementById('inv-sort').value : 'newest';
+  var now = new Date();
+  invoiceList.forEach(function(inv) {
+    if (inv.status === 'Outstanding' && inv.due && new Date(inv.due) < now) inv.status = 'Overdue';
   });
-
-  // Filter
-  let filtered = invoiceList.filter(inv => {
+  var filtered = invoiceList.filter(function(inv) {
     if (fStatus && inv.status !== fStatus) return false;
     if (search) {
-      const hay = (inv.id + inv.toName + inv.toAddr + (inv.txHash||'')).toLowerCase();
-      if (!hay.includes(search)) return false;
+      var hay = (inv.id + inv.toName + inv.toAddr + (inv.txHash||'')).toLowerCase();
+      if (hay.indexOf(search) === -1) return false;
     }
     if (fDateFrom && inv.created < fDateFrom) return false;
-    if (fDateTo   && inv.created.slice(0,10) > fDateTo) return false;
+    if (fDateTo && inv.created.slice(0,10) > fDateTo) return false;
     return true;
   });
-
-  // Sort
-  filtered.sort((a, b) => {
-    if (sortBy === 'oldest')  return new Date(a.created) - new Date(b.created);
+  filtered.sort(function(a, b) {
+    if (sortBy === 'oldest') return new Date(a.created) - new Date(b.created);
     if (sortBy === 'highest') return b.total - a.total;
-    if (sortBy === 'lowest')  return a.total - b.total;
-    return new Date(b.created) - new Date(a.created); // newest
+    if (sortBy === 'lowest') return a.total - b.total;
+    return new Date(b.created) - new Date(a.created);
   });
-
   if (countEl) countEl.textContent = filtered.length + ' invoice' + (filtered.length !== 1 ? 's' : '');
-
-  if (!filtered.length) {
-    tbody.innerHTML = '';
-    if (empty) empty.style.display = '';
-    return;
-  }
+  if (!filtered.length) { tbody.innerHTML = ''; if (empty) empty.style.display = ''; return; }
   if (empty) empty.style.display = 'none';
-
-  tbody.innerHTML = filtered.map(inv => {
-    const txLink = inv.txHash
-      ? `<a href="https://testnet.arcscan.app/tx/${inv.txHash}" target="_blank" style="color:var(--blue);text-decoration:none;font-size:8.5px;font-family:monospace">${shortAddr(inv.txHash)}&nbsp;<i class="ti ti-external-link" style="font-size:7px"></i></a>`
-      : '<span style="color:var(--muted)">—</span>';
-    const isPaid      = inv.status === 'Paid';
-    const isCancelled = inv.status === 'Cancelled';
-    return `<tr class="inv-row" style="cursor:pointer" onclick="invToggleDetail('${inv.id}')">
-      <td style="font-weight:700;color:var(--yellow);font-size:10px">${inv.id}</td>
-      <td>
-        <div style="display:flex;align-items:center;gap:6px">
-          ${invAvatar(inv.toName, inv.toAddr)}
-          <div>
-            <div style="font-size:10px;font-weight:600;color:var(--text)">${inv.toName||shortAddr(inv.toAddr)}</div>
-            <div style="font-size:8.5px;color:var(--muted2);font-family:monospace">${shortAddr(inv.toAddr)}</div>
-          </div>
-        </div>
-      </td>
-      <td style="font-weight:600;color:var(--text)">${inv.total.toFixed(2)} <span style="color:var(--muted2);font-size:8.5px">${inv.currency||'USDC'}</span></td>
-      <td style="font-size:9px;color:var(--muted2)">${inv.due||'—'}</td>
-      <td>${invStatusBadge(inv.status)}</td>
-      <td>
-        <div style="display:flex;align-items:center;gap:4px">
-          <div style="width:6px;height:6px;border-radius:50%;background:var(--blue);flex-shrink:0"></div>
-          <span style="font-size:8.5px;color:var(--muted2)">${inv.chainName||'Arc Testnet'}</span>
-        </div>
-      </td>
-      <td>${txLink}</td>
-      <td>
-        <div style="display:flex;gap:3px;align-items:center" onclick="event.stopPropagation()">
-          ${!isPaid && !isCancelled ? `<button class="btn primary" style="padding:2px 7px;font-size:8.5px" onclick="payInvoice('${inv.id}')"><i class="ti ti-coin"></i>Pay</button>` : ''}
-          <button class="btn" title="Open payment page" style="padding:2px 6px;font-size:9px;color:var(--teal)" onclick="invOpenPayPage('${inv.id}')"><i class="ti ti-external-link"></i></button>
-          <button class="btn" title="Copy link" style="padding:2px 6px;font-size:9px" onclick="invCopyLinkById('${inv.id}')"><i class="ti ti-link"></i></button>
-          <button class="btn" title="Download QR" style="padding:2px 6px;font-size:9px" onclick="invDownloadQR('${inv.id}')"><i class="ti ti-qrcode"></i></button>
-          ${inv.txHash ? `<a class="btn" href="https://testnet.arcscan.app/tx/${inv.txHash}" target="_blank" title="View on explorer" style="padding:2px 6px;font-size:9px;text-decoration:none"><i class="ti ti-external-link"></i></a>` : ''}
-          <button class="btn" title="Delete" style="padding:2px 6px;font-size:9px;color:var(--red)" onclick="invDelete('${inv.id}')"><i class="ti ti-trash"></i></button>
-        </div>
-      </td>
-    </tr>
-    <tr id="inv-detail-row-${inv.id}" style="display:none">
-      <td colspan="8" style="padding:0;border:none">
-        <div id="inv-detail-content-${inv.id}"></div>
-      </td>
-    </tr>`;
+  tbody.innerHTML = filtered.map(function(inv) {
+    var isPaid = inv.status === 'Paid';
+    var isCancelled = inv.status === 'Cancelled';
+    var dueDisplay = inv.due ? invDueCountdown(inv) : '—';
+    return '<tr class="inv-row" style="cursor:pointer" onclick="invfiOpenDrawer(\'' + inv.id + '\')"><td style="font-weight:700;color:var(--yellow);font-size:10px">' + inv.id + '</td><td><div style="display:flex;align-items:center;gap:6px">' + invAvatar(inv.toName, inv.toAddr) + '<div style="font-size:9.5px;font-weight:600;color:var(--text)">' + (inv.toName||shortAddr(inv.toAddr)) + '</div></div></td><td style="font-weight:600;color:var(--text);white-space:nowrap">' + inv.total.toFixed(2) + ' <span style="color:var(--muted2);font-size:8px">' + (inv.currency||'USDC') + '</span></td><td style="font-size:9px;color:' + (inv.status==='Overdue'?'var(--red)':'var(--muted2)') + '">' + dueDisplay + '</td><td>' + invStatusBadge(inv.status) + '</td><td><div style="display:flex;gap:3px;align-items:center" onclick="event.stopPropagation()">' + (!isPaid && !isCancelled ? '<button class="btn primary" style="padding:2px 6px;font-size:8px" onclick="payInvoice(\'' + inv.id + '\')"><i class="ti ti-coin"></i>Pay</button>' : '') + '<button class="btn" title="Open details" style="padding:2px 5px;font-size:8px;color:var(--blue)" onclick="invfiOpenDrawer(\'' + inv.id + '\')"><i class="ti ti-eye"></i></button><button class="btn" title="Copy link" style="padding:2px 5px;font-size:8px" onclick="invCopyLinkById(\'' + inv.id + '\')"><i class="ti ti-link"></i></button><button class="btn" title="PDF" style="padding:2px 5px;font-size:8px" onclick="invExportPDF(\'' + inv.id + '\')"><i class="ti ti-file-download"></i></button><button class="btn" title="Delete" style="padding:2px 5px;font-size:8px;color:var(--red)" onclick="invDelete(\'' + inv.id + '\')"><i class="ti ti-trash"></i></button></div></td></tr>';
   }).join('');
-
   updateInvStats();
 }
 
-// ── Toggle detail row ──────────────────────────────────────
-function invToggleDetail(id) {
-  const row = document.getElementById('inv-detail-row-' + id);
-  if (!row) return;
-  const isOpen = row.style.display !== 'none';
-  // Close all
-  document.querySelectorAll('[id^="inv-detail-row-"]').forEach(r => r.style.display = 'none');
-  if (!isOpen) {
-    row.style.display = '';
-    const contentEl = document.getElementById('inv-detail-content-' + id);
-    if (contentEl) {
-      const inv = invoiceList.find(i => i.id === id);
-      contentEl.innerHTML = invDetailHTML(inv);
-      // Generate QR Code for premium dashboard
-      setTimeout(() => {
-        const qrEl = document.getElementById('inv-detail-qr-' + id);
-        if (qrEl && typeof QRCode !== 'undefined') {
-          const payUrl = inv.payUrl || buildPublicPayUrl(inv.publicToken || id);
-          qrEl.innerHTML = '';
-          new QRCode(qrEl, { text: payUrl, width:120, height:120, colorDark:'#000', colorLight:'#fff', correctLevel: QRCode.CorrectLevel.L });
-        }
-      }, 50);
-      // Generate QR Code dynamically for the new dashboard
-      const qrEl = document.getElementById(`inv-detail-qr-${id}`);
-      if (qrEl && typeof QRCode !== 'undefined') {
-        qrEl.innerHTML = '';
-        new QRCode(qrEl, {
-          text: inv.payUrl || buildPublicPayUrl(inv.publicToken || id),
-          width: 140,
-          height: 140,
-          colorDark: "#000000",
-          colorLight: "#ffffff",
-          correctLevel: QRCode.CorrectLevel.L
-        });
-      }
-    }
-  }
+function invDueCountdown(inv) {
+  if (!inv.due) return '';
+  var dueMs = new Date(inv.due).getTime() - Date.now();
+  var days = Math.ceil(dueMs / 86400000);
+  if (days > 0) return 'Due in ' + days + 'd';
+  if (days === 0) return 'Due today';
+  return Math.abs(days) + 'd overdue';
 }
 
-// ── Detail HTML (premium enterprise Web3 dashboard — UI/UX only) ─
-function invDetailHTML(inv) {
+function invfiOpenDrawer(id) {
+  var inv = invoiceList.find(function(i) { return i.id === id; });
+  if (!inv) return;
+  var overlay = document.getElementById('invfi-drawer-overlay');
+  var drawer = document.getElementById('invfi-drawer');
+  var content = document.getElementById('invfi-drawer-content');
+  if (!overlay || !drawer || !content) return;
+  overlay.style.display = '';
+  drawer.style.display = '';
+  document.body.style.overflow = 'hidden';
+  content.innerHTML = invfiDrawerHTML(inv);
+  setTimeout(function() {
+    var qrEl = document.getElementById('invfi-drawer-qr');
+    if (qrEl && typeof QRCode !== 'undefined') {
+      qrEl.innerHTML = '';
+      new QRCode(qrEl, { text: inv.payUrl || buildPublicPayUrl(inv.publicToken || id), width: 130, height: 130, colorDark: '#000', colorLight: '#fff', correctLevel: QRCode.CorrectLevel.L });
+    }
+  }, 100);
+}
+
+function invfiCloseDrawer() {
+  var overlay = document.getElementById('invfi-drawer-overlay');
+  var drawer = document.getElementById('invfi-drawer');
+  if (overlay) overlay.style.display = 'none';
+  if (drawer) drawer.style.display = 'none';
+  document.body.style.overflow = '';
+}
+
+function invfiDrawerHTML(inv) {
   if (!inv) return '';
-  const isPaid    = inv.status === 'Paid';
-  const isOverdue = inv.status === 'Overdue';
-  const isCancelled = inv.status === 'Cancelled';
+  var isPaid = inv.status === 'Paid';
+  var isCancelled = inv.status === 'Cancelled';
+  var cur = inv.currency || 'USDC';
+  var fmt = function(ts) { return ts ? new Date(ts).toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '—'; };
+  var events = [];
+  events.push({ label: 'Created', ts: inv.created, done: true });
+  if (inv.sentAt) events.push({ label: 'Sent', ts: inv.sentAt, done: true });
+  if (inv.openedAt) events.push({ label: 'Viewed', ts: inv.openedAt, done: true });
+  if (inv.status === 'PartialPaid') events.push({ label: 'Partial Paid', ts: inv.paidOn, done: true, active: true });
+  if (inv.status === 'Pending' || inv.status === 'Processing') events.push({ label: 'Pending', ts: null, active: true });
+  if (isPaid) { events.push({ label: 'Paid', ts: inv.paidOn, done: true }); }
+  else if (!isCancelled && inv.status !== 'Draft') events.push({ label: 'Awaiting Payment', ts: null });
+  var timelineHTML = '';
+  for (var i = 0; i < events.length; i++) {
+    var ev = events[i];
+    timelineHTML += '<div style="display:flex;gap:8px;align-items:flex-start;position:relative"><div style="display:flex;flex-direction:column;align-items:center"><div style="width:10px;height:10px;border-radius:50%;background:' + (ev.done ? 'var(--teal)' : (ev.active ? 'var(--blue)' : 'var(--border)')) + ';border:2px solid ' + (ev.done ? 'var(--teal)' : (ev.active ? 'var(--blue)' : 'var(--border)')) + ';flex-shrink:0"></div>' + (i < events.length - 1 ? '<div style="width:1px;flex:1;background:' + (ev.done ? 'var(--teal)' : 'var(--border)') + ';min-height:20px"></div>' : '') + '</div><div style="padding-bottom:' + (i < events.length - 1 ? '12px' : '0') + '"><div style="font-size:10px;font-weight:600;color:' + (ev.done ? 'var(--teal)' : (ev.active ? 'var(--blue)' : 'var(--muted2)')) + '">' + ev.label + '</div><div style="font-size:8px;color:var(--muted2)">' + (ev.ts ? fmt(ev.ts) : '—') + '</div></div></div>';
+  }
+  var acceptedPayments = inv.acceptedPayments || ['USDC'];
+  var acceptedNetworks = inv.acceptedNetworks || ['Arc'];
+  var pmChips = '';
+  for (var j = 0; j < acceptedPayments.length; j++) { pmChips += '<span style="font-size:8px;padding:2px 6px;background:rgba(79,142,247,.08);border:1px solid rgba(79,142,247,.2);border-radius:3px;color:var(--blue)">' + acceptedPayments[j] + '</span>'; }
+  var netChips = '';
+  for (var k = 0; k < acceptedNetworks.length; k++) { netChips += '<span style="font-size:8px;padding:2px 6px;background:rgba(168,85,247,.06);border:1px solid rgba(168,85,247,.15);border-radius:3px;color:var(--purple)">' + acceptedNetworks[k] + '</span>'; }
+  var lineItemsHTML = '';
+  if (inv.lineItems && inv.lineItems.length > 0) {
+    lineItemsHTML = '<div style="margin-bottom:14px"><div style="font-size:9px;color:var(--muted2);text-transform:uppercase;margin-bottom:4px">Line Items</div><div style="background:rgba(0,0,0,.1);border-radius:6px;padding:8px">';
+    for (var li = 0; li < inv.lineItems.length; li++) {
+      var item = inv.lineItems[li];
+      lineItemsHTML += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:9px;border-bottom:1px solid rgba(255,255,255,.03)"><span style="color:var(--text)">' + (item.name||'—') + '</span><span style="color:var(--muted2)">' + item.qty + 'x ' + ((item.price||0).toFixed(2)) + '</span><span style="color:var(--yellow);font-weight:600">' + ((item.total||0).toFixed(2)) + '</span></div>';
+    }
+    lineItemsHTML += '</div></div>';
+  }
+  var partialBarHTML = '';
+  if (inv.status === 'PartialPaid') {
+    var pct = Math.min(100, Math.round(((inv.paidAmount||0) / (inv.total||1)) * 100));
+    partialBarHTML = '<div style="margin-top:6px"><div style="background:rgba(255,255,255,.05);border-radius:3px;height:6px;overflow:hidden;margin-bottom:4px"><div style="background:linear-gradient(90deg,var(--teal),var(--blue));height:100%;width:' + pct + '%;border-radius:3px"></div></div><div style="font-size:8px;color:var(--muted2)">Paid: ' + ((inv.paidAmount||0).toFixed(2)) + ' ' + cur + ' · Remaining: ' + ((inv.remainingAmount||0).toFixed(2)) + ' ' + cur + '</div></div>';
+  }
+  var onchainHTML = '';
+  if (inv.txHash) {
+    onchainHTML = '<div style="margin-bottom:14px"><div style="font-size:9px;color:var(--muted2);text-transform:uppercase;margin-bottom:4px">On-Chain Verification</div><div style="background:rgba(0,0,0,.1);border-radius:6px;padding:10px;font-size:9px"><div style="display:flex;justify-content:space-between;padding:2px 0"><span style="color:var(--muted2)">Chain</span><span style="color:var(--blue)">' + (inv.chainName||'Arc Testnet') + '</span></div><div style="display:flex;justify-content:space-between;padding:2px 0"><span style="color:var(--muted2)">Tx Hash</span><a href="https://testnet.arcscan.app/tx/' + inv.txHash + '" target="_blank" style="color:var(--teal);font-family:monospace;font-size:8.5px;text-decoration:none">' + shortAddr(inv.txHash) + ' <i class="ti ti-external-link" style="font-size:7px"></i></a></div><div style="display:flex;justify-content:space-between;padding:2px 0"><span style="color:var(--muted2)">Paid On</span><span style="color:var(--text)">' + (inv.paidOn ? fmt(inv.paidOn) : '—') + '</span></div></div></div>';
+  }
+  var descHTML = '';
+  if (inv.desc) { descHTML = '<div style="margin-bottom:14px"><div style="font-size:9px;color:var(--muted2);text-transform:uppercase;margin-bottom:4px">Description</div><div style="font-size:10px;color:var(--text);padding:8px;background:rgba(0,0,0,.1);border-radius:6px">' + inv.desc + '</div></div>'; }
+  return '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid var(--border)"><div><div style="font-size:8px;color:var(--muted2);text-transform:uppercase;letter-spacing:.5px">Invoice</div><div style="font-size:14px;font-weight:800;color:var(--yellow)">' + inv.id + '</div></div><div style="display:flex;align-items:center;gap:8px">' + invStatusBadge(inv.status) + '<button class="btn" style="font-size:9px;padding:2px 6px" onclick="invfiCloseDrawer()"><i class="ti ti-x"></i></button></div></div><div style="text-align:center;padding:16px;background:rgba(0,0,0,.15);border-radius:8px;margin-bottom:14px"><div style="font-size:9px;color:var(--muted2);text-transform:uppercase;margin-bottom:4px">Amount Due</div><div style="font-size:28px;font-weight:800;color:var(--text)">' + inv.total.toFixed(2) + ' <span style="color:var(--blue);font-size:16px">' + cur + '</span></div>' + partialBarHTML + '</div><div style="margin-bottom:14px"><div style="font-size:9px;color:var(--muted2);text-transform:uppercase;margin-bottom:6px">Client Information</div><div style="display:flex;align-items:center;gap:8px;padding:10px;background:rgba(0,0,0,.1);border-radius:6px">' + invAvatar(inv.toName, inv.toAddr) + '<div><div style="font-size:11px;font-weight:600;color:var(--text)">' + (inv.toName||'Unknown') + '</div><div style="font-size:8.5px;color:var(--blue);font-family:monospace;cursor:pointer" onclick="navigator.clipboard.writeText(\'' + (inv.toAddr||'') + '\');toast(\'Address copied\',\'success\')">' + (inv.toAddr ? shortAddr(inv.toAddr) : '—') + '</div></div></div></div>' + descHTML + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px"><div><div style="font-size:9px;color:var(--muted2);text-transform:uppercase;margin-bottom:4px">Payment Methods</div><div style="display:flex;gap:3px;flex-wrap:wrap">' + pmChips + '</div></div><div><div style="font-size:9px;color:var(--muted2);text-transform:uppercase;margin-bottom:4px">Networks</div><div style="display:flex;gap:3px;flex-wrap:wrap">' + netChips + '</div></div></div>' + lineItemsHTML + '<div style="margin-bottom:14px;background:rgba(0,0,0,.1);border-radius:6px;padding:10px"><div style="font-size:9px;color:var(--muted2);text-transform:uppercase;margin-bottom:6px">Payment Breakdown</div><div style="display:flex;justify-content:space-between;font-size:9px;padding:2px 0;color:var(--muted2)"><span>Subtotal</span><span>' + ((inv.subtotal||0).toFixed(2)) + ' ' + cur + '</span></div><div style="display:flex;justify-content:space-between;font-size:9px;padding:2px 0;color:var(--muted2)"><span>Tax (' + (inv.taxPct||0) + '%)</span><span>' + ((inv.taxAmt||0).toFixed(2)) + ' ' + cur + '</span></div><div style="display:flex;justify-content:space-between;font-size:9px;padding:2px 0;color:var(--muted2)"><span>Protocol Fee</span><span>' + ((inv.protocolFee||0).toFixed(2)) + ' ' + cur + '</span></div><div style="display:flex;justify-content:space-between;font-size:10px;padding:4px 0 0;font-weight:700;color:var(--yellow);border-top:1px solid var(--border);margin-top:2px"><span>Total</span><span>' + ((inv.total||0).toFixed(2)) + ' ' + cur + '</span></div></div>' + onchainHTML + '<div style="margin-bottom:14px"><div style="font-size:9px;color:var(--muted2);text-transform:uppercase;margin-bottom:6px">Timeline</div><div style="padding:8px">' + timelineHTML + '</div></div><div style="display:flex;gap:12px;align-items:center;margin-bottom:14px;padding:12px;background:rgba(0,0,0,.1);border-radius:6px"><div id="invfi-drawer-qr" style="width:100px;height:100px;display:flex;align-items:center;justify-content:center;background:#fff;border-radius:4px;flex-shrink:0"><i class="ti ti-qrcode" style="font-size:36px;color:#ddd"></i></div><div style="flex:1;min-width:0"><div style="font-size:8px;color:var(--muted2);margin-bottom:4px">Payment Link</div><div style="font-size:8px;color:var(--blue);word-break:break-all;font-family:monospace">' + ((inv.payUrl||'').replace(/^https?:\/\//, '')) + '</div></div></div><div style="display:flex;gap:4px;flex-wrap:wrap">' + (!isPaid && !isCancelled ? '<button class="btn primary" style="flex:1;font-size:10px;padding:8px" onclick="payInvoice(\'' + inv.id + '\')"><i class="ti ti-coin"></i>Pay Now</button>' : '') + '<button class="btn" style="flex:1;font-size:9px;padding:8px" onclick="invExportPDF(\'' + inv.id + '\')"><i class="ti ti-file-download"></i>PDF</button><button class="btn" style="flex:1;font-size:9px;padding:8px" onclick="invCopyLinkById(\'' + inv.id + '\')"><i class="ti ti-link"></i>Copy Link</button><button class="btn" style="flex:1;font-size:9px;padding:8px" onclick="invShareInvoice(\'' + inv.id + '\')"><i class="ti ti-share"></i>Share</button><button class="btn" style="flex:1;font-size:9px;padding:8px" onclick="invExportJSON(\'' + inv.id + '\')"><i class="ti ti-json"></i>JSON</button></div>';
+}
 
-  // ── Payment score (preserved logic) ─────────────────────
-  const scorePct  = isPaid ? 100 : (isOverdue ? 15 : (inv.status === 'Pending' ? 72 : 85));
-  const scoreClass= scorePct >= 80 ? 'high' : (scorePct >= 50 ? 'med' : 'low');
-  const riskLabel = isPaid ? 'Zero' : (isOverdue ? 'High' : 'Low');
-  const riskClass = isPaid ? 'green' : (isOverdue ? 'red' : 'green');
-  const etaLabel  = isPaid ? 'Settled' : (isOverdue ? 'Overdue' : '< 30s');
-  const circumference = 2 * Math.PI * 28;
-  const offset = circumference - (scorePct / 100) * circumference;
-
-  // ── Progress stages (exact spec order) ──────────────────
-  const stages = ['Created','Sent','Opened','Payment Pending','Paid'];
-  const stageMap = { 'Draft':0, 'Sent':1, 'Opened':2, 'Pending':2, 'Outstanding':2, 'Payment Pending':3, 'Paid':4, 'Overdue':2, 'Cancelled':1 };
-  const curStage = stageMap[inv.status] ?? 0;
-
-  const stepsHTML = stages.map((s, i) => {
-    const cls = i < curStage ? 'done' : (i === curStage ? 'active' : '');
-    return `<div class="piv-step ${cls}"><div class="piv-step-dot"></div><div class="piv-step-label">${s}</div></div>`;
-  }).join('');
-
-  // ── Client / due / helpers (preserved) ──────────────────
-  const clientName   = inv.toName || inv.to || 'Client';
-  const clientAddr   = inv.toAddr || inv.to || '';
-  const clientLetter = (clientName[0] || 'C').toUpperCase();
-  const memberSince  = inv.created ? new Date(inv.created).toLocaleDateString('en-US',{month:'short',year:'numeric'}) : 'May 2026';
-
-  let dueCountdown = '';
-  if (inv.due && !isPaid && !isCancelled) {
-    const dueMs = new Date(inv.due).getTime() - Date.now();
-    const dueDays = Math.ceil(dueMs / 86400000);
-    if (dueDays > 0) dueCountdown = `Due in ${dueDays} day${dueDays===1?'':'s'}`;
-    else if (dueDays === 0) dueCountdown = 'Due today';
-    else dueCountdown = `${Math.abs(dueDays)} days overdue`;
-  } else if (isPaid) dueCountdown = 'Paid';
-
-  const fmt = ts => ts ? new Date(ts).toLocaleString('en-US',{month:'numeric',day:'numeric',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
-
-  const tlEvents = [
-    { label:'Invoice Created', ts: inv.created,      channel:'Arc Testnet', note:'Invoice was created and saved', cls:'done' },
-    { label:'Invoice Sent',    ts: inv.sentAt,        channel:'Email',       note:'Invoice was sent to client',   cls: inv.sentAt ? 'done' : '' },
-    { label:'Client Opened',   ts: inv.openedAt,      channel:'Web',         note:'Client viewed the invoice',    cls: inv.openedAt ? 'done' : '' },
-    { label:'Payment Pending', ts: inv.pendingAt,     channel:null,          note:'Waiting for payment',          cls: isPaid ? 'done' : (inv.pendingAt||curStage>=3 ? 'active':'') },
-    { label:'Payment Confirmed',ts:inv.confirmedAt||inv.paidOn, channel:null, note:'Payment confirmed on-chain',  cls: isPaid ? 'done' : '' },
-    { label:'Settled',         ts: inv.settledAt||inv.paidOn,   channel:null, note:'Invoice settled',            cls: isPaid ? 'done' : '' },
-  ];
-  const tlHTML = tlEvents.map(ev => `
-    <div class="piv-tl-row ${ev.cls}">
-      <div class="piv-tl-icon"><i class="ti ti-${ev.cls==='done'?'check':(ev.cls==='active'?'clock':'circle')}" style="font-size:10px"></i></div>
-      <div class="piv-tl-body">
-        <div class="piv-tl-label">${ev.label}</div>
-        <div class="piv-tl-time">${ev.ts ? fmt(ev.ts) : '—'}${ev.channel ? ` · ${ev.channel}` : ''}</div>
-        ${ev.note ? `<div class="piv-tl-note">${ev.note}</div>` : ''}
-      </div>
-    </div>`).join('');
-
-  const activities = [
-    { label:'Invoice Created', ts:inv.created, note:'Invoice was created and saved', ch:'Arc Testnet', cls:'done' },
-    ...(inv.sentAt    ? [{ label:'Invoice Sent',     ts:inv.sentAt,    note:'Invoice was sent to client',   ch:'Email', cls:'done' }] : []),
-    ...(inv.openedAt  ? [{ label:'Client Opened',    ts:inv.openedAt,  note:'Client viewed the invoice',    ch:'Web',   cls:'done' }] : []),
-    ...(curStage >= 3 ? [{ label:'Payment Pending',  ts:inv.pendingAt, note:'Waiting for payment',          ch:null,    cls: isPaid?'done':'active' }] : []),
-    ...(isPaid        ? [{ label:'Payment Confirmed',ts:inv.paidOn||inv.confirmedAt, note:'On-chain transfer confirmed', ch:null, cls:'done' }] : []),
-    ...(isPaid        ? [{ label:'Settled',          ts:inv.settledAt||inv.paidOn,   note:'Invoice fully settled',       ch:null, cls:'done' }] : []),
-  ];
-  const actHTML = activities.map(a => `
-    <div class="evt">
-      <div class="dot ${a.cls}"></div>
-      <div style="flex:1;min-width:0">
-        <span style="color:#e5e7eb;font-weight:600">${a.label}</span>
-        ${a.ch ? `<span style="font-size:8px;margin-left:5px;color:#4f8ef7;background:rgba(79,142,247,.1);padding:0 4px;border-radius:2px">${a.ch}</span>` : ''}
-      </div>
-      <span class="ts">${a.ts ? fmt(a.ts) : '—'}</span>
-    </div>`).join('');
-
-  const lineItemsHTML = (inv.lineItems||[]).length > 0 ? `
-    <div style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,.05)">
-      ${(inv.lineItems||[]).map(li=>`
-        <div class="row" style="font-size:10px"><span>${li.name||'—'}</span><span>${li.qty||1}×${(li.price||0).toFixed(2)}</span><span class="highlight">${(li.total||0).toFixed(2)}</span></div>`).join('')}
-    </div>` : '';
-
-  const networkLabel = inv.chainName || 'Arc Testnet';
-  const tokenLabel   = inv.currency || 'USDC';
-  const amountDue    = isPaid ? '0.00' : (inv.total || 0).toFixed(2);
-
-  // ── PREMIUM ENTERPRISE DASHBOARD (spec compliant) ───────
-  return `
-<div class="piv-container">
-
-  <!-- 1. Premium Invoice Header -->
-  <div class="piv-premium-header">
-    <div class="piv-header-main">
-      <div class="piv-inv-id">
-        Invoice <span style="color:var(--yellow)">${inv.id}</span>
-        <button class="piv-copy-id" onclick="navigator.clipboard?.writeText('${inv.id}');toast('Copied','success')" title="Copy ID"><i class="ti ti-copy"></i></button>
-      </div>
-      <span class="piv-status-badge ${inv.status||'Outstanding'}">${inv.status||'Outstanding'}</span>
-      <span class="piv-net-badge"><span class="dot"></span>${networkLabel}</span>
-      <span class="piv-token-badge">${tokenLabel}</span>
-      <span class="piv-header-amount">${amountDue} ${tokenLabel}</span>
-      <span class="piv-due-count">
-        ${inv.due ? `<i class="ti ti-calendar"></i> ${new Date(inv.due).toLocaleDateString('en-US',{month:'2-digit',day:'2-digit',year:'numeric'})}` : ''}
-        ${dueCountdown ? `· <span class="cd ${isOverdue?'overdue':''}">${dueCountdown}</span>` : ''}
-      </span>
-    </div>
-    <div class="piv-header-actions">
-      <button class="btn" style="font-size:9.5px;padding:5px 10px" onclick="invExportPDF('${inv.id}')"><i class="ti ti-file-download"></i>PDF</button>
-      <button class="btn" style="font-size:9.5px;padding:5px 10px" onclick="invCopyLinkById('${inv.id}')"><i class="ti ti-link"></i>Copy Link</button>
-      <button class="btn primary" style="font-size:9.5px;padding:5px 10px" onclick="invOpenPayPage('${inv.id}')"><i class="ti ti-external-link"></i>Open</button>
-    </div>
-  </div>
-
-  <!-- 2. Large Hero Amount -->
-  <div class="piv-hero-lg">
-    <div>
-      <div style="font-size:10px;color:#6b7280;letter-spacing:.6px;text-transform:uppercase">Amount Due</div>
-      <div class="piv-hero-amount">${amountDue} <span>${tokenLabel}</span></div>
-    </div>
-    <div class="piv-hero-meta">
-      <span class="piv-hero-status ${isPaid?'Paid':(isOverdue?'Overdue':'Outstanding')} pulse" style="border-color:${isPaid?'#22c55e':(isOverdue?'#ef4444':'#f59e0b')};color:${isPaid?'#22c55e':(isOverdue?'#ef4444':'#f59e0b')}">
-        ${inv.status||'Outstanding'}
-      </span>
-    </div>
-  </div>
-
-  <!-- 3. Horizontal Payment Progress Tracker -->
-  <div class="piv-progress-premium">
-    <div class="piv-progress-label">Payment Progress</div>
-    <div class="piv-progress-steps">
-      ${stepsHTML}
-    </div>
-  </div>
-
-  <!-- 4. Main content: left stack + right payment module -->
-  <div class="piv-main-grid">
-
-    <!-- LEFT -->
-    <div class="piv-left-col">
-
-      <!-- Payment Score -->
-      <div class="piv-card">
-        <div class="piv-card-title" style="color:#a78bfa"><i class="ti ti-chart-pie"></i>Payment Score</div>
-        <div class="piv-score-wrap">
-          <div class="piv-score-circle-wrap">
-            <svg class="piv-score-svg" width="84" height="84" viewBox="0 0 84 84">
-              <circle class="piv-score-bg" cx="42" cy="42" r="28"/>
-              <circle class="piv-score-arc ${scoreClass}" cx="42" cy="42" r="28"
-                stroke-dasharray="${circumference}" stroke-dashoffset="${offset}"/>
-            </svg>
-            <div class="piv-score-pct ${scoreClass}">${scorePct}%</div>
-          </div>
-          <div class="piv-score-metrics">
-            <div class="piv-score-metric"><div class="lbl">Probability of Payment</div><div class="val ${scoreClass}">${scoreClass==='high'?'High':(scoreClass==='med'?'Medium':'Low')}</div></div>
-            <div class="piv-score-metric"><div class="lbl">Risk Level</div><div class="val ${riskClass}">${riskLabel}</div></div>
-            <div class="piv-score-metric"><div class="lbl">Settlement ETA</div><div class="val green">${etaLabel}</div></div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Client Profile (rich) -->
-      <div class="piv-card">
-        <div class="piv-card-title" style="color:#4f8ef7"><i class="ti ti-user-circle"></i>Client Profile</div>
-        <div class="piv-client-rich">
-          <div class="piv-avatar-lg">${clientLetter}</div>
-          <div class="piv-client-info">
-            <div class="piv-client-name">${clientName}</div>
-            <div class="piv-client-wallet" onclick="navigator.clipboard?.writeText('${clientAddr}');toast('Wallet copied','success')">${clientAddr ? (clientAddr.slice(0,8)+'...'+clientAddr.slice(-4)) : '—'}</div>
-            <div class="piv-badges">
-              <span class="piv-verified green"><i class="ti ti-shield-check"></i> Wallet Verified</span>
-              <span class="piv-verified blue"><i class="ti ti-star"></i> KYC Verified</span>
-            </div>
-            <div class="piv-client-meta">
-              <div class="meta-item"><span class="meta-val">${inv.clientHistory||12}</span><span style="font-size:8px;color:#6b7280">Invoices</span></div>
-              <div class="meta-item"><span class="meta-val" style="color:#22c55e">100%</span><span style="font-size:8px;color:#6b7280">Success</span></div>
-              <div class="meta-item"><span class="meta-val">${memberSince}</span><span style="font-size:8px;color:#6b7280">Member</span></div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Payment Breakdown -->
-      <div class="piv-card">
-        <div class="piv-card-title" style="color:#14b8a6"><i class="ti ti-receipt"></i>Payment Breakdown</div>
-        <div class="piv-break-premium">
-          <div class="row"><span>Subtotal</span><span>${(inv.subtotal||0).toFixed(2)} ${tokenLabel}</span></div>
-          <div class="row"><span>Tax (${inv.taxPct||0}%)</span><span>${(inv.taxAmt||0).toFixed(2)} ${tokenLabel}</span></div>
-          <div class="row total"><span>Total</span><span class="highlight">${(inv.total||0).toFixed(2)} ${tokenLabel}</span></div>
-          <div class="row"><span>Amount Paid</span><span class="${isPaid?'paid':''}">${isPaid ? amountDue+' '+tokenLabel : '0.00 '+tokenLabel}</span></div>
-          <div class="row" style="font-weight:700;font-size:12.5px"><span>Amount Due</span><span class="${isPaid?'paid':'due'}">${isPaid ? '0.00' : amountDue} ${tokenLabel}</span></div>
-          ${lineItemsHTML}
-        </div>
-      </div>
-
-      <!-- Invoice Timeline -->
-      <div class="piv-card">
-        <div class="piv-card-title" style="color:#14b8a6"><i class="ti ti-timeline"></i>Invoice Timeline</div>
-        <div class="piv-timeline-pro">${tlHTML}</div>
-      </div>
-
-      <!-- Activity & Events -->
-      <div class="piv-card">
-        <div class="piv-card-title"><i class="ti ti-activity"></i>Activity &amp; Events</div>
-        <div class="piv-activity-premium">${actHTML || '<div style="font-size:9px;color:#6b7280;padding:6px 0">No activity yet.</div>'}</div>
-      </div>
-
-    </div>
-
-    <!-- RIGHT: Payment Module -->
-    <div class="piv-right-col">
-
-      <div class="piv-pay-premium">
-        <div style="font-size:9px;color:#6b7280;margin-bottom:6px;letter-spacing:.6px">PAY INVOICE</div>
-
-        <div class="piv-qr-wrap">
-          <div id="inv-detail-qr-${inv.id}" style="width:138px;height:138px;display:flex;align-items:center;justify-content:center;background:#fff;border-radius:6px">
-            <i class="ti ti-qrcode" style="font-size:52px;color:#ddd"></i>
-          </div>
-        </div>
-
-        <div style="font-size:10px;color:#fff;font-weight:800;margin:2px 0 10px">${amountDue} ${tokenLabel}</div>
-
-        <div style="text-align:left;font-size:10px;margin-bottom:12px">
-          <div style="display:flex;justify-content:space-between;padding:3px 0;color:#6b7280"><span>Recipient</span><span style="color:#fff;font-family:monospace;cursor:pointer" onclick="navigator.clipboard?.writeText('${clientAddr}');toast('Address copied','success')">${clientAddr ? clientAddr.slice(0,8)+'...'+clientAddr.slice(-4) : '—'}</span></div>
-          <div style="display:flex;justify-content:space-between;padding:3px 0;color:#6b7280"><span>Token</span><span style="color:#14b8a6;font-weight:700">${tokenLabel}</span></div>
-          <div style="display:flex;justify-content:space-between;padding:3px 0;color:#6b7280"><span>Network</span><span style="color:#4f8ef7">${networkLabel}</span></div>
-        </div>
-
-        ${!isPaid && !isCancelled ? `<button class="piv-pay-btn" id="piv-pay-btn-${inv.id}" onclick="payInvoice('${inv.id}')"><i class="ti ti-wallet"></i> Pay Now</button>` : ''}
-        ${isPaid ? `<div style="padding:12px;background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.35);border-radius:8px;color:#22c55e;font-weight:800;font-size:13px"><i class="ti ti-check-circle"></i> Payment Complete</div>` : ''}
-
-        <div class="piv-action-bar">
-          <button onclick="invCopyLinkById('${inv.id}')"><i class="ti ti-link"></i> Copy Link</button>
-          <button onclick="invShareInvoice('${inv.id}')"><i class="ti ti-share"></i> Share</button>
-          <button onclick="invExportPDF('${inv.id}')"><i class="ti ti-file-download"></i> Download PDF</button>
-          <button onclick="${inv.txHash ? `window.open('https://testnet.arcscan.app/tx/${inv.txHash}','_blank')` : `invOpenPayPage('${inv.id}')`}"><i class="ti ti-external-link"></i> ${inv.txHash ? 'Explorer' : 'Open Page'}</button>
-        </div>
-      </div>
-
-      <!-- Security & Trust -->
-      <div class="piv-card">
-        <div class="piv-card-title"><i class="ti ti-shield-lock"></i>Security &amp; Trust</div>
-        <div class="piv-trust-premium">
-          <div class="piv-trust-badge escrow"><div class="ico escrow"><i class="ti ti-lock"></i></div><div><strong>Smart Escrow</strong><div style="font-size:8.5px;color:#6b7280">Protected</div></div></div>
-          <div class="piv-trust-badge circle"><div class="ico circle"><i class="ti ti-building-bank"></i></div><div><strong>Circle Secured</strong><div style="font-size:8.5px;color:#6b7280">Infrastructure</div></div></div>
-          <div class="piv-trust-badge onchain"><div class="ico onchain"><i class="ti ti-certificate"></i></div><div><strong>Onchain Proof</strong><div style="font-size:8.5px;color:#6b7280">Verified</div></div></div>
-        </div>
-      </div>
-
-    </div>
-  </div>
-
-  <!-- Bottom bar -->
-  <div class="piv-bottom-premium">
-    <div><i class="ti ti-lock" style="color:#eab308"></i> Secured by Elligentt Smart Escrow • Verified on Arc</div>
-    <div style="font-family:monospace;color:#4f8ef7">${inv.id}</div>
-  </div>
-
-</div>`;
+// Keep invToggleDetail for backward compat
+function invToggleDetail(id) {
+  invfiOpenDrawer(id);
 }
 
 function invDelete(id) {
@@ -21942,6 +21903,181 @@ function invDelete(id) {
   renderInvoices();
   updateInvStats();
   toast('Invoice removed', 'info');
+}
+
+function invToggleCrosschain() {
+  var cb = document.getElementById('inv-pm-xchain');
+  var panel = document.getElementById('invfi-xchain-networks');
+  if (!panel) return;
+  panel.style.display = cb && cb.checked ? '' : 'none';
+  invPreviewUpdate();
+}
+
+function invfiAIParse() {
+  var input = (document.getElementById('invfi-ai-input') ? document.getElementById('invfi-ai-input').value : '').trim();
+  if (!input) { toast('Describe your invoice first', 'warning'); return; }
+  var result = { amount: 0, currency: 'USDC', taxPct: 0, dueDays: 7, crosschain: false, itemName: 'Professional Services' };
+  var amtMatch = input.match(/(\d+(?:\.\d+)?)\s*(USDC|EURC|cirBTC|usdc|eurc|cirbtc)/i);
+  if (amtMatch) { result.amount = parseFloat(amtMatch[1]); result.currency = amtMatch[2].toUpperCase(); }
+  else { var numMatch = input.match(/(\d+(?:\.\d+)?)/); if (numMatch) result.amount = parseFloat(numMatch[1]); }
+  var taxMatch = input.match(/(\d+)%?\s*tax/i);
+  if (taxMatch) result.taxPct = parseInt(taxMatch[1]);
+  var dueMatch = input.match(/due\s+in\s+(\d+)\s*days?/i);
+  if (dueMatch) result.dueDays = parseInt(dueMatch[1]);
+  else { var dMatch = input.match(/(\d+)\s*days?/i); if (dMatch) result.dueDays = parseInt(dMatch[1]); }
+  if (/cross.?chain|crosschain/i.test(input)) result.crosschain = true;
+  var lines = input.split(/[.,\n]+/).filter(function(l) { return l.trim(); });
+  if (lines.length > 0) { result.itemName = lines[0].replace(/\d+\s*(USDC|EURC|cirBTC)/gi,'').replace(/\d+%?\s*tax/gi,'').replace(/due\s+in\s+\d+\s*days?/gi,'').replace(/cross.?chain|crosschain/gi,'').replace(/\d+(?:\.\d+)?/g,'').trim(); if (!result.itemName) result.itemName = 'Professional Services'; }
+  var setVal = function(id, v) { var el = document.getElementById(id); if (el) el.value = v; };
+  setVal('inv-desc', input.slice(0, 200));
+  if (result.amount > 0) {
+    var firstRow = document.querySelector('#inv-line-items .inv-line-row');
+    if (firstRow) {
+      var nameEl = firstRow.querySelector('.li-name'); if (nameEl) nameEl.value = result.itemName;
+      var priceEl = firstRow.querySelector('.li-price'); if (priceEl) priceEl.value = result.amount;
+    }
+  }
+  setVal('inv-currency', result.currency);
+  setVal('inv-tax', String(result.taxPct));
+  var dueDate = new Date(); dueDate.setDate(dueDate.getDate() + result.dueDays);
+  setVal('inv-due', dueDate.toISOString().slice(0,10));
+  if (result.crosschain) { var xcCb = document.getElementById('inv-pm-xchain'); if (xcCb) { xcCb.checked = true; invToggleCrosschain(); } }
+  invRecalcLines(); invPreviewUpdate();
+  var suggestEl = document.getElementById('invfi-ai-suggest');
+  if (suggestEl) { suggestEl.style.display = ''; suggestEl.innerHTML = '<i class="ti ti-sparkles" style="color:var(--purple)"></i> Generated: ' + result.itemName + ' · ' + result.amount + ' ' + result.currency + ' · ' + result.taxPct + '% tax · Due in ' + result.dueDays + 'd' + (result.crosschain ? ' · Crosschain' : ''); }
+  toast('Invoice generated from AI description', 'success');
+}
+
+var INVOICEFI_TEMPLATES = {
+  'Freelancer': { items: [{ name:'Freelance Services', qty:1, price:0 }], taxPct:0, dueDays:14 },
+  'Agency': { items: [{ name:'Agency Retainer', qty:1, price:0 }, { name:'Project Management', qty:1, price:0 }], taxPct:0, dueDays:30 },
+  'Consulting': { items: [{ name:'Consulting Hours', qty:10, price:0 }], taxPct:0, dueDays:14 },
+  'Subscription': { items: [{ name:'Monthly Subscription', qty:1, price:0 }], taxPct:0, dueDays:7, recurring:'Monthly' },
+  'Payroll': { items: [{ name:'Salary Payment', qty:1, price:0 }], taxPct:0, dueDays:1 },
+  'DAO Payments': { items: [{ name:'DAO Contributor Reward', qty:1, price:0 }], taxPct:0, dueDays:7 },
+  'Investment': { items: [{ name:'Investment Allocation', qty:1, price:0 }], taxPct:0, dueDays:30 },
+  'Crypto Services': { items: [{ name:'Smart Contract Audit', qty:1, price:0 }, { name:'Development Hours', qty:1, price:0 }], taxPct:0, dueDays:14 },
+  'NFT Services': { items: [{ name:'NFT Collection Design', qty:1, price:0 }, { name:'Smart Contract Deployment', qty:1, price:0 }], taxPct:0, dueDays:21 },
+  'Custom': { items: [{ name:'Custom Service', qty:1, price:0 }], taxPct:0, dueDays:7 }
+};
+
+function invfiLoadTemplate(templateName) {
+  var tpl = INVOICEFI_TEMPLATES[templateName];
+  if (!tpl) { toast('Template not found', 'error'); return; }
+  var container = document.getElementById('inv-line-items');
+  if (container) {
+    container.innerHTML = '';
+    tpl.items.forEach(function(item) {
+      var row = document.createElement('div');
+      row.className = 'inv-line-row';
+      row.style.cssText = 'display:grid;grid-template-columns:1fr 50px 80px 70px 22px;gap:4px;align-items:center';
+      row.innerHTML = '<input class="cinput li-name" value="' + item.name.replace(/"/g,'&quot;') + '" style="font-size:10px" oninput="invRecalcLines()"/><input class="cinput li-qty" type="number" value="' + item.qty + '" min="0" style="font-size:10px;text-align:center" oninput="invRecalcLines()"/><input class="cinput li-price" type="number" placeholder="0.00" min="0" style="font-size:10px" oninput="invRecalcLines()"/><div class="cinput li-total" style="font-size:10px;color:var(--yellow);background:rgba(245,158,11,.05);cursor:default">0.00</div><button class="btn" style="padding:3px 5px;font-size:10px;color:var(--red)" onclick="this.closest(\'.inv-line-row\').remove();invRecalcLines()"><i class="ti ti-x"></i></button>';
+      container.appendChild(row);
+    });
+  }
+  var setVal = function(id, v) { var el = document.getElementById(id); if (el) el.value = v; };
+  setVal('inv-tax', String(tpl.taxPct || 0));
+  if (tpl.dueDays) { var dueDate = new Date(); dueDate.setDate(dueDate.getDate() + tpl.dueDays); setVal('inv-due', dueDate.toISOString().slice(0,10)); }
+  invPreviewUpdate();
+  toast(templateName + ' template loaded', 'success');
+}
+
+function invExportPDF(id) {
+  var inv = id ? invoiceList.find(function(i) { return i.id === id; }) : null;
+  if (!inv) { toast('Invoice not found', 'error'); return; }
+  var cur = inv.currency || 'USDC';
+  var isPaid = inv.status === 'Paid';
+  var lineItemsRows = '';
+  if (inv.lineItems && inv.lineItems.length > 0) {
+    for (var li = 0; li < inv.lineItems.length; li++) {
+      var item = inv.lineItems[li];
+      lineItemsRows += '<tr><td>'+(item.name||'—')+'</td><td style="text-align:center">'+(item.qty||1)+'</td><td style="text-align:right">'+((item.price||0).toFixed(2))+'</td><td style="text-align:right">'+((item.total||0).toFixed(2))+'</td></tr>';
+    }
+  }
+  var dueDate = inv.due ? new Date(inv.due+'T00:00:00').toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'}) : '—';
+  var createdDate = inv.created ? new Date(inv.created).toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'}) : '—';
+  var paidInfo = '';
+  if (inv.paidOn) { paidInfo = '<div class="section"><h3>Payment</h3><div class="box"><div style="font-size:10px"><span style="color:#888">Paid on:</span> <strong>'+new Date(inv.paidOn).toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric',hour:'2-digit',minute:'2-digit'})+'</strong></div><div style="font-size:10px;margin-top:2px"><span style="color:#888">From:</span> <span style="font-family:monospace;font-size:9px">'+(inv.paidFrom?(inv.paidFrom.slice(0,10)+'...'+inv.paidFrom.slice(-6)):'—')+'</span></div></div></div>'; }
+  var html = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Invoice '+inv.id+'</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:monospace;font-size:11px;color:#111;background:#fff;padding:40px 48px;line-height:1.5}.header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:32px;padding-bottom:16px;border-bottom:2px solid #000}.header h1{font-size:20px;font-weight:800}.inv-id{font-size:14px;color:#d97706;font-weight:700}.status{display:inline-block;padding:3px 10px;border-radius:4px;font-size:9px;font-weight:700;text-transform:uppercase;'+ (isPaid?'background:#dcfce7;color:#166534;border:1px solid #86efac':(inv.status==='Overdue'?'background:#fee2e2;color:#991b1b;border:1px solid #fca5a5':'background:#fef3c7;color:#92400e;border:1px solid #fcd34d')) +'}.section{margin-bottom:20px}.section h3{font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:#888;margin-bottom:8px;font-weight:600}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.box{padding:12px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px}table{width:100%;border-collapse:collapse}th,td{padding:6px 10px;text-align:left;border-bottom:1px solid #e5e7eb;font-size:10px}th{background:#f3f4f6;font-weight:700;text-transform:uppercase;font-size:8px;letter-spacing:.5px;color:#6b7280}.amount-hero{text-align:center;padding:20px;margin:16px 0}.amount-hero .total{font-size:36px;font-weight:800}.amount-hero .currency{font-size:14px;color:#4f8ef7;font-weight:600}.footer{margin-top:24px;padding-top:12px;border-top:1px solid #e5e7eb;font-size:8px;color:#999;text-align:center}.breakdown-row{display:flex;justify-content:space-between;padding:3px 0;font-size:10px}.breakdown-row.total{font-weight:800;font-size:12px;border-top:1px solid #d1d5db;padding-top:6px;margin-top:4px}@media print{body{padding:20px 24px}}</style></head><body><div class="header"><div><h1>INVOICE</h1><div class="inv-id">'+inv.id+'</div><div style="margin-top:4px;font-size:10px;color:#555">'+createdDate+'</div></div><div class="meta"><div style="font-weight:700;font-size:12px;color:#000">'+(inv.from||'Elligente User')+'</div><span class="status">'+inv.status+'</span></div></div><div class="grid section"><div class="box"><h3>Bill To</h3><div style="font-weight:700;font-size:12px">'+(inv.toName||'Client')+'</div><div style="font-family:monospace;font-size:9px;color:#4f8ef7;margin-top:2px;word-break:break-all">'+(inv.toAddr||'—')+'</div></div><div class="box"><h3>Payment Info</h3><div style="font-size:10px"><span style="color:#888">Due:</span> <strong>'+dueDate+'</strong></div><div style="font-size:10px;margin-top:2px"><span style="color:#888">Currency:</span> <strong>'+cur+'</strong></div><div style="font-size:10px;margin-top:2px"><span style="color:#888">Network:</span> <strong>'+(inv.chainName||'Arc Testnet')+'</strong></div>'+(inv.txHash?'<div style="font-size:10px;margin-top:2px"><span style="color:#888">Tx:</span> <span style="font-family:monospace;font-size:8px">'+inv.txHash.slice(0,10)+'...'+inv.txHash.slice(-8)+'</span></div>':'')+'</div></div></div><div class="amount-hero"><div class="total">'+inv.total.toFixed(2)+'</div><div class="currency">'+cur+'</div></div>'+(inv.lineItems&&inv.lineItems.length>0?'<div class="section"><h3>Line Items</h3><table><thead><tr><th>Item</th><th style="text-align:center">Qty</th><th style="text-align:right">Rate</th><th style="text-align:right">Amount</th></tr></thead><tbody>'+lineItemsRows+'</tbody></table></div>':'')+'<div class="section"><h3>Breakdown</h3><div style="max-width:300px;margin-left:auto"><div class="breakdown-row"><span>Subtotal</span><span>'+((inv.subtotal||0).toFixed(2))+' '+cur+'</span></div><div class="breakdown-row"><span>Tax ('+(inv.taxPct||0)+'%)</span><span>'+((inv.taxAmt||0).toFixed(2))+' '+cur+'</span></div><div class="breakdown-row"><span>Protocol Fee</span><span>'+((inv.protocolFee||0).toFixed(2))+' '+cur+'</span></div><div class="breakdown-row total"><span>Total Due</span><span>'+((inv.total||0).toFixed(2))+' '+cur+'</span></div></div></div>'+(inv.desc?'<div class="section"><h3>Description</h3><div style="font-size:10px;color:#555;padding:10px;background:#f9fafb;border-radius:6px">'+inv.desc+'</div></div>':'')+paidInfo+'<div class="footer">Generated by Elligentt InvoiceFi · '+inv.id+' · '+new Date().toLocaleDateString()+'</div></body></html>';
+  var printWin = window.open('', '_blank', 'width=860,height=700');
+  if (printWin) {
+    printWin.document.write(html);
+    printWin.document.close();
+    printWin.onload = function(){ printWin.print(); };
+  } else {
+    toast('Popup blocked — allow popups for this site', 'warning');
+  }
+}
+
+function invExportJSON(id) {
+  var inv = id ? invoiceList.find(function(i) { return i.id === id; }) : null;
+  if (!inv) { toast('Invoice not found', 'error'); return; }
+  var blob = new Blob([JSON.stringify(inv, null, 2)], { type: 'application/json' });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a'); a.href = url; a.download = 'invoice-'+inv.id+'.json';
+  a.click(); URL.revokeObjectURL(url);
+  toast('Exported as JSON', 'success');
+}
+
+function invExportCSV(id) {
+  var list = id ? [invoiceList.find(function(i) { return i.id === id; })].filter(Boolean) : invoiceList;
+  if (!list.length) { toast('No invoices to export', 'error'); return; }
+  var header = 'ID,Client,Address,Amount,Currency,Status,Due Date,Created,Tx Hash';
+  var rows = list.map(function(inv) { return '"'+inv.id+'","'+(inv.toName||'')+'","'+(inv.toAddr||'')+'",'+inv.total+','+(inv.currency||'USDC')+','+inv.status+',"'+(inv.due||'')+'","'+(inv.created||'')+'","'+(inv.txHash||'')+'"'; });
+  var csv = header + '\n' + rows.join('\n');
+  var blob = new Blob([csv], { type: 'text/csv' });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a'); a.href = url; a.download = id ? 'invoice-'+id+'.csv' : 'invoices-export.csv';
+  a.click(); URL.revokeObjectURL(url);
+  toast('Exported as CSV', 'success');
+}
+
+function invShareInvoice(id) {
+  var inv = invoiceList.find(function(i) { return i.id === id; });
+  if (!inv) return;
+  var url = inv.payUrl || buildPublicPayUrl(inv.publicToken || id);
+  if (navigator.share) { navigator.share({ title: 'Invoice '+inv.id, text: 'Invoice '+inv.id+' — '+inv.total+' '+inv.currency, url: url }); }
+  else { navigator.clipboard.writeText(url).then(function() { toast('Invoice link copied', 'success'); }); }
+}
+
+function invfiGetAcceptedPayments() {
+  var methods = [];
+  if (document.getElementById('inv-pm-usdc') && document.getElementById('inv-pm-usdc').checked) methods.push('USDC');
+  if (document.getElementById('inv-pm-eurc') && document.getElementById('inv-pm-eurc').checked) methods.push('EURC');
+  if (document.getElementById('inv-pm-cirbtc') && document.getElementById('inv-pm-cirbtc').checked) methods.push('cirBTC');
+  if (document.getElementById('inv-pm-xchain') && document.getElementById('inv-pm-xchain').checked) methods.push('Crosschain');
+  return methods;
+}
+
+function invfiGetAcceptedNetworks() {
+  var cbs = document.querySelectorAll('.invfi-net-cb:checked');
+  var nets = []; for (var i = 0; i < cbs.length; i++) { nets.push(cbs[i].value); }
+  return nets;
+}
+
+function invfiOpenSettings() {
+  var s = invoiceSettings;
+  var netChecks = ''; for (var n = 0; n < INVOICEFI_CONFIG.acceptedNetworks.length; n++) { var net = INVOICEFI_CONFIG.acceptedNetworks[n]; netChecks += '<label style="display:flex;align-items:center;gap:3px;padding:3px 6px;background:rgba(79,142,247,.06);border:1px solid rgba(79,142,247,.15);border-radius:3px;font-size:8.5px;cursor:pointer;color:var(--text)"><input type="checkbox" value="'+net+'" '+(s.defaultNetworks.indexOf(net)>=0?'checked':'')+' class="invfi-settings-net" style="accent-color:var(--blue)"/> '+net+'</label>'; }
+  var pmChecks = ''; var pms = ['USDC','EURC','cirBTC','Crosschain']; for (var p = 0; p < pms.length; p++) { var pm = pms[p]; pmChecks += '<label style="display:flex;align-items:center;gap:3px;padding:3px 6px;background:rgba(79,142,247,.06);border:1px solid rgba(79,142,247,.15);border-radius:3px;font-size:8.5px;cursor:pointer;color:var(--text)"><input type="checkbox" value="'+pm+'" '+(s.defaultPaymentMethods.indexOf(pm)>=0?'checked':'')+' class="invfi-settings-pm" style="accent-color:var(--blue)"/> '+pm+'</label>'; }
+  var html = '<div style="position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center" onclick="if(event.target===this)this.remove()"><div class="card" style="width:440px;max-height:80vh;overflow-y:auto" onclick="event.stopPropagation()"><div class="ch"><i class="ti ti-settings" style="font-size:13px;color:var(--blue)"></i><span class="ct">Invoice Settings</span><button class="btn" style="margin-left:auto;font-size:9px" onclick="this.closest(\'.card\').parentElement.remove()"><i class="ti ti-x"></i></button></div><div class="cb" style="display:flex;flex-direction:column;gap:10px"><div><div class="swap-label">Default Currency</div><select id="invfi-settings-currency" class="cinput"><option '+(s.defaultCurrency==='USDC'?'selected':'')+'>USDC</option><option '+(s.defaultCurrency==='EURC'?'selected':'')+'>EURC</option><option '+(s.defaultCurrency==='cirBTC'?'selected':'')+'>cirBTC</option></select></div><div><div class="swap-label">Default Due Date (days)</div><input id="invfi-settings-due-days" class="cinput" type="number" value="'+s.defaultDueDays+'" min="0" max="365"/></div><div><div class="swap-label">Tax Rate (%)</div><input id="invfi-settings-tax" class="cinput" type="number" value="'+s.taxRate+'" min="0" max="100"/></div><div><div class="swap-label">Company Name</div><input id="invfi-settings-brand" class="cinput" value="'+s.branding.companyName.replace(/"/g,'&quot;')+'"/></div><div><div class="swap-label">Default Networks</div><div style="display:flex;gap:4px;flex-wrap:wrap">'+netChecks+'</div></div><div><div class="swap-label">Default Payment Methods</div><div style="display:flex;gap:4px;flex-wrap:wrap">'+pmChecks+'</div></div><div style="display:flex;align-items:center;gap:8px"><span style="font-size:10px;color:var(--muted2)">Enable Reminders</span><input type="checkbox" id="invfi-settings-remind" '+(s.reminderEnabled?'checked':'')+' style="accent-color:var(--blue)"/></div><button class="action-btn" onclick="invfiSaveSettings()">Save Settings</button></div></div></div>';
+  var overlay = document.createElement('div'); overlay.innerHTML = html; document.body.appendChild(overlay.firstElementChild);
+}
+
+function invfiSaveSettings() {
+  invoiceSettings.defaultCurrency = document.getElementById('invfi-settings-currency') ? document.getElementById('invfi-settings-currency').value : 'USDC';
+  invoiceSettings.defaultDueDays = parseInt(document.getElementById('invfi-settings-due-days') ? document.getElementById('invfi-settings-due-days').value : '7') || 7;
+  invoiceSettings.taxRate = parseInt(document.getElementById('invfi-settings-tax') ? document.getElementById('invfi-settings-tax').value : '0') || 0;
+  invoiceSettings.branding.companyName = (document.getElementById('invfi-settings-brand') ? document.getElementById('invfi-settings-brand').value : '').trim() || 'Elligente User';
+  invoiceSettings.defaultNetworks = []; var netCbs = document.querySelectorAll('.invfi-settings-net:checked'); for (var i = 0; i < netCbs.length; i++) { invoiceSettings.defaultNetworks.push(netCbs[i].value); }
+  invoiceSettings.defaultPaymentMethods = []; var pmCbs = document.querySelectorAll('.invfi-settings-pm:checked'); for (var j = 0; j < pmCbs.length; j++) { invoiceSettings.defaultPaymentMethods.push(pmCbs[j].value); }
+  invoiceSettings.reminderEnabled = document.getElementById('invfi-settings-remind') ? document.getElementById('invfi-settings-remind').checked : false;
+  Store.save('invoiceSettings', invoiceSettings);
+  var setVal = function(id, v) { var el = document.getElementById(id); if (el) el.value = v; };
+  setVal('inv-currency', invoiceSettings.defaultCurrency);
+  setVal('inv-tax', String(invoiceSettings.taxRate));
+  setVal('inv-from', invoiceSettings.branding.companyName);
+  var modal = document.querySelector('[style*="z-index:9999"]'); if (modal) modal.remove();
+  toast('Invoice settings saved', 'success');
 }
 
 //  RECIPIENTS / CONTACTS
