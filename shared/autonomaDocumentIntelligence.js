@@ -443,13 +443,16 @@
 
     if (plan.mode === 'crosschain') {
       if (typeof window !== 'undefined' && typeof window._agentExecuteBridge === 'function') {
-        plan.rows.forEach(function(r){
-          try {
-            var domain = {Base_Sepolia:6, Arbitrum_Sepolia:3, Ethereum_Sepolia:0, Optimism_Sepolia:2, Polygon_Amoy:7}[r._chain] || 6;
-            window._agentExecuteBridge(r._amount, domain, r._chain.replace('_',' '), 'doc_crosschain_' + Date.now(), 5042002, r.address);
-            results.success++;
-          } catch(e) { results.failed++; results.errors.push('Crosschain for ' + r.address + ': ' + (e.message || 'error')); }
-        });
+        (async function(){
+          for(var i = 0; i < plan.rows.length; i++){
+            var r = plan.rows[i];
+            try {
+              var domain = {Base_Sepolia:6, Arbitrum_Sepolia:3, Ethereum_Sepolia:0, Optimism_Sepolia:2, Polygon_Amoy:7}[r._chain] || 6;
+              await window._agentExecuteBridge(r._amount, domain, r._chain.replace('_',' '), 'doc_crosschain_' + Date.now() + '_' + i, 5042002, r.address);
+              results.success++;
+            } catch(e) { results.failed++; results.errors.push('Crosschain for ' + r.address + ': ' + (e.message || 'error')); }
+          }
+        })();
       } else {
         return { success: 0, failed: plan.rows.length, errors: ['Crosschain engine unavailable'] };
       }

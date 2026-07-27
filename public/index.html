@@ -6130,7 +6130,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
             <div style="display:flex;align-items:center;gap:3px;margin-top:4px;font-size:8.5px;color:var(--muted2)"><i class="ti ti-wallet" style="font-size:9px"></i>Balance: <span id="bridge-to-bal" style="color:var(--text);font-weight:600">—</span> USDC</div>
 
             <div class="rate-box" style="margin-top:10px" id="bridge-rate-box">
-              <div class="rate-row"><span>Bridge Protocol</span><span class="rate-val teal">CCTP v2</span></div>
+              <div class="rate-row"><span>Bridge Protocol</span><span class="rate-val teal" id="bridge-protocol">CCTP v2</span></div>
               <div class="rate-row"><span>Bridge Fee</span><span class="rate-val" id="bridge-fee-display">~0.001 USDC</span></div>
               <div class="rate-row"><span>Estimated Time</span><span class="rate-val" id="bridge-time">~2 minutes</span></div>
               <div class="rate-row"><span>You Receive</span><span class="rate-val teal" id="bridge-receive">~1.00 USDC</span></div>
@@ -19714,15 +19714,18 @@ function applyBridgeChains(){
 function updateBridgeEst(){
   const amt=parseFloat(document.getElementById('bridge-amount').value)||0;
   const toIsArc = CHAINS[bridgeToIdx]?.id === 'Arc_Testnet';
+  const useTurbo = selectedBridgeMode === 'turbo' || (selectedBridgeMode === 'auto' && toIsArc);
+  const protocolEl = document.getElementById('bridge-protocol');
+  if (protocolEl) protocolEl.textContent = useTurbo ? 'Turbo' : 'CCTP v2';
   // Turbo Bridge fee: 1.00% for inbound ARC routes; Standard: 0.05%
-  const feeRate = toIsArc ? (TURBO_FEE_BPS / 10000) : 0.0005;
+  const feeRate = useTurbo ? (TURBO_FEE_BPS / 10000) : 0.0005;
   const fee=Math.max(0.000001, amt * feeRate);
   const receive=Math.max(0, amt - fee);
   document.getElementById('bridge-usd').textContent=`≈ $${amt.toFixed(2)} USD`;
   document.getElementById('bridge-amount-out').textContent=`~${receive.toFixed(4)}`;
   document.getElementById('bridge-fee-display').textContent=`~${fee.toFixed(4)} USDC (${(feeRate*100).toFixed(2)}%)`;
   document.getElementById('bridge-receive').textContent=`~${receive.toFixed(4)} USDC`;
-  if (toIsArc) {
+  if (useTurbo) {
     document.getElementById('bridge-time').textContent = '10 – 30 seconds (Turbo)';
   } else if (CHAINS[bridgeFromIdx]?.id === 'Solana_Devnet') {
     document.getElementById('bridge-time').textContent = '~3 minutes';
@@ -19880,15 +19883,11 @@ async function executeBridge(){
   const stepList=document.getElementById('bridge-step-list');
   const stdStepsEl=document.getElementById('bridge-standard-steps');
   const turboWrapEl=document.getElementById('turbo-steps-wrap');
-  if (fromChain.chainId === 5042002) {
-    stepsCard.style.display=''; stepList.innerHTML='';
-    if (stdStepsEl) stdStepsEl.style.display='';
-    if (turboWrapEl) turboWrapEl.style.display='none';
-    document.getElementById('bridge-step-status').textContent='Pending';
-    document.getElementById('bridge-step-status').style.color='var(--muted2)';
-  } else {
-    stepsCard.style.display='none';
-  }
+  stepsCard.style.display=''; stepList.innerHTML='';
+  if (stdStepsEl) stdStepsEl.style.display='';
+  if (turboWrapEl) turboWrapEl.style.display='none';
+  document.getElementById('bridge-step-status').textContent='Pending';
+  document.getElementById('bridge-step-status').style.color='var(--muted2)';
 
   const steps=[
     {name:'approve', label:`Approve USDC on ${fromChain.name}`,     detail:'ERC-20 approval on source chain'},
@@ -30077,13 +30076,40 @@ function setBridgeMode(mode) {
   }
 }
 
+// ── Manual bridge mode selector ───────────────────────────────────────────
+let selectedBridgeMode = 'auto';
+
+function selectBridgeMode(mode) {
+  selectedBridgeMode = mode;
+  document.querySelectorAll('.bridge-mode-btn').forEach(function(b){
+    b.classList.toggle('active', b.dataset.mode === mode);
+  });
+  updateBridgeEst();
+  try { localStorage.setItem('arcpay_bridge_mode', mode); } catch(e) {}
+}
+try {
+  var savedBridgeMode = localStorage.getItem('arcpay_bridge_mode');
+  if (savedBridgeMode && (savedBridgeMode === 'auto' || savedBridgeMode === 'turbo' || savedBridgeMode === 'cctp')) {
+    selectedBridgeMode = savedBridgeMode;
+    var initBtn = document.querySelector('.bridge-mode-btn[data-mode="' + savedBridgeMode + '"]');
+    if (initBtn) {
+      document.querySelectorAll('.bridge-mode-btn').forEach(function(b){ b.classList.remove('active'); });
+      initBtn.classList.add('active');
+    }
+  }
+} catch(e) {}
+
 // ── executeBridgeOrTurbo ─ auto-routing based on chain direction ──────────
 // External chains → ARC = Turbo Bridge (uses Treasury liquidity + real depositForBurn)
 // ARC → External chains = Standard Bridge (real CCTP)
-// No manual mode selection required — routing is fully automatic.
+// Manual mode selection overrides auto-routing.
 function executeBridgeOrTurbo() {
   const toChain = CHAINS[bridgeToIdx];
-  if (toChain?.id === 'Arc_Testnet') {
+  if (selectedBridgeMode === 'cctp') {
+    executeBridge();
+  } else if (selectedBridgeMode === 'turbo') {
+    executeTurboBridge();
+  } else if (toChain?.id === 'Arc_Testnet') {
     executeTurboBridge();
   } else {
     executeBridge();
@@ -40785,8 +40811,10 @@ const UBScreen = (function() {
       var created = 0;
       rows.forEach(function(r){
         try {
+          var isXc = r._chain && r._chain !== 'Arc_Testnet';
           ScheduleEngine.create({
-            type: 'payment', name: (r.note||'Doc Payment')+' to '+r.address.slice(0,6)+'...', token: r._token,
+            type: (mode === 'recurring' && isXc) ? 'crosschain' : isXc ? 'crosschain' : 'payment',
+            name: (r.note||'Doc Payment')+' to '+r.address.slice(0,6)+'...', token: r._token,
             amount: r._amount, total: r._amount,
             network: r._chain, fromNetwork: 'Arc_Testnet', toNetwork: r._chain,
             recipients: [{ addr: r.address, amount: r._amount, note: r.note||'', chainId: r._chain, token: r._token }],
@@ -40816,22 +40844,34 @@ const UBScreen = (function() {
 
     if(mode === 'crosschain'){
       if(typeof window !== 'undefined' && typeof window._agentExecuteBridge === 'function'){
-        var bridged = 0;
-        rows.forEach(function(r){
-          try {
-            var domain = {Base_Sepolia:6,Arbitrum_Sepolia:3,Ethereum_Sepolia:0,Optimism_Sepolia:2,Polygon_Amoy:7}[r._chain]||6;
-            window._agentExecuteBridge(r._amount,domain,r._chain.replace('_',' '),'doc_xc_'+Date.now(),5042002,r.address);
-            bridged++;
-          } catch(e){}
-        });
-        autUI('ai',
-          R.intro('Initiated ' + bridged + ' crosschain bridge operations.') +
-          R.card(R.head('arrows-cross','Crosschain Bridge'),
-            R.row('Operations',bridged+'/'+rows.length,'green')+
-            R.row('Total',total.toLocaleString('en-US',{maximumFractionDigits:2}),'green'),
-            R.actions({icon:'external-link',label:'View Bridge',cls:'primary',action:"showPage('bridge')"})
-          )
-        );
+        (async function(){
+          var bridged = 0;
+          for(var i = 0; i < rows.length; i++){
+            var r = rows[i];
+            try {
+              var domain = {Base_Sepolia:6,Arbitrum_Sepolia:3,Ethereum_Sepolia:0,Optimism_Sepolia:2,Polygon_Amoy:7}[r._chain]||6;
+              autUI('ai',
+                R.intro('Executing crosschain ' + (i+1) + '/' + rows.length + '...') +
+                R.card(R.head('arrows-cross','Crosschain Bridge'),
+                  R.row('Progress',(i+1)+'/'+rows.length,'blue')+
+                  R.row('Amount',r._amount.toLocaleString('en-US',{maximumFractionDigits:2})+' '+r._token,'')+
+                  R.row('Destination',r._chain.replace('_',' ')+' → '+r.address.slice(0,6)+'...',''),
+                  R.actions({icon:'external-link',label:'View Bridge',cls:'primary',action:"showPage('bridge')"})
+                )
+              );
+              await window._agentExecuteBridge(r._amount,domain,r._chain.replace('_',' '),'doc_xc_'+Date.now()+'_'+i,5042002,r.address);
+              bridged++;
+            } catch(e){}
+          }
+          autUI('ai',
+            R.intro('Completed ' + bridged + ' crosschain bridge operations.') +
+            R.card(R.head('arrows-cross','Crosschain Bridge'),
+              R.row('Operations',bridged+'/'+rows.length,'green')+
+              R.row('Total',total.toLocaleString('en-US',{maximumFractionDigits:2}),'green'),
+              R.actions({icon:'external-link',label:'View Bridge',cls:'primary',action:"showPage('bridge')"})
+            )
+          );
+        })();
       } else {
         autUI('ai',R.intro('Crosschain engine unavailable. Please open the Bridge page manually.'));
       }
