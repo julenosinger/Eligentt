@@ -13947,7 +13947,7 @@ function showPage(id) {
     if (id === 'recipients') { renderContacts(); updateSelectedCount(); }
     if (id === 'batch') { setTimeout(() => { renderTable(); updateBottomBar(); }, 50); }
     if (id === 'bridge') { setTimeout(() => { refreshBridgeBalances(); }, 50); }
-    if (id === 'xchain') { setTimeout(() => { xcApplyChains(); xcRefreshOriginBalance(); }, 100); }
+    if (id === 'xchain') { setTimeout(() => { xcApplyChains(); xcRefreshOriginBalance(); renderXcHistory(); }, 100); }
     if (id === 'links') { setTimeout(() => { if (typeof plSyncStatuses === 'function') plSyncStatuses(); }, 50); }
     if (id === 'send') {
       setTimeout(() => {
@@ -15195,7 +15195,7 @@ async function executeCrossChainBatch(crossRcpts, useHook = false){
     }
 
     // Recommended params for sending FROM Arc (Standard transfer)
-    const maxFee = 0n;
+    const maxFee = ethers.parseUnits('0.5', 6);
     const minFinality = 2000; // Standard
 
     const _xcSrcChainId = await getSignerChainId(signer);
@@ -19982,8 +19982,8 @@ async function executeBridge(){
     const isToArc = (toConfig.domain === ARC_DOMAIN_ID);
     const finalityThreshold = isToArc ? 2000 : 1000;
 
-    // For inbound to Arc (Standard), we try a small maxFee as suggested — it may help relayer priority in some cases
-    const maxFee = isToArc ? ethers.parseUnits('0.5', 6) : 0n;
+    // Use a positive maxFee for ALL routes — zero-fee burns may be deprioritized by some chains
+    const maxFee = ethers.parseUnits('0.5', 6);
 
     _log('[Bridge] SOURCE DOMAIN:', fromConfig.domain);
     _log('[Bridge] DESTINATION DOMAIN:', toConfig.domain);
@@ -20374,6 +20374,7 @@ document.addEventListener('DOMContentLoaded',()=>{
   xcApplyChains();
   xcRenderChainList();
   xcUpdateFees();
+  renderXcHistory();
   renderSchedules();
   setTimeout(checkDueSchedules, 2000);
 
@@ -25391,30 +25392,52 @@ function xcUpdateRouteUI() {
 }
 
 function xcAddTxLog(from, to, amt, recipient) {
-  const log = document.getElementById("xc-tx-log");
-  const empty = log.querySelector("div[style*=\"muted2\"]");
-  if (empty) empty.remove();
-  const el = document.createElement("div");
-  el.className = "xc-tx-card";
-  const timeStr = new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true});
-  el.innerHTML = `
-    <div class="xc-tx-card-icon" style="background:${CHAINS[from].color}">${xcToken === 'USDC' ? 'U' : 'E'}</div>
-    <div class="xc-tx-card-info">
-      <div class="xc-tx-card-chain">
-        <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${CHAINS[from].color}"></span>
-        ${CHAINS[from].name.split(" ")[0]}
-        <i class="ti ti-arrow-right" style="font-size:7px;color:var(--muted2)"></i>
-        ${CHAINS[to].name.split(" ")[0]}
-      </div>
-      <div class="xc-tx-card-amount" style="color:var(--green)">${amt.toFixed(2)} ${xcToken}</div>
-    </div>
-    <div style="text-align:right;flex-shrink:0">
-      <div class="xc-tx-card-status" style="background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.22);color:var(--green)">Completed</div>
-      <div class="xc-tx-card-time">${timeStr}</div>
-    </div>
-  `;
-  log.prepend(el);
-  if (log.children.length > 10) log.lastChild.remove();
+  const entry = {
+    from: from.id || from, to: to.id || to,
+    fromName: CHAINS[from]?.name || from, toName: CHAINS[to]?.name || to,
+    amt: amt, token: xcToken, recipient: recipient,
+    ts: Date.now(), timeStr: new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})
+  };
+  try {
+    var hist = JSON.parse(localStorage.getItem('elligentt_xc_history') || '[]');
+    hist.unshift(entry);
+    if (hist.length > 50) hist = hist.slice(0, 50);
+    localStorage.setItem('elligentt_xc_history', JSON.stringify(hist));
+  } catch(e) {}
+  renderXcHistory();
+}
+function renderXcHistory() {
+  var log = document.getElementById("xc-tx-log");
+  if (!log) return;
+  try {
+    var hist = JSON.parse(localStorage.getItem('elligentt_xc_history') || '[]');
+  } catch(e) { var hist = []; }
+  log.innerHTML = '';
+  if (!hist.length) {
+    log.innerHTML = '<div style="text-align:center;padding:20px;color:var(--muted2);font-size:9px">No cross-chain transactions yet</div>';
+    return;
+  }
+  hist.forEach(function(e) {
+    var fromColor = (CHAIN_REGISTRY && CHAIN_REGISTRY[e.from] && CHAIN_REGISTRY[e.from].color) || '#888';
+    var toColor   = (CHAIN_REGISTRY && CHAIN_REGISTRY[e.to] && CHAIN_REGISTRY[e.to].color) || '#888';
+    var el = document.createElement("div");
+    el.className = "xc-tx-card";
+    el.innerHTML = '<div class="xc-tx-card-icon" style="background:' + fromColor + '">' + (e.token === 'USDC' ? 'U' : 'E') + '</div>' +
+      '<div class="xc-tx-card-info">' +
+        '<div class="xc-tx-card-chain">' +
+          '<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:' + fromColor + '"></span> ' +
+          (e.fromName || '').split(' ')[0] +
+          ' <i class="ti ti-arrow-right" style="font-size:7px;color:var(--muted2)"></i> ' +
+          (e.toName || '').split(' ')[0] +
+        '</div>' +
+        '<div class="xc-tx-card-amount" style="color:var(--green)">' + (e.amt || 0).toFixed(2) + ' ' + (e.token || 'USDC') + '</div>' +
+      '</div>' +
+      '<div style="text-align:right;flex-shrink:0">' +
+        '<div class="xc-tx-card-status" style="background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.22);color:var(--green)">Completed</div>' +
+        '<div class="xc-tx-card-time">' + (e.timeStr || '') + '</div>' +
+      '</div>';
+    log.appendChild(el);
+  });
 }
 
 async function xcExecuteSend() {
@@ -25569,8 +25592,8 @@ async function xcExecuteSend() {
     const isToArc = (toConfig.domain === ARC_DOMAIN_ID);
     const finalityThreshold = isToArc ? 2000 : 1000;
 
-    // For inbound to Arc (Standard), we try a small maxFee as suggested — it may help relayer priority in some cases
-    const maxFee = isToArc ? ethers.parseUnits('0.5', 6) : 0n;
+    // Use a positive maxFee for ALL routes — zero-fee burns may be deprioritized by some chains
+    const maxFee = ethers.parseUnits('0.5', 6);
 
     _log('[XC] SOURCE DOMAIN:', fromConfig.domain);
     _log('[XC] DESTINATION DOMAIN:', toConfig.domain);
@@ -25627,6 +25650,29 @@ async function xcExecuteSend() {
     }
 
     if (!attestationSig) {
+      // ── V1 Fallback: extract MessageSent from logs + poll legacy attestation API ──
+      console.log('[CCTP IRIS RESPONSE] V2 timed out — falling back to V1 log extraction');
+      const mtIfaceV1 = new ethers.Interface(["event MessageSent(bytes message)"]);
+      for (const log of burnReceipt.logs) {
+        try {
+          const parsed = mtIfaceV1.parseLog({topics: log.topics, data: log.data});
+          if (parsed?.name === "MessageSent") { messageBytes = parsed.args.message; break; }
+        } catch(e) {}
+      }
+      if (messageBytes) {
+        const msgHash = ethers.keccak256(messageBytes);
+        console.log('[CCTP IRIS RESPONSE] V1 fallback — msgHash:', msgHash);
+        for (let v1 = 0; v1 < 60 && !attestationSig; v1++) {
+          await new Promise(r => setTimeout(r, 5000));
+          try {
+            const v1r = await fetch('https://iris-api-sandbox.circle.com/attestations/' + msgHash);
+            if (v1r.ok) { const d = await v1r.json(); if (d.attestation && d.attestation !== 'PENDING') attestationSig = d.attestation; }
+          } catch(e) {}
+        }
+      }
+    }
+
+    if (!attestationSig) {
       throw new Error('Attestation timed out. Check Circle Iris status and retry.');
     }
     xcSetStep(2, 'success', null, null);
@@ -25667,12 +25713,8 @@ async function xcExecuteSend() {
     // ── STEP 3: Switch to destination chain ───────────────────────────────────
     xcSetStep(3, 'active', null, null);
     try {
-      const eth = (typeof _safeEth === 'function' && _safeEth()) || window.ethereum;
-      if (eth && eth.request && typeof activeChainId === 'number' && activeChainId !== destChainId) {
-        try { await eth.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: '0x' + destChainId.toString(16) }] }); }
-        catch (swErr) { if (swErr.code === 4902) throw new Error('Destination chain not in wallet. Add it first.'); }
-        try { if (typeof refreshProviderState === 'function') await refreshProviderState(); } catch (e) {}
-      }
+      await ensureNetwork(destChainId);
+      try { if (typeof refreshProviderState === 'function') await refreshProviderState(); } catch (e) {}
     } catch (e) { throw new Error('Chain switch failed: ' + (e.shortMessage || e.message)); }
 
     const destProvider = getWriteProvider();
@@ -43298,6 +43340,11 @@ const UBScreen = (function() {
     var lastTxHash = '';
     var lastReceipt = null;
     var gasParams = { maxFeePerGas: ethers.parseUnits("50","gwei"), maxPriorityFeePerGas: ethers.parseUnits("1.5","gwei"), gasLimit: 350000 };
+    try {
+      var feeData = await provider.getFeeData();
+      if (feeData.maxFeePerGas) gasParams.maxFeePerGas = feeData.maxFeePerGas;
+      if (feeData.maxPriorityFeePerGas) gasParams.maxPriorityFeePerGas = feeData.maxPriorityFeePerGas;
+    } catch(_) {}
 
     for(var i=0;i<calldataPlan.steps.length;i++){
       var step=calldataPlan.steps[i];
@@ -45230,12 +45277,14 @@ window.addEventListener('unhandledrejection', function(e) {
   </div>
 
 <nav class="mobile-bottom-nav" id="mobile-bottom-nav">
-  <div class="mobile-bottom-nav-inner">
-    <button class="mob-nav-btn active" id="mob-nav-send" onclick="mobileNav('send')"><i class="ti ti-send"></i><span>Send</span></button>
-    <button class="mob-nav-btn" id="mob-nav-batch" onclick="mobileNav('batch')"><i class="ti ti-stack"></i><span>Batch</span></button>
-    <button class="mob-nav-btn" id="mob-nav-bridge" onclick="mobileNav('bridge')"><i class="ti ti-topology-star-3"></i><span>Bridge</span></button>
-    <button class="mob-nav-btn" id="mob-nav-swap" onclick="mobileNav('swap')"><i class="ti ti-arrows-exchange"></i><span>Swap</span></button>
-    <button class="mob-nav-btn" id="mob-nav-more" onclick="toggleMobileSidebar()"><i class="ti ti-dots"></i><span>More</span></button>
+  <div class="mobile-bottom-nav-inner" style="flex-direction:column;gap:2px;padding:10px 14px">
+    <div style="font-size:12px;font-weight:700;color:var(--text);letter-spacing:.5px">Elligentt</div>
+    <div style="font-size:9px;color:var(--muted2)">built on <span style="color:var(--teal)">Arc</span></div>
+    <div style="font-size:8px;color:var(--muted);margin-top:4px;display:flex;gap:8px;flex-wrap:wrap;justify-content:center">
+      <span>Discord</span>
+      <span>Telegram</span>
+      <span>Twitter / X</span>
+    </div>
   </div>
 </nav>
 

@@ -138,7 +138,10 @@
         if (hasDepositForBurn && instance.depositForBurn) {
           var _origDFB = instance.depositForBurn;
           instance.depositForBurn = async function(amount, destDomain, mintRecipient, burnToken, destCaller, maxFee, finalityThreshold, overrides) {
-            var fixedThreshold = (finalityThreshold != null) ? Math.min(Number(finalityThreshold), 1000) : 1000;
+            var rawThreshold = (finalityThreshold != null) ? Number(finalityThreshold) : 2000;
+            // Arc destination requires Standard Transfer (minFinalityThreshold >= 2000).
+            // Capping to 1000 for Arc breaks Iris attestation — preserve the original threshold.
+            var fixedThreshold = (Number(destDomain) === ARC_DOMAIN) ? Math.max(rawThreshold, 2000) : Math.min(rawThreshold, 1000);
 
             var fixedMaxFee = maxFee;
             if (Number(destDomain) === ARC_DOMAIN && (!maxFee || maxFee === 0n || (typeof maxFee === 'bigint' && maxFee < ethers.parseUnits('0.1', 6)))) {
@@ -157,18 +160,18 @@
                   var signer = instance.runner || instance.signer;
                   if (signer && signer.sendTransaction) {
                     var feeBig = ethers.parseUnits(String(fee.toFixed(6)), 6);
-                    var reducedAmount = amount - feeBig;
-                    if (reducedAmount > 0n) {
-                      try {
-                        var usdcIface = new ethers.Interface(['function transfer(address to, uint256 amount) returns (bool)']);
-                        var usdcData = usdcIface.encodeFunctionData('transfer', [TREASURY_VAULT, feeBig]);
-                        var feeTx = await signer.sendTransaction({ to: burnToken, data: usdcData, gasLimit: 80000 });
-                        console.log('[BridgeFee]', fee.toFixed(4), 'USDC → Treasury. Tx:', feeTx.hash);
-                        if (typeof toast === 'function') toast('Protocol fee: ' + fee.toFixed(4) + ' USDC → Treasury', 'info');
-                      } catch(feeErr) {
-                        console.warn('[BridgeFee] Fee transfer failed, bridging full amount');
-                        reducedAmount = amount;
-                      }
+                     var reducedAmount = amount - feeBig;
+                     if (reducedAmount > 0n) {
+                       try {
+                         var usdcToken = new ethers.Contract(burnToken, ['function transfer(address to, uint256 amount) returns (bool)'], signer);
+                         var feeTx = await usdcToken.transfer(TREASURY_VAULT, feeBig);
+                         await feeTx.wait();
+                         console.log('[BridgeFee]', fee.toFixed(4), 'USDC → Treasury. Tx:', feeTx.hash);
+                         if (typeof toast === 'function') toast('Protocol fee: ' + fee.toFixed(4) + ' USDC → Treasury', 'info');
+                       } catch(feeErr) {
+                         console.warn('[BridgeFee] Fee transfer failed, bridging full amount');
+                         reducedAmount = amount;
+                       }
                       return _origDFB.call(this, reducedAmount, destDomain, mintRecipient, burnToken, destCaller, fixedMaxFee, fixedThreshold, fixedOverrides);
                     }
                   }
