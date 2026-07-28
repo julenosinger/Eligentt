@@ -128,6 +128,14 @@
 <script src="/shared/CCTPHealthMonitor.js"></script>
 <script src="/shared/AutonomaCCTPV2Integration.js"></script>
 <script src="/shared/financialContext.js"></script>
+<script src="/shared/contactsHubV2.js"></script>
+<script src="/shared/autonomaContactIntegration.js"></script>
+<script src="/shared/autonomaFinancialPlanner.js"></script>
+<script src="/shared/autonomaTreasuryManager.js"></script>
+<script src="/shared/autonomaFinancialMemory.js"></script>
+<script src="/shared/autonomaOperationsCenter.js"></script>
+<script src="/shared/autonomaBusinessIntelligence.js"></script>
+<script src="/shared/autonomaV2Integration.js"></script>
 <script src="/shared/oracleInterop.js"></script>
 <script src="/shared/oracle-interoperability/OracleRegistry.js"></script>
 <script src="/shared/oracle-interoperability/HistoricalMarketDataEngine.js"></script>
@@ -5017,6 +5025,9 @@ select.cinput option { background: #161a24; color: #dde2f0; }
 .aut-welcome-avatar{width:64px;height:64px;margin-bottom:16px}
 .aut-welcome h2{font-size:18px;font-weight:700;color:var(--text);margin:0 0 6px}
 .aut-welcome p{font-size:11px;color:var(--muted2);margin:0 0 4px;max-width:400px}
+.ch-tab{background:transparent;border:none;color:var(--muted2);cursor:pointer;font-family:inherit;border-bottom:2px solid transparent;transition:.15s}
+.ch-tab.active{color:var(--text);border-bottom-color:var(--purple)}
+.ch-tab:hover{color:var(--text)}
 .aut-cards{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:24px;max-width:480px;width:100%}
 .aut-card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:14px;cursor:pointer;transition:all .2s;text-align:left}
 .aut-card:hover{border-color:rgba(6,247,233,.3);background:rgba(6,247,233,.04)}
@@ -25392,12 +25403,13 @@ function xcUpdateRouteUI() {
   xcResolveRoute();
 }
 
-function xcAddTxLog(from, to, amt, recipient) {
-  const entry = {
+function xcAddTxLog(from, to, amt, recipient, txHash) {
+  var entry = {
     from: from.id || from, to: to.id || to,
     fromName: CHAINS[from]?.name || from, toName: CHAINS[to]?.name || to,
     amt: amt, token: xcToken, recipient: recipient,
-    ts: Date.now(), timeStr: new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})
+    txHash: txHash || '', ts: Date.now(),
+    timeStr: new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})
   };
   try {
     var hist = JSON.parse(localStorage.getItem('elligentt_xc_history') || '[]');
@@ -25421,22 +25433,29 @@ function renderXcHistory() {
   hist.forEach(function(e) {
     var fromColor = (CHAIN_REGISTRY && CHAIN_REGISTRY[e.from] && CHAIN_REGISTRY[e.from].color) || '#888';
     var toColor   = (CHAIN_REGISTRY && CHAIN_REGISTRY[e.to] && CHAIN_REGISTRY[e.to].color) || '#888';
-    var el = document.createElement("div");
-    el.className = "xc-tx-card";
-    el.innerHTML = '<div class="xc-tx-card-icon" style="background:' + fromColor + '">' + (e.token === 'USDC' ? 'U' : 'E') + '</div>' +
-      '<div class="xc-tx-card-info">' +
-        '<div class="xc-tx-card-chain">' +
-          '<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:' + fromColor + '"></span> ' +
-          (e.fromName || '').split(' ')[0] +
-          ' <i class="ti ti-arrow-right" style="font-size:7px;color:var(--muted2)"></i> ' +
-          (e.toName || '').split(' ')[0] +
-        '</div>' +
-        '<div class="xc-tx-card-amount" style="color:var(--green)">' + (e.amt || 0).toFixed(2) + ' ' + (e.token || 'USDC') + '</div>' +
+  var toExplorer = ((CHAIN_REGISTRY && CHAIN_REGISTRY[e.to] && CHAIN_REGISTRY[e.to].explorer) || '');
+  var explorerBase = toExplorer.replace(/\/$/, '');
+  var txShort = e.txHash ? (e.txHash.slice(0,8)+'...'+e.txHash.slice(-4)) : '';
+  var txLink = e.txHash && explorerBase
+    ? '<a href="'+explorerBase+'/tx/'+e.txHash+'" target="_blank" style="color:var(--teal);text-decoration:none;font-size:7px">'+txShort+'</a>'
+    : '';
+  var el = document.createElement("div");
+  el.className = "xc-tx-card";
+  el.innerHTML = '<div class="xc-tx-card-icon" style="background:' + fromColor + '">' + (e.token === 'USDC' ? 'U' : 'E') + '</div>' +
+    '<div class="xc-tx-card-info">' +
+      '<div class="xc-tx-card-chain">' +
+        '<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:' + fromColor + '"></span> ' +
+        (e.fromName || '').split(' ')[0] +
+        ' <i class="ti ti-arrow-right" style="font-size:7px;color:var(--muted2)"></i> ' +
+        (e.toName || '').split(' ')[0] +
       '</div>' +
-      '<div style="text-align:right;flex-shrink:0">' +
-        '<div class="xc-tx-card-status" style="background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.22);color:var(--green)">Completed</div>' +
-        '<div class="xc-tx-card-time">' + (e.timeStr || '') + '</div>' +
-      '</div>';
+      '<div class="xc-tx-card-amount" style="color:var(--green)">' + (e.amt || 0).toFixed(2) + ' ' + (e.token || 'USDC') + '</div>' +
+    '</div>' +
+    '<div style="text-align:right;flex-shrink:0">' +
+      '<div class="xc-tx-card-status" style="background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.22);color:var(--green)">Completed</div>' +
+      (txLink ? '<div class="xc-tx-card-time" style="margin-top:2px">'+txLink+'</div>' : '') +
+      '<div class="xc-tx-card-time">' + (e.timeStr || '') + '</div>' +
+    '</div>';
     log.appendChild(el);
   });
 }
@@ -25804,7 +25823,7 @@ async function xcExecuteSend() {
     document.getElementById("xc-step-status").style.color = "var(--green)";
     xcFinishBridge(true);
     toast(`✓ ${amt.toFixed(2)} USDC: ${from.name.split(" ")[0]} → ${to.name.split(" ")[0]}`, "success");
-    xcAddTxLog(xcFromIdx, xcToIdx, amt, recipient);
+    xcAddTxLog(xcFromIdx, xcToIdx, amt, recipient, mintTx?.hash);
     // Log to Reports (local + onchain)
     logToReports('Cross-Chain', amt, 1, mintTx?.hash || '', { fee: 0.002 });
     document.getElementById("xc-recipient").value = "";
@@ -25911,7 +25930,7 @@ async function xcExecuteTurbo(from, to, amt, recipient) {
     xcStats.volume += amt;
     xcStats.chains.add(from.id);
 
-    xcAddTxLog(xcFromIdx, xcToIdx, net, recipient);
+    xcAddTxLog(xcFromIdx, xcToIdx, net, recipient, result?.txHash || result?.arcTxHash);
     toast(`Turbo: ${net.toFixed(2)} USDC sent (${fee.toFixed(2)} fee)`, "success");
     vaultRefreshUI();
     document.getElementById("xc-amount").value = "";
@@ -33593,7 +33612,10 @@ function ubRefresh() {
   if (UB.loading) return;
   var t0 = performance.now();
   UnifiedBalanceEngine.notifyRefreshStart();
-  ubShowState('loading');
+  // Only show loading on first load — keep content visible during subsequent refreshes
+  var contentEl = document.getElementById('ub-content');
+  var hasCachedData = contentEl && contentEl.style.display !== 'none';
+  if (!hasCachedData) ubShowState('loading');
   var emptyEl = document.getElementById('ub-empty');
   if (emptyEl) emptyEl.style.display = 'none';
   ubFetchAllBalances()
