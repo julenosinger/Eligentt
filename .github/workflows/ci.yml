@@ -1,0 +1,63 @@
+name: CI/CD — Test, Security & Deploy
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - run: |
+          echo "=== Syntax validation ==="
+          find shared tests functions -name "*.js" -exec node -c {} \; 2>&1 | tee syntax.log
+          FAIL=$(grep -c "SyntaxError" syntax.log || true)
+          if [ "$FAIL" -gt 0 ]; then echo "FAILED: $FAIL syntax errors"; exit 1; fi
+          echo "PASSED: 0 syntax errors"
+
+  bundle-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          echo "=== Script tag balance ==="
+          OPEN=$(grep -o '<script' index.html | wc -l)
+          CLOSE=$(grep -o '</script>' index.html | wc -l)
+          echo "Open: $OPEN  Close: $CLOSE"
+          if [ "$OPEN" != "$CLOSE" ]; then echo "UNBALANCED script tags!"; exit 1; fi
+          echo "BALANCED: $OPEN script tags"
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Secret scan
+        run: |
+          echo "=== Secret scan ==="
+          if grep -r "0x[0-9a-fA-F]\{64\}" shared/ 2>/dev/null; then
+            echo "WARNING: Potential private keys found in shared/"
+          else
+            echo "CLEAN: No private keys in shared/"
+          fi
+      - name: Dependency check
+        run: |
+          echo "=== Dependency verification ==="
+          echo "CDN deps: ethers, qrcodejs, web3modal, dompurify"
+          grep -c "ethers" index.html > /dev/null && echo "  ethers: OK" || echo "  ethers: MISSING"
+          grep -c "dompurify" index.html > /dev/null && echo "  dompurify: OK" || echo "  dompurify: MISSING"
+
+  deploy-preview:
+    needs: [syntax, bundle-check, security]
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy Preview
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CF_API_TOKEN }}
+          command: pages deploy ./public --project-name elligente --branch preview-${{ github.sha }}
