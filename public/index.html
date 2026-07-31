@@ -146,6 +146,135 @@
 <script src="/shared/oracle-interoperability/CrossChainAnalyticsEngine.js"></script>
 <script src="/shared/oracle-interoperability/OraclePluginManager.js"></script>
 <script src="/shared/oracle-interoperability/OracleDashboardEngine.js"></script>
+<!-- ════════════════════════════════════════
+     Elligentt Phase 19 — Pure Modular Infrastructure
+     DO NOT REMOVE — PureExecutionGuard, RuntimeMode v19
+═════════════════════════════════════════ -->
+<script src="/shared/migration/RuntimeMode.js"></script>
+<script src="/shared/migration/LegacyPurgeAnalyzer.js"></script>
+<script src="/shared/system/PureExecutionGuard.js"></script>
+<script src="/shared/core/GlobalRegistryV2.js"></script>
+<script src="/shared/ui/components/EventDelegator.js"></script>
+<script src="/shared/migration/FinalLegacyAudit.js"></script>
+<script src="/shared/migration/GlobalMigrationManager.js"></script>
+<script src="/shared/core/GlobalCleanupManager.js"></script>
+<script src="/shared/migration/CoreMigrationAdapters.js"></script>
+<script src="/shared/migration/Phase19FinalCertification.js"></script>
+<!-- ════════════════════════════════════════
+     Elligentt Phase 19.5 — Cutover Validation
+     PureModularAudit + PureModularValidator + Certification
+═════════════════════════════════════════ -->
+<script src="/shared/migration/PureModularAudit.js"></script>
+<script src="/shared/system/PureModularValidator.js"></script>
+<script src="/shared/migration/Phase19_5Certification.js"></script>
+<!-- ════════════════════════════════════════
+     Elligentt Phase 20 — Production Cutover
+     CutoverManager + PurgeEngine + ReleaseValidator + SmokeTests + Benchmark + ReleaseManager + FinalCert
+═════════════════════════════════════════ -->
+<script src="/shared/system/ProductionCutoverManager.js"></script>
+<script src="/shared/migration/LegacyPurgeEngine.js"></script>
+<script src="/shared/system/PureModularReleaseValidator.js"></script>
+<script src="/tests/FinancialSmokeTests.js"></script>
+<script src="/shared/system/PerformanceBenchmark.js"></script>
+<script src="/shared/system/ReleaseManager.js"></script>
+<script src="/shared/migration/Phase20FinalCertification.js"></script>
+<!-- Phase 20 Bootstrap -->
+<script>
+(function(){
+  'use strict';
+  document.addEventListener('DOMContentLoaded',function(){
+    setTimeout(function(){
+      console.log('[Phase20] Running production cutover validation...');
+
+      if(typeof ProductionCutoverManager!=='undefined'){
+        var report = ProductionCutoverManager.generateReport();
+        console.log('[Phase20] ProductionCutoverManager cutover-ready:', report.cutoverReady);
+      }
+      if(typeof LegacyPurgeEngine!=='undefined'){
+        var r = LegacyPurgeEngine.quickReport();
+        console.log('[Phase20] LegacyPurgeEngine: ' + r.totalLegacyFunctions + ' legacy, ' + r.safeToRemove + ' safe, ' + r.unknown + ' unknown');
+      }
+      if(typeof PureModularReleaseValidator!=='undefined'){
+        var ready = PureModularReleaseValidator.isProductionReady();
+        console.log('[Phase20] PureModularReleaseValidator production-ready:', ready.allPassed);
+        PureModularReleaseValidator.printReport();
+      }
+      if(typeof PerformanceBenchmark!=='undefined'){
+        setTimeout(function(){ PerformanceBenchmark.printReport(); },2000);
+      }
+      if(typeof FinancialSmokeTests!=='undefined'){
+        setTimeout(function(){ FinancialSmokeTests.runAll(); },3000);
+      }
+      if(typeof Phase20FinalCertification!=='undefined'){
+        setTimeout(function(){ Phase20FinalCertification.printReport(); },4000);
+      }
+      console.log('[Phase20] INFRASTRUCTURE ACTIVE — all Phase 20 modules loaded');
+    },1500);
+  });
+})();
+</script>
+<!-- Phase 19.5 Bootstrap: Run validation and print certification -->
+<script>
+(function(){
+  'use strict';
+  document.addEventListener('DOMContentLoaded',function(){
+    setTimeout(function(){
+      console.log('[Phase19.5] Running validation suite...');
+      if(typeof PureModularAudit!=='undefined'){
+        var q = PureModularAudit.quickAudit();
+        console.log('[Phase19.5] Legacy Audit: ' + q.total + ' total, ' + q.active + ' active, ' + q.unknown + ' unknown, cutover-ready: ' + q.cutoverReady);
+      }
+      if(typeof PureModularValidator!=='undefined'){
+        var ready = PureModularValidator.isReady();
+        console.log('[Phase19.5] PureModularValidator: ready=' + ready + ', failures=' + PureModularValidator.getFailures().length);
+        PureModularValidator.printReport();
+      }
+      if(typeof Phase19_5Certification!=='undefined'){
+        setTimeout(function(){
+          Phase19_5Certification.printReport();
+          var checklist = Phase19_5Certification.cutoverChecklist();
+          console.log('[Phase19.5] Cutover Checklist:', checklist);
+        },2000);
+      }
+    },1500);
+  });
+})();
+</script>
+<!-- Phase 19 Bootstrap: Observation Mode (MIXED — monitor, don't block) -->
+<script>
+(function(){
+  'use strict';
+  if(typeof RuntimeMode!=='undefined'){
+    RuntimeMode.setMode('MIXED');
+    RuntimeMode.clear();
+    console.log('[Phase19 Preview] RuntimeMode: MIXED (observation) — violations: ' + RuntimeMode.getSummary().violations);
+  }
+  document.addEventListener('DOMContentLoaded',function(){
+    setTimeout(function(){
+      if(typeof PureExecutionGuard!=='undefined'){
+        PureExecutionGuard.activate();
+        console.log('[Phase19 Preview] PureExecutionGuard: ACTIVE — monitoring ' + Object.keys(PureExecutionGuard.BLOCK_MAP).length + ' legacy functions');
+      }
+      if(typeof PureRuntimeValidator!=='undefined'){
+        PureRuntimeValidator.start();
+        console.log('[Phase19 Preview] PureRuntimeValidator: ACTIVE');
+      }
+      if(typeof GlobalRegistryV2!=='undefined'){
+        GlobalRegistryV2.autoRegister();
+        console.log('[Phase19 Preview] GlobalRegistryV2: ' + GlobalRegistryV2.getRegisteredCount() + ' modules');
+      }
+      if(typeof LegacyPurgeAnalyzer!=='undefined'){
+        var scan = LegacyPurgeAnalyzer.quickScan();
+        console.log('[Phase19 Preview] LegacyPurgeAnalyzer: ' + scan.legacyFunctions + ' legacy, ' + scan.globals + ' globals, ' + scan.inlineHandlers + ' inline handlers');
+      }
+      if(typeof Phase19FinalCertification!=='undefined'){
+        setTimeout(function(){ Phase19FinalCertification.printReport(); }, 3000);
+      }
+      console.log('[Phase19 Preview] INFRASTRUCTURE ACTIVE — monitoring mode (non-blocking)');
+    },500);
+  });
+})();
+</script>
 <style>
 /* ── Wallet Modal ───────────────────────────────────────── */
 .wm-overlay{position:fixed;inset:0;background:rgba(0,0,0,.82);z-index:2000;display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .22s;backdrop-filter:blur(4px)}

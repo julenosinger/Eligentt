@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<link rel="icon" type="image/svg+xml" href="/favicon-main.svg"/>
+<link rel="stylesheet" href="/styles/base.css"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Elligentt — Batch Payments | Arc Testnet</title>
+<meta name="description" content="Batch USDC payments, swap and bridge on Arc Testnet. Send to 500 recipients in one transaction. Powered by Elligentt Contracts."/>
+<meta property="og:title" content="Elligentt — Batch Payments on Arc Testnet"/>
+<meta property="og:description" content="Send USDC to hundreds of wallets in one transaction. Swap, bridge, invoices."/>
+<meta property="og:type" content="website"/>
+<meta name="twitter:card" content="summary_large_image"/>
+<meta name="theme-color" content="#4f8ef7"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-title" content="Elligentt"/>
+<link rel="manifest" href="/manifest.json"/>
+<link rel="icon" type="image/x-icon" href="/favicon.ico"/>
+<link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png"/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.44.0/tabler-icons.min.css"/>
+<script src="https://cdn.jsdelivr.net/npm/ethers@6.7.1/dist/ethers.umd.min.js" integrity="sha384-eoEZatO/ymJi+LdBilp3xt/M9N9Lla2JlMVPZuk48Fg1YGl2Mc+vmsky+nkOtlSi" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js" integrity="sha384-3zSEDfvllQohrq0PHL1fOXJuC/jSOO34H46t6UQfobFOmxE5BpjjaIJY5F2/bMnU" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@web3modal/ethereum@2.7.1/dist/index.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.9/dist/purify.min.js" integrity="sha384-3HPB1XT51W3gGRxAmZ+qbZwRpRlFQL632y8x+adAqCr4Wp3TaWwCLSTAJJKbyWEK" crossorigin="anonymous" defer></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+
+<!-- Configuration (load before all modules) -->
+<script src="/config/system.js"></script>
+<script src="/config/chains.js"></script>
+<script src="/config/contracts.js"></script>
+<script src="/config/cctp.js"></script>
+<script src="/config/fees.js"></script>
+<script src="/config/slippage.js"></script>
+<script src="/config/runtime.js"></script>
+<script src="/config/application.js"></script>
+
+<!-- Core Infrastructure -->
+<script src="/shared/jsonFix.js"></script>
+<script src="/shared/storageManager.js"></script>
+<script src="/shared/logger.js"></script>
+<script src="/shared/eventBus.js"></script>
+<script src="/shared/compat.js"></script>
+
+<!-- Remediation -->
+<script src="/shared/keyMigration.js"></script>
+<script src="/shared/treasurySync.js"></script>
+<script src="/shared/contractRegistryFix.js"></script>
+<script src="/shared/schedulerFix.js"></script>
+<script src="/shared/autonomaConsolidation.js"></script>
+<script src="/shared/swapIsolation.js"></script>
+<script src="/shared/paymentQueueRemediation.js"></script>
+<script src="/shared/multisendDedup.js"></script>
+<script src="/shared/bridgeInboundFix.js"></script>
+<script src="/shared/autonomaScheduleRoute.js"></script>
+<script src="/shared/bridgeRouteSelector.js"></script>
+<script src="/shared/moduleLoader.js"></script>
+<script src="/remediation/bootstrap.js"></script>
+<script src="/shared/memoIndexer.js"></script>
+<script src="/shared/treasuryIndexer.js"></script>
+<script src="/shared/applicationLedger.js"></script>
+
+<!-- Core Services -->
+<script src="/shared/profile.js"></script>
+<script src="/shared/walletManager.js"></script>
+<script src="/shared/auth.js"></script>
+<script src="/shared/eventIndexer.js"></script>
+<script src="/shared/treasuryGuard.js"></script>
+<script src="/shared/multicall.js"></script>
+<script src="/shared/securityAttackLab.js"></script>
+<script src="/shared/invariantEngine.js"></script>
+<script src="/shared/permitEngine.js"></script>
+<script src="/shared/permissionCards.js"></script>
+<script src="/shared/contractRegistry.js"></script>
+<script src="/shared/riskEngine.js"></script>
+<script src="/shared/executionQueue.js"></script>
+<script src="/shared/executionPlanner.js"></script>
+
+<!-- Stores -->
+<script src="/shared/store/walletStore.js"></script>
+<script src="/shared/store/paymentStore.js"></script>
+<script src="/shared/store/swapStore.js"></script>
+<script src="/shared/store/poolStore.js"></script>
+<script src="/shared/store/aiwalletStore.js"></script>
+<script src="/shared/store/autonomaStore.js"></script>
+<script src="/shared/store/settingsStore.js"></script>
+<script src="/shared/store/uiStore.js"></script>
+
+<!-- Domain Services -->
+<script src="/shared/domain/domainRegistry.js"></script>
+
+<!-- System Layer -->
+<script src="/shared/system/LockManager.js"></script>
+<script src="/shared/system/CacheManager.js"></script>
+<script src="/shared/system/CircuitBreaker.js"></script>
+<script src="/shared/system/QueueManager.js"></script>
+<script src="/shared/system/AgentManager.js"></script>
+<script src="/shared/system/ExecutionCoordinator.js"></script>
+<script src="/shared/system/WorkflowManager.js"></script>
+<script src="/shared/system/ResourceManager.js"></script>
+<script src="/shared/system/HeartbeatManager.js"></script>
+<script src="/shared/system/LifecycleManager.js"></script>
+<script src="/shared/system/MetricsManager.js"></script>
+<script src="/shared/system/AuditManager.js"></script>
+<script src="/shared/system/RecoveryManager.js"></script>
+<script src="/shared/system/VersionManager.js"></script>
+<script src="/shared/system/PolicyCoordinator.js"></script>
+<script src="/shared/system/DiagnosticsManager.js"></script>
+<script src="/shared/system/ObservabilityCenter.js"></script>
+<script src="/shared/system/SystemManager.js"></script>
+
+<!-- Security -->
+<script src="/shared/security/SecurityCenter.js"></script>
+<script src="/shared/security/IntentSecurity.js"></script>
+<script src="/shared/security/SecurityValidator.js"></script>
+<script src="/shared/security/SecurityAudit.js"></script>
+
+<!-- Migration Infrastructure -->
+<script src="/shared/migration/MigrationFlags.js"></script>
+<script src="/shared/migration/LegacyTracker.js"></script>
+<script src="/shared/migration/ParityChecker.js"></script>
+<script src="/shared/migration/ProductionGuard.js"></script>
+<script src="/shared/migration/ProductionConfig.js"></script>
+<script src="/shared/migration/RuntimeMode.js"></script>
+
+<!-- Core Registry -->
+<script src="/shared/core/errorHandler.js"></script>
+<script src="/shared/core/telemetry.js"></script>
+<script src="/shared/core/StorageAdapter.js"></script>
+<script src="/shared/core/GlobalRegistry.js"></script>
+<script src="/shared/core/GlobalRegistryV2.js"></script>
+<script src="/shared/core/GlobalCleanupManager.js"></script>
+
+<!-- Phase 19 Infrastructure -->
+<script src="/shared/migration/LegacyPurgeAnalyzer.js"></script>
+<script src="/shared/system/PureExecutionGuard.js"></script>
+<script src="/shared/system/PureRuntimeValidator.js"></script>
+<script src="/shared/ui/dom/EventDelegator.js"></script>
+<script src="/shared/migration/FinalLegacyAudit.js"></script>
+<script src="/shared/migration/GlobalMigrationManager.js"></script>
+<script src="/shared/migration/CoreMigrationAdapters.js"></script>
+
+<!-- AI & Autonoma -->
+<script src="/shared/aiRecommendations.js"></script>
+<script src="/shared/autonomaCore.js"></script>
+<script src="/shared/autonomaDocumentIntelligence.js"></script>
+<script src="/shared/autonomaFinancialMemory.js"></script>
+<script src="/shared/autonomaFinancialPlanner.js"></script>
+<script src="/shared/autonomaNlu.js"></script>
+<script src="/shared/autonomaAgent.js"></script>
+<script src="/shared/autonomaBusinessIntelligence.js"></script>
+<script src="/shared/autonomaOperationsCenter.js"></script>
+<script src="/shared/autonomaTreasuryManager.js"></script>
+<script src="/shared/autonomaContactIntegration.js"></script>
+<script src="/shared/autonomaScheduleRoute.js"></script>
+<script src="/shared/aiSmartWallet.js"></script>
+
+<!-- RPC & Chain -->
+<script src="/shared/rpcManager.js"></script>
+<script src="/shared/chainSimulator.js"></script>
+<script src="/shared/priceOracleEngine.js"></script>
+<script src="/shared/twapEngine.js"></script>
+
+<!-- Pool -->
+<script src="/shared/poolAbiDiscovery.js"></script>
+<script src="/shared/priceImpact.js"></script>
+<script src="/shared/liquidityHealth.js"></script>
+<script src="/shared/liquidityProtection.js"></script>
+<script src="/shared/antiWhaleProtection.js"></script>
+<script src="/shared/poolRegistryModule.js"></script>
+<script src="/shared/poolHealthCheck.js"></script>
+<script src="/shared/economicRisk.js"></script>
+<script src="/shared/poolStateManager.js"></script>
+<script src="/shared/poolDataValidator.js"></script>
+<script src="/shared/poolRetryManager.js"></script>
+<script src="/shared/poolReserveSnapshot.js"></script>
+<script src="/shared/poolWatcher.js"></script>
+
+<!-- Financial -->
+<script src="/shared/policyEngine.js"></script>
+<script src="/shared/economicMonitoring.js"></script>
+<script src="/shared/economicRisk.js"></script>
+<script src="/shared/financialContext.js"></script>
+<script src="/shared/lpAnalytics.js"></script>
+
+<!-- Plugins -->
+<script src="/shared/plugins/WalletPlugin.js"></script>
+<script src="/shared/plugins/AIWalletPlugin.js"></script>
+<script src="/shared/plugins/AutonomaPlugin.js"></script>
+<script src="/shared/plugins/BridgePlugin.js"></script>
+<script src="/shared/plugins/SwapPlugin.js"></script>
+<script src="/shared/plugins/TreasuryPlugin.js"></script>
+<script src="/shared/plugins/SchedulerPlugin.js"></script>
+<script src="/shared/plugins/ContactsPlugin.js"></script>
+<script src="/shared/plugins/DashboardPlugin.js"></script>
+<script src="/shared/plugins/HistoryPlugin.js"></script>
+<script src="/shared/plugins/ReportsPlugin.js"></script>
+<script src="/shared/plugins/NotificationsPlugin.js"></script>
+<script src="/shared/plugins/MissionControlPlugin.js"></script>
+<script src="/shared/plugins/VaultPlugin.js"></script>
+<script src="/shared/plugins/InsightsPlugin.js"></script>
+<script src="/shared/plugins/SimulationPlugin.js"></script>
+<script src="/shared/plugins/SettingsPlugin.js"></script>
+<script src="/shared/plugins/TimelinePlugin.js"></script>
+
+<!-- Page Modules -->
+<script src="/shared/pages/PageController.js"></script>
+<script src="/shared/pages/PageLoader.js"></script>
+<script src="/shared/pages/EventMigrationLayer.js"></script>
+
+<!-- Kernel -->
+<script src="/shared/kernel/ServiceContainer.js"></script>
+<script src="/shared/kernel/FeatureFlags.js"></script>
+<script src="/shared/kernel/CapabilityRegistry.js"></script>
+<script src="/shared/kernel/DependencyResolver.js"></script>
+<script src="/shared/kernel/PluginRegistry.js"></script>
+<script src="/shared/kernel/PluginLoader.js"></script>
+<script src="/shared/kernel/PluginLifecycle.js"></script>
+<script src="/shared/kernel/PluginContext.js"></script>
+<script src="/shared/kernel/ModuleDiagnostics.js"></script>
+<script src="/shared/kernel/ModuleHealth.js"></script>
+<script src="/shared/kernel/ApplicationKernel.js"></script>
+
+<!-- Agents -->
+<script src="/shared/agentIdentity.js"></script>
+<script src="/shared/agentAuthorization.js"></script>
+<script src="/shared/agentReputation.js"></script>
+<script src="/shared/agentAudit.js"></script>
+<script src="/shared/agentSession.js"></script>
+<script src="/shared/agentScheduleExecutor.js"></script>
+<script src="/shared/agentTreasury.js"></script>
+<script src="/shared/agentWalletManager.js"></script>
+
+<!-- CCTP & Bridge -->
+<script src="/shared/cctp.js"></script>
+<script src="/shared/CCTPV2InboundEngine.js"></script>
+<script src="/shared/CCTPHealthMonitor.js"></script>
+<script src="/shared/CCTPFinalityEngine.js"></script>
+<script src="/shared/CircleAttestationMonitor.js"></script>
+<script src="/shared/BridgeRecoveryEngine.js"></script>
+<script src="/shared/ExecutionAggregator.js"></script>
+<script src="/shared/CrossChainTransferRouter.js"></script>
+
+<!-- Additional modules -->
+<script src="/shared/executionWatchdog.js"></script>
+<script src="/shared/resilience.js"></script>
+<script src="/shared/trustLayer.js"></script>
+<script src="/shared/performance.js"></script>
+<script src="/shared/validators.js"></script>
+<script src="/shared/anomalyDetection.js"></script>
+<script src="/shared/oracleInterop.js"></script>
+<script src="/shared/historicalMetrics.js"></script>
+<script src="/shared/ubMerchantHub.js"></script>
+<script src="/shared/poolAlertSystem.js"></script>
+<script src="/shared/contactsHubV2.js"></script>
+<script src="/shared/missionEngine.js"></script>
+
+<!-- Batch execution -->
+<script src="/shared/BatchExecutionEngine.js"></script>
+
+<!-- Migration Support -->
+<script src="/shared/migration/MigrationAdapters.js"></script>
+<script src="/shared/migration/MigrationReport.js"></script>
+<script src="/shared/migration/DeadCodeCollector.js"></script>
+<script src="/shared/migration/BootstrapCleanup.js"></script>
+
+<!-- Services -->
+<script src="/shared/services/rpcService.js"></script>
+<script src="/shared/services/walletService.js"></script>
+<script src="/shared/services/notificationService.js"></script>
+
+<!-- UI Components -->
+<script src="/shared/ui/uiRenderer.js"></script>
+
+<!-- Phase 19 Migration Support -->
+<script src="/shared/migration/Phase18FinalReport.js"></script>
+<script src="/shared/migration/Phase19FinalCertification.js"></script>
+
+<!-- Phase 19 Test Suite -->
+<script src="/tests/Phase19MonolithPurge.test.js"></script>
+
+<!-- ════════════════════════════════════════
+     APPLICATION SHELL
+     Zero business logic.
+     Zero blockchain logic.
+     Zero inline JavaScript.
+     Only the app shell and bootstrap.
+     ════════════════════════════════════════ -->
+</head>
+
+<body>
+
+<div id="app-shell"></div>
+
+<!-- ════════════════════════════════════════
+     BOOTSTRAP — Single entry point.
+     AppBootstrap orchestrates: config → EventBus → Stores → RPC → Wallet → UI → Ready
+     ════════════════════════════════════════ -->
+<script src="/shared/appBootstrap.js"></script>
+
+<script type="module">
+  // Phase 19: Pure Modular Runtime Bootstrap
+  (function () {
+    'use strict';
+
+    function boot() {
+      console.log('[Elligentt v19] Pure Modular Runtime — booting...');
+
+      // 1. Set PURE_MODULAR mode
+      try {
+        if (typeof RuntimeMode !== 'undefined') {
+          RuntimeMode.setMode('PURE_MODULAR');
+          console.log('[Elligentt v19] RuntimeMode: PURE_MODULAR');
+        }
+      } catch (e) {
+        console.warn('[Elligentt v19] RuntimeMode unavailable:', e.message);
+      }
+
+      // 2. Activate PureExecutionGuard
+      try {
+        if (typeof PureExecutionGuard !== 'undefined') {
+          PureExecutionGuard.activate();
+          var blockedCount = Object.keys(PureExecutionGuard.BLOCK_MAP).length;
+          console.log('[Elligentt v19] PureExecutionGuard: ACTIVE — blocking ' + blockedCount + ' legacy functions');
+        }
+      } catch (e) {
+        console.warn('[Elligentt v19] PureExecutionGuard unavailable:', e.message);
+      }
+
+      // 3. Start PureRuntimeValidator
+      try {
+        if (typeof PureRuntimeValidator !== 'undefined') {
+          PureRuntimeValidator.start();
+          console.log('[Elligentt v19] PureRuntimeValidator: ACTIVE');
+        }
+      } catch (e) {
+        console.warn('[Elligentt v19] PureRuntimeValidator unavailable:', e.message);
+      }
+
+      // 4. Auto-register GlobalRegistryV2
+      try {
+        if (typeof GlobalRegistryV2 !== 'undefined') {
+          GlobalRegistryV2.autoRegister();
+          console.log('[Elligentt v19] GlobalRegistryV2: ' + GlobalRegistryV2.getRegisteredCount() + ' modules registered');
+        }
+      } catch (e) {
+        console.warn('[Elligentt v19] GlobalRegistryV2 unavailable:', e.message);
+      }
+
+      // 5. Activate EventDelegator (handles all data-action)
+      try {
+        if (typeof EventDelegator !== 'undefined') {
+          EventDelegator.activate();
+          console.log('[Elligentt v19] EventDelegator: ACTIVE — ' + EventDelegator.getActionCount() + ' actions');
+        }
+      } catch (e) {
+        console.warn('[Elligentt v19] EventDelegator unavailable:', e.message);
+      }
+
+      // 6. Run migration audit
+      try {
+        if (typeof FinalLegacyAudit !== 'undefined') {
+          var audit = FinalLegacyAudit.audit();
+          console.log('[Elligentt v19] FinalLegacyAudit: ' + audit.summary.status);
+        }
+      } catch (e) {
+        console.warn('[Elligentt v19] FinalLegacyAudit unavailable:', e.message);
+      }
+
+      // 7. Run LegacyPurgeAnalyzer
+      try {
+        if (typeof LegacyPurgeAnalyzer !== 'undefined') {
+          var scan = LegacyPurgeAnalyzer.quickScan();
+          console.log('[Elligentt v19] LegacyPurgeAnalyzer: ' + scan.legacyFunctions + ' legacy fns, ' + scan.globals + ' globals, ' + scan.inlineHandlers + ' inline handlers');
+        }
+      } catch (e) {
+        console.warn('[Elligentt v19] LegacyPurgeAnalyzer unavailable:', e.message);
+      }
+
+      // 8. Boot ApplicationKernel
+      try {
+        if (typeof ApplicationKernel !== 'undefined') {
+          ApplicationKernel.boot();
+        }
+      } catch (e) {
+        console.warn('[Elligentt v19] ApplicationKernel boot failed:', e.message);
+      }
+
+      // 9. Boot SystemManager
+      try {
+        if (typeof SystemManager !== 'undefined') {
+          SystemManager.boot();
+        }
+      } catch (e) {
+        console.warn('[Elligentt v19] SystemManager boot failed:', e.message);
+      }
+
+      // 10. Start AppBootstrap
+      try {
+        if (typeof AppBootstrap !== 'undefined') {
+          AppBootstrap.start({
+            onReady: function (report) {
+              console.log('[Elligentt v19] AppBootstrap: READY — ' + (report.totalTime || 0).toFixed(0) + 'ms');
+              _finalizeBoot();
+            }
+          });
+        } else {
+          _finalizeBoot();
+        }
+      } catch (e) {
+        console.warn('[Elligentt v19] AppBootstrap start failed:', e.message);
+      }
+    }
+
+    function _finalizeBoot() {
+      // 11. Emit Phase 19 boot complete
+      try {
+        if (typeof EventBus !== 'undefined') {
+          EventBus.emit('PHASE19_BOOT_COMPLETE', {
+            version: '19.0.0',
+            mode: 'PURE_MODULAR',
+            timestamp: Date.now(),
+            runtimeMode: typeof RuntimeMode !== 'undefined' ? RuntimeMode.getSummary() : null,
+            guardActive: typeof PureExecutionGuard !== 'undefined' ? PureExecutionGuard.isActive() : false
+          });
+        }
+      } catch (e) {}
+
+      // 12. Print certification
+      try {
+        if (typeof Phase19FinalCertification !== 'undefined') {
+          setTimeout(function () {
+            Phase19FinalCertification.printReport();
+          }, 1000);
+        }
+      } catch (e) {}
+
+      // 13. Run tests (in development)
+      try {
+        if (typeof Phase19TestSuite !== 'undefined' && typeof ProductionConfig !== 'undefined' && !ProductionConfig.isProduction) {
+          setTimeout(function () {
+            console.log('[Elligentt v19] Running test suite...');
+            Phase19TestSuite.runAll();
+          }, 2000);
+        }
+      } catch (e) {}
+
+      console.log('[Elligentt v19] PURE MODULAR RUNTIME ACTIVE — NO LEGACY FALLBACK');
+    }
+
+    // Wait for DOM
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', boot);
+    } else {
+      boot();
+    }
+  })();
+</script>
+
+</body>
+</html>
