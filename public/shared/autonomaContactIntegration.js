@@ -70,15 +70,35 @@
     for (var j = 0; j < groupPatterns.length; j++) {
       var gm = msg.match(groupPatterns[j]);
       if (gm) {
-        var groupName = gm[1].trim();
+        var groupName = gm[1].trim().toLowerCase();
         var groupContacts = ContactsHub.getGroupAddresses(groupName);
         if (groupContacts.length > 0) {
           return { msg: msg, resolved: null, context: null, group: groupName, groupContacts: groupContacts };
         }
-        // Also check payroll group
-        var payrollContacts = ContactsHub.getPayrollContacts();
-        if (/(?:payroll|folha|employees|funcion[a-z]+)/i.test(groupName) && payrollContacts.length > 0) {
-          return { msg: msg, resolved: null, context: null, group: 'Payroll', groupContacts: payrollContacts };
+        // SmartRecipient: payroll / employees lookup
+        if ((/(?:payroll|folha|employees|employee|funcion[a-z]+)/i.test(groupName) || groupName === 'employees')) {
+          var srPayroll = (typeof SmartRecipient !== 'undefined') ? SmartRecipient.getPayrollRecipients() : [];
+          if (srPayroll.length > 0) {
+            return { msg: msg, resolved: null, context: null, group: 'Payroll', groupContacts: srPayroll.map(function(r){ return r.contact; }) };
+          }
+          var legacyPayroll = ContactsHub.getPayrollContacts();
+          if (legacyPayroll.length > 0) {
+            return { msg: msg, resolved: null, context: null, group: 'Payroll', groupContacts: legacyPayroll };
+          }
+        }
+        // SmartRecipient: suppliers lookup
+        if (/(?:supplier|suppliers|fornecedor|fornecedores|vendor)/i.test(groupName)) {
+          var srSuppliers = (typeof SmartRecipient !== 'undefined') ? SmartRecipient.getSupplierRecipients() : [];
+          if (srSuppliers.length > 0) {
+            return { msg: msg, resolved: null, context: null, group: 'Suppliers', groupContacts: srSuppliers.map(function(r){ return r.contact; }) };
+          }
+        }
+        // SmartRecipient: tag-based lookup
+        if (typeof SmartRecipient !== 'undefined') {
+          var tagResults = SmartRecipient.findByTag(groupName.charAt(0).toUpperCase() + groupName.slice(1));
+          if (tagResults.length > 0) {
+            return { msg: msg, resolved: null, context: null, group: groupName, groupContacts: tagResults.map(function(r){ return r.contact; }) };
+          }
         }
       }
     }
@@ -191,10 +211,21 @@
 
   /* ── Enrich contact helper ────────────────────────────────────────── */
   function enrichContact(c) {
+    var out = c;
     try {
-      if (typeof ContactsHub !== 'undefined' && ContactsHub.enrichContact) return ContactsHub.enrichContact(c);
+      if (typeof ContactsHub !== 'undefined' && ContactsHub.enrichContact) out = ContactsHub.enrichContact(c);
     } catch (_) {}
-    return c;
+    // SmartRecipient crosschain preferences for "Bridge and pay Gabriel" scenarios
+    if (typeof SmartRecipient !== 'undefined' && out && out.name) {
+      var xc = SmartRecipient.getContactForBridge(out.name);
+      if (xc) {
+        out.preferredToken = out.preferredToken || xc.preferredToken;
+        out.preferredChain = out.preferredChain || xc.preferredChain;
+        out.allowCrosschain = xc.allowCrosschain;
+        out.preferredRoute = out.preferredRoute || xc.preferredRoute;
+      }
+    }
+    return out;
   }
 
   /* ── Init ─────────────────────────────────────────────────────────── */

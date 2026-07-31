@@ -29,7 +29,7 @@
     84532: { rpc: 'https://sepolia.base.org', name: 'Base Sepolia' },
     421614: { rpc: 'https://sepolia-rollup.arbitrum.io/rpc', name: 'Arbitrum Sepolia' },
     11155420: { rpc: 'https://sepolia.optimism.io', name: 'Optimism Sepolia' },
-    80002: { rpc: 'https://rpc-amoy.polygon.technology', name: 'Polygon Amoy' }
+    80002: { rpc: 'https://polygon-amoy-bor-rpc.publicnode.com', name: 'Polygon Amoy' }
   };
 
   function _statusFromLatency(ms, threshold) {
