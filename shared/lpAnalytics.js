@@ -44,7 +44,7 @@
 
     // Reserve distribution
     result.metrics.reserveDistribution = {
-      tokenA: parseFloat(((rA / rA + (rB || 1) * 67000) * 100).toFixed(2)),
+      tokenA: parseFloat(((rA / (rA + (rB || 1) * 67000)) * 100).toFixed(2)),
       tokenB: parseFloat((((rB || 0) * 67000 / result.tvl) * 100).toFixed(2))
     };
 

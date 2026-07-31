@@ -1,5 +1,16 @@
+var _memFallback = new Map();
+
 export async function checkRateLimit(kv, { identifier, endpoint, limit = 20, windowMs = 60000 }) {
-  if (!kv) return { allowed: true, remaining: limit, resetAt: Date.now() + windowMs };
+  if (!kv) {
+    var now2 = Date.now();
+    var fbKey = endpoint + ':' + identifier;
+    var fb = _memFallback.get(fbKey);
+    if (!fb || (now2 - fb.windowStart) > windowMs) { fb = { count: 0, windowStart: now2 }; }
+    if (fb.count >= limit) { return { allowed: false, remaining: 0, resetAt: fb.windowStart + windowMs, retryAfter: Math.ceil((fb.windowStart + windowMs - now2) / 1000) || 1 }; }
+    fb.count++;
+    _memFallback.set(fbKey, fb);
+    return { allowed: true, remaining: limit - fb.count, resetAt: fb.windowStart + windowMs };
+  }
 
   const key = `rate:${endpoint}:${identifier}`;
   const now = Date.now();

@@ -25,24 +25,26 @@ function generateSessionToken() {
 const LOGIN_MAX_ATTEMPTS = 5;
 const LOGIN_WINDOW_MS = 900000;
 
-async function getLoginAttempts(KV, email) {
-  try {
-    const raw = await KV.get(`login_attempt:${email}`);
-    if (!raw) return { count: 0, windowStart: Date.now() };
-    const data = JSON.parse(raw);
-    if (Date.now() - data.windowStart > LOGIN_WINDOW_MS) return { count: 0, windowStart: Date.now() };
-    return data;
-  } catch (_) {
-    return { count: 0, windowStart: Date.now() };
-  }
-}
-
 async function recordLoginFailure(KV, email) {
-  const data = await getLoginAttempts(KV, email);
-  data.count = (data.count || 0) + 1;
+  const raw = await KV.get(`login_attempt:${email}`);
+  var data;
+  if (!raw) {
+    data = { count: 1, windowStart: Date.now() };
+  } else {
+    data = JSON.parse(raw);
+    if (Date.now() - data.windowStart > LOGIN_WINDOW_MS) {
+      data = { count: 1, windowStart: Date.now() };
+    } else {
+      data.count = (data.count || 0) + 1;
+    }
+  }
   try {
     await KV.put(`login_attempt:${email}`, JSON.stringify(data), { expirationTtl: Math.ceil(LOGIN_WINDOW_MS / 1000) });
   } catch (_) {}
+}
+
+async function getLoginAttempts(KV, email) {
+  return recordLoginFailure(KV, email);
 }
 
 async function clearLoginAttempts(KV, email) {
