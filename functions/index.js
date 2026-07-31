@@ -55,8 +55,6 @@ async function handleCircleProxy(request, env, url) {
   const circleUrl = 'https://api.circle.com' + circlePath + url.search;
 
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(function() { controller.abort(); }, 15000);
     const resp = await fetch(circleUrl, {
       method: request.method,
       headers: {
@@ -65,9 +63,7 @@ async function handleCircleProxy(request, env, url) {
       },
       body: request.method !== 'GET' && request.method !== 'HEAD'
         ? await request.text() : undefined,
-      signal: controller.signal,
     });
-    clearTimeout(timeout);
 
     const data = await resp.text();
     const corsOrigin = getAllowedOrigin(request, env);
@@ -91,10 +87,7 @@ async function handleIrisProxy(request, env, url) {
   const irisUrl = 'https://iris-api-sandbox.circle.com' + irisPath + url.search;
 
   try {
-    const controller2 = new AbortController();
-    const timeout2 = setTimeout(function() { controller2.abort(); }, 15000);
-    const resp = await fetch(irisUrl, { method: request.method, signal: controller2.signal });
-    clearTimeout(timeout2);
+    const resp = await fetch(irisUrl, { method: request.method });
     const data = await resp.text();
     return new Response(data, {
       status: resp.status,

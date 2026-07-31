@@ -91,17 +91,8 @@ export function endpointLimit(appRecord, kind) {
   return (typeof v === 'number' && v > 0) ? v : (DEFAULT_ENDPOINT_LIMITS[kind] || DEFAULT_ENDPOINT_LIMITS.request);
 }
 
-var _coreMemFallback = new Map();
-
 async function incr(kv, k) {
-  if (!kv || typeof kv.get !== 'function' || typeof kv.put !== 'function') {
-    var now = Date.now();
-    var fb = _coreMemFallback.get(k);
-    if (!fb || (now - fb.windowStart) > (WINDOW_SECONDS * 1000)) { fb = { count: 0, windowStart: now }; }
-    fb.count++;
-    _coreMemFallback.set(k, fb);
-    return fb.count;
-  }
+  if (!kv || typeof kv.get !== 'function' || typeof kv.put !== 'function') return 1;
   try {
     const raw = await kv.get(k);
     const count = (raw ? parseInt(raw, 10) : 0) + 1;

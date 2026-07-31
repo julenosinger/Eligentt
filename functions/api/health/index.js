@@ -1,23 +1,15 @@
-function getHealthCors(request, env) {
-  const configured = (env.ALLOWED_ORIGINS || 'https://elligente.pages.dev').split(',').map(function(s) { return s.trim(); }).filter(Boolean);
-  const origin = (request && request.headers && request.headers.get('Origin')) || '';
-  var allowOrigin = configured[0];
-  if (origin && configured.indexOf(origin) !== -1) allowOrigin = origin;
-  return {
-    'Access-Control-Allow-Origin': allowOrigin,
-    'Access-Control-Allow-Methods': 'GET, OPTIONS',
-    'Content-Type': 'application/json',
-    'Vary': 'Origin',
-  };
-}
+const CORS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, OPTIONS',
+  'Content-Type': 'application/json',
+};
 
-export async function onRequestOptions(context) {
-  return new Response(null, { status: 204, headers: getHealthCors(context.request, context.env) });
+export async function onRequestOptions() {
+  return new Response(null, { status: 204, headers: CORS });
 }
 
 export async function onRequestGet(context) {
-  const { request, env } = context;
-  const CORS = getHealthCors(request, env);
+  const { env } = context;
   const rpcPrimary = env.ARC_RPC_URL || 'https://arc-testnet.drpc.org';
   const rpcFallback = env.ARC_RPC_FALLBACK || null;
   const startTime = Date.now();
