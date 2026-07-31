@@ -103,8 +103,9 @@
     // 6. Router validation
     var routerCheck = { name: 'Router/Factory', passed: false, detail: '' };
     if (!poolConfig.routerAddress || poolConfig.routerAddress === '0x0000000000000000000000000000000000000001') {
-      routerCheck.passed = true; // Not required — direct pool access
-      routerCheck.detail = 'No router configured (direct pool access)';
+      routerCheck.passed = false;
+      routerCheck.detail = 'Router contract not deployed (placeholder address) — swaps blocked';
+      routerCheck.warning = true;
     } else {
       try {
         var rCode = await provider.getCode(poolConfig.routerAddress);
