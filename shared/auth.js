@@ -3,6 +3,7 @@ const AuthManager = (() => {
 
   const SESSION_KEY = 'elligente_session';
   const PROFILE_KEY = 'elligente_auth_profile';
+  const MIGRATED_KEY = 'elligente_auth_migrated';
   const API_BASE = '/api/auth';
 
   let _session = null;
@@ -13,19 +14,23 @@ const AuthManager = (() => {
   function _loadSession() {
     try {
       const raw = localStorage.getItem(SESSION_KEY);
-      if (raw) _session = JSON.parse(raw);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && parsed.ts) _session = { ts: parsed.ts };
+      }
       const pRaw = localStorage.getItem(PROFILE_KEY);
       if (pRaw) _profile = JSON.parse(pRaw);
     } catch (_) {}
   }
 
-  function _saveSession(token, profile) {
-    _session = { token, ts: Date.now() };
+  function _saveProfile(profile) {
     _profile = profile;
-    try {
-      localStorage.setItem(SESSION_KEY, JSON.stringify(_session));
-      localStorage.setItem(PROFILE_KEY, JSON.stringify(_profile));
-    } catch (_) {}
+    try { localStorage.setItem(PROFILE_KEY, JSON.stringify(_profile)); } catch (_) {}
+  }
+
+  function _clearLegacyTokens() {
+    try { localStorage.removeItem(SESSION_KEY); } catch (_) {}
+    try { localStorage.setItem(MIGRATED_KEY, '1'); } catch (_) {}
   }
 
   function _clearSession() {
@@ -41,10 +46,7 @@ const AuthManager = (() => {
 
   async function _api(endpoint, body, method = 'POST') {
     const headers = { 'Content-Type': 'application/json' };
-    if (_session && _session.token) {
-      headers['Authorization'] = 'Bearer ' + _session.token;
-    }
-    const opts = { method, headers };
+    const opts = { method, headers, credentials: 'same-origin' };
     if (body && method !== 'GET') opts.body = JSON.stringify(body);
     const resp = await fetch(API_BASE + endpoint, opts);
     const data = await resp.json();
@@ -59,7 +61,9 @@ const AuthManager = (() => {
   async function verifyCode(email, code, password, name) {
     const data = await _api('/verify', { email, code, password: password || undefined, name: name || undefined });
     if (data.ok && data.sessionToken && data.profile) {
-      _saveSession(data.sessionToken, data.profile);
+      _session = { ts: Date.now() };
+      _saveProfile(data.profile);
+      _clearLegacyTokens();
       _buildRemoteSigner();
     }
     return data;
@@ -68,19 +72,20 @@ const AuthManager = (() => {
   async function loginWithPassword(email, password) {
     const data = await _api('/login', { email, password });
     if (data.ok && data.sessionToken && data.profile) {
-      _saveSession(data.sessionToken, data.profile);
+      _session = { ts: Date.now() };
+      _saveProfile(data.profile);
+      _clearLegacyTokens();
       _buildRemoteSigner();
     }
     return data;
   }
 
   async function validateSession() {
-    if (!_session || !_session.token) return false;
+    if (!_session) return false;
     try {
       const data = await _api('/session', null, 'GET');
       if (data.ok && data.profile) {
-        _profile = data.profile;
-        try { localStorage.setItem(PROFILE_KEY, JSON.stringify(_profile)); } catch (_) {}
+        _saveProfile(data.profile);
         _buildRemoteSigner();
         return true;
       }
@@ -91,19 +96,14 @@ const AuthManager = (() => {
   }
 
   async function logout() {
-    if (_session && _session.token) {
-      try {
-        await fetch(API_BASE + '/session', {
-          method: 'DELETE',
-          headers: { 'Authorization': 'Bearer ' + _session.token },
-        });
-      } catch (_) {}
-    }
+    try {
+      await fetch(API_BASE + '/session', { method: 'DELETE', credentials: 'same-origin' });
+    } catch (_) {}
     _clearSession();
   }
 
   async function signOnServer(action, payload) {
-    if (!_session || !_session.token) throw new Error('Not authenticated');
+    if (!_session) throw new Error('Not authenticated');
     return _api('/sign', { action, ...payload });
   }
 
@@ -179,7 +179,7 @@ const AuthManager = (() => {
   }
 
   function isAuthenticated() {
-    return !!(_session && _session.token && _profile);
+    return !!(_session && _profile);
   }
 
   function getProfile() {
@@ -187,7 +187,7 @@ const AuthManager = (() => {
   }
 
   function getSessionToken() {
-    return _session ? _session.token : null;
+    return null;
   }
 
   function getRemoteSigner() {

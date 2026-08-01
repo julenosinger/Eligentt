@@ -29,6 +29,82 @@
   var SCHEMA_VERSION = 3;  // v3 = encrypted session key support
 
   /* ════════════════════════════════════════
+     Phase 1.1 — Safe centralized v1→v2 migration
+     Atomic: write → read-back → decrypt → verify address → delete v1
+     ════════════════════════════════════════ */
+
+  function _isValidPrivateKey(key) {
+    return key && typeof key === 'string' && /^0x[0-9a-fA-F]{64}$/.test(key);
+  }
+
+  function _deriveAddressFromKey(privateKey) {
+    try {
+      if (typeof ethers === 'undefined') return null;
+      return (new ethers.Wallet(privateKey)).address;
+    } catch(e) { return null; }
+  }
+
+  async function _migrateV1ToEncryptedV2(privateKey) {
+    var result = { success: false, reason: null };
+    if (!_isValidPrivateKey(privateKey)) {
+      result.reason = 'invalid_key_format';
+      return result;
+    }
+    if (!_sessionPassword) {
+      result.reason = 'no_password';
+      return result;
+    }
+    var expectedAddress = _deriveAddressFromKey(privateKey);
+    if (!expectedAddress) {
+      result.reason = 'derive_address_failed';
+      return result;
+    }
+    _sessionPrivateKey = privateKey;
+    try { await _saveSessionKeyEncrypted(); } catch(e) {
+      _sessionPrivateKey = (expectedAddress === _deriveAddressFromKey(privateKey)) ? privateKey : null;
+      result.reason = 'encrypt_write_failed';
+      return result;
+    }
+    var storedV2 = null;
+    try { storedV2 = localStorage.getItem(SESSION_KEY_ENC); } catch(e) {}
+    if (!storedV2 || !storedV2.startsWith('ENC:')) {
+      result.reason = 'v2_read_failed';
+      return result;
+    }
+    var decrypted = null;
+    try { decrypted = await decryptData(storedV2); } catch(e) {}
+    if (!decrypted) {
+      result.reason = 'v2_decrypt_failed';
+      return result;
+    }
+    var parsed = null;
+    try { parsed = JSON.parse(decrypted); } catch(e) {}
+    if (!parsed || !_isValidPrivateKey(parsed.privateKey)) {
+      result.reason = 'v2_parse_failed';
+      return result;
+    }
+    var migratedAddress = _deriveAddressFromKey(parsed.privateKey);
+    if (migratedAddress !== expectedAddress) {
+      result.reason = 'address_mismatch';
+      return result;
+    }
+    result.success = true;
+    return result;
+  }
+
+  async function _safeDeleteLegacyV1() {
+    try { localStorage.removeItem('elligentt_agent_session_v1'); } catch(e) {}
+    try {
+      var w1raw = localStorage.getItem('elligentt_agent_wallet_v1');
+      if (w1raw) {
+        var w1 = JSON.parse(w1raw);
+        delete w1.walletPrivateKey;
+        localStorage.setItem('elligentt_agent_wallet_v1', JSON.stringify(w1));
+      }
+    } catch(e) {}
+  }
+
+  /* ════════════════════════════════════════
      C1 — WebCrypto AES-GCM encrypt/decrypt
      ════════════════════════════════════════ */
   function _getCrypto() {
@@ -52,11 +128,12 @@
   }
 
   async function encryptData(plaintext) {
-    if (!_sessionPassword) return plaintext; // no password = no encryption
+    if (!_sessionPassword) return null;
     var subtle = _getCrypto();
-    if (!subtle) return plaintext;
+    if (!subtle) return null;
     try {
       var key = await _deriveKey(_sessionPassword);
+      if (!key) return null;
       var iv = crypto.getRandomValues(new Uint8Array(12));
       var enc = new TextEncoder();
       var ciphertext = await subtle.encrypt({ name: 'AES-GCM', iv: iv }, key, enc.encode(plaintext));
@@ -64,13 +141,13 @@
       combined.set(iv);
       combined.set(new Uint8Array(ciphertext), iv.length);
       return 'ENC:' + _arrayBufferToBase64(combined.buffer);
-    } catch(e) { return plaintext; }
+    } catch(e) { return null; }
   }
 
   async function decryptData(ciphertext) {
-    if (!ciphertext || typeof ciphertext !== 'string') return ciphertext;
-    if (!ciphertext.startsWith('ENC:')) return ciphertext; // not encrypted — backward compat
-    if (!_sessionPassword) return null; // no password set — can't decrypt
+    if (!ciphertext || typeof ciphertext !== 'string') return null;
+    if (!ciphertext.startsWith('ENC:')) return null;
+    if (!_sessionPassword) return null;
     var subtle = _getCrypto();
     if (!subtle) return null;
     try {
@@ -101,7 +178,9 @@
 
   async function setEncryptionPassword(password) {
     if (!password) { _sessionPassword = null; return; }
-    _sessionPassword = String(password);
+    var pw = String(password);
+    if (pw.length < 8) { _sessionPassword = null; return; }
+    _sessionPassword = pw;
     if (_sessionPrivateKey) {
       await _saveSessionKeyEncrypted();
     }
@@ -109,25 +188,25 @@
 
   async function _saveSessionKeyEncrypted() {
     if (!_sessionPrivateKey) return;
+    if (!_sessionPassword) throw new Error('AGENT_WALLET_NO_PASSWORD');
     var payload = JSON.stringify({ privateKey: _sessionPrivateKey, version: SCHEMA_VERSION });
     var encrypted = await encryptData(payload);
-    try { localStorage.setItem(SESSION_KEY_ENC, encrypted); } catch(e) {}
+    if (!encrypted || !encrypted.startsWith('ENC:')) throw new Error('AGENT_WALLET_ENCRYPTION_FAILED');
+    try { localStorage.setItem(SESSION_KEY_ENC, encrypted); } catch(e) { throw e; }
   }
 
   async function _loadSessionKeyEncrypted() {
-    if (_sessionPrivateKey) return _sessionPrivateKey; // already in RAM
+    if (_sessionPrivateKey) return _sessionPrivateKey;
     try {
       var stored = localStorage.getItem(SESSION_KEY_ENC);
       if (!stored) {
-        // [C1 FIX] Migrate legacy v1 plaintext key to encrypted v2, then delete v1
-        stored = localStorage.getItem('elligentt_agent_session_v1');
-        if (stored) {
-          var v1 = JSON.parse(stored);
-          if (v1 && v1.privateKey) {
+        var v1Raw = localStorage.getItem('elligentt_agent_session_v1');
+        if (v1Raw) {
+          var v1 = JSON.parse(v1Raw);
+          if (v1 && v1.privateKey && _isValidPrivateKey(v1.privateKey)) {
             _sessionPrivateKey = v1.privateKey;
-            // Immediately encrypt and save to v2, remove plaintext v1
-            _saveSessionKeyEncrypted().then(function(){
-              try { localStorage.removeItem('elligentt_agent_session_v1'); } catch(e) {}
+            _migrateV1ToEncryptedV2(v1.privateKey).then(function(mr) {
+              if (mr && mr.success) _safeDeleteLegacyV1();
             }).catch(function(){});
             return _sessionPrivateKey;
           }
@@ -139,8 +218,7 @@
       var parsed = JSON.parse(plaintext);
       if (parsed && parsed.privateKey) {
         _sessionPrivateKey = parsed.privateKey;
-        // [C1 FIX] Verify v1 is also cleaned up after successful v2 load
-        try { if (localStorage.getItem('elligentt_agent_session_v1')) localStorage.removeItem('elligentt_agent_session_v1'); } catch(e) {}
+        try { if (localStorage.getItem('elligentt_agent_session_v1')) _safeDeleteLegacyV1(); } catch(e) {}
         return _sessionPrivateKey;
       }
     } catch(e) {}
@@ -271,7 +349,7 @@
       version: '1.0.0',
       metadataURI: null,
       capabilities: ['swap','bridge','treasury','payments','contracts','vault','crosschain','permit','recurring','scheduled','reimbursement','treasury_deposit'],
-      supportedChains: ['Arc Testnet','Base','Ethereum','Arbitrum','Optimism','Polygon'],
+      supportedChains: ['Arc Testnet','Base','Ethereum Sepolia','Arbitrum Sepolia','Optimism Sepolia','Polygon Amoy'],
       status: 'active',
       sessionStatus: 'inactive',
       reputationScore: 50,
@@ -413,11 +491,10 @@
         var oldRaw = localStorage.getItem('elligentt_agent_session_v1');
         if (oldRaw) {
           var old = JSON.parse(oldRaw);
-          if (old && old.privateKey) {
+          if (old && old.privateKey && _isValidPrivateKey(old.privateKey)) {
             _sessionPrivateKey = old.privateKey;
-            // Migrate to encrypted v2 and remove v1
-            _saveSessionKeyEncrypted().then(function(){
-              try { localStorage.removeItem('elligentt_agent_session_v1'); } catch(e) {}
+            _migrateV1ToEncryptedV2(old.privateKey).then(function(mr) {
+              if (mr && mr.success) _safeDeleteLegacyV1();
             }).catch(function(){});
             return restoreAgentWallet(old.privateKey);
           }
@@ -427,10 +504,11 @@
         var oldStateRaw = localStorage.getItem('elligentt_agent_wallet_v1');
         if (oldStateRaw) {
           var oldState = JSON.parse(oldStateRaw);
-          if (oldState && oldState.walletPrivateKey) {
+          if (oldState && oldState.walletPrivateKey && _isValidPrivateKey(oldState.walletPrivateKey)) {
             _sessionPrivateKey = oldState.walletPrivateKey;
-            // Migrate to encrypted v2 and try to remove legacy
-            _saveSessionKeyEncrypted().catch(function(){});
+            _migrateV1ToEncryptedV2(oldState.walletPrivateKey).then(function(mr) {
+              if (mr && mr.success) _safeDeleteLegacyV1();
+            }).catch(function(){});
             return restoreAgentWallet(oldState.walletPrivateKey);
           }
         }
@@ -594,24 +672,19 @@
   }
 
   function _ensureV1KeyExists() {
-    // [C1 FIX] Never sync plaintext key to v1 anymore. Always use encrypted v2.
-    // If we have a key in RAM, ensure it's saved to encrypted v2 only.
     if (_sessionPrivateKey) {
       try {
         var v1 = localStorage.getItem('elligentt_agent_session_v1');
         if (v1) {
-          // Legacy v1 exists — migrate to v2 and remove v1
-          _saveSessionKeyEncrypted().then(function(){
-            try { localStorage.removeItem('elligentt_agent_session_v1'); } catch(e) {}
+          _migrateV1ToEncryptedV2(_sessionPrivateKey).then(function(mr) {
+            if (mr && mr.success) _safeDeleteLegacyV1();
           }).catch(function(){});
         } else {
-          // No v1, just ensure v2 is synced
           _saveSessionKeyEncrypted().catch(function(){});
         }
       } catch(e) {}
     }
     if (!_sessionPrivateKey && !agentWallet) {
-      // Try loading from encrypted v2 first, then v1 as fallback
       _loadSessionKeyEncrypted().then(function(key){
         if (key) {
           _sessionPrivateKey = key;
@@ -834,10 +907,10 @@
     setEncryptionPassword: setEncryptionPassword,
     /* [C1 FIX] Public migration helper — encrypts a legacy v1 key into v2 */
     _migrateV1Key: function(privateKey) {
-      if (!privateKey) return;
+      if (!privateKey || !_isValidPrivateKey(privateKey)) return;
       _sessionPrivateKey = privateKey;
-      _saveSessionKeyEncrypted().then(function(){
-        try { localStorage.removeItem('elligentt_agent_session_v1'); } catch(e) {}
+      _migrateV1ToEncryptedV2(privateKey).then(function(mr) {
+        if (mr && mr.success) _safeDeleteLegacyV1();
       }).catch(function(){});
     },
     createWalletWithBackup: createWalletWithBackup,

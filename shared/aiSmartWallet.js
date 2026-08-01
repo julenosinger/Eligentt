@@ -1251,6 +1251,8 @@
       if (!html) html = '<div style="font-size:9px;color:var(--muted2)">Session details unavailable.</div>';
       sess.innerHTML = html;
     }
+    const passBox = $id('aiw-agent-pass');
+    if (passBox) { _renderAgentPassBox(passBox); }
   }
 
   /* ══════════════════════════════════════════════════════════════════

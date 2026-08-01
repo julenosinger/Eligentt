@@ -27,15 +27,18 @@ async function encryptData(plaintext, cryptoKey, saltStr) {
   return JSON.stringify({ iv: Array.from(iv), ct: Array.from(new Uint8Array(cipher)), salt: saltStr, version: 2 });
 }
 
-async function hashPassword(password, salt) {
+async function hashPassword(password, salt, iterations) {
   const enc = new TextEncoder();
   const material = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveBits']);
   const bits = await crypto.subtle.deriveBits(
-    { name: 'PBKDF2', salt: enc.encode(salt), iterations: 100000, hash: 'SHA-256' },
+    { name: 'PBKDF2', salt: enc.encode(salt), iterations: iterations || 100000, hash: 'SHA-256' },
     material, 256
   );
   return Array.from(new Uint8Array(bits)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
+
+const PBKDF2_V2 = 600000;
+const HASH_PREFIX_V2 = 'v2:';
 
 // SECURITY: hash submitted OTP the same way register.js stored it (salted PBKDF2).
 async function hashOTP(code, salt) {
@@ -139,7 +142,8 @@ export async function onRequestPost(context) {
 
     if (password && typeof password === 'string' && password.length >= 6) {
       const salt = user.passwordSalt;
-      user.passwordHash = await hashPassword(password, salt);
+      const rawHash = await hashPassword(password, salt, PBKDF2_V2);
+      user.passwordHash = HASH_PREFIX_V2 + rawHash;
     }
   } else {
     const wallet = ethers.Wallet.createRandom();
@@ -151,7 +155,7 @@ export async function onRequestPost(context) {
     const passwordSalt = Array.from(crypto.getRandomValues(new Uint8Array(16))).map(b => b.toString(16).padStart(2, '0')).join('');
     let passwordHash = null;
     if (password && typeof password === 'string' && password.length >= 6) {
-      passwordHash = await hashPassword(password, passwordSalt);
+      passwordHash = HASH_PREFIX_V2 + await hashPassword(password, passwordSalt, PBKDF2_V2);
     }
 
     user = {
@@ -195,10 +199,12 @@ export async function onRequestPost(context) {
     createdAt: Date.now(),
   }), { expirationTtl: 86400 });
 
-  // SECURITY: technical log only — no email, wallet address, OTP or token.
   console.log(`[AUTH] verification successful (${existingRaw ? 'login' : 'registration'})`);
 
-  return json({
+  const headers = getAuthCors(request, env);
+  headers.set('Set-Cookie', `elligente_sid=${sessionToken}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=86400`);
+
+  return new Response(JSON.stringify({
     ok: true,
     isNewUser: !existingRaw,
     sessionToken,
@@ -216,5 +222,5 @@ export async function onRequestPost(context) {
       auth: user.auth,
       stats: user.stats,
     },
-  });
+  }), { status: 200, headers });
 }

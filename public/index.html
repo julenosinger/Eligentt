@@ -52,7 +52,6 @@
 <script src="/shared/schedulerFix.js"></script>
 <script src="/shared/autonomaConsolidation.js"></script>
 <script src="/shared/swapIsolation.js"></script>
-<script src="/shared/paymentQueueRemediation.js"></script>
 <script src="/shared/multisendDedup.js"></script>
 <script src="/shared/bridgeInboundFix.js"></script>
 <script src="/shared/autonomaScheduleRoute.js"></script>
@@ -5700,7 +5699,6 @@ select.cinput option { background: #161a24; color: #dde2f0; }
       <div class="nav-item" id="nav-send" onclick="showPage('send')"><i class="ti ti-send"></i>Send Assets</div>
       <div class="nav-item" id="nav-xchain" onclick="showPage('xchain')"><i class="ti ti-world-share"></i>Cross-Chain<span class="nav-kit">Pay</span></div>
       <div class="nav-item" id="nav-batch" onclick="showPage('batch')"><i class="ti ti-stack"></i>Batch Payments</div>
-      <div class="nav-item" id="nav-queue" onclick="showPage('queue')"><i class="ti ti-list-check"></i>Payment Queue</div>
       <div class="nav-item" id="nav-links" onclick="showPage('links')"><i class="ti ti-link"></i>Payment Links</div>
       <div class="nav-item" id="nav-invoices" onclick="showPage('invoices')"><i class="ti ti-file-invoice"></i>Invoices</div>
       <div class="nav-item" id="nav-unified-balance" onclick="showPage('unified-balance')"><i class="ti ti-chart-donut-3"></i>Balance<span class="nav-kit" style="background:rgba(6,247,233,.12);color:#06F7E9;border:1px solid rgba(6,247,233,.25)">Unified</span></div>
@@ -7239,49 +7237,6 @@ select.cinput option { background: #161a24; color: #dde2f0; }
             </div>
           </div>
 
-        </div>
-      </div>
-    </div>
-
-    <!-- PAGE: PAYMENT QUEUE -->
-    <div class="page" id="page-queue">
-      <div class="page-header">
-        <div class="page-icon" style="background:rgba(79,142,247,.12);color:var(--blue)"><i class="ti ti-list-check"></i></div>
-        <div><div class="page-title">Payment Queue</div><div class="page-sub">Manage pending and scheduled batch payments</div></div>
-        <div style="margin-left:auto;display:flex;gap:8px">
-          <button class="btn primary" onclick="showPage('batch')"><i class="ti ti-plus"></i>New Batch</button>
-        </div>
-      </div>
-      <div style="flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px">
-        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">
-          <div class="card" style="padding:12px"><div class="st-lbl">Pending</div><div class="st-val yellow" id="pq-pending">0</div></div>
-          <div class="card" style="padding:12px"><div class="st-lbl">Processing</div><div class="st-val blue" id="pq-processing">0</div></div>
-          <div class="card" style="padding:12px"><div class="st-lbl">Completed</div><div class="st-val green" id="pq-completed">0</div></div>
-          <div class="card" style="padding:12px"><div class="st-lbl">Failed</div><div class="st-val red" id="pq-failed-stat">0</div></div>
-        </div>
-        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
-          <span style="font-size:10px;color:var(--muted2)">Filter:</span>
-          <button class="btn primary" id="qf-all" onclick="filterQueue('all',this)" style="padding:4px 10px;font-size:9.5px">All</button>
-          <button class="btn" id="qf-pending" onclick="filterQueue('Pending',this)" style="padding:4px 10px;font-size:9.5px">Pending</button>
-          <button class="btn" id="qf-processing" onclick="filterQueue('Processing',this)" style="padding:4px 10px;font-size:9.5px">Processing</button>
-          <button class="btn" id="qf-completed" onclick="filterQueue('Completed',this)" style="padding:4px 10px;font-size:9.5px">Completed</button>
-          <button class="btn" id="qf-failed" onclick="filterQueue('Failed',this)" style="padding:4px 10px;font-size:9.5px">Failed</button>
-          <input id="queue-search" class="cinput" type="text" placeholder="Search by ID or address..." style="flex:1;max-width:260px;font-size:10px;padding:5px 9px" oninput="renderQueueTable()"/>
-          <button class="btn" onclick="retryFailed()" style="padding:4px 10px;font-size:9.5px;margin-left:auto"><i class="ti ti-refresh"></i>Retry Failed</button>
-          <button class="btn" onclick="clearCompleted()" style="padding:4px 10px;font-size:9.5px"><i class="ti ti-trash"></i>Clear Done</button>
-        </div>
-        <div class="card">
-          <div class="ch"><i class="ti ti-list" style="font-size:13px;color:var(--blue)"></i><span class="ct">Queue Items</span><span id="queue-count" style="font-size:9px;color:var(--muted2);margin-left:4px"></span></div>
-          <div style="overflow-x:auto">
-            <table class="btable">
-              <thead><tr><th><input type="checkbox" onchange="toggleAllQueue(this)" style="accent-color:var(--blue)"/></th><th>Batch ID</th><th>Recipients</th><th>Total USDC</th><th>Status</th><th>Progress</th><th>Created</th><th>Actions</th></tr></thead>
-              <tbody id="queue-tbody"></tbody>
-            </table>
-          </div>
-          <div id="queue-empty" style="padding:32px;text-align:center;color:var(--muted2);font-size:11px">
-            <i class="ti ti-list-check" style="font-size:32px;display:block;margin-bottom:8px;opacity:.3"></i>
-            No payments in queue. <span style="color:var(--blue);cursor:pointer" onclick="showPage('batch')">Create a batch</span> to get started.
-          </div>
         </div>
       </div>
     </div>
@@ -10639,6 +10594,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
             </div>
             <div class="card">
               <div class="ch"><span class="ct"><i class="ti ti-id-badge-2" style="color:var(--purple);margin-right:5px"></i>Wallet Security &amp; Session</span></div>
+              <div id="aiw-agent-pass" style="margin-bottom:6px"></div>
               <div class="cb" id="aiw-sec-session"></div>
             </div>
             </div>
@@ -10861,7 +10817,6 @@ select.cinput option { background: #161a24; color: #dde2f0; }
     <div class="footer-col">
       <h4><i class="ti ti-stack"></i>Product</h4>
       <button onclick="showPage('batch')"><i class="ti ti-stack"></i>Batch Payments</button>
-      <button onclick="showPage('queue')"><i class="ti ti-list-check"></i>Payment Queue</button>
       <button onclick="showPage('links')"><i class="ti ti-link"></i>Payment Links</button>
       <button onclick="showPage('invoices')"><i class="ti ti-file-invoice"></i>Invoices<span class="footer-tag">New</span></button>
       <button onclick="showPage('swap')"><i class="ti ti-arrows-exchange"></i>Token Swap</button>
@@ -13961,6 +13916,38 @@ function updateScheduleDatePreview() {
   }
 }
 
+// ── Agent Wallet Password UI ────────────────────────────
+function _renderAgentPassBox(box) {
+  var hasPw = false;
+  try { hasPw = typeof AgentWalletManager !== 'undefined' && AgentWalletManager.hasEncryptionPassword && AgentWalletManager.hasEncryptionPassword(); } catch(e) {}
+  if (hasPw) {
+    box.innerHTML = '<div style="display:flex;align-items:center;gap:6px"><span style="font-size:10px;color:#22c55e"><i class="ti ti-shield-lock" style="font-size:11px"></i> Password set</span><button onclick="_agentPassUpdate()" style="font-size:9px;background:var(--border);color:var(--muted);border:1px solid var(--border2);border-radius:4px;padding:3px 8px;cursor:pointer">Update</button><button onclick="_agentPassClear()" style="font-size:9px;background:none;color:#ef4444;border:1px solid rgba(239,68,68,.4);border-radius:4px;padding:3px 8px;cursor:pointer">Clear</button></div>';
+  } else {
+    box.innerHTML = '<div style="padding:8px;background:rgba(245,158,11,.06);border:1px solid rgba(245,158,11,.2);border-radius:6px;margin-bottom:6px"><div style="font-size:10px;color:#f59e0b;margin-bottom:6px"><i class="ti ti-alert-triangle" style="font-size:11px;margin-right:4px"></i>Set a session password to encrypt your Agent Wallet. Without it, the wallet key is lost on page reload.</div><div style="display:flex;gap:4px"><input id="aiw-pass-input" type="password" placeholder="Encryption password (min 8 chars)" style="flex:1;background:var(--bg);border:1px solid var(--border2);border-radius:4px;padding:5px 8px;font-size:11px;color:var(--text)" onkeydown="if(event.key===\'Enter\')_agentPassSet()"/><button onclick="_agentPassSet()" style="font-size:10px;background:var(--purple);color:#fff;border:none;border-radius:4px;padding:5px 12px;cursor:pointer;white-space:nowrap;font-weight:600">Set Password</button></div></div>';
+  }
+}
+async function _agentPassSet() {
+  var inp = document.getElementById('aiw-pass-input');
+  var v = inp ? inp.value : '';
+  if (v.length < 8) { alert('Password must be at least 8 characters.'); return; }
+  if (typeof AgentWalletManager !== 'undefined' && AgentWalletManager.setEncryptionPassword) {
+    await AgentWalletManager.setEncryptionPassword(v);
+  }
+  var box = document.getElementById('aiw-agent-pass');
+  if (box) _renderAgentPassBox(box);
+}
+function _agentPassUpdate() {
+  var box = document.getElementById('aiw-agent-pass');
+  if (!box) return;
+  box.innerHTML = '<div style="padding:8px;background:rgba(245,158,11,.06);border:1px solid rgba(245,158,11,.2);border-radius:6px;margin-bottom:6px"><div style="font-size:10px;color:#f59e0b;margin-bottom:6px"><i class="ti ti-shield-lock" style="font-size:11px;margin-right:4px"></i>Update your encryption password.</div><div style="display:flex;gap:4px"><input id="aiw-pass-input" type="password" placeholder="New password (min 8 chars)" style="flex:1;background:var(--bg);border:1px solid var(--border2);border-radius:4px;padding:5px 8px;font-size:11px;color:var(--text)" onkeydown="if(event.key===\'Enter\')_agentPassSet()"/><button onclick="_agentPassSet()" style="font-size:10px;background:var(--purple);color:#fff;border:none;border-radius:4px;padding:5px 12px;cursor:pointer;font-weight:600">Update</button></div></div>';
+}
+async function _agentPassClear() {
+  if (typeof AgentWalletManager !== 'undefined' && AgentWalletManager.setEncryptionPassword) {
+    await AgentWalletManager.setEncryptionPassword('');
+  }
+  var box = document.getElementById('aiw-agent-pass');
+  if (box) _renderAgentPassBox(box);
+}
 // ── Toast ──────────────────────────────────────────────────
 let _tt;
 function toast(msg,type='info'){
@@ -20436,8 +20423,6 @@ document.addEventListener('DOMContentLoaded',()=>{
   // No other selects or pages are modified.
   ['sch-token','sch-freq'].forEach(id => enhanceSelectToPortal(document.getElementById(id)));
   // Settings now loaded via SettingsService.init()
-  renderQueueTable();
-  updateQueueStats();
   renderPayLinks();
   renderInvoices();
   updateInvStats();
@@ -20548,7 +20533,6 @@ const Store = {
   save(k, v)      { localStorage.setItem('arcpay_'+k, JSON.stringify(v)); },
 };
 
-let queueItems   = Store.load('queue',   []);
 let payLinks     = Store.load('links',   []);
 let invoiceList  = Store.load('invoices',[]);
 let contacts     = Store.load('contacts',[]);
@@ -20556,127 +20540,13 @@ let selectedContacts = new Set();
 let templateList = Store.load('templates',[]);
 let txHistory    = Store.load('txhistory',[]);
 let contactFilter = 'all';
-let queueFilter   = 'all';
 let currentPayLink = null;
 
 // sync txHistory from batchCount changes
 function syncHistoryFromBatch(batchId, total, rcptCount, txHash, blockNumber) {
-  // Centralized logger (keeps exact previous behavior for Multisend)
   logToReports('Batch', total, rcptCount, txHash, { id: batchId, fee: +(total*MULTISEND_FEE_RATE).toFixed(2) });
   if (typeof logFeeEvent === 'function') logFeeEvent({ module:'MultiSend', amount:total, feeAmount:+(total*MULTISEND_FEE_RATE).toFixed(4), asset:'USDC', txHash:txHash });
-  syncQueueFromBatch(batchId, total, rcptCount);
 }
-
-function syncQueueFromBatch(batchId, total, rcptCount) {
-  const item = {
-    id: batchId, recipients: rcptCount, total: +total.toFixed(2),
-    status: 'Completed', progress: 100,
-    created: new Date().toISOString(), selected: false
-  };
-  queueItems.unshift(item);
-  Store.save('queue', queueItems);
-  renderQueueTable();
-  updateQueueStats();
-}
-
-// Log any app operation (single, batch, cross-chain, bridge, etc.) to Reports
-// Supports both local (demo/preview) and real on-chain (with txHash)
-function logToReports(type, amount, recipientsCount, txHash, opts = {}) {
-  const entry = {
-    id: opts.id || ('#' + _secureRandomInt(9e7).toString().padStart(7,'0')),
-    date: new Date().toISOString(),
-    type: type,
-    recipients: Number(recipientsCount) || 1,
-    amount: parseFloat(amount) || 0,
-    fee: parseFloat(opts.fee || 0),
-    status: opts.status || 'Success',
-    txHash: txHash || ''
-  };
-  txHistory.unshift(entry);
-  Store.save('txhistory', txHistory);
-  // Re-render only if Reports page is open (cheap & safe)
-  const rptPage = document.getElementById('page-reports');
-  if (rptPage && rptPage.style.display !== 'none' && !rptPage.classList.contains('hidden')) {
-    try { renderReports(); } catch(e) { _warn('silent-catch', e?.message||e); }
-  }
-}
-
-// ══════════════════════════════════════════════════════════
-//  PAYMENT QUEUE
-// ══════════════════════════════════════════════════════════
-function renderQueueTable() {
-  const search = (document.getElementById('queue-search')?.value||'').toLowerCase();
-  const filtered = queueItems.filter(q => {
-    if(queueFilter!=='all' && q.status!==queueFilter) return false;
-    if(search && !q.id.toLowerCase().includes(search)) return false;
-    return true;
-  });
-  const tbody = document.getElementById('queue-tbody');
-  if(!tbody) return;
-  const empty = document.getElementById('queue-empty');
-  document.getElementById('queue-count').textContent = filtered.length + ' items';
-  if(filtered.length===0) { tbody.innerHTML=''; empty.style.display=''; return; }
-  empty.style.display='none';
-  tbody.innerHTML = filtered.map((q,i) => {
-    const sc = {Pending:'yellow',Processing:'blue',Completed:'green',Failed:'red'}[q.status]||'muted2';
-    const barW = q.progress||0;
-    return `<tr>
-      <td><input type="checkbox" ${q.selected?'checked':''} onchange="queueItems.find(x=>x.id==='${q.id}').selected=this.checked" style="accent-color:var(--blue)"/></td>
-      <td style="color:var(--blue)">${q.id}</td>
-      <td>${q.recipients}</td>
-      <td>${q.total.toFixed(2)} USDC</td>
-      <td><span style="color:var(--${sc})">${q.status}</span></td>
-      <td style="min-width:80px"><div style="background:var(--border);border-radius:2px;height:4px"><div style="background:var(--blue);height:4px;border-radius:2px;width:${barW}%"></div></div><div style="font-size:8.5px;color:var(--muted2);margin-top:2px">${barW}%</div></td>
-      <td style="font-size:9px;color:var(--muted2)">${new Date(q.created).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})+' '+new Date(q.created).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})}</td>
-      <td>
-        <button class="btn" style="padding:2px 7px;font-size:8.5px" onclick="retryQueueItem('${q.id}')"><i class="ti ti-refresh"></i></button>
-        <button class="btn" style="padding:2px 7px;font-size:8.5px;margin-left:3px" onclick="removeQueueItem('${q.id}')"><i class="ti ti-trash"></i></button>
-      </td>
-    </tr>`;
-  }).join('');
-}
-
-function updateQueueStats() {
-  const counts = {Pending:0, Processing:0, Completed:0, Failed:0};
-  queueItems.forEach(q => { if(counts[q.status]!==undefined) counts[q.status]++; });
-  document.getElementById('pq-pending')?.textContent != null && (document.getElementById('pq-pending').textContent = counts.Pending);
-  document.getElementById('pq-processing')?.textContent != null && (document.getElementById('pq-processing').textContent = counts.Processing);
-  document.getElementById('pq-completed')?.textContent != null && (document.getElementById('pq-completed').textContent = counts.Completed);
-  document.getElementById('pq-failed-stat')?.textContent != null && (document.getElementById('pq-failed-stat').textContent = counts.Failed);
-}
-
-function filterQueue(status, btn) {
-  queueFilter = status;
-  document.querySelectorAll('[id^="qf-"]').forEach(b => b.classList.remove('primary'));
-  btn.classList.add('primary');
-  renderQueueTable();
-}
-
-function retryQueueItem(id) {
-  const q = queueItems.find(x=>x.id===id);
-  if(q) { q.status='Pending'; q.progress=0; Store.save('queue',queueItems); renderQueueTable(); updateQueueStats(); toast('Queued for retry','info'); }
-}
-function removeQueueItem(id) {
-  queueItems = queueItems.filter(x=>x.id!==id);
-  Store.save('queue', queueItems); renderQueueTable(); updateQueueStats();
-}
-function toggleAllQueue(cb) {
-  queueItems.forEach(q => q.selected = cb.checked);
-  renderQueueTable();
-}
-function retryFailed() {
-  let n = 0;
-  queueItems.forEach(q => { if(q.status==='Failed') { q.status='Pending'; q.progress=0; n++; } });
-  Store.save('queue',queueItems); renderQueueTable(); updateQueueStats();
-  toast(n>0?`${n} items requeued`:'No failed items','info');
-}
-function clearCompleted() {
-  const before = queueItems.length;
-  queueItems = queueItems.filter(q=>q.status!=='Completed');
-  Store.save('queue',queueItems); renderQueueTable(); updateQueueStats();
-  toast(`${before-queueItems.length} completed items removed`,'info');
-}
-
 
 // ── Invoice helpers for premium dashboard ──────────────────
 function invCloseDetail(id) {
@@ -21227,7 +21097,7 @@ function renderPayLinks() {
         ${plTypeBadge(l.type||'fixed')}
         ${plStatusBadgeHTML(l)}
       </div>
-      <div class="pl-link-card-name">${l.label||'Untitled'}</div>
+      <div class="pl-link-card-name">${escHtml(l.label||'Untitled')}</div>
       <div style="margin:2px 0 0">
         <span class="pl-link-card-amt">${l.type==='open'?'Any':l.amount}</span>
         <span class="pl-link-card-cur">USDC</span>
@@ -21876,7 +21746,7 @@ function renderInvoices() {
     var isPaid = inv.status === 'Paid';
     var isCancelled = inv.status === 'Cancelled';
     var dueDisplay = inv.due ? invDueCountdown(inv) : '—';
-    return '<tr class="inv-row" style="cursor:pointer" onclick="invfiOpenDrawer(\'' + inv.id + '\')"><td style="font-weight:700;color:var(--yellow);font-size:10px">' + inv.id + '</td><td><div style="display:flex;align-items:center;gap:6px">' + invAvatar(inv.toName, inv.toAddr) + '<div style="font-size:9.5px;font-weight:600;color:var(--text)">' + (inv.toName||shortAddr(inv.toAddr)) + '</div></div></td><td style="font-weight:600;color:var(--text);white-space:nowrap">' + inv.total.toFixed(2) + ' <span style="color:var(--muted2);font-size:8px">' + (inv.currency||'USDC') + '</span></td><td style="font-size:9px;color:' + (inv.status==='Overdue'?'var(--red)':'var(--muted2)') + '">' + dueDisplay + '</td><td>' + invStatusBadge(inv.status) + '</td><td><div style="display:flex;gap:3px;align-items:center" onclick="event.stopPropagation()">' + (!isPaid && !isCancelled ? '<button class="btn primary" style="padding:2px 6px;font-size:8px" onclick="payInvoice(\'' + inv.id + '\')"><i class="ti ti-coin"></i>Pay</button>' : '') + '<button class="btn" title="Open details" style="padding:2px 5px;font-size:8px;color:var(--blue)" onclick="invfiOpenDrawer(\'' + inv.id + '\')"><i class="ti ti-eye"></i></button><button class="btn" title="Copy link" style="padding:2px 5px;font-size:8px" onclick="invCopyLinkById(\'' + inv.id + '\')"><i class="ti ti-link"></i></button><button class="btn" title="PDF" style="padding:2px 5px;font-size:8px" onclick="invExportPDF(\'' + inv.id + '\')"><i class="ti ti-file-download"></i></button><button class="btn" title="Delete" style="padding:2px 5px;font-size:8px;color:var(--red)" onclick="invDelete(\'' + inv.id + '\')"><i class="ti ti-trash"></i></button></div></td></tr>';
+    return '<tr class="inv-row" style="cursor:pointer" onclick="invfiOpenDrawer(\'' + inv.id + '\')"><td style="font-weight:700;color:var(--yellow);font-size:10px">' + escHtml(inv.id) + '</td><td><div style="display:flex;align-items:center;gap:6px">' + invAvatar(inv.toName, inv.toAddr) + '<div style="font-size:9.5px;font-weight:600;color:var(--text)">' + escHtml(inv.toName||shortAddr(inv.toAddr)) + '</div></div></td><td style="font-weight:600;color:var(--text);white-space:nowrap">' + inv.total.toFixed(2) + ' <span style="color:var(--muted2);font-size:8px">' + (inv.currency||'USDC') + '</span></td><td style="font-size:9px;color:' + (inv.status==='Overdue'?'var(--red)':'var(--muted2)') + '">' + dueDisplay + '</td><td>' + invStatusBadge(inv.status) + '</td><td><div style="display:flex;gap:3px;align-items:center" onclick="event.stopPropagation()">' + (!isPaid && !isCancelled ? '<button class="btn primary" style="padding:2px 6px;font-size:8px" onclick="payInvoice(\'' + inv.id + '\')"><i class="ti ti-coin"></i>Pay</button>' : '') + '<button class="btn" title="Open details" style="padding:2px 5px;font-size:8px;color:var(--blue)" onclick="invfiOpenDrawer(\'' + inv.id + '\')"><i class="ti ti-eye"></i></button><button class="btn" title="Copy link" style="padding:2px 5px;font-size:8px" onclick="invCopyLinkById(\'' + inv.id + '\')"><i class="ti ti-link"></i></button><button class="btn" title="PDF" style="padding:2px 5px;font-size:8px" onclick="invExportPDF(\'' + inv.id + '\')"><i class="ti ti-file-download"></i></button><button class="btn" title="Delete" style="padding:2px 5px;font-size:8px;color:var(--red)" onclick="invDelete(\'' + inv.id + '\')"><i class="ti ti-trash"></i></button></div></td></tr>';
   }).join('');
   updateInvStats();
 }
@@ -21948,7 +21818,7 @@ function invfiDrawerHTML(inv) {
     lineItemsHTML = '<div style="margin-bottom:14px"><div style="font-size:9px;color:var(--muted2);text-transform:uppercase;margin-bottom:4px">Line Items</div><div style="background:rgba(0,0,0,.1);border-radius:6px;padding:8px">';
     for (var li = 0; li < inv.lineItems.length; li++) {
       var item = inv.lineItems[li];
-      lineItemsHTML += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:9px;border-bottom:1px solid rgba(255,255,255,.03)"><span style="color:var(--text)">' + (item.name||'—') + '</span><span style="color:var(--muted2)">' + item.qty + 'x ' + ((item.price||0).toFixed(2)) + '</span><span style="color:var(--yellow);font-weight:600">' + ((item.total||0).toFixed(2)) + '</span></div>';
+      lineItemsHTML += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:9px;border-bottom:1px solid rgba(255,255,255,.03)"><span style="color:var(--text)">' + escHtml(item.name||'—') + '</span><span style="color:var(--muted2)">' + item.qty + 'x ' + ((item.price||0).toFixed(2)) + '</span><span style="color:var(--yellow);font-weight:600">' + ((item.total||0).toFixed(2)) + '</span></div>';
     }
     lineItemsHTML += '</div></div>';
   }
@@ -21962,8 +21832,8 @@ function invfiDrawerHTML(inv) {
     onchainHTML = '<div style="margin-bottom:14px"><div style="font-size:9px;color:var(--muted2);text-transform:uppercase;margin-bottom:4px">On-Chain Verification</div><div style="background:rgba(0,0,0,.1);border-radius:6px;padding:10px;font-size:9px"><div style="display:flex;justify-content:space-between;padding:2px 0"><span style="color:var(--muted2)">Chain</span><span style="color:var(--blue)">' + (inv.chainName||'Arc Testnet') + '</span></div><div style="display:flex;justify-content:space-between;padding:2px 0"><span style="color:var(--muted2)">Tx Hash</span><a href="https://testnet.arcscan.app/tx/' + inv.txHash + '" target="_blank" style="color:var(--teal);font-family:monospace;font-size:8.5px;text-decoration:none">' + shortAddr(inv.txHash) + ' <i class="ti ti-external-link" style="font-size:7px"></i></a></div><div style="display:flex;justify-content:space-between;padding:2px 0"><span style="color:var(--muted2)">Paid On</span><span style="color:var(--text)">' + (inv.paidOn ? fmt(inv.paidOn) : '—') + '</span></div></div></div>';
   }
   var descHTML = '';
-  if (inv.desc) { descHTML = '<div style="margin-bottom:14px"><div style="font-size:9px;color:var(--muted2);text-transform:uppercase;margin-bottom:4px">Description</div><div style="font-size:10px;color:var(--text);padding:8px;background:rgba(0,0,0,.1);border-radius:6px">' + inv.desc + '</div></div>'; }
-  return '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid var(--border)"><div><div style="font-size:8px;color:var(--muted2);text-transform:uppercase;letter-spacing:.5px">Invoice</div><div style="font-size:14px;font-weight:800;color:var(--yellow)">' + inv.id + '</div></div><div style="display:flex;align-items:center;gap:8px">' + invStatusBadge(inv.status) + '<button class="btn" style="font-size:9px;padding:2px 6px" onclick="invfiCloseDrawer()"><i class="ti ti-x"></i></button></div></div><div style="text-align:center;padding:16px;background:rgba(0,0,0,.15);border-radius:8px;margin-bottom:14px"><div style="font-size:9px;color:var(--muted2);text-transform:uppercase;margin-bottom:4px">Amount Due</div><div style="font-size:28px;font-weight:800;color:var(--text)">' + inv.total.toFixed(2) + ' <span style="color:var(--blue);font-size:16px">' + cur + '</span></div>' + partialBarHTML + '</div><div style="margin-bottom:14px"><div style="font-size:9px;color:var(--muted2);text-transform:uppercase;margin-bottom:6px">Client Information</div><div style="display:flex;align-items:center;gap:8px;padding:10px;background:rgba(0,0,0,.1);border-radius:6px">' + invAvatar(inv.toName, inv.toAddr) + '<div><div style="font-size:11px;font-weight:600;color:var(--text)">' + (inv.toName||'Unknown') + '</div><div style="font-size:8.5px;color:var(--blue);font-family:monospace;cursor:pointer" onclick="navigator.clipboard.writeText(\'' + (inv.toAddr||'') + '\');toast(\'Address copied\',\'success\')">' + (inv.toAddr ? shortAddr(inv.toAddr) : '—') + '</div></div></div></div>' + descHTML + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px"><div><div style="font-size:9px;color:var(--muted2);text-transform:uppercase;margin-bottom:4px">Payment Methods</div><div style="display:flex;gap:3px;flex-wrap:wrap">' + pmChips + '</div></div><div><div style="font-size:9px;color:var(--muted2);text-transform:uppercase;margin-bottom:4px">Networks</div><div style="display:flex;gap:3px;flex-wrap:wrap">' + netChips + '</div></div></div>' + lineItemsHTML + '<div style="margin-bottom:14px;background:rgba(0,0,0,.1);border-radius:6px;padding:10px"><div style="font-size:9px;color:var(--muted2);text-transform:uppercase;margin-bottom:6px">Payment Breakdown</div><div style="display:flex;justify-content:space-between;font-size:9px;padding:2px 0;color:var(--muted2)"><span>Subtotal</span><span>' + ((inv.subtotal||0).toFixed(2)) + ' ' + cur + '</span></div><div style="display:flex;justify-content:space-between;font-size:9px;padding:2px 0;color:var(--muted2)"><span>Tax (' + (inv.taxPct||0) + '%)</span><span>' + ((inv.taxAmt||0).toFixed(2)) + ' ' + cur + '</span></div><div style="display:flex;justify-content:space-between;font-size:9px;padding:2px 0;color:var(--muted2)"><span>Protocol Fee</span><span>' + ((inv.protocolFee||0).toFixed(2)) + ' ' + cur + '</span></div><div style="display:flex;justify-content:space-between;font-size:10px;padding:4px 0 0;font-weight:700;color:var(--yellow);border-top:1px solid var(--border);margin-top:2px"><span>Total</span><span>' + ((inv.total||0).toFixed(2)) + ' ' + cur + '</span></div></div>' + onchainHTML + '<div style="margin-bottom:14px"><div style="font-size:9px;color:var(--muted2);text-transform:uppercase;margin-bottom:6px">Timeline</div><div style="padding:8px">' + timelineHTML + '</div></div><div style="display:flex;gap:12px;align-items:center;margin-bottom:14px;padding:12px;background:rgba(0,0,0,.1);border-radius:6px"><div id="invfi-drawer-qr" style="width:100px;height:100px;display:flex;align-items:center;justify-content:center;background:#fff;border-radius:4px;flex-shrink:0"><i class="ti ti-qrcode" style="font-size:36px;color:#ddd"></i></div><div style="flex:1;min-width:0"><div style="font-size:8px;color:var(--muted2);margin-bottom:4px">Payment Link</div><div style="font-size:8px;color:var(--blue);word-break:break-all;font-family:monospace">' + ((inv.payUrl||'').replace(/^https?:\/\//, '')) + '</div></div></div><div style="display:flex;gap:4px;flex-wrap:wrap">' + (!isPaid && !isCancelled ? '<button class="btn primary" style="flex:1;font-size:10px;padding:8px" onclick="payInvoice(\'' + inv.id + '\')"><i class="ti ti-coin"></i>Pay Now</button>' : '') + '<button class="btn" style="flex:1;font-size:9px;padding:8px" onclick="invExportPDF(\'' + inv.id + '\')"><i class="ti ti-file-download"></i>PDF</button><button class="btn" style="flex:1;font-size:9px;padding:8px" onclick="invCopyLinkById(\'' + inv.id + '\')"><i class="ti ti-link"></i>Copy Link</button><button class="btn" style="flex:1;font-size:9px;padding:8px" onclick="invShareInvoice(\'' + inv.id + '\')"><i class="ti ti-share"></i>Share</button><button class="btn" style="flex:1;font-size:9px;padding:8px" onclick="invExportJSON(\'' + inv.id + '\')"><i class="ti ti-json"></i>JSON</button></div>';
+  if (inv.desc) { descHTML = '<div style="margin-bottom:14px"><div style="font-size:9px;color:var(--muted2);text-transform:uppercase;margin-bottom:4px">Description</div><div style="font-size:10px;color:var(--text);padding:8px;background:rgba(0,0,0,.1);border-radius:6px">' + escHtml(inv.desc) + '</div></div>'; }
+  return '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid var(--border)"><div><div style="font-size:8px;color:var(--muted2);text-transform:uppercase;letter-spacing:.5px">Invoice</div><div style="font-size:14px;font-weight:800;color:var(--yellow)">' + escHtml(inv.id) + '</div></div><div style="display:flex;align-items:center;gap:8px">' + invStatusBadge(inv.status) + '<button class="btn" style="font-size:9px;padding:2px 6px" onclick="invfiCloseDrawer()"><i class="ti ti-x"></i></button></div></div><div style="text-align:center;padding:16px;background:rgba(0,0,0,.15);border-radius:8px;margin-bottom:14px"><div style="font-size:9px;color:var(--muted2);text-transform:uppercase;margin-bottom:4px">Amount Due</div><div style="font-size:28px;font-weight:800;color:var(--text)">' + inv.total.toFixed(2) + ' <span style="color:var(--blue);font-size:16px">' + cur + '</span></div>' + partialBarHTML + '</div><div style="margin-bottom:14px"><div style="font-size:9px;color:var(--muted2);text-transform:uppercase;margin-bottom:6px">Client Information</div><div style="display:flex;align-items:center;gap:8px;padding:10px;background:rgba(0,0,0,.1);border-radius:6px">' + invAvatar(inv.toName, inv.toAddr) + '<div><div style="font-size:11px;font-weight:600;color:var(--text)">' + escHtml(inv.toName||'Unknown') + '</div><div style="font-size:8.5px;color:var(--blue);font-family:monospace;cursor:pointer" onclick="navigator.clipboard.writeText(\'' + (inv.toAddr||'') + '\');toast(\'Address copied\',\'success\')">' + (inv.toAddr ? shortAddr(inv.toAddr) : '—') + '</div></div></div></div>' + descHTML + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px"><div><div style="font-size:9px;color:var(--muted2);text-transform:uppercase;margin-bottom:4px">Payment Methods</div><div style="display:flex;gap:3px;flex-wrap:wrap">' + pmChips + '</div></div><div><div style="font-size:9px;color:var(--muted2);text-transform:uppercase;margin-bottom:4px">Networks</div><div style="display:flex;gap:3px;flex-wrap:wrap">' + netChips + '</div></div></div>' + lineItemsHTML + '<div style="margin-bottom:14px;background:rgba(0,0,0,.1);border-radius:6px;padding:10px"><div style="font-size:9px;color:var(--muted2);text-transform:uppercase;margin-bottom:6px">Payment Breakdown</div><div style="display:flex;justify-content:space-between;font-size:9px;padding:2px 0;color:var(--muted2)"><span>Subtotal</span><span>' + ((inv.subtotal||0).toFixed(2)) + ' ' + cur + '</span></div><div style="display:flex;justify-content:space-between;font-size:9px;padding:2px 0;color:var(--muted2)"><span>Tax (' + (inv.taxPct||0) + '%)</span><span>' + ((inv.taxAmt||0).toFixed(2)) + ' ' + cur + '</span></div><div style="display:flex;justify-content:space-between;font-size:9px;padding:2px 0;color:var(--muted2)"><span>Protocol Fee</span><span>' + ((inv.protocolFee||0).toFixed(2)) + ' ' + cur + '</span></div><div style="display:flex;justify-content:space-between;font-size:10px;padding:4px 0 0;font-weight:700;color:var(--yellow);border-top:1px solid var(--border);margin-top:2px"><span>Total</span><span>' + ((inv.total||0).toFixed(2)) + ' ' + cur + '</span></div></div>' + onchainHTML + '<div style="margin-bottom:14px"><div style="font-size:9px;color:var(--muted2);text-transform:uppercase;margin-bottom:6px">Timeline</div><div style="padding:8px">' + timelineHTML + '</div></div><div style="display:flex;gap:12px;align-items:center;margin-bottom:14px;padding:12px;background:rgba(0,0,0,.1);border-radius:6px"><div id="invfi-drawer-qr" style="width:100px;height:100px;display:flex;align-items:center;justify-content:center;background:#fff;border-radius:4px;flex-shrink:0"><i class="ti ti-qrcode" style="font-size:36px;color:#ddd"></i></div><div style="flex:1;min-width:0"><div style="font-size:8px;color:var(--muted2);margin-bottom:4px">Payment Link</div><div style="font-size:8px;color:var(--blue);word-break:break-all;font-family:monospace">' + ((inv.payUrl||'').replace(/^https?:\/\//, '')) + '</div></div></div><div style="display:flex;gap:4px;flex-wrap:wrap">' + (!isPaid && !isCancelled ? '<button class="btn primary" style="flex:1;font-size:10px;padding:8px" onclick="payInvoice(\'' + inv.id + '\')"><i class="ti ti-coin"></i>Pay Now</button>' : '') + '<button class="btn" style="flex:1;font-size:9px;padding:8px" onclick="invExportPDF(\'' + inv.id + '\')"><i class="ti ti-file-download"></i>PDF</button><button class="btn" style="flex:1;font-size:9px;padding:8px" onclick="invCopyLinkById(\'' + inv.id + '\')"><i class="ti ti-link"></i>Copy Link</button><button class="btn" style="flex:1;font-size:9px;padding:8px" onclick="invShareInvoice(\'' + inv.id + '\')"><i class="ti ti-share"></i>Share</button><button class="btn" style="flex:1;font-size:9px;padding:8px" onclick="invExportJSON(\'' + inv.id + '\')"><i class="ti ti-json"></i>JSON</button></div>';
 }
 
 // Keep invToggleDetail for backward compat
@@ -22018,7 +21888,7 @@ function invfiAIParse() {
   if (result.crosschain) { var xcCb = document.getElementById('inv-pm-xchain'); if (xcCb) { xcCb.checked = true; invToggleCrosschain(); } }
   invRecalcLines(); invPreviewUpdate();
   var suggestEl = document.getElementById('invfi-ai-suggest');
-  if (suggestEl) { suggestEl.style.display = ''; suggestEl.innerHTML = '<i class="ti ti-sparkles" style="color:var(--purple)"></i> Generated: ' + result.itemName + ' · ' + result.amount + ' ' + result.currency + ' · ' + result.taxPct + '% tax · Due in ' + result.dueDays + 'd' + (result.crosschain ? ' · Crosschain' : ''); }
+  if (suggestEl) { suggestEl.style.display = ''; suggestEl.innerHTML = '<i class="ti ti-sparkles" style="color:var(--purple)"></i> Generated: ' + escHtml(result.itemName) + ' · ' + result.amount + ' ' + result.currency + ' · ' + result.taxPct + '% tax · Due in ' + result.dueDays + 'd' + (result.crosschain ? ' · Crosschain' : ''); }
   toast('Invoice generated from AI description', 'success');
 }
 
@@ -22163,7 +22033,7 @@ function saAutocomplete(query) {
   if (results.length === 0) { list.style.display = 'none'; return; }
   list.innerHTML = results.map(function(c) {
     var addr = c.addr ? c.addr.substring(0,6)+'...'+c.addr.substring(c.addr.length-4) : '';
-    return '<div onclick="saSelectRecipient(\''+c.addr+'\',\''+c.name.replace(/'/g,"\\'")+'\')" style="padding:6px 10px;cursor:pointer;font-size:10px;border-bottom:1px solid var(--border2);display:flex;align-items:center;gap:8px"><span style="width:22px;height:22px;border-radius:50%;background:linear-gradient(135deg,rgba(167,139,250,.3),rgba(79,142,247,.2));display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;flex-shrink:0">'+c.name.charAt(0).toUpperCase()+'</span><div><div style="color:var(--text)">'+c.name+'</div><div style="color:var(--muted2);font-size:8px;font-family:monospace">'+addr+'</div></div></div>';
+    return '<div onclick="saSelectRecipient(\''+c.addr+'\',\''+c.name.replace(/'/g,"\\'")+'\')" style="padding:6px 10px;cursor:pointer;font-size:10px;border-bottom:1px solid var(--border2);display:flex;align-items:center;gap:8px"><span style="width:22px;height:22px;border-radius:50%;background:linear-gradient(135deg,rgba(167,139,250,.3),rgba(79,142,247,.2));display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;flex-shrink:0">'+escHtml(c.name.charAt(0).toUpperCase())+'</span><div><div style="color:var(--text)">'+escHtml(c.name)+'</div><div style="color:var(--muted2);font-size:8px;font-family:monospace">'+addr+'</div></div></div>';
   }).join('');
   list.style.display = 'block';
 }
@@ -22407,18 +22277,18 @@ function renderContacts() {
     const chain = CHAINS.find(ch=>ch.id===(c.chainId||'Arc_Testnet'))||null;
     const soc = c.socials || {};
     const socialLinks = [
-      soc.x       ? `<a href="https://x.com/${soc.x.replace('@','')}" target="_blank" style="font-size:8px;color:var(--blue);text-decoration:none;display:flex;align-items:center;gap:2px"><i class="ti ti-brand-x" style="font-size:9px"></i>${soc.x}</a>` : '',
-      soc.telegram? `<a href="https://t.me/${soc.telegram.replace('@','')}" target="_blank" style="font-size:8px;color:var(--blue);text-decoration:none;display:flex;align-items:center;gap:2px"><i class="ti ti-brand-telegram" style="font-size:9px"></i>${soc.telegram}</a>` : '',
-      soc.email   ? `<a href="mailto:${soc.email}" style="font-size:8px;color:var(--blue);text-decoration:none;display:flex;align-items:center;gap:2px"><i class="ti ti-mail" style="font-size:9px"></i>${soc.email}</a>` : '',
+      soc.x       ? `<a href="https://x.com/${escHtml(soc.x.replace('@',''))}" target="_blank" style="font-size:8px;color:var(--blue);text-decoration:none;display:flex;align-items:center;gap:2px"><i class="ti ti-brand-x" style="font-size:9px"></i>${escHtml(soc.x)}</a>` : '',
+      soc.telegram? `<a href="https://t.me/${escHtml(soc.telegram.replace('@',''))}" target="_blank" style="font-size:8px;color:var(--blue);text-decoration:none;display:flex;align-items:center;gap:2px"><i class="ti ti-brand-telegram" style="font-size:9px"></i>${escHtml(soc.telegram)}</a>` : '',
+      soc.email   ? `<a href="mailto:${escHtml(soc.email)}" style="font-size:8px;color:var(--blue);text-decoration:none;display:flex;align-items:center;gap:2px"><i class="ti ti-mail" style="font-size:9px"></i>${escHtml(soc.email)}</a>` : '',
     ].filter(Boolean).join('');
     const addrShort = c.addr ? shortAddr(c.addr) : '<span style="color:var(--muted2);font-style:italic">No address</span>';
     const isSel = selectedContacts.has(c.id) ? 'checked' : '';
     return `
     <div class="card" style="padding:13px;display:flex;align-items:flex-start;gap:10px;transition:border .15s" onmouseenter="this.style.borderColor='var(--blue)'" onmouseleave="this.style.borderColor=''" >
-      <div style="width:36px;height:36px;border-radius:50%;background:${GRAD[i%GRAD.length]};display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:#fff;flex-shrink:0">${(c.name||'?')[0].toUpperCase()}</div>
+      <div style="width:36px;height:36px;border-radius:50%;background:${GRAD[i%GRAD.length]};display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:#fff;flex-shrink:0">${escHtml((c.name||'?')[0].toUpperCase())}</div>
       <div style="flex:1;min-width:0">
         <div style="font-size:11px;font-weight:600;display:flex;align-items:center;gap:5px;flex-wrap:wrap">
-          ${c.name}
+          ${escHtml(c.name)}
           <i class="ti ${c.favorite?'ti-star-filled':'ti-star'}" style="font-size:11px;color:${c.favorite?'var(--yellow)':'var(--muted2)'};cursor:pointer;margin-left:auto" onclick="toggleFav('${c.id}',this)" title="Favorite"></i>
         </div>
         <div style="font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--muted2);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${addrShort}</div>
@@ -22427,7 +22297,7 @@ function renderContacts() {
           <span style="font-size:8px;color:var(--muted2)">${chain.name}</span>
         </div>
         ${socialLinks?`<div style="display:flex;gap:8px;margin-top:5px;flex-wrap:wrap">${socialLinks}</div>`:''}
-        ${c.note&&!c.socials?`<div style="font-size:8.5px;color:var(--muted2);margin-top:3px">${c.note}</div>`:''}
+        ${c.note&&!c.socials?`<div style="font-size:8.5px;color:var(--muted2);margin-top:3px">${escHtml(c.note)}</div>`:''}
       </div>
       <div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0; align-items:flex-end;">
         <input type="checkbox" class="contact-select" data-id="${c.id}" ${isSel} onchange="toggleContactSelect(this)" style="margin-bottom:2px; accent-color:var(--blue);" title="Select for batch" />
@@ -23279,13 +23149,11 @@ const SettingsService = {
   _domCache: {},
 
   getToken() {
-    try { return localStorage.getItem('elligente_session') || ''; } catch(e) { return ''; }
+    return '';
   },
 
   async _request(method, body, extra) {
-    const token = this.getToken();
-    const opts = { method, headers: { 'Content-Type': 'application/json' } };
-    if (token) opts.headers['Authorization'] = 'Bearer ' + token;
+    const opts = { method, headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin' };
     if (body) opts.body = JSON.stringify(body);
     const url = '/api/settings' + (extra || '');
     const resp = await fetch(url, opts);
@@ -26564,7 +26432,7 @@ function schCsvRenderSummary(result){
   var detailsBody = document.getElementById('sch-csv-details-body');
   if(detailsBody){
     detailsBody.innerHTML = result.recipients.map(function(r, i){
-      return '<tr style="border-bottom:1px solid rgba(255,255,255,.03)"><td style="padding:2px 4px;color:var(--muted2)">' + (i+1) + '</td><td style="padding:2px 4px;color:#a78bfa">' + r.addr.slice(0,8) + '...' + r.addr.slice(-6) + '</td><td style="padding:2px 4px;color:var(--green);text-align:right">' + r.amount.toFixed(2) + '</td><td style="padding:2px 4px;color:var(--text)">' + (r.note || '—') + '</td></tr>';
+      return '<tr style="border-bottom:1px solid rgba(255,255,255,.03)"><td style="padding:2px 4px;color:var(--muted2)">' + (i+1) + '</td><td style="padding:2px 4px;color:#a78bfa">' + r.addr.slice(0,8) + '...' + r.addr.slice(-6) + '</td><td style="padding:2px 4px;color:var(--green);text-align:right">' + r.amount.toFixed(2) + '</td><td style="padding:2px 4px;color:var(--text)">' + escHtml(r.note || '—') + '</td></tr>';
     }).join('');
   }
 }
@@ -27321,7 +27189,7 @@ function saRenderActivity() {
       '<div class="sa-activity-icon out"><i class="ti ti-send"></i></div>' +
       '<div class="sa-activity-detail">' +
         '<div class="sa-activity-label">' + tx.asset + ' \u2192 ' + shortAddr(tx.recipient) + '</div>' +
-        '<div class="sa-activity-sub">' + (tx.memo || 'Direct transfer') + ' \u00b7 Block ' + (tx.block || '\u2014') + '</div>' +
+        '<div class="sa-activity-sub">' + escHtml(tx.memo || 'Direct transfer') + ' \u00b7 Block ' + (tx.block || '\u2014') + '</div>' +
       '</div>' +
       '<div>' +
         '<div class="sa-activity-amount">-' + tx.amount + ' ' + tx.asset + '</div>' +
@@ -34521,7 +34389,7 @@ function ubRenderAutonomous() {
     var p = plans[i];
     var stepsHtml = '';
     for (var s = 0; s < p.steps.length; s++) {
-      stepsHtml += '<div style="display:flex;gap:6px;padding:2px 0;font-size:8.5px"><span style="color:var(--blue);font-weight:700;min-width:16px">' + p.steps[s].step + '.</span><span style="color:var(--text)">' + p.steps[s].label + '</span></div>';
+      stepsHtml += '<div style="display:flex;gap:6px;padding:2px 0;font-size:8.5px"><span style="color:var(--blue);font-weight:700;min-width:16px">' + p.steps[s].step + '.</span><span style="color:var(--text)">' + escHtml(p.steps[s].label) + '</span></div>';
     }
 
     html += '<div class="card" style="padding:10px;border:1px solid var(--border);transition:border .15s">' +
@@ -38080,36 +37948,36 @@ const UBScreen = (function() {
   // ── AIResponseRenderer ──
   const R = {
     head(icon, title, badge) {
-      const b = badge ? '<span class="aut-rc-badge '+badge.cls+'">'+badge.text+'</span>' : '';
+      const b = badge ? '<span class="aut-rc-badge '+esc(badge.cls)+'">'+esc(badge.text)+'</span>' : '';
       return '<div class="aut-rc-head"><i class="ti ti-'+icon+'"></i><span class="aut-rc-title">'+title+'</span>'+b+'</div>';
     },
     row(label, value, cls) {
-      return '<div class="aut-rc-row"><span class="aut-rl">'+label+'</span><span class="aut-rv'+(cls?' style="color:var(--'+cls+')"':'')+'">'+value+'</span></div>';
+      return '<div class="aut-rc-row"><span class="aut-rl">'+esc(label)+'</span><span class="aut-rv'+(cls?' style="color:var(--'+esc(cls)+')"':'')+'">'+value+'</span></div>';
     },
     sep() { return '<div class="aut-rc-sep"></div>'; },
     section(t) { return '<div class="aut-rc-section">'+t+'</div>'; },
     token(sym, name, icon, color, amount, usd) {
-      return '<div class="aut-tk"><div class="aut-tk-icon" style="background:'+color+'">'+icon+'</div><div class="aut-tk-info"><div class="aut-tk-sym">'+sym+'</div><div class="aut-tk-name">'+name+'</div></div><div class="aut-tk-bal"><div class="aut-tk-amt">'+amount+'</div><div class="aut-tk-usd">'+usd+'</div></div></div>';
+      return '<div class="aut-tk"><div class="aut-tk-icon" style="background:'+color+'">'+icon+'</div><div class="aut-tk-info"><div class="aut-tk-sym">'+esc(sym)+'</div><div class="aut-tk-name">'+esc(name)+'</div></div><div class="aut-tk-bal"><div class="aut-tk-amt">'+amount+'</div><div class="aut-tk-usd">'+esc(usd)+'</div></div></div>';
     },
     actions(...btns) {
-      return '<div class="aut-act-bar">'+btns.map(b=>'<button class="aut-act '+b.cls+'" onclick="'+b.action+'"><i class="ti ti-'+b.icon+'"></i>'+b.label+'</button>').join('')+'</div>';
+      return '<div class="aut-act-bar">'+btns.map(b=>'<button class="aut-act '+esc(b.cls)+'" onclick="'+b.action+'"><i class="ti ti-'+b.icon+'"></i>'+esc(b.label)+'</button>').join('')+'</div>';
     },
     card(head, body, actions) {
       return '<div class="aut-rc">'+head+'<div class="aut-rc-body">'+body+'</div>'+(actions||'')+'</div>';
     },
     intro(text) { return '<div class="aut-intro">'+text+'</div>'; },
     chainPill(name, color) {
-      return '<span class="aut-chain-pill"><span class="dot" style="background:'+color+'"></span>'+name+'</span>';
+      return '<span class="aut-chain-pill"><span class="dot" style="background:'+color+'"></span>'+esc(name)+'</span>';
     },
     swapSection(label, sym, icon, color, amount) {
-      return '<div class="aut-swap-section"><div class="aut-swap-label">'+label+'</div><div class="aut-swap-val"><div class="aut-tk-icon" style="background:'+color+'">'+icon+'</div>'+amount+' '+sym+'</div></div>';
+      return '<div class="aut-swap-section"><div class="aut-swap-label">'+esc(label)+'</div><div class="aut-swap-val"><div class="aut-tk-icon" style="background:'+color+'">'+icon+'</div>'+amount+' '+esc(sym)+'</div></div>';
     },
     flowArrow() { return '<div class="aut-flow"><div class="aut-flow-arrow"><i class="ti ti-arrow-down"></i></div></div>'; },
     poolPos(pair, lp, tokA, amtA, tokB, amtB, usd) {
-      return '<div class="aut-pool-pos"><div class="aut-pool-pair"><i class="ti ti-droplet" style="color:var(--teal);font-size:12px"></i>'+pair+'</div>'+
+      return '<div class="aut-pool-pos"><div class="aut-pool-pair"><i class="ti ti-droplet" style="color:var(--teal);font-size:12px"></i>'+esc(pair)+'</div>'+
         '<div class="aut-pool-detail"><span class="lbl">LP Tokens</span><span class="val">'+lp+'</span></div>'+
-        '<div class="aut-pool-detail"><span class="lbl">'+tokA+'</span><span class="val">'+amtA+'</span></div>'+
-        '<div class="aut-pool-detail"><span class="lbl">'+tokB+'</span><span class="val">'+amtB+'</span></div>'+
+        '<div class="aut-pool-detail"><span class="lbl">'+esc(tokA)+'</span><span class="val">'+amtA+'</span></div>'+
+        '<div class="aut-pool-detail"><span class="lbl">'+esc(tokB)+'</span><span class="val">'+amtB+'</span></div>'+
         '<div class="aut-pool-detail"><span class="lbl">Value</span><span class="val green">$'+usd+'</span></div></div>';
     }
   };
@@ -39563,7 +39431,7 @@ const UBScreen = (function() {
         if(empty)empty.remove();
         var entry = document.createElement('div');
         entry.style.cssText='display:flex;align-items:center;gap:6px;font-size:9px;padding:5px 0;border-bottom:1px solid var(--border)';
-        entry.innerHTML='<i class="ti ti-robot" style="color:var(--purple);font-size:10px"></i><span style="flex:1">"'+schName+'" created by Autonoma ('+typeLabel+' · '+freqLabels[freq]+')</span><span style="color:var(--muted2)">'+new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})+'</span>';
+        entry.innerHTML='<i class="ti ti-robot" style="color:var(--purple);font-size:10px"></i><span style="flex:1">"'+escHtml(schName)+'" created by Autonoma ('+typeLabel+' · '+freqLabels[freq]+')</span><span style="color:var(--muted2)">'+new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})+'</span>';
         logEl.prepend(entry);
       }
     }catch(_){}
@@ -41275,6 +41143,14 @@ const UBScreen = (function() {
       R.row('Status',state.isPaused?'<span style="color:#f59e0b">Paused</span>':'<span style="color:#22c55e">Active</span>','muted')+
       R.row('Version',state.version||'1.0.0','muted')+
       R.row('Developer',state.developer||'Elligentt','muted')+
+      (function(){
+        try {
+          if (typeof AgentWalletManager !== 'undefined' && AgentWalletManager.hasEncryptionPassword && !AgentWalletManager.hasEncryptionPassword()) {
+            return R.sep() + '<div style="padding:6px 8px;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.2);border-radius:6px;margin-top:4px"><div style="font-size:9px;color:#f59e0b;margin-bottom:4px"><i class="ti ti-shield-lock" style="font-size:10px;margin-right:3px"></i>Session password not set — your wallet key is only in memory and will be lost on reload.</div><button onclick="showPage(\'aiwallet\')" style="font-size:8px;background:rgba(245,158,11,.15);color:#f59e0b;border:1px solid rgba(245,158,11,.3);border-radius:4px;padding:3px 8px;cursor:pointer">Go to AI Wallet Security <i class="ti ti-arrow-right" style="font-size:7px"></i></button></div>';
+          }
+        } catch(_e) {}
+        return '';
+      })()+
       '</div></div>';
   }
 

@@ -1,18 +1,58 @@
 import { getAuthCors } from './_cors.mjs';
 
-// SECURITY: responses use a per-request CORS allowlist (see _cors.mjs).
 function mkJson(headers) {
   return (data, status = 200) => new Response(JSON.stringify(data), { status, headers });
 }
 
-async function hashPassword(password, salt) {
+function timingSafeEqualHex(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+async function hashPassword(password, salt, iterations) {
   const enc = new TextEncoder();
   const material = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveBits']);
   const bits = await crypto.subtle.deriveBits(
-    { name: 'PBKDF2', salt: enc.encode(salt), iterations: 100000, hash: 'SHA-256' },
+    { name: 'PBKDF2', salt: enc.encode(salt), iterations: iterations || 100000, hash: 'SHA-256' },
     material, 256
   );
   return Array.from(new Uint8Array(bits)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+const PBKDF2_V1 = 100000;
+const PBKDF2_V2 = 600000;
+const HASH_PREFIX_V1 = 'v1:';
+const HASH_PREFIX_V2 = 'v2:';
+
+function versionedHash(hexHash, version) {
+  return (version === 2 ? HASH_PREFIX_V2 : HASH_PREFIX_V1) + hexHash;
+}
+
+async function verifyAndRehash(password, storedHash, salt, KV, normalizedEmail, user) {
+  let ok = false;
+  let rehash = false;
+  if (storedHash.startsWith(HASH_PREFIX_V2)) {
+    const expected = storedHash.substring(HASH_PREFIX_V2.length);
+    const computed = await hashPassword(password, salt, PBKDF2_V2);
+    ok = timingSafeEqualHex(computed, expected);
+  } else if (storedHash.startsWith(HASH_PREFIX_V1)) {
+    const expected = storedHash.substring(HASH_PREFIX_V1.length);
+    const computed = await hashPassword(password, salt, PBKDF2_V1);
+    ok = timingSafeEqualHex(computed, expected);
+    rehash = ok; // rehash on successful v1 login
+  } else {
+    const computed = await hashPassword(password, salt, PBKDF2_V1);
+    ok = timingSafeEqualHex(computed, storedHash);
+    rehash = ok;
+  }
+  if (ok && rehash) {
+    const newHash = await hashPassword(password, salt, PBKDF2_V2);
+    user.passwordHash = versionedHash(newHash, 2);
+    try { await KV.put(`user:${normalizedEmail}`, JSON.stringify(user)); } catch (_) {}
+  }
+  return ok;
 }
 
 function generateSessionToken() {
@@ -94,8 +134,8 @@ export async function onRequestPost(context) {
     return json({ error: 'Invalid credentials' }, 401);
   }
 
-  const hash = await hashPassword(password, user.passwordSalt);
-  if (hash !== user.passwordHash) {
+  const verified = await verifyAndRehash(password, user.passwordHash, user.passwordSalt, KV, normalizedEmail, user);
+  if (!verified) {
     await recordLoginFailure(KV, normalizedEmail);
     return json({ error: 'Invalid credentials' }, 401);
   }
@@ -114,12 +154,13 @@ export async function onRequestPost(context) {
     createdAt: Date.now(),
   }), { expirationTtl: 86400 });
 
-  // SECURITY: technical log only — never log email, password, token or wallet.
   console.log('[AUTH] password login successful');
 
   const ownerId = env.OWNER_USER_ID || '';
+  const headers = getAuthCors(request, env);
+  headers.set('Set-Cookie', `elligente_sid=${sessionToken}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=86400`);
 
-  return json({
+  return new Response(JSON.stringify({
     ok: true,
     sessionToken,
     profile: {
@@ -139,5 +180,5 @@ export async function onRequestPost(context) {
         settings: !!(ownerId && user.id === ownerId),
       },
     },
-  });
+  }), { status: 200, headers });
 }

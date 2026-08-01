@@ -1,8 +1,16 @@
 import { getAuthCors } from './_cors.mjs';
 
-// SECURITY: responses use a per-request CORS allowlist (see _cors.mjs).
 function mkJson(headers) {
   return (data, status = 200) => new Response(JSON.stringify(data), { status, headers });
+}
+
+function extractToken(request) {
+  const authHeader = request.headers.get('Authorization') || '';
+  const bearer = authHeader.replace('Bearer ', '').trim();
+  if (bearer && bearer.length >= 32) return bearer;
+  const cookieHeader = request.headers.get('Cookie') || '';
+  const match = cookieHeader.match(/elligente_sid=([^;]+)/);
+  return match ? match[1].trim() : '';
 }
 
 export async function onRequestOptions(context) {
@@ -15,8 +23,7 @@ export async function onRequestGet(context) {
   const KV = env.AUTH_KV;
   if (!KV) return json({ error: 'AUTH_KV not configured' }, 503);
 
-  const authHeader = request.headers.get('Authorization') || '';
-  const token = authHeader.replace('Bearer ', '').trim();
+  const token = extractToken(request);
   if (!token || token.length < 32) {
     return json({ error: 'Invalid session token' }, 401);
   }
@@ -36,7 +43,10 @@ export async function onRequestGet(context) {
   const user = JSON.parse(userRaw);
   const ownerId = env.OWNER_USER_ID || '';
 
-  return json({
+  const headers = getAuthCors(request, env);
+  headers.set('Set-Cookie', `elligente_sid=${token}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=86400`);
+
+  return new Response(JSON.stringify({
     ok: true,
     profile: {
       id: user.id,
@@ -55,7 +65,7 @@ export async function onRequestGet(context) {
         settings: !!(ownerId && user.id === ownerId),
       },
     },
-  });
+  }), { status: 200, headers });
 }
 
 export async function onRequestDelete(context) {
@@ -64,11 +74,13 @@ export async function onRequestDelete(context) {
   const KV = env.AUTH_KV;
   if (!KV) return json({ error: 'AUTH_KV not configured' }, 503);
 
-  const authHeader = request.headers.get('Authorization') || '';
-  const token = authHeader.replace('Bearer ', '').trim();
+  const token = extractToken(request);
   if (token && token.length >= 32) {
     await KV.delete(`session:${token}`);
   }
 
-  return json({ ok: true, message: 'Session destroyed' });
+  const headers = getAuthCors(request, env);
+  headers.set('Set-Cookie', 'elligente_sid=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0');
+
+  return new Response(JSON.stringify({ ok: true, message: 'Session destroyed' }), { status: 200, headers });
 }

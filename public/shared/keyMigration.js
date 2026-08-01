@@ -20,6 +20,13 @@
     return /^0x[0-9a-fA-F]{64}$/.test(key);
   }
 
+  function _deriveAddressFromKey(privateKey) {
+    try {
+      if (typeof ethers === 'undefined') return null;
+      return (new ethers.Wallet(privateKey)).address;
+    } catch(e) { return null; }
+  }
+
   /* ── Encrypt a key using WebCrypto AES-GCM with a device-derived key ── */
   async function _encryptKey(plaintextKey, storageKey) {
     try {
@@ -112,7 +119,8 @@
         return;
       }
 
-      // Check if v2 already exists with a valid key
+      var expectedAddress = _deriveAddressFromKey(key);
+
       var v2exists = localStorage.getItem('elligentt_agent_session_v2');
       if (v2exists) {
         results.removed.push('elligentt_agent_session_v1 (v2 already exists)');
@@ -127,11 +135,15 @@
       localStorage.setItem('elligentt_agent_session_v2', payload);
       results.migrated.push('elligentt_agent_session_v1 → v2');
 
-      // Verify
-      var verify = localStorage.getItem('elligentt_agent_session_v2');
-      if (verify && verify.indexOf('ENC_V5:') !== -1) {
-        localStorage.removeItem('elligentt_agent_session_v1');
-        results.removed.push('elligentt_agent_session_v1 (deleted after successful migration)');
+      var verifyRaw = localStorage.getItem('elligentt_agent_session_v2');
+      if (verifyRaw && verifyRaw.indexOf('ENC_V5:') !== -1) {
+        var decryptedKey = await decryptMigratedKey(verifyRaw, 'agent_session');
+        if (decryptedKey && _deriveAddressFromKey(decryptedKey) === expectedAddress) {
+          localStorage.removeItem('elligentt_agent_session_v1');
+          results.removed.push('elligentt_agent_session_v1 (deleted after verified migration)');
+        } else {
+          results.errors.push('elligentt_agent_session_v1: migration verification failed — v1 preserved');
+        }
       }
     } catch(e) {
       results.errors.push('elligentt_agent_session_v1 migration error: ' + (e.message || e));
@@ -146,7 +158,6 @@
       results.found.push('elligentt_session_wallet_v1');
 
       var key = raw;
-      // Handle both raw key and JSON-wrapped
       try {
         var parsed = JSON.parse(raw);
         if (parsed && parsed.privateKey) key = parsed.privateKey;
@@ -158,16 +169,24 @@
         return;
       }
 
+      var expectedAddress = _deriveAddressFromKey(key);
+
       var encrypted = await _encryptKey(key, 'session_wallet');
       if (!encrypted) return;
 
-      localStorage.setItem('elligentt_session_wallet_v2', JSON.stringify({ key: encrypted, version: 5 }));
+      var payload = JSON.stringify({ key: encrypted, version: 5 });
+      localStorage.setItem('elligentt_session_wallet_v2', payload);
       results.migrated.push('elligentt_session_wallet_v1 → v2');
 
-      var verify = localStorage.getItem('elligentt_session_wallet_v2');
-      if (verify && verify.indexOf('ENC_V5:') !== -1) {
-        localStorage.removeItem('elligentt_session_wallet_v1');
-        results.removed.push('elligentt_session_wallet_v1 (deleted)');
+      var verifyRaw = localStorage.getItem('elligentt_session_wallet_v2');
+      if (verifyRaw && verifyRaw.indexOf('ENC_V5:') !== -1) {
+        var decryptedKey = await decryptMigratedKey(verifyRaw, 'session_wallet');
+        if (decryptedKey && _deriveAddressFromKey(decryptedKey) === expectedAddress) {
+          localStorage.removeItem('elligentt_session_wallet_v1');
+          results.removed.push('elligentt_session_wallet_v1 (deleted after verified migration)');
+        } else {
+          results.errors.push('elligentt_session_wallet_v1: migration verification failed — v1 preserved');
+        }
       }
     } catch(e) {
       results.errors.push('elligentt_session_wallet_v1 migration error: ' + (e.message || e));
@@ -184,13 +203,13 @@
       if (!isValidPrivateKey(key)) return;
       results.found.push('elligentt_agent_wallet_v1 (walletPrivateKey)');
 
-      // Check if v2 already stores this key
+      var expectedAddress = _deriveAddressFromKey(key);
+
       var v2raw = localStorage.getItem('elligentt_agent_wallet_v2');
       if (v2raw) {
         try {
           var v2 = JSON.parse(v2raw);
           if (v2 && v2.schemaVersion >= 3) {
-            // v2 already has encrypted key — just scrub v1
             localStorage.removeItem('elligentt_agent_wallet_v1');
             results.removed.push('elligentt_agent_wallet_v1 (v2 already present, deleted)');
             return;
@@ -201,17 +220,29 @@
       var encrypted = await _encryptKey(key, 'agent_wallet');
       if (!encrypted) return;
 
-      // Store encrypted key in v2
       parsed.walletPrivateKey = encrypted;
       parsed._encryptedKey = encrypted;
       parsed._migrationVersion = 5;
       localStorage.setItem('elligentt_agent_wallet_v2', JSON.stringify(parsed));
       results.migrated.push('elligentt_agent_wallet_v1 walletPrivateKey → encrypted v2');
 
-      // Verify then delete v1
-      if (localStorage.getItem('elligentt_agent_wallet_v2')) {
-        localStorage.removeItem('elligentt_agent_wallet_v1');
-        results.removed.push('elligentt_agent_wallet_v1 (deleted after migration)');
+      var verifyRaw = localStorage.getItem('elligentt_agent_wallet_v2');
+      if (verifyRaw) {
+        try {
+          var verifyObj = JSON.parse(verifyRaw);
+          var encKey = verifyObj && (verifyObj._encryptedKey || verifyObj.walletPrivateKey);
+          if (encKey && typeof encKey === 'string' && encKey.indexOf('ENC_V5:') === 0) {
+            var decryptedKey = await decryptMigratedKey(encKey, 'agent_wallet');
+            if (decryptedKey && _deriveAddressFromKey(decryptedKey) === expectedAddress) {
+              localStorage.removeItem('elligentt_agent_wallet_v1');
+              results.removed.push('elligentt_agent_wallet_v1 (deleted after verified migration)');
+            } else {
+              results.errors.push('elligentt_agent_wallet_v1: address verification failed — v1 preserved');
+            }
+          }
+        } catch(e) {
+          results.errors.push('elligentt_agent_wallet_v1 verification error: ' + (e.message || e));
+        }
       }
     } catch(e) {
       results.errors.push('elligentt_agent_wallet_v1 migration error: ' + (e.message || e));
