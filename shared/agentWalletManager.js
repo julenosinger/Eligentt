@@ -178,12 +178,9 @@
       // [C1 FIX] Never persist plaintext key. Write encrypted to v2 (sync-encrypt with device-derived key).
       // If no user password is set, derive a one-time device key for basic obfuscation.
       _saveSessionKeyEncrypted().then(function(){
-        // After encrypted save succeeds, remove any legacy v1 plaintext key
         try { localStorage.removeItem('elligentt_agent_session_v1'); } catch(e) {}
       }).catch(function(){
-        // Fallback: if encryption fails, store temporarily and warn
-        try { localStorage.setItem('elligentt_agent_session_v1', JSON.stringify({ privateKey: w.privateKey, createdAt: Date.now() })); } catch(e) {}
-        try { console.warn('[AgentWalletManager] Could not encrypt key — stored with basic obfuscation. Set an encryption password for full protection.'); } catch(e) {}
+        try { console.warn('[AgentWalletManager] Key encryption failed — secure context required'); } catch(e) {}
       });
 
       if (agentState) {

@@ -22,6 +22,36 @@
     try { var raw2 = localStorage.getItem(AUDIT_KEY); if(raw2) auditLog = JSON.parse(raw2); } catch(e){ auditLog = []; }
     try { var raw3 = localStorage.getItem(SCHEDULED_KEY); if(raw3) scheduledPermits = JSON.parse(raw3); } catch(e){ scheduledPermits = []; }
     invalidateExpired();
+    // Migrate legacy v1 plaintext key to encrypted v2
+    try {
+      var v1key = localStorage.getItem('elligentt_session_wallet_v1');
+      if (v1key && v1key.indexOf('ENC:') !== 0 && v1key.indexOf('0x') === 0) {
+        var dk = _permitGetDeviceKey();
+        var enc2 = _permitEncrypt(v1key, dk);
+        localStorage.setItem('elligentt_session_wallet_v2', 'ENC:' + enc2);
+        localStorage.removeItem('elligentt_session_wallet_v1');
+      }
+    } catch(_e) {}
+
+  function _permitGetDeviceKey() {
+    var stored = localStorage.getItem('elligentt_permit_device_key');
+    if (stored) return stored;
+    var arr = new Uint8Array(32);
+    if (window.crypto && window.crypto.getRandomValues) { window.crypto.getRandomValues(arr); }
+    else { for (var i = 0; i < 32; i++) arr[i] = Math.floor(Math.random() * 256); }
+    var key = Array.from(arr).map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
+    localStorage.setItem('elligentt_permit_device_key', key);
+    return key;
+  }
+  function _permitEncrypt(text, key) {
+    var out = ''; for (var i = 0; i < text.length; i++) { out += String.fromCharCode(text.charCodeAt(i) ^ key.charCodeAt(i % key.length)); }
+    return btoa(out);
+  }
+  function _permitDecrypt(b64, key) {
+    var text = atob(b64); var out = '';
+    for (var i = 0; i < text.length; i++) { out += String.fromCharCode(text.charCodeAt(i) ^ key.charCodeAt(i % key.length)); }
+    return out;
+  }
   }
 
   function save(){
@@ -42,10 +72,25 @@
     if(sessionWallet) return sessionWallet;
     try {
       if(typeof ethers !== 'undefined'){
-        var swKey = 'elligentt_session_wallet_v1';
+        var swKey = 'elligentt_session_wallet_v2';
         var existing = localStorage.getItem(swKey);
-        if(existing){ sessionWallet = new ethers.Wallet(existing); }
-        else { var w = ethers.Wallet.createRandom(); localStorage.setItem(swKey, w.privateKey); sessionWallet = w; }
+        if(existing && existing.indexOf('ENC:') === 0){
+          try {
+            var raw = existing.substring(4);
+            var deviceKey = _permitGetDeviceKey();
+            var dec = _permitDecrypt(raw, deviceKey);
+            if(dec) sessionWallet = new ethers.Wallet(dec);
+          } catch(_e){}
+        }
+        if(!sessionWallet){
+          var w = ethers.Wallet.createRandom();
+          try {
+            var deviceKey2 = _permitGetDeviceKey();
+            var enc = _permitEncrypt(w.privateKey, deviceKey2);
+            localStorage.setItem(swKey, 'ENC:' + enc);
+          } catch(_e){}
+          sessionWallet = w;
+        }
       }
     } catch(e){}
     return sessionWallet;

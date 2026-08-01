@@ -57,7 +57,7 @@
       var secret = Array.from(arr, function(b) { return b.toString(16).padStart(2, '0'); }).join('');
       localStorage.setItem('elligentt_device_remediation_secret', secret);
       return secret;
-    } catch(e) { return 'fallback_secret_v5_remediation'; }
+    } catch(e) { throw new Error('PRODUCTION ERROR: Crypto.getRandomValues unavailable. Cannot generate device secret.'); }
   }
 
   /* ── Decrypt a migrated key ── */
