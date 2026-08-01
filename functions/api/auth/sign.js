@@ -61,6 +61,15 @@ function checkTxPolicy(transaction, env) {
   return { allowed: true };
 }
 
+function extractToken(request) {
+  const authHeader = request.headers.get('Authorization') || '';
+  const bearer = authHeader.replace('Bearer ', '').trim();
+  if (bearer && bearer.length >= 32) return bearer;
+  const cookieHeader = request.headers.get('Cookie') || '';
+  const match = cookieHeader.match(/elligente_sid=([^;]+)/);
+  return match ? match[1].trim() : '';
+}
+
 export async function onRequestOptions(context) {
   return new Response(null, { status: 204, headers: getAuthCors(context.request, context.env) });
 }
@@ -71,15 +80,13 @@ export async function onRequestPost(context) {
   const KV = env.AUTH_KV;
   if (!KV) return json({ error: 'AUTH_KV not configured' }, 503);
 
-  // SECURITY: never fall back to a hardcoded secret. Fail closed if missing.
   const serverSecret = env.AUTH_SECRET;
   if (!serverSecret) {
     console.error('[AUTH/SIGN] AUTH_SECRET not configured');
     return json({ error: 'Server misconfiguration' }, 500);
   }
 
-  const authHeader = request.headers.get('Authorization') || '';
-  const token = authHeader.replace('Bearer ', '').trim();
+  const token = extractToken(request);
   if (!token || token.length < 32) {
     return json({ error: 'Invalid session token' }, 401);
   }
@@ -90,6 +97,16 @@ export async function onRequestPost(context) {
   }
 
   const session = JSON.parse(sessionRaw);
+
+  // CUSTODIAL UNLOCK CHECK — sign/send requires unlocked state
+  const unlockRaw = await KV.get(`unlock:${token}`);
+  if (!unlockRaw) {
+    return json({ error: 'Custodial wallet locked. Use /api/auth/unlock to authorize operations.' }, 403);
+  }
+  const unlock = JSON.parse(unlockRaw);
+  if (Date.now() > unlock.expiresAt) {
+    return json({ error: 'Custodial unlock expired. Re-enter your password.' }, 403);
+  }
 
   let body;
   try { body = await request.json(); } catch (_) {

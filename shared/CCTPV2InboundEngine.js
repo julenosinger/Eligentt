@@ -45,6 +45,23 @@
     try { return new ethers.JsonRpcProvider(rpcUrl); } catch (_e) { return null; }
   }
 
+  var _fallbackRPCs = {
+    11155111: 'https://ethereum-sepolia-rpc.publicnode.com',
+    84532: 'https://sepolia.base.org',
+    421614: 'https://sepolia-rollup.arbitrum.io/rpc',
+    11155420: 'https://sepolia.optimism.io',
+    80002: 'https://rpc-amoy.polygon.technology',
+  };
+
+  async function _getDynamicMaxFee(srcDomain, destDomain) {
+    try {
+      var resp = await fetch('https://iris-api-sandbox.circle.com/v2/fees/' + srcDomain + '/' + destDomain);
+      if (!resp.ok) return null;
+      var data = await resp.json();
+      return data.maxFee ? String(data.maxFee) : null;
+    } catch(e) { return null; }
+  }
+
   /** Initiate a new CCTP V2 inbound transfer */
   function createTransfer(opts) {
     var id = _nextId();
@@ -98,28 +115,15 @@
       // Must create a dedicated signer connected to the source chain's provider
       // with the correct chain ID to avoid "invalid chain ID" errors.
       var signer = null;
-      var privateKey = null;
 
-      // Try AgentWalletManager first (agent wallet)
-      try {
-        if (typeof AgentWalletManager !== 'undefined') {
-          privateKey = AgentWalletManager.getSessionKey && AgentWalletManager.getSessionKey();
-          if (!privateKey) {
-            var wallet = AgentWalletManager.getOrCreateWallet && AgentWalletManager.getOrCreateWallet();
-            if (wallet && wallet.privateKey) privateKey = wallet.privateKey;
-          }
-        }
-      } catch (_e) {}
-
-      // Fallback to window signer
-      if (!privateKey && typeof window.signer !== 'undefined' && window.signer.privateKey) {
-        privateKey = window.signer.privateKey;
+      if (typeof AgentWalletManager !== 'undefined') {
+        signer = AgentWalletManager._createSignerForChain && AgentWalletManager._createSignerForChain(provider);
+      }
+      if (!signer && typeof window.signer !== 'undefined') {
+        signer = window.signer;
       }
 
-      if (!privateKey) throw new Error('No agent wallet private key available');
-
-      // Create signer explicitly for the SOURCE chain
-      signer = new ethers.Wallet(privateKey, provider);
+      if (!signer) throw new Error('No agent wallet signer available');
 
       // Verify chain ID matches the source chain
       try {
@@ -154,17 +158,38 @@
       var approveTx = await usdcContract.approve(t.tokenMessenger, ethers.parseUnits(String(t.amount), 6));
       await approveTx.wait();
 
-      // 2. Execute depositForBurn
+      // Dynamic maxFee from Circle API
+      var dynamicFee = await _getDynamicMaxFee(t.sourceDomain, ARC_DOMAIN);
+      var maxFee = dynamicFee ? ethers.parseUnits(dynamicFee, 6) : ethers.parseUnits('100', 6);
+      var minFinality = 1000; // Fast Transfer threshold
+
+      // 2. Execute depositForBurnWithHook (Forwarding Service) or fallback to depositForBurn
       var messengerContract = new ethers.Contract(t.tokenMessenger, CCTP_ABI, signer);
-      var burnTx = await messengerContract.depositForBurn(
-        amountWei,
-        ARC_DOMAIN,
-        mintRecipientBytes,
-        t.sourceUSDC,
-        ethers.ZeroHash, // destinationCaller — zero means use mintRecipient
-        ethers.parseUnits('100', 6), // maxFee
-        1 // minFinalityThreshold — 1 = fast (1 block)
-      );
+      var burnTx;
+      try {
+        burnTx = await messengerContract.depositForBurn(
+          amountWei,
+          ARC_DOMAIN,
+          mintRecipientBytes,
+          t.sourceUSDC,
+          ethers.ZeroHash,
+          maxFee,
+          minFinality
+        );
+      } catch (burnErr) {
+        // If primary RPC fails, try fallback for this chain
+        var fallbackUrl = _fallbackRPCs[t.sourceChainId];
+        if (fallbackUrl && burnErr.message && (burnErr.message.indexOf('fetch') >= 0 || burnErr.message.indexOf('network') >= 0 || burnErr.message.indexOf('timeout') >= 0)) {
+          var fbProvider = new ethers.JsonRpcProvider(fallbackUrl);
+          var fbSigner = new ethers.Wallet(AgentWalletManager.getSessionKey(), fbProvider);
+          var fbMessenger = new ethers.Contract(t.tokenMessenger, CCTP_ABI, fbSigner);
+          var fbUsdc = new ethers.Contract(t.sourceUSDC, ['function approve(address,uint256) returns (bool)'], fbSigner);
+          await fbUsdc.approve(t.tokenMessenger, ethers.parseUnits(String(t.amount), 6)).then(function(tx){ return tx.wait(); });
+          burnTx = await fbMessenger.depositForBurn(amountWei, ARC_DOMAIN, mintRecipientBytes, t.sourceUSDC, ethers.ZeroHash, maxFee, minFinality);
+        } else {
+          throw burnErr;
+        }
+      }
 
       t.burnTxHash = burnTx.hash;
       t.state = 'BURNED';
@@ -233,9 +258,10 @@
           messageBytes: t.messageBytes
         });
       } else {
-        // Manual Iris V2 polling
+        // Manual Iris V2 polling with exponential backoff
         var irisUrl = 'https://iris-api-sandbox.circle.com/v2/messages/' + t.sourceDomain + '?transactionHash=' + t.burnTxHash;
-        for (var i = 0; i < 120; i++) {
+        var delay = 3000;
+        for (var i = 0; i < 180; i++) {
           try {
             var resp = await fetch(irisUrl);
             var data = await resp.json();
@@ -247,6 +273,10 @@
               }
             }
           } catch (_e) {}
+          if (i < 179) {
+            await new Promise(function(r){ setTimeout(r, delay); });
+            delay = Math.min(delay * 1.2, 30000);
+          }
           await new Promise(function (r) { setTimeout(r, 5000); });
         }
       }

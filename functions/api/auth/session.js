@@ -43,11 +43,22 @@ export async function onRequestGet(context) {
   const user = JSON.parse(userRaw);
   const ownerId = env.OWNER_USER_ID || '';
 
+  // Check custodial unlock state
+  let custodialUnlocked = false;
+  try {
+    const unlockRaw = await KV.get(`unlock:${token}`);
+    if (unlockRaw) {
+      const unlock = JSON.parse(unlockRaw);
+      custodialUnlocked = (Date.now() < unlock.expiresAt);
+    }
+  } catch (_) {}
+
   const headers = getAuthCors(request, env);
   headers.set('Set-Cookie', `elligente_sid=${token}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=86400`);
 
   return new Response(JSON.stringify({
     ok: true,
+    custodialUnlocked,
     profile: {
       id: user.id,
       email: user.email,
@@ -77,6 +88,7 @@ export async function onRequestDelete(context) {
   const token = extractToken(request);
   if (token && token.length >= 32) {
     await KV.delete(`session:${token}`);
+    await KV.delete(`unlock:${token}`);
   }
 
   const headers = getAuthCors(request, env);

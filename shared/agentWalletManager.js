@@ -25,6 +25,12 @@
   var _sessionPassword = null;    // RAM only — never persisted
   var _sessionMnemonic = null;    // RAM only
   var _sessionPrivateKey = null;  // RAM only — canonical source
+  var _showBackup = false;        // RAM only — set on new wallet creation
+
+  // PHASE 7B-5 — Auto-lock (RAM only, never persisted)
+  var _autoLockTimer = null;
+  var _autoLockMs = 30 * 60 * 1000; // 30 minutes
+  var _signingOps = 0;
 
   var SCHEMA_VERSION = 3;  // v3 = encrypted session key support
 
@@ -106,20 +112,35 @@
 
   /* ════════════════════════════════════════
      C1 — WebCrypto AES-GCM encrypt/decrypt
+     ENC:  legacy, static salt, 100k
+     ENC3: per-wallet salt, 100k
+     ENC4: per-wallet salt, 600k
      ════════════════════════════════════════ */
+  var WALLET_SALT_LEN = 16;
+  var PBKDF2_V1 = 100000;
+  var PBKDF2_V4 = 600000;
+
   function _getCrypto() {
     var c = window.crypto || window.msCrypto;
     if (!c || !c.subtle) return null;
     return c.subtle;
   }
 
-  async function _deriveKey(password) {
+  function _generateSalt() {
+    var arr = new Uint8Array(WALLET_SALT_LEN);
+    crypto.getRandomValues(arr);
+    return _arrayBufferToBase64(arr.buffer);
+  }
+
+  async function _deriveKey(password, salt, iterations) {
     var subtle = _getCrypto();
     if (!subtle) return null;
     var enc = new TextEncoder();
+    var usedSalt = salt || 'elligentt_agent_salt_v1';
+    var iters = iterations || PBKDF2_V1;
     var keyMaterial = await subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveKey']);
     return await subtle.deriveKey(
-      { name: 'PBKDF2', salt: enc.encode('elligentt_agent_salt_v1'), iterations: 100000, hash: 'SHA-256' },
+      { name: 'PBKDF2', salt: enc.encode(usedSalt), iterations: iters, hash: 'SHA-256' },
       keyMaterial,
       { name: 'AES-GCM', length: 256 },
       false,
@@ -160,6 +181,126 @@
     } catch(e) { return null; }
   }
 
+  // PHASE 7B-2 — Per-wallet salt (v3 format)
+  async function _encryptV3(plaintext) {
+    if (!_sessionPassword) return null;
+    var subtle = _getCrypto();
+    if (!subtle) return null;
+    var salt = _generateSalt();
+    if (!salt) return null;
+    try {
+      var key = await _deriveKey(_sessionPassword, salt);
+      if (!key) return null;
+      var iv = crypto.getRandomValues(new Uint8Array(12));
+      var enc = new TextEncoder();
+      var ciphertext = await subtle.encrypt({ name: 'AES-GCM', iv: iv }, key, enc.encode(plaintext));
+      var combined = new Uint8Array(iv.length + ciphertext.byteLength);
+      combined.set(iv);
+      combined.set(new Uint8Array(ciphertext), iv.length);
+      return 'ENC3:' + salt + ':' + _arrayBufferToBase64(combined.buffer);
+    } catch(e) { return null; }
+  }
+
+  async function _decryptV3(ciphertext) {
+    if (!ciphertext || typeof ciphertext !== 'string') return null;
+    if (!ciphertext.startsWith('ENC3:')) return null;
+    if (!_sessionPassword) return null;
+    var subtle = _getCrypto();
+    if (!subtle) return null;
+    try {
+      var rest = ciphertext.substring(5);
+      var sep = rest.indexOf(':');
+      if (sep < 0) return null;
+      var salt = rest.substring(0, sep);
+      var payload = rest.substring(sep + 1);
+      if (!salt || !payload) return null;
+      var key = await _deriveKey(_sessionPassword, salt, PBKDF2_V1);
+      var combined = _base64ToArrayBuffer(payload);
+      var iv = combined.slice(0, 12);
+      var data = combined.slice(12);
+      var decrypted = await subtle.decrypt({ name: 'AES-GCM', iv: iv }, key, data);
+      return new TextDecoder().decode(decrypted);
+    } catch(e) { return null; }
+  }
+
+  // PHASE 7B-3 — 600k iterations (v4 format)
+  async function _encryptV4(plaintext) {
+    if (!_sessionPassword) return null;
+    var subtle = _getCrypto();
+    if (!subtle) return null;
+    var salt = _generateSalt();
+    if (!salt) return null;
+    try {
+      var key = await _deriveKey(_sessionPassword, salt, PBKDF2_V4);
+      if (!key) return null;
+      var iv = crypto.getRandomValues(new Uint8Array(12));
+      var enc = new TextEncoder();
+      var ciphertext = await subtle.encrypt({ name: 'AES-GCM', iv: iv }, key, enc.encode(plaintext));
+      var combined = new Uint8Array(iv.length + ciphertext.byteLength);
+      combined.set(iv);
+      combined.set(new Uint8Array(ciphertext), iv.length);
+      return 'ENC4:' + salt + ':' + _arrayBufferToBase64(combined.buffer);
+    } catch(e) { return null; }
+  }
+
+  async function _decryptV4(ciphertext) {
+    if (!ciphertext || typeof ciphertext !== 'string') return null;
+    if (!ciphertext.startsWith('ENC4:')) return null;
+    if (!_sessionPassword) return null;
+    var subtle = _getCrypto();
+    if (!subtle) return null;
+    try {
+      var rest = ciphertext.substring(5);
+      var sep = rest.indexOf(':');
+      if (sep < 0) return null;
+      var salt = rest.substring(0, sep);
+      var payload = rest.substring(sep + 1);
+      if (!salt || !payload) return null;
+      var key = await _deriveKey(_sessionPassword, salt, PBKDF2_V4);
+      var combined = _base64ToArrayBuffer(payload);
+      var iv = combined.slice(0, 12);
+      var data = combined.slice(12);
+      var decrypted = await subtle.decrypt({ name: 'AES-GCM', iv: iv }, key, data);
+      return new TextDecoder().decode(decrypted);
+    } catch(e) { return null; }
+  }
+
+  // PHASE 7B-4 — Safe migration ENC/ENC3 → ENC4 on unlock
+  async function _tryMigrateToENC4(currentPrivateKey) {
+    if (!currentPrivateKey || !_isValidPrivateKey(currentPrivateKey)) return;
+    if (!_sessionPassword) return;
+    var stored = localStorage.getItem(SESSION_KEY_ENC);
+    if (!stored || stored.startsWith('ENC4:')) return;
+    var expectedAddress = _deriveAddressFromKey(currentPrivateKey);
+    if (!expectedAddress) return;
+    try {
+      var payload = JSON.stringify({ privateKey: currentPrivateKey, version: SCHEMA_VERSION });
+      var encrypted = await _encryptV4(payload);
+      if (!encrypted || !encrypted.startsWith('ENC4:')) return;
+      localStorage.setItem(SESSION_KEY_ENC, encrypted);
+      var verify = localStorage.getItem(SESSION_KEY_ENC);
+      if (!verify || !verify.startsWith('ENC4:')) {
+        localStorage.setItem(SESSION_KEY_ENC, stored);
+        return;
+      }
+      var decrypted = await _decryptV4(verify);
+      if (!decrypted) { localStorage.setItem(SESSION_KEY_ENC, stored); return; }
+      var parsed = JSON.parse(decrypted);
+      if (!parsed || !_isValidPrivateKey(parsed.privateKey)) {
+        localStorage.setItem(SESSION_KEY_ENC, stored);
+        return;
+      }
+      var migratedAddress = _deriveAddressFromKey(parsed.privateKey);
+      if (migratedAddress !== expectedAddress) {
+        localStorage.setItem(SESSION_KEY_ENC, stored);
+        return;
+      }
+      try { localStorage.removeItem('elligentt_agent_session_v1'); } catch(e) {}
+    } catch(e) {
+      try { localStorage.setItem(SESSION_KEY_ENC, stored); } catch(_e) {}
+    }
+  }
+
   function _arrayBufferToBase64(buffer) {
     var bytes = new Uint8Array(buffer);
     var binary = '';
@@ -182,7 +323,9 @@
     if (pw.length < 8) { _sessionPassword = null; return; }
     _sessionPassword = pw;
     if (_sessionPrivateKey) {
+      _scheduleAutoLock();
       await _saveSessionKeyEncrypted();
+      _tryMigrateToENC4(_sessionPrivateKey).catch(function(){});
     }
   }
 
@@ -190,8 +333,8 @@
     if (!_sessionPrivateKey) return;
     if (!_sessionPassword) throw new Error('AGENT_WALLET_NO_PASSWORD');
     var payload = JSON.stringify({ privateKey: _sessionPrivateKey, version: SCHEMA_VERSION });
-    var encrypted = await encryptData(payload);
-    if (!encrypted || !encrypted.startsWith('ENC:')) throw new Error('AGENT_WALLET_ENCRYPTION_FAILED');
+    var encrypted = await _encryptV4(payload);
+    if (!encrypted || !encrypted.startsWith('ENC4:')) throw new Error('AGENT_WALLET_ENCRYPTION_FAILED');
     try { localStorage.setItem(SESSION_KEY_ENC, encrypted); } catch(e) { throw e; }
   }
 
@@ -213,11 +356,23 @@
         }
         return null;
       }
-      var plaintext = await decryptData(stored);
+      // Detect format: ENC4 (600k), ENC3 (100k), or legacy ENC
+      var plaintext;
+      if (stored.startsWith('ENC4:')) {
+        plaintext = await _decryptV4(stored);
+      } else if (stored.startsWith('ENC3:')) {
+        plaintext = await _decryptV3(stored);
+      } else {
+        plaintext = await decryptData(stored);
+      }
       if (!plaintext) return null;
       var parsed = JSON.parse(plaintext);
       if (parsed && parsed.privateKey) {
         _sessionPrivateKey = parsed.privateKey;
+        _scheduleAutoLock();
+        if (!stored.startsWith('ENC4:')) {
+          _tryMigrateToENC4(parsed.privateKey).catch(function(){});
+        }
         try { if (localStorage.getItem('elligentt_agent_session_v1')) _safeDeleteLegacyV1(); } catch(e) {}
         return _sessionPrivateKey;
       }
@@ -226,11 +381,81 @@
   }
 
   /* ════════════════════════════════════════
+     PHASE 7B-5 — Auto-lock (inactivity timer)
+     ════════════════════════════════════════ */
+  function _clearAutoLockTimer() {
+    if (_autoLockTimer) { clearTimeout(_autoLockTimer); _autoLockTimer = null; }
+  }
+
+  function _scheduleAutoLock() {
+    _clearAutoLockTimer();
+    _autoLockTimer = setTimeout(function() {
+      if (_signingOps > 0) { _scheduleAutoLock(); return; }
+      _sessionPrivateKey = null;
+      _autoLockTimer = null;
+    }, _autoLockMs);
+  }
+
+  function _noteActivity() {
+    if (_sessionPrivateKey) _scheduleAutoLock();
+  }
+
+  function isSessionUnlocked() {
+    return !!_sessionPrivateKey;
+  }
+
+  function lockAgentWallet() {
+    _clearAutoLockTimer();
+    _sessionPrivateKey = null;
+  }
+
+  // PHASE 7B-8 — Verify password against stored encrypted wallet (no side effects)
+  async function verifyWalletPassword(password) {
+    if (!password || String(password).length < 8) return false;
+    var stored = null;
+    try { stored = localStorage.getItem(SESSION_KEY_ENC); } catch(e) {}
+    if (!stored) return false;
+    var pw = String(password);
+    try {
+      var plaintext;
+      if (stored.startsWith('ENC4:')) {
+        var rest = stored.substring(5);
+        var sep = rest.indexOf(':');
+        if (sep < 0) return false;
+        var salt = rest.substring(0, sep);
+        var payload = rest.substring(sep + 1);
+        var subtle = _getCrypto();
+        if (!subtle) return false;
+        var enc = new TextEncoder();
+        var keyMaterial = await subtle.importKey('raw', enc.encode(pw), 'PBKDF2', false, ['deriveKey']);
+        var key = await subtle.deriveKey(
+          { name: 'PBKDF2', salt: enc.encode(salt), iterations: PBKDF2_V4, hash: 'SHA-256' },
+          keyMaterial, { name: 'AES-GCM', length: 256 }, false, ['decrypt']
+        );
+        var combined = _base64ToArrayBuffer(payload);
+        var iv = combined.slice(0, 12);
+        var data = combined.slice(12);
+        await subtle.decrypt({ name: 'AES-GCM', iv: iv }, key, data);
+        return true;
+      }
+      // Legacy ENC/ENC3 fallback — attempt decrypt with provided password
+      var savedPw = _sessionPassword;
+      _sessionPassword = pw;
+      var result;
+      if (stored.startsWith('ENC3:')) result = await _decryptV3(stored);
+      else result = await decryptData(stored);
+      _sessionPassword = savedPw;
+      return !!result;
+    } catch(e) { return false; }
+  }
+
+  /* ════════════════════════════════════════
      M2 — Canonical signer source
      ════════════════════════════════════════ */
   async function getSessionSigner(provider) {
     var key = await _loadSessionKeyEncrypted();
     if (!key) return null;
+    _noteActivity();
     var p = provider || getAgentProvider();
     return new ethers.Wallet(key, p);
   }
@@ -249,6 +474,7 @@
       var w = ethers.Wallet.createRandom();
       _sessionPrivateKey = w.privateKey;
       _sessionMnemonic = w.mnemonic ? w.mnemonic.phrase : null;
+      _showBackup = !!_sessionMnemonic;
       agentProvider = getAgentProvider();
       agentWallet = w.connect(agentProvider);
       _setSessionWallet(agentWallet);
@@ -465,6 +691,70 @@
       }
       return agentWallet;
     } catch(e){ return null; }
+  }
+
+  // PHASE 7B-6 — BIP-39 mnemonic import
+  async function restoreFromMnemonic(mnemonic, password) {
+    if (!mnemonic || typeof mnemonic !== 'string') return { success: false, reason: 'invalid_mnemonic' };
+    if (!password || String(password).length < 8) return { success: false, reason: 'password_required' };
+    var phrase = mnemonic.trim().toLowerCase().replace(/\s+/g, ' ');
+    if (typeof ethers === 'undefined') return { success: false, reason: 'ethers_unavailable' };
+    var w;
+    try { w = ethers.Wallet.fromPhrase(phrase); } catch(e) { return { success: false, reason: 'invalid_mnemonic' }; }
+    if (!w || !_isValidPrivateKey(w.privateKey)) return { success: false, reason: 'invalid_mnemonic' };
+    var importedAddress = w.address;
+    _sessionPrivateKey = w.privateKey;
+    _sessionMnemonic = phrase;
+    _sessionPassword = String(password);
+    _showBackup = false;
+    try {
+      var payload = JSON.stringify({ privateKey: w.privateKey, version: SCHEMA_VERSION });
+      var encrypted = await _encryptV4(payload);
+      if (!encrypted || !encrypted.startsWith('ENC4:')) {
+        _sessionPrivateKey = null; _sessionPassword = null; _sessionMnemonic = null;
+        return { success: false, reason: 'encrypt_failed' };
+      }
+      localStorage.setItem(SESSION_KEY_ENC, encrypted);
+      // Activate wallet
+      agentProvider = getAgentProvider();
+      agentWallet = w.connect(agentProvider);
+      _setSessionWallet(agentWallet);
+      if (!agentState) loadState();
+      agentState.walletAddress = importedAddress;
+      agentState.registrationDate = Date.now();
+      saveState();
+      _scheduleAutoLock();
+      try { localStorage.removeItem('elligentt_agent_session_v1'); } catch(e) {}
+      return { success: true, address: importedAddress };
+    } catch(e) {
+      _sessionPrivateKey = null; _sessionPassword = null; _sessionMnemonic = null;
+      return { success: false, reason: 'restore_failed' };
+    }
+  }
+
+  // PHASE 7B-7A — HD derivation + safe cross-chain signer
+  function deriveAddressFromMnemonic(mnemonic, accountIndex) {
+    if (!mnemonic || typeof mnemonic !== 'string') return { success: false, reason: 'invalid_mnemonic' };
+    var idx = (accountIndex === undefined) ? 0 : Number(accountIndex);
+    if (!Number.isFinite(idx) || idx < 0 || Math.floor(idx) !== idx) return { success: false, reason: 'invalid_account_index' };
+    if (typeof ethers === 'undefined') return { success: false, reason: 'ethers_unavailable' };
+    try {
+      var phrase = mnemonic.trim().toLowerCase().replace(/\s+/g, ' ');
+      var hdNode = ethers.HDNodeWallet.fromPhrase(phrase);
+      var derived = hdNode.derivePath("m/44'/60'/0'/0/" + idx);
+      return { success: true, address: derived.address, accountIndex: idx, derivationPath: "m/44'/60'/0'/0/" + idx };
+    } catch(e) { return { success: false, reason: 'invalid_mnemonic' }; }
+  }
+
+  function _createSignerForChain(provider) {
+    if (!_sessionPrivateKey) return null;
+    return new ethers.Wallet(_sessionPrivateKey, provider || getAgentProvider());
+  }
+
+  // PHASE 7B-7B — Derive accounts from session mnemonic
+  function deriveAccountAddress(accountIndex) {
+    if (!_sessionMnemonic) return { success: false, reason: 'wallet_locked' };
+    return deriveAddressFromMnemonic(_sessionMnemonic, accountIndex);
   }
 
   function getOrCreateWallet(){
@@ -916,6 +1206,15 @@
     createWalletWithBackup: createWalletWithBackup,
     getMnemonic: getMnemonic,
     hasMnemonicBackup: hasMnemonicBackup,
+    needsBackupDisplay: function() { return _showBackup && !!_sessionMnemonic; },
+    clearBackupFlag: function() { _showBackup = false; },
+    isSessionUnlocked: isSessionUnlocked,
+    lockAgentWallet: lockAgentWallet,
+    verifyWalletPassword: verifyWalletPassword,
+    restoreFromMnemonic: restoreFromMnemonic,
+    deriveAddressFromMnemonic: deriveAddressFromMnemonic,
+    deriveAccountAddress: deriveAccountAddress,
+    _createSignerForChain: _createSignerForChain,
     emergencyShutdown: emergencyShutdown,
     isShutdown: isShutdown,
     get walletAddress(){ return getAgentAddress(); },

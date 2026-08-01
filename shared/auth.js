@@ -10,6 +10,7 @@ const AuthManager = (() => {
   let _profile = null;
   let _remoteSigner = null;
   let _remoteProvider = null;
+  let _custodialUnlocked = false;
 
   function _loadSession() {
     try {
@@ -33,11 +34,24 @@ const AuthManager = (() => {
     try { localStorage.setItem(MIGRATED_KEY, '1'); } catch (_) {}
   }
 
+  async function unlockCustodial(password) {
+    const data = await _api('/unlock', { password });
+    if (data.ok && data.unlocked) {
+      _custodialUnlocked = true;
+    }
+    return data;
+  }
+
+  function isCustodialUnlocked() {
+    return _custodialUnlocked;
+  }
+
   function _clearSession() {
     _session = null;
     _profile = null;
     _remoteSigner = null;
     _remoteProvider = null;
+    _custodialUnlocked = false;
     try {
       localStorage.removeItem(SESSION_KEY);
       localStorage.removeItem(PROFILE_KEY);
@@ -86,6 +100,7 @@ const AuthManager = (() => {
       const data = await _api('/session', null, 'GET');
       if (data.ok && data.profile) {
         _saveProfile(data.profile);
+        if (data.custodialUnlocked) _custodialUnlocked = true;
         _buildRemoteSigner();
         return true;
       }
@@ -102,9 +117,31 @@ const AuthManager = (() => {
     _clearSession();
   }
 
+  async function _ensureUnlocked() {
+    if (_custodialUnlocked) return true;
+    if (typeof window._promptCustodialUnlock === 'function') {
+      const password = await window._promptCustodialUnlock();
+      if (!password) return false;
+      try {
+        const data = await unlockCustodial(password);
+        return data.ok && data.unlocked;
+      } catch (_) { return false; }
+    }
+    return false;
+  }
+
   async function signOnServer(action, payload) {
     if (!_session) throw new Error('Not authenticated');
-    return _api('/sign', { action, ...payload });
+    const unlocked = await _ensureUnlocked();
+    if (!unlocked) throw new Error('Custodial wallet locked. Unlock required.');
+    try {
+      return await _api('/sign', { action, ...payload });
+    } catch (e) {
+      if (e.message && e.message.indexOf('Custodial') >= 0) {
+        _custodialUnlocked = false;
+      }
+      throw e;
+    }
   }
 
   function _buildRemoteSigner() {
@@ -220,6 +257,8 @@ const AuthManager = (() => {
     getRemoteSigner,
     getRemoteProvider,
     getWalletAddress,
+    unlockCustodial,
+    isCustodialUnlocked,
   };
 })();
 

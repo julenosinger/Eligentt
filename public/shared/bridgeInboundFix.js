@@ -138,10 +138,8 @@
         if (hasDepositForBurn && instance.depositForBurn) {
           var _origDFB = instance.depositForBurn;
           instance.depositForBurn = async function(amount, destDomain, mintRecipient, burnToken, destCaller, maxFee, finalityThreshold, overrides) {
-            var rawThreshold = (finalityThreshold != null) ? Number(finalityThreshold) : 2000;
-            // Arc destination requires Standard Transfer (minFinalityThreshold >= 2000).
-            // Capping to 1000 for Arc breaks Iris attestation — preserve the original threshold.
-            var fixedThreshold = (Number(destDomain) === ARC_DOMAIN) ? Math.max(rawThreshold, 2000) : Math.min(rawThreshold, 1000);
+            var rawThreshold = (finalityThreshold != null) ? Number(finalityThreshold) : 1000;
+            var fixedThreshold = Math.max(rawThreshold, 1000); // Fast Transfer for all chains
 
             var fixedMaxFee = maxFee;
             if (Number(destDomain) === ARC_DOMAIN && (!maxFee || maxFee === 0n || (typeof maxFee === 'bigint' && maxFee < ethers.parseUnits('0.1', 6)))) {
