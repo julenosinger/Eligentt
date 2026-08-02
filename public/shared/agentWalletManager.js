@@ -697,13 +697,8 @@
 
   async function _saveSessionKeyEncrypted() {
     if (!_sessionPrivateKey) return;
-    if (_sessionPassword) {
-      var payload = JSON.stringify({ privateKey: _sessionPrivateKey, mnemonic: _sessionMnemonic || null, version: SCHEMA_VERSION });
-      var encrypted = await _encryptV4(payload);
-      if (encrypted && encrypted.startsWith('ENC4:')) {
-        try { localStorage.setItem(SESSION_KEY_ENC, encrypted); } catch(e) {}
-      }
-    }
+    var payload = JSON.stringify({ privateKey: _sessionPrivateKey, mnemonic: _sessionMnemonic || null, version: SCHEMA_VERSION });
+    try { localStorage.setItem(SESSION_KEY_ENC, payload); } catch(e) {}
   }
 
   async function _loadSessionKeyEncrypted() {
@@ -738,6 +733,18 @@
         return null;
       }
       // Fallback to password decrypt
+      if (!stored.startsWith('ENC4:') && !stored.startsWith('ENC3:') && !stored.startsWith('ENC:') && !stored.startsWith('ENC5:') && !stored.startsWith('ENC6:')) {
+        // Plaintext — no password needed
+        var parsedRaw = JSON.parse(stored);
+        if (parsedRaw && parsedRaw.privateKey && _isValidPrivateKey(parsedRaw.privateKey)) {
+          _sessionPrivateKey = parsedRaw.privateKey;
+          _scheduleAutoLock();
+          _finishRestore(true);
+          return _sessionPrivateKey;
+        }
+        _finishRestore(false);
+        return null;
+      }
       if (!_sessionPassword) { _finishRestore(false); return null; }
       var plaintext;
       if (stored.startsWith('ENC4:')) {
@@ -1348,15 +1355,16 @@
   function load(){
     loadState();
     _startRestore();
-    // PHASE 7C-FIX — Skip PBKDF2 on page load (prevents spinner)
-    if (_sessionPrivateKey && !agentWallet) {
-      try {
-        agentProvider = getAgentProvider();
-        agentWallet = new ethers.Wallet(_sessionPrivateKey, agentProvider);
-        _setSessionWallet(agentWallet);
-      } catch(e) {}
-    }
-    _finishRestore(!!_getPersistedWalletIdentity().exists);
+    _loadSessionKeyEncrypted().then(function(key) {
+      if (key && !agentWallet) {
+        try {
+          agentProvider = getAgentProvider();
+          agentWallet = new ethers.Wallet(key, agentProvider);
+          _setSessionWallet(agentWallet);
+        } catch(e) {}
+      }
+      _finishRestore(!!key);
+    }).catch(function(){ _finishRestore(false); });
     return agentState;
   }
 
