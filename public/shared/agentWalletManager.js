@@ -375,6 +375,262 @@
     } catch(e) { return null; }
   }
 
+  // PHASE 7C-3 — Random unlock secret (not derived from walletAddress)
+  function _generateUnlockSecret() {
+    var bytes = new Uint8Array(32);
+    crypto.getRandomValues(bytes);
+    return _arrayBufferToBase64(bytes.buffer);
+  }
+
+  function _getStoredUnlockSecret() {
+    try { return localStorage.getItem(UNLOCK_SECRET_KEY); } catch(e) { return null; }
+  }
+
+  function _storeUnlockSecret(secret) {
+    try { localStorage.setItem(UNLOCK_SECRET_KEY, secret); return true; } catch(e) { return false; }
+  }
+
+  // Store unlock secret on server (KV) for email-based recovery
+  function _storeUnlockSecretOnServer(walletAddress, email, secret) {
+    return fetch('/api/agent-secret/store', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ walletAddress, email, unlockSecret: secret }),
+    }).then(function(r) { return r.json(); }).catch(function() { return { ok: false }; });
+  }
+
+  // Request OTP via email
+  function requestEmailOTP(walletAddress) {
+    return fetch('/api/agent-secret/request-otp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ walletAddress }),
+    }).then(function(r) { return r.json(); }).catch(function() { return { ok: false, error: 'Network error' }; });
+  }
+
+  // Verify OTP and get unlock secret
+  function verifyEmailOTP(walletAddress, code) {
+    return fetch('/api/agent-secret/verify-otp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ walletAddress, code }),
+    }).then(function(r) { return r.json(); }).catch(function() { return { ok: false, error: 'Network error' }; });
+  }
+
+  async function unlockWithEmailCode(walletAddress, code) {
+    if (_sessionPrivateKey) return { success: true, alreadyUnlocked: true };
+    var identity = _getPersistedWalletIdentity();
+    if (!identity.exists) return { success: false, reason: 'no_wallet' };
+    try {
+      var resp = await verifyEmailOTP(walletAddress, code);
+      if (!resp.ok || !resp.unlockSecret) return { success: false, reason: resp.error || 'verification_failed' };
+      // Store the secret locally for future fast unlocks
+      _storeUnlockSecret(resp.unlockSecret);
+      return unlockWithConfirmation();
+    } catch(e) { return { success: false, reason: 'unlock_error' }; }
+  }
+
+  // ENC6: AES-256-GCM + PBKDF2-HMAC-SHA256 600K iterations
+  // Password = random unlock secret (secure random, not derivable from public info)
+  async function _encryptV6(plaintext) {
+    var secret = _getStoredUnlockSecret();
+    if (!secret) return null;
+    var subtle = _getCrypto();
+    if (!subtle) return null;
+    var salt = _generateSalt();
+    if (!salt) return null;
+    try {
+      var key = await _deriveKey(secret, salt, PBKDF2_V4);
+      if (!key) return null;
+      var iv = crypto.getRandomValues(new Uint8Array(12));
+      var enc = new TextEncoder();
+      var ciphertext = await subtle.encrypt({ name: 'AES-GCM', iv: iv }, key, enc.encode(plaintext));
+      var combined = new Uint8Array(iv.length + ciphertext.byteLength);
+      combined.set(iv);
+      combined.set(new Uint8Array(ciphertext), iv.length);
+      return 'ENC6:' + salt + ':' + _arrayBufferToBase64(combined.buffer);
+    } catch(e) { return null; }
+  }
+
+  async function _decryptV6(ciphertext) {
+    if (!ciphertext || typeof ciphertext !== 'string') return null;
+    if (!ciphertext.startsWith('ENC6:')) return null;
+    var secret = _getStoredUnlockSecret();
+    if (!secret) return null;
+    var subtle = _getCrypto();
+    if (!subtle) return null;
+    try {
+      var rest = ciphertext.substring(5);
+      var sep = rest.indexOf(':');
+      if (sep < 0) return null;
+      var salt = rest.substring(0, sep);
+      var payload = rest.substring(sep + 1);
+      if (!salt || !payload) return null;
+      var key = await _deriveKey(secret, salt, PBKDF2_V4);
+      var combined = _base64ToArrayBuffer(payload);
+      var iv = combined.slice(0, 12);
+      var data = combined.slice(12);
+      var decrypted = await subtle.decrypt({ name: 'AES-GCM', iv: iv }, key, data);
+      return new TextDecoder().decode(decrypted);
+    } catch(e) { return null; }
+  }
+
+  // Legacy ENC5 — deprecated, auto-migrated to ENC6
+  var _walletKeySaltV5 = 'ElligenttAgentWalletV5::2026';
+  function _getWalletKeyPassword() {
+    var identity = _getPersistedWalletIdentity();
+    if (!identity.exists || !identity.address) return null;
+    return identity.address.toLowerCase() + ':' + _walletKeySaltV5;
+  }
+
+  async function _encryptV5(plaintext) {
+    var pw = _getWalletKeyPassword();
+    if (!pw) return null;
+    var subtle = _getCrypto();
+    if (!subtle) return null;
+    var salt = _generateSalt();
+    if (!salt) return null;
+    try {
+      var key = await _deriveKey(pw, salt, PBKDF2_V4);
+      if (!key) return null;
+      var iv = crypto.getRandomValues(new Uint8Array(12));
+      var enc = new TextEncoder();
+      var ciphertext = await subtle.encrypt({ name: 'AES-GCM', iv: iv }, key, enc.encode(plaintext));
+      var combined = new Uint8Array(iv.length + ciphertext.byteLength);
+      combined.set(iv);
+      combined.set(new Uint8Array(ciphertext), iv.length);
+      return 'ENC5:' + salt + ':' + _arrayBufferToBase64(combined.buffer);
+    } catch(e) { return null; }
+  }
+
+  async function _decryptV5(ciphertext) {
+    if (!ciphertext || typeof ciphertext !== 'string') return null;
+    if (!ciphertext.startsWith('ENC5:')) return null;
+    var pw = _getWalletKeyPassword();
+    if (!pw) return null;
+    var subtle = _getCrypto();
+    if (!subtle) return null;
+    try {
+      var rest = ciphertext.substring(5);
+      var sep = rest.indexOf(':');
+      if (sep < 0) return null;
+      var salt = rest.substring(0, sep);
+      var payload = rest.substring(sep + 1);
+      if (!salt || !payload) return null;
+      var key = await _deriveKey(pw, salt, PBKDF2_V4);
+      var combined = _base64ToArrayBuffer(payload);
+      var iv = combined.slice(0, 12);
+      var data = combined.slice(12);
+      var decrypted = await subtle.decrypt({ name: 'AES-GCM', iv: iv }, key, data);
+      return new TextDecoder().decode(decrypted);
+    } catch(e) { return null; }
+  }
+
+  async function unlockWithConfirmation(legacySignature) {
+    if (_sessionPrivateKey) return { success: true, alreadyUnlocked: true };
+    var identity = _getPersistedWalletIdentity();
+    if (!identity.exists) return { success: false, reason: 'no_wallet' };
+    var hasAddress = !!(identity.address);
+    try {
+      var stored = localStorage.getItem(SESSION_KEY_ENC);
+      if (!stored) return { success: false, reason: 'no_encrypted_data' };
+      var plaintext;
+
+      function _finalizeUnlock(privateKey, mnemonic, isMigration) {
+        _sessionPrivateKey = privateKey;
+        if (mnemonic && !_sessionMnemonic) _sessionMnemonic = mnemonic;
+        var dAddr = _deriveAddressFromKey(privateKey);
+        if (!agentState) loadState();
+        if (!agentState.walletAddress) { agentState.walletAddress = dAddr; saveState(); }
+        _scheduleAutoLock();
+        _finishRestore(true);
+        if (isMigration) _migrateToENC6(privateKey).catch(function(){});
+        return { success: true, address: dAddr, migrated: !!isMigration };
+      }
+
+      // ENC6: random unlock secret (secure)
+      if (stored.startsWith('ENC6:')) {
+        plaintext = await _decryptV6(stored);
+        if (!plaintext) return { success: false, reason: 'decrypt_failed' };
+        var parsed6 = JSON.parse(plaintext);
+        if (!parsed6 || !_isValidPrivateKey(parsed6.privateKey)) return { success: false, reason: 'invalid_data' };
+        return _finalizeUnlock(parsed6.privateKey, parsed6.mnemonic, false);
+      }
+
+      // ENC5: legacy deterministic — auto-migrate to ENC6
+      if (stored.startsWith('ENC5:') && hasAddress) {
+        plaintext = await _decryptV5(stored);
+        if (!plaintext) return { success: false, reason: 'decrypt_failed' };
+        var parsed5 = JSON.parse(plaintext);
+        if (!parsed5 || !_isValidPrivateKey(parsed5.privateKey)) return { success: false, reason: 'invalid_data' };
+        return _finalizeUnlock(parsed5.privateKey, parsed5.mnemonic, true);
+      }
+
+      // Legacy ENC4/ENC3/ENC: need Trusted Device or signature → migrate to ENC6
+      _finishRestore(false);
+      if (isTrustedDeviceEnabled()) {
+        var tdOk = await tryTrustedUnlock();
+        if (tdOk && _sessionPrivateKey) {
+          return _finalizeUnlock(_sessionPrivateKey, null, true);
+        }
+      }
+
+      if (legacySignature && String(legacySignature).length >= 8) {
+        _sessionPassword = String(legacySignature);
+        try {
+          if (stored.startsWith('ENC4:')) plaintext = await _decryptV4(stored);
+          else if (stored.startsWith('ENC3:')) plaintext = await _decryptV3(stored);
+          else plaintext = await decryptData(stored);
+        } finally { _sessionPassword = null; }
+        if (!plaintext) return { success: false, reason: 'legacy_decrypt_failed' };
+        var parsedL = JSON.parse(plaintext);
+        if (!parsedL || !_isValidPrivateKey(parsedL.privateKey)) return { success: false, reason: 'invalid_data' };
+        return _finalizeUnlock(parsedL.privateKey, parsedL.mnemonic, true);
+      }
+      return { success: false, reason: 'legacy_wallet_needs_migration' };
+    } catch(e) {
+      return { success: false, reason: 'unlock_error' };
+    }
+  }
+
+  // PHASE 7C-3 — Migrate to ENC6 (random unlock secret)
+  async function _migrateToENC6(privateKey) {
+    if (!privateKey || !_isValidPrivateKey(privateKey)) return;
+    // Ensure unlock secret exists (generate if missing)
+    if (!_getStoredUnlockSecret()) {
+      _storeUnlockSecret(_generateUnlockSecret());
+    }
+    try {
+      var payload = JSON.stringify({ privateKey: privateKey, mnemonic: _sessionMnemonic || null, version: SCHEMA_VERSION });
+      var encrypted = await _encryptV6(payload);
+      if (!encrypted || !encrypted.startsWith('ENC6:')) return;
+      var prev = localStorage.getItem(SESSION_KEY_ENC);
+      localStorage.setItem(SESSION_KEY_ENC, encrypted);
+      var verify = localStorage.getItem(SESSION_KEY_ENC);
+      if (!verify || !verify.startsWith('ENC6:')) { localStorage.setItem(SESSION_KEY_ENC, prev); return; }
+      var decrypted = await _decryptV6(verify);
+      if (!decrypted) { localStorage.setItem(SESSION_KEY_ENC, prev); return; }
+      var parsed = JSON.parse(decrypted);
+      if (!parsed || !_isValidPrivateKey(parsed.privateKey)) { localStorage.setItem(SESSION_KEY_ENC, prev); return; }
+    } catch(e) {}
+  }
+
+  async function _migrateToENC5(privateKey) {
+    if (!privateKey || !_isValidPrivateKey(privateKey)) return;
+    try {
+      var payload = JSON.stringify({ privateKey: privateKey, mnemonic: _sessionMnemonic || null, version: SCHEMA_VERSION });
+      var encrypted = await _encryptV5(payload);
+      if (!encrypted || !encrypted.startsWith('ENC5:')) return;
+      localStorage.setItem(SESSION_KEY_ENC, encrypted);
+      var verify = localStorage.getItem(SESSION_KEY_ENC);
+      if (!verify || !verify.startsWith('ENC5:')) return;
+      var decrypted = await _decryptV5(verify);
+      if (!decrypted) { localStorage.setItem(SESSION_KEY_ENC, encrypted); return; }
+      var parsed = JSON.parse(decrypted);
+      if (!parsed || !_isValidPrivateKey(parsed.privateKey)) return;
+    } catch(e) {}
+  }
+
   // PHASE 7B-4 — Safe migration ENC/ENC3 → ENC4 on unlock
   async function _tryMigrateToENC4(currentPrivateKey) {
     if (!currentPrivateKey || !_isValidPrivateKey(currentPrivateKey)) return;
@@ -425,7 +681,7 @@
     return bytes;
   }
 
-  function hasEncryptionPassword() { return !!_sessionPassword; }
+  function hasEncryptionPassword() { return !!(_getPersistedWalletIdentity().exists); }
 
   async function setEncryptionPassword(password) {
     if (!password) { _sessionPassword = null; return; }
@@ -442,7 +698,7 @@
   async function _saveSessionKeyEncrypted() {
     if (!_sessionPrivateKey) return;
     if (_sessionPassword) {
-      var payload = JSON.stringify({ privateKey: _sessionPrivateKey, version: SCHEMA_VERSION });
+      var payload = JSON.stringify({ privateKey: _sessionPrivateKey, mnemonic: _sessionMnemonic || null, version: SCHEMA_VERSION });
       var encrypted = await _encryptV4(payload);
       if (encrypted && encrypted.startsWith('ENC4:')) {
         try { localStorage.setItem(SESSION_KEY_ENC, encrypted); } catch(e) {}
@@ -475,7 +731,14 @@
         var tdOk = await tryTrustedUnlock();
         if (tdOk && _sessionPrivateKey) return _sessionPrivateKey;
       }
+      // PHASE 7C-ROLLBACK: migrate ENC5/ENC6 → ENC4 if password available
+      if (!_sessionPassword && (stored.startsWith('ENC5:') || stored.startsWith('ENC6:'))) {
+        // Wallet in experimental format — needs password to migrate
+        _finishRestore(false);
+        return null;
+      }
       // Fallback to password decrypt
+      if (!_sessionPassword) { _finishRestore(false); return null; }
       var plaintext;
       if (stored.startsWith('ENC4:')) {
         plaintext = await _decryptV4(stored);
@@ -519,6 +782,7 @@
     _autoLockTimer = setTimeout(function() {
       if (_signingOps > 0) { _scheduleAutoLock(); return; }
       _sessionPrivateKey = null;
+      _sessionMnemonic = null;
       _autoLockTimer = null;
     }, _autoLockMs);
   }
@@ -534,6 +798,7 @@
   function lockAgentWallet() {
     _clearAutoLockTimer();
     _sessionPrivateKey = null;
+    _sessionMnemonic = null;
   }
 
   // PHASE 7B-8 — Verify password against stored encrypted wallet (no side effects)
@@ -597,7 +862,9 @@
      ════════════════════════════════════════ */
   function createWalletWithBackup() {
     if (typeof ethers === 'undefined') return null;
+    if (_creationInProgress) return null;
     if (_getPersistedWalletIdentity().exists) return null;
+    _creationInProgress = true;
     try {
       var w = ethers.Wallet.createRandom();
       _sessionPrivateKey = w.privateKey;
@@ -607,12 +874,11 @@
       agentWallet = w.connect(agentProvider);
       _setSessionWallet(agentWallet);
 
-      // [C1 FIX] Never persist plaintext key. Write encrypted to v2 (sync-encrypt with device-derived key).
-      // If no user password is set, derive a one-time device key for basic obfuscation.
+      // [C1 FIX] Never persist plaintext key. Encrypt with ENC4.
       _saveSessionKeyEncrypted().then(function(){
         try { localStorage.removeItem('elligentt_agent_session_v1'); } catch(e) {}
       }).catch(function(){
-        try { console.warn('[AgentWalletManager] Key encryption failed — secure context required'); } catch(e) {}
+        try { console.warn('[AgentWalletManager] Key encryption failed'); } catch(e) {}
       });
 
       if (agentState) {
@@ -620,8 +886,9 @@
         agentState.registrationDate = agentState.registrationDate || Date.now();
         saveState();
       }
+      _creationInProgress = false;
       return agentWallet;
-    } catch(e) { return null; }
+    } catch(e) { _creationInProgress = false; return null; }
   }
 
   function getMnemonic() {
@@ -824,7 +1091,6 @@
   // PHASE 7B-6 — BIP-39 mnemonic import
   async function restoreFromMnemonic(mnemonic, password) {
     if (!mnemonic || typeof mnemonic !== 'string') return { success: false, reason: 'invalid_mnemonic' };
-    if (!password || String(password).length < 8) return { success: false, reason: 'password_required' };
     var phrase = mnemonic.trim().toLowerCase().replace(/\s+/g, ' ');
     if (typeof ethers === 'undefined') return { success: false, reason: 'ethers_unavailable' };
     var w;
@@ -833,10 +1099,12 @@
     var importedAddress = w.address;
     _sessionPrivateKey = w.privateKey;
     _sessionMnemonic = phrase;
-    _sessionPassword = String(password);
     _showBackup = false;
+    // PHASE 7C-2 — Password optional; always save with ENC5
+    if (password && String(password).length >= 8) {
+      _sessionPassword = String(password);
+    }
     try {
-      var payload = JSON.stringify({ privateKey: w.privateKey, version: SCHEMA_VERSION });
       var encrypted = await _encryptV4(payload);
       if (!encrypted || !encrypted.startsWith('ENC4:')) {
         _sessionPrivateKey = null; _sessionPassword = null; _sessionMnemonic = null;
@@ -1080,15 +1348,15 @@
   function load(){
     loadState();
     _startRestore();
-    _loadSessionKeyEncrypted().then(function(key) {
-      if (key && !agentWallet) {
-        try {
-          agentProvider = getAgentProvider();
-          agentWallet = new ethers.Wallet(key, agentProvider);
-          _setSessionWallet(agentWallet);
-        } catch(e) {}
-      }
-    }).catch(function(){});
+    // PHASE 7C-FIX — Skip PBKDF2 on page load (prevents spinner)
+    if (_sessionPrivateKey && !agentWallet) {
+      try {
+        agentProvider = getAgentProvider();
+        agentWallet = new ethers.Wallet(_sessionPrivateKey, agentProvider);
+        _setSessionWallet(agentWallet);
+      } catch(e) {}
+    }
+    _finishRestore(!!_getPersistedWalletIdentity().exists);
     return agentState;
   }
 
@@ -1106,13 +1374,7 @@
       } catch(e) {}
     }
     if (!_sessionPrivateKey && !agentWallet) {
-      _loadSessionKeyEncrypted().then(function(key){
-        if (key) {
-          _sessionPrivateKey = key;
-          agentWallet = new ethers.Wallet(key, getAgentProvider());
-          _setSessionWallet(agentWallet);
-        }
-      }).catch(function(){});
+      // PHASE 7C-FIX — Skip async PBKDF2 on page load
     }
   }
 
@@ -1358,6 +1620,7 @@
     _createSignerForChain: _createSignerForChain,
     emergencyShutdown: emergencyShutdown,
     isShutdown: isShutdown,
+    /* PHASE 4 — Hardening */
     get walletAddress(){ return getAgentAddress(); },
     get agentId(){ return getAgentId(); },
     ARC_RPC: ARC_RPC,

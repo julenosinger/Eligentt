@@ -1251,21 +1251,6 @@
       if (!html) html = '<div style="font-size:9px;color:var(--muted2)">Session details unavailable.</div>';
       sess.innerHTML = html;
     }
-    const passBox = $id('aiw-agent-pass');
-    if (passBox) { _renderAgentPassBox(passBox); }
-    _renderTrustedDevice();
-  }
-
-  function _renderTrustedDevice() {
-    var box = document.getElementById('aiw-trusted-device');
-    if (!box) return;
-    var enabled = false;
-    try { if (typeof AgentWalletManager !== 'undefined' && AgentWalletManager.isTrustedDeviceEnabled) enabled = AgentWalletManager.isTrustedDeviceEnabled(); } catch(_e) {}
-    if (enabled) {
-      box.innerHTML = '<div style="padding:6px 8px;background:rgba(34,197,94,.06);border:1px solid rgba(34,197,94,.2);border-radius:6px"><div style="display:flex;align-items:center;justify-content:space-between"><span style="font-size:9px;color:#22c55e"><i class="ti ti-device-mobile" style="font-size:10px;margin-right:3px"></i>Trusted Device enabled</span><button onclick="_disableTrustedDevice()" style="font-size:8px;background:none;color:#ef4444;border:1px solid rgba(239,68,68,.3);border-radius:4px;padding:2px 6px;cursor:pointer">Disable</button></div></div>';
-    } else {
-      box.innerHTML = '<div style="padding:6px 8px;background:rgba(245,158,11,.05);border:1px solid rgba(245,158,11,.15);border-radius:6px"><div style="font-size:8px;color:var(--muted2);margin-bottom:4px;line-height:1.4">Keep your wallet unlocked on this device. Your password is never stored.</div><button onclick="_enableTrustedDevice()" style="font-size:8px;background:var(--border);color:var(--muted);border:1px solid var(--border2);border-radius:4px;padding:3px 8px;cursor:pointer">Enable Trusted Device</button></div>';
-    }
   }
 
   /* ══════════════════════════════════════════════════════════════════

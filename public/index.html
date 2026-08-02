@@ -5291,12 +5291,11 @@ select.cinput option { background: #161a24; color: #dde2f0; }
       <span style="font-size:14px;font-weight:700;color:var(--text)">Backup Recovery Phrase</span>
     </div>
     <div id="recovery-pw-step" style="margin-bottom:12px">
-      <div style="font-size:10px;color:var(--muted2);margin-bottom:6px;line-height:1.5">For your security, enter your Agent Wallet password to reveal your recovery phrase.</div>
-      <input id="recovery-pw-input" type="password" placeholder="Agent Wallet password" style="width:100%;box-sizing:border-box;background:var(--bg);border:1px solid var(--border2);border-radius:6px;padding:8px 10px;font-size:12px;color:var(--text);margin-bottom:6px" onkeydown="if(event.key==='Enter')_recoveryVerifyPw()"/>
-      <div id="recovery-pw-err" style="font-size:9px;color:#ef4444;display:none;margin-bottom:4px">Incorrect password.</div>
+      <div style="font-size:10px;color:var(--muted2);margin-bottom:6px;line-height:1.5">Your wallet must be unlocked to view the recovery phrase.</div>
+      <div id="recovery-pw-err" style="font-size:9px;color:#ef4444;display:none;margin-bottom:4px">Wallet is locked. Unlock it first.</div>
       <div style="display:flex;gap:6px;justify-content:flex-end">
         <button onclick="_recoveryPwCancel()" style="font-size:10px;background:var(--border);color:var(--muted);border:1px solid var(--border2);border-radius:6px;padding:6px 12px;cursor:pointer">Cancel</button>
-        <button onclick="_recoveryVerifyPw()" style="font-size:10px;background:var(--purple);color:#fff;border:none;border-radius:6px;padding:6px 14px;cursor:pointer;font-weight:600">Verify & Continue</button>
+        <button onclick="_recoveryVerifyPw()" style="font-size:10px;background:var(--purple);color:#fff;border:none;border-radius:6px;padding:6px 14px;cursor:pointer;font-weight:600">Verify &amp; Continue</button>
       </div>
     </div>
     <div id="recovery-reveal-step" style="display:none">
@@ -5316,19 +5315,6 @@ select.cinput option { background: #161a24; color: #dde2f0; }
       <label for="recovery-confirm-cb" style="font-size:10px;color:var(--muted2)">I have securely backed up my recovery phrase.</label>
     </div>
     <button id="recovery-continue-btn" onclick="_recoveryContinue()" disabled style="width:100%;font-size:11px;background:var(--purple);color:#fff;border:none;border-radius:6px;padding:8px;cursor:pointer;font-weight:600;opacity:0.5">Continue</button>
-    </div>
-  </div>
-</div>
-
-<!-- AGENT WALLET UNLOCK CONFIRMATION MODAL -->
-<div class="modal-ov" id="agent-unlock-confirm-modal" style="display:none;z-index:1000001">
-  <div style="background:var(--card);border:1px solid var(--border2);border-radius:12px;padding:20px;width:340px;max-width:90vw;text-align:center">
-    <i class="ti ti-lock-open" style="font-size:28px;color:var(--purple);margin-bottom:8px;display:block"></i>
-    <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:4px">Unlock Agent Wallet</div>
-    <div style="font-size:9px;color:var(--muted2);margin-bottom:14px;line-height:1.5">Confirm to unlock your Agent Wallet.<br>This is a signature only — no transaction, no gas cost.</div>
-    <div style="display:flex;gap:8px;justify-content:center">
-      <button onclick="_agentUnlockCancel()" style="font-size:10px;background:var(--border);color:var(--muted);border:1px solid var(--border2);border-radius:6px;padding:7px 16px;cursor:pointer">Cancel</button>
-      <button onclick="_agentUnlockConfirm()" style="font-size:10px;background:var(--purple);color:#fff;border:none;border-radius:6px;padding:7px 20px;cursor:pointer;font-weight:600">Confirm</button>
     </div>
   </div>
 </div>
@@ -10659,12 +10645,6 @@ select.cinput option { background: #161a24; color: #dde2f0; }
                 </div>
               </div>
             </div>
-            <div class="card">
-              <div class="ch"><span class="ct"><i class="ti ti-id-badge-2" style="color:var(--purple);margin-right:5px"></i>Wallet Security &amp; Session</span></div>
-              <div id="aiw-agent-pass" style="margin-bottom:6px"></div>
-              <div id="aiw-trusted-device" style="margin-bottom:6px"></div>
-              <div class="cb" id="aiw-sec-session"></div>
-            </div>
             <div class="card" style="margin-top:10px">
               <div class="ch"><span class="ct"><i class="ti ti-key" style="color:#f59e0b;margin-right:5px"></i>Recovery Phrase</span></div>
               <div class="cb" style="font-size:9px;color:var(--muted2);line-height:1.6">
@@ -13994,81 +13974,6 @@ function updateScheduleDatePreview() {
 }
 
 // ── Agent Wallet Password UI ────────────────────────────
-function _renderAgentPassBox(box) {
-  var unlocked = false;
-  try { unlocked = typeof AgentWalletManager !== 'undefined' && AgentWalletManager.isSessionUnlocked && AgentWalletManager.isSessionUnlocked(); } catch(e) {}
-  var hasWallet = false;
-  try { hasWallet = typeof AgentWalletManager !== 'undefined' && AgentWalletManager.hasPersistedWallet && AgentWalletManager.hasPersistedWallet(); } catch(e) {}
-  if (!hasWallet && !unlocked) {
-    box.innerHTML = '<div style="font-size:9px;color:var(--muted2);text-align:center;padding:4px">No Agent Wallet created</div>';
-    return;
-  }
-  if (unlocked) {
-    box.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 8px;background:rgba(34,197,94,.06);border:1px solid rgba(34,197,94,.2);border-radius:6px"><span style="font-size:10px;color:#22c55e"><i class="ti ti-lock-open" style="font-size:11px;margin-right:4px"></i>Wallet Unlocked</span><button onclick="_agentWalletLock()" style="font-size:9px;background:rgba(239,68,68,.1);color:#ef4444;border:1px solid rgba(239,68,68,.3);border-radius:4px;padding:3px 10px;cursor:pointer">Lock Wallet</button></div>';
-  } else {
-    box.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 8px;background:rgba(245,158,11,.06);border:1px solid rgba(245,158,11,.2);border-radius:6px"><span style="font-size:10px;color:#f59e0b"><i class="ti ti-lock" style="font-size:11px;margin-right:4px"></i>Wallet Locked</span><button onclick="_agentWalletUnlock()" style="font-size:9px;background:var(--purple);color:#fff;border:none;border-radius:4px;padding:3px 10px;cursor:pointer;font-weight:600">Unlock Wallet</button></div>';
-  }
-}
-function _agentWalletUnlock() {
-  if (!walletAddress) { toast('Connect wallet first', 'warning'); return; }
-  if (typeof AgentWalletManager === 'undefined') return;
-  var m = document.getElementById('agent-unlock-confirm-modal');
-  if (m) m.style.display = 'flex';
-}
-function _agentUnlockConfirm() {
-  var m = document.getElementById('agent-unlock-confirm-modal');
-  if (m) m.style.display = 'none';
-  var msg = 'elligente-agent-unlock';
-  var provider = window.ethereum;
-  if (!provider && typeof window.signer !== 'undefined' && window.signer.signMessage) {
-    window.signer.signMessage(msg).then(function(sig) { _agentUnlockWithSig(sig); }).catch(function() { toast('Signature rejected', 'error'); });
-    return;
-  }
-  if (!provider) { toast('No wallet detected. Connect MetaMask or Rabby.', 'warning'); return; }
-  provider.request({ method: 'personal_sign', params: [msg, walletAddress] }).then(function(sig) {
-    _agentUnlockWithSig(sig);
-  }).catch(function() { toast('Signature rejected', 'error'); });
-}
-function _agentUnlockCancel() {
-  var m = document.getElementById('agent-unlock-confirm-modal');
-  if (m) m.style.display = 'none';
-}
-function _agentUnlockWithSig(sig) {
-  if (!sig) { toast('Signature rejected', 'error'); return; }
-  if (typeof AgentWalletManager === 'undefined' || !AgentWalletManager.setEncryptionPassword) return;
-  AgentWalletManager.setEncryptionPassword(sig).then(function() {
-    var box = document.getElementById('aiw-agent-pass');
-    if (box) _renderAgentPassBox(box);
-    toast('Wallet unlocked', 'success');
-  }).catch(function() { toast('Unlock failed', 'error'); });
-}
-function _agentWalletLock() {
-  if (typeof AgentWalletManager !== 'undefined' && AgentWalletManager.lockAgentWallet) {
-    AgentWalletManager.lockAgentWallet();
-  }
-  var box = document.getElementById('aiw-agent-pass');
-  if (box) _renderAgentPassBox(box);
-  toast('Wallet locked', 'info');
-}
-// ── Trusted Device ────────────────────────────────────
-async function _enableTrustedDevice() {
-  if (typeof AgentWalletManager === 'undefined' || !AgentWalletManager.enableTrustedDevice) return;
-  var result = await AgentWalletManager.enableTrustedDevice();
-  if (result.success) {
-    toast('Trusted Device enabled. Your wallet will stay unlocked on this device.', 'success');
-    var box = document.getElementById('aiw-trusted-device');
-    if (box && typeof _renderTrustedDevice === 'function') _renderTrustedDevice();
-  } else {
-    toast('Could not enable Trusted Device. Unlock your wallet first.', 'warning');
-  }
-}
-async function _disableTrustedDevice() {
-  if (typeof AgentWalletManager === 'undefined' || !AgentWalletManager.disableTrustedDevice) return;
-  AgentWalletManager.disableTrustedDevice();
-  toast('Trusted Device disabled.', 'info');
-  var box = document.getElementById('aiw-trusted-device');
-  if (box && typeof _renderTrustedDevice === 'function') _renderTrustedDevice();
-}
 // ── Agent Wallet Restore ──────────────────────────────
 async function _restoreAgentWallet() {
   var phrase = document.getElementById('aiw-restore-phrase');
@@ -14077,16 +13982,13 @@ async function _restoreAgentWallet() {
   var m = phrase ? phrase.value.trim() : '';
   var p = pw ? pw.value : '';
   if (!m || m.split(/\s+/).length < 12) { if (msg) { msg.style.color = '#ef4444'; msg.textContent = 'Enter a valid 12-word recovery phrase.'; } return; }
-  if (p.length < 8) { if (msg) { msg.style.color = '#ef4444'; msg.textContent = 'Password must be at least 8 characters.'; } return; }
   if (msg) { msg.style.color = '#f59e0b'; msg.textContent = 'Restoring...'; }
   try {
-    var result = await AgentWalletManager.restoreFromMnemonic(m, p);
+    var result = await AgentWalletManager.restoreFromMnemonic(m, p || undefined);
     if (result.success) {
       if (msg) { msg.style.color = '#22c55e'; msg.textContent = 'Wallet restored: ' + result.address.slice(0,6) + '...' + result.address.slice(-4); }
       if (phrase) phrase.value = '';
       if (pw) pw.value = '';
-      var box = document.getElementById('aiw-agent-pass');
-      if (box && typeof _renderAgentPassBox === 'function') _renderAgentPassBox(box);
     } else {
       if (msg) { msg.style.color = '#ef4444'; msg.textContent = result.reason || 'Restore failed'; }
     }
@@ -14108,26 +14010,25 @@ async function _showRecoveryBackupAsync() {
   if (!mnemonic) {
     try {
       if (typeof AgentWalletManager !== 'undefined' && AgentWalletManager.isSessionUnlocked && !AgentWalletManager.isSessionUnlocked()) {
-        toast('Wallet is locked. Set your encryption password first to unlock the wallet, then try again.', 'warning');
+        toast('Wallet is locked. Unlock your wallet first, then try again.', 'warning');
       } else {
         toast('No recovery phrase available. It may have been cleared or the wallet was not created in this session.', 'warning');
       }
     } catch(_e) {}
     return;
   }
-  // PHASE 7B-8: password confirmation in modal
-  if (typeof AgentWalletManager !== 'undefined' && AgentWalletManager.hasEncryptionPassword && AgentWalletManager.hasEncryptionPassword() && AgentWalletManager.verifyWalletPassword) {
+  // PHASE 7C-2 — Recovery phrase: wallet must be unlocked (no password needed)
+  if (typeof AgentWalletManager !== 'undefined' && AgentWalletManager.isSessionUnlocked && AgentWalletManager.isSessionUnlocked() && AgentWalletManager.getMnemonic) {
     var m = document.getElementById('recovery-backup-modal');
-    if (m) m.style.display = 'flex';
+    if (m) { m.style.display = 'flex'; m.classList.add('open'); }
     document.getElementById('recovery-pw-step').style.display = '';
     document.getElementById('recovery-reveal-step').style.display = 'none';
     document.getElementById('recovery-pw-err').style.display = 'none';
-    var inp = document.getElementById('recovery-pw-input');
-    if (inp) { inp.value = ''; setTimeout(function(){ inp.focus(); }, 100); }
     var _m = mnemonic;
-    _recoveryPwResolve = async function(pw) {
-      var ok = await AgentWalletManager.verifyWalletPassword(pw);
-      if (ok) {
+    _recoveryPwResolve = async function() {
+      var isUnlocked = false;
+      try { isUnlocked = typeof AgentWalletManager !== 'undefined' && AgentWalletManager.isSessionUnlocked && AgentWalletManager.isSessionUnlocked(); } catch(_e) {}
+      if (isUnlocked) {
         document.getElementById('recovery-pw-step').style.display = 'none';
         document.getElementById('recovery-reveal-step').style.display = '';
         _recoverySetupRevealCore(_m);
@@ -14137,7 +14038,23 @@ async function _showRecoveryBackupAsync() {
     };
     return;
   }
-  _recoverySetupRevealCore(mnemonic);
+  // Wallet is locked or mnemonic unavailable — show verification step
+  var m2 = document.getElementById('recovery-backup-modal');
+  if (m2) { m2.style.display = 'flex'; m2.classList.add('open'); }
+  document.getElementById('recovery-pw-step').style.display = '';
+  document.getElementById('recovery-reveal-step').style.display = 'none';
+  document.getElementById('recovery-pw-err').style.display = 'none';
+  _recoveryPwResolve = async function() {
+    var isUnlocked = false;
+    try { isUnlocked = typeof AgentWalletManager !== 'undefined' && AgentWalletManager.isSessionUnlocked && AgentWalletManager.isSessionUnlocked(); } catch(_e) {}
+    if (isUnlocked) {
+      document.getElementById('recovery-pw-step').style.display = 'none';
+      document.getElementById('recovery-reveal-step').style.display = '';
+      _recoverySetupRevealCore(mnemonic);
+    } else {
+      document.getElementById('recovery-pw-err').style.display = '';
+    }
+  };
 }
 function _recoverySetupRevealCore(mnemonic) {
   var addr = '';
@@ -14170,15 +14087,12 @@ function _recoverySetupRevealCore(mnemonic) {
 }
 var _recoveryPwResolve = null;
 function _recoveryVerifyPw() {
-  var inp = document.getElementById('recovery-pw-input');
-  var pw = inp ? inp.value : '';
-  if (!pw) return;
-  if (_recoveryPwResolve) _recoveryPwResolve(pw);
+  if (_recoveryPwResolve) _recoveryPwResolve();
 }
 function _recoveryPwCancel() {
   _recoveryPwResolve = null;
   var m = document.getElementById('recovery-backup-modal');
-  if (m) m.style.display = 'none';
+  if (m) { m.style.display = 'none'; m.classList.remove('open'); }
 }
 // Legacy alias for backward compat
 function _recoverySetupReveal() {
@@ -14198,7 +14112,7 @@ function _recoveryCopy() {
 }
 function _recoveryContinue() {
   var m = document.getElementById('recovery-backup-modal');
-  if (m) m.style.display = 'none';
+  if (m) { m.style.display = 'none'; m.classList.remove('open'); }
   _recoveryPhrase = '';
   try { if (typeof AgentWalletManager !== 'undefined' && AgentWalletManager.clearBackupFlag) AgentWalletManager.clearBackupFlag(); } catch(_e) {}
 }
@@ -14210,7 +14124,7 @@ function _promptCustodialUnlock() {
     var m = document.getElementById('custodial-unlock-modal');
     var pw = document.getElementById('custodial-unlock-pw');
     var err = document.getElementById('custodial-unlock-err');
-    if (m) m.style.display = 'flex';
+    if (m) { m.style.display = 'flex'; m.classList.add('open'); }
     if (pw) { pw.value = ''; pw.focus(); }
     if (err) err.style.display = 'none';
   });
@@ -14225,12 +14139,12 @@ function _custodialUnlockConfirm() {
   }
   if (_custodialUnlockResolve) { _custodialUnlockResolve(v); _custodialUnlockResolve = null; }
   var m = document.getElementById('custodial-unlock-modal');
-  if (m) m.style.display = 'none';
+  if (m) { m.style.display = 'none'; m.classList.remove('open'); }
 }
 function _custodialUnlockCancel() {
   if (_custodialUnlockResolve) { _custodialUnlockResolve(null); _custodialUnlockResolve = null; }
   var m = document.getElementById('custodial-unlock-modal');
-  if (m) m.style.display = 'none';
+  if (m) { m.style.display = 'none'; m.classList.remove('open'); }
 }
 // ── Toast ──────────────────────────────────────────────────
 let _tt;
@@ -42994,9 +42908,8 @@ setTimeout(function() {
     // [C1 FIX] Use encrypted v2 signer via AgentWalletManager instead of plaintext localStorage
     var signer = await _agentGetSigner();
     if(!signer){
-      autUI('ai', R.card(R.head('lock','Agent Wallet Locked',{text:'Locked',cls:'pending'}),
-        R.row('Action','Unlock your Agent Wallet to continue','muted'),
-        R.actions({icon:'lock-open',label:'Unlock Wallet',cls:'primary',action:"_agentUnlockConfirm()"})));
+      autUI('ai', R.card(R.head('alert','Agent Wallet Unavailable',{text:'Locked',cls:'pending'}),
+        R.intro('The Agent Wallet is not available for signing. Restore or recreate your Agent Wallet.')));
       return;
     }
 
@@ -43152,12 +43065,6 @@ setTimeout(function() {
     }
   }
 
-  function _showAgentUnlockCard() {
-    autUI('ai', R.card(R.head('lock','Agent Wallet Locked',{text:'Locked',cls:'pending'}),
-      R.intro('Your Agent Wallet is locked. Confirm to unlock and continue.'),
-      R.actions({icon:'lock-open',label:'Unlock Wallet',cls:'primary',action:"_agentUnlockConfirm()"})));
-  }
-
   function _agentStateMsg(execId, state, detail){
     var states = {
       PLANNING:       ['#6b7280','Planning execution...'],
@@ -43263,7 +43170,7 @@ setTimeout(function() {
     // [C1 FIX] Use encrypted v2 signer via AgentWalletManager
     var signer = await _agentGetSigner();
     if(!signer){
-      _showAgentUnlockCard();
+      autUI('ai', R.card(R.head('alert','Agent Wallet Required',{text:'Unavailable',cls:'pending'}), R.intro('Agent Wallet is not available for this operation.')));
       return;
     }
 
@@ -43425,7 +43332,7 @@ setTimeout(function() {
     // [C1 FIX] Use encrypted v2 signer via AgentWalletManager
     var signer = await _agentGetSigner();
     if(!signer){
-      _showAgentUnlockCard();
+      autUI('ai', R.card(R.head('alert','Agent Wallet Required',{text:'Unavailable',cls:'pending'}), R.intro('Agent Wallet is not available for this operation.')));
       return;
     }
 
@@ -43698,7 +43605,7 @@ setTimeout(function() {
     // [C1 FIX] Use encrypted v2 signer via AgentWalletManager
     var signer = await _agentGetSigner();
     if(!signer){
-      _showAgentUnlockCard();
+      autUI('ai', R.card(R.head('alert','Agent Wallet Required',{text:'Unavailable',cls:'pending'}), R.intro('Agent Wallet is not available for this operation.')));
       return;
     }
 
@@ -43863,7 +43770,7 @@ setTimeout(function() {
     // [C1 FIX] Use encrypted v2 signer via AgentWalletManager
     var signer = await _agentGetSigner();
     if(!signer){
-      _showAgentUnlockCard();
+      autUI('ai', R.card(R.head('alert','Agent Wallet Required',{text:'Unavailable',cls:'pending'}), R.intro('Agent Wallet is not available for this operation.')));
       return;
     }
 
@@ -44018,7 +43925,7 @@ setTimeout(function() {
     // [C1 FIX] Use encrypted v2 signer via AgentWalletManager
     var signer = await _agentGetSigner();
     if(!signer){
-      _showAgentUnlockCard();
+      autUI('ai', R.card(R.head('alert','Agent Wallet Required',{text:'Unavailable',cls:'pending'}), R.intro('Agent Wallet is not available for this operation.')));
       return;
     }
 
