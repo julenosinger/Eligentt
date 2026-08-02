@@ -32,6 +32,87 @@
   var _autoLockMs = 30 * 60 * 1000; // 30 minutes
   var _signingOps = 0;
 
+  // PHASE 7B-9 — Session restore (prevents race conditions)
+  var _restoreState = 'idle'; // idle | restoring | ready | locked | failed
+  var _restorePromise = null;
+  var _restoreResolve = null;
+
+  function _startRestore() {
+    if (_restoreState === 'ready' || _restoreState === 'restoring') return _restorePromise;
+    _restoreState = 'restoring';
+    _restorePromise = new Promise(function(resolve) { _restoreResolve = resolve; });
+    return _restorePromise;
+  }
+
+  function _finishRestore(success) {
+    _restoreState = success ? 'ready' : 'locked';
+    if (_restoreResolve) { _restoreResolve(); _restoreResolve = null; }
+  }
+
+  // PHASE 7B-9 — Trusted Device
+  var TRUSTED_DEVICE_KEY = 'elligentt_agent_trusted_device';
+
+  function isTrustedDeviceEnabled() {
+    try { return !!localStorage.getItem(TRUSTED_DEVICE_KEY); } catch(e) { return false; }
+  }
+
+  async function enableTrustedDevice() {
+    if (!_sessionPrivateKey || !_sessionPassword) return { success: false, reason: 'wallet_locked' };
+    var subtle = _getCrypto();
+    if (!subtle) return { success: false, reason: 'crypto_unavailable' };
+    try {
+      var deviceKey = new Uint8Array(32);
+      crypto.getRandomValues(deviceKey);
+      var enc = new TextEncoder();
+      var keyMaterial = await subtle.importKey('raw', deviceKey, { name: 'AES-GCM' }, false, ['encrypt']);
+      var iv = crypto.getRandomValues(new Uint8Array(12));
+      var ciphertext = await subtle.encrypt({ name: 'AES-GCM', iv: iv }, keyMaterial, enc.encode(JSON.stringify({ privateKey: _sessionPrivateKey, version: SCHEMA_VERSION })));
+      var combined = new Uint8Array(iv.length + ciphertext.byteLength);
+      combined.set(iv);
+      combined.set(new Uint8Array(ciphertext), iv.length);
+      var deviceB64 = _arrayBufferToBase64(deviceKey.buffer);
+      var encryptedB64 = _arrayBufferToBase64(combined.buffer);
+      localStorage.setItem(TRUSTED_DEVICE_KEY, JSON.stringify({ deviceKey: deviceB64, encrypted: encryptedB64, address: _deriveAddressFromKey(_sessionPrivateKey), createdAt: Date.now() }));
+      return { success: true };
+    } catch(e) { return { success: false, reason: 'enroll_failed' }; }
+  }
+
+  async function tryTrustedUnlock() {
+    if (_sessionPrivateKey) { _finishRestore(true); return true; }
+    try {
+      var raw = localStorage.getItem(TRUSTED_DEVICE_KEY);
+      if (!raw) { _finishRestore(false); return false; }
+      var data = JSON.parse(raw);
+      if (!data.deviceKey || !data.encrypted) { _finishRestore(false); return false; }
+      var subtle = _getCrypto();
+      if (!subtle) { _finishRestore(false); return false; }
+      var deviceKeyBytes = _base64ToArrayBuffer(data.deviceKey);
+      var keyMaterial = await subtle.importKey('raw', deviceKeyBytes, { name: 'AES-GCM' }, false, ['decrypt']);
+      var combined = _base64ToArrayBuffer(data.encrypted);
+      var iv = combined.slice(0, 12);
+      var ct = combined.slice(12);
+      var decrypted = await subtle.decrypt({ name: 'AES-GCM', iv: iv }, keyMaterial, ct);
+      var parsed = JSON.parse(new TextDecoder().decode(decrypted));
+      if (parsed && parsed.privateKey && _isValidPrivateKey(parsed.privateKey)) {
+        var identity = _getPersistedWalletIdentity();
+        if (identity.exists && identity.address) {
+          var derivedAddr = _deriveAddressFromKey(parsed.privateKey);
+          if (derivedAddr && derivedAddr.toLowerCase() !== identity.address) { _finishRestore(false); return false; }
+        }
+        _sessionPrivateKey = parsed.privateKey;
+        _scheduleAutoLock();
+        _finishRestore(true);
+        return true;
+      }
+    } catch(e) {}
+    _finishRestore(false);
+    return false;
+  }
+
+  function disableTrustedDevice() {
+    try { localStorage.removeItem(TRUSTED_DEVICE_KEY); } catch(e) {}
+  }
+
   var SCHEMA_VERSION = 3;  // v3 = encrypted session key support
 
   /* ════════════════════════════════════════
@@ -109,6 +190,35 @@
       }
     } catch(e) {}
   }
+
+  // PHASE 7B-9 — Central persisted wallet identity
+  function _getPersistedWalletIdentity() {
+    try {
+      var v2raw = localStorage.getItem(WALLET_KEY);
+      if (v2raw) {
+        var v2 = JSON.parse(v2raw);
+        if (v2 && v2.walletAddress && typeof v2.walletAddress === 'string' && v2.walletAddress.length === 42 && v2.walletAddress.startsWith('0x')) {
+          return { exists: true, address: v2.walletAddress.toLowerCase(), source: 'v2' };
+        }
+      }
+    } catch(e) {}
+    try {
+      var v1raw = localStorage.getItem('elligentt_agent_wallet_v1');
+      if (v1raw) {
+        var v1 = JSON.parse(v1raw);
+        if (v1 && v1.walletAddress && typeof v1.walletAddress === 'string' && v1.walletAddress.startsWith('0x')) {
+          return { exists: true, address: v1.walletAddress.toLowerCase(), source: 'v1' };
+        }
+      }
+    } catch(e) {}
+    try {
+      var encRaw = localStorage.getItem(SESSION_KEY_ENC);
+      if (encRaw) return { exists: true, address: null, source: 'encrypted_only' };
+    } catch(e) {}
+    return { exists: false };
+  }
+
+  var _creationInProgress = false;
 
   /* ════════════════════════════════════════
      C1 — WebCrypto AES-GCM encrypt/decrypt
@@ -331,11 +441,13 @@
 
   async function _saveSessionKeyEncrypted() {
     if (!_sessionPrivateKey) return;
-    if (!_sessionPassword) throw new Error('AGENT_WALLET_NO_PASSWORD');
-    var payload = JSON.stringify({ privateKey: _sessionPrivateKey, version: SCHEMA_VERSION });
-    var encrypted = await _encryptV4(payload);
-    if (!encrypted || !encrypted.startsWith('ENC4:')) throw new Error('AGENT_WALLET_ENCRYPTION_FAILED');
-    try { localStorage.setItem(SESSION_KEY_ENC, encrypted); } catch(e) { throw e; }
+    if (_sessionPassword) {
+      var payload = JSON.stringify({ privateKey: _sessionPrivateKey, version: SCHEMA_VERSION });
+      var encrypted = await _encryptV4(payload);
+      if (encrypted && encrypted.startsWith('ENC4:')) {
+        try { localStorage.setItem(SESSION_KEY_ENC, encrypted); } catch(e) {}
+      }
+    }
   }
 
   async function _loadSessionKeyEncrypted() {
@@ -351,12 +463,19 @@
             _migrateV1ToEncryptedV2(v1.privateKey).then(function(mr) {
               if (mr && mr.success) _safeDeleteLegacyV1();
             }).catch(function(){});
+            _finishRestore(true);
             return _sessionPrivateKey;
           }
         }
+        _finishRestore(false);
         return null;
       }
-      // Detect format: ENC4 (600k), ENC3 (100k), or legacy ENC
+      // PHASE 7B-9: try Trusted Device with proper await
+      if (isTrustedDeviceEnabled()) {
+        var tdOk = await tryTrustedUnlock();
+        if (tdOk && _sessionPrivateKey) return _sessionPrivateKey;
+      }
+      // Fallback to password decrypt
       var plaintext;
       if (stored.startsWith('ENC4:')) {
         plaintext = await _decryptV4(stored);
@@ -365,11 +484,19 @@
       } else {
         plaintext = await decryptData(stored);
       }
-      if (!plaintext) return null;
+      if (!plaintext) { _finishRestore(false); return null; }
       var parsed = JSON.parse(plaintext);
       if (parsed && parsed.privateKey) {
+        var identity = _getPersistedWalletIdentity();
+        if (identity.exists && identity.address) {
+          var derivedAddr = _deriveAddressFromKey(parsed.privateKey);
+          if (derivedAddr && derivedAddr.toLowerCase() !== identity.address) {
+            return null;
+          }
+        }
         _sessionPrivateKey = parsed.privateKey;
         _scheduleAutoLock();
+        _finishRestore(true);
         if (!stored.startsWith('ENC4:')) {
           _tryMigrateToENC4(parsed.privateKey).catch(function(){});
         }
@@ -470,6 +597,7 @@
      ════════════════════════════════════════ */
   function createWalletWithBackup() {
     if (typeof ethers === 'undefined') return null;
+    if (_getPersistedWalletIdentity().exists) return null;
     try {
       var w = ethers.Wallet.createRandom();
       _sessionPrivateKey = w.privateKey;
@@ -805,6 +933,7 @@
       } catch(e) {}
     }
     loadState();
+    if (_getPersistedWalletIdentity().exists) return null;
     var w = createAgentWallet();
     if(w && agentState){
       _setSessionWallet(w);
@@ -819,7 +948,9 @@
 
   function getAgentAddress(){
     var w = getOrCreateWallet();
-    return w ? w.address : null;
+    if (w) return w.address;
+    if (!agentState) loadState();
+    return (agentState && agentState.walletAddress) ? agentState.walletAddress : null;
   }
 
   function getAgentSigner(){
@@ -948,7 +1079,7 @@
 
   function load(){
     loadState();
-    // Auto-load encrypted session key into RAM (non-blocking)
+    _startRestore();
     _loadSessionKeyEncrypted().then(function(key) {
       if (key && !agentWallet) {
         try {
@@ -986,8 +1117,14 @@
   }
 
   function _autoCreateIfMissing() {
+    if (_creationInProgress) return;
+    if (_restoreState === 'restoring') {
+      setTimeout(function() { _autoCreateIfMissing(); }, 500);
+      return;
+    }
+    var identity = _getPersistedWalletIdentity();
+    if (identity.exists && identity.address) return;
     _ensureV1KeyExists();
-    // Check all sources for an existing key
     if (agentWallet || _sessionPrivateKey) return;
     try {
       var v1 = localStorage.getItem('elligentt_agent_session_v1');
@@ -1000,7 +1137,6 @@
       var v1Old = localStorage.getItem('elligentt_agent_wallet_v1');
       if (v1Old) { var po = JSON.parse(v1Old); if (po && po.walletPrivateKey) return; }
     } catch(e) {}
-    // No key found — auto-create (sync, requires ethers)
     try {
       if (typeof ethers !== 'undefined') {
         createWalletWithBackup();
@@ -1210,7 +1346,12 @@
     clearBackupFlag: function() { _showBackup = false; },
     isSessionUnlocked: isSessionUnlocked,
     lockAgentWallet: lockAgentWallet,
+    hasPersistedWallet: function() { return _getPersistedWalletIdentity().exists; },
     verifyWalletPassword: verifyWalletPassword,
+    isTrustedDeviceEnabled: isTrustedDeviceEnabled,
+    enableTrustedDevice: enableTrustedDevice,
+    tryTrustedUnlock: tryTrustedUnlock,
+    disableTrustedDevice: disableTrustedDevice,
     restoreFromMnemonic: restoreFromMnemonic,
     deriveAddressFromMnemonic: deriveAddressFromMnemonic,
     deriveAccountAddress: deriveAccountAddress,

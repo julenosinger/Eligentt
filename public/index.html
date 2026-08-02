@@ -5320,6 +5320,19 @@ select.cinput option { background: #161a24; color: #dde2f0; }
   </div>
 </div>
 
+<!-- AGENT WALLET UNLOCK CONFIRMATION MODAL -->
+<div class="modal-ov" id="agent-unlock-confirm-modal" style="display:none;z-index:1000001">
+  <div style="background:var(--card);border:1px solid var(--border2);border-radius:12px;padding:20px;width:340px;max-width:90vw;text-align:center">
+    <i class="ti ti-lock-open" style="font-size:28px;color:var(--purple);margin-bottom:8px;display:block"></i>
+    <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:4px">Unlock Agent Wallet</div>
+    <div style="font-size:9px;color:var(--muted2);margin-bottom:14px;line-height:1.5">Confirm to unlock your Agent Wallet.<br>This is a signature only — no transaction, no gas cost.</div>
+    <div style="display:flex;gap:8px;justify-content:center">
+      <button onclick="_agentUnlockCancel()" style="font-size:10px;background:var(--border);color:var(--muted);border:1px solid var(--border2);border-radius:6px;padding:7px 16px;cursor:pointer">Cancel</button>
+      <button onclick="_agentUnlockConfirm()" style="font-size:10px;background:var(--purple);color:#fff;border:none;border-radius:6px;padding:7px 20px;cursor:pointer;font-weight:600">Confirm</button>
+    </div>
+  </div>
+</div>
+
 <!-- ===================================================== -->
 <!-- MULTISEND ONLY: Premium Futuristic Confirmation Modal   -->
 <!-- Scope: #modal (Multisend Review & Sign)                 -->
@@ -10649,13 +10662,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
             <div class="card">
               <div class="ch"><span class="ct"><i class="ti ti-id-badge-2" style="color:var(--purple);margin-right:5px"></i>Wallet Security &amp; Session</span></div>
               <div id="aiw-agent-pass" style="margin-bottom:6px"></div>
-              <div id="aiw-restore-wallet" style="margin-bottom:6px">
-                <div style="font-size:9px;color:var(--muted2);margin-bottom:4px">Restore Agent Wallet from recovery phrase</div>
-                <input id="aiw-restore-phrase" type="password" placeholder="12-word recovery phrase" style="width:100%;box-sizing:border-box;background:var(--bg);border:1px solid var(--border2);border-radius:4px;padding:5px 8px;font-size:10px;color:var(--text);margin-bottom:4px" onfocus="this.type='text'" onblur="if(!this.value)this.type='password'"/>
-                <input id="aiw-restore-pw" type="password" placeholder="Encryption password (min 8 chars)" style="width:100%;box-sizing:border-box;background:var(--bg);border:1px solid var(--border2);border-radius:4px;padding:5px 8px;font-size:10px;color:var(--text);margin-bottom:4px"/>
-                <button onclick="_restoreAgentWallet()" style="font-size:9px;background:var(--border);color:var(--muted);border:1px solid var(--border2);border-radius:4px;padding:4px 10px;cursor:pointer">Restore</button>
-                <span id="aiw-restore-msg" style="font-size:8px;margin-left:6px"></span>
-              </div>
+              <div id="aiw-trusted-device" style="margin-bottom:6px"></div>
               <div class="cb" id="aiw-sec-session"></div>
             </div>
             <div class="card" style="margin-top:10px">
@@ -13988,35 +13995,79 @@ function updateScheduleDatePreview() {
 
 // ── Agent Wallet Password UI ────────────────────────────
 function _renderAgentPassBox(box) {
-  var hasPw = false;
-  try { hasPw = typeof AgentWalletManager !== 'undefined' && AgentWalletManager.hasEncryptionPassword && AgentWalletManager.hasEncryptionPassword(); } catch(e) {}
-  if (hasPw) {
-    box.innerHTML = '<div style="display:flex;align-items:center;gap:6px"><span style="font-size:10px;color:#22c55e"><i class="ti ti-shield-lock" style="font-size:11px"></i> Password set</span><button onclick="_agentPassUpdate()" style="font-size:9px;background:var(--border);color:var(--muted);border:1px solid var(--border2);border-radius:4px;padding:3px 8px;cursor:pointer">Update</button><button onclick="_agentPassClear()" style="font-size:9px;background:none;color:#ef4444;border:1px solid rgba(239,68,68,.4);border-radius:4px;padding:3px 8px;cursor:pointer">Clear</button></div>';
+  var unlocked = false;
+  try { unlocked = typeof AgentWalletManager !== 'undefined' && AgentWalletManager.isSessionUnlocked && AgentWalletManager.isSessionUnlocked(); } catch(e) {}
+  var hasWallet = false;
+  try { hasWallet = typeof AgentWalletManager !== 'undefined' && AgentWalletManager.hasPersistedWallet && AgentWalletManager.hasPersistedWallet(); } catch(e) {}
+  if (!hasWallet && !unlocked) {
+    box.innerHTML = '<div style="font-size:9px;color:var(--muted2);text-align:center;padding:4px">No Agent Wallet created</div>';
+    return;
+  }
+  if (unlocked) {
+    box.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 8px;background:rgba(34,197,94,.06);border:1px solid rgba(34,197,94,.2);border-radius:6px"><span style="font-size:10px;color:#22c55e"><i class="ti ti-lock-open" style="font-size:11px;margin-right:4px"></i>Wallet Unlocked</span><button onclick="_agentWalletLock()" style="font-size:9px;background:rgba(239,68,68,.1);color:#ef4444;border:1px solid rgba(239,68,68,.3);border-radius:4px;padding:3px 10px;cursor:pointer">Lock Wallet</button></div>';
   } else {
-    box.innerHTML = '<div style="padding:8px;background:rgba(245,158,11,.06);border:1px solid rgba(245,158,11,.2);border-radius:6px;margin-bottom:6px"><div style="font-size:10px;color:#f59e0b;margin-bottom:6px"><i class="ti ti-alert-triangle" style="font-size:11px;margin-right:4px"></i>Set a session password to encrypt your Agent Wallet. Without it, the wallet key is lost on page reload.</div><div style="display:flex;gap:4px"><input id="aiw-pass-input" type="password" placeholder="Encryption password (min 8 chars)" style="flex:1;background:var(--bg);border:1px solid var(--border2);border-radius:4px;padding:5px 8px;font-size:11px;color:var(--text)" onkeydown="if(event.key===\'Enter\')_agentPassSet()"/><button onclick="_agentPassSet()" style="font-size:10px;background:var(--purple);color:#fff;border:none;border-radius:4px;padding:5px 12px;cursor:pointer;white-space:nowrap;font-weight:600">Set Password</button></div></div>';
+    box.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 8px;background:rgba(245,158,11,.06);border:1px solid rgba(245,158,11,.2);border-radius:6px"><span style="font-size:10px;color:#f59e0b"><i class="ti ti-lock" style="font-size:11px;margin-right:4px"></i>Wallet Locked</span><button onclick="_agentWalletUnlock()" style="font-size:9px;background:var(--purple);color:#fff;border:none;border-radius:4px;padding:3px 10px;cursor:pointer;font-weight:600">Unlock Wallet</button></div>';
   }
 }
-async function _agentPassSet() {
-  var inp = document.getElementById('aiw-pass-input');
-  var v = inp ? inp.value : '';
-  if (v.length < 8) { alert('Password must be at least 8 characters.'); return; }
-  if (typeof AgentWalletManager !== 'undefined' && AgentWalletManager.setEncryptionPassword) {
-    await AgentWalletManager.setEncryptionPassword(v);
+function _agentWalletUnlock() {
+  if (!walletAddress) { toast('Connect wallet first', 'warning'); return; }
+  if (typeof AgentWalletManager === 'undefined') return;
+  var m = document.getElementById('agent-unlock-confirm-modal');
+  if (m) m.style.display = 'flex';
+}
+function _agentUnlockConfirm() {
+  var m = document.getElementById('agent-unlock-confirm-modal');
+  if (m) m.style.display = 'none';
+  var msg = 'elligente-agent-unlock';
+  var provider = window.ethereum;
+  if (!provider && typeof window.signer !== 'undefined' && window.signer.signMessage) {
+    window.signer.signMessage(msg).then(function(sig) { _agentUnlockWithSig(sig); }).catch(function() { toast('Signature rejected', 'error'); });
+    return;
+  }
+  if (!provider) { toast('No wallet detected. Connect MetaMask or Rabby.', 'warning'); return; }
+  provider.request({ method: 'personal_sign', params: [msg, walletAddress] }).then(function(sig) {
+    _agentUnlockWithSig(sig);
+  }).catch(function() { toast('Signature rejected', 'error'); });
+}
+function _agentUnlockCancel() {
+  var m = document.getElementById('agent-unlock-confirm-modal');
+  if (m) m.style.display = 'none';
+}
+function _agentUnlockWithSig(sig) {
+  if (!sig) { toast('Signature rejected', 'error'); return; }
+  if (typeof AgentWalletManager === 'undefined' || !AgentWalletManager.setEncryptionPassword) return;
+  AgentWalletManager.setEncryptionPassword(sig).then(function() {
+    var box = document.getElementById('aiw-agent-pass');
+    if (box) _renderAgentPassBox(box);
+    toast('Wallet unlocked', 'success');
+  }).catch(function() { toast('Unlock failed', 'error'); });
+}
+function _agentWalletLock() {
+  if (typeof AgentWalletManager !== 'undefined' && AgentWalletManager.lockAgentWallet) {
+    AgentWalletManager.lockAgentWallet();
   }
   var box = document.getElementById('aiw-agent-pass');
   if (box) _renderAgentPassBox(box);
+  toast('Wallet locked', 'info');
 }
-function _agentPassUpdate() {
-  var box = document.getElementById('aiw-agent-pass');
-  if (!box) return;
-  box.innerHTML = '<div style="padding:8px;background:rgba(245,158,11,.06);border:1px solid rgba(245,158,11,.2);border-radius:6px;margin-bottom:6px"><div style="font-size:10px;color:#f59e0b;margin-bottom:6px"><i class="ti ti-shield-lock" style="font-size:11px;margin-right:4px"></i>Update your encryption password.</div><div style="display:flex;gap:4px"><input id="aiw-pass-input" type="password" placeholder="New password (min 8 chars)" style="flex:1;background:var(--bg);border:1px solid var(--border2);border-radius:4px;padding:5px 8px;font-size:11px;color:var(--text)" onkeydown="if(event.key===\'Enter\')_agentPassSet()"/><button onclick="_agentPassSet()" style="font-size:10px;background:var(--purple);color:#fff;border:none;border-radius:4px;padding:5px 12px;cursor:pointer;font-weight:600">Update</button></div></div>';
-}
-async function _agentPassClear() {
-  if (typeof AgentWalletManager !== 'undefined' && AgentWalletManager.setEncryptionPassword) {
-    await AgentWalletManager.setEncryptionPassword('');
+// ── Trusted Device ────────────────────────────────────
+async function _enableTrustedDevice() {
+  if (typeof AgentWalletManager === 'undefined' || !AgentWalletManager.enableTrustedDevice) return;
+  var result = await AgentWalletManager.enableTrustedDevice();
+  if (result.success) {
+    toast('Trusted Device enabled. Your wallet will stay unlocked on this device.', 'success');
+    var box = document.getElementById('aiw-trusted-device');
+    if (box && typeof _renderTrustedDevice === 'function') _renderTrustedDevice();
+  } else {
+    toast('Could not enable Trusted Device. Unlock your wallet first.', 'warning');
   }
-  var box = document.getElementById('aiw-agent-pass');
-  if (box) _renderAgentPassBox(box);
+}
+async function _disableTrustedDevice() {
+  if (typeof AgentWalletManager === 'undefined' || !AgentWalletManager.disableTrustedDevice) return;
+  AgentWalletManager.disableTrustedDevice();
+  toast('Trusted Device disabled.', 'info');
+  var box = document.getElementById('aiw-trusted-device');
+  if (box && typeof _renderTrustedDevice === 'function') _renderTrustedDevice();
 }
 // ── Agent Wallet Restore ──────────────────────────────
 async function _restoreAgentWallet() {
@@ -16112,8 +16163,22 @@ function startAttestationPolling(intentId, messageHash, srcDomain, txHash){
   _attestationTimers[intentId] = setTimeout(poll, delay);
 }
 
+var _irisCache = {};
+
 async function _doAttestationPoll(intentId, messageHash, srcDomain, txHash) {
+  var cacheKey = (txHash || messageHash) + '_' + srcDomain;
+  var now = Date.now();
+  if (_irisCache[cacheKey] && (now - _irisCache[cacheKey].ts) < 15000) {
+    var c = _irisCache[cacheKey];
+    if (c.result) _applyIrisResult(intentId, c.result, txHash, srcDomain);
+    else updateBridgeHistory(intentId, { irisStatus: 'pending_attestation' });
+    return;
+  }
+  if (_irisCache[cacheKey] && _irisCache[cacheKey].pending) return;
+  _irisCache[cacheKey] = { pending: true, ts: now };
+
   var irisV2Result = null;
+  if (document.hidden) { delete _irisCache[cacheKey].pending; updateBridgeHistory(intentId, { irisStatus: 'pending_attestation' }); return; }
   if(txHash && srcDomain){
     try {
       var v2url = 'https://iris-api-sandbox.circle.com/v2/messages/' + srcDomain + '?transactionHash=' + txHash;
@@ -16135,6 +16200,11 @@ async function _doAttestationPoll(intentId, messageHash, srcDomain, txHash) {
     } catch(_v1e){}
   }
 
+  _irisCache[cacheKey] = { result: irisV2Result, ts: now, pending: false };
+  _applyIrisResult(intentId, irisV2Result, txHash, srcDomain);
+}
+
+function _applyIrisResult(intentId, irisV2Result, txHash, srcDomain) {
   if(!irisV2Result){
     updateBridgeHistory(intentId, { irisStatus: 'pending_attestation' });
     return;
@@ -20289,19 +20359,14 @@ async function executeBridge(){
     const destAddr32   = ethers.zeroPadValue(walletAddress, 32);
     const zeroCaller32 = ethers.zeroPadValue('0x0000000000000000000000000000000000000000', 32);
 
-    // Arc Testnet as DESTINATION only supports Standard Transfer (minFinalityThreshold >= 2000).
-    // Fast Transfer (1000) is NOT supported for Arc as destination — Iris will never attest.
-    const ARC_DOMAIN_ID = 26;
-    const isToArc = (toConfig.domain === ARC_DOMAIN_ID);
-    const finalityThreshold = isToArc ? 2000 : 1000;
+    const finalityThreshold = 1000; // Fast Transfer for all destinations (Circle docs confirm Arc supports Fast Transfer)
 
-    // For inbound to Arc (Standard), we try a small maxFee as suggested — it may help relayer priority in some cases
     // Use a positive maxFee for ALL routes — zero-fee burns may be deprioritized
     const maxFee = ethers.parseUnits('0.5', 6);
 
     _log('[Bridge] SOURCE DOMAIN:', fromConfig.domain);
     _log('[Bridge] DESTINATION DOMAIN:', toConfig.domain);
-    _log('[Bridge] finalityThreshold:', finalityThreshold, isToArc ? '(Standard — Arc destination)' : '(Fast)');
+    _log('[Bridge] finalityThreshold:', finalityThreshold, '(Fast Transfer)');
     _log('[Bridge] maxFee for burn:', ethers.formatUnits(maxFee, 6), 'USDC');
 
     await verifyCurrentChain(fromChain.chainId, 'Bridge depositForBurn');
@@ -20796,6 +20861,16 @@ let contactFilter = 'all';
 let currentPayLink = null;
 
 // sync txHistory from batchCount changes
+function logToReports(type, amount, rcptCount, txHash, opts) {
+  var entry = {
+    id: (opts && opts.id) || ('#' + Math.floor(Math.random() * 9e7).toString().padStart(7,'0')),
+    date: new Date().toISOString(), type: type, recipients: Number(rcptCount) || 1,
+    amount: parseFloat(amount) || 0, fee: parseFloat((opts && opts.fee) || 0),
+    status: (opts && opts.status) || 'Success', txHash: txHash || ''
+  };
+  txHistory.unshift(entry);
+  Store.save('txhistory', txHistory);
+}
 function syncHistoryFromBatch(batchId, total, rcptCount, txHash, blockNumber) {
   logToReports('Batch', total, rcptCount, txHash, { id: batchId, fee: +(total*MULTISEND_FEE_RATE).toFixed(2) });
   if (typeof logFeeEvent === 'function') logFeeEvent({ module:'MultiSend', amount:total, feeAmount:+(total*MULTISEND_FEE_RATE).toFixed(4), asset:'USDC', txHash:txHash });
@@ -25876,19 +25951,13 @@ async function xcExecuteSend() {
     const mintRecipient32 = ethers.zeroPadValue(recipient, 32);
     const zeroCaller32    = ethers.zeroPadValue('0x0000000000000000000000000000000000000000', 32);
 
-    // Arc Testnet as DESTINATION only supports Standard Transfer (minFinalityThreshold >= 2000).
-    // Fast Transfer (1000) is NOT supported for Arc as destination — Iris will never attest.
-    const ARC_DOMAIN_ID = 26;
-    const isToArc = (toConfig.domain === ARC_DOMAIN_ID);
-    const finalityThreshold = isToArc ? 2000 : 1000;
+    const finalityThreshold = 1000; // Fast Transfer for all destinations
 
-    // For inbound to Arc (Standard), we try a small maxFee as suggested — it may help relayer priority in some cases
-    // Use a positive maxFee for ALL routes — zero-fee burns may be deprioritized
     const maxFee = ethers.parseUnits('0.5', 6);
 
     _log('[XC] SOURCE DOMAIN:', fromConfig.domain);
     _log('[XC] DESTINATION DOMAIN:', toConfig.domain);
-    _log('[XC] finalityThreshold:', finalityThreshold, isToArc ? '(Standard — Arc destination)' : '(Fast)');
+    _log('[XC] finalityThreshold:', finalityThreshold, '(Fast Transfer)');
     _log('[XC] maxFee for burn:', ethers.formatUnits(maxFee, 6), 'USDC');
 
     await verifyCurrentChain(from.chainId, 'XC depositForBurn');
@@ -42924,7 +42993,12 @@ setTimeout(function() {
 
     // [C1 FIX] Use encrypted v2 signer via AgentWalletManager instead of plaintext localStorage
     var signer = await _agentGetSigner();
-    if(!signer){ _agentStateMsg(execId, 'FAILED', 'No agent session key — reconnect or create Agent Wallet'); return; }
+    if(!signer){
+      autUI('ai', R.card(R.head('lock','Agent Wallet Locked',{text:'Locked',cls:'pending'}),
+        R.row('Action','Unlock your Agent Wallet to continue','muted'),
+        R.actions({icon:'lock-open',label:'Unlock Wallet',cls:'primary',action:"_agentUnlockConfirm()"})));
+      return;
+    }
 
     var provider = signer.provider;
     var agentAddr = signer.address;
@@ -43078,6 +43152,12 @@ setTimeout(function() {
     }
   }
 
+  function _showAgentUnlockCard() {
+    autUI('ai', R.card(R.head('lock','Agent Wallet Locked',{text:'Locked',cls:'pending'}),
+      R.intro('Your Agent Wallet is locked. Confirm to unlock and continue.'),
+      R.actions({icon:'lock-open',label:'Unlock Wallet',cls:'primary',action:"_agentUnlockConfirm()"})));
+  }
+
   function _agentStateMsg(execId, state, detail){
     var states = {
       PLANNING:       ['#6b7280','Planning execution...'],
@@ -43183,7 +43263,7 @@ setTimeout(function() {
     // [C1 FIX] Use encrypted v2 signer via AgentWalletManager
     var signer = await _agentGetSigner();
     if(!signer){
-      _agentStateMsg(execId, 'FAILED', 'No agent session key found. Reconnect wallet.');
+      _showAgentUnlockCard();
       return;
     }
 
@@ -43345,7 +43425,7 @@ setTimeout(function() {
     // [C1 FIX] Use encrypted v2 signer via AgentWalletManager
     var signer = await _agentGetSigner();
     if(!signer){
-      _agentStateMsg(execId, 'FAILED', 'No agent session key found. Reconnect wallet.');
+      _showAgentUnlockCard();
       return;
     }
 
@@ -43618,7 +43698,7 @@ setTimeout(function() {
     // [C1 FIX] Use encrypted v2 signer via AgentWalletManager
     var signer = await _agentGetSigner();
     if(!signer){
-      _agentStateMsg(execId, 'FAILED', 'No agent session key found.');
+      _showAgentUnlockCard();
       return;
     }
 
@@ -43783,7 +43863,7 @@ setTimeout(function() {
     // [C1 FIX] Use encrypted v2 signer via AgentWalletManager
     var signer = await _agentGetSigner();
     if(!signer){
-      _agentStateMsg(execId, 'FAILED', 'No agent session key found. Reconnect wallet.');
+      _showAgentUnlockCard();
       return;
     }
 
@@ -43938,7 +44018,7 @@ setTimeout(function() {
     // [C1 FIX] Use encrypted v2 signer via AgentWalletManager
     var signer = await _agentGetSigner();
     if(!signer){
-      _agentStateMsg(execId, 'FAILED', 'No agent session key found. Reconnect wallet.');
+      _showAgentUnlockCard();
       return;
     }
 
