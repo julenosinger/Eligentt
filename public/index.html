@@ -10291,8 +10291,9 @@ select.cinput option { background: #161a24; color: #dde2f0; }
             <input type="file" id="aut-csv-input" accept=".csv,.xlsx,.xls,.txt,.json" style="display:none" onchange="autonomaHandleFile(this)"/>
             <button class="aut-send-btn" onclick="document.getElementById('aut-csv-input').click()" title="Upload Financial File (CSV, XLSX, TXT, JSON)" aria-label="Upload financial file" style="background:rgba(167,139,250,.12);border-color:rgba(167,139,250,.25);color:#a78bfa"><i class="ti ti-file-upload"></i></button>
             <textarea class="aut-input" id="aut-input" placeholder="Type or speak your request..." rows="1" aria-label="Message Autonoma" aria-multiline="true" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();autonomaSend()}"></textarea>
-            <button class="aut-send-btn aut-mic-btn" id="aut-mic-btn" type="button" title="Voice input" aria-label="Start voice input"><i class="ti ti-microphone"></i></button>
-            <button class="aut-send-btn" onclick="autonomaSend()" title="Send" aria-label="Send message"><i class="ti ti-send"></i></button>
+      <button class="aut-send-btn aut-mic-btn" id="aut-mic-btn" type="button" title="Voice input" aria-label="Start voice input"><i class="ti ti-microphone"></i></button>
+      <button class="aut-send-btn aut-stop-btn" id="aut-stop-btn" onclick="autonomaStop()" title="Stop" aria-label="Stop generating" style="display:none;background:#ef4444;border-color:#ef4444"><i class="ti ti-player-stop-filled" style="font-size:14px"></i></button>
+      <button class="aut-send-btn" id="aut-send-btn" onclick="autonomaSend()" title="Send" aria-label="Send message"><i class="ti ti-send"></i></button>
           </div>
         </div>
       </div>
@@ -38238,8 +38239,14 @@ const UBScreen = (function() {
     const d=document.createElement('div'); d.className='aut-msg ai'; d.id='aut-typing';
     d.innerHTML='<div class="aut-msg-avatar"><i class="ti ti-brain"></i></div><div class="aut-msg-body"><div class="aut-msg-meta"><span class="aut-msg-name">Autonoma</span><span class="aut-msg-time">'+fmtTime()+'</span></div><div class="aut-typing"><span></span><span></span><span></span></div></div>';
     c.appendChild(d); c.scrollTop=c.scrollHeight;
+    var stop=document.getElementById('aut-stop-btn'); if(stop) stop.style.display='';
+    var send=document.getElementById('aut-send-btn'); if(send) send.style.display='none';
   }
-  function autHideTyping() { const e=document.getElementById('aut-typing'); if(e)e.remove(); }
+  function autHideTyping() {
+    const e=document.getElementById('aut-typing'); if(e)e.remove();
+    var stop=document.getElementById('aut-stop-btn'); if(stop) stop.style.display='none';
+    var send=document.getElementById('aut-send-btn'); if(send) send.style.display='';
+  }
 
   // ── Init / Chat Management ──
   window.autonomaInit = function() {
@@ -38353,6 +38360,17 @@ const UBScreen = (function() {
   };
   window.autConfirmOp = function(oid) { const op=autPendingOps[oid]; if(!op) return; delete autPendingOps[oid]; try{op.execute();}catch(e){} };
   window.autCancelOp = function(oid) { delete autPendingOps[oid]; autUI('ai','<div class="aut-intro" style="color:var(--muted2)"><i class="ti ti-x" style="margin-right:4px"></i>Operation cancelled.</div>'); };
+  window.autonomaStop = function() {
+    autHideTyping();
+    // Signal all running agent executions to stop
+    _agentStopRequested = true;
+    // Clear pending operations
+    var keys = Object.keys(autPendingOps);
+    for (var i = 0; i < keys.length; i++) { delete autPendingOps[keys[i]]; }
+    // Stop agent scheduler
+    try { if (typeof _agentStopScheduler === 'function') _agentStopScheduler(); } catch(e) {}
+    autUI('ai','<div class="aut-intro" style="color:var(--muted2)"><i class="ti ti-player-stop-filled" style="margin-right:4px"></i>Stopped.</div>');
+  };
   window.autCopyText = function(text) { try{navigator.clipboard.writeText(text);}catch(e){} const t=document.getElementById('toast'); if(t){t.textContent='Copied!';t.classList.add('show');setTimeout(()=>t.classList.remove('show'),1500);} };
 
   // ── Global permit approve/reject callbacks (reliable inline scope) ──
@@ -42782,6 +42800,20 @@ setTimeout(function() {
   // ══════════════════════════════════════════════════════════
 
   var _agentExecState = {};
+  var _agentStopRequested = false;
+
+  function _agentStopCheck(execId) {
+    if (_agentStopRequested) {
+      _agentStateMsg(execId, 'CANCELLED', 'Stopped by user');
+      _agentStopRequested = false;
+      return true;
+    }
+    return false;
+  }
+
+  function _agentCancelledMsg(execId) {
+    _agentStateMsg(execId, 'CANCELLED', 'Stopped by user');
+  }
 
   function _agentGetPrivateKey(){
     // [C1 FIX] Deprecated — use _agentGetSigner() instead which uses encrypted v2 storage.
@@ -42904,10 +42936,12 @@ setTimeout(function() {
 
   async function _agentExecuteOp(operation, amount, asset, paramsJson){
     var execId = 'exec_' + Date.now();
+    _agentStopRequested = false;
 
     // [C1 FIX] Use encrypted v2 signer via AgentWalletManager instead of plaintext localStorage
     var signer = await _agentGetSigner();
     if(!signer){ return; }
+    if (_agentStopCheck(execId)) return;
 
     var provider = signer.provider;
     var agentAddr = signer.address;
@@ -42923,6 +42957,7 @@ setTimeout(function() {
       }
 
       _agentStateMsg(execId, 'BROADCASTING', 'Send '+amount+' USDC to '+dest.substring(0,8)+'...');
+      if (_agentStopCheck(execId)) return;
 
       var USDC='0x3600000000000000000000000000000000000000';
       var iface = new ethers.Interface(['function transfer(address to, uint256 amount) returns (bool)']);
@@ -43075,7 +43110,8 @@ setTimeout(function() {
       REJECTED:       ['#f59e0b','Transaction rejected'],
       REVERTED:       ['#ef4444','Transaction reverted on-chain'],
       DROPPED:        ['#ef4444','Transaction dropped'],
-      VERIFICATION_FAILED: ['#ef4444','Verification failed']
+      VERIFICATION_FAILED: ['#ef4444','Verification failed'],
+      CANCELLED:        ['#ef4444','Cancelled by user']
     };
     var s = states[state] || ['#6b7280',state];
     var msg = '<div style="font-size:10px"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:'+s[0]+';margin-right:6px;vertical-align:middle"></span>'+
@@ -43205,6 +43241,7 @@ setTimeout(function() {
       if(!txData||!contractAddr||!txData.calldata) continue;
 
       _agentStateMsg(execId, 'BROADCASTING', 'Step '+(i+1)+'/'+calldataPlan.steps.length+': '+step.label);
+      if (_agentStopCheck(execId)) return;
 
       try {
         // Arc uses EIP-1559 with minimum 20 Gwei maxFeePerGas
@@ -43377,6 +43414,7 @@ setTimeout(function() {
       if(!txData||!contractAddr||!txData.calldata) continue;
 
       _agentStateMsg(execId, 'BROADCASTING', 'Step '+(i+1)+'/'+calldataPlan.steps.length+': '+step.label);
+      if (_agentStopCheck(execId)) return;
 
       // Rebuild calldata with correct mintRecipient if this is the depositForBurn step
       var calldata = txData.calldata;
@@ -43647,6 +43685,7 @@ setTimeout(function() {
       if(!txData||!contractAddr||!txData.calldata) continue;
 
       _agentStateMsg(execId, 'BROADCASTING', 'Step '+(i+1)+'/'+calldataPlan.steps.length+': '+step.label);
+      if (_agentStopCheck(execId)) return;
 
       var calldata = txData.calldata;
       if(txData.method === 'depositForBurn' && typeof ethers !== 'undefined'){
