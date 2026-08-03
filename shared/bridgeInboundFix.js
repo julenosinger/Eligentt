@@ -19,7 +19,7 @@
 
   /* ── Fee config ── */
   var TREASURY_VAULT = '0xbfC9E8F79bd30b912081ae88F9ad0A515F08c2F1';
-  var FEE_ENABLED = true;        // ativo por padrao
+  var FEE_ENABLED = false;       // disabled
   var FEE_BPS = 50;              // 0.50%
   var FEE_MIN_USDC = 0.005;     // taxa minima 
   var FEE_MAX_USDC = 100;       // taxa maxima
@@ -237,7 +237,8 @@
   }
 
   setTimeout(install, 2500);
-  setTimeout(_injectFeeDisplay, 3500);
+  // Fee display disabled
+  // setTimeout(_injectFeeDisplay, 3500);
 
   window.BridgeInboundFix = {
     install: install,

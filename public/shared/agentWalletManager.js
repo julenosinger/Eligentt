@@ -16,6 +16,7 @@
 
   var WALLET_KEY = 'elligentt_agent_wallet_v2';
   var SESSION_KEY_ENC = 'elligentt_agent_session_v2';
+  var UNLOCK_SECRET_KEY = 'elligentt_agent_unlock_secret_v1';
   var ARC_RPC = 'https://arc-testnet.drpc.org';
   var ARC_CHAIN_ID = 5042002;
 
@@ -1112,6 +1113,7 @@
       _sessionPassword = String(password);
     }
     try {
+      var payload = JSON.stringify({ privateKey: w.privateKey, mnemonic: phrase, version: SCHEMA_VERSION });
       var encrypted = await _encryptV4(payload);
       if (!encrypted || !encrypted.startsWith('ENC4:')) {
         _sessionPrivateKey = null; _sessionPassword = null; _sessionMnemonic = null;
