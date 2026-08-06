@@ -9,7 +9,7 @@
 
   var loaded = {};
   var pending = {};
-  var basePath = '/shared/';
+  var basePath = '/';
 
   /* ════════════════════════════════════════
      MODULE CLASSIFICATION
