@@ -699,6 +699,20 @@
   async function _saveSessionKeyEncrypted() {
     if (!_sessionPrivateKey) return;
     var payload = JSON.stringify({ privateKey: _sessionPrivateKey, mnemonic: _sessionMnemonic || null, version: SCHEMA_VERSION });
+    // Encrypt with device-bound unlock secret (ENC6 — no password needed)
+    try {
+      var secret = _getStoredUnlockSecret();
+      if (!secret) {
+        secret = _generateUnlockSecret();
+        _storeUnlockSecret(secret);
+      }
+      var encrypted = await _encryptV6(payload);
+      if (encrypted) {
+        localStorage.setItem(SESSION_KEY_ENC, encrypted);
+        return;
+      }
+    } catch(e) { console.warn('[AgentWallet] Session encryption failed, using plaintext fallback'); }
+    // Fallback: store as plaintext (will be auto-migrated next time)
     try { localStorage.setItem(SESSION_KEY_ENC, payload); } catch(e) {}
   }
 
@@ -727,22 +741,42 @@
         var tdOk = await tryTrustedUnlock();
         if (tdOk && _sessionPrivateKey) return _sessionPrivateKey;
       }
-      // PHASE 7C-ROLLBACK: migrate ENC5/ENC6 → ENC4 if password available
-      if (!_sessionPassword && (stored.startsWith('ENC5:') || stored.startsWith('ENC6:'))) {
-        // Wallet in experimental format — needs password to migrate
+      // ENC6: device-bound unlock secret (no password needed)
+      if (stored.startsWith('ENC6:')) {
+        var v6plain = await _decryptV6(stored);
+        if (v6plain) {
+          var v6p = JSON.parse(v6plain);
+          if (v6p && v6p.privateKey) {
+            _sessionPrivateKey = v6p.privateKey;
+            if (v6p.mnemonic) _sessionMnemonic = v6p.mnemonic;
+            _scheduleAutoLock();
+            _finishRestore(true);
+            return _sessionPrivateKey;
+          }
+        }
         _finishRestore(false);
         return null;
       }
+      // ENC5: deprecated, auto-migrate to ENC6
+      if (stored.startsWith('ENC5:')) {
+        if (!_sessionPassword) { _finishRestore(false); return null; }
+        // fall through to password decrypt
+      }
       // Fallback to password decrypt
       if (!stored.startsWith('ENC4:') && !stored.startsWith('ENC3:') && !stored.startsWith('ENC:') && !stored.startsWith('ENC5:') && !stored.startsWith('ENC6:')) {
-        // Plaintext — no password needed
-        var parsedRaw = JSON.parse(stored);
-        if (parsedRaw && parsedRaw.privateKey && _isValidPrivateKey(parsedRaw.privateKey)) {
-          _sessionPrivateKey = parsedRaw.privateKey;
-          _scheduleAutoLock();
-          _finishRestore(true);
-          return _sessionPrivateKey;
-        }
+        // Legacy plaintext session — parse, then auto-migrate to encrypted ENC6
+        try {
+          var parsedRaw = JSON.parse(stored);
+          if (parsedRaw && parsedRaw.privateKey && _isValidPrivateKey(parsedRaw.privateKey)) {
+            _sessionPrivateKey = parsedRaw.privateKey;
+            if (parsedRaw.mnemonic) _sessionMnemonic = parsedRaw.mnemonic;
+            _scheduleAutoLock();
+            _finishRestore(true);
+            // Auto-migrate to encrypted storage
+            _saveSessionKeyEncrypted().catch(function(){});
+            return _sessionPrivateKey;
+          }
+        } catch(pe) {}
         _finishRestore(false);
         return null;
       }
@@ -1179,33 +1213,21 @@
     if (!agentWallet && _sessionPrivateKey) {
       return restoreAgentWallet(_sessionPrivateKey);
     }
-    // [C1 FIX] Fallback: try restoring from old v1 session key (Treasury backwards compat)
-    // On successful load, immediately migrate to encrypted v2 and delete v1 plaintext
+    // Legacy v1 plaintext keys detected — DO NOT auto-restore (security)
+    // Instead, warn user and delete the plaintext keys. User must restore via mnemonic.
     if (!agentWallet) {
       try {
         var oldRaw = localStorage.getItem('elligentt_agent_session_v1');
         if (oldRaw) {
-          var old = JSON.parse(oldRaw);
-          if (old && old.privateKey && _isValidPrivateKey(old.privateKey)) {
-            _sessionPrivateKey = old.privateKey;
-            _migrateV1ToEncryptedV2(old.privateKey).then(function(mr) {
-              if (mr && mr.success) _safeDeleteLegacyV1();
-            }).catch(function(){});
-            return restoreAgentWallet(old.privateKey);
-          }
+          console.warn('[AgentWallet] Legacy v1 plaintext key detected. Deleted for security. Restore via mnemonic if needed.');
+          _safeDeleteLegacyV1();
         }
       } catch(e) {}
       try {
         var oldStateRaw = localStorage.getItem('elligentt_agent_wallet_v1');
         if (oldStateRaw) {
-          var oldState = JSON.parse(oldStateRaw);
-          if (oldState && oldState.walletPrivateKey && _isValidPrivateKey(oldState.walletPrivateKey)) {
-            _sessionPrivateKey = oldState.walletPrivateKey;
-            _migrateV1ToEncryptedV2(oldState.walletPrivateKey).then(function(mr) {
-              if (mr && mr.success) _safeDeleteLegacyV1();
-            }).catch(function(){});
-            return restoreAgentWallet(oldState.walletPrivateKey);
-          }
+          console.warn('[AgentWallet] Legacy v1 plaintext state detected. Deleted for security. Restore via mnemonic if needed.');
+          _safeDeleteLegacyV1();
         }
       } catch(e) {}
     }

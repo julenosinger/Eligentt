@@ -21,14 +21,14 @@
 <link rel="apple-touch-icon" href="/icon-192.png"/>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet"/>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.44.0/tabler-icons.min.css"/>
-<script src="https://cdn.jsdelivr.net/npm/ethers@6.7.1/dist/ethers.umd.min.js" integrity="sha384-eoEZatO/ymJi+LdBilp3xt/M9N9Lla2JlMVPZuk48Fg1YGl2Mc+vmsky+nkOtlSi" crossorigin="anonymous"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.44.0/tabler-icons.min.css" integrity="sha384-mY6asDzXlnHeimHHXw8cavPeArhEcAfnCibDFiaDPex3Fudo+edh/hnT7siZz8bg" crossorigin="anonymous"/>
+<script src="https://cdn.jsdelivr.net/npm/ethers@6.13.5/dist/ethers.umd.min.js" integrity="sha384-NRAZj94DQk3dgtsOZzVYHbYVV1DFkF5QhL5RRxF0ILZLi6OQ7CsMlun748D42JbO" crossorigin="anonymous"></script>
 <!-- QRCode.js -->
 <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js" integrity="sha384-3zSEDfvllQohrq0PHL1fOXJuC/jSOO34H46t6UQfobFOmxE5BpjjaIJY5F2/bMnU" crossorigin="anonymous"></script>
 <!-- WalletConnect v2 -->
-<script src="https://cdn.jsdelivr.net/npm/@web3modal/ethereum@2.7.1/dist/index.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/@web3modal/ethereum@2.7.1/dist/index.js" integrity="sha384-scb267QicZDIPcJtRbV2eSYKkU7C4HaAWIMu31Ou9tDHHJXvp3Lg9XsWxQ+CWR7a" crossorigin="anonymous" defer></script>
 <!-- DOMPurify -->
-<script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.9/dist/purify.min.js" integrity="sha384-3HPB1XT51W3gGRxAmZ+qbZwRpRlFQL632y8x+adAqCr4Wp3TaWwCLSTAJJKbyWEK" crossorigin="anonymous" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.4/dist/purify.min.js" integrity="sha384-eEu5CTj3qGvu9PdJuS+YlkNi7d2XxQROAFYOr59zgObtlcux1ae1Il3u7jvdCSWu" crossorigin="anonymous" defer></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <!-- Elligente Centralized Config (load before inline scripts) -->
 <script src="/config/system.js"></script>
@@ -24469,6 +24469,86 @@ const SettingsService = {
   _selectedAuditIndex: -1,
   _saving: false,
   _domCache: {},
+  // Sensitive fields that must be encrypted before localStorage storage
+  _SENSITIVE_KEYS: ['circleApiKey','circleEntitySecret','circleWebhookSecret','circleTreasury',
+    'telegramToken','discordWebhook','slackWebhook','webhookUrl','wcProjectId'],
+  // Provider key-secret pairs (dynamic — matched by suffix)
+  _SENSITIVE_SUFFIXES: ['Key','Secret','ApiKey','apiSecret','Token','Webhook'],
+
+  // Derive or retrieve device encryption key
+  async _getSettingsKey() {
+    var KEY = 'elligentt_settings_enc_key';
+    try {
+      var raw = await this._deriveDeviceKey();
+      var enc = new TextEncoder().encode(raw);
+      var key = await crypto.subtle.importKey('raw', enc, { name: 'AES-GCM' }, false, ['encrypt','decrypt']);
+      return key;
+    } catch(e) {
+      // Fallback: derive from navigator properties (stable per device)
+      var seed = (navigator.hardwareConcurrency || 4) + '|' + (navigator.language || 'en') + '|' + (screen.width || 1920);
+      var hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(seed));
+      return crypto.subtle.importKey('raw', hash, { name: 'AES-GCM' }, false, ['encrypt','decrypt']);
+    }
+  },
+
+  async _deriveDeviceKey() {
+    var stored = localStorage.getItem('elligentt_settings_enc_key');
+    if (stored) return stored;
+    var arr = new Uint8Array(32);
+    crypto.getRandomValues(arr);
+    var key = Array.from(arr, function(b){ return b.toString(16).padStart(2,'0'); }).join('');
+    localStorage.setItem('elligentt_settings_enc_key', key);
+    return key;
+  },
+
+  _isSensitive(key) {
+    if (this._SENSITIVE_KEYS.indexOf(key) !== -1) return true;
+    for (var i = 0; i < this._SENSITIVE_SUFFIXES.length; i++) {
+      if (key.endsWith(this._SENSITIVE_SUFFIXES[i])) return true;
+    }
+    return false;
+  },
+
+  async _encryptSensitive(payload) {
+    var out = Object.assign({}, payload);
+    var key = await this._getSettingsKey();
+    var iv = crypto.getRandomValues(new Uint8Array(12));
+    var enc = new TextEncoder();
+    var sensitiveFields = [];
+    for (var k in out) {
+      if (out[k] && typeof out[k] === 'string' && this._isSensitive(k)) {
+        sensitiveFields.push(k);
+      }
+    }
+    if (sensitiveFields.length === 0) return out;
+    var plaintext = JSON.stringify(sensitiveFields.reduce(function(o,k){ o[k]=out[k]; return o; }, {}));
+    var encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv }, key, enc.encode(plaintext));
+    // Store as base64:iv:ciphertext
+    var ivHex = Array.from(iv, function(b){ return b.toString(16).padStart(2,'0'); }).join('');
+    var ctHex = Array.from(new Uint8Array(encrypted), function(b){ return b.toString(16).padStart(2,'0'); }).join('');
+    out['_enc'] = ivHex + ':' + ctHex;
+    // Remove sensitive plaintext fields
+    for (var i = 0; i < sensitiveFields.length; i++) delete out[sensitiveFields[i]];
+    return out;
+  },
+
+  async _decryptSensitive(payload) {
+    if (!payload || !payload._enc) return payload;
+    var out = Object.assign({}, payload);
+    try {
+      var parts = payload._enc.split(':');
+      if (parts.length !== 2) { delete out._enc; return out; }
+      var iv = new Uint8Array(parts[0].match(/.{2}/g).map(function(b){ return parseInt(b,16); }));
+      var ct = new Uint8Array(parts[1].match(/.{2}/g).map(function(b){ return parseInt(b,16); }));
+      var key = await this._getSettingsKey();
+      var decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: iv }, key, ct.buffer);
+      var dec = new TextDecoder().decode(decrypted);
+      var sensitive = JSON.parse(dec);
+      for (var k in sensitive) out[k] = sensitive[k];
+      delete out._enc;
+    } catch(e) { delete out._enc; }
+    return out;
+  },
 
   getToken() {
     return '';
@@ -24505,14 +24585,33 @@ const SettingsService = {
   },
 
   _fallbackLocal() {
+    var self = this;
     try {
       const s = JSON.parse(localStorage.getItem('arcpay_settings') || '{}');
-      this._cache = s;
-      this._loaded = true;
-      this._lastLoadTime = Date.now();
-      this._invalidateDomCache();
-      this._applyToForm();
-      ConfigurationEngine.sync();
+      if (s._enc && typeof crypto !== 'undefined' && crypto.subtle) {
+        this._decryptSensitive(s).then(function(decrypted) {
+          self._cache = decrypted;
+          self._loaded = true;
+          self._lastLoadTime = Date.now();
+          self._invalidateDomCache();
+          self._applyToForm();
+          ConfigurationEngine.sync();
+        }).catch(function() {
+          self._cache = s;
+          self._loaded = true;
+          self._lastLoadTime = Date.now();
+          self._invalidateDomCache();
+          self._applyToForm();
+          ConfigurationEngine.sync();
+        });
+      } else {
+        this._cache = s;
+        this._loaded = true;
+        this._lastLoadTime = Date.now();
+        this._invalidateDomCache();
+        this._applyToForm();
+        ConfigurationEngine.sync();
+      }
     } catch(e) {}
   },
 
@@ -24554,7 +24653,19 @@ const SettingsService = {
   },
 
   _saveLocal(payload) {
-    try { localStorage.setItem('arcpay_settings', JSON.stringify({...payload, ts:Date.now()})); } catch(e) {}
+    var self = this;
+    if (typeof crypto !== 'undefined' && crypto.subtle) {
+      this._encryptSensitive(payload).then(function(encrypted) {
+        try { localStorage.setItem('arcpay_settings', JSON.stringify({...encrypted, ts:Date.now()})); } catch(e) {}
+      }).catch(function() {
+        // Fallback: store without sensitive fields if encryption fails
+        var safe = Object.assign({}, payload);
+        for (var k in safe) { if (self._isSensitive(k)) delete safe[k]; }
+        try { localStorage.setItem('arcpay_settings', JSON.stringify({...safe, ts:Date.now()})); } catch(e) {}
+      });
+    } else {
+      try { localStorage.setItem('arcpay_settings', JSON.stringify({...payload, ts:Date.now()})); } catch(e) {}
+    }
   },
 
   _gatherAll() {
@@ -24986,8 +25097,13 @@ const SettingsService = {
     } catch(e) {
       try {
         const s = JSON.parse(localStorage.getItem('arcpay_settings') || '{}');
-        this._downloadJSON('elligentt-settings-backup-' + Date.now() + '.json', s);
-        toast('Backup exported (local)','info');
+        // Redact sensitive fields in local export
+        var safe = Object.assign({}, s);
+        delete safe._enc;
+        var self = this;
+        for (var k in safe) { if (self._isSensitive(k)) safe[k] = '[ENCRYPTED]'; }
+        this._downloadJSON('elligentt-settings-backup-' + Date.now() + '.json', safe);
+        toast('Backup exported (local — keys redacted)','info');
       } catch(e2) { toast('Export failed: ' + this._safeError(e2), 'error'); }
     }
     this._setBtnNormal('#page-settings .page-header .btn:first-of-type');
@@ -39524,6 +39640,12 @@ const UBScreen = (function() {
     try {
       var file = input.files && input.files[0];
       if (!file) return;
+      // Max 5MB file size limit
+      if (file.size > 5 * 1024 * 1024) {
+        toast('File too large (max 5MB)', 'error');
+        input.value = '';
+        return;
+      }
       var name = file.name || '';
       var ext = name.split('.').pop().toLowerCase();
       var reader = new FileReader();
@@ -39963,8 +40085,51 @@ const UBScreen = (function() {
     if(r.indexOf('connected') !== -1 || r.indexOf('balance') !== -1) return {status:'completed'};
     return {status:'completed'};
   }
-  function autSave(){try{localStorage.setItem(AUT_KEY,JSON.stringify(autChats))}catch(e){}}
-  function autLoad(){try{const r=localStorage.getItem(AUT_KEY);if(r){autChats=JSON.parse(r);if(autChats.length)autCurId=autChats[0].id;}}catch(e){autChats=[];}}
+  var _autEncKey = null;
+  async function _autGetEncKey() {
+    if (_autEncKey) return _autEncKey;
+    var stored = localStorage.getItem('elligentt_autonoma_enc_key');
+    if (stored) {
+      var raw = new Uint8Array(stored.split(',').map(Number));
+      return _autEncKey = await crypto.subtle.importKey('raw', raw, { name: 'AES-GCM' }, false, ['encrypt','decrypt']);
+    }
+    var keyBytes = new Uint8Array(32);
+    crypto.getRandomValues(keyBytes);
+    localStorage.setItem('elligentt_autonoma_enc_key', Array.from(keyBytes).join(','));
+    return _autEncKey = await crypto.subtle.importKey('raw', keyBytes, { name: 'AES-GCM' }, false, ['encrypt','decrypt']);
+  }
+  async function autSave(){
+    try {
+      var key = await _autGetEncKey();
+      var iv = crypto.getRandomValues(new Uint8Array(12));
+      var enc = new TextEncoder();
+      var ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv }, key, enc.encode(JSON.stringify(autChats)));
+      var payload = { v:1, iv: Array.from(iv).join(','), ct: Array.from(new Uint8Array(ct)).join(',') };
+      localStorage.setItem(AUT_KEY, JSON.stringify(payload));
+    } catch(e) {
+      // Fallback: plaintext (old browsers)
+      try { localStorage.setItem(AUT_KEY, JSON.stringify(autChats)); } catch(e2) {}
+    }
+  }
+  async function autLoad(){
+    try {
+      var r = localStorage.getItem(AUT_KEY);
+      if (!r) return;
+      var parsed = JSON.parse(r);
+      if (parsed.v === 1 && parsed.iv && parsed.ct) {
+        var key = await _autGetEncKey();
+        var iv = new Uint8Array(parsed.iv.split(',').map(Number));
+        var ct = new Uint8Array(parsed.ct.split(',').map(Number));
+        var dec = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: iv }, key, ct);
+        autChats = JSON.parse(new TextDecoder().decode(dec));
+      } else {
+        // Legacy plaintext
+        autChats = parsed;
+        // Auto-migrate to encrypted on next save
+      }
+      if (autChats.length) autCurId = autChats[0].id;
+    } catch(e) { autChats = []; }
+  }
 
   // ══════════════════════════════════════════════════════════
   //  AUTONOMA v4 — Enhanced AI Agent Engine
@@ -42731,7 +42896,6 @@ setTimeout(function() {
     if(/\b(treasury|tesouraria|tesouro)\b/.test(low)) ops.push('treasury');
     if(/\b(schedul\w*|agend\w*|recurring|recorrent\w*)\b/.test(low)) ops.push('scheduled');
     if(/\b(multisend|batch|lote|em massa|m[uú]ltiplos|v[aá]rios|diversos)\b/.test(low)) ops.push('multisend');
-    if(/\b(all|tudo|everything)\b/.test(low)) ops=['swap','bridge','payment','treasury','crosschain','recurring','scheduled','multisend'];
 
     if(ops.length===0){
       return R.intro('What should I allow the Agent to do?')+
@@ -44345,6 +44509,22 @@ setTimeout(function() {
     c.scrollTop=c.scrollHeight;
   }
 
+  async function _agentGetGasParams(chainId) {
+    try {
+      var provider = _agentGetProvider();
+      if (provider && typeof provider.getFeeData === 'function') {
+        var feeData = await provider.getFeeData();
+        var maxFee = feeData.maxFeePerGas || ethers.parseUnits("20","gwei");
+        var maxPriority = feeData.maxPriorityFeePerGas || ethers.parseUnits("1.5","gwei");
+        if (maxFee > ethers.parseUnits("100","gwei")) maxFee = ethers.parseUnits("100","gwei");
+        if (maxPriority > ethers.parseUnits("10","gwei")) maxPriority = ethers.parseUnits("5","gwei");
+        maxFee = maxFee * 120n / 100n;
+        return { maxFeePerGas: maxFee, maxPriorityFeePerGas: maxPriority, gasLimit: 350000n };
+      }
+    } catch(e) {}
+    return { maxFeePerGas: ethers.parseUnits("20","gwei"), maxPriorityFeePerGas: ethers.parseUnits("1.5","gwei"), gasLimit: 350000n };
+  }
+
   async function _agentExecuteOp(operation, amount, asset, paramsJson){
     var execId = 'exec_' + Date.now();
     _agentStopRequested = false;
@@ -44378,16 +44558,17 @@ setTimeout(function() {
       try {
         var nonce = await provider.send('eth_getTransactionCount', [agentAddr, 'pending']);
 
+        var gasParams = await _agentGetGasParams();
         var rawTx = {
           type: 2,
           chainId: 5042002,
           to: USDC,
           data: calldata,
           value: '0x0',
-          gasLimit: ethers.toBeHex(120000),
+          gasLimit: ethers.toBeHex(gasParams.gasLimit),
           nonce: nonce,
-          maxFeePerGas: ethers.toBeHex(ethers.parseUnits("20", "gwei")),
-          maxPriorityFeePerGas: ethers.toBeHex(ethers.parseUnits("1", "gwei"))
+          maxFeePerGas: ethers.toBeHex(gasParams.maxFeePerGas),
+          maxPriorityFeePerGas: ethers.toBeHex(gasParams.maxPriorityFeePerGas)
         };
 
         if(!_agentPreValidate(execId, 'payment', rawTx.maxFeePerGas, rawTx.gasLimit)) return;
@@ -44655,19 +44836,19 @@ setTimeout(function() {
       if (_agentStopCheck(execId)) return;
 
       try {
-        // Arc uses EIP-1559 with minimum 20 Gwei maxFeePerGas
+        var gasParams = await _agentGetGasParams();
         var nonce = await provider.send('eth_getTransactionCount', [agentAddr, 'pending']);
 
         var rawTx = {
-          type: 2,  // EIP-1559 (required by Arc)
+          type: 2,  // EIP-1559
           chainId: 5042002,
           to: contractAddr,
           data: txData.calldata,
           value: '0x0',
-          gasLimit: ethers.toBeHex(300000),
+          gasLimit: ethers.toBeHex(gasParams.gasLimit),
           nonce: nonce,
-          maxFeePerGas: ethers.toBeHex(ethers.parseUnits("20", "gwei")),       // 20 Gwei minimum
-          maxPriorityFeePerGas: ethers.toBeHex(ethers.parseUnits("1", "gwei"))  // 1 Gwei tip
+          maxFeePerGas: ethers.toBeHex(gasParams.maxFeePerGas),
+          maxPriorityFeePerGas: ethers.toBeHex(gasParams.maxPriorityFeePerGas)
         };
 
         if(!_agentPreValidate(execId, 'swap', rawTx.maxFeePerGas, rawTx.gasLimit)) return;
@@ -44813,10 +44994,7 @@ setTimeout(function() {
     var lastTxHash = '';
     var lastReceipt = null;
 
-    // For non-Arc chains, we need to adjust gas parameters
-    var gasParams = isArcSource
-      ? { maxFeePerGas: ethers.parseUnits("20","gwei"), maxPriorityFeePerGas: ethers.parseUnits("1","gwei"), gasLimit: 350000 }
-      : { maxFeePerGas: ethers.parseUnits("50","gwei"), maxPriorityFeePerGas: ethers.parseUnits("1.5","gwei"), gasLimit: 350000 };
+    var gasParams = await _agentGetGasParams();
 
     for(var i=0;i<calldataPlan.steps.length;i++){
       var step=calldataPlan.steps[i];
@@ -45304,16 +45482,17 @@ setTimeout(function() {
 
       _agentStateMsg(execId, 'BROADCASTING', 'Step '+(i+1)+'/'+totalSteps+': '+step.label);
       try {
+        var gasParams = await _agentGetGasParams();
         var nonce = await provider.send('eth_getTransactionCount', [agentAddr, 'pending']);
         var rawTx = {
           type: 2, chainId: 5042002,
           to: step.contract,
           data: step.calldata,
           value: '0x0',
-          gasLimit: ethers.toBeHex(350000),
+          gasLimit: ethers.toBeHex(gasParams.gasLimit),
           nonce: nonce,
-          maxFeePerGas: ethers.toBeHex(ethers.parseUnits("20", "gwei")),
-          maxPriorityFeePerGas: ethers.toBeHex(ethers.parseUnits("1", "gwei"))
+          maxFeePerGas: ethers.toBeHex(gasParams.maxFeePerGas),
+          maxPriorityFeePerGas: ethers.toBeHex(gasParams.maxPriorityFeePerGas)
         };
         if(!_agentPreValidate(execId, opType||'liquidity', rawTx.maxFeePerGas, rawTx.gasLimit)) return;
         var signedTx = await signer.signTransaction(rawTx);
@@ -45418,6 +45597,7 @@ setTimeout(function() {
     // Step 1: Approve executor
     _agentStateMsg(execId, 'BROADCASTING', 'Step 1/2: Approve '+totalAmt+' '+token);
     try {
+      var gasParams = await _agentGetGasParams();
       var approveData = tokenContract.interface.encodeFunctionData('approve', [EXECUTOR_V4_ADDRESS, totalBig * 2n]);
       var nonce = await provider.send('eth_getTransactionCount', [agentAddr, 'pending']);
       var rawTx = {
@@ -45425,10 +45605,10 @@ setTimeout(function() {
         to: tokenAddr,
         data: approveData,
         value: '0x0',
-        gasLimit: ethers.toBeHex(100000),
+        gasLimit: ethers.toBeHex(gasParams.gasLimit),
         nonce: nonce,
-        maxFeePerGas: ethers.toBeHex(ethers.parseUnits("20", "gwei")),
-        maxPriorityFeePerGas: ethers.toBeHex(ethers.parseUnits("1", "gwei"))
+        maxFeePerGas: ethers.toBeHex(gasParams.maxFeePerGas),
+        maxPriorityFeePerGas: ethers.toBeHex(gasParams.maxPriorityFeePerGas)
       };
       if(!_agentPreValidate(execId, 'multisend', rawTx.maxFeePerGas, rawTx.gasLimit)) return;
       var signedTx = await signer.signTransaction(rawTx);
@@ -45452,6 +45632,7 @@ setTimeout(function() {
 
     _agentStateMsg(execId, 'BROADCASTING', 'Step 2/2: Send batch to '+count+' recipients');
     try {
+      var gasParams2 = await _agentGetGasParams();
       var batchData = executorContract.interface.encodeFunctionData('sendTokenBatch', [tokenAddr, recipients, amountBigs]);
       var nonce2 = await provider.send('eth_getTransactionCount', [agentAddr, 'pending']);
       var rawTx2 = {
@@ -45459,10 +45640,10 @@ setTimeout(function() {
         to: EXECUTOR_V4_ADDRESS,
         data: batchData,
         value: '0x0',
-        gasLimit: ethers.toBeHex(200000 + count * 30000),
+        gasLimit: ethers.toBeHex(BigInt(200000 + count * 30000)),
         nonce: nonce2,
-        maxFeePerGas: ethers.toBeHex(ethers.parseUnits("20", "gwei")),
-        maxPriorityFeePerGas: ethers.toBeHex(ethers.parseUnits("1", "gwei"))
+        maxFeePerGas: ethers.toBeHex(gasParams2.maxFeePerGas),
+        maxPriorityFeePerGas: ethers.toBeHex(gasParams2.maxPriorityFeePerGas)
       };
       if(!_agentPreValidate(execId, 'multisend', rawTx2.maxFeePerGas, rawTx2.gasLimit)) return;
       var signedTx2 = await signer.signTransaction(rawTx2);
@@ -45632,33 +45813,17 @@ setTimeout(function() {
 
   function _agentCheckSchedules(){
     if(!AGENT_SCHEDULER_ENABLED) return;
-    if(_agentSchedulerRunning) return;
-    if(typeof ScheduleEngine === 'undefined') return;
-    if(typeof AgentWalletManager === 'undefined') return;
-    if(AgentWalletManager.isPaused()) return;
-    if(!AgentWalletManager.getAgentAddress()) return;
-
-    try {
-      var all = ScheduleEngine.getAll();
-      if(!all || !all.length) return;
-      var now = new Date();
-      var due = all.filter(function(s){
-        return s.status === 'Active' && s.nextRun && new Date(s.nextRun) <= now;
-      });
-      if(due.length === 0) return;
-
-      // Execute only the first due schedule per tick to avoid parallel execution
-      console.log('[AgentScheduler] Found '+due.length+' due schedule(s). Executing next...');
-      _agentExecuteSchedule(due[0]);
-    } catch(e){
-      console.warn('[AgentScheduler] Check error:', e.message || e);
+    // Delegate to AgentScheduleExecutor — single source of truth for schedule execution
+    if(typeof AgentScheduleExecutor !== 'undefined'){
+      AgentScheduleExecutor.tickNow().catch(function(){});
+      return;
     }
   }
 
   function _agentStartScheduler(){
     if(_agentSchedulerInterval) return;
-    console.log('[AgentScheduler] Started — checking every 60s');
-    _agentCheckSchedules(); // Immediate first check
+    console.log('[AgentScheduler] Started via AgentScheduleExecutor — checking every 60s');
+    if(typeof AgentScheduleExecutor !== 'undefined') AgentScheduleExecutor.start();
     _agentSchedulerInterval = setInterval(_agentCheckSchedules, 60000);
   }
 
