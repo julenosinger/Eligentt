@@ -51,6 +51,7 @@
   var _inFlight = {};
   var ledger = {};
   var notifications = [];
+  var _broadcastedTxHashes = {}; // HARD INVARIANT: scheduleId → set of txHashes already broadcast
 
   /* ── Persistence ── */
   function _loadLedger(){
@@ -174,7 +175,7 @@
   function _advanceSchedule(sched, note, status, txHash, meta){
     var eng = _engine();
     if (!eng) return;
-    var execCount = (sched.execCount || 0) + (status === 'executed' || status === 'delegated' ? 1 : 0);
+    var execCount = (sched.execCount || 0) + (status === 'executed' ? 1 : 0);
     var history = (sched.executionHistory || []).slice();
     history.unshift({
       ts: new Date().toISOString(), status: status, note: note,
@@ -370,6 +371,12 @@
   /* ── Broadcast one ERC-20 transfer signed by the Agent Wallet ── */
   async function _broadcastTransfer(provider, signer, agentAddr, tokenInfo, transfer){
     var E = _ethers();
+    var schedId = transfer._schedId || 'unknown';
+    var schedKey = transfer._schedKey || 'unknown';
+    if (_broadcastedTxHashes[schedKey]) {
+      console.error('[AgentScheduleExecutor] HARD BLOCK: schedule ' + schedId + ' (key ' + schedKey + ') already broadcast tx ' + _broadcastedTxHashes[schedKey] + ' — refusing duplicate');
+      return { ok: false, txHash: _broadcastedTxHashes[schedKey], reason: 'DUPLICATE_BLOCKED_BY_INVARIANT' };
+    }
     var feeData;
     try { feeData = await provider.getFeeData(); } catch(e){}
     var maxFee = feeData && feeData.maxFeePerGas ? BigInt(feeData.maxFeePerGas) : 0n;
@@ -400,11 +407,15 @@
     };
     var signedTx = await signer.signTransaction(rawTx);
     var txHash = await provider.send('eth_sendRawTransaction', [signedTx]);
-    var receipt = await provider.waitForTransaction(txHash, 1, 60000);
-    if (!receipt || receipt.status !== 1) {
-      return { ok: false, txHash: txHash, reason: 'Transaction reverted on-chain', receipt: receipt };
+    try {
+      var receipt = await provider.waitForTransaction(txHash, 1, 60000);
+      if (!receipt || receipt.status !== 1) {
+        return { ok: false, txHash: txHash, reason: 'Transaction reverted on-chain', receipt: receipt };
+      }
+      return { ok: true, txHash: txHash, receipt: receipt };
+    } catch(waitErr) {
+      return { ok: false, txHash: txHash, reason: 'Receipt timeout (tx submitted): ' + (waitErr.shortMessage || waitErr.message || 'timeout').substring(0, 80) };
     }
-    return { ok: true, txHash: txHash, receipt: receipt };
   }
 
   function _recordOutcome(sched, auth, total, token, result, txHash, duration, gasUsed, reason, meta){
@@ -444,17 +455,73 @@
     } catch(e){}
   }
 
+  /* ── Atomic execution claim (TOCTOU-safe, shared across executors) ── */
+  var CLAIM_LEASE_MS = 300000; // 5-minute claim lease
+
+  function _tryClaimExecution(schedId, nextRun, owner){
+    var key = schedId + '|' + nextRun;
+    var prior = ledger[key];
+    if (prior) {
+      if (prior.status === 'executed' || prior.status === 'completed') {
+        return { ok: false, reason: 'ALREADY_EXECUTED', key: key };
+      }
+      if (prior.status === 'claiming') {
+        var leaseExpired = (Date.now() - (prior.claimedAt || prior.ts || 0)) > CLAIM_LEASE_MS;
+        if (!leaseExpired) {
+          return { ok: false, reason: 'ALREADY_CLAIMED', key: key, claimedBy: prior.owner };
+        }
+        if (prior.txHash) {
+          return { ok: false, reason: 'TX_EXISTS_MUST_RECOVER', key: key, txHash: prior.txHash };
+        }
+        // Stale claim with no txHash — safe to reclaim
+      }
+      if (prior.status === 'failed' || prior.status === 'blocked' || prior.status === 'skipped_stale') {
+        if (prior.txHash) {
+          return { ok: false, reason: 'TX_EXISTS_MUST_RECOVER', key: key, txHash: prior.txHash };
+        }
+        return { ok: false, reason: 'TERMINAL_STATE', key: key };
+      }
+      // Retryable states pass through
+    }
+    ledger[key] = {
+      status: 'claiming', owner: owner, claimedAt: Date.now(),
+      leaseUntil: Date.now() + CLAIM_LEASE_MS, txHash: null, attempts: (prior && prior.attempts || 0) + 1
+    };
+    _saveLedger();
+    return { ok: true, key: key };
+  }
+
+  function _acquireLocalLock(key){
+    if (_inFlight[key]) return false;
+    if (!ledger[key] || ledger[key].status !== 'claiming') return false;
+    _inFlight[key] = true;
+    return true;
+  }
+
+  function _isClaimed(schedId, nextRun){
+    var key = schedId + '|' + (nextRun || '');
+    if (_inFlight[key]) return true;
+    var entry = ledger[key];
+    if (!entry) return false;
+    if (entry.status === 'claiming') {
+      if ((Date.now() - (entry.claimedAt || entry.ts || 0)) < CLAIM_LEASE_MS) return true;
+      if (entry.txHash) return true;
+      return false;
+    }
+    if (entry.status === 'executed' || entry.status === 'delegated' || entry.status === 'completed') return true;
+    return false;
+  }
+
   /* ── Execute a single due schedule ── */
   async function _executeSchedule(sched){
-    var key = _execKey(sched);
-    if (_inFlight[key]) return { status: 'in_flight' };
-    var prior = ledger[key];
-    if (prior && prior.status === 'awaiting_auth') {
-      if (!hasScheduledAuth()) return { status: 'awaiting_auth' };
-    } else if (prior && prior.status !== 'retry_pending') {
-      return { status: 'replay_blocked' };
-    }
+    console.log('[AgentScheduleExecutor] _executeSchedule ENTER:', sched.id, sched.name, sched.type, 'nextRun:', sched.nextRun, 'execCount:', sched.execCount, 'status:', sched.status);
+    var claim = _tryClaimExecution(sched.id, sched.nextRun, 'agent_scheduler');
+    if (!claim.ok) { console.log('[AgentScheduleExecutor] _executeSchedule CLAIM FAILED:', claim.reason, 'claimedBy:', claim.claimedBy); return { status: claim.reason.toLowerCase(), reason: claim.reason, claimedBy: claim.claimedBy }; }
+    console.log('[AgentScheduleExecutor] _executeSchedule CLAIMED:', claim.key);
 
+    var key = claim.key;
+    if (!_acquireLocalLock(key)) return { status: 'local_lock_failed' };
+    var prior = ledger[key];
     var defaults = _policyDefaults();
     if (prior && prior.status === 'retry_pending') {
       if ((prior.attempts || 0) >= (defaults.retryMax || 3)) {
@@ -463,9 +530,10 @@
         _advanceSchedule(sched, 'Failed after ' + prior.attempts + ' attempts: ' + (prior.reason || ''), 'failed', null, { token: sched.token, amount: sched.amount });
         if (defaults.pauseOnFailure) { try { _engine().update(sched.id, { status: 'Paused' }); } catch(e){} }
         _notify(sched, 'failed', 'Schedule "' + sched.name + '" failed after ' + prior.attempts + ' attempts — ' + (defaults.pauseOnFailure ? 'paused' : 'skipped'), 'error');
+        delete _inFlight[key];
         return { status: 'failed_final' };
       }
-      if (Date.now() - (prior.lastAttempt || 0) < (defaults.retryDelayMs || 30000)) return { status: 'retry_waiting' };
+      if (Date.now() - (prior.lastAttempt || 0) < (defaults.retryDelayMs || 30000)) { delete _inFlight[key]; return { status: 'retry_waiting' }; }
     }
 
     var overdueMs = Date.now() - new Date(sched.nextRun).getTime();
@@ -474,21 +542,21 @@
       _saveLedger();
       _advanceSchedule(sched, 'Skipped: missed execution window by ' + Math.round(overdueMs / 3600000) + 'h', 'skipped', null, { token: sched.token, amount: sched.amount });
       _notify(sched, 'skipped', 'Schedule "' + sched.name + '" missed its execution window and was skipped (deadline protection)', 'warning');
+      delete _inFlight[key];
       return { status: 'skipped_stale' };
     }
 
     if (MANUAL_TYPES.indexOf(sched.type) !== -1) {
-      if (!prior) {
+      if (!prior || prior.status === 'claiming') {
         ledger[key] = { status: 'manual_required', reason: sched.type + ' requires manual execution', ts: Date.now() };
         _saveLedger();
         _notify(sched, 'manual', 'Schedule "' + sched.name + '" (' + sched.type + ') is due — open the Schedules tab to run it manually', 'warning');
       }
+      delete _inFlight[key];
       return { status: 'manual_required' };
     }
-
-    _inFlight[key] = true;
     var startTime = Date.now();
-    var attempts = ((prior && prior.attempts) || 0) + 1;
+    var attempts = prior && prior.attempts ? prior.attempts : 1;
 
     try {
       var wm = _wm();
@@ -559,6 +627,8 @@
       var lastHash = '';
       var gasUsed = 0;
       for (var i = 0; i < v.transfers.length; i++) {
+        v.transfers[i]._schedId = sched.id;
+        v.transfers[i]._schedKey = key;
         var br;
         try {
           br = await _broadcastTransfer(provider, signer, agentAddr, v.tokenInfo, v.transfers[i]);
@@ -566,6 +636,9 @@
           br = { ok: false, reason: (txErr.shortMessage || txErr.message || 'broadcast error').substring(0, 120), txHash: '' };
         }
         if (!br.ok) {
+          if (br.reason === 'DUPLICATE_BLOCKED_BY_INVARIANT') {
+            console.error('[AgentScheduleExecutor] CRITICAL: duplicate broadcast prevented for schedule ' + sched.id + ' key ' + key + ' — existing txHash: ' + (br.txHash || 'none'));
+          }
           var failNote = 'Transfer ' + (i + 1) + '/' + v.transfers.length + ' failed: ' + br.reason + (confirmed > 0 ? ' (' + confirmed + ' confirmed before failure)' : '');
           ledger[key] = { status: 'failed', reason: failNote, ts: Date.now(), attempts: attempts, txHash: br.txHash || lastHash };
           _saveLedger();
@@ -580,6 +653,7 @@
         confirmed++;
         spent += v.transfers[i].amount;
         lastHash = br.txHash;
+        _broadcastedTxHashes[key] = br.txHash; // HARD INVARIANT: record broadcast
         try { gasUsed += Number(br.receipt.gasUsed || 0); } catch(e){}
       }
 
@@ -590,6 +664,7 @@
       _recordOutcome(sched, v.auth, spent, v.token, 'success', lastHash, duration, gasUsed, null, { sender: agentAddr, recipient: v.transfers.length === 1 ? v.transfers[0].to : (v.transfers.length + ' recipients'), token: v.token, amount: spent, gasUsed: gasUsed });
       try { if (task) ExecutionQueue.updateStatus(task.id, 'completed', { txHash: lastHash, result: 'success', progress: 100 }); } catch(e){}
       _notify(sched, 'executed', 'Schedule "' + sched.name + '" executed by Agent Wallet — ' + spent.toFixed(2) + ' ' + v.token + ' (tx ' + lastHash.slice(0, 10) + '...)', 'success');
+      console.log('[AgentScheduleExecutor] _executeSchedule DONE:', sched.id, 'txHash:', lastHash, 'spent:', spent, 'execCount after:', (sched.execCount || 0) + 1);
       return { status: 'executed', txHash: lastHash };
     } catch(fatal) {
       var fReason = (fatal && (fatal.shortMessage || fatal.message)) ? String(fatal.shortMessage || fatal.message).substring(0, 140) : 'Unknown executor error';
@@ -603,7 +678,7 @@
 
   /* ── Delegate swap/bridge/crosschain to the existing agent executors ── */
   async function _delegateExecution(sched, key, v, startTime){
-    var attempts = ((ledger[key] && ledger[key].attempts) || 0) + 1;
+    var attempts = (ledger[key] && ledger[key].attempts) ? ledger[key].attempts : 1;
     var fn = null;
     var args = [];
     if (sched.type === 'swap' && typeof window !== 'undefined' && typeof window._agentExecuteSwap === 'function') {
@@ -668,11 +743,18 @@
       return { status: 'failed', reason: failReason };
     }
 
-    ledger[key] = { status: 'delegated', ts: Date.now(), attempts: attempts, amount: v.total, asset: v.token };
+    var actualTxHash = (delResult && delResult.txHash) || null;
+    var mintTxHash = (delResult && delResult.mintTxHash) || null;
+    var duration = Date.now() - startTime;
+    var txNote = actualTxHash ? ' · tx ' + actualTxHash.slice(0, 10) + '...' : '';
+    if (mintTxHash) txNote += ' · mint ' + mintTxHash.slice(0, 10) + '...';
+
+    ledger[key] = { status: 'executed', ts: Date.now(), attempts: attempts, amount: v.total, asset: v.token, txHash: actualTxHash, mintTxHash: mintTxHash };
     _saveLedger();
-    _advanceSchedule(sched, 'Delegated to Agent Wallet ' + sched.type + ' executor — ' + v.total + ' ' + v.token, 'delegated', null, { token: v.token, amount: v.total });
-    _notify(sched, 'executed', 'Schedule "' + sched.name + '" — Agent Wallet executed the ' + sched.type + ' (' + v.total + ' ' + v.token + ')', 'info');
-    return { status: 'delegated' };
+    _advanceSchedule(sched, 'Executed by Agent Wallet ' + sched.type + ' executor — ' + v.total + ' ' + v.token + txNote, 'executed', actualTxHash, { token: v.token, amount: v.total, mintTxHash: mintTxHash });
+    _recordOutcome(sched, v.auth, v.total, v.token, 'success', actualTxHash, duration, 0, null, { token: v.token, amount: v.total, mintTxHash: mintTxHash });
+    _notify(sched, 'executed', 'Schedule "' + sched.name + '" — Agent Wallet executed the ' + sched.type + ' (' + v.total + ' ' + v.token + ')' + txNote, 'success');
+    return { status: 'executed', txHash: actualTxHash, mintTxHash: mintTxHash };
   }
 
   /* ── Tick loop ── */
@@ -699,6 +781,7 @@
     var summary = { processed: 0, executed: 0, blocked: 0, failed: 0, results: [] };
     try {
       var due = getDueSchedules();
+      console.log('[AgentScheduleExecutor] _tick: ' + due.length + ' due schedules found');
       for (var i = 0; i < due.length; i++) {
         var fresh = eng.getById(due[i].id);
         if (!fresh || !isEligible(fresh)) continue;
@@ -714,12 +797,14 @@
     } finally {
       _ticking = false;
     }
+    console.log('[AgentScheduleExecutor] _tick done:', summary.executed, 'executed,', summary.failed, 'failed,', summary.blocked, 'blocked');
     return summary;
   }
 
   function start(){
     if (_timer) return false;
     if (_isEmergencyStopped()) return false;
+    console.log('[AgentScheduleExecutor] START: 30s interval + 1.5s initial tick');
     _timer = setInterval(function(){ _tick(); }, TICK_MS);
     setTimeout(function(){ _tick(); }, 1500);
     return true;
@@ -765,11 +850,19 @@
     hasScheduledAuth: hasScheduledAuth,
     getExecutionLog: getExecutionLog,
     getNotifications: getNotifications,
+    tryClaimExecution: function(schedId, nextRun, owner){ return _tryClaimExecution(schedId, nextRun, owner); },
+    releaseClaim: function(schedId, nextRun, finalStatus, txHash){
+      var k = schedId + '|' + (nextRun || '');
+      delete _inFlight[k];
+      if (finalStatus) { ledger[k] = { status: finalStatus, ts: Date.now(), txHash: txHash || null }; _saveLedger(); }
+    },
+    isClaimed: function(schedId, nextRun){ return _isClaimed(schedId, nextRun); },
+    isInFlight: function(schedId, nextRun){ var k = schedId + '|' + (nextRun || ''); return !!_inFlight[k]; },
     setAutoEnabled: setAutoEnabled,
     isAutoEnabled: isAutoEnabled,
     SUPPORTED_TYPES: SUPPORTED_TYPES.slice(),
     ARC_CHAIN_ID: ARC_CHAIN_ID,
-    version: '1.0.0'
+    version: '1.1.0'
   };
 
   if (typeof window !== 'undefined') window.AgentScheduleExecutor = API;

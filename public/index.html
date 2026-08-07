@@ -47454,5 +47454,85 @@ window.addEventListener('unhandledrejection', function(e) {
 
 </script>
 <script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v4513226cdae34746b4dedf0b4dfa099e1781791509496" integrity="sha512-ZE9pZaUXND66v380QUtch/5sE9tPFh2zg45pR2PB0CVkCtOREv2AJKkSidISWkysEuQ0EH8faUU5du78bx87UQ==" data-cf-beacon='{"version":"2024.11.0","token":"f5e4dda1a03749d9a5da52a5007b2fc1","r":1,"server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
+
+<script>
+(function(){
+'use strict';
+
+window.XcPopup = {
+  show: function(config){
+    var prev = document.getElementById('xc-popup-overlay'); if (prev) prev.remove();
+    var steps = config.steps || [];
+    var title = config.title || 'Cross-Chain Transfer';
+    var onClose = config.onClose || null;
+    var autoCloseSec = config.autoCloseSec || 10;
+    var ov = document.createElement('div');
+    ov.id = 'xc-popup-overlay'; ov.setAttribute('role','dialog'); ov.setAttribute('aria-modal','true');
+    ov.style.cssText = 'position:fixed;inset:0;z-index:1000001;display:flex;align-items:center;justify-content:center;background:rgba(2,6,15,.75);backdrop-filter:blur(5px);padding:20px;font-family:inherit';
+    var box = document.createElement('div');
+    box.style.cssText = 'width:100%;max-width:430px;max-height:85vh;overflow-y:auto;background:var(--card,#11151f);border:1px solid var(--border,#222a3a);border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.7)';
+    
+    var head = document.createElement('div');
+    head.style.cssText = 'display:flex;align-items:center;gap:10px;padding:16px 18px;border-bottom:1px solid var(--border,#222a3a)';
+    head.innerHTML = '<i class="ti ti-topology-star-3" style="color:var(--teal,#2dd4bf);font-size:18px;flex-shrink:0"></i><span style="font-size:13px;font-weight:700;color:var(--text,#dde2f0);flex:1">'+title+'</span><span id="xc-popup-status" style="font-size:10px;color:var(--yellow);font-weight:600">In Progress</span>';
+    box.appendChild(head);
+    
+    var body = document.createElement('div');
+    body.id = 'xc-popup-body';
+    body.style.cssText = 'padding:12px 18px';
+    for(var i=0;i<steps.length;i++){
+      var s=steps[i];
+      var el=document.createElement('div');
+      el.id='xc-popup-step-'+i;
+      el.style.cssText='display:flex;align-items:flex-start;gap:10px;padding:9px 0;border-bottom:'+(i<steps.length-1?'1px solid rgba(255,255,255,.03)':'none');
+      el.innerHTML='<div class="xc-popup-ico" style="width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0;background:rgba(255,255,255,.05);color:var(--muted2)">'+(i+1)+'</div><div style="flex:1;min-width:0"><div style="font-size:11px;font-weight:600;color:var(--text)">'+s.label+'</div><div class="xc-popup-sub" style="font-size:9px;color:var(--muted2);margin-top:2px">'+(s.detail||'')+'</div></div>';
+      body.appendChild(el);
+    }
+    box.appendChild(body);
+    
+    var foot=document.createElement('div');
+    foot.id='xc-popup-foot';
+    foot.style.cssText='display:flex;align-items:center;justify-content:space-between;padding:12px 18px;border-top:1px solid var(--border,#222a3a)';
+    foot.innerHTML='<span id="xc-popup-timer" style="font-size:9px;color:var(--muted2)"></span><button id="xc-popup-close" style="padding:7px 16px;border-radius:7px;border:1px solid var(--border2,#2e3548);background:transparent;color:var(--muted2);font-size:10px;font-weight:600;cursor:pointer;font-family:inherit;display:none">Close</button>';
+    box.appendChild(foot); ov.appendChild(box); document.body.appendChild(ov);
+    
+    var closeBtn=document.getElementById('xc-popup-close');
+    var timerEl=document.getElementById('xc-popup-timer');
+    var statusEl=document.getElementById('xc-popup-status');
+    var allDone=false, timerId=null;
+    
+    function doClose(){
+      if(timerId) clearInterval(timerId);
+      try{if(ov&&ov.parentNode) ov.parentNode.removeChild(ov);}catch(_){}
+      try{if(onClose) onClose();}catch(_){}
+    }
+    closeBtn.addEventListener('click',doClose);
+    ov.addEventListener('click',function(e){if(e.target===ov){if(allDone) doClose();}});
+    
+    var api={
+      updateStep:function(idx,state,txHash,explorerBase){
+        var el=document.getElementById('xc-popup-step-'+idx); if(!el) return;
+        var ico=el.querySelector('.xc-popup-ico');
+        if(state==='active'){ico.innerHTML='<span style="animation:spin .9s linear infinite;display:inline-block">&#x21BB;</span>';ico.style.background='rgba(245,158,11,.18)';ico.style.color='var(--yellow)';}
+        else if(state==='success'){ico.textContent='\u2713';ico.style.background='rgba(34,197,94,.18)';ico.style.color='var(--green)';}
+        else if(state==='error'){ico.textContent='\u2715';ico.style.background='rgba(239,68,68,.18)';ico.style.color='var(--red)';}
+        if(txHash && explorerBase){
+          var sub=el.querySelector('.xc-popup-sub');
+          if(sub) sub.innerHTML='Tx: <a href="'+explorerBase.replace(/\/$/,'')+'/tx/'+txHash+'" target="_blank" rel="noopener" style="color:var(--teal);text-decoration:none">'+String(txHash).slice(0,12)+'\u2026'+String(txHash).slice(-6)+'</a>';
+        }
+      },
+      complete:function(success,msg){
+        allDone=true; statusEl.textContent=success?'Completed \u2713':'Failed \u2715';
+        statusEl.style.color=success?'var(--green)':'var(--red)'; closeBtn.style.display='';
+        if(success){var r=autoCloseSec; timerEl.textContent='Auto-closing in '+r+'s'; timerId=setInterval(function(){r--;if(r<=0){clearInterval(timerId);doClose();}else{timerEl.textContent='Auto-closing in '+r+'s';}},1000);}
+        else{timerEl.textContent=msg||'Operation failed';timerEl.style.color='var(--red)';}
+      },
+      close:doClose
+    };
+    ov._xcApi=api; return api;
+  }
+};
+})();
+</script>
 </body>
 </html>

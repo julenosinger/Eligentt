@@ -138,6 +138,22 @@
       return { ok: false, error: 'Agent scheduler unavailable (_agentExecuteMultiSend not found)' };
     }
 
+    var fresh = hasScheduleEngine() ? ScheduleEngine.getById(sched.id) : null;
+    if (!fresh || fresh.status === 'Completed') {
+      return { ok: false, error: 'Schedule already completed' };
+    }
+
+    var claimed = false;
+    try {
+      if (typeof AgentScheduleExecutor !== 'undefined' && AgentScheduleExecutor.tryClaimExecution) {
+        var claimResult = AgentScheduleExecutor.tryClaimExecution(sched.id, sched.nextRun, 'batch_executor');
+        if (!claimResult.ok) {
+          return { ok: false, error: 'Execution claim failed: ' + claimResult.reason + (claimResult.claimedBy ? ' (claimed by ' + claimResult.claimedBy + ')' : '') };
+        }
+        claimed = true;
+      }
+    } catch (_e) {}
+
     var params = extractBatchParams(sched);
     if (!params.addresses.length) {
       return { ok: false, error: 'No valid recipients found in schedule ' + sched.id };
@@ -193,10 +209,12 @@
       emitStatus(execEntry);
 
       // Execute via existing agent multisend function
-      await window._agentExecuteMultiSend(params.token, params.addresses, params.amounts);
+      var execResult = await window._agentExecuteMultiSend(params.token, params.addresses, params.amounts);
 
-      // Check if execution produced a result via the agent state messages
-      // _agentExecuteMultiSend is fire-and-forget in nature; we check for completion
+      if (execResult && execResult.txHash) {
+        execEntry.txHash = execResult.txHash;
+      }
+
       var elapsed = Date.now() - startTime;
       execEntry.status = 'completed';
       execEntry.progress = 100;
@@ -204,16 +222,9 @@
       execEntry.endTime = Date.now();
       execEntry.retries = 0;
 
-      // Generate report
       execEntry.report = generateReport(execEntry);
-
-      // Update the AI Wallet intent status
       updateIntentStatus(execEntry, 'executed');
-
-      // Update schedule execution count
       updateScheduleAfterExecution(sched, execEntry);
-
-      // Update history
       updateHistory(execEntry, params);
 
       save();
@@ -226,10 +237,17 @@
       execEntry.retries = (execEntry.retries || 0) + 1;
 
       updateIntentStatus(execEntry, 'failed');
-
       save();
       emitStatus(execEntry);
       return { ok: false, error: e.message || String(e), execEntry: execEntry };
+    } finally {
+      if (claimed) {
+        try {
+          if (typeof AgentScheduleExecutor !== 'undefined' && AgentScheduleExecutor.releaseClaim) {
+            AgentScheduleExecutor.releaseClaim(sched.id, sched.nextRun);
+          }
+        } catch (_e) {}
+      }
     }
   }
 
@@ -343,11 +361,15 @@
   function updateScheduleAfterExecution(sched, execEntry) {
     if (!hasScheduleEngine()) return;
     try {
+      var fresh = ScheduleEngine.getById(sched.id);
+      if (!fresh) return;
+      if (fresh.status === 'Completed') return;
+      var execCount = (fresh.execCount || 0) + 1;
       var nextRun = null;
       if (sched.freq === 'once') {
         ScheduleEngine.update(sched.id, {
-          status: 'Completed',
-          execCount: (sched.execCount || 0) + 1,
+          status: execCount >= (sched.maxEx || 1) ? 'Completed' : 'Active',
+          execCount: execCount,
           lastExecuted: new Date().toISOString()
         });
       } else {
@@ -362,7 +384,7 @@
         nextRun = d ? d.toISOString() : null;
         ScheduleEngine.update(sched.id, {
           nextRun: nextRun,
-          execCount: (sched.execCount || 0) + 1,
+          execCount: execCount,
           lastExecuted: new Date().toISOString()
         });
       }
