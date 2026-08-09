@@ -31,7 +31,7 @@ const ElligenteCCTP = Object.freeze({
     84532:    { domain:6,  usdc:'0x036CbD53842c5426634e7929541eC2318f3dCF7e', eurc:null, tokenMessenger:'0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA', messageTransmitter:'0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275', rpc:'https://sepolia.base.org', explorer:'https://sepolia.basescan.org' },
     421614:   { domain:3,  usdc:'0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d', eurc:null, tokenMessenger:'0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA', messageTransmitter:'0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275', rpc:'https://sepolia-rollup.arbitrum.io/rpc', explorer:'https://sepolia.arbiscan.io' },
     11155420: { domain:2,  usdc:'0x5fd84259d66Cd46123540766Be93DFE6D43130D7', eurc:null, tokenMessenger:'0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA', messageTransmitter:'0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275', rpc:'https://sepolia.optimism.io', explorer:'https://sepolia-optimism.etherscan.io' },
-    80002:    { domain:7,  usdc:'0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582', eurc:null, tokenMessenger:'0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA', messageTransmitter:'0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275', rpc:'https://polygon-amoy-bor-rpc.publicnode.com', explorer:'https://amoy.polygonscan.com' }
+    80002:    { domain:7,  usdc:'0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582', eurc:null, tokenMessenger:'0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA', messageTransmitter:'0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275', rpc:'https://rpc-amoy.polygon.technology', explorer:'https://amoy.polygonscan.com' }
   }
 });
 

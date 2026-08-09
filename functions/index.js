@@ -2,6 +2,51 @@ export async function onRequest(context) {
   const { request, env, next } = context;
   const url = new URL(request.url);
 
+  if (url.pathname === '/api/deepseek/chat') {
+    if (request.method === 'OPTIONS') {
+      return new Response(null, {
+        status: 204,
+        headers: {
+          'Access-Control-Allow-Origin': getAllowedOrigin(request, env),
+          'Access-Control-Allow-Methods': 'POST, OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type',
+          'Access-Control-Max-Age': '86400',
+        }
+      });
+    }
+    return handleDeepSeekProxy(request, env);
+  }
+
+  if (url.pathname === '/api/openai/chat') {
+    if (request.method === 'OPTIONS') {
+      return new Response(null, {
+        status: 204,
+        headers: {
+          'Access-Control-Allow-Origin': getAllowedOrigin(request, env),
+          'Access-Control-Allow-Methods': 'POST, OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type',
+          'Access-Control-Max-Age': '86400',
+        }
+      });
+    }
+    return handleOpenAIProxy(request, env);
+  }
+
+  if (url.pathname === '/api/anthropic/chat') {
+    if (request.method === 'OPTIONS') {
+      return new Response(null, {
+        status: 204,
+        headers: {
+          'Access-Control-Allow-Origin': getAllowedOrigin(request, env),
+          'Access-Control-Allow-Methods': 'POST, OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type, x-api-key, anthropic-version',
+          'Access-Control-Max-Age': '86400',
+        }
+      });
+    }
+    return handleAnthropicProxy(request, env);
+  }
+
   if (url.pathname.startsWith('/api/circle/')) {
     return handleCircleProxy(request, env, url);
   }
@@ -98,6 +143,115 @@ async function handleIrisProxy(request, env, url) {
     });
   } catch (e) {
     return new Response(JSON.stringify({ error: 'Iris API unavailable' }), {
+      status: 502, headers: { 'Content-Type': 'application/json' }
+    });
+  }
+}
+
+async function handleDeepSeekProxy(request, env) {
+  const apiKey = env.DEEPSEEK_API_KEY || '';
+  if (!apiKey) {
+    return new Response(JSON.stringify({ error: 'DeepSeek API key not configured on server' }), {
+      status: 503, headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': getAllowedOrigin(request, env),
+      }
+    });
+  }
+
+  try {
+    const body = await request.text();
+    const resp = await fetch('https://api.deepseek.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + apiKey,
+        'Content-Type': 'application/json',
+      },
+      body: body,
+    });
+    const data = await resp.text();
+    return new Response(data, {
+      status: resp.status,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': getAllowedOrigin(request, env),
+      },
+    });
+  } catch (e) {
+    return new Response(JSON.stringify({ error: 'DeepSeek API unavailable' }), {
+      status: 502, headers: { 'Content-Type': 'application/json' }
+    });
+  }
+}
+
+async function handleOpenAIProxy(request, env) {
+  const apiKey = env.OPENAI_API_KEY || '';
+  if (!apiKey) {
+    return new Response(JSON.stringify({ error: 'OpenAI API key not configured on server' }), {
+      status: 503, headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': getAllowedOrigin(request, env),
+      }
+    });
+  }
+
+  try {
+    const body = await request.text();
+    const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + apiKey,
+        'Content-Type': 'application/json',
+      },
+      body: body,
+    });
+    const data = await resp.text();
+    return new Response(data, {
+      status: resp.status,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': getAllowedOrigin(request, env),
+      },
+    });
+  } catch (e) {
+    return new Response(JSON.stringify({ error: 'OpenAI API unavailable' }), {
+      status: 502, headers: { 'Content-Type': 'application/json' }
+    });
+  }
+}
+
+async function handleAnthropicProxy(request, env) {
+  const apiKey = env.ANTHROPIC_API_KEY || '';
+  if (!apiKey) {
+    return new Response(JSON.stringify({ error: 'Anthropic API key not configured on server' }), {
+      status: 503, headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': getAllowedOrigin(request, env),
+      }
+    });
+  }
+
+  try {
+    const body = await request.text();
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': apiKey,
+        'Content-Type': 'application/json',
+        'anthropic-version': '2023-06-01',
+      },
+      body: body,
+    });
+    const data = await resp.text();
+    return new Response(data, {
+      status: resp.status,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': getAllowedOrigin(request, env),
+      },
+    });
+  } catch (e) {
+    return new Response(JSON.stringify({ error: 'Anthropic API unavailable' }), {
       status: 502, headers: { 'Content-Type': 'application/json' }
     });
   }

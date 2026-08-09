@@ -77,6 +77,7 @@
 <script src="/shared/executionPlanner.js"></script>
 <script src="/shared/aiRecommendations.js"></script>
 <script src="/shared/autonomaCore.js"></script>
+<script src="/shared/autonomaLLM.js"></script>
 <script src="/shared/autonomaDocumentIntelligence.js"></script>
 <script src="/shared/ubMerchantHub.js"></script>
 <script src="/shared/rpcManager.js"></script>
@@ -6030,6 +6031,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
       <div class="nav-item" id="nav-unified-balance" onclick="showPage('unified-balance')" title="Unified Balance"><i class="ti ti-chart-donut-3"></i>Balance<span class="nav-kit" style="background:rgba(6,247,233,.12);color:#06F7E9;border:1px solid rgba(6,247,233,.25)">Unified</span></div>
       <div class="nav-group" style="margin-top:4px">App Kit</div>
       <div class="nav-item" id="nav-schedule" onclick="showPage('schedule')" title="Schedule"><i class="ti ti-calendar-event"></i>Schedule<span class="nav-new">New</span></div>
+      <div class="nav-item" id="nav-queue" onclick="showPage('queue')" title="Payment Queue"><i class="ti ti-list-check"></i>Queue<span class="nav-kit" style="background:rgba(34,197,94,.12);color:var(--green);border:1px solid rgba(34,197,94,.25)">PG</span></div>
       <div class="nav-item" id="nav-swap" onclick="showPage('swap')" title="Swap"><i class="ti ti-arrows-exchange"></i>Swap<span class="nav-kit">Kit</span></div>
       <div class="nav-item" id="nav-bridge" onclick="showPage('bridge')" title="Bridge"><i class="ti ti-topology-star-3"></i>Bridge<span class="nav-kit">Kit</span></div>
       <div class="nav-item" id="nav-pool" onclick="showPage('pool')" title="Liquidity Pool"><i class="ti ti-droplet"></i>Liquidity<span class="nav-kit">Pool</span></div>
@@ -6128,6 +6130,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
             <button class="btn" style="font-size:8.5px;padding:2px 7px" onclick="setAllRecipientsChain('Arbitrum_Sepolia')"><span class="ms-chain-dot" style="background:#12aaff;display:inline-block;width:6px;height:6px;border-radius:50%;margin-right:3px;vertical-align:middle"></span>Arbitrum</button>
             <button class="btn" style="font-size:8.5px;padding:2px 7px" onclick="setAllRecipientsChain('Optimism_Sepolia')"><span class="ms-chain-dot" style="background:#ff0420;display:inline-block;width:6px;height:6px;border-radius:50%;margin-right:3px;vertical-align:middle"></span>Optimism</button>
             <button class="btn" style="font-size:8.5px;padding:2px 7px" onclick="setAllRecipientsChain('Ethereum_Sepolia')"><span class="ms-chain-dot" style="background:#627eea;display:inline-block;width:6px;height:6px;border-radius:50%;margin-right:3px;vertical-align:middle"></span>Sepolia</button>
+            <button class="btn" style="font-size:8.5px;padding:2px 7px" onclick="setAllRecipientsChain('Solana_Devnet')"><span class="ms-chain-dot" style="background:#9945ff;display:inline-block;width:6px;height:6px;border-radius:50%;margin-right:3px;vertical-align:middle"></span>Solana</button>
 
             <div style="flex:1"></div>
             <button class="btn" onclick="showPage('templates')" style="font-size:9px;padding:3px 7px"><i class="ti ti-template"></i>Templates</button>
@@ -6216,7 +6219,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
             <div class="ms-review-row"><span class="ms-review-label">Recipients</span><span class="ms-review-value" id="ms-fp-r">0</span></div>
             <div class="ms-review-row"><span class="ms-review-label">Total USDC</span><span class="ms-review-value blue" id="ms-fp-t">0.00</span></div>
             <div class="ms-review-row"><span class="ms-review-label">Protocol Fee (0.2%)</span><span class="ms-review-value" id="ms-fp-f">0.00</span></div>
-            <div class="ms-review-row"><span class="ms-review-label">Est. Gas</span><span class="ms-review-value">~0.001 USDC</span></div>
+            <div class="ms-review-row"><span class="ms-review-label">Est. Gas</span><span class="ms-review-value" id="ms-fp-gas">~0.001 USDC</span></div>
             <div class="ms-review-total"><span>You Approve</span><span class="blue" id="ms-fp-p">0.00 USDC</span></div>
             <div class="ms-review-row" style="margin-top:4px"><span class="ms-review-label">Network</span><span class="ms-review-value blue">Arc Testnet</span></div>
           </div>
@@ -7354,7 +7357,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
           <div class="ch"><i class="ti ti-list" style="font-size:13px;color:var(--yellow)"></i><span class="ct">All Automations</span><span id="sch-count" style="font-size:9px;color:var(--muted2);margin-left:4px"></span></div>
           <div style="overflow-x:auto">
             <table class="btable">
-              <thead><tr><th>Name</th><th>Type</th><th>Asset</th><th>Network</th><th>Frequency</th><th>Next Run</th><th>Exec.</th><th>Status</th><th>Actions</th></tr></thead>
+              <thead><tr><th>Name</th><th>Type</th><th>Asset</th><th>Network</th><th>Frequency</th><th>Next Run</th><th>Exec.</th><th>Success</th><th>Status</th><th>Actions</th></tr></thead>
               <tbody id="sch-tbody"></tbody>
             </table>
           </div>
@@ -7369,6 +7372,44 @@ select.cinput option { background: #161a24; color: #dde2f0; }
           <div class="ch"><i class="ti ti-history" style="font-size:13px;color:var(--muted2)"></i><span class="ct">Execution History</span></div>
           <div id="sch-log" style="display:flex;flex-direction:column;gap:4px;max-height:250px;overflow-y:auto;padding:8px">
             <div style="font-size:9px;color:var(--muted2);text-align:center">No executions yet.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- PAGE: QUEUE — Payment Queue -->
+    <div class="page" id="page-queue">
+      <div class="page-header">
+        <div class="page-icon" style="background:rgba(34,197,94,.12);color:var(--green)"><i class="ti ti-list-check"></i></div>
+        <div><div class="page-title">Payment Queue</div><div class="page-sub">Track in-progress and pending payments across all modules</div></div>
+        <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+          <button class="btn" onclick="queueRefreshAll()"><i class="ti ti-refresh"></i>Refresh</button>
+          <button class="btn" style="color:var(--red)" onclick="queueClearCompleted()"><i class="ti ti-trash"></i>Clear Done</button>
+        </div>
+      </div>
+      <div style="flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px">
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">
+          <div class="card" style="padding:10px"><div class="st-lbl">Pending</div><div class="st-val yellow" id="queue-stat-pending">0</div></div>
+          <div class="card" style="padding:10px"><div class="st-lbl">Processing</div><div class="st-val blue" id="queue-stat-processing">0</div></div>
+          <div class="card" style="padding:10px"><div class="st-lbl">Completed</div><div class="st-val green" id="queue-stat-done">0</div></div>
+          <div class="card" style="padding:10px"><div class="st-lbl">Failed</div><div class="st-val red" id="queue-stat-failed">0</div></div>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+          <input id="queue-search" class="cinput" placeholder="Search by ID or recipient..." style="flex:1;min-width:160px;font-size:9px;padding:4px 8px" oninput="renderQueue()"/>
+          <select id="queue-filter-status" class="cinput" style="font-size:9px;min-width:90px;padding:3px 6px;height:auto" onchange="renderQueue()">
+            <option value="">All Status</option><option>pending</option><option>processing</option><option>completed</option><option>failed</option><option>cancelled</option>
+          </select>
+          <button class="btn" style="font-size:8px;padding:2px 6px" onclick="document.getElementById('queue-search').value='';document.getElementById('queue-filter-status').value='';renderQueue()">Reset</button>
+        </div>
+        <div class="card" style="overflow:hidden">
+          <table class="btable" style="font-size:9px">
+            <thead><tr><th>Task</th><th>Type</th><th>Recipient</th><th style="width:70px">Amount</th><th>Status</th><th style="width:60px">Progress</th><th style="width:160px">Actions</th></tr></thead>
+            <tbody id="queue-tbody"></tbody>
+          </table>
+          <div id="queue-empty" style="padding:40px;text-align:center;color:var(--muted2);font-size:11px;display:none">
+            <i class="ti ti-list-check" style="font-size:36px;display:block;margin-bottom:10px;opacity:.2"></i>
+            <div>No queued payments</div>
+            <div style="font-size:9px;margin-top:4px">Payments from batch, cross-chain, and scheduled tasks appear here</div>
           </div>
         </div>
       </div>
@@ -7840,6 +7881,88 @@ select.cinput option { background: #161a24; color: #dde2f0; }
               </div>
             </div>
 
+            <!-- Currency (NEW) -->
+            <div class="pl-field-group">
+              <label class="pl-label">Currency</label>
+              <select id="pl-currency" class="pl-select" style="width:100%" onchange="plCurrencyChange()">
+                <option value="USDC">USDC — Circle</option>
+                <option value="EURC">EURC — Circle</option>
+                <option value="cirBTC">cirBTC — Circle</option>
+              </select>
+            </div>
+
+            <!-- Payment Methods + Networks (NEW) -->
+            <div class="pl-field-group">
+              <label class="pl-label">Accepted Payment Methods</label>
+              <div style="display:flex;gap:4px;flex-wrap:wrap">
+                <label class="invfi-chip" style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:rgba(79,142,247,.08);border:1px solid rgba(79,142,247,.2);border-radius:4px;font-size:9px;cursor:pointer;color:var(--text)">
+                  <input type="checkbox" id="pl-pm-usdc" checked style="accent-color:var(--blue)"/> USDC
+                </label>
+                <label class="invfi-chip" style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:rgba(79,142,247,.08);border:1px solid rgba(79,142,247,.2);border-radius:4px;font-size:9px;cursor:pointer;color:var(--text)">
+                  <input type="checkbox" id="pl-pm-eurc" style="accent-color:var(--blue)"/> EURC
+                </label>
+                <label class="invfi-chip" style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:rgba(79,142,247,.08);border:1px solid rgba(79,142,247,.2);border-radius:4px;font-size:9px;cursor:pointer;color:var(--text)">
+                  <input type="checkbox" id="pl-pm-cirbtc" style="accent-color:var(--blue)"/> cirBTC
+                </label>
+                <label class="invfi-chip" style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:rgba(168,85,247,.08);border:1px solid rgba(168,85,247,.2);border-radius:4px;font-size:9px;cursor:pointer;color:var(--text)">
+                  <input type="checkbox" id="pl-pm-xchain" onchange="plToggleCrosschain()" style="accent-color:var(--purple)"/> Crosschain
+                </label>
+                <label class="invfi-chip" style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:rgba(13,148,136,.08);border:1px solid rgba(13,148,136,.25);border-radius:4px;font-size:9px;cursor:pointer;color:var(--text)">
+                  <input type="checkbox" id="pl-pm-cctpv2" onchange="plToggleCCTPv2()" style="accent-color:var(--teal)"/> CCTP v2
+                </label>
+              </div>
+            </div>
+
+            <!-- Crosschain Networks (NEW) -->
+            <div id="pl-xchain-networks" style="display:none;padding-bottom:8px">
+              <label class="pl-label">Supported Networks</label>
+              <div style="display:flex;gap:4px;flex-wrap:wrap">
+                <label class="invfi-chip" style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:rgba(79,142,247,.06);border:1px solid rgba(79,142,247,.15);border-radius:4px;font-size:9px;cursor:pointer;color:var(--muted2)">
+                  <input type="checkbox" class="pl-net-cb" value="Arc" checked style="accent-color:var(--blue)"/> Arc
+                </label>
+                <label class="invfi-chip" style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:rgba(79,142,247,.06);border:1px solid rgba(79,142,247,.15);border-radius:4px;font-size:9px;cursor:pointer;color:var(--muted2)">
+                  <input type="checkbox" class="pl-net-cb" value="Ethereum" style="accent-color:#627eea"/> Ethereum
+                </label>
+                <label class="invfi-chip" style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:rgba(79,142,247,.06);border:1px solid rgba(79,142,247,.15);border-radius:4px;font-size:9px;cursor:pointer;color:var(--muted2)">
+                  <input type="checkbox" class="pl-net-cb" value="Base" style="accent-color:#0052ff"/> Base
+                </label>
+                <label class="invfi-chip" style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:rgba(79,142,247,.06);border:1px solid rgba(79,142,247,.15);border-radius:4px;font-size:9px;cursor:pointer;color:var(--muted2)">
+                  <input type="checkbox" class="pl-net-cb" value="Polygon" style="accent-color:#8247e5"/> Polygon
+                </label>
+                <label class="invfi-chip" style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:rgba(79,142,247,.06);border:1px solid rgba(79,142,247,.15);border-radius:4px;font-size:9px;cursor:pointer;color:var(--muted2)">
+                  <input type="checkbox" class="pl-net-cb" value="Arbitrum" style="accent-color:#28a0f0"/> Arbitrum
+                </label>
+                <label class="invfi-chip" style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:rgba(79,142,247,.06);border:1px solid rgba(79,142,247,.15);border-radius:4px;font-size:9px;cursor:pointer;color:var(--muted2)">
+                  <input type="checkbox" class="pl-net-cb" value="Optimism" style="accent-color:#ff0420"/> Optimism
+                </label>
+                <label class="invfi-chip" style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:rgba(79,142,247,.06);border:1px solid rgba(79,142,247,.15);border-radius:4px;font-size:9px;cursor:pointer;color:var(--muted2)">
+                  <input type="checkbox" class="pl-net-cb" value="Solana" style="accent-color:#9945ff"/> Solana
+                </label>
+              </div>
+            </div>
+
+            <!-- CCTP v2 Networks (NEW) -->
+            <div id="pl-cctpv2-networks" style="display:none;padding-bottom:8px">
+              <label class="pl-label">CCTP v2 Source Chains</label>
+              <div style="display:flex;gap:4px;flex-wrap:wrap">
+                <label class="invfi-chip" style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:rgba(13,148,136,.06);border:1px solid rgba(13,148,136,.15);border-radius:4px;font-size:9px;cursor:pointer;color:var(--muted2)">
+                  <input type="checkbox" class="pl-cctpv2-net-cb" value="Ethereum" style="accent-color:#627eea"/> Ethereum (Sepolia)
+                </label>
+                <label class="invfi-chip" style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:rgba(13,148,136,.06);border:1px solid rgba(13,148,136,.15);border-radius:4px;font-size:9px;cursor:pointer;color:var(--muted2)">
+                  <input type="checkbox" class="pl-cctpv2-net-cb" value="Base" style="accent-color:#0052ff"/> Base (Sepolia)
+                </label>
+                <label class="invfi-chip" style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:rgba(13,148,136,.06);border:1px solid rgba(13,148,136,.15);border-radius:4px;font-size:9px;cursor:pointer;color:var(--muted2)">
+                  <input type="checkbox" class="pl-cctpv2-net-cb" value="Arbitrum" style="accent-color:#28a0f0"/> Arbitrum (Sepolia)
+                </label>
+                <label class="invfi-chip" style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:rgba(13,148,136,.06);border:1px solid rgba(13,148,136,.15);border-radius:4px;font-size:9px;cursor:pointer;color:var(--muted2)">
+                  <input type="checkbox" class="pl-cctpv2-net-cb" value="Optimism" style="accent-color:#ff0420"/> Optimism (Sepolia)
+                </label>
+                <label class="invfi-chip" style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:rgba(13,148,136,.06);border:1px solid rgba(13,148,136,.15);border-radius:4px;font-size:9px;cursor:pointer;color:var(--muted2)">
+                  <input type="checkbox" class="pl-cctpv2-net-cb" value="Polygon" style="accent-color:#8247e5"/> Polygon (Amoy)
+                </label>
+              </div>
+            </div>
+
             <!-- Label -->
             <div class="pl-field-group">
               <label class="pl-label">Label <span class="pl-required">*</span></label>
@@ -8093,10 +8216,17 @@ select.cinput option { background: #161a24; color: #dde2f0; }
           </div>
         </div>
         <div class="pl-feature-card">
+          <div class="pl-feature-icon" style="background:rgba(13,148,136,.12);color:var(--teal)"><i class="ti ti-bridge"></i></div>
+          <div class="pl-feature-text">
+            <div class="pl-feature-title">CCTP v2 Bridge</div>
+            <div class="pl-feature-sub">Cross-chain USDC via Circle</div>
+          </div>
+        </div>
+        <div class="pl-feature-card">
           <div class="pl-feature-icon" style="background:rgba(167,139,250,.12);color:var(--purple)"><i class="ti ti-world"></i></div>
           <div class="pl-feature-text">
-            <div class="pl-feature-title">Cross-Chain</div>
-            <div class="pl-feature-sub">Multi-network support</div>
+            <div class="pl-feature-title">Multi-Network</div>
+            <div class="pl-feature-sub">7 chains supported</div>
           </div>
         </div>
         <div class="pl-feature-card">
@@ -8124,6 +8254,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
         <div class="page-icon" style="background:rgba(245,158,11,.1);color:var(--yellow)"><i class="ti ti-file-invoice"></i></div>
         <div><div class="page-title">Invoices</div><div class="page-sub">Create, send and track USDC invoices on Arc Testnet</div></div>
         <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+          <button class="btn" onclick="showPage('links')" title="Payment Links" style="font-size:10px"><i class="ti ti-link"></i>Payment Links</button>
           <button class="btn" onclick="invfiOpenSettings()" title="Invoice Settings" style="font-size:10px"><i class="ti ti-settings"></i></button>
           <button class="btn" onclick="invSwitchTab('list')" id="inv-tab-list" style="font-size:10px"><i class="ti ti-list"></i>All Invoices</button>
           <button class="btn primary" onclick="invSwitchTab('create')" id="inv-tab-create" style="font-size:10px"><i class="ti ti-plus"></i>New Invoice</button>
@@ -8287,6 +8418,9 @@ select.cinput option { background: #161a24; color: #dde2f0; }
                   <label class="invfi-chip" style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:rgba(168,85,247,.08);border:1px solid rgba(168,85,247,.2);border-radius:4px;font-size:9px;cursor:pointer;color:var(--text)">
                     <input type="checkbox" id="inv-pm-xchain" onchange="invToggleCrosschain()" style="accent-color:var(--purple)"/> Crosschain
                   </label>
+                  <label class="invfi-chip" style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:rgba(13,148,136,.08);border:1px solid rgba(13,148,136,.25);border-radius:4px;font-size:9px;cursor:pointer;color:var(--text)">
+                    <input type="checkbox" id="inv-pm-cctpv2" onchange="invToggleCCTPv2()" style="accent-color:var(--teal)"/> CCTP v2
+                  </label>
                 </div>
               </div>
               <div id="invfi-xchain-networks" style="display:none">
@@ -8320,6 +8454,32 @@ select.cinput option { background: #161a24; color: #dde2f0; }
                   <span id="invfi-route-text">Arc to CCTP V2 to Arc to Merchant Wallet</span>
                 </div>
               </div>
+              <!-- CCTP v2 Networks — InvoiceFi V2 -->
+              <div id="invfi-cctpv2-networks" style="display:none">
+                <div><div class="swap-label">CCTP v2 Source Chains</div>
+                  <div style="display:flex;gap:4px;flex-wrap:wrap" id="invfi-cctpv2-network-chips">
+                    <label class="invfi-chip" style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:rgba(13,148,136,.06);border:1px solid rgba(13,148,136,.15);border-radius:4px;font-size:9px;cursor:pointer;color:var(--muted2)">
+                      <input type="checkbox" class="invfi-cctpv2-net-cb" value="Ethereum" style="accent-color:#627eea"/> Ethereum (Sepolia)
+                    </label>
+                    <label class="invfi-chip" style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:rgba(13,148,136,.06);border:1px solid rgba(13,148,136,.15);border-radius:4px;font-size:9px;cursor:pointer;color:var(--muted2)">
+                      <input type="checkbox" class="invfi-cctpv2-net-cb" value="Base" style="accent-color:#0052ff"/> Base (Sepolia)
+                    </label>
+                    <label class="invfi-chip" style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:rgba(13,148,136,.06);border:1px solid rgba(13,148,136,.15);border-radius:4px;font-size:9px;cursor:pointer;color:var(--muted2)">
+                      <input type="checkbox" class="invfi-cctpv2-net-cb" value="Arbitrum" style="accent-color:#28a0f0"/> Arbitrum (Sepolia)
+                    </label>
+                    <label class="invfi-chip" style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:rgba(13,148,136,.06);border:1px solid rgba(13,148,136,.15);border-radius:4px;font-size:9px;cursor:pointer;color:var(--muted2)">
+                      <input type="checkbox" class="invfi-cctpv2-net-cb" value="Optimism" style="accent-color:#ff0420"/> Optimism (Sepolia)
+                    </label>
+                    <label class="invfi-chip" style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:rgba(13,148,136,.06);border:1px solid rgba(13,148,136,.15);border-radius:4px;font-size:9px;cursor:pointer;color:var(--muted2)">
+                      <input type="checkbox" class="invfi-cctpv2-net-cb" value="Polygon" style="accent-color:#8247e5"/> Polygon (Amoy)
+                    </label>
+                  </div>
+                </div>
+                <div id="invfi-cctpv2-route-preview" style="margin-top:6px;font-size:9px;color:var(--muted2);background:rgba(0,0,0,.15);border-radius:5px;padding:6px 8px">
+                  <span style="color:var(--teal);font-weight:600">CCTP v2: </span>
+                  <span id="invfi-cctpv2-route-text">Source Chain → burn USDC → Circle Attestation → Arc mint → Merchant Wallet</span>
+                </div>
+              </div>
               <!-- Chain label -->
               <div><div class="swap-label">Chain / Network</div>
                 <div class="cinput" style="display:flex;align-items:center;gap:6px;cursor:default;color:var(--blue)">
@@ -8345,6 +8505,25 @@ select.cinput option { background: #161a24; color: #dde2f0; }
                   <div id="inv-reminder-knob" style="width:14px;height:14px;background:var(--muted2);border-radius:50%;position:absolute;top:2px;left:2px;transition:.2s"></div>
                 </div>
               </div>
+              <!-- Advanced Payment Options — InvoiceFi V2 -->
+              <div style="display:flex;align-items:center;justify-content:space-between">
+                <span style="font-size:10px;color:var(--muted2)">Escrow (hold funds until delivery)</span>
+                <input type="checkbox" id="inv-escrow" style="accent-color:var(--purple)" onchange="invPreviewUpdate()"/>
+              </div>
+              <div style="display:flex;align-items:center;justify-content:space-between">
+                <span style="font-size:10px;color:var(--muted2)">Installments</span>
+                <select id="inv-installments" class="cinput" style="font-size:9px;min-width:90px;padding:2px 4px;height:auto" onchange="invPreviewUpdate()">
+                  <option value="">One-time</option>
+                  <option value="Monthly">Monthly</option>
+                  <option value="Weekly">Weekly</option>
+                  <option value="Quarterly">Quarterly</option>
+                </select>
+              </div>
+              <div style="display:flex;align-items:center;justify-content:space-between">
+                <span style="font-size:10px;color:var(--muted2)">Split Recipients</span>
+                <button class="btn" style="font-size:8px;padding:2px 6px" onclick="invAddSplitRecipient()"><i class="ti ti-plus"></i>Add</button>
+              </div>
+              <div id="inv-split-recipients" style="display:flex;flex-direction:column;gap:3px"></div>
               <button class="action-btn" style="background:linear-gradient(135deg,#d97706,#f59e0b);margin-top:2px" onclick="createInvoice()"><i class="ti ti-file-invoice"></i>Create &amp; Send Invoice</button>
             </div>
           </div>
@@ -10460,6 +10639,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
         <div class="page-icon" style="background:rgba(6,247,233,.1);color:#06F7E9"><i class="ti ti-chart-donut-3"></i></div>
         <div><div class="page-title">Unified Balance</div><div class="page-sub">Multi-chain portfolio, analytics and smart actions</div></div>
         <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+          <button class="btn" onclick="ubExportCSV()"><i class="ti ti-table-export"></i>Export</button>
           <button class="btn" onclick="ubRefresh()"><i class="ti ti-refresh"></i>Refresh</button>
         </div>
       </div>
@@ -10548,6 +10728,17 @@ select.cinput option { background: #161a24; color: #dde2f0; }
               <span id="ub-screen-gas" style="font-size:8px;color:var(--muted)">Gas: —</span>
             </div>
           </div>
+          <!-- ── PORTFOLIO HEALTH SCORE ── -->
+          <div class="card" id="ub-health-card">
+            <div class="ch"><i class="ti ti-heartbeat" style="font-size:13px;color:var(--teal)"></i><span class="ct">Portfolio Health Score</span><span id="ub-health-grade" style="font-size:9px;margin-left:auto;padding:3px 8px;border-radius:3px;font-weight:600">—</span></div>
+            <div class="cb" id="ub-health-body" style="display:flex;flex-direction:column;gap:10px"></div>
+          </div>
+          <!-- ── HISTORICAL TREND (30 snapshots) ── -->
+          <div class="card" id="ub-history-card">
+            <div class="ch"><i class="ti ti-chart-bar" style="font-size:13px;color:var(--blue)"></i><span class="ct">Balance History</span><span style="font-size:8px;color:var(--muted2);margin-left:8px">(30 snapshots)</span></div>
+            <div class="cb" id="ub-history-body" style="min-height:80px"><div style="font-size:9px;color:var(--muted2);text-align:center;padding:20px">Collecting data...</div></div>
+          </div>
+          <!-- ── ASSETS TABLE ── -->
           <div class="card">
             <div class="ch"><i class="ti ti-coins" style="font-size:13px;color:var(--yellow)"></i><span class="ct">Assets</span><span id="ub-asset-count" style="font-size:9px;color:var(--muted2);margin-left:auto">0 tokens</span></div>
             <div style="overflow-x:auto">
@@ -10556,16 +10747,6 @@ select.cinput option { background: #161a24; color: #dde2f0; }
                 <tbody id="ub-asset-tbody"><tr><td colspan="5" style="text-align:center;color:var(--muted2);padding:24px">Loading assets...</td></tr></tbody>
               </table>
             </div>
-          </div>
-          <!-- ── PORTFOLIO HEALTH SCORE ── -->
-          <div class="card" id="ub-health-card">
-            <div class="ch"><i class="ti ti-heartbeat" style="font-size:13px;color:var(--teal)"></i><span class="ct">Portfolio Health Score</span><span id="ub-health-grade" style="font-size:9px;margin-left:auto;padding:3px 8px;border-radius:3px;font-weight:600">—</span></div>
-            <div class="cb" id="ub-health-body" style="display:flex;flex-direction:column;gap:10px"></div>
-          </div>
-          <!-- ── SMART RECOMMENDATIONS ── -->
-          <div class="card" id="ub-recommendations-card">
-            <div class="ch"><i class="ti ti-bulb" style="font-size:13px;color:var(--yellow)"></i><span class="ct">AI Recommendations</span><span id="ub-rec-count" style="font-size:9px;color:var(--muted2);margin-left:auto">0 actions</span></div>
-            <div class="cb" id="ub-recommendations" style="display:flex;flex-direction:column;gap:6px"><div style="text-align:center;color:var(--muted2);font-size:9.5px;padding:12px">Analyzing portfolio...</div></div>
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
             <div class="card">
@@ -10578,18 +10759,6 @@ select.cinput option { background: #161a24; color: #dde2f0; }
             </div>
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-            <div class="card">
-              <div class="ch"><i class="ti ti-robot" style="font-size:13px;color:#06F7E9"></i><span class="ct">Autonomous Finance</span><span id="af-permission-badge" style="font-size:8px;margin-left:auto;padding:2px 6px;border-radius:3px;background:rgba(34,197,94,.12);color:var(--green);display:none">Approval Required</span></div>
-              <div class="cb" id="ub-autonomous-actions" style="display:flex;flex-direction:column;gap:8px"><div style="text-align:center;color:var(--muted2);font-size:9.5px;padding:20px">No data yet — connect wallet to generate plans</div></div>
-            </div>
-            <div class="card" id="ub-goals-card" style="display:none">
-              <div class="ch"><i class="ti ti-target-arrow" style="font-size:13px;color:var(--purple)"></i><span class="ct">AI Goals</span><button class="btn" style="padding:2px 8px;font-size:8px;margin-left:auto" onclick="AF.Goals.addGoalPrompt()"><i class="ti ti-plus"></i>New Goal</button></div>
-              <div class="cb" id="ub-goals" style="display:flex;flex-direction:column;gap:6px"><div style="text-align:center;color:var(--muted2);font-size:9.5px;padding:12px">No goals set</div></div>
-            </div>
-            <div class="card">
-              <div class="ch"><i class="ti ti-wallet" style="font-size:13px;color:var(--blue)"></i><span class="ct">Connected Wallets</span></div>
-              <div class="cb" id="ub-wallets" style="display:flex;flex-direction:column;gap:8px"><div style="text-align:center;color:var(--muted2);font-size:9.5px;padding:20px">No wallet connected</div></div>
-            </div>
             <div class="card" id="ub-agents-card" style="display:none">
               <div class="ch"><i class="ti ti-users-group" style="font-size:13px;color:#06F7E9"></i><span class="ct">Agent Economy</span><span id="ag-active-count" style="font-size:8px;color:var(--muted2);margin-left:auto">0 active</span></div>
               <div class="cb" id="ub-agents" style="display:flex;flex-direction:column;gap:8px"><div style="text-align:center;color:var(--muted2);font-size:9.5px;padding:12px">No agents initialized — connect wallet to activate</div></div>
@@ -12238,6 +12407,7 @@ const CHAIN_REGISTRY = {
     tokens: {
       USDC: { address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e', decimals: 6 },
       EURC: { address: '0xe6fb90f2e62b36e9d95e04dd905bf73a6e800f9f', decimals: 6 },
+      cirBTC: { address: '0xf0C4a4CE82A5746AbAAd9425360Ab04fbBA432BF', decimals: 8 },
     },
     cctp: { domain: 6,
       tokenMessenger:     '0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA',
@@ -12254,6 +12424,7 @@ const CHAIN_REGISTRY = {
     tokens: {
       USDC: { address: '0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d', decimals: 6 },
       EURC: { address: '0x6fc00b41a90e1e7ea7a6c2c45da0be3e16d7beb9', decimals: 6 },
+      cirBTC: { address: '0xf0C4a4CE82A5746AbAAd9425360Ab04fbBA432BF', decimals: 8 },
     },
     cctp: { domain: 3,
       tokenMessenger:     '0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA',
@@ -12270,6 +12441,7 @@ const CHAIN_REGISTRY = {
     tokens: {
       USDC: { address: '0x5fd84259d66Cd46123540766Be93DFE6D43130D7', decimals: 6 },
       EURC: { address: '0x5e1b0d9b92f80b9ae24ca71f90050a6a8f6a0e2', decimals: 6 },
+      cirBTC: { address: '0xf0C4a4CE82A5746AbAAd9425360Ab04fbBA432BF', decimals: 8 },
     },
     cctp: { domain: 2,
       tokenMessenger:     '0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA',
@@ -12286,6 +12458,7 @@ const CHAIN_REGISTRY = {
     tokens: {
       USDC: { address: '0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582', decimals: 6 },
       EURC: { address: '0x4b8bcc128a9eb5a8f08a1d41bae2fea31afe4830', decimals: 6 },
+      cirBTC: { address: '0xf0C4a4CE82A5746AbAAd9425360Ab04fbBA432BF', decimals: 8 },
     },
     cctp: { domain: 7,
       tokenMessenger:     '0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA',
@@ -14672,6 +14845,7 @@ function showPage(id) {
       var schCreate = document.getElementById('sch-create-panel'); if (schCreate) schCreate.lang = 'en-US';
       var dateInput = document.getElementById('sch-date'); if (dateInput) dateInput.lang = 'en-US';
     }
+    if (id === 'queue') { setTimeout(function() { renderQueue(); updateQueueStats(); }, 50); }
     if (id === 'autonoma') { setTimeout(() => { if (typeof autonomaInit === 'function') autonomaInit(); }, 50); }
     if (id === 'unified-balance') { setTimeout(() => { if (typeof ubInit === 'function') ubInit(); }, 50); }
   } catch (err) {
@@ -17906,8 +18080,8 @@ function renderTable(){
     const routeClass = isBridge ? 'bridge' : 'direct';
 
     // Status badge
-    const statusClass = valid ? 'ready' : 'invalid';
-    const statusText  = valid ? 'Ready' : 'Invalid';
+    const statusClass = valid ? (r._status === 'sent' ? 'ready' : r._status === 'failed' ? 'invalid' : 'ready') : 'invalid';
+    const statusText  = r._status === 'sent' ? 'Sent' : r._status === 'failed' ? 'Failed' : (valid ? 'Ready' : 'Invalid');
 
     // Chain options
     const chainOpts = CHAINS.map(c =>
@@ -17916,7 +18090,7 @@ function renderTable(){
 
     // Token
     const tok = r.token || 'USDC';
-    const tokenOpts = ['USDC','EURC'].map(t =>
+    const tokenOpts = ['USDC','EURC','cirBTC'].map(t =>
       `<option value="${t}" ${t===tok?'selected':''}>${t}</option>`
     ).join('');
 
@@ -17930,7 +18104,10 @@ function renderTable(){
           <div style="width:20px;height:20px;min-width:20px;border-radius:50%;background:${RCPT_COLORS[i%RCPT_COLORS.length]};display:flex;align-items:center;justify-content:center;font-size:7px;font-weight:800;color:#fff">${r.addr ? r.addr.slice(2,4).toUpperCase() : '0x'}</div>
           <div style="display:flex;flex-direction:column;gap:1px;min-width:0">
             <input class="ms-table-input name" value="${escHtml(r.name||'')}" placeholder="Name" onchange="recipients[${i}].name=this.value" onfocus="this.select()"/>
-            <input class="ms-table-input addr" value="${escHtml(r.addr)}" placeholder="0x..." onchange="recipients[${i}].addr=this.value;renderTable()" onfocus="this.select()"/>
+            <div style="position:relative">
+              <input class="ms-table-input addr" value="${escHtml(r.addr)}" placeholder="0x... or search contacts" oninput="batchAddrAutocomplete(${i},this)" onfocus="batchAddrAutocomplete(${i},this);this.select()" onblur="setTimeout(function(){var el=document.getElementById('batch-ac-list-${i}');if(el)el.style.display='none'},200)"/>
+              <div id="batch-ac-list-${i}" class="batch-autocomplete-list" style="display:none;position:absolute;top:100%;left:0;right:0;background:var(--surface);border:1px solid var(--border);border-radius:4px;z-index:50;max-height:160px;overflow-y:auto"></div>
+            </div>
           </div>
         </div>
       </td>
@@ -17978,6 +18155,34 @@ function addRow(){
   }, 30);
 }
 
+function batchAddrAutocomplete(idx, input) {
+  var query = (input.value || '').trim().toLowerCase();
+  var listEl = document.getElementById('batch-ac-list-' + idx);
+  if (!listEl) return;
+  if (query.length < 2) { listEl.style.display = 'none'; return; }
+  var results = [];
+  try {
+    if (typeof RecipientRegistry !== 'undefined' && RecipientRegistry.autocomplete) {
+      results = RecipientRegistry.autocomplete(query, 8);
+    }
+  } catch (_e) { }
+  if (!results.length) { listEl.style.display = 'none'; return; }
+  listEl.style.display = '';
+  listEl.innerHTML = results.map(function(c) {
+    var addr = c.addr ? c.addr.substring(0, 6) + '...' + c.addr.substring(c.addr.length - 4) : '';
+    return '<div onclick="batchSelectRecipient(' + idx + ',\'' + c.addr + '\',\'' + (c.name || '').replace(/'/g, "\\'") + '\')" style="padding:5px 8px;cursor:pointer;font-size:9px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:6px;color:var(--text);background:rgba(255,255,255,.03)"><span style="width:18px;height:18px;border-radius:50%;background:linear-gradient(135deg,rgba(167,139,250,.3),rgba(79,142,247,.2));display:flex;align-items:center;justify-content:center;font-size:7px;font-weight:700;flex-shrink:0">' + escHtml(c.name.charAt(0).toUpperCase()) + '</span><div><div style="font-size:9px">' + escHtml(c.name) + '</div><div style="font-size:7px;color:var(--muted2);font-family:monospace">' + addr + '</div></div></div>';
+  }).join('');
+}
+
+function batchSelectRecipient(idx, addr, name) {
+  recipients[idx].addr = addr;
+  recipients[idx].name = name;
+  saveRecipients();
+  renderTable();
+  var listEl = document.getElementById('batch-ac-list-' + idx);
+  if (listEl) listEl.style.display = 'none';
+}
+
 function setAllRecipientsChain(chainId){
   if(!recipients.length) return;
   recipients.forEach(r => r.chainId = chainId);
@@ -17989,7 +18194,7 @@ function setAllRecipientsChain(chainId){
 function updateStats(){saveRecipients();
   const total = recipients.reduce((s,r)=>s+(parseFloat(r.amount)||0),0);
   const n = recipients.length;
-  const fee = total*0.01;
+  const fee = total*0.002; // 0.2% platform fee
 
   // Route analysis
   const bridgeCount = recipients.filter(r=>getRecipientRoute(r)==='bridge').length;
@@ -18087,7 +18292,19 @@ function toggleAutoSwap() {
   tgl.classList.toggle('on');
   tgl.classList.toggle('off');
   const nowOn = tgl.classList.contains('on');
-  toast(nowOn ? 'Auto Swap: ON — Different tokens will be auto-swapped' : 'Auto Swap: OFF', 'info');
+  if (nowOn) {
+    var tokens = {};
+    recipients.forEach(function(r) { tokens[r.token||'USDC'] = (tokens[r.token||'USDC']||0) + (parseFloat(r.amount)||0); });
+    var tokenList = Object.keys(tokens);
+    if (tokenList.length > 1) {
+      toast('Auto Swap ON — detected ' + tokenList.map(function(t){ return tokens[t].toFixed(2) + ' ' + t; }).join(', ') + '. Will prompt swap before sending.', 'info');
+    } else {
+      toast('Auto Swap ON — all recipients use ' + tokenList[0], 'info');
+    }
+    renderTable();
+  } else {
+    toast('Auto Swap OFF', 'info');
+  }
 }
 
 // ── Bottom Bar State ───────────────────────────────────────
@@ -18124,7 +18341,6 @@ function updateBottomBar() {
     info.innerHTML = '<span style="width:5px;height:5px;border-radius:50%;background:var(--green);animation:pulse 1.5s ease-in-out infinite"></span> RPC: rpc.testnet.arc.network · '+directCount+' direct / '+bridgeCount+' bridge';
   }
 }
-function editAll(){const v=prompt('New USDC value for all:');if(!v||isNaN(parseFloat(v)))return;recipients.forEach(r=>r.amount=parseFloat(v).toFixed(2));renderTable();toast('Values updated','success');}
 function duplicateAll(){recipients.push(...recipients.map(r=>({...r})));saveRecipients();renderTable();toast('Duplicated','success');}
 function clearAll(){if(!recipients.length)return;if(!confirm(`Clear all ${recipients.length} recipients?`))return;recipients.length=0;saveRecipients();renderTable();toast('Cleared','info'); resetWorkflow(); updateWorkflowStep(1,'active'); updateWorkflowStep(2,'pending'); updateWorkflowStep(3,'pending'); updateWorkflowStep(4,'pending'); updateBottomBar(); }
 function openEditAllModal(){
@@ -18263,13 +18479,13 @@ function loadCSV(input){
   const reader=new FileReader();
   reader.onload=e=>{
     const lines=e.target.result.split('\n').filter(l=>l.trim());
-    let n=0;
+    var n=0, skipped=0, dupes=0;
+    var existingAddrs = new Set(recipients.map(function(r){ return (r.addr||'').toLowerCase(); }));
+    var newRows = [];
     lines.forEach(line=>{
       const cols=line.split(',').map(s=>s.trim());
-      // Support formats: addr,amount,note  OR  name,addr,amount,note,chain
-      let addr,amount,note,name='',chainId='Arc_Testnet';
+      var addr,amount,note,name='',chainId='Arc_Testnet';
       if(cols.length>=4&&(isAddr(cols[1])||isEns(cols[1]))){
-        // name,addr,amount,note[,chain]
         [name,addr,amount,note]=cols;
         if(cols[4]){const key=cols[4].toLowerCase().trim();chainId=CHAIN_MAP[key]||'Arc_Testnet';}
       } else {
@@ -18277,9 +18493,25 @@ function loadCSV(input){
         if(cols[3]){const key=cols[3].toLowerCase().trim();chainId=CHAIN_MAP[key]||'Arc_Testnet';}
       }
       if(!addr||addr.toLowerCase()==='address'||addr.toLowerCase()==='addr')return;
-      if(isAddr(addr)||isEns(addr)){recipients.push({addr,amount:(parseFloat(amount)||0).toFixed(2),note:note||'',name:name||'',chainId});n++;}
+      var amt = parseFloat(amount)||0;
+      if(amt<=0){skipped++;return;}
+      var addrLower = addr.toLowerCase();
+      if(existingAddrs.has(addrLower)){dupes++;return;}
+      if(isAddr(addr)||isEns(addr)){
+        existingAddrs.add(addrLower);
+        newRows.push({addr,amount:amt.toFixed(2),note:note||'',name:name||'',chainId});
+        n++;
+      }
     });
-    saveRecipients();renderTable();toast(`${n} recipient(s) imported`,'success');
+    if(newRows.length>0){
+      recipients.push(...newRows);saveRecipients();renderTable();
+      var msg=n+' recipient(s) imported';
+      if(skipped>0)msg+=', '+skipped+' skipped (invalid amount)';
+      if(dupes>0)msg+=', '+dupes+' duplicates';
+      toast(msg,'success');
+    } else {
+      toast('No valid recipients found in CSV','warning');
+    }
   };
   reader.readAsText(file);input.value='';
 }
@@ -18289,11 +18521,32 @@ function exportCSV(){
 }
 
 // ── Modal ──────────────────────────────────────────────────
-function openModal(){
+async function openModal(){
   if(!recipients.length){toast('Add at least one recipient','error');return;}
   if(!walletAddress){toast('Connect your wallet before sending','warning');return;}
   const valid=recipients.filter(r=>(isAddr(r.addr)||isEns(r.addr))&&parseFloat(r.amount)>0);
   if(!valid.length){toast('No valid recipients with amount > 0','error');return;}
+
+  // ── Real gas estimation ──
+  try {
+    if (signer && signer.provider && valid.length > 0) {
+      const gasEstEl = document.getElementById('ms-fp-gas');
+      if (gasEstEl) gasEstEl.textContent = 'estimating...';
+      var gasTestAddr = valid[0]._resolved || valid[0].addr;
+      var batchSize = valid.length;
+      var perTxGas = 21000n;
+      try {
+        var testContract = new ethers.Contract(activeUSDC(), USDC_ABI, signer);
+        var gasEst = await testContract.transfer.estimateGas(gasTestAddr, 1n);
+        perTxGas = gasEst;
+      } catch (_g) {}
+      var totalGas = perTxGas * BigInt(batchSize);
+      var feeData = await signer.provider.getFeeData();
+      var gasPrice = feeData.gasPrice || 1000000000n;
+      var estUSDC = Number(totalGas * gasPrice) / 1e18;
+      if (gasEstEl) gasEstEl.textContent = '~' + estUSDC.toFixed(4) + ' USDC (' + batchSize + ' txs)';
+    }
+  } catch (_ge) { /* keep static fallback */ }
 
   // Check: any cross-chain recipients without auto-bridge enabled
   const bridgeRcpts = recipients.filter(r=>getRecipientRoute(r)==='bridge');
@@ -18403,16 +18656,18 @@ async function signTx(){
       // This works on any chain without needing a custom batch contract
       const usdcContract = new ethers.Contract(activeUSDC(), USDC_ABI, signer);
       const eurcContract = new ethers.Contract(activeEURC(), USDC_ABI, signer);
+      const cirBtcContract = typeof activeCirBTC === 'function' ? new ethers.Contract(activeCirBTC(), USDC_ABI, signer) : null;
 
-      // Use fresh read-only provider only for balance checks (to avoid decode errors on some RPC states)
       const readProvider = getCachedProvider('https://arc-testnet.drpc.org');
       const usdcRead = new ethers.Contract(activeUSDC(), USDC_ABI, readProvider);
       const eurcRead = new ethers.Contract(activeEURC(), USDC_ABI, readProvider);
+      const cirBtcRead = typeof activeCirBTC === 'function' ? new ethers.Contract(activeCirBTC(), USDC_ABI, readProvider) : null;
 
-      // Check USDC balance for all direct USDC recipients
       const usdcTotal = directRcpts.filter(r=>(r.token||'USDC')==='USDC')
         .reduce((s,r)=>s+(parseFloat(r.amount)||0),0);
       const eurcTotal = directRcpts.filter(r=>r.token==='EURC')
+        .reduce((s,r)=>s+(parseFloat(r.amount)||0),0);
+      var cirBtcTotal = directRcpts.filter(r=>r.token==='cirBTC')
         .reduce((s,r)=>s+(parseFloat(r.amount)||0),0);
 
       if(usdcTotal>0){
@@ -18420,6 +18675,20 @@ async function signTx(){
         if(bal < toUsdc(usdcTotal.toFixed(6))){
           toast(`Insufficient USDC. Need ${usdcTotal.toFixed(2)} USDC`,'error'); return;
         }
+      }
+      if(eurcTotal>0){
+        const bal = await eurcRead.balanceOf(walletAddress);
+        if(bal < toUsdc(eurcTotal.toFixed(6))){
+          toast(`Insufficient EURC. Need ${eurcTotal.toFixed(2)} EURC`,'error'); return;
+        }
+      }
+      if(cirBtcTotal>0 && cirBtcRead){
+        const bal = await cirBtcRead.balanceOf(walletAddress);
+        if(bal < toUsdc(cirBtcTotal.toFixed(6))){
+          toast(`Insufficient cirBTC. Need ${cirBtcTotal.toFixed(2)} cirBTC`,'error'); return;
+        }
+      } else if (cirBtcTotal > 0 && !cirBtcRead) {
+        toast('cirBTC contract not available on this chain','error'); return;
       }
 
       // ── MULTISEND: Multicall3 (ARC→ARC) via transferFrom pattern ────────────
@@ -18830,6 +19099,15 @@ async function signTx(){
           );
           if (hash) lastHash = lastHash || hash;
         }
+
+        // ── cirBTC batch ───────────────────────────────────────────────────────
+        const cirBtcDirectRcpts = directRcpts.filter(r => r.token==='cirBTC');
+        if (cirBtcDirectRcpts.length > 0 && cirBtcContract && typeof activeCirBTC === 'function') {
+          const hash = await executeBatchViaMulticall3(
+            cirBtcContract, activeCirBTC(), walletAddress, cirBtcDirectRcpts, 'cirBTC'
+          );
+          if (hash) lastHash = lastHash || hash;
+        }
       }
 
       // ── Cross-chain recipients via MultiSendExecutorV7 ────────────────
@@ -18993,6 +19271,10 @@ async function signTx(){
       closeModal();
       const rcptCount = validRcpts.length;
 
+      // Mark recipients as sent
+      validRcpts.forEach(function(r) { r._status = 'sent'; });
+      saveRecipients(); renderTable();
+
       // Defensive wrapper to prevent "Maximum call stack size exceeded" in post-processing
       try {
         finalizeBatch(lastHash, null, false, total, rcptCount);
@@ -19070,6 +19352,12 @@ async function executeInParts(){
 
   for(let i=0;i<parts;i++){
     const slice = validRcpts.slice(i*s, (i+1)*s);
+    if (parts > 1 && i > 0) {
+      if (!confirm('Part ' + (i+1) + ' of ' + parts + ' — ' + slice.length + ' recipients ready. Continue?')) {
+        toast('Execution paused at part ' + (i+1), 'warning');
+        recipients.length=0; originalRecipients.forEach(r=>recipients.push(r)); renderTable(); return;
+      }
+    }
     toast(`Sending part ${i+1}/${parts} — ${slice.length} recipient${slice.length>1?'s':''}...`,'info');
 
     // Swap recipients array to just this slice
@@ -22098,16 +22386,22 @@ function invShareInvoice(id) {
     toast('Invoice link copied!', 'success');
   }
 }
-function invExportPDF(id) {
-  const inv = invoiceList.find(i => i.id === id);
-  if (!inv) { toast('Invoice not found', 'error'); return; }
-  window.print();
-  toast('Opening PDF export...', 'info');
-}
+// PDF export handled by detailed invExportPDF in Invoices section
 
 // ══════════════════════════════════════════════════════════
 //  PAYMENT LINKS  —  Smart QR + Analytics + Card Design
 // ══════════════════════════════════════════════════════════
+
+// ── PayLink Config ────────────────────────────────────────
+const PAYLINK_CONFIG = {
+  acceptedCurrencies: ['USDC','EURC','cirBTC'],
+  acceptedNetworks: ['Arc','Ethereum','Base','Polygon','Arbitrum','Optimism','Solana'],
+  defaultCurrency: 'USDC',
+  defaultExpiry: 'never',
+  linkTypes: ['fixed','open','donation','subscription'],
+  statusList: ['Active','Paid','Expired','Disabled','Processing'],
+  cctpv2Networks: ['Ethereum','Base','Arbitrum','Optimism','Polygon']
+};
 
 const PAY_BASE_URL = window.location.origin || 'https://elligente.pages.dev';
 
@@ -22172,6 +22466,8 @@ function updatePlStats() {
   const paid      = payLinks.filter(l => l.status === 'Paid').length;
   const collected = payLinks.filter(l => l.status === 'Paid')
                             .reduce((s,l) => s + (parseFloat(l.amount)||0), 0);
+  const cctpv2Collected = payLinks.filter(l => l.status === 'Paid' && l.cctpv2Status === 'COMPLETED')
+                                  .reduce((s,l) => s + (parseFloat(l.amount)||0), 0);
   const conv      = scans > 0 ? ((paid / scans) * 100).toFixed(1) + '%' : '—';
 
   const set = (id,v) => { const el=document.getElementById(id); if(el) el.textContent=v; };
@@ -22232,6 +22528,46 @@ function plSetType(type, btn) {
   if (inp && type !== 'open') inp.placeholder = '0.00';
 }
 
+function plCurrencyChange() {
+  var cur = document.getElementById('pl-currency')?.value || 'USDC';
+  var badge = document.querySelector('.pl-amount-badge');
+  if (badge) badge.textContent = cur;
+}
+
+function plToggleCrosschain() {
+  var cb = document.getElementById('pl-pm-xchain');
+  var panel = document.getElementById('pl-xchain-networks');
+  if (panel) panel.style.display = cb && cb.checked ? '' : 'none';
+}
+
+function plToggleCCTPv2() {
+  var cb = document.getElementById('pl-pm-cctpv2');
+  var panel = document.getElementById('pl-cctpv2-networks');
+  if (panel) panel.style.display = cb && cb.checked ? '' : 'none';
+}
+
+function plGetAcceptedPayments() {
+  var m = [];
+  if (document.getElementById('pl-pm-usdc')?.checked) m.push('USDC');
+  if (document.getElementById('pl-pm-eurc')?.checked) m.push('EURC');
+  if (document.getElementById('pl-pm-cirbtc')?.checked) m.push('cirBTC');
+  if (document.getElementById('pl-pm-xchain')?.checked) m.push('Crosschain');
+  if (document.getElementById('pl-pm-cctpv2')?.checked) m.push('CCTP v2');
+  return m;
+}
+
+function plGetAcceptedNetworks() {
+  var cbs = document.querySelectorAll('.pl-net-cb:checked');
+  var nets = []; for (var i = 0; i < cbs.length; i++) nets.push(cbs[i].value);
+  return nets;
+}
+
+function plGetCCTPv2Networks() {
+  var cbs = document.querySelectorAll('.pl-cctpv2-net-cb:checked');
+  var nets = []; for (var i = 0; i < cbs.length; i++) nets.push(cbs[i].value);
+  return nets;
+}
+
 // ── Advanced options toggle ───────────────────────────────
 function plToggleAdv(btn) {
   btn.classList.toggle('open');
@@ -22270,6 +22606,85 @@ function plOpenCurrentPayPage() {
   });
 }
 
+// ── Pay Payment Link via CCTP v2 ─────────────────────────
+async function payLinkViaCCTPv2(linkId, sourceChain) {
+  if (!walletAddress) { toast('Connect wallet to pay', 'error'); return; }
+  var link = payLinks.find(function(l) { return l.id === linkId; });
+  if (!link) return;
+  var cctpCfg = (typeof ElligenteCCTP !== 'undefined' && ElligenteCCTP.CCTP_CONFIG) ? ElligenteCCTP.CCTP_CONFIG : {};
+  var sourceChainId = null, srcCfg = null;
+  var chainIdMap = { 'Ethereum': 11155111, 'Base': 84532, 'Arbitrum': 421614, 'Optimism': 11155420, 'Polygon': 80002 };
+  sourceChainId = chainIdMap[sourceChain];
+  if (!sourceChainId) { toast('Unknown source chain: ' + sourceChain, 'error'); return; }
+  srcCfg = cctpCfg[String(sourceChainId)];
+  if (!srcCfg || !srcCfg.tokenMessenger) { toast('CCTP v2 not configured for ' + sourceChain, 'error'); return; }
+  var payAmt = parseFloat((link.amount || 0).toFixed(6));
+  if (payAmt <= 0) { toast('Invalid link amount', 'error'); return; }
+  if (!signer) { toast('Wallet signer not available', 'error'); return; }
+  try {
+    var provider = signer.provider;
+    var currentChainId = (await provider.getNetwork()).chainId;
+    if (Number(currentChainId) !== Number(sourceChainId)) {
+      toast('Please switch to ' + sourceChain + ' network', 'warning'); return;
+    }
+    var usdcAddr = srcCfg.usdc;
+    var tokenMessengerAddr = srcCfg.tokenMessenger;
+    var arcDomain = (typeof ElligenteCCTP !== 'undefined') ? ElligenteCCTP.ARC_DOMAIN : 26;
+    var usdc = new ethers.Contract(usdcAddr, USDC_ABI, signer);
+    var tokenMessengerAbi = ['function depositForBurn(uint256 amount, uint32 destinationDomain, bytes32 mintRecipient, address burnToken)'];
+    var tokenMessenger = new ethers.Contract(tokenMessengerAddr, tokenMessengerAbi, signer);
+    var bridgeAmount = ethers.parseUnits(payAmt.toFixed(6), 6);
+    var mintRecipientBytes = ethers.zeroPadValue(link.addr || link.recipient || walletAddress, 32);
+    link.status = 'Processing'; link.cctpv2Status = 'INITIATED';
+    Store.save('links', payLinks); renderPayLinks(); updatePlStats();
+    toast('Approving USDC for CCTP v2 bridge...', 'info');
+    var approveTx = await usdc.approve(tokenMessengerAddr, bridgeAmount);
+    await approveTx.wait();
+    toast('Burning USDC on ' + sourceChain + ' via CCTP v2...', 'info');
+    var burnTx = await tokenMessenger.depositForBurn(bridgeAmount, arcDomain, mintRecipientBytes, usdcAddr);
+    link.cctpv2BurnTx = burnTx.hash; link.cctpv2Status = 'BURNING';
+    Store.save('links', payLinks);
+    var burnReceipt = await burnTx.wait();
+    link.cctpv2Status = 'BURNED';
+    toast('Polling Circle Iris for attestation...', 'info');
+    link.cctpv2Status = 'WAITING_ATTESTATION'; Store.save('links', payLinks);
+    var attestResult = null;
+    if (typeof CCTPShared !== 'undefined') {
+      attestResult = await CCTPShared.pollBridgeAttestation(srcCfg, burnTx.hash, burnReceipt, {
+        isArcInbound: true, maxPolls: 180, interval: 5000
+      });
+    }
+    if (!attestResult) {
+      link.cctpv2Status = 'ATTESTATION_TIMEOUT'; Store.save('links', payLinks); renderPayLinks(); updatePlStats();
+      toast('CCTP v2 bridge submitted. USDC will arrive on Arc in 10-15 min.', 'warning'); return;
+    }
+    link.cctpv2Status = 'ATTESTED';
+    toast('Minting USDC on Arc...', 'info');
+    link.cctpv2Status = 'MINTING'; Store.save('links', payLinks); renderPayLinks(); updatePlStats();
+    var arcCfg = cctpCfg['5042002'];
+    if (arcCfg && arcCfg.messageTransmitter && attestResult.messageBytes && attestResult.attestationSig) {
+      var arcProvider = new ethers.JsonRpcProvider(arcCfg.rpc);
+      var arcSigner = signer.connect(arcProvider);
+      var mtAbi = ['function receiveMessage(bytes message, bytes attestation) returns (bool)'];
+      var mtContract = new ethers.Contract(arcCfg.messageTransmitter, mtAbi, arcSigner);
+      var mintTx = await mtContract.receiveMessage(attestResult.messageBytes, attestResult.attestationSig);
+      link.cctpv2MintTx = mintTx.hash;
+      await mintTx.wait();
+    }
+    link.cctpv2Status = 'COMPLETED'; link.status = 'Paid'; link.paidTx = link.cctpv2MintTx || link.cctpv2BurnTx || '';
+    link.paidOn = new Date().toISOString(); link.payments = (link.payments || 0) + 1;
+    Store.save('links', payLinks); renderPayLinks(); updatePlStats();
+    toast('Payment link paid via CCTP v2 from ' + sourceChain + '!', 'success');
+    refreshBalance();
+  } catch (e) {
+    var link2 = payLinks.find(function(l) { return l.id === linkId; });
+    if (link2) { link2.cctpv2Status = 'FAILED'; if (link2.status === 'Processing') link2.status = 'Active'; }
+    Store.save('links', payLinks); renderPayLinks(); updatePlStats();
+    if (e.code === 4001) toast('Rejected', 'error');
+    else toast('CCTP v2 error: ' + (e.shortMessage || e.message || '').substring(0, 120), 'error');
+  }
+}
+
 // ── Create Payment Link ───────────────────────────────────
 function createPayLink() {
   const amount  = parseFloat(document.getElementById('pl-amount')?.value) || 0;
@@ -22297,9 +22712,16 @@ function createPayLink() {
     feeReceiver: (typeof TREASURY_VAULT_ADDRESS !== 'undefined') ? TREASURY_VAULT_ADDRESS : '',
     type:      currentPlType || 'fixed',
     desc,
-    addr, recipient: addr, token: 'USDC', chain: 'Arc Testnet',
+    addr, recipient: addr, token: document.getElementById('pl-currency')?.value || 'USDC', chain: 'Arc Testnet',
+    currency: document.getElementById('pl-currency')?.value || 'USDC',
     expiry, expiresAt, uses: 0, scans: 0, payments: 0,
-    status: 'Active', created: new Date().toISOString(), url: payUrl
+    status: 'Active', created: new Date().toISOString(), url: payUrl,
+    acceptedPayments: plGetAcceptedPayments(),
+    acceptedNetworks: plGetAcceptedNetworks(),
+    crosschainEnabled: plGetAcceptedPayments().indexOf('Crosschain') >= 0,
+    cctpv2Enabled: plGetAcceptedPayments().indexOf('CCTP v2') >= 0,
+    cctpv2Networks: plGetCCTPv2Networks(),
+    cctpv2Status: null
   };
 
   payLinks.unshift(link);
@@ -22311,7 +22733,7 @@ function createPayLink() {
   fetch('/api/payment-links', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ label, amount, type: currentPlType || 'fixed', desc, recipient: addr, token: 'USDC', chain: 'Arc Testnet', expiry })
+    body: JSON.stringify({ label, amount, type: currentPlType || 'fixed', desc, recipient: addr, token: link.currency || 'USDC', chain: 'Arc Testnet', expiry })
   }).then(r => r.json()).then(res => {
     if (res.ok && res.link) {
       const idx = payLinks.findIndex(x => x.id === link.id);
@@ -22342,7 +22764,7 @@ function createPayLink() {
   drawQRReal('pl-qr-container', payUrl, 140);
 
   const set = (id,v) => { const el=document.getElementById(id); if(el) el.textContent=v; };
-  set('pl-prev-amount',    amount + ' USDC');
+  set('pl-prev-amount',    (currentPlType==='open'?'Any':amount) + ' ' + (link.currency||'USDC'));
   set('pl-prev-recipient', shortAddr(addr));
   set('pl-prev-expiry',    expiry === 'never' ? 'Never' : expiry);
 
@@ -22525,9 +22947,19 @@ function ppOpenLink() {
 }
 function ppDownloadQR(fmt) {
   if (!currentPayLink) return;
-  if (fmt === 'pdf') { toast('PDF export coming soon','info'); return; }
-  if (fmt === 'svg') { toast('SVG export coming soon','info'); return; }
-  downloadQRFromEl('pl-preview-panel-qr', 'elligente-' + currentPayLink.id + '-qr.png');
+  if (fmt === 'svg') {
+    var canvas = document.querySelector('#pl-preview-panel-qr canvas');
+    if (canvas) {
+      var dataUrl = canvas.toDataURL('image/png');
+      var a = document.createElement('a'); a.href = dataUrl; a.download = 'elligente-' + currentPayLink.id + '-qr.svg';
+      a.click(); toast('QR downloaded as SVG','success');
+    } else { toast('QR not ready','error'); }
+  } else if (fmt === 'pdf') {
+    downloadQRFromEl('pl-preview-panel-qr', 'elligente-' + currentPayLink.id + '-qr.png');
+    toast('QR downloaded as PNG (PDF preview available via browser print)','info');
+  } else {
+    downloadQRFromEl('pl-preview-panel-qr', 'elligente-' + currentPayLink.id + '-qr.png');
+  }
 }
 
 // ── Type badge HTML ───────────────────────────────────────
@@ -22633,7 +23065,7 @@ function renderPayLinks() {
       <div class="pl-link-card-name">${escHtml(l.label||'Untitled')}</div>
       <div style="margin:2px 0 0">
         <span class="pl-link-card-amt">${l.type==='open'?'Any':l.amount}</span>
-        <span class="pl-link-card-cur">USDC</span>
+        <span class="pl-link-card-cur">${l.currency||l.token||'USDC'}</span>
       </div>
       <div class="pl-link-card-stats">
         <div class="pl-link-stat-item">
@@ -22655,10 +23087,12 @@ function renderPayLinks() {
           ${expLabel}
         </div>
         <div class="pl-link-card-actions" onclick="event.stopPropagation()">
+          ${l.cctpv2Enabled && l.cctpv2Networks && l.cctpv2Networks.length > 0 && l.status !== 'Paid' && l.status !== 'Disabled' ? '<select class="cinput" style="font-size:7px;padding:2px 3px;min-width:55px;background:rgba(13,148,136,.08);border:1px solid rgba(13,148,136,.25);color:var(--teal);height:22px" onchange="if(this.value)payLinkViaCCTPv2(\'' + l.id + '\',this.value)"><option value="">CCTP</option>' + l.cctpv2Networks.map(function(n){return '<option value="'+n+'">'+n.slice(0,4)+'</option>';}).join('') + '</select>' : ''}
           <button class="pl-card-act" style="color:var(--blue);border-color:rgba(79,142,247,.25);" title="Open payment page" onclick="plShowQR('${l.id}')"><i class="ti ti-external-link"></i></button>
           <button class="pl-card-act" style="color:var(--teal);border-color:rgba(45,212,191,.25);" title="Copy link" onclick="plCopyLinkById('${l.id}')"><i class="ti ti-copy"></i></button>
           <button class="pl-card-act" style="color:var(--yellow);border-color:rgba(245,158,11,.25);" title="${l.status==='Disabled'?'Re-enable':'Disable'}" onclick="plDisableLink('${l.id}')"><i class="ti ti-${l.status==='Disabled'?'toggle-right':'toggle-left'}"></i></button>
           <button class="pl-card-act danger" style="color:var(--red);border-color:rgba(239,68,68,.25);" title="Delete" onclick="deactivateLink('${l.id}')"><i class="ti ti-trash"></i></button>
+          <button class="pl-card-act" style="color:var(--yellow);border-color:rgba(245,158,11,.25);font-size:7px;padding:2px 4px" title="Convert to Invoice" onclick="createInvoiceFromPayLink('${l.id}')"><i class="ti ti-file-invoice"></i></button>
         </div>
       </div>
     </div>`;
@@ -22676,8 +23110,88 @@ function renderPayLinks() {
 
 
 // ══════════════════════════════════════════════════════════
-//  INVOICES
+//  LINK ↔ INVOICE CONVERSION
 // ══════════════════════════════════════════════════════════
+
+function createInvoiceFromPayLink(linkId) {
+  var link = payLinks.find(function(l) { return l.id === linkId; });
+  if (!link) { toast('Payment link not found', 'error'); return; }
+  showPage('invoices');
+  setTimeout(function() {
+    var setVal = function(id, v) { var el = document.getElementById(id); if (el) el.value = v; };
+    setVal('inv-num', 'INV-' + (invoiceList.length + 1).toString().padStart(3, '0'));
+    setVal('inv-from', 'Elligente User');
+    setVal('inv-to-addr', link.addr || link.recipient || '');
+    setVal('inv-to-name', link.label || '');
+    setVal('inv-desc', link.desc || '');
+    setVal('inv-currency', link.currency || link.token || 'USDC');
+    setVal('inv-amount', String(link.amount || 0));
+    var firstRow = document.querySelector('#inv-line-items .inv-line-row');
+    if (firstRow) {
+      var nameEl = firstRow.querySelector('.li-name'); if (nameEl) nameEl.value = link.label || 'Payment Link Item';
+      var priceEl = firstRow.querySelector('.li-price'); if (priceEl) priceEl.value = String(link.amount || 0);
+    }
+    if (link.acceptedPayments) {
+      var pmMap = { 'USDC': 'inv-pm-usdc', 'EURC': 'inv-pm-eurc', 'cirBTC': 'inv-pm-cirbtc', 'Crosschain': 'inv-pm-xchain', 'CCTP v2': 'inv-pm-cctpv2' };
+      for (var k in pmMap) {
+        var cb = document.getElementById(pmMap[k]);
+        if (cb) cb.checked = link.acceptedPayments.indexOf(k) >= 0;
+      }
+      if (link.acceptedPayments.indexOf('Crosschain') >= 0) invToggleCrosschain();
+      if (link.acceptedPayments.indexOf('CCTP v2') >= 0) invToggleCCTPv2();
+    }
+    if (link.cctpv2Networks && link.cctpv2Networks.length > 0) {
+      var cctpCbs = document.querySelectorAll('.invfi-cctpv2-net-cb');
+      cctpCbs.forEach(function(cb) { cb.checked = link.cctpv2Networks.indexOf(cb.value) >= 0; });
+    }
+    if (link.expiry && link.expiry !== 'never') {
+      var expMap = { '24h': 1, '7d': 7, '30d': 30 };
+      var days = expMap[link.expiry] || 0;
+      if (days) { var d = new Date(); d.setDate(d.getDate() + days); setVal('inv-due', d.toISOString().slice(0, 10)); }
+    }
+    invRecalcLines(); invPreviewUpdate();
+    toast('Invoice created from payment link: ' + link.label, 'success');
+  }, 200);
+}
+
+function createPayLinkFromInvoice(invId) {
+  var inv = invoiceList.find(function(i) { return i.id === invId; });
+  if (!inv) { toast('Invoice not found', 'error'); return; }
+  showPage('links');
+  setTimeout(function() {
+    var setVal = function(id, v) { var el = document.getElementById(id); if (el) el.value = v; };
+    setVal('pl-label', inv.id + ' - ' + (inv.toName || 'Payment'));
+    setVal('pl-amount', String(inv.subtotal || 0));
+    setVal('pl-addr', inv.toAddr || inv.recipient || '');
+    setVal('pl-desc', inv.desc || '');
+    if (inv.currency) {
+      var curSel = document.getElementById('pl-currency'); if (curSel) curSel.value = inv.currency;
+      plCurrencyChange();
+    }
+    if (inv.acceptedPayments) {
+      var pmMap = { 'USDC': 'pl-pm-usdc', 'EURC': 'pl-pm-eurc', 'cirBTC': 'pl-pm-cirbtc', 'Crosschain': 'pl-pm-xchain', 'CCTP v2': 'pl-pm-cctpv2' };
+      for (var k in pmMap) {
+        var cb = document.getElementById(pmMap[k]);
+        if (cb) cb.checked = inv.acceptedPayments.indexOf(k) >= 0;
+      }
+      if (inv.acceptedPayments.indexOf('Crosschain') >= 0) plToggleCrosschain();
+      if (inv.acceptedPayments.indexOf('CCTP v2') >= 0) plToggleCCTPv2();
+    }
+    if (inv.cctpv2Networks && inv.cctpv2Networks.length > 0) {
+      var cctpCbs = document.querySelectorAll('.pl-cctpv2-net-cb');
+      cctpCbs.forEach(function(cb) { cb.checked = inv.cctpv2Networks.indexOf(cb.value) >= 0; });
+    }
+    if (inv.due) {
+      var expSel = document.getElementById('pl-expiry'); if (expSel) expSel.value = '7d';
+    }
+    var panel = document.getElementById('pl-adv-body');
+    if (panel && !panel.classList.contains('open')) {
+      var btn = document.querySelector('.pl-adv-toggle');
+      if (btn) plToggleAdv(btn);
+    }
+    toast('Payment link created from invoice: ' + inv.id, 'success');
+  }, 200);
+}
 
 // ── InvoiceFi V2 Feature Flags ────────────────────────────
 const INVOICE_V2_ENABLED          = true;
@@ -22770,6 +23284,16 @@ function invToggleReminder() {
     knob.style.background = 'var(--muted2)';
     knob.style.left       = '2px';
   }
+}
+
+// ── Split Recipients ──────────────────────────────────────
+function invAddSplitRecipient() {
+  var container = document.getElementById('inv-split-recipients');
+  if (!container) return;
+  var row = document.createElement('div');
+  row.style.cssText = 'display:grid;grid-template-columns:1fr 60px 22px;gap:4px;align-items:center';
+  row.innerHTML = '<input class="cinput inv-split-addr" placeholder="0x..." style="font-size:9px"/><input class="cinput inv-split-pct" type="number" placeholder="%" min="1" max="100" style="font-size:9px;text-align:center"/><button class="btn" style="padding:2px 4px;font-size:9px;color:var(--red)" onclick="this.parentElement.remove()"><i class="ti ti-x"></i></button>';
+  container.appendChild(row);
 }
 
 // ── Line items ─────────────────────────────────────────────
@@ -23010,14 +23534,19 @@ function createInvoice() {
     acceptedPayments: invfiGetAcceptedPayments(),
     acceptedNetworks: invfiGetAcceptedNetworks(),
     crosschainEnabled: (invfiGetAcceptedPayments()).indexOf('Crosschain') >= 0,
+    cctpv2Enabled: (invfiGetAcceptedPayments()).indexOf('CCTP v2') >= 0,
+    cctpv2Networks: invfiGetCCTPv2Networks(),
+    cctpv2Status: null,
+    cctpv2TransferId: null,
     paidAmount: 0,
     remainingAmount: total,
     attachments: [],
     tags: [],
-    escrowEnabled: false,
+    escrowEnabled: document.getElementById('inv-escrow') ? document.getElementById('inv-escrow').checked : false,
+    installments: document.getElementById('inv-installments') ? document.getElementById('inv-installments').value || null : null,
     milestones: [],
     recurring: null,
-    splitRecipients: []
+    splitRecipients: invfiGetSplitRecipients()
   };
   invoiceList.unshift(inv);
 
@@ -23130,6 +23659,193 @@ async function payInvoice(id) {
   }
 }
 
+// ── Pay invoice (partial amount support) ──────────────────
+async function payInvoicePartial(invId) {
+  if (!walletAddress) { toast('Connect wallet to pay', 'error'); return; }
+  var inv = invoiceList.find(function(i) { return i.id === invId; });
+  if (!inv) return;
+  var remaining = (inv.remainingAmount || inv.total || 0) - (inv.paidAmount || 0);
+  if (remaining <= 0) { toast('Invoice already fully paid', 'warning'); return; }
+  var amtStr = prompt('Enter payment amount in USDC (remaining: ' + remaining.toFixed(2) + '):', remaining.toFixed(2));
+  if (!amtStr) return;
+  var payAmt = parseFloat(amtStr);
+  if (isNaN(payAmt) || payAmt <= 0) { toast('Invalid amount', 'error'); return; }
+  if (payAmt > remaining + 0.001) { payAmt = remaining; }
+  payAmt = parseFloat(payAmt.toFixed(6));
+
+  if (signer) {
+    try {
+      var usdc = new ethers.Contract(activeUSDC(), USDC_ABI, signer);
+      toast('Sending ' + payAmt + ' USDC for invoice ' + invId + '...', 'info');
+      inv.status = 'Processing';
+      inv.timeline = inv.timeline || [];
+      inv.timeline.push({ event: 'Partial Payment Initiated', ts: new Date().toISOString(), detail: payAmt + ' USDC' });
+      renderInvoices(); updateInvStats();
+
+      var tx;
+      if (activeChainId === 5042002) {
+        var erc20If = new ethers.Interface(USDC_ABI);
+        var transferData = erc20If.encodeFunctionData('transfer', [inv.toAddr, toUsdc(payAmt.toFixed(6))]);
+        var memoC = new ethers.Contract(MEMO_CONTRACT_ADDRESS, MEMO_ABI, signer);
+        tx = await memoC.memo(activeUSDC(), transferData, ethers.id('INV-' + inv.id), ethers.toUtf8Bytes(JSON.stringify({type:'invoice',id:inv.id,amount:payAmt,ts:Date.now()})));
+      } else {
+        tx = await usdc.transfer(inv.toAddr, toUsdc(payAmt.toFixed(6)));
+      }
+      await tx.wait();
+      inv.txHash = tx.hash;
+      inv.paidAmount = (inv.paidAmount || 0) + payAmt;
+      inv.remainingAmount = (inv.total || 0) - inv.paidAmount;
+      if (inv.remainingAmount <= 0.001) {
+        inv.status = 'Paid'; inv.paidOn = new Date().toISOString(); inv.paidFrom = walletAddress;
+        inv.timeline.push({ event: 'Settlement Complete', ts: new Date().toISOString(), detail: 'Invoice fully paid' });
+      } else {
+        inv.status = 'PartialPaid';
+        inv.timeline.push({ event: 'Partial Payment Received', ts: new Date().toISOString(), detail: payAmt + ' USDC, remaining: ' + inv.remainingAmount.toFixed(2) });
+      }
+      Store.save('invoices', invoiceList); renderInvoices(); updateInvStats();
+      toast(inv.status === 'Paid' ? 'Invoice fully paid!' : 'Partial payment of ' + payAmt + ' USDC received', 'success');
+      refreshBalance();
+    } catch (e) {
+      var inv2 = invoiceList.find(function(i) { return i.id === invId; });
+      if (inv2 && inv2.status === 'Processing') inv2.status = inv2.paidAmount > 0 ? 'PartialPaid' : 'Outstanding';
+      Store.save('invoices', invoiceList); renderInvoices(); updateInvStats();
+      if (e.code === 4001) toast('Rejected', 'error');
+      else toast('Payment error: ' + (e.shortMessage || e.message || ''), 'error');
+    }
+  }
+}
+
+// ── Pay invoice via CCTP v2 (cross-chain bridge + payment) ──
+async function payInvoiceViaCCTPv2(invId, sourceChain) {
+  if (!walletAddress) { toast('Connect wallet to pay', 'error'); return; }
+  var inv = invoiceList.find(function(i) { return i.id === invId; });
+  if (!inv) return;
+
+  var cctpCfg = (typeof ElligenteCCTP !== 'undefined' && ElligenteCCTP.CCTP_CONFIG) ? ElligenteCCTP.CCTP_CONFIG : {};
+  var sourceChainId = null, srcCfg = null;
+  var chainIdMap = { 'Ethereum': 11155111, 'Base': 84532, 'Arbitrum': 421614, 'Optimism': 11155420, 'Polygon': 80002 };
+  sourceChainId = chainIdMap[sourceChain];
+  if (!sourceChainId) { toast('Unknown source chain: ' + sourceChain, 'error'); return; }
+  srcCfg = cctpCfg[String(sourceChainId)];
+  if (!srcCfg || !srcCfg.tokenMessenger) { toast('CCTP v2 not configured for ' + sourceChain, 'error'); return; }
+
+  var recipientAmt = parseFloat(((inv.subtotal || 0) + (inv.taxAmt || 0)).toFixed(6));
+  var feeAmt = parseFloat((inv.protocolFee || 0).toFixed(6));
+  var totalBridge = parseFloat((recipientAmt + feeAmt).toFixed(6));
+  if (totalBridge <= 0) { toast('Invalid invoice amount', 'error'); return; }
+  if (!signer) { toast('Wallet signer not available', 'error'); return; }
+
+  try {
+    var provider = signer.provider;
+    var currentChainId = (await provider.getNetwork()).chainId;
+    if (Number(currentChainId) !== Number(sourceChainId)) {
+      toast('Please switch to ' + sourceChain + ' network (chain ' + sourceChainId + ')', 'warning');
+      return;
+    }
+
+    var usdcAddr = srcCfg.usdc;
+    var tokenMessengerAddr = srcCfg.tokenMessenger;
+    var arcDomain = (typeof ElligenteCCTP !== 'undefined') ? ElligenteCCTP.ARC_DOMAIN : 26;
+    var usdc = new ethers.Contract(usdcAddr, USDC_ABI, signer);
+    var tokenMessengerAbi = ['function depositForBurn(uint256 amount, uint32 destinationDomain, bytes32 mintRecipient, address burnToken)'];
+    var tokenMessenger = new ethers.Contract(tokenMessengerAddr, tokenMessengerAbi, signer);
+
+    var usdcDecimals = 6;
+    var bridgeAmount = ethers.parseUnits(totalBridge.toFixed(6), usdcDecimals);
+    var mintRecipientBytes = ethers.zeroPadValue(inv.toAddr || walletAddress, 32);
+
+    inv.status = 'Processing';
+    inv.cctpv2Status = 'INITIATED';
+    inv.cctpv2SourceChain = sourceChain;
+    inv.timeline = inv.timeline || [];
+    inv.timeline.push({ event: 'CCTP v2 Initiated', ts: new Date().toISOString(), detail: 'Bridging ' + totalBridge + ' USDC from ' + sourceChain + ' to Arc via CCTP v2' });
+    Store.save('invoices', invoiceList); renderInvoices(); updateInvStats();
+
+    toast('Approving USDC for CCTP v2 bridge...', 'info');
+    var approveTx = await usdc.approve(tokenMessengerAddr, bridgeAmount);
+    await approveTx.wait();
+    inv.timeline.push({ event: 'USDC Approved', ts: new Date().toISOString(), detail: 'Approved ' + totalBridge + ' USDC for bridge' });
+
+    toast('Burning USDC on ' + sourceChain + ' via CCTP v2...', 'info');
+    var burnTx = await tokenMessenger.depositForBurn(bridgeAmount, arcDomain, mintRecipientBytes, usdcAddr);
+    inv.cctpv2BurnTx = burnTx.hash;
+    inv.cctpv2Status = 'BURNING';
+    inv.timeline.push({ event: 'CCTP v2 Burn', ts: new Date().toISOString(), detail: 'Burn tx: ' + burnTx.hash });
+    Store.save('invoices', invoiceList); renderInvoices(); updateInvStats();
+
+    var burnReceipt = await burnTx.wait();
+    inv.cctpv2Status = 'BURNED';
+    inv.timeline.push({ event: 'CCTP v2 Burn Confirmed', ts: new Date().toISOString(), detail: 'Block #' + burnReceipt.blockNumber });
+
+    toast('Polling Circle Iris for attestation (~2-10 min)...', 'info');
+    inv.cctpv2Status = 'WAITING_ATTESTATION';
+    Store.save('invoices', invoiceList); renderInvoices(); updateInvStats();
+
+    var attestResult = null;
+    if (typeof CCTPShared !== 'undefined') {
+      attestResult = await CCTPShared.pollBridgeAttestation(srcCfg, burnTx.hash, burnReceipt, {
+        isArcInbound: true, maxPolls: 180, interval: 5000,
+        onPoll: function(poll, status) {
+          if (poll % 6 === 0) {
+            inv.cctpv2Status = 'WAITING_ATTESTATION';
+            inv.cctpv2PollCount = poll;
+            Store.save('invoices', invoiceList); renderInvoices();
+          }
+        }
+      });
+    }
+
+    if (!attestResult) {
+      inv.cctpv2Status = 'ATTESTATION_TIMEOUT';
+      inv.timeline.push({ event: 'CCTP v2 Timeout', ts: new Date().toISOString(), detail: 'Attestation polling timed out. Funds will arrive automatically via Circle.' });
+      Store.save('invoices', invoiceList); renderInvoices(); updateInvStats();
+      toast('CCTP v2 bridge submitted. USDC will arrive on Arc in 10-15 min. Auto-settlement pending.', 'warning');
+      return;
+    }
+
+    inv.cctpv2Status = 'ATTESTED';
+    inv.timeline.push({ event: 'CCTP v2 Attested', ts: new Date().toISOString(), detail: 'Attestation received after ' + (attestResult.pollCount || '?') + ' polls' });
+
+    toast('Minting USDC on Arc via receiveMessage...', 'info');
+    inv.cctpv2Status = 'MINTING';
+    Store.save('invoices', invoiceList); renderInvoices(); updateInvStats();
+
+    var arcCfg = cctpCfg['5042002'];
+    if (arcCfg && arcCfg.messageTransmitter && attestResult.messageBytes && attestResult.attestationSig) {
+      var arcProvider = new ethers.JsonRpcProvider(arcCfg.rpc);
+      var arcSigner = signer.connect(arcProvider);
+      var mtAbi = ['function receiveMessage(bytes message, bytes attestation) returns (bool)'];
+      var mtContract = new ethers.Contract(arcCfg.messageTransmitter, mtAbi, arcSigner);
+      var mintTx = await mtContract.receiveMessage(attestResult.messageBytes, attestResult.attestationSig);
+      inv.cctpv2MintTx = mintTx.hash;
+      inv.timeline.push({ event: 'CCTP v2 Mint', ts: new Date().toISOString(), detail: 'Mint tx: ' + mintTx.hash });
+      var mintReceipt = await mintTx.wait();
+      inv.timeline.push({ event: 'CCTP v2 Mint Confirmed', ts: new Date().toISOString(), detail: 'Block #' + mintReceipt.blockNumber });
+    }
+
+    inv.cctpv2Status = 'COMPLETED';
+    inv.status = 'Paid';
+    inv.paidOn = new Date().toISOString();
+    inv.paidFrom = walletAddress;
+    inv.txHash = inv.cctpv2MintTx || inv.cctpv2BurnTx || '';
+    inv.timeline.push({ event: 'Settlement Complete', ts: new Date().toISOString(), detail: 'Invoice marked as paid via CCTP v2 from ' + sourceChain });
+    Store.save('invoices', invoiceList); renderInvoices(); updateInvStats();
+    toast('Invoice ' + invId + ' paid via CCTP v2 from ' + sourceChain + '!', 'success');
+    refreshBalance();
+  } catch (e) {
+    var inv2 = invoiceList.find(function(i) { return i.id === invId; });
+    if (inv2) {
+      inv2.cctpv2Status = 'FAILED';
+      if (inv2.status === 'Processing') inv2.status = 'Outstanding';
+      inv2.timeline = inv2.timeline || [];
+      inv2.timeline.push({ event: 'CCTP v2 Failed', ts: new Date().toISOString(), detail: (e.shortMessage || e.message || '').substring(0, 200) });
+    }
+    Store.save('invoices', invoiceList); renderInvoices(); updateInvStats();
+    if (e.code === 4001) toast('Rejected', 'error');
+    else toast('CCTP v2 error: ' + (e.shortMessage || e.message || '').substring(0, 120), 'error');
+  }
+}
+
 // ── Status badge ───────────────────────────────────────────
 function invStatusBadge(status) {
   var map = {
@@ -23145,7 +23861,8 @@ function invStatusBadge(status) {
     'PartialPaid': { bg: 'rgba(6,182,212,.12)', color: 'var(--teal)', border: 'rgba(6,182,212,.25)', glow: '0 0 6px rgba(6,182,212,.15)' },
     'Scheduled': { bg: 'rgba(236,72,153,.1)', color: '#ec4899', border: 'rgba(236,72,153,.2)', glow: '0 0 6px rgba(236,72,153,.12)' },
     'Refunded': { bg: 'rgba(251,146,60,.12)', color: '#fb923c', border: 'rgba(251,146,60,.25)', glow: 'none' },
-    'Disputed': { bg: 'rgba(239,68,68,.12)', color: '#f87171', border: 'rgba(239,68,68,.25)', glow: '0 0 8px rgba(239,68,68,.2)' }
+    'Disputed': { bg: 'rgba(239,68,68,.12)', color: '#f87171', border: 'rgba(239,68,68,.25)', glow: '0 0 8px rgba(239,68,68,.2)' },
+    'CCTPv2': { bg: 'rgba(13,148,136,.15)', color: 'var(--teal)', border: 'rgba(13,148,136,.3)', glow: '0 0 8px rgba(13,148,136,.25)' }
   };
   var s = map[status] || map['Outstanding'];
   return '<span style="display:inline-flex;align-items:center;gap:3px;font-size:8.5px;padding:2px 8px;border-radius:3px;background:'+s.bg+';color:'+s.color+';border:1px solid '+s.border+';box-shadow:'+s.glow+';white-space:nowrap;font-weight:600"><span style="width:5px;height:5px;border-radius:50%;background:'+s.color+';display:inline-block"></span>'+status+'</span>';
@@ -23164,7 +23881,7 @@ function updateInvStats() {
   var now = new Date();
   var month = now.getMonth();
   var year = now.getFullYear();
-  var totalRevenue = 0, outstandingAmt = 0, overdueCount = 0, paidTotal = 0, xchainVol = 0;
+  var totalRevenue = 0, outstandingAmt = 0, overdueCount = 0, paidTotal = 0, xchainVol = 0, cctpv2Vol = 0;
   var paidCount = 0, totalCount = invoiceList.length, pendingAmt = 0, partialPayCount = 0;
   var largestInv = 0;
   var clientMap = new Map();
@@ -23186,6 +23903,7 @@ function updateInvStats() {
       paidTotal += inv.total || 0;
       totalRevenue += inv.total || 0;
       if (inv.chainName && inv.chainName !== 'Arc Testnet') xchainVol += inv.total || 0;
+      if (inv.cctpv2Enabled && inv.cctpv2Status === 'COMPLETED') cctpv2Vol += inv.total || 0;
       if (inv.paidOn && inv.created) {
         var payTime = new Date(inv.paidOn).getTime() - new Date(inv.created).getTime();
         if (payTime > 0) { totalPayTimeMs += payTime; paidWithTimeCount++; }
@@ -23221,7 +23939,7 @@ function updateInvStats() {
   set('invfi-stat-overdue', String(overdueCount));
   set('invfi-stat-paid-total', fmt(paidTotal));
   set('invfi-stat-success-rate', rate);
-  set('invfi-stat-xchain-vol', fmt(xchainVol));
+  set('invfi-stat-xchain-vol', fmt(xchainVol + cctpv2Vol));
   set('invfi-stat-pending', fmt(pendingAmt));
   set('invfi-stat-total-clients', String(totalClients));
   set('invfi-stat-repeat-clients', String(repeatClientCount));
@@ -23279,7 +23997,7 @@ function renderInvoices() {
     var isPaid = inv.status === 'Paid';
     var isCancelled = inv.status === 'Cancelled';
     var dueDisplay = inv.due ? invDueCountdown(inv) : '—';
-    return '<tr class="inv-row" style="cursor:pointer" onclick="invfiOpenDrawer(\'' + inv.id + '\')"><td style="font-weight:700;color:var(--yellow);font-size:10px">' + escHtml(inv.id) + '</td><td><div style="display:flex;align-items:center;gap:6px">' + invAvatar(inv.toName, inv.toAddr) + '<div style="font-size:9.5px;font-weight:600;color:var(--text)">' + escHtml(inv.toName||shortAddr(inv.toAddr)) + '</div></div></td><td style="font-weight:600;color:var(--text);white-space:nowrap">' + inv.total.toFixed(2) + ' <span style="color:var(--muted2);font-size:8px">' + (inv.currency||'USDC') + '</span></td><td style="font-size:9px;color:' + (inv.status==='Overdue'?'var(--red)':'var(--muted2)') + '">' + dueDisplay + '</td><td>' + invStatusBadge(inv.status) + '</td><td><div style="display:flex;gap:3px;align-items:center" onclick="event.stopPropagation()">' + (!isPaid && !isCancelled ? '<button class="btn primary" style="padding:2px 6px;font-size:8px" onclick="payInvoice(\'' + inv.id + '\')"><i class="ti ti-coin"></i>Pay</button>' : '') + '<button class="btn" title="Open details" style="padding:2px 5px;font-size:8px;color:var(--blue)" onclick="invfiOpenDrawer(\'' + inv.id + '\')"><i class="ti ti-eye"></i></button><button class="btn" title="Copy link" style="padding:2px 5px;font-size:8px" onclick="invCopyLinkById(\'' + inv.id + '\')"><i class="ti ti-link"></i></button><button class="btn" title="PDF" style="padding:2px 5px;font-size:8px" onclick="invExportPDF(\'' + inv.id + '\')"><i class="ti ti-file-download"></i></button><button class="btn" title="Delete" style="padding:2px 5px;font-size:8px;color:var(--red)" onclick="invDelete(\'' + inv.id + '\')"><i class="ti ti-trash"></i></button></div></td></tr>';
+    return '<tr class="inv-row" style="cursor:pointer" onclick="invfiOpenDrawer(\'' + inv.id + '\')"><td style="font-weight:700;color:var(--yellow);font-size:10px">' + escHtml(inv.id) + '</td><td><div style="display:flex;align-items:center;gap:6px">' + invAvatar(inv.toName, inv.toAddr) + '<div style="font-size:9.5px;font-weight:600;color:var(--text)">' + escHtml(inv.toName||shortAddr(inv.toAddr)) + '</div></div></td><td style="font-weight:600;color:var(--text);white-space:nowrap">' + inv.total.toFixed(2) + ' <span style="color:var(--muted2);font-size:8px">' + (inv.currency||'USDC') + '</span></td><td style="font-size:9px;color:' + (inv.status==='Overdue'?'var(--red)':'var(--muted2)') + '">' + dueDisplay + '</td><td>' + invStatusBadge(inv.status) + '</td><td><div style="display:flex;gap:3px;align-items:center" onclick="event.stopPropagation()">' + (!isPaid && !isCancelled ? '<button class="btn primary" style="padding:2px 6px;font-size:8px" onclick="payInvoice(\'' + inv.id + '\')"><i class="ti ti-coin"></i>Pay</button>' : '') + (!isPaid && !isCancelled ? '<button class="btn" style="padding:2px 6px;font-size:7px;color:var(--teal);border-color:rgba(45,212,191,.25)" onclick="payInvoicePartial(\'' + inv.id + '\')" title="Partial Payment"><i class="ti ti-coins"></i></button>' : '') + (!isPaid && !isCancelled && inv.cctpv2Enabled && inv.cctpv2Networks && inv.cctpv2Networks.length > 0 ? '<select class="cinput" style="font-size:7px;padding:2px 3px;min-width:60px;background:rgba(13,148,136,.08);border:1px solid rgba(13,148,136,.25);color:var(--teal)" onchange="if(this.value)payInvoiceViaCCTPv2(\'' + inv.id + '\',this.value)"><option value="">CCTP v2</option>' + inv.cctpv2Networks.map(function(n){return '<option value="'+n+'">'+n+'</option>';}).join('') + '</select>' : '') + '<button class="btn" title="Open details" style="padding:2px 5px;font-size:8px;color:var(--blue)" onclick="invfiOpenDrawer(\'' + inv.id + '\')"><i class="ti ti-eye"></i></button><button class="btn" title="Copy link" style="padding:2px 5px;font-size:8px" onclick="invCopyLinkById(\'' + inv.id + '\')"><i class="ti ti-link"></i></button><button class="btn" title="PDF" style="padding:2px 5px;font-size:8px" onclick="invExportPDF(\'' + inv.id + '\')"><i class="ti ti-file-download"></i></button><button class="btn" title="Delete" style="padding:2px 5px;font-size:8px;color:var(--red)" onclick="invDelete(\'' + inv.id + '\')"><i class="ti ti-trash"></i></button></div></td></tr>';
   }).join('');
   updateInvStats();
 }
@@ -23366,7 +24084,33 @@ function invfiDrawerHTML(inv) {
   }
   var descHTML = '';
   if (inv.desc) { descHTML = '<div style="margin-bottom:14px"><div style="font-size:9px;color:var(--muted2);text-transform:uppercase;margin-bottom:4px">Description</div><div style="font-size:10px;color:var(--text);padding:8px;background:rgba(0,0,0,.1);border-radius:6px">' + escHtml(inv.desc) + '</div></div>'; }
-  return '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid var(--border)"><div><div style="font-size:8px;color:var(--muted2);text-transform:uppercase;letter-spacing:.5px">Invoice</div><div style="font-size:14px;font-weight:800;color:var(--yellow)">' + escHtml(inv.id) + '</div></div><div style="display:flex;align-items:center;gap:8px">' + invStatusBadge(inv.status) + '<button class="btn" style="font-size:9px;padding:2px 6px" onclick="invfiCloseDrawer()"><i class="ti ti-x"></i></button></div></div><div style="text-align:center;padding:16px;background:rgba(0,0,0,.15);border-radius:8px;margin-bottom:14px"><div style="font-size:9px;color:var(--muted2);text-transform:uppercase;margin-bottom:4px">Amount Due</div><div style="font-size:28px;font-weight:800;color:var(--text)">' + inv.total.toFixed(2) + ' <span style="color:var(--blue);font-size:16px">' + cur + '</span></div>' + partialBarHTML + '</div><div style="margin-bottom:14px"><div style="font-size:9px;color:var(--muted2);text-transform:uppercase;margin-bottom:6px">Client Information</div><div style="display:flex;align-items:center;gap:8px;padding:10px;background:rgba(0,0,0,.1);border-radius:6px">' + invAvatar(inv.toName, inv.toAddr) + '<div><div style="font-size:11px;font-weight:600;color:var(--text)">' + escHtml(inv.toName||'Unknown') + '</div><div style="font-size:8.5px;color:var(--blue);font-family:monospace;cursor:pointer" onclick="navigator.clipboard.writeText(\'' + (inv.toAddr||'') + '\');toast(\'Address copied\',\'success\')">' + (inv.toAddr ? shortAddr(inv.toAddr) : '—') + '</div></div></div></div>' + descHTML + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px"><div><div style="font-size:9px;color:var(--muted2);text-transform:uppercase;margin-bottom:4px">Payment Methods</div><div style="display:flex;gap:3px;flex-wrap:wrap">' + pmChips + '</div></div><div><div style="font-size:9px;color:var(--muted2);text-transform:uppercase;margin-bottom:4px">Networks</div><div style="display:flex;gap:3px;flex-wrap:wrap">' + netChips + '</div></div></div>' + lineItemsHTML + '<div style="margin-bottom:14px;background:rgba(0,0,0,.1);border-radius:6px;padding:10px"><div style="font-size:9px;color:var(--muted2);text-transform:uppercase;margin-bottom:6px">Payment Breakdown</div><div style="display:flex;justify-content:space-between;font-size:9px;padding:2px 0;color:var(--muted2)"><span>Subtotal</span><span>' + ((inv.subtotal||0).toFixed(2)) + ' ' + cur + '</span></div><div style="display:flex;justify-content:space-between;font-size:9px;padding:2px 0;color:var(--muted2)"><span>Tax (' + (inv.taxPct||0) + '%)</span><span>' + ((inv.taxAmt||0).toFixed(2)) + ' ' + cur + '</span></div><div style="display:flex;justify-content:space-between;font-size:9px;padding:2px 0;color:var(--muted2)"><span>Protocol Fee</span><span>' + ((inv.protocolFee||0).toFixed(2)) + ' ' + cur + '</span></div><div style="display:flex;justify-content:space-between;font-size:10px;padding:4px 0 0;font-weight:700;color:var(--yellow);border-top:1px solid var(--border);margin-top:2px"><span>Total</span><span>' + ((inv.total||0).toFixed(2)) + ' ' + cur + '</span></div></div>' + onchainHTML + '<div style="margin-bottom:14px"><div style="font-size:9px;color:var(--muted2);text-transform:uppercase;margin-bottom:6px">Timeline</div><div style="padding:8px">' + timelineHTML + '</div></div><div style="display:flex;gap:12px;align-items:center;margin-bottom:14px;padding:12px;background:rgba(0,0,0,.1);border-radius:6px"><div id="invfi-drawer-qr" style="width:100px;height:100px;display:flex;align-items:center;justify-content:center;background:#fff;border-radius:4px;flex-shrink:0"><i class="ti ti-qrcode" style="font-size:36px;color:#ddd"></i></div><div style="flex:1;min-width:0"><div style="font-size:8px;color:var(--muted2);margin-bottom:4px">Payment Link</div><div style="font-size:8px;color:var(--blue);word-break:break-all;font-family:monospace">' + ((inv.payUrl||'').replace(/^https?:\/\//, '')) + '</div></div></div><div style="display:flex;gap:4px;flex-wrap:wrap">' + (!isPaid && !isCancelled ? '<button class="btn primary" style="flex:1;font-size:10px;padding:8px" onclick="payInvoice(\'' + inv.id + '\')"><i class="ti ti-coin"></i>Pay Now</button>' : '') + '<button class="btn" style="flex:1;font-size:9px;padding:8px" onclick="invExportPDF(\'' + inv.id + '\')"><i class="ti ti-file-download"></i>PDF</button><button class="btn" style="flex:1;font-size:9px;padding:8px" onclick="invCopyLinkById(\'' + inv.id + '\')"><i class="ti ti-link"></i>Copy Link</button><button class="btn" style="flex:1;font-size:9px;padding:8px" onclick="invShareInvoice(\'' + inv.id + '\')"><i class="ti ti-share"></i>Share</button><button class="btn" style="flex:1;font-size:9px;padding:8px" onclick="invExportJSON(\'' + inv.id + '\')"><i class="ti ti-json"></i>JSON</button></div>';
+  var cctpv2StatusHTML = '';
+  if (inv.cctpv2Enabled || inv.cctpv2Status) {
+    var cctpStatusLabel = inv.cctpv2Status || '—';
+    var cctpStatusColor = 'var(--muted2)';
+    if (inv.cctpv2Status === 'INITIATED' || inv.cctpv2Status === 'BURNING') cctpStatusColor = '#f59e0b';
+    else if (inv.cctpv2Status === 'BURNED' || inv.cctpv2Status === 'WAITING_ATTESTATION') cctpStatusColor = '#f59e0b';
+    else if (inv.cctpv2Status === 'ATTESTED' || inv.cctpv2Status === 'MINTING') cctpStatusColor = '#06b6d4';
+    else if (inv.cctpv2Status === 'COMPLETED') cctpStatusColor = '#22c55e';
+    else if (inv.cctpv2Status === 'FAILED' || inv.cctpv2Status === 'ATTESTATION_TIMEOUT') cctpStatusColor = '#ef4444';
+    var cctpSource = inv.cctpv2SourceChain || '—';
+    var cctpBurnTx = inv.cctpv2BurnTx || '';
+    var cctpMintTx = inv.cctpv2MintTx || '';
+    cctpv2StatusHTML = '<div style="margin-bottom:14px"><div style="font-size:9px;color:var(--muted2);text-transform:uppercase;margin-bottom:4px">CCTP v2 Bridge Status</div><div style="background:rgba(13,148,136,.06);border:1px solid rgba(13,148,136,.15);border-radius:6px;padding:10px;font-size:9px"><div style="display:flex;justify-content:space-between;padding:2px 0"><span style="color:var(--muted2)">Status</span><span style="color:' + cctpStatusColor + ';font-weight:600">' + cctpStatusLabel + '</span></div><div style="display:flex;justify-content:space-between;padding:2px 0"><span style="color:var(--muted2)">Source</span><span style="color:var(--text)">' + cctpSource + '</span></div>';
+    if (cctpBurnTx) cctpv2StatusHTML += '<div style="display:flex;justify-content:space-between;padding:2px 0"><span style="color:var(--muted2)">Burn Tx</span><span style="color:var(--blue);font-family:monospace;font-size:8px">' + shortAddr(cctpBurnTx) + '</span></div>';
+    if (cctpMintTx) cctpv2StatusHTML += '<div style="display:flex;justify-content:space-between;padding:2px 0"><span style="color:var(--muted2)">Mint Tx</span><span style="color:var(--teal);font-family:monospace;font-size:8px">' + shortAddr(cctpMintTx) + '</span></div>';
+    cctpv2StatusHTML += '</div></div>';
+  }
+  var cctpv2ActionsHTML = '';
+  if (inv.cctpv2Enabled && inv.cctpv2Networks && inv.cctpv2Networks.length > 0 && !isPaid && !isCancelled) {
+    cctpv2ActionsHTML = '<div style="margin-bottom:14px"><div style="font-size:9px;color:var(--muted2);text-transform:uppercase;margin-bottom:4px">Pay via CCTP v2</div><div style="display:flex;gap:4px;flex-wrap:wrap">';
+    for (var ci = 0; ci < inv.cctpv2Networks.length; ci++) {
+      var cn = inv.cctpv2Networks[ci];
+      cctpv2ActionsHTML += '<button class="btn" style="font-size:8px;padding:4px 8px;background:rgba(13,148,136,.1);border:1px solid rgba(13,148,136,.25);color:var(--teal)" onclick="payInvoiceViaCCTPv2(\'' + inv.id + '\',\'' + cn + '\')"><i class="ti ti-bridge"></i>Pay from ' + cn + '</button>';
+    }
+    cctpv2ActionsHTML += '</div></div>';
+  }
+  return '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid var(--border)"><div><div style="font-size:8px;color:var(--muted2);text-transform:uppercase;letter-spacing:.5px">Invoice</div><div style="font-size:14px;font-weight:800;color:var(--yellow)">' + escHtml(inv.id) + '</div></div><div style="display:flex;align-items:center;gap:8px">' + invStatusBadge(inv.status) + '<button class="btn" style="font-size:8px;padding:3px 6px;color:var(--orange);border-color:rgba(245,158,11,.25);background:rgba(245,158,11,.06)" onclick="scheduleFromInvoice(\'' + inv.id + '\')" title="Create Scheduled Payment"><i class="ti ti-calendar-event"></i></button><button class="btn" style="font-size:8px;padding:3px 6px;color:var(--yellow);border-color:rgba(245,158,11,.25);background:rgba(245,158,11,.06)" onclick="createPayLinkFromInvoice(\'' + inv.id + '\')" title="Convert to Payment Link"><i class="ti ti-link"></i></button><button class="btn" style="font-size:9px;padding:2px 6px" onclick="invfiCloseDrawer()"><i class="ti ti-x"></i></button></div></div><div style="text-align:center;padding:16px;background:rgba(0,0,0,.15);border-radius:8px;margin-bottom:14px"><div style="font-size:9px;color:var(--muted2);text-transform:uppercase;margin-bottom:4px">Amount Due</div><div style="font-size:28px;font-weight:800;color:var(--text)">' + inv.total.toFixed(2) + ' <span style="color:var(--blue);font-size:16px">' + cur + '</span></div>' + partialBarHTML + '</div><div style="margin-bottom:14px"><div style="font-size:9px;color:var(--muted2);text-transform:uppercase;margin-bottom:6px">Client Information</div><div style="display:flex;align-items:center;gap:8px;padding:10px;background:rgba(0,0,0,.1);border-radius:6px">' + invAvatar(inv.toName, inv.toAddr) + '<div><div style="font-size:11px;font-weight:600;color:var(--text)">' + escHtml(inv.toName||'Unknown') + '</div><div style="font-size:8.5px;color:var(--blue);font-family:monospace;cursor:pointer" onclick="navigator.clipboard.writeText(\'' + (inv.toAddr||'') + '\');toast(\'Address copied\',\'success\')">' + (inv.toAddr ? shortAddr(inv.toAddr) : '—') + '</div></div></div></div>' + cctpv2ActionsHTML + descHTML + cctpv2StatusHTML + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px"><div><div style="font-size:9px;color:var(--muted2);text-transform:uppercase;margin-bottom:4px">Payment Methods</div><div style="display:flex;gap:3px;flex-wrap:wrap">' + pmChips + '</div></div><div><div style="font-size:9px;color:var(--muted2);text-transform:uppercase;margin-bottom:4px">Networks</div><div style="display:flex;gap:3px;flex-wrap:wrap">' + netChips + '</div></div></div>' + lineItemsHTML + '<div style="margin-bottom:14px;background:rgba(0,0,0,.1);border-radius:6px;padding:10px"><div style="font-size:9px;color:var(--muted2);text-transform:uppercase;margin-bottom:6px">Payment Breakdown</div><div style="display:flex;justify-content:space-between;font-size:9px;padding:2px 0;color:var(--muted2)"><span>Subtotal</span><span>' + ((inv.subtotal||0).toFixed(2)) + ' ' + cur + '</span></div><div style="display:flex;justify-content:space-between;font-size:9px;padding:2px 0;color:var(--muted2)"><span>Tax (' + (inv.taxPct||0) + '%)</span><span>' + ((inv.taxAmt||0).toFixed(2)) + ' ' + cur + '</span></div><div style="display:flex;justify-content:space-between;font-size:9px;padding:2px 0;color:var(--muted2)"><span>Protocol Fee</span><span>' + ((inv.protocolFee||0).toFixed(2)) + ' ' + cur + '</span></div><div style="display:flex;justify-content:space-between;font-size:10px;padding:4px 0 0;font-weight:700;color:var(--yellow);border-top:1px solid var(--border);margin-top:2px"><span>Total</span><span>' + ((inv.total||0).toFixed(2)) + ' ' + cur + '</span></div></div>' + onchainHTML + '<div style="margin-bottom:14px"><div style="font-size:9px;color:var(--muted2);text-transform:uppercase;margin-bottom:6px">Timeline</div><div style="padding:8px">' + timelineHTML + '</div></div><div style="display:flex;gap:12px;align-items:center;margin-bottom:14px;padding:12px;background:rgba(0,0,0,.1);border-radius:6px"><div id="invfi-drawer-qr" style="width:100px;height:100px;display:flex;align-items:center;justify-content:center;background:#fff;border-radius:4px;flex-shrink:0"><i class="ti ti-qrcode" style="font-size:36px;color:#ddd"></i></div><div style="flex:1;min-width:0"><div style="font-size:8px;color:var(--muted2);margin-bottom:4px">Payment Link</div><div style="font-size:8px;color:var(--blue);word-break:break-all;font-family:monospace">' + ((inv.payUrl||'').replace(/^https?:\/\//, '')) + '</div></div></div><div style="display:flex;gap:4px;flex-wrap:wrap">' + (!isPaid && !isCancelled ? '<button class="btn primary" style="flex:1;font-size:10px;padding:8px" onclick="payInvoice(\'' + inv.id + '\')"><i class="ti ti-coin"></i>Pay Now</button>' : '') + '<button class="btn" style="flex:1;font-size:9px;padding:8px" onclick="invExportPDF(\'' + inv.id + '\')"><i class="ti ti-file-download"></i>PDF</button><button class="btn" style="flex:1;font-size:9px;padding:8px" onclick="invCopyLinkById(\'' + inv.id + '\')"><i class="ti ti-link"></i>Copy Link</button><button class="btn" style="flex:1;font-size:9px;padding:8px" onclick="invShareInvoice(\'' + inv.id + '\')"><i class="ti ti-share"></i>Share</button><button class="btn" style="flex:1;font-size:9px;padding:8px" onclick="invExportJSON(\'' + inv.id + '\')"><i class="ti ti-json"></i>JSON</button></div>';
 }
 
 // Keep invToggleDetail for backward compat
@@ -23390,10 +24134,18 @@ function invToggleCrosschain() {
   invPreviewUpdate();
 }
 
+function invToggleCCTPv2() {
+  var cb = document.getElementById('inv-pm-cctpv2');
+  var panel = document.getElementById('invfi-cctpv2-networks');
+  if (!panel) return;
+  panel.style.display = cb && cb.checked ? '' : 'none';
+  invPreviewUpdate();
+}
+
 function invfiAIParse() {
   var input = (document.getElementById('invfi-ai-input') ? document.getElementById('invfi-ai-input').value : '').trim();
   if (!input) { toast('Describe your invoice first', 'warning'); return; }
-  var result = { amount: 0, currency: 'USDC', taxPct: 0, dueDays: 7, crosschain: false, itemName: 'Professional Services' };
+  var result = { amount: 0, currency: 'USDC', taxPct: 0, dueDays: 7, crosschain: false, cctpv2: false, itemName: 'Professional Services' };
   var amtMatch = input.match(/(\d+(?:\.\d+)?)\s*(USDC|EURC|cirBTC|usdc|eurc|cirbtc)/i);
   if (amtMatch) { result.amount = parseFloat(amtMatch[1]); result.currency = amtMatch[2].toUpperCase(); }
   else { var numMatch = input.match(/(\d+(?:\.\d+)?)/); if (numMatch) result.amount = parseFloat(numMatch[1]); }
@@ -23403,6 +24155,7 @@ function invfiAIParse() {
   if (dueMatch) result.dueDays = parseInt(dueMatch[1]);
   else { var dMatch = input.match(/(\d+)\s*days?/i); if (dMatch) result.dueDays = parseInt(dMatch[1]); }
   if (/cross.?chain|crosschain/i.test(input)) result.crosschain = true;
+  if (/cctp\s*v2|cctpv2/i.test(input)) { result.crosschain = true; result.cctpv2 = true; }
   var lines = input.split(/[.,\n]+/).filter(function(l) { return l.trim(); });
   if (lines.length > 0) { result.itemName = lines[0].replace(/\d+\s*(USDC|EURC|cirBTC)/gi,'').replace(/\d+%?\s*tax/gi,'').replace(/due\s+in\s+\d+\s*days?/gi,'').replace(/cross.?chain|crosschain/gi,'').replace(/\d+(?:\.\d+)?/g,'').trim(); if (!result.itemName) result.itemName = 'Professional Services'; }
   var setVal = function(id, v) { var el = document.getElementById(id); if (el) el.value = v; };
@@ -23419,6 +24172,7 @@ function invfiAIParse() {
   var dueDate = new Date(); dueDate.setDate(dueDate.getDate() + result.dueDays);
   setVal('inv-due', dueDate.toISOString().slice(0,10));
   if (result.crosschain) { var xcCb = document.getElementById('inv-pm-xchain'); if (xcCb) { xcCb.checked = true; invToggleCrosschain(); } }
+  if (result.cctpv2) { var cctpCb = document.getElementById('inv-pm-cctpv2'); if (cctpCb) { cctpCb.checked = true; invToggleCCTPv2(); } }
   invRecalcLines(); invPreviewUpdate();
   var suggestEl = document.getElementById('invfi-ai-suggest');
   if (suggestEl) { suggestEl.style.display = ''; suggestEl.innerHTML = '<i class="ti ti-sparkles" style="color:var(--purple)"></i> Generated: ' + escHtml(result.itemName) + ' · ' + result.amount + ' ' + result.currency + ' · ' + result.taxPct + '% tax · Due in ' + result.dueDays + 'd' + (result.crosschain ? ' · Crosschain' : ''); }
@@ -23523,6 +24277,7 @@ function invfiGetAcceptedPayments() {
   if (document.getElementById('inv-pm-eurc') && document.getElementById('inv-pm-eurc').checked) methods.push('EURC');
   if (document.getElementById('inv-pm-cirbtc') && document.getElementById('inv-pm-cirbtc').checked) methods.push('cirBTC');
   if (document.getElementById('inv-pm-xchain') && document.getElementById('inv-pm-xchain').checked) methods.push('Crosschain');
+  if (document.getElementById('inv-pm-cctpv2') && document.getElementById('inv-pm-cctpv2').checked) methods.push('CCTP v2');
   return methods;
 }
 
@@ -23532,10 +24287,27 @@ function invfiGetAcceptedNetworks() {
   return nets;
 }
 
+function invfiGetCCTPv2Networks() {
+  var cbs = document.querySelectorAll('.invfi-cctpv2-net-cb:checked');
+  var nets = []; for (var i = 0; i < cbs.length; i++) { nets.push(cbs[i].value); }
+  return nets;
+}
+
+function invfiGetSplitRecipients() {
+  var rows = document.querySelectorAll('#inv-split-recipients > div');
+  var splits = [];
+  rows.forEach(function(row) {
+    var addr = row.querySelector('.inv-split-addr')?.value.trim();
+    var pct = parseFloat(row.querySelector('.inv-split-pct')?.value) || 0;
+    if (addr && isAddr(addr) && pct > 0) splits.push({ addr: addr, pct: pct });
+  });
+  return splits;
+}
+
 function invfiOpenSettings() {
   var s = invoiceSettings;
   var netChecks = ''; for (var n = 0; n < INVOICEFI_CONFIG.acceptedNetworks.length; n++) { var net = INVOICEFI_CONFIG.acceptedNetworks[n]; netChecks += '<label style="display:flex;align-items:center;gap:3px;padding:3px 6px;background:rgba(79,142,247,.06);border:1px solid rgba(79,142,247,.15);border-radius:3px;font-size:8.5px;cursor:pointer;color:var(--text)"><input type="checkbox" value="'+net+'" '+(s.defaultNetworks.indexOf(net)>=0?'checked':'')+' class="invfi-settings-net" style="accent-color:var(--blue)"/> '+net+'</label>'; }
-  var pmChecks = ''; var pms = ['USDC','EURC','cirBTC','Crosschain']; for (var p = 0; p < pms.length; p++) { var pm = pms[p]; pmChecks += '<label style="display:flex;align-items:center;gap:3px;padding:3px 6px;background:rgba(79,142,247,.06);border:1px solid rgba(79,142,247,.15);border-radius:3px;font-size:8.5px;cursor:pointer;color:var(--text)"><input type="checkbox" value="'+pm+'" '+(s.defaultPaymentMethods.indexOf(pm)>=0?'checked':'')+' class="invfi-settings-pm" style="accent-color:var(--blue)"/> '+pm+'</label>'; }
+  var pmChecks = ''; var pms = ['USDC','EURC','cirBTC','Crosschain','CCTP v2']; for (var p = 0; p < pms.length; p++) { var pm = pms[p]; pmChecks += '<label style="display:flex;align-items:center;gap:3px;padding:3px 6px;background:rgba(79,142,247,.06);border:1px solid rgba(79,142,247,.15);border-radius:3px;font-size:8.5px;cursor:pointer;color:var(--text)"><input type="checkbox" value="'+pm+'" '+(s.defaultPaymentMethods.indexOf(pm)>=0?'checked':'')+' class="invfi-settings-pm" style="accent-color:var(--blue)"/> '+pm+'</label>'; }
   var html = '<div style="position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center" onclick="if(event.target===this)this.remove()"><div class="card" style="width:440px;max-height:80vh;overflow-y:auto" onclick="event.stopPropagation()"><div class="ch"><i class="ti ti-settings" style="font-size:13px;color:var(--blue)"></i><span class="ct">Invoice Settings</span><button class="btn" style="margin-left:auto;font-size:9px" onclick="this.closest(\'.card\').parentElement.remove()"><i class="ti ti-x"></i></button></div><div class="cb" style="display:flex;flex-direction:column;gap:10px"><div><div class="swap-label">Default Currency</div><select id="invfi-settings-currency" class="cinput"><option '+(s.defaultCurrency==='USDC'?'selected':'')+'>USDC</option><option '+(s.defaultCurrency==='EURC'?'selected':'')+'>EURC</option><option '+(s.defaultCurrency==='cirBTC'?'selected':'')+'>cirBTC</option></select></div><div><div class="swap-label">Default Due Date (days)</div><input id="invfi-settings-due-days" class="cinput" type="number" value="'+s.defaultDueDays+'" min="0" max="365"/></div><div><div class="swap-label">Tax Rate (%)</div><input id="invfi-settings-tax" class="cinput" type="number" value="'+s.taxRate+'" min="0" max="100"/></div><div><div class="swap-label">Company Name</div><input id="invfi-settings-brand" class="cinput" value="'+s.branding.companyName.replace(/"/g,'&quot;')+'"/></div><div><div class="swap-label">Default Networks</div><div style="display:flex;gap:4px;flex-wrap:wrap">'+netChecks+'</div></div><div><div class="swap-label">Default Payment Methods</div><div style="display:flex;gap:4px;flex-wrap:wrap">'+pmChecks+'</div></div><div style="display:flex;align-items:center;gap:8px"><span style="font-size:10px;color:var(--muted2)">Enable Reminders</span><input type="checkbox" id="invfi-settings-remind" '+(s.reminderEnabled?'checked':'')+' style="accent-color:var(--blue)"/></div><button class="action-btn" onclick="invfiSaveSettings()">Save Settings</button></div></div></div>';
   var overlay = document.createElement('div'); overlay.innerHTML = html; document.body.appendChild(overlay.firstElementChild);
 }
@@ -28380,6 +29152,78 @@ function scheduleDelete(id){
   toast('Schedule removed', 'info');
 }
 
+function scheduleDuplicate(id) {
+  var s = ScheduleEngine.getById(id);
+  if (!s) { toast('Schedule not found', 'error'); return; }
+  var cloneData = JSON.parse(JSON.stringify(s));
+  delete cloneData.id;
+  cloneData.name = (cloneData.name || 'Schedule') + ' (copy)';
+  cloneData.created = new Date().toISOString();
+  cloneData.execCount = 0;
+  cloneData.executionHistory = [];
+  cloneData.status = 'Active';
+  cloneData.nextRun = new Date(Date.now() + 86400000 * 7).toISOString();
+  ScheduleEngine.create(cloneData);
+  schedules = ScheduleEngine.getAll();
+  renderSchedules();
+  toast('Schedule duplicated: ' + cloneData.name, 'success');
+}
+
+function scheduleSaveAsTemplate(id) {
+  var s = ScheduleEngine.getById(id);
+  if (!s) { toast('Schedule not found', 'error'); return; }
+  var tpl = {
+    id: 'tpl-' + Date.now().toString(36),
+    name: s.name,
+    type: s.type,
+    token: s.token,
+    freq: s.freq,
+    recipients: s.recipients || [],
+    amount: s.amount || s.total || 0,
+    network: s.network,
+    created: new Date().toISOString()
+  };
+  var scheduleTemplates = Store.load('scheduleTemplates', []);
+  scheduleTemplates.unshift(tpl);
+  Store.save('scheduleTemplates', scheduleTemplates);
+  toast('Schedule saved as template: ' + s.name, 'success');
+}
+
+function schGenerateQR(id) {
+  var s = ScheduleEngine.getById(id);
+  if (!s) return;
+  var addr = s.address || (s.recipients && s.recipients.length > 0 ? s.recipients[0].addr : '');
+  var amt = s.amount || s.total || 0;
+  var token = s.token || 'USDC';
+  var payUrl = buildPublicPayUrl('sch-' + s.id);
+  // Create a temp modal to show the QR
+  var html = '<div style="position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center" onclick="if(event.target===this)this.remove()"><div class="card" style="width:320px;text-align:center" onclick="event.stopPropagation()"><div class="ch"><i class="ti ti-qrcode" style="color:var(--blue)"></i><span class="ct">Schedule QR — ' + escHtml(s.name) + '</span><button class="btn" style="margin-left:auto;font-size:9px" onclick="this.closest(\'div[style*=fixed]\').remove()"><i class="ti ti-x"></i></button></div><div class="cb"><div id="sch-qr-temp" style="width:200px;height:200px;margin:0 auto;overflow:hidden;background:#fff;border-radius:6px"></div><div style="margin-top:8px;font-size:9px;color:var(--muted2);word-break:break-all;font-family:monospace">' + payUrl + '</div><div style="margin-top:6px;font-size:10px;color:var(--text)">' + amt.toFixed(2) + ' ' + token + '</div><div style="margin-top:6px;font-size:9px;color:var(--muted2)">' + (addr ? shortAddr(addr) : 'Any recipient') + '</div><button class="btn" style="margin-top:10px;font-size:9px" onclick="navigator.clipboard.writeText(\'' + payUrl + '\');toast(\'Link copied\',\'success\')"><i class="ti ti-copy"></i>Copy Link</button></div></div></div>';
+  var overlay = document.createElement('div'); overlay.innerHTML = html; document.body.appendChild(overlay.firstElementChild);
+  setTimeout(function() { drawQRReal('sch-qr-temp', payUrl, 200); }, 100);
+}
+
+function scheduleFromInvoice(invId) {
+  var inv = invoiceList.find(function(i) { return i.id === invId; });
+  if (!inv) return;
+  showPage('schedule');
+  setTimeout(function() {
+    scheduleCreateNew();
+    schSelectType('payment', document.querySelector('#sch-type-selector .sch-type-btn[data-type="payment"]'));
+    var setVal = function(id, v) { var el = document.getElementById(id); if (el) el.value = v; };
+    setVal('sch-name', inv.id + ' - ' + (inv.toName || 'Payment'));
+    setVal('sch-token', inv.currency || 'USDC');
+    setVal('sch-amount', String(inv.subtotal || 0));
+    setVal('sch-address', inv.toAddr || inv.recipient || '');
+    if (inv.due) {
+      var dueDate = new Date(inv.due + 'T00:00:00Z');
+      setVal('sch-date', dueDate.toISOString().slice(0, 16));
+      updateScheduleDatePreview();
+    }
+    setVal('sch-freq', 'once');
+    toast('Schedule pre-filled from invoice: ' + inv.id, 'success');
+  }, 300);
+}
+
 function renderSchedules(){
   var tbody = document.getElementById('sch-tbody');
   var empty = document.getElementById('sch-empty');
@@ -28410,7 +29254,7 @@ function renderSchedules(){
     var historyHtml = '';
     var hist = (s.executionHistory || []).slice(0, 10);
     if (hist.length) {
-      historyHtml = '<tr class="sch-detail-row" id="sch-detail-' + s.id + '" style="display:none"><td colspan="9" style="padding:0;background:rgba(0,0,0,.15)"><div style="padding:8px 12px;max-height:200px;overflow-y:auto">' +
+      historyHtml = '<tr class="sch-detail-row" id="sch-detail-' + s.id + '" style="display:none"><td colspan="10" style="padding:0;background:rgba(0,0,0,.15)"><div style="padding:8px 12px;max-height:200px;overflow-y:auto">' +
         '<div style="font-size:9px;color:var(--muted2);margin-bottom:6px;font-weight:600">Execution History</div>' +
         '<table style="width:100%;font-size:8.5px;border-collapse:collapse">' +
         '<tr style="color:var(--muted2);border-bottom:1px solid rgba(255,255,255,.05)"><th style="text-align:left;padding:2px 4px">Date/Time</th><th style="text-align:left;padding:2px 4px">Sender</th><th style="text-align:left;padding:2px 4px">Recipient</th><th style="text-align:left;padding:2px 4px">Token</th><th style="text-align:right;padding:2px 4px">Amount</th><th style="text-align:left;padding:2px 4px">Status</th><th style="text-align:left;padding:2px 4px">Tx Hash</th><th style="text-align:right;padding:2px 4px">Gas</th></tr>' +
@@ -28431,6 +29275,7 @@ function renderSchedules(){
 
     var hasHistory = (s.executionHistory || []).length > 0;
     var historyToggle = hasHistory ? '<button class="btn" style="padding:2px 7px;font-size:8.5px;margin-left:2px" onclick="schToggleHistory(\'' + s.id + '\')" title="Toggle execution history"><i class="ti ti-history"></i></button>' : '';
+    var qrBtn = (s.type === 'payment' || s.type === 'multisend' || s.type === 'link_payment') ? '<button class="btn" style="padding:2px 5px;font-size:8px;color:var(--blue)" title="Generate QR for scheduled payment" onclick="schGenerateQR(\'' + s.id + '\')"><i class="ti ti-qrcode"></i></button>' : '';
 
     var mainRow = '<tr' + (isDue ? ' style="background:rgba(245,158,11,.05)"' : '') + '>' +
       '<td style="font-weight:600">' + s.name + (isDue ? '<span style="font-size:8px;margin-left:5px;color:var(--yellow)">DUE</span>' : '') + (agentOn && s.status === 'Active' ? '<span style="font-size:8px;margin-left:5px;color:#a78bfa" title="Auto-executed by Agent Wallet">AUTO</span>' : '') + '</td>' +
@@ -28440,12 +29285,15 @@ function renderSchedules(){
       '<td>' + (freqLabel[s.freq] || s.freq) + '</td>' +
       '<td style="font-size:9px;color:' + (isDue ? 'var(--yellow)' : 'var(--muted2)') + '">' + nextRun + '</td>' +
       '<td style="text-align:center">' + s.execCount + (s.maxEx > 0 ? ' / ' + s.maxEx : '') + '</td>' +
+      '<td style="text-align:center">' + (s.execCount > 0 ? ((hist.filter(function(h){ return h.status === 'executed' || h.status === 'delegated'; }).length / Math.max(1, s.execCount) * 100).toFixed(0) + '%') : '—') + '</td>' +
       '<td><span style="color:var(--' + sc + ')">' + s.status + '</span></td>' +
       '<td style="display:flex;gap:3px;align-items:center">' +
         '<button class="btn primary" style="padding:2px 7px;font-size:8.5px" onclick="scheduleRun(\'' + s.id + '\')" title="Execute Now"><i class="ti ti-player-play"></i></button>' +
         '<button class="btn" style="padding:2px 7px;font-size:8.5px;color:' + (agentOn ? '#a78bfa' : 'var(--muted2)') + '" onclick="scheduleToggleAgent(\'' + s.id + '\')" title="' + (agentOn ? 'Agent auto-execution ON — click to disable' : 'Agent auto-execution OFF — click to enable') + '"><i class="ti ti-robot"></i></button>' +
         '<button class="btn" style="padding:2px 7px;font-size:8.5px" onclick="schedulePause(\'' + s.id + '\')" title="' + (s.status === 'Active' ? 'Pause' : 'Resume') + '"><i class="ti ti-' + (s.status === 'Active' ? 'pause' : 'play') + '"></i></button>' +
-        historyToggle +
+        '<button class="btn" style="padding:2px 7px;font-size:8.5px;color:var(--blue)" onclick="scheduleDuplicate(\'' + s.id + '\')" title="Duplicate"><i class="ti ti-copy"></i></button>' +
+        '<button class="btn" style="padding:2px 7px;font-size:8.5px;color:var(--teal)" onclick="scheduleSaveAsTemplate(\'' + s.id + '\')" title="Save as Template"><i class="ti ti-template"></i></button>' +
+        qrBtn + historyToggle +
         '<button class="btn" style="padding:2px 7px;font-size:8.5px;color:var(--red)" onclick="scheduleDelete(\'' + s.id + '\')" title="Delete"><i class="ti ti-trash"></i></button>' +
       '</td></tr>';
 
@@ -28465,6 +29313,113 @@ function checkDueSchedules(){
   const due = all.filter(function(s){ return s.status === 'Active' && s.nextRun && new Date(s.nextRun) <= new Date(); });
   if(due.length) toast(due.length + ' scheduled automation(s) due for execution — check Multi Schedule page', 'warning');
   if(typeof AgentScheduleExecutor !== 'undefined'){ try { AgentScheduleExecutor.start(); } catch(_){} }
+}
+
+// ══════════════════════════════════════════════════════════
+//  PAYMENT QUEUE — Track in-flight & queued payments
+// ══════════════════════════════════════════════════════════
+
+function queueRefreshAll() {
+  // Collect tasks from all sources: batch recipients with status, execution queue, CCTP transfers
+  renderQueue(); updateQueueStats(); toast('Queue refreshed', 'info');
+}
+
+function updateQueueStats() {
+  var tasks = gatherQueueTasks();
+  var pending = tasks.filter(function(t) { return t.status === 'pending' || t.status === 'queued'; }).length;
+  var processing = tasks.filter(function(t) { return t.status === 'processing' || t.status === 'running'; }).length;
+  var done = tasks.filter(function(t) { return t.status === 'completed' || t.status === 'confirmed'; }).length;
+  var failed = tasks.filter(function(t) { return t.status === 'failed' || t.status === 'reverted'; }).length;
+  var setFn = function(id, v) { var el = document.getElementById(id); if (el) el.textContent = v; };
+  setFn('queue-stat-pending', pending);
+  setFn('queue-stat-processing', processing);
+  setFn('queue-stat-done', done);
+  setFn('queue-stat-failed', failed);
+}
+
+function gatherQueueTasks() {
+  var tasks = [];
+  if (typeof ExecutionQueue !== 'undefined' && ExecutionQueue.getAll) {
+    var eq = ExecutionQueue.getAll();
+    eq.forEach(function(t) { tasks.push({
+      id: t.id, type: t.type || 'batch', recipient: t.label || t.id, amount: t.amount || 0,
+      status: t.status, progress: t.progress || 0, created: t.created || '',
+      data: t
+    }); });
+  }
+  // Add batch recipients as viewable tasks
+  if (typeof recipients !== 'undefined' && recipients.length) {
+    recipients.forEach(function(r, i) {
+      tasks.push({
+        id: 'batch-' + i, type: 'batch', recipient: r.addr ? shortAddr(r.addr) : '—',
+        amount: parseFloat(r.amount) || 0, status: 'pending', progress: 0,
+        created: new Date().toISOString(), data: r
+      });
+    });
+  }
+  return tasks;
+}
+
+function renderQueue() {
+  var tbody = document.getElementById('queue-tbody');
+  var empty = document.getElementById('queue-empty');
+  if (!tbody) return;
+  var tasks = gatherQueueTasks();
+  var search = (document.getElementById('queue-search')?.value || '').toLowerCase();
+  var fStatus = document.getElementById('queue-filter-status')?.value || '';
+
+  var filtered = tasks.filter(function(t) {
+    if (fStatus && t.status !== fStatus) return false;
+    if (search) {
+      var hay = (t.id + t.recipient + (t.type || '')).toLowerCase();
+      if (hay.indexOf(search) === -1) return false;
+    }
+    return true;
+  });
+
+  updateQueueStatsFromTasks(filtered, tasks);
+
+  if (!filtered.length) { tbody.innerHTML = ''; if (empty) empty.style.display = ''; return; }
+  if (empty) empty.style.display = 'none';
+
+  var statusColor = { pending: 'var(--yellow)', processing: 'var(--blue)', running: 'var(--blue)', completed: 'var(--green)', confirmed: 'var(--green)', failed: 'var(--red)', reverted: 'var(--red)', cancelled: 'var(--muted2)' };
+  tbody.innerHTML = filtered.map(function(t) {
+    var sc = statusColor[t.status] || 'var(--muted2)';
+    var pgPct = t.progress || 0;
+    return '<tr><td style="font-size:8.5px;font-family:monospace;color:var(--muted2)">' + t.id + '</td><td><span style="font-size:8px;padding:2px 6px;background:rgba(79,142,247,.1);border:1px solid rgba(79,142,247,.2);border-radius:3px;color:var(--blue)">' + (t.type || 'task') + '</span></td><td style="font-size:9px">' + (t.recipient || '—') + '</td><td style="font-weight:600">' + (Number(t.amount) || 0).toFixed(2) + ' USDC</td><td><span style="color:' + sc + ';font-weight:600;font-size:8.5px">' + t.status + '</span></td><td><div style="background:rgba(255,255,255,.05);border-radius:3px;height:4px;width:50px;overflow:hidden"><div style="background:linear-gradient(90deg,var(--blue),var(--teal));height:100%;width:' + pgPct + '%"></div></div></td><td><div style="display:flex;gap:3px"><button class="btn" style="padding:2px 5px;font-size:8px" onclick="queueRetry(\'' + t.id + '\')" title="Retry"><i class="ti ti-refresh"></i></button><button class="btn" style="padding:2px 5px;font-size:8px;color:var(--red)" onclick="queueCancel(\'' + t.id + '\')" title="Cancel"><i class="ti ti-x"></i></button></div></td></tr>';
+  }).join('');
+}
+
+function updateQueueStatsFromTasks(filtered, allTasks) {
+  var setFn = function(id, v) { var el = document.getElementById(id); if (el) el.textContent = v; };
+  setFn('queue-stat-pending', allTasks.filter(function(t) { return t.status === 'pending' || t.status === 'queued'; }).length);
+  setFn('queue-stat-processing', allTasks.filter(function(t) { return t.status === 'processing' || t.status === 'running'; }).length);
+  setFn('queue-stat-done', allTasks.filter(function(t) { return t.status === 'completed' || t.status === 'confirmed'; }).length);
+  setFn('queue-stat-failed', allTasks.filter(function(t) { return t.status === 'failed' || t.status === 'reverted'; }).length);
+}
+
+function queueRetry(taskId) {
+  if (typeof ExecutionQueue !== 'undefined' && ExecutionQueue.retry) {
+    ExecutionQueue.retry(taskId); renderQueue(); toast('Retrying task ' + taskId, 'info');
+  } else {
+    toast('Queue engine not available', 'warning');
+  }
+}
+
+function queueCancel(taskId) {
+  if (typeof ExecutionQueue !== 'undefined' && ExecutionQueue.cancel) {
+    ExecutionQueue.cancel(taskId); renderQueue(); toast('Cancelled task ' + taskId, 'info');
+  } else {
+    toast('Queue engine not available', 'warning');
+  }
+}
+
+function queueClearCompleted() {
+  if (typeof ExecutionQueue !== 'undefined' && ExecutionQueue.clearCompleted) {
+    ExecutionQueue.clearCompleted(); renderQueue(); updateQueueStats(); toast('Cleared completed tasks', 'info');
+  } else {
+    toast('Queue engine not available', 'warning');
+  }
 }
 
 // ══════════════════════════════════════════════════════════
@@ -35070,13 +36025,18 @@ const UnifiedBalanceEngine = {
   getAssets() { return this._cache._lastAssets || []; },
   getTotalUSD() { return this._cache._lastTotalUSD || 0; },
   getCacheAge() { return this._cache._lastFetch ? (Date.now() - this._cache._lastFetch) : Infinity; },
-  isCacheValid() { return this.getCacheAge() < this._cacheTTL; },
+  isCacheValid(walletAddr) {
+    if (this.getCacheAge() >= this._cacheTTL) return false;
+    if (walletAddr && this._cache._wallet && this._cache._wallet !== walletAddr) return false;
+    return this._cache._lastAssets && this._cache._lastAssets.length > 0;
+  },
 
   notifyAssets(assets, totalUSD) {
     var self = this;
     self._cache._lastAssets = assets || [];
     self._cache._lastTotalUSD = totalUSD || 0;
     self._cache._lastFetch = Date.now();
+    self._cache._wallet = (typeof walletAddress !== 'undefined') ? walletAddress : '';
     self._emit('balanceUpdated', { assets: assets, totalUSD: totalUSD, ts: Date.now() });
     self._notifyWatchers('balanceUpdated', { assets: assets, totalUSD: totalUSD });
   },
@@ -35143,12 +36103,13 @@ const UB = {
 
 function ubGetTokenRate(sym) {
   if (sym === 'USDC') return 1.00;
-  if (sym === 'EURC') return (typeof RT !== 'undefined' ? RT.EURC_USD_RATE : 1.08) || 1.08;
+  if (sym === 'EURC') {
+    if (typeof RT !== 'undefined' && RT.EURC_USD_RATE > 0) return RT.EURC_USD_RATE;
+    return 1.08;
+  }
   if (sym === 'cirBTC') {
-    var poolRate = null;
-    try { if (typeof getTokenUSDRate === 'function') poolRate = getTokenUSDRate('cirBTC'); } catch(_) {}
-    if (poolRate && poolRate > 0) return poolRate;
     if (typeof RT !== 'undefined' && RT.BTC_USD_PRICE > 0) return RT.BTC_USD_PRICE;
+    try { if (typeof getTokenUSDRate === 'function') { var r = getTokenUSDRate('cirBTC'); if (r) return r; } } catch(_) {}
     return 67000;
   }
   if (sym === 'ETH') {
@@ -35369,6 +36330,10 @@ UB.getRecommendations = function() {
 
 function ubInit() {
   if (typeof walletAddress !== 'undefined' && walletAddress) {
+    if (UnifiedBalanceEngine.isCacheValid && UnifiedBalanceEngine.isCacheValid(walletAddress)) {
+      ubShowState('content');
+      return;
+    }
     ubRefresh();
   } else {
     ubShowState('empty');
@@ -35544,10 +36509,9 @@ function ubRenderAll() {
   ubRenderHero();
   ubRenderAssets();
   ubRenderHealth();
-  ubRenderRecommendations();
   ubRenderIntelligence();
   ubRenderActivity();
-  ubRenderWallets();
+  ubRenderHistory();
   // Take financial memory snapshot
   try { FinancialMemory.takeSnapshot(); } catch(_) {}
 }
@@ -35744,32 +36708,6 @@ function ubRenderHealth() {
   body.innerHTML = html;
 }
 
-// ── Smart Recommendations ──────────────────────────────
-function ubRenderRecommendations() {
-  var card = document.getElementById('ub-recommendations-card');
-  var body = document.getElementById('ub-recommendations');
-  var countEl = document.getElementById('ub-rec-count');
-  if (!card || !body) return;
-
-  var recs = UB.getRecommendations();
-
-  if (recs.length) card.style.display = '';
-  else { card.style.display = 'none'; return; }
-
-  if (countEl) countEl.textContent = recs.length + ' action' + (recs.length !== 1 ? 's' : '');
-
-  var html = '';
-  for (var i = 0; i < recs.length; i++) {
-    var r = recs[i];
-    html += '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);cursor:pointer" onclick="' + (r.action || '') + '" onmouseenter="this.style.background=\'rgba(255,255,255,.02)\'" onmouseleave="this.style.background=\'\'">';
-    html += '<div style="width:30px;height:30px;border-radius:50%;background:' + (r.color === 'var(--blue)' ? 'rgba(79,142,247,.12)' : r.color === 'var(--teal)' ? 'rgba(45,212,191,.12)' : r.color === 'var(--purple)' ? 'rgba(167,139,250,.12)' : r.color === 'var(--green)' ? 'rgba(34,197,94,.12)' : r.color === '#06F7E9' ? 'rgba(6,247,233,.12)' : 'rgba(245,158,11,.12)') + ';display:flex;align-items:center;justify-content:center;flex-shrink:0"><i class="ti ti-' + r.icon + '" style="color:' + r.color + ';font-size:13px"></i></div>';
-    html += '<div style="flex:1"><div style="font-size:10px;font-weight:600">' + r.title + '</div><div style="font-size:8.5px;color:var(--muted2)">' + r.desc + '</div></div>';
-    html += '<button class="btn primary" style="padding:4px 10px;font-size:8.5px;flex-shrink:0" onclick="event.stopPropagation();' + (r.action || '') + '">' + r.actionLabel + '</button>';
-    html += '</div>';
-  }
-  body.innerHTML = html;
-}
-
 function ubRenderActivity() {
   var el = document.getElementById('ub-activity');
   if (!el) return;
@@ -35785,6 +36723,7 @@ function ubRenderActivity() {
           label: (tx.type || 'Transaction') + (tx.amount ? ' $' + parseFloat(tx.amount).toFixed(2) : ''),
           status: tx.status || tx.state || 'completed',
           ts: tx.ts || tx.created || '',
+          txHash: tx.txHash || '',
           icon: ubActivityIcon(tx.type || 'payment'),
           color: ubActivityColor(tx.status || tx.state || 'completed')
         });
@@ -35821,9 +36760,10 @@ function ubRenderActivity() {
   for (var k = 0; k < items.length && k < 30; k++) {
     var it = items[k];
     var timeStr = it.ts ? ubTimeAgo(it.ts) : '';
+    var txLink = it.txHash ? '<a href="https://testnet.arcscan.app/tx/' + it.txHash + '" target="_blank" style="color:var(--blue);text-decoration:none;font-family:monospace;font-size:7px" title="' + it.txHash + '">' + shortAddr(it.txHash) + '</a>' : '';
     html += '<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border);font-size:9px">' +
       '<i class="ti ti-' + it.icon + '" style="color:' + it.color + ';font-size:11px"></i>' +
-      '<span style="flex:1">' + it.label + '</span>' +
+      '<span style="flex:1">' + it.label + (txLink ? ' <span style="font-size:7px">' + txLink + '</span>' : '') + '</span>' +
       '<span style="color:var(--muted2);font-size:8px">' + timeStr + '</span>' +
       '</div>';
   }
@@ -35851,34 +36791,50 @@ function ubTimeAgo(iso) {
     if (diff < 3600000) return Math.floor(diff / 60000) + 'm ago';
     if (diff < 86400000) return Math.floor(diff / 3600000) + 'h ago';
     return Math.floor(diff / 86400000) + 'd ago';
-  } catch(e) { return ''; }
+  } catch(_) { return ''; }
 }
 
-function ubRenderWallets() {
-  var el = document.getElementById('ub-wallets');
-  if (!el) return;
-  if (typeof walletAddress === 'undefined' || !walletAddress) {
-    el.innerHTML = '<div style="text-align:center;color:var(--muted2);font-size:9.5px;padding:20px">No wallet connected</div>';
+function ubExportCSV() {
+  var assets = UB.state.assets || [];
+  if (!assets.length) { toast('No data to export', 'warning'); return; }
+  var rows = [['Token','Chain','Balance','USD Value']];
+  assets.forEach(function(a) {
+    rows.push([a.token||'', a.chainName||'', parseFloat(a.balance||0).toFixed(6), (a.usd||0).toFixed(2)]);
+  });
+  rows.push([]);
+  rows.push(['Total USD','','',(UB.state.totalUSD||0).toFixed(2)]);
+  var csv = rows.map(function(r) { return r.join(','); }).join('\n');
+  var a = document.createElement('a');
+  a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+  a.download = 'elligente-portfolio.csv';
+  a.click();
+  toast('Portfolio exported', 'success');
+}
+
+function ubRenderHistory() {
+  var body = document.getElementById('ub-history-body');
+  if (!body) return;
+  var snapshots = FinancialMemory.getHistory();
+  if (!snapshots || snapshots.length < 2) {
+    body.innerHTML = '<div style="font-size:9px;color:var(--muted2);text-align:center;padding:20px">Snapshot data accumulating... (need 2+ data points)</div>';
     return;
   }
-  var chain = typeof getActiveChain === 'function' ? getActiveChain() : null;
-  var chainName = chain ? chain.name : 'Unknown';
-  var chainColor = chain ? chain.color : '#888';
-  var addrShort = walletAddress ? walletAddress.slice(0, 6) + '...' + walletAddress.slice(-4) : '—';
-  var networks = (typeof CHAINS !== 'undefined') ? CHAINS : [];
-
-  var html = '<div class="card" style="padding:10px;border:1px solid var(--border)">';
-  html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">';
-  html += '<div style="width:28px;height:28px;border-radius:50%;background:' + chainColor + ';display:flex;align-items:center;justify-content:center;font-size:11px;color:#fff;font-weight:700">' + (chain ? chain.symbol : 'W') + '</div>';
-  html += '<div style="flex:1"><div style="font-size:10px;font-weight:600">' + chainName + '</div><div style="font-family:\'JetBrains Mono\',monospace;font-size:8px;color:var(--muted2)">' + addrShort + '</div></div>';
-  html += '<span class="status-badge-pb" style="font-size:8px;padding:2px 6px;border-radius:3px">Active</span>';
+  var maxUSD = 0;
+  snapshots.forEach(function(s) { if (s.totalUSD > maxUSD) maxUSD = s.totalUSD; });
+  if (maxUSD <= 0) maxUSD = 1;
+  var barWidth = Math.max(3, Math.floor(90 / snapshots.length));
+  var html = '<div style="display:flex;align-items:flex-end;gap:2px;height:60px;padding:4px 0">';
+  snapshots.forEach(function(s) {
+    var h = Math.max(4, Math.round((s.totalUSD / maxUSD) * 52));
+    var label = s.ts ? new Date(s.ts).toLocaleTimeString('en-US', {hour:'2-digit',minute:'2-digit'}) : '';
+    html += '<div title="$' + (s.totalUSD||0).toFixed(2) + ' at ' + label + '" style="flex:1;min-width:' + barWidth + 'px;background:linear-gradient(0deg,var(--blue),var(--teal));height:' + h + 'px;border-radius:2px 2px 0 0;opacity:0.7"></div>';
+  });
   html += '</div>';
-  html += '<div style="display:flex;flex-wrap:wrap;gap:4px;font-size:8px;color:var(--muted2)">';
-  for (var i = 0; i < networks.length; i++) {
-    html += '<span style="display:inline-flex;align-items:center;gap:3px;padding:2px 6px;background:rgba(0,0,0,.15);border-radius:3px"><div style="width:6px;height:6px;border-radius:50%;background:' + (networks[i].color || '#888') + '"></div>' + (networks[i].shortName || networks[i].name) + '</span>';
-  }
-  html += '</div></div>';
-  el.innerHTML = html;
+  html += '<div style="display:flex;justify-content:space-between;font-size:7px;color:var(--muted2);padding:2px 0">';
+  html += '<span>$' + (snapshots[snapshots.length-1].totalUSD||0).toFixed(2) + '</span>';
+  html += '<span>max: $' + maxUSD.toFixed(2) + '</span>';
+  html += '</div>';
+  body.innerHTML = html;
 }
 
 window.ubInit = ubInit;
@@ -40679,6 +41635,14 @@ const UBScreen = (function() {
 
   // ── Core Process Engine ──────────────────────────────
   async function autProcess(msg){
+    // ── Autonoma LLM (DeepSeek) — try first, fallback to regex ──
+    try {
+      if (typeof AutonomaLLM !== 'undefined' && AutonomaLLM.isAvailable()) {
+        var llmResp = await AutonomaLLM.ask(msg);
+        if (llmResp) return llmResp;
+      }
+    } catch (_llmErr) { /* fall through to regex pipeline */ }
+
     // ── Autonoma Agent layer (preserved: safety net / planner / scheduler) ──
     try{
       if(typeof AutonomaAgent!=='undefined' && typeof AutonomaAgent.tryHandle==='function'){

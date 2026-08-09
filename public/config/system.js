@@ -26,8 +26,8 @@ const SystemConfig = Object.freeze({
   CCTP_TOKEN_MESSENGER:       '0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA',
   CCTP_MESSAGE_TRANSMITTER:   '0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275',
   CCTP_ARC_DOMAIN:            26,
-  CCTP_ATTEST_URL:            'https://iris-api-sandbox.circle.com/attestations/',
-  CCTP_IRIS_V2_URL:           'https://iris-api-sandbox.circle.com/v2/messages/',
+  CCTP_ATTEST_URL:         'https://iris-api-sandbox.circle.com/attestations/',
+  CCTP_IRIS_V2_URL:        'https://iris-api-sandbox.circle.com/v2/messages/',
 
   PLATFORM_FEE_BPS:     100,
   TURBO_FEE_BPS:        100,
