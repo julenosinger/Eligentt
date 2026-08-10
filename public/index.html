@@ -7167,6 +7167,9 @@ select.cinput option { background: #161a24; color: #dde2f0; }
                 <button class="sa-action-btn" onclick="saCreateInvoice()">
                   <i class="ti ti-file-invoice"></i> Invoice
                 </button>
+                <button class="sa-action-btn" onclick="saGenerateQR()">
+                  <i class="ti ti-qrcode"></i> QR Code
+                </button>
               </div>
             </div>
 
@@ -7211,6 +7214,15 @@ select.cinput option { background: #161a24; color: #dde2f0; }
               <div class="sa-route-row">
                 <span class="sa-route-lbl">Status</span>
                 <span class="sa-route-val" id="sa-rt-status" style="color:var(--muted2)">Enter amount &amp; recipient</span>
+              </div>
+            </div>
+            <!-- Cross-Chain Status Tracker -->
+            <div id="sa-xchain-status" style="display:none;margin-top:8px;padding:10px;background:rgba(0,0,0,.15);border:1px solid var(--border);border-radius:6px">
+              <div style="font-size:9px;color:var(--muted2);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">Bridge Status</div>
+              <div id="sa-xc-steps" style="display:flex;flex-direction:column;gap:6px">
+                <div class="sa-xc-step" data-step="burn"><div style="display:flex;align-items:center;gap:6px"><div class="sa-xc-dot" style="width:8px;height:8px;border-radius:50%;background:var(--border)"></div><span style="font-size:9px;color:var(--muted2)">Burn USDC on Arc</span><span class="sa-xc-step-status" style="font-size:7px;margin-left:auto;color:var(--muted2)"></span></div></div>
+                <div class="sa-xc-step" data-step="attest"><div style="display:flex;align-items:center;gap:6px"><div class="sa-xc-dot" style="width:8px;height:8px;border-radius:50%;background:var(--border)"></div><span style="font-size:9px;color:var(--muted2)">Circle Attestation</span><span class="sa-xc-step-status" style="font-size:7px;margin-left:auto;color:var(--muted2)"></span></div></div>
+                <div class="sa-xc-step" data-step="mint"><div style="display:flex;align-items:center;gap:6px"><div class="sa-xc-dot" style="width:8px;height:8px;border-radius:50%;background:var(--border)"></div><span style="font-size:9px;color:var(--muted2)">Mint on Destination</span><span class="sa-xc-step-status" style="font-size:7px;margin-left:auto;color:var(--muted2)"></span></div></div>
               </div>
             </div>
 
@@ -8839,23 +8851,29 @@ select.cinput option { background: #161a24; color: #dde2f0; }
         <div class="page-icon" style="background:rgba(79,142,247,.12);color:var(--blue)"><i class="ti ti-chart-bar"></i></div>
         <div><div class="page-title">Reports &amp; Analytics</div><div class="page-sub">Volume metrics, transaction history and on-chain insights</div></div>
         <div style="margin-left:auto;display:flex;gap:8px">
-          <button class="btn" onclick="exportReportCSV()"><i class="ti ti-download"></i>Export CSV</button>
+          <select id="report-type" class="btn" style="cursor:pointer;font-family:inherit" onchange="renderReports()">
+            <option value="">All Types</option>
+            <option>Batch</option><option>Bridge</option><option>Single Send</option><option>Cross-Chain</option><option>Invoice</option><option>Payment Link</option>
+          </select>
           <select id="report-period" class="btn" style="cursor:pointer;font-family:inherit" onchange="renderReports()">
             <option value="7">Last 7 days</option>
             <option value="30" selected>Last 30 days</option>
             <option value="90">Last 90 days</option>
             <option value="all">All time</option>
           </select>
+          <button class="btn" onclick="exportReportCSV()"><i class="ti ti-download"></i>Export CSV</button>
         </div>
       </div>
       <div style="flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:12px">
-        <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px">
-          <div class="card" style="padding:12px"><div class="st-lbl">Total Sent</div><div class="st-val blue" id="rpt-total-sent">$0.00</div></div>
-          <div class="card" style="padding:12px"><div class="st-lbl">Batches</div><div class="st-val" id="rpt-batches">0</div></div>
-          <div class="card" style="padding:12px"><div class="st-lbl">Recipients Paid</div><div class="st-val green" id="rpt-recipients">0</div></div>
-          <div class="card" style="padding:12px"><div class="st-lbl">Fees Paid</div><div class="st-val yellow" id="rpt-fees">$0.00</div></div>
-          <div class="card" style="padding:12px"><div class="st-lbl">Avg Batch</div><div class="st-val purple" id="rpt-avg">$0.00</div></div>
+        <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:8px">
+          <div class="card" style="padding:12px"><div class="st-lbl">Total Sent</div><div class="st-val blue" id="rpt-total-sent">$0.00</div><div style="font-size:7px;color:var(--muted2);margin-top:2px" id="rpt-total-trend"></div></div>
+          <div class="card" style="padding:12px"><div class="st-lbl">Batches</div><div class="st-val" id="rpt-batches">0</div><div style="font-size:7px;color:var(--muted2);margin-top:2px" id="rpt-batches-trend"></div></div>
+          <div class="card" style="padding:12px"><div class="st-lbl">Recipients Paid</div><div class="st-val green" id="rpt-recipients">0</div><div style="font-size:7px;color:var(--muted2);margin-top:2px" id="rpt-recipients-trend"></div></div>
+          <div class="card" style="padding:12px"><div class="st-lbl">Fees Paid</div><div class="st-val yellow" id="rpt-fees">$0.00</div><div style="font-size:7px;color:var(--muted2);margin-top:2px" id="rpt-fees-trend"></div></div>
+          <div class="card" style="padding:12px"><div class="st-lbl">Avg Batch</div><div class="st-val purple" id="rpt-avg">$0.00</div><div style="font-size:7px;color:var(--muted2);margin-top:2px" id="rpt-avg-trend"></div></div>
+          <div class="card" style="padding:12px"><div class="st-lbl">Fees by Type</div><div class="st-val teal" id="rpt-fees-type">—</div></div>
         </div>
+        <div id="rpt-loading" style="display:none;text-align:center;padding:30px"><div class="aut-typing"><span></span><span></span><span></span></div></div>
         <div class="card">
           <div class="ch"><i class="ti ti-chart-bar" style="font-size:13px;color:var(--blue)"></i><span class="ct">Volume by Day</span></div>
           <div style="padding:14px 14px 10px">
@@ -15629,7 +15647,7 @@ async function connectTrustWallet() {
     setupProviderEvents(raw);
   } catch (e) {
     if (row) row.style.opacity = '1';
-    if (e.code === 4001) toast('Connection rejected', 'error');
+    if (e.code === 4001) { if (!walletAddress) toast('Connection rejected', 'error'); }
     else { _err('Trust:', e); toast('Trust Wallet: ' + (e.message || 'error'), 'error'); }
   }
 }
@@ -15661,7 +15679,7 @@ async function connectMetaMask() {
     setupProviderEvents(raw);
   } catch(e) {
     if(row) row.style.opacity = '1';
-    if(e.code === 4001) toast('Connection rejected by user', 'error');
+    if(e.code === 4001) { if (!walletAddress) toast('Connection rejected by user', 'error'); }
     else { _err('MetaMask:', e); toast('MetaMask: ' + (e.shortMessage||e.message||'error'), 'error'); }
   }
 }
@@ -15693,7 +15711,7 @@ async function connectCoinbase() {
     setupProviderEvents(raw);
   } catch(e) {
     if(row) row.style.opacity = '1';
-    if(e.code === 4001) toast('Connection rejected', 'error');
+    if(e.code === 4001) { if (!walletAddress) toast('Connection rejected', 'error'); }
     else { _err('Coinbase:', e); toast('Coinbase Wallet: ' + (e.message||'error'), 'error'); }
   }
 }
@@ -15725,7 +15743,7 @@ async function connectRabby() {
     setupProviderEvents(raw);
   } catch(e) {
     if(row) row.style.opacity = '1';
-    if(e.code === 4001) toast('Connection rejected', 'error');
+    if(e.code === 4001) { if (!walletAddress) toast('Connection rejected', 'error'); }
     else { _err('Rabby:', e); toast('Rabby: ' + (e.message||'error'), 'error'); }
   }
 }
@@ -22363,6 +22381,7 @@ function logToReports(type, amount, rcptCount, txHash, opts) {
   };
   txHistory.unshift(entry);
   Store.save('txhistory', txHistory);
+  try { if (typeof EventBus !== 'undefined') EventBus.emit('TX_HISTORY_UPDATED', entry); } catch(_) {}
 }
 function syncHistoryFromBatch(batchId, total, rcptCount, txHash, blockNumber) {
   logToReports('Batch', total, rcptCount, txHash, { id: batchId, fee: +(total*MULTISEND_FEE_RATE).toFixed(2) });
@@ -24731,64 +24750,168 @@ function deleteTemplate(id) {
 // ══════════════════════════════════════════════════════════
 //  REPORTS
 // ══════════════════════════════════════════════════════════
+var _rptRendering = false;
 function renderReports() {
-  const period = parseInt(document.getElementById('report-period')?.value||'30');
-  const cutoff = period===0 ? null : new Date(Date.now()-period*86400000);
-  const data   = cutoff ? txHistory.filter(t=>new Date(t.date)>=cutoff) : txHistory;
-  const total  = data.reduce((s,t)=>s+t.amount,0);
-  const fees   = data.reduce((s,t)=>s+t.fee,0);
-  const rcpts  = data.reduce((s,t)=>s+t.recipients,0);
-  const avg    = data.length>0?total/data.length:0;
-  const set=(id,v)=>{const el=document.getElementById(id);if(el)el.textContent=v;};
-  set('rpt-total-sent','$'+total.toFixed(2));
-  set('rpt-batches', data.length);
-  set('rpt-recipients', rcpts);
-  set('rpt-fees','$'+fees.toFixed(2));
-  set('rpt-avg','$'+avg.toFixed(2));
-  set('rpt-count', data.length+' transactions');
+  if (_rptRendering) return;
+  var loading = document.getElementById('rpt-loading');
+  if (loading) loading.style.display = '';
+  setTimeout(function() {
+    _rptRendering = true;
+    try { _rptRenderNow(); } catch (e) { _err('[Reports] render error:', e); }
+    _rptRendering = false;
+    if (loading) loading.style.display = 'none';
+  }, 80);
+}
 
-  // Draw bar chart
-  const barsEl   = document.getElementById('report-bars');
-  const labelsEl = document.getElementById('report-labels');
-  if(barsEl) {
-    const days = Math.min(period===0?30:period, 30);
-    const buckets = [];
-    for(let d=days-1;d>=0;d--) {
-      const day = new Date(Date.now()-d*86400000);
-      const label = day.toLocaleDateString('en-US',{month:'short',day:'numeric'});
-      const dayTotal = txHistory.filter(t=>{
-        const td=new Date(t.date); return td.toDateString()===day.toDateString();
-      }).reduce((s,t)=>s+t.amount,0);
-      buckets.push({label,val:dayTotal});
+function _rptRenderNow() {
+  var period = parseInt(document.getElementById('report-period')?.value||'30');
+  var typeFilter = document.getElementById('report-type')?.value || '';
+  var cutoff = period===0 ? null : new Date(Date.now()-period*86400000);
+
+  // Gather all data sources
+  var allData = [];
+  txHistory.forEach(function(t) { allData.push({ date: t.date, id: t.id, type: /batch/i.test(t.type) ? 'Batch' : /bridge/i.test(t.type) ? 'Bridge' : /cross.chain/i.test(t.type) ? 'Cross-Chain' : 'Single Send', recipients: t.recipients, amount: t.amount, fee: t.fee, status: t.status, txHash: t.txHash }); });
+  try {
+    if (typeof invoiceList !== 'undefined') invoiceList.forEach(function(inv) {
+      if (inv.status === 'Paid') allData.push({ date: inv.paidOn || inv.created, id: inv.id, type: 'Invoice', recipients: 1, amount: inv.subtotal || inv.total || 0, fee: inv.protocolFee || 0, status: 'Success', txHash: inv.txHash || '' });
+    });
+  } catch(_) {}
+  try {
+    if (typeof payLinks !== 'undefined') payLinks.forEach(function(l) {
+      if (l.status === 'Paid') allData.push({ date: l.paidOn || l.created, id: l.id, type: 'Payment Link', recipients: 1, amount: l.amount || 0, fee: l.feeAmount || 0, status: 'Success', txHash: l.paidTx || '' });
+    });
+  } catch(_) {}
+
+  var data = cutoff ? allData.filter(function(t) { return new Date(t.date) >= cutoff; }) : allData;
+  if (typeFilter) data = data.filter(function(t) { return t.type === typeFilter; });
+  data.sort(function(a, b) { return new Date(b.date) - new Date(a.date); });
+
+  // Previous period for trend comparison
+  var prevCutoff = cutoff ? new Date(cutoff.getTime() - period*86400000) : null;
+  var prevEnd = cutoff || new Date();
+  var prevData = prevCutoff ? allData.filter(function(t) { var d = new Date(t.date); return d >= prevCutoff && d < cutoff; }) : [];
+
+  var total = data.reduce(function(s,t) { return s + t.amount; }, 0);
+  var fees = data.reduce(function(s,t) { return s + t.fee; }, 0);
+  var rcpts = data.reduce(function(s,t) { return s + t.recipients; }, 0);
+  var avg = data.length > 0 ? total / data.length : 0;
+  var prevTotal = prevData.reduce(function(s,t) { return s + t.amount; }, 0);
+
+  var set = function(id, v) { var el = document.getElementById(id); if (el) el.textContent = v; };
+  set('rpt-total-sent', '$' + total.toFixed(2));
+  set('rpt-batches', String(data.length));
+  set('rpt-recipients', String(rcpts));
+  set('rpt-fees', '$' + fees.toFixed(2));
+  set('rpt-avg', '$' + avg.toFixed(2));
+  set('rpt-count', data.length + ' transactions');
+
+  // Trend indicators
+  var trendFn = function(id, curr, prev) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    if (prev > 0 && curr > 0) {
+      var pct = ((curr - prev) / prev * 100);
+      var up = pct >= 0;
+      el.innerHTML = '<i class="ti ti-arrow-' + (up ? 'up' : 'down') + '" style="font-size:7px;color:' + (up ? 'var(--green)' : 'var(--red)') + '"></i> ' + Math.abs(pct).toFixed(0) + '% vs prev';
+    } else if (prev > 0 && curr === 0) {
+      el.innerHTML = '<span style="color:var(--red)">-100%</span>';
+    } else if (prev === 0 && curr > 0) {
+      el.innerHTML = '<span style="color:var(--green)">New</span>';
+    } else {
+      el.innerHTML = '';
     }
-    const maxVal = Math.max(...buckets.map(b=>b.val),1);
-    barsEl.innerHTML = buckets.map(b=>{
-      const h = Math.max(2,(b.val/maxVal)*100);
-      const isToday = b.label===new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
-      return `<div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;height:100%">
-        <div style="width:100%;background:${isToday?'var(--blue)':'rgba(79,142,247,.4)'};border-radius:3px 3px 0 0;height:${h}%;min-height:2px;transition:height .3s" title="${b.label}: $${b.val.toFixed(2)}"></div>
-      </div>`;
+  };
+  trendFn('rpt-total-trend', total, prevTotal);
+  trendFn('rpt-batches-trend', data.length, prevData.length);
+  trendFn('rpt-recipients-trend', rcpts, prevData.reduce(function(s,t) { return s + t.recipients; }, 0));
+  trendFn('rpt-fees-trend', fees, prevData.reduce(function(s,t) { return s + t.fee; }, 0));
+  trendFn('rpt-avg-trend', avg, prevData.length > 0 ? prevTotal / prevData.length : 0);
+
+  // Fees by type breakdown
+  var feesByType = {};
+  data.forEach(function(t) {
+    feesByType[t.type] = (feesByType[t.type] || 0) + t.fee;
+  });
+  var feesTypeStr = Object.keys(feesByType).map(function(k) {
+    return '<span style="font-size:8px;display:block;color:var(--muted2)">' + k + ': $' + feesByType[k].toFixed(2) + '</span>';
+  }).join('');
+  var feesTypeEl = document.getElementById('rpt-fees-type');
+  if (feesTypeEl) feesTypeEl.innerHTML = feesTypeStr || '—';
+
+  // Bar chart with Y-axis
+  var barsEl = document.getElementById('report-bars');
+  var labelsEl = document.getElementById('report-labels');
+  if (barsEl) {
+    var days = Math.min(period===0 ? 30 : period, 30);
+    var buckets = [];
+    for (var d = days - 1; d >= 0; d--) {
+      var day = new Date(Date.now() - d * 86400000);
+      var label = day.toLocaleDateString('en-US', {month:'short',day:'numeric'});
+      var dayTotal = allData.filter(function(t) {
+        return new Date(t.date).toDateString() === day.toDateString();
+      }).reduce(function(s,t) { return s + t.amount; }, 0);
+      buckets.push({label: label, val: dayTotal});
+    }
+    var maxVal = Math.max.apply(null, buckets.map(function(b) { return b.val; }).concat([1]));
+    barsEl.innerHTML = buckets.map(function(b) {
+      var h = Math.max(2, (b.val / maxVal) * 100);
+      var isToday = b.label === new Date().toLocaleDateString('en-US',{month:'short',day:'numeric'});
+      return '<div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;height:100%">' +
+        '<div style="width:100%;background:' + (isToday ? 'var(--blue)' : 'rgba(79,142,247,.4)') + ';border-radius:3px 3px 0 0;height:' + h + '%;min-height:2px" title="' + b.label + ': $' + b.val.toFixed(2) + '"></div>' +
+        '</div>';
     }).join('');
-    if(labelsEl) labelsEl.innerHTML = buckets.map(b=>`<div style="flex:1;font-size:7px;color:var(--muted2);text-align:center;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">${b.label.split(' ')[1]||b.label}</div>`).join('');
+    // Y-axis: show max value
+    var yLabel = document.getElementById('rpt-y-label');
+    if (!yLabel) {
+      yLabel = document.createElement('div');
+      yLabel.id = 'rpt-y-label';
+      yLabel.style.cssText = 'position:absolute;left:-4px;top:0;font-size:7px;color:var(--muted2);transform:translateX(-100%);padding-right:6px';
+      barsEl.parentElement.style.position = 'relative';
+      barsEl.parentElement.appendChild(yLabel);
+    }
+    yLabel.textContent = '$' + maxVal.toFixed(0);
+    if (labelsEl) labelsEl.innerHTML = buckets.map(function(b) {
+      return '<div style="flex:1;font-size:7px;color:var(--muted2);text-align:center;overflow:hidden;white-space:nowrap">' + (b.label.split(' ')[1] || b.label) + '</div>';
+    }).join('');
   }
 
-  // Table
-  const tbody=document.getElementById('rpt-tbody');
-  const empty=document.getElementById('rpt-empty');
-  if(!tbody) return;
-  if(!data.length){ tbody.innerHTML=''; empty.style.display=''; return; }
-  empty.style.display='none';
-  tbody.innerHTML=data.map(t=>`<tr>
-    <td style="font-size:9px;color:var(--muted2)">${new Date(t.date).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}</td>
-    <td style="color:var(--blue)">${t.id}</td>
-    <td>${t.type}</td>
-    <td>${t.recipients}</td>
-    <td style="font-weight:600">${t.amount.toFixed(2)} USDC</td>
-    <td style="color:var(--yellow)">${t.fee.toFixed(2)} USDC</td>
-    <td><span style="color:var(--green)">${t.status}</span></td>
-    <td>${t.txHash?`<a href="https://testnet.arcscan.app/tx/${t.txHash}" target="_blank" style="color:var(--blue);text-decoration:none;font-size:9px">${shortAddr(t.txHash)}</a>`:'—'}</td>
-  </tr>`).join('');
+  // Table with expandable rows
+  var tbody = document.getElementById('rpt-tbody');
+  var empty = document.getElementById('rpt-empty');
+  if (!tbody) return;
+  if (!data.length) { tbody.innerHTML = ''; if (empty) empty.style.display = ''; return; }
+  if (empty) empty.style.display = 'none';
+  tbody.innerHTML = data.map(function(t) {
+    var explorerUrl = 'https://testnet.arcscan.app/tx/' + (t.txHash || '');
+    var txLink = t.txHash ? '<a href="' + explorerUrl + '" target="_blank" style="color:var(--blue);text-decoration:none;font-size:9px" title="' + t.txHash + '">' + shortAddr(t.txHash) + '</a>' : '—';
+    return '<tr style="cursor:pointer" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display===`none`?``:`none`" title="Click to expand">' +
+      '<td style="font-size:9px;color:var(--muted2)">' + new Date(t.date).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) + '</td>' +
+      '<td style="color:var(--blue)">' + t.id + '</td>' +
+      '<td>' + t.type + '</td>' +
+      '<td>' + t.recipients + '</td>' +
+      '<td style="font-weight:600">' + t.amount.toFixed(2) + ' USDC</td>' +
+      '<td style="color:var(--yellow)">' + t.fee.toFixed(2) + ' USDC</td>' +
+      '<td><span style="color:var(--green)">' + t.status + '</span></td>' +
+      '<td>' + txLink + '</td>' +
+      '</tr>' +
+      '<tr style="display:none;background:rgba(0,0,0,.15)"><td colspan="8" style="padding:8px 12px;font-size:9px">' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;color:var(--muted2)">' +
+      '<div>Tx Hash: <a href="' + explorerUrl + '" target="_blank" style="color:var(--teal);text-decoration:none;font-family:monospace;font-size:8px">' + shortAddr(t.txHash || '—') + ' <i class="ti ti-external-link" style="font-size:7px"></i></a></div>' +
+      '<div>Date: <span style="color:var(--text)">' + new Date(t.date).toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) + '</span></div>' +
+      '<div>Type: <span style="color:var(--text)">' + t.type + '</span></div>' +
+      '<div>Amount: <span style="color:var(--text);font-weight:600">$' + t.amount.toFixed(2) + '</span></div>' +
+      '</div></td></tr>';
+  }).join('');
 }
+
+// Auto-refresh via EventBus
+try {
+  if (typeof EventBus !== 'undefined') {
+    EventBus.on('TX_HISTORY_UPDATED', function() { renderReports(); });
+    EventBus.on('INVOICE_PAID', function() { renderReports(); });
+    EventBus.on('PAYMENT_LINK_PAID', function() { renderReports(); });
+  }
+} catch(_) {}
 
 function exportReportCSV() {
   const rows=[['Date','Batch ID','Type','Recipients','Amount','Fee','Status','Tx Hash'],...txHistory.map(t=>[new Date(t.date).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}),t.id,t.type,t.recipients,t.amount,t.fee,t.status,t.txHash])];
@@ -28076,10 +28199,12 @@ async function xcExecuteSend() {
       amtBig, toConfig.domain, mintRecipient32, fromConfig.usdc, zeroCaller32, maxFee, finalityThreshold, { gasLimit: xcBurnGas }
     );
     xcSetStep(1, 'active', burnTx.hash, fromConfig.explorer);
+    try { if (typeof saUpdateXCStep === 'function') saUpdateXCStep('burn', 'active', 'submitted'); } catch(_) {}
     const burnReceipt = await burnTx.wait();
     if (!burnReceipt || burnReceipt.status !== 1) throw new Error(`depositForBurn failed (status=0). Tx: ${burnTx.hash}`);
     _log("[XC] depositForBurn confirmed. Logs:", burnReceipt.logs.length);
     xcSetStep(1, 'success', burnTx.hash, fromConfig.explorer);
+    try { if (typeof saUpdateXCStep === 'function') saUpdateXCStep('burn', 'done', shortAddr(burnTx.hash)); } catch(_) {}
 
     // ═══════════════════════════════════════════════════════════════════
     // CCTP FAST FLOW — Iris V2 direct, no event log parsing, no hash-matching.
@@ -28088,6 +28213,7 @@ async function xcExecuteSend() {
 
     // ── STEP 2: Circle Iris attestation ──────────────────────────────────────
     xcSetStep(2, 'active', null, null);
+    try { if (typeof saUpdateXCStep === 'function') saUpdateXCStep('attest', 'active', 'polling...'); } catch(_) {}
 
     let messageBytes = null, attestationSig = null;
 
@@ -28143,6 +28269,7 @@ async function xcExecuteSend() {
       throw new Error('Attestation timed out. Check Circle Iris status and retry.');
     }
     xcSetStep(2, 'success', null, null);
+    try { if (typeof saUpdateXCStep === 'function') saUpdateXCStep('attest', 'done', 'verified'); } catch(_) {}
 
     // ── [CCTP FINAL PAYLOAD] hash from Iris message ──
     const messageHash = ethers.keccak256(messageBytes);
@@ -28208,6 +28335,7 @@ async function xcExecuteSend() {
 
     // ── STEP 4: receiveMessage() ──────────────────────────────────────────────
     xcSetStep(4, 'active', null, null);
+    try { if (typeof saUpdateXCStep === 'function') saUpdateXCStep('mint', 'active', 'minting...'); } catch(_) {}
 
     // ── [CCTP FINAL PAYLOAD] Verify hash before mint ──
     const verifyHash = ethers.keccak256(messageBytes);
@@ -28257,6 +28385,7 @@ async function xcExecuteSend() {
     console.log('[CCTP FINAL PAYLOAD] Confirmed — block:', mintReceipt.blockNumber);
     _log("[XC] receiveMessage() confirmed ✓");
     xcSetStep(4, 'success', mintTx.hash, toConfig.explorer);
+    try { if (typeof saUpdateXCStep === 'function') saUpdateXCStep('mint', 'done', shortAddr(mintTx.hash)); } catch(_) {}
 
     // ── STEP 5: Complete ───────────────────────────────────────────────────────
     xcSetStep(5, 'success', null, null);
@@ -29454,9 +29583,11 @@ function saToRaw(amount) {
 function saUpdateNetwork() {
   var netDisplay = document.getElementById('sa-network-display');
   var netBadgeText = document.getElementById('sa-network-badge-text');
+  var sel = document.getElementById('sa-src-network');
   if (netDisplay) netDisplay.value = 'Arc Testnet (Chain ID: 5042002)';
   if (netBadgeText) netBadgeText.textContent = 'Arc Testnet';
-  saDestChainId = 5042002;
+  // Reset source to Arc if selector exists
+  if (sel) sel.value = '5042002';
   saRefreshBalance();
   saUpdateRoute();
 }
@@ -29551,7 +29682,11 @@ function saUpdateRoute() {
   var isXChain = saIsCrossChain();
   // Route visualization
   var routeViz = document.getElementById('sa-xroute-viz');
+  var xcStatus = document.getElementById('sa-xchain-status');
   if (routeViz) routeViz.style.display = isXChain ? '' : 'none';
+  if (xcStatus) xcStatus.style.display = isXChain ? '' : 'none';
+  // Reset cross-chain step dots when switching routes
+  if (!isXChain) saResetXCSteps();
   if (isXChain) {
     var fromEl = document.getElementById('sa-xroute-from');
     var toEl = document.getElementById('sa-xroute-to');
@@ -29627,10 +29762,36 @@ function saExecuteCrossChain() {
 
   // Execute via existing cross-chain flow
   if (typeof xcExecuteSend === 'function') {
+    saUpdateXCStep('burn', 'starting');
     xcExecuteSend();
   } else {
     toast('Cross-chain bridge unavailable', 'error');
   }
+}
+
+// ── Cross-chain status tracker helpers ──────────────────
+function saUpdateXCStep(step, status, detail) {
+  var stepEl = document.querySelector('.sa-xc-step[data-step="' + step + '"]');
+  if (!stepEl) return;
+  var dot = stepEl.querySelector('.sa-xc-dot');
+  var st = stepEl.querySelector('.sa-xc-step-status');
+  if (status === 'active') {
+    if (dot) { dot.style.background = 'var(--blue)'; dot.style.boxShadow = '0 0 6px rgba(79,142,247,.5)'; dot.style.animation = 'pulse 1.5s ease-in-out infinite'; }
+    if (st) st.textContent = detail || 'in progress...';
+  } else if (status === 'done') {
+    if (dot) { dot.style.background = 'var(--green)'; dot.style.boxShadow = '0 0 6px rgba(34,197,94,.3)'; dot.style.animation = ''; }
+    if (st) st.textContent = detail || 'complete';
+  } else if (status === 'failed') {
+    if (dot) { dot.style.background = 'var(--red)'; dot.style.boxShadow = '0 0 6px rgba(239,68,68,.3)'; dot.style.animation = ''; }
+    if (st) st.textContent = detail || 'failed';
+  } else {
+    if (dot) { dot.style.background = 'var(--border)'; dot.style.boxShadow = ''; dot.style.animation = ''; }
+    if (st) st.textContent = detail || '';
+  }
+}
+
+function saResetXCSteps() {
+  saUpdateXCStep('burn', 'pending'); saUpdateXCStep('attest', 'pending'); saUpdateXCStep('mint', 'pending');
 }
 
 // ── Execute send ──────────────────────────────────────────
@@ -29643,152 +29804,121 @@ async function saExecuteSend() {
   var recipient = document.getElementById('sa-recipient')?.value.trim() || '';
   var amount    = parseFloat(document.getElementById('sa-amount')?.value) || 0;
   var memo      = document.getElementById('sa-memo')?.value.trim() || '';
-  _log('[SendAssets] step 1/7 — start | asset:', saCurrentAsset, '| chainId:', activeChainId, '| walletType:', activeWalletType);
 
-  // Validation
   if (!walletAddress || !signer) { toast('Connect your wallet first', 'error'); return; }
-  if (!isAddr(recipient)) { toast('Invalid recipient address', 'error'); return; }
+  if (!isAddr(recipient) && !isEns(recipient)) { toast('Invalid recipient address', 'error'); return; }
   if (recipient === '0x0000000000000000000000000000000000000000') { toast('Zero address not allowed', 'error'); return; }
   if (amount <= 0) { toast('Amount must be greater than 0', 'error'); return; }
+
+  // ENS resolution
+  if (isEns(recipient) && recipient.length > 4 && recipient.length < 100) {
+    try {
+      var ensProvider = getCachedProvider('https://cloudflare-eth.com');
+      var resolved = await ensProvider.resolveName(recipient);
+      if (!resolved) { toast('ENS name not found: ' + recipient, 'error'); return; }
+      recipient = resolved;
+    } catch (e) { toast('ENS resolution failed', 'error'); return; }
+  }
+
+  // Gas estimation
+  var saFeeBps = (typeof ElligenteFees !== 'undefined' && ElligenteFees.SEND_ASSETS_FEE_BPS) || 20;
+  var feeAmt = amount * saFeeBps / 10000;
+  var totalAmt = amount + feeAmt;
+  var gasEst = '~0.001 USDC';
+  try {
+    if (signer && signer.provider) {
+      var estGas = await signer.provider.estimateGas({ to: recipient, value: 1n });
+      var feeData = await signer.provider.getFeeData();
+      var gp = feeData.gasPrice || 1000000000n;
+      var estUSD = Number(estGas * gp) / 1e18;
+      gasEst = '~' + estUSD.toFixed(5) + ' USDC';
+    }
+  } catch (_g) {}
+
+  // Confirmation modal (app-native, not browser confirm)
+  var confirmed = false;
+  var confHtml = '<div id="sa-confirm-overlay" style="position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center"><div class="card" style="width:380px;max-width:95vw" onclick="event.stopPropagation()"><div class="ch"><i class="ti ti-send" style="color:var(--blue)"></i><span class="ct">Confirm Send</span></div><div class="cb" style="display:flex;flex-direction:column;gap:8px"><div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:10px"><div style="color:var(--muted2)">Asset</div><div style="color:var(--text);font-weight:600">' + amount.toFixed(4) + ' ' + saCurrentAsset + '</div><div style="color:var(--muted2)">To</div><div style="font-family:monospace;color:var(--blue);font-size:9px">' + shortAddr(recipient) + '</div><div style="color:var(--muted2)">Fee (' + (saFeeBps/100).toFixed(1) + '%)</div><div style="color:var(--yellow)">' + feeAmt.toFixed(4) + ' ' + saCurrentAsset + '</div><div style="color:var(--muted2);font-weight:600">Total</div><div style="color:var(--text);font-weight:700">' + totalAmt.toFixed(4) + ' ' + saCurrentAsset + '</div><div style="color:var(--muted2)">Est. Gas</div><div style="color:var(--teal)">' + gasEst + '</div></div><div style="display:flex;gap:8px;margin-top:4px"><button class="action-btn" style="flex:1;background:linear-gradient(135deg,#4f8ef7,#a78bfa)" onclick="document.getElementById(\'sa-confirm-overlay\').remove();window._saConfirmed=true;window._saResolve()"><i class="ti ti-check"></i>Confirm</button><button class="btn" style="flex:1;color:var(--muted2)" onclick="document.getElementById(\'sa-confirm-overlay\').remove();window._saConfirmed=false;window._saResolve()">Cancel</button></div></div></div></div>';
+  var overlay = document.createElement('div'); overlay.innerHTML = confHtml; document.body.appendChild(overlay.firstElementChild);
+  await new Promise(function(resolve) { window._saResolve = resolve; });
+  if (!window._saConfirmed) { delete window._saResolve; delete window._saConfirmed; return; }
+  delete window._saResolve; delete window._saConfirmed;
+
+  // Sanity check
   if (recipient.toLowerCase() === walletAddress.toLowerCase()) { toast('Recipient is your own address — are you sure?', 'warning'); }
 
   var saTokenCfg = SA_TOKENS[saCurrentAsset] || {};
-  // Always use the ACTUAL connected provider (_rawProvider via _safeEth), never raw
-  // window.ethereum — with multiple wallet extensions the raw object can be a
-  // different/hijacked provider whose request() stalls and the wallet never opens.
   var saEth = (typeof _safeEth === 'function') ? _safeEth() : (window.ethereum || null);
   var isExternalWallet = !!(saEth && activeWalletType && activeWalletType !== 'intelligent');
 
-  // ── Live chain re-sync (Phase 2): discard stale chain state before routing ──
-  // activeChainId can be stale (default 5042002) while the wallet is on another
-  // chain. Reading eth_chainId live + hard provider refresh prevents allowance()
-  // from being sent to a token address that does not exist on the actual chain.
   if (isExternalWallet && typeof SendGuard !== 'undefined') {
     var saLiveChainId = await SendGuard.getLiveChainId(saEth);
-    _log('[SendAssets] step 2/7 — live chainId:', saLiveChainId, '| activeChainId:', activeChainId);
     if (saLiveChainId && saLiveChainId !== activeChainId) {
-      _warn('[SendAssets] Stale chain state detected. activeChainId=' + activeChainId + ' live=' + saLiveChainId + ' — refreshing provider');
+      _warn('[SendAssets] Stale chain state detected — refreshing provider');
       try { if (typeof refreshProviderState === 'function') await refreshProviderState(); } catch(e) { _warn('[SendAssets] provider refresh failed:', e.message); }
     }
   }
 
-  // ── Native tokens NEVER go through the ERC-20 (allowance/approve/transfer) path ──
-  if (saTokenCfg.isNative) {
-    toast(saCurrentAsset + ' is a native asset and cannot be sent as ERC-20', 'error');
-    return;
-  }
+  if (saTokenCfg.isNative) { toast(saCurrentAsset + ' is a native asset', 'error'); return; }
 
-  // Ensure on Arc Testnet
   if (activeChainId !== 5042002) {
     toast('Switching to Arc Testnet...', 'info');
     try {
-      if (!isExternalWallet && typeof WalletManager !== 'undefined' && WalletManager.getActiveSource && WalletManager.getActiveSource() === 'internal') {
-        await WalletManager.switchInternalChain(5042002);
-        activeChainId = window.activeChainId || activeChainId;
-      } else {
-        await saEth?.request({ method:'wallet_switchEthereumChain', params:[{chainId:'0x4cef52'}] });
-        // Hard refresh: the old signer/provider is still bound to the previous
-        // chain — using it after the switch causes CALL_EXCEPTION on eth_call.
-        if (isExternalWallet && typeof refreshProviderState === 'function') await refreshProviderState();
-      }
-    }
-    catch(e) { toast('Please switch to Arc Testnet manually', 'error'); return; }
-    // Verify the switch actually landed on Arc — never proceed on the wrong chain
+      if (!isExternalWallet && typeof WalletManager !== 'undefined') await WalletManager.switchInternalChain(5042002);
+      else { await saEth?.request({ method:'wallet_switchEthereumChain', params:[{chainId:'0x4cef52'}] }); if (isExternalWallet && typeof refreshProviderState === 'function') await refreshProviderState(); }
+    } catch(e) { toast('Please switch to Arc Testnet manually', 'error'); return; }
     if (activeChainId !== 5042002) { toast('Please switch to Arc Testnet manually', 'error'); return; }
   }
 
-  // ── Token validation (Phase 4): block invalid/placeholder/wrong-chain tokens ──
   if (!saTokenCfg.isNative && typeof SendGuard !== 'undefined') {
-    try {
-      SendGuard.assertERC20Token(saGetTokenAddr(), activeChainId, saCurrentAsset);
-      _log('[SendAssets] step 3/7 — token validated:', saGetTokenAddr());
-    } catch(ge) {
-      _err('[SendAssets] Token validation failed:', ge.message, '| token:', saGetTokenAddr(), '| chainId:', activeChainId);
-      toast(ge.message, 'error');
-      return;
-    }
+    try { SendGuard.assertERC20Token(saGetTokenAddr(), activeChainId, saCurrentAsset); } catch(ge) { toast(ge.message, 'error'); return; }
   }
 
-  // Balance check
-  var balOk = false;
+  var tokenAddr = saGetTokenAddr();
+  var rawAmt = saToRaw(amount);
+  var feeRaw = (rawAmt * BigInt(saFeeBps)) / 10000n;
+  var totalNeed = rawAmt + feeRaw;
+
   try {
-    var tokenAddr = saGetTokenAddr();
-    var rawAmt = saToRaw(amount);
-    var saFeeBps = (typeof ElligenteFees !== 'undefined' && ElligenteFees.SEND_ASSETS_FEE_BPS) || 20;
-    var feeRaw = (rawAmt * BigInt(saFeeBps)) / 10000n;
-    var totalNeed = rawAmt + feeRaw;
     var tc = new ethers.Contract(tokenAddr, USDC_ABI, provider);
     var bal = await tc.balanceOf(walletAddress);
-    if (bal >= totalNeed) balOk = true;
-    else {
+    if (bal < totalNeed) {
       var have = (Number(bal) / Math.pow(10, saGetTokenDecimals())).toFixed(4);
       var need = (Number(totalNeed) / Math.pow(10, saGetTokenDecimals())).toFixed(4);
-      toast('Insufficient ' + saCurrentAsset + '. Have: ' + have + ', Need: ' + need, 'error');
+      toast('Insufficient ' + saCurrentAsset + '. Have: ' + have + ', Need: ' + need, 'error'); return;
     }
-  } catch(e) { _warn('[SendAssets] Balance check error:', e.message); balOk = true; }
-  if (!balOk) return;
+  } catch(e) { _warn('[SendAssets] Balance check error:', e.message); }
 
-  // Update button
   var btn = document.getElementById('sa-send-btn');
   var btnContent = document.getElementById('sa-send-btn-content');
   if (btn) btn.disabled = true;
   if (btnContent) btnContent.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i> Sending...';
 
-  // ── Arc Testnet path (Multicall3 + Memo) ──
-  var tokenAddr = saGetTokenAddr();
-  var rawAmt    = saToRaw(amount);
-  var saFeeBps  = (typeof ElligenteFees !== 'undefined' && ElligenteFees.SEND_ASSETS_FEE_BPS) || 20;
-  var feeRaw    = (rawAmt * BigInt(saFeeBps)) / 10000n;
-  var totalNeed = rawAmt + feeRaw;
-
   try {
     var contract = new ethers.Contract(tokenAddr, USDC_ABI, signer);
-    var MC3_ADDR = (typeof ElligenteContracts !== 'undefined' && ElligenteContracts.MULTICALL3_ADDRESS) || '0xcA11bde05977b3631167028862bE2a173976CA11';
-    var mc3Abi   = ['function aggregate3(tuple(address target, bool allowFailure, bytes callData)[] calls) payable returns (tuple(bool success, bytes returnData)[])'];
-    var erc20If  = new ethers.Interface(USDC_ABI);
+    var MC3_ADDR = '0xcA11bde05977b3631167028862bE2a173976CA11';
+    var mc3Abi = ['function aggregate3(tuple(address target, bool allowFailure, bytes callData)[] calls) payable returns (tuple(bool success, bytes returnData)[])'];
+    var erc20If = new ethers.Interface(USDC_ABI);
 
-    // ── Hardening (Phase 7): validate token, spender and deployments before any
-    // allowance()/approve()/transfer() call ever leaves the app ──
     if (typeof SendGuard !== 'undefined') {
       SendGuard.assertERC20Token(tokenAddr, activeChainId, saCurrentAsset);
       SendGuard.assertSpender(MC3_ADDR);
       SendGuard.assertRecipient(recipient);
-      var saChain = getActiveChain();
-      var saReadProv = (saChain && saChain.rpc && typeof getCachedProvider === 'function') ? getCachedProvider(saChain.rpc) : provider;
-      await SendGuard.assertContractDeployed(saReadProv, tokenAddr, saCurrentAsset + ' token');
-      await SendGuard.assertContractDeployed(saReadProv, MC3_ADDR, 'Multicall3');
-      _log('[SendAssets] step 4/7 — token + spender + deployments validated');
     }
 
-    console.table({ chainId: activeChainId, selectedToken: saCurrentAsset, tokenAddress: tokenAddr, spender: MC3_ADDR, recipient: recipient, amount: amount, isNativeToken: !!saTokenCfg.isNative });
-
-    _log('[SendAssets] step 5/7 — reading allowance...');
-    // Read allowance via the chain read-RPC (not the wallet provider) so a slow
-    // wallet RPC can never stall the flow before the wallet popup; falls back to signer.
     var allowance;
     try {
-      var saChainRead = getActiveChain();
-      var saAllowProv = (saChainRead && saChainRead.rpc && typeof getCachedProvider === 'function') ? getCachedProvider(saChainRead.rpc) : provider;
-      var readCtr = new ethers.Contract(tokenAddr, USDC_ABI, saAllowProv);
-      allowance = await Promise.race([
-        readCtr.allowance(walletAddress, MC3_ADDR),
-        new Promise(function(_, rej){ setTimeout(function(){ rej(new Error('allowance_read_timeout')); }, 8000); })
-      ]);
+      allowance = await contract.allowance(walletAddress, MC3_ADDR);
     } catch(arErr) {
-      _warn('[SendAssets] read-RPC allowance failed (' + arErr.message + ') — falling back to wallet provider');
       allowance = await contract.allowance(walletAddress, MC3_ADDR);
     }
-    _log('[SendAssets] step 5/7 — allowance (raw):', allowance.toString(), '| need:', totalNeed.toString());
     if (allowance < totalNeed) {
       if (btnContent) btnContent.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i> Approving...';
-      toast('Approving ' + saCurrentAsset + ' for batch transfer...', 'info');
-      _log('[SendAssets] step 6/7 — requesting approve() in wallet...');
+      toast('Approving ' + saCurrentAsset + '...', 'info');
       var appTx = await contract.approve(MC3_ADDR, ethers.MaxUint256);
       await appTx.wait();
     }
 
     if (btnContent) btnContent.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i> Sending...';
-    toast('Sending ' + amount + ' ' + saCurrentAsset + ' to ' + shortAddr(recipient) + ' (+ ' + (Number(feeRaw) / Math.pow(10, saGetTokenDecimals())).toFixed(4) + ' fee)...', 'info');
 
     var callData1 = erc20If.encodeFunctionData('transferFrom', [walletAddress, recipient, rawAmt]);
     var callData2 = erc20If.encodeFunctionData('transferFrom', [walletAddress, TREASURY_VAULT_ADDRESS, feeRaw]);
@@ -29803,16 +29933,14 @@ async function saExecuteSend() {
       var mc3Iface = new ethers.Interface(mc3Abi);
       var aggData = mc3Iface.encodeFunctionData('aggregate3', [aggCalls]);
       var memoC = new ethers.Contract(MEMO_CONTRACT_ADDRESS, MEMO_ABI, signer);
-      _log('[SendAssets] step 7/7 — requesting memo(aggregate3) tx in wallet...');
       tx = await memoC.memo(MC3_ADDR, aggData, ethers.id(memoText.slice(0, 64)), ethers.toUtf8Bytes(memoText));
     } else {
-      _log('[SendAssets] step 7/7 — requesting aggregate3 tx in wallet...');
       tx = await mc3.aggregate3(aggCalls);
     }
 
     if (btnContent) btnContent.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i> Confirming...';
     var receipt = await tx.wait(1, 25000);
-    if (!receipt || receipt.status !== 1) throw new Error('Batch transaction not confirmed on-chain');
+    if (!receipt || receipt.status !== 1) throw new Error('Transaction not confirmed');
 
     await new Promise(function(r) { setTimeout(r, 3000); });
 
@@ -29827,7 +29955,6 @@ async function saExecuteSend() {
       if (btnContent) btnContent.innerHTML = '<i class="ti ti-send"></i> Send Asset';
       if (btn) btn.disabled = false;
       document.getElementById('sa-amount').value = '';
-      document.getElementById('sa-recipient').value = '';
       document.getElementById('sa-memo').value = '';
       saUpdateRoute();
       saRefreshBalance();
@@ -29847,6 +29974,13 @@ async function saExecuteSend() {
 function saLogTx(tx) {
   saRecentTxs.unshift(tx);
   if (saRecentTxs.length > 20) saRecentTxs.pop();
+  // Persist to localStorage
+  try {
+    var saved = Store.load('sendTxs', []);
+    saved.unshift(tx);
+    if (saved.length > 50) saved.length = 50;
+    Store.save('sendTxs', saved);
+  } catch (_e) {}
   saRenderActivity();
 }
 
@@ -29918,12 +30052,22 @@ function saRenderActivity() {
 function saSaveRecipient() {
   const addr = document.getElementById('sa-recipient')?.value.trim() || '';
   if (!isAddr(addr)) { toast('Enter a valid recipient address first', 'warning'); return; }
-  // Navigate to recipients page and pre-fill
-  showPage('recipients');
-  toast('Add recipient in the Recipients page below', 'info');
+  var name = prompt('Contact name:', '');
+  if (!name) return;
+  try {
+    if (typeof RecipientRegistry !== 'undefined' && RecipientRegistry.add) {
+      RecipientRegistry.add(name, addr);
+      toast('Contact saved: ' + name, 'success');
+    } else if (typeof contacts !== 'undefined') {
+      contacts.unshift({ name: name, addr: addr, chainId: 'Arc_Testnet', created: new Date().toISOString() });
+      Store.save('contacts', contacts);
+      toast('Contact saved: ' + name, 'success');
+    } else {
+      showPage('recipients');
+    }
+  } catch (_e) { showPage('recipients'); }
 }
 function saCreatePayLink() {
-  // Navigate to payment links and pre-fill amount
   const amount = document.getElementById('sa-amount')?.value || '';
   showPage('links');
   setTimeout(() => {
@@ -29933,8 +30077,27 @@ function saCreatePayLink() {
   }, 100);
 }
 function saCreateInvoice() {
+  var amount = parseFloat(document.getElementById('sa-amount')?.value) || 0;
+  var recipient = document.getElementById('sa-recipient')?.value.trim() || '';
   showPage('invoices');
-  setTimeout(() => { invSwitchTab && invSwitchTab('create'); }, 100);
+  setTimeout(() => {
+    invSwitchTab && invSwitchTab('create');
+    if (amount > 0) {
+      var firstRow = document.querySelector('#inv-line-items .inv-line-row');
+      if (firstRow) { var priceEl = firstRow.querySelector('.li-price'); if (priceEl) priceEl.value = String(amount); }
+    }
+    if (recipient && isAddr(recipient)) { var addrEl = document.getElementById('inv-to-addr'); if (addrEl) addrEl.value = recipient; }
+    invRecalcLines && invRecalcLines(); invPreviewUpdate && invPreviewUpdate();
+  }, 200);
+}
+function saGenerateQR() {
+  var recipient = document.getElementById('sa-recipient')?.value.trim() || '';
+  var amount = parseFloat(document.getElementById('sa-amount')?.value) || 0;
+  if (!isAddr(recipient)) { toast('Enter a valid recipient address first', 'warning'); return; }
+  var payUrl = buildPublicPayUrl('send-' + Date.now().toString(36));
+  var html = '<div style="position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center" onclick="if(event.target===this)this.remove()"><div class="card" style="width:300px;text-align:center" onclick="event.stopPropagation()"><div class="ch"><i class="ti ti-qrcode" style="color:var(--blue)"></i><span class="ct">Payment QR</span><button class="btn" style="margin-left:auto;font-size:9px" onclick="this.closest(\'div[style*=fixed]\').remove()"><i class="ti ti-x"></i></button></div><div class="cb"><div id="sa-qr-temp" style="width:180px;height:180px;margin:0 auto;overflow:hidden;background:#fff;border-radius:6px"></div><div style="margin-top:8px;font-size:10px;color:var(--text)">' + (amount>0?amount.toFixed(2)+' '+saCurrentAsset:'Any amount') + '</div><div style="margin-top:4px;font-size:9px;color:var(--muted2);font-family:monospace">' + shortAddr(recipient) + '</div><button class="btn" style="margin-top:10px;font-size:9px" onclick="navigator.clipboard.writeText(\'' + recipient + '\');toast(\'Address copied\',\'success\')"><i class="ti ti-copy"></i>Copy Address</button></div></div></div>';
+  var overlay = document.createElement('div'); overlay.innerHTML = html; document.body.appendChild(overlay.firstElementChild);
+  setTimeout(function() { drawQRReal('sa-qr-temp', payUrl, 180); }, 100);
 }
 
 // ── Init when page shown ──────────────────────────────────
@@ -36120,10 +36283,10 @@ function ubGetTokenRate(sym) {
 }
 
 const UB_TOKEN_META = {
-  USDC:   { name:'USD Coin',    icon:'U', color:'#2775ca', get rate() { return ubGetTokenRate('USDC'); } },
-  EURC:   { name:'Euro Coin',    icon:'E', color:'#2562de', get rate() { return ubGetTokenRate('EURC'); } },
-  cirBTC: { name:'Circle BTC',   icon:'₿', color:'#f7931a', get rate() { return ubGetTokenRate('cirBTC'); } },
-  ETH:    { name:'Ether',        icon:'<svg viewBox="0 0 32 32" width="12" height="12"><path d="M16 4v10l-8 4 8-4 8 4-8-4V4zM16 20l-8-4 8 10 8-10-8 4z" fill="white"/></svg>', color:'#627eea', get rate() { return ubGetTokenRate('ETH'); } }
+  USDC:   { name:'USD Coin',    icon:'<img src="/assets/tokens/usdc/Symbol/USDC-symbol.png" style="width:18px;height:18px" alt="USDC">', color:'#2775ca', get rate() { return ubGetTokenRate('USDC'); } },
+  EURC:   { name:'Euro Coin',    icon:'<img src="/assets/tokens/eurc/Symbol/EURC-symbol.png" style="width:18px;height:18px" alt="EURC">', color:'#2562de', get rate() { return ubGetTokenRate('EURC'); } },
+  cirBTC: { name:'Circle BTC',   icon:'<img src="/assets/tokens/cirbtc/Logos/PNG/cirBTC_Icon.png" style="width:18px;height:18px" alt="cirBTC">', color:'#f7931a', get rate() { return ubGetTokenRate('cirBTC'); } },
+  ETH:    { name:'Ether',        icon:'<img src="/assets/tokens/eth/eth-logo.png" style="width:18px;height:18px" alt="ETH" onerror="this.style.display=\'none\'">', color:'#627eea', get rate() { return ubGetTokenRate('ETH'); } }
 };
 const UB_FREQ_LABELS = { once:'One-time', daily:'Daily', weekly:'Weekly', biweekly:'Bi-weekly', monthly:'Monthly' };
 
@@ -36585,7 +36748,7 @@ function ubRenderAssets() {
         '<button class="btn" style="padding:2px 7px;font-size:8px" onclick="UBAction.openBridge(\'Ethereum_Sepolia\',\'Arc_Testnet\',' + a.balance + ')" title="Bridge"><i class="ti ti-topology-star-3"></i></button>';
     }
     rows += '<tr>' +
-      '<td><div style="display:flex;align-items:center;gap:6px"><div style="width:22px;height:22px;border-radius:50%;background:' + tokenInfo.color + ';display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:#fff;flex-shrink:0">' + tokenInfo.icon + '</div><div><div style="font-weight:600;font-size:10px">' + a.token + '</div><div style="font-size:8px;color:var(--muted2)">' + a.tokenName + '</div></div></div></td>' +
+      '<td><div style="display:flex;align-items:center;gap:6px"><div style="width:28px;height:28px;border-radius:50%;background:#fff;display:flex;align-items:center;justify-content:center;flex-shrink:0">' + tokenInfo.icon + '</div><div><div style="font-weight:600;font-size:10px">' + a.token + '</div><div style="font-size:8px;color:var(--muted2)">' + a.tokenName + '</div></div></div></td>' +
       '<td><div style="display:flex;align-items:center;gap:4px"><div style="width:7px;height:7px;border-radius:50%;background:' + (getChainColor(a.chainId)) + '"></div><span style="font-size:9px">' + a.chainName + '</span></div></td>' +
       '<td style="font-family:\'JetBrains Mono\',monospace;font-size:10px">' + a.balance.toFixed(4) + '</td>' +
       '<td style="font-family:\'JetBrains Mono\',monospace;font-size:10px"><span style="color:var(--green)">$' + a.usd.toFixed(2) + '</span><span style="font-size:8px;color:var(--muted2);margin-left:4px">(' + perc + '%)</span></td>' +
