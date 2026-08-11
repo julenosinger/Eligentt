@@ -40,7 +40,12 @@ function log(msg, level) {
 }
 
 function ensureDir(dir) { if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true }); }
-function readText(fp) { return fs.existsSync(fp) ? fs.readFileSync(fp, 'utf8') : null; }
+function readText(fp) {
+  if (!fs.existsSync(fp)) return null;
+  const buf = fs.readFileSync(fp);
+  if (buf.length >= 2 && buf[0] === 0xFF && buf[1] === 0xFE) return buf.toString('utf16le'); // UTF-16LE BOM
+  return buf.toString('utf8');
+}
 function writeText(fp, content) { ensureDir(path.dirname(fp)); fs.writeFileSync(fp, content, 'utf8'); }
 function contentHash(content) { return crypto.createHash('sha256').update(content).digest('hex').slice(0, 8); }
 
@@ -223,6 +228,12 @@ async function buildBundle(scripts, name) {
     }
   }
 
+  // Bundle registry for ModuleLoader — marks all bundled modules as already loaded
+  content += '\n  window.__ELLIGENTT_BUNDLE = {\n';
+  content += `    version: "${new Date().toISOString().slice(0, 10)}",\n`;
+  content += `    total: ${bundledPaths.length},\n`;
+  content += '    files: ' + JSON.stringify(bundledPaths) + ',\n';
+  content += '  };\n';
   content += '\n})();\n';
 
   // Minify with terser (comment/whitespace only — safe mode)
