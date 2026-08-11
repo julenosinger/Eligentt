@@ -111,6 +111,12 @@
     if (loaded[path]) return Promise.resolve();
     if (pending[path]) return pending[path];
 
+    if (window.__ELLIGENTT_BUNDLE && window.__ELLIGENTT_BUNDLE.files &&
+        window.__ELLIGENTT_BUNDLE.files.indexOf(path) !== -1) {
+      loaded[path] = true;
+      return Promise.resolve();
+    }
+
     // Skip dormant modules
     if (DORMANT.indexOf(path) !== -1) {
       loaded[path] = true;

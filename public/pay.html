@@ -11,8 +11,9 @@
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.44.0/tabler-icons.min.css"/>
-<script src="https://cdn.jsdelivr.net/npm/ethers@6.7.1/dist/ethers.umd.min.js" integrity="sha384-eoEZatO/ymJi+LdBilp3xt/M9N9Lla2JlMVPZuk48Fg1YGl2Mc+vmsky+nkOtlSi" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/ethers@6.13.5/dist/ethers.umd.min.js" integrity="sha384-NRAZj94DQk3dgtsOZzVYHbYVV1DFkF5QhL5RRxF0ILZLi6OQ7CsMlun748D42JbO" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js" integrity="sha384-3zSEDfvllQohrq0PHL1fOXJuC/jSOO34H46t6UQfobFOmxE5BpjjaIJY5F2/bMnU" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.4/dist/purify.min.js" integrity="sha384-eEu5CTj3qGvu9PdJuS+YlkNi7d2XxQROAFYOr59zgObtlcux1ae1Il3u7jvdCSWu" crossorigin="anonymous"></script>
 <!-- Real config — single source of truth (addresses, chain, fees) -->
 <script src="/config/system.js"></script>
 <script src="/config/chains.js"></script>
@@ -296,7 +297,7 @@
   function toast(msg, type){
     var el=$('toast'); if(!el) return;
     var ic={success:'ti-check',error:'ti-x',warning:'ti-alert-triangle',info:'ti-info-circle'}[type||'info']||'ti-info-circle';
-    el.innerHTML='<i class="ti '+ic+'"></i>'+String(msg);
+    el.innerHTML='<i class="ti '+ic+'"></i>'+DOMPurify.sanitize(String(msg));
     el.className='toast '+(type||'info')+' show';
     clearTimeout(_tt); _tt=setTimeout(function(){ el.classList.remove('show'); }, 4200);
   }
@@ -344,7 +345,7 @@
   // ── Render ──
   function statusBadge(status){
     var s = status || 'Active';
-    var cls = 'active', label = s;
+    var cls = 'active', label = DOMPurify.sanitize(s);
     if (s === 'Paid')                       { cls='paid'; }
     else if (s === 'Expired')               { cls='dead'; }
     else if (s === 'Disabled'||s==='Cancelled'){ cls='dead'; }
@@ -439,7 +440,7 @@
     setBtn('<i class="ti ti-bolt"></i> Pay ' + fmt(total) + ' ' + tk);
   }
 
-  function showNotice(kind, html){ var n=$('notice'); n.className='notice show '+kind; n.innerHTML=html; }
+  function showNotice(kind, html){ var n=$('notice'); n.className='notice show '+kind; n.innerHTML=DOMPurify.sanitize(html); }
   function hideNotice(){ var n=$('notice'); n.className='notice'; n.innerHTML=''; }
   function explorerLink(hash){
     return ' <br><a href="'+ARC_EXPLORER+'/tx/'+hash+'" target="_blank" rel="noopener">'+shortHash(hash)+'</a>';
