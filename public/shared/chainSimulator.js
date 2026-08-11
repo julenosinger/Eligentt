@@ -327,6 +327,10 @@
     'function depositForBurn(uint256 amount, uint32 destinationDomain, bytes32 mintRecipient, address burnToken, bytes32 destinationCaller, uint256 maxFee, uint32 minFinalityThreshold) external returns (uint64 nonce)'
   ]);
 
+  var CCTP_FORWARD_IFACE = new ethers.Interface([
+    'function depositForBurnWithHook(uint256 amount, uint32 destinationDomain, bytes32 mintRecipient, address burnToken, bytes32 destinationCaller, bytes hookData, uint256 maxFee, uint32 minFinalityThreshold) external returns (uint64 nonce)'
+  ]);
+
   /* ── Build swap calldata with slippage & deadline (C2, C4) ── */
   function buildSwapCalldata(amountIn, tokenIn, tokenOut, slippageBps, poolAddr, quoteAmountOut) {
     try {
@@ -458,18 +462,33 @@
     } catch(e){ return null; }
   }
 
-  function buildBridgeCalldata(amount, destDomain, mintRecipient, burnToken, maxFee){
+  function buildBridgeCalldata(amount, destDomain, mintRecipient, burnToken, maxFee, useForwarding){
     try {
       var amtBig = ethers.parseUnits(String(amount), 6);
       var domain = Number(destDomain) || 6;
       var recipient = mintRecipient || ethers.ZeroHash;
       var token = burnToken || TOKENS.USDC;
       var fee = maxFee ? ethers.parseUnits(String(maxFee), 6) : ethers.parseUnits('0.5', 6);
+      var forwardingEnabled = useForwarding && (typeof ElligenteCCTP !== 'undefined' && ElligenteCCTP.FORWARDING_ENABLED);
+
+      if (forwardingEnabled) {
+        var hookData = (typeof ElligenteCCTP !== 'undefined') ? ElligenteCCTP.FORWARDING_HOOK_DATA : '0x636374702d666f72776172640000000000000000000000000000000000000000';
+        var calldata = CCTP_FORWARD_IFACE.encodeFunctionData('depositForBurnWithHook', [amtBig, domain, recipient, token, ethers.ZeroHash, hookData, fee, 0]);
+        return {
+          calldata: calldata,
+          contract: CCTP_MESSENGER,
+          method: 'depositForBurnWithHook',
+          forwarding: true,
+          params: { amount: String(amount), destDomain: domain, maxFee: ethers.formatUnits(fee, 6) }
+        };
+      }
+
       var calldata = CCTP_IFACE.encodeFunctionData('depositForBurn', [amtBig, domain, recipient, token, ethers.ZeroHash, fee, 0]);
       return {
         calldata: calldata,
         contract: CCTP_MESSENGER,
         method: 'depositForBurn',
+        forwarding: false,
         params: { amount: String(amount), destDomain: domain, maxFee: ethers.formatUnits(fee, 6) }
       };
     } catch(e){ return null; }
