@@ -19,6 +19,9 @@ const { minify } = require('terser');
 
 const ROOT = path.resolve(__dirname, '..');
 const PUBLIC = path.join(ROOT, 'public');
+// SOURCE_HTML = monolithic authoring source (inline <style>/<script>).
+// SRC_HTML    = build output (bundles + extracted app.css references).
+const SOURCE_HTML = path.join(ROOT, 'index.html');
 const SRC_HTML = path.join(PUBLIC, 'index.html');
 const BACKUP_HTML = path.join(PUBLIC, 'index.original.html');
 const BUNDLE_DIR = path.join(PUBLIC, 'bundles');
@@ -482,8 +485,8 @@ async function main() {
   log(`Synced: ${syncStats.synced} | Skipped: ${syncStats.skipped} | Errors: ${syncStats.errors}`, 'h2');
 
   // ── Verify ──
-  if (!fs.existsSync(SRC_HTML)) { log('index.html not found', 'error'); process.exit(1); }
-  const originalHTML = readText(SRC_HTML);
+  if (!fs.existsSync(SOURCE_HTML)) { log('source index.html not found', 'error'); process.exit(1); }
+  const originalHTML = readText(SOURCE_HTML);
   log(`Source HTML: ${(originalHTML.length / 1024).toFixed(0)} KB`, 'h2');
 
   if (!fs.existsSync(BACKUP_HTML)) {
