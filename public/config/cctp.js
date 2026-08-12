@@ -7,7 +7,6 @@ const ElligenteCCTP = Object.freeze({
 
   ATTEST_URL:            'https://iris-api-sandbox.circle.com/attestations/',
   IRIS_V2_URL:           'https://iris-api-sandbox.circle.com/v2/messages/',
-  IRIS_FEES_URL:         'https://iris-api-sandbox.circle.com/v2/fees/',
 
   CIRCLE_FAUCET_URL:     'https://faucet.circle.com',
   CIRCLE_CONSOLE_URL:    'https://console.circle.com',
@@ -15,13 +14,6 @@ const ElligenteCCTP = Object.freeze({
   FINALITY_FAST:         1000,
   FINALITY_STANDARD:     2000,
   MAX_FEE_USDC:          '0.5',
-
-  // ── Circle Forwarding Service ──
-  FORWARDING_ENABLED:    true,
-  FORWARDING_HOOK_DATA:  '0x636374702d666f72776172640000000000000000000000000000000000000000', // "cctp-forward" + version=0 + length=0
-  FORWARDING_FEE_USDC:   '0.55',  // 0.5 CCTP fee + 0.05 forwarding service fee (most routes)
-  FORWARDING_FEE_SOLANA: '0.60',  // Solana: higher due to rent + ATA creation
-  FORWARDING_FEE_HYPERCORE: '0.70', // HyperCore deposits: $0.20 service fee
 
   SETTLEMENT_POLL_MAX:        180,
   SETTLEMENT_POLL_INTERVAL:   6000,

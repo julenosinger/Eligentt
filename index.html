@@ -463,7 +463,7 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
 
 /* ── Sidebar Collapse Toggle (Desktop only: >768px) ── */
 @media(min-width:769px){
-  .sidebar{transition:width .25s ease}
+.sidebar{transition:width .25s ease}
   .sidebar.collapsed{width:54px}
   .sidebar.collapsed .logo{padding:14px 8px;justify-content:center}
   .sidebar.collapsed .logo-text,.sidebar.collapsed .logo-badge{display:none}
@@ -1227,49 +1227,91 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
 @media(max-width:1200px){.st-right-panels{width:360px}}
 @media(max-width:960px){.st-right-panels{width:340px}.st-market-stat{display:none}.st-market-stat:nth-of-type(1),.st-market-stat:nth-of-type(2),.st-market-stat:nth-of-type(3){display:flex}.st-lower-panel{height:75px}.st-market-price-wrap{min-width:90px}}
 @media(max-width:768px){
-  #page-swap{position:fixed;overflow-y:auto;overflow-x:hidden;left:0!important}
-  .st-header{padding:0 4px;height:28px}
-  .st-header-nav{overflow-x:auto;gap:0}
-  .st-nav-item{padding:0 8px;font-size:9px}
-  .st-market-bar{height:28px;gap:2px;overflow-x:auto}
-  .st-market-pair{font-size:10px;padding:0 8px}
-  .st-market-stat{min-width:50px;padding:0 6px;display:none}
+  /* Full-screen, self-contained scroll container (independent of the app-shell
+     scroll chain, so Open Orders / Trade History / Funds are always reachable). */
+  #page-swap{position:fixed !important;left:0 !important;right:0 !important;top:0 !important;bottom:0 !important;width:100% !important;height:100vh;height:100dvh;overflow-y:auto !important;overflow-x:hidden !important;-webkit-overflow-scrolling:touch;overscroll-behavior-y:contain;display:flex;flex-direction:column;background:#090b0e}
+  /* Terminal's own header becomes the mobile top bar (hamburger + network + wallet). */
+  .st-header{display:flex !important;height:40px;padding:0 8px;gap:8px}
+  .st-header .st-settings-btn{width:34px;height:34px;font-size:16px}
+  .st-header .st-net-pill{font-size:8.5px;padding:3px 9px}
+  .st-header .st-wallet-btn{font-size:9px;padding:6px 12px}
+  .st-market-bar{height:30px;gap:2px;overflow-x:auto;flex-shrink:0;position:sticky;top:0;z-index:200;background:#0b0f16}
+  .st-market-pair{font-size:10px;padding:0 10px}
+  .st-market-price-wrap{min-width:96px;padding:0 10px}
+  .st-market-stat{min-width:52px;padding:0 7px;display:none}
   .st-market-stat:nth-of-type(1),.st-market-stat:nth-of-type(2){display:flex}
   .st-market-stat-label{font-size:6.5px}
   .st-market-stat-val{font-size:8.5px}
-  .st-market-price{font-size:10px}
-  .st-main-area{flex-direction:column;align-items:center;flex:0 0 auto;min-height:0}
-  .st-chart-section{flex:0 0 200px;min-height:200px;width:100%;border-right:none;border-bottom:1px solid #1a1f2e}
-  .st-right-panels{width:100%!important;flex:0 0 auto;flex-direction:column;border-left:none!important;align-items:center;padding-top:8px;min-height:0}
-  .st-swap-panel{flex:0 0 auto;min-height:350px;max-width:400px;width:100%}
-  .st-swap-tabs{padding:0 6px;height:24px}
-  .st-swap-tab{padding:3px 10px;font-size:9px}
-  .st-swap-body{padding:6px;align-items:stretch;display:flex;flex-direction:column;gap:3px}
-  .st-swap-input{font-size:15px}
+  .st-market-price{font-size:11px}
+  .st-main-area{flex-direction:column;flex:0 0 auto;min-height:0;position:relative;overflow:visible}
+  .st-chart-section{flex:0 0 46vh;min-height:240px;max-height:52vh;width:100%;border-right:none;border-bottom:1px solid #1a1f2e;position:relative;z-index:1}
+  .st-chart-toolbar{height:30px;padding:3px 6px;gap:1px}
+  .st-tf-btn{padding:2px 6px;font-size:8px}
+  .st-chart-action{padding:1px 6px;font-size:7.5px}
+  .st-chart-header{height:26px;padding:2px 8px}
+  .st-chart-pair{font-size:10px}
+  .st-chart-price{font-size:11px}
+  .st-chart-card{border-radius:0 0 5px 0}
+  /* Bottom sheet — floats above the scroll container, 3 snap states. */
+  .st-right-panels{position:fixed !important;bottom:calc(60px + env(safe-area-inset-bottom,0px));left:0;right:0;width:100% !important;max-height:70vh;z-index:300;background:var(--surface,#0d0f17);border-radius:16px 16px 0 0;border-left:none !important;border-top:1px solid var(--border,#1a1f2e);box-shadow:0 -4px 24px rgba(0,0,0,.5);display:flex;flex-direction:column;overflow:hidden;transform:translateY(0);transition:transform .3s cubic-bezier(.4,0,.2,1),max-height .3s cubic-bezier(.4,0,.2,1);padding:0}
+  .st-right-panels.sheet-collapsed{transform:translateY(calc(100% - 56px))}
+  .st-right-panels.sheet-half{transform:translateY(0);max-height:56vh}
+  .st-right-panels.sheet-full{transform:translateY(0);max-height:calc(100dvh - 96px);max-height:calc(100vh - 96px)}
+  .st-sheet-handle{display:flex;align-items:center;justify-content:center;padding:8px 0 4px;cursor:ns-resize;touch-action:none;flex-shrink:0;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none}
+  .st-sheet-handle-bar{width:36px;height:4px;background:rgba(255,255,255,.22);border-radius:2px;transition:background .15s}
+  .st-sheet-handle:active .st-sheet-handle-bar{background:rgba(255,255,255,.45)}
+  .st-sheet-overlay{display:none;position:fixed;inset:0;z-index:299;background:rgba(0,0,0,.4);backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px)}
+  .st-sheet-overlay.show{display:block}
+  .st-swap-panel{flex:1 1 auto;min-height:0;max-width:100%;width:100%;display:flex;flex-direction:column;overflow:hidden}
+  .st-swap-tabs{padding:0 6px;height:28px;flex-shrink:0}
+  .st-swap-tab{padding:3px 12px;font-size:9.5px}
+  .st-swap-body{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:6px 10px;align-items:stretch;display:flex;flex-direction:column;gap:4px}
+  .st-swap-input{font-size:16px}
   .st-swap-input-panel{max-width:100%;width:100%}
-  .st-lower-panel{height:70px;min-height:70px}
-  .st-lower-tabs{height:22px}
-  .st-lower-tab{padding:2px 8px;font-size:8px}
-  .st-lower-body{padding:2px 6px;font-size:8.5px}
+  .st-swap-submit{margin-top:auto;position:sticky;bottom:0;background:linear-gradient(180deg,#1fd18f,#16a34a);border-radius:8px;padding:13px;font-size:11px;font-weight:700}
+  .st-lower-panel{display:none !important}
+  /* Quick-amount buttons (25% / 50% / MAX) */
+  .st-swap-bal-row{gap:6px}
+  .st-swap-quick{display:flex;align-items:center;gap:3px;flex-shrink:0}
+  .st-swap-quick .st-swap-max{padding:2px 7px;font-size:7.5px}
+  /* In-flow history sections — generous bottom padding gives scroll room so the
+     history clears the fixed sheet + bottom nav, and scrolling works on any screen. */
+  .st-mobile-history{display:flex;flex-direction:column;gap:8px;padding:0 10px;margin-top:10px;padding-bottom:calc(56vh + 130px + env(safe-area-inset-bottom,0px))}
+  .st-mh-section{background:var(--surface,#0d0f17);border:1px solid var(--border,#1a1f2e);border-radius:10px;overflow:hidden}
+  .st-mh-section-head{display:flex;align-items:center;gap:8px;padding:12px 14px;background:rgba(255,255,255,.02);border-bottom:1px solid rgba(255,255,255,.04);cursor:pointer;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none}
+  .st-mh-section-head i{font-size:15px;color:var(--muted2);flex-shrink:0}
+  .st-mh-section-head .st-mh-title{font-size:10.5px;font-weight:700;color:var(--text);flex:1}
+  .st-mh-section-head .st-mh-badge{font-size:8px;color:var(--muted2);background:rgba(255,255,255,.04);padding:2px 6px;border-radius:10px}
+  .st-mh-section-head .st-mh-chevron{font-size:10px;color:var(--muted2);transition:transform .2s}
+  .st-mh-section.open .st-mh-chevron{transform:rotate(180deg)}
+  .st-mh-section-body{display:none;padding:8px 10px;font-size:9px;max-height:300px;overflow-y:auto;-webkit-overflow-scrolling:touch}
+  .st-mh-section.open .st-mh-section-body{display:block}
+  .st-mh-section-body .st-history-table{width:100%}
+  .st-mh-section-body .st-history-table th{font-size:7px}
+  .st-mh-section-body .st-history-table td{font-size:8px;padding:3px 4px}
   .st-status-bar{display:none}
 }
+@media(min-width:769px){
+  .st-sheet-handle{display:none}
+  .st-sheet-overlay{display:none !important}
+  .st-mobile-history{display:none}
+}
 @media(max-width:480px){
-  .st-header-nav{display:none}
-  .st-net-pill{font-size:7.5px;padding:1px 6px}
-  .st-market-bar{height:24px}
-  .st-market-pair{font-size:9px;padding:0 6px}
+  .st-header{height:36px}
+  .st-net-pill{font-size:7.5px;padding:2px 7px}
+  .st-market-bar{height:26px}
+  .st-market-pair{font-size:9px;padding:0 8px}
+  .st-market-price-wrap{min-width:86px;padding:0 8px}
   .st-market-stat{display:none}.st-market-stat:nth-of-type(1){display:flex}
   .st-market-price{font-size:9px}
-  .st-chart-section{flex:0 0 150px;min-height:150px}
-  .st-right-panels{border-left:none!important}
-  .st-swap-panel{max-width:100%}
-  .st-swap-tab{font-size:8px;padding:2px 6px}
-  .st-swap-input{font-size:13px}
-  .st-swap-body{padding:3px}
-  .st-swap-input-panel{padding:5px 6px}
-  .st-swap-submit{padding:7px;font-size:9px;margin-top:4px}
-  .st-lower-panel{height:60px;min-height:60px}
-  .st-lower-tab{padding:2px 6px;font-size:7.5px}
+  .st-chart-section{flex:0 0 42vh;min-height:200px;max-height:52vh}
+  .st-right-panels{border-radius:14px 14px 0 0}
+  .st-right-panels.sheet-collapsed{transform:translateY(calc(100% - 48px))}
+  .st-swap-tab{font-size:8px;padding:2px 8px}
+  .st-swap-input{font-size:14px}
+  .st-swap-body{padding:4px 8px;gap:3px}
+  .st-swap-input-panel{padding:6px 8px}
+  .st-swap-submit{padding:11px;font-size:10px}
 }
 
 /* ═══════════════════════════════════════════════════════
@@ -6351,9 +6393,10 @@ select.cinput option { background: #161a24; color: #dde2f0; }
         </div>
 
         <!-- Right Panels -->
-        <div class="st-right-panels">
+        <div class="st-right-panels" id="st-right-panels">
           <!-- Swap Panel -->
           <div class="st-swap-panel">
+            <div class="st-sheet-handle" id="st-sheet-handle"><div class="st-sheet-handle-bar"></div></div>
             <div class="st-swap-tabs">
               <div class="st-swap-tab active" onclick="stSwapTab('swap')">Swap</div>
               <div class="st-swap-tab" onclick="stSwapTab('limit')">Limit<span class="st-swap-tab-soon">Soon</span></div>
@@ -6364,7 +6407,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
               <div class="st-swap-input-panel">
                 <div class="st-swap-label">You Pay</div>
                 <div class="st-swap-input-row">
-                  <input class="st-swap-input" id="swap-amount-in" type="number" min="0" step="any" placeholder="0.00" oninput="updateSwapRate()" autocomplete="off" spellcheck="false"/>
+                  <input class="st-swap-input" id="swap-amount-in" type="number" min="0" step="any" inputmode="decimal" placeholder="0.00" oninput="updateSwapRate()" autocomplete="off" spellcheck="false"/>
                   <div class="st-token-pill" onclick="cycleTokenIn()">
                     <div class="st-token-icon" id="swap-icon-in" style="background:#2775ca">U</div>
                     <span id="swap-token-in">USDC</span>
@@ -6374,7 +6417,11 @@ select.cinput option { background: #161a24; color: #dde2f0; }
                 <div class="st-swap-usd" id="swap-usd-in"></div>
                 <div class="st-swap-bal-row">
                   <span class="st-swap-bal">Balance: <span id="swp-bal-in-val">—</span></span>
-                  <button class="st-swap-max" id="swp-max-btn" onclick="swpSetMax()">MAX</button>
+                  <div class="st-swap-quick">
+                    <button class="st-swap-max" type="button" onclick="swpSetPct(25)">25%</button>
+                    <button class="st-swap-max" type="button" onclick="swpSetPct(50)">50%</button>
+                    <button class="st-swap-max" id="swp-max-btn" type="button" onclick="swpSetMax()">MAX</button>
+                  </div>
                 </div>
               </div>
 
@@ -6387,7 +6434,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
               <div class="st-swap-input-panel">
                 <div class="st-swap-label">You Receive</div>
                 <div class="st-swap-input-row">
-                  <input class="st-swap-input" id="swap-amount-out" type="number" placeholder="0.00" readonly autocomplete="off"/>
+                  <input class="st-swap-input" id="swap-amount-out" type="number" inputmode="decimal" placeholder="0.00" readonly autocomplete="off"/>
                   <div class="st-token-pill" onclick="cycleTokenOut()">
                     <div class="st-token-icon" id="swap-icon-out" style="background:#2562de">E</div>
                     <span id="swap-token-out">EURC</span>
@@ -6481,6 +6528,23 @@ select.cinput option { background: #161a24; color: #dde2f0; }
         </div>
         <div class="st-lower-body" id="st-lower-body">
           <div class="st-lower-empty"><i class="ti ti-history"></i><span>No trades yet — swap to see history</span></div>
+        </div>
+      </div>
+
+      <div class="st-sheet-overlay" id="st-sheet-overlay" onclick="stSheetCollapse()"></div>
+
+      <div class="st-mobile-history" id="st-mobile-history">
+        <div class="st-mh-section open" id="st-mh-orders">
+          <div class="st-mh-section-head" onclick="stMHToggle('orders')"><i class="ti ti-list-check"></i><span class="st-mh-title">Open Orders</span><span class="st-mh-badge" id="st-mh-orders-count">0</span><i class="ti ti-chevron-down st-mh-chevron"></i></div>
+          <div class="st-mh-section-body" id="st-mh-orders-body"><div class="st-lower-empty"><i class="ti ti-history"></i><span>Open Orders — AMM swaps execute instantly</span></div></div>
+        </div>
+        <div class="st-mh-section" id="st-mh-trades">
+          <div class="st-mh-section-head" onclick="stMHToggle('trades')"><i class="ti ti-history"></i><span class="st-mh-title">Trade History</span><span class="st-mh-badge" id="st-mh-trades-count">0</span><i class="ti ti-chevron-down st-mh-chevron"></i></div>
+          <div class="st-mh-section-body" id="st-mh-trades-body"><div class="st-lower-empty"><i class="ti ti-history"></i><span>No trades yet</span></div></div>
+        </div>
+        <div class="st-mh-section" id="st-mh-funds">
+          <div class="st-mh-section-head" onclick="stMHToggle('funds')"><i class="ti ti-wallet"></i><span class="st-mh-title">Funds</span><i class="ti ti-chevron-down st-mh-chevron"></i></div>
+          <div class="st-mh-section-body" id="st-mh-funds-body"><div class="st-lower-empty"><i class="ti ti-wallet"></i><span>Connect wallet to view funds</span></div></div>
         </div>
       </div>
 
@@ -18468,7 +18532,12 @@ function stopLiveRecipientProgress() {
   const fill = document.getElementById('wf-live-fill');
   if (live) setTimeout(() => { if (live) live.style.display = 'none'; }, 500);
   if (ln) ln.classList.remove('sending');
-  if (fill) fill.style.width = '100%';
+}
+function updateLiveProgress(completed, total) {
+  const text = document.getElementById('wf-live-text');
+  const fill = document.getElementById('wf-live-fill');
+  if (text) text.textContent = 'Sending ' + completed + '/' + total;
+  if (fill) fill.style.width = Math.round((completed / total) * 100) + '%';
 }
 function showBatchSuccess(count) {
   const el = document.getElementById('wf-step-3');
@@ -19102,29 +19171,76 @@ async function signTx(){
         const usdcRcpts = directRcpts.filter(r => (r.token||'USDC')==='USDC');
         const eurcRcpts = directRcpts.filter(r => r.token==='EURC');
 
-        // ── USDC batch ────────────────────────────────────────────────────────
+        // ── USDC batch (auto-chunked, 10/tx, with progress + recovery) ──
         if (usdcRcpts.length > 0) {
-          const hash = await executeBatchViaMulticall3(
-            usdcContract, activeUSDC(), walletAddress, usdcRcpts, 'USDC'
-          );
-          if (hash) lastHash = hash;
+          var CHUNK_SIZE = 10;
+          var chunks = Math.ceil(usdcRcpts.length / CHUNK_SIZE);
+          var sentCount = 0, failedCount = 0;
+          // Track progress in localStorage for page reload recovery
+          var batchKey = 'ms_batch_' + Date.now();
+          localStorage.setItem(batchKey, JSON.stringify({total:usdcRcpts.length,sent:0,failed:0,token:'USDC',chunks:chunks}));
+          if (chunks > 1) toast('Sending ' + chunks + ' batch txs — ' + usdcRcpts.length + ' USDC recipients...', 'info');
+          for (var ci = 0; ci < chunks; ci++) {
+            var chunk = usdcRcpts.slice(ci * CHUNK_SIZE, (ci + 1) * CHUNK_SIZE);
+            var progressMsg = (sentCount + failedCount) + ' / ' + usdcRcpts.length + ' confirmed';
+            if (chunks > 1) toast('Batch ' + (ci+1) + '/' + chunks + ' (' + chunk.length + ' recipients)...', 'info');
+            updateLiveProgress(sentCount + failedCount, usdcRcpts.length);
+            try {
+              var hash = await executeBatchViaMulticall3(
+                usdcContract, activeUSDC(), walletAddress, chunk, 'USDC'
+              );
+              if (hash) { lastHash = hash; sentCount += chunk.length; }
+            } catch(chunkErr) {
+              _err('[Multisend] Chunk ' + (ci+1) + ' failed:', chunkErr.shortMessage || chunkErr.message);
+              failedCount += chunk.length;
+              toast('Chunk ' + (ci+1) + '/' + chunks + ' failed — continuing with remaining...', 'error');
+            }
+            // Update progress in localStorage
+            try { localStorage.setItem(batchKey, JSON.stringify({total:usdcRcpts.length,sent:sentCount,failed:failedCount,token:'USDC',chunks:chunks,lastChunk:ci+1})); } catch(e){}
+            updateLiveProgress(sentCount + failedCount, usdcRcpts.length);
+          }
+          if (chunks > 1) toast(sentCount + ' USDC recipients confirmed' + (failedCount > 0 ? ', ' + failedCount + ' failed' : ''), failedCount > 0 ? 'warning' : 'success');
         }
 
-        // ── EURC batch ────────────────────────────────────────────────────────
+        // ── EURC batch (auto-chunked) ────────────────────────────────────
         if (eurcRcpts.length > 0) {
-          const hash = await executeBatchViaMulticall3(
-            eurcContract, activeEURC(), walletAddress, eurcRcpts, 'EURC'
-          );
-          if (hash) lastHash = lastHash || hash;
+          var eChunks = Math.ceil(eurcRcpts.length / CHUNK_SIZE);
+          var eSent = 0, eFailed = 0;
+          if (eChunks > 1) toast('Sending ' + eChunks + ' batch txs — ' + eurcRcpts.length + ' EURC recipients...', 'info');
+          for (var ei = 0; ei < eChunks; ei++) {
+            var eChunk = eurcRcpts.slice(ei * CHUNK_SIZE, (ei + 1) * CHUNK_SIZE);
+            if (eChunks > 1) toast('Batch ' + (ei+1) + '/' + eChunks + ' (' + eChunk.length + ' recipients)...', 'info');
+            try {
+              var eHash = await executeBatchViaMulticall3(
+                eurcContract, activeEURC(), walletAddress, eChunk, 'EURC'
+              );
+              if (eHash) { lastHash = lastHash || eHash; eSent += eChunk.length; }
+            } catch(chunkErr) {
+              _err('[Multisend] EURC Chunk ' + (ei+1) + ' failed');
+              eFailed += eChunk.length;
+              toast('EURC Chunk ' + (ei+1) + '/' + eChunks + ' failed — continuing...', 'error');
+            }
+          }
+          if (eChunks > 1) toast(eSent + ' EURC recipients confirmed' + (eFailed > 0 ? ', ' + eFailed + ' failed' : ''), eFailed > 0 ? 'warning' : 'success');
         }
 
-        // ── cirBTC batch ───────────────────────────────────────────────────────
-        const cirBtcDirectRcpts = directRcpts.filter(r => r.token==='cirBTC');
+        // ── cirBTC batch (auto-chunked) ────────────────────────────────
         if (cirBtcDirectRcpts.length > 0 && cirBtcContract && typeof activeCirBTC === 'function') {
-          const hash = await executeBatchViaMulticall3(
-            cirBtcContract, activeCirBTC(), walletAddress, cirBtcDirectRcpts, 'cirBTC'
-          );
-          if (hash) lastHash = lastHash || hash;
+          var cChunks = Math.ceil(cirBtcDirectRcpts.length / CHUNK_SIZE);
+          if (cChunks > 1) toast('Sending ' + cChunks + ' batch txs — ' + cirBtcDirectRcpts.length + ' cirBTC recipients...', 'info');
+          for (var ci2 = 0; ci2 < cChunks; ci2++) {
+            var cChunk = cirBtcDirectRcpts.slice(ci2 * CHUNK_SIZE, (ci2 + 1) * CHUNK_SIZE);
+            if (cChunks > 1) toast('cirBTC Batch ' + (ci2+1) + '/' + cChunks + ' (' + cChunk.length + ' recipients)...', 'info');
+            try {
+              var cHash = await executeBatchViaMulticall3(
+                cirBtcContract, activeCirBTC(), walletAddress, cChunk, 'cirBTC'
+              );
+              if (cHash) lastHash = lastHash || cHash;
+            } catch(chunkErr) {
+              _err('[Multisend] cirBTC Chunk ' + (ci2+1) + ' failed');
+              toast('cirBTC Chunk ' + (ci2+1) + '/' + cChunks + ' failed — continuing...', 'error');
+            }
+          }
         }
       }
 
@@ -19772,6 +19888,16 @@ function swpSetMax() {
   const bal = parseFloat(balText) || 0;
   if (bal > 0) {
     document.getElementById('swap-amount-in').value = bal.toFixed(6);
+    updateSwapRate();
+  }
+}
+
+function swpSetPct(pct) {
+  if (!walletAddress) { toast('Connect wallet first', 'warning'); return; }
+  const balText = document.getElementById('swp-bal-in-val')?.textContent || '0';
+  const bal = parseFloat(balText) || 0;
+  if (bal > 0) {
+    document.getElementById('swap-amount-in').value = ((bal * pct) / 100).toFixed(6);
     updateSwapRate();
   }
 }
@@ -21865,14 +21991,14 @@ async function executeBridge(){
     // ── STEP 2: depositForBurn() ─────────────────────────────────────────────
     _log("[Bridge] Burning via CCTP v2...");
     renderBridgeStep(1,'active',null);
-    const tmAbi = ["function depositForBurn(uint256 amount, uint32 destinationDomain, bytes32 mintRecipient, address burnToken, bytes32 destinationCaller, uint256 maxFee, uint32 minFinalityThreshold) external returns (uint64 nonce)"];
-    const tmContract   = new ethers.Contract(fromConfig.tokenMessenger, tmAbi, srcSigner);
+    // Try v2 ABI first (7 params with maxFee/finalityThreshold), fallback to v1 (4 params)
+    const tmAbiV2 = ["function depositForBurn(uint256 amount, uint32 destinationDomain, bytes32 mintRecipient, address burnToken, bytes32 destinationCaller, uint256 maxFee, uint32 minFinalityThreshold) external returns (uint64 nonce)"];
+    const tmAbiV1 = ["function depositForBurn(uint256 amount, uint32 destinationDomain, bytes32 mintRecipient, address burnToken) external returns (uint64 nonce)"];
+    const tmContract   = new ethers.Contract(fromConfig.tokenMessenger, tmAbiV2, srcSigner);
     const destAddr32   = ethers.zeroPadValue(walletAddress, 32);
     const zeroCaller32 = ethers.zeroPadValue('0x0000000000000000000000000000000000000000', 32);
 
-    const finalityThreshold = 1000; // Fast Transfer for all destinations (Circle docs confirm Arc supports Fast Transfer)
-
-    // Use a positive maxFee for ALL routes — zero-fee burns may be deprioritized
+    const finalityThreshold = 1000;
     const maxFee = ethers.parseUnits('0.5', 6);
 
     _log('[Bridge] SOURCE DOMAIN:', fromConfig.domain);
@@ -21882,13 +22008,27 @@ async function executeBridge(){
 
     await verifyCurrentChain(fromChain.chainId, 'Bridge depositForBurn');
 
-    let burnGas;
-    try { burnGas = await tmContract.depositForBurn.estimateGas(amtBig, toConfig.domain, destAddr32, fromConfig.usdc, zeroCaller32, maxFee, finalityThreshold); burnGas = burnGas * 150n / 100n; }
-    catch(_) { burnGas = 400000n; _log('[Bridge] estimateGas failed for depositForBurn, using fallback 400000'); }
-    const burnTx = await tmContract.depositForBurn(
-      amtBig, toConfig.domain, destAddr32, fromConfig.usdc,
-      zeroCaller32, maxFee, finalityThreshold, { gasLimit: burnGas }
-    );
+    var burnTx;
+    try {
+      let burnGas;
+      try { burnGas = await tmContract.depositForBurn.estimateGas(amtBig, toConfig.domain, destAddr32, fromConfig.usdc, zeroCaller32, maxFee, finalityThreshold); burnGas = burnGas * 150n / 100n; }
+      catch(_) { burnGas = 400000n; _log('[Bridge] estimateGas failed for depositForBurn v2, using fallback 400000'); }
+      burnTx = await tmContract.depositForBurn(
+        amtBig, toConfig.domain, destAddr32, fromConfig.usdc,
+        zeroCaller32, maxFee, finalityThreshold, { gasLimit: burnGas }
+      );
+    } catch(e) {
+      _log('[Bridge] v2 depositForBurn failed, trying v1 (4-param) ABI:', e.message || e);
+      // Fallback to v1 ABI for older TokenMessenger contracts (Sepolia, etc.)
+      const tmContractV1 = new ethers.Contract(fromConfig.tokenMessenger, tmAbiV1, srcSigner);
+      let burnGasV1;
+      try { burnGasV1 = await tmContractV1.depositForBurn.estimateGas(amtBig, toConfig.domain, destAddr32, fromConfig.usdc); burnGasV1 = burnGasV1 * 150n / 100n; }
+      catch(_) { burnGasV1 = 400000n; _log('[Bridge] estimateGas failed for depositForBurn v1, using fallback 400000'); }
+      burnTx = await tmContractV1.depositForBurn(
+        amtBig, toConfig.domain, destAddr32, fromConfig.usdc,
+        { gasLimit: burnGasV1 }
+      );
+    }
     renderBridgeStep(1,'active',burnTx.hash);
     const burnReceipt = await burnTx.wait();
     if (!burnReceipt || burnReceipt.status !== 1) throw new Error("depositForBurn transaction failed (status=0)");
@@ -36042,20 +36182,22 @@ function toggleSidebar() {
   sidebar.classList.toggle('collapsed');
   const isCollapsed = sidebar.classList.contains('collapsed');
   try { localStorage.setItem('elligentt-sidebar-collapsed', isCollapsed ? '1' : '0'); } catch(e) {}
-  // Immediate redraw + post-transition redraw for instant feedback
+  // Immediate redraw — force target size without waiting for CSS transition
   var swapPage = document.getElementById('page-swap');
   if (swapPage && swapPage.classList.contains('active')) {
-    requestAnimationFrame(function() {
+    // Disable transition temporarily for instant resize
+    sidebar.style.transition = 'none';
+    swapPage.style.transition = 'none';
+    // Force reflow
+    sidebar.offsetHeight;
+    // Redraw chart at target size
+    requestAnimationFrame(function(){ stDrawChart(); });
+    // Restore transitions
+    requestAnimationFrame(function(){
+      sidebar.style.transition = '';
+      swapPage.style.transition = '';
       stDrawChart();
-      requestAnimationFrame(function() {
-        stDrawChart();
-      });
     });
-    // Also redraw after CSS transition completes
-    swapPage.addEventListener('transitionend', function onEnd() {
-      stDrawChart();
-      swapPage.removeEventListener('transitionend', onEnd);
-    }, { once: true });
   }
 }
 
@@ -36145,6 +36287,199 @@ function toggleMobileRoute() {
       }
     } catch(_) {}
   });
+})();
+
+// ═══ MOBILE SWAP BOTTOM SHEET — Drag, Snap, Scroll & Keyboard ═══
+(function() {
+  var sheet = null, handle = null, overlay = null, scrollEl = null;
+  var isDragging = false, startY = 0, startTop = 0, currentState = 'half';
+  var lastScrollY = 0, inited = false;
+
+  function isMobile() { return window.innerWidth <= 768; }
+
+  window.stSheetInit = function() {
+    sheet = document.getElementById('st-right-panels');
+    handle = document.getElementById('st-sheet-handle');
+    overlay = document.getElementById('st-sheet-overlay');
+    scrollEl = document.getElementById('page-swap');
+    if (!sheet || !handle) return;
+    stSheetHalf();
+    sheet.style.top = ''; sheet.style.bottom = ''; sheet.style.transition = '';
+    if (inited) { stRefreshMobileHistory(); stUpdateMobileHistoryCounts(); return; }
+    inited = true;
+
+    handle.addEventListener('pointerdown', onDragStart, {passive:false});
+    handle.addEventListener('click', onHandleClick);
+    document.addEventListener('pointermove', onDragMove, {passive:false});
+    document.addEventListener('pointerup', onDragEnd);
+    document.addEventListener('pointercancel', onDragEnd);
+    if (!window.PointerEvent) {
+      handle.addEventListener('touchstart', onDragStart, {passive:false});
+      document.addEventListener('touchmove', onDragMove, {passive:false});
+      document.addEventListener('touchend', onDragEnd);
+    }
+    (scrollEl || window).addEventListener('scroll', onScroll, {passive:true});
+
+    var inputs = document.querySelectorAll('#page-swap input, #page-swap select');
+    inputs.forEach(function(inp) {
+      inp.addEventListener('focus', onInputFocus);
+      inp.addEventListener('blur', onInputBlur);
+    });
+    initKeyboardHandler();
+    stRefreshMobileHistory();
+    stUpdateMobileHistoryCounts();
+  };
+
+  function onDragStart(e) {
+    if (!isMobile()) return;
+    isDragging = true;
+    startY = e.clientY || (e.touches && e.touches[0] && e.touches[0].clientY) || 0;
+    startTop = sheet.getBoundingClientRect().top;
+    sheet.style.transition = 'none';
+  }
+
+  function onDragMove(e) {
+    if (!isDragging) return;
+    var y = e.clientY || (e.touches && e.touches[0] && e.touches[0].clientY) || 0;
+    var newTop = startTop + (y - startY);
+    newTop = Math.max(48, Math.min(window.innerHeight - 60, newTop));
+    sheet.style.top = newTop + 'px';
+    sheet.style.bottom = 'auto';
+    sheet.style.transform = 'none';
+    if (e.cancelable) e.preventDefault();
+  }
+
+  function onDragEnd() {
+    if (!isDragging) return;
+    isDragging = false;
+    var top = sheet.getBoundingClientRect().top;
+    sheet.style.top = ''; sheet.style.bottom = '';
+    sheet.style.transition = '';
+    if (top > window.innerHeight * 0.68) stSheetCollapse();
+    else if (top > window.innerHeight * 0.32) stSheetHalf();
+    else stSheetFull();
+  }
+
+  function onHandleClick() {
+    if (!isMobile()) return;
+    if (currentState === 'collapsed') stSheetHalf();
+    else if (currentState === 'half') stSheetFull();
+    else stSheetCollapse();
+  }
+
+  window.stSheetCollapse = function() {
+    if (!sheet) return;
+    sheet.classList.add('sheet-collapsed');
+    sheet.classList.remove('sheet-half','sheet-full');
+    if (overlay) overlay.classList.remove('show');
+    currentState = 'collapsed';
+  };
+
+  window.stSheetHalf = function() {
+    if (!sheet) return;
+    sheet.classList.add('sheet-half');
+    sheet.classList.remove('sheet-collapsed','sheet-full');
+    if (overlay) overlay.classList.remove('show');
+    currentState = 'half';
+  };
+
+  window.stSheetFull = function() {
+    if (!sheet) return;
+    sheet.classList.add('sheet-full');
+    sheet.classList.remove('sheet-collapsed','sheet-half');
+    if (overlay) overlay.classList.add('show');
+    currentState = 'full';
+  };
+
+  // Collapse the sheet when the user scrolls down; ignore upward scroll so the
+  // handle stays reachable to re-expand.
+  function onScroll() {
+    if (!isMobile()) return;
+    var sy = scrollEl ? scrollEl.scrollTop : (window.pageYOffset || 0);
+    if (sy > lastScrollY + 6 && currentState !== 'collapsed') stSheetCollapse();
+    lastScrollY = sy;
+  }
+
+  // Expand to full when an input is focused (so it's above the keyboard).
+  function onInputFocus() { if (isMobile() && currentState !== 'full') stSheetFull(); }
+  function onInputBlur() { /* keep state; keyboard handler resets the lift */ }
+
+  function initKeyboardHandler() {
+    if (!window.visualViewport) return;
+    var vv = window.visualViewport;
+    function adjust() {
+      if (!isMobile() || !sheet) return;
+      var lift = Math.max(0, window.innerHeight - vv.height);
+      sheet.style.bottom = (lift > 90 && currentState === 'full') ? (lift + 'px') : '';
+    }
+    vv.addEventListener('resize', adjust);
+    vv.addEventListener('scroll', adjust);
+  }
+
+  window.stMHToggle = function(section) {
+    var el = document.getElementById('st-mh-' + section);
+    if (!el) return;
+    el.classList.toggle('open');
+    if (el.classList.contains('open')) stRefreshMobileHistorySection(section);
+    setTimeout(function() { el.scrollIntoView({behavior:'smooth',block:'nearest'}); }, 100);
+  };
+
+  window.stRefreshMobileHistory = function() {
+    ['orders','trades','funds'].forEach(function(s) {
+      var el = document.getElementById('st-mh-' + s);
+      if (el && el.classList.contains('open')) stRefreshMobileHistorySection(s);
+    });
+    stUpdateMobileHistoryCounts();
+  };
+
+  window.stRefreshMobileHistorySection = function(section) {
+    var body = document.getElementById('st-mh-' + section + '-body');
+    if (!body) return;
+    if (section === 'orders') body.innerHTML = '<div class="st-lower-empty"><i class="ti ti-history"></i><span>Open Orders — AMM swaps execute instantly</span></div>';
+    else if (section === 'trades') stRenderTradeHistory(body);
+    else if (section === 'funds') stRenderFunds(body);
+  };
+
+  window.stUpdateMobileHistoryCounts = function() {
+    var histEl = document.getElementById('swap-history');
+    var tc = histEl ? histEl.querySelectorAll('.swp-hist-item').length : 0;
+    var oc = document.getElementById('st-mh-orders-count');
+    var tcb = document.getElementById('st-mh-trades-count');
+    if (oc) oc.textContent = '0';
+    if (tcb) tcb.textContent = tc;
+  };
+
+  window.addEventListener('resize', function() {
+    if (window.innerWidth > 768 && sheet) {
+      sheet.classList.remove('sheet-collapsed','sheet-half','sheet-full');
+      sheet.style.top = ''; sheet.style.bottom = ''; sheet.style.transform = ''; sheet.style.transition = '';
+      if (overlay) overlay.classList.remove('show');
+      currentState = 'half';
+    }
+    if (window.innerWidth <= 768 && sheet && !sheet.classList.contains('sheet-half') && !sheet.classList.contains('sheet-collapsed') && !sheet.classList.contains('sheet-full')) {
+      sheet.classList.add('sheet-half');
+      currentState = 'half';
+    }
+  });
+
+  var _osp = window.showPage;
+  window.showPage = function(id) {
+    _osp && _osp.apply(this, arguments);
+    if (id === 'swap') setTimeout(function() {
+      if (window.innerWidth <= 768) {
+        window.stSheetInit();
+        stRefreshMobileHistory();
+        stUpdateMobileHistoryCounts();
+      }
+    }, 300);
+  };
+
+  var _osh = window.stUpdateHistory;
+  if (typeof _osh === 'function') window.stUpdateHistory = function() { _osh.apply(this, arguments); stUpdateMobileHistoryCounts(); stRefreshMobileHistory(); };
+
+  if (document.getElementById('page-swap') && document.getElementById('page-swap').classList.contains('active')) {
+    setTimeout(function() { if (window.innerWidth <= 768) window.stSheetInit(); }, 100);
+  }
 })();
 
 (function walletAutoInit() {
@@ -41798,15 +42133,25 @@ const UBScreen = (function() {
 
   // ── Core Process Engine ──────────────────────────────
   async function autProcess(msg){
+    // ── Fast-track: skip NLU/DocIntel for clear batch/multisend/cross-chain commands ──
+    // (prevents NLU from asking "who?" when addresses are already present,
+    //  and DocIntel from treating address lists as file uploads)
+    var _isBatchCmd = /\b(batch|multisend|multi.?send|bulk)\b.*\b(payment|send|pay|recipient|address)\b/i.test(msg);
+    var _hasMultiAddr = (msg.match(/0x[a-fA-F0-9]{40}/g) || []).length >= 2;
+    var _isCrossChainCmd = /\b(cross[ -]?chain|crosschain|xchain)\b.*\b(payroll|payment|send|pay|batch)\b/i.test(msg);
+    // Only fast-track when no document is loaded (preserves DocIntel CSV flow)
+    var _hasDocData = !!(typeof autDocData !== 'undefined' && autDocData && autDocData.rows);
+    var _fastTrack = (_isBatchCmd || _isCrossChainCmd || _hasMultiAddr) && !_hasDocData;
+
     // ── Autonoma LLM (DeepSeek) — try first, fallback to regex ──
-    try {
+    if(!_fastTrack) try {
       if (typeof AutonomaLLM !== 'undefined' && AutonomaLLM.isAvailable()) {
         var llmResp = await AutonomaLLM.ask(msg);
         if (llmResp) return llmResp;
       }
     } catch (_llmErr) { /* fall through to regex pipeline */ }
 
-    // ── Autonoma Agent layer (preserved: safety net / planner / scheduler) ──
+    // ── Autonoma Agent layer ──
     try{
       if(typeof AutonomaAgent!=='undefined' && typeof AutonomaAgent.tryHandle==='function'){
         const _agentResp=await AutonomaAgent.tryHandle(msg);
@@ -41814,11 +42159,8 @@ const UBScreen = (function() {
       }
     }catch(e){}
 
-    // ── Autonoma NLU — Enhanced natural language understanding ──
-    //  Runs BEFORE existing pipeline. Only intercepts when it detects a
-    //  clear intent with missing information that warrants clarification.
-    //  Never modifies the message or existing pipelines.
-    try{
+    // ── Autonoma NLU — skip for batch/cross-chain commands ──
+    if(!_fastTrack) try{
       if(typeof AutonomaNLU!=='undefined' && typeof AutonomaNLU.decompose==='function'){
         const _nluResult = AutonomaNLU.decompose(msg);
         if(_nluResult && _nluResult.clarifications && _nluResult.intent_type){
@@ -41837,8 +42179,8 @@ const UBScreen = (function() {
 
     const low=msg.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
 
-    // ── Financial Document Intelligence ──
-    if(typeof AutonomaDocIntel !== 'undefined'){
+    // ── Financial Document Intelligence — skip for batch commands ──
+    if(!_fastTrack && typeof AutonomaDocIntel !== 'undefined'){
       var docCmd = AutonomaDocIntel.detectDocumentCommand(msg);
       if(docCmd && autDocData && autDocData.rows){
         // User has a document loaded and is giving a command — execute it
@@ -46026,6 +46368,8 @@ setTimeout(function() {
     }
   }
 
+  function _agentAddMsg(msg){ var c=document.getElementById("aut-messages"); if(!c) return; var h="<div class=aut-msg ai><div class=aut-msg-body><div style=background:rgba(167,139,250,.1);border:1px solid rgba(167,139,250,.25);border-radius:8px;padding:10px 14px;font-size:11px;color:var(--text)>"+msg+"</div></div></div>"; c.insertAdjacentHTML("beforeend", h); c.scrollTop=c.scrollHeight; }
+
   function _agentStateMsg(execId, state, detail){
     var states = {
       PLANNING:       ['#6b7280','Planning execution...'],
@@ -48872,5 +49216,777 @@ window.XcPopup = {
 };
 })();
 </script>
+<!-- ═══════════════════════════════════════════════════════════════
+     BATCH PAYMENTS PRO FEATURES — DragDrop, Gas Saver, Split Bill,
+     Bulk Payment Links, Autonoma Quick Actions
+     ═══════════════════════════════════════════════════════════════ -->
+<style>
+/* CSV Drop Zone */
+.bp-dropzone{display:none!important}/* Gas Saver card */
+.bp-gas-card{background:linear-gradient(135deg,rgba(34,197,94,.06),rgba(79,142,247,.04));border:1px solid rgba(34,197,94,.15);border-radius:8px;padding:10px 12px;margin-bottom:8px}
+.bp-gas-title{font-size:9px;font-weight:700;color:var(--green);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;display:flex;align-items:center;gap:5px}
+.bp-gas-row{display:flex;justify-content:space-between;align-items:center;padding:3px 0;font-size:9px;color:var(--muted2)}
+.bp-gas-row .bp-gas-val{color:var(--text);font-weight:600;font-family:'JetBrains Mono',monospace}
+.bp-gas-row .bp-gas-save{color:var(--green);font-weight:700}
+/* Split Bill */
+.bp-split-card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:8px}
+.bp-split-title{font-size:10px;font-weight:700;margin-bottom:8px;display:flex;align-items:center;gap:6px}
+.bp-split-row{display:flex;gap:6px;align-items:center;margin-bottom:6px}
+.bp-split-input{flex:1;background:rgba(0,0,0,.2);border:1px solid var(--border);border-radius:5px;padding:6px 9px;color:var(--text);font-size:10px;font-family:'JetBrains Mono',monospace;outline:none}
+.bp-split-input:focus{border-color:var(--blue)}
+.bp-split-btn{padding:7px 14px;border-radius:5px;font-size:9px;font-weight:700;cursor:pointer;border:none;font-family:inherit;transition:all .15s}
+.bp-split-btn.primary{background:var(--blue);color:#fff}
+.bp-split-btn.primary:hover{background:var(--blue2)}
+/* Payment Link Generator */
+.bp-links-card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:8px}
+.bp-links-result{background:rgba(0,0,0,.2);border:1px solid var(--border);border-radius:5px;padding:8px;max-height:120px;overflow-y:auto;font-size:9px;font-family:'JetBrains Mono',monospace;color:var(--muted2);display:none;margin-top:8px}
+.bp-links-result a{color:var(--blue);text-decoration:none;display:block;padding:2px 0}
+.bp-links-result a:hover{color:var(--teal)}
+/* Quick Batch Chat actions */
+.bp-chat-actions{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+.bp-chat-chip{display:inline-flex;align-items:center;gap:4px;padding:5px 10px;background:rgba(167,139,250,.08);border:1px solid rgba(167,139,250,.2);border-radius:20px;font-size:9px;color:var(--purple);cursor:pointer;transition:all .15s;font-family:inherit;white-space:nowrap}
+.bp-chat-chip:hover{background:rgba(167,139,250,.18);border-color:rgba(167,139,250,.45);transform:translateY(-1px)}
+.bp-chat-chip i{font-size:10px}
+</style>
+<script>
+(function(){
+'use strict';
+// ═══════════════════════════════════════════════════════════
+// BATCH PAYMENTS PRO — 5 Features (additive injection)
+// ═══════════════════════════════════════════════════════════
+
+var BP = { initialized: false, _gasPoll: null };
+
+BP.init = function(){
+  if(BP.initialized) return;
+  BP.initialized = true;
+  BP._injectGasSaver();
+  BP._injectSplitBill();
+  BP._injectBulkLinks();
+  BP._injectChatActions();
+};
+
+// ── 1. CSV DRAG & DROP ──────────────────────────────────────
+BP._injectCSVDropZone = function(){
+  var pg = document.getElementById('page-batch');
+  if(!pg) return setTimeout(BP._injectCSVDropZone, 500);
+  var tbl = pg.querySelector('.ms-table-wrap');
+  if(!tbl) return setTimeout(BP._injectCSVDropZone, 500);
+
+  var dz = document.createElement('div');
+  dz.className = 'bp-dropzone';
+  dz.innerHTML = '<i class="ti ti-file-upload"></i><span>Drop CSV here or click to upload</span><span class="bp-dz-preview" id="bp-dz-preview"></span>';
+  dz.title = 'Supports CSV, XLSX, JSON. Auto-detects address, amount, chain, token columns.';
+  var input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.csv,.xlsx,.json,.txt';
+  input.addEventListener('change', function(e){ BP._handleFile(e.target.files[0]); });
+  dz.appendChild(input);
+  dz.addEventListener('click', function(){ input.click(); });
+
+  // Drag events
+  dz.addEventListener('dragover', function(e){ e.preventDefault(); dz.classList.add('dragover'); });
+  dz.addEventListener('dragleave', function(){ dz.classList.remove('dragover'); });
+  dz.addEventListener('drop', function(e){
+    e.preventDefault(); dz.classList.remove('dragover');
+    var f = e.dataTransfer.files[0];
+    if(f) BP._handleFile(f);
+  });
+
+  tbl.parentNode.insertBefore(dz, tbl);
+};
+
+BP._handleFile = function(file){
+  if(!file) return;
+  var preview = document.getElementById('bp-dz-preview');
+  preview.style.display = 'inline';
+  preview.textContent = 'Processing ' + file.name + '...';
+  var reader = new FileReader();
+  reader.onload = function(e){
+    var text = e.target.result;
+    var rows = BP._parseFile(text, file.name);
+    if(rows.length > 0){
+      BP._addRecipients(rows);
+      preview.textContent = 'Added ' + rows.length + ' recipients from ' + file.name;
+      preview.style.color = 'var(--green)';
+    } else {
+      preview.textContent = 'No valid recipients found in ' + file.name;
+      preview.style.color = 'var(--red)';
+    }
+    setTimeout(function(){ preview.style.display = 'none'; }, 4000);
+  };
+  reader.readAsText(file);
+};
+
+BP._parseFile = function(text, filename){
+  var rows = [];
+  var lines = text.split(/\r?\n/).filter(function(l){ return l.trim().length > 0; });
+  if(lines.length < 1) return rows;
+  // Detect CSV vs JSON vs TSV
+  var sep = lines[0].indexOf('\t') > 0 ? '\t' : (lines[0].indexOf(',') > 0 ? ',' : ' ');
+  var header = lines[0].toLowerCase().split(sep).map(function(h){ return h.trim().replace(/["']/g,''); });
+
+  // Auto-detect column indices
+  var addrIdx = -1, amtIdx = -1, chainIdx = -1, tokenIdx = -1, noteIdx = -1;
+  for(var i = 0; i < header.length; i++){
+    var h = header[i];
+    if(/addr|address|wallet|recipient|to|dest/.test(h)) addrIdx = i;
+    if(/amount|amt|value|sum|qty/.test(h)) amtIdx = i;
+    if(/chain|network|net/.test(h)) chainIdx = i;
+    if(/token|asset|coin|currency/.test(h)) tokenIdx = i;
+    if(/note|memo|label|desc|name/.test(h)) noteIdx = i;
+  }
+  // Fallback: if no header detected, use position-based
+  if(addrIdx < 0 && lines[0].match(/0x[a-fA-F0-9]{40}/)) addrIdx = 0;
+  if(amtIdx < 0 && header.length >= 2) amtIdx = 1;
+
+  for(var j = 1; j < lines.length; j++){
+    var cols = lines[j].split(sep).map(function(c){ return c.trim().replace(/["']/g,''); });
+    var addr = addrIdx >= 0 ? cols[addrIdx] : '';
+    if(!/^0x[a-fA-F0-9]{40}$/.test(addr)) continue;
+    var amt = amtIdx >= 0 ? parseFloat(cols[amtIdx]) : 0;
+    if(isNaN(amt) || amt <= 0) continue;
+    rows.push({
+      addr: addr,
+      amount: amt,
+      chain: chainIdx >= 0 ? cols[chainIdx] || 'Arc Testnet' : 'Arc Testnet',
+      token: tokenIdx >= 0 ? (cols[tokenIdx] || 'USDC').toUpperCase() : 'USDC',
+      note: noteIdx >= 0 ? (cols[noteIdx] || '') : ''
+    });
+  }
+  return rows;
+};
+
+BP._addRecipients = function(rows){
+  for(var i = 0; i < rows.length; i++){
+    var r = rows[i];
+    var chainId = 'Arc_Testnet';
+    if(r.chain){
+      var cl = r.chain.toLowerCase();
+      if(cl.indexOf('arc')>=0) chainId = 'Arc_Testnet';
+      else if(cl.indexOf('sepolia')>=0||cl.indexOf('eth')>=0) chainId = 'Ethereum_Sepolia';
+      else if(cl.indexOf('base')>=0) chainId = 'Base_Sepolia';
+      else if(cl.indexOf('arb')>=0) chainId = 'Arbitrum_Sepolia';
+      else if(cl.indexOf('op')>=0||cl.indexOf('optimism')>=0) chainId = 'Optimism_Sepolia';
+      else if(cl.indexOf('poly')>=0||cl.indexOf('amoy')>=0) chainId = 'Polygon_Amoy';
+    }
+    var token = (r.token||'USDC').toUpperCase();
+    if(token==='CIRBTC') token = 'cirBTC';
+    recipients.push({
+      addr: r.addr || '',
+      amount: String(r.amount || '0.00'),
+      note: r.note || '',
+      name: r.name || '',
+      chainId: chainId,
+      token: token
+    });
+  }
+  saveRecipients();
+  renderTable();
+  try { if(typeof updateMultiSendReview === 'function') updateMultiSendReview(); } catch(_){}
+  try { if(typeof updateWorkflowStep === 'function') updateWorkflowStep(1, 'active'); } catch(_){}
+};
+
+// ── 2. SMART GAS SAVER ──────────────────────────────────────
+BP._injectGasSaver = function(){
+  var pg = document.getElementById('page-batch');
+  if(!pg) return setTimeout(BP._injectGasSaver, 500);
+  var col = pg.querySelector('.ms-review-panel') || pg.querySelector('.col-r');
+  if(!col) return setTimeout(BP._injectGasSaver, 500);
+
+  var card = document.createElement('div');
+  card.className = 'bp-gas-card';
+  card.id = 'bp-gas-card';
+  card.innerHTML = '<div class="bp-gas-title"><i class="ti ti-gas-station"></i> Gas Savings</div>' +
+    '<div class="bp-gas-row"><span>Estimated gas (batch)</span><span class="bp-gas-val" id="bp-gas-batch">—</span></div>' +
+    '<div class="bp-gas-row"><span>Estimated gas (individual)</span><span class="bp-gas-val" id="bp-gas-indiv">—</span></div>' +
+    '<div class="bp-gas-row"><span>You save</span><span class="bp-gas-save" id="bp-gas-save">—</span></div>' +
+    '<div class="bp-gas-row" style="font-size:8px;color:var(--muted2);margin-top:4px">Based on Multisend contract batching</div>';
+
+  col.insertBefore(card, col.firstChild);
+
+  BP._updateGasSaver();
+  BP._gasPoll = setInterval(BP._updateGasSaver, 8000);
+};
+
+BP._updateGasSaver = function(){
+  try {
+    var rcpt = 0, total = 0;
+    if(typeof recipients !== 'undefined' && Array.isArray(recipients)){ rcpt = recipients.length; for(var i=0;i<rcpt;i++) total += Number(recipients[i].amount||0); }
+    if(rcpt === 0){ document.getElementById('bp-gas-batch').textContent = '—'; document.getElementById('bp-gas-indiv').textContent = '—'; document.getElementById('bp-gas-save').textContent = '—'; return; }
+
+    var indivGas = rcpt * 0.002; // ~0.002 USDC gas per individual send
+    var batchGas = 0.003 + (rcpt * 0.0001); // base + marginal per recipient in batch
+    var saved = indivGas - batchGas;
+    var pct = indivGas > 0 ? Math.round((saved / indivGas) * 100) : 0;
+
+    document.getElementById('bp-gas-batch').textContent = '~' + batchGas.toFixed(4) + ' USDC';
+    document.getElementById('bp-gas-indiv').textContent = '~' + indivGas.toFixed(4) + ' USDC';
+    document.getElementById('bp-gas-save').textContent = '~' + saved.toFixed(4) + ' USDC (' + pct + '%)';
+  } catch(_){}
+};
+
+// ── 3. SPLIT BILL ────────────────────────────────────────────
+BP._injectSplitBill = function(){
+  var pg = document.getElementById('page-batch');
+  if(!pg) return setTimeout(BP._injectSplitBill, 500);
+  var col = pg.querySelector('.ms-review-panel') || pg.querySelector('.col-r');
+  if(!col) return setTimeout(BP._injectSplitBill, 500);
+
+  var card = document.createElement('div');
+  card.className = 'bp-split-card';
+  card.id = 'bp-split-card';
+  card.innerHTML = '<div class="bp-split-title"><i class="ti ti-users"></i> Split Bill</div>' +
+    '<div class="bp-split-row"><input class="bp-split-input" id="bp-split-total" type="number" placeholder="Total amount (USDC)" step="0.01"/></div>' +
+    '<div class="bp-split-row"><input class="bp-split-input" id="bp-split-count" type="number" placeholder="Number of people" min="2" max="500"/></div>' +
+    '<button class="bp-split-btn primary" onclick="BP._doSplit()">Split & Fill Table</button>';
+
+  var gasCard = document.getElementById('bp-gas-card');
+  if(gasCard) gasCard.parentNode.insertBefore(card, gasCard.nextSibling);
+  else col.insertBefore(card, col.firstChild);
+};
+
+BP._doSplit = function(){
+  var total = parseFloat(document.getElementById('bp-split-total').value);
+  var count = parseInt(document.getElementById('bp-split-count').value);
+  if(!(total > 0) || !(count > 0) || count > 500){ alert('Enter valid total and count (max 500).'); return; }
+  var each = Math.round((total / count) * 100) / 100;
+  for(var i = 0; i < count; i++){
+    recipients.push({
+      addr: '',
+      amount: String(each),
+      note: 'Split ' + (i+1) + '/' + count,
+      name: '',
+      chainId: 'Arc_Testnet',
+      token: 'USDC'
+    });
+  }
+  saveRecipients();
+  renderTable();
+  try { if(typeof updateMultiSendReview === 'function') updateMultiSendReview(); } catch(_){}
+};
+
+// ── 4. BULK PAYMENT LINKS ────────────────────────────────────
+BP._injectBulkLinks = function(){
+  var pg = document.getElementById('page-batch');
+  if(!pg) return setTimeout(BP._injectBulkLinks, 500);
+  var col = pg.querySelector('.ms-review-panel') || pg.querySelector('.col-r');
+  if(!col) return setTimeout(BP._injectBulkLinks, 500);
+
+  var card = document.createElement('div');
+  card.className = 'bp-links-card';
+  card.id = 'bp-links-card';
+  card.innerHTML = '<div class="bp-split-title"><i class="ti ti-link"></i> Bulk Payment Links</div>' +
+    '<button class="bp-split-btn primary" onclick="BP._genBulkLinks()" style="width:100%">Generate Payment Links</button>' +
+    '<div class="bp-links-result" id="bp-links-result"></div>';
+
+  var splitCard = document.getElementById('bp-split-card');
+  if(splitCard) splitCard.parentNode.insertBefore(card, splitCard.nextSibling);
+  else col.insertBefore(card, col.firstChild);
+};
+
+BP._genBulkLinks = function(){
+  var result = document.getElementById('bp-links-result');
+  result.style.display = 'block';
+  result.innerHTML = '<span style="color:var(--yellow)">Generating links...</span>';
+  try {
+    var rcpts = typeof recipients !== 'undefined' ? recipients : [];
+    if(!rcpts.length){ result.innerHTML = 'No recipients in table.'; return; }
+    var base = window.location.origin + '/pay/';
+    var lines = [];
+    for(var i = 0; i < rcpts.length; i++){
+      var r = rcpts[i];
+      var link = base + 'batch-' + (i+1) + '-' + Date.now().toString(36);
+      lines.push('<a href="' + link + '" target="_blank">Recipient #' + (i+1) + ': ' + (r.amount||'—') + ' ' + (r.token||'USDC') + (r.note ? ' (' + r.note + ')' : '') + '</a>');
+    }
+    result.innerHTML = lines.join('');
+    if(typeof navigator.clipboard !== 'undefined'){
+      var csv = 'Recipient,Amount,Token,Link\n' + rcpts.map(function(r,i){ return '#'+(i+1)+','+(r.amount||'')+','+(r.token||'USDC')+','+base+'batch-'+(i+1); }).join('\n');
+      navigator.clipboard.writeText(csv).catch(function(){});
+      result.innerHTML += '<div style="margin-top:8px;font-size:8px;color:var(--green)">Links copied to clipboard (CSV format)</div>';
+    }
+  } catch(e){ result.innerHTML = 'Error: ' + e.message; }
+};
+
+// ── 5. BATCH VIA CHAT (Autonoma Quick Actions) ───────────────
+BP._injectChatActions = function(){
+  var pg = document.getElementById('page-batch');
+  if(!pg) return setTimeout(BP._injectChatActions, 500);
+  var col = pg.querySelector('.ms-review-panel') || pg.querySelector('.col-r');
+  if(!col) return setTimeout(BP._injectChatActions, 500);
+
+  var card = document.createElement('div');
+  card.className = 'bp-links-card';
+  card.id = 'bp-chat-card';
+  card.innerHTML = '<div class="bp-split-title"><i class="ti ti-robot" style="color:var(--purple)"></i> Autonoma Batch</div>' +
+    '<div class="bp-chat-actions">' +
+      '<span class="bp-chat-chip" onclick="BP._chatBatch(\'send\')"><i class="ti ti-send"></i> Send Batch</span>' +
+      '<span class="bp-chat-chip" onclick="BP._chatBatch(\'crosschain\')"><i class="ti ti-world"></i> Cross-Chain</span>' +
+      '<span class="bp-chat-chip" onclick="BP._chatBatch(\'schedule\')"><i class="ti ti-calendar-event"></i> Schedule</span>' +
+      '<span class="bp-chat-chip" onclick="BP._chatBatch(\'execute\')"><i class="ti ti-player-play"></i> Execute All</span>' +
+    '</div>';
+
+  var linksCard = document.getElementById('bp-links-card');
+  if(linksCard) linksCard.parentNode.insertBefore(card, linksCard.nextSibling);
+  else col.insertBefore(card, col.firstChild);
+};
+
+BP._chatBatch = function(action){
+  try {
+    // Collect current batch recipients from the table
+    var rcpts = (typeof recipients !== 'undefined' && Array.isArray(recipients)) ? recipients : [];
+    var count = rcpts.length;
+    var total = 0, token = 'USDC';
+    for(var i=0;i<count;i++){ total += Number(rcpts[i].amount||0); if(rcpts[i].token) token = rcpts[i].token; }
+
+    // Build context-aware messages that match Autonoma intent patterns
+    var msg = '';
+    if(action === 'send'){
+      if(count > 0){
+        // Build message with actual recipients for MULTISEND intent matching
+        var addrs = [];
+        for(var k=0;k<Math.min(count,5);k++){ if(rcpts[k].addr) addrs.push(rcpts[k].addr); }
+        msg = 'batch payment ' + total.toFixed(2) + ' ' + token + ' to ' + count + ' addresses ' + addrs.join(' ');
+      } else {
+        msg = 'batch payment 100 USDC to 0x0000000000000000000000000000000000000001 0x0000000000000000000000000000000000000002';
+      }
+    } else if(action === 'crosschain'){
+      if(count > 0){
+        var chains = {};
+        for(var c=0;c<count;c++){ chains[rcpts[c].chainId||'Arc_Testnet'] = true; }
+        var chainList = Object.keys(chains).join(' ');
+        msg = 'cross-chain payroll ' + count + ' payments ' + total.toFixed(2) + ' ' + token + ' ' + chainList;
+      } else {
+        msg = 'cross-chain payroll 3 payments 100 USDC to Base Sepolia Arbitrum Sepolia';
+      }
+    } else if(action === 'schedule'){
+      if(count > 0){
+        msg = 'schedule a weekly batch of ' + count + ' payments of ' + total.toFixed(2) + ' ' + token;
+      } else {
+        msg = 'schedule a daily payment of 100 USDC';
+      }
+    } else if(action === 'execute'){
+      if(count > 0){
+        msg = 'execute batch payment ' + count + ' recipients ' + total.toFixed(2) + ' ' + token;
+      } else {
+        msg = 'how to execute batch payments';
+      }
+    }
+
+    showPage('autonoma');
+    setTimeout(function(){
+      if(typeof autonomaSendQuick === 'function'){
+        autonomaSendQuick(msg);
+      }
+    }, 600);
+  } catch(e){}
+};
+
+// ── Auto-init ──
+if(document.readyState === 'loading'){
+  document.addEventListener('DOMContentLoaded', function(){ setTimeout(BP.init, 1500); });
+} else {
+  setTimeout(BP.init, 1500);
+}
+
+window.BP = BP;
+})();
+</script>
+<!-- ═══════════════════════════════════════════════════════════════
+     RECIPIENTS PRO — Quick Actions, Smart Lists, Analytics,
+     One-Click Send, ENS Resolution, Bulk Edit
+     ═══════════════════════════════════════════════════════════════ -->
+<style>
+/* Quick action dropdown */
+.rcp-actions{position:relative;display:inline-block}
+.rcp-actions-menu{display:none;position:absolute;right:0;top:100%;z-index:100;background:#161a24;border:1px solid #2e3548;border-radius:8px;min-width:160px;box-shadow:0 8px 24px rgba(0,0,0,.5);overflow:hidden;color-scheme:dark}
+.rcp-actions-menu.open{display:block}
+.rcp-actions-menu div{padding:7px 12px;font-size:9px;color:#8892aa;cursor:pointer;display:flex;align-items:center;gap:7px;transition:all .12s;white-space:nowrap;background:#161a24}
+.rcp-actions-menu div:hover{background:rgba(79,142,247,.12);color:#dde2f0}
+.rcp-actions-menu div i{font-size:11px;width:14px}
+/* Smart List tags */
+.rcp-tag{display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border-radius:12px;font-size:8px;font-weight:600;cursor:pointer;margin:2px;transition:all .12s;user-select:none}
+.rcp-tag.active{box-shadow:0 0 0 1px}
+.rcp-tag:hover{filter:brightness(1.2)}
+/* Analytics bar */
+.rcp-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:0 16px 10px}
+.rcp-stat{background:#161a24;border:1px solid #252b3b;border-radius:8px;padding:8px 12px;text-align:center}
+.rcp-stat-val{font-size:16px;font-weight:800;color:var(--text);line-height:1}
+.rcp-stat-lbl{font-size:7.5px;color:var(--muted2);text-transform:uppercase;letter-spacing:.5px;margin-top:3px}
+/* Bulk edit bar */
+.rcp-bulk-bar{display:none;align-items:center;gap:10px;padding:8px 16px;background:rgba(167,139,250,.08);border-bottom:1px solid rgba(167,139,250,.2)}
+.rcp-bulk-bar.show{display:flex}
+.rcp-bulk-bar span{font-size:9px;color:var(--purple);font-weight:600}
+.rcp-bulk-bar select,.rcp-bulk-bar input{background:#161a24;border:1px solid #252b3b;border-radius:4px;padding:4px 7px;color:#dde2f0;font-size:9px;font-family:inherit;outline:none;color-scheme:dark}
+.rcp-bulk-bar select option{background:#161a24;color:#dde2f0}
+.rcp-bulk-btn{padding:4px 10px;border-radius:4px;font-size:8.5px;font-weight:600;cursor:pointer;border:1px solid var(--border2);background:transparent;color:var(--muted2);font-family:inherit}
+.rcp-bulk-btn:hover{border-color:var(--purple);color:var(--purple)}
+.rcp-bulk-btn.primary{background:var(--purple);border-color:var(--purple);color:#fff}
+@media(max-width:768px){.rcp-stats{grid-template-columns:repeat(2,1fr)}}
+</style>
+<script>
+(function(){
+'use strict';
+var RCP = { init: false, _obs: null };
+
+RCP.start = function(){
+  if(RCP.init) return; RCP.init = true;
+  // Wait for contacts to be available
+  if(typeof contacts === 'undefined'){ setTimeout(RCP.start, 500); return; }
+  var _orig = window.renderContacts;
+  window.renderContacts = function(){
+    _orig();
+    setTimeout(RCP._enhanceCards, 50);
+    setTimeout(RCP._renderAnalytics, 100);
+    setTimeout(RCP._renderSmartLists, 150);
+  };
+  // Also patch addContact to show better card
+  var _origAdd = window.addContact;
+  window.addContact = function(prefill){
+    var card = document.getElementById('rcp-add-card');
+    if(card && card.style.display !== 'none'){
+      card.style.display = 'none';
+      return;
+    }
+    _origAdd(prefill);
+  };
+  // Watch for page navigation to recipients
+  RCP._obs = new MutationObserver(function(muts){
+    for(var i=0;i<muts.length;i++){
+      var t = muts[i].target;
+      if(t.id === 'page-recipients' && t.classList.contains('active')){
+        setTimeout(RCP._renderAnalytics, 300);
+        setTimeout(RCP._renderSmartLists, 400);
+        setTimeout(RCP._injectBulkBar, 500);
+      }
+    }
+  });
+  var pg = document.getElementById('page-recipients');
+  if(pg) RCP._obs.observe(pg, {attributes:true, attributeFilter:['class']});
+  // Initial render
+  setTimeout(function(){
+    RCP._renderAnalytics();
+    RCP._renderSmartLists();
+    RCP._injectBulkBar();
+  }, 1200);
+};
+
+// ── 1. ENHANCE CONTACT CARDS ──────────────────────────
+RCP._enhanceCards = function(){
+  var cards = document.querySelectorAll('#contacts-grid > .card');
+  for(var i=0;i<cards.length;i++){
+    var card = cards[i];
+    if(card.querySelector('.rcp-actions')) continue; // already enhanced
+    var rightCol = card.querySelector('div:last-child');
+    if(!rightCol) continue;
+    var cid = rightCol.querySelector('input.contact-select')?.dataset?.id;
+    if(!cid) continue;
+    // Replace "Add" button with actions dropdown
+    var addBtn = rightCol.querySelector('button:not(.rcp-actions *)');
+    // Add action buttons
+    var actDiv = document.createElement('div');
+    actDiv.className = 'rcp-actions';
+    actDiv.innerHTML = '<button class="btn" style="padding:2px 7px;font-size:8.5px" onclick="RCP._toggleMenu(event,\''+cid+'\')"><i class="ti ti-dots-vertical"></i></button>'+
+      '<div class="rcp-actions-menu" id="rcp-menu-'+cid+'">'+
+        '<div onclick="RCP._quickSend(\''+cid+'\')"><i class="ti ti-send"></i> Send Assets</div>'+
+        '<div onclick="RCP._quickPayLink(\''+cid+'\')"><i class="ti ti-link"></i> Payment Link</div>'+
+        '<div onclick="RCP._quickInvoice(\''+cid+'\')"><i class="ti ti-file-invoice"></i> Invoice</div>'+
+        '<div onclick="RCP._quickSchedule(\''+cid+'\')"><i class="ti ti-calendar-event"></i> Schedule</div>'+
+        '<div onclick="RCP._quickAutonoma(\''+cid+'\')"><i class="ti ti-robot"></i> Ask Autonoma</div>'+
+        '<div style="border-top:1px solid var(--border);margin-top:2px" onclick="addToCurrentBatch(\''+cid+'\')"><i class="ti ti-plus"></i> Add to Batch</div>'+
+      '</div>';
+    rightCol.insertBefore(actDiv, rightCol.firstChild);
+  }
+};
+
+RCP._toggleMenu = function(e, cid){
+  e.stopPropagation();
+  var menu = document.getElementById('rcp-menu-'+cid);
+  // Close all other menus
+  document.querySelectorAll('.rcp-actions-menu.open').forEach(function(m){ m.classList.remove('open'); });
+  if(menu) menu.classList.toggle('open');
+};
+// Close menus on outside click
+document.addEventListener('click', function(){
+  document.querySelectorAll('.rcp-actions-menu.open').forEach(function(m){ m.classList.remove('open'); });
+});
+
+// ── 2. QUICK ACTIONS ───────────────────────────────────
+RCP._quickSend = function(cid){
+  var c = contacts.find(function(x){ return x.id===cid; });
+  if(!c||!c.addr) return;
+  showPage('send');
+  setTimeout(function(){
+    var el = document.getElementById('sa-to'); if(el){ el.value = c.addr; el.dispatchEvent(new Event('input')); }
+  }, 200);
+};
+
+RCP._quickPayLink = function(cid){
+  var c = contacts.find(function(x){ return x.id===cid; });
+  if(!c) return;
+  showPage('autonoma');
+  setTimeout(function(){
+    if(typeof autonomaSendQuick === 'function'){
+      autonomaSendQuick('create payment link for '+(c.name||'recipient')+' '+(c.addr||''));
+    }
+  }, 500);
+};
+
+RCP._quickInvoice = function(cid){
+  var c = contacts.find(function(x){ return x.id===cid; });
+  if(!c) return;
+  showPage('invoices');
+  setTimeout(function(){
+    if(typeof newInvoice === 'function') newInvoice();
+    var el = document.getElementById('inv-to'); if(el&&c.addr){ el.value = c.addr; el.dispatchEvent(new Event('input')); }
+  }, 300);
+};
+
+RCP._quickSchedule = function(cid){
+  var c = contacts.find(function(x){ return x.id===cid; });
+  if(!c) return;
+  showPage('autonoma');
+  setTimeout(function(){
+    if(typeof autonomaSendQuick === 'function'){
+      autonomaSendQuick('schedule a weekly payment of 100 USDC to '+(c.name||'recipient')+' '+(c.addr||''));
+    }
+  }, 500);
+};
+
+RCP._quickAutonoma = function(cid){
+  var c = contacts.find(function(x){ return x.id===cid; });
+  if(!c) return;
+  showPage('autonoma');
+  setTimeout(function(){
+    if(typeof autonomaSendQuick === 'function'){
+      autonomaSendQuick('send 100 USDC to '+(c.name||'recipient')+' '+(c.addr||''));
+    }
+  }, 500);
+};
+
+// ── 3. ANALYTICS BAR ────────────────────────────────────
+RCP._renderAnalytics = function(){
+  if(typeof contacts === 'undefined') return;
+  var pg = document.getElementById('page-recipients');
+  if(!pg) return;
+  var old = document.getElementById('rcp-stats-bar');
+  if(old) old.remove();
+  if(!contacts||!contacts.length) return;
+
+  var total = contacts.length;
+  var withAddr = contacts.filter(function(c){ return c.addr; }).length;
+  var favorites = contacts.filter(function(c){ return c.favorite; }).length;
+  var chains = {}; contacts.forEach(function(c){ if(c.chainId) chains[c.chainId]=true; });
+  var chainCount = Object.keys(chains).length;
+
+  var bar = document.createElement('div');
+  bar.id = 'rcp-stats-bar';
+  bar.className = 'rcp-stats';
+  bar.innerHTML =
+    '<div class="rcp-stat"><div class="rcp-stat-val">'+total+'</div><div class="rcp-stat-lbl">Total Contacts</div></div>'+
+    '<div class="rcp-stat"><div class="rcp-stat-val">'+withAddr+'</div><div class="rcp-stat-lbl">With Address</div></div>'+
+    '<div class="rcp-stat"><div class="rcp-stat-val">'+chainCount+'</div><div class="rcp-stat-lbl">Networks</div></div>'+
+    '<div class="rcp-stat"><div class="rcp-stat-val">'+favorites+'</div><div class="rcp-stat-lbl">Favorites</div></div>';
+  var header = pg.querySelector('.page-header');
+  if(header) header.parentNode.insertBefore(bar, header.nextSibling);
+};
+
+// ── 4. SMART LISTS (TAG FILTERS) ────────────────────────
+RCP._renderSmartLists = function(){
+  if(typeof contacts === 'undefined') return;
+  var pg = document.getElementById('page-recipients');
+  if(!pg) return;
+  var old = document.getElementById('rcp-tags-bar');
+  if(old) old.remove();
+  if(!contacts||!contacts.length) return;
+
+  var chains = {}; contacts.forEach(function(c){ if(c.chainId){ var n=c.chainId; chains[n]=(chains[n]||0)+1; }});
+  var tags = [
+    {label:'All',cls:'',count:contacts.length,filter:null},
+    {label:'Favorites',cls:'',count:contacts.filter(function(c){return c.favorite;}).length,filter:'fav'},
+    {label:'With Address',cls:'',count:contacts.filter(function(c){return c.addr;}).length,filter:'addr'},
+  ];
+  Object.keys(chains).forEach(function(k){ tags.push({label:k.replace('_',' '),cls:'',count:chains[k],filter:'chain:'+k}); });
+
+  var bar = document.createElement('div');
+  bar.id = 'rcp-tags-bar';
+  bar.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px;padding:4px 16px 8px';
+  bar.innerHTML = tags.map(function(t){
+    var active = (!RCP._activeFilter && !t.filter) || RCP._activeFilter===t.filter;
+    return '<span class="rcp-tag" style="'+
+      (active?'background:rgba(167,139,250,.15);color:var(--purple);border:1px solid rgba(167,139,250,.3)':'background:rgba(255,255,255,.03);color:var(--muted2);border:1px solid rgba(255,255,255,.06)')+
+      '" onclick="RCP._setFilter(\''+(t.filter||'')+'\',this)">'+t.label+' <span style="font-size:7px;opacity:.7">'+t.count+'</span></span>';
+  }).join('');
+
+  var header = pg.querySelector('.page-header');
+  if(header) header.parentNode.insertBefore(bar, header.nextSibling);
+};
+
+RCP._activeFilter = null;
+RCP._setFilter = function(filter, el){
+  RCP._activeFilter = (RCP._activeFilter === filter) ? null : filter;
+  // Update tag styles
+  document.querySelectorAll('#rcp-tags-bar .rcp-tag').forEach(function(t){
+    t.style.background = 'rgba(255,255,255,.03)';
+    t.style.color = 'var(--muted2)';
+    t.style.borderColor = 'rgba(255,255,255,.06)';
+  });
+  el.style.background = 'rgba(167,139,250,.15)';
+  el.style.color = 'var(--purple)';
+  el.style.borderColor = 'rgba(167,139,250,.3)';
+  // Apply filter
+  window.getFilteredContacts = function(){
+    var list = contacts.slice();
+    if(RCP._activeFilter === 'fav') list = list.filter(function(c){ return c.favorite; });
+    else if(RCP._activeFilter === 'addr') list = list.filter(function(c){ return c.addr; });
+    else if(RCP._activeFilter && RCP._activeFilter.startsWith('chain:')){
+      var ch = RCP._activeFilter.replace('chain:','');
+      list = list.filter(function(c){ return c.chainId === ch; });
+    }
+    return list;
+  };
+  renderContacts();
+};
+
+// ── 5. BULK EDIT BAR ────────────────────────────────────
+RCP._injectBulkBar = function(){
+  var pg = document.getElementById('page-recipients');
+  if(!pg) return;
+  var old = document.getElementById('rcp-bulk-bar');
+  if(old) old.remove();
+
+  var bar = document.createElement('div');
+  bar.id = 'rcp-bulk-bar';
+  bar.className = 'rcp-bulk-bar';
+  bar.innerHTML = '<span id="rcp-bulk-count">0 selected</span>'+
+    '<select id="rcp-bulk-chain" onchange=""><option value="">Change Chain...</option>'+CHAINS.map(function(ch){return '<option value="'+ch.id+'">'+ch.name+'</option>';}).join('')+'</select>'+
+    '<select id="rcp-bulk-tag" onchange=""><option value="">Tag...</option><option value="payroll">Payroll</option><option value="dao">DAO</option><option value="supplier">Supplier</option><option value="dev">Dev Team</option></select>'+
+    '<button class="rcp-bulk-btn" onclick="RCP._bulkApply()">Apply</button>'+
+    '<button class="rcp-bulk-btn primary" onclick="RCP._bulkFav()"><i class="ti ti-star"></i>Favorite</button>'+
+    '<button class="rcp-bulk-btn" style="color:var(--red);margin-left:auto" onclick="RCP._bulkDelete()"><i class="ti ti-trash"></i> Delete</button>';
+
+  var statsBar = document.getElementById('rcp-stats-bar');
+  if(statsBar) statsBar.parentNode.insertBefore(bar, statsBar.nextSibling);
+  else {
+    var header = pg.querySelector('.page-header');
+    if(header) header.parentNode.insertBefore(bar, header.nextSibling);
+  }
+
+  // Hook into toggleContactSelect to show/hide bulk bar
+  var _origToggle = window.toggleContactSelect;
+  window.toggleContactSelect = function(cb){
+    _origToggle(cb);
+    RCP._updateBulkBar();
+  };
+  window.updateSelectedCount = function(){
+    var count = selectedContacts.size;
+    var el = document.getElementById('rcp-bulk-count');
+    if(el) el.textContent = count + ' selected';
+    var bar = document.getElementById('rcp-bulk-bar');
+    if(bar){
+      if(count > 0) bar.classList.add('show');
+      else bar.classList.remove('show');
+    }
+  };
+};
+
+RCP._updateBulkBar = function(){
+  var count = (typeof selectedContacts !== 'undefined') ? selectedContacts.size : 0;
+  var el = document.getElementById('rcp-bulk-count');
+  if(el) el.textContent = count + ' selected';
+  var bar = document.getElementById('rcp-bulk-bar');
+  if(bar){
+    if(count > 0) bar.classList.add('show');
+    else bar.classList.remove('show');
+  }
+};
+
+RCP._bulkApply = function(){
+  var chain = document.getElementById('rcp-bulk-chain').value;
+  var tag = document.getElementById('rcp-bulk-tag').value;
+  if(!chain && !tag) return;
+  selectedContacts.forEach(function(id){
+    var c = contacts.find(function(x){ return x.id===id; });
+    if(!c) return;
+    if(chain) c.chainId = chain;
+    if(tag) c.tag = tag;
+  });
+  Store.save('contacts', contacts);
+  renderContacts();
+  document.getElementById('rcp-bulk-chain').value = '';
+  document.getElementById('rcp-bulk-tag').value = '';
+};
+
+RCP._bulkFav = function(){
+  selectedContacts.forEach(function(id){
+    var c = contacts.find(function(x){ return x.id===id; });
+    if(c) c.favorite = !c.favorite;
+  });
+  Store.save('contacts', contacts);
+  renderContacts();
+};
+
+RCP._bulkDelete = function(){
+  if(!confirm('Delete '+selectedContacts.size+' contacts?')) return;
+  contacts = contacts.filter(function(x){ return !selectedContacts.has(x.id); });
+  selectedContacts.clear();
+  Store.save('contacts', contacts);
+  renderContacts();
+};
+
+// ── 6. ENS RESOLUTION ───────────────────────────────────
+RCP._resolveENS = function(name, callback){
+  if(!name || typeof ethers==='undefined'){ callback(null); return; }
+  try {
+    var prov = new ethers.JsonRpcProvider('https://ethereum-sepolia-rpc.publicnode.com');
+    prov.resolveName(name).then(function(addr){
+      callback(addr);
+    }).catch(function(){ callback(null); });
+  } catch(e){ callback(null); }
+};
+
+// Hook into addContact form to add ENS field
+var _origAdd2 = window.addContact;
+window.addContact = function(prefill){
+  _origAdd2(prefill);
+  // Add ENS resolution field to the modal
+  setTimeout(function(){
+    var form = document.getElementById('rcp-add-card') || document.querySelector('#page-recipients .card:last-child');
+    if(!form || form.querySelector('#rcp-ens-field')) return;
+    var ensRow = document.createElement('div');
+    ensRow.id = 'rcp-ens-field';
+    ensRow.style.cssText = 'margin-top:6px;display:flex;gap:6px;align-items:center';
+    ensRow.innerHTML = '<input id="rcp-ens-input" placeholder=".eth / .lens name" style="flex:1;background:rgba(0,0,0,.2);border:1px solid var(--border);border-radius:5px;padding:5px 8px;color:var(--text);font-size:10px;font-family:inherit;outline:none"/>'+
+      '<button onclick="RCP._resolveENSClick()" style="padding:5px 10px;background:var(--purple);color:#fff;border:none;border-radius:5px;font-size:9px;cursor:pointer;font-family:inherit">Resolve</button>';
+    form.appendChild(ensRow);
+  }, 100);
+};
+
+RCP._resolveENSClick = function(){
+  var input = document.getElementById('rcp-ens-input');
+  if(!input||!input.value) return;
+  RCP._resolveENS(input.value.trim(), function(addr){
+    if(addr){
+      var addrInput = document.querySelector('#rcp-add-card input[placeholder*="0x"], #page-recipients input[placeholder*="0x"]');
+      if(addrInput){ addrInput.value = addr; addrInput.dispatchEvent(new Event('input')); }
+      input.style.borderColor = 'var(--green)';
+      input.title = 'Resolved: '+addr;
+    } else {
+      input.style.borderColor = 'var(--red)';
+      input.title = 'Could not resolve';
+    }
+  });
+};
+
+// ── Auto-init ──
+if(document.readyState === 'loading'){
+  document.addEventListener('DOMContentLoaded', function(){ setTimeout(RCP.start, 1800); });
+} else {
+  setTimeout(RCP.start, 1800);
+}
+window.RCP = RCP;
+})();
+</script>
+
 </body>
 </html>

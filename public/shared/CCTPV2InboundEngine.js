@@ -144,7 +144,6 @@
 
       var CCTP_ABI = [
         'function depositForBurn(uint256 amount, uint32 destinationDomain, bytes32 mintRecipient, address burnToken, bytes32 destinationCaller, uint256 maxFee, uint32 minFinalityThreshold)',
-        'function depositForBurnWithHook(uint256 amount, uint32 destinationDomain, bytes32 mintRecipient, address burnToken, bytes32 destinationCaller, bytes hookData, uint256 maxFee, uint32 minFinalityThreshold)',
         'event MessageSent(bytes message)',
         'function approve(address spender, uint256 amount) returns (bool)'
       ];
@@ -159,29 +158,24 @@
       var approveTx = await usdcContract.approve(t.tokenMessenger, ethers.parseUnits(String(t.amount), 6));
       await approveTx.wait();
 
-      // Dynamic maxFee from Circle API — include forwarding fee estimate
+      // Dynamic maxFee from Circle API
       var dynamicFee = await _getDynamicMaxFee(t.sourceDomain, ARC_DOMAIN);
-      var forwardingEnabled = (typeof ElligenteCCTP !== 'undefined' && ElligenteCCTP.FORWARDING_ENABLED);
-      var forwardHookData = (typeof ElligenteCCTP !== 'undefined') ? ElligenteCCTP.FORWARDING_HOOK_DATA : null;
-      var forwardingFee = forwardingEnabled ? (typeof ElligenteCCTP !== 'undefined' ? ElligenteCCTP.FORWARDING_FEE_USDC : '0.55') : '0.5';
-      var maxFee = dynamicFee ? ethers.parseUnits(String(Number(dynamicFee) + (forwardingEnabled ? 0.05 : 0)), 6) : ethers.parseUnits(forwardingFee, 6);
+      var maxFee = dynamicFee ? ethers.parseUnits(dynamicFee, 6) : ethers.parseUnits('100', 6);
       var minFinality = 1000; // Fast Transfer threshold
 
       // 2. Execute depositForBurnWithHook (Forwarding Service) or fallback to depositForBurn
       var messengerContract = new ethers.Contract(t.tokenMessenger, CCTP_ABI, signer);
       var burnTx;
       try {
-        if (forwardingEnabled && forwardHookData) {
-          burnTx = await messengerContract.depositForBurnWithHook(
-            amountWei, ARC_DOMAIN, mintRecipientBytes, t.sourceUSDC,
-            ethers.ZeroHash, forwardHookData, maxFee, minFinality
-          );
-        } else {
-          burnTx = await messengerContract.depositForBurn(
-            amountWei, ARC_DOMAIN, mintRecipientBytes, t.sourceUSDC,
-            ethers.ZeroHash, maxFee, minFinality
-          );
-        }
+        burnTx = await messengerContract.depositForBurn(
+          amountWei,
+          ARC_DOMAIN,
+          mintRecipientBytes,
+          t.sourceUSDC,
+          ethers.ZeroHash,
+          maxFee,
+          minFinality
+        );
       } catch (burnErr) {
         // If primary RPC fails, try fallback for this chain
         var fallbackUrl = _fallbackRPCs[t.sourceChainId];
