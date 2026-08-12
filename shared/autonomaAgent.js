@@ -182,7 +182,7 @@
             if(provider){
               var USDC = '0x3600000000000000000000000000000000000000';
               var c = new ethers.Contract(USDC, ['function balanceOf(address) view returns (uint256)'], provider);
-              try { var rawBal = await c.balanceOf(agentAddr); balFloat = parseFloat(ethers.formatUnits(rawBal, 6)); } catch(e){}
+              try { c.balanceOf(agentAddr).then(function(rawBal){ balFloat = parseFloat(ethers.formatUnits(rawBal, 6)); }).catch(function(){}); } catch(e){}
             }
           }
         }
