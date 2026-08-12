@@ -12724,6 +12724,15 @@ function getCirBTCPoolPrice() {
 }
 
 function getCirBTCReferencePrice() {
+  // External reference price for cirBTC (used to detect pool price deviation).
+  // MUST NOT read the pool's own price here — comparing pool vs pool would always
+  // yield ~0% deviation. Priority: live oracle → static config → last resort.
+  try {
+    if (typeof OracleInterop !== 'undefined' && OracleInterop.getMarketData) {
+      var md = OracleInterop.getMarketData('cirBTC');
+      if (md && md.price && md.price > 0) return md.price;
+    }
+  } catch(_e){}
   return (typeof RT !== 'undefined' && RT.BTC_USD_PRICE > 0) ? RT.BTC_USD_PRICE : 100000;
 }
 
@@ -15999,7 +16008,7 @@ async function verifyCrossChainBatcher(){
 // ── In-app dark confirm modal (replaces the native browser confirm() popup) ──
 // UI ONLY: shows an app-styled dialog and runs the SAME callbacks. Falls back to
 // native confirm() if DOM building fails, so the operation flow is never blocked.
-function appConfirm(message, onConfirm, onCancel){
+function appConfirm(message, onConfirm, onCancel, title, icon){
   try {
     var prev = document.getElementById('app-confirm-overlay'); if (prev) prev.remove();
     var ov = document.createElement('div');
@@ -16009,7 +16018,7 @@ function appConfirm(message, onConfirm, onCancel){
     box.style.cssText = 'width:100%;max-width:380px;background:var(--card,#11151f);border:1px solid var(--border,#222a3a);border-radius:12px;box-shadow:0 18px 50px rgba(0,0,0,.6);overflow:hidden;font-family:inherit';
     var head = document.createElement('div');
     head.style.cssText = 'display:flex;align-items:center;gap:8px;padding:14px 16px;border-bottom:1px solid var(--border,#222a3a)';
-    head.innerHTML = '<i class="ti ti-topology-star-3" style="color:var(--teal,#2dd4bf);font-size:16px"></i><span style="font-size:12px;font-weight:700;color:var(--text,#dde2f0)">Confirm Cross-Chain Batch</span>';
+    head.innerHTML = '<i class="ti ' + (icon || 'ti-topology-star-3') + '" style="color:var(--teal,#2dd4bf);font-size:16px"></i><span style="font-size:12px;font-weight:700;color:var(--text,#dde2f0)">' + (title || 'Confirm Cross-Chain Batch') + '</span>';
     var body = document.createElement('div');
     body.style.cssText = 'padding:14px 16px;font-size:11px;line-height:1.6;color:var(--muted2,#aeb6c8);white-space:pre-line';
     body.textContent = message;
@@ -27394,6 +27403,17 @@ async function executeAddLiquidity() {
   const pd = poolData[activePoolId];
   const inverted = pd?.tokenOrderInverted || false;
 
+  // Slippage-aware confirmation — the AMM addLiquidity has no min-amount/deadline,
+  // so surface the current ratio + exact amounts before any approval/execution.
+  var rateLine = (pd && pd.loaded && pd.reserveA > 0 && pd.reserveB > 0)
+    ? 'Pool rate: 1 ' + pcfg.tokenA + ' \u2248 ' + (pd.reserveB / pd.reserveA).toFixed(6) + ' ' + pcfg.tokenB
+    : 'Pool has no liquidity yet (initial ratio applies)';
+  var confMsg = 'Add liquidity to ' + pcfg.tokenA + '/' + pcfg.tokenB + ':\n\n' +
+    aStr + ' ' + pcfg.tokenA + '\n' + bStr + ' ' + pcfg.tokenB + '\n\n' +
+    rateLine + '\n\nProceed to approve and add?';
+  var confirmed = await new Promise(function(resolve){ appConfirm(confMsg, function(){ resolve(true); }, function(){ resolve(false); }, 'Add Liquidity', 'ti-droplet'); });
+  if (!confirmed) { toast('Add liquidity cancelled', 'info'); return; }
+
   const btn = document.getElementById('pool-add-btn');
   btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader spin"></i> Adding...';
 
@@ -27507,6 +27527,18 @@ async function executeRemoveLiquidity() {
     return;
   }
   if (lpAmtBig > userLpBal) { toast('Insufficient LP balance', 'error'); return; }
+
+  // Slippage-aware confirmation — surface expected token output before burning LP.
+  var rmShare = (pd && pd.lpSupply > 0) ? (parseFloat(lpStr) / pd.lpSupply) : 0;
+  var rmExpA = rmShare * (pd ? pd.reserveA : 0);
+  var rmExpB = rmShare * (pd ? pd.reserveB : 0);
+  var rmMsg = 'Remove liquidity from ' + pcfg.tokenA + '/' + pcfg.tokenB + ':\n\n' +
+    lpStr + ' ' + (pcfg.lpSymbol || 'LP') + '\n\n' +
+    'You will receive approximately:\n' +
+    rmExpA.toFixed(6) + ' ' + pcfg.tokenA + '\n' +
+    rmExpB.toFixed(6) + ' ' + pcfg.tokenB + '\n\nProceed?';
+  var rmConfirmed = await new Promise(function(resolve){ appConfirm(rmMsg, function(){ resolve(true); }, function(){ resolve(false); }, 'Remove Liquidity', 'ti-trash'); });
+  if (!rmConfirmed) { toast('Remove liquidity cancelled', 'info'); return; }
 
   const btn = document.getElementById('pool-remove-btn');
   btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader spin"></i> Removing...';
