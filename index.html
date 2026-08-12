@@ -768,6 +768,12 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
   color:var(--yellow);
   border:1px solid rgba(245,158,11,.2);
 }
+.ms-status-badge.duplicate{
+  background:rgba(245,158,11,.12);
+  color:var(--yellow);
+  border:1px solid rgba(245,158,11,.35);
+  margin-left:4px;
+}
 .ms-row-remove{
   width:22px; height:22px; border-radius:4px;
   border:1px solid rgba(239,68,68,.15);
@@ -18132,6 +18138,48 @@ function getRecipientRoute(r) {
   return String(destId) === String(srcId) ? 'direct' : 'bridge';
 }
 
+// ── Duplicate recipient detection (chain + normalized address) ──
+// Comparison-only normalization. Named distinctly from the existing
+// normalizeEvmAddress() (which throws and checksums) to avoid overriding it.
+// It never mutates the displayed/transactional address stored on the recipient.
+function normalizeRecipientAddr(addr) {
+  return String(addr == null ? '' : addr).trim().toLowerCase();
+}
+function recipientDuplicateKey(r) {
+  return String(r.chainId || 'Arc_Testnet') + '::' + normalizeRecipientAddr(r.addr);
+}
+// O(n) single pass using a Map. Returns [{ key, rows:[indices] }] for every
+// group of non-empty addresses sharing the same chain + normalized address.
+function findDuplicateGroups() {
+  var map = new Map();
+  recipients.forEach(function (r, i) {
+    var norm = normalizeRecipientAddr(r.addr);
+    if (!norm) return; // empty/incomplete rows are not duplicates
+    var key = recipientDuplicateKey(r);
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(i);
+  });
+  var groups = [];
+  map.forEach(function (rows, key) { if (rows.length > 1) groups.push({ key: key, rows: rows }); });
+  return groups;
+}
+// Set of row indices involved in any duplicate group (for the UI badges).
+function getDuplicateIndices() {
+  var set = new Set();
+  findDuplicateGroups().forEach(function (g) { g.rows.forEach(function (i) { set.add(i); }); });
+  return set;
+}
+// Human-readable "0xAbC…123 — Rows 1, 4" summary of all duplicate groups.
+function duplicateSummary() {
+  var groups = findDuplicateGroups();
+  if (!groups.length) return '';
+  return groups.map(function (g) {
+    var addr = (recipients[g.rows[0]] && recipients[g.rows[0]].addr) || '';
+    var label = isAddr(addr) ? shortAddr(addr) : addr;
+    return label + ' — Rows ' + g.rows.map(function (i) { return i + 1; }).join(', ');
+  }).join('\n');
+}
+
 // ── Color palette for recipient avatars ────────────────────
 const RCPT_COLORS = ['#4f8ef7','#a78bfa','#22c55e','#f59e0b','#ef4444','#2dd4bf','#ec4899','#6366f1','#14b8a6','#f97316'];
 
@@ -18151,6 +18199,8 @@ function renderTable(){
     return;
   }
   if(empty) empty.style.display = 'none';
+
+  const duplicateIdx = getDuplicateIndices();
 
   recipients.forEach((r,i)=>{
     const valid = isAddr(r.addr)||isEns(r.addr);
@@ -18211,7 +18261,7 @@ function renderTable(){
       <td><input class="ms-table-input amount" value="${escHtml(r.amount)}" onchange="recipients[${i}].amount=this.value;updateStats()" onfocus="this.select()"/></td>
       <td><input class="ms-table-input note" value="${escHtml(r.note||'')}" placeholder="Note" onchange="recipients[${i}].note=this.value"/></td>
       <td><span class="ms-route-badge ${routeClass}">${routeLabel}</span></td>
-      <td><span class="ms-status-badge ${statusClass}">${statusText}</span></td>
+      <td><span class="ms-status-badge ${statusClass}">${statusText}</span>${duplicateIdx.has(i) ? '<span class="ms-status-badge duplicate">⚠ Duplicate</span>' : ''}</td>
       <td><button class="ms-row-remove" onclick="removeRow(${i})" title="Remove">×</button></td>`;
 
     tr.innerHTML = cells;
@@ -18398,31 +18448,36 @@ function updateBottomBar() {
   const bridgeCount = recipients.filter(r=>getRecipientRoute(r)==='bridge').length;
   const directCount = n - bridgeCount;
   const autoBridgeOn = document.getElementById('tgl-auto-bridge')?.classList.contains('on') ?? true;
+  const hasDuplicates = getDuplicateIndices().size > 0;
 
   const setBtn = (id, enabled) => {
     const btn = document.getElementById(id);
     if(btn) btn.disabled = !enabled;
   };
 
-  // Send Same-Chain: enabled only if there are direct recipients and wallet connected
-  setBtn('ms-btn-samechain', hasAddress && directCount > 0);
-  setBtn('ms-review-btn', hasAddress && directCount > 0);
+  // Send Same-Chain: enabled only if there are direct recipients, wallet connected and no duplicates
+  setBtn('ms-btn-samechain', hasAddress && directCount > 0 && !hasDuplicates);
+  setBtn('ms-review-btn', hasAddress && directCount > 0 && !hasDuplicates);
 
-  // Send Cross-Chain: enabled only if bridge recipients exist AND auto-bridge is on AND wallet connected
-  const canCrossChain = hasAddress && bridgeCount > 0 && autoBridgeOn;
+  // Send Cross-Chain: enabled only if bridge recipients exist AND auto-bridge is on AND wallet connected AND no duplicates
+  const canCrossChain = hasAddress && bridgeCount > 0 && autoBridgeOn && !hasDuplicates;
   setBtn('ms-btn-crosschain', canCrossChain);
   setBtn('ms-xc-btn', canCrossChain);
 
-  // Execute Queue: enabled if there are any recipients and wallet connected
-  setBtn('ms-btn-execute-queue', hasAddress && n > 0);
+  // Execute Queue: enabled if there are any recipients and wallet connected and no duplicates
+  setBtn('ms-btn-execute-queue', hasAddress && n > 0 && !hasDuplicates);
 
   // Execute in Parts: same
-  setBtn('ms-btn-execute-parts', hasAddress && n > 0);
+  setBtn('ms-btn-execute-parts', hasAddress && n > 0 && !hasDuplicates);
 
   // Bottom info
   const info = document.getElementById('ms-bottom-info');
   if(info && hasAddress) {
-    info.innerHTML = '<span style="width:5px;height:5px;border-radius:50%;background:var(--green);animation:pulse 1.5s ease-in-out infinite"></span> RPC: rpc.testnet.arc.network · '+directCount+' direct / '+bridgeCount+' bridge';
+    if (hasDuplicates) {
+      info.innerHTML = '<span style="width:5px;height:5px;border-radius:50%;background:var(--yellow);animation:pulse 1.5s ease-in-out infinite"></span> <span style="color:var(--yellow);font-weight:600">Duplicate recipients detected. Resolve duplicates before sending.</span>';
+    } else {
+      info.innerHTML = '<span style="width:5px;height:5px;border-radius:50%;background:var(--green);animation:pulse 1.5s ease-in-out infinite"></span> RPC: rpc.testnet.arc.network · '+directCount+' direct / '+bridgeCount+' bridge';
+    }
   }
 }
 function duplicateAll(){recipients.push(...recipients.map(r=>({...r})));saveRecipients();renderTable();toast('Duplicated','success');}
@@ -18459,7 +18514,7 @@ function clearBatches(){
   ['q-tot','q-suc','q-pen','q-fai'].forEach(id=>{const e=document.getElementById(id);if(e)e.textContent='0';});
   toast('History cleared','info');
 }
-function validateAll(){const bad=recipients.filter(r=>!isAddr(r.addr)&&!isEns(r.addr));if(bad.length)toast(`${bad.length} invalid address(es)`,'warning');else toast('All addresses valid!','success');renderTable();}
+function validateAll(){const bad=recipients.filter(r=>!isAddr(r.addr)&&!isEns(r.addr));const dups=findDuplicateGroups();if(bad.length)toast(`${bad.length} invalid address(es)`,'warning');else if(dups.length)toast(`All addresses valid — ${dups.length} duplicate group(s): ${duplicateSummary().replace(/\n/g,' · ')}`,'warning');else toast('All addresses valid!','success');renderTable();}
 
 let wfSendInterval = null;
 function updateWorkflowStep(step, state, opts = {}) {
@@ -18568,8 +18623,7 @@ function loadCSV(input){
   const reader=new FileReader();
   reader.onload=e=>{
     const lines=e.target.result.split('\n').filter(l=>l.trim());
-    var n=0, skipped=0, dupes=0;
-    var existingAddrs = new Set(recipients.map(function(r){ return (r.addr||'').toLowerCase(); }));
+    var n=0, skipped=0;
     var newRows = [];
     lines.forEach(line=>{
       const cols=line.split(',').map(s=>s.trim());
@@ -18584,20 +18638,23 @@ function loadCSV(input){
       if(!addr||addr.toLowerCase()==='address'||addr.toLowerCase()==='addr')return;
       var amt = parseFloat(amount)||0;
       if(amt<=0){skipped++;return;}
-      var addrLower = addr.toLowerCase();
-      if(existingAddrs.has(addrLower)){dupes++;return;}
       if(isAddr(addr)||isEns(addr)){
-        existingAddrs.add(addrLower);
         newRows.push({addr,amount:amt.toFixed(2),note:note||'',name:name||'',chainId});
         n++;
       }
     });
     if(newRows.length>0){
       recipients.push(...newRows);saveRecipients();renderTable();
-      var msg=n+' recipient(s) imported';
-      if(skipped>0)msg+=', '+skipped+' skipped (invalid amount)';
-      if(dupes>0)msg+=', '+dupes+' duplicates';
-      toast(msg,'success');
+      var dupGroups = findDuplicateGroups();
+      if(dupGroups.length){
+        var dupRows = dupGroups.reduce(function(s,g){return s+g.rows.length;},0);
+        var detail = duplicateSummary().replace(/\n/g, ' · ');
+        toast('⚠ '+n+' recipient(s) imported'+(skipped>0?', '+skipped+' skipped':'')+' — '+dupGroups.length+' duplicate group(s) ('+dupRows+' rows). '+detail,'warning');
+      } else {
+        var msg=n+' recipient(s) imported';
+        if(skipped>0)msg+=', '+skipped+' skipped (invalid amount)';
+        toast(msg,'success');
+      }
     } else {
       toast('No valid recipients found in CSV','warning');
     }
@@ -18613,6 +18670,7 @@ function exportCSV(){
 async function openModal(){
   if(!recipients.length){toast('Add at least one recipient','error');return;}
   if(!walletAddress){toast('Connect your wallet before sending','warning');return;}
+  if(findDuplicateGroups().length){toast('Duplicate recipients detected. Resolve duplicates before sending.','error');return;}
   const valid=recipients.filter(r=>(isAddr(r.addr)||isEns(r.addr))&&parseFloat(r.amount)>0);
   if(!valid.length){toast('No valid recipients with amount > 0','error');return;}
 
@@ -18660,6 +18718,7 @@ async function openModal(){
 function closeModal(){document.getElementById('modal').classList.remove('open');}
 
 async function signTx(){
+  if(findDuplicateGroups().length){toast('Duplicate recipients detected. Resolve duplicates before sending.','error');return;}
   const btn=document.getElementById('sign-btn');
   btn.disabled=true;
   const textEl = btn.querySelector('.ms-btn-text');
