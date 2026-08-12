@@ -7429,6 +7429,13 @@ select.cinput option { background: #161a24; color: #dde2f0; }
             </div>
             <div><div class="swap-label">Max Executions (0 = unlimited)</div><input id="sch-max" class="cinput" type="number" value="0" min="0"/></div>
             <div><div class="swap-label">Gas Budget (USDC)</div><input id="sch-gas" class="cinput" type="number" value="0.10" step="0.01"/></div>
+            <div style="grid-column:1/-1;display:flex;align-items:center;gap:8px;padding:4px 0">
+              <button class="stg-toggle on" id="sch-agent-toggle" data-on="true" style="cursor:pointer" onclick="schToggleAgentCreate(this)"><span class="knob"></span></button>
+              <span style="font-size:9px;color:var(--muted2)">Agent auto-execution (uses Agent Wallet)</span>
+            </div>
+            <div id="sch-agent-warning" style="grid-column:1/-1;display:none;padding:8px 10px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.25);border-radius:6px;font-size:9px;color:#f87171">
+              <i class="ti ti-alert-triangle" style="margin-right:4px"></i>Agent Wallet or authorization is missing — this automation will <b>NOT</b> run automatically. Set up the Agent Wallet (Autonoma / AI Smart Wallet) or turn off auto-execution.
+            </div>
             <div style="grid-column:1/-1;display:flex;gap:8px;padding-top:4px">
               <button class="action-btn blue-btn" style="flex:1;padding:10px" onclick="scheduleSubmit()"><i class="ti ti-calendar-event"></i>Create Schedule</button>
               <button class="btn" style="padding:10px 16px" onclick="document.getElementById('sch-create-panel').style.display='none'">Cancel</button>
@@ -14934,6 +14941,7 @@ function showPage(id) {
       var schPage = document.getElementById('page-schedule'); if (schPage) schPage.lang = 'en-US';
       var schCreate = document.getElementById('sch-create-panel'); if (schCreate) schCreate.lang = 'en-US';
       var dateInput = document.getElementById('sch-date'); if (dateInput) dateInput.lang = 'en-US';
+      setTimeout(function(){ if (typeof checkDueSchedules === 'function') checkDueSchedules(); }, 150);
     }
     if (id === 'queue') { setTimeout(function() { renderQueue(); updateQueueStats(); }, 50); }
     if (id === 'autonoma') { setTimeout(() => { if (typeof autonomaInit === 'function') autonomaInit(); }, 50); }
@@ -22583,6 +22591,9 @@ function logToReports(type, amount, rcptCount, txHash, opts) {
   txHistory.unshift(entry);
   Store.save('txhistory', txHistory);
   try { if (typeof EventBus !== 'undefined') EventBus.emit('TX_HISTORY_UPDATED', entry); } catch(_) {}
+  // Resolve any pending manual schedule run (idempotent — only fires if a
+  // schedule was routed via the Play button).
+  try { if (typeof schCompleteRun === 'function') schCompleteRun(txHash || ''); } catch(_) {}
 }
 function syncHistoryFromBatch(batchId, total, rcptCount, txHash, blockNumber) {
   logToReports('Batch', total, rcptCount, txHash, { id: batchId, fee: +(total*MULTISEND_FEE_RATE).toFixed(2) });
@@ -29102,6 +29113,10 @@ function scheduleCreateNew(){
   document.getElementById('sch-recipients').value = '';
   document.getElementById('sch-max').value = '0';
   document.getElementById('sch-gas').value = '0.10';
+  // Reset agent-execution toggle to ON and refresh the warning banner
+  var agentToggle = document.getElementById('sch-agent-toggle');
+  if(agentToggle){ agentToggle.classList.add('on'); agentToggle.classList.remove('off'); agentToggle.setAttribute('data-on','true'); }
+  schRefreshAgentWarning();
   // Re-enhance selects
   setTimeout(() => {
     enhanceSelectToPortal(document.getElementById('sch-token'));
@@ -29260,6 +29275,23 @@ function schCsvClear(){
   if(textarea) textarea.value = '';
 }
 
+function schToggleAgentCreate(btn){
+  var on = btn.getAttribute('data-on') !== 'true';
+  btn.setAttribute('data-on', on ? 'true' : 'false');
+  btn.classList.toggle('on', on);
+  btn.classList.toggle('off', !on);
+  schRefreshAgentWarning();
+}
+
+function schRefreshAgentWarning(){
+  var warn = document.getElementById('sch-agent-warning');
+  if(!warn) return;
+  var toggle = document.getElementById('sch-agent-toggle');
+  var agentOn = !toggle || toggle.getAttribute('data-on') === 'true';
+  var ready = schAgentStatus().ready;
+  warn.style.display = (agentOn && !ready) ? '' : 'none';
+}
+
 function scheduleSubmit(){
   const name = document.getElementById('sch-name')?.value.trim() || 'Schedule ' + (ScheduleEngine.getAll().length+1);
   const token = document.getElementById('sch-token')?.value || 'USDC';
@@ -29324,7 +29356,7 @@ function scheduleSubmit(){
     status: 'Active',
     created: new Date().toISOString(),
     createdBy,
-    agentExecution: true,
+    agentExecution: !(document.getElementById('sch-agent-toggle') && document.getElementById('sch-agent-toggle').getAttribute('data-on') === 'false'),
     walletAddress: walletAddress || ''
   });
   schedules = ScheduleEngine.getAll();
@@ -29393,21 +29425,17 @@ async function scheduleRun(id){
     toast('Schedule already completed (max executions reached)', 'warning');
     return;
   }
+  if(!walletAddress){ toast('Connect wallet to execute','warning'); openWalletModal(); return; }
 
-  var execEntry = {
-    ts: new Date().toISOString(),
-    status: 'executed',
-    note: sch.type + ' automation triggered manually'
-  };
+  // Mark a pending manual run. The schedule is finalized (execCount+1 / status)
+  // only after the on-chain transaction is actually confirmed (schCompleteRun).
+  window._schPendingRun = { id: sch.id, ts: Date.now() };
+
+  // Informational "started" history entry (NOT counted as executed).
   var history = (sch.executionHistory || []).slice();
-  history.unshift(execEntry);
+  history.unshift({ ts: new Date().toISOString(), status: 'started', note: sch.type + ' routed for manual execution' });
   if(history.length > 50) history.length = 50;
-
-  var execCount = (sch.execCount || 0) + 1;
-  var nextRun = sch.freq === 'once' ? null : scheduleNextDate(sch.freq, sch.nextRun || new Date().toISOString());
-  var newStatus = (sch.freq === 'once' || (sch.maxEx > 0 && execCount >= sch.maxEx)) ? 'Completed' : (sch.status || 'Active');
-
-  ScheduleEngine.update(sch.id, { execCount: execCount, executionHistory: history, nextRun: nextRun, status: newStatus });
+  ScheduleEngine.update(sch.id, { executionHistory: history });
 
   // Route based on type
   switch(sch.type){
@@ -29481,9 +29509,36 @@ async function scheduleRun(id){
       return;
   }
 
-  schLogEntry(sch.id, 'executed', '"' + sch.name + '" executed (' + schTypeLabel(sch.type) + ' · ' + (sch.amount||sch.total||0).toFixed(2) + ' ' + sch.token + ')');
+  schLogEntry(sch.id, 'started', '"' + sch.name + '" routed for manual execution (' + schTypeLabel(sch.type) + ')');
   schedules = ScheduleEngine.getAll();
   renderSchedules();
+}
+
+// Finalize a pending manual run after a real on-chain transaction is confirmed.
+// Called from logToReports() so batch / bridge / cross-chain / single-send
+// completions all resolve the pending schedule exactly once.
+function schCompleteRun(txHash){
+  var pending = window._schPendingRun;
+  if(!pending || !pending.id) return;
+  // Ignore stale pending markers (older than 30 minutes)
+  if(Date.now() - (pending.ts || 0) > 30 * 60 * 1000){ window._schPendingRun = null; return; }
+  window._schPendingRun = null;
+
+  var sch = ScheduleEngine.getById(pending.id);
+  if(!sch) return;
+  // Re-validate: never exceed maxEx, never re-complete.
+  if(sch.status === 'Completed' || (sch.maxEx > 0 && (sch.execCount || 0) >= sch.maxEx)) return;
+
+  var execCount = (sch.execCount || 0) + 1;
+  var nextRun = sch.freq === 'once' ? null : scheduleNextDate(sch.freq, sch.nextRun || new Date().toISOString());
+  var newStatus = (sch.freq === 'once' || (sch.maxEx > 0 && execCount >= sch.maxEx)) ? 'Completed' : (sch.status || 'Active');
+  var history = (sch.executionHistory || []).slice();
+  history.unshift({ ts: new Date().toISOString(), status: 'executed', note: sch.type + ' executed manually', txHash: txHash || null, token: sch.token, amount: (sch.amount || sch.total || 0) });
+  if(history.length > 50) history.length = 50;
+  ScheduleEngine.update(sch.id, { execCount: execCount, executionHistory: history, nextRun: nextRun, status: newStatus });
+  schedules = ScheduleEngine.getAll();
+  renderSchedules();
+  schLogEntry(sch.id, 'executed', '"' + sch.name + '" executed (' + schTypeLabel(sch.type) + ' · ' + (sch.amount||sch.total||0).toFixed(2) + ' ' + sch.token + ')');
 }
 
 // ── Execute Now (manual trigger) ──────────────────────────
@@ -29597,6 +29652,7 @@ function renderSchedules(){
 
   var all = ScheduleEngine.getAll();
   var now = new Date();
+  var agentReady = schAgentStatus().ready;
   var active = all.filter(function(s){ return s.status === 'Active'; }).length;
   var duePending = all.filter(function(s){ return s.status === 'Active' && s.nextRun && new Date(s.nextRun) <= now; }).length;
   var done = all.filter(function(s){ return s.status === 'Completed'; }).length;
@@ -29615,6 +29671,7 @@ function renderSchedules(){
     var nextRun = formatUSDateTime(s.nextRun);
     var isDue = s.nextRun && new Date(s.nextRun) <= now && s.status === 'Active';
     var agentOn = s.agentExecution !== false;
+    var agentWarn = (agentOn && s.status === 'Active' && !agentReady) ? '<span style="font-size:8px;margin-left:5px;color:var(--red);font-weight:700" title="Agent Wallet / authorization missing — auto-execution will not run until configured">⚠ NO AGENT</span>' : '';
     var assetInfo = (s.amount || 0) > 0 ? (s.amount || 0).toFixed(2) + ' ' + s.token : (s.recipients && s.recipients.length ? s.recipients.length + ' rcpts' : '—');
 
     var historyHtml = '';
@@ -29644,7 +29701,7 @@ function renderSchedules(){
     var qrBtn = (s.type === 'payment' || s.type === 'multisend' || s.type === 'link_payment') ? '<button class="btn" style="padding:2px 5px;font-size:8px;color:var(--blue)" title="Generate QR for scheduled payment" onclick="schGenerateQR(\'' + s.id + '\')"><i class="ti ti-qrcode"></i></button>' : '';
 
     var mainRow = '<tr' + (isDue ? ' style="background:rgba(245,158,11,.05)"' : '') + '>' +
-      '<td style="font-weight:600">' + s.name + (isDue ? '<span style="font-size:8px;margin-left:5px;color:var(--yellow)">DUE</span>' : '') + (agentOn && s.status === 'Active' ? '<span style="font-size:8px;margin-left:5px;color:#a78bfa" title="Auto-executed by Agent Wallet">AUTO</span>' : '') + '</td>' +
+      '<td style="font-weight:600">' + s.name + (isDue ? '<span style="font-size:8px;margin-left:5px;color:var(--yellow)">DUE</span>' : '') + (agentOn && s.status === 'Active' ? '<span style="font-size:8px;margin-left:5px;color:#a78bfa" title="Auto-executed by Agent Wallet">AUTO</span>' : '') + agentWarn + '</td>' +
       '<td><span class="sch-type-badge ' + s.type + '"><i class="ti ti-' + schTypeIcon(s.type) + '" style="font-size:9px"></i>' + schTypeLabel(s.type) + '</span></td>' +
       '<td style="color:var(--text)">' + assetInfo + '</td>' +
       '<td style="font-size:9px;color:var(--muted2)">' + (s.network || '—') + '</td>' +
@@ -29674,6 +29731,13 @@ function schToggleHistory(id){
 }
 
 // Check due schedules on init
+function schAgentStatus(){
+  var wmReady = false, authReady = false;
+  try { wmReady = !!(typeof AgentWalletManager !== 'undefined' && !AgentWalletManager.isPaused() && AgentWalletManager.getAgentAddress()); } catch(_){}
+  try { authReady = !!(typeof AgentScheduleExecutor !== 'undefined' && typeof AgentScheduleExecutor.hasScheduledAuth === 'function' && AgentScheduleExecutor.hasScheduledAuth()); } catch(_){}
+  return { wmReady: wmReady, authReady: authReady, ready: !!(wmReady && authReady) };
+}
+
 function checkDueSchedules(){
   const all = ScheduleEngine.getAll();
   const due = all.filter(function(s){ return s.status === 'Active' && s.nextRun && new Date(s.nextRun) <= new Date(); });

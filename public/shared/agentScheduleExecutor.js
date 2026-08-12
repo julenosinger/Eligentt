@@ -165,7 +165,11 @@
       case 'daily': d.setUTCDate(d.getUTCDate() + 1); break;
       case 'weekly': d.setUTCDate(d.getUTCDate() + 7); break;
       case 'biweekly': d.setUTCDate(d.getUTCDate() + 14); break;
-      case 'monthly': d.setUTCMonth(d.getUTCMonth() + 1); break;
+      case 'monthly':
+        var currentDay = d.getUTCDate();
+        d.setUTCMonth(d.getUTCMonth() + 1);
+        if (d.getUTCDate() !== currentDay) d.setUTCDate(0); // month-end rollover (31 Jan -> 28/29 Feb)
+        break;
       default: return null;
     }
     return d.toISOString();
@@ -192,7 +196,11 @@
       next = _nextRunAfter(sched.freq, next);
     }
     var newStatus = sched.status;
-    if (sched.freq === 'once' || (sched.maxEx > 0 && execCount >= sched.maxEx) || !next) {
+    // Only terminal states (executed / skipped) may complete the schedule.
+    // A failed execution must NOT be marked "Completed" nor lose its nextRun —
+    // otherwise a one-time failure looks successful and can never be retried.
+    var isTerminal = (status === 'executed' || status === 'skipped');
+    if (isTerminal && (sched.freq === 'once' || (sched.maxEx > 0 && execCount >= sched.maxEx) || !next)) {
       newStatus = 'Completed';
       next = null;
     }
