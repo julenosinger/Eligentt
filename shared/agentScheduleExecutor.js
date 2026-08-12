@@ -491,6 +491,12 @@
     }
 
     _inFlight[key] = true;
+    // Shared cross-executor claim: only one executor may run this slot.
+    var eng0 = _engine();
+    if (eng0 && typeof eng0.claimExecution === 'function' && !eng0.claimExecution(key, 'agent_schedule_executor')) {
+      delete _inFlight[key];
+      return { status: 'claimed_by_other' };
+    }
     var startTime = Date.now();
     var attempts = ((prior && prior.attempts) || 0) + 1;
 
@@ -602,6 +608,8 @@
       return { status: 'error', reason: fReason };
     } finally {
       delete _inFlight[key];
+      var engF = _engine();
+      try { if (engF && typeof engF.releaseExecutionClaim === 'function') engF.releaseExecutionClaim(key, 'agent_schedule_executor'); } catch(_e) {}
     }
   }
 

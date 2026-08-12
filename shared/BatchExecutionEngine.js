@@ -146,6 +146,17 @@
       return { ok: false, error: 'Batch too large (' + params.addresses.length + ' > 256)' };
     }
 
+    // Shared cross-executor claim (same slot key as AgentScheduleExecutor:
+    // "scheduleId|nextRun") so the same schedule is never executed twice.
+    var claimKey = sched.id + '|' + sched.nextRun;
+    var _claimAcquired = false;
+    if (hasScheduleEngine() && typeof ScheduleEngine.claimExecution === 'function') {
+      if (!ScheduleEngine.claimExecution(claimKey, 'batch_execution_engine')) {
+        return { ok: false, error: 'Schedule already claimed by another executor' };
+      }
+      _claimAcquired = true;
+    }
+
     var execEntry = {
       id: 'BATX-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6),
       scheduleId: sched.id,
@@ -230,6 +241,10 @@
       save();
       emitStatus(execEntry);
       return { ok: false, error: e.message || String(e), execEntry: execEntry };
+    } finally {
+      if (_claimAcquired && hasScheduleEngine() && typeof ScheduleEngine.releaseExecutionClaim === 'function') {
+        try { ScheduleEngine.releaseExecutionClaim(claimKey, 'batch_execution_engine'); } catch(_e) {}
+      }
     }
   }
 

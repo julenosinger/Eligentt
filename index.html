@@ -28942,8 +28942,14 @@ const ScheduleEngine = (() => {
 
   let _schedules = Store.load('schedules', []);
   let _listeners = {};
+  // Shared execution claim/lease store — single idempotency point used by
+  // BOTH AgentScheduleExecutor and BatchExecutionEngine (and future executors)
+  // so a given execution slot (scheduleId|nextRun) is claimed exactly once.
+  let _execClaims = {};
+  try { _execClaims = JSON.parse(localStorage.getItem('elligentt_sched_claims_v1') || '{}'); } catch(_) { _execClaims = {}; }
 
   function _persist() { Store.save('schedules', _schedules); }
+  function _saveClaims() { try { localStorage.setItem('elligentt_sched_claims_v1', JSON.stringify(_execClaims)); } catch(_){} }
 
   function _emit(event, data) {
     try {
@@ -29005,6 +29011,32 @@ const ScheduleEngine = (() => {
     return _schedules;
   }
 
+  // ── Execution claim / lease (shared idempotency) ─────────
+  // key = "scheduleId|nextRun" (a single execution slot).
+  // Atomic within the single-threaded JS loop: check + set happen synchronously.
+  function claimExecution(key, executor, ttlMs) {
+    var now = Date.now();
+    var leaseMs = ttlMs || 300000;
+    var c = _execClaims[key];
+    if (c && c.executor !== executor && (now - (c.claimedAt || 0)) < leaseMs) return false;
+    _execClaims[key] = { executor: executor, claimedAt: now, leaseMs: leaseMs };
+    _saveClaims();
+    return true;
+  }
+  function releaseExecutionClaim(key, executor) {
+    var c = _execClaims[key];
+    if (!c) return true;
+    if (executor && c.executor !== executor) return false;
+    delete _execClaims[key];
+    _saveClaims();
+    return true;
+  }
+  function isExecutionClaimed(key) {
+    var now = Date.now();
+    var c = _execClaims[key];
+    return !!(c && (now - (c.claimedAt || 0)) < (c.leaseMs || 300000));
+  }
+
   // ── Migration on load ───────────────────────────────────
   (function _migrate() {
     var changed = false;
@@ -29022,7 +29054,7 @@ const ScheduleEngine = (() => {
     if (changed) _persist();
   })();
 
-  return { create: create, getAll: getAll, getById: getById, update: update, remove: remove, on: on, reload: reload };
+  return { create: create, getAll: getAll, getById: getById, update: update, remove: remove, on: on, reload: reload, claimExecution: claimExecution, releaseExecutionClaim: releaseExecutionClaim, isExecutionClaimed: isExecutionClaimed };
 })();
 
 // Legacy alias — keep global `schedules` pointing to engine data for backward compat
@@ -29357,6 +29389,10 @@ function scheduleNextDate(freq, from){
 async function scheduleRun(id){
   var sch = ScheduleEngine.getById(id);
   if(!sch) return;
+  if(sch.status === 'Completed' || (sch.maxEx > 0 && (sch.execCount || 0) >= sch.maxEx)) {
+    toast('Schedule already completed (max executions reached)', 'warning');
+    return;
+  }
 
   var execEntry = {
     ts: new Date().toISOString(),
