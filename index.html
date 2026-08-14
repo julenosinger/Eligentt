@@ -20996,6 +20996,23 @@ function swpAddHistory(symIn, symOut, amtIn, amtOut, txHash) {
 // ══════════════════════════════════════════════════════════
 var ST = { tf:'1H', prec:4, chartAnim:null, chartType:'line' };
 
+// ── Chart history store (real price snapshots per pair) ──
+var _stTickStore = {};   // pairKey -> [{t:ms, p:price}]
+var _stLastRecord = {};  // pairKey -> last record ts
+function _stTfMs(tf) { return ({'1m':60000,'5m':300000,'15m':900000,'1H':3600000,'4H':14400000,'1D':86400000})[tf] || 3600000; }
+function _stRnd(seed) { var t = seed >>> 0; return function() { t += 0x6D2B79F5; var r = Math.imul(t ^ (t >>> 15), 1 | t); r = (r + Math.imul(r ^ (r >>> 7), 61 | r)) ^ r; return ((r ^ (r >>> 14)) >>> 0) / 4294967296; }; }
+function _stHash(str) { var h = 2166136261; for (var i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
+function _stRecordTick(pairKey, price) {
+  if (!price || price <= 0) return;
+  var now = Date.now();
+  var last = _stLastRecord[pairKey] || 0;
+  if (now - last < 3000) return;
+  _stLastRecord[pairKey] = now;
+  var arr = _stTickStore[pairKey] || (_stTickStore[pairKey] = []);
+  arr.push({ t: now, p: price });
+  if (arr.length > 900) arr.splice(0, arr.length - 600);
+}
+
 function stSetTF(tf) { ST.tf = tf; document.querySelectorAll('.st-tf-btn').forEach(function(b){b.classList.toggle('active', b.textContent.trim()===tf)}); stDrawChart(); }
 
 function stToggleChartType() {
@@ -21135,7 +21152,7 @@ function stDrawChart() {
   canvas.width = w * dpr; canvas.height = h * dpr;
   canvas.style.width = w + 'px'; canvas.style.height = h + 'px';
   var ctx = canvas.getContext('2d');
-  ctx.scale(dpr, dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
   if (w < 20 || h < 20) return;
   if (loading) { loading.classList.add('done'); }
@@ -21181,22 +21198,42 @@ function stDrawChart() {
     return;
   }
 
-  // Generate candles + volumes
+  // ── Build candles: real history snapshots + deterministic backfill ──
+  var pairKey = tIn.sym + '/' + tOut.sym;
+  _stRecordTick(pairKey, price);
   var bars = isMobile ? 30 : 60;
+  var bucketMs = _stTfMs(ST.tf);
+  var nowBucket = Math.floor(Date.now() / bucketMs) * bucketMs;
+  var ticks = _stTickStore[pairKey] || [];
+  var rnd = _stRnd(_stHash(pairKey));
+  var volatility = price * 0.004;
   var candles = [];
   var volumes = [];
-  var seed = price;
-  var prevPrice = price;
+  var prev = price;
   for (var i = 0; i < bars; i++) {
-    var volatility = price * 0.004;
-    var open = seed;
-    var change = (Math.random() - 0.5) * volatility;
-    var close = open + change;
-    var high = Math.max(open, close) + Math.random() * volatility * 0.6;
-    var low = Math.min(open, close) - Math.random() * volatility * 0.6;
-    candles.push({ o: open, h: high, l: low, c: close });
-    volumes.push(price * 10 * (0.3 + Math.random() * 1.4));
-    seed = close;
+    var bStart = nowBucket - (bars - 1 - i) * bucketMs;
+    var bEnd = bStart + bucketMs;
+    var o = 0, h = -Infinity, l = Infinity, c = 0, n = 0;
+    for (var k = 0; k < ticks.length; k++) {
+      var s = ticks[k];
+      if (s.t >= bStart && s.t < bEnd) {
+        if (n === 0) o = s.p;
+        c = s.p;
+        if (s.p > h) h = s.p;
+        if (s.p < l) l = s.p;
+        n++;
+      }
+    }
+    if (n === 0) {
+      var open = prev;
+      var close = open + (rnd() - 0.5) * volatility;
+      o = open; c = close;
+      h = Math.max(open, close) + rnd() * volatility * 0.6;
+      l = Math.min(open, close) - rnd() * volatility * 0.6;
+    }
+    candles.push({ o: o, h: h, l: l, c: c, t: bStart, n: n });
+    volumes.push(price * 10 * (0.3 + rnd() * 1.4) + Math.min(n, 20) * price * 0.3);
+    prev = c;
   }
 
   // Price change for header
@@ -21211,8 +21248,12 @@ function stDrawChart() {
   }
 
   // Layout helpers
-  var yMin = price * 0.95;
-  var yMax = price * 1.05;
+  // Auto-scale Y to visible candles (with 8% padding)
+  var yMin = Infinity, yMax = -Infinity;
+  for (var yi = 0; yi < candles.length; yi++) { if (candles[yi].l < yMin) yMin = candles[yi].l; if (candles[yi].h > yMax) yMax = candles[yi].h; }
+  if (!isFinite(yMin) || !isFinite(yMax) || yMax - yMin < price * 1e-6) { yMin = price * 0.99; yMax = price * 1.01; }
+  var yPad = (yMax - yMin) * 0.08 || price * 0.002;
+  yMin -= yPad; yMax += yPad;
   var xTo = function(i, total) { return margin.left + (i / (total - 1)) * plotW; };
   var yTo = function(v) { return margin.top + (1 - (v - yMin) / (yMax - yMin)) * chartH; };
 
@@ -21267,23 +21308,24 @@ function stDrawChart() {
       ctx.fillRect(cx - cw/2, bodyTop, cw, bodyH);
     }
   } else {
-    // Line with glow
+    // Line with glow — color by trend
+    var lineColor = isUp ? '#22c55e' : '#ef4444';
     var points = candles.map(function(c) { return c.c; });
     ctx.save();
-    ctx.shadowColor = 'rgba(34,197,94,.4)'; ctx.shadowBlur = 8;
+    ctx.shadowColor = isUp ? 'rgba(34,197,94,.4)' : 'rgba(239,68,68,.4)'; ctx.shadowBlur = 8;
     ctx.beginPath();
     for (var i = 0; i < points.length; i++) {
       var px = xTo(i, bars), py = yTo(points[i]);
       if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
     }
-    ctx.strokeStyle = '#22c55e'; ctx.lineWidth = 2;
+    ctx.strokeStyle = lineColor; ctx.lineWidth = 2;
     ctx.stroke();
     ctx.restore();
 
     // Gradient fill
     var grad = ctx.createLinearGradient(0, margin.top, 0, margin.top + chartH);
-    grad.addColorStop(0, 'rgba(34,197,94,0.15)');
-    grad.addColorStop(1, 'rgba(34,197,94,0.0)');
+    grad.addColorStop(0, isUp ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)');
+    grad.addColorStop(1, isUp ? 'rgba(34,197,94,0.0)' : 'rgba(239,68,68,0.0)');
     ctx.beginPath();
     for (var i = 0; i < points.length; i++) {
       var px = xTo(i, bars), py = yTo(points[i]);
@@ -21320,16 +21362,16 @@ function stDrawChart() {
   // ── MA Overlay (if enabled) ──
   if (ST.showMA) {
     var maPeriod = Math.max(5, Math.floor(bars / 4));
-    var maPoints = [];
-    for (var i = 0; i < bars; i++) {
-      var sum = 0, count = 0;
-      for (var j = Math.max(0, i - maPeriod + 1); j <= i; j++) { sum += candles[j].c; count++; }
-      if (count > 0) maPoints.push({ x: xTo(i, bars), y: yTo(sum / count) });
-    }
+    var maSum = 0, maStarted = false;
     ctx.beginPath();
-    for (var i = 0; i < maPoints.length; i++) {
-      if (i === 0) ctx.moveTo(maPoints[i].x, maPoints[i].y);
-      else ctx.lineTo(maPoints[i].x, maPoints[i].y);
+    for (var i = 0; i < bars; i++) {
+      maSum += candles[i].c;
+      if (i >= maPeriod) maSum -= candles[i - maPeriod].c;
+      if (i >= maPeriod - 1) {
+        var mpx = xTo(i, bars), mpy = yTo(maSum / maPeriod);
+        if (!maStarted) { ctx.moveTo(mpx, mpy); maStarted = true; }
+        else ctx.lineTo(mpx, mpy);
+      }
     }
     ctx.strokeStyle = 'rgba(168,85,247,.6)'; ctx.lineWidth = 1; ctx.setLineDash([3, 5]);
     ctx.stroke(); ctx.setLineDash([]);
@@ -21350,11 +21392,22 @@ function stDrawChart() {
     ctx.fillRect(vx - vw/2, volTop + volumeH - vh, vw, Math.max(1, vh));
   }
 
-  // Time axis
+  // Time axis (real timestamps per candle)
   ctx.fillStyle = '#505870'; ctx.font = '8px "JetBrains Mono", monospace'; ctx.textAlign = 'center';
   for (var i = 0; i <= 6; i++) {
-    var tx = margin.left + (i / 6) * plotW;
-    var label = i === 0 ? '' : i === 6 ? 'Now' : '';
+    var tIdx = Math.round((i / 6) * (bars - 1));
+    var tx = xTo(tIdx, bars);
+    var label = '';
+    if (candles[tIdx] && candles[tIdx].t) {
+      var td = new Date(candles[tIdx].t);
+      var thh = ('0' + td.getHours()).slice(-2);
+      var tmm = ('0' + td.getMinutes()).slice(-2);
+      if (ST.tf === '1D' || ST.tf === '4H') {
+        label = ('0' + (td.getMonth() + 1)).slice(-2) + '/' + ('0' + td.getDate()).slice(-2) + ' ' + thh + ':' + tmm;
+      } else {
+        label = thh + ':' + tmm;
+      }
+    }
     if (label) ctx.fillText(label, tx, volTop + volumeH + 14);
   }
 }
@@ -21712,25 +21765,26 @@ function stStopAutoRefresh() {
   if (_stInterval) { clearInterval(_stInterval); _stInterval = null; }
 }
 
-// ── Resize handler — ResizeObserver para resposta instantanea ──
+// ── Resize handler — debounced redraw (ResizeObserver + window fallback) ──
 (function() {
   var chartArea = document.getElementById('st-chart-area');
-  if (chartArea && typeof ResizeObserver !== 'undefined') {
-    var ro = new ResizeObserver(function() {
+  var _stResizeTimer = null;
+  function _stDebouncedDraw() {
+    if (_stResizeTimer) clearTimeout(_stResizeTimer);
+    _stResizeTimer = setTimeout(function() {
+      _stResizeTimer = null;
       var swapPage = document.getElementById('page-swap');
       if (swapPage && swapPage.classList.contains('active')) {
         stDrawChart();
       }
-    });
+    }, 150);
+  }
+  if (chartArea && typeof ResizeObserver !== 'undefined') {
+    var ro = new ResizeObserver(function() { _stDebouncedDraw(); });
     ro.observe(chartArea);
   }
   // Fallback: window resize
-  window.addEventListener('resize', function() {
-    var swapPage = document.getElementById('page-swap');
-    if (swapPage && swapPage.classList.contains('active')) {
-      stDrawChart();
-    }
-  });
+  window.addEventListener('resize', function() { _stDebouncedDraw(); });
 })();
 
 // ── Canvas crosshair + tooltip ──────────────────────────
@@ -21785,7 +21839,7 @@ function stStopAutoRefresh() {
       '<div class="tt-row"><span class="tt-label">L</span><span class="tt-down">' + c.l.toFixed(6) + '</span></div>' +
       '<div class="tt-row"><span class="tt-label">C</span><span class="tt-' + dir + '">' + c.c.toFixed(6) + '</span></div>' +
       '<div class="tt-row"><span class="tt-label">Vol</span><span>' + vol.toFixed(2) + '</span></div>' +
-      '<div class="tt-row"><span class="tt-label">Bar</span><span>' + (idx + 1) + '/' + bars + '</span></div>';
+      '<div class="tt-row"><span class="tt-label">Time</span><span>' + (c.t ? new Date(c.t).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}) : '\u2014') + '</span></div>';
 
     // Position tooltip
     var ttRect = tt.getBoundingClientRect();
