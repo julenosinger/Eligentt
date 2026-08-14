@@ -21,6 +21,7 @@ const executorSrc = fs.readFileSync(path.join(root, 'public', 'shared', 'agentSc
 const authSrc = fs.readFileSync(path.join(root, 'public', 'shared', 'agentAuthorization.js'), 'utf8');
 const policySrc = fs.readFileSync(path.join(root, 'public', 'shared', 'policyEngine.js'), 'utf8');
 const html = fs.readFileSync(path.join(root, 'public', 'index.html'), 'utf8');
+const srcHtml = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 
 const RCPT = '0x' + '11'.repeat(20);
 const BAL_HEX = '0x' + (10n ** 12n).toString(16).padStart(64, '0'); // 1,000,000 USDC (6 dec)
@@ -128,7 +129,10 @@ function boot(opts = {}) {
   new Function('window', policySrc)(polWin);
   globalThis.PolicyEngine = polWin.PolicyEngine;
 
-  const exWin = {};
+  const exWin = {
+    _agentExecuteSwap: opts.swapStub || (async function () { return { ok: true, txHash: '0x' + 'ee'.repeat(32) }; }),
+    _agentExecuteBridge: opts.bridgeStub || (async function () { return { ok: true, txHash: '0x' + 'ff'.repeat(32), mintTxHash: '0x' + 'aa'.repeat(32) }; }),
+  };
   new Function('window', 'localStorage', 'document', executorSrc)(exWin, ls, undefined);
   const executor = exWin.AgentScheduleExecutor;
 
@@ -240,19 +244,260 @@ describe('AgentScheduleExecutor — on-chain execution (happy path)', () => {
     expect(parsed.from).toBe(env.signer.address);
   });
 
-  it('executes multisend schedules with one transfer per recipient', async () => {
+  it('executes a scheduled MultiSend sequentially — one confirmed tx before the next', async () => {
     const rcpts = [
       { addr: RCPT, amount: 10 },
       { addr: '0x' + '33'.repeat(20), amount: 15 },
+      { addr: '0x' + '44'.repeat(20), amount: 25 },
     ];
-    const env = boot({ schedules: [makeSchedule({ type: 'multisend', recipients: rcpts, amount: 0, total: 25, freq: 'daily' })] });
-    grantScheduledAuth(env.auth);
+    const log = [];
+    const provider = {
+      sent: [], simCalls: [], log,
+      async getNetwork() { return { chainId: BigInt(5042002) }; },
+      async call(tx) { if (tx && tx.data && tx.data.startsWith('0xa9059cbb')) this.simCalls.push(tx); return BAL_HEX; },
+      async getBalance() { return 10n ** 18n; },
+      async send(method, params) {
+        if (method === 'eth_getTransactionCount') return '0x' + this.sent.length.toString(16);
+        if (method === 'eth_sendRawTransaction') { log.push('send'); this.sent.push(params[0]); return '0x' + 'ab'.repeat(32); }
+        throw new Error('unexpected rpc ' + method);
+      },
+      async waitForTransaction() { log.push('wait'); return { status: 1, blockNumber: 123, gasUsed: 21000n }; },
+    };
+    const env = boot({ provider, schedules: [makeSchedule({ type: 'multisend', recipients: rcpts, amount: 0, total: 50, freq: 'once' })] });
+    grantScheduledAuth(env.auth, { maxSpending: 1000, dailyLimit: null });
     await env.executor.tickNow();
-    expect(env.provider.sent.length).toBe(2);
+
+    // One individual transaction per recipient, sequentially.
+    expect(env.provider.sent.length).toBe(3);
+    expect(env.provider.simCalls.length).toBe(3);
+    // Strict send → wait ordering proves each row waits for the previous receipt (no concurrency).
+    expect(log).toEqual(['send', 'wait', 'send', 'wait', 'send', 'wait']);
+
+    const sched = env.engine.getById('SCH_TEST_1');
+    expect(sched.status).toBe('Completed');      // one-time multisend completes
+    expect(sched.execCount).toBe(1);
+    expect(sched.recipients.length).toBe(3);     // recipients preserved
+    expect(sched.executionHistory[0].rows.length).toBe(3);
+    expect(sched.executionHistory[0].rows.every((r) => r.status === 'completed')).toBe(true);
+    expect(sched.executionHistory[0].rows.every((r) => r.txHash && /^0x[0-9a-f]{64}$/.test(r.txHash))).toBe(true);
+    expect(env.auth.getActive()[0].usedSpending).toBe(50);
+  });
+});
+
+describe('AgentScheduleExecutor — scheduled MultiSend (sequential execution)', () => {
+  const THREE = [
+    { addr: RCPT, amount: 100 },
+    { addr: '0x' + '33'.repeat(20), amount: 50 },
+    { addr: '0x' + '44'.repeat(20), amount: 25 },
+  ];
+
+  function orderedProvider() {
+    const log = [];
+    return {
+      sent: [], simCalls: [], log,
+      async getNetwork() { return { chainId: BigInt(5042002) }; },
+      async call(tx) { if (tx && tx.data && tx.data.startsWith('0xa9059cbb')) this.simCalls.push(tx); return BAL_HEX; },
+      async getBalance() { return 10n ** 18n; },
+      async send(method, params) {
+        if (method === 'eth_getTransactionCount') return '0x' + this.sent.length.toString(16);
+        if (method === 'eth_sendRawTransaction') { log.push('send'); this.sent.push(params[0]); return '0x' + 'ab'.repeat(32); }
+        throw new Error('unexpected rpc ' + method);
+      },
+      async waitForTransaction() { log.push('wait'); return { status: 1, blockNumber: 123, gasUsed: 21000n }; },
+    };
+  }
+
+  it('TEST 1 — preserves every CSV row (3 recipients) through the schedule data model', () => {
+    const sched = makeSchedule({ type: 'multisend', recipients: THREE, amount: 0, total: 175, freq: 'once' });
+    expect(sched.type).toBe('multisend');
+    expect(sched.recipients.length).toBe(3);
+    expect(sched.recipients[0].addr).toBe(RCPT);
+    expect(sched.recipients[0].amount).toBe(100);
+    expect(sched.recipients[1].amount).toBe(50);
+    expect(sched.recipients[2].amount).toBe(25);
+    expect(sched.total).toBe(175);
+  });
+
+  it('TEST 2/3/4 — sends rows sequentially: each row waits for the previous receipt', async () => {
+    const env = boot({ provider: orderedProvider(), schedules: [makeSchedule({ type: 'multisend', recipients: THREE, amount: 0, total: 175, freq: 'once' })] });
+    grantScheduledAuth(env.auth, { maxSpending: 1000, dailyLimit: null });
+    await env.executor.tickNow();
+    expect(env.provider.sent.length).toBe(3);
+    // send → wait interleaving proves recipient #N+1 does NOT start before #N is confirmed.
+    expect(env.provider.log).toEqual(['send', 'wait', 'send', 'wait', 'send', 'wait']);
+  });
+
+  it('TEST 5 — does not use Promise.all() for scheduled recipient execution', () => {
+    const fn = executorSrc.slice(executorSrc.indexOf('async function _executeMultiSendSequential'), executorSrc.indexOf('async function _delegateExecution'));
+    expect(fn).not.toContain('Promise.all');
+  });
+
+  it('TEST 6/7 — never calls the batch contract (sendTokenBatch / MultiSendExecutor)', () => {
+    expect(executorSrc).not.toContain('sendTokenBatch');
+    expect(executorSrc).not.toContain('batchTransfer');
+    expect(executorSrc).not.toContain('MultiSendExecutor');
+    expect(executorSrc).not.toContain('EXECUTOR_V4');
+    expect(executorSrc).not.toContain('_agentExecuteMultiSend');
+  });
+
+  it('TEST 8 — converts amounts safely to 6-decimal base units (61.5 USDC → 61500000)', async () => {
+    const env = boot({ schedules: [makeSchedule({ type: 'multisend', recipients: [{ addr: RCPT, amount: 61.5 }], amount: 0, total: 61.5, freq: 'once' })] });
+    grantScheduledAuth(env.auth, { maxSpending: 1000, dailyLimit: null });
+    await env.executor.tickNow();
+    expect(env.provider.sent.length).toBe(1);
+    const tx = realEthers.Transaction.from(env.provider.sent[0]);
+    const decoded = new realEthers.Interface(['function transfer(address to, uint256 amount)']).decodeFunctionData('transfer', tx.data);
+    expect(decoded[1].toString()).toBe('61500000');
+  });
+
+  it('TEST 9 — a failed row halts execution: #1 completed, #2 failed, #3 pending and NOT sent', async () => {
+    let waitCalls = 0;
+    const provider = {
+      sent: [], simCalls: [],
+      async getNetwork() { return { chainId: BigInt(5042002) }; },
+      async call(tx) { if (tx && tx.data && tx.data.startsWith('0xa9059cbb')) this.simCalls.push(tx); return BAL_HEX; },
+      async getBalance() { return 10n ** 18n; },
+      async send(method, params) {
+        if (method === 'eth_getTransactionCount') return '0x' + this.sent.length.toString(16);
+        if (method === 'eth_sendRawTransaction') { this.sent.push(params[0]); return '0x' + 'ab'.repeat(32); }
+        throw new Error('unexpected rpc ' + method);
+      },
+      async waitForTransaction() {
+        waitCalls++;
+        return { status: waitCalls === 2 ? 0 : 1, blockNumber: 123, gasUsed: 21000n };
+      },
+    };
+    const env = boot({ provider, schedules: [makeSchedule({ type: 'multisend', recipients: THREE, amount: 0, total: 175, freq: 'once' })] });
+    grantScheduledAuth(env.auth, { maxSpending: 1000, dailyLimit: null });
+    await env.executor.tickNow();
+
+    expect(env.provider.sent.length).toBe(2);       // row 1 + row 2 broadcast; row 3 NOT sent
+
+    const sched = env.engine.getById('SCH_TEST_1');
+    expect(sched.status).toBe('Paused');            // paused on failure, not Completed
+    expect(sched.recipients.length).toBe(3);        // recipients preserved
+
+    const log = env.executor.getExecutionLog(5)[0];
+    expect(log.status).toBe('failed');
+    expect(log.rows.length).toBe(3);
+    expect(log.rows[0].status).toBe('completed');
+    expect(log.rows[0].txHash).toMatch(/^0x[0-9a-f]{64}$/);   // completed row keeps its tx hash
+    expect(log.rows[1].status).toBe('failed');
+    expect(log.rows[2].status).toBe('pending');
+    expect(log.rows[2].txHash).toBeNull();                     // pending row has no tx hash
+  });
+
+  it('TEST 10 — already-completed rows are not re-sent on a second scheduler tick', async () => {
+    const env = boot({ schedules: [makeSchedule({ type: 'multisend', recipients: THREE, amount: 0, total: 175, freq: 'daily' })] });
+    grantScheduledAuth(env.auth, { maxSpending: 1000, dailyLimit: null });
+    const originalRun = env.engine.getById('SCH_TEST_1').nextRun;
+    await env.executor.tickNow();
+    expect(env.provider.sent.length).toBe(3);
+    env.engine.update('SCH_TEST_1', { nextRun: originalRun, status: 'Active' });
+    const summary2 = await env.executor.tickNow();
+    expect(env.provider.sent.length).toBe(3);       // replay-blocked: no additional sends
+    expect(summary2.executed).toBe(0);
+  });
+
+  it('TEST 11 — recurring MultiSend advances nextRun and keeps recipients intact', async () => {
+    const env = boot({ schedules: [makeSchedule({ type: 'multisend', recipients: THREE, amount: 0, total: 175, freq: 'weekly' })] });
+    grantScheduledAuth(env.auth, { maxSpending: 1000, dailyLimit: null });
+    const before = env.engine.getById('SCH_TEST_1').nextRun;
+    await env.executor.tickNow();
     const sched = env.engine.getById('SCH_TEST_1');
     expect(sched.status).toBe('Active');
+    expect(sched.execCount).toBe(1);
+    expect(sched.nextRun).not.toBe(before);
     expect(new Date(sched.nextRun).getTime()).toBeGreaterThan(Date.now());
-    expect(env.auth.getActive()[0].usedSpending).toBe(25);
+    expect(sched.recipients.length).toBe(3);
+  });
+
+  it('TEST 12 — a normal single-recipient Payment still uses the single-payment path', async () => {
+    const env = boot({ schedules: [makeSchedule({ type: 'payment', amount: 50, total: 50, recipients: [{ addr: RCPT, amount: 50 }] })] });
+    grantScheduledAuth(env.auth);
+    await env.executor.tickNow();
+    expect(env.provider.sent.length).toBe(1);
+  });
+
+  it('TEST 13 — AI Smart Wallet MultiSend is deferred to BatchExecutionEngine (untouched here)', async () => {
+    const env = boot({ schedules: [makeSchedule({ type: 'multisend', recipients: THREE, amount: 0, total: 175, freq: 'once', createdBy: 'aiwallet' })] });
+    grantScheduledAuth(env.auth, { maxSpending: 1000, dailyLimit: null });
+    const summary = await env.executor.tickNow();
+    expect(summary.processed).toBe(0);              // aiwallet multisend is not handled by this executor
+    expect(env.provider.sent.length).toBe(0);
+  });
+
+  it('authorization is evaluated against the TOTAL value of all recipients', async () => {
+    const env = boot({ schedules: [makeSchedule({ type: 'multisend', recipients: THREE, amount: 0, total: 175, freq: 'once' })] });
+    // Authorization limit 150 < total 175 → the whole schedule is blocked up-front.
+    grantScheduledAuth(env.auth, { maxSpending: 150, dailyLimit: null });
+    await env.executor.tickNow();
+    expect(env.provider.sent.length).toBe(0);
+    expect(env.engine.getById('SCH_TEST_1').execCount).toBe(0);
+    expect(env.engine.getById('SCH_TEST_1').recipients.length).toBe(3);
+  });
+});
+
+describe('AgentScheduleExecutor — swap / bridge / crosschain schedule tx recording', () => {
+  it('records the swap transaction hash from the delegated executor', async () => {
+    const env = boot({
+      schedules: [makeSchedule({ type: 'swap', amount: 30, total: 30, swapToToken: 'EURC', recipients: [], address: '' })],
+      swapStub: async function () { return { ok: true, txHash: '0x' + 'ab'.repeat(32) }; },
+    });
+    grantScheduledAuth(env.auth, { allowedOperations: ['swap'] });
+    const summary = await env.executor.tickNow();
+    expect(summary.executed).toBe(1);
+    const sched = env.engine.getById('SCH_TEST_1');
+    expect(sched.status).toBe('Completed');
+    expect(sched.executionHistory[0].txHash).toBe('0x' + 'ab'.repeat(32));
+  });
+
+  it('records the bridge transaction hash + mint hash from the delegated executor', async () => {
+    const env = boot({
+      schedules: [makeSchedule({ type: 'bridge', amount: 30, total: 30, toNetwork: 'Base_Sepolia', recipients: [], address: '' })],
+      bridgeStub: async function () { return { ok: true, txHash: '0x' + 'cd'.repeat(32), mintTxHash: '0x' + 'ef'.repeat(32) }; },
+    });
+    grantScheduledAuth(env.auth, { allowedOperations: ['bridge'] });
+    const summary = await env.executor.tickNow();
+    expect(summary.executed).toBe(1);
+    const sched = env.engine.getById('SCH_TEST_1');
+    expect(sched.executionHistory[0].txHash).toBe('0x' + 'cd'.repeat(32));
+    expect(sched.executionHistory[0].mintTxHash).toBe('0x' + 'ef'.repeat(32));
+  });
+
+  it('passes the crosschain recipient to the delegated bridge executor', async () => {
+    let capturedRecipient = null;
+    const env = boot({
+      schedules: [makeSchedule({ type: 'crosschain', amount: 30, total: 30, toNetwork: 'Base_Sepolia', recipients: [{ addr: RCPT, amount: 30 }], address: RCPT })],
+      bridgeStub: async function (amount, domain, chainName, calldataId, srcChain, recipientAddr) {
+        capturedRecipient = recipientAddr;
+        return { ok: true, txHash: '0x' + 'cd'.repeat(32) };
+      },
+    });
+    grantScheduledAuth(env.auth, { allowedOperations: ['crosschain'] });
+    await env.executor.tickNow();
+    expect(capturedRecipient).toBe(RCPT);
+  });
+
+  it('delegated failure (ok:false) is recorded as failed and never marks Completed', async () => {
+    const env = boot({
+      schedules: [makeSchedule({ type: 'swap', amount: 30, total: 30, swapToToken: 'EURC', recipients: [], address: '' })],
+      swapStub: async function () { return { ok: false, error: 'No liquidity for USDC → EURC' }; },
+    });
+    grantScheduledAuth(env.auth, { allowedOperations: ['swap'] });
+    const summary = await env.executor.tickNow();
+    expect(summary.executed).toBe(0);
+    const sched = env.engine.getById('SCH_TEST_1');
+    expect(sched.status).not.toBe('Completed');
+  });
+
+  it('Schedule form shows + captures a recipient address for crosschain (distinct from bridge)', () => {
+    const select = srcHtml.slice(srcHtml.indexOf('function schSelectType'), srcHtml.indexOf('function scheduleCreateNew'));
+    expect(select).toContain('isCrosschain');
+    expect(select).toContain('isPayment || isLink || isMultiSend || isCrosschain');
+    const submit = srcHtml.slice(srcHtml.indexOf('function scheduleSubmit()'), srcHtml.indexOf('function schTypeLabel'));
+    expect(submit).toContain("type === 'crosschain'");
+    expect(submit).toContain('cross-chain delivery');
   });
 });
 

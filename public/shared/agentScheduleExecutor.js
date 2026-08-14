@@ -188,6 +188,8 @@
       token: meta ? meta.token : sched.token || null,
       amount: meta ? meta.amount : null,
       gasUsed: meta ? meta.gasUsed : null,
+      rows: meta ? meta.rows : null,
+      mintTxHash: meta ? meta.mintTxHash : null,
       chainId: ARC_CHAIN_ID
     });
     if (history.length > 50) history.length = 50;
@@ -210,6 +212,9 @@
   function isEligible(sched){
     if (!sched || sched.status !== 'Active' || !sched.nextRun) return false;
     if (sched.agentExecution === false) return false;
+    // AI Smart Wallet MultiSend (createdBy === 'aiwallet') is executed by the
+    // existing BatchExecutionEngine (batch contract) — never by this executor.
+    if (sched.type === 'multisend' && sched.createdBy === 'aiwallet') return false;
     if (SUPPORTED_TYPES.indexOf(sched.type) === -1 && MANUAL_TYPES.indexOf(sched.type) === -1) return false;
     return new Date(sched.nextRun).getTime() <= Date.now();
   }
@@ -463,7 +468,7 @@
     var prior = ledger[key];
     if (prior && prior.status === 'awaiting_auth') {
       if (!hasScheduledAuth()) return { status: 'awaiting_auth' };
-    } else if (prior && prior.status !== 'retry_pending') {
+    } else if (prior && prior.status !== 'retry_pending' && prior.status !== 'in_progress') {
       return { status: 'replay_blocked' };
     }
 
@@ -561,6 +566,10 @@
         return { status: 'policy_blocked', reason: pol.reason };
       }
 
+      if (sched.type === 'multisend') {
+        return await _executeMultiSendSequential(sched, key, v, provider, signer, agentAddr, startTime, attempts, defaults);
+      }
+
       var task = null;
       try {
         if (typeof ExecutionQueue !== 'undefined') {
@@ -621,7 +630,101 @@
     }
   }
 
-  /* ÔöÇÔöÇ Delegate swap/bridge/crosschain to the existing agent executors ÔöÇÔöÇ */
+  /* ── Execute a scheduled MultiSend as a SEQUENTIAL payment queue ──
+     Sends each recipient row ONE AT A TIME using the existing single-payment
+     broadcast path (_broadcastTransfer). The next row only starts after the
+     previous transaction receipt is confirmed. The on-chain batch contract is
+     NEVER used here. Per-row state is persisted in the execution ledger so an
+     interrupted run resumes without re-sending already-confirmed rows. */
+  function _emitProgress(sched, current, total, message) {
+    try {
+      if (typeof document !== 'undefined') {
+        document.dispatchEvent(new CustomEvent('AGENT_SCHEDULE_PROGRESS', { detail: { scheduleId: sched ? sched.id : null, current: current, total: total, message: message, ts: Date.now() } }));
+      }
+    } catch(e){}
+    try { if (sched && typeof schLogEntry === 'function') schLogEntry(sched.id, 'info', message); } catch(e){}
+  }
+
+  async function _executeMultiSendSequential(sched, key, v, provider, signer, agentAddr, startTime, attempts, defaults) {
+    var transfers = v.transfers;
+    var tokenInfo = v.tokenInfo;
+    var total = v.total;
+
+    // Per-row execution state — restored from a prior partial run (replay protection).
+    var prior = ledger[key];
+    var rows = (prior && Array.isArray(prior.rows) && prior.rows.length === transfers.length)
+      ? prior.rows
+      : transfers.map(function (t, i) { return { rowIndex: i, status: 'pending', to: t.to, amount: t.amount, txHash: null }; });
+
+    var confirmed = 0;
+    var spent = 0;
+    var lastHash = '';
+    var gasUsed = 0;
+
+    var task = null;
+    try {
+      if (typeof ExecutionQueue !== 'undefined') {
+        task = ExecutionQueue.enqueue({ type: 'scheduled', operation: 'scheduled:multisend', amount: total, asset: v.token, destination: transfers.length + ' recipients' });
+        ExecutionQueue.updateStatus(task.id, 'running');
+      }
+    } catch(e){}
+
+    // Sequential, one row at a time — never fires recipients concurrently.
+    for (var i = 0; i < transfers.length; i++) {
+      if (rows[i] && rows[i].status === 'completed') {
+        confirmed++;
+        spent += transfers[i].amount;
+        lastHash = rows[i].txHash || lastHash;
+        continue; // already confirmed — do not re-send
+      }
+
+      _emitProgress(sched, confirmed + 1, transfers.length, 'MultiSend: ' + (confirmed + 1) + ' / ' + transfers.length + ' — Processing recipient #' + (i + 1) + '...');
+
+      var br;
+      try {
+        br = await _broadcastTransfer(provider, signer, agentAddr, tokenInfo, transfers[i]);
+      } catch(txErr) {
+        br = { ok: false, reason: (txErr.shortMessage || txErr.message || 'broadcast error').substring(0, 120), txHash: '' };
+      }
+
+      if (!br.ok) {
+        rows[i] = { rowIndex: i, status: 'failed', to: transfers[i].to, amount: transfers[i].amount, txHash: br.txHash || null, error: br.reason };
+        var failNote = 'MultiSend recipient #' + (i + 1) + '/' + transfers.length + ' failed: ' + br.reason + (confirmed > 0 ? ' (' + confirmed + ' confirmed before failure)' : '');
+        ledger[key] = { status: 'failed', reason: failNote, ts: Date.now(), attempts: attempts, txHash: br.txHash || lastHash, rows: rows, amount: total, asset: v.token };
+        _saveLedger();
+        if (spent > 0) { try { _authz().recordUsage(v.auth.id, spent, 'scheduled:multisend', 'partial'); } catch(e){} }
+        _advanceSchedule(sched, failNote, 'failed', br.txHash || lastHash, { sender: agentAddr, recipient: transfers[i].to, token: v.token, amount: total, gasUsed: gasUsed, rows: rows });
+        if (defaults.pauseOnFailure) { try { _engine().update(sched.id, { status: 'Paused' }); } catch(e){} }
+        _recordOutcome(sched, null, spent, v.token, 'failed', br.txHash || lastHash, Date.now() - startTime, gasUsed, failNote, { sender: agentAddr, recipient: transfers[i].to, token: v.token, amount: spent, gasUsed: gasUsed });
+        try { if (task) ExecutionQueue.updateStatus(task.id, 'failed', { error: failNote, txHash: br.txHash || lastHash }); } catch(e){}
+        _notify(sched, 'failed', 'Schedule "' + sched.name + '" MultiSend failed at recipient #' + (i + 1) + '/' + transfers.length + ' — ' + confirmed + ' completed, ' + (transfers.length - confirmed - 1) + ' pending', 'error');
+        return { status: 'failed', reason: failNote, rows: rows };
+      }
+
+      confirmed++;
+      spent += transfers[i].amount;
+      lastHash = br.txHash;
+      rows[i] = { rowIndex: i, status: 'completed', to: transfers[i].to, amount: transfers[i].amount, txHash: br.txHash };
+      try { gasUsed += Number(br.receipt.gasUsed || 0); } catch(e){}
+
+      // Persist per-row progress after EVERY confirmed row (crash-safe resume).
+      ledger[key] = { status: 'in_progress', ts: Date.now(), attempts: attempts, txHash: lastHash, rows: rows, amount: total, asset: v.token };
+      _saveLedger();
+
+      _emitProgress(sched, confirmed, transfers.length, 'MultiSend: ' + confirmed + ' / ' + transfers.length);
+    }
+
+    var duration = Date.now() - startTime;
+    ledger[key] = { status: 'executed', ts: Date.now(), attempts: attempts, txHash: lastHash, amount: spent, asset: v.token, rows: rows };
+    _saveLedger();
+    _advanceSchedule(sched, 'Executed by Agent Wallet — MultiSend ' + transfers.length + '/' + transfers.length + ' recipients (' + spent.toFixed(2) + ' ' + v.token + ')', 'executed', lastHash, { sender: agentAddr, recipient: transfers.length + ' recipients', token: v.token, amount: spent, gasUsed: gasUsed, rows: rows });
+    _recordOutcome(sched, v.auth, spent, v.token, 'success', lastHash, duration, gasUsed, null, { sender: agentAddr, recipient: transfers.length + ' recipients', token: v.token, amount: spent, gasUsed: gasUsed, rows: rows });
+    try { if (task) ExecutionQueue.updateStatus(task.id, 'completed', { txHash: lastHash, result: 'success', progress: 100 }); } catch(e){}
+    _notify(sched, 'executed', 'Schedule "' + sched.name + '" MultiSend completed — ' + transfers.length + '/' + transfers.length + ' recipients processed', 'success');
+    return { status: 'executed', txHash: lastHash, rows: rows };
+  }
+
+  /* Delegate swap/bridge/crosschain to the existing agent executors */
   async function _delegateExecution(sched, key, v, startTime){
     var attempts = ((ledger[key] && ledger[key].attempts) || 0) + 1;
     var fn = null;

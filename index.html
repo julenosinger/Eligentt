@@ -7385,7 +7385,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
             <div id="sch-swap-to-token-wrap" style="display:none"><div class="swap-label">To Token</div><select id="sch-swap-to-token" class="cinput" style="color-scheme:dark"><option>USDC</option><option>EURC</option><option>cirBTC</option><option>ETH</option></select></div>
             <!-- Payment / MultiSend / Link fields -->
             <div style="grid-column:1/-1" id="sch-recipients-wrap">
-              <div class="swap-label">Recipient Address</div>
+              <div class="swap-label" id="sch-address-label">Recipient Address</div>
               <input id="sch-address" class="cinput" placeholder="0x... or leave blank for payment links"/>
             </div>
             <div style="grid-column:1/-1" id="sch-csv-wrap">
@@ -29141,7 +29141,11 @@ const ScheduleEngine = (() => {
     var now = Date.now();
     var leaseMs = ttlMs || 300000;
     var c = _execClaims[key];
-    if (c && c.executor !== executor && (now - (c.claimedAt || 0)) < leaseMs) return false;
+    // Proper mutex: block ANY re-claim (including the SAME executor running in a
+    // second tab/instance) while the lease is active. Previously the same executor
+    // could always re-claim, so two concurrent scheduler instances could both win
+    // the claim and broadcast the same scheduled operation twice.
+    if (c && (now - (c.claimedAt || 0)) < leaseMs) return false;
     _execClaims[key] = { executor: executor, claimedAt: now, leaseMs: leaseMs };
     _saveClaims();
     return true;
@@ -29195,13 +29199,19 @@ function schSelectType(type, btn){
   const isMultiSend = type === 'multisend';
   const isPayment = type === 'payment';
   const isLink = type === 'link_payment';
+  const isCrosschain = type === 'crosschain';
   document.getElementById('sch-from-network-wrap').style.display = isBridge ? '' : 'none';
   document.getElementById('sch-to-network-wrap').style.display = isBridge ? '' : 'none';
   document.getElementById('sch-swap-to-token-wrap').style.display = isSwap ? '' : 'none';
-  document.getElementById('sch-recipients-wrap').style.display = (isPayment || isLink || isMultiSend) ? '' : 'none';
+  document.getElementById('sch-recipients-wrap').style.display = (isPayment || isLink || isMultiSend || isCrosschain) ? '' : 'none';
   document.getElementById('sch-csv-wrap').style.display = isMultiSend ? '' : 'none';
   var csvImport = document.getElementById('sch-csv-import-wrap');
   if(csvImport) csvImport.style.display = isMultiSend ? '' : 'none';
+  // Crosschain mints to an explicit recipient; bridge mints to self.
+  var rcptLabel = document.getElementById('sch-address-label');
+  if(rcptLabel) rcptLabel.textContent = isCrosschain ? 'Recipient Address (cross-chain destination)' : 'Recipient Address';
+  var rcptInput = document.getElementById('sch-address');
+  if(rcptInput) rcptInput.placeholder = isCrosschain ? '0x... recipient on the destination chain' : '0x... or leave blank for payment links';
 }
 
 function scheduleCreateNew(){
@@ -29439,13 +29449,17 @@ function scheduleSubmit(){
     if(address && isAddr(address) && amount > 0){
       recipients = [{ addr: address, amount, note: name }];
     }
+  } else if(type === 'crosschain'){
+    // Crosschain mints to an explicit recipient (distinct from bridge-to-self).
+    if(!address || !isAddr(address)){ toast('Enter a valid recipient address for cross-chain delivery','error'); return; }
+    recipients = [{ addr: address, amount, note: name }];
   }
 
   // Validate minimum data
-  if((type === 'payment' || type === 'multisend' || type === 'link_payment') && !recipients.length){
+  if((type === 'payment' || type === 'multisend' || type === 'link_payment' || type === 'crosschain') && !recipients.length){
     toast('Provide a valid recipient or amount','error'); return;
   }
-  if(type !== 'payment' && type !== 'multisend' && type !== 'link_payment' && amount <= 0){
+  if(type !== 'payment' && type !== 'multisend' && type !== 'link_payment' && type !== 'crosschain' && amount <= 0){
     toast('Provide an amount','error'); return;
   }
 
@@ -29803,7 +29817,16 @@ function renderSchedules(){
           var statusLabel = h.status || '—';
           var txHash = h.txHash ? '<a href="https://testnet.arcscan.app/tx/' + h.txHash + '" target="_blank" style="color:var(--blue);text-decoration:none" title="' + h.txHash + '">' + shortAddr(h.txHash) + '</a>' : '—';
           var gas = h.gasUsed ? Number(h.gasUsed).toLocaleString() + ' gas' : '—';
-          return '<tr style="border-bottom:1px solid rgba(255,255,255,.02)"><td style="padding:3px 4px;color:var(--muted2)">' + execDate + '</td><td style="padding:3px 4px;color:#a78bfa">' + sender + '</td><td style="padding:3px 4px;color:var(--text)">' + recipient + '</td><td style="padding:3px 4px">' + token + '</td><td style="padding:3px 4px;text-align:right;color:var(--text)">' + amount + '</td><td style="padding:3px 4px;color:' + statusColor + '">' + statusLabel + '</td><td style="padding:3px 4px">' + txHash + '</td><td style="padding:3px 4px;text-align:right;color:var(--muted2)">' + gas + '</td></tr>';
+          var mainRow = '<tr style="border-bottom:1px solid rgba(255,255,255,.02)"><td style="padding:3px 4px;color:var(--muted2)">' + execDate + '</td><td style="padding:3px 4px;color:#a78bfa">' + sender + '</td><td style="padding:3px 4px;color:var(--text)">' + recipient + '</td><td style="padding:3px 4px">' + token + '</td><td style="padding:3px 4px;text-align:right;color:var(--text)">' + amount + '</td><td style="padding:3px 4px;color:' + statusColor + '">' + statusLabel + '</td><td style="padding:3px 4px">' + txHash + '</td><td style="padding:3px 4px;text-align:right;color:var(--muted2)">' + gas + '</td></tr>';
+          var rowsHtml = '';
+          if (h.rows && h.rows.length) {
+            rowsHtml = h.rows.map(function(r){
+              var rColor = r.status === 'completed' ? 'var(--green)' : r.status === 'failed' ? 'var(--red)' : 'var(--yellow)';
+              var rTx = r.txHash ? '<a href="https://testnet.arcscan.app/tx/' + r.txHash + '" target="_blank" style="color:var(--blue);text-decoration:none" title="' + r.txHash + '">' + shortAddr(r.txHash) + '</a>' : '—';
+              return '<tr style="border-bottom:1px solid rgba(255,255,255,.02);background:rgba(0,0,0,.06)"><td style="padding:3px 4px"></td><td style="padding:3px 4px"></td><td style="padding:3px 4px;color:var(--text)">↳ #' + (r.rowIndex + 1) + ' ' + shortAddr(r.to) + '</td><td style="padding:3px 4px"></td><td style="padding:3px 4px;text-align:right;color:var(--text)">' + Number(r.amount || 0).toFixed(2) + ' ' + token + '</td><td style="padding:3px 4px;color:' + rColor + '">' + r.status + '</td><td style="padding:3px 4px">' + rTx + '</td><td style="padding:3px 4px"></td></tr>';
+            }).join('');
+          }
+          return mainRow + rowsHtml;
         }).join('') +
         '</table></div></td></tr>';
     }
@@ -46749,8 +46772,7 @@ setTimeout(function() {
     // [C1 FIX] Use encrypted v2 signer via AgentWalletManager
     var signer = await _agentGetSigner();
     if(!signer){
-      return;
-      return;
+      return { ok: false, error: 'Agent signer unavailable' };
     }
 
     var provider = signer.provider;
@@ -46761,7 +46783,7 @@ setTimeout(function() {
     // Get calldata
     var calldataPlan = null;
     try { calldataPlan = _agentBuildSwapPlan(amount, tokenIn, tokenOut, 100); } catch(e){}
-    if(!calldataPlan||!calldataPlan.valid||!calldataPlan.steps.length){ _agentStateMsg(execId, 'FAILED', calldataPlan ? calldataPlan.error : 'No swap plan — check liquidity for '+tokenIn+' → '+tokenOut); return; }
+    if(!calldataPlan||!calldataPlan.valid||!calldataPlan.steps.length){ _agentStateMsg(execId, 'FAILED', calldataPlan ? calldataPlan.error : 'No swap plan — check liquidity for '+tokenIn+' → '+tokenOut); return { ok: false, error: calldataPlan ? calldataPlan.error : 'No swap plan' }; }
     _log('[agent swap] plan built: ' + calldataPlan.steps.length + ' steps, est. output: ' + (calldataPlan.estimatedOutput || 'N/A'));
 
     // Verify balance first
@@ -46773,7 +46795,7 @@ setTimeout(function() {
       var balFloat = parseFloat(ethers.formatUnits(bal, 6));
       if(balFloat < amount){
         _agentStateMsg(execId, 'FAILED', 'Insufficient balance: '+balFloat.toFixed(2)+' USDC (need '+amount+')');
-        return;
+        return { ok: false, error: 'Insufficient balance: '+balFloat.toFixed(2)+' USDC (need '+amount+')' };
       }
     } catch(e){}
 
@@ -46788,7 +46810,7 @@ setTimeout(function() {
       if(!txData||!contractAddr||!txData.calldata) continue;
 
       _agentStateMsg(execId, 'BROADCASTING', 'Step '+(i+1)+'/'+calldataPlan.steps.length+': '+step.label);
-      if (_agentStopCheck(execId)) return;
+      if (_agentStopCheck(execId)) return { ok: false, error: 'Stopped by user' };
 
       try {
         var gasParams = await _agentGetGasParams();
@@ -46806,10 +46828,10 @@ setTimeout(function() {
           maxPriorityFeePerGas: ethers.toBeHex(gasParams.maxPriorityFeePerGas)
         };
 
-        if(!_agentPreValidate(execId, 'swap', rawTx.maxFeePerGas, rawTx.gasLimit)) return;
+        if(!_agentPreValidate(execId, 'swap', rawTx.maxFeePerGas, rawTx.gasLimit)) return { ok: false, error: 'Pre-execution validation failed' };
         // [C2 FIX] TOCTOU: re-validate swap authorization immediately before signing
         var swapRecheck = _agentRevalidateAuth('swap', amount, tokenIn);
-        if(!swapRecheck.ok){ _agentStateMsg(execId, 'REJECTED', swapRecheck.reason); return; }
+        if(!swapRecheck.ok){ _agentStateMsg(execId, 'REJECTED', swapRecheck.reason); return { ok: false, error: swapRecheck.reason }; }
         var signedTx = await signer.signTransaction(rawTx);
         var txHash = await provider.send('eth_sendRawTransaction', [signedTx]);
         lastTxHash = txHash;
@@ -46825,7 +46847,7 @@ setTimeout(function() {
         else if(/insufficient/i.test(eMsg)) _agentStateMsg(execId, 'FAILED', 'Insufficient funds');
         else if(/nonce/i.test(eMsg)) _agentStateMsg(execId, 'FAILED', 'Nonce conflict');
         else _agentStateMsg(execId, 'FAILED', eMsg);
-        return;
+        return { ok: false, error: eMsg };
       }
 
       // ⏳ Wait for confirmation
@@ -46835,13 +46857,13 @@ setTimeout(function() {
         lastReceipt = await provider.waitForTransaction(txHash, 1, 60000);
       } catch(waitErr){
         _agentStateMsg(execId, 'DROPPED', 'Tx not confirmed within 60s');
-        return;
+        return { ok: false, error: 'Tx not confirmed within 60s' };
       }
 
       if(!lastReceipt || lastReceipt.status !== 1){
         _agentStateMsg(execId, 'REVERTED',
           'Step '+(i+1)+' reverted on-chain. <a href="https://testnet.arcscan.app/tx/'+txHash+'" target="_blank" style="color:#ef4444">View on ArcScan ↗</a>');
-        return;
+        return { ok: false, error: 'Step '+(i+1)+' reverted on-chain' };
       }
 
       _addAgentResultMsg(
@@ -46884,6 +46906,8 @@ setTimeout(function() {
         c.scrollTop=c.scrollHeight;
       }
     }, 800);
+
+    return { ok: true, txHash: lastTxHash };
   }
 
   async function _agentExecuteBridge(amount, destDomain, destChainName, calldataId, sourceChainId, recipientAddr){
@@ -46912,8 +46936,7 @@ setTimeout(function() {
     // [C1 FIX] Use encrypted v2 signer via AgentWalletManager
     var signer = await _agentGetSigner();
     if(!signer){
-      return;
-      return;
+      return { ok: false, error: 'Agent signer unavailable' };
     }
 
     var provider = signer.provider;
@@ -46932,7 +46955,7 @@ setTimeout(function() {
     if(!calldataPlan||!calldataPlan.steps){
       if(typeof ChainSimulator !== 'undefined') calldataPlan = ChainSimulator.prepareFullBridge(amount, destDomain, mintRecipient);
     }
-    if(!calldataPlan||!calldataPlan.steps){ _agentStateMsg(execId, 'FAILED', 'No bridge calldata plan'); return; }
+    if(!calldataPlan||!calldataPlan.steps){ _agentStateMsg(execId, 'FAILED', 'No bridge calldata plan'); return { ok: false, error: 'No bridge calldata plan' }; }
 
     try {
       var balAbi = ['function balanceOf(address) view returns (uint256)'];
@@ -46941,7 +46964,7 @@ setTimeout(function() {
       var balFloat = parseFloat(ethers.formatUnits(bal, 6));
       if(balFloat < amount){
         _agentStateMsg(execId, 'FAILED', 'Insufficient balance: '+balFloat.toFixed(2)+' USDC (need '+amount+')');
-        return;
+        return { ok: false, error: 'Insufficient balance: '+balFloat.toFixed(2)+' USDC (need '+amount+')' };
       }
     } catch(e){}
 
@@ -46958,7 +46981,7 @@ setTimeout(function() {
       if(!txData||!contractAddr||!txData.calldata) continue;
 
       _agentStateMsg(execId, 'BROADCASTING', 'Step '+(i+1)+'/'+calldataPlan.steps.length+': '+step.label);
-      if (_agentStopCheck(execId)) return;
+      if (_agentStopCheck(execId)) return { ok: false, error: 'Stopped by user' };
 
       // Rebuild calldata with correct mintRecipient if this is the depositForBurn step
       var calldata = txData.calldata;
@@ -46991,7 +47014,7 @@ setTimeout(function() {
           maxPriorityFeePerGas: ethers.toBeHex(gasParams.maxPriorityFeePerGas)
         };
 
-        if(!_agentPreValidate(execId, 'bridge', rawTx.maxFeePerGas, rawTx.gasLimit)) return;
+        if(!_agentPreValidate(execId, 'bridge', rawTx.maxFeePerGas, rawTx.gasLimit)) return { ok: false, error: 'Pre-execution validation failed' };
         var signedTx = await signer.signTransaction(rawTx);
         var txHash = await provider.send('eth_sendRawTransaction', [signedTx]);
         lastTxHash = txHash;
@@ -47007,16 +47030,16 @@ setTimeout(function() {
         else if(/insufficient/i.test(eMsg)) _agentStateMsg(execId, 'FAILED', 'Insufficient funds');
         else if(/nonce/i.test(eMsg)) _agentStateMsg(execId, 'FAILED', 'Nonce conflict');
         else _agentStateMsg(execId, 'FAILED', eMsg);
-        return;
+        return { ok: false, error: eMsg };
       }
 
       _agentStateMsg(execId, 'CONFIRMING', 'Step '+(i+1)+' awaiting block...');
       try { lastReceipt = await provider.waitForTransaction(txHash, 1, 60000); }
-      catch(waitErr){ _agentStateMsg(execId, 'DROPPED', 'Tx not confirmed within 60s'); return; }
+      catch(waitErr){ _agentStateMsg(execId, 'DROPPED', 'Tx not confirmed within 60s'); return { ok: false, error: 'Tx not confirmed within 60s' }; }
 
       if(!lastReceipt || lastReceipt.status !== 1){
         _agentStateMsg(execId, 'REVERTED', 'Step '+(i+1)+' reverted on-chain.');
-        return;
+        return { ok: false, error: 'Step '+(i+1)+' reverted on-chain' };
       }
       _addAgentResultMsg(
         '<div style="font-size:10px"><span style="color:#22c55e">✓ Step '+(i+1)+' confirmed</span><br>'+
@@ -47091,7 +47114,7 @@ setTimeout(function() {
         if(destCctpCfg && destCctpCfg.messageTransmitter && destCctpCfg.rpc){
           var destProvider = new ethers.JsonRpcProvider(destCctpCfg.rpc);
           var sessionKey = (typeof AgentWalletManager !== 'undefined') ? AgentWalletManager.getSessionKey() : null;
-          if (!sessionKey) { _agentStateMsg(execId, 'FAILED', 'Agent wallet not available'); return; }
+          if (!sessionKey) { _agentStateMsg(execId, 'FAILED', 'Agent wallet not available'); return { ok: false, error: 'Agent wallet not available' }; }
           var destSigner = new ethers.Wallet(sessionKey, destProvider);
           var destMtAbi = ['function receiveMessage(bytes message, bytes attestation) returns (bool)'];
           var destMtContract = new ethers.Contract(destCctpCfg.messageTransmitter, destMtAbi, destSigner);
@@ -47161,6 +47184,8 @@ setTimeout(function() {
         c.scrollTop=c.scrollHeight;
       }
     }, 800);
+
+    return { ok: true, txHash: lastTxHash, mintTxHash: mintTxHash };
   }
 
   async function _agentExecuteTurboBridge(amount, fromChainId, fromChainName, toChainName, calldataId){
@@ -47201,7 +47226,7 @@ setTimeout(function() {
     if(!calldataPlan||!calldataPlan.steps){
       if(typeof ChainSimulator !== 'undefined') calldataPlan = ChainSimulator.prepareFullBridge(amount, arcDomain, mintRecipient);
     }
-    if(!calldataPlan||!calldataPlan.steps){ _agentStateMsg(execId, 'FAILED', 'No bridge calldata plan'); return; }
+    if(!calldataPlan||!calldataPlan.steps){ _agentStateMsg(execId, 'FAILED', 'No bridge calldata plan'); return { ok: false, error: 'No bridge calldata plan' }; }
 
     try {
       var balAbi = ['function balanceOf(address) view returns (uint256)'];
@@ -47246,7 +47271,7 @@ setTimeout(function() {
       try {
         var nonce = await provider.send('eth_getTransactionCount', [agentAddr, 'pending']);
         var rawTx = { type:2, chainId:chainId, to:contractAddr, data:calldata, value:'0x0', gasLimit:ethers.toBeHex(gasParams.gasLimit), nonce:nonce, maxFeePerGas:ethers.toBeHex(gasParams.maxFeePerGas), maxPriorityFeePerGas:ethers.toBeHex(gasParams.maxPriorityFeePerGas) };
-        if(!_agentPreValidate(execId, 'bridge', rawTx.maxFeePerGas, rawTx.gasLimit)) return;
+        if(!_agentPreValidate(execId, 'bridge', rawTx.maxFeePerGas, rawTx.gasLimit)) return { ok: false, error: 'Pre-execution validation failed' };
         var signedTx = await signer.signTransaction(rawTx);
         var txHash = await provider.send('eth_sendRawTransaction', [signedTx]);
         lastTxHash = txHash;
@@ -47509,8 +47534,7 @@ setTimeout(function() {
     // [C1 FIX] Use encrypted v2 signer via AgentWalletManager
     var signer = await _agentGetSigner();
     if(!signer){
-      return;
-      return;
+      return { ok: false, error: 'Agent signer unavailable' };
     }
 
     var provider = signer.provider;
@@ -47518,11 +47542,11 @@ setTimeout(function() {
 
     if(!Array.isArray(recipients) || !Array.isArray(amounts) || recipients.length !== amounts.length){
       _agentStateMsg(execId, 'FAILED', 'Invalid recipients/amounts arrays');
-      return;
+      return { ok: false, error: 'Invalid recipients/amounts arrays' };
     }
     var count = recipients.length;
-    if(count === 0){ _agentStateMsg(execId, 'FAILED', 'No recipients provided'); return; }
-    if(count > 256){ _agentStateMsg(execId, 'FAILED', 'Batch too large (max 256)'); return; }
+    if(count === 0){ _agentStateMsg(execId, 'FAILED', 'No recipients provided'); return { ok: false, error: 'No recipients provided' }; }
+    if(count > 256){ _agentStateMsg(execId, 'FAILED', 'Batch too large (max 256)'); return { ok: false, error: 'Batch too large (max 256)' }; }
 
     _agentStateMsg(execId, 'PLANNING', agentAddr.substring(0,8)+'... Batch '+count+' recipients · '+token);
 
@@ -47541,7 +47565,7 @@ setTimeout(function() {
       var balFloat = parseFloat(ethers.formatUnits(bal, decimals));
       if(balFloat < totalAmt){
         _agentStateMsg(execId, 'FAILED', 'Insufficient balance: '+balFloat.toFixed(2)+' '+token+' (need '+totalAmt+')');
-        return;
+        return { ok: false, error: 'Insufficient balance: '+balFloat.toFixed(2)+' '+token+' (need '+totalAmt+')' };
       }
     } catch(e){}
 
@@ -47565,20 +47589,20 @@ setTimeout(function() {
         maxFeePerGas: ethers.toBeHex(gasParams.maxFeePerGas),
         maxPriorityFeePerGas: ethers.toBeHex(gasParams.maxPriorityFeePerGas)
       };
-      if(!_agentPreValidate(execId, 'multisend', rawTx.maxFeePerGas, rawTx.gasLimit)) return;
+      if(!_agentPreValidate(execId, 'multisend', rawTx.maxFeePerGas, rawTx.gasLimit)) return { ok: false, error: 'Pre-execution validation failed (approve)' };
       var signedTx = await signer.signTransaction(rawTx);
       var txHash = await provider.send('eth_sendRawTransaction', [signedTx]);
       lastTxHash = txHash;
       _addAgentResultMsg('<div style="font-size:10px"><span style="color:#06F7E9">Step 1: Approve submitted</span><br><code style="font-size:8px;color:#a78bfa">'+txHash+'</code></div>', 'pending');
     } catch(sendErr){
       _agentStateMsg(execId, 'FAILED', (sendErr.message||String(sendErr)).substring(0,150));
-      return;
+      return { ok: false, error: (sendErr.message||String(sendErr)).substring(0,150) };
     }
 
     _agentStateMsg(execId, 'CONFIRMING', 'Step 1 awaiting block...');
     try { lastReceipt = await provider.waitForTransaction(lastTxHash, 1, 60000); }
-    catch(e){ _agentStateMsg(execId, 'DROPPED', 'Not confirmed'); return; }
-    if(!lastReceipt || lastReceipt.status !== 1){ _agentStateMsg(execId, 'REVERTED', 'Approve reverted'); return; }
+    catch(e){ _agentStateMsg(execId, 'DROPPED', 'Not confirmed'); return { ok: false, error: 'Approve not confirmed' }; }
+    if(!lastReceipt || lastReceipt.status !== 1){ _agentStateMsg(execId, 'REVERTED', 'Approve reverted'); return { ok: false, error: 'Approve reverted' }; }
     _addAgentResultMsg('<div style="font-size:10px"><span style="color:#22c55e">&#x2713; Step 1 confirmed</span></div>', 'success');
 
     // Step 2: Multi-send
@@ -47600,20 +47624,20 @@ setTimeout(function() {
         maxFeePerGas: ethers.toBeHex(gasParams2.maxFeePerGas),
         maxPriorityFeePerGas: ethers.toBeHex(gasParams2.maxPriorityFeePerGas)
       };
-      if(!_agentPreValidate(execId, 'multisend', rawTx2.maxFeePerGas, rawTx2.gasLimit)) return;
+      if(!_agentPreValidate(execId, 'multisend', rawTx2.maxFeePerGas, rawTx2.gasLimit)) return { ok: false, error: 'Pre-execution validation failed (multisend)' };
       var signedTx2 = await signer.signTransaction(rawTx2);
       var txHash2 = await provider.send('eth_sendRawTransaction', [signedTx2]);
       lastTxHash = txHash2;
       _addAgentResultMsg('<div style="font-size:10px"><span style="color:#06F7E9">Step 2: Multi-send submitted</span><br><code style="font-size:8px;color:#a78bfa">'+txHash2+'</code><br><a href="https://testnet.arcscan.app/tx/'+txHash2+'" target="_blank" style="color:#a78bfa;font-size:8px">View on ArcScan →</a></div>', 'pending');
     } catch(sendErr){
       _agentStateMsg(execId, 'FAILED', (sendErr.message||String(sendErr)).substring(0,150));
-      return;
+      return { ok: false, error: (sendErr.message||String(sendErr)).substring(0,150) };
     }
 
     _agentStateMsg(execId, 'CONFIRMING', 'Step 2 awaiting block...');
     try { lastReceipt = await provider.waitForTransaction(lastTxHash, 1, 60000); }
-    catch(e){ _agentStateMsg(execId, 'DROPPED', 'Not confirmed'); return; }
-    if(!lastReceipt || lastReceipt.status !== 1){ _agentStateMsg(execId, 'REVERTED', 'Multi-send reverted'); return; }
+    catch(e){ _agentStateMsg(execId, 'DROPPED', 'Not confirmed'); return { ok: false, error: 'Multi-send not confirmed' }; }
+    if(!lastReceipt || lastReceipt.status !== 1){ _agentStateMsg(execId, 'REVERTED', 'Multi-send reverted'); return { ok: false, error: 'Multi-send reverted' }; }
 
     _agentStateMsg(execId, 'COMPLETED');
     var duration = Date.now() - startTime;
@@ -47642,6 +47666,8 @@ setTimeout(function() {
         c.scrollTop=c.scrollHeight;
       }
     }, 800);
+
+    return { ok: true, txHash: lastTxHash };
   }
 
   // ══════════════════════════════════════════════════════════
@@ -47768,8 +47794,11 @@ setTimeout(function() {
 
   function _agentCheckSchedules(){
     if(!AGENT_SCHEDULER_ENABLED) return;
-    // Delegate to AgentScheduleExecutor — single source of truth for schedule execution
+    // Delegate to AgentScheduleExecutor — single source of truth for schedule execution.
+    // Also used for immediate pickup (AI Smart Wallet instant intents). tickNow() is
+    // guarded by _ticking, so a call here never races the periodic 30s loop.
     if(typeof AgentScheduleExecutor !== 'undefined'){
+      AgentScheduleExecutor.start();
       AgentScheduleExecutor.tickNow().catch(function(){});
       return;
     }
@@ -47777,13 +47806,16 @@ setTimeout(function() {
 
   function _agentStartScheduler(){
     if(_agentSchedulerInterval) return;
-    console.log('[AgentScheduler] Started via AgentScheduleExecutor — checking every 60s');
+    console.log('[AgentScheduler] Started via AgentScheduleExecutor — single 30s tick loop');
+    // AgentScheduleExecutor.start() owns the periodic 30s interval. A separate 60s
+    // interval here would create a second concurrent trigger path for the same
+    // scheduler, so it is intentionally not created.
     if(typeof AgentScheduleExecutor !== 'undefined') AgentScheduleExecutor.start();
-    _agentSchedulerInterval = setInterval(_agentCheckSchedules, 60000);
+    _agentSchedulerInterval = 1; // started marker (no separate interval)
   }
 
   function _agentStopScheduler(){
-    if(_agentSchedulerInterval){ clearInterval(_agentSchedulerInterval); _agentSchedulerInterval = null; }
+    _agentSchedulerInterval = null;
     console.log('[AgentScheduler] Stopped');
   }
 

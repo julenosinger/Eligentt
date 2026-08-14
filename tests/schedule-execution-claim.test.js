@@ -63,6 +63,15 @@ describe('ScheduleEngine execution claim (idempotency)', () => {
     expect(engine.isExecutionClaimed(KEY)).toBe(true);
   });
 
+  it('the SAME executor cannot re-claim a held slot (multi-tab protection)', () => {
+    const { engine } = makeEngine();
+    engine.claimExecution(KEY, 'agent_schedule_executor');
+    // A second tab/instance using the same executor name must be rejected too —
+    // otherwise two tabs would both broadcast the same scheduled operation.
+    expect(engine.claimExecution(KEY, 'agent_schedule_executor')).toBe(false);
+    expect(engine.isExecutionClaimed(KEY)).toBe(true);
+  });
+
   it('release only works for the owner', () => {
     const { engine } = makeEngine();
     engine.claimExecution(KEY, 'agent_schedule_executor');
