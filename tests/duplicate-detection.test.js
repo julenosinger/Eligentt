@@ -187,3 +187,55 @@ describe('duplicate resolution', () => {
     expect(c.findDuplicateGroups()).toHaveLength(0);
   });
 });
+
+describe('contract-address detection (batch payments)', () => {
+  const code2 = [
+    extractFunction(src, 'normalizeRecipientAddr'),
+    extractArrow(src, 'isAddr'),
+    extractFunction(src, '_contractProvider'),
+    'async ' + extractFunction(src, 'detectContractAddresses'),
+    extractFunction(src, 'markContractRecipients'),
+  ].join('\n');
+
+  function makeCtx2(rows, provider) {
+    const context = { recipients: [], provider, signer: { provider }, getCachedProvider: () => provider };
+    vm.createContext(context);
+    vm.runInContext(code2, context);
+    rows.forEach(r => context.recipients.push(r));
+    return context;
+  }
+
+  it('flags a recipient that is a smart contract (has bytecode)', async () => {
+    const provider = { getCode: async (addr) => (addr.toLowerCase() === A.toLowerCase() ? '0x6000600055' : '0x') };
+    const c = makeCtx2([{ addr: A, chainId: 'Arc_Testnet' }], provider);
+    const contracts = await c.detectContractAddresses();
+    expect(contracts).toContain(A.toLowerCase());
+    c.markContractRecipients(contracts);
+    expect(c.recipients[0]._isContract).toBe(true);
+  });
+
+  it('does NOT flag a regular wallet (no bytecode) as contract', async () => {
+    const provider = { getCode: async () => '0x' };
+    const c = makeCtx2([{ addr: B, chainId: 'Arc_Testnet' }], provider);
+    const contracts = await c.detectContractAddresses();
+    expect(contracts).toEqual([]);
+    c.markContractRecipients(contracts);
+    expect(c.recipients[0]._isContract).toBeFalsy();
+  });
+
+  it('ignores invalid/non-address rows when detecting contracts', async () => {
+    const provider = { getCode: async () => '0x6000600055' };
+    const c = makeCtx2([{ addr: 'not-an-address', chainId: 'Arc_Testnet' }], provider);
+    const contracts = await c.detectContractAddresses();
+    expect(contracts).toEqual([]);
+  });
+
+  it('deduplicates repeated addresses before on-chain contract lookup', async () => {
+    let getCodeCalls = 0;
+    const provider = { getCode: async () => { getCodeCalls++; return '0x6000600055'; } };
+    const c = makeCtx2([{ addr: A, chainId: 'Arc_Testnet' }, { addr: A, chainId: 'Arc_Testnet' }], provider);
+    const contracts = await c.detectContractAddresses();
+    expect(contracts).toEqual([A.toLowerCase()]);
+    expect(getCodeCalls).toBe(1);
+  });
+});

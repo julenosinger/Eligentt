@@ -774,6 +774,12 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
   border:1px solid rgba(245,158,11,.35);
   margin-left:4px;
 }
+.ms-status-badge.contract{
+  background:rgba(167,139,250,.12);
+  color:var(--purple);
+  border:1px solid rgba(167,139,250,.35);
+  margin-left:4px;
+}
 .ms-row-remove{
   width:22px; height:22px; border-radius:4px;
   border:1px solid rgba(239,68,68,.15);
@@ -1236,7 +1242,7 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
 @media(max-width:768px){
   /* Full-screen, self-contained scroll container (independent of the app-shell
      scroll chain, so Open Orders / Trade History / Funds are always reachable). */
-  #page-swap{position:fixed !important;left:0 !important;right:0 !important;top:0 !important;bottom:0 !important;width:100% !important;height:100vh;height:100dvh;overflow-y:auto !important;overflow-x:hidden !important;-webkit-overflow-scrolling:touch;overscroll-behavior-y:contain;background:#090b0e}
+  #page-swap{position:fixed !important;left:0 !important;right:0 !important;top:0 !important;bottom:0 !important;width:100% !important;height:100vh;height:100dvh;overflow-y:auto !important;overflow-x:hidden !important;overscroll-behavior-y:contain;background:#090b0e}
   /* Terminal's own header becomes the mobile top bar (hamburger + network + wallet). */
   .st-header{display:flex !important;height:40px;padding:0 8px;gap:8px}
   .st-header .st-settings-btn{width:34px;height:34px;font-size:16px}
@@ -1283,7 +1289,7 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
   .st-swap-quick .st-swap-max{padding:2px 7px;font-size:7.5px}
   /* In-flow history sections — generous bottom padding gives scroll room so the
      history clears the fixed sheet + bottom nav, and scrolling works on any screen. */
-  .st-mobile-history{display:flex;flex-direction:column;gap:8px;padding:0 10px;margin-top:10px;padding-bottom:calc(56vh + 130px + env(safe-area-inset-bottom,0px))}
+  .st-mobile-history{display:flex;flex-direction:column;flex-shrink:0;gap:8px;padding:0 10px;margin-top:10px;padding-bottom:calc(56vh + 130px + env(safe-area-inset-bottom,0px))}
   .st-mh-section{background:var(--surface,#0d0f17);border:1px solid var(--border,#1a1f2e);border-radius:10px;overflow:hidden}
   .st-mh-section-head{display:flex;align-items:center;gap:8px;padding:12px 14px;background:rgba(255,255,255,.02);border-bottom:1px solid rgba(255,255,255,.04);cursor:pointer;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none}
   .st-mh-section-head i{font-size:15px;color:var(--muted2);flex-shrink:0}
@@ -18223,6 +18229,77 @@ function duplicateSummary() {
   }).join('\n');
 }
 
+// ── Contract-address detection ─────────────────────────────
+// Recognizes when a recipient "address" is actually a smart contract (has
+// on-chain bytecode), not a regular wallet. Such recipients may reject the
+// transfer or behave unexpectedly, so they are flagged distinctly from
+// invalid/duplicate rows.
+function _contractProvider(){
+  try {
+    if (typeof signer !== 'undefined' && signer && signer.provider) return signer.provider;
+  } catch(e){}
+  try {
+    if (typeof provider !== 'undefined' && provider && typeof provider.getCode === 'function') return provider;
+  } catch(e){}
+  try {
+    if (typeof getCachedProvider === 'function') return getCachedProvider('https://rpc.testnet.arc.network');
+  } catch(e){}
+  return null;
+}
+
+async function detectContractAddresses(){
+  var prov = _contractProvider();
+  if (!prov || typeof prov.getCode !== 'function') return [];
+  var uniq = [];
+  var seen = {};
+  recipients.forEach(function(r){
+    if (!isAddr(r.addr)) return;
+    var norm = normalizeRecipientAddr(r.addr);
+    if (seen[norm]) return;
+    seen[norm] = true;
+    uniq.push(r.addr);
+  });
+  var contracts = [];
+  for (var i = 0; i < uniq.length; i++) {
+    try {
+      var code = await prov.getCode(uniq[i]);
+      if (code && code !== '0x') contracts.push(normalizeRecipientAddr(uniq[i]));
+    } catch(e) { /* treat as non-contract on RPC error */ }
+  }
+  return contracts;
+}
+
+function markContractRecipients(contracts){
+  var set = {};
+  (contracts || []).forEach(function(n){ set[n] = true; });
+  recipients.forEach(function(r){
+    r._isContract = !!(r.addr && isAddr(r.addr) && set[normalizeRecipientAddr(r.addr)]);
+  });
+}
+
+var _contractCheckTimer = null;
+var _lastContractSig = null;
+function _recipientContractSig(){
+  return recipients.map(function(r){
+    return (r.chainId || 'Arc_Testnet') + '::' + normalizeRecipientAddr(r.addr);
+  }).join('|');
+}
+function scheduleContractCheck(){
+  if (_contractCheckTimer) clearTimeout(_contractCheckTimer);
+  _contractCheckTimer = setTimeout(function(){
+    _contractCheckTimer = null;
+    runContractCheck();
+  }, 400);
+}
+async function runContractCheck(){
+  var sig = _recipientContractSig();
+  if (sig === _lastContractSig) return; // already checked this exact recipient set
+  _lastContractSig = sig;
+  var contracts = await detectContractAddresses();
+  markContractRecipients(contracts);
+  renderTable(true);
+}
+
 // ── Color palette for recipient avatars ────────────────────
 const RCPT_COLORS = ['#4f8ef7','#a78bfa','#22c55e','#f59e0b','#ef4444','#2dd4bf','#ec4899','#6366f1','#14b8a6','#f97316'];
 
@@ -18230,7 +18307,7 @@ function renderRecipients(){
   try { if(typeof renderTable === 'function') renderTable(); } catch(e){ console.warn('[Bridge] renderRecipients fallback:', e.message); }
 }
 
-function renderTable(){
+function renderTable(skipContractCheck){
   const tbody = document.getElementById('tbody');
   const empty = document.getElementById('ms-empty');
   if(!tbody) return;
@@ -18304,7 +18381,7 @@ function renderTable(){
       <td><input class="ms-table-input amount" value="${escHtml(r.amount)}" onchange="recipients[${i}].amount=this.value;updateStats()" onfocus="this.select()"/></td>
       <td><input class="ms-table-input note" value="${escHtml(r.note||'')}" placeholder="Note" onchange="recipients[${i}].note=this.value"/></td>
       <td><span class="ms-route-badge ${routeClass}">${routeLabel}</span></td>
-      <td><span class="ms-status-badge ${statusClass}">${statusText}</span>${duplicateIdx.has(i) ? '<span class="ms-status-badge duplicate">⚠ Duplicate</span>' : ''}</td>
+      <td><span class="ms-status-badge ${statusClass}">${statusText}</span>${duplicateIdx.has(i) ? '<span class="ms-status-badge duplicate">⚠ Duplicate</span>' : ''}${r._isContract ? '<span class="ms-status-badge contract">⚠ Contract</span>' : ''}</td>
       <td><button class="ms-row-remove" onclick="removeRow(${i})" title="Remove">×</button></td>`;
 
     tr.innerHTML = cells;
@@ -18313,6 +18390,7 @@ function renderTable(){
 
   updateStats();
   updateBottomBar();
+  if(!skipContractCheck) scheduleContractCheck();
 }
 function removeRow(i){recipients.splice(i,1);saveRecipients();renderTable();}
 function addRow(){
@@ -18557,7 +18635,17 @@ function clearBatches(){
   ['q-tot','q-suc','q-pen','q-fai'].forEach(id=>{const e=document.getElementById(id);if(e)e.textContent='0';});
   toast('History cleared','info');
 }
-function validateAll(){const bad=recipients.filter(r=>!isAddr(r.addr)&&!isEns(r.addr));const dups=findDuplicateGroups();if(bad.length)toast(`${bad.length} invalid address(es)`,'warning');else if(dups.length)toast(`All addresses valid — ${dups.length} duplicate group(s): ${duplicateSummary().replace(/\n/g,' · ')}`,'warning');else toast('All addresses valid!','success');renderTable();}
+async function validateAll(){
+  const bad = recipients.filter(r=>!isAddr(r.addr)&&!isEns(r.addr));
+  const dups = findDuplicateGroups();
+  const contracts = await detectContractAddresses();
+  markContractRecipients(contracts);
+  if(bad.length) toast(`${bad.length} invalid address(es)`,'warning');
+  else if(contracts.length) toast(`${contracts.length} contract address(es) detected — they may not be regular wallets. Verify before sending.`,'warning');
+  else if(dups.length) toast(`All addresses valid — ${dups.length} duplicate group(s): ${duplicateSummary().replace(/\n/g,' · ')}`,'warning');
+  else toast('All addresses valid!','success');
+  renderTable();
+}
 
 let wfSendInterval = null;
 function updateWorkflowStep(step, state, opts = {}) {
@@ -18716,6 +18804,15 @@ async function openModal(){
   if(findDuplicateGroups().length){toast('Duplicate recipients detected. Resolve duplicates before sending.','error');return;}
   const valid=recipients.filter(r=>(isAddr(r.addr)||isEns(r.addr))&&parseFloat(r.amount)>0);
   if(!valid.length){toast('No valid recipients with amount > 0','error');return;}
+
+  // Recognize recipients that are smart contracts (not regular wallets).
+  try {
+    const contracts = await detectContractAddresses();
+    markContractRecipients(contracts);
+    if(contracts.length){
+      toast(`${contracts.length} recipient(s) are smart contracts (not regular wallets) — verify before sending.`, 'warning');
+    }
+  } catch(_c){}
 
   // ── Real gas estimation ──
   try {
@@ -36651,7 +36748,7 @@ function toggleMobileRoute() {
     var top = sheet.getBoundingClientRect().top;
     sheet.style.top = ''; sheet.style.bottom = '';
     sheet.style.transition = '';
-    if (top > window.innerHeight * 0.68) stSheetCollapse();
+    if (top > window.innerHeight * 0.60) stSheetCollapse();
     else if (top > window.innerHeight * 0.32) stSheetHalf();
     else stSheetFull();
   }
