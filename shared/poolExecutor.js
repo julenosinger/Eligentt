@@ -1,21 +1,25 @@
 /**
- * Elligentt Pool Executor — safe DIRECT-route swap execution (Phase 6).
+ * Elligentt Pool Executor — safe DIRECT-route swap execution (Phase 6.1).
  * =============================================================================
- * An ORCHESTRATOR for direct (single-pool) swaps. It performs NO financial math:
- *   - PoolRouter  → route discovery / ranking
- *   - PoolEngine  → quote, price impact, utilization (canonical)
- *   - SwapMath    → minOut (canonical slippage)
+ * An ORCHESTRATOR for direct (single-pool) swaps. Performs NO financial math:
+ *   PoolRouter → route discovery/ranking
+ *   PoolEngine → quote / price impact / utilization (canonical)
+ *   SwapMath   → minOut (canonical slippage)
  *
- * Guarantees:
- *   - DIRECT routes only (multi-hop → MULTI_HOP_NOT_SUPPORTED)
- *   - fresh-state re-validation before transaction creation
- *   - quote expiration (expiresAt)
- *   - explicit error codes (never a generic "swap failed")
- *   - no automatic transaction retry (duplicate-tx protection)
- *   - receipt.status === 1 required before success
+ * Phase 6.1 hardening guarantees:
+ *   - FINAL quote is produced (after a fresh state refresh) BEFORE user confirms
+ *   - a lightweight FINAL pre-submit guard re-validates wallet/chain/pool/token/
+ *     amount/quote-expiry/state/allowance/balance WITHOUT silently modifying the
+ *     user-confirmed parameters (material change → ROUTE_STATE_CHANGED abort)
+ *   - balance + allowance are re-read immediately before approval/submission
+ *   - approval receipt requires status === 1, then allowance is re-read
+ *   - swap receipt requires status === 1
+ *   - no automatic transaction retry (duplicate-tx protection; unknown state is
+ *     surfaced as TRANSACTION_STATUS_UNKNOWN, never blindly re-submitted)
+ *   - post-swap balance delta + actual Swap-event output are captured (BigInt);
+ *     actual output is never inferred from the stale quote
  *
- * The executor is wallet-agnostic: it consumes an injected `adapter` for all
- * wallet / provider operations, so the existing user-wallet flow is preserved.
+ * Wallet-agnostic: consumes an injected `adapter` for all wallet/provider ops.
  *
  * Attached to: window.PoolExecutor
  */
@@ -24,6 +28,8 @@
 
   var ERRORS = {
     WALLET_NOT_CONNECTED: 'WALLET_NOT_CONNECTED',
+    WRONG_NETWORK: 'WRONG_NETWORK',
+    WALLET_CHANGED: 'WALLET_CHANGED',
     INSUFFICIENT_BALANCE: 'INSUFFICIENT_BALANCE',
     INSUFFICIENT_ALLOWANCE: 'INSUFFICIENT_ALLOWANCE',
     POOL_NOT_FOUND: 'POOL_NOT_FOUND',
@@ -35,12 +41,22 @@
     QUOTE_UNAVAILABLE: 'QUOTE_UNAVAILABLE',
     POOL_EXECUTION_UNAVAILABLE: 'POOL_EXECUTION_UNAVAILABLE',
     INVALID_TOKEN_ORDER: 'INVALID_TOKEN_ORDER',
+    APPROVAL_TRANSACTION_REVERTED: 'APPROVAL_TRANSACTION_REVERTED',
+    APPROVAL_INSUFFICIENT: 'APPROVAL_INSUFFICIENT',
     SWAP_TRANSACTION_REVERTED: 'SWAP_TRANSACTION_REVERTED',
     SWAP_RECEIPT_UNAVAILABLE: 'SWAP_RECEIPT_UNAVAILABLE',
+    TRANSACTION_STATUS_UNKNOWN: 'TRANSACTION_STATUS_UNKNOWN',
     POST_SWAP_VERIFICATION_FAILED: 'POST_SWAP_VERIFICATION_FAILED',
+    POST_SWAP_OUTPUT_UNAVAILABLE: 'POST_SWAP_OUTPUT_UNAVAILABLE',
     RPC_ERROR: 'RPC_ERROR',
-    TRANSACTION_DUPLICATE_RISK: 'TRANSACTION_DUPLICATE_RISK',
     USER_REJECTED: 'USER_REJECTED',
+  };
+
+  var STATES = {
+    IDLE: 'IDLE', QUOTING: 'QUOTING', READY: 'READY', CONFIRMING: 'CONFIRMING',
+    APPROVING: 'APPROVING', APPROVAL_CONFIRMING: 'APPROVAL_CONFIRMING',
+    SWAPPING: 'SWAPPING', SWAP_CONFIRMING: 'SWAP_CONFIRMING',
+    VERIFYING: 'VERIFYING', SUCCESS: 'SUCCESS', FAILED: 'FAILED', UNKNOWN: 'UNKNOWN',
   };
 
   // Verified on-chain (Phase 3): swap(address tokenIn, uint256 amountIn, uint256 amountOutMin)
@@ -66,7 +82,6 @@
     if (!router && opts.createRouter) router = opts.createRouter({ poolEngine: PE, swapMath: SM });
     else if (!router && typeof window !== 'undefined' && window.PoolRouter) router = window.PoolRouter.createRouter({ poolEngine: PE, swapMath: SM });
 
-    // swap calldata encoder (injected for testability, else window.ethers)
     var ethers = opts.ethers || ((typeof window !== 'undefined') ? window.ethers : null);
     var swapIface = opts.swapIface;
     if (!swapIface && ethers && ethers.Interface) {
@@ -74,67 +89,43 @@
     }
 
     function getSwapSelector() {
-      if (swapIface) {
-        try { return swapIface.getFunction('swap').selector; } catch (e) { /* fall through */ }
-      }
+      if (swapIface) { try { return swapIface.getFunction('swap').selector; } catch (e) { /* fall through */ } }
       return SWAP_SELECTOR;
     }
 
-    /** Encode swap(tokenIn, amountIn, amountOutMin) calldata — no invented params. */
     function encodeSwapCalldata(poolAddress, tokenInAddr, amountInRaw, minOutRaw) {
       if (!swapIface) return { ok: false, error: ERRORS.POOL_EXECUTION_UNAVAILABLE };
       try {
-        var data = swapIface.encodeFunctionData('swap', [tokenInAddr, amountInRaw, minOutRaw]);
-        return { ok: true, to: poolAddress, data: data };
-      } catch (e) {
-        return { ok: false, error: ERRORS.POOL_EXECUTION_UNAVAILABLE };
-      }
+        return { ok: true, to: poolAddress, data: swapIface.encodeFunctionData('swap', [tokenInAddr, amountInRaw, minOutRaw]) };
+      } catch (e) { return { ok: false, error: ERRORS.POOL_EXECUTION_UNAVAILABLE }; }
     }
 
-    /**
-     * Discover + quote a DIRECT route. Returns { ok, quote, alternatives } or
-     * { ok:false, reason }. Never fabricates a quote.
-     */
+    /** Discover + quote a DIRECT route. Returns { ok, quote, alternatives } | { ok:false, reason }. */
     function prepareDirectSwap(req) {
       req = req || {};
       var amountInRaw = toBig(req.amountInRaw);
       var slippageBps = req.slippageBps != null ? req.slippageBps : 50;
-
-      if (!PE) return { ok: false, reason: ERRORS.QUOTE_UNAVAILABLE };
-      if (!router) return { ok: false, reason: ERRORS.QUOTE_UNAVAILABLE };
+      if (!PE || !router) return { ok: false, reason: ERRORS.QUOTE_UNAVAILABLE };
       if (amountInRaw <= 0n) return { ok: false, reason: ERRORS.QUOTE_UNAVAILABLE };
 
       var rres = router.findBestRoute({ tokenIn: req.tokenIn, tokenOut: req.tokenOut, amountInRaw: amountInRaw, slippageBps: slippageBps });
-      if (!rres.ok) {
-        return { ok: false, reason: rres.reason === 'ROUTE_QUOTE_UNAVAILABLE' ? ERRORS.QUOTE_UNAVAILABLE : rres.reason };
-      }
+      if (!rres.ok) return { ok: false, reason: rres.reason === 'ROUTE_QUOTE_UNAVAILABLE' ? ERRORS.QUOTE_UNAVAILABLE : rres.reason };
       var best = rres.bestRoute;
-      // DIRECT ONLY: exactly one pool, two tokens in the path.
       if (!best.path || best.path.length !== 2 || !best.pools || best.pools.length !== 1) {
         return { ok: false, reason: ERRORS.MULTI_HOP_NOT_SUPPORTED };
       }
-
       var pool = PE.getPool(best.pools[0]);
       var now = Date.now();
       var quote = {
-        routeId: best.routeId,
-        poolId: best.pools[0],
+        routeId: best.routeId, poolId: best.pools[0],
         poolAddress: pool ? pool.address : null,
-        tokenIn: req.tokenIn,
-        tokenOut: req.tokenOut,
-        amountInRaw: amountInRaw,
-        expectedOutRaw: best.expectedOutRaw,
-        minOutRaw: best.minOutRaw,
-        priceImpactBps: best.priceImpactBps,
-        feeBps: best.feeBps,
-        quotedAt: now,
-        stateUpdatedAt: best.stateUpdatedAt,
-        expiresAt: now + maxQuoteAgeMs,
-        confidence: 'FRESH',
+        tokenIn: req.tokenIn, tokenOut: req.tokenOut,
+        amountInRaw: amountInRaw, expectedOutRaw: best.expectedOutRaw, minOutRaw: best.minOutRaw,
+        priceImpactBps: best.priceImpactBps, feeBps: best.feeBps,
+        quotedAt: now, stateUpdatedAt: best.stateUpdatedAt,
+        expiresAt: now + maxQuoteAgeMs, confidence: 'FRESH',
       };
-      if (quote.minOutRaw == null || quote.expectedOutRaw <= 0n) {
-        return { ok: false, reason: ERRORS.QUOTE_UNAVAILABLE };
-      }
+      if (quote.minOutRaw == null || quote.expectedOutRaw <= 0n) return { ok: false, reason: ERRORS.QUOTE_UNAVAILABLE };
       return { ok: true, quote: quote, alternatives: rres.alternatives };
     }
 
@@ -143,7 +134,6 @@
       return (nowMs != null ? nowMs : Date.now()) > quote.expiresAt;
     }
 
-    /** Re-quote fresh state; report whether the material output changed. */
     function revalidate(quote, req) {
       req = req || {};
       var r = prepareDirectSwap({ tokenIn: quote.tokenIn, tokenOut: quote.tokenOut, amountInRaw: quote.amountInRaw, slippageBps: req.slippageBps });
@@ -157,109 +147,189 @@
       return encodeSwapCalldata(quote.poolAddress, tokenInAddr, quote.amountInRaw, quote.minOutRaw);
     }
 
-    /**
-     * Full direct-swap flow. All wallet/provider ops go through `adapter`:
-     *   getWalletAddress(), readBalance(addr), readAllowance(addr, spender),
-     *   approve(addr, spender, amount), submitSwap(to, data),
-     *   waitForReceipt(tx), confirm(quote), onSubmitted(hash), onConfirmed(receipt)
-     * Returns { ok, code, quote, txHash, receipt }.
-     */
+    /** Extract the actual Swap event from a receipt (injected iface). */
+    function extractSwapEvent(receipt, iface) {
+      if (!receipt || !iface || !Array.isArray(receipt.logs)) return null;
+      var topic = null;
+      try { topic = iface.getEvent('Swap').topicHash; } catch (e) { return null; }
+      for (var i = 0; i < receipt.logs.length; i++) {
+        var log = receipt.logs[i];
+        if (!log || !log.topics || log.topics.indexOf(topic) === -1) continue;
+        try {
+          var parsed = iface.parseLog(log);
+          var a = parsed.args || {};
+          var in0 = toBig(a.amount0In), in1 = toBig(a.amount1In);
+          var out0 = toBig(a.amount0Out), out1 = toBig(a.amount1Out);
+          return {
+            amountInRaw: in0 > 0n ? in0 : in1,
+            amountOutRaw: out0 > 0n ? out0 : out1,
+            tokenInIsToken0: in0 > 0n,
+          };
+        } catch (e) { /* skip */ }
+      }
+      return null;
+    }
+
     async function executeDirectSwap(req) {
       var adapter = req.adapter;
       if (!adapter) return { ok: false, code: ERRORS.RPC_ERROR };
+      var state = STATES.IDLE;
+      function setState(s) { state = s; if (adapter.onStateChange) { try { adapter.onStateChange(s); } catch (e) {} } }
 
+      // 1. wallet
       var wallet = await adapter.getWalletAddress();
-      if (!wallet) return { ok: false, code: ERRORS.WALLET_NOT_CONNECTED };
+      if (!wallet) { setState(STATES.FAILED); return { ok: false, code: ERRORS.WALLET_NOT_CONNECTED }; }
 
-      // 1. quote (direct-only, canonical PoolEngine via router)
+      // 2. chain
+      var chainId = adapter.getChainId ? await adapter.getChainId() : null;
+      if (req.expectedChainId != null && chainId !== req.expectedChainId) {
+        setState(STATES.FAILED); return { ok: false, code: ERRORS.WRONG_NETWORK };
+      }
+
+      // 3. initial quote
+      setState(STATES.QUOTING);
       var prep = prepareDirectSwap(req);
-      if (!prep.ok) return { ok: false, code: prep.reason };
-      var quote = prep.quote;
+      if (!prep.ok) { setState(STATES.FAILED); return { ok: false, code: prep.reason }; }
+      var pool = PE.getPool(prep.quote.poolId);
+      if (!pool || !pool.deployed) { setState(STATES.FAILED); return { ok: false, code: ERRORS.POOL_INVALID }; }
 
-      var pool = PE.getPool(quote.poolId);
-      if (!pool || !pool.deployed) return { ok: false, code: ERRORS.POOL_INVALID };
-
-      var tIn = PE.getToken(quote.tokenIn), tOut = PE.getToken(quote.tokenOut);
-      if (!tIn || !tOut || !tIn.address || !tOut.address) return { ok: false, code: ERRORS.INVALID_TOKEN_ORDER };
+      var tIn = PE.getToken(prep.quote.tokenIn), tOut = PE.getToken(prep.quote.tokenOut);
+      if (!tIn || !tOut || !tIn.address || !tOut.address) { setState(STATES.FAILED); return { ok: false, code: ERRORS.INVALID_TOKEN_ORDER }; }
+      if (prep.quote.tokenIn !== pool.tokenA && prep.quote.tokenIn !== pool.tokenB) { setState(STATES.FAILED); return { ok: false, code: ERRORS.INVALID_TOKEN_ORDER }; }
       var tokenInAddr = tIn.address;
 
-      // 2. balance check
-      var balance = await adapter.readBalance(tokenInAddr);
-      if (balance == null || balance < quote.amountInRaw) return { ok: false, code: ERRORS.INSUFFICIENT_BALANCE };
+      // 4. fresh state refresh (adapter-owned)
+      if (adapter.refreshState) { await adapter.refreshState(prep.quote.poolId); }
 
-      // 3. allowance
-      var allowance = await adapter.readAllowance(tokenInAddr, quote.poolAddress);
-      var needsApproval = (allowance != null) && allowance < quote.amountInRaw;
+      // 5. FINAL quote — the freshest available quote, produced BEFORE confirmation
+      var final = prepareDirectSwap({ tokenIn: req.tokenIn, tokenOut: req.tokenOut, amountInRaw: prep.quote.amountInRaw, slippageBps: req.slippageBps });
+      if (!final.ok) { setState(STATES.FAILED); return { ok: false, code: final.reason }; }
+      var quote = final.quote;
 
-      // 4. user confirmation (final quote)
+      // immutable confirmed parameters
+      var confirmed = {
+        wallet: wallet, chainId: chainId, poolId: quote.poolId, poolAddress: quote.poolAddress,
+        tokenIn: quote.tokenIn, tokenOut: quote.tokenOut, amountInRaw: quote.amountInRaw,
+        expectedOutRaw: quote.expectedOutRaw, minOutRaw: quote.minOutRaw, slippageBps: req.slippageBps,
+        quotedAt: quote.quotedAt, expiresAt: quote.expiresAt,
+      };
+
+      // 6. USER confirms the FINAL quote
+      setState(STATES.READY);
       if (adapter.confirm) {
-        var confirmed = await adapter.confirm(quote);
-        if (!confirmed) return { ok: false, code: ERRORS.USER_REJECTED };
+        setState(STATES.CONFIRMING);
+        var c = await adapter.confirm(quote);
+        if (!c) { setState(STATES.FAILED); return { ok: false, code: ERRORS.USER_REJECTED }; }
       }
 
-      // 5. quote expiration
-      if (isQuoteExpired(quote)) return { ok: false, code: ERRORS.QUOTE_EXPIRED };
+      // 7. FINAL pre-submit guard — validate WITHOUT modifying confirmed params
+      var guard = await preSubmitGuard(adapter, confirmed, req);
+      if (!guard.ok) { setState(STATES.FAILED); return { ok: false, code: guard.code }; }
 
-      // 6. fresh-state re-validation
-      var rv = revalidate(quote, { slippageBps: req.slippageBps });
-      if (!rv.ok) return { ok: false, code: rv.reason };
-      if (rv.changed) {
-        if (!adapter.confirm) return { ok: false, code: ERRORS.ROUTE_STATE_CHANGED };
-        var reconfirmed = await adapter.confirm(rv.quote);
-        if (!reconfirmed) return { ok: false, code: ERRORS.ROUTE_STATE_CHANGED };
-        quote = rv.quote;
-      }
+      // capture pre-swap balances for delta verification (BigInt)
+      var beforeIn = await adapter.readBalance(tokenInAddr);
+      var beforeOut = await adapter.readBalance(tOut.address);
 
-      // 7. approval (only when insufficient)
-      if (needsApproval) {
-        try {
-          await adapter.approve(tokenInAddr, quote.poolAddress, quote.amountInRaw);
-        } catch (e) {
-          return { ok: false, code: ERRORS.INSUFFICIENT_ALLOWANCE, detail: e && e.message };
+      // 8. approval (only when insufficient), with receipt + re-read
+      if (guard.needsApproval) {
+        setState(STATES.APPROVING);
+        var appTx = await adapter.approve(tokenInAddr, confirmed.poolAddress, confirmed.amountInRaw);
+        if (adapter.waitForReceipt) {
+          setState(STATES.APPROVAL_CONFIRMING);
+          var appReceipt = await adapter.waitForReceipt(appTx);
+          if (!appReceipt || appReceipt.status !== 1) { setState(STATES.FAILED); return { ok: false, code: ERRORS.APPROVAL_TRANSACTION_REVERTED }; }
         }
+        var allowance2 = await adapter.readAllowance(tokenInAddr, confirmed.poolAddress);
+        if (allowance2 == null || allowance2 < confirmed.amountInRaw) { setState(STATES.FAILED); return { ok: false, code: ERRORS.APPROVAL_INSUFFICIENT }; }
       }
 
-      // 8. build swap tx (exact deployed ABI)
+      // 9. build swap tx (exact deployed ABI)
       var tx = buildSwapTx(quote, tokenInAddr);
-      if (!tx.ok) return { ok: false, code: tx.error };
+      if (!tx.ok) { setState(STATES.FAILED); return { ok: false, code: tx.error }; }
 
-      // 9. submit — NO automatic retry (duplicate-tx protection)
+      // 10. submit — NO automatic retry
+      setState(STATES.SWAPPING);
       var submitTx;
       try {
         submitTx = await adapter.submitSwap(tx.to, tx.data);
       } catch (e) {
-        return { ok: false, code: ERRORS.TRANSACTION_DUPLICATE_RISK, detail: e && e.message };
+        setState(STATES.UNKNOWN);
+        return { ok: false, code: ERRORS.TRANSACTION_STATUS_UNKNOWN, detail: e && e.message };
       }
-      if (!submitTx || !submitTx.hash) return { ok: false, code: ERRORS.SWAP_RECEIPT_UNAVAILABLE };
+      if (!submitTx || !submitTx.hash) { setState(STATES.UNKNOWN); return { ok: false, code: ERRORS.SWAP_RECEIPT_UNAVAILABLE }; }
       if (adapter.onSubmitted) adapter.onSubmitted(submitTx.hash);
 
-      // 10. receipt + status verification
+      // 11. receipt (strict status === 1)
+      setState(STATES.SWAP_CONFIRMING);
       var receipt = await adapter.waitForReceipt(submitTx);
-      if (!receipt) return { ok: false, code: ERRORS.SWAP_RECEIPT_UNAVAILABLE };
-      if (receipt.status === 0) return { ok: false, code: ERRORS.SWAP_TRANSACTION_REVERTED };
+      if (!receipt) { setState(STATES.FAILED); return { ok: false, code: ERRORS.SWAP_RECEIPT_UNAVAILABLE }; }
+      if (receipt.status !== 1) { setState(STATES.FAILED); return { ok: false, code: ERRORS.SWAP_TRANSACTION_REVERTED }; }
 
-      // 11. post-transaction refresh (adapter-owned)
-      if (adapter.onConfirmed) await adapter.onConfirmed(receipt);
+      // 12. post-swap verification (balance delta + actual event output)
+      setState(STATES.VERIFYING);
+      var afterIn = await adapter.readBalance(tokenInAddr);
+      var afterOut = await adapter.readBalance(tOut.address);
+      var deltaIn = (beforeIn != null && afterIn != null) ? beforeIn - afterIn : null;
+      var deltaOut = (afterOut != null && beforeOut != null) ? afterOut - beforeOut : null;
+      var actualEvent = (adapter.getSwapEvent) ? await adapter.getSwapEvent(receipt, confirmed.poolAddress) : null;
+      var postSwap = {
+        beforeIn: beforeIn, afterIn: afterIn, deltaInRaw: deltaIn,
+        beforeOut: beforeOut, afterOut: afterOut, deltaOutRaw: deltaOut,
+        actual: actualEvent, // { amountInRaw, amountOutRaw, tokenInIsToken0 } | null
+      };
 
-      return { ok: true, code: null, quote: quote, txHash: submitTx.hash, receipt: receipt };
+      if (adapter.onConfirmed) await adapter.onConfirmed(receipt, postSwap);
+
+      setState(STATES.SUCCESS);
+      return { ok: true, code: null, quote: quote, txHash: submitTx.hash, receipt: receipt, postSwap: postSwap };
+    }
+
+    /** Final pre-submit guard — read fresh state, validate, ABORT on material change. */
+    async function preSubmitGuard(adapter, confirmed, req) {
+      // wallet unchanged
+      var walletNow = await adapter.getWalletAddress();
+      if (walletNow !== confirmed.wallet) return { ok: false, code: ERRORS.WALLET_CHANGED };
+      // chain unchanged
+      if (adapter.getChainId && req.expectedChainId != null) {
+        var chainNow = await adapter.getChainId();
+        if (chainNow !== req.expectedChainId) return { ok: false, code: ERRORS.WRONG_NETWORK };
+      }
+      // quote not expired
+      if (!confirmed.expiresAt || Date.now() > confirmed.expiresAt) return { ok: false, code: ERRORS.QUOTE_EXPIRED };
+      // re-quote current state (fresh) and compare — do NOT substitute
+      var rres = router.findBestRoute({ tokenIn: confirmed.tokenIn, tokenOut: confirmed.tokenOut, amountInRaw: confirmed.amountInRaw, slippageBps: confirmed.slippageBps });
+      if (!rres.ok || !rres.bestRoute) return { ok: false, code: ERRORS.ROUTE_STATE_CHANGED };
+      if (rres.bestRoute.pools[0] !== confirmed.poolId || rres.bestRoute.expectedOutRaw !== confirmed.expectedOutRaw) {
+        return { ok: false, code: ERRORS.ROUTE_STATE_CHANGED }; // material change → abort
+      }
+      // balance re-read
+      var tokenInAddr = PE.getToken(confirmed.tokenIn).address;
+      var balance = await adapter.readBalance(tokenInAddr);
+      if (balance == null || balance < confirmed.amountInRaw) return { ok: false, code: ERRORS.INSUFFICIENT_BALANCE };
+      // allowance re-read
+      var allowance = await adapter.readAllowance(tokenInAddr, confirmed.poolAddress);
+      var needsApproval = (allowance == null) ? false : allowance < confirmed.amountInRaw;
+      if (allowance == null) return { ok: false, code: ERRORS.RPC_ERROR };
+      return { ok: true, needsApproval: needsApproval };
     }
 
     return {
-      ERRORS: ERRORS,
-      SWAP_SELECTOR: SWAP_SELECTOR,
+      ERRORS: ERRORS, STATES: STATES, SWAP_SELECTOR: SWAP_SELECTOR,
       getSwapSelector: getSwapSelector,
       encodeSwapCalldata: encodeSwapCalldata,
       prepareDirectSwap: prepareDirectSwap,
       revalidate: revalidate,
       buildSwapTx: buildSwapTx,
       isQuoteExpired: isQuoteExpired,
+      extractSwapEvent: extractSwapEvent,
       executeDirectSwap: executeDirectSwap,
     };
   }
 
   var API = {
-    VERSION: '1.0.0',
+    VERSION: '1.1.0',
     ERRORS: ERRORS,
+    STATES: STATES,
     SWAP_SELECTOR: SWAP_SELECTOR,
     createExecutor: createExecutor,
   };

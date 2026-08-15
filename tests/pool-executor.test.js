@@ -53,15 +53,16 @@ function seedUsdcCirbtc(updatedAt) {
   PE.updatePoolState('usdc-cirbtc', { reserveARaw: 7_000_000_000n, reserveBRaw: 20_000_000n, lpSupplyRaw: 1n, updatedAt: updatedAt != null ? updatedAt : Date.now() });
 }
 
-/** Mock adapter with recordable behavior. */
+/** Mock adapter with recordable behavior. Approval updates allowance (stateful). */
 function makeAdapter(overrides = {}) {
   const calls = { approve: 0, submit: 0 };
+  let allowance = overrides.allowance === undefined ? 0n : overrides.allowance;
   return {
     calls,
     getWalletAddress: async () => (overrides.wallet === undefined ? '0xuser' : overrides.wallet),
     readBalance: async () => (overrides.balance === undefined ? 10_000_000_000n : overrides.balance),
-    readAllowance: async () => (overrides.allowance === undefined ? 0n : overrides.allowance),
-    approve: async () => { calls.approve++; return { hash: '0xapprove' }; },
+    readAllowance: async () => allowance,
+    approve: async () => { calls.approve++; allowance = 10_000_000_000_000n; return { hash: '0xapprove' }; },
     submitSwap: async () => { calls.submit++; return { hash: '0xswap' }; },
     waitForReceipt: async () => ({ status: overrides.receiptStatus === undefined ? 1 : overrides.receiptStatus }),
     confirm: async () => true,
@@ -241,7 +242,7 @@ describe('Direct swap execution flow', () => {
   it('reports SWAP_TRANSACTION_REVERTED on status 0', async () => {
     seedUsdcEurc();
     const ex = makeExecutor();
-    const adapter = makeAdapter({ allowance: 1n, receiptStatus: 0 });
+    const adapter = makeAdapter({ allowance: 1_000_000_000n, receiptStatus: 0 }); // sufficient allowance → no approval
     const res = await ex.executeDirectSwap({ tokenIn: 'USDC', tokenOut: 'EURC', amountInRaw: 100_000_000n, adapter });
     expect(res.ok).toBe(false);
     expect(res.code).toBe('SWAP_TRANSACTION_REVERTED');
@@ -271,11 +272,11 @@ describe('Direct swap execution flow', () => {
     seedUsdcEurc();
     const ex = makeExecutor();
     let submits = 0;
-    const adapter = makeAdapter({ allowance: 1n });
+    const adapter = makeAdapter({ allowance: 1_000_000_000n }); // sufficient → reaches submit
     adapter.submitSwap = async () => { submits++; throw new Error('timeout'); };
     const res = await ex.executeDirectSwap({ tokenIn: 'USDC', tokenOut: 'EURC', amountInRaw: 100_000_000n, adapter });
     expect(res.ok).toBe(false);
-    expect(res.code).toBe('TRANSACTION_DUPLICATE_RISK');
+    expect(res.code).toBe('TRANSACTION_STATUS_UNKNOWN');
     expect(submits).toBe(1); // exactly one attempt, no retry
   });
 
