@@ -84,6 +84,7 @@
 <script src="/shared/chainSimulator.js"></script>
 <script src="/shared/poolAbiDiscovery.js"></script>
 <script src="/shared/priceImpact.js"></script>
+<script src="/shared/swapMath.js"></script>
 <script src="/shared/liquidityHealth.js"></script>
 <script src="/shared/liquidityProtection.js"></script>
 <script src="/shared/antiWhaleProtection.js"></script>
@@ -105,6 +106,7 @@
 <script src="/shared/economicMonitoring.js"></script>
 <script src="/shared/autonomaAgent.js"></script>
 <script src="/shared/autonomaNlu.js"></script>
+<script src="/shared/autonomaAgentBrain.js"></script>
 <script src="/shared/agentIdentity.js"></script>
 <script src="/shared/agentAuthorization.js"></script>
 <script src="/shared/agentWalletManager.js"></script>
@@ -12765,8 +12767,8 @@ function getTokAddr(sym) {
 const POOL_REGISTRY = [
   { id:'usdc-eurc',    tokenA:'USDC', tokenB:'EURC',   address:'0x18076d992005186AeB13AC5270CaD6E27DB95247', fee:10,  feeTier:null, type:'stable', lpDecimals:18, deployed:true, lpName:'Elligentt USDC-EURC LP', lpSymbol:'LP-USDC-EURC' },
   { id:'usdc-cirbtc',  tokenA:'USDC', tokenB:'cirBTC', address:'0x14590fB7dCbD5CeBabFF63B915ef23d008dB98F4', fee:30,  feeTier:null, type:'crypto', lpDecimals:18, deployed:true, lpName:'Elligentt USDC-cirBTC LP', lpSymbol:'LP-USDC-cirBTC' },
-  { id:'eurc-cirbtc',  tokenA:'EURC', tokenB:'cirBTC', address:'0x38076d992005186AeB13aC5270CaD6E27dB95249', fee:30,  feeTier:null, type:'crypto', lpDecimals:18, deployed:true, lpName:'Elligentt EURC-cirBTC LP', lpSymbol:'LP-EURC-cirBTC' },
-  { id:'eth-usdc',     tokenA:'ETH',  tokenB:'USDC',   address:'0x48076d992005186AeB13aC5270CaD6E27dB9524A', fee:30,  feeTier:null, type:'crypto', lpDecimals:18, deployed:true, lpName:'Elligentt ETH-USDC LP', lpSymbol:'LP-ETH-USDC' },
+  { id:'eurc-cirbtc',  tokenA:'EURC', tokenB:'cirBTC', address:'0x38076d992005186AeB13aC5270CaD6E27dB95249', fee:30,  feeTier:null, type:'crypto', lpDecimals:18, deployed:false, lpName:'Elligentt EURC-cirBTC LP', lpSymbol:'LP-EURC-cirBTC' },
+  { id:'eth-usdc',     tokenA:'ETH',  tokenB:'USDC',   address:'0x48076d992005186AeB13aC5270CaD6E27dB9524A', fee:30,  feeTier:null, type:'crypto', lpDecimals:18, deployed:false, lpName:'Elligentt ETH-USDC LP', lpSymbol:'LP-ETH-USDC' },
 ];
 
 // AMM Factory — discovers pools deployed by the factory contract.
@@ -20776,6 +20778,17 @@ async function executeSwap() {
   const amtIn = parseFloat(document.getElementById('swap-amount-in').value) || 0;
   if (amtIn <= 0) { toast('Enter an amount to swap','error'); _swpExecuting = false; return; }
 
+  // ── Slippage validation (never NaN/negative/0/absurd) ─────
+  var slipCheck = (typeof SwapMath !== 'undefined' && SwapMath.validateSlippage)
+    ? SwapMath.validateSlippage(SWP.slippage, 50)
+    : (function(){ var n = Number(SWP.slippage); return (!isFinite(n) || n <= 0) ? { ok:false, reason:'SLIPPAGE_INVALID' } : (n > 50 ? { ok:false, reason:'SLIPPAGE_TOO_HIGH' } : { ok:true, bps:Math.round(n*100) }); })();
+  if (!slipCheck.ok) {
+    toast('Invalid slippage setting — set a value between 0.01% and 50%', 'error');
+    swpSetBtn('disabled', 'Invalid Slippage');
+    _swpExecuting = false; return;
+  }
+  const slippageBps = slipCheck.bps;
+
   try {
   const tIn  = TOKEN_LIST[SWP.tokenInIdx];
   const tOut = TOKEN_LIST[SWP.tokenOutIdx];
@@ -20842,11 +20855,24 @@ async function executeSwap() {
 
   swpSetBtn('approving', 'Preparing…');
 
-  // ── Compute minReceived BEFORE pre-simulation (needed for staticCall) ──
-  const displayedOut = parseFloat(document.getElementById('swap-amount-out').value) || 0;
-  const minReceived = displayedOut > 0
-    ? ethers.parseUnits((displayedOut * (1 - SWP.slippage / 100)).toFixed(tOut.decimals), tOut.decimals)
-    : 0n;
+  // ── Compute minReceived from the validated quote (never 0) ──
+  // The quote shown to the user and the value used for execution must be the
+  // same object. Never fall back to 0 — block if a safe minOut cannot be derived.
+  const quoteOut = (SWP.lastQuote && Number(SWP.lastQuote.amtOut)) || 0;
+  if (!(quoteOut > 0)) {
+    toast('No valid quote available — enter an amount and refresh', 'warning');
+    swpSetBtn('disabled', 'Refresh Quote');
+    return;
+  }
+  const minReceivedRaw = (typeof SwapMath !== 'undefined' && SwapMath.calcMinOut)
+    ? SwapMath.calcMinOut(SwapMath.parseUnits(quoteOut.toFixed(tOut.decimals), tOut.decimals), slippageBps)
+    : ethers.parseUnits((quoteOut * (1 - SWP.slippage / 100)).toFixed(tOut.decimals), tOut.decimals);
+  if (!minReceivedRaw || minReceivedRaw <= 0n) {
+    toast('Unable to calculate a safe minimum output — refresh the quote and try again', 'error');
+    swpSetBtn('disabled', 'Refresh Quote');
+    return;
+  }
+  const minReceived = minReceivedRaw;
 
   // ── Pre-swap simulation: validate entire route ──────────
   const simResult = await preSwapSimulation(route, tIn, tOut, amtIn, minReceived);
@@ -20989,9 +21015,13 @@ async function executeSwap() {
         hopMin = minReceived;
       } else {
         const hopMinOut = hopMinOuts[i];
-        hopMin = hopMinOut > 0
-          ? ethers.parseUnits(hopMinOut.toFixed(currentDecimals), currentDecimals)
-          : 1n;
+        if (!(hopMinOut > 0)) {
+          toast('Unable to compute safe intermediate hop minimum — aborting', 'error');
+          swpSetStep(i * 2 + 1, 'error');
+          swpSetBtn('ready', `Swap ${tIn.sym} → ${tOut.sym}`);
+          return;
+        }
+        hopMin = ethers.parseUnits(hopMinOut.toFixed(currentDecimals), currentDecimals);
       }
       let swapGas = SWP.FALLBACK_GAS;
       try {
@@ -42535,6 +42565,24 @@ const UBScreen = (function() {
     // Only fast-track when no document is loaded (preserves DocIntel CSV flow)
     var _hasDocData = !!(typeof autDocData !== 'undefined' && autDocData && autDocData.rows);
     var _fastTrack = (_isBatchCmd || _isCrossChainCmd || _hasMultiAddr) && !_hasDocData;
+
+    // ── Agent Brain orchestration (Phase 1) — feature-flagged, additive ──
+    if(!_fastTrack && typeof AutonomaAgentBrain !== 'undefined' && AutonomaAgentBrain.isEnabled()){
+      try{
+        var _brainOut = await AutonomaAgentBrain.run(msg, {
+          executeIntent: _executeIntent,
+          classify: _classifyIntent,
+          extractParams: _extractParams,
+          render: R,
+          msg: msg,
+          rememberEntity: function(name, addr){
+            try { if (typeof RecipientResolver !== 'undefined' && RecipientResolver.add) RecipientResolver.add({ name: name, addr: addr }); } catch(_e){}
+          }
+        });
+        if(_brainOut && _brainOut.handled) return _brainOut.html;
+        // else fall through to the existing pipeline
+      }catch(_brainErr){ /* fall through to the existing pipeline */ }
+    }
 
     // ── Autonoma LLM (DeepSeek) — try first, fallback to regex ──
     if(!_fastTrack) try {
