@@ -13115,15 +13115,19 @@ async function loadSinglePool(poolCfg) {
       });
     }
 
-    // LP decimals: use on-chain value if available, otherwise try common values
-    let lpDecEffective = poolCfg.lpDecimals || 18;
-    if (lpDec === null || lpDec === undefined) {
-      // Try reading decimals() directly as fallback
+    // LP decimals: read from on-chain decimals() — NEVER assume 18 for financial math.
+    // Track verification so execution can block (LP_DECIMALS_UNAVAILABLE) instead of
+    // silently using an unverified fallback.
+    let lpDecVerified = (lpDec !== null && lpDec !== undefined);
+    let lpDecEffective = lpDecVerified ? Number(lpDec) : 0;
+    if (!lpDecVerified) {
+      // Try reading decimals() directly as a last resort.
       try {
         const rawDec = await poolContract.decimals();
         if (rawDec !== null && rawDec !== undefined) {
           lpDecEffective = Number(rawDec);
           poolCfg.lpDecimals = lpDecEffective;
+          lpDecVerified = true;
         }
       } catch(_) {}
     }
@@ -13148,6 +13152,7 @@ async function loadSinglePool(poolCfg) {
       lpName: poolCfg.lpName || (poolCfg.tokenA + '-' + poolCfg.tokenB + ' LP'),
       lpSymbol: poolCfg.lpSymbol || ('LP-' + poolCfg.tokenA + '-' + poolCfg.tokenB),
       _lpDecimals: lpDecEffective,
+      _lpDecimalsVerified: lpDecVerified,
       _reserveARaw: rawA,
       _reserveBRaw: rawB,
       _lpSupplyRaw: supply,
@@ -13174,7 +13179,7 @@ async function loadSinglePool(poolCfg) {
       const lpProvider = getCachedProvider(ARC_RPC);
       const lpContract = new ethers.Contract(poolCfg.address, [{ inputs:[{name:'_owner',type:'address'}], name:'balanceOf', outputs:[{name:'',type:'uint256'}], stateMutability:'view', type:'function' }], lpProvider);
       const rawLp = await lpContract.balanceOf(walletAddress);
-      const lpDecUse = poolCfg.lpDecimals || poolData[poolCfg.id]._lpDecimals || 18;
+      const lpDecUse = getLPDecimals(poolCfg.id) ?? 18; // display only; execution uses raw
       poolData[poolCfg.id].userLp = parseFloat(ethers.formatUnits(rawLp, lpDecUse));
       poolData[poolCfg.id]._userLpRaw = rawLp; // canonical raw BigInt (financial math only via PoolEngine)
     } catch(e) { console.warn('[Pool] balanceOf failed for', poolCfg.id, (e && e.message) || e); }
@@ -13683,6 +13688,15 @@ function getLiquidityDepth(poolId) {
   const decB = TOKEN_REGISTRY[pcfg.tokenB]?.decimals;
   if (decA == null || decB == null) return null; // UNKNOWN_TOKEN_DECIMALS
   return _PE.tvlUsd(pd._reserveARaw, pd._reserveBRaw, decA, decB, rateA, rateB);
+}
+
+// ── Verified LP token decimals (read on-chain, never assumed 18) ──
+// Returns the verified LP decimals or null (LP_DECIMALS_UNAVAILABLE). Financial
+// execution (add/remove liquidity) must block when this returns null.
+function getLPDecimals(poolId) {
+  const pd = poolData[poolId];
+  if (pd && pd._lpDecimalsVerified && pd._lpDecimals != null) return pd._lpDecimals;
+  return null; // LP_DECIMALS_UNAVAILABLE
 }
 
 // ── Canonical LP position (real on-chain data, raw BigInt via PoolEngine) ──
@@ -27917,10 +27931,14 @@ async function executeAddLiquidity() {
             const amt1 = inverted ? rawA : rawB;
             const tx = await pc.addLiquidity(amt0, amt1);
             const receipt = await tx.wait();
+            if (!receipt || receipt.status !== 1) {
+              throw new Error('Add liquidity transaction not confirmed on-chain (receipt status: ' + (receipt ? receipt.status : 'null') + ')');
+            }
             try {
               const lpC = new ethers.Contract(pcfg.address, ['function balanceOf(address) view returns (uint256)'], getCachedProvider('https://arc-testnet.drpc.org'));
               const lpBal = await lpC.balanceOf(walletAddress);
-              const lpFmt = ethers.formatUnits(lpBal, pcfg.lpDecimals || 18);
+              const lpDec = getLPDecimals(activePoolId);
+              const lpFmt = lpDec !== null ? ethers.formatUnits(lpBal, lpDec) : lpBal.toString() + ' (raw, decimals unknown)';
               _log('[Pool] LP balance after mint:', lpFmt);
               if (lpBal === 0n) {
                 toast('Warning: LP balance is 0 after addLiquidity — verify contract', 'warning');
@@ -27971,7 +27989,9 @@ async function executeRemoveLiquidity() {
 
   let lpAmtBig;
   try {
-    lpAmtBig = ethers.parseUnits(lpStr, pcfg.lpDecimals || 18);
+    const lpDec = getLPDecimals(activePoolId);
+    if (lpDec === null) { toast('LP token decimals unavailable — cannot remove liquidity', 'error'); return; }
+    lpAmtBig = ethers.parseUnits(lpStr, lpDec);
   } catch(e) {
     toast('Invalid LP amount format', 'error');
     return;
@@ -28044,6 +28064,9 @@ async function executeRemoveLiquidity() {
     const step2 = addStep('Remove Liquidity', `Burn LP & receive ${pcfg.tokenA} + ${pcfg.tokenB}`);
     const removeTx = await pc.removeLiquidity(lpAmtBig);
     const removeReceipt = await removeTx.wait();
+    if (!removeReceipt || removeReceipt.status !== 1) {
+      throw new Error('Remove liquidity transaction not confirmed on-chain (receipt status: ' + (removeReceipt ? removeReceipt.status : 'null') + ')');
+    }
     markStep(step2, true);
 
     const step3 = addStep('Confirmed', 'Transaction mined on Arc Testnet');
