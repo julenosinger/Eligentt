@@ -13001,6 +13001,13 @@ async function loadSinglePool(poolCfg) {
         return;
       }
       poolCfg._codeVerified = true;
+      // Detect whether this pool emits Swap/Mint/Burn events (determines whether
+      // real volume/fees/APR can be derived from on-chain logs). usdc-cirbtc does;
+      // usdc-eurc (older deployment) does NOT — its volume/fees are unavailable.
+      try {
+        const _swapTopic = (typeof ethers !== 'undefined' && ethers.id) ? ethers.id('Swap(address,uint256,uint256,uint256,uint256,address)').slice(2).toLowerCase() : null;
+        poolCfg._hasSwapEvents = _swapTopic ? code.toLowerCase().includes(_swapTopic) : false;
+      } catch(_) { poolCfg._hasSwapEvents = false; }
     }
   } catch(codeErr) {
     // Transient RPC failure — keep last good data instead of wiping the UI
@@ -13169,9 +13176,11 @@ async function loadSinglePool(poolCfg) {
       const rawLp = await lpContract.balanceOf(walletAddress);
       const lpDecUse = poolCfg.lpDecimals || poolData[poolCfg.id]._lpDecimals || 18;
       poolData[poolCfg.id].userLp = parseFloat(ethers.formatUnits(rawLp, lpDecUse));
+      poolData[poolCfg.id]._userLpRaw = rawLp; // canonical raw BigInt (financial math only via PoolEngine)
     } catch(e) { console.warn('[Pool] balanceOf failed for', poolCfg.id, (e && e.message) || e); }
   } else {
     poolData[poolCfg.id].userLp = 0;
+    poolData[poolCfg.id]._userLpRaw = 0n;
   }
 }
 
@@ -13406,19 +13415,13 @@ function calculateRealAPR(poolId) {
   const pd = poolData[poolId];
   const pcfg = POOL_REGISTRY.find(p => p.id === poolId);
   if (!pd || !pd.loaded || !pcfg) return null;
-  const rateA = getTokenUSDRate(pcfg.tokenA);
-  const rateB = getTokenUSDRate(pcfg.tokenB);
-  if (rateA === null || rateB === null) return null;
-  const tvl = pd.reserveA * rateA + pd.reserveB * rateB;
-  if (tvl <= 0) return null;
+  // APR is only real when fees come from on-chain Swap events. No synthetic
+  // estimation — return null (N/A) otherwise.
+  if (!pcfg._hasSwapEvents) return null;
+  const tvl = getLiquidityDepth(poolId); // canonical PoolEngine TVL
+  if (tvl === null || tvl <= 0) return null;
   const fees24h = pd.fees24h || getPoolFees24h(poolId) || 0;
-  if (fees24h <= 0) {
-    // Fallback: estimate from volume if fees not tracked
-    const vol24 = pd.volume24h || 0;
-    if (vol24 <= 0) return null;
-    const feeRate = (pcfg.feeTier || pcfg.fee) / 10000;
-    return (vol24 * feeRate * 365 / tvl) * 100;
-  }
+  if (fees24h <= 0) return null; // no real fees → N/A, never a fabricated APR
   return (fees24h * 365 / tvl) * 100;
 }
 
@@ -13680,6 +13683,67 @@ function getLiquidityDepth(poolId) {
   const decB = TOKEN_REGISTRY[pcfg.tokenB]?.decimals;
   if (decA == null || decB == null) return null; // UNKNOWN_TOKEN_DECIMALS
   return _PE.tvlUsd(pd._reserveARaw, pd._reserveBRaw, decA, decB, rateA, rateB);
+}
+
+// ── Canonical LP position (real on-chain data, raw BigInt via PoolEngine) ──
+// Returns { ok, lpBalanceRaw, totalSupplyRaw, shareBps, tokenAAmountRaw,
+//           tokenBAmountRaw, positionValueUsd, updatedAt } or { ok:false, error }.
+function getLPPosition(poolId) {
+  const pd = poolData[poolId];
+  if (!pd || !pd.loaded || pd.error) return { ok: false, error: 'LP_POSITION_UNAVAILABLE' };
+  const pcfg = POOL_REGISTRY.find(p => p.id === poolId);
+  if (!pcfg) return { ok: false, error: 'INVALID_POOL' };
+  if (!_PE || !_PE.getPoolState) return { ok: false, error: 'POOL_ENGINE_UNAVAILABLE' };
+  const st = _PE.getPoolState(poolId);
+  if (!st || st.reserveARaw == null || st.reserveBRaw == null || st.lpSupplyRaw == null) return { ok: false, error: 'POOL_STATE_UNAVAILABLE' };
+  const lpBalanceRaw = pd._userLpRaw != null ? pd._userLpRaw : 0n;
+  const totalSupplyRaw = st.lpSupplyRaw;
+  const shareBps = _PE.lpShareBps(lpBalanceRaw, totalSupplyRaw); // null when supply is 0
+  const under = _PE.removeLiquidityAmounts(lpBalanceRaw, totalSupplyRaw, st.reserveARaw, st.reserveBRaw);
+  const priceA = getTokenUSDRate(pcfg.tokenA);
+  const priceB = getTokenUSDRate(pcfg.tokenB);
+  let positionValueUsd = null;
+  if (shareBps !== null && under !== null && priceA !== null && priceB !== null) {
+    positionValueUsd = _PE.positionValueUsd(shareBps, st.reserveARaw, st.reserveBRaw, st.tokenADecimals, st.tokenBDecimals, priceA, priceB);
+  }
+  return {
+    ok: true,
+    poolId: poolId,
+    wallet: (typeof walletAddress !== 'undefined' ? walletAddress : null) || null,
+    lpBalanceRaw: lpBalanceRaw,
+    totalSupplyRaw: totalSupplyRaw,
+    shareBps: shareBps,
+    tokenAAmountRaw: under ? under.amountARaw : null,
+    tokenBAmountRaw: under ? under.amountBRaw : null,
+    positionValueUsd: positionValueUsd,
+    updatedAt: st.updatedAt,
+  };
+}
+
+// ── Fee-earnings availability: only pools that emit Swap events ──
+function isFeeEarningsAvailable(poolId) {
+  const pcfg = POOL_REGISTRY.find(p => p.id === poolId);
+  return !!(pcfg && pcfg._hasSwapEvents);
+}
+
+// ── Real liquidity depth: expected output / impact / utilization for standard
+// trade sizes, all via canonical PoolEngine.depth (no second AMM formula). ──
+function getLiquidityDepthReport(poolId, sizesUsd) {
+  const pd = poolData[poolId];
+  const pcfg = POOL_REGISTRY.find(p => p.id === poolId);
+  if (!pd || !pd.loaded || !pcfg || !_PE || !_PE.depth) return null;
+  const st = _PE.getPoolState(poolId);
+  if (!st || st.reserveARaw == null || st.reserveBRaw == null || st.reserveARaw <= 0n || st.reserveBRaw <= 0n) return null;
+  const priceInUsd = getTokenUSDRate(pcfg.tokenA);
+  if (priceInUsd === null) return null;
+  const list = (Array.isArray(sizesUsd) ? sizesUsd : [100, 500, 1000, 5000, 10000]);
+  const rows = [];
+  for (const size of list) {
+    const d = _PE.depth(st.reserveARaw, st.reserveBRaw, st.tokenADecimals, st.tokenBDecimals, priceInUsd, st.feeBps, size);
+    if (d === null) continue;
+    rows.push(d);
+  }
+  return rows.length ? rows : null;
 }
 
 function getPoolReserveRatio(poolId) {
@@ -14011,14 +14075,16 @@ function getTotalFeesAccrued(poolId) {
 
 function getClaimableFees(poolId, userLpAmount) {
   const pd = poolData[poolId];
-  if (!pd || !pd.loaded || pd.lpSupply <= 0) return 0;
+  if (!pd || !pd.loaded || pd.lpSupply <= 0) return null;
+  if (!isFeeEarningsAvailable(poolId)) return null; // LP_FEES_UNAVAILABLE (no Swap events)
   const share = userLpAmount / pd.lpSupply;
   return getTotalFeesAccrued(poolId) * share;
 }
 
 function getClaimableFeesForActivePosition(poolId) {
   const pd = poolData[poolId];
-  if (!pd || pd.userLp <= 0) return 0;
+  if (!pd || pd.userLp <= 0) return null;
+  if (!isFeeEarningsAvailable(poolId)) return null;
   return getClaimableFees(poolId, pd.userLp);
 }
 
@@ -27129,7 +27195,7 @@ function renderPoolList() {
         </div>
         <div class="plist-stat-row">
           <span class="plist-stat-label">APR</span>
-          <span class="plist-stat-val green">${(() => { const realApr = calculateRealAPR(pcfg.id); if (realApr !== null) return realApr.toFixed(2) + '%'; return hasLiq ? ((pcfg.feeTier || pcfg.fee) / 100).toFixed(1) + '% (est.)' : '—'; })()}</span>
+          <span class="plist-stat-val green">${(() => { const realApr = calculateRealAPR(pcfg.id); if (realApr !== null) return realApr.toFixed(2) + '%'; return 'N/A'; })()}</span>
         </div>
         <div class="plist-stat-row">
           <span class="plist-stat-label">24h Fees</span>
@@ -27296,11 +27362,11 @@ function renderMyLPPositions() {
     const poolTvl = getLiquidityDepth(pcfg.id);
     const posVal = poolTvl !== null ? poolTvl * share : null;
     const claimableFees = getClaimableFeesForActivePosition(pcfg.id);
-    const feesDisplay = claimableFees > 0.01
-      ? `$${claimableFees.toFixed(2)}`
-      : claimableFees > 0 ? `<$0.01` : '$0.00';
+    const feesDisplay = claimableFees === null
+      ? 'Fee earnings unavailable'
+      : claimableFees > 0.01 ? `$${claimableFees.toFixed(2)}` : claimableFees > 0 ? `<$0.01` : '$0.00';
     const totalFeesAccrued = getTotalFeesAccrued(pcfg.id);
-    const poolFeeInfo = totalFeesAccrued > 0
+    const poolFeeInfo = (claimableFees !== null && totalFeesAccrued > 0)
       ? `Pool fees: $${totalFeesAccrued.toFixed(2)}`
       : '';
     const lpSymbol = pcfg.lpSymbol || 'LP';
@@ -27375,12 +27441,7 @@ function poolUpdateUI() {
   const aprEl = document.getElementById('pool-apr');
   if (aprEl) {
     const realApr = calculateRealAPR(activePoolId);
-    if (realApr !== null) {
-      aprEl.textContent = realApr.toFixed(2) + '%';
-    } else {
-      const aprLabel = ((pcfg.feeTier || pcfg.fee) / 100).toFixed(1);
-      aprEl.textContent = hasLiq ? aprLabel + '% (est.)' : '—';
-    }
+    aprEl.textContent = realApr !== null ? realApr.toFixed(2) + '%' : 'N/A';
   }
 
   // Utilization display if element exists
@@ -27565,9 +27626,9 @@ function poolUpdateLPPosition(pcfg, pd, hasLiq) {
   _s('pool-my-val-b', posB.toFixed(decDispB) + ' ' + pcfg.tokenB);
   _s('pool-my-total-usd', posValUSD !== null ? '$' + posValUSD.toFixed(2) : 'Price unavailable');
 
-  // Fee accumulation: estimate fees earned from LP value growth
+  // Fee accumulation: fees earned only when derivable from real Swap events
   const feesEarned = getClaimableFeesForActivePosition(pcfg.id);
-  _s('pool-my-fees', feesEarned > 0.01 ? '$' + feesEarned.toFixed(2) : feesEarned > 0 ? '<$0.01' : '$0.00');
+  _s('pool-my-fees', feesEarned === null ? 'Fee earnings unavailable' : feesEarned > 0.01 ? '$' + feesEarned.toFixed(2) : feesEarned > 0 ? '<$0.01' : '$0.00');
 }
 
 // ── Add Liquidity sync ──────────────────────────────────────
