@@ -33,7 +33,7 @@ const POOL = '0x14590fb7dcbd5cebabff63b915ef23d008db98f4';
 const SENDER = '0x1111111111111111111111111111111111111111';
 const TO = '0x2222222222222222222222222222222222222222';
 
-function makeLog(eventName, args, blockNumber, txHash, logIndex, timestamp) {
+function makeLog(eventName, args, blockNumber, txHash, logIndex) {
   const frag = iface.getEvent(eventName);
   const { topics, data } = iface.encodeEventLog(frag, args);
   return {
@@ -44,12 +44,12 @@ function makeLog(eventName, args, blockNumber, txHash, logIndex, timestamp) {
     blockHash: '0x' + blockNumber.toString(16).padStart(64, '0'),
     transactionHash: txHash,
     logIndex,
-    timestamp,
     chainId: 5042002,
   };
 }
 
-function makeProvider(logs) {
+function makeProvider(logs, tsMap) {
+  const ts = tsMap || {};
   return {
     async getLogs(filter) {
       const from = parseInt(filter.fromBlock, 16);
@@ -57,6 +57,7 @@ function makeProvider(logs) {
       return logs.filter(l => l.blockNumber >= from && l.blockNumber <= to);
     },
     async getBlockNumber() { return 20000; },
+    async getBlock(n) { return { timestamp: (ts[n] != null ? ts[n] : 1700000000 + n) }; },
   };
 }
 
@@ -64,8 +65,7 @@ describe('Indexer — event decoding', () => {
   const decode = Idx.createDecoder(iface);
 
   it('decodes Swap events with raw BigInt amounts', () => {
-    const log = makeLog('Swap', [SENDER, 1000n, 0n, 0n, 500n, TO], 100, '0xtx1', 0, 1700000000);
-    const ev = decode(log);
+    const ev = decode(makeLog('Swap', [SENDER, 1000n, 0n, 0n, 500n, TO], 100, '0xtx1', 0));
     expect(ev.eventType).toBe('Swap');
     expect(ev.amount0In).toBe(1000n);
     expect(ev.amount1Out).toBe(500n);
@@ -75,10 +75,10 @@ describe('Indexer — event decoding', () => {
   });
 
   it('decodes Mint and Burn events', () => {
-    const m = decode(makeLog('Mint', [SENDER, 500n, 600n], 101, '0xtx2', 0, 1700000000));
+    const m = decode(makeLog('Mint', [SENDER, 500n, 600n], 101, '0xtx2', 0));
     expect(m.eventType).toBe('Mint');
     expect(m.amount0).toBe(500n);
-    const b = decode(makeLog('Burn', [SENDER, 100n, 200n, TO], 102, '0xtx3', 0, 1700000000));
+    const b = decode(makeLog('Burn', [SENDER, 100n, 200n, TO], 102, '0xtx3', 0));
     expect(b.eventType).toBe('Burn');
     expect(b.amount1).toBe(200n);
   });
@@ -97,14 +97,12 @@ describe('Indexer — event identity + deduplication', () => {
 
   it('does not duplicate the same event across scans', async () => {
     const decode = Idx.createDecoder(iface);
-    const log = makeLog('Swap', [SENDER, 1000n, 0n, 0n, 500n, TO], 100, '0xtx1', 0, 1700000000);
+    const log = makeLog('Swap', [SENDER, 1000n, 0n, 0n, 500n, TO], 100, '0xtx1', 0);
     const provider = makeProvider([log]);
     const idx = Idx.createIndexer({ chainId: 5042002, poolAddress: POOL, provider, decode, confirmationDepth: 5, chunkSize: 100 });
-
     await idx.ingestRange(100, 150);
     await idx.ingestRange(100, 150); // rescan same range
-    const events = idx.getEvents({ eventType: 'Swap' });
-    expect(events.length).toBe(1);
+    expect(idx.getEvents({ eventType: 'Swap' }).length).toBe(1);
   });
 });
 
@@ -113,7 +111,7 @@ describe('Indexer — block chunking', () => {
     const decode = Idx.createDecoder(iface);
     const logs = [];
     for (let b = 1; b <= 50; b++) {
-      logs.push(makeLog('Swap', [SENDER, 10n * BigInt(b), 0n, 0n, 5n * BigInt(b), TO], b, '0xtx' + b, 0, 1700000000 + b));
+      logs.push(makeLog('Swap', [SENDER, 10n * BigInt(b), 0n, 0n, 5n * BigInt(b), TO], b, '0xtx' + b, 0));
     }
     let getLogsCalls = 0;
     const provider = {
@@ -124,6 +122,7 @@ describe('Indexer — block chunking', () => {
         return logs.filter(l => l.blockNumber >= from && l.blockNumber <= to);
       },
       async getBlockNumber() { return 20000; },
+      async getBlock(n) { return { timestamp: 1700000000 + n }; },
     };
     const idx = Idx.createIndexer({ chainId: 5042002, poolAddress: POOL, provider, decode, confirmationDepth: 5, chunkSize: 20 });
     const res = await idx.ingestRange(1, 50);
@@ -138,8 +137,8 @@ describe('Indexer — cursor continuation', () => {
   it('resumes from lastIndexedBlock without rescanning', async () => {
     const decode = Idx.createDecoder(iface);
     const logs = [
-      makeLog('Swap', [SENDER, 100n, 0n, 0n, 50n, TO], 100, '0xtxA', 0, 1700000000),
-      makeLog('Swap', [SENDER, 200n, 0n, 0n, 100n, TO], 200, '0xtxB', 0, 1700000000),
+      makeLog('Swap', [SENDER, 100n, 0n, 0n, 50n, TO], 100, '0xtxA', 0),
+      makeLog('Swap', [SENDER, 200n, 0n, 0n, 100n, TO], 200, '0xtxB', 0),
     ];
     const provider = makeProvider(logs);
     const idx = Idx.createIndexer({ chainId: 5042002, poolAddress: POOL, provider, decode, confirmationDepth: 5, chunkSize: 1000 });
@@ -154,15 +153,17 @@ describe('Indexer — cursor continuation', () => {
 describe('Indexer — volume windows (24h/7d/30d)', () => {
   function buildIndexer(now) {
     const decode = Idx.createDecoder(iface);
+    const tsMap = {
+      10: now / 1000 - 3600,            // 1 hour ago
+      11: now / 1000 - 3 * 86400,       // 3 days ago
+      12: now / 1000 - 10 * 86400,      // 10 days ago
+    };
     const logs = [
-      // 1 hour ago
-      makeLog('Swap', [SENDER, 1000n, 0n, 0n, 500n, TO], 10, '0xtx1', 0, now / 1000 - 3600),
-      // 3 days ago
-      makeLog('Swap', [SENDER, 2000n, 0n, 0n, 1000n, TO], 11, '0xtx2', 0, now / 1000 - 3 * 86400),
-      // 10 days ago
-      makeLog('Swap', [SENDER, 4000n, 0n, 0n, 2000n, TO], 12, '0xtx3', 0, now / 1000 - 10 * 86400),
+      makeLog('Swap', [SENDER, 1000n, 0n, 0n, 500n, TO], 10, '0xtx1', 0),
+      makeLog('Swap', [SENDER, 2000n, 0n, 0n, 1000n, TO], 11, '0xtx2', 0),
+      makeLog('Swap', [SENDER, 4000n, 0n, 0n, 2000n, TO], 12, '0xtx3', 0),
     ];
-    const provider = makeProvider(logs);
+    const provider = makeProvider(logs, tsMap);
     const idx = Idx.createIndexer({ chainId: 5042002, poolAddress: POOL, provider, decode, confirmationDepth: 5, chunkSize: 1000 });
     return idx.ingestRange(10, 12).then(() => idx);
   }
@@ -170,7 +171,7 @@ describe('Indexer — volume windows (24h/7d/30d)', () => {
   it('24h window includes only recent swaps', async () => {
     const now = Date.now();
     const idx = await buildIndexer(now);
-    const v = idx.computeVolume(86400, { now, token0Symbol: 'USDC', token1Symbol: 'cirBTC', token0Decimals: 6, token1Decimals: 8 });
+    const v = idx.computeVolume(86400, { now });
     expect(v.amount0InRaw).toBe(1000n); // only the 1-hour-ago swap
   });
 

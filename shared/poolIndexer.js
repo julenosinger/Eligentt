@@ -1,14 +1,22 @@
 /**
- * Elligentt Authoritative Pool Indexer (Phase 5).
+ * Elligentt Authoritative Pool Indexer (Phase 5.5 — production hardening).
  * =============================================================================
- * A dedicated on-chain event indexing layer for pool analytics. It scans block
- * ranges in safe chunks, decodes Swap/Mint/Burn logs, deduplicates by
- * (transactionHash + logIndex), and maintains an indexing cursor so it can
- * resume / backfill / incrementally update without rescanning history.
+ * A persistent, recoverable, deterministic on-chain event indexer for pool
+ * analytics. It scans block ranges in safe chunks, decodes Swap/Mint/Burn logs,
+ * deduplicates by (transactionHash + logIndex), and maintains a durable
+ * per-pool cursor that only advances AFTER events are successfully persisted.
  *
- * Financial event amounts are stored as raw BigInt — never converted to Number.
- * This module is a pure orchestrator over the blockchain; it performs NO pool
- * math. PoolEngine remains the financial source of truth.
+ * Properties guaranteed by this module:
+ *   - cursor survives restart (persisted via a pluggable async IndexStore)
+ *   - failed chunks never advance the cursor (retry-safe, idempotent)
+ *   - overlapping / repeated ranges never produce duplicates
+ *   - block timestamps come from real blocks (batched + cached), never invented
+ *   - events with unknown timestamps are excluded from time-windowed analytics
+ *   - financial amounts remain raw BigInt (exact string when serialized)
+ *   - analytics are rebuildable from indexed events (no stored derived truth)
+ *
+ * This module performs NO pool math. PoolEngine remains the financial source
+ * of truth. No route execution. No multi-hop.
  *
  * Attached to: window.PoolIndexer
  */
@@ -16,6 +24,8 @@
   'use strict';
 
   var EVENT_TYPES = { SWAP: 'Swap', MINT: 'Mint', BURN: 'Burn' };
+  var STATUS = { COMPLETE: 'COMPLETE', PARTIAL: 'PARTIAL', UNAVAILABLE: 'UNAVAILABLE', ERROR: 'ERROR' };
+  var INDEX_VERSION = 1;
 
   function toBig(v) {
     if (typeof v === 'bigint') return v;
@@ -30,31 +40,67 @@
     return String(txHash || '') + ':' + String(logIndex ?? 0);
   }
 
-  /** In-memory store (pluggable via opts.store for D1/KV later). */
+  /* ══════════════════════════════════════════════════════════════
+     INDEX STORE — async pluggable persistence interface.
+     Indexer depends on this interface, not on a specific backend.
+     ══════════════════════════════════════════════════════════════ */
+
+  /** In-memory store (async interface) — for tests / non-persistent fallback. */
   function createMemoryStore() {
     var map = {};
     return {
-      has: function (key) { return Object.prototype.hasOwnProperty.call(map, key); },
-      put: function (key, ev) { map[key] = ev; },
-      list: function () { return Object.keys(map).map(function (k) { return map[k]; }); },
-      size: function () { return Object.keys(map).length; }
+      get: async function (key) { return Object.prototype.hasOwnProperty.call(map, key) ? map[key] : null; },
+      put: async function (key, value) { map[key] = value; },
+      has: async function (key) { return Object.prototype.hasOwnProperty.call(map, key); },
+      list: async function (prefix) {
+        var out = [];
+        for (var k in map) { if (Object.prototype.hasOwnProperty.call(map, k) && (!prefix || k.indexOf(prefix) === 0)) out.push({ key: k, value: map[k] }); }
+        return out;
+      },
+      delete: async function (key) { delete map[key]; },
+      size: async function () { return Object.keys(map).length; },
     };
   }
 
   /**
-   * Decode a raw log into a normalized event, or null when the log is not a
-   * supported pool event. `iface` is an ethers.Interface carrying the Swap/Mint/
-   * Burn event definitions.
+   * Cloudflare KV store adapter (existing infrastructure). Wraps a KV binding
+   * (get/put/list/delete). Values are strings; BigInt amounts are serialized by
+   * the indexer before persistence.
    */
+  function createKVStore(kv, prefix) {
+    prefix = (prefix || 'pool-index').replace(/\/$/, '');
+    function k(key) { return prefix + ':' + key; }
+    return {
+      get: async function (key) { try { return await kv.get(k(key)); } catch (e) { return null; } },
+      put: async function (key, value) { try { await kv.put(k(key), String(value)); } catch (e) { throw e; } },
+      has: async function (key) { try { return (await kv.get(k(key))) != null; } catch (e) { return false; } },
+      list: async function (subPrefix) {
+        try {
+          var all = [];
+          var cursor;
+          do {
+            var res = await kv.list({ prefix: k(subPrefix || ''), cursor: cursor });
+            all = all.concat((res.keys || []).map(function (kk) { return { key: kk.name.substring(prefix.length + 1), value: null }; }));
+            cursor = res.list_complete ? undefined : res.cursor;
+          } while (cursor);
+          return all;
+        } catch (e) { return []; }
+      },
+      delete: async function (key) { try { await kv.delete(k(key)); } catch (e) {} },
+    };
+  }
+
+  /* ══════════════════════════════════════════════════════════════
+     DECODER
+     ══════════════════════════════════════════════════════════════ */
+
   function createDecoder(iface) {
     return function decodeLog(log) {
       if (!log || !log.topics || !log.topics.length) return null;
       var parsed;
       try {
         parsed = iface.parseLog({ topics: log.topics, data: log.data || '0x' });
-      } catch (e) {
-        return null;
-      }
+      } catch (e) { return null; }
       if (!parsed || !parsed.name) return null;
 
       var base = {
@@ -64,7 +110,7 @@
         blockHash: log.blockHash || null,
         transactionHash: log.transactionHash || '',
         logIndex: Number(log.logIndex != null ? log.logIndex : log.index) || 0,
-        timestamp: Number(log.timestamp) || 0,
+        timestamp: null, // resolved separately via getBlock(blockNumber)
       };
 
       if (parsed.name === 'Swap') {
@@ -96,139 +142,271 @@
     };
   }
 
-  /**
-   * createIndexer({ chainId, poolAddress, provider, decode, confirmationDepth,
-   *                  chunkSize, store, lastIndexedBlock })
-   *   provider           — object with getLogs(filter) (ethers provider).
-   *   decode             — function(log) -> normalized event | null.
-   *   confirmationDepth  — blocks behind `latest` treated as immutable (default 10).
-   *   chunkSize          — max block span per getLogs call (default 2000).
-   */
+  /* ══════════════════════════════════════════════════════════════
+     SERIALIZATION (BigInt → exact string, and back)
+     ══════════════════════════════════════════════════════════════ */
+
+  var BIGINT_FIELDS = ['blockNumber', 'amount0In', 'amount1In', 'amount0Out', 'amount1Out', 'amount0', 'amount1'];
+
+  function serializeEvent(ev) {
+    var out = {};
+    for (var k in ev) {
+      if (Object.prototype.hasOwnProperty.call(ev, k)) {
+        var v = ev[k];
+        if (typeof v === 'bigint') out[k] = v.toString();
+        else out[k] = v;
+      }
+    }
+    return JSON.stringify(out);
+  }
+
+  function deserializeEvent(json) {
+    var o = JSON.parse(json);
+    for (var i = 0; i < BIGINT_FIELDS.length; i++) {
+      var f = BIGINT_FIELDS[i];
+      if (o[f] != null && typeof o[f] === 'string' && /^-?\d+$/.test(o[f])) o[f] = BigInt(o[f]);
+    }
+    return o;
+  }
+
+  function validateEvent(ev) {
+    if (!ev) return false;
+    if (!ev.transactionHash || !ev.eventType) return false;
+    if (ev.chainId == null) return false;
+    if (ev.blockNumber == null || ev.blockNumber < 0n) return false;
+    if (ev.poolAddress && !/^0x[a-fA-F0-9]{40}$/.test(ev.poolAddress)) return false;
+    return true;
+  }
+
+  /* ══════════════════════════════════════════════════════════════
+     INDEXER
+     ══════════════════════════════════════════════════════════════ */
+
   function createIndexer(opts) {
     opts = opts || {};
     var chainId = opts.chainId;
     var poolAddress = (opts.poolAddress || '').toLowerCase();
     var provider = opts.provider;
     var decode = opts.decode || function () { return null; };
+    var store = opts.store || createMemoryStore();
     var confirmationDepth = opts.confirmationDepth != null ? opts.confirmationDepth : 10;
     var chunkSize = opts.chunkSize || 2000;
-    var store = opts.store || createMemoryStore();
+    var maxRetries = opts.maxRetries != null ? opts.maxRetries : 3;
+    var retryBackoffMs = opts.retryBackoffMs != null ? opts.retryBackoffMs : 500;
+    var indexVersion = opts.indexVersion != null ? opts.indexVersion : INDEX_VERSION;
+
+    var cursorKey = opts.cursorKey || ('cursor:' + chainId + ':' + poolAddress);
+    var eventPrefix = opts.eventPrefix || ('evt:' + chainId + ':' + poolAddress + ':');
+
+    // In-memory authoritative index (cache). Persisted to `store` async.
+    var _events = {};            // eventKey -> normalized event (BigInt)
+    var _timestamps = {};        // blockNumber -> timestamp (cache)
+    var _inflight = false;       // per-instance concurrency guard
+
     var cursor = {
       chainId: chainId,
       poolAddress: poolAddress,
-      lastIndexedBlock: opts.lastIndexedBlock || 0,
+      lastIndexedBlock: 0,
       status: 'IDLE',
+      lastIndexedAt: 0,
       indexedEvents: 0,
+      indexVersion: indexVersion,
     };
 
-    function normalize(ev) {
+    function normalize(ev, chainIdOverride) {
       if (!ev) return null;
-      ev.chainId = chainId;
-      ev.poolAddress = poolAddress;
+      if (chainIdOverride != null) ev.chainId = chainIdOverride;
+      if (ev.poolAddress) ev.poolAddress = ev.poolAddress.toLowerCase();
+      else ev.poolAddress = poolAddress;
       ev.key = eventIdentity(ev.transactionHash, ev.logIndex);
       return ev;
     }
 
-    /** Scan a single [from,to] block range and return raw logs. */
-    function fetchLogs(from, to) {
-      return provider.getLogs({
-        address: poolAddress,
-        fromBlock: '0x' + from.toString(16),
-        toBlock: '0x' + to.toString(16),
-      });
+    function eventStoreKey(ev) { return eventPrefix + ev.transactionHash + ':' + ev.logIndex; }
+
+    async function persistCursor() {
+      cursor.lastIndexedAt = Date.now();
+      await store.put(cursorKey, JSON.stringify(cursor));
     }
 
-    /**
-     * Ingest events in [fromBlock, toBlock], chunked safely, deduplicated by
-     * (txHash + logIndex). Advances the cursor. Returns a summary.
-     */
-    async function ingestRange(fromBlock, toBlock) {
-      var from = BigInt(fromBlock);
-      var to = BigInt(toBlock);
-      var indexed = 0, skipped = 0, chunks = 0, errors = 0;
-      if (to < from) return { ok: false, reason: 'INVALID_RANGE', indexed: 0, skipped: 0, chunks: 0, errors: 0, lastIndexedBlock: cursor.lastIndexedBlock };
-
-      cursor.status = 'SCANNING';
-      var cursorBlock = from;
-      while (cursorBlock <= to) {
-        var chunkEnd = cursorBlock + BigInt(chunkSize) - 1n;
-        if (chunkEnd > to) chunkEnd = to;
-        chunks++;
+    async function init() {
+      var raw = await store.get(cursorKey);
+      if (raw) {
         try {
-          var logs = await fetchLogs(cursorBlock, chunkEnd);
-          for (var i = 0; i < logs.length; i++) {
-            var ev = normalize(decode(logs[i]));
-            if (!ev) { skipped++; continue; }
-            if (store.has(ev.key)) { skipped++; continue; }
-            store.put(ev.key, ev);
-            indexed++;
+          var saved = JSON.parse(raw);
+          if (saved && saved.lastIndexedBlock != null) {
+            cursor.lastIndexedBlock = Number(saved.lastIndexedBlock);
+            cursor.status = saved.status || 'IDLE';
+            cursor.lastIndexedAt = Number(saved.lastIndexedAt) || 0;
+            cursor.indexedEvents = Number(saved.indexedEvents) || 0;
+            cursor.indexVersion = saved.indexVersion != null ? saved.indexVersion : indexVersion;
           }
-        } catch (e) {
-          errors++;
-          cursor.status = 'ERROR';
-          cursor.error = (e && e.message) || 'RPC_ERROR';
-          // Do not advance past the failed chunk; allow retry from cursorBlock.
-          break;
-        }
-        cursorBlock = chunkEnd + 1n;
+        } catch (e) { /* corrupt cursor — start fresh */ }
       }
-
-      cursor.lastIndexedBlock = Number(cursorBlock - 1n);
-      cursor.indexedEvents += indexed;
-      cursor.status = errors ? 'PARTIAL' : 'COMPLETE';
-      return {
-        ok: errors === 0,
-        indexed: indexed, skipped: skipped, chunks: chunks, errors: errors,
-        lastIndexedBlock: cursor.lastIndexedBlock,
-        status: cursor.status,
-      };
+      // Load persisted events into memory (rebuildable analytics source).
+      var entries = await store.list(eventPrefix);
+      for (var i = 0; i < entries.length; i++) {
+        var e = entries[i];
+        if (!e.key) continue;
+        try {
+          var loaded = await store.get(e.key);
+          if (!loaded) continue;
+          var ev = deserializeEvent(loaded);
+          if (!validateEvent(ev)) continue;
+          _events[ev.key] = ev;
+        } catch (err) { /* skip corrupt record */ }
+      }
+      return Object.assign({}, cursor);
     }
 
-    /** Incrementally index up to (latestBlock - confirmationDepth). */
+    async function fetchLogsWithRetry(from, to) {
+      var lastErr = null;
+      for (var attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+          return await provider.getLogs({
+            address: poolAddress,
+            fromBlock: '0x' + from.toString(16),
+            toBlock: '0x' + to.toString(16),
+          });
+        } catch (e) {
+          lastErr = e;
+          if (attempt < maxRetries) {
+            await new Promise(function (r) { setTimeout(r, retryBackoffMs * Math.pow(2, attempt)); });
+          }
+        }
+      }
+      throw lastErr || new Error('RPC_ERROR');
+    }
+
+    /** Resolve block timestamps in batch, cached per blockNumber. */
+    async function resolveTimestamps(logs) {
+      var blocks = {};
+      for (var i = 0; i < logs.length; i++) {
+        var bn = Number(logs[i].blockNumber);
+        if (_timestamps[bn] != null) continue;
+        blocks[bn] = true;
+      }
+      var bns = Object.keys(blocks).map(Number);
+      for (var j = 0; j < bns.length; j++) {
+        var b = bns[j];
+        try {
+          var blk = await provider.getBlock(b);
+          if (blk && blk.timestamp != null) _timestamps[b] = Number(blk.timestamp);
+          else _timestamps[b] = null;
+        } catch (e) {
+          _timestamps[b] = null; // TIMESTAMP_UNAVAILABLE
+        }
+      }
+    }
+
+    async function ingestRange(fromBlock, toBlock) {
+      if (_inflight) return { ok: false, reason: 'INDEXING_IN_PROGRESS', status: cursor.status, lastIndexedBlock: cursor.lastIndexedBlock };
+      _inflight = true;
+      try {
+        var from = BigInt(fromBlock);
+        var to = BigInt(toBlock);
+        if (to < from) return { ok: false, reason: 'INVALID_RANGE', indexed: 0, skipped: 0, chunks: 0, errors: 0, lastIndexedBlock: cursor.lastIndexedBlock, status: cursor.status };
+
+        cursor.status = 'SCANNING';
+        var indexed = 0, skipped = 0, chunks = 0, errors = 0, missingTs = 0;
+        var cursorBlock = from;
+
+        while (cursorBlock <= to) {
+          var chunkEnd = cursorBlock + BigInt(chunkSize) - 1n;
+          if (chunkEnd > to) chunkEnd = to;
+          chunks++;
+          try {
+            var logs = await fetchLogsWithRetry(cursorBlock, chunkEnd);
+            await resolveTimestamps(logs);
+
+            // Decode + validate + dedup (against BOTH memory and store).
+            var decoded = [];
+            for (var i = 0; i < logs.length; i++) {
+              var ev = normalize(decode(logs[i]), chainId);
+              if (!ev || !validateEvent(ev)) { skipped++; continue; }
+              ev.timestamp = _timestamps[Number(ev.blockNumber)] != null ? _timestamps[Number(ev.blockNumber)] : null;
+              if (ev.timestamp === null) missingTs++;
+              if (_events[ev.key]) { skipped++; continue; }
+              if (await store.has(eventStoreKey(ev))) { _events[ev.key] = ev; skipped++; continue; }
+              decoded.push(ev);
+            }
+
+            // Persist events FIRST (idempotent by unique key), THEN cursor.
+            for (var d = 0; d < decoded.length; d++) {
+              await store.put(eventStoreKey(decoded[d]), serializeEvent(decoded[d]));
+              _events[decoded[d].key] = decoded[d];
+              indexed++;
+            }
+
+            // Advance cursor only AFTER events persisted.
+            cursor.lastIndexedBlock = Number(chunkEnd);
+            cursor.indexedEvents += indexed;
+            await persistCursor();
+          } catch (e) {
+            errors++;
+            cursor.status = STATUS.ERROR;
+            cursor.error = (e && e.message) || 'RPC_ERROR';
+            // Do NOT advance the cursor past this failed chunk.
+            break;
+          }
+          cursorBlock = chunkEnd + 1n;
+        }
+
+        cursor.status = errors ? STATUS.ERROR : (missingTs ? STATUS.PARTIAL : STATUS.COMPLETE);
+        cursor.missingTimestamps = missingTs;
+        await persistCursor();
+        return {
+          ok: errors === 0,
+          indexed: indexed, skipped: skipped, chunks: chunks, errors: errors, missingTimestamps: missingTs,
+          lastIndexedBlock: cursor.lastIndexedBlock,
+          status: cursor.status,
+        };
+      } finally {
+        _inflight = false;
+      }
+    }
+
     async function ingestLatest() {
       var latest = await provider.getBlockNumber();
       var boundary = Number(latest) - confirmationDepth;
       if (boundary < 0) boundary = 0;
       var from = cursor.lastIndexedBlock > 0 ? cursor.lastIndexedBlock + 1 : 0;
-      if (boundary < from) return { ok: true, indexed: 0, skipped: 0, chunks: 0, errors: 0, lastIndexedBlock: cursor.lastIndexedBlock, status: cursor.status };
+      if (boundary < from) return { ok: true, indexed: 0, skipped: 0, chunks: 0, errors: 0, missingTimestamps: 0, lastIndexedBlock: cursor.lastIndexedBlock, status: cursor.status };
       return ingestRange(from, boundary);
     }
 
+    /** Deterministic event ordering: blockNumber ASC, logIndex ASC. */
     function getEvents(filter) {
       filter = filter || {};
-      var all = store.list();
-      return all.filter(function (ev) {
+      var all = Object.keys(_events).map(function (k) { return _events[k]; });
+      var out = all.filter(function (ev) {
         if (filter.eventType && ev.eventType !== filter.eventType) return false;
         if (filter.fromBlock != null && ev.blockNumber < BigInt(filter.fromBlock)) return false;
         if (filter.toBlock != null && ev.blockNumber > BigInt(filter.toBlock)) return false;
         return true;
       });
+      out.sort(function (a, b) {
+        if (a.blockNumber !== b.blockNumber) return (a.blockNumber < b.blockNumber) ? -1 : 1;
+        return a.logIndex - b.logIndex;
+      });
+      return out;
     }
 
-    /**
-     * Token-denominated volume in [now - periodSeconds, now] for the pool's
-     * `token0`/`token1` amounts (raw BigInt, not Number). `token0`/`token1` are
-     * metadata labels only — no pricing is performed here.
-     */
     function computeTokenVolume(periodSeconds, nowMs) {
       var now = nowMs != null ? nowMs : Date.now();
       var cutoff = now - (periodSeconds * 1000);
       var swaps = getEvents({ eventType: EVENT_TYPES.SWAP });
-      var in0 = 0n, in1 = 0n;
+      var in0 = 0n, in1 = 0n, missingTs = 0;
       for (var i = 0; i < swaps.length; i++) {
         var s = swaps[i];
-        if (s.timestamp <= 0 || s.timestamp * 1000 < cutoff) continue;
+        if (s.timestamp == null) { missingTs++; continue; } // exclude unknown timestamps from windowed analytics
+        if (s.timestamp * 1000 < cutoff) continue;
         in0 += s.amount0In || 0n;
         in1 += s.amount1In || 0n;
       }
-      return { periodSeconds: periodSeconds, amount0InRaw: in0, amount1InRaw: in1, swapCount: swaps.length, status: 'COMPLETE' };
+      return { periodSeconds: periodSeconds, amount0InRaw: in0, amount1InRaw: in1, swapCount: swaps.length, missingTimestamps: missingTs };
     }
 
-    /**
-     * Aggregated volume with optional USD valuation. `priceFn(symbol)` returns a
-     * USD price or null. When no trustworthy price exists, usd values are null
-     * (never a fabricated 0). Token volumes are always raw BigInt.
-     */
     function computeVolume(periodSeconds, opts2) {
       opts2 = opts2 || {};
       var nowMs = opts2.now != null ? opts2.now : Date.now();
@@ -238,9 +416,9 @@
       if (priceFn) {
         var p0 = priceFn(opts2.token0Symbol), p1 = priceFn(opts2.token1Symbol);
         var dec0 = opts2.token0Decimals || 18, dec1 = opts2.token1Decimals || 18;
-        var h0 = t.amount0InRaw / (10n ** BigInt(dec0));
-        var h1 = t.amount1InRaw / (10n ** BigInt(dec1));
         if (p0 != null && p1 != null) {
+          var h0 = t.amount0InRaw / (10n ** BigInt(dec0));
+          var h1 = t.amount1InRaw / (10n ** BigInt(dec1));
           usdVolume = Number(h0) * p0 + Number(h1) * p1;
         }
       }
@@ -250,37 +428,60 @@
         amount1InRaw: t.amount1InRaw,
         usdVolume: usdVolume,
         swapCount: t.swapCount,
-        status: t.status,
+        status: t.missingTimestamps ? STATUS.PARTIAL : STATUS.COMPLETE,
+        missingTimestamps: t.missingTimestamps,
       };
     }
 
     function getCursor() { return Object.assign({}, cursor); }
 
-    function reset(fromBlock) {
+    function getStatus() {
+      return {
+        cursor: Object.assign({}, cursor),
+        inMemoryEvents: Object.keys(_events).length,
+        status: cursor.status,
+      };
+    }
+
+    async function reset(fromBlock) {
       cursor.lastIndexedBlock = fromBlock || 0;
       cursor.indexedEvents = 0;
       cursor.status = 'IDLE';
+      cursor.lastIndexedAt = 0;
+      await persistCursor();
       return Object.assign({}, cursor);
     }
 
     return {
       EVENT_TYPES: EVENT_TYPES,
+      STATUS: STATUS,
+      init: init,
       ingestRange: ingestRange,
       ingestLatest: ingestLatest,
       getEvents: getEvents,
       computeVolume: computeVolume,
       getCursor: getCursor,
+      getStatus: getStatus,
       reset: reset,
       eventIdentity: eventIdentity,
     };
   }
 
-  window.PoolIndexer = {
-    VERSION: '1.0.0',
+  var API = {
+    VERSION: '1.1.0',
+    INDEX_VERSION: INDEX_VERSION,
     EVENT_TYPES: EVENT_TYPES,
+    STATUS: STATUS,
     createIndexer: createIndexer,
     createDecoder: createDecoder,
     createMemoryStore: createMemoryStore,
+    createKVStore: createKVStore,
     eventIdentity: eventIdentity,
+    serializeEvent: serializeEvent,
+    deserializeEvent: deserializeEvent,
   };
+
+  // Dual-mode: browser global + CommonJS (for Cloudflare Pages Functions).
+  if (typeof module !== 'undefined' && module.exports) { module.exports = API; }
+  if (typeof window !== 'undefined') { window.PoolIndexer = API; }
 })();
