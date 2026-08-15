@@ -86,6 +86,8 @@
 <script src="/shared/priceImpact.js"></script>
 <script src="/shared/swapMath.js"></script>
 <script src="/shared/poolEngine.js"></script>
+<script src="/shared/poolIndexer.js"></script>
+<script src="/shared/poolRouter.js"></script>
 <script src="/shared/liquidityHealth.js"></script>
 <script src="/shared/liquidityProtection.js"></script>
 <script src="/shared/antiWhaleProtection.js"></script>
@@ -13365,7 +13367,9 @@ async function indexAllPoolEvents(fromBlock) {
   }
 }
 
-// Track a new swap in real time — called from executeSwap
+// Track a swap performed by the CURRENT session — SESSION_OBSERVED_VOLUME only.
+// This is real but incomplete and MUST NOT be presented as authoritative 24h/7d/30d
+// pool volume. It is stored in a separate namespace from the on-chain index.
 function trackPoolVolume(poolId, amount, tokenSym) {
   const tokenRate = getTokenUSDRate(tokenSym);
   const usdValue = tokenRate !== null ? amount * tokenRate : 0;
@@ -13374,28 +13378,26 @@ function trackPoolVolume(poolId, amount, tokenSym) {
   const feeRate = pcfg ? (pcfg.feeTier || pcfg.fee) / 10000 : 0.001;
   const feeUsd = usdValue * feeRate;
 
-  evt.swaps.push({ ts: Math.floor(Date.now()/1000), amountIn: amount, tokenIn: tokenSym, usd: usdValue, feeUsd, txHash: null });
-  evt.volume24h += usdValue;
-  evt.fees24h += feeUsd;
-  // Prune entries beyond 24h
+  if (!evt.sessionSwaps) evt.sessionSwaps = [];
+  evt.sessionSwaps.push({ ts: Math.floor(Date.now()/1000), amountIn: amount, tokenIn: tokenSym, usd: usdValue, feeUsd, txHash: null });
   const cutoff = Math.floor(Date.now()/1000) - _eventsWindow;
-  evt.swaps = evt.swaps.filter(s => s.ts > cutoff).slice(0, 100);
-  // Recompute from remaining entries for accuracy
-  evt.volume24h = evt.swaps.reduce((s, v) => s + v.usd, 0);
-  evt.fees24h = evt.swaps.reduce((s, v) => s + v.feeUsd, 0);
-
-  if (poolData[poolId]) {
-    poolData[poolId].volume24h = evt.volume24h;
-    poolData[poolId].fees24h = evt.fees24h;
-  }
+  evt.sessionSwaps = evt.sessionSwaps.filter(s => s.ts > cutoff).slice(0, 100);
+  evt.sessionVolume24h = evt.sessionSwaps.reduce((s, v) => s + v.usd, 0);
+  evt.sessionFees24h = evt.sessionSwaps.reduce((s, v) => s + v.feeUsd, 0);
+  // NOTE: authoritative volume24h/fees24h are owned by the on-chain event indexer only.
 }
 
-// Get 24h volume from events
+// SESSION-observed volume (NOT authoritative pool volume).
+function getSessionObservedVolume24h(poolId) {
+  return _evtGet(poolId).sessionVolume24h || 0;
+}
+
+// Get 24h volume from INDEXED on-chain events (authoritative)
 function getPoolVolume24h(poolId) {
   return _evtGet(poolId).volume24h || 0;
 }
 
-// Get 24h fees from events
+// Get 24h fees from INDEXED on-chain events (authoritative)
 function getPoolFees24h(poolId) {
   return _evtGet(poolId).fees24h || 0;
 }
