@@ -12638,12 +12638,37 @@ const CCTP_CONFIG = Object.fromEntries(
 //  Add new tokens here without changing any other code
 //  Rates are computed dynamically from on-chain pool data via getTokenUSDRate()
 // ═══════════════════════════════════════════════════════════
-const TOKEN_REGISTRY = {
-  USDC:   { sym:'USDC',   name:'USD Coin',    decimals:6,  address:'0x3600000000000000000000000000000000000000', icon:'U', color:'#2775ca' },
-  EURC:   { sym:'EURC',   name:'Euro Coin',    decimals:6,  address:'0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a', icon:'E', color:'#2562de' },
-  cirBTC: { sym:'cirBTC', name:'Circle BTC',   decimals:8,  address:'0xf0C4a4CE82A5746AbAAd9425360Ab04fbBA432BF', icon:'₿', color:'#f7931a' },
-  ETH:    { sym:'ETH',    name:'Ether',         decimals:18, address:'0x0000000000000000000000000000000000000000', icon:'<svg viewBox="0 0 32 32" width="12" height="12"><path d="M16 4v10l-8 4 8-4 8 4-8-4V4zM16 20l-8-4 8 10 8-10-8 4z" fill="white"/></svg>', color:'#627eea' },
+// ── Token metadata: authoritative address/decimals/name come from PoolEngine
+// (single source of truth). UI-only fields (icon/color) remain local. ──
+const _PE = (typeof window !== 'undefined' && window.PoolEngine) ? window.PoolEngine : null;
+const _TOKEN_UI = {
+  USDC:   { icon:'U', color:'#2775ca' },
+  EURC:   { icon:'E', color:'#2562de' },
+  cirBTC: { icon:'₿', color:'#f7931a' },
+  ETH:    { icon:'<svg viewBox="0 0 32 32" width="12" height="12"><path d="M16 4v10l-8 4 8-4 8 4-8-4V4zM16 20l-8-4 8 10 8-10-8 4z" fill="white"/></svg>', color:'#627eea' },
 };
+const _TOKEN_DEFAULTS = {
+  USDC:   { name:'USD Coin',  decimals:6,  address:'0x3600000000000000000000000000000000000000' },
+  EURC:   { name:'Euro Coin',  decimals:6,  address:'0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a' },
+  cirBTC: { name:'Circle BTC', decimals:8,  address:'0xf0C4a4CE82A5746AbAAd9425360Ab04fbBA432BF' },
+  ETH:    { name:'Ether',      decimals:18, address:'0x0000000000000000000000000000000000000000' },
+};
+const TOKEN_REGISTRY = (function(){
+  const out = {};
+  for (const sym of Object.keys(_TOKEN_UI)) {
+    const c = (_PE && _PE.getToken) ? _PE.getToken(sym) : null;
+    const d = _TOKEN_DEFAULTS[sym] || {};
+    const ui = _TOKEN_UI[sym];
+    out[sym] = {
+      sym: sym,
+      name: (c && c.name) || d.name,
+      decimals: (c && c.decimals != null) ? c.decimals : d.decimals,
+      address: (c && c.address) || d.address,
+      icon: ui.icon, color: ui.color,
+    };
+  }
+  return out;
+})();
 const TOKEN_LIST = Object.keys(TOKEN_REGISTRY).map(k => TOKEN_REGISTRY[k]);
 
 // ── Token deduplication — ensures no duplicates by (chainId, address) ──
@@ -12765,12 +12790,40 @@ function getTokAddr(sym) {
 //  Each pool = tokenA/tokenB pair with contract address + fee
 //  Pools are discovered from on-chain factory + static registry
 // ═══════════════════════════════════════════════════════════
-const POOL_REGISTRY = [
-  { id:'usdc-eurc',    tokenA:'USDC', tokenB:'EURC',   address:'0x18076d992005186AeB13AC5270CaD6E27DB95247', fee:10,  feeTier:null, type:'stable', lpDecimals:18, deployed:true, lpName:'Elligentt USDC-EURC LP', lpSymbol:'LP-USDC-EURC' },
-  { id:'usdc-cirbtc',  tokenA:'USDC', tokenB:'cirBTC', address:'0x14590fB7dCbD5CeBabFF63B915ef23d008dB98F4', fee:30,  feeTier:null, type:'crypto', lpDecimals:18, deployed:true, lpName:'Elligentt USDC-cirBTC LP', lpSymbol:'LP-USDC-cirBTC' },
-  { id:'eurc-cirbtc',  tokenA:'EURC', tokenB:'cirBTC', address:'0x38076d992005186AeB13aC5270CaD6E27dB95249', fee:30,  feeTier:null, type:'crypto', lpDecimals:18, deployed:false, lpName:'Elligentt EURC-cirBTC LP', lpSymbol:'LP-EURC-cirBTC' },
-  { id:'eth-usdc',     tokenA:'ETH',  tokenB:'USDC',   address:'0x48076d992005186AeB13aC5270CaD6E27dB9524A', fee:30,  feeTier:null, type:'crypto', lpDecimals:18, deployed:false, lpName:'Elligentt ETH-USDC LP', lpSymbol:'LP-ETH-USDC' },
-];
+// ── Pool registry: authoritative config (id, tokenA/B, address, fee, type,
+// deployed) comes from PoolEngine.REGISTRY (single source of truth).
+// UI/derived fields (lpName/lpSymbol/lpDecimals) remain local. ──
+const POOL_REGISTRY = (function(){
+  const _LP_META = {
+    'usdc-eurc':   { lpName:'Elligentt USDC-EURC LP',  lpSymbol:'LP-USDC-EURC' },
+    'usdc-cirbtc': { lpName:'Elligentt USDC-cirBTC LP', lpSymbol:'LP-USDC-cirBTC' },
+    'eurc-cirbtc': { lpName:'Elligentt EURC-cirBTC LP', lpSymbol:'LP-EURC-cirBTC' },
+    'eth-usdc':    { lpName:'Elligentt ETH-USDC LP',    lpSymbol:'LP-ETH-USDC' },
+  };
+  if (_PE && Array.isArray(_PE.REGISTRY) && _PE.REGISTRY.length) {
+    return _PE.REGISTRY.map(function(p){
+      const m = _LP_META[p.id] || {};
+      return {
+        id: p.id,
+        tokenA: p.tokenA, tokenB: p.tokenB,
+        address: p.address,
+        fee: p.feeBps, feeTier: null,
+        type: p.type,
+        lpDecimals: 18,
+        deployed: !!p.deployed,
+        lpName: m.lpName || ('Elligentt ' + p.tokenA + '-' + p.tokenB + ' LP'),
+        lpSymbol: m.lpSymbol || ('LP-' + p.tokenA + '-' + p.tokenB),
+      };
+    });
+  }
+  // Fallback (PoolEngine unavailable) — same verified values.
+  return [
+    { id:'usdc-eurc',    tokenA:'USDC', tokenB:'EURC',   address:'0x18076d992005186AeB13AC5270CaD6E27DB95247', fee:10,  feeTier:null, type:'stable', lpDecimals:18, deployed:true,  lpName:'Elligentt USDC-EURC LP', lpSymbol:'LP-USDC-EURC' },
+    { id:'usdc-cirbtc',  tokenA:'USDC', tokenB:'cirBTC', address:'0x14590fB7dCbD5CeBabFF63B915ef23d008dB98F4', fee:30,  feeTier:null, type:'crypto', lpDecimals:18, deployed:true,  lpName:'Elligentt USDC-cirBTC LP', lpSymbol:'LP-USDC-cirBTC' },
+    { id:'eurc-cirbtc',  tokenA:'EURC', tokenB:'cirBTC', address:'0x38076d992005186AeB13aC5270CaD6E27dB95249', fee:30,  feeTier:null, type:'crypto', lpDecimals:18, deployed:false, lpName:'Elligentt EURC-cirBTC LP', lpSymbol:'LP-EURC-cirBTC' },
+    { id:'eth-usdc',     tokenA:'ETH',  tokenB:'USDC',   address:'0x48076d992005186AeB13aC5270CaD6E27dB9524A', fee:30,  feeTier:null, type:'crypto', lpDecimals:18, deployed:false, lpName:'Elligentt ETH-USDC LP', lpSymbol:'LP-ETH-USDC' },
+  ];
+})();
 
 // AMM Factory — discovers pools deployed by the factory contract.
 // Set this address once the factory is deployed on Arc Testnet.
@@ -13083,7 +13136,17 @@ async function loadSinglePool(poolCfg) {
       lpName: poolCfg.lpName || (poolCfg.tokenA + '-' + poolCfg.tokenB + ' LP'),
       lpSymbol: poolCfg.lpSymbol || ('LP-' + poolCfg.tokenA + '-' + poolCfg.tokenB),
       _lpDecimals: lpDecEffective,
+      _reserveARaw: rawA,
+      _reserveBRaw: rawB,
+      _lpSupplyRaw: supply,
+      updatedAt: Date.now(),
     };
+  // Sync canonical raw state into PoolEngine (single source of truth for math).
+  try {
+    if (_PE && _PE.updatePoolState) {
+      _PE.updatePoolState(poolCfg.id, { reserveARaw: rawA, reserveBRaw: rawB, lpSupplyRaw: supply, updatedAt: Date.now(), error: null });
+    }
+  } catch(_e) {}
   } catch(e) {
     if (!poolData[poolCfg.id]) {
       poolData[poolCfg.id] = { reserveA:0, reserveB:0, lpSupply:0, userLp:0, volume24h:0, loaded:true, error:null };
@@ -13601,7 +13664,14 @@ function getLiquidityDepth(poolId) {
   const rateA = getTokenUSDRate(pcfg.tokenA);
   const rateB = getTokenUSDRate(pcfg.tokenB);
   if (rateA === null || rateB === null) return null;
-  return pd.reserveA * rateA + pd.reserveB * rateB; // TVL = depth
+  // Canonical TVL via PoolEngine over raw on-chain reserves (BigInt-safe).
+  if (_PE && _PE.tvlUsd && pd._reserveARaw != null && pd._reserveBRaw != null) {
+    const decA = TOKEN_REGISTRY[pcfg.tokenA]?.decimals || 6;
+    const decB = TOKEN_REGISTRY[pcfg.tokenB]?.decimals || 6;
+    const tvl = _PE.tvlUsd(pd._reserveARaw, pd._reserveBRaw, decA, decB, rateA, rateB);
+    if (tvl !== null) return tvl;
+  }
+  return pd.reserveA * rateA + pd.reserveB * rateB; // fallback (human reserves)
 }
 
 function getPoolReserveRatio(poolId) {
@@ -19975,15 +20045,35 @@ function getAvailableRoutes(symIn, symOut) {
   return findAllRoutes(symIn, symOut).filter(r => !r.noLiq && r.output > 0);
 }
 
-// Calculate output through a specific pool using AMM math
+// Calculate output through a specific pool using AMM math.
+// Canonical: PoolEngine (BigInt) over raw on-chain reserves. Float path below
+// is a guarded fallback for the brief window before raw reserves load.
 function calcPoolOutput(amountIn, poolCfg, tokenInSym) {
   const pd = poolData[poolCfg.id];
   if (!pd || !pd.loaded) return 0;
 
-  const tokA = TOKEN_REGISTRY[poolCfg.tokenA];
-  const tokB = TOKEN_REGISTRY[poolCfg.tokenB];
-  const fee = (poolCfg.feeTier || poolCfg.fee) / 10000;
+  if (_PE && _PE.getAmountOut && _PE.getPoolState && typeof SwapMath !== 'undefined' && SwapMath.parseUnits && SwapMath.formatUnits) {
+    const st = _PE.getPoolState(poolCfg.id);
+    if (st) {
+      const isA = tokenInSym === poolCfg.tokenA;
+      const decIn  = (TOKEN_REGISTRY[tokenInSym]?.decimals) || 6;
+      const decOut = (TOKEN_REGISTRY[isA ? poolCfg.tokenB : poolCfg.tokenA]?.decimals) || 6;
+      const rIn  = isA ? st.reserveARaw : st.reserveBRaw;
+      const rOut = isA ? st.reserveBRaw : st.reserveARaw;
+      if (rIn != null && rOut != null && rIn > 0n && rOut > 0n) {
+        const amtInRaw = SwapMath.parseUnits(String(amountIn), decIn);
+        if (amtInRaw !== null && amtInRaw > 0n) {
+          const feeBps = Math.round((poolCfg.feeTier || poolCfg.fee) || 0);
+          const outRaw = _PE.getAmountOut(amtInRaw, rIn, rOut, feeBps);
+          const outNum = Number(SwapMath.formatUnits(outRaw, decOut));
+          if (isFinite(outNum)) return outNum;
+        }
+      }
+    }
+  }
 
+  // Guarded float fallback (legacy snapshot window — raw reserves not yet loaded).
+  const fee = (poolCfg.feeTier || poolCfg.fee) / 10000;
   let reserveIn, reserveOut;
   if (tokenInSym === poolCfg.tokenA) {
     reserveIn = pd.reserveA;
@@ -19992,7 +20082,6 @@ function calcPoolOutput(amountIn, poolCfg, tokenInSym) {
     reserveIn = pd.reserveB;
     reserveOut = pd.reserveA;
   }
-
   if (reserveIn <= 0 || reserveOut <= 0) return 0;
   const amtInWithFee = amountIn * (1 - fee);
   return (reserveOut * amtInWithFee) / (reserveIn + amtInWithFee);
@@ -20328,8 +20417,8 @@ function swpUpdatePoolInfo() {
     if (resBL) resBL.textContent = poolCfg.tokenB + ' Reserve';
     if (resA) resA.textContent = pd.loaded ? fmt(pd.reserveA) + ' ' + poolCfg.tokenA : '…';
     if (resB) resB.textContent = pd.loaded ? fmt(pd.reserveB) + ' ' + poolCfg.tokenB : '…';
-    const tvl = (pd.reserveA || 0) * (getTokenUSDRate(poolCfg.tokenA) || 0) + (pd.reserveB || 0) * (getTokenUSDRate(poolCfg.tokenB) || 0);
-    if (tvlEl) tvlEl.textContent = pd.loaded ? '$' + fmt(tvl) : '…';
+    const tvl = pd.loaded ? getLiquidityDepth(poolCfg.id) : null;
+    if (tvlEl) tvlEl.textContent = pd.loaded ? (tvl !== null ? '$' + fmt(tvl) : 'Price unavailable') : '…';
     if (feeEl) feeEl.textContent = poolCfg.feeTier ? (poolCfg.feeTier / 100).toFixed(1) + '%' : (poolCfg.fee / 100).toFixed(1) + '%';
   } else {
     if (resAL) resAL.textContent = 'Reserve A';
@@ -20676,14 +20765,32 @@ async function updateSwapRate() {
 }
 
 function calcRoutePriceImpact(amtIn, route) {
+  // Canonical: single-pool price impact via PoolEngine (spot vs execution).
+  if (route && route.pools && route.pools.length === 1 && _PE && _PE.priceImpactBps && _PE.getPoolState && typeof SwapMath !== 'undefined' && SwapMath.parseUnits) {
+    const poolCfg = route.pools[0];
+    const tokenInSym = route.hops[0];
+    const st = _PE.getPoolState(poolCfg.id);
+    if (st && st.reserveARaw && st.reserveBRaw && st.reserveARaw > 0n && st.reserveBRaw > 0n) {
+      const isA = tokenInSym === poolCfg.tokenA;
+      const decIn = (TOKEN_REGISTRY[tokenInSym]?.decimals) || 6;
+      const amtInRaw = SwapMath.parseUnits(String(amtIn), decIn);
+      if (amtInRaw !== null && amtInRaw > 0n) {
+        const feeBps = Math.round((poolCfg.feeTier || poolCfg.fee) || 0);
+        const rIn = isA ? st.reserveARaw : st.reserveBRaw;
+        const rOut = isA ? st.reserveBRaw : st.reserveARaw;
+        const bps = _PE.priceImpactBps(amtInRaw, rIn, rOut, feeBps);
+        if (bps !== null) return bps / 100; // bps → percent
+      }
+    }
+  }
+  // Multi-hop fallback: marginal (spot proxy) vs effective price.
   const out1 = calcRouteOutput(amtIn, route);
   if (out1 <= 0) return 100;
   const out2 = calcRouteOutput(amtIn * 0.01, route);
   if (out2 <= 0) return 100;
   const marginal = out2 / (amtIn * 0.01);
-  const spot = marginal;
   const effective = out1 / amtIn;
-  return spot > 0 ? Math.max(0, ((spot - effective) / spot) * 100) : 100;
+  return marginal > 0 ? Math.max(0, ((marginal - effective) / marginal) * 100) : 100;
 }
 
 function swpSet(id, val, cls) {
@@ -26921,7 +27028,7 @@ function renderPoolList() {
     const tB = TOKEN_REGISTRY[pcfg.tokenB];
     const hasData = pd && pd.loaded && !pd.error;
     const hasLiq = hasData && pd.reserveA > 0 && pd.reserveB > 0;
-    const tvl = hasLiq ? (pd.reserveA * (getTokenUSDRate(pcfg.tokenA) || 1) + pd.reserveB * (getTokenUSDRate(pcfg.tokenB) || 1)) : 0;
+    const tvl = hasLiq ? getLiquidityDepth(pcfg.id) : null;
     const userHasLP = (pd?.userLp || 0) > 0;
     const feePct = ((pcfg.feeTier || pcfg.fee) / 100).toFixed(1);
 
@@ -26939,7 +27046,7 @@ function renderPoolList() {
       <div class="plist-card-body">
         <div class="plist-stat-row">
           <span class="plist-stat-label">TVL</span>
-          <span class="plist-stat-val ${isInvalid ? 'yellow' : 'teal'}">${hasLiq ? '$' + fmt(tvl) : isInvalid ? 'Pool configuration invalid' : pcfg.deployed ? (pd?.loaded ? 'No liquidity' : 'Loading...') : 'Coming soon'}</span>
+          <span class="plist-stat-val ${isInvalid ? 'yellow' : 'teal'}">${hasLiq ? (tvl !== null ? '$' + fmt(tvl) : 'Price unavailable') : isInvalid ? 'Pool configuration invalid' : pcfg.deployed ? (pd?.loaded ? 'No liquidity' : 'Loading...') : 'Coming soon'}</span>
         </div>
         <div class="plist-stat-row">
           <span class="plist-stat-label">Volume 24h</span>
@@ -27111,7 +27218,8 @@ function renderMyLPPositions() {
     const share = pd.lpSupply > 0 ? pd.userLp / pd.lpSupply : 0;
     const posA = pd.reserveA * share;
     const posB = pd.reserveB * share;
-    const posVal = posA * (getTokenUSDRate(pcfg.tokenA) || 0) + posB * (getTokenUSDRate(pcfg.tokenB) || 0);
+    const poolTvl = getLiquidityDepth(pcfg.id);
+    const posVal = poolTvl !== null ? poolTvl * share : null;
     const claimableFees = getClaimableFeesForActivePosition(pcfg.id);
     const feesDisplay = claimableFees > 0.01
       ? `$${claimableFees.toFixed(2)}`
@@ -27128,14 +27236,14 @@ function renderMyLPPositions() {
         <div class="lp-pos-icon" style="background:${tB.color}">${tB.icon}</div>
         <span class="lp-pos-pair-name">${pcfg.tokenA} / ${pcfg.tokenB}</span>
         <span style="font-size:7px;background:rgba(45,212,191,.12);color:var(--teal);padding:1px 4px;border-radius:3px;font-weight:600">${lpSymbol}</span>
-        <span style="margin-left:auto;font-size:8px;color:var(--green);font-weight:700">$${posVal.toFixed(2)}</span>
+        <span style="margin-left:auto;font-size:8px;color:var(--green);font-weight:700">${posVal !== null ? '$' + posVal.toFixed(2) : 'Price unavailable'}</span>
       </div>
       <div style="font-size:7.5px;color:var(--muted);margin-bottom:6px">${lpName} · ERC-20</div>
       <div class="lp-pos-grid">
         <div><span class="lp-pos-stat">LP Balance</span><br><span class="lp-pos-stat-val" style="color:var(--teal)">${pd.userLp < 1e-6 ? pd.userLp.toExponential(3) : pd.userLp.toFixed(8)}</span></div>
         <div><span class="lp-pos-stat">Pool Share</span><br><span class="lp-pos-stat-val">${(share * 100).toFixed(4)}%</span></div>
         <div><span class="lp-pos-stat">Fees Earned</span><br><span class="lp-pos-stat-val" style="color:var(--yellow)">${feesDisplay}</span></div>
-        <div><span class="lp-pos-stat">Total Value</span><br><span class="lp-pos-stat-val" style="color:var(--green)">$${posVal.toFixed(2)}</span></div>
+        <div><span class="lp-pos-stat">Total Value</span><br><span class="lp-pos-stat-val" style="color:var(--green)">${posVal !== null ? '$' + posVal.toFixed(2) : 'Price unavailable'}</span></div>
       </div>
       <div class="lp-pos-grid" style="margin-top:4px">
         <div><span class="lp-pos-stat">${pcfg.tokenA}</span><br><span class="lp-pos-stat-val">${posA.toFixed(decDispA)}</span></div>
@@ -27153,9 +27261,8 @@ function updatePoolStats() {
   POOL_REGISTRY.forEach(pcfg => {
     const pd = poolData[pcfg.id];
     if (pd && pd.loaded && !pd.error && pd.reserveA > 0 && pd.reserveB > 0) {
-      const tA = TOKEN_REGISTRY[pcfg.tokenA];
-      const tB = TOKEN_REGISTRY[pcfg.tokenB];
-      totalTVL += pd.reserveA * (getTokenUSDRate(pcfg.tokenA) || 1) + pd.reserveB * (getTokenUSDRate(pcfg.tokenB) || 1);
+      const tvl = getLiquidityDepth(pcfg.id);
+      if (tvl !== null) totalTVL += tvl;
       activeCount++;
     }
   });
@@ -27175,14 +27282,16 @@ function poolUpdateUI() {
   const hasData = pd && pd.loaded && !pd.error;
   const hasLiq = hasData && pd.reserveA > 0 && pd.reserveB > 0;
 
-  const tvl = hasLiq ? (pd.reserveA * (getTokenUSDRate(pcfg.tokenA) || 1) + pd.reserveB * (getTokenUSDRate(pcfg.tokenB) || 1)) : 0;
-  const pctA = tvl > 0 ? (pd.reserveA * (getTokenUSDRate(pcfg.tokenA) || 1) / tvl * 100) : 50;
+  const tvl = hasLiq ? getLiquidityDepth(activePoolId) : null;
+  const rateAForRatio = hasLiq ? getTokenUSDRate(pcfg.tokenA) : null;
+  const rateBForRatio = hasLiq ? getTokenUSDRate(pcfg.tokenB) : null;
+  const pctA = (tvl !== null && tvl > 0 && rateAForRatio !== null) ? (pd.reserveA * rateAForRatio / tvl * 100) : 50;
   const pctB = 100 - pctA;
   const fmt = n => (n || 0).toLocaleString('en-US', { minimumFractionDigits:2, maximumFractionDigits:2 });
 
   // Stats
   const tvlEl = document.getElementById('pool-tvl');
-  if (tvlEl) tvlEl.textContent = hasLiq ? '$' + fmt(tvl) : (hasData ? '$0.00' : 'Loading...');
+  if (tvlEl) tvlEl.textContent = hasLiq ? (tvl !== null ? '$' + fmt(tvl) : 'Price unavailable') : (hasData ? 'No liquidity' : 'Loading...');
   const ratioEl = document.getElementById('pool-ratio');
   if (ratioEl) ratioEl.textContent = hasLiq ? Math.round(pctA) + ' / ' + Math.round(pctB) : (hasData ? 'Empty' : '—');
   const volEl = document.getElementById('pool-vol24');
@@ -27367,9 +27476,8 @@ function poolUpdateLPPosition(pcfg, pd, hasLiq) {
   const share = pd.lpSupply > 0 ? userLp / pd.lpSupply : 0;
   const posA = pd.reserveA * share;
   const posB = pd.reserveB * share;
-  const rateA = getTokenUSDRate(pcfg.tokenA) || 0;
-  const rateB = getTokenUSDRate(pcfg.tokenB) || 0;
-  const posValUSD = posA * rateA + posB * rateB;
+  const poolTvlPos = getLiquidityDepth(pcfg.id);
+  const posValUSD = poolTvlPos !== null ? poolTvlPos * share : null;
   const tA = TOKEN_REGISTRY[pcfg.tokenA];
   const tB = TOKEN_REGISTRY[pcfg.tokenB];
   const decDispA = tA && tA.decimals > 6 ? 8 : 4;
@@ -27380,7 +27488,7 @@ function poolUpdateLPPosition(pcfg, pd, hasLiq) {
   _s('pool-my-lp-supply-info', 'of ' + pd.lpSupply.toFixed(4) + ' total');
   _s('pool-my-val-a', posA.toFixed(decDispA) + ' ' + pcfg.tokenA);
   _s('pool-my-val-b', posB.toFixed(decDispB) + ' ' + pcfg.tokenB);
-  _s('pool-my-total-usd', '$' + posValUSD.toFixed(2));
+  _s('pool-my-total-usd', posValUSD !== null ? '$' + posValUSD.toFixed(2) : 'Price unavailable');
 
   // Fee accumulation: estimate fees earned from LP value growth
   const feesEarned = getClaimableFeesForActivePosition(pcfg.id);
@@ -27523,8 +27631,10 @@ function poolSyncRemove() {
   const decDispB = tB.decimals > 6 ? 8 : 4;
   document.getElementById('pool-remove-amt-a').textContent = aOut > 0 ? aOut.toFixed(decDispA) : '0.' + '0'.repeat(decDispA);
   document.getElementById('pool-remove-amt-b').textContent = bOut > 0 ? bOut.toFixed(decDispB) : '0.' + '0'.repeat(decDispB);
+  const rmRateA = getTokenUSDRate(pcfg.tokenA);
+  const rmRateB = getTokenUSDRate(pcfg.tokenB);
   document.getElementById('pool-remove-total-usd').textContent =
-    '≈ $' + (aOut * (getTokenUSDRate(pcfg.tokenA) || 1) + bOut * (getTokenUSDRate(pcfg.tokenB) || 1)).toFixed(2);
+    (rmRateA !== null && rmRateB !== null) ? '≈ $' + (aOut * rmRateA + bOut * rmRateB).toFixed(2) : 'Price unavailable';
 }
 
 function setRemovePct(pct) {
@@ -27574,6 +27684,10 @@ async function executeAddLiquidity() {
   const pcfg = POOL_REGISTRY.find(p => p.id === activePoolId);
   if (!pcfg || !pcfg.deployed) { toast('Pool not deployed yet', 'error'); return; }
   if (poolData[activePoolId]?.error) { toast(poolData[activePoolId].error, 'error'); return; }
+  // Refresh on-chain state before a financial write (never execute on stale reserves).
+  await loadSinglePool(pcfg);
+  if (poolData[activePoolId]?.error) { toast(poolData[activePoolId].error, 'error'); return; }
+  if (_PE && _PE.isStale && _PE.isStale(activePoolId, 60000)) { toast('Pool state is stale — refresh and try again', 'error'); return; }
 
   const aStr = (document.getElementById('pool-add-amt-a').value || '').trim();
   const bStr = (document.getElementById('pool-add-amt-b').value || '').trim();
@@ -27711,6 +27825,10 @@ async function executeRemoveLiquidity() {
   const pcfg = POOL_REGISTRY.find(p => p.id === activePoolId);
   if (!pcfg || !pcfg.deployed) { toast('Pool not deployed', 'error'); return; }
   if (poolData[activePoolId]?.error) { toast(poolData[activePoolId].error, 'error'); return; }
+  // Refresh on-chain state before a financial write (never execute on stale reserves).
+  await loadSinglePool(pcfg);
+  if (poolData[activePoolId]?.error) { toast(poolData[activePoolId].error, 'error'); return; }
+  if (_PE && _PE.isStale && _PE.isStale(activePoolId, 60000)) { toast('Pool state is stale — refresh and try again', 'error'); return; }
 
   const lpStr = (document.getElementById('pool-remove-lp').value || '').trim();
   if (!lpStr) { toast('Enter LP amount', 'error'); return; }

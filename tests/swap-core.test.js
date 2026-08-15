@@ -119,27 +119,39 @@ describe('SwapMath — price impact', () => {
 });
 
 describe('production calcPoolOutput matches SwapMath (regression)', () => {
-  it('TEST 16 — the deployed AMM formula is identical to the reference', () => {
-    const fn = extractFunction(html, 'calcPoolOutput');
-    // calcPoolOutput references bare globals (poolData / TOKEN_REGISTRY) — expose them.
-    globalThis.poolData = { usdc_eurc: { loaded: true, reserveA: 26508.21, reserveB: 23994.22 } };
+  it('TEST 16 — the deployed AMM formula is identical to the reference (via PoolEngine)', () => {
+    // Load PoolEngine (canonical engine) and expose it to the extracted function.
+    const peWin = {};
+    new Function('window', fs.readFileSync(path.join(root, 'shared', 'swapMath.js'), 'utf8'))(peWin);
+    new Function('window', fs.readFileSync(path.join(root, 'shared', 'poolEngine.js'), 'utf8'))(peWin);
+    const PE = peWin.PoolEngine;
+
+    const reserveA = SM.parseUnits('26508.21', 6);
+    const reserveB = SM.parseUnits('23994.22', 6);
+    PE.updatePoolState('usdc-eurc', { reserveARaw: reserveA, reserveBRaw: reserveB, lpSupplyRaw: 1n, updatedAt: Date.now() });
+
+    globalThis._PE = PE;
+    globalThis.SwapMath = SM;
+    globalThis.poolData = { 'usdc-eurc': { loaded: true, reserveA: 26508.21, reserveB: 23994.22, _reserveARaw: reserveA, _reserveBRaw: reserveB } };
     globalThis.TOKEN_REGISTRY = { USDC: { decimals: 6 }, EURC: { decimals: 6 } };
     try {
+      const fn = extractFunction(html, 'calcPoolOutput');
       const win = {};
       new Function('window', fn + '\nwindow.calcPoolOutput = calcPoolOutput;')(win);
-      const poolCfg = { id: 'usdc_eurc', tokenA: 'USDC', tokenB: 'EURC', feeTier: null, fee: 10 };
+      const poolCfg = { id: 'usdc-eurc', tokenA: 'USDC', tokenB: 'EURC', feeTier: null, fee: 10 };
 
       const productionOut = win.calcPoolOutput(100, poolCfg, 'USDC');
 
       const refOut = Number(SM.formatUnits(
-        SM.getAmountOut(SM.parseUnits('100', 6), SM.parseUnits('26508.21', 6), SM.parseUnits('23994.22', 6), 10),
+        SM.getAmountOut(SM.parseUnits('100', 6), reserveA, reserveB, 10),
         6
       ));
 
-      // Production uses float math for the display quote; the on-chain amount is
-      // exact via parseUnits. Match within float precision (5 decimals).
-      expect(productionOut).toBeCloseTo(refOut, 5);
+      // Canonical path routes through PoolEngine/SwapMath → exact match.
+      expect(productionOut).toBe(refOut);
     } finally {
+      delete globalThis._PE;
+      delete globalThis.SwapMath;
       delete globalThis.poolData;
       delete globalThis.TOKEN_REGISTRY;
     }

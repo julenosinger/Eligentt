@@ -314,12 +314,107 @@
     return { amountARaw: amountA, amountBRaw: amountB, shareBps: Number(lp * 10000n / sup) };
   }
 
+  /* ══════════════════════════════════════════════════════════════
+     TOKEN METADATA — canonical address + decimals (single source).
+     UI-only fields (icon, color) live in the app, NOT here.
+     ══════════════════════════════════════════════════════════════ */
+  var TOKENS = {
+    USDC:   { sym: 'USDC',   name: 'USD Coin',  decimals: 6,  address: '0x3600000000000000000000000000000000000000' },
+    EURC:   { sym: 'EURC',   name: 'Euro Coin',  decimals: 6,  address: '0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a' },
+    cirBTC: { sym: 'cirBTC', name: 'Circle BTC', decimals: 8,  address: '0xf0C4a4CE82A5746AbAAd9425360Ab04fbBA432BF' },
+    ETH:    { sym: 'ETH',    name: 'Ether',      decimals: 18, address: '0x0000000000000000000000000000000000000000' }
+  };
+
+  function getToken(sym) { return TOKENS[sym] || null; }
+
+  /* ══════════════════════════════════════════════════════════════
+     LIVE POOL STATE — canonical on-chain snapshot (raw BigInt).
+     Populated by the app after each on-chain read (loadSinglePool).
+     PoolEngine does NOT read the chain itself; it owns the *state*.
+     ══════════════════════════════════════════════════════════════ */
+  var _states = {};
+
+  function updatePoolState(id, state) {
+    var p = getPool(id);
+    if (!p) return false;
+    if (!state) state = {};
+    _states[id] = {
+      reserveARaw: state.reserveARaw != null ? toBig(state.reserveARaw) : null,
+      reserveBRaw: state.reserveBRaw != null ? toBig(state.reserveBRaw) : null,
+      lpSupplyRaw: state.lpSupplyRaw != null ? toBig(state.lpSupplyRaw) : null,
+      updatedAt: Number(state.updatedAt) || Date.now(),
+      error: state.error || null
+    };
+    return true;
+  }
+
+  /** Canonical pool state snapshot (registry config + raw reserves + age). */
+  function getPoolState(id) {
+    var p = getPool(id);
+    if (!p) return null;
+    var s = _states[id] || { reserveARaw: null, reserveBRaw: null, lpSupplyRaw: null, updatedAt: 0, error: null };
+    return {
+      id: p.id,
+      address: p.address,
+      tokenA: p.tokenA, tokenB: p.tokenB,
+      tokenAAddress: p.tokenAAddress, tokenBAddress: p.tokenBAddress,
+      tokenADecimals: p.tokenADecimals, tokenBDecimals: p.tokenBDecimals,
+      feeBps: p.feeBps, type: p.type, deployed: p.deployed,
+      reserveARaw: s.reserveARaw, reserveBRaw: s.reserveBRaw, lpSupplyRaw: s.lpSupplyRaw,
+      updatedAt: s.updatedAt, error: s.error
+    };
+  }
+
+  function hasLiquidity(id) {
+    var s = getPoolState(id);
+    return !!(s && s.reserveARaw && s.reserveBRaw && s.reserveARaw > 0n && s.reserveBRaw > 0n);
+  }
+
+  /** True when the snapshot is missing or older than maxAgeMs (default 60s). */
+  function isStale(id, maxAgeMs) {
+    var s = getPoolState(id);
+    if (!s || s.updatedAt <= 0) return true;
+    var max = Number(maxAgeMs);
+    if (!isFinite(max) || max <= 0) max = 60000;
+    return (Date.now() - s.updatedAt) > max;
+  }
+
+  /**
+   * Canonical end-to-end quote from live state (used by Swap).
+   * Returns { ok, amountOutRaw, priceImpactBps, utilizationBps, code }.
+   * Never fabricates output: failures carry an error code, not a 0.
+   */
+  function quote(id, tokenInSym, amountInRaw) {
+    var s = getPoolState(id);
+    if (!s) return { ok: false, code: ERR.INVALID_POOL };
+    if (!s.deployed) return { ok: false, code: ERR.POOL_NOT_DEPLOYED };
+    if (!s.reserveARaw || !s.reserveBRaw || s.reserveARaw <= 0n || s.reserveBRaw <= 0n) return { ok: false, code: ERR.ZERO_LIQUIDITY };
+    var a = toBig(amountInRaw);
+    if (a <= 0n) return { ok: false, code: ERR.INVALID_TOKEN };
+    var isA = tokenInSym === s.tokenA;
+    var isB = tokenInSym === s.tokenB;
+    if (!isA && !isB) return { ok: false, code: ERR.INVALID_TOKEN };
+    var rIn = isA ? s.reserveARaw : s.reserveBRaw;
+    var rOut = isA ? s.reserveBRaw : s.reserveARaw;
+    var out = getAmountOut(a, rIn, rOut, s.feeBps);
+    var impact = priceImpactBps(a, rIn, rOut, s.feeBps);
+    var util = utilizationBps(a, rIn);
+    return { ok: true, amountOutRaw: out, priceImpactBps: impact, utilizationBps: util };
+  }
+
   window.PoolEngine = {
-    VERSION: '1.0.0',
+    VERSION: '1.1.0',
     ERR: ERR,
     REGISTRY: REGISTRY,
+    TOKENS: TOKENS,
     getPool: getPool,
+    getToken: getToken,
     getDeployedPools: getDeployedPools,
+    updatePoolState: updatePoolState,
+    getPoolState: getPoolState,
+    hasLiquidity: hasLiquidity,
+    isStale: isStale,
+    quote: quote,
     spotPriceScaled: spotPriceScaled,
     spotPrice: spotPrice,
     getAmountOut: getAmountOut,
