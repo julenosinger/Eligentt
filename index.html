@@ -12647,6 +12647,9 @@ const _TOKEN_UI = {
   cirBTC: { icon:'₿', color:'#f7931a' },
   ETH:    { icon:'<svg viewBox="0 0 32 32" width="12" height="12"><path d="M16 4v10l-8 4 8-4 8 4-8-4V4zM16 20l-8-4 8 10 8-10-8 4z" fill="white"/></svg>', color:'#627eea' },
 };
+// _TOKEN_DEFAULTS is UI bootstrap ONLY. Financial execution never reads these —
+// it reads PoolEngine state (tokenADecimals/tokenBDecimals/address) exclusively.
+// These MUST NOT override on-chain/verified metadata.
 const _TOKEN_DEFAULTS = {
   USDC:   { name:'USD Coin',  decimals:6,  address:'0x3600000000000000000000000000000000000000' },
   EURC:   { name:'Euro Coin',  decimals:6,  address:'0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a' },
@@ -12816,7 +12819,9 @@ const POOL_REGISTRY = (function(){
       };
     });
   }
-  // Fallback (PoolEngine unavailable) — same verified values.
+  // Fallback (PoolEngine unavailable) — UI bootstrap ONLY. Same verified values,
+  // but financial EXECUTION is gated by PoolEngine (calcPoolOutputRaw/quote) and
+  // this fallback never authorizes execution on its own.
   return [
     { id:'usdc-eurc',    tokenA:'USDC', tokenB:'EURC',   address:'0x18076d992005186AeB13AC5270CaD6E27DB95247', fee:10,  feeTier:null, type:'stable', lpDecimals:18, deployed:true,  lpName:'Elligentt USDC-EURC LP', lpSymbol:'LP-USDC-EURC' },
     { id:'usdc-cirbtc',  tokenA:'USDC', tokenB:'cirBTC', address:'0x14590fB7dCbD5CeBabFF63B915ef23d008dB98F4', fee:30,  feeTier:null, type:'crypto', lpDecimals:18, deployed:true,  lpName:'Elligentt USDC-cirBTC LP', lpSymbol:'LP-USDC-cirBTC' },
@@ -13633,6 +13638,9 @@ async function preSwapSimulation(route, tIn, tOut, amtIn, minReceived) {
     const pcfg = route.pools[i];
     let tokenInSym = route.hops[i];
     let amt = i === 0 ? amtIn : calcRouteOutput(amtIn, { pools: route.pools.slice(0, i), hops: route.hops.slice(0, i + 1) });
+    if (amt === null || !(amt > 0)) {
+      return { ok: false, reason: `Hop ${i+1} canonical output unavailable — refresh quote` };
+    }
     const tokenInAddr = getTokAddr(tokenInSym);
     const tok = TOKEN_REGISTRY[tokenInSym];
     try {
@@ -13663,15 +13671,15 @@ function getLiquidityDepth(poolId) {
   if (!pcfg) return null;
   const rateA = getTokenUSDRate(pcfg.tokenA);
   const rateB = getTokenUSDRate(pcfg.tokenB);
-  if (rateA === null || rateB === null) return null;
+  if (rateA === null || rateB === null) return null; // PRICE_UNAVAILABLE → TVL_UNAVAILABLE
   // Canonical TVL via PoolEngine over raw on-chain reserves (BigInt-safe).
-  if (_PE && _PE.tvlUsd && pd._reserveARaw != null && pd._reserveBRaw != null) {
-    const decA = TOKEN_REGISTRY[pcfg.tokenA]?.decimals || 6;
-    const decB = TOKEN_REGISTRY[pcfg.tokenB]?.decimals || 6;
-    const tvl = _PE.tvlUsd(pd._reserveARaw, pd._reserveBRaw, decA, decB, rateA, rateB);
-    if (tvl !== null) return tvl;
-  }
-  return pd.reserveA * rateA + pd.reserveB * rateB; // fallback (human reserves)
+  // No legacy float fallback — unavailable state returns null (TVL_UNAVAILABLE).
+  if (!_PE || !_PE.tvlUsd) return null; // POOL_ENGINE_UNAVAILABLE
+  if (pd._reserveARaw == null || pd._reserveBRaw == null) return null; // POOL_STATE_UNAVAILABLE
+  const decA = TOKEN_REGISTRY[pcfg.tokenA]?.decimals;
+  const decB = TOKEN_REGISTRY[pcfg.tokenB]?.decimals;
+  if (decA == null || decB == null) return null; // UNKNOWN_TOKEN_DECIMALS
+  return _PE.tvlUsd(pd._reserveARaw, pd._reserveBRaw, decA, decB, rateA, rateB);
 }
 
 function getPoolReserveRatio(poolId) {
@@ -20017,7 +20025,7 @@ function findAllRoutes(symIn, symOut) {
   for (const r of routes) {
     if (r.noLiq) continue;
     const out = calcRouteOutput(1, r);
-    r.output = out;
+    r.output = (out === null || out <= 0) ? 0 : out;
     r.fee = r.pools.reduce((sum, p) => sum + (p.feeTier || p.fee), 0);
   }
 
@@ -20045,54 +20053,67 @@ function getAvailableRoutes(symIn, symOut) {
   return findAllRoutes(symIn, symOut).filter(r => !r.noLiq && r.output > 0);
 }
 
-// Calculate output through a specific pool using AMM math.
-// Canonical: PoolEngine (BigInt) over raw on-chain reserves. Float path below
-// is a guarded fallback for the brief window before raw reserves load.
-function calcPoolOutput(amountIn, poolCfg, tokenInSym) {
-  const pd = poolData[poolCfg.id];
-  if (!pd || !pd.loaded) return 0;
-
-  if (_PE && _PE.getAmountOut && _PE.getPoolState && typeof SwapMath !== 'undefined' && SwapMath.parseUnits && SwapMath.formatUnits) {
-    const st = _PE.getPoolState(poolCfg.id);
-    if (st) {
-      const isA = tokenInSym === poolCfg.tokenA;
-      const decIn  = (TOKEN_REGISTRY[tokenInSym]?.decimals) || 6;
-      const decOut = (TOKEN_REGISTRY[isA ? poolCfg.tokenB : poolCfg.tokenA]?.decimals) || 6;
-      const rIn  = isA ? st.reserveARaw : st.reserveBRaw;
-      const rOut = isA ? st.reserveBRaw : st.reserveARaw;
-      if (rIn != null && rOut != null && rIn > 0n && rOut > 0n) {
-        const amtInRaw = SwapMath.parseUnits(String(amountIn), decIn);
-        if (amtInRaw !== null && amtInRaw > 0n) {
-          const feeBps = Math.round((poolCfg.feeTier || poolCfg.fee) || 0);
-          const outRaw = _PE.getAmountOut(amtInRaw, rIn, rOut, feeBps);
-          const outNum = Number(SwapMath.formatUnits(outRaw, decOut));
-          if (isFinite(outNum)) return outNum;
-        }
-      }
-    }
-  }
-
-  // Guarded float fallback (legacy snapshot window — raw reserves not yet loaded).
-  const fee = (poolCfg.feeTier || poolCfg.fee) / 10000;
-  let reserveIn, reserveOut;
-  if (tokenInSym === poolCfg.tokenA) {
-    reserveIn = pd.reserveA;
-    reserveOut = pd.reserveB;
-  } else {
-    reserveIn = pd.reserveB;
-    reserveOut = pd.reserveA;
-  }
-  if (reserveIn <= 0 || reserveOut <= 0) return 0;
-  const amtInWithFee = amountIn * (1 - fee);
-  return (reserveOut * amtInWithFee) / (reserveIn + amtInWithFee);
+// ── Canonical AMM output — FINANCIAL PRIMITIVE (raw BigInt) ──
+// Single source of truth: PoolEngine.getAmountOut over raw on-chain reserves.
+// Returns { ok:true, amountOutRaw } or { ok:false, error } — NEVER a fabricated
+// zero. This is the ONLY path used for quotes / minOut / execution.
+function calcPoolOutputRaw(poolCfg, tokenInSym, amountInRaw) {
+  if (!_PE || !_PE.getAmountOut || !_PE.getPoolState) return { ok: false, error: 'POOL_ENGINE_UNAVAILABLE' };
+  const st = _PE.getPoolState(poolCfg.id);
+  if (!st) return { ok: false, error: 'POOL_STATE_UNAVAILABLE' };
+  if (!st.deployed) return { ok: false, error: 'POOL_NOT_DEPLOYED' };
+  const isA = tokenInSym === poolCfg.tokenA;
+  const decIn  = isA ? st.tokenADecimals : st.tokenBDecimals;
+  const decOut = isA ? st.tokenBDecimals : st.tokenADecimals;
+  if (decIn == null || decOut == null) return { ok: false, error: 'UNKNOWN_TOKEN_DECIMALS' };
+  const rIn  = isA ? st.reserveARaw : st.reserveBRaw;
+  const rOut = isA ? st.reserveBRaw : st.reserveARaw;
+  if (rIn == null || rOut == null || rIn < 0n || rOut < 0n) return { ok: false, error: 'INVALID_RESERVES' };
+  if (rIn <= 0n || rOut <= 0n) return { ok: false, error: 'ZERO_LIQUIDITY' };
+  if (amountInRaw == null || amountInRaw <= 0n) return { ok: false, error: 'INVALID_TOKEN' };
+  const feeBps = Math.round(st.feeBps || 0);
+  const outRaw = _PE.getAmountOut(amountInRaw, rIn, rOut, feeBps);
+  if (outRaw <= 0n) return { ok: false, error: 'INSUFFICIENT_LIQUIDITY' };
+  return { ok: true, amountOutRaw: outRaw };
 }
 
-// Calculate output through route (direct or multi-hop)
+// ── Canonical route output (raw, chained across hops) — used by execution ──
+function calcRouteOutputRaw(route, amountInRaw) {
+  let amt = amountInRaw;
+  for (let i = 0; i < route.pools.length; i++) {
+    const res = calcPoolOutputRaw(route.pools[i], route.hops[i], amt);
+    if (!res.ok) return res;
+    amt = res.amountOutRaw;
+  }
+  return { ok: true, amountOutRaw: amt };
+}
+
+// ── Human-readable AMM output (display / ranking ONLY) ──
+// Returns a number on success or null when canonical data is unavailable.
+// NEVER falls back to legacy float AMM math. Not used for execution.
+function calcPoolOutput(amountIn, poolCfg, tokenInSym) {
+  if (!_PE || !_PE.getPoolState) return null;
+  const st = _PE.getPoolState(poolCfg.id);
+  if (!st) return null;
+  const isA = tokenInSym === poolCfg.tokenA;
+  const decIn  = isA ? st.tokenADecimals : st.tokenBDecimals;
+  const decOut = isA ? st.tokenBDecimals : st.tokenADecimals;
+  if (decIn == null || decOut == null) return null;
+  const amtInRaw = (typeof SwapMath !== 'undefined' && SwapMath.parseUnits) ? SwapMath.parseUnits(String(amountIn), decIn) : null;
+  if (amtInRaw === null || amtInRaw <= 0n) return null;
+  const res = calcPoolOutputRaw(poolCfg, tokenInSym, amtInRaw);
+  if (!res.ok) return null;
+  const outNum = Number(SwapMath.formatUnits(res.amountOutRaw, decOut));
+  return isFinite(outNum) ? outNum : null;
+}
+
+// Calculate output through route (direct or multi-hop) — display/ranking.
+// Returns a number on success or null when canonical data is unavailable.
 function calcRouteOutput(amountIn, route) {
   let amt = amountIn;
   for (let i = 0; i < route.pools.length; i++) {
     amt = calcPoolOutput(amt, route.pools[i], route.hops[i]);
-    if (amt <= 0) return 0;
+    if (amt === null || amt <= 0) return null;
   }
   return amt;
 }
@@ -20604,30 +20625,49 @@ async function updateSwapRate() {
         return;
       }
 
-      // Calculate output
-      let amtOut = calcRouteOutput(amtIn, route);
-      let source = 'AMM (local)';
+      // ── Canonical raw quote (BigInt) — the ONLY source for expectedOut/minOut ──
+      const amountInRaw = (typeof SwapMath !== 'undefined' && SwapMath.parseUnits) ? SwapMath.parseUnits(String(amtIn), tIn.decimals) : null;
+      if (amountInRaw === null || amountInRaw <= 0n) {
+        swpShowPrecheck('error', 'Invalid amount');
+        swpSetBtn('disabled', 'Invalid amount');
+        if (rateEl) rateEl.textContent = 'Invalid amount';
+        SWP.lastQuote = null;
+        return;
+      }
 
-      // Try on-chain quote for direct pools
+      let expectedOutRaw = null;
+      let source = 'PoolEngine (local)';
+
+      // On-chain quote for direct pools (canonical raw BigInt)
       if (route.type === 'direct' && route.pools[0].address && route.pools[0].address !== '0x0000000000000000000000000000000000000000') {
         try {
           const readProvider = getCachedProvider('https://arc-testnet.drpc.org');
           const pc = new ethers.Contract(route.pools[0].address, POOL_CONTRACT_ABI, readProvider);
           const tokenInAddr = getTokAddr(tIn.sym);
-          const decIn = tIn.decimals;
-          const decOut = tOut.decimals;
-          const amtInBig = ethers.parseUnits(amtIn.toFixed(decIn), decIn);
-          const amtOutBig = await pc.getAmountOut(amtInBig, tokenInAddr);
-          amtOut = parseFloat(ethers.formatUnits(amtOutBig, decOut));
-          source = 'onchain';
-          _log('[swap] onchain quote:', amtOut, tOut.sym);
+          const amtOutBig = await pc.getAmountOut(amountInRaw, tokenInAddr);
+          if (amtOutBig > 0n) { expectedOutRaw = amtOutBig; source = 'onchain'; }
         } catch (contractErr) {
-          source = 'AMM (local)';
-          _warn('[swap] getAmountOut failed, using local AMM:', contractErr.message);
+          _warn('[swap] onchain getAmountOut failed — falling back to PoolEngine:', contractErr.message);
         }
       }
 
-      if (amtOut <= 0) {
+      // Canonical local quote via PoolEngine (raw — NEVER legacy float AMM).
+      if (expectedOutRaw === null) {
+        const rawRes = calcRouteOutputRaw(route, amountInRaw);
+        if (!rawRes.ok || rawRes.amountOutRaw <= 0n) {
+          swpShowPrecheck('error', 'Quote unavailable — ' + (rawRes.error || 'pool state unavailable'));
+          swpSetBtn('disabled', 'Quote unavailable');
+          if (rateEl) rateEl.textContent = 'Quote unavailable';
+          SWP.lastQuote = null;
+          return;
+        }
+        expectedOutRaw = rawRes.amountOutRaw;
+        source = 'PoolEngine (local)';
+      }
+
+      const amtOut = Number((typeof SwapMath !== 'undefined' && SwapMath.formatUnits) ? SwapMath.formatUnits(expectedOutRaw, tOut.decimals) : ethers.formatUnits(expectedOutRaw, tOut.decimals));
+
+      if (!(amtOut > 0)) {
         swpShowPrecheck('error', 'Swap amount too small.');
         swpSetBtn('disabled', 'Amount too small');
         if (rateEl) rateEl.textContent = 'Amount too small';
@@ -20660,6 +20700,15 @@ async function updateSwapRate() {
 
       const rate        = amtOut / amtIn;
       const priceImpact = calcRoutePriceImpact(amtIn, route);
+
+      // ── Canonical price impact is mandatory: block when unavailable ──
+      if (priceImpact === null) {
+        if (rateEl) rateEl.textContent = 'Price impact unavailable';
+        swpShowPrecheck('error', 'Price impact unavailable — cannot validate this trade');
+        swpSetBtn('disabled', 'Price impact unavailable');
+        SWP.lastQuote = null;
+        return;
+      }
 
       // ── Protection: max price impact hard block ──────────────
       const impactCheck = PROTECTION.checkPriceImpact(priceImpact, amtIn);
@@ -20745,7 +20794,8 @@ async function updateSwapRate() {
         swpHidePrecheck();
       }
 
-      SWP.lastQuote = { amtIn, amtOut, minReceived, rate, priceImpact, feeAmt, source, tIn, tOut, route, totalFee };
+      const _qState = (_PE && _PE.getPoolState) ? _PE.getPoolState(route.pools[0].id) : null;
+      SWP.lastQuote = { amtIn, amtOut, minReceived, rate, priceImpact, feeAmt, source, tIn, tOut, route, totalFee, expectedOutRaw, amountInRaw, quotedAt: Date.now(), stateUpdatedAt: _qState ? _qState.updatedAt : null };
       SwapEngine.notifyQuoteLoaded(SWP.lastQuote);
       // Stamp block number synchronously so it's ready before user clicks
       await stampQuoteBlock();
@@ -20770,27 +20820,29 @@ function calcRoutePriceImpact(amtIn, route) {
     const poolCfg = route.pools[0];
     const tokenInSym = route.hops[0];
     const st = _PE.getPoolState(poolCfg.id);
-    if (st && st.reserveARaw && st.reserveBRaw && st.reserveARaw > 0n && st.reserveBRaw > 0n) {
+    if (st && st.reserveARaw != null && st.reserveBRaw != null && st.reserveARaw > 0n && st.reserveBRaw > 0n) {
       const isA = tokenInSym === poolCfg.tokenA;
-      const decIn = (TOKEN_REGISTRY[tokenInSym]?.decimals) || 6;
-      const amtInRaw = SwapMath.parseUnits(String(amtIn), decIn);
-      if (amtInRaw !== null && amtInRaw > 0n) {
-        const feeBps = Math.round((poolCfg.feeTier || poolCfg.fee) || 0);
-        const rIn = isA ? st.reserveARaw : st.reserveBRaw;
-        const rOut = isA ? st.reserveBRaw : st.reserveARaw;
-        const bps = _PE.priceImpactBps(amtInRaw, rIn, rOut, feeBps);
-        if (bps !== null) return bps / 100; // bps → percent
+      const decIn = isA ? st.tokenADecimals : st.tokenBDecimals;
+      if (decIn != null) {
+        const amtInRaw = SwapMath.parseUnits(String(amtIn), decIn);
+        if (amtInRaw !== null && amtInRaw > 0n) {
+          const feeBps = Math.round(st.feeBps || 0);
+          const rIn = isA ? st.reserveARaw : st.reserveBRaw;
+          const rOut = isA ? st.reserveBRaw : st.reserveARaw;
+          const bps = _PE.priceImpactBps(amtInRaw, rIn, rOut, feeBps);
+          if (bps !== null) return bps / 100; // bps → percent
+        }
       }
     }
   }
-  // Multi-hop fallback: marginal (spot proxy) vs effective price.
+  // Multi-hop: marginal (spot proxy) vs effective price — display heuristic only.
   const out1 = calcRouteOutput(amtIn, route);
-  if (out1 <= 0) return 100;
+  if (out1 === null || out1 <= 0) return null;
   const out2 = calcRouteOutput(amtIn * 0.01, route);
-  if (out2 <= 0) return 100;
+  if (out2 === null || out2 <= 0) return null;
   const marginal = out2 / (amtIn * 0.01);
   const effective = out1 / amtIn;
-  return marginal > 0 ? Math.max(0, ((marginal - effective) / marginal) * 100) : 100;
+  return marginal > 0 ? Math.max(0, ((marginal - effective) / marginal) * 100) : null;
 }
 
 function swpSet(id, val, cls) {
@@ -20919,6 +20971,16 @@ async function executeSwap() {
     }
   }
 
+  // ── Pool-state freshness: never execute against stale canonical state ──
+  if (_PE && _PE.isStale && route.pools[0] && _PE.isStale(route.pools[0].id, 60000)) {
+    toast('Pool state is stale — refresh and try again', 'warning');
+    await updateSwapRate();
+    if (!SWP.lastQuote || (_PE.isStale(route.pools[0].id, 60000))) {
+      swpSetBtn('ready', 'Refresh Quote');
+      return;
+    }
+  }
+
   // ── TWAP manipulation check ──────────────────────────────
   if (route.type === 'direct' && route.pools[0]) {
     const manipCheck = detectPriceManipulation(route.pools[0].id, 0.10); // 10% tolerance for testnet
@@ -20963,19 +21025,18 @@ async function executeSwap() {
 
   swpSetBtn('approving', 'Preparing…');
 
-  // ── Compute minReceived from the validated quote (never 0) ──
-  // The quote shown to the user and the value used for execution must be the
-  // same object. Never fall back to 0 — block if a safe minOut cannot be derived.
-  const quoteOut = (SWP.lastQuote && Number(SWP.lastQuote.amtOut)) || 0;
-  if (!(quoteOut > 0)) {
-    toast('No valid quote available — enter an amount and refresh', 'warning');
+  // ── minOut is computed exclusively from the canonical RAW expectedOut ──
+  // Never Number()→toFixed()→parseUnits round-trip. No legacy float fallback.
+  const expectedOutRaw = SWP.lastQuote && SWP.lastQuote.expectedOutRaw;
+  if (!expectedOutRaw || expectedOutRaw <= 0n) {
+    toast('No valid raw quote available — enter an amount and refresh', 'warning');
     swpSetBtn('disabled', 'Refresh Quote');
     return;
   }
   const minReceivedRaw = (typeof SwapMath !== 'undefined' && SwapMath.calcMinOut)
-    ? SwapMath.calcMinOut(SwapMath.parseUnits(quoteOut.toFixed(tOut.decimals), tOut.decimals), slippageBps)
-    : ethers.parseUnits((quoteOut * (1 - SWP.slippage / 100)).toFixed(tOut.decimals), tOut.decimals);
-  if (!minReceivedRaw || minReceivedRaw <= 0n) {
+    ? SwapMath.calcMinOut(expectedOutRaw, slippageBps)
+    : null;
+  if (minReceivedRaw === null || minReceivedRaw <= 0n) {
     toast('Unable to calculate a safe minimum output — refresh the quote and try again', 'error');
     swpSetBtn('disabled', 'Refresh Quote');
     return;
@@ -21001,6 +21062,13 @@ async function executeSwap() {
     let runningAmt = amtIn;
     for (let i = 0; i < route.pools.length; i++) {
       const hopOut = calcPoolOutput(runningAmt, route.pools[i], route.hops[i]);
+      if (hopOut === null || !(hopOut > 0)) {
+        // Canonical hop output unavailable — block (never execute with a fake 0 minOut).
+        swpSetBtn('ready', `Swap ${tIn.sym} → ${tOut.sym}`);
+        swpShowPrecheck('error', 'Could not compute a canonical per-hop output — refresh and try again');
+        toast('Could not compute a canonical per-hop output — refresh and try again', 'error');
+        return;
+      }
       const hopSlippage = SWP.slippage / route.pools.length; // distribute slippage
       const hopMin = hopOut * (1 - hopSlippage / 100);
       hopMinOuts.push(hopMin);
@@ -21167,7 +21235,14 @@ async function executeSwap() {
     currentDecimals = nextToken.decimals;
     // Approximate next amount (AMM local calc for progression)
     if (!isLastHop) {
-      currentAmount = calcPoolOutput(currentAmount, poolCfg, route.hops[i]);
+      const nextAmt = calcPoolOutput(currentAmount, poolCfg, route.hops[i]);
+      if (nextAmt === null || !(nextAmt > 0)) {
+        toast('Canonical route output became unavailable mid-swap — aborting', 'error');
+        swpSetStep(i * 2 + 1, 'error');
+        swpSetBtn('ready', `Swap ${tIn.sym} → ${tOut.sym}`);
+        return;
+      }
+      currentAmount = nextAmt;
     }
   }
 

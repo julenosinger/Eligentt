@@ -135,9 +135,10 @@ describe('production calcPoolOutput matches SwapMath (regression)', () => {
     globalThis.poolData = { 'usdc-eurc': { loaded: true, reserveA: 26508.21, reserveB: 23994.22, _reserveARaw: reserveA, _reserveBRaw: reserveB } };
     globalThis.TOKEN_REGISTRY = { USDC: { decimals: 6 }, EURC: { decimals: 6 } };
     try {
+      const fnRaw = extractFunction(html, 'calcPoolOutputRaw');
       const fn = extractFunction(html, 'calcPoolOutput');
       const win = {};
-      new Function('window', fn + '\nwindow.calcPoolOutput = calcPoolOutput;')(win);
+      new Function('window', fnRaw + '\n' + fn + '\nwindow.calcPoolOutput = calcPoolOutput;')(win);
       const poolCfg = { id: 'usdc-eurc', tokenA: 'USDC', tokenB: 'EURC', feeTier: null, fee: 10 };
 
       const productionOut = win.calcPoolOutput(100, poolCfg, 'USDC');

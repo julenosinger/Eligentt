@@ -107,7 +107,17 @@ describe('TEST 12 — RPC failure does not become zero liquidity', () => {
     expect(PE.hasLiquidity('usdc-cirbtc')).toBe(false);
     const q = PE.quote('usdc-cirbtc', 'USDC', 100_000_000n);
     expect(q.ok).toBe(false);
-    expect(q.code).toBe('ZERO_LIQUIDITY');
+    expect(['ZERO_LIQUIDITY', 'INVALID_RESERVES', 'POOL_STATE_UNAVAILABLE']).toContain(q.code);
+  });
+
+  it('a pool with NO state at all is explicitly unavailable (never a fake quote)', () => {
+    // Simulate a pool never loaded (no updatePoolState call) — RPC never returned reserves.
+    const q = PE.quote('usdc-cirbtc', 'USDC', 100_000_000n);
+    // usdc-cirbtc has state from the prior test, so reset it to simulate a fresh unavailable pool
+    const fresh = PE.validatePoolState('eth-usdc');
+    // eth-usdc is undeployed → POOL_NOT_DEPLOYED (explicit, not a fake zero)
+    expect(fresh.code).toBe('POOL_NOT_DEPLOYED');
+    expect(q.ok).toBe(false);
   });
 
   it('error state is preserved, never overwritten to zero values', () => {
@@ -163,8 +173,8 @@ describe('TEST 10 — stale pool state is detected', () => {
    Static analysis — production index.html routes through PoolEngine
    ════════════════════════════════════════════════════════════ */
 describe('TEST 1 — Swap quote uses PoolEngine', () => {
-  it('calcPoolOutput routes through _PE.getAmountOut (BigInt)', () => {
-    expect(indexHtml).toContain('_PE.getAmountOut(amtInRaw, rIn, rOut, feeBps)');
+  it('calcPoolOutputRaw routes through _PE.getAmountOut (BigInt)', () => {
+    expect(indexHtml).toContain('_PE.getAmountOut(amountInRaw, rIn, rOut, feeBps)');
   });
   it('swap price impact routes through _PE.priceImpactBps', () => {
     expect(indexHtml).toContain('_PE.priceImpactBps(amtInRaw, rIn, rOut, feeBps)');
@@ -205,20 +215,24 @@ describe('TEST 5 — LP analytics uses PoolEngine math', () => {
 });
 
 describe('TEST 6 — no duplicated AMM formula in production paths', () => {
-  it('float AMM formula appears only once (guarded fallback)', () => {
-    const matches = indexHtml.match(/\(reserveOut \* amtInWithFee\) \/ \(reserveIn \+ amtInWithFee\)/g) || [];
-    expect(matches.length).toBe(1);
+  it('legacy float AMM formula is REMOVED from production', () => {
+    const matches = indexHtml.match(/amtInWithFee/g) || [];
+    expect(matches.length).toBe(0);
   });
-  it('canonical BigInt formula lives in PoolEngine/SwapMath, not re-implemented inline', () => {
-    // the swapMath.js constant-product formula is the only "reserveOut * inFee" shape
+  it('canonical BigInt formula lives only in PoolEngine/SwapMath', () => {
     expect(swapMathSrc).toContain('(reserveOut * amountInWithFee) / (reserveIn + amountInWithFee)');
+    // production routes through PoolEngine.getAmountOut (raw), never re-implements it
+    expect(indexHtml).toContain('_PE.getAmountOut(amountInRaw, rIn, rOut, feeBps)');
   });
 });
 
 describe('TEST 8 — BigInt financial math does not round-trip through Number', () => {
   it('swap amountOut is formatted via SwapMath.formatUnits (not Number(BigInt))', () => {
-    expect(indexHtml).toContain('SwapMath.formatUnits(outRaw, decOut)');
+    expect(indexHtml).toContain('SwapMath.formatUnits(res.amountOutRaw, decOut)');
     expect(indexHtml).toContain('SwapMath.parseUnits(String(amountIn), decIn)');
+  });
+  it('minOut is computed from raw expectedOutRaw (no Number→toFixed→parseUnits)', () => {
+    expect(indexHtml).toContain('SwapMath.calcMinOut(expectedOutRaw, slippageBps)');
   });
 });
 

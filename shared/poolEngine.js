@@ -14,9 +14,13 @@
 
   /* ── Error codes (never convert errors to fake zero values) ── */
   var ERR = {
+    POOL_ENGINE_UNAVAILABLE: 'POOL_ENGINE_UNAVAILABLE',
     POOL_NOT_DEPLOYED: 'POOL_NOT_DEPLOYED',
     POOL_UNAVAILABLE: 'POOL_UNAVAILABLE',
+    POOL_STATE_UNAVAILABLE: 'POOL_STATE_UNAVAILABLE',
+    POOL_STATE_STALE: 'POOL_STATE_STALE',
     INVALID_POOL: 'INVALID_POOL',
+    INVALID_POOL_STATE: 'INVALID_POOL_STATE',
     INVALID_TOKEN: 'INVALID_TOKEN',
     ZERO_LIQUIDITY: 'ZERO_LIQUIDITY',
     INSUFFICIENT_LIQUIDITY: 'INSUFFICIENT_LIQUIDITY',
@@ -24,6 +28,11 @@
     STALE_DATA: 'STALE_DATA',
     INVALID_RESERVES: 'INVALID_RESERVES',
     UNKNOWN_DECIMALS: 'UNKNOWN_DECIMALS',
+    UNKNOWN_TOKEN_DECIMALS: 'UNKNOWN_TOKEN_DECIMALS',
+    QUOTE_UNAVAILABLE: 'QUOTE_UNAVAILABLE',
+    QUOTE_STALE: 'QUOTE_STALE',
+    TVL_UNAVAILABLE: 'TVL_UNAVAILABLE',
+    PRICE_UNAVAILABLE: 'PRICE_UNAVAILABLE',
     UNSUPPORTED_LP: 'UNSUPPORTED_LP',
     ANALYTICS_UNAVAILABLE: 'ANALYTICS_UNAVAILABLE'
   };
@@ -380,15 +389,34 @@
   }
 
   /**
+   * Validate a pool's state BEFORE any financial calculation.
+   * Returns { ok, code, state }. Invalid/unavailable state produces an explicit
+   * error code — never a fabricated zero.
+   */
+  function validatePoolState(id) {
+    var p = getPool(id);
+    if (!p) return { ok: false, code: ERR.INVALID_POOL };
+    if (!p.deployed) return { ok: false, code: ERR.POOL_NOT_DEPLOYED };
+    if (!TOKENS[p.tokenA] || !TOKENS[p.tokenB]) return { ok: false, code: ERR.INVALID_TOKEN };
+    if (p.tokenADecimals == null || p.tokenBDecimals == null) return { ok: false, code: ERR.UNKNOWN_TOKEN_DECIMALS };
+    if (p.feeBps == null || p.feeBps < 0 || p.feeBps >= 10000) return { ok: false, code: ERR.INVALID_POOL };
+    var s = _states[id];
+    if (!s || s.updatedAt <= 0) return { ok: false, code: ERR.POOL_STATE_UNAVAILABLE };
+    if (s.reserveARaw == null || s.reserveBRaw == null) return { ok: false, code: ERR.INVALID_RESERVES };
+    if (s.reserveARaw < 0n || s.reserveBRaw < 0n) return { ok: false, code: ERR.INVALID_RESERVES };
+    if (s.reserveARaw <= 0n && s.reserveBRaw <= 0n) return { ok: false, code: ERR.ZERO_LIQUIDITY };
+    return { ok: true, code: null, state: getPoolState(id) };
+  }
+
+  /**
    * Canonical end-to-end quote from live state (used by Swap).
    * Returns { ok, amountOutRaw, priceImpactBps, utilizationBps, code }.
    * Never fabricates output: failures carry an error code, not a 0.
    */
   function quote(id, tokenInSym, amountInRaw) {
-    var s = getPoolState(id);
-    if (!s) return { ok: false, code: ERR.INVALID_POOL };
-    if (!s.deployed) return { ok: false, code: ERR.POOL_NOT_DEPLOYED };
-    if (!s.reserveARaw || !s.reserveBRaw || s.reserveARaw <= 0n || s.reserveBRaw <= 0n) return { ok: false, code: ERR.ZERO_LIQUIDITY };
+    var v = validatePoolState(id);
+    if (!v.ok) return { ok: false, code: v.code };
+    var s = v.state;
     var a = toBig(amountInRaw);
     if (a <= 0n) return { ok: false, code: ERR.INVALID_TOKEN };
     var isA = tokenInSym === s.tokenA;
@@ -396,6 +424,7 @@
     if (!isA && !isB) return { ok: false, code: ERR.INVALID_TOKEN };
     var rIn = isA ? s.reserveARaw : s.reserveBRaw;
     var rOut = isA ? s.reserveBRaw : s.reserveARaw;
+    if (rIn <= 0n || rOut <= 0n) return { ok: false, code: ERR.ZERO_LIQUIDITY };
     var out = getAmountOut(a, rIn, rOut, s.feeBps);
     var impact = priceImpactBps(a, rIn, rOut, s.feeBps);
     var util = utilizationBps(a, rIn);
@@ -403,7 +432,7 @@
   }
 
   window.PoolEngine = {
-    VERSION: '1.1.0',
+    VERSION: '1.2.0',
     ERR: ERR,
     REGISTRY: REGISTRY,
     TOKENS: TOKENS,
@@ -412,6 +441,7 @@
     getDeployedPools: getDeployedPools,
     updatePoolState: updatePoolState,
     getPoolState: getPoolState,
+    validatePoolState: validatePoolState,
     hasLiquidity: hasLiquidity,
     isStale: isStale,
     quote: quote,
