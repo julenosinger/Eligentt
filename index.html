@@ -1226,6 +1226,10 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
 .st-lower-tab.active{color:var(--green);border-bottom-color:var(--green)}
 .st-lower-tab:hover{color:var(--text)}
 .st-lower-tab .count{font-size:8px;color:var(--muted);margin-left:3px}
+.st-refresh-btn{margin-left:auto;display:flex;align-items:center;gap:4px;padding:2px 8px;font-size:8px;font-weight:600;color:var(--muted2);background:transparent;border:1px solid #1a1f2e;border-radius:3px;cursor:pointer;font-family:'JetBrains Mono',monospace;transition:all .12s;flex-shrink:0}
+.st-refresh-btn:hover{color:var(--text);border-color:rgba(34,197,94,.3)}
+.st-refresh-btn:disabled{opacity:.55;cursor:default}
+.st-refresh-btn.refreshing i{animation:spin 1s linear infinite}
 .st-lower-body{flex:1;overflow-y:auto;padding:4px 10px;font-size:9px}
 .st-lower-empty{display:flex;align-items:center;justify-content:center;height:100%;color:var(--muted);font-size:9.5px;flex-direction:column;gap:3px}
 .st-lower-empty i{font-size:15px;opacity:.3}
@@ -1315,12 +1319,19 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
   .st-sheet-overlay{display:none !important}
   .st-mobile-history{display:none}
 }
-/* Desktop: whole-page vertical scroll. The terminal content flows at a natural
-   height (chart + swap panel + lower panel) that exceeds the viewport, so
-   #page-swap (overflow-y:auto) scrolls as ONE unit — not per-section. */
+/* Desktop: whole-page vertical scroll. The terminal flows at NATURAL height
+   (chart + swap panel + lower panel stacked) and #page-swap (overflow-y:auto)
+   scrolls as ONE unit. The right Swap card is NOT clipped, so its bottom
+   (fee / route / slippage / swap button / pool status) stays fully visible and
+   the Trade History section sits BELOW it — never overlapping or covering it. */
 @media(min-width:961px){
-  .st-main-area{flex:0 0 auto;height:70vh;min-height:480px}
-  .st-lower-panel{height:auto;min-height:36vh}
+  .st-main-area{flex:0 0 auto;height:auto;min-height:0;overflow:visible}
+  .st-chart-section{flex:1;min-height:54vh}
+  .st-right-panels{overflow:visible;height:auto}
+  .st-swap-panel{flex:0 0 auto;height:auto}
+  .st-swap-body{flex:0 0 auto;overflow:visible}
+  .st-lower-panel{height:auto;min-height:30vh}
+  .st-lower-body{overflow:visible}
 }
 @media(max-width:480px){
   .st-header{height:36px}
@@ -6552,6 +6563,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
           <div class="st-lower-tab active" onclick="stLowerTab('orders')">Open Orders <span class="count">(0)</span></div>
           <div class="st-lower-tab" onclick="stLowerTab('trades')">Trade History</div>
           <div class="st-lower-tab" onclick="stLowerTab('funds')">Funds</div>
+          <button class="st-refresh-btn" id="st-trade-refresh" onclick="stRefreshTradeHistory()" title="Refresh Trade History"><i class="ti ti-refresh"></i><span class="st-refresh-label">Refresh</span></button>
         </div>
         <div class="st-lower-body" id="st-lower-body">
           <div class="st-lower-empty"><i class="ti ti-history"></i><span>No trades yet — swap to see history</span></div>
@@ -22034,7 +22046,9 @@ function stRenderTradeHistory(body) {
   const swaps = getAuthoritativeAllSwaps(20);
   if (swaps.length === 0) {
     const statuses = Object.keys(_authoritativeHistory).map(id => _authoritativeHistory[id] && _authoritativeHistory[id].status).filter(Boolean);
-    const msg = statuses.indexOf('INDEX_WARMING') >= 0 ? 'Analytics warming up' : 'No trades yet';
+    let msg = 'No trades yet';
+    if (statuses.indexOf('INDEX_WARMING') >= 0) msg = 'Analytics warming up';
+    else if (statuses.indexOf('INDEX_UNAVAILABLE') >= 0 || statuses.indexOf('ERROR') >= 0) msg = 'History unavailable';
     body.innerHTML = '<div class="st-lower-empty"><i class="ti ti-history"></i><span>' + msg + '</span></div>';
     return;
   }
@@ -22087,6 +22101,35 @@ function stUpdateHistory() {
   if (!body) return;
   var activeTab = document.querySelector('.st-lower-tab.active');
   if (activeTab && activeTab.textContent.indexOf('Trade History') >= 0) { stRenderTradeHistory(body); }
+}
+
+// ── Trade History Refresh (authoritative single source) ──────────
+// Fetches /api/pool-index?includeEvents=true&refresh=true, then re-renders both
+// the Swap Trade History and the Liquidity Recent Activity from the SAME shared
+// authoritative history store. No DOM/session writes, no Date.now timestamps,
+// no frontend queryFilter for Swap/Swapped. Duplicate clicks are ignored.
+let _stTradeRefreshBusy = false;
+async function stRefreshTradeHistory() {
+  if (_stTradeRefreshBusy) return; // prevent duplicate simultaneous requests
+  const btn = document.getElementById('st-trade-refresh');
+  const lbl = btn ? btn.querySelector('.st-refresh-label') : null;
+  _stTradeRefreshBusy = true;
+  if (btn) { btn.disabled = true; btn.classList.add('refreshing'); }
+  if (lbl) lbl.textContent = 'Refreshing…';
+  try {
+    await refreshAuthoritativeSwapHistory(true);
+  } catch (_) { /* refresh failure is non-fatal; render current state */ }
+  finally {
+    _stTradeRefreshBusy = false;
+    if (btn) { btn.disabled = false; btn.classList.remove('refreshing'); }
+    if (lbl) lbl.textContent = 'Refresh';
+  }
+  if (typeof stUpdateHistory === 'function') stUpdateHistory();
+  if (typeof swpSyncRecentSwaps === 'function') swpSyncRecentSwaps();
+  if (typeof stUpdateMobileHistoryCounts === 'function') stUpdateMobileHistoryCounts();
+  if (typeof stRefreshMobileHistory === 'function') { try { stRefreshMobileHistory(); } catch(_){} }
+  // Liquidity Recent Activity shares _authoritativeHistory → re-render if visible.
+  if (typeof poolUpdateUI === 'function' && typeof activePoolId !== 'undefined' && activePoolId) { try { poolUpdateUI(); } catch(_){} }
 }
 
 // ── Status Bar Update ──────────────────────────
