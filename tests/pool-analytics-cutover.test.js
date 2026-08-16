@@ -33,9 +33,9 @@ describe('Missing USD price is null, never 0 (authoritative analytics)', () => {
     expect(html).not.toMatch(/usdVal\s*=\s*rateIn !== null \? amountIn \* rateIn : 0/);
     expect(html).not.toMatch(/usdValue\s*=\s*tokenRate !== null \? amount \* tokenRate : 0/);
   });
-  it('volume reduction does not sum null as 0', () => {
-    expect(html).toContain('const anyMissingPrice = evt.swaps.some');
-    expect(html).toContain('evt.volume24h = anyMissingPrice ? null');
+  it('authoritative volume returns null (not 0) when the API data is unavailable', () => {
+    expect(html).toContain('if (!a || !a.analytics) return null');
+    expect(html).toContain('if (r0 === null || r1 === null) return null');
   });
   it('indexer computeVolume keeps usdVolume null without a price', () => {
     expect(idxSrc).toContain('usdVolume: usdVolume');
@@ -56,9 +56,22 @@ describe('USDC/EURC is a valid indexed swap pool (Swapped event)', () => {
     expect(idxSrc).toContain("SWAPPED: 'swapped'");
     expect(idxSrc).toContain('detectSwapEventType');
   });
-  it('indexPoolEvents supports the Swapped branch', () => {
-    expect(html).toContain("poolCfg.swapEventType === 'swapped'");
-    expect(html).toContain('POOL_SWAPPED_EVENT_ABI');
+});
+
+describe('Frontend no longer independently indexes authoritative swap history', () => {
+  it('no filters.Swap / filters.Swapped queryFilter in index.html', () => {
+    expect(html).not.toContain('filters.Swap(');
+    expect(html).not.toContain('filters.Swapped(');
+    expect(html).not.toContain('POOL_SWAPPED_EVENT_ABI');
+  });
+  it('frontend consumes /api/pool-index as the authoritative source', () => {
+    expect(html).toContain('/api/pool-index?pool=');
+    expect(html).toContain('refreshAuthoritativeAnalytics');
+    expect(html).toContain('fetchPoolAnalytics');
+  });
+  it('authoritative volume/fees return null when unavailable (never 0)', () => {
+    expect(html).toContain('if (!a || !a.analytics) return null');
+    expect(html).toContain('getPoolVolume24h');
   });
 });
 

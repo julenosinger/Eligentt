@@ -13223,6 +13223,8 @@ async function loadAllPools() {
       })));
       // Persist snapshot (Treasury metric: cached balances → instant paint on next load)
       try { if (typeof persistPoolSnapshot === 'function') persistPoolSnapshot(); } catch(_) {}
+      // Fetch authoritative analytics from /api/pool-index (single source).
+      try { await refreshAuthoritativeAnalytics(); } catch(_) {}
       // Refresh pool list UI if visible
       renderPoolList();
       updatePoolStats();
@@ -13253,12 +13255,6 @@ function _evtGet(poolId) {
   return _eventsCache[poolId];
 }
 
-// Index events for a single pool. First call = cold start (full 24h window).
-// Subsequent calls = incremental (only new blocks since last index).
-const POOL_SWAPPED_EVENT_ABI = [
-  'event Swapped(address indexed user, address tokenIn, uint256 amountIn, uint256 amountOut)'
-];
-
 // Resolve an event's block timestamp from the chain. NEVER uses Date.now() as a
 // fallback: on failure returns null so the caller can mark history PARTIAL.
 async function _eventBlockTs(ev) {
@@ -13268,6 +13264,9 @@ async function _eventBlockTs(ev) {
   } catch (e) { return null; }
 }
 
+// Index events for a single pool. After the 6.2.2 cutover this only indexes
+// Mint/Burn (LP activity) — authoritative Swap/Swapped history is served by
+// /api/pool-index (server PoolIndexer). First call = cold start (full 24h window).
 async function indexPoolEvents(poolCfg, fromBlock) {
   if (!poolCfg || !poolCfg.deployed || !poolCfg.address || poolCfg.address === '0x0000000000000000000000000000000000000000') return;
   const rp = getCachedProvider('https://arc-testnet.drpc.org');
@@ -13290,58 +13289,17 @@ async function indexPoolEvents(poolCfg, fromBlock) {
     }
     if (startBlock >= currentBlock) { evt.lastBlock = currentBlock; return; }
 
-    const swapEvents = await pool.queryFilter(pool.filters.Swap(), startBlock, currentBlock).catch(() => []);
+    // PHASE 6.2.2 CUTOVER: the frontend no longer independently indexes swap
+    // events (Swap/Swapped) to reconstruct authoritative pool volume/history.
+    // Authoritative analytics come from /api/pool-index (server PoolIndexer).
+    // Here we keep ONLY Mint/Burn LP-activity indexing (UI/session concern).
     const mintEvents = await pool.queryFilter(pool.filters.Mint(), startBlock, currentBlock).catch(() => []);
     const burnEvents = await pool.queryFilter(pool.filters.Burn(), startBlock, currentBlock).catch(() => []);
 
     const decA = TOKEN_REGISTRY[poolCfg.tokenA]?.decimals || 6;
     const decB = TOKEN_REGISTRY[poolCfg.tokenB]?.decimals || 6;
 
-    // Process swap events. Two supported shapes (Phase 6.2):
-    //   standard  Swap(...)                       (usdc-cirbtc)
-    //   swapped   Swapped(user, tokenIn, amountIn, amountOut)  (usdc-eurc)
-    const newSwaps = [];
-    if (poolCfg.swapEventType === 'swapped') {
-      const swappedPool = new ethers.Contract(poolCfg.address, POOL_SWAPPED_EVENT_ABI, rp);
-      const swappedEvents = await swappedPool.queryFilter(swappedPool.filters.Swapped(), startBlock, currentBlock).catch(() => []);
-      const tokAA = getTokAddr(poolCfg.tokenA).toLowerCase();
-      const tokBA = getTokAddr(poolCfg.tokenB).toLowerCase();
-      for (const ev of swappedEvents) {
-        const ts = await _eventBlockTs(ev);
-        if (ts === null) { evt._missingTimestamps = true; continue; }
-        if (ts < cutoff) continue;
-        const tokenInAddr = (ev.args.tokenIn || '').toLowerCase();
-        let tokenIn, decIn;
-        if (tokenInAddr === tokAA) { tokenIn = poolCfg.tokenA; decIn = decA; }
-        else if (tokenInAddr === tokBA) { tokenIn = poolCfg.tokenB; decIn = decB; }
-        else continue; // unknown tokenIn — reject
-        const amountIn = parseFloat(ethers.formatUnits(ev.args.amountIn || 0n, decIn));
-        const rateIn = getTokenUSDRate(tokenIn);
-        const usdVal = rateIn !== null ? amountIn * rateIn : null; // missing price → null, never 0
-        const feeRate = (poolCfg.feeTier || poolCfg.fee) / 10000;
-        const feeUsd = usdVal !== null ? usdVal * feeRate : null;
-        newSwaps.push({ ts, amountIn, tokenIn, usd: usdVal, feeUsd, txHash: ev.transactionHash });
-      }
-    } else {
-      for (const ev of swapEvents) {
-        const ts = await _eventBlockTs(ev);
-        if (ts === null) { evt._missingTimestamps = true; continue; }
-        if (ts < cutoff) continue;
-        const [aIn, bIn] = [
-          parseFloat(ethers.formatUnits(ev.args.amount0In || 0n, decA)),
-          parseFloat(ethers.formatUnits(ev.args.amount1In || 0n, decB)),
-        ];
-        const amountIn = aIn > 0 ? aIn : bIn;
-        const tokenIn  = aIn > 0 ? poolCfg.tokenA : poolCfg.tokenB;
-        const rateIn   = getTokenUSDRate(tokenIn);
-        const usdVal   = rateIn !== null ? amountIn * rateIn : null; // missing price → null, never 0
-        const feeRate  = (poolCfg.feeTier || poolCfg.fee) / 10000;
-        const feeUsd   = usdVal !== null ? usdVal * feeRate : null;
-        newSwaps.push({ ts, amountIn, tokenIn, usd: usdVal, feeUsd, txHash: ev.transactionHash });
-      }
-    }
-
-    // Process new Mint/Burn events
+    // Process Mint/Burn events (LP activity — NOT authoritative swap volume)
     const newLpActivity = [];
     for (const ev of mintEvents) {
       const ts = await _eventBlockTs(ev);
@@ -13362,36 +13320,17 @@ async function indexPoolEvents(poolCfg, fromBlock) {
         txHash: ev.transactionHash });
     }
 
-    // Merge: incoming entries + existing cache, dedupe by txHash
-    const seenTxs = new Set(newSwaps.map(s => s.txHash).filter(Boolean));
-    const keptSwaps = evt.swaps.filter(s => !s.txHash || !seenTxs.has(s.txHash));
-    evt.swaps = [...newSwaps, ...keptSwaps].sort((a,b) => b.ts - a.ts).slice(0, 150);
-    // Prune >24h
-    const pruneSwaps = evt.swaps.filter(s => s.ts >= cutoff);
-    evt.swaps = pruneSwaps.slice(0, 150);
-    // Merge LP activity
+    // Merge LP activity only
     const seenLp = new Set(newLpActivity.map(a => a.txHash).filter(Boolean));
     const keptLp = evt.lpActivity.filter(a => !a.txHash || !seenLp.has(a.txHash));
     evt.lpActivity = [...newLpActivity, ...keptLp].sort((a,b) => b.ts - a.ts).filter(a => a.ts >= cutoff).slice(0, 50);
-
-    // Recompute totals from the merged swap list. Missing USD price → null
-    // (unavailable), NEVER a fabricated 0.
-    const anyMissingPrice = evt.swaps.some(s => s.usd === null);
-    evt.volume24h = anyMissingPrice ? null : evt.swaps.reduce((s, v) => s + v.usd, 0);
-    evt.fees24h   = anyMissingPrice ? null : evt.swaps.reduce((s, v) => s + v.feeUsd, 0);
     evt.lastBlock = currentBlock;
 
-    // Sync to poolData
     if (poolData[poolCfg.id]) {
-      poolData[poolCfg.id].volume24h = evt.volume24h;
-      poolData[poolCfg.id].fees24h   = evt.fees24h;
-      poolData[poolCfg.id].swapEvents = evt.swaps.slice(0, 20);
       poolData[poolCfg.id].lpActivity = evt.lpActivity.slice(0, 20);
     }
-    // Feed TWAP from new reserve data
+    // Feed TWAP from current reserve data (manipulation detection — not swap history)
     feedTWAPFromEvents(poolCfg.id);
-    // Sync fee ledger
-    syncFeeLedgerFromEvents(poolCfg.id);
   } catch(e) {
     _warn('[event-index] pool', poolCfg.id, ':', e.message?.slice(0, 80));
   }
@@ -13439,43 +13378,86 @@ function getSessionObservedVolume24h(poolId) {
   return _evtGet(poolId).sessionVolume24h || 0;
 }
 
-// Get 24h volume from INDEXED on-chain events (authoritative)
+// ═══════════════════════════════════════════════════════════
+// AUTHORITATIVE POOL ANALYTICS — consumed from /api/pool-index (single source).
+// The frontend MUST NOT independently index historical swap logs.
+// ═══════════════════════════════════════════════════════════
+const _authoritativeAnalytics = {}; // poolId -> { status, analytics, fetchedAt }
+
+async function fetchPoolAnalytics(poolId) {
+  const pcfg = POOL_REGISTRY.find(p => p.id === poolId);
+  if (!pcfg || !pcfg.swapEventType || pcfg.swapEventType === 'none') return { status: 'NO_SWAP_EVENTS' };
+  try {
+    const res = await fetch(`/api/pool-index?pool=${pcfg.address.toLowerCase()}`);
+    if (res.status === 503) return { status: 'INDEX_UNAVAILABLE' };
+    if (!res.ok) return { status: 'ERROR', http: res.status };
+    const data = await res.json();
+    if (!data.ok) return { status: data.reason || 'ERROR' };
+    return { status: data.status, analytics: data.analytics, fetchedAt: Date.now() };
+  } catch (e) {
+    return { status: 'INDEX_UNAVAILABLE', detail: e && e.message };
+  }
+}
+
+async function refreshAuthoritativeAnalytics() {
+  const pools = POOL_REGISTRY.filter(p => p.deployed && p.swapEventType && p.swapEventType !== 'none');
+  await Promise.all(pools.map(async (pcfg) => {
+    _authoritativeAnalytics[pcfg.id] = await fetchPoolAnalytics(pcfg.id);
+  }));
+}
+
+function getAuthoritativeAnalytics(poolId) {
+  return _authoritativeAnalytics[poolId] || null;
+}
+
+// 24h volume (USD) from the authoritative index. null when unavailable — never 0.
 function getPoolVolume24h(poolId) {
-  return _evtGet(poolId).volume24h || 0;
+  const a = _authoritativeAnalytics[poolId];
+  if (!a || !a.analytics) return null; // INDEX_UNAVAILABLE/ERROR → null, not 0
+  const vol = a.analytics.volume24h;
+  if (!vol) return null;
+  if (vol.usdVolume != null) return vol.usdVolume;
+  // token-denominated → USD at the display boundary only
+  const pcfg = POOL_REGISTRY.find(p => p.id === poolId);
+  const r0 = getTokenUSDRate(pcfg.tokenA), r1 = getTokenUSDRate(pcfg.tokenB);
+  if (r0 === null || r1 === null) return null; // missing price → null
+  const d0 = TOKEN_REGISTRY[pcfg.tokenA]?.decimals || 6;
+  const d1 = TOKEN_REGISTRY[pcfg.tokenB]?.decimals || 6;
+  const in0 = Number(BigInt(vol.amount0InRaw || '0')) / Math.pow(10, d0);
+  const in1 = Number(BigInt(vol.amount1InRaw || '0')) / Math.pow(10, d1);
+  return in0 * r0 + in1 * r1;
 }
 
-// Get 24h fees from INDEXED on-chain events (authoritative)
+// 24h fees (USD) — pool trading fee, null when unavailable (never 0).
 function getPoolFees24h(poolId) {
-  return _evtGet(poolId).fees24h || 0;
+  const vol = getPoolVolume24h(poolId);
+  if (vol === null) return null;
+  const pcfg = POOL_REGISTRY.find(p => p.id === poolId);
+  const feeRate = (pcfg.feeTier || pcfg.fee) / 10000;
+  return vol * feeRate;
 }
 
-// Calculate utilization rate: volume24h / TVL
+// Calculate utilization rate: volume24h / TVL. null when either is unavailable.
 function getPoolUtilization(poolId) {
   const pd = poolData[poolId];
   if (!pd || !pd.loaded) return null;
-  const pcfg = POOL_REGISTRY.find(p => p.id === poolId);
-  if (!pcfg) return null;
-  const rateA = getTokenUSDRate(pcfg.tokenA);
-  const rateB = getTokenUSDRate(pcfg.tokenB);
-  if (rateA === null || rateB === null) return null;
-  const tvl = pd.reserveA * rateA + pd.reserveB * rateB;
-  if (tvl <= 0) return null;
-  const vol24 = pd.volume24h || 0;
+  const tvl = getLiquidityDepth(poolId);
+  if (tvl === null || tvl <= 0) return null;
+  const vol24 = getPoolVolume24h(poolId);
+  if (vol24 === null) return null;
   return vol24 / tvl; // 0.0 - 1.0+
 }
 
-// Calculate real APR from onchain events
+// Calculate real APR from authoritative indexed fees. null when unavailable.
 function calculateRealAPR(poolId) {
   const pd = poolData[poolId];
   const pcfg = POOL_REGISTRY.find(p => p.id === poolId);
   if (!pd || !pd.loaded || !pcfg) return null;
-  // APR is only real when fees come from on-chain Swap events. No synthetic
-  // estimation — return null (N/A) otherwise.
   if (!pcfg._hasSwapEvents) return null;
   const tvl = getLiquidityDepth(poolId); // canonical PoolEngine TVL
   if (tvl === null || tvl <= 0) return null;
-  const fees24h = pd.fees24h || getPoolFees24h(poolId) || 0;
-  if (fees24h <= 0) return null; // no real fees → N/A, never a fabricated APR
+  const fees24h = getPoolFees24h(poolId); // authoritative (null when unavailable)
+  if (fees24h === null || fees24h <= 0) return null; // N/A, never a fabricated APR
   return (fees24h * 365 / tvl) * 100;
 }
 

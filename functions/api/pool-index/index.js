@@ -46,7 +46,7 @@ function corsHeaders(env) {
 }
 
 function json(body, status) {
-  return new Response(JSON.stringify(body), {
+  return new Response(JSON.stringify(body, function (k, v) { return typeof v === 'bigint' ? v.toString() : v; }), {
     status: status || 200,
     headers: { 'Content-Type': 'application/json', ...corsHeaders({}) },
   });
@@ -58,6 +58,7 @@ function getIndexer(env, poolAddress) {
   const provider = new ethers.JsonRpcProvider(ARC_RPC_URL);
   const iface = new ethers.Interface(EVENTS);
   return {
+    poolCfg,
     idx: PoolIndexer.createIndexer({
       chainId: CHAIN_ID,
       poolAddress,
@@ -73,6 +74,21 @@ function getIndexer(env, poolAddress) {
   };
 }
 
+/** Authoritative analytics derived from the persistent index (server-side only). */
+function computeAnalytics(idx) {
+  const now = Date.now();
+  const v24 = idx.computeVolume(86400, { now });
+  const v7 = idx.computeVolume(7 * 86400, { now });
+  const v30 = idx.computeVolume(30 * 86400, { now });
+  const swaps = idx.getEvents({ eventType: 'Swap' });
+  return {
+    swapCount: swaps.length,
+    volume24h: { amount0InRaw: v24.amount0InRaw, amount1InRaw: v24.amount1InRaw, usdVolume: v24.usdVolume, status: v24.status },
+    volume7d:  { amount0InRaw: v7.amount0InRaw, amount1InRaw: v7.amount1InRaw, usdVolume: v7.usdVolume, status: v7.status },
+    volume30d: { amount0InRaw: v30.amount0InRaw, amount1InRaw: v30.amount1InRaw, usdVolume: v30.usdVolume, status: v30.status },
+  };
+}
+
 export async function onRequestGet({ request, env }) {
   const url = new URL(request.url);
   const pool = (url.searchParams.get('pool') || '').toLowerCase();
@@ -83,12 +99,16 @@ export async function onRequestGet({ request, env }) {
 
   try {
     await setup.idx.init();
+    const cursor = setup.idx.getCursor();
     return json({
       ok: true,
       pool: DEPLOYED_POOLS[pool].id,
-      cursor: setup.idx.getCursor(),
+      poolAddress: pool,
+      chainId: CHAIN_ID,
+      lastIndexedBlock: cursor.lastIndexedBlock,
+      status: cursor.status,
+      analytics: computeAnalytics(setup.idx),
       events: setup.idx.getEvents().length,
-      status: setup.idx.getStatus(),
     });
   } catch (e) {
     return json({ ok: false, reason: 'INDEX_UNAVAILABLE', detail: (e && e.message) || 'error' }, 503);

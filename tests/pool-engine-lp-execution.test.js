@@ -107,14 +107,14 @@ describe('Post-transaction state refresh is wired', () => {
    On-chain history — real event logs (TEST 18/21)
    ════════════════════════════════════════════════════════════ */
 describe('On-chain history comes from real event logs', () => {
-  it('indexes real Swap/Mint/Burn events via queryFilter', () => {
-    expect(indexHtml).toContain('pool.queryFilter(pool.filters.Swap()');
+  it('indexes Mint/Burn (LP activity) via queryFilter — no frontend Swap indexing', () => {
     expect(indexHtml).toContain('pool.filters.Mint()');
     expect(indexHtml).toContain('pool.filters.Burn()');
+    expect(indexHtml).not.toContain('pool.filters.Swap()');
   });
-  it('volume/fees are derived from indexed swap events (no synthetic data)', () => {
-    expect(indexHtml).toMatch(/evt\.volume24h = anyMissingPrice \? null : evt\.swaps\.reduce/);
-    expect(indexHtml).toMatch(/evt\.fees24h\s*=\s*anyMissingPrice \? null : evt\.swaps\.reduce/);
+  it('authoritative volume/fees come from /api/pool-index (not local swap indexing)', () => {
+    expect(indexHtml).toContain('/api/pool-index?pool=');
+    expect(indexHtml).toContain('refreshAuthoritativeAnalytics');
   });
   it('session-observed volume is separated from authoritative volume', () => {
     expect(indexHtml).toMatch(/evt\.sessionVolume24h = anyMissing \? null : evt\.sessionSwaps\.reduce/);
