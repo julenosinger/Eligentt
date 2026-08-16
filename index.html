@@ -13259,6 +13259,15 @@ const POOL_SWAPPED_EVENT_ABI = [
   'event Swapped(address indexed user, address tokenIn, uint256 amountIn, uint256 amountOut)'
 ];
 
+// Resolve an event's block timestamp from the chain. NEVER uses Date.now() as a
+// fallback: on failure returns null so the caller can mark history PARTIAL.
+async function _eventBlockTs(ev) {
+  try {
+    const b = await ev.getBlock();
+    return (b && b.timestamp != null) ? Number(b.timestamp) : null;
+  } catch (e) { return null; }
+}
+
 async function indexPoolEvents(poolCfg, fromBlock) {
   if (!poolCfg || !poolCfg.deployed || !poolCfg.address || poolCfg.address === '0x0000000000000000000000000000000000000000') return;
   const rp = getCachedProvider('https://arc-testnet.drpc.org');
@@ -13298,8 +13307,8 @@ async function indexPoolEvents(poolCfg, fromBlock) {
       const tokAA = getTokAddr(poolCfg.tokenA).toLowerCase();
       const tokBA = getTokAddr(poolCfg.tokenB).toLowerCase();
       for (const ev of swappedEvents) {
-        const block = await ev.getBlock().catch(() => ({ timestamp: now }));
-        const ts = block.timestamp || now;
+        const ts = await _eventBlockTs(ev);
+        if (ts === null) { evt._missingTimestamps = true; continue; }
         if (ts < cutoff) continue;
         const tokenInAddr = (ev.args.tokenIn || '').toLowerCase();
         let tokenIn, decIn;
@@ -13308,15 +13317,15 @@ async function indexPoolEvents(poolCfg, fromBlock) {
         else continue; // unknown tokenIn — reject
         const amountIn = parseFloat(ethers.formatUnits(ev.args.amountIn || 0n, decIn));
         const rateIn = getTokenUSDRate(tokenIn);
-        const usdVal = rateIn !== null ? amountIn * rateIn : 0;
+        const usdVal = rateIn !== null ? amountIn * rateIn : null; // missing price → null, never 0
         const feeRate = (poolCfg.feeTier || poolCfg.fee) / 10000;
-        const feeUsd = usdVal * feeRate;
+        const feeUsd = usdVal !== null ? usdVal * feeRate : null;
         newSwaps.push({ ts, amountIn, tokenIn, usd: usdVal, feeUsd, txHash: ev.transactionHash });
       }
     } else {
       for (const ev of swapEvents) {
-        const block = await ev.getBlock().catch(() => ({ timestamp: now }));
-        const ts = block.timestamp || now;
+        const ts = await _eventBlockTs(ev);
+        if (ts === null) { evt._missingTimestamps = true; continue; }
         if (ts < cutoff) continue;
         const [aIn, bIn] = [
           parseFloat(ethers.formatUnits(ev.args.amount0In || 0n, decA)),
@@ -13325,9 +13334,9 @@ async function indexPoolEvents(poolCfg, fromBlock) {
         const amountIn = aIn > 0 ? aIn : bIn;
         const tokenIn  = aIn > 0 ? poolCfg.tokenA : poolCfg.tokenB;
         const rateIn   = getTokenUSDRate(tokenIn);
-        const usdVal   = rateIn !== null ? amountIn * rateIn : 0;
+        const usdVal   = rateIn !== null ? amountIn * rateIn : null; // missing price → null, never 0
         const feeRate  = (poolCfg.feeTier || poolCfg.fee) / 10000;
-        const feeUsd   = usdVal * feeRate;
+        const feeUsd   = usdVal !== null ? usdVal * feeRate : null;
         newSwaps.push({ ts, amountIn, tokenIn, usd: usdVal, feeUsd, txHash: ev.transactionHash });
       }
     }
@@ -13335,8 +13344,8 @@ async function indexPoolEvents(poolCfg, fromBlock) {
     // Process new Mint/Burn events
     const newLpActivity = [];
     for (const ev of mintEvents) {
-      const block = await ev.getBlock().catch(() => ({ timestamp: now }));
-      const ts = block.timestamp || now;
+      const ts = await _eventBlockTs(ev);
+      if (ts === null) { evt._missingTimestamps = true; continue; }
       if (ts < cutoff) continue;
       newLpActivity.push({ type:'mint', ts,
         amountA: parseFloat(ethers.formatUnits(ev.args.amount0 || 0n, decA)),
@@ -13344,8 +13353,8 @@ async function indexPoolEvents(poolCfg, fromBlock) {
         txHash: ev.transactionHash });
     }
     for (const ev of burnEvents) {
-      const block = await ev.getBlock().catch(() => ({ timestamp: now }));
-      const ts = block.timestamp || now;
+      const ts = await _eventBlockTs(ev);
+      if (ts === null) { evt._missingTimestamps = true; continue; }
       if (ts < cutoff) continue;
       newLpActivity.push({ type:'burn', ts,
         amountA: parseFloat(ethers.formatUnits(ev.args.amount0 || 0n, decA)),
@@ -13365,9 +13374,11 @@ async function indexPoolEvents(poolCfg, fromBlock) {
     const keptLp = evt.lpActivity.filter(a => !a.txHash || !seenLp.has(a.txHash));
     evt.lpActivity = [...newLpActivity, ...keptLp].sort((a,b) => b.ts - a.ts).filter(a => a.ts >= cutoff).slice(0, 50);
 
-    // Recompute totals from the merged swap list
-    evt.volume24h = evt.swaps.reduce((s, v) => s + v.usd, 0);
-    evt.fees24h   = evt.swaps.reduce((s, v) => s + v.feeUsd, 0);
+    // Recompute totals from the merged swap list. Missing USD price → null
+    // (unavailable), NEVER a fabricated 0.
+    const anyMissingPrice = evt.swaps.some(s => s.usd === null);
+    evt.volume24h = anyMissingPrice ? null : evt.swaps.reduce((s, v) => s + v.usd, 0);
+    evt.fees24h   = anyMissingPrice ? null : evt.swaps.reduce((s, v) => s + v.feeUsd, 0);
     evt.lastBlock = currentBlock;
 
     // Sync to poolData
@@ -13407,18 +13418,19 @@ async function indexAllPoolEvents(fromBlock) {
 // pool volume. It is stored in a separate namespace from the on-chain index.
 function trackPoolVolume(poolId, amount, tokenSym) {
   const tokenRate = getTokenUSDRate(tokenSym);
-  const usdValue = tokenRate !== null ? amount * tokenRate : 0;
+  const usdValue = tokenRate !== null ? amount * tokenRate : null; // session-only; missing price → null
   const evt = _evtGet(poolId);
   const pcfg = POOL_REGISTRY.find(p => p.id === poolId);
   const feeRate = pcfg ? (pcfg.feeTier || pcfg.fee) / 10000 : 0.001;
-  const feeUsd = usdValue * feeRate;
+  const feeUsd = usdValue !== null ? usdValue * feeRate : null;
 
   if (!evt.sessionSwaps) evt.sessionSwaps = [];
   evt.sessionSwaps.push({ ts: Math.floor(Date.now()/1000), amountIn: amount, tokenIn: tokenSym, usd: usdValue, feeUsd, txHash: null });
   const cutoff = Math.floor(Date.now()/1000) - _eventsWindow;
   evt.sessionSwaps = evt.sessionSwaps.filter(s => s.ts > cutoff).slice(0, 100);
-  evt.sessionVolume24h = evt.sessionSwaps.reduce((s, v) => s + v.usd, 0);
-  evt.sessionFees24h = evt.sessionSwaps.reduce((s, v) => s + v.feeUsd, 0);
+  const anyMissing = evt.sessionSwaps.some(s => s.usd === null);
+  evt.sessionVolume24h = anyMissing ? null : evt.sessionSwaps.reduce((s, v) => s + v.usd, 0);
+  evt.sessionFees24h = anyMissing ? null : evt.sessionSwaps.reduce((s, v) => s + v.feeUsd, 0);
   // NOTE: authoritative volume24h/fees24h are owned by the on-chain event indexer only.
 }
 

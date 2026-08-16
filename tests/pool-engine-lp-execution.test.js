@@ -113,11 +113,11 @@ describe('On-chain history comes from real event logs', () => {
     expect(indexHtml).toContain('pool.filters.Burn()');
   });
   it('volume/fees are derived from indexed swap events (no synthetic data)', () => {
-    expect(indexHtml).toContain('evt.volume24h = evt.swaps.reduce');
-    expect(indexHtml).toMatch(/evt\.fees24h\s*=\s*evt\.swaps\.reduce/);
+    expect(indexHtml).toMatch(/evt\.volume24h = anyMissingPrice \? null : evt\.swaps\.reduce/);
+    expect(indexHtml).toMatch(/evt\.fees24h\s*=\s*anyMissingPrice \? null : evt\.swaps\.reduce/);
   });
   it('session-observed volume is separated from authoritative volume', () => {
-    expect(indexHtml).toContain('evt.sessionVolume24h = evt.sessionSwaps.reduce');
+    expect(indexHtml).toMatch(/evt\.sessionVolume24h = anyMissing \? null : evt\.sessionSwaps\.reduce/);
     expect(indexHtml).toContain('getSessionObservedVolume24h');
   });
   it('history is gated on pools that actually emit Swap events', () => {
