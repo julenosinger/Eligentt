@@ -13416,14 +13416,14 @@ function getAuthoritativeAnalytics(poolId) {
 // (includeEvents=true). The frontend MUST NOT index Swap/Swapped logs itself.
 const _authoritativeHistory = {}; // poolId -> { status, events: [], fetchedAt }
 
-async function fetchPoolSwapHistory(poolId, limit = 50) {
+async function fetchPoolSwapHistory(poolId, limit = 50, refresh = false) {
   const pcfg = POOL_REGISTRY.find(p => p.id === poolId);
   if (!pcfg || !pcfg.swapEventType || pcfg.swapEventType === 'none') {
     _authoritativeHistory[poolId] = { status: 'NO_SWAP_EVENTS', events: [], fetchedAt: Date.now() };
     return _authoritativeHistory[poolId];
   }
   try {
-    const res = await fetch(`/api/pool-index?pool=${pcfg.address.toLowerCase()}&includeEvents=true&limit=${limit}`);
+    const res = await fetch(`/api/pool-index?pool=${pcfg.address.toLowerCase()}&includeEvents=true&limit=${limit}${refresh ? '&refresh=true' : ''}`);
     if (res.status === 503) { _authoritativeHistory[poolId] = { status: 'INDEX_UNAVAILABLE', events: [], fetchedAt: Date.now() }; return _authoritativeHistory[poolId]; }
     if (!res.ok) { _authoritativeHistory[poolId] = { status: 'ERROR', events: [], fetchedAt: Date.now() }; return _authoritativeHistory[poolId]; }
     const data = await res.json();
@@ -13439,6 +13439,29 @@ async function fetchPoolSwapHistory(poolId, limit = 50) {
 
 function getAuthoritativeSwapHistory(poolId) {
   return (_authoritativeHistory[poolId] && _authoritativeHistory[poolId].events) || [];
+}
+
+// Aggregate authoritative swaps across all indexed pools — the single source of
+// truth for BOTH the Swap Trade History and the Liquidity Recent Activity.
+function getAuthoritativeAllSwaps(limit = 20) {
+  const all = [];
+  for (const poolId in _authoritativeHistory) {
+    const h = _authoritativeHistory[poolId];
+    if (!h || !h.events) continue;
+    for (const ev of h.events) all.push(ev);
+  }
+  all.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+  return limit != null ? all.slice(0, limit) : all;
+}
+
+// Re-fetch authoritative swap history for all pools. `force` adds refresh=true
+// (server-side re-ingest) — used immediately after a successful user swap so the
+// new event surfaces once indexed past confirmationDepth. No client-side indexing.
+async function refreshAuthoritativeSwapHistory(force) {
+  const pools = POOL_REGISTRY.filter(p => p.deployed && p.swapEventType && p.swapEventType !== 'none');
+  await Promise.all(pools.map(async (pcfg) => {
+    await fetchPoolSwapHistory(pcfg.id, 50, !!force).catch(() => {});
+  }));
 }
 
 // Format a raw (BigInt-as-string) token amount using the token's decimals,
@@ -14238,7 +14261,7 @@ function renderActivityFeed(poolId, containerId) {
         <i class="ti ti-arrows-exchange" style="color:var(--teal);font-size:10px"></i>
         <span style="flex:1">${label}</span>
         <span style="color:var(--muted2);font-size:8px">${formatActivityTime(a.ts)}</span>
-        ${a.txHash ? `<a href="https://testnet.arcscan.app/tx/${a.txHash}" target="_blank" style="font-size:7px;color:var(--teal)">tx</a>` : ''}
+        ${a.txHash ? `<a href="https://testnet.arcscan.app/tx/${a.txHash}" target="_blank" style="font-size:7px;color:var(--teal)">${shortAddr(a.txHash)}</a>` : ''}
       </div>`;
     } else {
       const isMint = a.type === 'mint';
@@ -20330,34 +20353,19 @@ function swpToggleDetails() {
 function swpSyncRecentSwaps() {
   var list = document.getElementById('swa-hist-list');
   if (!list) return;
-  var histEl = document.getElementById('swap-history');
-  if (!histEl || !histEl.children.length) {
-    // Try ExecutionEngine task history
-    if (typeof ExecutionEngine !== 'undefined' && ExecutionEngine.getTasks) {
-      var tasks = ExecutionEngine.getTasks();
-      var swapTasks = tasks.filter(function(t) { return t.type === 'swap' && t.status === 'completed'; }).slice(-5).reverse();
-      if (swapTasks.length) {
-        list.innerHTML = swapTasks.map(function(t) {
-          var amt = (t.metadata && t.metadata.amtIn) ? t.metadata.amtIn.toFixed(2) : '?';
-          var tIn = (t.metadata && t.metadata.tIn) ? t.metadata.tIn : '?';
-          var tOut = (t.metadata && t.metadata.tOut) ? t.metadata.tOut : '?';
-          var time = t.completedAt ? new Date(t.completedAt).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}) : '';
-          return '<div class="swa-hist-item"><div class="swa-hist-status ok"></div><div><div class="swa-hist-tokens">' + tIn + ' <span style="color:var(--muted2);font-size:9px">→</span> ' + tOut + '</div><div class="swa-hist-amt">' + amt + ' ' + tIn + '</div></div><div class="swa-hist-time">' + time + '</div></div>';
-        }).join('');
-        return;
-      }
-    }
+  // Authoritative swap history — /api/pool-index (includeEvents=true).
+  var swaps = getAuthoritativeAllSwaps(5);
+  if (!swaps.length) {
     list.innerHTML = '<div class="swa-empty"><i class="ti ti-arrows-exchange"></i><span>No recent swaps</span></div>';
     return;
   }
-  var items = histEl.querySelectorAll('.swp-hist-item');
-  if (!items.length) { list.innerHTML = '<div class="swa-empty"><i class="ti ti-arrows-exchange"></i><span>No recent swaps</span></div>'; return; }
-  var html = '';
-  for (var i = Math.max(0, items.length - 5); i < items.length; i++) {
-    var item = items[i];
-    html += '<div class="swa-hist-item">' + item.innerHTML + '</div>';
-  }
-  list.innerHTML = html || '<div class="swa-empty"><i class="ti ti-arrows-exchange"></i><span>No recent swaps</span></div>';
+  list.innerHTML = swaps.map(function(ev) {
+    var amt = formatRawTokenAmount(ev.amountInRaw, ev.tokenIn);
+    var tIn = ev.tokenIn || '?';
+    var tOut = ev.tokenOut || '?';
+    var time = formatActivityTime(ev.timestamp);
+    return '<div class="swa-hist-item"><div class="swa-hist-status ok"></div><div><div class="swa-hist-tokens">' + escHtml(tIn) + ' <span style="color:var(--muted2);font-size:9px">→</span> ' + escHtml(tOut) + '</div><div class="swa-hist-amt">' + amt + ' ' + escHtml(tIn) + '</div></div><div class="swa-hist-time">' + time + '</div></div>';
+  }).join('');
 }
 
 function swpSetMax() {
@@ -21428,41 +21436,23 @@ async function executeSwap() {
   } finally { _swpExecuting = false; }
 }
 
-// ── Swap history ───────────────────────────────────────────
-function swpNow() {
-  try { return new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }); }
-  catch (_) { return new Date().toLocaleTimeString(); }
-}
-
+// ── Swap history (transient post-execution hook) ──────────────────
+// NOTE (Phase 6.4): this is NO LONGER the source of the Swap Trade History.
+// Authoritative history comes from /api/pool-index?includeEvents=true and is
+// rendered by stRenderTradeHistory / swpSyncRecentSwaps / renderActivityFeed.
+// After a successful swap we only request a server-side refresh so the new event
+// surfaces once it is indexed past confirmationDepth. (symIn/symOut/amtIn/amtOut
+// are retained for signature compatibility with the execution flow; the on-chain
+// values are authoritative.)
 function swpAddHistory(symIn, symOut, amtIn, amtOut, txHash) {
-  const container = document.getElementById('swap-history');
-  if (!container) return;
-  const empty = container.querySelector('.swp-empty');
-  if (empty) empty.remove();
-  const item = document.createElement('div');
-  item.className = 'swp-hist-item';
-  const hashLink = txHash
-    ? `<a href="https://testnet.arcscan.app/tx/${txHash}" target="_blank" class="swp-hist-hash">${shortAddr(txHash)}</a>`
-    : '';
-  const fmt = (n) => {
-    const v = Number(n) || 0;
-    if (v === 0) return '0';
-    if (v >= 1) return v.toFixed(4);
-    if (v >= 0.0001) return v.toFixed(6);
-    if (v >= 0.000001) return v.toFixed(8);
-    return v.toFixed(10);
-  };
-  setSafeHTML(item, `
-    <div class="swp-hist-icon"><i class="ti ti-arrows-exchange"></i></div>
-    <div style="flex:1;min-width:0">
-      <div class="swp-hist-label">${fmt(amtIn)} ${escHtml(symIn)} → ${fmt(amtOut)} ${escHtml(symOut)}</div>
-      <div class="swp-hist-sub">Arc Testnet · ${swpNow()}</div>
-    </div>
-    ${hashLink}
-  `);
-  container.insertBefore(item, container.firstChild);
-  while (container.children.length > 5) container.lastChild.remove();
-  if (typeof stUpdateHistory === 'function') stUpdateHistory();
+  // Transient post-execution hook only. Request the authoritative history
+  // (server re-ingest, respecting confirmationDepth) then re-render the
+  // authoritative views once the response lands. The event may not appear until
+  // it is confirmed past confirmationDepth — never invent it locally.
+  refreshAuthoritativeSwapHistory(true).then(function() {
+    if (typeof stUpdateHistory === 'function') stUpdateHistory();
+    if (typeof swpSyncRecentSwaps === 'function') swpSyncRecentSwaps();
+  }).catch(function() {});
 }
 
 
@@ -22030,30 +22020,32 @@ function stUpdateMarket() {
 }
 
 // ── Trade History ──────────────────────────
+// Authoritative: reads normalized events from /api/pool-index (includeEvents=true).
+// Does NOT read the session DOM (#swap-history) or frontend-computed quotes.
 function stRenderTradeHistory(body) {
   if (!body) return;
-  var histEl = document.getElementById('swap-history');
-  if (!histEl || !histEl.children.length) {
-    body.innerHTML = '<div class="st-lower-empty"><i class="ti ti-history"></i><span>No trades yet</span></div>';
+  const swaps = getAuthoritativeAllSwaps(20);
+  if (swaps.length === 0) {
+    const statuses = Object.keys(_authoritativeHistory).map(id => _authoritativeHistory[id] && _authoritativeHistory[id].status).filter(Boolean);
+    const msg = statuses.indexOf('INDEX_WARMING') >= 0 ? 'Analytics warming up' : 'No trades yet';
+    body.innerHTML = '<div class="st-lower-empty"><i class="ti ti-history"></i><span>' + msg + '</span></div>';
     return;
   }
-  var items = histEl.querySelectorAll('.swp-hist-item');
   var html = '<table class="st-history-table"><thead><tr><th>Pair</th><th>Type</th><th>Amount</th><th>Total</th><th>TX</th><th>Status</th><th>Time</th></tr></thead><tbody>';
-  for (var i = 0; i < Math.min(items.length, 20); i++) {
-    var item = items[i];
-    var label = (item.querySelector('.swp-hist-label') || {}).textContent || '—';
-    var parts = label.split(' → ');
-    var amtText = parts[0] || '';
-    var outText = parts[1] || '';
-    var hash = (item.querySelector('.swp-hist-hash') || {}).textContent || '—';
-    var hashHref = (item.querySelector('.swp-hist-hash') || {}).href || '#';
-    html += '<tr><td>' + amtText.split(' ').pop() + '/' + outText.split(' ').pop() + '</td>' +
+  for (var i = 0; i < swaps.length; i++) {
+    var ev = swaps[i];
+    var tokenIn = ev.tokenIn || '?';
+    var tokenOut = ev.tokenOut || '?';
+    var amtIn = formatRawTokenAmount(ev.amountInRaw, tokenIn);
+    var amtOut = formatRawTokenAmount(ev.amountOutRaw, tokenOut);
+    var hash = ev.txHash ? shortAddr(ev.txHash) : '—';
+    html += '<tr><td>' + escHtml(tokenIn) + '/' + escHtml(tokenOut) + '</td>' +
       '<td style="color:#22c55e">Swap</td>' +
-      '<td>' + amtText + '</td>' +
-      '<td>' + outText + '</td>' +
-      '<td><a class="st-tx-link" href="' + hashHref + '" target="_blank">' + hash + '</a></td>' +
+      '<td>' + amtIn + ' ' + escHtml(tokenIn) + '</td>' +
+      '<td>' + amtOut + ' ' + escHtml(tokenOut) + '</td>' +
+      '<td><a class="st-tx-link" href="https://testnet.arcscan.app/tx/' + ev.txHash + '" target="_blank">' + hash + '</a></td>' +
       '<td><span class="st-tx-status ok">Done</span></td>' +
-      '<td>' + (item.querySelector('.swp-hist-sub') || {}).textContent || '—' + '</td></tr>';
+      '<td>' + formatActivityTime(ev.timestamp) + '</td></tr>';
   }
   html += '</tbody></table>';
   body.innerHTML = html;
@@ -37228,8 +37220,7 @@ function toggleMobileRoute() {
   };
 
   window.stUpdateMobileHistoryCounts = function() {
-    var histEl = document.getElementById('swap-history');
-    var tc = histEl ? histEl.querySelectorAll('.swp-hist-item').length : 0;
+    var tc = (typeof getAuthoritativeAllSwaps === 'function') ? getAuthoritativeAllSwaps(20).length : 0;
     var oc = document.getElementById('st-mh-orders-count');
     var tcb = document.getElementById('st-mh-trades-count');
     if (oc) oc.textContent = '0';
@@ -49844,28 +49835,11 @@ window.addEventListener('unhandledrejection', function(e) {
     } catch(e) {}
   }
 
-  // Sync recent swaps from original swap-history to swa-hist-list
+  // Sync recent swaps from authoritative history (single source of truth).
+  // swpSyncRecentSwaps reads /api/pool-index (includeEvents=true) events — not
+  // the session DOM (#swap-history) nor frontend-computed quote values.
   function syncSwapHistory() {
-    try {
-      const orig = document.getElementById('swap-history');
-      const dest = document.getElementById('swa-hist-list');
-      if (!orig || !dest) return;
-      const items = orig.querySelectorAll('[data-tx], .swp-hist-item, [class*="hist"]');
-      if (items.length === 0) {
-        // Check innerHTML
-        if (orig.innerHTML.trim() && !orig.innerHTML.includes('swp-empty')) {
-          dest.innerHTML = orig.innerHTML;
-        } else {
-          dest.innerHTML = '<div class="swa-empty"><i class="ti ti-arrows-exchange"></i>Recent swaps will appear here</div>';
-        }
-        return;
-      }
-      dest.innerHTML = '';
-      items.forEach(function(item) {
-        const clone = item.cloneNode(true);
-        dest.appendChild(clone);
-      });
-    } catch(e) {}
+    try { if (typeof swpSyncRecentSwaps === 'function') swpSyncRecentSwaps(); } catch(e) {}
   }
 
   // AI Optimizer stub: connect to Autonoma if available

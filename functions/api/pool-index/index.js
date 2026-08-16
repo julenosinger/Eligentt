@@ -167,16 +167,19 @@ export function createPoolIndexHandler(inject = {}) {
     const inst = getInstance(pool);
     const idx = inst.idx;
     const includeEvents = url.searchParams.get('includeEvents') === 'true';
+    const forceRefresh = url.searchParams.get('refresh') === 'true';
     const { limit, offset } = parsePagination(url);
 
     try {
       await idx.init();
 
       // AUTO-INGEST (memory mode): incremental, cooldown-gated, no timers.
+      // `refresh=true` requests an immediate ingest (e.g. after a user swap),
+      // still server-side, still guarded by _inflight/confirmationDepth/dedup.
       // A failed ingest must NOT fail the read path — analytics are served
       // from whatever the index already holds (possibly INDEX_WARMING).
       const t = now();
-      if (t - inst.lastAutoIngest >= cooldownMs) {
+      if (forceRefresh || t - inst.lastAutoIngest >= cooldownMs) {
         inst.lastAutoIngest = t;
         try { await idx.ingestLatest(); } catch (e) { /* non-fatal */ }
       }
