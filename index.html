@@ -13403,11 +13403,56 @@ async function refreshAuthoritativeAnalytics() {
   const pools = POOL_REGISTRY.filter(p => p.deployed && p.swapEventType && p.swapEventType !== 'none');
   await Promise.all(pools.map(async (pcfg) => {
     _authoritativeAnalytics[pcfg.id] = await fetchPoolAnalytics(pcfg.id);
+    // Authoritative swap history (Recent Activity) from the same source.
+    await fetchPoolSwapHistory(pcfg.id).catch(() => {});
   }));
 }
 
 function getAuthoritativeAnalytics(poolId) {
   return _authoritativeAnalytics[poolId] || null;
+}
+
+// Authoritative swap history (Recent Activity) — served by /api/pool-index
+// (includeEvents=true). The frontend MUST NOT index Swap/Swapped logs itself.
+const _authoritativeHistory = {}; // poolId -> { status, events: [], fetchedAt }
+
+async function fetchPoolSwapHistory(poolId, limit = 50) {
+  const pcfg = POOL_REGISTRY.find(p => p.id === poolId);
+  if (!pcfg || !pcfg.swapEventType || pcfg.swapEventType === 'none') {
+    _authoritativeHistory[poolId] = { status: 'NO_SWAP_EVENTS', events: [], fetchedAt: Date.now() };
+    return _authoritativeHistory[poolId];
+  }
+  try {
+    const res = await fetch(`/api/pool-index?pool=${pcfg.address.toLowerCase()}&includeEvents=true&limit=${limit}`);
+    if (res.status === 503) { _authoritativeHistory[poolId] = { status: 'INDEX_UNAVAILABLE', events: [], fetchedAt: Date.now() }; return _authoritativeHistory[poolId]; }
+    if (!res.ok) { _authoritativeHistory[poolId] = { status: 'ERROR', events: [], fetchedAt: Date.now() }; return _authoritativeHistory[poolId]; }
+    const data = await res.json();
+    if (!data.ok) { _authoritativeHistory[poolId] = { status: data.reason || 'ERROR', events: [], fetchedAt: Date.now() }; return _authoritativeHistory[poolId]; }
+    const swaps = (data.events || []).filter(e => e.eventType === 'Swap');
+    _authoritativeHistory[poolId] = { status: data.status, events: swaps, fetchedAt: Date.now() };
+    return _authoritativeHistory[poolId];
+  } catch (e) {
+    _authoritativeHistory[poolId] = { status: 'INDEX_UNAVAILABLE', events: [], fetchedAt: Date.now() };
+    return _authoritativeHistory[poolId];
+  }
+}
+
+function getAuthoritativeSwapHistory(poolId) {
+  return (_authoritativeHistory[poolId] && _authoritativeHistory[poolId].events) || [];
+}
+
+// Format a raw (BigInt-as-string) token amount using the token's decimals,
+// trimming trailing zeros (e.g. 1000000 USDC -> "1", 899200 EURC -> "0.8992").
+function formatRawTokenAmount(raw, sym) {
+  const dec = (TOKEN_REGISTRY[sym] && TOKEN_REGISTRY[sym].decimals != null) ? TOKEN_REGISTRY[sym].decimals : 6;
+  const rawStr = String(raw == null ? '0' : raw).trim();
+  if (!/^-?\d+$/.test(rawStr)) return rawStr;
+  let val;
+  try { val = Number(rawStr) / Math.pow(10, dec); } catch (_) { return rawStr; }
+  if (!isFinite(val)) return rawStr;
+  const fixed = val.toFixed(dec);
+  const trimmed = fixed.replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
+  return trimmed || '0';
 }
 
 // 24h volume (USD) from the authoritative index. null when unavailable — never 0.
@@ -14153,10 +14198,12 @@ function getRecentActivity(poolId, limit = 10) {
   const evt = _evtGet(poolId);
   const activity = [];
 
-  // Merge swap + lpActivity sorted by time
-  for (const s of evt.swaps || []) {
-    activity.push({ type: 'swap', ts: s.ts, tokenIn: s.tokenIn, amount: s.amountIn, usd: s.usd, txHash: s.txHash });
+  // Authoritative swap history — from /api/pool-index (includeEvents=true).
+  // Never independently indexed via queryFilter.
+  for (const s of getAuthoritativeSwapHistory(poolId)) {
+    activity.push({ type: 'swap', ts: s.timestamp, tokenIn: s.tokenIn, tokenOut: s.tokenOut, amountInRaw: s.amountInRaw, amountOutRaw: s.amountOutRaw, txHash: s.txHash });
   }
+  // LP activity (Mint/Burn) — session UI concern, still event-log derived.
   for (const a of evt.lpActivity || []) {
     activity.push({ type: a.type, ts: a.ts, amountA: a.amountA, amountB: a.amountB, txHash: a.txHash });
   }
@@ -14176,14 +14223,20 @@ function renderActivityFeed(poolId, containerId) {
   if (!container) return;
   const items = getRecentActivity(poolId, 10);
   if (items.length === 0) {
-    container.innerHTML = '<div style="font-size:9px;color:var(--muted2);text-align:center;padding:10px">No recent activity</div>';
+    const status = getAuthoritativeAnalytics(poolId)?.status;
+    const msg = status === 'INDEX_WARMING' ? 'Analytics warming up' : 'No recent activity';
+    container.innerHTML = `<div style="font-size:9px;color:var(--muted2);text-align:center;padding:10px">${msg}</div>`;
     return;
   }
   container.innerHTML = items.map(a => {
     if (a.type === 'swap') {
+      const inTxt = a.amountInRaw != null ? formatRawTokenAmount(a.amountInRaw, a.tokenIn) : (a.amount != null ? Number(a.amount).toFixed(4) : '0');
+      const label = (a.amountOutRaw != null && a.tokenOut)
+        ? `${inTxt} ${a.tokenIn || '?'} → ${formatRawTokenAmount(a.amountOutRaw, a.tokenOut)} ${a.tokenOut}`
+        : `Swap ${inTxt} ${a.tokenIn || '?'}`;
       return `<div style="display:flex;align-items:center;gap:6px;padding:4px 6px;font-size:9px;border-bottom:1px solid var(--border-light)">
         <i class="ti ti-arrows-exchange" style="color:var(--teal);font-size:10px"></i>
-        <span style="flex:1">Swap ${Number(a.amount||0).toFixed(4)} ${a.tokenIn||'?'}</span>
+        <span style="flex:1">${label}</span>
         <span style="color:var(--muted2);font-size:8px">${formatActivityTime(a.ts)}</span>
         ${a.txHash ? `<a href="https://testnet.arcscan.app/tx/${a.txHash}" target="_blank" style="font-size:7px;color:var(--teal)">tx</a>` : ''}
       </div>`;
@@ -27567,6 +27620,8 @@ function poolUpdateUI() {
   updatePoolStats();
   poolUpdateDeviation(pcfg, pd, hasLiq);
   poolUpdateLPPosition(pcfg, pd, hasLiq);
+  // Recent Activity — authoritative swap history from /api/pool-index.
+  renderActivityFeed(activePoolId, 'pool-tx-log');
 }
 
 function poolUpdateDeviation(pcfg, pd, hasLiq) {
