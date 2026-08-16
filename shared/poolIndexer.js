@@ -27,6 +27,19 @@
   var STATUS = { COMPLETE: 'COMPLETE', PARTIAL: 'PARTIAL', UNAVAILABLE: 'UNAVAILABLE', ERROR: 'ERROR' };
   var INDEX_VERSION = 1;
 
+  // Index lifecycle modes (Phase 6.5). DISTINCT from `STATUS` (per-ingest result).
+  //   warming    → no recent window indexed yet (INDEX_WARMING)
+  //   live       → recent window indexed, older history may still be backfilling
+  //   complete   → full history indexed down to block 0
+  var MODES = { WARMING: 'warming', LIVE: 'live', COMPLETE: 'complete' };
+
+  // Cold-start bootstrap window. A fresh (MemoryStore) isolate indexes this many
+  // RECENT blocks instead of scanning from block 0 — which could be tens of
+  // millions of blocks on Arc Testnet. ≈20000 blocks ≈ 11h at 2s/block.
+  var DEFAULT_RECENT_BOOTSTRAP_BLOCKS = 20000;
+  // Bounded backfill progress per ingest request (older history, one chunk at a time).
+  var DEFAULT_BACKFILL_CHUNK_BLOCKS = 2000;
+
   // Swap event capabilities (Phase 6.2).
   var SWAP_EVENT_TYPE = { STANDARD: 'standard', SWAPPED: 'swapped', NONE: 'none' };
 
@@ -238,6 +251,8 @@
     var maxRetries = opts.maxRetries != null ? opts.maxRetries : 3;
     var retryBackoffMs = opts.retryBackoffMs != null ? opts.retryBackoffMs : 500;
     var indexVersion = opts.indexVersion != null ? opts.indexVersion : INDEX_VERSION;
+    var recentBootstrapBlocks = opts.recentBootstrapBlocks != null ? opts.recentBootstrapBlocks : DEFAULT_RECENT_BOOTSTRAP_BLOCKS;
+    var backfillChunkBlocks = opts.backfillChunkBlocks != null ? opts.backfillChunkBlocks : DEFAULT_BACKFILL_CHUNK_BLOCKS;
 
     var cursorKey = opts.cursorKey || ('cursor:' + chainId + ':' + poolAddress);
     var eventPrefix = opts.eventPrefix || ('evt:' + chainId + ':' + poolAddress + ':');
@@ -251,6 +266,8 @@
       chainId: chainId,
       poolAddress: poolAddress,
       lastIndexedBlock: 0,
+      firstIndexedBlock: 0,      // earliest indexed block (backfill cursor; 0 = full)
+      latestConfirmedBlock: 0,   // chain head minus confirmationDepth at last ingest
       status: 'IDLE',
       lastIndexedAt: 0,
       indexedEvents: 0,
@@ -280,6 +297,8 @@
           var saved = JSON.parse(raw);
           if (saved && saved.lastIndexedBlock != null) {
             cursor.lastIndexedBlock = Number(saved.lastIndexedBlock);
+            cursor.firstIndexedBlock = Number(saved.firstIndexedBlock) || 0;
+            cursor.latestConfirmedBlock = Number(saved.latestConfirmedBlock) || 0;
             cursor.status = saved.status || 'IDLE';
             cursor.lastIndexedAt = Number(saved.lastIndexedAt) || 0;
             cursor.indexedEvents = Number(saved.indexedEvents) || 0;
@@ -343,6 +362,30 @@
       }
     }
 
+    /**
+     * Process ONE chunk [from, to]: fetch logs, resolve timestamps, decode,
+     * dedup (memory + store) and persist. Returns per-chunk counters. Does NOT
+     * touch the cursor — the caller decides how/if to advance it (forward or
+     * backward), which makes backfill idempotent and dedup-safe.
+     */
+    async function processChunk(from, to) {
+      var logs = await fetchLogsWithRetry(from, to);
+      await resolveTimestamps(logs);
+      var indexed = 0, skipped = 0, missingTs = 0;
+      for (var i = 0; i < logs.length; i++) {
+        var ev = normalize(decode(logs[i]), chainId);
+        if (!ev || !validateEvent(ev)) { skipped++; continue; }
+        ev.timestamp = _timestamps[Number(ev.blockNumber)] != null ? _timestamps[Number(ev.blockNumber)] : null;
+        if (ev.timestamp === null) missingTs++;
+        if (_events[ev.key]) { skipped++; continue; }
+        if (await store.has(eventStoreKey(ev))) { _events[ev.key] = ev; skipped++; continue; }
+        await store.put(eventStoreKey(ev), serializeEvent(ev));
+        _events[ev.key] = ev;
+        indexed++;
+      }
+      return { indexed: indexed, skipped: skipped, missingTimestamps: missingTs };
+    }
+
     async function ingestRange(fromBlock, toBlock) {
       if (_inflight) return { ok: false, reason: 'INDEXING_IN_PROGRESS', status: cursor.status, lastIndexedBlock: cursor.lastIndexedBlock };
       _inflight = true;
@@ -360,31 +403,14 @@
           if (chunkEnd > to) chunkEnd = to;
           chunks++;
           try {
-            var logs = await fetchLogsWithRetry(cursorBlock, chunkEnd);
-            await resolveTimestamps(logs);
-
-            // Decode + validate + dedup (against BOTH memory and store).
-            var decoded = [];
-            for (var i = 0; i < logs.length; i++) {
-              var ev = normalize(decode(logs[i]), chainId);
-              if (!ev || !validateEvent(ev)) { skipped++; continue; }
-              ev.timestamp = _timestamps[Number(ev.blockNumber)] != null ? _timestamps[Number(ev.blockNumber)] : null;
-              if (ev.timestamp === null) missingTs++;
-              if (_events[ev.key]) { skipped++; continue; }
-              if (await store.has(eventStoreKey(ev))) { _events[ev.key] = ev; skipped++; continue; }
-              decoded.push(ev);
-            }
-
-            // Persist events FIRST (idempotent by unique key), THEN cursor.
-            for (var d = 0; d < decoded.length; d++) {
-              await store.put(eventStoreKey(decoded[d]), serializeEvent(decoded[d]));
-              _events[decoded[d].key] = decoded[d];
-              indexed++;
-            }
+            var r = await processChunk(cursorBlock, chunkEnd);
+            indexed += r.indexed;
+            skipped += r.skipped;
+            missingTs += r.missingTimestamps;
 
             // Advance cursor only AFTER events persisted.
             cursor.lastIndexedBlock = Number(chunkEnd);
-            cursor.indexedEvents += indexed;
+            cursor.indexedEvents += r.indexed;
             await persistCursor();
           } catch (e) {
             errors++;
@@ -410,13 +436,102 @@
       }
     }
 
+    /**
+     * Backfill older history (below the recent bootstrap window), bounded to
+     * `backfillChunkBlocks` per call. Does NOT advance `lastIndexedBlock`; it
+     * moves `firstIndexedBlock` downward toward block 0. Returns `complete:true`
+     * once the earliest block reaches 0. Never blocks on millions of blocks.
+     */
+    async function ingestBackfill() {
+      if (_inflight) return { ok: false, reason: 'INDEXING_IN_PROGRESS', firstIndexedBlock: cursor.firstIndexedBlock };
+      if (cursor.firstIndexedBlock <= 0) return { ok: true, backfilled: 0, complete: true, firstIndexedBlock: 0 };
+      _inflight = true;
+      try {
+        var from = Math.max(0, cursor.firstIndexedBlock - backfillChunkBlocks);
+        var to = cursor.firstIndexedBlock - 1;
+        var indexed = 0, skipped = 0, missingTs = 0, chunks = 0, errors = 0;
+        var cb = BigInt(from);
+        var cto = BigInt(to);
+        while (cb <= cto) {
+          var chunkEnd = cb + BigInt(chunkSize) - 1n;
+          if (chunkEnd > cto) chunkEnd = cto;
+          chunks++;
+          try {
+            var r = await processChunk(cb, chunkEnd);
+            indexed += r.indexed;
+            skipped += r.skipped;
+            missingTs += r.missingTimestamps;
+          } catch (e) {
+            errors++;
+            cursor.error = (e && e.message) || 'RPC_ERROR';
+            break;
+          }
+          cb = chunkEnd + 1n;
+        }
+        // Advance the backfill cursor only if the whole bounded range succeeded.
+        if (!errors) {
+          cursor.firstIndexedBlock = from;
+          cursor.indexedEvents += indexed;
+          cursor.missingTimestamps = (cursor.missingTimestamps || 0) + missingTs;
+        }
+        await persistCursor();
+        return {
+          ok: errors === 0,
+          backfilled: errors ? 0 : (to - from + 1),
+          indexed: indexed, skipped: skipped, chunks: chunks, errors: errors, missingTimestamps: missingTs,
+          complete: cursor.firstIndexedBlock <= 0,
+          firstIndexedBlock: cursor.firstIndexedBlock,
+        };
+      } finally {
+        _inflight = false;
+      }
+    }
+
     async function ingestLatest() {
       var latest = await provider.getBlockNumber();
-      var boundary = Number(latest) - confirmationDepth;
-      if (boundary < 0) boundary = 0;
-      var from = cursor.lastIndexedBlock > 0 ? cursor.lastIndexedBlock + 1 : 0;
-      if (boundary < from) return { ok: true, indexed: 0, skipped: 0, chunks: 0, errors: 0, missingTimestamps: 0, lastIndexedBlock: cursor.lastIndexedBlock, status: cursor.status };
-      return ingestRange(from, boundary);
+      var latestConfirmed = Number(latest) - confirmationDepth;
+      if (latestConfirmed < 0) latestConfirmed = 0;
+      cursor.latestConfirmedBlock = latestConfirmed;
+
+      if (cursor.lastIndexedBlock === 0) {
+        // COLD START (MemoryStore): bootstrap the RECENT window, NOT block 0.
+        // initialStart = max(0, latestConfirmed - recentBootstrapBlocks).
+        var initialStart = Math.max(0, latestConfirmed - recentBootstrapBlocks);
+        var res = await ingestRange(initialStart, latestConfirmed);
+        if (res.reason !== 'INDEXING_IN_PROGRESS') {
+          cursor.firstIndexedBlock = initialStart;
+        }
+        await persistCursor();
+        return res;
+      }
+
+      // WARM — forward incremental ingest, then one bounded backfill chunk.
+      var from = cursor.lastIndexedBlock + 1;
+      var res = { ok: true, indexed: 0, skipped: 0, chunks: 0, errors: 0, missingTimestamps: 0, lastIndexedBlock: cursor.lastIndexedBlock, status: cursor.status };
+      if (latestConfirmed >= from) {
+        res = await ingestRange(from, latestConfirmed);
+      }
+      if (cursor.firstIndexedBlock > 0) {
+        await ingestBackfill();
+      }
+      return res;
+    }
+
+    /** High-level lifecycle state + coverage (Phase 6.5). */
+    function getIndexState() {
+      var hasData = cursor.lastIndexedBlock > 0 || cursor.firstIndexedBlock > 0 || Object.keys(_events).length > 0;
+      var mode = !hasData ? MODES.WARMING : (cursor.firstIndexedBlock <= 0 ? MODES.COMPLETE : MODES.LIVE);
+      var backfilling = hasData && cursor.firstIndexedBlock > 0;
+      return {
+        mode: mode,
+        backfilling: backfilling,
+        status: cursor.status,
+        lastIndexedBlock: cursor.lastIndexedBlock,
+        firstIndexedBlock: cursor.firstIndexedBlock,
+        latestConfirmedBlock: cursor.latestConfirmedBlock,
+        recentBootstrapBlocks: recentBootstrapBlocks,
+        indexedEvents: cursor.indexedEvents,
+      };
     }
 
     /** Deterministic event ordering: blockNumber ASC, logIndex ASC. */
@@ -489,6 +604,8 @@
 
     async function reset(fromBlock) {
       cursor.lastIndexedBlock = fromBlock || 0;
+      cursor.firstIndexedBlock = fromBlock || 0;
+      cursor.latestConfirmedBlock = 0;
       cursor.indexedEvents = 0;
       cursor.status = 'IDLE';
       cursor.lastIndexedAt = 0;
@@ -499,23 +616,29 @@
     return {
       EVENT_TYPES: EVENT_TYPES,
       STATUS: STATUS,
+      MODES: MODES,
       init: init,
       ingestRange: ingestRange,
       ingestLatest: ingestLatest,
+      ingestBackfill: ingestBackfill,
       getEvents: getEvents,
       computeVolume: computeVolume,
       getCursor: getCursor,
       getStatus: getStatus,
+      getIndexState: getIndexState,
       reset: reset,
       eventIdentity: eventIdentity,
     };
   }
 
   var API = {
-    VERSION: '1.2.0',
+    VERSION: '1.3.0',
     INDEX_VERSION: INDEX_VERSION,
     EVENT_TYPES: EVENT_TYPES,
     STATUS: STATUS,
+    MODES: MODES,
+    DEFAULT_RECENT_BOOTSTRAP_BLOCKS: DEFAULT_RECENT_BOOTSTRAP_BLOCKS,
+    DEFAULT_BACKFILL_CHUNK_BLOCKS: DEFAULT_BACKFILL_CHUNK_BLOCKS,
     SWAP_EVENT_TYPE: SWAP_EVENT_TYPE,
     SWAP_TOPIC: SWAP_TOPIC,
     SWAPPED_TOPIC: SWAPPED_TOPIC,

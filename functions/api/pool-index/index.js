@@ -69,18 +69,42 @@ function json(body, status, env) {
 }
 
 /** Authoritative analytics derived from the in-memory index (server-side only). */
-function computeAnalytics(idx) {
+function computeAnalytics(idx, state) {
   const now = Date.now();
   const v24 = idx.computeVolume(86400, { now });
   const v7 = idx.computeVolume(7 * 86400, { now });
   const v30 = idx.computeVolume(30 * 86400, { now });
   const swaps = idx.getEvents({ eventType: 'Swap' });
+  // LIVE != COMPLETE: when older history is still backfilling, time-windowed
+  // volumes are under-counted → mark coverage PARTIAL (never fabricate 0).
+  const backfilling = !!(state && state.backfilling);
+  const s24 = backfilling && v24.status === 'COMPLETE' ? 'PARTIAL' : v24.status;
+  const s7 = backfilling && v7.status === 'COMPLETE' ? 'PARTIAL' : v7.status;
+  const s30 = backfilling && v30.status === 'COMPLETE' ? 'PARTIAL' : v30.status;
   return {
     swapCount: swaps.length,
-    volume24h: { amount0InRaw: v24.amount0InRaw, amount1InRaw: v24.amount1InRaw, usdVolume: v24.usdVolume, status: v24.status },
-    volume7d:  { amount0InRaw: v7.amount0InRaw, amount1InRaw: v7.amount1InRaw, usdVolume: v7.usdVolume, status: v7.status },
-    volume30d: { amount0InRaw: v30.amount0InRaw, amount1InRaw: v30.amount1InRaw, usdVolume: v30.usdVolume, status: v30.status },
+    coverage: backfilling ? 'PARTIAL' : 'COMPLETE',
+    volume24h: { amount0InRaw: v24.amount0InRaw, amount1InRaw: v24.amount1InRaw, usdVolume: v24.usdVolume, status: s24 },
+    volume7d:  { amount0InRaw: v7.amount0InRaw, amount1InRaw: v7.amount1InRaw, usdVolume: v7.usdVolume, status: s7 },
+    volume30d: { amount0InRaw: v30.amount0InRaw, amount1InRaw: v30.amount1InRaw, usdVolume: v30.usdVolume, status: s30 },
   };
+}
+
+/**
+ * Map the indexer lifecycle state to the public status string.
+ *   warming   → INDEX_WARMING
+ *   error     → ERROR
+ *   partial   → PARTIAL
+ *   backfill  → BACKFILLING  (recent window live, older history pending)
+ *   complete  → COMPLETE
+ */
+function resolveStatus(state) {
+  if (!state) return STATUS_WARMING;
+  if (state.status === 'ERROR') return 'ERROR';
+  if (state.status === 'PARTIAL') return 'PARTIAL';
+  if (state.mode === 'warming') return STATUS_WARMING;
+  if (state.backfilling) return 'BACKFILLING';
+  return 'COMPLETE';
 }
 
 function strBig(v) {
@@ -143,6 +167,8 @@ export function createPoolIndexHandler(inject = {}) {
         store: makeStore(poolAddress),
         confirmationDepth: 10,
         chunkSize: 2000,
+        recentBootstrapBlocks: inject.recentBootstrapBlocks,
+        backfillChunkBlocks: inject.backfillChunkBlocks,
       });
       inst = { idx, poolCfg, lastAutoIngest: 0 };
       instances[poolAddress] = inst;
@@ -184,12 +210,11 @@ export function createPoolIndexHandler(inject = {}) {
         try { await idx.ingestLatest(); } catch (e) { /* non-fatal */ }
       }
 
+      const state = idx.getIndexState();
       const cursor = idx.getCursor();
       const allEvents = idx.getEvents();
-      const warmed = cursor.lastIndexedBlock > 0 || allEvents.length > 0;
-      const status = warmed
-        ? (cursor.status && cursor.status !== 'IDLE' ? cursor.status : 'COMPLETE')
-        : STATUS_WARMING;
+      const status = resolveStatus(state);
+      const warmed = state.mode !== 'warming';
 
       const body = {
         ok: true,
@@ -198,8 +223,16 @@ export function createPoolIndexHandler(inject = {}) {
         chainId: CHAIN_ID,
         lastIndexedBlock: cursor.lastIndexedBlock,
         status,
+        indexMode: state.mode,
+        backfilling: state.backfilling,
+        coverage: {
+          fromBlock: state.firstIndexedBlock,
+          toBlock: state.lastIndexedBlock,
+          latestConfirmedBlock: state.latestConfirmedBlock,
+          backfillRemaining: state.firstIndexedBlock,
+        },
         eventCount: allEvents.length,
-        analytics: warmed ? computeAnalytics(idx) : null,
+        analytics: warmed ? computeAnalytics(idx, state) : null,
       };
 
       if (includeEvents) {
@@ -226,7 +259,12 @@ export function createPoolIndexHandler(inject = {}) {
     try {
       await inst.idx.init();
       const summary = await inst.idx.ingestLatest();
-      return json({ ok: summary.ok, summary, cursor: inst.idx.getCursor(), eventCount: inst.idx.getEvents().length }, 200, env);
+      const state = inst.idx.getIndexState();
+      return json({
+        ok: summary.ok, summary, cursor: inst.idx.getCursor(),
+        status: resolveStatus(state), indexMode: state.mode, backfilling: state.backfilling,
+        eventCount: inst.idx.getEvents().length,
+      }, 200, env);
     } catch (e) {
       return json({ ok: false, reason: 'INDEX_ERROR', detail: (e && e.message) || 'error' }, 500, env);
     }
@@ -245,4 +283,4 @@ export async function onRequestPost({ request, env }) {
   return _defaultHandler.handlePost(new URL(request.url), env);
 }
 
-export { DEPLOYED_POOLS, CHAIN_ID, INGEST_COOLDOWN_MS, DEFAULT_EVENT_LIMIT, MAX_EVENT_LIMIT, STATUS_WARMING, computeAnalytics };
+export { DEPLOYED_POOLS, CHAIN_ID, INGEST_COOLDOWN_MS, DEFAULT_EVENT_LIMIT, MAX_EVENT_LIMIT, STATUS_WARMING, computeAnalytics, resolveStatus };
