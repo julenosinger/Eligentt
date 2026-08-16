@@ -18,14 +18,24 @@ import PoolIndexer from '../../../shared/poolIndexer.js';
 const CHAIN_ID = 5042002;
 const ARC_RPC_URL = 'https://arc-testnet.drpc.org';
 
-// Verified deployed pools (Phase 3 on-chain verification). Only these are indexable.
+// Verified deployed pools (Phase 3 + Phase 6.2). Only these are indexable.
+// swapEventType: 'standard' (Swap event) | 'swapped' (Swapped event) | 'none'.
 const DEPLOYED_POOLS = {
-  '0x18076d992005186aeb13ac5270cad6e27db95247': { id: 'usdc-eurc', hasSwapEvents: false },
-  '0x14590fb7dcbd5cebabff63b915ef23d008db98f4': { id: 'usdc-cirbtc', hasSwapEvents: true },
+  '0x18076d992005186aeb13ac5270cad6e27db95247': {
+    id: 'usdc-eurc', swapEventType: 'swapped',
+    token0Address: '0x3600000000000000000000000000000000000000', token0Symbol: 'USDC',
+    token1Address: '0x89b50855aa3be2f677cd6303cec089b5f319d72a', token1Symbol: 'EURC',
+  },
+  '0x14590fb7dcbd5cebabff63b915ef23d008db98f4': {
+    id: 'usdc-cirbtc', swapEventType: 'standard',
+    token0Address: '0x3600000000000000000000000000000000000000', token0Symbol: 'USDC',
+    token1Address: '0xf0c4a4ce82a5746abaad9425360ab04fbba432bf', token1Symbol: 'cirBTC',
+  },
 };
 
 const EVENTS = [
   'event Swap(address indexed sender, uint256 amount0In, uint256 amount1In, uint256 amount0Out, uint256 amount1Out, address indexed to)',
+  'event Swapped(address indexed user, address tokenIn, uint256 amountIn, uint256 amountOut)',
   'event Mint(address indexed sender, uint256 amount0, uint256 amount1)',
   'event Burn(address indexed sender, uint256 amount0, uint256 amount1, address indexed to)',
 ];
@@ -44,6 +54,7 @@ function json(body, status) {
 
 function getIndexer(env, poolAddress) {
   if (!env.POOL_INDEX_KV) return { error: 'POOL_INDEX_KV binding not configured' };
+  const poolCfg = DEPLOYED_POOLS[poolAddress];
   const provider = new ethers.JsonRpcProvider(ARC_RPC_URL);
   const iface = new ethers.Interface(EVENTS);
   return {
@@ -51,7 +62,10 @@ function getIndexer(env, poolAddress) {
       chainId: CHAIN_ID,
       poolAddress,
       provider,
-      decode: PoolIndexer.createDecoder(iface),
+      decode: PoolIndexer.createDecoder(iface, {
+        token0Address: poolCfg.token0Address, token1Address: poolCfg.token1Address,
+        token0Symbol: poolCfg.token0Symbol, token1Symbol: poolCfg.token1Symbol,
+      }),
       store: PoolIndexer.createKVStore(env.POOL_INDEX_KV, 'pool-index'),
       confirmationDepth: 10,
       chunkSize: 2000,
@@ -85,7 +99,7 @@ export async function onRequestPost({ request, env }) {
   const url = new URL(request.url);
   const pool = (url.searchParams.get('pool') || '').toLowerCase();
   if (!DEPLOYED_POOLS[pool]) return json({ ok: false, reason: 'UNKNOWN_POOL' }, 400);
-  if (!DEPLOYED_POOLS[pool].hasSwapEvents) return json({ ok: false, reason: 'NO_SWAP_EVENTS', detail: 'Contract does not emit Swap/Mint/Burn events' }, 422);
+  if (DEPLOYED_POOLS[pool].swapEventType === 'none') return json({ ok: false, reason: 'NO_SWAP_EVENTS', detail: 'Contract does not emit Swap/Swapped events' }, 422);
 
   const setup = getIndexer(env, pool);
   if (setup.error) return json({ ok: false, reason: 'INDEX_UNAVAILABLE', detail: setup.error }, 503);

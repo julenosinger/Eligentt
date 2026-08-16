@@ -147,25 +147,29 @@
       return encodeSwapCalldata(quote.poolAddress, tokenInAddr, quote.amountInRaw, quote.minOutRaw);
     }
 
-    /** Extract the actual Swap event from a receipt (injected iface). */
-    function extractSwapEvent(receipt, iface) {
+    /** Extract the actual Swap/Swapped event from a receipt. */
+    function extractSwapEvent(receipt, iface, swappedIface) {
       if (!receipt || !iface || !Array.isArray(receipt.logs)) return null;
-      var topic = null;
-      try { topic = iface.getEvent('Swap').topicHash; } catch (e) { return null; }
+      var swapTopic = null, swappedTopic = null;
+      try { swapTopic = iface.getEvent('Swap').topicHash; } catch (e) {}
+      if (swappedIface) { try { swappedTopic = swappedIface.getEvent('Swapped').topicHash; } catch (e) {} }
       for (var i = 0; i < receipt.logs.length; i++) {
         var log = receipt.logs[i];
-        if (!log || !log.topics || log.topics.indexOf(topic) === -1) continue;
-        try {
-          var parsed = iface.parseLog(log);
-          var a = parsed.args || {};
-          var in0 = toBig(a.amount0In), in1 = toBig(a.amount1In);
-          var out0 = toBig(a.amount0Out), out1 = toBig(a.amount1Out);
-          return {
-            amountInRaw: in0 > 0n ? in0 : in1,
-            amountOutRaw: out0 > 0n ? out0 : out1,
-            tokenInIsToken0: in0 > 0n,
-          };
-        } catch (e) { /* skip */ }
+        if (!log || !log.topics) continue;
+        if (swapTopic && log.topics.indexOf(swapTopic) !== -1) {
+          try {
+            var a = iface.parseLog(log).args || {};
+            var in0 = toBig(a.amount0In), in1 = toBig(a.amount1In);
+            var out0 = toBig(a.amount0Out), out1 = toBig(a.amount1Out);
+            return { amountInRaw: in0 > 0n ? in0 : in1, amountOutRaw: out0 > 0n ? out0 : out1, tokenInIsToken0: in0 > 0n, eventType: 'Swap', user: a.sender || a.to || null };
+          } catch (e) {}
+        }
+        if (swappedTopic && log.topics.indexOf(swappedTopic) !== -1) {
+          try {
+            var b = swappedIface.parseLog(log).args || {};
+            return { amountInRaw: toBig(b.amountIn), amountOutRaw: toBig(b.amountOut), tokenInIsToken0: null, eventType: 'Swapped', user: b.user || null };
+          } catch (e) {}
+        }
       }
       return null;
     }

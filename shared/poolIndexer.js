@@ -27,6 +27,22 @@
   var STATUS = { COMPLETE: 'COMPLETE', PARTIAL: 'PARTIAL', UNAVAILABLE: 'UNAVAILABLE', ERROR: 'ERROR' };
   var INDEX_VERSION = 1;
 
+  // Swap event capabilities (Phase 6.2).
+  var SWAP_EVENT_TYPE = { STANDARD: 'standard', SWAPPED: 'swapped', NONE: 'none' };
+
+  // Verified topics. Standard Uniswap-V2-style Swap + USDC/EURC Swapped.
+  var SWAP_TOPIC = '0xd78ad95fa46c994b6551d0da85fc275fe613ce37657fb8d5e3d130840159d822';
+  var SWAPPED_TOPIC = '0xa078c4190abe07940190effc1846be0ccf03ad6007bc9e93f9697d0b460befbb';
+
+  /** Detect which swap event a pool emits from its deployed bytecode. */
+  function detectSwapEventType(code) {
+    if (!code || code === '0x') return SWAP_EVENT_TYPE.NONE;
+    var c = code.toLowerCase();
+    if (c.indexOf(SWAP_TOPIC.slice(2)) !== -1) return SWAP_EVENT_TYPE.STANDARD;
+    if (c.indexOf(SWAPPED_TOPIC.slice(2)) !== -1) return SWAP_EVENT_TYPE.SWAPPED;
+    return SWAP_EVENT_TYPE.NONE;
+  }
+
   function toBig(v) {
     if (typeof v === 'bigint') return v;
     if (v == null) return 0n;
@@ -94,7 +110,13 @@
      DECODER
      ══════════════════════════════════════════════════════════════ */
 
-  function createDecoder(iface) {
+  function createDecoder(iface, opts) {
+    opts = opts || {};
+    var t0 = (opts.token0Address || '').toLowerCase();
+    var t1 = (opts.token1Address || '').toLowerCase();
+    var s0 = opts.token0Symbol || null;
+    var s1 = opts.token1Symbol || null;
+
     return function decodeLog(log) {
       if (!log || !log.topics || !log.topics.length) return null;
       var parsed;
@@ -115,11 +137,33 @@
 
       if (parsed.name === 'Swap') {
         var a = parsed.args || {};
+        var in0 = toBig(a.amount0In), in1 = toBig(a.amount1In);
+        var out0 = toBig(a.amount0Out), out1 = toBig(a.amount1Out);
         return Object.assign({}, base, {
           eventType: EVENT_TYPES.SWAP,
-          amount0In: toBig(a.amount0In), amount1In: toBig(a.amount1In),
-          amount0Out: toBig(a.amount0Out), amount1Out: toBig(a.amount1Out),
+          amount0In: in0, amount1In: in1, amount0Out: out0, amount1Out: out1,
+          tokenIn: in0 > 0n ? s0 : s1,
+          tokenOut: out0 > 0n ? s0 : s1,
+          amountInRaw: in0 > 0n ? in0 : in1,
+          amountOutRaw: out0 > 0n ? out0 : out1,
+          user: a.sender || a.to || null,
           sender: a.sender || null, to: a.to || null,
+        });
+      }
+      if (parsed.name === 'Swapped') {
+        var b = parsed.args || {};
+        var tokenInAddr = (b.tokenIn || '').toLowerCase();
+        var amtIn = toBig(b.amountIn), amtOut = toBig(b.amountOut);
+        var ti, to, a0i = 0n, a1i = 0n, a0o = 0n, a1o = 0n;
+        if (t0 && tokenInAddr === t0) { ti = s0; to = s1; a0i = amtIn; a1o = amtOut; }
+        else if (t1 && tokenInAddr === t1) { ti = s1; to = s0; a1i = amtIn; a0o = amtOut; }
+        else { return null; } // unknown tokenIn — reject
+        return Object.assign({}, base, {
+          eventType: EVENT_TYPES.SWAP,
+          amount0In: a0i, amount1In: a1i, amount0Out: a0o, amount1Out: a1o,
+          tokenIn: ti, tokenOut: to,
+          amountInRaw: amtIn, amountOutRaw: amtOut,
+          user: b.user || null,
         });
       }
       if (parsed.name === 'Mint') {
@@ -131,11 +175,11 @@
         });
       }
       if (parsed.name === 'Burn') {
-        var b = parsed.args || {};
+        var bu = parsed.args || {};
         return Object.assign({}, base, {
           eventType: EVENT_TYPES.BURN,
-          amount0: toBig(b.amount0), amount1: toBig(b.amount1),
-          sender: b.sender || null, to: b.to || null,
+          amount0: toBig(bu.amount0), amount1: toBig(bu.amount1),
+          sender: bu.sender || null, to: bu.to || null,
         });
       }
       return null;
@@ -146,7 +190,7 @@
      SERIALIZATION (BigInt → exact string, and back)
      ══════════════════════════════════════════════════════════════ */
 
-  var BIGINT_FIELDS = ['blockNumber', 'amount0In', 'amount1In', 'amount0Out', 'amount1Out', 'amount0', 'amount1'];
+  var BIGINT_FIELDS = ['blockNumber', 'amount0In', 'amount1In', 'amount0Out', 'amount1Out', 'amount0', 'amount1', 'amountInRaw', 'amountOutRaw'];
 
   function serializeEvent(ev) {
     var out = {};
@@ -468,10 +512,14 @@
   }
 
   var API = {
-    VERSION: '1.1.0',
+    VERSION: '1.2.0',
     INDEX_VERSION: INDEX_VERSION,
     EVENT_TYPES: EVENT_TYPES,
     STATUS: STATUS,
+    SWAP_EVENT_TYPE: SWAP_EVENT_TYPE,
+    SWAP_TOPIC: SWAP_TOPIC,
+    SWAPPED_TOPIC: SWAPPED_TOPIC,
+    detectSwapEventType: detectSwapEventType,
     createIndexer: createIndexer,
     createDecoder: createDecoder,
     createMemoryStore: createMemoryStore,

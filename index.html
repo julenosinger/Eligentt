@@ -13004,13 +13004,18 @@ async function loadSinglePool(poolCfg) {
         return;
       }
       poolCfg._codeVerified = true;
-      // Detect whether this pool emits Swap/Mint/Burn events (determines whether
-      // real volume/fees/APR can be derived from on-chain logs). usdc-cirbtc does;
-      // usdc-eurc (older deployment) does NOT — its volume/fees are unavailable.
+      // Detect which swap event the pool emits (Phase 6.2): standard Swap (usdc-cirbtc)
+      // or the Swapped event (usdc-eurc). Determines whether real volume/fees/APR
+      // can be derived from on-chain logs.
       try {
-        const _swapTopic = (typeof ethers !== 'undefined' && ethers.id) ? ethers.id('Swap(address,uint256,uint256,uint256,uint256,address)').slice(2).toLowerCase() : null;
-        poolCfg._hasSwapEvents = _swapTopic ? code.toLowerCase().includes(_swapTopic) : false;
-      } catch(_) { poolCfg._hasSwapEvents = false; }
+        if (typeof PoolIndexer !== 'undefined' && PoolIndexer.detectSwapEventType) {
+          poolCfg.swapEventType = PoolIndexer.detectSwapEventType(code);
+        } else {
+          const _swapTopic = (typeof ethers !== 'undefined' && ethers.id) ? ethers.id('Swap(address,uint256,uint256,uint256,uint256,address)').slice(2).toLowerCase() : null;
+          poolCfg.swapEventType = _swapTopic && code.toLowerCase().includes(_swapTopic) ? 'standard' : 'none';
+        }
+        poolCfg._hasSwapEvents = poolCfg.swapEventType !== 'none';
+      } catch(_) { poolCfg.swapEventType = 'none'; poolCfg._hasSwapEvents = false; }
     }
   } catch(codeErr) {
     // Transient RPC failure — keep last good data instead of wiping the UI
@@ -13250,6 +13255,10 @@ function _evtGet(poolId) {
 
 // Index events for a single pool. First call = cold start (full 24h window).
 // Subsequent calls = incremental (only new blocks since last index).
+const POOL_SWAPPED_EVENT_ABI = [
+  'event Swapped(address indexed user, address tokenIn, uint256 amountIn, uint256 amountOut)'
+];
+
 async function indexPoolEvents(poolCfg, fromBlock) {
   if (!poolCfg || !poolCfg.deployed || !poolCfg.address || poolCfg.address === '0x0000000000000000000000000000000000000000') return;
   const rp = getCachedProvider('https://arc-testnet.drpc.org');
@@ -13279,23 +13288,48 @@ async function indexPoolEvents(poolCfg, fromBlock) {
     const decA = TOKEN_REGISTRY[poolCfg.tokenA]?.decimals || 6;
     const decB = TOKEN_REGISTRY[poolCfg.tokenB]?.decimals || 6;
 
-    // Process new Swap events
+    // Process swap events. Two supported shapes (Phase 6.2):
+    //   standard  Swap(...)                       (usdc-cirbtc)
+    //   swapped   Swapped(user, tokenIn, amountIn, amountOut)  (usdc-eurc)
     const newSwaps = [];
-    for (const ev of swapEvents) {
-      const block = await ev.getBlock().catch(() => ({ timestamp: now }));
-      const ts = block.timestamp || now;
-      if (ts < cutoff) continue;
-      const [aIn, bIn] = [
-        parseFloat(ethers.formatUnits(ev.args.amount0In || 0n, decA)),
-        parseFloat(ethers.formatUnits(ev.args.amount1In || 0n, decB)),
-      ];
-      const amountIn = aIn > 0 ? aIn : bIn;
-      const tokenIn  = aIn > 0 ? poolCfg.tokenA : poolCfg.tokenB;
-      const rateIn   = getTokenUSDRate(tokenIn);
-      const usdVal   = rateIn !== null ? amountIn * rateIn : 0;
-      const feeRate  = (poolCfg.feeTier || poolCfg.fee) / 10000;
-      const feeUsd   = usdVal * feeRate;
-      newSwaps.push({ ts, amountIn, tokenIn, usd: usdVal, feeUsd, txHash: ev.transactionHash });
+    if (poolCfg.swapEventType === 'swapped') {
+      const swappedPool = new ethers.Contract(poolCfg.address, POOL_SWAPPED_EVENT_ABI, rp);
+      const swappedEvents = await swappedPool.queryFilter(swappedPool.filters.Swapped(), startBlock, currentBlock).catch(() => []);
+      const tokAA = getTokAddr(poolCfg.tokenA).toLowerCase();
+      const tokBA = getTokAddr(poolCfg.tokenB).toLowerCase();
+      for (const ev of swappedEvents) {
+        const block = await ev.getBlock().catch(() => ({ timestamp: now }));
+        const ts = block.timestamp || now;
+        if (ts < cutoff) continue;
+        const tokenInAddr = (ev.args.tokenIn || '').toLowerCase();
+        let tokenIn, decIn;
+        if (tokenInAddr === tokAA) { tokenIn = poolCfg.tokenA; decIn = decA; }
+        else if (tokenInAddr === tokBA) { tokenIn = poolCfg.tokenB; decIn = decB; }
+        else continue; // unknown tokenIn — reject
+        const amountIn = parseFloat(ethers.formatUnits(ev.args.amountIn || 0n, decIn));
+        const rateIn = getTokenUSDRate(tokenIn);
+        const usdVal = rateIn !== null ? amountIn * rateIn : 0;
+        const feeRate = (poolCfg.feeTier || poolCfg.fee) / 10000;
+        const feeUsd = usdVal * feeRate;
+        newSwaps.push({ ts, amountIn, tokenIn, usd: usdVal, feeUsd, txHash: ev.transactionHash });
+      }
+    } else {
+      for (const ev of swapEvents) {
+        const block = await ev.getBlock().catch(() => ({ timestamp: now }));
+        const ts = block.timestamp || now;
+        if (ts < cutoff) continue;
+        const [aIn, bIn] = [
+          parseFloat(ethers.formatUnits(ev.args.amount0In || 0n, decA)),
+          parseFloat(ethers.formatUnits(ev.args.amount1In || 0n, decB)),
+        ];
+        const amountIn = aIn > 0 ? aIn : bIn;
+        const tokenIn  = aIn > 0 ? poolCfg.tokenA : poolCfg.tokenB;
+        const rateIn   = getTokenUSDRate(tokenIn);
+        const usdVal   = rateIn !== null ? amountIn * rateIn : 0;
+        const feeRate  = (poolCfg.feeTier || poolCfg.fee) / 10000;
+        const feeUsd   = usdVal * feeRate;
+        newSwaps.push({ ts, amountIn, tokenIn, usd: usdVal, feeUsd, txHash: ev.transactionHash });
+      }
     }
 
     // Process new Mint/Burn events
