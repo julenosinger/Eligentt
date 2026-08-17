@@ -37906,7 +37906,8 @@ function ubFetchAllBalances(walletKey) {
     var chain = chains[ci];
     if (!chain || !chain.rpc || chain.isEvm === false) return fetchChain(ci + 1);
 
-    var batch = [];
+    // ── UB-2.3: group ERC20 balanceOf per chain into ONE Multicall3 aggregate3 ──
+    var erc20 = [];
     for (var ti = 0; ti < TOKENS.length; ti++) {
       var sym = TOKENS[ti];
       var tokenAddr = chain.tokens && chain.tokens[sym] ? chain.tokens[sym].address : null;
@@ -37915,13 +37916,29 @@ function ubFetchAllBalances(walletKey) {
         results.push(ubResult({ sym: sym, chain: chain, address: tokenAddr, decimals: (chain.tokens[sym].decimals || 6), status: 'not_supported' }));
         continue;
       }
-      batch.push(ubFetchOne(chain, sym, tokenAddr, walletKey));
+      erc20.push({ sym: sym, tokenAddr: tokenAddr, decimals: (chain.tokens[sym].decimals || 6) });
+    }
+    var batch = [];
+    if (erc20.length) {
+      batch.push(_ubMulticallChain(chain, erc20, walletKey).then(function(mcResults) {
+        if (mcResults && mcResults.length) return mcResults;
+        // Multicall3 unavailable or total failure → per-chain fallback to
+        // individual calls (same timeout + retry as before, never a fabricated 0).
+        var fallback = [];
+        for (var f = 0; f < erc20.length; f++) fallback.push(ubFetchOne(chain, erc20[f].sym, erc20[f].tokenAddr, walletKey));
+        return Promise.all(fallback);
+      }));
     }
     if (chain.chainId !== 5042002 && chain.nativeCurrency && chain.nativeCurrency.symbol === 'ETH') {
       batch.push(ubFetchNativeBalance(chain, walletKey));
     }
     return Promise.all(batch).then(function(chainResults) {
-      for (var r = 0; r < chainResults.length; r++) { if (chainResults[r]) results.push(chainResults[r]); }
+      for (var r = 0; r < chainResults.length; r++) {
+        var cr = chainResults[r];
+        if (!cr) continue;
+        if (Array.isArray(cr)) { for (var k = 0; k < cr.length; k++) { if (cr[k]) results.push(cr[k]); } }
+        else results.push(cr);
+      }
       return new Promise(function(resolve) { setTimeout(function() { resolve(fetchChain(ci + 1)); }, 150); });
     });
   }
@@ -37957,6 +37974,67 @@ function ubFetchOne(chain, sym, tokenAddr, walletKey) {
   }).catch(function(e) {
     return ubResult({ sym: sym, chain: chain, address: tokenAddr, decimals: decimals, raw: null, amount: null, price: priceRes.price, priceStatus: priceRes.status, status: 'unavailable', error: (e && e.message) || 'RPC_ERROR' });
   });
+}
+
+// ══════════════════════════════════════════════════════════
+//  UB-2.3 — Multicall3 batching (reuses the project's canonical Multicall3)
+//  Aggregates ERC20 balanceOf per chain into ONE aggregate3 eth_call. Strict
+//  semantics: success→available (0 is a REAL zero), individual failure→unavailable,
+//  total failure→null (caller falls back to individual calls). Never masks a
+//  failure as a zero balance.
+// ══════════════════════════════════════════════════════════
+const UB_MULTICALL3_ABI = [
+  'function aggregate3(tuple(address target, bool allowFailure, bytes callData)[] calls) view returns (tuple(bool success, bytes returnData)[])',
+];
+const UB_BALANCEOF_ABI = ['function balanceOf(address) view returns (uint256)'];
+
+function _ubMulticall3Address() {
+  try { if (typeof Multicall !== 'undefined' && Multicall && Multicall.MULTICALL3) return Multicall.MULTICALL3; } catch(_e) {}
+  try { if (typeof ContractResolver !== 'undefined' && ContractResolver && ContractResolver.MULTICALL3) return ContractResolver.MULTICALL3; } catch(_e) {}
+  return '0xcA11bde05977b3631167028862bE2a173976CA11';
+}
+
+// tokens: [{ sym, tokenAddr, decimals }]. Returns an array of ubResult aligned
+// with `tokens`, or null when multicall is unavailable / total failure (caller
+// then falls back to individual ubFetchOne calls).
+async function _ubMulticallChain(chain, tokens, walletKey) {
+  if (typeof ethers === 'undefined' || !ethers.Interface || !tokens || !tokens.length) return null;
+  var prov = _ubProvider(chain.rpc);
+  if (!prov) return null;
+  var erc20Iface;
+  try { erc20Iface = new ethers.Interface(UB_BALANCEOF_ABI); } catch(_e) { return null; }
+  var calls = [];
+  for (var i = 0; i < tokens.length; i++) {
+    var cd;
+    try { cd = erc20Iface.encodeFunctionData('balanceOf', [walletKey]); } catch(_e) { return null; }
+    calls.push({ target: tokens[i].tokenAddr, allowFailure: true, callData: cd });
+  }
+  var mcAddr = _ubMulticall3Address();
+  var mc;
+  try { mc = new ethers.Contract(mcAddr, UB_MULTICALL3_ABI, prov); } catch(_e) { return null; }
+  var raw;
+  try { raw = await _ubWithTimeout(mc.aggregate3(calls), UB_RPC_TIMEOUT_MS); }
+  catch(_e) { return null; } // multicall total failure → fallback (never fabricated 0)
+  if (!Array.isArray(raw) || raw.length !== tokens.length) return null;
+
+  var out = [];
+  for (var j = 0; j < tokens.length; j++) {
+    var t = tokens[j];
+    var r = raw[j];
+    if (!r || r.success !== true) {
+      out.push(ubResult({ sym: t.sym, chain: chain, address: t.tokenAddr, decimals: t.decimals, status: 'unavailable', error: 'MULTICALL_CALL_FAILED' }));
+      continue;
+    }
+    var rawBal;
+    try { rawBal = erc20Iface.decodeFunctionResult('balanceOf', r.returnData)[0]; }
+    catch(_de) {
+      out.push(ubResult({ sym: t.sym, chain: chain, address: t.tokenAddr, decimals: t.decimals, status: 'unavailable', error: 'MULTICALL_DECODE_FAILED' }));
+      continue;
+    }
+    var priceRes = ubResolveTokenPrice(t.sym);
+    out.push(ubResult({ sym: t.sym, chain: chain, address: t.tokenAddr, decimals: t.decimals, raw: rawBal, amount: _ubFormatAmount(rawBal, t.decimals), price: priceRes.price, priceStatus: priceRes.status, status: 'available' }));
+  }
+  return out;
 }
 
 function ubRenderAll() {
