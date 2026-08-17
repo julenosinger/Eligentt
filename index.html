@@ -10800,6 +10800,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
                 <div style="display:flex;align-items:center;gap:5px">
                   <span style="font-size:7.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px">Portfolio</span>
                   <span id="ub-hero-total" style="font-size:15px;font-weight:800;color:var(--text)">$0.00</span>
+                  <span id="ub-hero-valuation" style="font-size:8px;color:var(--yellow);padding:1px 5px;border-radius:3px;display:none"></span>
                   <span id="ub-hero-change" style="font-size:8px;padding:1px 5px;border-radius:3px;display:none"></span>
                 </div>
                 <span style="color:var(--border);font-size:9px">|</span>
@@ -37435,29 +37436,48 @@ let _ubGeneration = 0;
 function _ubBumpGeneration() { _ubGeneration++; }
 function _ubWalletKey() { return (typeof walletAddress === 'string' && walletAddress) ? walletAddress.toLowerCase() : ''; }
 
-function ubGetTokenRate(sym) {
-  if (sym === 'USDC') return 1.00;
-  if (sym === 'EURC') {
-    if (typeof RT !== 'undefined' && RT.EURC_USD_RATE > 0) return RT.EURC_USD_RATE;
-    return 1.08;
-  }
-  if (sym === 'cirBTC') {
-    if (typeof RT !== 'undefined' && RT.BTC_USD_PRICE > 0) return RT.BTC_USD_PRICE;
-    try { if (typeof getTokenUSDRate === 'function') { var r = getTokenUSDRate('cirBTC'); if (r) return r; } } catch(_) {}
-    return 67000;
-  }
-  if (sym === 'ETH') {
-    if (typeof RT !== 'undefined' && RT.ETH_USD_PRICE > 0) return RT.ETH_USD_PRICE;
-    return 2500;
-  }
-  return 0;
+// ── UB-2.2: price integrity — real sources only, NEVER a hardcoded financial fallback ──
+// Returns { status: 'available'|'unavailable', price: number|null }. Unavailable
+// prices are represented as null and are NEVER coerced to 0 or a fake constant.
+function ubResolveTokenPrice(sym) {
+  // USDC: base stablecoin ($1 peg) — the app's established base asset.
+  if (sym === 'USDC') return { status: 'available', price: 1.00 };
+  // 1) On-chain oracle (existing real source; guarded — may be dormant in this build).
+  try {
+    if (typeof OracleInterop !== 'undefined' && OracleInterop.getMarketData) {
+      var md = OracleInterop.getMarketData(sym);
+      if (md && md.price != null && md.price > 0) return { status: 'available', price: md.price };
+    }
+  } catch(_e) {}
+  // 2) On-chain pool reserve ratio (existing real source via the USDC pair).
+  try {
+    var poolRate = _ubPoolDerivedRate(sym);
+    if (poolRate != null && poolRate > 0) return { status: 'available', price: poolRate };
+  } catch(_e) {}
+  return { status: 'unavailable', price: null };
+}
+
+// Clean pool-derived USD rate (USDC pair reserve ratio). Returns null when the
+// real on-chain reserves are not available — no reference-price fallback.
+function _ubPoolDerivedRate(sym) {
+  if (typeof findPool !== 'function' || typeof poolData === 'undefined') return null;
+  var pair = findPool('USDC', sym);
+  if (!pair) return null;
+  var pd = poolData[pair.id];
+  if (!pd || !pd.loaded || pd.reserveA <= 0 || pd.reserveB <= 0) return null;
+  var usdcIsA = pair.tokenA === 'USDC';
+  var reserveUSDC = usdcIsA ? pd.reserveA : pd.reserveB;
+  var reserveOther = usdcIsA ? pd.reserveB : pd.reserveA;
+  if (reserveOther <= 0 || reserveUSDC <= 0) return null;
+  if (sym === 'cirBTC' && (reserveOther < 0.00000001 || reserveUSDC < 0.01)) return null; // dust guard
+  return reserveUSDC / reserveOther;
 }
 
 const UB_TOKEN_META = {
-  USDC:   { name:'USD Coin',    icon:'<img src="/assets/tokens/usdc/Symbol/USDC-symbol.png" style="width:18px;height:18px" alt="USDC">', color:'#2775ca', get rate() { return ubGetTokenRate('USDC'); } },
-  EURC:   { name:'Euro Coin',    icon:'<img src="/assets/tokens/eurc/Symbol/EURC-symbol.png" style="width:18px;height:18px" alt="EURC">', color:'#2562de', get rate() { return ubGetTokenRate('EURC'); } },
-  cirBTC: { name:'Circle BTC',   icon:'<img src="/assets/tokens/cirbtc/Logos/PNG/cirBTC_Icon.png" style="width:18px;height:18px" alt="cirBTC">', color:'#f7931a', get rate() { return ubGetTokenRate('cirBTC'); } },
-  ETH:    { name:'Ether',        icon:'<img src="/assets/tokens/eth/eth-logo.png" style="width:18px;height:18px" alt="ETH" onerror="this.style.display=\'none\'">', color:'#627eea', get rate() { return ubGetTokenRate('ETH'); } }
+  USDC:   { name:'USD Coin',    icon:'<img src="/assets/tokens/usdc/Symbol/USDC-symbol.png" style="width:18px;height:18px" alt="USDC">', color:'#2775ca' },
+  EURC:   { name:'Euro Coin',    icon:'<img src="/assets/tokens/eurc/Symbol/EURC-symbol.png" style="width:18px;height:18px" alt="EURC">', color:'#2562de' },
+  cirBTC: { name:'Circle BTC',   icon:'<img src="/assets/tokens/cirbtc/Logos/PNG/cirBTC_Icon.png" style="width:18px;height:18px" alt="cirBTC">', color:'#f7931a' },
+  ETH:    { name:'Ether',        icon:'<img src="/assets/tokens/eth/eth-logo.png" style="width:18px;height:18px" alt="ETH" onerror="this.style.display=\'none\'">', color:'#627eea' }
 };
 const UB_FREQ_LABELS = { once:'One-time', daily:'Daily', weekly:'Weekly', biweekly:'Bi-weekly', monthly:'Monthly' };
 
@@ -37467,8 +37487,9 @@ const UB_RPC_MAX_RETRIES = 1;     // 1 retry after the initial attempt (conserva
 // Explicit asset deployment metadata. cirBTC is only deployed on Arc Testnet;
 // it must NOT be queried on chains where the Arc contract address is invalid
 // (queried on unsupported chains = "not_supported", NOT an RPC failure).
+// Keyed by CANONICAL numeric chain ID (unambiguous, matches CHAIN_REGISTRY.chainId).
 const UB_TOKEN_DEPLOYMENT = {
-  cirBTC: { 'Arc_Testnet': true },
+  cirBTC: { 5042002: true },   // Arc Testnet only
 };
 function ubTokenDeployed(sym, chainId) {
   var d = UB_TOKEN_DEPLOYMENT[sym];
@@ -37833,33 +37854,43 @@ function ubResult(o) {
 }
 
 // Build authoritative state from structured results. Only AVAILABLE + non-zero
-// balances contribute to `totalUSD`. UNAVAILABLE results are retained (never
-// turned into 0) and reflected in `aggregateStatus`.
+// balances with a TRUSTWORTHY price contribute to `totalUSD`. UNAVAILABLE results
+// and unavailable prices are retained (never turned into 0).
 function ubBuildState(results, generation) {
   var assets = [];
   var totalUSD = 0;
-  var hasAvailable = false, hasUnavailable = false;
+  var hasAvailable = false, hasUnavailable = false, hasPriceUnavailable = false, hasValuedUSD = false;
   for (var i = 0; i < results.length; i++) {
     var r = results[i];
     if (r.status === 'available') {
       hasAvailable = true;
-      var usd = (r.price != null && r.amount != null) ? (r.amount * r.price) : null;
+      // usd: null only when (a) balance unavailable, or (b) real balance but price unavailable.
+      var usd;
+      if (r.amount == null) usd = null;
+      else if (r.amount === 0) usd = 0;                       // real zero → usd 0
+      else if (r.price != null) usd = r.amount * r.price;
+      else { usd = null; hasPriceUnavailable = true; }        // real balance, price unavailable
       r.usd = usd;
       if (r.amount > 0) {
-        totalUSD += (usd != null ? usd : 0);
+        if (usd != null) { totalUSD += usd; hasValuedUSD = true; }
         assets.push({
           token: r.token, tokenName: r.tokenName, icon: r.icon, color: r.color,
           chainId: r.chainId, chainName: r.chainName,
-          balance: r.amount, usd: (usd != null ? usd : 0), address: r.address,
-          status: r.status, raw: r.raw, decimals: r.decimals, priceStatus: r.priceStatus,
+          symbol: r.token, rawAmount: r.raw, price: r.price, priceStatus: r.priceStatus, balanceStatus: r.status,
+          balance: r.amount, usd: usd, address: r.address,
+          status: r.status, raw: r.raw, decimals: r.decimals,
         });
       }
     } else if (r.status === 'unavailable') {
       hasUnavailable = true;
     }
   }
-  var aggregateStatus = !hasAvailable ? 'unavailable' : (hasUnavailable ? 'partial' : 'complete');
-  return { results: results, assets: assets, totalUSD: totalUSD, aggregateStatus: aggregateStatus, generation: generation };
+  // aggregateStatus: 'complete' | 'partial' | 'unavailable'.
+  var aggregateStatus;
+  if (!hasAvailable) aggregateStatus = 'unavailable';
+  else if (hasUnavailable || hasPriceUnavailable) aggregateStatus = 'partial';
+  else aggregateStatus = 'complete';
+  return { results: results, assets: assets, totalUSD: totalUSD, aggregateStatus: aggregateStatus, hasValuedUSD: hasValuedUSD, generation: generation };
 }
 
 function ubFetchAllBalances(walletKey) {
@@ -37880,8 +37911,7 @@ function ubFetchAllBalances(walletKey) {
       var sym = TOKENS[ti];
       var tokenAddr = chain.tokens && chain.tokens[sym] ? chain.tokens[sym].address : null;
       if (!tokenAddr || tokenAddr === '0x0000000000000000000000000000000000000000') continue;
-      var chainId = chain.id || chain.name;
-      if (!ubTokenDeployed(sym, chainId)) {
+      if (!ubTokenDeployed(sym, chain.chainId)) {
         results.push(ubResult({ sym: sym, chain: chain, address: tokenAddr, decimals: (chain.tokens[sym].decimals || 6), status: 'not_supported' }));
         continue;
       }
@@ -37900,32 +37930,32 @@ function ubFetchAllBalances(walletKey) {
 }
 
 function ubFetchNativeBalance(chain, walletKey) {
-  var meta = UB_TOKEN_META['ETH'] || { name: 'Ether', icon: '?', color: '#627eea', rate: 0 };
+  var meta = UB_TOKEN_META['ETH'] || { name: 'Ether', icon: '?', color: '#627eea' };
   var chainId = chain.id || chain.name;
-  var price = ubGetTokenRate('ETH');
+  var priceRes = ubResolveTokenPrice('ETH');
   return _ubCallWithRetry(function() {
     var prov = _ubProvider(chain.rpc);
     if (!prov) throw new Error('NO_PROVIDER');
     return prov.getBalance(walletKey);   // wallet snapshot, never the mutable global
   }).then(function(raw) {
-    return ubResult({ sym: 'ETH', chain: chain, address: '0x0000000000000000000000000000000000000000', decimals: 18, raw: raw, amount: _ubFormatAmount(raw, 18), price: price, status: 'available' });
+    return ubResult({ sym: 'ETH', chain: chain, address: '0x0000000000000000000000000000000000000000', decimals: 18, raw: raw, amount: _ubFormatAmount(raw, 18), price: priceRes.price, priceStatus: priceRes.status, status: 'available' });
   }).catch(function(e) {
-    return ubResult({ sym: 'ETH', chain: chain, address: '0x0000000000000000000000000000000000000000', decimals: 18, raw: null, amount: null, price: price, status: 'unavailable', error: (e && e.message) || 'RPC_ERROR' });
+    return ubResult({ sym: 'ETH', chain: chain, address: '0x0000000000000000000000000000000000000000', decimals: 18, raw: null, amount: null, price: priceRes.price, priceStatus: priceRes.status, status: 'unavailable', error: (e && e.message) || 'RPC_ERROR' });
   });
 }
 
 function ubFetchOne(chain, sym, tokenAddr, walletKey) {
   var decimals = (chain.tokens && chain.tokens[sym]) ? (chain.tokens[sym].decimals || 6) : 6;
-  var price = ubGetTokenRate(sym);
+  var priceRes = ubResolveTokenPrice(sym);
   return _ubCallWithRetry(function() {
     var prov = _ubProvider(chain.rpc);
     if (!prov) throw new Error('NO_PROVIDER');
     var contract = new ethers.Contract(tokenAddr, (typeof USDC_ABI !== 'undefined' ? USDC_ABI : ['function balanceOf(address) view returns (uint256)']), prov);
     return contract.balanceOf(walletKey);   // wallet snapshot, never the mutable global
   }).then(function(raw) {
-    return ubResult({ sym: sym, chain: chain, address: tokenAddr, decimals: decimals, raw: raw, amount: _ubFormatAmount(raw, decimals), price: price, status: 'available' });
+    return ubResult({ sym: sym, chain: chain, address: tokenAddr, decimals: decimals, raw: raw, amount: _ubFormatAmount(raw, decimals), price: priceRes.price, priceStatus: priceRes.status, status: 'available' });
   }).catch(function(e) {
-    return ubResult({ sym: sym, chain: chain, address: tokenAddr, decimals: decimals, raw: null, amount: null, price: price, status: 'unavailable', error: (e && e.message) || 'RPC_ERROR' });
+    return ubResult({ sym: sym, chain: chain, address: tokenAddr, decimals: decimals, raw: null, amount: null, price: priceRes.price, priceStatus: priceRes.status, status: 'unavailable', error: (e && e.message) || 'RPC_ERROR' });
   });
 }
 
@@ -37952,7 +37982,22 @@ function ubRenderHero() {
   var tokCount = Object.keys(tokens).length;
 
   var elTotal = document.getElementById('ub-hero-total');
-  if (elTotal) elTotal.textContent = '$' + total.toFixed(2);
+  if (elTotal) {
+    // Show a number only when it is trustworthy: complete, or partial with at
+    // least one valued asset. Otherwise "—" (never a fabricated $0).
+    if (UB.state.aggregateStatus === 'complete' || UB.state.hasValuedUSD) {
+      elTotal.textContent = '$' + total.toFixed(2);
+    } else {
+      elTotal.textContent = '—';
+    }
+  }
+  // Partial / unavailable valuation indicator (never a fabricated number).
+  var elVal = document.getElementById('ub-hero-valuation');
+  if (elVal) {
+    if (UB.state.aggregateStatus === 'partial') { elVal.style.display = ''; elVal.textContent = 'Portfolio value partially unavailable'; elVal.style.color = 'var(--yellow)'; }
+    else if (UB.state.aggregateStatus === 'unavailable') { elVal.style.display = ''; elVal.textContent = 'USD valuation unavailable'; elVal.style.color = 'var(--muted2)'; }
+    else elVal.style.display = 'none';
+  }
 
   // Trend indicator from financial memory
   var trend = null;
@@ -37991,14 +38036,15 @@ function ubRenderAssets() {
     return;
   }
 
-  // Sort by USD value desc
-  assets.sort(function(a, b) { return b.usd - a.usd; });
+  // Sort by USD value desc (null usd sorts last).
+  assets.sort(function(a, b) { return (b.usd != null ? b.usd : -1) - (a.usd != null ? a.usd : -1); });
 
   var rows = '';
   for (var i = 0; i < assets.length; i++) {
     var a = assets[i];
     var tokenInfo = UB_TOKEN_META[a.token] || { name:a.token, icon:'?', color:'#888' };
-    var perc = UB.state.totalUSD > 0 ? ((a.usd / UB.state.totalUSD) * 100).toFixed(1) : '0.0';
+    var usdText = (a.usd != null) ? ('$' + a.usd.toFixed(2)) : '—';
+    var percText = (a.usd != null && UB.state.totalUSD > 0) ? ('(' + ((a.usd / UB.state.totalUSD) * 100).toFixed(1) + '%)') : '—';
     var isArcAsset = a.chainId === 'Arc_Testnet';
     // Build action buttons: Send always available, Swap/Bridge only for Arc assets
     var actions =
@@ -38011,8 +38057,8 @@ function ubRenderAssets() {
     rows += '<tr>' +
       '<td><div style="display:flex;align-items:center;gap:6px"><div style="width:28px;height:28px;border-radius:50%;background:#fff;display:flex;align-items:center;justify-content:center;flex-shrink:0">' + tokenInfo.icon + '</div><div><div style="font-weight:600;font-size:10px">' + a.token + '</div><div style="font-size:8px;color:var(--muted2)">' + a.tokenName + '</div></div></div></td>' +
       '<td><div style="display:flex;align-items:center;gap:4px"><div style="width:7px;height:7px;border-radius:50%;background:' + (getChainColor(a.chainId)) + '"></div><span style="font-size:9px">' + a.chainName + '</span></div></td>' +
-      '<td style="font-family:\'JetBrains Mono\',monospace;font-size:10px">' + a.balance.toFixed(4) + '</td>' +
-      '<td style="font-family:\'JetBrains Mono\',monospace;font-size:10px"><span style="color:var(--green)">$' + a.usd.toFixed(2) + '</span><span style="font-size:8px;color:var(--muted2);margin-left:4px">(' + perc + '%)</span></td>' +
+      '<td style="font-family:\'JetBrains Mono\',monospace;font-size:10px">' + (a.balance != null ? a.balance.toFixed(4) : '—') + '</td>' +
+      '<td style="font-family:\'JetBrains Mono\',monospace;font-size:10px"><span style="color:var(--green)">' + usdText + '</span><span style="font-size:8px;color:var(--muted2);margin-left:4px">' + percText + '</span></td>' +
       '<td style="text-align:right"><div style="display:flex;gap:3px;justify-content:flex-end">' + actions + '</div></td></tr>';
   }
   tbody.innerHTML = rows;

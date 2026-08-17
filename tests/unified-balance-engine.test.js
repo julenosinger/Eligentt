@@ -24,7 +24,7 @@ function slice(from, to) {
 
 // Assemble the real UB engine + refresh code into an eval-able unit.
 function assemble(timeoutMs, retries) {
-  const ubState = slice('const UB = {', 'function ubGetTokenRate');
+  const ubState = slice('const UB = {', 'const UB_TOKEN_META');
   let constants = slice('const UB_RPC_TIMEOUT_MS', 'UB.analyze = function');
   const refresh = slice('function ubRefresh()', 'function ubFetchAllBalances');
   const engine = slice('function _ubProvider', 'function ubRenderAll');
@@ -70,7 +70,17 @@ function load({ balanceOf, getBalance, chains, timeoutMs, retries } = {}) {
       cirBTC: { name: 'Circle BTC', icon: 'B', color: '#f7931a' },
       ETH: { name: 'Ether', icon: 'E', color: '#627eea' },
     },
-    ubGetTokenRate: (sym) => ({ USDC: 1.0, EURC: 1.08, cirBTC: 67000, ETH: 2500 }[sym] || 0),
+    // Real on-chain pool price source (mocked with valid reserves so EURC/cirBTC
+    // prices are AVAILABLE for balance-engine tests).
+    findPool: (a, b) => {
+      if ((a === 'USDC' && b === 'EURC') || (a === 'EURC' && b === 'USDC')) return { id: 'usdc-eurc', tokenA: 'USDC', tokenB: 'EURC' };
+      if ((a === 'USDC' && b === 'cirBTC') || (a === 'cirBTC' && b === 'USDC')) return { id: 'usdc-cirbtc', tokenA: 'USDC', tokenB: 'cirBTC' };
+      return null;
+    },
+    poolData: {
+      'usdc-eurc': { loaded: true, reserveA: 110000000, reserveB: 100000000 },      // EURC rate 1.10
+      'usdc-cirbtc': { loaded: true, reserveA: 7000000000000, reserveB: 100000000 }, // cirBTC rate 70000
+    },
     CHAINS: chains || [arcChain()],
     USDC_ABI: ['function balanceOf(address) view returns (uint256)'],
     document: { getElementById: () => ({ style: { display: '' }, textContent: '' }) },
@@ -328,5 +338,73 @@ describe('Decimal / raw integer integrity', () => {
     expect(r.status).toBe('unavailable');
     expect(r.amount).toBeNull();
     expect(r.raw).toBeNull();
+  });
+});
+
+/* ── UB-2.1.1 — cirBTC canonical chain-ID regression ─────────────── */
+describe('cirBTC canonical chain-ID deployment guard', () => {
+  function chainWithCir(id, shortName, chainId, cirAddr) {
+    return {
+      id, name: id.replace(/_/g, ' '), shortName, chainId, rpc: 'https://' + shortName, isEvm: true,
+      nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+      tokens: { USDC: { address: '0x1' + chainId + '00', decimals: 6 }, cirBTC: { address: cirAddr, decimals: 8 } },
+    };
+  }
+  const ALL_CHAINS = [
+    chainWithCir('Arc_Testnet', 'Arc', 5042002, '0xA2'),
+    chainWithCir('Ethereum_Sepolia', 'Sepolia', 11155111, '0xB2'),
+    chainWithCir('Base_Sepolia', 'Base', 84532, '0xC2'),
+    chainWithCir('Arbitrum_Sepolia', 'Arb', 421614, '0xD2'),
+    chainWithCir('Optimism_Sepolia', 'OP', 11155420, '0xE2'),
+    chainWithCir('Polygon_Amoy', 'Polygon', 80002, '0xF2'),
+  ];
+
+  it('Arc (5042002) queries cirBTC; every other chain is not_supported with no balanceOf', async () => {
+    const eng = load({ balanceOf: async () => 1n, chains: ALL_CHAINS });
+    const results = await eng.ubFetchAllBalances('0xwallet');
+
+    // Arc cirBTC → available (queried).
+    const arcCir = results.find((r) => r.token === 'cirBTC' && r.chainId === 'Arc_Testnet');
+    expect(arcCir.status).toBe('available');
+
+    // Non-Arc chains → not_supported + no balanceOf for their cirBTC address.
+    for (const c of ALL_CHAINS.filter((c) => c.chainId !== 5042002)) {
+      const r = results.find((x) => x.token === 'cirBTC' && x.chainId === c.id);
+      expect(r.status).toBe('not_supported');
+      const call = eng.calls.balanceOf.find((x) => x.token === c.tokens.cirBTC.address);
+      expect(call).toBeUndefined();
+    }
+
+    // Arc cirBTC address queried exactly once.
+    expect(eng.calls.balanceOf.filter((x) => x.token === '0xA2').length).toBe(1);
+  });
+});
+
+/* ── UB-2.1.1 — refresh queue (3 requests → 1 follow-up) ──────────── */
+describe('Refresh queue robustness', () => {
+  it('3 extra refresh requests during in-flight → exactly one follow-up', async () => {
+    let release;
+    const gate = new Promise((r) => { release = r; });
+    let calls = 0;
+    const eng = load({ balanceOf: async () => { calls++; return gate.then(() => 1000000n); }, chains: [singleChain()] });
+    eng.setWallet('0xaaaa');
+    eng.ubRefresh();
+    eng.ubRefresh(); eng.ubRefresh(); eng.ubRefresh(); // 3 additional requests
+    release();
+    await settle(eng);
+    expect(calls).toBe(2); // initial + exactly one follow-up (never 4)
+    expect(eng.UB.state.assets.length).toBe(1);
+  });
+});
+
+/* ── UB-2.1.1 — aggregate status: unavailable ─────────────────────── */
+describe('Aggregate status — unavailable', () => {
+  it('aggregateStatus = unavailable when every query fails (never 0 fallback)', async () => {
+    const eng = load({ balanceOf: async () => { throw new Error('DOWN'); }, chains: [singleChain()] });
+    const results = await eng.ubFetchAllBalances('0xwallet');
+    const state = eng.ubBuildState(results, 1);
+    expect(state.aggregateStatus).toBe('unavailable');
+    expect(state.totalUSD).toBe(0);
+    expect(state.assets.length).toBe(0);
   });
 });
