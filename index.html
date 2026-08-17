@@ -10808,6 +10808,8 @@ select.cinput option { background: #161a24; color: #dde2f0; }
                 <span style="font-size:9px;font-weight:600;color:var(--blue)">Tokens <span id="ub-hero-tokens">0</span></span>
                 <span style="font-size:9px;font-weight:600;color:var(--purple)">24h <span id="ub-hero-activity">0</span></span>
                 <span style="color:var(--border);font-size:9px">|</span>
+                <span id="ub-hero-chain-status" style="font-size:7.5px;color:var(--muted2)" title=""></span>
+                <span style="color:var(--border);font-size:9px">|</span>
                 <span id="ub-updated" style="font-size:7.5px;color:var(--muted2)"></span>
                 <span id="ub-updating" style="display:none;font-size:7.5px;color:var(--teal)"><i class="ti ti-refresh"></i> Updating…</span>
               </div>
@@ -37843,6 +37845,8 @@ function ubRefresh() {
       }
       _ubLastRenderedWallet = walletKey;
       if (UnifiedBalanceEngine.markUpdated) UnifiedBalanceEngine.markUpdated(walletKey);
+      // UB-4: keep failed chains' prior balances visible (marked stale), never as $0.
+      _ubRetainStaleChains(newState, UB.state.assets, newState.chainStatus);
       UB.state = newState;
       ubRenderAll();
       ubShowState('content');
@@ -37927,13 +37931,33 @@ function _ubWithTimeout(promise, ms) {
   });
 }
 
-// Conservative retry: initial attempt + `retries` retries. No infinite loops.
+// ── UB-4: exponential backoff for transient RPC failures (timeout / 429 / rate limit) ──
+var UB_RETRY_BASE_DELAY_MS = 250;
+var UB_RETRY_MAX_DELAY_MS = 2000;
+function _ubSleep(ms) { return new Promise(function(resolve) { setTimeout(resolve, ms); }); }
+function _ubBackoffMs(attempt) {
+  return Math.min(UB_RETRY_BASE_DELAY_MS * Math.pow(2, attempt), UB_RETRY_MAX_DELAY_MS);
+}
+function _ubIsRateLimited(e) {
+  if (!e) return false;
+  if (e.code === 429 || e.status === 429) return true;
+  if (e.response && e.response.status === 429) return true;
+  var msg = (e.message || e.shortMessage || '').toLowerCase();
+  return msg.indexOf('429') >= 0 || msg.indexOf('rate limit') >= 0 || msg.indexOf('too many requests') >= 0;
+}
+
+// Conservative retry: initial attempt + `retries` retries with exponential backoff.
+// No infinite loops; backoff only between attempts (never after the last).
 async function _ubCallWithRetry(fn, retries) {
   var max = (retries != null ? retries : UB_RPC_MAX_RETRIES);
   var lastErr = null;
   for (var attempt = 0; attempt <= max; attempt++) {
     try { return await _ubWithTimeout(fn(), UB_RPC_TIMEOUT_MS); }
-    catch (e) { lastErr = e; }
+    catch (e) {
+      lastErr = e;
+      if (attempt >= max) break;
+      await _ubSleep(_ubBackoffMs(attempt));
+    }
   }
   throw lastErr || new Error('RPC_ERROR');
 }
@@ -37961,6 +37985,28 @@ function ubResult(o) {
     status: o.status || 'available',          // available | unavailable | stale | not_supported
     error: o.error || null,
   };
+}
+
+// UB-4: per-chain status derived from structured results.
+// 'available' → ≥1 available token (chain reached); 'unavailable' → no available
+// token and ≥1 unavailable (RPC failed); 'not_supported' → no available/unavailable.
+function _ubChainStatus(results) {
+  var chainData = {};
+  for (var i = 0; i < results.length; i++) {
+    var r = results[i];
+    var cid = r.chainId;
+    if (!chainData[cid]) chainData[cid] = { available: false, unavailable: false };
+    if (r.status === 'available') chainData[cid].available = true;
+    else if (r.status === 'unavailable') chainData[cid].unavailable = true;
+  }
+  var status = {};
+  for (var cid in chainData) {
+    var d = chainData[cid];
+    if (d.available) status[cid] = 'available';
+    else if (d.unavailable) status[cid] = 'unavailable';
+    else status[cid] = 'not_supported';
+  }
+  return status;
 }
 
 // Build authoritative state from structured results. Only AVAILABLE + non-zero
@@ -38000,7 +38046,21 @@ function ubBuildState(results, generation) {
   if (!hasAvailable) aggregateStatus = 'unavailable';
   else if (hasUnavailable || hasPriceUnavailable) aggregateStatus = 'partial';
   else aggregateStatus = 'complete';
-  return { results: results, assets: assets, totalUSD: totalUSD, aggregateStatus: aggregateStatus, hasValuedUSD: hasValuedUSD, generation: generation };
+  return { results: results, assets: assets, totalUSD: totalUSD, aggregateStatus: aggregateStatus, hasValuedUSD: hasValuedUSD, generation: generation, chainStatus: _ubChainStatus(results) };
+}
+
+// UB-4: retain a failed chain's previous assets (marked stale) so a transient
+// per-chain outage never silently erases known balances. Retained assets are
+// excluded from totalUSD (usd = null) and are clearly marked `stale`.
+function _ubRetainStaleChains(newState, prevAssets, chainStatus) {
+  if (!prevAssets || !prevAssets.length || !chainStatus) return;
+  for (var i = 0; i < prevAssets.length; i++) {
+    var a = prevAssets[i];
+    if (chainStatus[a.chainId] === 'unavailable' && a.status !== 'stale') {
+      newState.assets.push(Object.assign({}, a, { status: 'stale', stale: true, usd: null, balanceStatus: 'stale' }));
+      chainStatus[a.chainId] = 'stale';
+    }
+  }
 }
 
 function ubFetchAllBalances(walletKey) {
@@ -38146,9 +38206,14 @@ async function _ubMulticallChain(chain, tokens, walletKey, nativeSym) {
   }
   var mc;
   try { mc = new ethers.Contract(mcAddr, UB_MULTICALL3_ABI, prov); } catch(_e) { return null; }
-  var raw;
-  try { raw = await _ubWithTimeout(mc.aggregate3(calls), UB_RPC_TIMEOUT_MS); }
-  catch(_e) { return null; } // multicall total failure → fallback (never fabricated 0)
+  var raw = null;
+  for (var attempt = 0; attempt <= UB_RPC_MAX_RETRIES; attempt++) {
+    try { raw = await _ubWithTimeout(mc.aggregate3(calls), UB_RPC_TIMEOUT_MS); break; }
+    catch(_e) {
+      if (attempt >= UB_RPC_MAX_RETRIES) return null; // total failure after retries → fallback
+      await _ubSleep(_ubBackoffMs(attempt));
+    }
+  }
   if (!Array.isArray(raw) || raw.length !== calls.length) return null;
 
   var out = [];
@@ -38252,6 +38317,24 @@ function ubRenderHero() {
   try { if (typeof ScheduleEngine !== 'undefined') actCount += ScheduleEngine.getAll().length; } catch(_) {}
   var elAct = document.getElementById('ub-hero-activity');
   if (elAct) elAct.textContent = String(actCount);
+
+  // ── UB-4: per-chain freshness ("N/M networks updated") ──
+  var elChainStatus = document.getElementById('ub-hero-chain-status');
+  if (elChainStatus) {
+    var cs = UB.state.chainStatus || {};
+    var totalChains = 0, updated = 0, downList = [];
+    for (var cid in cs) {
+      totalChains++;
+      if (cs[cid] === 'available') updated++;
+      else downList.push(cid);
+    }
+    if (totalChains > 0) {
+      elChainStatus.textContent = updated + '/' + totalChains + ' networks updated';
+      elChainStatus.title = downList.length ? ('Unavailable: ' + downList.join(', ')) : 'All networks updated';
+      elChainStatus.style.color = downList.length ? 'var(--yellow)' : 'var(--muted2)';
+      elChainStatus.style.display = '';
+    }
+  }
 }
 
 function ubRenderAssets() {
@@ -38286,7 +38369,7 @@ function ubRenderAssets() {
     }
     rows += '<tr>' +
       '<td><div style="display:flex;align-items:center;gap:6px"><div style="width:28px;height:28px;border-radius:50%;background:#fff;display:flex;align-items:center;justify-content:center;flex-shrink:0">' + tokenInfo.icon + '</div><div><div style="font-weight:600;font-size:10px">' + a.token + '</div><div style="font-size:8px;color:var(--muted2)">' + a.tokenName + '</div></div></div></td>' +
-      '<td><div style="display:flex;align-items:center;gap:4px"><div style="width:7px;height:7px;border-radius:50%;background:' + (getChainColor(a.chainId)) + '"></div><span style="font-size:9px">' + a.chainName + '</span></div></td>' +
+      '<td><div style="display:flex;align-items:center;gap:4px"><div style="width:7px;height:7px;border-radius:50%;background:' + (getChainColor(a.chainId)) + ';opacity:' + (a.stale ? '.4' : '1') + '"></div><span style="font-size:9px' + (a.stale ? ';color:var(--muted2)' : '') + '">' + a.chainName + '</span>' + (a.stale ? '<span style="font-size:7px;color:var(--yellow);margin-left:2px">stale</span>' : '') + '</div></td>' +
       '<td style="font-family:\'JetBrains Mono\',monospace;font-size:10px">' + (a.balance != null ? a.balance.toFixed(4) : '—') + '</td>' +
       '<td style="font-family:\'JetBrains Mono\',monospace;font-size:10px"><span style="color:var(--green)">' + usdText + '</span><span style="font-size:8px;color:var(--muted2);margin-left:4px">' + percText + '</span></td>' +
       '<td style="text-align:right"><div style="display:flex;gap:3px;justify-content:flex-end">' + actions + '</div></td></tr>';
