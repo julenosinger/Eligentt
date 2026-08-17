@@ -37361,7 +37361,7 @@ const UnifiedBalanceEngine = {
   _cache: {},
   _cacheTTL: 15000,
   _watchers: {},
-  _metrics: { refreshes:0, loads:0, cacheHits:0, cacheMisses:0, errors:0, reconciliations:0, totalRefreshTime:0, totalLoadTime:0 },
+  _metrics: { refreshes:0, loads:0, cacheHits:0, cacheMisses:0, errors:0, reconciliations:0, totalRefreshTime:0, totalLoadTime:0, successfulRefreshes:0, failedRefreshes:0, retries:0, rpcCalls:0, rpcFailures:0, rpcTimeouts:0, rateLimits:0, rpcLatencySum:0, rpcLatencyCount:0, lastRefreshAt:0, lastSuccessfulRefreshAt:0 },
 
   getAssets() { return this._cache._lastAssets || []; },
   getTotalUSD() { return this._cache._lastTotalUSD || 0; },
@@ -37435,13 +37435,65 @@ const UnifiedBalanceEngine = {
     return { healthy: issues.length === 0, issues: issues, timestamp: Date.now() };
   },
 
-  getMetrics() { return this._metrics; },
+  getMetrics() {
+    var m = this._metrics;
+    var chainStatus = (typeof UB !== 'undefined' && UB.state && UB.state.chainStatus) ? UB.state.chainStatus : {};
+    var chainCount = 0, healthy = 0, stale = 0, unavailable = 0;
+    for (var cid in chainStatus) {
+      chainCount++;
+      if (chainStatus[cid] === 'available') healthy++;
+      else if (chainStatus[cid] === 'stale') stale++;
+      else if (chainStatus[cid] === 'unavailable') unavailable++;
+    }
+    return {
+      refreshes: m.successfulRefreshes + m.failedRefreshes,
+      successfulRefreshes: m.successfulRefreshes,
+      failedRefreshes: m.failedRefreshes,
+      cacheHits: m.cacheHits,
+      cacheMisses: m.cacheMisses,
+      retries: m.retries,
+      rpcCalls: m.rpcCalls,
+      rpcFailures: m.rpcFailures,
+      rpcTimeouts: m.rpcTimeouts,
+      rateLimits: m.rateLimits,
+      averageLatencyMs: m.rpcLatencyCount ? Math.round(m.rpcLatencySum / m.rpcLatencyCount) : null,
+      lastRefreshAt: m.lastRefreshAt,
+      lastSuccessfulRefreshAt: m.lastSuccessfulRefreshAt,
+      chainCount: chainCount,
+      healthyChains: healthy,
+      staleChains: stale,
+      unavailableChains: unavailable,
+    };
+  },
 
   recordLoad(ms) { this._metrics.loads++; this._metrics.totalLoadTime += ms; },
-  recordRefresh(ms) { this._metrics.refreshes++; this._metrics.totalRefreshTime += ms; },
-  recordError() { this._metrics.errors++; },
+  recordRefresh(ms) {
+    var now = Date.now();
+    this._metrics.refreshes++;
+    this._metrics.successfulRefreshes++;
+    this._metrics.totalRefreshTime += ms;
+    this._metrics.lastRefreshAt = now;
+    this._metrics.lastSuccessfulRefreshAt = now;
+  },
+  recordError() {
+    var now = Date.now();
+    this._metrics.errors++;
+    this._metrics.failedRefreshes++;
+    this._metrics.lastRefreshAt = now;
+  },
   recordCacheHit() { this._metrics.cacheHits++; },
   recordCacheMiss() { this._metrics.cacheMisses++; },
+  recordRpcAttempt(o) {
+    var m = this._metrics;
+    m.rpcCalls++;
+    if (o.isRetry) m.retries++;
+    if (o.latencyMs != null) { m.rpcLatencySum += o.latencyMs; m.rpcLatencyCount++; }
+    if (!o.ok) {
+      m.rpcFailures++;
+      if (o.timeout) m.rpcTimeouts++;
+      if (o.rateLimited) m.rateLimits++;
+    }
+  },
 };
 
 // ══════════════════════════════════════════════════════════
@@ -37839,26 +37891,33 @@ function ubRefresh() {
     .then(function(results) {
       if (generation !== _ubGeneration) return; // stale wallet/network — discard results
       var newState = ubBuildState(results, generation);
-      // UB-2.4: a refresh that yields NOTHING available (every call unavailable)
-      // while prior data is on screen is treated as a transient failure — keep
-      // the last known portfolio (marked stale) instead of blanking valid data.
-      // Real zero balances still resolve to 'complete' (available, amount 0).
-      if (newState.aggregateStatus === 'unavailable' && hasCachedData) {
-        _ubLastRenderedWallet = walletKey;
-        ubShowState('content');
-        ubSetUpdating(false);
-        ubMarkStale('data unavailable');
+      _ubLastRenderedWallet = walletKey;
+      // UB-2.4 + UB-6: a refresh that yields NOTHING available (no usable state) is a
+      // failed refresh. Keep the last known portfolio (marked stale) when it exists;
+      // otherwise render the unavailable (empty) state. Real zero → 'complete'.
+      if (newState.aggregateStatus === 'unavailable') {
+        if (hasCachedData) {
+          ubShowState('content');
+          ubSetUpdating(false);
+          ubMarkStale('data unavailable');
+        } else {
+          if (UnifiedBalanceEngine.markUpdated) UnifiedBalanceEngine.markUpdated(walletKey);
+          newState.chainHealth = _ubChainHealth(results, newState.chainStatus, null, _ubRpcCollector.summary());
+          UB.state = newState;
+          ubRenderAll();
+          ubShowState('content');
+          ubSetUpdating(false);
+        }
         UnifiedBalanceEngine.notifyRefreshFailed(new Error('all_unavailable'));
         UnifiedBalanceEngine.recordError();
         return;
       }
-      _ubLastRenderedWallet = walletKey;
       if (UnifiedBalanceEngine.markUpdated) UnifiedBalanceEngine.markUpdated(walletKey);
       // UB-4: keep failed chains' prior balances visible (marked stale), never as $0.
       // Only retain prior assets for the SAME wallet (never leak wallet-A data into wallet-B).
       _ubRetainStaleChains(newState, sameWallet ? UB.state.assets : null, newState.chainStatus);
-      // UB-5: per-chain health (status + reason + last success) — derived only.
-      newState.chainHealth = _ubChainHealth(results, newState.chainStatus, sameWallet ? (UB.state.chainHealth || null) : null);
+      // UB-5: per-chain health (status + reason + last success + real RPC metrics) — derived only.
+      newState.chainHealth = _ubChainHealth(results, newState.chainStatus, sameWallet ? (UB.state.chainHealth || null) : null, _ubRpcCollector.summary());
       UB.state = newState;
       ubRenderAll();
       ubShowState('content');
@@ -37960,14 +38019,55 @@ function _ubIsRateLimited(e) {
   return msg.indexOf('429') >= 0 || msg.indexOf('rate limit') >= 0 || msg.indexOf('too many requests') >= 0;
 }
 
+// ── UB-6: per-refresh RPC metrics collector (in-memory, diagnostic only, never persisted) ──
+var _ubRpcCollector = {
+  chains: {},
+  _reset() { this.chains = {}; },
+  _chain(cid) {
+    var key = (cid != null) ? cid : 'unknown';
+    return this.chains[key] || (this.chains[key] = { attempts: 0, failures: 0, timeouts: 0, rateLimits: 0, latencies: [], lastAttemptAt: 0, lastFailureAt: 0, lastSuccessAt: 0, lastError: null, lastErrorType: null });
+  },
+  record(cid, o) {
+    var c = this._chain(cid);
+    c.attempts++;
+    if (o.latencyMs != null) c.latencies.push(o.latencyMs);
+    c.lastAttemptAt = Date.now();
+    if (o.ok) {
+      c.lastSuccessAt = Date.now();
+    } else {
+      c.failures++;
+      if (o.timeout) c.timeouts++;
+      if (o.rateLimited) c.rateLimits++;
+      c.lastFailureAt = Date.now();
+      c.lastError = o.error || 'RPC error';
+      c.lastErrorType = o.timeout ? 'timeout' : (o.rateLimited ? 'rate_limit' : 'error');
+    }
+  },
+  summary() { return this.chains; },
+};
+
+// UB-6: record one real RPC attempt to both the per-chain collector and engine metrics.
+function _ubRecordRpc(cid, o) {
+  _ubRpcCollector.record(cid, o);
+  if (typeof UnifiedBalanceEngine !== 'undefined' && UnifiedBalanceEngine.recordRpcAttempt) UnifiedBalanceEngine.recordRpcAttempt(o);
+}
+
 // Conservative retry: initial attempt + `retries` retries with exponential backoff.
 // No infinite loops; backoff only between attempts (never after the last).
-async function _ubCallWithRetry(fn, retries) {
+// UB-6: each attempt is timed and recorded (attempts / retries / latency / failures).
+async function _ubCallWithRetry(fn, retries, chainId) {
   var max = (retries != null ? retries : UB_RPC_MAX_RETRIES);
   var lastErr = null;
   for (var attempt = 0; attempt <= max; attempt++) {
-    try { return await _ubWithTimeout(fn(), UB_RPC_TIMEOUT_MS); }
-    catch (e) {
+    var t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : null;
+    try {
+      var v = await _ubWithTimeout(fn(), UB_RPC_TIMEOUT_MS);
+      _ubRecordRpc(chainId, { ok: true, latencyMs: (t0 != null ? performance.now() - t0 : null), timeout: false, rateLimited: false, isRetry: attempt > 0 });
+      return v;
+    } catch (e) {
+      var timeout = !!(e && e.message === 'RPC_TIMEOUT');
+      var rateLimited = _ubIsRateLimited(e);
+      _ubRecordRpc(chainId, { ok: false, latencyMs: (t0 != null ? performance.now() - t0 : null), timeout: timeout, rateLimited: rateLimited, error: (e && e.message) || 'RPC_ERROR', isRetry: attempt > 0 });
       lastErr = e;
       if (attempt >= max) break;
       await _ubSleep(_ubBackoffMs(attempt));
@@ -38032,16 +38132,24 @@ function _ubErrorReason(error) {
   return 'RPC error';
 }
 
-// UB-5: per-chain health (status + reason + last success timestamp) derived from
-// results + finalized chainStatus + previous health. Never fetches anything itself.
-function _ubChainHealth(results, chainStatus, prevHealth) {
+// UB-5/UB-6: per-chain health (status + reason + last success + real RPC metrics)
+// derived from results + finalized chainStatus + previous health + per-refresh RPC
+// metrics. Never fetches anything itself.
+function _ubChainHealth(results, chainStatus, prevHealth, rpcSummary) {
   var prev = prevHealth || {};
+  var rpc = rpcSummary || {};
   var health = {};
   for (var cid in chainStatus) {
     var st = chainStatus[cid];
     var p = prev[cid] || {};
+    var s = rpc[cid] || null;
+    var attempts = s ? s.attempts : 0;
+    var retries = s ? Math.max(0, s.attempts - 1) : 0;
+    var latencyMs = (s && s.latencies && s.latencies.length) ? s.latencies[s.latencies.length - 1] : null;
+    var lastAttemptAt = s ? s.lastAttemptAt : 0;
+    var lastFailureAt = s ? s.lastFailureAt : 0;
     if (st === 'available') {
-      health[cid] = { status: 'available', reason: null, lastSuccessAt: Date.now() };
+      health[cid] = { status: 'available', reason: null, lastSuccessAt: Date.now(), attempts: attempts, retries: retries, latencyMs: latencyMs, lastAttemptAt: lastAttemptAt, lastFailureAt: lastFailureAt };
     } else {
       var reason = null;
       if (st === 'unavailable') {
@@ -38049,7 +38157,9 @@ function _ubChainHealth(results, chainStatus, prevHealth) {
           if (results[i].chainId === cid && results[i].status === 'unavailable') { reason = _ubErrorReason(results[i].error); break; }
         }
       }
-      health[cid] = { status: st, reason: reason, lastSuccessAt: p.lastSuccessAt || 0 };
+      if (s && s.lastErrorType === 'timeout') reason = 'RPC timeout';
+      else if (s && s.lastErrorType === 'rate_limit') reason = 'RPC rate limit';
+      health[cid] = { status: st, reason: reason, lastSuccessAt: p.lastSuccessAt || 0, attempts: attempts, retries: retries, latencyMs: latencyMs, lastAttemptAt: lastAttemptAt, lastFailureAt: lastFailureAt };
     }
   }
   return health;
@@ -38114,6 +38224,7 @@ function ubFetchAllBalances(walletKey) {
   var results = [];
   if (!chains.length) return Promise.resolve(results);
   if (!walletKey) return Promise.resolve(results);
+  _ubRpcCollector._reset();   // UB-6: fresh per-refresh RPC metrics
 
   var TOKENS = ['USDC', 'EURC', 'cirBTC'];
   var evmChains = [];
@@ -38177,7 +38288,7 @@ function ubFetchNativeBalance(chain, walletKey) {
     var prov = _ubProvider(chain.rpc);
     if (!prov) throw new Error('NO_PROVIDER');
     return prov.getBalance(walletKey);   // wallet snapshot, never the mutable global
-  }).then(function(raw) {
+  }, null, chainId).then(function(raw) {
     return ubResult({ sym: 'ETH', chain: chain, address: '0x0000000000000000000000000000000000000000', decimals: 18, raw: raw, amount: _ubFormatAmount(raw, 18), price: priceRes.price, priceStatus: priceRes.status, status: 'available' });
   }).catch(function(e) {
     return ubResult({ sym: 'ETH', chain: chain, address: '0x0000000000000000000000000000000000000000', decimals: 18, raw: null, amount: null, price: priceRes.price, priceStatus: priceRes.status, status: 'unavailable', error: (e && e.message) || 'RPC_ERROR' });
@@ -38192,7 +38303,7 @@ function ubFetchOne(chain, sym, tokenAddr, walletKey) {
     if (!prov) throw new Error('NO_PROVIDER');
     var contract = new ethers.Contract(tokenAddr, (typeof USDC_ABI !== 'undefined' ? USDC_ABI : ['function balanceOf(address) view returns (uint256)']), prov);
     return contract.balanceOf(walletKey);   // wallet snapshot, never the mutable global
-  }).then(function(raw) {
+  }, null, (chain.id || chain.name)).then(function(raw) {
     return ubResult({ sym: sym, chain: chain, address: tokenAddr, decimals: decimals, raw: raw, amount: _ubFormatAmount(raw, decimals), price: priceRes.price, priceStatus: priceRes.status, status: 'available' });
   }).catch(function(e) {
     return ubResult({ sym: sym, chain: chain, address: tokenAddr, decimals: decimals, raw: null, amount: null, price: priceRes.price, priceStatus: priceRes.status, status: 'unavailable', error: (e && e.message) || 'RPC_ERROR' });
@@ -38253,9 +38364,17 @@ async function _ubMulticallChain(chain, tokens, walletKey, nativeSym) {
   var mc;
   try { mc = new ethers.Contract(mcAddr, UB_MULTICALL3_ABI, prov); } catch(_e) { return null; }
   var raw = null;
+  var cidKey = chain.id || chain.name;
   for (var attempt = 0; attempt <= UB_RPC_MAX_RETRIES; attempt++) {
-    try { raw = await _ubWithTimeout(mc.aggregate3(calls), UB_RPC_TIMEOUT_MS); break; }
-    catch(_e) {
+    var t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : null;
+    try {
+      raw = await _ubWithTimeout(mc.aggregate3(calls), UB_RPC_TIMEOUT_MS);
+      _ubRecordRpc(cidKey, { ok: true, latencyMs: (t0 != null ? performance.now() - t0 : null), timeout: false, rateLimited: false, isRetry: attempt > 0 });
+      break;
+    } catch(_e) {
+      var timeout = !!(_e && _e.message === 'RPC_TIMEOUT');
+      var rateLimited = _ubIsRateLimited(_e);
+      _ubRecordRpc(cidKey, { ok: false, latencyMs: (t0 != null ? performance.now() - t0 : null), timeout: timeout, rateLimited: rateLimited, error: (_e && _e.message) || 'RPC_ERROR', isRetry: attempt > 0 });
       if (attempt >= UB_RPC_MAX_RETRIES) return null; // total failure after retries → fallback
       await _ubSleep(_ubBackoffMs(attempt));
     }
@@ -38681,6 +38800,18 @@ function ubToggleNetworks() {
   if (chev) chev.className = 'ti ti-chevron-' + (open ? 'down' : 'up');
 }
 
+function _ubChainId(cid) {
+  try {
+    if (typeof CHAINS !== 'undefined') {
+      for (var i = 0; i < CHAINS.length; i++) {
+        var c = CHAINS[i];
+        if (c && (c.id === cid || c.name === cid)) return c.chainId;
+      }
+    }
+  } catch(_e) {}
+  return null;
+}
+
 function ubRenderNetworks() {
   var card = document.getElementById('ub-networks-card');
   if (!card) return;
@@ -38706,24 +38837,50 @@ function ubRenderNetworks() {
     if (st === 'unavailable') return { text: 'Unavailable', color: 'var(--red)', dot: 'var(--red)' };
     return { text: 'Not supported', color: 'var(--muted2)', dot: 'var(--muted2)' };
   };
+  var fmtTime = function(ts) {
+    if (!ts) return '—';
+    return new Date(ts).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  };
+
   var rows = '';
   for (var j = 0; j < ids.length; j++) {
     var cid = ids[j];
     var st = chainStatus[cid];
     var h = chainHealth[cid] || {};
     var l = label(st);
+    var cidNum = _ubChainId(cid);
+    var ret = (h.retries != null) ? h.retries : 0;
+    var lat = (h.latencyMs != null) ? (Math.round(h.latencyMs) + ' ms') : '—';
     rows += '<div style="display:flex;align-items:center;gap:6px;padding:3px 0;font-size:9px">' +
       '<span style="width:6px;height:6px;border-radius:50%;background:' + l.dot + ';flex-shrink:0"></span>' +
       '<span style="color:var(--text);flex:1">' + cid + '</span>' +
       '<span style="color:' + l.color + '">' + l.text + '</span></div>';
-    if (st === 'unavailable' && h.reason) {
+    if (cidNum != null) {
+      rows += '<div style="padding-left:12px;font-size:7.5px;color:var(--muted2)">Chain ID: ' + cidNum + '</div>';
+    }
+    rows += '<div style="padding-left:12px;font-size:7.5px;color:var(--muted2)">Retries: ' + ret + ' · Latency: ' + lat + '</div>';
+    if ((st === 'stale' || st === 'unavailable') && h.reason) {
       rows += '<div style="padding-left:12px;font-size:7.5px;color:var(--muted2)">Reason: ' + h.reason + '</div>';
     }
-    if ((st === 'stale' || st === 'unavailable') && h.lastSuccessAt) {
-      rows += '<div style="padding-left:12px;font-size:7.5px;color:var(--muted2)">Last success: ' + new Date(h.lastSuccessAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + '</div>';
-    }
+    rows += '<div style="padding-left:12px;font-size:7.5px;color:var(--muted2)">Last success: ' + fmtTime(h.lastSuccessAt) + '</div>';
   }
-  body.innerHTML = rows;
+
+  // ── UB-6: aggregate RPC health summary (compact, derived from real metrics) ──
+  var m = (typeof UnifiedBalanceEngine !== 'undefined' && UnifiedBalanceEngine.getMetrics) ? UnifiedBalanceEngine.getMetrics() : null;
+  var healthy = 0, stale = 0, unavailable = 0;
+  for (var k = 0; k < ids.length; k++) {
+    var sk = chainStatus[ids[k]];
+    if (sk === 'available') healthy++;
+    else if (sk === 'stale') stale++;
+    else if (sk === 'unavailable') unavailable++;
+  }
+  var rpcHtml = '<div style="border-top:1px solid var(--border);margin-top:6px;padding-top:6px">' +
+    '<div style="font-size:8px;color:var(--teal);margin-bottom:3px">RPC HEALTH</div>' +
+    '<div style="font-size:7.5px;color:var(--muted2)">Healthy: ' + healthy + '/' + ids.length + ' · Stale: ' + stale + ' · Unavailable: ' + unavailable + '</div>' +
+    '<div style="font-size:7.5px;color:var(--muted2)">RPC Calls: ' + (m ? m.rpcCalls : 0) + ' · Retries: ' + (m ? m.retries : 0) + ' · Failures: ' + (m ? m.rpcFailures : 0) + ' · Avg Latency: ' + (m && m.averageLatencyMs != null ? m.averageLatencyMs + ' ms' : '—') + '</div>' +
+    '</div>';
+
+  body.innerHTML = rows + rpcHtml;
 }
 
 window.ubInit = ubInit;
