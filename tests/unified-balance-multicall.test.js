@@ -291,9 +291,12 @@ describe('Multicall — dedup + concurrency', () => {
   it('each chain+wallet+token is consulted exactly once (no duplicate aggregate3 targets)', async () => {
     const eng = load({ balanceOf: async () => 1000000n, chains: realChains() });
     await eng.ubFetchAllBalances('0xwallet');
-    const keys = eng.calls.aggregate3.flat().map((c) => c.target + ':' + c.callData.__wallet);
-    expect(new Set(keys).size).toBe(keys.length);
-    expect(keys.length).toBe(13); // 3 (Arc) + 2×5 (others)
+    const all = eng.calls.aggregate3.flat();
+    const erc20Keys = all.filter((c) => c.target.toLowerCase() !== MULTICALL3.toLowerCase()).map((c) => c.target + ':' + c.callData.__wallet);
+    const nativeTargets = all.filter((c) => c.target.toLowerCase() === MULTICALL3.toLowerCase());
+    expect(new Set(erc20Keys).size).toBe(erc20Keys.length); // no duplicate ERC20 token+wallet
+    expect(erc20Keys.length).toBe(13); // 3 (Arc) + 2×5 (others)
+    expect(nativeTargets.length).toBe(4); // one getEthBalance per ETH-native chain
   });
 
   it('wallet switch during in-flight multicall → A discarded, B authoritative', async () => {
@@ -386,20 +389,20 @@ describe('Multicall — invariants', () => {
     expect(usdc.amount).toBe(0);
   });
 
-  it('RPC calls are reduced: 6 aggregate3 + 4 getBalance (17 → 10)', async () => {
+  it('RPC calls are reduced: 6 aggregate3 + 0 getBalance (17 → 6)', async () => {
     const multi = load({ balanceOf: async () => 1000000n, chains: realChains() });
     await multi.ubFetchAllBalances('0xwallet');
     const after = multi.calls.aggregate3.length + multi.calls.getBalance.length;
     expect(multi.calls.aggregate3.length).toBe(6);
     expect(multi.calls.balanceOf.length).toBe(0);
-    expect(multi.calls.getBalance.length).toBe(4); // ETH-native chains only
+    expect(multi.calls.getBalance.length).toBe(0); // native folded into aggregate3
 
     const baseline = load({ multicall: false, balanceOf: async () => 1000000n, chains: realChains() });
     await baseline.ubFetchAllBalances('0xwallet');
     const before = baseline.calls.balanceOf.length + baseline.calls.getBalance.length;
     expect(before).toBe(17); // 13 balanceOf + 4 getBalance
 
-    expect(after).toBeLessThan(before); // real reduction, not an estimate
+    expect(after).toBeLessThan(before); // 6 < 17, real reduction not an estimate
   });
 
   it('UB refresh path does not call legacy refreshBalance()', () => {

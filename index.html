@@ -37457,21 +37457,36 @@ let _ubLastRenderedWallet = '';
 // ── UB-2.2: price integrity — real sources only, NEVER a hardcoded financial fallback ──
 // Returns { status: 'available'|'unavailable', price: number|null }. Unavailable
 // prices are represented as null and are NEVER coerced to 0 or a fake constant.
+// ── UB-3.3: price cache (memoization only — NEVER authoritative, never stale-as-fresh) ──
+const UB_PRICE_CACHE_TTL_MS = 30000;
+const _ubPriceCache = {};   // sym → { symbol, price, source, ts, status } (wallet-independent)
+
 function ubResolveTokenPrice(sym) {
   // USDC: base stablecoin ($1 peg) — the app's established base asset.
   if (sym === 'USDC') return { status: 'available', price: 1.00 };
-  // 1) On-chain oracle (existing real source; guarded — may be dormant in this build).
+  var now = Date.now();
+  var cached = _ubPriceCache[sym];
+  if (cached && cached.status === 'available' && (now - cached.ts) < UB_PRICE_CACHE_TTL_MS) {
+    return { status: 'available', price: cached.price };   // fresh memoized price only
+  }
+  // Re-resolve from real sources (oracle → pool). No hardcoded fallback.
+  var source = null, price = null;
   try {
     if (typeof OracleInterop !== 'undefined' && OracleInterop.getMarketData) {
       var md = OracleInterop.getMarketData(sym);
-      if (md && md.price != null && md.price > 0) return { status: 'available', price: md.price };
+      if (md && md.price != null && md.price > 0) { source = 'oracle'; price = md.price; }
     }
   } catch(_e) {}
-  // 2) On-chain pool reserve ratio (existing real source via the USDC pair).
-  try {
-    var poolRate = _ubPoolDerivedRate(sym);
-    if (poolRate != null && poolRate > 0) return { status: 'available', price: poolRate };
-  } catch(_e) {}
+  if (price == null) {
+    try {
+      var poolRate = _ubPoolDerivedRate(sym);
+      if (poolRate != null && poolRate > 0) { source = 'pool'; price = poolRate; }
+    } catch(_e) {}
+  }
+  if (price != null) {
+    _ubPriceCache[sym] = { symbol: sym, price: price, source: source, ts: now, status: 'available' };
+    return { status: 'available', price: price };
+  }
   return { status: 'unavailable', price: null };
 }
 
@@ -37995,13 +38010,16 @@ function ubFetchAllBalances(walletKey) {
   if (!walletKey) return Promise.resolve(results);
 
   var TOKENS = ['USDC', 'EURC', 'cirBTC'];
+  var evmChains = [];
+  for (var ci = 0; ci < chains.length; ci++) {
+    var c = chains[ci];
+    if (c && c.rpc && c.isEvm !== false) evmChains.push(c);
+  }
+  if (!evmChains.length) return Promise.resolve(results);
 
-  function fetchChain(ci) {
-    if (ci >= chains.length) return Promise.resolve(results);
-    var chain = chains[ci];
-    if (!chain || !chain.rpc || chain.isEvm === false) return fetchChain(ci + 1);
-
-    // ── UB-2.3: group ERC20 balanceOf per chain into ONE Multicall3 aggregate3 ──
+  // ── UB-2.3 + UB-3.1/3.2: one Multicall3 aggregate3 per chain (ERC20 + native),
+  // executed with bounded concurrency (no 150ms serial delay, no unlimited RPC).
+  function fetchChain(chain) {
     var erc20 = [];
     for (var ti = 0; ti < TOKENS.length; ti++) {
       var sym = TOKENS[ti];
@@ -38013,32 +38031,36 @@ function ubFetchAllBalances(walletKey) {
       }
       erc20.push({ sym: sym, tokenAddr: tokenAddr, decimals: (chain.tokens[sym].decimals || 6) });
     }
-    var batch = [];
-    if (erc20.length) {
-      batch.push(_ubMulticallChain(chain, erc20, walletKey).then(function(mcResults) {
-        if (mcResults && mcResults.length) return mcResults;
-        // Multicall3 unavailable or total failure → per-chain fallback to
-        // individual calls (same timeout + retry as before, never a fabricated 0).
-        var fallback = [];
-        for (var f = 0; f < erc20.length; f++) fallback.push(ubFetchOne(chain, erc20[f].sym, erc20[f].tokenAddr, walletKey));
-        return Promise.all(fallback);
-      }));
-    }
-    if (chain.chainId !== 5042002 && chain.nativeCurrency && chain.nativeCurrency.symbol === 'ETH') {
-      batch.push(ubFetchNativeBalance(chain, walletKey));
-    }
-    return Promise.all(batch).then(function(chainResults) {
-      for (var r = 0; r < chainResults.length; r++) {
-        var cr = chainResults[r];
-        if (!cr) continue;
-        if (Array.isArray(cr)) { for (var k = 0; k < cr.length; k++) { if (cr[k]) results.push(cr[k]); } }
-        else results.push(cr);
+    var nativeSym = (chain.chainId !== 5042002 && chain.nativeCurrency && chain.nativeCurrency.symbol === 'ETH') ? 'ETH' : null;
+    if (!erc20.length && !nativeSym) return Promise.resolve();
+
+    return _ubMulticallChain(chain, erc20, walletKey, nativeSym).then(function(mcResults) {
+      if (mcResults && mcResults.length) {
+        for (var k = 0; k < mcResults.length; k++) { if (mcResults[k]) results.push(mcResults[k]); }
+        return;
       }
-      return new Promise(function(resolve) { setTimeout(function() { resolve(fetchChain(ci + 1)); }, 150); });
+      // Multicall3 unavailable or total failure → per-chain fallback to
+      // individual calls (same timeout + retry as before, never a fabricated 0).
+      var fallback = [];
+      for (var f = 0; f < erc20.length; f++) fallback.push(ubFetchOne(chain, erc20[f].sym, erc20[f].tokenAddr, walletKey));
+      if (nativeSym) fallback.push(ubFetchNativeBalance(chain, walletKey));
+      return Promise.all(fallback).then(function(fbResults) {
+        for (var r = 0; r < fbResults.length; r++) { if (fbResults[r]) results.push(fbResults[r]); }
+      });
     });
   }
 
-  return fetchChain(0);
+  // Bounded parallel scheduler: at most UB_MAX_CHAIN_CONCURRENCY chains in flight.
+  var index = 0;
+  function worker() {
+    if (index >= evmChains.length) return Promise.resolve();
+    var chain = evmChains[index++];
+    return Promise.resolve(fetchChain(chain)).then(worker);
+  }
+  var workerCount = Math.min(UB_MAX_CHAIN_CONCURRENCY, evmChains.length);
+  var workers = [];
+  for (var w = 0; w < workerCount; w++) workers.push(worker());
+  return Promise.all(workers).then(function() { return results; });
 }
 
 function ubFetchNativeBalance(chain, walletKey) {
@@ -38082,6 +38104,8 @@ const UB_MULTICALL3_ABI = [
   'function aggregate3(tuple(address target, bool allowFailure, bytes callData)[] calls) view returns (tuple(bool success, bytes returnData)[])',
 ];
 const UB_BALANCEOF_ABI = ['function balanceOf(address) view returns (uint256)'];
+const UB_GETETHBALANCE_ABI = ['function getEthBalance(address) view returns (uint256)'];
+const UB_MAX_CHAIN_CONCURRENCY = 3;   // UB-3.1: bounded parallel chain fetch (rate-limit safe)
 
 function _ubMulticall3Address() {
   try { if (typeof Multicall !== 'undefined' && Multicall && Multicall.MULTICALL3) return Multicall.MULTICALL3; } catch(_e) {}
@@ -38090,27 +38114,42 @@ function _ubMulticall3Address() {
 }
 
 // tokens: [{ sym, tokenAddr, decimals }]. Returns an array of ubResult aligned
-// with `tokens`, or null when multicall is unavailable / total failure (caller
-// then falls back to individual ubFetchOne calls).
-async function _ubMulticallChain(chain, tokens, walletKey) {
-  if (typeof ethers === 'undefined' || !ethers.Interface || !tokens || !tokens.length) return null;
+// with `tokens` (+ native ETH result when nativeSym === 'ETH'), or null when
+// multicall is unavailable / total failure (caller then falls back to individual
+// ubFetchOne / ubFetchNativeBalance calls). Native balance is folded into the same
+// aggregate3 via Multicall3.getEthBalance; on individual native failure it falls
+// back to the existing getBalance path. Never masks a failure as a zero balance.
+async function _ubMulticallChain(chain, tokens, walletKey, nativeSym) {
+  if (typeof ethers === 'undefined' || !ethers.Interface) return null;
+  var hasNative = (nativeSym === 'ETH');
+  if ((!tokens || !tokens.length) && !hasNative) return null;
   var prov = _ubProvider(chain.rpc);
   if (!prov) return null;
-  var erc20Iface;
-  try { erc20Iface = new ethers.Interface(UB_BALANCEOF_ABI); } catch(_e) { return null; }
+  var erc20Iface, ethIface;
+  try {
+    erc20Iface = new ethers.Interface(UB_BALANCEOF_ABI);
+    if (hasNative) ethIface = new ethers.Interface(UB_GETETHBALANCE_ABI);
+  } catch(_e) { return null; }
+  var mcAddr = _ubMulticall3Address();
   var calls = [];
   for (var i = 0; i < tokens.length; i++) {
     var cd;
     try { cd = erc20Iface.encodeFunctionData('balanceOf', [walletKey]); } catch(_e) { return null; }
     calls.push({ target: tokens[i].tokenAddr, allowFailure: true, callData: cd });
   }
-  var mcAddr = _ubMulticall3Address();
+  var nativeIdx = -1;
+  if (hasNative) {
+    try {
+      calls.push({ target: mcAddr, allowFailure: true, callData: ethIface.encodeFunctionData('getEthBalance', [walletKey]) });
+      nativeIdx = calls.length - 1;
+    } catch(_e) { nativeIdx = -1; } // getEthBalance unsupported → handled via fallback below
+  }
   var mc;
   try { mc = new ethers.Contract(mcAddr, UB_MULTICALL3_ABI, prov); } catch(_e) { return null; }
   var raw;
   try { raw = await _ubWithTimeout(mc.aggregate3(calls), UB_RPC_TIMEOUT_MS); }
   catch(_e) { return null; } // multicall total failure → fallback (never fabricated 0)
-  if (!Array.isArray(raw) || raw.length !== tokens.length) return null;
+  if (!Array.isArray(raw) || raw.length !== calls.length) return null;
 
   var out = [];
   for (var j = 0; j < tokens.length; j++) {
@@ -38128,6 +38167,23 @@ async function _ubMulticallChain(chain, tokens, walletKey) {
     }
     var priceRes = ubResolveTokenPrice(t.sym);
     out.push(ubResult({ sym: t.sym, chain: chain, address: t.tokenAddr, decimals: t.decimals, raw: rawBal, amount: _ubFormatAmount(rawBal, t.decimals), price: priceRes.price, priceStatus: priceRes.status, status: 'available' }));
+  }
+
+  if (hasNative) {
+    var nr = nativeIdx >= 0 ? raw[nativeIdx] : null;
+    var nativeOk = false;
+    if (nr && nr.success === true) {
+      try {
+        var ethRaw = ethIface.decodeFunctionResult('getEthBalance', nr.returnData)[0];
+        nativeOk = true;
+        var ethPrice = ubResolveTokenPrice('ETH');
+        out.push(ubResult({ sym: 'ETH', chain: chain, address: '0x0000000000000000000000000000000000000000', decimals: 18, raw: ethRaw, amount: _ubFormatAmount(ethRaw, 18), price: ethPrice.price, priceStatus: ethPrice.status, status: 'available' }));
+      } catch(_de) { nativeOk = false; }
+    }
+    if (!nativeOk) {
+      // Multicall3 getEthBalance failed / unsupported → safe getBalance fallback.
+      out.push(await ubFetchNativeBalance(chain, walletKey));
+    }
   }
   return out;
 }
@@ -38279,17 +38335,21 @@ function ubRenderIntelligence() {
   html += '<div style="font-size:9px;color:var(--muted2);margin-bottom:6px">Concentration Breakdown</div>';
 
   var byToken = {};
+  var byTokenUnknown = {};   // UB-2.5: track tokens whose USD value is unavailable
   for (var i = 0; i < assets.length; i++) {
-    byToken[assets[i].token] = (byToken[assets[i].token] || 0) + assets[i].usd;
+    var a2 = assets[i];
+    if (a2.usd != null) byToken[a2.token] = (byToken[a2.token] || 0) + a2.usd;
+    else { if (byToken[a2.token] == null) byToken[a2.token] = 0; byTokenUnknown[a2.token] = true; }
   }
   var tokens = Object.keys(byToken);
   for (var j = 0; j < tokens.length; j++) {
     var tk = tokens[j];
+    var tkUnknown = byTokenUnknown[tk] === true;
     var tkPct = total > 0 ? ((byToken[tk] / total) * 100).toFixed(0) : 0;
     var meta = UB_TOKEN_META[tk] || { color:'#888', icon:'?' };
     html += '<div style="display:flex;align-items:center;justify-content:space-between;font-size:9px;margin-bottom:3px">';
     html += '<span style="display:flex;align-items:center;gap:4px"><div style="width:8px;height:8px;border-radius:2px;background:' + meta.color + '"></div>' + tk + '</span>';
-    html += '<span style="color:var(--muted2)">$' + byToken[tk].toFixed(2) + ' <span style="color:var(--text)">(' + tkPct + '%)</span></span></div>';
+    html += '<span style="color:var(--muted2)">' + (tkUnknown ? '—' : ('$' + byToken[tk].toFixed(2))) + (tkUnknown ? '' : (' <span style="color:var(--text)">(' + tkPct + '%)</span>')) + '</span></div>';
   }
   html += '</div>';
 
@@ -38443,7 +38503,7 @@ function ubExportCSV() {
   if (!assets.length) { toast('No data to export', 'warning'); return; }
   var rows = [['Token','Chain','Balance','USD Value']];
   assets.forEach(function(a) {
-    rows.push([a.token||'', a.chainName||'', parseFloat(a.balance||0).toFixed(6), (a.usd||0).toFixed(2)]);
+    rows.push([a.token||'', a.chainName||'', (a.balance != null ? parseFloat(a.balance).toFixed(6) : '—'), (a.usd != null ? a.usd.toFixed(2) : '—')]);
   });
   rows.push([]);
   rows.push(['Total USD','','',(UB.state.totalUSD||0).toFixed(2)]);
