@@ -10807,6 +10807,9 @@ select.cinput option { background: #161a24; color: #dde2f0; }
                 <span style="font-size:9px;font-weight:600;color:var(--teal)">Nets <span id="ub-hero-nets">0</span></span>
                 <span style="font-size:9px;font-weight:600;color:var(--blue)">Tokens <span id="ub-hero-tokens">0</span></span>
                 <span style="font-size:9px;font-weight:600;color:var(--purple)">24h <span id="ub-hero-activity">0</span></span>
+                <span style="color:var(--border);font-size:9px">|</span>
+                <span id="ub-updated" style="font-size:7.5px;color:var(--muted2)"></span>
+                <span id="ub-updating" style="display:none;font-size:7.5px;color:var(--teal)"><i class="ti ti-refresh"></i> Updating…</span>
               </div>
               <div style="display:flex;gap:4px;flex-wrap:wrap">
                 <button class="btn primary" onclick="UBScreen.openSend()" style="padding:5px 9px;font-size:8.5px"><i class="ti ti-send"></i>Send</button>
@@ -37352,6 +37355,18 @@ const UnifiedBalanceEngine = {
   getAssets() { return this._cache._lastAssets || []; },
   getTotalUSD() { return this._cache._lastTotalUSD || 0; },
   getCacheAge() { return this._cache._lastFetch ? (Date.now() - this._cache._lastFetch) : Infinity; },
+  getLastUpdated() { return this._cache._lastFetch || 0; },
+  markUpdated(walletKey) {
+    this._cache._lastFetch = Date.now();
+    this._cache._wallet = walletKey || (typeof walletAddress !== 'undefined' ? walletAddress : '');
+  },
+  // UB-2.4: explicit cache state — fresh (within TTL) vs stale (older than TTL).
+  // `stale` is a UI hint only; on-chain is always re-fetched on refresh.
+  getCacheState() {
+    var hasData = !!(this._cache._lastAssets && this._cache._lastAssets.length > 0);
+    var age = this.getCacheAge();
+    return { hasData: hasData, age: age, fresh: hasData && age < this._cacheTTL, stale: hasData && age >= this._cacheTTL, wallet: this._cache._wallet || '', lastFetch: this._cache._lastFetch || 0 };
+  },
   isCacheValid(walletAddr) {
     if (this.getCacheAge() >= this._cacheTTL) return false;
     if (walletAddr && this._cache._wallet && this._cache._wallet !== walletAddr) return false;
@@ -37435,6 +37450,9 @@ const UB = {
 let _ubGeneration = 0;
 function _ubBumpGeneration() { _ubGeneration++; }
 function _ubWalletKey() { return (typeof walletAddress === 'string' && walletAddress) ? walletAddress.toLowerCase() : ''; }
+// UB-2.4: wallet of the currently rendered portfolio. Used to detect a wallet
+// switch mid-refresh so stale wallet-A data is never shown while wallet B loads.
+let _ubLastRenderedWallet = '';
 
 // ── UB-2.2: price integrity — real sources only, NEVER a hardcoded financial fallback ──
 // Returns { status: 'available'|'unavailable', price: number|null }. Unavailable
@@ -37584,25 +37602,48 @@ const FinancialMemory = (function() {
 
   function save(snaps) { try { localStorage.setItem(KEY, JSON.stringify(snaps)); } catch(e) {} }
 
+  // UB-2.4: wallet-scoped snapshots. `wallet` is derived from the current
+  // wallet; legacy snapshots (no `wallet` field) are only surfaced while
+  // disconnected so wallets are never mixed.
+  function _walletKey() {
+    try { return (typeof _ubWalletKey === 'function') ? _ubWalletKey() : ''; } catch(_e) { return ''; }
+  }
+  function _scoped(snaps) {
+    var key = _walletKey();
+    return (snaps || []).filter(function(s) {
+      if (!s) return false;
+      if (s.wallet) return s.wallet === key;
+      return !key; // legacy snapshot: visible only when no wallet connected
+    });
+  }
+
   function takeSnapshot() {
     var snaps = load();
-    var snap = {
-      ts: new Date().toISOString(),
-      totalUSD: UB.state.totalUSD,
-      assets: UB.state.assets.length,
-      networks: Object.keys(UB.state.assets.reduce(function(m, a) { m[a.chainId] = true; return m; }, {})).length,
-      tokens: Object.keys(UB.state.assets.reduce(function(m, a) { m[a.token] = true; return m; }, {})).length
-    };
+    var key = _walletKey();
+    var assets = (typeof UB !== 'undefined' && UB.state && UB.state.assets) ? UB.state.assets : [];
+    var totalUSD = (typeof UB !== 'undefined' && UB.state) ? UB.state.totalUSD : 0;
+    var assetsCount = assets.length;
+    var networks = Object.keys(assets.reduce(function(m, a) { m[a.chainId] = true; return m; }, {})).length;
+    var tokens = Object.keys(assets.reduce(function(m, a) { m[a.token] = true; return m; }, {})).length;
+
+    // Skip when the previous snapshot (same wallet) is materially identical —
+    // prevents refresh storms from stacking dozens of duplicate snapshots.
+    var last = snaps[0];
+    if (last && last.wallet === key && last.totalUSD === totalUSD && last.assets === assetsCount && last.networks === networks && last.tokens === tokens) {
+      return snaps;
+    }
+
+    var snap = { ts: new Date().toISOString(), wallet: key, totalUSD: totalUSD, assets: assetsCount, networks: networks, tokens: tokens };
     snaps.unshift(snap);
     if (snaps.length > MAX_SNAPS) snaps.length = MAX_SNAPS;
     save(snaps);
     return snaps;
   }
 
-  function getHistory() { return load(); }
+  function getHistory() { return _scoped(load()); }
 
   function getTrend() {
-    var snaps = load();
+    var snaps = _scoped(load());
     if (snaps.length < 2) return { direction: 'stable', change: 0, label: 'No trend data yet' };
     var prev = snaps[1].totalUSD;
     var curr = snaps[0].totalUSD;
@@ -37701,9 +37742,11 @@ UB.getRecommendations = function() {
 function ubInit() {
   if (typeof walletAddress !== 'undefined' && walletAddress) {
     if (UnifiedBalanceEngine.isCacheValid && UnifiedBalanceEngine.isCacheValid(walletAddress)) {
+      UnifiedBalanceEngine.recordCacheHit();
       ubShowState('content');
       return;
     }
+    UnifiedBalanceEngine.recordCacheMiss();
     ubRefresh();
   } else {
     ubShowState('empty');
@@ -37721,6 +37764,7 @@ document.addEventListener('WALLET_CONNECTED', function() {
 });
 document.addEventListener('WALLET_DISCONNECTED', function() {
   _ubBumpGeneration();
+  _ubLastRenderedWallet = '';
   UnifiedBalanceEngine.invalidate();
   var page = document.getElementById('page-unified-balance');
   if (page && page.classList.contains('active')) {
@@ -37741,6 +37785,7 @@ document.addEventListener('WALLET_SWITCHED', function() {
 function ubRefresh() {
   var walletKey = _ubWalletKey();
   if (!walletKey) {
+    _ubLastRenderedWallet = '';
     UB.state.results = []; UB.state.assets = []; UB.state.totalUSD = 0; UB.state.aggregateStatus = 'unavailable';
     ubShowState('empty');
     return;
@@ -37753,28 +37798,56 @@ function ubRefresh() {
   var generation = _ubGeneration;       // capture generation (bumped on wallet/network change)
   var t0 = performance.now();
   UnifiedBalanceEngine.notifyRefreshStart();
-  // Only show loading on first load — keep content visible during subsequent refreshes
+  // UB-2.4: keep the previous portfolio visible during a SAME-wallet refresh
+  // (show "Updating…"), but blank to "loading" on a wallet switch so wallet-A
+  // data is never shown while wallet-B balances load.
+  var sameWallet = (_ubLastRenderedWallet === walletKey);
   var contentEl = document.getElementById('ub-content');
-  var hasCachedData = contentEl && contentEl.style.display !== 'none';
+  var hasCachedData = contentEl && contentEl.style.display !== 'none' && sameWallet;
   if (!hasCachedData) ubShowState('loading');
+  ubSetUpdating(hasCachedData);
   var emptyEl = document.getElementById('ub-empty');
   if (emptyEl) emptyEl.style.display = 'none';
 
   ubFetchAllBalances(walletKey)
     .then(function(results) {
       if (generation !== _ubGeneration) return; // stale wallet/network — discard results
-      UB.state = ubBuildState(results, generation);
+      var newState = ubBuildState(results, generation);
+      // UB-2.4: a refresh that yields NOTHING available (every call unavailable)
+      // while prior data is on screen is treated as a transient failure — keep
+      // the last known portfolio (marked stale) instead of blanking valid data.
+      // Real zero balances still resolve to 'complete' (available, amount 0).
+      if (newState.aggregateStatus === 'unavailable' && hasCachedData) {
+        _ubLastRenderedWallet = walletKey;
+        ubShowState('content');
+        ubSetUpdating(false);
+        ubMarkStale('data unavailable');
+        UnifiedBalanceEngine.notifyRefreshFailed(new Error('all_unavailable'));
+        UnifiedBalanceEngine.recordError();
+        return;
+      }
+      _ubLastRenderedWallet = walletKey;
+      if (UnifiedBalanceEngine.markUpdated) UnifiedBalanceEngine.markUpdated(walletKey);
+      UB.state = newState;
       ubRenderAll();
       ubShowState('content');
+      ubSetUpdating(false);
       UnifiedBalanceEngine.notifyRefreshComplete(UB.state.assets, UB.state.totalUSD);
       UnifiedBalanceEngine.recordRefresh(performance.now() - t0);
       try { UBScreen.refreshDashboard(); } catch(_) {}
     })
     .catch(function(e) {
       if (generation !== _ubGeneration) return;
-      var errEl = document.getElementById('ub-error-msg');
-      if (errEl) errEl.textContent = (e && e.message) || 'Unknown error';
-      ubShowState('error');
+      ubSetUpdating(false);
+      if (hasCachedData) {
+        // Refresh failed but we still have the prior portfolio → keep showing it
+        // (marked stale) instead of blanking valid data.
+        ubMarkStale((e && e.message) || 'Unknown error');
+      } else {
+        var errEl = document.getElementById('ub-error-msg');
+        if (errEl) errEl.textContent = (e && e.message) || 'Unknown error';
+        ubShowState('error');
+      }
       UnifiedBalanceEngine.notifyRefreshFailed(e);
       UnifiedBalanceEngine.recordError();
     })
@@ -37793,6 +37866,28 @@ function ubShowState(state) {
   if (state === 'content') {
     var contentEl = document.getElementById('ub-content');
     if (contentEl) contentEl.style.display = 'flex';
+  }
+}
+
+// ── UB-2.4: refresh freshness UI (Updating… / Updated HH:MM:SS / Stale) ──
+function ubSetUpdating(on) {
+  var el = document.getElementById('ub-updating');
+  if (el) el.style.display = on ? '' : 'none';
+}
+function ubMarkStale(msg) {
+  var el = document.getElementById('ub-updated');
+  if (el) { el.textContent = 'Stale' + (msg ? ' · ' + msg : ''); el.style.color = 'var(--yellow)'; }
+}
+function ubRenderUpdated() {
+  var el = document.getElementById('ub-updated');
+  if (!el) return;
+  var t = (UnifiedBalanceEngine.getLastUpdated && UnifiedBalanceEngine.getLastUpdated()) || 0;
+  if (t) {
+    var d = new Date(t);
+    el.textContent = 'Updated ' + d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    el.style.color = 'var(--muted2)';
+  } else {
+    el.textContent = '';
   }
 }
 
@@ -38049,6 +38144,7 @@ function ubRenderAll() {
 }
 
 function ubRenderHero() {
+  ubRenderUpdated();
   var assets = UB.state.assets;
   var total = UB.state.totalUSD;
   var chains = {}; var tokens = {};
