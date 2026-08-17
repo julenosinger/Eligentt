@@ -280,11 +280,12 @@ describe('UB-6 — Networks panel metrics UI', () => {
       { Single_Chain: { status: 'available', reason: null, lastSuccessAt: 123, attempts: 1, retries: 0, latencyMs: 182, lastAttemptAt: 123, lastFailureAt: 0 } },
     );
     eng.ubRenderNetworks();
-    const html = eng.ui('ub-networks-body').innerHTML;
-    expect(html).toContain('Retries: 0');
-    expect(html).toContain('Latency: 182 ms');
-    expect(html).toContain('Chain ID: 999999');
-    expect(html).toContain('RPC HEALTH');
+    expect(eng.ui('ub-networks-list').innerHTML).toContain('Fresh');
+    const adv = eng.ui('ub-networks-advanced').innerHTML;
+    expect(adv).toContain('Retries: 0');
+    expect(adv).toContain('Latency: 182 ms');
+    expect(adv).toContain('Chain 999999');
+    expect(adv).toContain('RPC HEALTH');
   });
 
   it('null latency renders "—", never "0 ms"', () => {
@@ -294,12 +295,13 @@ describe('UB-6 — Networks panel metrics UI', () => {
       { Single_Chain: { status: 'unavailable', reason: 'RPC timeout', lastSuccessAt: 0, attempts: 2, retries: 1, latencyMs: null, lastAttemptAt: 123, lastFailureAt: 123 } },
     );
     eng.ubRenderNetworks();
-    const html = eng.ui('ub-networks-body').innerHTML;
-    expect(html).toContain('Latency: —');
-    expect(html).not.toContain('Latency: 0 ms');
-    expect(html).toContain('Reason: RPC timeout');
-    expect(html).not.toContain('NaN');
-    expect(html).not.toContain('undefined');
+    const list = eng.ui('ub-networks-list').innerHTML;
+    const adv = eng.ui('ub-networks-advanced').innerHTML;
+    expect(adv).toContain('Latency: —');
+    expect(adv).not.toContain('Latency: 0 ms');
+    expect(list).toContain('Reason: RPC timeout');
+    expect(list + adv).not.toContain('NaN');
+    expect(list + adv).not.toContain('undefined');
   });
 
   it('stale network retains lastSuccessAt and reason', () => {
@@ -309,10 +311,11 @@ describe('UB-6 — Networks panel metrics UI', () => {
       { Single_Chain: { status: 'stale', reason: 'RPC rate limit', lastSuccessAt: 1700000000000, attempts: 3, retries: 2, latencyMs: 812, lastAttemptAt: 1700000001000, lastFailureAt: 1700000001000 } },
     );
     eng.ubRenderNetworks();
-    const html = eng.ui('ub-networks-body').innerHTML;
-    expect(html).toContain('Stale');
-    expect(html).toContain('Reason: RPC rate limit');
-    expect(html).toContain('Retries: 2');
+    const list = eng.ui('ub-networks-list').innerHTML;
+    const adv = eng.ui('ub-networks-advanced').innerHTML;
+    expect(list).toContain('Stale');
+    expect(list).toContain('Reason: RPC rate limit');
+    expect(adv).toContain('Retries: 2');
   });
 
   it('rendering the panel causes ZERO RPC calls', () => {

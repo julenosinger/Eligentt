@@ -81,7 +81,7 @@ function makeEthers({ multicall = true, balanceOf, getBalance, getEthBalance, ag
 function makeDoc() {
   const els = {};
   function get(id) {
-    if (!els[id]) els[id] = { id, style: { display: (id === 'ub-content' || id === 'ub-networks-body' ? 'none' : '') }, textContent: '', innerHTML: '', title: '', className: '' };
+    if (!els[id]) els[id] = { id, style: { display: (id === 'ub-content' || id === 'ub-networks-body' || id === 'ub-networks-advanced' ? 'none' : '') }, textContent: '', innerHTML: '', title: '', className: '' };
     return els[id];
   }
   return { get };
@@ -113,7 +113,7 @@ function load({ balanceOf, getBalance, getEthBalance, aggregate3, multicall = tr
   };
   const names = Object.keys(globals);
   const body = assemble() +
-    '\nreturn { UB, UnifiedBalanceEngine, FinancialMemory, ubRefresh, ubShowState, ubSetUpdating, ubMarkStale, ubRenderUpdated, ubRenderHero, ubRenderNetworks, ubToggleNetworks, ubRenderAll, ubFetchAllBalances, ubBuildState, ubResult, ubTokenDeployed, _ubChainStatus, _ubChainHealth, _ubErrorReason, setWallet: (w) => { walletAddress = w; }, getWallet: () => walletAddress, setActiveChain: (id) => { activeChainId = id; }, getGeneration: () => _ubGeneration, bumpGeneration: _ubBumpGeneration, getLastRenderedWallet: () => _ubLastRenderedWallet };';
+    '\nreturn { UB, UnifiedBalanceEngine, FinancialMemory, ubRefresh, ubShowState, ubSetUpdating, ubMarkStale, ubRenderUpdated, ubRenderHero, ubRenderNetworks, ubToggleNetworks, ubToggleNetworksAdvanced, ubRenderAll, ubFetchAllBalances, ubBuildState, ubResult, ubTokenDeployed, _ubChainStatus, _ubChainHealth, _ubErrorReason, setWallet: (w) => { walletAddress = w; }, getWallet: () => walletAddress, setActiveChain: (id) => { activeChainId = id; }, getGeneration: () => _ubGeneration, bumpGeneration: _ubBumpGeneration, getLastRenderedWallet: () => _ubLastRenderedWallet };';
   const fn = new Function(...names, body);
   const api = fn(...names.map((n) => globals[n]));
   api.calls = calls;
@@ -187,7 +187,7 @@ describe('UB-5 — network health panel', () => {
     );
     eng.ubRenderNetworks();
     expect(eng.ui('ub-networks-summary').textContent).toBe('2/2 updated');
-    expect(eng.ui('ub-networks-body').innerHTML).toContain('Fresh');
+    expect(eng.ui('ub-networks-list').innerHTML).toContain('Fresh');
   });
 
   it('renders "1/2 updated" with unavailable reason (no NaN/undefined)', () => {
@@ -198,7 +198,7 @@ describe('UB-5 — network health panel', () => {
     );
     eng.ubRenderNetworks();
     expect(eng.ui('ub-networks-summary').textContent).toBe('1/2 updated');
-    const html = eng.ui('ub-networks-body').innerHTML;
+    const html = eng.ui('ub-networks-list').innerHTML;
     expect(html).toContain('Unavailable');
     expect(html).toContain('RPC timeout');
     expect(html).not.toContain('NaN');
@@ -232,6 +232,35 @@ describe('UB-5 — network health panel', () => {
     eng.UB.state = { assets: [], totalUSD: 0, aggregateStatus: 'unavailable', hasValuedUSD: false, chainStatus: {}, chainHealth: {} };
     eng.ubRenderNetworks();
     expect(eng.ui('ub-networks-card').style.display).toBe('none');
+  });
+
+  it('clean list excludes technical details (they live in Advanced)', () => {
+    const eng = load();
+    eng.UB.state = state(
+      { Arc_Testnet: 'available' },
+      { Arc_Testnet: { status: 'available', reason: null, lastSuccessAt: 123, attempts: 1, retries: 0, latencyMs: 182, lastAttemptAt: 123, lastFailureAt: 0 } },
+    );
+    eng.ubRenderNetworks();
+    const list = eng.ui('ub-networks-list').innerHTML;
+    expect(list).toContain('Fresh');
+    expect(list).not.toContain('Retries');
+    expect(list).not.toContain('Latency');
+    expect(list).not.toContain('Chain ');
+    const adv = eng.ui('ub-networks-advanced').innerHTML;
+    expect(adv).toContain('Retries');
+    expect(adv).toContain('Latency');
+    expect(adv).toContain('Chain ');
+  });
+
+  it('advanced details toggle expands/collapses', () => {
+    const eng = load();
+    eng.UB.state = state({ Arc_Testnet: 'available' }, { Arc_Testnet: { status: 'available', reason: null, lastSuccessAt: 1 } });
+    eng.ubRenderNetworks();
+    expect(eng.ui('ub-networks-advanced').style.display).toBe('none');
+    eng.ubToggleNetworksAdvanced();
+    expect(eng.ui('ub-networks-advanced').style.display).toBe('flex');
+    eng.ubToggleNetworksAdvanced();
+    expect(eng.ui('ub-networks-advanced').style.display).toBe('none');
   });
 });
 
