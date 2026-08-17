@@ -37421,11 +37421,19 @@ const UnifiedBalanceEngine = {
 //  UNIFIED BALANCE — Multi-chain portfolio & analytics
 // ══════════════════════════════════════════════════════════
 const UB = {
-  state: { assets: [], totalUSD: 0 },
+  state: { results: [], assets: [], totalUSD: 0, aggregateStatus: 'unavailable', generation: 0 },
   loading: false,
+  _refreshQueued: false,
   memory: null,
   recs: []
 };
+
+// ── UB-2.1: generation guard + wallet snapshot ─────────────────
+// Bumped on wallet connect/disconnect/switch and network change. In-flight
+// refreshes capture the generation at start and DISCARD results on mismatch.
+let _ubGeneration = 0;
+function _ubBumpGeneration() { _ubGeneration++; }
+function _ubWalletKey() { return (typeof walletAddress === 'string' && walletAddress) ? walletAddress.toLowerCase() : ''; }
 
 function ubGetTokenRate(sym) {
   if (sym === 'USDC') return 1.00;
@@ -37452,6 +37460,21 @@ const UB_TOKEN_META = {
   ETH:    { name:'Ether',        icon:'<img src="/assets/tokens/eth/eth-logo.png" style="width:18px;height:18px" alt="ETH" onerror="this.style.display=\'none\'">', color:'#627eea', get rate() { return ubGetTokenRate('ETH'); } }
 };
 const UB_FREQ_LABELS = { once:'One-time', daily:'Daily', weekly:'Weekly', biweekly:'Bi-weekly', monthly:'Monthly' };
+
+// ── UB-2.1: balance-engine hardening ───────────────────────────
+const UB_RPC_TIMEOUT_MS = 8000;   // per-call timeout (a chain must not block refresh forever)
+const UB_RPC_MAX_RETRIES = 1;     // 1 retry after the initial attempt (conservative)
+// Explicit asset deployment metadata. cirBTC is only deployed on Arc Testnet;
+// it must NOT be queried on chains where the Arc contract address is invalid
+// (queried on unsupported chains = "not_supported", NOT an RPC failure).
+const UB_TOKEN_DEPLOYMENT = {
+  cirBTC: { 'Arc_Testnet': true },
+};
+function ubTokenDeployed(sym, chainId) {
+  var d = UB_TOKEN_DEPLOYMENT[sym];
+  if (!d) return true; // no restriction → deployed
+  return !!d[chainId];
+}
 
 // ══════════════════════════════════════════════════════════
 //  PORTFOLIO ANALYZER — Risk, Health, Concentration Engine
@@ -37668,6 +37691,7 @@ function ubInit() {
 
 // Auto-refresh when wallet connects/disconnects while UB page is open
 document.addEventListener('WALLET_CONNECTED', function() {
+  _ubBumpGeneration();
   UnifiedBalanceEngine.invalidate();
   var page = document.getElementById('page-unified-balance');
   if (page && page.classList.contains('active')) {
@@ -37675,6 +37699,7 @@ document.addEventListener('WALLET_CONNECTED', function() {
   }
 });
 document.addEventListener('WALLET_DISCONNECTED', function() {
+  _ubBumpGeneration();
   UnifiedBalanceEngine.invalidate();
   var page = document.getElementById('page-unified-balance');
   if (page && page.classList.contains('active')) {
@@ -37683,6 +37708,7 @@ document.addEventListener('WALLET_DISCONNECTED', function() {
 });
 // Refresh on account switch while UB page is open
 document.addEventListener('WALLET_SWITCHED', function() {
+  _ubBumpGeneration();
   UnifiedBalanceEngine.invalidate();
   var page = document.getElementById('page-unified-balance');
   if (page && page.classList.contains('active')) {
@@ -37692,7 +37718,18 @@ document.addEventListener('WALLET_SWITCHED', function() {
 });
 
 function ubRefresh() {
-  if (UB.loading) return;
+  var walletKey = _ubWalletKey();
+  if (!walletKey) {
+    UB.state.results = []; UB.state.assets = []; UB.state.totalUSD = 0; UB.state.aggregateStatus = 'unavailable';
+    ubShowState('empty');
+    return;
+  }
+  // Exactly one follow-up refresh if requested while another is in-flight (no lost refresh, no duplicates).
+  if (UB.loading) { UB._refreshQueued = true; return; }
+
+  UB.loading = true;
+  UB._refreshQueued = false;
+  var generation = _ubGeneration;       // capture generation (bumped on wallet/network change)
   var t0 = performance.now();
   UnifiedBalanceEngine.notifyRefreshStart();
   // Only show loading on first load — keep content visible during subsequent refreshes
@@ -37701,14 +37738,28 @@ function ubRefresh() {
   if (!hasCachedData) ubShowState('loading');
   var emptyEl = document.getElementById('ub-empty');
   if (emptyEl) emptyEl.style.display = 'none';
-  ubFetchAllBalances()
-    .then(function() { ubRenderAll(); ubShowState('content'); UnifiedBalanceEngine.notifyRefreshComplete(UB.state.assets, UB.state.totalUSD); UnifiedBalanceEngine.recordRefresh(performance.now() - t0); try { UBScreen.refreshDashboard(); } catch(_) {} })
+
+  ubFetchAllBalances(walletKey)
+    .then(function(results) {
+      if (generation !== _ubGeneration) return; // stale wallet/network — discard results
+      UB.state = ubBuildState(results, generation);
+      ubRenderAll();
+      ubShowState('content');
+      UnifiedBalanceEngine.notifyRefreshComplete(UB.state.assets, UB.state.totalUSD);
+      UnifiedBalanceEngine.recordRefresh(performance.now() - t0);
+      try { UBScreen.refreshDashboard(); } catch(_) {}
+    })
     .catch(function(e) {
+      if (generation !== _ubGeneration) return;
       var errEl = document.getElementById('ub-error-msg');
       if (errEl) errEl.textContent = (e && e.message) || 'Unknown error';
       ubShowState('error');
       UnifiedBalanceEngine.notifyRefreshFailed(e);
       UnifiedBalanceEngine.recordError();
+    })
+    .finally(function() {
+      UB.loading = false;
+      if (UB._refreshQueued) { UB._refreshQueued = false; ubRefresh(); }
     });
 }
 
@@ -37724,45 +37775,123 @@ function ubShowState(state) {
   }
 }
 
-function ubFetchAllBalances() {
-  UB.loading = true;
-  UB.state.assets = [];
-  UB.state.totalUSD = 0;
+// ══════════════════════════════════════════════════════════
+//  UB-2.1 — authoritative balance engine (single source of truth)
+//  Structured results with explicit status; wallet snapshot; timeout + 1 retry;
+//  per-chain isolation; cirBTC deployment validation; raw BigInt preservation.
+// ══════════════════════════════════════════════════════════
 
-  var chains = (typeof CHAINS !== 'undefined') ? CHAINS : [];
-  if (!chains.length) { console.warn('[UB] CHAINS empty or undefined, aborting fetch'); UB.loading = false; return Promise.resolve(); }
+function _ubProvider(rpc) {
+  try { if (typeof getCachedProvider === 'function') return getCachedProvider(rpc); } catch(e) {}
+  try { return new ethers.JsonRpcProvider(rpc); } catch(e2) { return null; }
+}
 
-  if (typeof walletAddress === 'undefined' || !walletAddress) {
-    UB.loading = false; return Promise.resolve();
+function _ubWithTimeout(promise, ms) {
+  return new Promise(function(resolve, reject) {
+    var timer = setTimeout(function() { reject(new Error('RPC_TIMEOUT')); }, ms);
+    Promise.resolve(promise).then(
+      function(v) { clearTimeout(timer); resolve(v); },
+      function(e) { clearTimeout(timer); reject(e); }
+    );
+  });
+}
+
+// Conservative retry: initial attempt + `retries` retries. No infinite loops.
+async function _ubCallWithRetry(fn, retries) {
+  var max = (retries != null ? retries : UB_RPC_MAX_RETRIES);
+  var lastErr = null;
+  for (var attempt = 0; attempt <= max; attempt++) {
+    try { return await _ubWithTimeout(fn(), UB_RPC_TIMEOUT_MS); }
+    catch (e) { lastErr = e; }
   }
+  throw lastErr || new Error('RPC_ERROR');
+}
 
-  var TOKENS = ['USDC', 'EURC', 'cirBTC', 'ETH'];
-  console.log('[UB] Starting balance fetch across', chains.length, 'chains for wallet', walletAddress.slice(0, 6) + '...');
+function _ubFormatAmount(raw, decimals) {
+  try { return Number(raw) / Math.pow(10, decimals); } catch(e) { return 0; }
+}
+
+function ubResult(o) {
+  var meta = UB_TOKEN_META[o.sym] || { name: o.sym, icon: '?', color: '#888' };
+  return {
+    token: o.sym,
+    tokenName: meta.name,
+    icon: meta.icon,
+    color: meta.color,
+    chainId: (o.chain.id || o.chain.name),
+    chainName: (o.chain.shortName || o.chain.name),
+    address: o.address || null,
+    decimals: o.decimals || null,
+    raw: (o.raw != null ? o.raw : null),      // exact BigInt (null when unavailable)
+    amount: (o.amount != null ? o.amount : null), // formatted number (null when unavailable)
+    price: (o.price != null ? o.price : null),
+    priceStatus: o.priceStatus || 'available',
+    usd: null,
+    status: o.status || 'available',          // available | unavailable | stale | not_supported
+    error: o.error || null,
+  };
+}
+
+// Build authoritative state from structured results. Only AVAILABLE + non-zero
+// balances contribute to `totalUSD`. UNAVAILABLE results are retained (never
+// turned into 0) and reflected in `aggregateStatus`.
+function ubBuildState(results, generation) {
+  var assets = [];
+  var totalUSD = 0;
+  var hasAvailable = false, hasUnavailable = false;
+  for (var i = 0; i < results.length; i++) {
+    var r = results[i];
+    if (r.status === 'available') {
+      hasAvailable = true;
+      var usd = (r.price != null && r.amount != null) ? (r.amount * r.price) : null;
+      r.usd = usd;
+      if (r.amount > 0) {
+        totalUSD += (usd != null ? usd : 0);
+        assets.push({
+          token: r.token, tokenName: r.tokenName, icon: r.icon, color: r.color,
+          chainId: r.chainId, chainName: r.chainName,
+          balance: r.amount, usd: (usd != null ? usd : 0), address: r.address,
+          status: r.status, raw: r.raw, decimals: r.decimals, priceStatus: r.priceStatus,
+        });
+      }
+    } else if (r.status === 'unavailable') {
+      hasUnavailable = true;
+    }
+  }
+  var aggregateStatus = !hasAvailable ? 'unavailable' : (hasUnavailable ? 'partial' : 'complete');
+  return { results: results, assets: assets, totalUSD: totalUSD, aggregateStatus: aggregateStatus, generation: generation };
+}
+
+function ubFetchAllBalances(walletKey) {
+  var chains = (typeof CHAINS !== 'undefined') ? CHAINS : [];
+  var results = [];
+  if (!chains.length) return Promise.resolve(results);
+  if (!walletKey) return Promise.resolve(results);
+
+  var TOKENS = ['USDC', 'EURC', 'cirBTC'];
 
   function fetchChain(ci) {
-    if (ci >= chains.length) {
-      console.log('[UB] All balance fetches completed. Total assets:', UB.state.assets.length, 'Total USD:', UB.state.totalUSD.toFixed(2));
-      UB.loading = false;
-      return Promise.resolve();
-    }
-    var chain = typeof CHAINS === 'object' && CHAINS[ci] ? CHAINS[ci] : chains[ci];
-    if (!chain || !chain.rpc || chain.isEvm === false) {
-      console.log('[UB] Skipping chain index', ci, '— invalid, no RPC, or non-EVM');
-      return fetchChain(ci + 1);
-    }
-    console.log('[UB] Processing chain:', chain.shortName || chain.name, '(id:', chain.id || chain.chainId, ', RPC:', chain.rpc, ')');
+    if (ci >= chains.length) return Promise.resolve(results);
+    var chain = chains[ci];
+    if (!chain || !chain.rpc || chain.isEvm === false) return fetchChain(ci + 1);
+
     var batch = [];
     for (var ti = 0; ti < TOKENS.length; ti++) {
       var sym = TOKENS[ti];
       var tokenAddr = chain.tokens && chain.tokens[sym] ? chain.tokens[sym].address : null;
       if (!tokenAddr || tokenAddr === '0x0000000000000000000000000000000000000000') continue;
-      console.log('[UB]   Fetching', sym, 'at', tokenAddr, 'on', chain.shortName || chain.name);
-      batch.push(ubFetchOne(chain, sym, tokenAddr));
+      var chainId = chain.id || chain.name;
+      if (!ubTokenDeployed(sym, chainId)) {
+        results.push(ubResult({ sym: sym, chain: chain, address: tokenAddr, decimals: (chain.tokens[sym].decimals || 6), status: 'not_supported' }));
+        continue;
+      }
+      batch.push(ubFetchOne(chain, sym, tokenAddr, walletKey));
     }
     if (chain.chainId !== 5042002 && chain.nativeCurrency && chain.nativeCurrency.symbol === 'ETH') {
-      batch.push(ubFetchNativeBalance(chain));
+      batch.push(ubFetchNativeBalance(chain, walletKey));
     }
-    return Promise.all(batch).then(function() {
+    return Promise.all(batch).then(function(chainResults) {
+      for (var r = 0; r < chainResults.length; r++) { if (chainResults[r]) results.push(chainResults[r]); }
       return new Promise(function(resolve) { setTimeout(function() { resolve(fetchChain(ci + 1)); }, 150); });
     });
   }
@@ -37770,64 +37899,33 @@ function ubFetchAllBalances() {
   return fetchChain(0);
 }
 
-function ubFetchNativeBalance(chain) {
-  return new Promise(function(resolve) {
-    try {
-      if (typeof ethers === 'undefined') { resolve(); return; }
-      var prov = null;
-      try { if (typeof getCachedProvider === 'function') prov = getCachedProvider(chain.rpc); } catch(e) {}
-      if (!prov) { try { prov = new ethers.JsonRpcProvider(chain.rpc); } catch(e2) {} }
-      if (!prov) { resolve(); return; }
-      prov.getBalance(walletAddress).then(function(bal) {
-        var amount = Number(bal) / 1e18;
-        if (amount <= 0) { resolve(); return; }
-        var meta = UB_TOKEN_META['ETH'] || { name:'Ether', icon:'<svg viewBox="0 0 32 32" width="12" height="12"><path d="M16 4v10l-8 4 8-4 8 4-8-4V4zM16 20l-8-4 8 10 8-10-8 4z" fill="white"/></svg>', color:'#627eea', rate:0 };
-        var usd = amount * (meta.rate || 0);
-        var asset = {
-          token: 'ETH', tokenName: meta.name, icon: meta.icon, color: meta.color,
-          chainId: chain.id || chain.name, chainName: chain.shortName || chain.name,
-          balance: amount, usd: usd, address: '0x0000000000000000000000000000000000000000'
-        };
-        UB.state.assets.push(asset);
-        UB.state.totalUSD += usd;
-        resolve();
-      }).catch(function() { resolve(); });
-    } catch(e) { resolve(); }
+function ubFetchNativeBalance(chain, walletKey) {
+  var meta = UB_TOKEN_META['ETH'] || { name: 'Ether', icon: '?', color: '#627eea', rate: 0 };
+  var chainId = chain.id || chain.name;
+  var price = ubGetTokenRate('ETH');
+  return _ubCallWithRetry(function() {
+    var prov = _ubProvider(chain.rpc);
+    if (!prov) throw new Error('NO_PROVIDER');
+    return prov.getBalance(walletKey);   // wallet snapshot, never the mutable global
+  }).then(function(raw) {
+    return ubResult({ sym: 'ETH', chain: chain, address: '0x0000000000000000000000000000000000000000', decimals: 18, raw: raw, amount: _ubFormatAmount(raw, 18), price: price, status: 'available' });
+  }).catch(function(e) {
+    return ubResult({ sym: 'ETH', chain: chain, address: '0x0000000000000000000000000000000000000000', decimals: 18, raw: null, amount: null, price: price, status: 'unavailable', error: (e && e.message) || 'RPC_ERROR' });
   });
 }
 
-function ubFetchOne(chain, sym, tokenAddr) {
-  return new Promise(function(resolve) {
-    var rpc = chain.rpc;
-    var meta = UB_TOKEN_META[sym] || { name:sym, icon:'?', color:'#888', rate:0 };
-    try {
-      if (typeof ethers === 'undefined') { resolve(); return; }
-      var prov = null;
-      try {
-        if (typeof getCachedProvider === 'function') {
-          prov = getCachedProvider(rpc);
-        }
-      } catch(e) {}
-      if (!prov) {
-        try { prov = new ethers.JsonRpcProvider(rpc); } catch(e2) {}
-      }
-      if (!prov) { resolve(); return; }
-      var contract = new ethers.Contract(tokenAddr, (typeof USDC_ABI !== 'undefined' ? USDC_ABI : ['function balanceOf(address) view returns (uint256)']), prov);
-      contract.balanceOf(walletAddress).then(function(bal) {
-        var decimals = (chain.tokens && chain.tokens[sym]) ? (chain.tokens[sym].decimals || 6) : 6;
-        var amount = Number(bal) / Math.pow(10, decimals);
-        if (amount <= 0) { resolve(); return; }
-        var usd = amount * meta.rate;
-        var asset = {
-          token: sym, tokenName: meta.name, icon: meta.icon, color: meta.color,
-          chainId: chain.id || chain.name, chainName: chain.shortName || chain.name,
-          balance: amount, usd: usd, address: tokenAddr
-        };
-        UB.state.assets.push(asset);
-        UB.state.totalUSD += usd;
-        resolve();
-      }).catch(function(err) { console.warn('[UB] balanceOf failed:', sym, 'on', chain.shortName || chain.name, (err && err.message) || err); resolve(); });
-    } catch(e) { console.warn('[UB] ubFetchOne error:', sym, 'on', chain.shortName || chain.name, (e && e.message) || e); resolve(); }
+function ubFetchOne(chain, sym, tokenAddr, walletKey) {
+  var decimals = (chain.tokens && chain.tokens[sym]) ? (chain.tokens[sym].decimals || 6) : 6;
+  var price = ubGetTokenRate(sym);
+  return _ubCallWithRetry(function() {
+    var prov = _ubProvider(chain.rpc);
+    if (!prov) throw new Error('NO_PROVIDER');
+    var contract = new ethers.Contract(tokenAddr, (typeof USDC_ABI !== 'undefined' ? USDC_ABI : ['function balanceOf(address) view returns (uint256)']), prov);
+    return contract.balanceOf(walletKey);   // wallet snapshot, never the mutable global
+  }).then(function(raw) {
+    return ubResult({ sym: sym, chain: chain, address: tokenAddr, decimals: decimals, raw: raw, amount: _ubFormatAmount(raw, decimals), price: price, status: 'available' });
+  }).catch(function(e) {
+    return ubResult({ sym: sym, chain: chain, address: tokenAddr, decimals: decimals, raw: null, amount: null, price: price, status: 'unavailable', error: (e && e.message) || 'RPC_ERROR' });
   });
 }
 
