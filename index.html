@@ -10862,6 +10862,15 @@ select.cinput option { background: #161a24; color: #dde2f0; }
               <span id="ub-screen-gas" style="font-size:8px;color:var(--muted)">Gas: —</span>
             </div>
           </div>
+          <!-- ── NETWORK HEALTH (UB-5) ── -->
+          <div class="card" id="ub-networks-card" style="display:none">
+            <div class="ch" style="cursor:pointer" onclick="ubToggleNetworks()">
+              <i class="ti ti-topology-star-3" style="font-size:13px;color:var(--teal)"></i><span class="ct">Networks</span>
+              <span id="ub-networks-summary" style="font-size:9px;color:var(--muted2);margin-left:auto">—</span>
+              <i class="ti ti-chevron-down" id="ub-networks-chevron" style="font-size:11px;color:var(--muted2);margin-left:6px"></i>
+            </div>
+            <div class="cb" id="ub-networks-body" style="display:none;flex-direction:column;gap:4px"></div>
+          </div>
           <!-- ── ASSETS TABLE ── -->
           <div class="card">
             <div class="ch"><i class="ti ti-coins" style="font-size:13px;color:var(--yellow)"></i><span class="ct">Assets</span><span id="ub-asset-count" style="font-size:9px;color:var(--muted2);margin-left:auto">0 tokens</span></div>
@@ -37846,7 +37855,10 @@ function ubRefresh() {
       _ubLastRenderedWallet = walletKey;
       if (UnifiedBalanceEngine.markUpdated) UnifiedBalanceEngine.markUpdated(walletKey);
       // UB-4: keep failed chains' prior balances visible (marked stale), never as $0.
-      _ubRetainStaleChains(newState, UB.state.assets, newState.chainStatus);
+      // Only retain prior assets for the SAME wallet (never leak wallet-A data into wallet-B).
+      _ubRetainStaleChains(newState, sameWallet ? UB.state.assets : null, newState.chainStatus);
+      // UB-5: per-chain health (status + reason + last success) — derived only.
+      newState.chainHealth = _ubChainHealth(results, newState.chainStatus, sameWallet ? (UB.state.chainHealth || null) : null);
       UB.state = newState;
       ubRenderAll();
       ubShowState('content');
@@ -37892,6 +37904,8 @@ function ubShowState(state) {
 function ubSetUpdating(on) {
   var el = document.getElementById('ub-updating');
   if (el) el.style.display = on ? '' : 'none';
+  var ns = document.getElementById('ub-networks-summary');
+  if (ns && on) { ns.textContent = 'Updating…'; ns.style.color = 'var(--teal)'; }
 }
 function ubMarkStale(msg) {
   var el = document.getElementById('ub-updated');
@@ -38007,6 +38021,38 @@ function _ubChainStatus(results) {
     else status[cid] = 'not_supported';
   }
   return status;
+}
+
+// UB-5: user-facing (non-technical) reason for a chain failure.
+function _ubErrorReason(error) {
+  var msg = (error && error.message) ? String(error.message) : String(error || '');
+  msg = msg.toLowerCase();
+  if (msg.indexOf('timeout') >= 0) return 'RPC timeout';
+  if (msg.indexOf('429') >= 0 || msg.indexOf('rate limit') >= 0 || msg.indexOf('too many requests') >= 0) return 'RPC rate limit';
+  return 'RPC error';
+}
+
+// UB-5: per-chain health (status + reason + last success timestamp) derived from
+// results + finalized chainStatus + previous health. Never fetches anything itself.
+function _ubChainHealth(results, chainStatus, prevHealth) {
+  var prev = prevHealth || {};
+  var health = {};
+  for (var cid in chainStatus) {
+    var st = chainStatus[cid];
+    var p = prev[cid] || {};
+    if (st === 'available') {
+      health[cid] = { status: 'available', reason: null, lastSuccessAt: Date.now() };
+    } else {
+      var reason = null;
+      if (st === 'unavailable') {
+        for (var i = 0; i < results.length; i++) {
+          if (results[i].chainId === cid && results[i].status === 'unavailable') { reason = _ubErrorReason(results[i].error); break; }
+        }
+      }
+      health[cid] = { status: st, reason: reason, lastSuccessAt: p.lastSuccessAt || 0 };
+    }
+  }
+  return health;
 }
 
 // Build authoritative state from structured results. Only AVAILABLE + non-zero
@@ -38260,6 +38306,7 @@ function ubRenderAll() {
   ubRenderIntelligence();
   ubRenderActivity();
   ubRenderHistory();
+  ubRenderNetworks();
   // Take financial memory snapshot
   try { FinancialMemory.takeSnapshot(); } catch(_) {}
 }
@@ -38624,8 +38671,65 @@ function ubRenderHistory() {
   body.innerHTML = html;
 }
 
+// ── UB-5: Network Health panel (discreet, collapsed by default) ──
+function ubToggleNetworks() {
+  var body = document.getElementById('ub-networks-body');
+  var chev = document.getElementById('ub-networks-chevron');
+  if (!body) return;
+  var open = body.style.display !== 'none';
+  body.style.display = open ? 'none' : 'flex';
+  if (chev) chev.className = 'ti ti-chevron-' + (open ? 'down' : 'up');
+}
+
+function ubRenderNetworks() {
+  var card = document.getElementById('ub-networks-card');
+  if (!card) return;
+  var summary = document.getElementById('ub-networks-summary');
+  var body = document.getElementById('ub-networks-body');
+  var chainStatus = UB.state.chainStatus || {};
+  var chainHealth = UB.state.chainHealth || {};
+  var ids = Object.keys(chainStatus);
+  if (!ids.length) { card.style.display = 'none'; return; }
+  card.style.display = '';
+
+  var updated = 0;
+  for (var i = 0; i < ids.length; i++) if (chainStatus[ids[i]] === 'available') updated++;
+  if (summary) {
+    summary.textContent = updated + '/' + ids.length + ' updated';
+    summary.style.color = updated < ids.length ? 'var(--yellow)' : 'var(--muted2)';
+  }
+  if (!body) return;
+
+  var label = function(st) {
+    if (st === 'available') return { text: 'Fresh', color: 'var(--green)', dot: 'var(--green)' };
+    if (st === 'stale') return { text: 'Stale', color: 'var(--yellow)', dot: 'var(--yellow)' };
+    if (st === 'unavailable') return { text: 'Unavailable', color: 'var(--red)', dot: 'var(--red)' };
+    return { text: 'Not supported', color: 'var(--muted2)', dot: 'var(--muted2)' };
+  };
+  var rows = '';
+  for (var j = 0; j < ids.length; j++) {
+    var cid = ids[j];
+    var st = chainStatus[cid];
+    var h = chainHealth[cid] || {};
+    var l = label(st);
+    rows += '<div style="display:flex;align-items:center;gap:6px;padding:3px 0;font-size:9px">' +
+      '<span style="width:6px;height:6px;border-radius:50%;background:' + l.dot + ';flex-shrink:0"></span>' +
+      '<span style="color:var(--text);flex:1">' + cid + '</span>' +
+      '<span style="color:' + l.color + '">' + l.text + '</span></div>';
+    if (st === 'unavailable' && h.reason) {
+      rows += '<div style="padding-left:12px;font-size:7.5px;color:var(--muted2)">Reason: ' + h.reason + '</div>';
+    }
+    if ((st === 'stale' || st === 'unavailable') && h.lastSuccessAt) {
+      rows += '<div style="padding-left:12px;font-size:7.5px;color:var(--muted2)">Last success: ' + new Date(h.lastSuccessAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + '</div>';
+    }
+  }
+  body.innerHTML = rows;
+}
+
 window.ubInit = ubInit;
 window.ubRefresh = ubRefresh;
+window.ubToggleNetworks = ubToggleNetworks;
+window.ubRenderNetworks = ubRenderNetworks;
 
 // ══════════════════════════════════════════════════════════
 //  AUTONOMOUS FINANCE LAYER — Action Planning + Permissions + Goals
