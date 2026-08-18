@@ -20,6 +20,12 @@
 (function(){
   'use strict';
 
+  // Idempotency guard: this module is both bundled AND lazy-loaded by ModuleLoader
+  // (DEFERRED tier). A second evaluation would create a SECOND 30s tick loop and a
+  // second AgentScheduleExecutor instance, giving two independent executors for the
+  // same schedules. Skip re-initialization when an instance already exists.
+  if (typeof window !== 'undefined' && window.AgentScheduleExecutor) return;
+
   var LEDGER_KEY = 'elligentt_agent_sched_exec_v1';
   var NOTIF_KEY = 'elligentt_agent_sched_notifs_v1';
   var ENABLED_KEY = 'elligentt_agent_sched_enabled_v1';
@@ -670,6 +676,13 @@
     }
     var startTime = Date.now();
     var attempts = ((prior && prior.attempts) || 0) + 1;
+
+    // Persist an in-flight marker IMMEDIATELY after the claim so any concurrent
+    // instance observes this occurrence as taken (via _ledgerRefresh) even before
+    // validation/simulation completes — closing the window where only the Web-Locks
+    // claim guarded against a double broadcast.
+    ledger[key] = { status: 'executing', ts: Date.now(), attempts: attempts };
+    _saveLedger();
 
     try {
       var wm = _wm();

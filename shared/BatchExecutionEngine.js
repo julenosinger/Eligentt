@@ -22,6 +22,10 @@
 (function () {
   'use strict';
 
+  // Idempotency guard: this module is bundled AND lazy-loaded by ModuleLoader
+  // (page-batch tier). Skip re-initialization to avoid a second poll loop.
+  if (typeof window !== 'undefined' && window.BatchExecutionEngine) return;
+
   var STORAGE_KEY = 'elligentt_batx_v1';
   var POLL_MS = 8000;
   var MAX_RETRIES = 3;
