@@ -582,7 +582,7 @@ describe('AgentScheduleExecutor — module source safety checks', () => {
     const execBody = executorSrc.slice(executorSrc.indexOf('async function _executeSchedule'));
     const vIdx = execBody.indexOf('await _validateIntent');
     const simIdx = execBody.indexOf('await _simulateTransfers');
-    const brIdx = execBody.indexOf('await _sendTransfer');
+    const brIdx = execBody.indexOf('await _signAndSend');
     expect(vIdx).toBeGreaterThan(-1);
     expect(simIdx).toBeGreaterThan(vIdx);
     expect(brIdx).toBeGreaterThan(simIdx);

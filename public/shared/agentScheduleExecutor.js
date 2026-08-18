@@ -406,11 +406,11 @@
   }
 
   /* ÔöÇÔöÇ Broadcast one ERC-20 transfer signed by the Agent Wallet ÔöÇÔöÇ */
-  /* ── Sign + broadcast ONE ERC-20 transfer (returns txHash immediately — NO receipt wait).
-     Separating send from receipt-wait is what makes "persist txHash before retry" possible:
-     once eth_sendRawTransaction returns a hash, that hash is the occurrence's identity and
-     must never be re-broadcast. */
-  async function _sendTransfer(provider, signer, agentAddr, tokenInfo, transfer){
+  /* ── Prepare ONE ERC-20 transfer (fee/gas/nonce + rawTx + fingerprint).
+     NO signing, NO broadcasting. The returned nonce + fingerprint are persisted as an
+     execution intent BEFORE broadcast, so a crash after eth_sendRawTransaction but before
+     txHash persistence can be reconciled by nonce/fingerprint — never re-broadcast. */
+  async function _prepareTransfer(provider, agentAddr, tokenInfo, transfer){
     var E = _ethers();
     var feeData;
     try { feeData = await provider.getFeeData(); } catch(e){}
@@ -432,17 +432,94 @@
       var gasEst = await provider.estimateGas({ from: agentAddr, to: tokenInfo.address, data: transfer._calldata });
       if (gasEst) TX_GAS_LIMIT = Math.min(Math.floor(Number(gasEst) * 1.3), 300000);
     } catch(e){}
-    var nonce = await provider.send('eth_getTransactionCount', [agentAddr, 'pending']);
+    var nonceHex = await provider.send('eth_getTransactionCount', [agentAddr, 'pending']);
+    var nonce = parseInt(nonceHex, 16);
     var rawTx = {
       type: 2, chainId: ARC_CHAIN_ID, to: tokenInfo.address,
       data: transfer._calldata, value: '0x0',
-      gasLimit: E.toBeHex(TX_GAS_LIMIT), nonce: nonce,
+      gasLimit: E.toBeHex(TX_GAS_LIMIT), nonce: nonceHex,
       maxFeePerGas: E.toBeHex(maxFee),
       maxPriorityFeePerGas: E.toBeHex(maxPriorityFee)
     };
+    return {
+      nonce: nonce, from: agentAddr, to: tokenInfo.address, data: transfer._calldata,
+      value: '0x0', chainId: ARC_CHAIN_ID, rawTx: rawTx,
+      fingerprint: _txFingerprint(agentAddr, nonce, tokenInfo.address, transfer._calldata)
+    };
+  }
+
+  /* ── Sign + broadcast a prepared raw transaction. Throws on ambiguous failure. ── */
+  async function _signAndSend(signer, provider, rawTx){
     var signedTx = await signer.signTransaction(rawTx);
     var txHash = await provider.send('eth_sendRawTransaction', [signedTx]);
-    return { ok: true, txHash: txHash };
+    return txHash;
+  }
+
+  function _txFingerprint(from, nonce, to, data){
+    var E = _ethers();
+    try {
+      return E.keccak256(E.toUtf8Bytes([ARC_CHAIN_ID, String(from).toLowerCase(), nonce, String(to).toLowerCase(), data].join('|')));
+    } catch(e){
+      return 'fp_' + ARC_CHAIN_ID + '_' + String(from).toLowerCase().slice(0, 10) + '_' + nonce;
+    }
+  }
+
+  /* ── Attribute a raw RPC transaction object to a persisted intent. ── */
+  function _intentMatches(intent, tx){
+    if (!intent || !tx) return false;
+    return String(tx.to || '').toLowerCase() === String(intent.to || '').toLowerCase()
+      && String(tx.input || tx.data || '') === String(intent.data || '')
+      && String(tx.value || '0x0') === String(intent.value || '0x0')
+      && String(tx.from || '').toLowerCase() === String(intent.from || '').toLowerCase()
+      && parseInt(String(tx.nonce), 16) === intent.nonce;
+  }
+
+  /* ── Resolve an uncertain broadcast by (wallet, chainId, nonce) + fingerprint.
+     Returns { resolved:true, txHash } or { resolved:false, reason }. NEVER rebroadcasts. ── */
+  async function _resolveUnknownIntent(intent, provider){
+    var nonce = intent && intent.nonce;
+    var from = intent && intent.from;
+    if (nonce == null || !from) return { resolved: false, reason: 'no_intent' };
+    // Strongest evidence: exact transaction at (from, nonce) if the RPC supports it.
+    var tx = null;
+    try { tx = await provider.send('eth_getTransactionByNonce', [from, '0x' + nonce.toString(16)]); } catch(e){}
+    if (tx && tx.hash) {
+      if (_intentMatches(intent, tx)) return { resolved: true, txHash: tx.hash };
+      return { resolved: false, reason: 'nonce_conflict' };
+    }
+    // Fallback: nonce-count evidence (pending + latest).
+    var pendingCount = null, latestCount = null;
+    try { latestCount = parseInt(await provider.send('eth_getTransactionCount', [from, 'latest']), 16); } catch(e){}
+    try { pendingCount = parseInt(await provider.send('eth_getTransactionCount', [from, 'pending']), 16); } catch(e){}
+    if ((pendingCount != null && pendingCount > nonce) || (latestCount != null && latestCount > nonce)) {
+      return { resolved: false, reason: 'nonce_consumed_unknown' };
+    }
+    return { resolved: false, reason: 'not_broadcast' };
+  }
+
+  /* ── Reconcile an occurrence whose broadcast status is uncertain. NEVER re-broadcast. ── */
+  async function _reconcileUnknown(sched, key, prior){
+    var wm = _wm();
+    var provider = wm ? wm.getAgentProvider() : null;
+    if (!provider) return { status: 'reconciling', nonce: prior.nonce };
+    var res = await _resolveUnknownIntent(prior, provider);
+    var reasonMap = {
+      nonce_conflict: 'Nonce conflict — transaction not attributable to this schedule',
+      nonce_consumed_unknown: 'Broadcast unknown — nonce consumed but transaction not recoverable',
+      not_broadcast: 'Broadcast unknown — no transaction found (not re-broadcast)',
+      no_intent: 'Broadcast unknown without intent — manual reconciliation required'
+    };
+    if (res.resolved) {
+      ledger[key] = { status: 'submitted', txHash: res.txHash, nonce: prior.nonce, from: prior.from, ts: Date.now(), attempts: prior.attempts || 0 };
+      _saveLedger();
+      return await _reconcileSubmitted(sched, key, ledger[key]);
+    }
+    // Safety first: never auto-rebroadcast. Mark failed with the exact reason.
+    ledger[key] = { status: 'failed', reason: reasonMap[res.reason] || res.reason, nonce: prior.nonce, from: prior.from, ts: Date.now(), attempts: prior.attempts || 0 };
+    _saveLedger();
+    _advanceSchedule(sched, 'Broadcast unknown: ' + (reasonMap[res.reason] || res.reason), 'failed', null, { token: sched.token, amount: sched.amount });
+    _pauseAfterFailure(sched, _policyDefaults());
+    return { status: 'failed', reason: res.reason };
   }
 
   /* ── Wait for a receipt for an already-broadcast transaction ── */
@@ -534,6 +611,10 @@
     } else if (prior && prior.status === 'submitted') {
       // A txHash already exists for this occurrence — reconcile, NEVER re-broadcast.
       return await _reconcileSubmitted(sched, key, prior);
+    } else if (prior && prior.status === 'execution_unknown') {
+      // Broadcast status uncertain (crash after send / ambiguous failure) — reconcile by
+      // nonce+fingerprint, NEVER re-broadcast.
+      return await _reconcileUnknown(sched, key, prior);
     } else if (prior && prior.status !== 'retry_pending' && prior.status !== 'in_progress') {
       return { status: 'replay_blocked' };
     }
@@ -665,39 +746,53 @@
       var lastHash = '';
       var gasUsed = 0;
       for (var i = 0; i < v.transfers.length; i++) {
-        var sendRes;
+        // 1. Prepare (compute nonce + rawTx + fingerprint). No broadcast yet.
+        var prep;
         try {
-          sendRes = await _sendTransfer(provider, signer, agentAddr, v.tokenInfo, v.transfers[i]);
-        } catch(txErr) {
-          sendRes = { ok: false, reason: (txErr.shortMessage || txErr.message || 'broadcast error').substring(0, 120), txHash: '' };
-        }
-        if (!sendRes.ok || !sendRes.txHash) {
-          // Broadcast failed (or outcome unknown) — never retry the broadcast here.
-          var sendFailNote = 'Transfer ' + (i + 1) + '/' + v.transfers.length + ' broadcast failed: ' + (sendRes.reason || 'unknown') + (confirmed > 0 ? ' (' + confirmed + ' confirmed before failure)' : '');
-          ledger[key] = { status: 'failed', reason: sendFailNote, ts: Date.now(), attempts: attempts, txHash: lastHash };
+          prep = await _prepareTransfer(provider, agentAddr, v.tokenInfo, v.transfers[i]);
+        } catch(prepErr) {
+          var prepNote = 'Transfer ' + (i + 1) + '/' + v.transfers.length + ' preparation failed: ' + ((prepErr.shortMessage || prepErr.message || 'prepare error')).substring(0, 120) + (confirmed > 0 ? ' (' + confirmed + ' confirmed before failure)' : '');
+          ledger[key] = { status: 'failed', reason: prepNote, ts: Date.now(), attempts: attempts, txHash: lastHash };
           _saveLedger();
           if (eng0 && typeof eng0.updateExecutionClaim === 'function') eng0.updateExecutionClaim(key, 'agent_schedule_executor', { status: 'failed', txHash: lastHash || null });
           if (spent > 0) { try { _authz().recordUsage(v.auth.id, spent, 'scheduled:' + sched.type, 'partial'); } catch(e){} }
-          _advanceSchedule(sched, sendFailNote, 'failed', lastHash, { sender: agentAddr, recipient: v.transfers[i].to, token: v.token, amount: v.transfers[i].amount, gasUsed: gasUsed });
+          _advanceSchedule(sched, prepNote, 'failed', lastHash, { sender: agentAddr, recipient: v.transfers[i].to, token: v.token, amount: v.transfers[i].amount, gasUsed: gasUsed });
           _pauseAfterFailure(sched, defaults)
-          _recordOutcome(sched, null, spent, v.token, 'failed', lastHash, Date.now() - startTime, gasUsed, sendFailNote, { sender: agentAddr, recipient: v.transfers[i].to, token: v.token, amount: v.transfers[i].amount, gasUsed: gasUsed });
-          try { if (task) ExecutionQueue.updateStatus(task.id, 'failed', { error: sendFailNote, txHash: lastHash }); } catch(e){}
-          _notify(sched, 'failed', 'Schedule "' + sched.name + '" failed: ' + sendFailNote, 'error');
+          _recordOutcome(sched, null, spent, v.token, 'failed', lastHash, Date.now() - startTime, gasUsed, prepNote, { sender: agentAddr, recipient: v.transfers[i].to, token: v.token, amount: v.transfers[i].amount, gasUsed: gasUsed });
+          try { if (task) ExecutionQueue.updateStatus(task.id, 'failed', { error: prepNote, txHash: lastHash }); } catch(e){}
+          _notify(sched, 'failed', 'Schedule "' + sched.name + '" failed: ' + prepNote, 'error');
           _outcome = 'failed';
-          return { status: 'failed', reason: sendFailNote };
+          return { status: 'failed', reason: prepNote };
         }
 
-        // txHash is known — persist it IMMEDIATELY (before waiting for the receipt).
-        lastHash = sendRes.txHash;
-        ledger[key] = { status: 'submitted', txHash: sendRes.txHash, ts: Date.now(), attempts: attempts, amount: spent + v.transfers[i].amount, asset: v.token };
+        // 2. Persist the execution intent (nonce + fingerprint) BEFORE broadcast.
+        //    This is the recovery anchor: a crash between the send and the txHash
+        //    persistence is reconciled by nonce/fingerprint — never re-broadcast.
+        ledger[key] = { status: 'execution_unknown', nonce: prep.nonce, from: prep.from, to: prep.to, data: prep.data, value: prep.value, chainId: prep.chainId, fingerprint: prep.fingerprint, ts: Date.now(), attempts: attempts, amount: spent + v.transfers[i].amount, asset: v.token };
         _saveLedger();
-        if (eng0 && typeof eng0.updateExecutionClaim === 'function') eng0.updateExecutionClaim(key, 'agent_schedule_executor', { status: 'submitted', txHash: sendRes.txHash });
+        if (eng0 && typeof eng0.updateExecutionClaim === 'function') eng0.updateExecutionClaim(key, 'agent_schedule_executor', { status: 'execution_unknown', nonce: prep.nonce });
+
+        // 3. Sign + broadcast. On throw the outcome is AMBIGUOUS — reconcile, never blind-retry.
+        var txHash;
+        try {
+          txHash = await _signAndSend(signer, provider, prep.rawTx);
+        } catch(sendErr) {
+          var unkRes = await _reconcileUnknown(sched, key, ledger[key]);
+          _outcome = (unkRes.status === 'reconciling' || unkRes.status === 'submitted') ? 'submitted' : 'running';
+          return unkRes;
+        }
+
+        // 4. txHash is known — persist it IMMEDIATELY (before waiting for the receipt).
+        lastHash = txHash;
+        ledger[key] = { status: 'submitted', txHash: txHash, nonce: prep.nonce, from: prep.from, ts: Date.now(), attempts: attempts, amount: spent + v.transfers[i].amount, asset: v.token };
+        _saveLedger();
+        if (eng0 && typeof eng0.updateExecutionClaim === 'function') eng0.updateExecutionClaim(key, 'agent_schedule_executor', { status: 'submitted', txHash: txHash });
 
         var rec;
         try {
-          rec = await _waitReceipt(provider, sendRes.txHash);
+          rec = await _waitReceipt(provider, txHash);
         } catch(wErr) {
-          rec = { ok: false, txHash: sendRes.txHash, reason: (wErr.shortMessage || wErr.message || 'receipt error').substring(0, 120) };
+          rec = { ok: false, txHash: txHash, reason: (wErr.shortMessage || wErr.message || 'receipt error').substring(0, 120) };
         }
         if (!rec.ok) {
           if (rec.receipt && rec.receipt.status === 0) {
@@ -754,11 +849,11 @@
 
   /* ── Execute a scheduled MultiSend as a SEQUENTIAL payment queue ──
      Sends each recipient row ONE AT A TIME using the single-payment send path
-     (_sendTransfer + _waitReceipt). The next row only starts after the previous
-     transaction receipt is confirmed. The on-chain batch contract is NEVER used
-     here. Per-row state (including the txHash of each submitted row) is persisted
-     in the execution ledger so an interrupted run resumes without re-sending
-     already-confirmed rows. */
+     (_prepareTransfer + _signAndSend + _waitReceipt). The next row only starts after
+     the previous transaction receipt is confirmed. The on-chain batch contract is
+     NEVER used here. Per-row state (intent nonce + txHash of each submitted row) is
+     persisted in the execution ledger so an interrupted run resumes or reconciles
+     without re-sending already-confirmed rows. */
   function _emitProgress(sched, current, total, message) {
     try {
       if (typeof document !== 'undefined') {
@@ -803,40 +898,84 @@
 
       _emitProgress(sched, confirmed + 1, transfers.length, 'MultiSend: ' + (confirmed + 1) + ' / ' + transfers.length + ' — Processing recipient #' + (i + 1) + '...');
 
-      var sendRes;
-      try {
-        sendRes = await _sendTransfer(provider, signer, agentAddr, tokenInfo, transfers[i]);
-      } catch(txErr) {
-        sendRes = { ok: false, reason: (txErr.shortMessage || txErr.message || 'broadcast error').substring(0, 120), txHash: '' };
+      var rowTxHash = null;
+      var engM = _engine();
+
+      // Reconcile a row whose broadcast was uncertain (crash between send and hash
+      // persistence) — recover the original tx by nonce/fingerprint, NEVER re-broadcast.
+      if (rows[i] && rows[i].status === 'execution_unknown' && rows[i].nonce != null) {
+        var unk = await _resolveUnknownIntent(rows[i], provider);
+        if (unk.resolved) {
+          rowTxHash = unk.txHash; // recovered — do NOT re-broadcast
+        } else {
+          rows[i] = { rowIndex: i, status: 'failed', to: transfers[i].to, amount: transfers[i].amount, txHash: null, error: unk.reason };
+          var unkNote = 'MultiSend recipient #' + (i + 1) + '/' + transfers.length + ' broadcast unknown: ' + unk.reason + (confirmed > 0 ? ' (' + confirmed + ' confirmed before failure)' : '');
+          ledger[key] = { status: 'failed', reason: unkNote, ts: Date.now(), attempts: attempts, txHash: lastHash, rows: rows, amount: total, asset: v.token };
+          _saveLedger();
+          if (spent > 0) { try { _authz().recordUsage(v.auth.id, spent, 'scheduled:multisend', 'partial'); } catch(e){} }
+          _advanceSchedule(sched, unkNote, 'failed', lastHash, { sender: agentAddr, recipient: transfers[i].to, token: v.token, amount: total, gasUsed: gasUsed, rows: rows });
+          _pauseAfterFailure(sched, defaults)
+          _notify(sched, 'failed', 'Schedule "' + sched.name + '" MultiSend broadcast unknown at recipient #' + (i + 1) + '/' + transfers.length + ' — ' + unk.reason, 'error');
+          return { status: 'failed', reason: unkNote, rows: rows };
+        }
       }
 
-      if (!sendRes.ok || !sendRes.txHash) {
-        rows[i] = { rowIndex: i, status: 'failed', to: transfers[i].to, amount: transfers[i].amount, txHash: null, error: sendRes.reason || 'broadcast failed' };
-        var failNote = 'MultiSend recipient #' + (i + 1) + '/' + transfers.length + ' broadcast failed: ' + (sendRes.reason || 'unknown') + (confirmed > 0 ? ' (' + confirmed + ' confirmed before failure)' : '');
-        ledger[key] = { status: 'failed', reason: failNote, ts: Date.now(), attempts: attempts, txHash: lastHash, rows: rows, amount: total, asset: v.token };
+      if (!rowTxHash) {
+        // Fresh broadcast: prepare (nonce+fingerprint), persist intent, then sign+send.
+        var prep;
+        try {
+          prep = await _prepareTransfer(provider, agentAddr, tokenInfo, transfers[i]);
+        } catch(prepErr) {
+          rows[i] = { rowIndex: i, status: 'failed', to: transfers[i].to, amount: transfers[i].amount, txHash: null, error: (prepErr.shortMessage || prepErr.message || 'prepare error') };
+          var prepNote = 'MultiSend recipient #' + (i + 1) + '/' + transfers.length + ' preparation failed: ' + ((prepErr.shortMessage || prepErr.message || 'prepare error')) + (confirmed > 0 ? ' (' + confirmed + ' confirmed before failure)' : '');
+          ledger[key] = { status: 'failed', reason: prepNote, ts: Date.now(), attempts: attempts, txHash: lastHash, rows: rows, amount: total, asset: v.token };
+          _saveLedger();
+          if (spent > 0) { try { _authz().recordUsage(v.auth.id, spent, 'scheduled:multisend', 'partial'); } catch(e){} }
+          _advanceSchedule(sched, prepNote, 'failed', lastHash, { sender: agentAddr, recipient: transfers[i].to, token: v.token, amount: total, gasUsed: gasUsed, rows: rows });
+          _pauseAfterFailure(sched, defaults)
+          _notify(sched, 'failed', 'Schedule "' + sched.name + '" MultiSend failed at recipient #' + (i + 1) + '/' + transfers.length, 'error');
+          return { status: 'failed', reason: prepNote, rows: rows };
+        }
+
+        // Persist the row execution intent BEFORE broadcast (crash-safe recovery anchor).
+        rows[i] = { rowIndex: i, status: 'execution_unknown', to: transfers[i].to, amount: transfers[i].amount, txHash: null, nonce: prep.nonce, from: prep.from, data: prep.data, value: prep.value, chainId: prep.chainId, fingerprint: prep.fingerprint };
+        ledger[key] = { status: 'in_progress', ts: Date.now(), attempts: attempts, txHash: lastHash, rows: rows, amount: total, asset: v.token };
         _saveLedger();
-        if (spent > 0) { try { _authz().recordUsage(v.auth.id, spent, 'scheduled:multisend', 'partial'); } catch(e){} }
-        _advanceSchedule(sched, failNote, 'failed', lastHash, { sender: agentAddr, recipient: transfers[i].to, token: v.token, amount: total, gasUsed: gasUsed, rows: rows });
-        _pauseAfterFailure(sched, defaults)
-        _recordOutcome(sched, null, spent, v.token, 'failed', lastHash, Date.now() - startTime, gasUsed, failNote, { sender: agentAddr, recipient: transfers[i].to, token: v.token, amount: spent, gasUsed: gasUsed });
-        try { if (task) ExecutionQueue.updateStatus(task.id, 'failed', { error: failNote, txHash: lastHash }); } catch(e){}
-        _notify(sched, 'failed', 'Schedule "' + sched.name + '" MultiSend failed at recipient #' + (i + 1) + '/' + transfers.length + ' — ' + confirmed + ' completed, ' + (transfers.length - confirmed - 1) + ' pending', 'error');
-        return { status: 'failed', reason: failNote, rows: rows };
+        if (engM && typeof engM.updateExecutionClaim === 'function') engM.updateExecutionClaim(key, 'agent_schedule_executor', { status: 'execution_unknown', nonce: prep.nonce });
+
+        try {
+          rowTxHash = await _signAndSend(signer, provider, prep.rawTx);
+        } catch(sendErr) {
+          // Ambiguous broadcast — reconcile by nonce, never blind-retry.
+          var unk2 = await _resolveUnknownIntent(rows[i], provider);
+          if (unk2.resolved) {
+            rowTxHash = unk2.txHash;
+          } else {
+            rows[i].status = 'failed';
+            rows[i].error = unk2.reason;
+            var unk2Note = 'MultiSend recipient #' + (i + 1) + '/' + transfers.length + ' broadcast unknown: ' + unk2.reason;
+            ledger[key] = { status: 'failed', reason: unk2Note, ts: Date.now(), attempts: attempts, txHash: lastHash, rows: rows, amount: total, asset: v.token };
+            _saveLedger();
+            _advanceSchedule(sched, unk2Note, 'failed', lastHash, { sender: agentAddr, recipient: transfers[i].to, token: v.token, amount: total, gasUsed: gasUsed, rows: rows });
+            _pauseAfterFailure(sched, defaults)
+            _notify(sched, 'failed', 'Schedule "' + sched.name + '" MultiSend broadcast unknown at recipient #' + (i + 1) + '/' + transfers.length, 'error');
+            return { status: 'failed', reason: unk2Note, rows: rows };
+          }
+        }
       }
 
       // txHash known — persist the row as 'submitted' IMMEDIATELY (before receipt).
-      lastHash = sendRes.txHash;
-      rows[i] = { rowIndex: i, status: 'submitted', to: transfers[i].to, amount: transfers[i].amount, txHash: sendRes.txHash };
+      lastHash = rowTxHash;
+      rows[i] = { rowIndex: i, status: 'submitted', to: transfers[i].to, amount: transfers[i].amount, txHash: rowTxHash, nonce: rows[i].nonce };
       ledger[key] = { status: 'in_progress', ts: Date.now(), attempts: attempts, txHash: lastHash, rows: rows, amount: total, asset: v.token };
       _saveLedger();
-      var engM = _engine();
-      if (engM && typeof engM.updateExecutionClaim === 'function') engM.updateExecutionClaim(key, 'agent_schedule_executor', { status: 'submitted', txHash: sendRes.txHash });
+      if (engM && typeof engM.updateExecutionClaim === 'function') engM.updateExecutionClaim(key, 'agent_schedule_executor', { status: 'submitted', txHash: rowTxHash });
 
       var rec;
       try {
-        rec = await _waitReceipt(provider, sendRes.txHash);
+        rec = await _waitReceipt(provider, rowTxHash);
       } catch(wErr) {
-        rec = { ok: false, txHash: sendRes.txHash, reason: (wErr.shortMessage || wErr.message || 'receipt error').substring(0, 120) };
+        rec = { ok: false, txHash: rowTxHash, reason: (wErr.shortMessage || wErr.message || 'receipt error').substring(0, 120) };
       }
       if (!rec.ok) {
         rows[i].txHash = rec.txHash;
@@ -862,7 +1001,7 @@
 
       confirmed++;
       spent += transfers[i].amount;
-      rows[i] = { rowIndex: i, status: 'completed', to: transfers[i].to, amount: transfers[i].amount, txHash: sendRes.txHash };
+      rows[i] = { rowIndex: i, status: 'completed', to: transfers[i].to, amount: transfers[i].amount, txHash: rowTxHash };
       try { gasUsed += Number(rec.receipt.gasUsed || 0); } catch(e){}
       if (engM && typeof engM.renewExecutionClaim === 'function') engM.renewExecutionClaim(key, 'agent_schedule_executor');
 
