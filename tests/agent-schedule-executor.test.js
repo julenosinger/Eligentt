@@ -374,7 +374,7 @@ describe('AgentScheduleExecutor — scheduled MultiSend (sequential execution)',
     expect(env.provider.sent.length).toBe(2);       // row 1 + row 2 broadcast; row 3 NOT sent
 
     const sched = env.engine.getById('SCH_TEST_1');
-    expect(sched.status).toBe('Paused');            // paused on failure, not Completed
+    expect(sched.status).toBe('Failed');            // one-time failure is terminal, not Completed
     expect(sched.recipients.length).toBe(3);        // recipients preserved
 
     const log = env.executor.getExecutionLog(5)[0];
@@ -570,7 +570,7 @@ describe('AgentScheduleExecutor — replay, simulation and safety', () => {
     const summary = await env.executor.tickNow();
     expect(summary.failed).toBe(1);
     const sched = env.engine.getById('SCH_TEST_1');
-    expect(sched.status).toBe('Paused');
+    expect(sched.status).toBe('Failed');            // one-time revert → terminal Failed (H3)
     expect(sched.executionHistory[0].status).toBe('failed');
     expect(env.executor.getExecutionLog(5)[0].status).toBe('failed');
     expect(env.toasts.some((t) => t.t === 'error')).toBe(true);
@@ -582,7 +582,7 @@ describe('AgentScheduleExecutor — module source safety checks', () => {
     const execBody = executorSrc.slice(executorSrc.indexOf('async function _executeSchedule'));
     const vIdx = execBody.indexOf('await _validateIntent');
     const simIdx = execBody.indexOf('await _simulateTransfers');
-    const brIdx = execBody.indexOf('await _broadcastTransfer');
+    const brIdx = execBody.indexOf('await _sendTransfer');
     expect(vIdx).toBeGreaterThan(-1);
     expect(simIdx).toBeGreaterThan(vIdx);
     expect(brIdx).toBeGreaterThan(simIdx);

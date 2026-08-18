@@ -29606,14 +29606,44 @@ const ScheduleEngine = (() => {
 
   let _schedules = Store.load('schedules', []);
   let _listeners = {};
-  // Shared execution claim/lease store — single idempotency point used by
-  // BOTH AgentScheduleExecutor and BatchExecutionEngine (and future executors)
-  // so a given execution slot (scheduleId|nextRun) is claimed exactly once.
+  // ── Execution claim / lease store ─────────────────────────
+  // Single idempotency point used by AgentScheduleExecutor, BatchExecutionEngine
+  // and the manual "Execute Now" path. key = "scheduleId|nextRun" (one occurrence).
+  // Persisted to localStorage and RE-READ on every operation, so a second tab or
+  // worker always observes the latest lease (fixes the stale in-memory cache).
+  // Mutual exclusion across tabs/workers is provided by the Web Locks API when
+  // available; otherwise the read→check→write runs as a synchronous critical
+  // section (safe within a single event loop).
   let _execClaims = {};
-  try { _execClaims = JSON.parse(localStorage.getItem('elligentt_sched_claims_v1') || '{}'); } catch(_) { _execClaims = {}; }
+  const _EXEC_CLAIMS_KEY = 'elligentt_sched_claims_v1';
+  const _CLAIM_DEFAULT_LEASE_MS = 300000;
+  const _CLAIM_LOCK_NAME = 'elligentt.schedule.claim';
+  const _CLAIM_CHANNEL_NAME = 'elligentt.schedule.claim';
+  let _claimChannel = null;
+  let _claimInstanceId = 'inst_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
 
   function _persist() { Store.save('schedules', _schedules); }
-  function _saveClaims() { try { localStorage.setItem('elligentt_sched_claims_v1', JSON.stringify(_execClaims)); } catch(_){} }
+
+  function _claimsLoad() {
+    try { _execClaims = JSON.parse(localStorage.getItem(_EXEC_CLAIMS_KEY) || '{}') || {}; }
+    catch (_e) { _execClaims = {}; }
+    return _execClaims;
+  }
+  function _claimsSave() { try { localStorage.setItem(_EXEC_CLAIMS_KEY, JSON.stringify(_execClaims)); } catch(_e){} }
+  function _claimsPrune(now) {
+    var keys = Object.keys(_execClaims);
+    if (keys.length <= 500) return;
+    for (var i = 0; i < keys.length; i++) {
+      var c = _execClaims[keys[i]];
+      if (c && ((c.status === 'confirmed' || c.status === 'failed') || (c.expiresAt && now > c.expiresAt))) delete _execClaims[keys[i]];
+    }
+  }
+  function _claimIsTerminal(c) { return !!(c && (c.status === 'confirmed' || c.status === 'failed')); }
+  function _claimExpired(c, now) {
+    var leaseMs = c.leaseMs || (c.expiresAt ? (c.expiresAt - (c.claimedAt || 0)) : _CLAIM_DEFAULT_LEASE_MS);
+    return (now - (c.claimedAt || 0)) >= leaseMs;
+  }
+  function _claimsBroadcast(msg) { try { if (_claimChannel) _claimChannel.postMessage(msg); } catch(_e){} }
 
   function _emit(event, data) {
     try {
@@ -29675,35 +29705,108 @@ const ScheduleEngine = (() => {
     return _schedules;
   }
 
-  // ── Execution claim / lease (shared idempotency) ─────────
-  // key = "scheduleId|nextRun" (a single execution slot).
-  // Atomic within the single-threaded JS loop: check + set happen synchronously.
-  function claimExecution(key, executor, ttlMs) {
+  // ── Execution claim / lease (shared idempotency + cross-tab atomicity) ─────────
+  function _claimSync(key, executor, meta, ttlMs) {
     var now = Date.now();
-    var leaseMs = ttlMs || 300000;
+    _claimsLoad();
+    _claimsPrune(now);
+    var leaseMs = ttlMs || _CLAIM_DEFAULT_LEASE_MS;
     var c = _execClaims[key];
-    // Proper mutex: block ANY re-claim (including the SAME executor running in a
-    // second tab/instance) while the lease is active. Previously the same executor
-    // could always re-claim, so two concurrent scheduler instances could both win
-    // the claim and broadcast the same scheduled operation twice.
-    if (c && (now - (c.claimedAt || 0)) < leaseMs) return false;
-    _execClaims[key] = { executor: executor, claimedAt: now, leaseMs: leaseMs };
-    _saveClaims();
+    if (c) {
+      if (_claimIsTerminal(c)) return { acquired: false, reason: 'terminal_' + c.status, claim: c };
+      if (!_claimExpired(c, now)) {
+        return { acquired: false, reason: (c.owner === _claimInstanceId) ? 'held_self' : 'held_other', claim: c };
+      }
+      // Lease expired: never re-broadcast an occurrence that was already submitted.
+      if (c.txHash || c.status === 'submitted' || c.status === 'reconciling') {
+        return { acquired: false, reason: 'submitted', claim: c };
+      }
+    }
+    var claim = {
+      key: key,
+      scheduleId: (meta && meta.scheduleId) || null,
+      occurrenceId: (meta && meta.occurrenceId) || key,
+      wallet: (meta && meta.wallet) || null,
+      chain: (meta && meta.chain) || null,
+      executor: executor || null,
+      owner: _claimInstanceId,
+      claimedAt: now,
+      acquiredAt: now,
+      leaseMs: leaseMs,
+      expiresAt: now + leaseMs,
+      status: 'claimed',
+      txHash: null
+    };
+    _execClaims[key] = claim;
+    _claimsSave();
+    _claimsBroadcast({ type: 'claimed', key: key, claim: claim });
+    return { acquired: true, claim: claim, reason: null };
+  }
+
+  function claimExecution(key, executor, meta, ttlMs) {
+    if (typeof navigator !== 'undefined' && navigator.locks && typeof navigator.locks.request === 'function') {
+      return navigator.locks.request(_CLAIM_LOCK_NAME, { mode: 'exclusive' }, function () {
+        return Promise.resolve(_claimSync(key, executor, meta, ttlMs));
+      });
+    }
+    return Promise.resolve(_claimSync(key, executor, meta, ttlMs));
+  }
+
+  function renewExecutionClaim(key, executor, ttlMs) {
+    var now = Date.now();
+    _claimsLoad();
+    var c = _execClaims[key];
+    if (!c) return false;
+    if (executor && c.executor && c.executor !== executor) return false;
+    if (_claimIsTerminal(c)) return false;
+    c.expiresAt = now + (ttlMs || c.leaseMs || _CLAIM_DEFAULT_LEASE_MS);
+    c.renewedAt = now;
+    _claimsSave();
     return true;
   }
+
+  function updateExecutionClaim(key, executor, patch) {
+    _claimsLoad();
+    var c = _execClaims[key];
+    if (!c) return false;
+    if (executor && c.executor && c.executor !== executor) return false;
+    for (var k in patch) { if (Object.prototype.hasOwnProperty.call(patch, k)) c[k] = patch[k]; }
+    _claimsSave();
+    _claimsBroadcast({ type: 'updated', key: key, claim: c });
+    return true;
+  }
+
   function releaseExecutionClaim(key, executor) {
+    _claimsLoad();
     var c = _execClaims[key];
     if (!c) return true;
-    if (executor && c.executor !== executor) return false;
+    if (executor && c.executor && c.executor !== executor) return false;
     delete _execClaims[key];
-    _saveClaims();
+    _claimsSave();
+    _claimsBroadcast({ type: 'released', key: key });
     return true;
   }
+
   function isExecutionClaimed(key) {
-    var now = Date.now();
+    _claimsLoad();
     var c = _execClaims[key];
-    return !!(c && (now - (c.claimedAt || 0)) < (c.leaseMs || 300000));
+    if (!c) return false;
+    if (_claimIsTerminal(c)) return true;
+    return !_claimExpired(c, Date.now());
   }
+
+  // Best-effort cross-tab sync (keeps the in-memory cache fresh; NOT the mutex).
+  try {
+    if (typeof BroadcastChannel !== 'undefined') {
+      _claimChannel = new BroadcastChannel(_CLAIM_CHANNEL_NAME);
+      _claimChannel.onmessage = function (e) { if (e && e.data && e.data.type) _claimsLoad(); };
+    }
+  } catch (_e) {}
+  try {
+    if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+      window.addEventListener('storage', function (e) { if (e && e.key === _EXEC_CLAIMS_KEY) _claimsLoad(); });
+    }
+  } catch (_e) {}
 
   // ── Migration on load ───────────────────────────────────
   (function _migrate() {
@@ -29722,7 +29825,7 @@ const ScheduleEngine = (() => {
     if (changed) _persist();
   })();
 
-  return { create: create, getAll: getAll, getById: getById, update: update, remove: remove, on: on, reload: reload, claimExecution: claimExecution, releaseExecutionClaim: releaseExecutionClaim, isExecutionClaimed: isExecutionClaimed };
+  return { create: create, getAll: getAll, getById: getById, update: update, remove: remove, on: on, reload: reload, claimExecution: claimExecution, renewExecutionClaim: renewExecutionClaim, updateExecutionClaim: updateExecutionClaim, releaseExecutionClaim: releaseExecutionClaim, isExecutionClaimed: isExecutionClaimed };
 })();
 
 // Legacy alias — keep global `schedules` pointing to engine data for backward compat
@@ -30092,11 +30195,32 @@ async function scheduleRun(id){
     toast('Schedule already completed (max executions reached)', 'warning');
     return;
   }
+  if(sch.status === 'Failed'){
+    toast('Schedule failed — duplicate it to run as a new occurrence', 'warning');
+    return;
+  }
   if(!walletAddress){ toast('Connect wallet to execute','warning'); openWalletModal(); return; }
+
+  // Shared cross-executor claim: manual "Execute Now" uses the SAME occurrence
+  // claim as the Agent. If the Agent (or another instance) already holds this
+  // occurrence, the manual run is rejected and nothing is broadcast twice.
+  var runKey = sch.id + '|' + sch.nextRun;
+  var runClaim = null;
+  if (typeof ScheduleEngine.claimExecution === 'function') {
+    runClaim = await ScheduleEngine.claimExecution(runKey, 'manual', {
+      scheduleId: sch.id, occurrenceId: runKey,
+      wallet: walletAddress || null,
+      chain: String(sch.network || 'Arc_Testnet').split(' → ')[0]
+    });
+    if (!runClaim || !runClaim.acquired) {
+      toast('Schedule already executing in another instance (' + ((runClaim && runClaim.claim && runClaim.claim.executor) || 'unknown executor') + ')', 'warning');
+      return;
+    }
+  }
 
   // Mark a pending manual run. The schedule is finalized (execCount+1 / status)
   // only after the on-chain transaction is actually confirmed (schCompleteRun).
-  window._schPendingRun = { id: sch.id, ts: Date.now() };
+  window._schPendingRun = { id: sch.id, ts: Date.now(), claimKey: runKey, claimOwner: runClaim ? runClaim.claim.owner : null };
 
   // Informational "started" history entry (NOT counted as executed).
   var history = (sch.executionHistory || []).slice();
@@ -30188,7 +30312,11 @@ function schCompleteRun(txHash){
   var pending = window._schPendingRun;
   if(!pending || !pending.id) return;
   // Ignore stale pending markers (older than 30 minutes)
-  if(Date.now() - (pending.ts || 0) > 30 * 60 * 1000){ window._schPendingRun = null; return; }
+  if(Date.now() - (pending.ts || 0) > 30 * 60 * 1000){
+    // Release any orphaned manual claim so a later run is not blocked forever.
+    try { if(pending.claimKey && typeof ScheduleEngine.releaseExecutionClaim === 'function') ScheduleEngine.releaseExecutionClaim(pending.claimKey, 'manual'); } catch(_e){}
+    window._schPendingRun = null; return;
+  }
   window._schPendingRun = null;
 
   var sch = ScheduleEngine.getById(pending.id);
@@ -30203,6 +30331,12 @@ function schCompleteRun(txHash){
   history.unshift({ ts: new Date().toISOString(), status: 'executed', note: sch.type + ' executed manually', txHash: txHash || null, token: sch.token, amount: (sch.amount || sch.total || 0) });
   if(history.length > 50) history.length = 50;
   ScheduleEngine.update(sch.id, { execCount: execCount, executionHistory: history, nextRun: nextRun, status: newStatus });
+  // Finalize the shared occurrence claim: mark terminal then release, so the
+  // occurrence can never be re-claimed and re-broadcast by any executor.
+  try {
+    if(pending.claimKey && typeof ScheduleEngine.updateExecutionClaim === 'function') ScheduleEngine.updateExecutionClaim(pending.claimKey, 'manual', { status: 'confirmed', txHash: txHash || null });
+    if(pending.claimKey && typeof ScheduleEngine.releaseExecutionClaim === 'function') ScheduleEngine.releaseExecutionClaim(pending.claimKey, 'manual');
+  } catch(_e){}
   schedules = ScheduleEngine.getAll();
   renderSchedules();
   schLogEntry(sch.id, 'executed', '"' + sch.name + '" executed (' + schTypeLabel(sch.type) + ' · ' + (sch.amount||sch.total||0).toFixed(2) + ' ' + sch.token + ')');
@@ -30212,6 +30346,12 @@ function schCompleteRun(txHash){
 function schedulePause(id){
   var s = ScheduleEngine.getById(id);
   if(!s) return;
+  // Terminal states are never toggled back to Active (a failed/completed
+  // one-time schedule must not silently re-enter Active with nextRun=null).
+  if(s.status === 'Failed' || s.status === 'Completed'){
+    toast('Schedule is ' + s.status.toLowerCase() + ' — duplicate it to run again', 'warning');
+    return;
+  }
   var newStatus = s.status === 'Active' ? 'Paused' : 'Active';
   ScheduleEngine.update(id, { status: newStatus });
   schedules = ScheduleEngine.getAll();
@@ -30334,7 +30474,7 @@ function renderSchedules(){
 
   var freqLabel = {once:'One-time', daily:'Daily', weekly:'Weekly', biweekly:'Bi-weekly', monthly:'Monthly'};
   tbody.innerHTML = all.map(function(s){
-    var sc = {Active:'green', Paused:'yellow', Completed:'blue'}[s.status] || 'muted2';
+    var sc = {Active:'green', Paused:'yellow', Completed:'blue', Failed:'red'}[s.status] || 'muted2';
     var nextRun = formatUSDateTime(s.nextRun);
     var isDue = s.nextRun && new Date(s.nextRun) <= now && s.status === 'Active';
     var agentOn = s.agentExecution !== false;

@@ -151,7 +151,11 @@
     var claimKey = sched.id + '|' + sched.nextRun;
     var _claimAcquired = false;
     if (hasScheduleEngine() && typeof ScheduleEngine.claimExecution === 'function') {
-      if (!ScheduleEngine.claimExecution(claimKey, 'batch_execution_engine')) {
+      var _claimRes = await ScheduleEngine.claimExecution(claimKey, 'batch_execution_engine', {
+        scheduleId: sched.id, occurrenceId: claimKey,
+        wallet: sched.walletAddress || null, chain: 'Arc Testnet'
+      });
+      if (!_claimRes || !_claimRes.acquired) {
         return { ok: false, error: 'Schedule already claimed by another executor' };
       }
       _claimAcquired = true;
@@ -203,17 +207,37 @@
       save();
       emitStatus(execEntry);
 
-      // Execute via existing agent multisend function
-      await window._agentExecuteMultiSend(params.token, params.addresses, params.amounts);
+      // Execute via existing agent multisend function and VALIDATE the real result.
+      // _agentExecuteMultiSend returns { ok, txHash } and does NOT throw on business
+      // failures (insufficient balance, revert, not-confirmed). Treating any
+      // non-throwing return as success previously marked failed batches as completed.
+      var msResult = await window._agentExecuteMultiSend(params.token, params.addresses, params.amounts);
 
-      // Check if execution produced a result via the agent state messages
-      // _agentExecuteMultiSend is fire-and-forget in nature; we check for completion
+      if (!msResult || msResult.ok !== true) {
+        execEntry.status = 'failed';
+        execEntry.progressLabel = 'Batch failed: ' + ((msResult && msResult.error) || 'unknown on-chain failure');
+        execEntry.endTime = Date.now();
+        execEntry.txHash = (msResult && msResult.txHash) || null;
+        execEntry.retries = (execEntry.retries || 0) + 1;
+        updateIntentStatus(execEntry, 'failed');
+        if (_claimAcquired && hasScheduleEngine() && typeof ScheduleEngine.updateExecutionClaim === 'function') {
+          try { ScheduleEngine.updateExecutionClaim(claimKey, 'batch_execution_engine', { status: 'failed', txHash: execEntry.txHash }); } catch(_e) {}
+        }
+        save();
+        emitStatus(execEntry);
+        return { ok: false, error: (msResult && msResult.error) || 'batch failed', execEntry: execEntry };
+      }
+
       var elapsed = Date.now() - startTime;
       execEntry.status = 'completed';
       execEntry.progress = 100;
       execEntry.progressLabel = 'Batch completed ÔÇö ' + params.addresses.length + ' recipients';
       execEntry.endTime = Date.now();
       execEntry.retries = 0;
+      execEntry.txHash = msResult.txHash || null;
+      if (_claimAcquired && hasScheduleEngine() && typeof ScheduleEngine.updateExecutionClaim === 'function') {
+        try { ScheduleEngine.updateExecutionClaim(claimKey, 'batch_execution_engine', { status: 'confirmed', txHash: execEntry.txHash }); } catch(_e) {}
+      }
 
       // Generate report
       execEntry.report = generateReport(execEntry);
