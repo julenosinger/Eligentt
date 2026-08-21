@@ -119,6 +119,7 @@
 <script src="/shared/policyEngine.js"></script>
 <script src="/shared/agentAudit.js"></script>
 <script src="/shared/agentScheduleExecutor.js"></script>
+<script src="/shared/autonomaExecutionGate.js"></script>
 <script src="/shared/trustLayer.js"></script>
 <script src="/shared/missionEngine.js"></script>
 <script src="/shared/agentTreasury.js"></script>
@@ -47786,47 +47787,16 @@ setTimeout(function() {
     _agentStateMsg(execId, 'CANCELLED', 'Stopped by user');
   }
 
-  function _agentGetPrivateKey(){
-    // [C1 FIX] Deprecated — use _agentGetSigner() instead which uses encrypted v2 storage.
-    // Kept for backwards compat only.
-    try {
-      var sess = JSON.parse(localStorage.getItem('elligentt_agent_session_v1'));
-      if(sess && sess.privateKey) {
-        // Migrate to encrypted v2 if AgentWalletManager is available
-        if(typeof AgentWalletManager !== 'undefined'){
-          try { AgentWalletManager._migrateV1Key(sess.privateKey); } catch(e) {}
-        }
-        return sess.privateKey;
-      }
-    } catch(e) {}
-    if(typeof AgentWalletManager !== 'undefined'){
-      var w = AgentWalletManager.getOrCreateWallet();
-      if(w && w.privateKey) return w.privateKey;
-      var sk = AgentWalletManager.getSessionKey();
-      if(sk) return sk;
-    }
-    return null;
-  }
-
   /**
-   * [C1 FIX] Secure signer retrieval — uses encrypted v2 storage via AgentWalletManager.
-   * Falls back to legacy v1 only if v2 is unavailable.
+   * [AUTONOMA-2] Secure signer retrieval — the ONLY Autonoma agent signer source.
+   * Uses the encrypted session signer via AgentWalletManager. Fail-closed: if the
+   * secure signer is unavailable there is NO plaintext/raw-key fallback.
    */
   async function _agentGetSigner(){
-    if(typeof AgentWalletManager !== 'undefined'){
+    if(typeof AgentWalletManager !== 'undefined' && typeof AgentWalletManager.getSessionSigner === 'function'){
       try {
         var signer = await AgentWalletManager.getSessionSigner();
         if(signer) return signer;
-      } catch(e){}
-      // Sync fallback
-      try {
-        var key = _agentGetPrivateKey();
-        if(key){
-          if(typeof ethers !== 'undefined'){
-            var provider = _agentGetProvider();
-            return new ethers.Wallet(key, provider);
-          }
-        }
       } catch(e){}
     }
     return null;
@@ -47846,9 +47816,10 @@ setTimeout(function() {
     return new ethers.JsonRpcProvider('https://rpc.testnet.arc.network');
   }
 
-  /** [C2 FIX] Re-validate authorization immediately before signing — TOCTOU guard */
+  /** [C2 FIX] Re-validate authorization immediately before signing — TOCTOU guard.
+   *  [AUTONOMA-0] Fail-closed: missing authorization system → deny, never allow. */
   function _agentRevalidateAuth(operation, amount, asset){
-    if(typeof AgentAuthorization === 'undefined') return { ok: true };
+    if(typeof AgentAuthorization === 'undefined') return { ok: false, reason: 'Authorization system unavailable' };
     try {
       var result = AgentAuthorization.validateExecution({
         operation: operation, amount: Number(amount) || 0, asset: asset || 'USDC',
@@ -47862,7 +47833,7 @@ setTimeout(function() {
   }
 
   function _agentPreValidate(execId, operation, maxFeePerGasWei, gasLimitWei){
-    if(typeof AgentWalletManager==='undefined' || typeof AgentWalletManager.validatePreExecution==='undefined') return true;
+    if(typeof AgentWalletManager==='undefined' || typeof AgentWalletManager.validatePreExecution==='undefined') return false;
     var result = AgentWalletManager.validatePreExecution(operation, maxFeePerGasWei, gasLimitWei);
     if(!result.ok){
       _agentStateMsg(execId, 'REJECTED', result.reason || 'Pre-execution validation failed');
@@ -47879,7 +47850,92 @@ setTimeout(function() {
     if(typeof AgentAuthorization!=='undefined'){
       return AgentAuthorization.hasOperationAuth(operation);
     }
-    return true;
+    return false;
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  //  AUTONOMA-0 — Centralized execution gate integration
+  //  Every _agentExecute* broadcast MUST first pass AutonomaExecutionGate.
+  //  Fail-closed: gate unavailable / blocked → NO broadcast.
+  // ══════════════════════════════════════════════════════════════
+  async function _agentGateCheck(operation, amount, asset, params){
+    var intent = {
+      operation: operation,
+      amount: Number(amount) || 0,
+      asset: asset || 'USDC',
+      network: 'Arc Testnet'
+    };
+    if (params) {
+      if (params.address) intent.destination = params.address;
+      if (params.recipient) intent.destination = params.recipient;
+      if (Array.isArray(params.recipients)) intent.destinations = params.recipients;
+      if (params.chainId != null) intent.chainId = Number(params.chainId);
+      if (params.chainOperation) intent.chainOperation = params.chainOperation;
+    }
+    if (typeof AutonomaExecutionGate === 'undefined' || typeof AutonomaExecutionGate.authorizeAutonomaExecution !== 'function') {
+      return { ok:false, code:'gate_unavailable', reason:'execution gate unavailable', userMessage:'Autonomous financial execution is currently blocked because the execution safety gate is unavailable.' };
+    }
+    var res;
+    try {
+      res = await AutonomaExecutionGate.authorizeAutonomaExecution(intent, {});
+    } catch(e) {
+      res = { ok:false, code:'gate_unavailable', reason:(e && e.message) || String(e), userMessage:'Autonomous financial execution is currently blocked because the execution safety gate could not run.' };
+    }
+    return res;
+  }
+
+  function _agentGateBlock(execId, gate){
+    var msg = (gate && (gate.userMessage || gate.reason)) || 'Autonomous financial execution is currently blocked because explicit authorization/approval is required.';
+    _agentStateMsg(execId, 'REJECTED', msg);
+    try { console.warn('[AutonomaGate] blocked:', gate && gate.code, gate && gate.reason || ''); } catch(e){}
+    return { ok:false, blocked:true, code:(gate && gate.code) || null, error: msg };
+  }
+
+  function _agentGateClaimSubmit(claimKey, txHash){
+    if (!claimKey) return;
+    try {
+      if (typeof ScheduleEngine !== 'undefined' && typeof ScheduleEngine.updateExecutionClaim === 'function') {
+        ScheduleEngine.updateExecutionClaim(claimKey, 'autonoma_execution_gate', { status:'submitted', txHash: txHash || null });
+      }
+    } catch(e){}
+  }
+
+  function _agentGateClaimDone(claimKey, status, txHash){
+    if (!claimKey) return;
+    try {
+      if (typeof ScheduleEngine !== 'undefined' && typeof ScheduleEngine.updateExecutionClaim === 'function') {
+        ScheduleEngine.updateExecutionClaim(claimKey, 'autonoma_execution_gate', { status: status, txHash: txHash || null });
+      }
+    } catch(e){}
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  //  AUTONOMA-1 — Single execution authority primitives.
+  //  The _agentExecute* adapters MUST NOT sign/broadcast/read-nonce/wait
+  //  directly. They route every blockchain I/O through AgentScheduleExecutor
+  //  (the MS-2/MS-3/MS-4 protected executor). Fail-closed if the authority
+  //  is unavailable — there is NO fallback to a direct broadcast.
+  // ══════════════════════════════════════════════════════════════
+  function _authority(){
+    try { return (typeof AgentScheduleExecutor !== 'undefined') ? AgentScheduleExecutor : null; } catch(e){ return null; }
+  }
+
+  async function _agentNextNonce(provider, from){
+    var a = _authority();
+    if (!a || typeof a.nextNonce !== 'function') throw new Error('Execution authority unavailable (nonce)');
+    return await a.nextNonce(provider, from);
+  }
+
+  async function _agentBroadcast(signer, provider, rawTx){
+    var a = _authority();
+    if (!a || typeof a.broadcast !== 'function') throw new Error('Execution authority unavailable (broadcast)');
+    return await a.broadcast(signer, provider, rawTx);
+  }
+
+  async function _agentWaitReceipt(provider, txHash){
+    var a = _authority();
+    if (!a || typeof a.waitReceipt !== 'function') throw new Error('Execution authority unavailable (receipt)');
+    return await a.waitReceipt(provider, txHash);
   }
 
   function _agentExecutionBanner(operation, amount, asset){
@@ -47943,6 +47999,10 @@ setTimeout(function() {
         _agentStateMsg(execId, 'FAILED', 'Invalid recipient address'); return;
       }
 
+      // [AUTONOMA-0] Hard execution gate — fail-closed. No broadcast without it.
+      var paymentGate = await _agentGateCheck('payment', amount, asset, { address: dest });
+      if(!paymentGate.ok){ return _agentGateBlock(execId, paymentGate); }
+
       _agentStateMsg(execId, 'BROADCASTING', 'Send '+amount+' USDC to '+dest.substring(0,8)+'...');
       if (_agentStopCheck(execId)) return;
 
@@ -47952,7 +48012,7 @@ setTimeout(function() {
 
       var txHash = '';
       try {
-        var nonce = await provider.send('eth_getTransactionCount', [agentAddr, 'pending']);
+        var nonce = await _agentNextNonce(provider, agentAddr);
 
         var gasParams = await _agentGetGasParams();
         var rawTx = {
@@ -47971,8 +48031,9 @@ setTimeout(function() {
         // [C2 FIX] TOCTOU: re-validate authorization immediately before signing
         var recheck = _agentRevalidateAuth('payment', amount, asset);
         if(!recheck.ok){ _agentStateMsg(execId, 'REJECTED', recheck.reason); return; }
-        var signedTx = await signer.signTransaction(rawTx);
-        txHash = await provider.send('eth_sendRawTransaction', [signedTx]);
+        // [AUTONOMA-1] Single execution authority broadcast (no direct send).
+        txHash = await _agentBroadcast(signer, provider, rawTx);
+        _agentGateClaimSubmit(paymentGate.claimKey, txHash);
       } catch(sendErr){
         var eMsg = (sendErr.message || String(sendErr)).substring(0, 150);
         if(/user.rejected|denied/i.test(eMsg)) _agentStateMsg(execId, 'REJECTED', 'User rejected');
@@ -47989,16 +48050,23 @@ setTimeout(function() {
 
       _agentStateMsg(execId, 'CONFIRMING', 'Awaiting block');
 
-      var receipt;
-      try { receipt = await provider.waitForTransaction(txHash, 1, 60000); }
+      var rec;
+      try { rec = await _agentWaitReceipt(provider, txHash); }
       catch(e){ _agentStateMsg(execId, 'DROPPED', 'Not confirmed'); return; }
 
-      if(!receipt || receipt.status !== 1){
-        _agentStateMsg(execId, 'REVERTED', '<a href="https://testnet.arcscan.app/tx/'+txHash+'" target="_blank" style="color:#ef4444">View on ArcScan ↗</a>');
+      if(!rec || !rec.ok || !rec.receipt || rec.receipt.status !== 1){
+        if(rec && rec.receipt && rec.receipt.status === 0){
+          _agentGateClaimDone(paymentGate.claimKey, 'failed', txHash);
+          _agentStateMsg(execId, 'REVERTED', '<a href="https://testnet.arcscan.app/tx/'+txHash+'" target="_blank" style="color:#ef4444">View on ArcScan ↗</a>');
+          return;
+        }
+        _agentStateMsg(execId, 'DROPPED', 'Not confirmed');
         return;
       }
+      var receipt = rec.receipt;
 
       _agentStateMsg(execId, 'COMPLETED');
+      _agentGateClaimDone(paymentGate.claimKey, 'confirmed', txHash);
 
       _addAgentResultMsg(
         '<div style="font-size:10px">'+
@@ -48189,6 +48257,10 @@ setTimeout(function() {
   async function _agentExecuteSwap(amount, tokenIn, tokenOut, calldataId){
     var execId = 'exec_' + Date.now();
 
+    // [AUTONOMA-0] Hard execution gate — fail-closed. No broadcast without it.
+    var swapGate = await _agentGateCheck('swap', amount, tokenIn, {});
+    if(!swapGate.ok){ _agentGateBlock(execId, swapGate); return { ok:false, error: swapGate.userMessage || swapGate.reason }; }
+
     // [C1 FIX] Use encrypted v2 signer via AgentWalletManager
     var signer = await _agentGetSigner();
     if(!signer){
@@ -48234,7 +48306,7 @@ setTimeout(function() {
 
       try {
         var gasParams = await _agentGetGasParams();
-        var nonce = await provider.send('eth_getTransactionCount', [agentAddr, 'pending']);
+        var nonce = await _agentNextNonce(provider, agentAddr);
 
         var rawTx = {
           type: 2,  // EIP-1559
@@ -48252,9 +48324,10 @@ setTimeout(function() {
         // [C2 FIX] TOCTOU: re-validate swap authorization immediately before signing
         var swapRecheck = _agentRevalidateAuth('swap', amount, tokenIn);
         if(!swapRecheck.ok){ _agentStateMsg(execId, 'REJECTED', swapRecheck.reason); return { ok: false, error: swapRecheck.reason }; }
-        var signedTx = await signer.signTransaction(rawTx);
-        var txHash = await provider.send('eth_sendRawTransaction', [signedTx]);
+        // [AUTONOMA-1] Single execution authority broadcast (no direct send).
+        var txHash = await _agentBroadcast(signer, provider, rawTx);
         lastTxHash = txHash;
+        _agentGateClaimSubmit(swapGate.claimKey, txHash);
 
         _addAgentResultMsg(
           '<div style="font-size:10px"><span style="color:#06F7E9">Step '+(i+1)+': '+step.label+' submitted</span><br>'+
@@ -48273,12 +48346,13 @@ setTimeout(function() {
       // ⏳ Wait for confirmation
       _agentStateMsg(execId, 'CONFIRMING', 'Step '+(i+1)+' awaiting block...');
 
-      try {
-        lastReceipt = await provider.waitForTransaction(txHash, 1, 60000);
-      } catch(waitErr){
-        _agentStateMsg(execId, 'DROPPED', 'Tx not confirmed within 60s');
-        return { ok: false, error: 'Tx not confirmed within 60s' };
+      var rec = await _agentWaitReceipt(provider, txHash);
+      if(!rec || !rec.ok || !rec.receipt || rec.receipt.status !== 1){
+        _agentStateMsg(execId, (rec && rec.receipt && rec.receipt.status === 0) ? 'REVERTED' : 'DROPPED',
+          (rec && rec.receipt && rec.receipt.status === 0) ? 'Step '+(i+1)+' reverted on-chain.' : 'Tx not confirmed within 60s');
+        return { ok: false, error: (rec && rec.receipt && rec.receipt.status === 0) ? 'Step '+(i+1)+' reverted on-chain' : 'Tx not confirmed within 60s' };
       }
+      lastReceipt = rec.receipt;
 
       if(!lastReceipt || lastReceipt.status !== 1){
         _agentStateMsg(execId, 'REVERTED',
@@ -48295,6 +48369,7 @@ setTimeout(function() {
     // All steps confirmed — post-verify
     _agentStateMsg(execId, 'VERIFYING', 'Checking on-chain state...');
     _agentStateMsg(execId, 'COMPLETED');
+    _agentGateClaimDone(swapGate.claimKey, 'confirmed', lastTxHash);
 
     var duration = Date.now() - startTime;
     _addAgentResultMsg(
@@ -48333,6 +48408,10 @@ setTimeout(function() {
   async function _agentExecuteBridge(amount, destDomain, destChainName, calldataId, sourceChainId, recipientAddr){
     var execId = 'exec_' + Date.now();
     var chainId = Number(sourceChainId) || 5042002; // default: Arc Testnet
+
+    // [AUTONOMA-0] Hard execution gate — fail-closed. No broadcast without it.
+    var bridgeGate = await _agentGateCheck('bridge', amount, 'USDC', { chainId: chainId, recipient: recipientAddr });
+    if(!bridgeGate.ok){ _agentGateBlock(execId, bridgeGate); return { ok:false, error: bridgeGate.userMessage || bridgeGate.reason }; }
     var cctpCfg = (typeof ElligenteCCTP !== 'undefined' && ElligenteCCTP.CCTP_CONFIG) ? ElligenteCCTP.CCTP_CONFIG[String(chainId)] : null;
     if(!cctpCfg){
       // Fallback chain config
@@ -48421,7 +48500,7 @@ setTimeout(function() {
       }
 
       try {
-        var nonce = await provider.send('eth_getTransactionCount', [agentAddr, 'pending']);
+        var nonce = await _agentNextNonce(provider, agentAddr);
         var rawTx = {
           type: 2,
           chainId: chainId,
@@ -48435,9 +48514,10 @@ setTimeout(function() {
         };
 
         if(!_agentPreValidate(execId, 'bridge', rawTx.maxFeePerGas, rawTx.gasLimit)) return { ok: false, error: 'Pre-execution validation failed' };
-        var signedTx = await signer.signTransaction(rawTx);
-        var txHash = await provider.send('eth_sendRawTransaction', [signedTx]);
+        // [AUTONOMA-1] Single execution authority broadcast (no direct send).
+        var txHash = await _agentBroadcast(signer, provider, rawTx);
         lastTxHash = txHash;
+        _agentGateClaimSubmit(bridgeGate.claimKey, txHash);
 
         _addAgentResultMsg(
           '<div style="font-size:10px"><span style="color:#06F7E9">Step '+(i+1)+': '+step.label+' submitted</span><br>'+
@@ -48454,8 +48534,13 @@ setTimeout(function() {
       }
 
       _agentStateMsg(execId, 'CONFIRMING', 'Step '+(i+1)+' awaiting block...');
-      try { lastReceipt = await provider.waitForTransaction(txHash, 1, 60000); }
-      catch(waitErr){ _agentStateMsg(execId, 'DROPPED', 'Tx not confirmed within 60s'); return { ok: false, error: 'Tx not confirmed within 60s' }; }
+      var rec = await _agentWaitReceipt(provider, txHash);
+      if(!rec || !rec.ok || !rec.receipt || rec.receipt.status !== 1){
+        _agentStateMsg(execId, (rec && rec.receipt && rec.receipt.status === 0) ? 'REVERTED' : 'DROPPED',
+          (rec && rec.receipt && rec.receipt.status === 0) ? 'Step '+(i+1)+' reverted on-chain.' : 'Tx not confirmed within 60s');
+        return { ok: false, error: (rec && rec.receipt && rec.receipt.status === 0) ? 'Step '+(i+1)+' reverted on-chain' : 'Tx not confirmed within 60s' };
+      }
+      lastReceipt = rec.receipt;
 
       if(!lastReceipt || lastReceipt.status !== 1){
         _agentStateMsg(execId, 'REVERTED', 'Step '+(i+1)+' reverted on-chain.');
@@ -48533,9 +48618,10 @@ setTimeout(function() {
         }
         if(destCctpCfg && destCctpCfg.messageTransmitter && destCctpCfg.rpc){
           var destProvider = new ethers.JsonRpcProvider(destCctpCfg.rpc);
-          var sessionKey = (typeof AgentWalletManager !== 'undefined') ? AgentWalletManager.getSessionKey() : null;
-          if (!sessionKey) { _agentStateMsg(execId, 'FAILED', 'Agent wallet not available'); return { ok: false, error: 'Agent wallet not available' }; }
-          var destSigner = new ethers.Wallet(sessionKey, destProvider);
+          // [AUTONOMA-2] Get a signer (never the raw key) via the canonical signer source.
+          var destSigner = (typeof AgentWalletManager !== 'undefined' && typeof AgentWalletManager.getSessionSigner === 'function')
+            ? await AgentWalletManager.getSessionSigner(destProvider) : null;
+          if (!destSigner) { _agentStateMsg(execId, 'FAILED', 'Agent wallet not available'); return { ok: false, error: 'Agent wallet not available' }; }
           var destMtAbi = ['function receiveMessage(bytes message, bytes attestation) returns (bool)'];
           var destMtContract = new ethers.Contract(destCctpCfg.messageTransmitter, destMtAbi, destSigner);
           var mintTx = await destMtContract.receiveMessage(attestResult.messageBytes, attestResult.attestationSig);
@@ -48554,6 +48640,7 @@ setTimeout(function() {
     }
 
     _agentStateMsg(execId, 'COMPLETED');
+    _agentGateClaimDone(bridgeGate.claimKey, 'confirmed', lastTxHash);
 
     var duration = Date.now() - startTime;
     // Destination explorer URL
@@ -48611,6 +48698,10 @@ setTimeout(function() {
   async function _agentExecuteTurboBridge(amount, fromChainId, fromChainName, toChainName, calldataId){
     var execId = 'exec_' + Date.now();
     var chainId = Number(fromChainId) || 11155111; // default: Ethereum Sepolia
+
+    // [AUTONOMA-0] Hard execution gate — fail-closed. No broadcast without it.
+    var turboGate = await _agentGateCheck('bridge', amount, 'USDC', { chainId: chainId, chainOperation: 'turbo_bridge' });
+    if(!turboGate.ok){ _agentGateBlock(execId, turboGate); return { ok:false, error: turboGate.userMessage || turboGate.reason }; }
     var cctpCfg = (typeof ElligenteCCTP !== 'undefined' && ElligenteCCTP.CCTP_CONFIG) ? ElligenteCCTP.CCTP_CONFIG[String(chainId)] : null;
     var fallbackConfigs = {
       11155111: { rpc:'https://ethereum-sepolia-rpc.publicnode.com', usdc:'0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238', explorer:'https://sepolia.etherscan.io', tokenMessenger:'0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA', domain:0 },
@@ -48689,12 +48780,13 @@ setTimeout(function() {
       }
 
       try {
-        var nonce = await provider.send('eth_getTransactionCount', [agentAddr, 'pending']);
+        var nonce = await _agentNextNonce(provider, agentAddr);
         var rawTx = { type:2, chainId:chainId, to:contractAddr, data:calldata, value:'0x0', gasLimit:ethers.toBeHex(gasParams.gasLimit), nonce:nonce, maxFeePerGas:ethers.toBeHex(gasParams.maxFeePerGas), maxPriorityFeePerGas:ethers.toBeHex(gasParams.maxPriorityFeePerGas) };
         if(!_agentPreValidate(execId, 'bridge', rawTx.maxFeePerGas, rawTx.gasLimit)) return { ok: false, error: 'Pre-execution validation failed' };
-        var signedTx = await signer.signTransaction(rawTx);
-        var txHash = await provider.send('eth_sendRawTransaction', [signedTx]);
+        // [AUTONOMA-1] Single execution authority broadcast (no direct send).
+        var txHash = await _agentBroadcast(signer, provider, rawTx);
         lastTxHash = txHash;
+        _agentGateClaimSubmit(turboGate.claimKey, txHash);
         _addAgentResultMsg('<div style="font-size:10px"><span style="color:#06F7E9">Step '+(i+1)+': '+step.label+' submitted</span><br><code style="font-size:8px;color:#a78bfa">'+txHash+'</code><br><a href="'+EXPLORER_URL+'/tx/'+txHash+'" target="_blank" style="color:#a78bfa;font-size:8px">View on Explorer ↗</a></div>', 'pending');
       } catch(sendErr){
         var eMsg = (sendErr.message || String(sendErr)).substring(0, 150);
@@ -48704,8 +48796,9 @@ setTimeout(function() {
         return;
       }
       _agentStateMsg(execId, 'CONFIRMING', 'Step '+(i+1)+' awaiting block...');
-      try { lastReceipt = await provider.waitForTransaction(txHash, 1, 60000); }
-      catch(waitErr){ _agentStateMsg(execId, 'DROPPED', 'Tx not confirmed within 60s'); return; }
+      var rec = await _agentWaitReceipt(provider, txHash);
+      if(!rec || !rec.ok || !rec.receipt || rec.receipt.status !== 1){ _agentStateMsg(execId, (rec && rec.receipt && rec.receipt.status === 0) ? 'REVERTED' : 'DROPPED', (rec && rec.receipt && rec.receipt.status === 0) ? 'Step '+(i+1)+' reverted on-chain.' : 'Tx not confirmed within 60s'); return; }
+      lastReceipt = rec.receipt;
       if(!lastReceipt || lastReceipt.status !== 1){ _agentStateMsg(execId, 'REVERTED', 'Step '+(i+1)+' reverted on-chain.'); return; }
       _addAgentResultMsg('<div style="font-size:10px"><span style="color:#22c55e">✓ Step '+(i+1)+' confirmed</span><br><span style="color:var(--muted);font-size:8px">Block #'+lastReceipt.blockNumber+' · Gas: '+Number(lastReceipt.gasUsed)+'</span></div>', 'success');
     }
@@ -48740,9 +48833,10 @@ setTimeout(function() {
       _agentStateMsg(execId, 'MINTING', 'Calling receiveMessage on ARC...');
       try {
         var arcProvider = new ethers.JsonRpcProvider('https://arc-testnet.drpc.org');
-        var sessionKey = (typeof AgentWalletManager !== 'undefined') ? AgentWalletManager.getSessionKey() : null;
-        if (!sessionKey) { _agentStateMsg(execId, 'FAILED', 'Agent wallet not available'); return; }
-        var arcSigner = new ethers.Wallet(sessionKey, arcProvider);
+        // [AUTONOMA-2] Get a signer (never the raw key) via the canonical signer source.
+        var arcSigner = (typeof AgentWalletManager !== 'undefined' && typeof AgentWalletManager.getSessionSigner === 'function')
+          ? await AgentWalletManager.getSessionSigner(arcProvider) : null;
+        if (!arcSigner) { _agentStateMsg(execId, 'FAILED', 'Agent wallet not available'); return; }
         var arcMtAbi = ['function receiveMessage(bytes message, bytes attestation) returns (bool)'];
         var arcMtContract = new ethers.Contract('0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275', arcMtAbi, arcSigner);
         var mintTx = await arcMtContract.receiveMessage(attestResult.messageBytes, attestResult.attestationSig);
@@ -48794,6 +48888,11 @@ setTimeout(function() {
 
   async function _agentExecuteLiquidity(operation, amountA, tokenA, amountB, tokenB, poolId){
     var execId = 'exec_' + Date.now();
+
+    // [AUTONOMA-0] Hard execution gate — fail-closed. No broadcast without it.
+    var liqOp = (operation === 'remove' || operation === 'remove_liquidity') ? 'remove_liquidity' : 'add_liquidity';
+    var liqGate = await _agentGateCheck(liqOp, amountA, tokenA, {});
+    if(!liqGate.ok){ _agentGateBlock(execId, liqGate); return { ok:false, error: liqGate.userMessage || liqGate.reason }; }
 
     // [C1 FIX] Use encrypted v2 signer via AgentWalletManager
     var signer = await _agentGetSigner();
@@ -48883,7 +48982,7 @@ setTimeout(function() {
       _agentStateMsg(execId, 'BROADCASTING', 'Step '+(i+1)+'/'+totalSteps+': '+step.label);
       try {
         var gasParams = await _agentGetGasParams();
-        var nonce = await provider.send('eth_getTransactionCount', [agentAddr, 'pending']);
+        var nonce = await _agentNextNonce(provider, agentAddr);
         var rawTx = {
           type: 2, chainId: 5042002,
           to: step.contract,
@@ -48895,9 +48994,10 @@ setTimeout(function() {
           maxPriorityFeePerGas: ethers.toBeHex(gasParams.maxPriorityFeePerGas)
         };
         if(!_agentPreValidate(execId, opType||'liquidity', rawTx.maxFeePerGas, rawTx.gasLimit)) return;
-        var signedTx = await signer.signTransaction(rawTx);
-        var txHash = await provider.send('eth_sendRawTransaction', [signedTx]);
+        // [AUTONOMA-1] Single execution authority broadcast (no direct send).
+        var txHash = await _agentBroadcast(signer, provider, rawTx);
         lastTxHash = txHash;
+        _agentGateClaimSubmit(liqGate.claimKey, txHash);
         _addAgentResultMsg('<div style="font-size:10px"><span style="color:#06F7E9">Step '+(i+1)+': '+step.label+' submitted</span><br><code style="font-size:8px;color:#a78bfa">'+txHash+'</code></div>', 'pending');
       } catch(sendErr){
         var eMsg = (sendErr.message || String(sendErr)).substring(0, 150);
@@ -48908,8 +49008,9 @@ setTimeout(function() {
       }
 
       _agentStateMsg(execId, 'CONFIRMING', 'Step '+(i+1)+' awaiting block...');
-      try { lastReceipt = await provider.waitForTransaction(txHash, 1, 60000); }
-      catch(waitErr){ _agentStateMsg(execId, 'DROPPED', 'Tx not confirmed within 60s'); return; }
+      var rec = await _agentWaitReceipt(provider, txHash);
+      if(!rec || !rec.ok || !rec.receipt || rec.receipt.status !== 1){ _agentStateMsg(execId, (rec && rec.receipt && rec.receipt.status === 0) ? 'REVERTED' : 'DROPPED', (rec && rec.receipt && rec.receipt.status === 0) ? 'Step '+(i+1)+' reverted on-chain.' : 'Tx not confirmed within 60s'); return; }
+      lastReceipt = rec.receipt;
 
       if(!lastReceipt || lastReceipt.status !== 1){
         _agentStateMsg(execId, 'REVERTED', 'Step '+(i+1)+' reverted on-chain.');
@@ -48919,6 +49020,7 @@ setTimeout(function() {
     }
 
     _agentStateMsg(execId, 'COMPLETED');
+    _agentGateClaimDone(liqGate.claimKey, 'confirmed', lastTxHash);
     var duration = Date.now() - startTime;
 
     _addAgentResultMsg(
@@ -48950,6 +49052,12 @@ setTimeout(function() {
 
   async function _agentExecuteMultiSend(token, recipients, amounts){
     var execId = 'exec_' + Date.now();
+
+    // [AUTONOMA-0] Hard execution gate — fail-closed. No broadcast without it.
+    var msTotal = 0;
+    try { if (Array.isArray(amounts)) { for (var _mi = 0; _mi < amounts.length; _mi++) { msTotal += Number(amounts[_mi]) || 0; } } } catch(e){}
+    var msGate = await _agentGateCheck('multisend', msTotal, token, { recipients: recipients });
+    if(!msGate.ok){ _agentGateBlock(execId, msGate); return { ok:false, error: msGate.userMessage || msGate.reason }; }
 
     // [C1 FIX] Use encrypted v2 signer via AgentWalletManager
     var signer = await _agentGetSigner();
@@ -48998,7 +49106,7 @@ setTimeout(function() {
     try {
       var gasParams = await _agentGetGasParams();
       var approveData = tokenContract.interface.encodeFunctionData('approve', [EXECUTOR_V4_ADDRESS, totalBig * 2n]);
-      var nonce = await provider.send('eth_getTransactionCount', [agentAddr, 'pending']);
+      var nonce = await _agentNextNonce(provider, agentAddr);
       var rawTx = {
         type: 2, chainId: 5042002,
         to: tokenAddr,
@@ -49010,9 +49118,10 @@ setTimeout(function() {
         maxPriorityFeePerGas: ethers.toBeHex(gasParams.maxPriorityFeePerGas)
       };
       if(!_agentPreValidate(execId, 'multisend', rawTx.maxFeePerGas, rawTx.gasLimit)) return { ok: false, error: 'Pre-execution validation failed (approve)' };
-      var signedTx = await signer.signTransaction(rawTx);
-      var txHash = await provider.send('eth_sendRawTransaction', [signedTx]);
+      // [AUTONOMA-1] Single execution authority broadcast (no direct send).
+      var txHash = await _agentBroadcast(signer, provider, rawTx);
       lastTxHash = txHash;
+      _agentGateClaimSubmit(msGate.claimKey, txHash);
       _addAgentResultMsg('<div style="font-size:10px"><span style="color:#06F7E9">Step 1: Approve submitted</span><br><code style="font-size:8px;color:#a78bfa">'+txHash+'</code></div>', 'pending');
     } catch(sendErr){
       _agentStateMsg(execId, 'FAILED', (sendErr.message||String(sendErr)).substring(0,150));
@@ -49020,9 +49129,9 @@ setTimeout(function() {
     }
 
     _agentStateMsg(execId, 'CONFIRMING', 'Step 1 awaiting block...');
-    try { lastReceipt = await provider.waitForTransaction(lastTxHash, 1, 60000); }
-    catch(e){ _agentStateMsg(execId, 'DROPPED', 'Not confirmed'); return { ok: false, error: 'Approve not confirmed' }; }
-    if(!lastReceipt || lastReceipt.status !== 1){ _agentStateMsg(execId, 'REVERTED', 'Approve reverted'); return { ok: false, error: 'Approve reverted' }; }
+    var rec1 = await _agentWaitReceipt(provider, lastTxHash);
+    if(!rec1 || !rec1.ok || !rec1.receipt || rec1.receipt.status !== 1){ _agentStateMsg(execId, (rec1 && rec1.receipt && rec1.receipt.status === 0) ? 'REVERTED' : 'DROPPED', (rec1 && rec1.receipt && rec1.receipt.status === 0) ? 'Approve reverted' : 'Approve not confirmed'); return { ok: false, error: (rec1 && rec1.receipt && rec1.receipt.status === 0) ? 'Approve reverted' : 'Approve not confirmed' }; }
+    lastReceipt = rec1.receipt;
     _addAgentResultMsg('<div style="font-size:10px"><span style="color:#22c55e">&#x2713; Step 1 confirmed</span></div>', 'success');
 
     // Step 2: Multi-send
@@ -49033,7 +49142,7 @@ setTimeout(function() {
     try {
       var gasParams2 = await _agentGetGasParams();
       var batchData = executorContract.interface.encodeFunctionData('sendTokenBatch', [tokenAddr, recipients, amountBigs]);
-      var nonce2 = await provider.send('eth_getTransactionCount', [agentAddr, 'pending']);
+      var nonce2 = await _agentNextNonce(provider, agentAddr);
       var rawTx2 = {
         type: 2, chainId: 5042002,
         to: EXECUTOR_V4_ADDRESS,
@@ -49045,9 +49154,10 @@ setTimeout(function() {
         maxPriorityFeePerGas: ethers.toBeHex(gasParams2.maxPriorityFeePerGas)
       };
       if(!_agentPreValidate(execId, 'multisend', rawTx2.maxFeePerGas, rawTx2.gasLimit)) return { ok: false, error: 'Pre-execution validation failed (multisend)' };
-      var signedTx2 = await signer.signTransaction(rawTx2);
-      var txHash2 = await provider.send('eth_sendRawTransaction', [signedTx2]);
+      // [AUTONOMA-1] Single execution authority broadcast (no direct send).
+      var txHash2 = await _agentBroadcast(signer, provider, rawTx2);
       lastTxHash = txHash2;
+      _agentGateClaimSubmit(msGate.claimKey, txHash2);
       _addAgentResultMsg('<div style="font-size:10px"><span style="color:#06F7E9">Step 2: Multi-send submitted</span><br><code style="font-size:8px;color:#a78bfa">'+txHash2+'</code><br><a href="https://testnet.arcscan.app/tx/'+txHash2+'" target="_blank" style="color:#a78bfa;font-size:8px">View on ArcScan →</a></div>', 'pending');
     } catch(sendErr){
       _agentStateMsg(execId, 'FAILED', (sendErr.message||String(sendErr)).substring(0,150));
@@ -49055,11 +49165,12 @@ setTimeout(function() {
     }
 
     _agentStateMsg(execId, 'CONFIRMING', 'Step 2 awaiting block...');
-    try { lastReceipt = await provider.waitForTransaction(lastTxHash, 1, 60000); }
-    catch(e){ _agentStateMsg(execId, 'DROPPED', 'Not confirmed'); return { ok: false, error: 'Multi-send not confirmed' }; }
-    if(!lastReceipt || lastReceipt.status !== 1){ _agentStateMsg(execId, 'REVERTED', 'Multi-send reverted'); return { ok: false, error: 'Multi-send reverted' }; }
+    var rec2 = await _agentWaitReceipt(provider, lastTxHash);
+    if(!rec2 || !rec2.ok || !rec2.receipt || rec2.receipt.status !== 1){ _agentStateMsg(execId, (rec2 && rec2.receipt && rec2.receipt.status === 0) ? 'REVERTED' : 'DROPPED', (rec2 && rec2.receipt && rec2.receipt.status === 0) ? 'Multi-send reverted' : 'Multi-send not confirmed'); return { ok: false, error: (rec2 && rec2.receipt && rec2.receipt.status === 0) ? 'Multi-send reverted' : 'Multi-send not confirmed' }; }
+    lastReceipt = rec2.receipt;
 
     _agentStateMsg(execId, 'COMPLETED');
+    _agentGateClaimDone(msGate.claimKey, 'confirmed', lastTxHash);
     var duration = Date.now() - startTime;
 
     _addAgentResultMsg(
