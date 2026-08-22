@@ -97,6 +97,16 @@
   }
 
   function _intentKey(intent) {
+    // A NEW user Chat action carries a unique executionId, generated ONCE at the
+    // Chat boundary and propagated unchanged through every internal hop (NLU /
+    // router / adapters). That id — not the financial parameters — is what makes
+    // two independent commands distinct. The same executionId routed twice MUST
+    // collapse to the same claim key (idempotency). When no executionId is
+    // supplied (legacy callers / schedule delegation), fall back to the
+    // deterministic financial-parameter identity so existing behavior is preserved.
+    if (intent.executionId && typeof intent.executionId === 'string' && intent.executionId.length) {
+      return 'aut0_' + _djb2('exec:' + intent.executionId);
+    }
     var dests = (intent.destinations || []).slice();
     if (!dests.length && intent.destination) dests.push(intent.destination);
     dests = dests.map(function (d) { return String(d).toLowerCase(); }).sort();
@@ -113,11 +123,12 @@
 
   function _chainAllowed(operation, chainId) {
     var id = Number(chainId);
-    if (operation === 'bridge' || operation === 'crosschain') {
-      // Agent bridge execution supports Arc Testnet source only (mirrors AgentScheduleExecutor).
-      return id === ARC_CHAIN_ID;
-    }
-    if (operation === 'turbo_bridge') {
+    if (operation === 'bridge' || operation === 'crosschain' || operation === 'turbo_bridge') {
+      // Agent bridge / cross-chain execution supports every CCTP source chain the
+      // existing Bridge/CCTP implementation supports — Arc AND the trusted external
+      // chains — in BOTH directions. The source chain is not hardcoded to Arc.
+      // Unsupported source chains are rejected here (fail-closed) and never
+      // fall through to a broadcast.
       return CCTP_SOURCE_CHAINS.indexOf(id) !== -1;
     }
     return id === ARC_CHAIN_ID;
@@ -239,7 +250,8 @@
     if (!eng || typeof eng.claimExecution !== 'function') return _block('execution_authority_unavailable');
     claimKey = _intentKey({
       operation: operation, wallet: agentAddr, asset: asset, amount: amount,
-      destinations: destinations, destination: destination, chainId: chainId
+      destinations: destinations, destination: destination, chainId: chainId,
+      executionId: intent.executionId || null
     });
     var claimRes;
     try {
