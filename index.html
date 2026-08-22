@@ -48545,8 +48545,21 @@ setTimeout(function() {
             USDC_ADDR,
             ethers.ZeroHash,
             ethers.parseUnits('0.5', 6),
-            0
+            1000
           ]);
+          // [AUTONOMA-5] The burn MUST target the SOURCE chain's tokenMessenger
+          // (same contract/domain as the normal Bridge), never Arc's.
+          contractAddr = MESSENGER_ADDR;
+        } catch(e){}
+      }
+      // [AUTONOMA-5] The approve MUST target the SOURCE chain's USDC and the SOURCE
+      // tokenMessenger (same contracts as the normal Bridge). Fixes external -> Arc
+      // "reverts at burn": the old plan approved Arc's USDC instead of the source USDC.
+      if(txData.method === 'approve' && typeof ethers !== 'undefined'){
+        try {
+          var apprIface = new ethers.Interface(['function approve(address spender, uint256 amount) returns (bool)']);
+          calldata = apprIface.encodeFunctionData('approve', [MESSENGER_ADDR, ethers.parseUnits(String(amount), 6)]);
+          contractAddr = USDC_ADDR;
         } catch(e){}
       }
 
