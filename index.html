@@ -45603,6 +45603,9 @@ const UBScreen = (function() {
     if(fromM&&chainMap[fromM[1]]!==undefined) fromIdx=chainMap[fromM[1]];
     if(toM&&chainMap[toM[1]]!==undefined) toIdx=chainMap[toM[1]];
     if(fromIdx===toIdx) toIdx=fromIdx===0?2:0;
+    // [AUTONOMA-4] A NORMAL bridge intent must use CCTP V2, never Turbo Bridge.
+    // Turbo Bridge is selected ONLY for an explicit "turbo/fast/quick" request.
+    var isTurbo = /\b(turbo|fast|r[aá]pida|rapida|quick)\b/i.test(low);
     const fromName=CHAINS[fromIdx]?.name||'Unknown',toName=CHAINS[toIdx]?.name||'Unknown';
     var permCheckB = _requirePermit('bridge', amt, 'USDC', fromName, '', 'Bridge ' + amt + ' USDC from ' + fromName + ' to ' + toName, 'Bridge ' + amt + ' USDC from ' + fromName + ' to ' + toName);
     if(typeof permCheckB === 'string') return permCheckB;
@@ -45667,8 +45670,8 @@ const UBScreen = (function() {
         _agentExecutionBanner('bridge', amt, 'USDC'),
         R.actions(
           {icon:'player-play',label:'Open Bridge & Pre-fill',cls:'confirm',action:"window._autoNavBridge("+amt+","+fromIdx+","+toIdx+")"},
-          (_agentCanExecute('bridge') && calldataPlan && fromIdx===0 ? {icon:'robot',label:'Execute via Agent',cls:'confirm',action:"_agentExecuteBridge("+amt+","+destDomain+",'"+toName+"','"+bridgeCalldataId+"',"+srcChainId+",null,'"+execId+"')"} :
-           _agentCanExecute('bridge') && calldataPlan ? {icon:'bolt',label:'Turbo Bridge via Agent',cls:'confirm',action:"_agentExecuteTurboBridge("+amt+","+srcChainId+",'"+fromName+"','"+toName+"','"+bridgeCalldataId+"','"+execId+"')"} :
+          (_agentCanExecute('bridge') && calldataPlan && isTurbo && fromIdx!==0 ? {icon:'bolt',label:'Turbo Bridge via Agent',cls:'confirm',action:"_agentExecuteTurboBridge("+amt+","+srcChainId+",'"+fromName+"','"+toName+"','"+bridgeCalldataId+"','"+execId+"')"} :
+           _agentCanExecute('bridge') && calldataPlan ? {icon:'robot',label:'Execute via Agent (CCTP V2)',cls:'confirm',action:"_agentExecuteBridge("+amt+","+destDomain+",'"+toName+"','"+bridgeCalldataId+"',"+srcChainId+",null,'"+execId+"')"} :
            {icon:'x',label:'Cancel',cls:'danger',action:"autCancelOp('none')"})
         )
       );
@@ -48447,6 +48450,9 @@ setTimeout(function() {
     var EXPLORER_URL = cctpCfg.explorer || 'https://testnet.arcscan.app';
     var srcDomain = cctpCfg.domain || 26;
 
+    var isArcSource = chainId === 5042002;
+    var chainName = isArcSource ? 'Arc Testnet' : ('Chain '+chainId);
+
     // [C1 FIX] Use encrypted v2 signer via AgentWalletManager
     var signer = await _agentGetSigner();
     if(!signer){
@@ -48455,14 +48461,23 @@ setTimeout(function() {
 
     var provider = signer.provider;
     var agentAddr = signer.address;
+
+    // [AUTONOMA-4] For a non-Arc source chain, sign+broadcast the burn on the SOURCE
+    // chain's provider (never the Arc provider). getSessionSigner(sourceProvider) is
+    // the single canonical signer source and yields the correct chainId for the burn.
+    if (!isArcSource && RPC_URL && typeof AgentWalletManager !== 'undefined' && typeof AgentWalletManager.getSessionSigner === 'function') {
+      try {
+        var _srcProv = new ethers.JsonRpcProvider(RPC_URL);
+        var _srcSigner = await AgentWalletManager.getSessionSigner(_srcProv);
+        if (_srcSigner) { signer = _srcSigner; provider = _srcSigner.provider; agentAddr = _srcSigner.address; }
+      } catch(e){}
+    }
+
     // Cross-chain payment: mint directly to the external recipient when provided.
     // CRITICAL: mintRecipient must be non-zero — defaults to the agent address (bridge-to-self).
     var payoutRecipient = (typeof recipientAddr === 'string' && /^0x[a-fA-F0-9]{40}$/.test(recipientAddr) &&
       recipientAddr.toLowerCase() !== '0x0000000000000000000000000000000000000000') ? recipientAddr : null;
     var mintRecipient = ethers.zeroPadValue(payoutRecipient || agentAddr, 32);
-
-    var isArcSource = chainId === 5042002;
-    var chainName = isArcSource ? 'Arc Testnet' : ('Chain '+chainId);
 
     var calldataPlan = window['_agentCalldata_'+calldataId];
     if(!calldataPlan||!calldataPlan.steps){
