@@ -458,6 +458,13 @@
         This is the SINGLE execution authority broadcast primitive for Autonoma —
         the only place that calls eth_sendRawTransaction. ── */
   async function _signAndSend(signer, provider, rawTx){
+    // [AUTONOMA-6B] Secure signer provider. Browser mode is unchanged (the
+    // single broadcast primitive below). Circle mode delegates sign+broadcast
+    // to the server (FAIL-CLOSED — SecureSignerProvider throws, never falls
+    // back to the browser signer).
+    if (typeof SecureSignerProvider !== 'undefined' && SecureSignerProvider.isCircleMode()) {
+      return await SecureSignerProvider.broadcast(signer, provider, rawTx);
+    }
     var signedTx = await signer.signTransaction(rawTx);
     var txHash = await provider.send('eth_sendRawTransaction', [signedTx]);
     return txHash;
@@ -465,6 +472,11 @@
 
   /* ── Single nonce source (read-only) for the execution authority. ── */
   function _nextNonce(provider, from){
+    // [AUTONOMA-6B] Circle mode resolves the nonce server-side (for the Circle
+    // wallet). Browser mode is unchanged.
+    if (typeof SecureSignerProvider !== 'undefined' && SecureSignerProvider.isCircleMode()) {
+      return SecureSignerProvider.nextNonce(provider, from);
+    }
     return provider.send('eth_getTransactionCount', [from, 'pending']);
   }
 

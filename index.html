@@ -120,6 +120,7 @@
 <script src="/shared/agentAudit.js"></script>
 <script src="/shared/agentScheduleExecutor.js"></script>
 <script src="/shared/autonomaExecutionGate.js"></script>
+<script src="/shared/secureSignerProvider.js"></script>
 <script src="/shared/trustLayer.js"></script>
 <script src="/shared/missionEngine.js"></script>
 <script src="/shared/agentTreasury.js"></script>
@@ -47806,6 +47807,16 @@ setTimeout(function() {
    * secure signer is unavailable there is NO plaintext/raw-key fallback.
    */
   async function _agentGetSigner(){
+    // [AUTONOMA-6B] Circle mode: resolve a remote signer stub (server-side
+    // signing). FAIL-CLOSED — returns null (no broadcast) if the Circle signer
+    // is unavailable. Never falls back to the browser Agent Wallet.
+    if(typeof SecureSignerProvider !== 'undefined' && SecureSignerProvider.isCircleMode()){
+      try {
+        var remoteSigner = await SecureSignerProvider.getSigner();
+        if(remoteSigner) return remoteSigner;
+      } catch(e){}
+      return null;
+    }
     if(typeof AgentWalletManager !== 'undefined' && typeof AgentWalletManager.getSessionSigner === 'function'){
       try {
         var signer = await AgentWalletManager.getSessionSigner();
