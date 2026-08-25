@@ -14857,6 +14857,7 @@ let bridgeFromIdx   = 1, bridgeToIdx     = 0;  // Sepolia → Arc
 
 // ── Utilities ──────────────────────────────────────────────
 const toUsdc   = n  => BigInt(Math.round((parseFloat(n)||0)*1e6));
+const toCirBtc = n  => BigInt(Math.round((parseFloat(n)||0)*1e8));
 const fromUsdc = bn => (Number(bn)/1e6).toFixed(2);
 const shortAddr= a  => a?a.slice(0,6)+'...'+a.slice(-4):'—';
 const isAddr   = a  => /^0x[0-9a-fA-F]{40}$/.test(a);
@@ -19269,8 +19270,8 @@ async function signTx(){
       }
       if(cirBtcTotal>0 && cirBtcRead){
         const bal = await cirBtcRead.balanceOf(walletAddress);
-        if(bal < toUsdc(cirBtcTotal.toFixed(6))){
-          toast(`Insufficient cirBTC. Need ${cirBtcTotal.toFixed(2)} cirBTC`,'error'); return;
+        if(bal < toCirBtc(cirBtcTotal.toFixed(8))){
+          toast(`Insufficient cirBTC. Need ${cirBtcTotal.toFixed(8)} cirBTC`,'error'); return;
         }
       } else if (cirBtcTotal > 0 && !cirBtcRead) {
         toast('cirBTC contract not available on this chain','error'); return;
@@ -19325,7 +19326,7 @@ async function signTx(){
       // ── Helper: execute batch via Multicall3 with transferFrom ──────────────
       async function executeBatchViaMulticall3(tokenContract, tokenAddr, senderAddr, rcpts, label) {
         const addrs = rcpts.map(r => r._resolved || r.addr);
-        const amts  = rcpts.map(r => toUsdc(r.amount));
+        const amts  = rcpts.map(r => label === 'cirBTC' ? toCirBtc(r.amount) : toUsdc(r.amount));
         const batchTotal = rcpts.reduce((s,r) => s+(parseFloat(r.amount)||0), 0);
 
         // ── Validation ──────────────────────────────────────────────────────
@@ -19386,9 +19387,12 @@ async function signTx(){
         _log(`[Multisend] protocolFee (0.2%, raw): ${feeAmt.toString()}`);
         _log(`[Multisend] batchTotal: ${batchTotal.toFixed(6)} ${label}`);
 
-        if (addrs.length > 150) {
-          _warn(`[Multisend] Large batch detected (${addrs.length} recipients). Encoding very large Multicall3 tx can cause "Maximum call stack size exceeded" in some browsers. Consider using "Execute in Parts" for >150 recipients.`);
-          toast(`Large batch (${addrs.length} recipients) — if you see stack errors, use "Execute in Parts"`, 'warning');
+        if (addrs.length > 200) {
+          _warn(`[Multisend] Very large batch (${addrs.length} recipients). Risk of browser stack overflow or gas limit exceeded. Use "Execute in Parts" for batches > 200.`);
+          toast(`Very large batch (${addrs.length} recipients) — strongly recommend "Execute in Parts" to avoid failures`, 'warning');
+        } else if (addrs.length > 100) {
+          _warn(`[Multisend] Large batch (${addrs.length} recipients). Consider "Execute in Parts" if you see errors.`);
+          toast(`Large batch (${addrs.length} recipients) — consider "Execute in Parts" for reliability`, 'info');
         }
 
         // ── Balance check (using fresh provider to avoid decode issues) ─────
@@ -19405,8 +19409,9 @@ async function signTx(){
         }
 
         if (balance < effectiveTotal) {
-          const have = (Number(balance) / 1e6).toFixed(2);
-          const need = (batchTotal + (Number(feeAmt)/1e6)).toFixed(2);
+          const dec = label === 'cirBTC' ? 1e8 : 1e6;
+          const have = (Number(balance) / dec).toFixed(label === 'cirBTC' ? 8 : 2);
+          const need = (batchTotal + (Number(feeAmt)/dec)).toFixed(label === 'cirBTC' ? 8 : 2);
           toast(`Insufficient ${label} balance (incl. 0.2% protocol fee). Have: ${have}, Need: ${need}`, 'error');
           throw new Error('insufficient_balance');
         }
@@ -30956,11 +30961,12 @@ async function saExecuteSend() {
 
   // Confirmation modal (app-native, not browser confirm)
   var confirmed = false;
-  var confHtml = '<div id="sa-confirm-overlay" style="position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center"><div class="card" style="width:380px;max-width:95vw" onclick="event.stopPropagation()"><div class="ch"><i class="ti ti-send" style="color:var(--blue)"></i><span class="ct">Confirm Send</span></div><div class="cb" style="display:flex;flex-direction:column;gap:8px"><div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:10px"><div style="color:var(--muted2)">Asset</div><div style="color:var(--text);font-weight:600">' + amount.toFixed(4) + ' ' + saCurrentAsset + '</div><div style="color:var(--muted2)">To</div><div style="font-family:monospace;color:var(--blue);font-size:9px">' + shortAddr(recipient) + '</div><div style="color:var(--muted2)">Fee (' + (saFeeBps/100).toFixed(1) + '%)</div><div style="color:var(--yellow)">' + feeAmt.toFixed(4) + ' ' + saCurrentAsset + '</div><div style="color:var(--muted2);font-weight:600">Total</div><div style="color:var(--text);font-weight:700">' + totalAmt.toFixed(4) + ' ' + saCurrentAsset + '</div><div style="color:var(--muted2)">Est. Gas</div><div style="color:var(--teal)">' + gasEst + '</div></div><div style="display:flex;gap:8px;margin-top:4px"><button class="action-btn" style="flex:1;background:linear-gradient(135deg,#4f8ef7,#a78bfa)" onclick="document.getElementById(\'sa-confirm-overlay\').remove();window._saConfirmed=true;window._saResolve()"><i class="ti ti-check"></i>Confirm</button><button class="btn" style="flex:1;color:var(--muted2)" onclick="document.getElementById(\'sa-confirm-overlay\').remove();window._saConfirmed=false;window._saResolve()">Cancel</button></div></div></div></div>';
+  var confHtml = '<div id="sa-confirm-overlay" style="position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center"><div class="card" style="width:380px;max-width:95vw" onclick="event.stopPropagation()"><div class="ch"><i class="ti ti-send" style="color:var(--blue)"></i><span class="ct">Confirm Send</span></div><div class="cb" style="display:flex;flex-direction:column;gap:8px"><div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:10px"><div style="color:var(--muted2)">Asset</div><div style="color:var(--text);font-weight:600">' + amount.toFixed(4) + ' ' + saCurrentAsset + '</div><div style="color:var(--muted2)">To</div><div style="font-family:monospace;color:var(--blue);font-size:9px">' + shortAddr(recipient) + '</div><div style="color:var(--muted2)">Fee (' + (saFeeBps/100).toFixed(1) + '%)</div><div style="color:var(--yellow)">' + feeAmt.toFixed(4) + ' ' + saCurrentAsset + '</div><div style="color:var(--muted2);font-weight:600">Total</div><div style="color:var(--text);font-weight:700">' + totalAmt.toFixed(4) + ' ' + saCurrentAsset + '</div><div style="color:var(--muted2)">Est. Gas</div><div style="color:var(--teal)">' + gasEst + '</div></div><div style="display:flex;gap:8px;margin-top:4px"><button class="action-btn" style="flex:1;background:linear-gradient(135deg,#4f8ef7,#a78bfa)" onclick="document.getElementById(\'sa-confirm-overlay\').remove();window._saResolve && window._saResolve(true)"><i class="ti ti-check"></i>Confirm</button><button class="btn" style="flex:1;color:var(--muted2)" onclick="document.getElementById(\'sa-confirm-overlay\').remove();window._saResolve && window._saResolve(false)">Cancel</button></div></div></div></div>';
   var overlay = document.createElement('div'); overlay.innerHTML = confHtml; document.body.appendChild(overlay.firstElementChild);
-  await new Promise(function(resolve) { window._saResolve = resolve; });
-  if (!window._saConfirmed) { delete window._saResolve; delete window._saConfirmed; return; }
-  delete window._saResolve; delete window._saConfirmed;
+  var _saLocalResolve;
+  var _saConfirmedLocal = await new Promise(function(resolve) { window._saResolve = resolve; _saLocalResolve = resolve; });
+  delete window._saResolve;
+  if (!_saConfirmedLocal) return;
 
   // Sanity check
   if (recipient.toLowerCase() === walletAddress.toLowerCase()) { toast('Recipient is your own address — are you sure?', 'warning'); }
@@ -31033,7 +31039,7 @@ async function saExecuteSend() {
     if (allowance < totalNeed) {
       if (btnContent) btnContent.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i> Approving...';
       toast('Approving ' + saCurrentAsset + '...', 'info');
-      var appTx = await contract.approve(MC3_ADDR, ethers.MaxUint256);
+      var appTx = await contract.approve(MC3_ADDR, totalNeed);
       await appTx.wait();
     }
 
