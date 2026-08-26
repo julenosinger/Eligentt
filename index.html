@@ -89,6 +89,7 @@
 <script src="/shared/poolIndexer.js"></script>
 <script src="/shared/poolRouter.js"></script>
 <script src="/shared/poolExecutor.js"></script>
+<script src="/shared/TowerAdapter.js"></script>
 <script src="/shared/liquidityHealth.js"></script>
 <script src="/shared/liquidityProtection.js"></script>
 <script src="/shared/antiWhaleProtection.js"></script>
@@ -20162,6 +20163,7 @@ const SWP = {
   slippage:   0.5,
   detailOpen: false,
   lastQuote:  null,
+  _towerQuoteData: null,        // dados do último quote Tower (calldata, spender, to)
   quoteTimer: null,
   checking:   false,
   FALLBACK_GAS: 300_000n,
@@ -20820,6 +20822,7 @@ async function updateSwapRate() {
         swpShowPrecheck('warning', `No pool exists for ${tIn.sym} → ${tOut.sym}. Add liquidity in Pool tab.`);
         swpSetBtn('nopool', 'No Route');
         SWP.lastQuote = null;
+        SWP._towerQuoteData = null;
         return;
       }
 
@@ -20828,6 +20831,7 @@ async function updateSwapRate() {
         swpShowPrecheck('warning', `Pool ${route.hops.join('/')} exists but has no liquidity.`);
         swpSetBtn('nopool', 'No Liquidity');
         SWP.lastQuote = null;
+        SWP._towerQuoteData = null;
         return;
       }
 
@@ -20838,14 +20842,51 @@ async function updateSwapRate() {
         swpSetBtn('disabled', 'Invalid amount');
         if (rateEl) rateEl.textContent = 'Invalid amount';
         SWP.lastQuote = null;
+        SWP._towerQuoteData = null;
         return;
       }
 
       let expectedOutRaw = null;
       let source = 'PoolEngine (local)';
 
+      // ── Tower Exchange quote (agregador externo, preferido quando disponível) ──
+      // Tenta Tower primeiro para rotas diretas. Fallback automático para on-chain
+      // ou PoolEngine se Tower falhar, timeout ou retornar quote inválido.
+      if (typeof TowerAdapter !== 'undefined' && route.type === 'direct') {
+        try {
+          const towerRes = await TowerAdapter.fetchQuote({
+            tokenIn: tIn.sym,
+            tokenOut: tOut.sym,
+            amountIn: amountInRaw.toString(),
+            slippageBps: Math.round(SWP.slippage * 100),
+          });
+          if (towerRes.ok && towerRes.data) {
+            // Extrair expectedOut em raw BigInt — Tower pode retornar como string ou número
+            const towerOut = towerRes.data.expectedOut || towerRes.data.amountOut || towerRes.data.minAmountOut;
+            if (towerOut != null) {
+              try {
+                const towerOutRaw = BigInt(String(towerOut));
+                if (towerOutRaw > 0n) {
+                  expectedOutRaw = towerOutRaw;
+                  source = 'Tower Exchange';
+                  // Guardar calldata Tower no quote para uso na execução (se disponível)
+                  SWP._towerQuoteData = towerRes.data;
+                  _log('[swap] Tower quote OK:', towerOut.toString(), tOut.sym);
+                }
+              } catch (_) {}
+            }
+          } else {
+            _warn('[swap] Tower quote indisponível — fallback local:', towerRes.error || towerRes.code);
+            SWP._towerQuoteData = null;
+          }
+        } catch (towerErr) {
+          _warn('[swap] Tower quote erro — fallback local:', towerErr.message);
+          SWP._towerQuoteData = null;
+        }
+      }
+
       // On-chain quote for direct pools (canonical raw BigInt)
-      if (route.type === 'direct' && route.pools[0].address && route.pools[0].address !== '0x0000000000000000000000000000000000000000') {
+      if (expectedOutRaw === null && route.type === 'direct' && route.pools[0].address && route.pools[0].address !== '0x0000000000000000000000000000000000000000') {
         try {
           const readProvider = getCachedProvider('https://arc-testnet.drpc.org');
           const pc = new ethers.Contract(route.pools[0].address, POOL_CONTRACT_ABI, readProvider);
@@ -20865,6 +20906,7 @@ async function updateSwapRate() {
           swpSetBtn('disabled', 'Quote unavailable');
           if (rateEl) rateEl.textContent = 'Quote unavailable';
           SWP.lastQuote = null;
+          SWP._towerQuoteData = null;
           return;
         }
         expectedOutRaw = rawRes.amountOutRaw;
@@ -20878,6 +20920,7 @@ async function updateSwapRate() {
         swpSetBtn('disabled', 'Amount too small');
         if (rateEl) rateEl.textContent = 'Amount too small';
         SWP.lastQuote = null;
+        SWP._towerQuoteData = null;
         return;
       }
 
@@ -20893,6 +20936,7 @@ async function updateSwapRate() {
               swpShowPrecheck('error', 'Insufficient CIRBTC liquidity for this trade. Reduce amount or add liquidity.');
               swpSetBtn('disabled', 'Insufficient Liquidity');
               SWP.lastQuote = null;
+              SWP._towerQuoteData = null;
               return;
             }
           }
@@ -20913,6 +20957,7 @@ async function updateSwapRate() {
         swpShowPrecheck('error', 'Price impact unavailable — cannot validate this trade');
         swpSetBtn('disabled', 'Price impact unavailable');
         SWP.lastQuote = null;
+        SWP._towerQuoteData = null;
         return;
       }
 
@@ -20923,6 +20968,7 @@ async function updateSwapRate() {
         swpShowPrecheck('error', impactCheck.reason);
         swpSetBtn('disabled', 'Excessive Impact');
         SWP.lastQuote = null;
+        SWP._towerQuoteData = null;
         return;
       }
 
@@ -20933,6 +20979,7 @@ async function updateSwapRate() {
         swpShowPrecheck('error', routeCheck.reason);
         swpSetBtn('nopool', 'Invalid Route');
         SWP.lastQuote = null;
+        SWP._towerQuoteData = null;
         return;
       }
 
@@ -21016,6 +21063,7 @@ async function updateSwapRate() {
       swpShowPrecheck('error', swpDecodeError(e));
       swpSetBtn('disabled', 'Quote error');
       SWP.lastQuote = null;
+      SWP._towerQuoteData = null;
     }
   }, 380);
 }
@@ -21160,6 +21208,9 @@ async function executeSwap() {
   const tOut = TOKEN_LIST[SWP.tokenOutIdx];
   const route = SWP.lastRoute;
   if (!route || route.noLiq) { toast('No valid route for this swap','error'); return; }
+
+  // Limpar dados Tower de quote anterior — serão revalidados se ainda vigentes
+  if (!SWP._towerQuoteData) SWP._towerQuoteData = null;
 
   // ── Quote freshness: reject stale quotes ─────────────────
   if (!SWP.lastQuote) {
@@ -21365,10 +21416,20 @@ async function executeSwap() {
       try { allowance = await tokenContract.allowance(walletAddress, poolAddr); } catch(e) {}
       if (allowance < amtBig) {
         let gas = SWP.FALLBACK_GAS;
-        try { gas = await tokenContract.approve.estimateGas(poolAddr, amtBig * 2n); gas = gas * 120n / 100n; } catch(e) {}
-        const tx = await tokenContract.approve(poolAddr, amtBig * 2n, { gasLimit: gas });
+        // Spender: Tower pode usar um endereço diferente do pool (ex: router Tower)
+        const approveTarget = (i === 0 && SWP._towerQuoteData && SWP._towerQuoteData.spender &&
+          /^0x[0-9a-fA-F]{40}$/.test(SWP._towerQuoteData.spender) &&
+          SWP._towerQuoteData.spender !== '0x0000000000000000000000000000000000000000')
+          ? SWP._towerQuoteData.spender
+          : poolAddr;
+        try { gas = await tokenContract.approve.estimateGas(approveTarget, amtBig); gas = gas * 120n / 100n; } catch(e) {}
+        const tx = await tokenContract.approve(approveTarget, amtBig, { gasLimit: gas });
         toast(`Approve ${currentTokenSym} submitted...`, 'info');
-        await tx.wait();
+        const appReceipt = await tx.wait();
+        // Verificar receipt de approve — revertido = erro explícito
+        if (!appReceipt || appReceipt.status !== 1) {
+          throw new Error('Approve transaction reverted on-chain');
+        }
         swpSetStep(i * 2, 'success', tx.hash);
       } else {
         swpSetStep(i * 2, 'skipped');
@@ -21389,8 +21450,65 @@ async function executeSwap() {
     swpSetStep(i * 2 + 1, 'active');
     swpSetBtn('swapping', `Swapping ${currentTokenSym} → ${nextTokenSym}${hopLabel}…`);
     try {
-      const poolCtr = new ethers.Contract(poolAddr, POOL_CONTRACT_ABI, signer);
       const amtBig = ethers.parseUnits(currentAmount.toFixed(currentDecimals), currentDecimals);
+
+      // ── Tower calldata: usar se disponível, válido e for o hop final em rota direta ──
+      const useTowerCalldata = (
+        isLastHop &&
+        route.type === 'direct' &&
+        i === 0 &&
+        SWP._towerQuoteData &&
+        SWP._towerQuoteData.calldata &&
+        /^0x[0-9a-fA-F]+$/.test(SWP._towerQuoteData.calldata) &&
+        SWP._towerQuoteData.to &&
+        /^0x[0-9a-fA-F]{40}$/.test(SWP._towerQuoteData.to) &&
+        SWP._towerQuoteData.to !== '0x0000000000000000000000000000000000000000'
+      );
+
+      if (useTowerCalldata) {
+        // Validar segurança antes de usar calldata externo
+        const towerValidation = (typeof TowerAdapter !== 'undefined' && TowerAdapter.validateResponse)
+          ? TowerAdapter.validateResponse(SWP._towerQuoteData, { amountInRaw: amtBig, slippageBps })
+          : { ok: true };
+
+        if (!towerValidation.ok) {
+          _warn('[swap] Tower calldata rejeitado:', towerValidation.reason, '— usando pool local');
+          // Fallback para execução local (prossegue com poolCtr abaixo)
+        } else {
+          // Executar via calldata Tower
+          let swapGas = SWP.FALLBACK_GAS;
+          try {
+            swapGas = await signer.estimateGas({ to: SWP._towerQuoteData.to, data: SWP._towerQuoteData.calldata });
+            swapGas = swapGas * 130n / 100n;
+          } catch(_) {}
+          const swapTx = await signer.sendTransaction({
+            to: SWP._towerQuoteData.to,
+            data: SWP._towerQuoteData.calldata,
+            gasLimit: swapGas,
+          });
+          lastTxHash = swapTx.hash;
+          toast(`Swap via Tower submitted...`, 'info');
+          const swapReceipt = await swapTx.wait(1, 25000);
+          if (!swapReceipt || swapReceipt.status !== 1) {
+            throw new Error('Tower swap transaction reverted (status: ' + (swapReceipt ? swapReceipt.status : 'null') + ')');
+          }
+          _log('[swap] Tower hop', i + 1, 'confirmed:', swapTx.hash, 'block:', swapReceipt.blockNumber);
+          swpSetStep(i * 2 + 1, 'success', swapTx.hash);
+          await new Promise(function(r) { setTimeout(r, 3000); });
+          SwapEngine.notifyExecutionComplete(swapReceipt);
+          trackPoolVolume(poolCfg.id, currentAmount, currentTokenSym);
+          // Limpar dados Tower após execução bem-sucedida
+          SWP._towerQuoteData = null;
+          // Avançar no loop normalmente
+          currentTokenAddr = nextTokenAddr;
+          currentTokenSym = nextTokenSym;
+          currentDecimals = nextToken.decimals;
+          continue; // próximo hop (ou fim do loop)
+        }
+      }
+
+      // ── Execução local (fallback ou multi-hop) ─────────────────────────────
+      const poolCtr = new ethers.Contract(poolAddr, POOL_CONTRACT_ABI, signer);
       // Per-hop min: final hop uses global minReceived, intermediate hops use computed hop min
       let hopMin;
       if (isLastHop) {
