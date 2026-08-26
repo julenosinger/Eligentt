@@ -537,30 +537,46 @@
   }
 
   /* ════════════════════════════════════════
-     MAIN RENDER
+     MAIN RENDER — three zones:
+       1. #ub-financial-center  (inside Screen Live) — financial command center
+       2. #ub-quick-actions     (immediately after Screen Live)
+       3. #ub-merchant-hub      (below Assets) — extended merchant features
   ════════════════════════════════════════ */
-  function renderAll() {
-    var hub = document.getElementById('ub-merchant-hub');
-    if (!hub) return;
-    if (!(UB && UB.state && UB.state.assets && UB.state.assets.length)) {
-      hub.style.display = 'none';
-      return;
-    }
-
+  function renderFinancialCenter() {
     var html = '';
-    html += renderAvailableToSpend();
     html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">' + renderCashFlow() + renderReservedMoney() + '</div>';
     html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">' + renderMonthlyOverview() + renderFinancialSummary() + '</div>';
-    html += renderQuickActions();
+    return html;
+  }
+
+  function renderExtendedHub() {
+    var html = '';
+    html += renderAvailableToSpend();
     html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">' + renderReceivables() + renderUpcomingPayments() + '</div>';
     html += renderFundAllocation();
     html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">' + renderContacts() + renderCustomerDirectory() + '</div>';
     html += renderNetworkBreakdown();
     html += renderBusinessHealth();
     html += renderExports();
+    return html;
+  }
 
-    hub.innerHTML = html;
-    hub.style.display = 'flex';
+  function renderAll() {
+    var fin = document.getElementById('ub-financial-center');
+    var qa = document.getElementById('ub-quick-actions');
+    var hub = document.getElementById('ub-merchant-hub');
+
+    if (!(UB && UB.state && UB.state.assets && UB.state.assets.length)) {
+      if (hub) hub.style.display = 'none';
+      if (fin) fin.style.display = 'none';
+      if (qa) qa.style.display = 'none';
+      return;
+    }
+
+    if (fin) { fin.innerHTML = renderFinancialCenter(); fin.style.display = 'flex'; }
+    if (qa) { qa.innerHTML = renderQuickActions(); qa.style.display = 'block'; }
+    if (hub) { hub.innerHTML = renderExtendedHub(); hub.style.display = 'flex'; }
+
     _rendered = true;
   }
 
