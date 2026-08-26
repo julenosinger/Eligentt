@@ -166,19 +166,35 @@
     }
 
     opts = opts || {};
-    var circleReq = opts.circle || null;
+    var circleReq = opts.circle || opts.request || null;
     if (!circleReq) {
       throw new Error('Circle signer requires a structured request (circle descriptor missing — fail-closed)');
     }
 
-    var body = {
-      chainId: rawTx && rawTx.chainId != null ? Number(rawTx.chainId) : _chainIdOf(provider),
-      operation: opts.operation || circleReq.operation || '',
-      executionId: opts.executionId || null,
-      request: circleReq
-    };
+    var chainId = rawTx && rawTx.chainId != null ? Number(rawTx.chainId) : _chainIdOf(provider);
+    var operation = opts.operation || circleReq.operation || '';
+    var executionId = opts.executionId || null;
 
-    var res = await _postJson('/api/agent-signer/broadcast', body);
+    // [AUTONOMA-6C] Obtain a server-issued, single-use authorization proof first.
+    var proofRes = await _postJson('/api/agent-signer/authorize', {
+      chainId: chainId,
+      operation: operation,
+      executionId: executionId,
+      amount: opts.amount != null ? opts.amount : null,
+      destination: opts.destination || null,
+      request: circleReq
+    });
+    if (!proofRes || proofRes.ok !== true || !proofRes.authorizationProof) {
+      throw new Error('Circle signer authorization denied: ' + ((proofRes && (proofRes.error || proofRes.reason)) || 'unknown'));
+    }
+
+    var res = await _postJson('/api/agent-signer/broadcast', {
+      authorizationProof: proofRes.authorizationProof,
+      chainId: chainId,
+      operation: operation,
+      executionId: executionId,
+      request: circleReq
+    });
     if (!res || res.ok !== true || !res.txHash) {
       throw new Error('Circle signer broadcast failed: ' + ((res && (res.error || res.reason)) || 'unknown'));
     }
@@ -196,6 +212,7 @@
     return fetch(path, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
       body: JSON.stringify(body)
     }).then(function (r) {
       return r.json().catch(function () { return {}; }).then(function (data) {
@@ -233,6 +250,6 @@
     broadcast: broadcast,
     waitReceipt: waitReceipt,
     getStatus: getStatus,
-    version: 'AUTONOMA-6B'
+    version: 'AUTONOMA-6C'
   };
 })();

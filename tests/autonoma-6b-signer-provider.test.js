@@ -126,14 +126,19 @@ describe('AUTONOMA-6B — SecureSignerProvider (unit)', () => {
     await expect(p.broadcast({}, {}, { type: 2 })).rejects.toThrow(/structured request|circle descriptor/);
   });
 
-  it('circle-mode broadcast with a structured request posts to the server and returns txHash', async () => {
-    let posted = null;
+  it('circle-mode broadcast obtains an authorization proof then posts the structured request to the server', async () => {
+    let authorizeBody = null;
+    let broadcastBody = null;
     globalThis.fetch = async (url, init) => {
       if (String(url).includes('/api/agent-signer/config')) {
         return { ok: true, json: async () => ({ available: true, address: CIRCLE_ADDR }) };
       }
+      if (String(url).includes('/api/agent-signer/authorize')) {
+        authorizeBody = JSON.parse(init.body);
+        return { ok: true, json: async () => ({ ok: true, authorizationProof: 'proof.aaaa' }) };
+      }
       if (String(url).includes('/api/agent-signer/broadcast')) {
-        posted = JSON.parse(init.body);
+        broadcastBody = JSON.parse(init.body);
         return { ok: true, json: async () => ({ ok: true, txHash: '0x' + 'cd'.repeat(32) }) };
       }
       throw new Error('unexpected fetch ' + url);
@@ -147,8 +152,29 @@ describe('AUTONOMA-6B — SecureSignerProvider (unit)', () => {
       circle: { type: 'transfer', tokenAddress: '0x3600000000000000000000000000000000000000', to: RCPT, amount: '1000000' },
     });
     expect(txHash).toBe('0x' + 'cd'.repeat(32));
-    expect(posted.request.type).toBe('transfer');
-    expect(posted.executionId).toBe('chat_1');
+    expect(authorizeBody.request.type).toBe('transfer');
+    expect(authorizeBody.executionId).toBe('chat_1');
+    expect(broadcastBody.authorizationProof).toBe('proof.aaaa');
+    expect(broadcastBody.request.type).toBe('transfer');
+    expect(broadcastBody.executionId).toBe('chat_1');
+  });
+
+  it('circle-mode broadcast FAILS-CLOSED when authorization is denied (no proof)', async () => {
+    globalThis.AgentScheduleExecutor = {
+      broadcast: async () => { throw new Error('browser fallback attempted'); },
+    };
+    globalThis.fetch = async (url) => {
+      if (String(url).includes('/api/agent-signer/authorize')) {
+        return { ok: true, json: async () => ({ ok: false, error: 'invalid_session' }) };
+      }
+      throw new Error('unexpected fetch ' + url);
+    };
+    const win = makeWindow();
+    const p = evalProvider(win);
+    p.setMode('circle');
+    await expect(
+      p.broadcast({}, {}, { chainId: 5042002 }, { circle: { type: 'transfer', tokenAddress: '0x1', to: RCPT, amount: '1' } })
+    ).rejects.toThrow(/authorization denied/);
   });
 
   it('circle-mode broadcast propagates a server error (fail-closed, no browser fallback)', async () => {
@@ -156,6 +182,9 @@ describe('AUTONOMA-6B — SecureSignerProvider (unit)', () => {
       broadcast: async () => { throw new Error('browser fallback attempted'); },
     };
     globalThis.fetch = async (url) => {
+      if (String(url).includes('/api/agent-signer/authorize')) {
+        return { ok: true, json: async () => ({ ok: true, authorizationProof: 'proof.aaaa' }) };
+      }
       if (String(url).includes('/api/agent-signer/broadcast')) {
         return { ok: true, json: async () => ({ ok: false, error: 'rejected by policy' }) };
       }

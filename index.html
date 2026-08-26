@@ -47958,10 +47958,10 @@ setTimeout(function() {
     return await a.nextNonce(provider, from);
   }
 
-  async function _agentBroadcast(signer, provider, rawTx){
+  async function _agentBroadcast(signer, provider, rawTx, opts){
     var a = _authority();
     if (!a || typeof a.broadcast !== 'function') throw new Error('Execution authority unavailable (broadcast)');
-    return await a.broadcast(signer, provider, rawTx);
+    return await a.broadcast(signer, provider, rawTx, opts);
   }
 
   async function _agentWaitReceipt(provider, txHash){
@@ -48067,8 +48067,20 @@ setTimeout(function() {
         // [C2 FIX] TOCTOU: re-validate authorization immediately before signing
         var recheck = _agentRevalidateAuth('payment', amount, asset);
         if(!recheck.ok){ _agentStateMsg(execId, 'REJECTED', recheck.reason); return; }
+        // [AUTONOMA-6C] In circle mode the signer needs a structured request
+        // (the adapter → Circle descriptor), carried alongside the rawTx.
+        var broadcastOpts = null;
+        if(typeof SecureSignerProvider !== 'undefined' && SecureSignerProvider.isCircleMode()){
+          broadcastOpts = {
+            operation: 'payment',
+            executionId: executionId,
+            amount: amount,
+            destination: dest,
+            circle: { type: 'transfer', tokenAddress: USDC, to: dest, amount: ethers.parseUnits(String(amount), 6).toString() }
+          };
+        }
         // [AUTONOMA-1] Single execution authority broadcast (no direct send).
-        txHash = await _agentBroadcast(signer, provider, rawTx);
+        txHash = await _agentBroadcast(signer, provider, rawTx, broadcastOpts);
         _agentGateClaimSubmit(paymentGate.claimKey, txHash);
       } catch(sendErr){
         var eMsg = (sendErr.message || String(sendErr)).substring(0, 150);

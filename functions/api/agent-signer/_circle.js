@@ -175,7 +175,122 @@ async function fetchNonce(env, chainId, address) {
   throw new Error('Nonce lookup failed: ' + ((data && data.error && data.error.message) || 'unknown'));
 }
 
+/* ───────────────────────────────────────────────────────────────────────
+   AUTONOMA-6C — Structured request → Circle contract-execution descriptor.
+   The endpoint never accepts a raw transaction as the authority of truth.
+   Every operation maps to a concrete, allowlisted contract + real ABI.
+   ─────────────────────────────────────────────────────────────────────── */
+
+// Known/allowlisted contracts (mirror functions/api/shared-config.mjs SIGN_ALLOWLIST,
+// lowercased). A contractExecution request may ONLY target one of these.
+const SIGN_ALLOWLIST = [
+  '0x3600000000000000000000000000000000000000', // USDC
+  '0x89b50855aa3be2f677cd6303cec089b5f319d72a', // EURC
+  '0xf0c4a4ce82a5746abaad9425360ab04fbba432bf', // CIRBTC
+  '0xbfc9e8f79bd30b912081ae88f9ad0a515f08c2f1', // TreasuryVault
+  '0x18076d992005186aeb13ac5270cad6e27db95247', // Pool
+  '0x17cfb1aacbc64d0f0c247ed261b66c3d56e3eb16', // CrosschainBatch
+  '0xca11bde05977b3631167028862be2a173976ca11', // Multicall3
+  '0x8fe6b999dc680ccfdd5bf7eb0974218be2542daa', // CCTP TokenMessenger
+  '0xe737e5cebeeba77efe34d4aa090756590b1ce275', // CCTP MessageTransmitter
+  '0x5294e9927c3306dcbadb03fe70b92e01ccede505', // Memo
+  '0x0000000000000000000000000000000000000001', // SwapRouter
+].map((a) => a.toLowerCase());
+
+const KNOWN_CONTRACTS = {
+  USDC: '0x3600000000000000000000000000000000000000',
+  CCTP_TOKEN_MESSENGER: '0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA',
+};
+
+function isAddress(a) {
+  return typeof a === 'string' && /^0x[0-9a-fA-F]{40}$/.test(a);
+}
+
+function isKnownContract(addr) {
+  return typeof addr === 'string' && SIGN_ALLOWLIST.indexOf(addr.toLowerCase()) !== -1;
+}
+
+function toBytes32Hex(bytes32Like) {
+  const s = String(bytes32Like || '');
+  if (/^0x[0-9a-fA-F]{64}$/.test(s)) return s;
+  if (isAddress(s)) return '0x' + s.slice(2).padStart(64, '0');
+  throw new Error('invalid bytes32');
+}
+
+/**
+ * Map a structured request into a Circle contract-execution descriptor.
+ *   { type:'transfer', tokenAddress, to, amount }
+ *   { type:'bridge', amount, destinationDomain, mintRecipient, burnToken?, destinationCaller?, maxFee?, finality? }
+ *   { type:'swap' | 'multisend' | 'contractExecution', contractAddress, abiFunctionSignature, abiParameters, value? }
+ *
+ * FAIL-CLOSED: unknown type, unknown/unauthorized contract, or invalid ABI
+ * signature throws — the request is rejected, never silently re-routed.
+ */
+function mapStructuredRequest(req) {
+  if (!req || typeof req !== 'object') throw new Error('missing request');
+  const type = req.type || 'contractExecution';
+
+  if (type === 'transfer' || type === 'send') {
+    if (!req.tokenAddress || !req.to || req.amount == null) {
+      throw new Error('transfer requires tokenAddress, to, amount');
+    }
+    if (!isKnownContract(req.tokenAddress)) throw new Error('transfer token not allowlisted');
+    if (!isAddress(req.to)) throw new Error('transfer recipient invalid');
+    return {
+      contractAddress: String(req.tokenAddress).toLowerCase(),
+      abiFunctionSignature: 'transfer(address,uint256)',
+      abiParameters: [String(req.to), String(req.amount)],
+      value: null,
+    };
+  }
+
+  if (type === 'bridge' || type === 'depositForBurn') {
+    // Real CCTP V2 TokenMessenger.depositForBurn (source chain) — same signature
+    // and contract the existing CCTP V2 bridge uses.
+    if (req.amount == null) throw new Error('bridge requires amount');
+    const destDomain = Number(req.destinationDomain);
+    if (!Number.isFinite(destDomain) || destDomain < 0) throw new Error('bridge requires destinationDomain');
+    const mintRecipient = toBytes32Hex(req.mintRecipient);
+    const burnToken = req.burnToken || KNOWN_CONTRACTS.USDC;
+    if (!isKnownContract(burnToken)) throw new Error('bridge burn token not allowlisted');
+    const destinationCaller = req.destinationCaller != null ? toBytes32Hex(req.destinationCaller) : '0x' + '0'.repeat(64);
+    const maxFee = req.maxFee != null ? String(req.maxFee) : '500000'; // 0.5 USDC default (existing flow)
+    const finality = req.finality != null ? String(Math.floor(Number(req.finality))) : '1000';
+    return {
+      contractAddress: KNOWN_CONTRACTS.CCTP_TOKEN_MESSENGER.toLowerCase(),
+      abiFunctionSignature: 'depositForBurn(uint256,uint32,bytes32,address,bytes32,uint256,uint32)',
+      abiParameters: [String(req.amount), String(destDomain), mintRecipient, String(burnToken).toLowerCase(), destinationCaller, maxFee, finality],
+      value: null,
+    };
+  }
+
+  // swap / multisend / generic contractExecution: the adapter supplies the real
+  // contract + ABI. The contract MUST be allowlisted; the signature MUST be a
+  // syntactically valid ABI function signature.
+  if (type === 'swap' || type === 'multisend' || type === 'contractExecution') {
+    if (!req.contractAddress || !req.abiFunctionSignature) {
+      throw new Error(type + ' requires contractAddress, abiFunctionSignature');
+    }
+    if (!isKnownContract(req.contractAddress)) throw new Error('contract not allowlisted');
+    if (!/^[a-zA-Z_][a-zA-Z0-9_]*\([a-zA-Z0-9\[\],\s]*\)$/.test(req.abiFunctionSignature)) {
+      throw new Error('invalid abiFunctionSignature');
+    }
+    if (req.abiParameters != null && !Array.isArray(req.abiParameters)) {
+      throw new Error('abiParameters must be an array');
+    }
+    return {
+      contractAddress: String(req.contractAddress).toLowerCase(),
+      abiFunctionSignature: req.abiFunctionSignature,
+      abiParameters: req.abiParameters || [],
+      value: req.value || null,
+    };
+  }
+
+  throw new Error('unknown request type: ' + type);
+}
+
 export {
   W3S_BASE, CHAIN_RPC, getCredentials, isConfigured, corsHeaders, json, err,
   createContractExecution, fetchNonce,
+  mapStructuredRequest, isKnownContract, isAddress, SIGN_ALLOWLIST, KNOWN_CONTRACTS,
 };

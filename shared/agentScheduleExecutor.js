@@ -457,13 +457,14 @@
   /* ── Sign + broadcast a prepared raw transaction. Throws on ambiguous failure.
         This is the SINGLE execution authority broadcast primitive for Autonoma —
         the only place that calls eth_sendRawTransaction. ── */
-  async function _signAndSend(signer, provider, rawTx){
-    // [AUTONOMA-6B] Secure signer provider. Browser mode is unchanged (the
+  async function _signAndSend(signer, provider, rawTx, opts){
+    // [AUTONOMA-6B/6C] Secure signer provider. Browser mode is unchanged (the
     // single broadcast primitive below). Circle mode delegates sign+broadcast
     // to the server (FAIL-CLOSED — SecureSignerProvider throws, never falls
-    // back to the browser signer).
+    // back to the browser signer). `opts` carries the structured Circle request
+    // and execution identity (AUTONOMA-6C).
     if (typeof SecureSignerProvider !== 'undefined' && SecureSignerProvider.isCircleMode()) {
-      return await SecureSignerProvider.broadcast(signer, provider, rawTx);
+      return await SecureSignerProvider.broadcast(signer, provider, rawTx, opts);
     }
     var signedTx = await signer.signTransaction(rawTx);
     var txHash = await provider.send('eth_sendRawTransaction', [signedTx]);
