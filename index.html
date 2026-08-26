@@ -90,6 +90,8 @@
 <script src="/shared/poolRouter.js"></script>
 <script src="/shared/poolExecutor.js"></script>
 <script src="/shared/TowerAdapter.js"></script>
+<script src="/shared/LocalAdapter.js"></script>
+<script src="/shared/SwapAggregator.js"></script>
 <script src="/shared/liquidityHealth.js"></script>
 <script src="/shared/liquidityProtection.js"></script>
 <script src="/shared/antiWhaleProtection.js"></script>
@@ -20172,6 +20174,10 @@ const SWP = {
   tokSelectorTarget: null, // 'in' | 'out' — which token pill was clicked
 };
 
+// Quote race guard: monotonic request id. A stale async quote (older request
+// resolving after a newer one) is discarded instead of overwriting the result.
+let _swapQuoteSeq = 0;
+
 // ── Token Registry Helpers ──────────────────────────────────
 function getTokenBySym(sym) { return TOKEN_REGISTRY[sym] || TOKEN_LIST[0]; }
 
@@ -20806,6 +20812,7 @@ async function updateSwapRate() {
   swpHidePrecheck();
 
   swapRateTimer = setTimeout(async () => {
+    const quoteSeq = ++_swapQuoteSeq;
     try {
       // Ensure pool data is loaded
       for (const pcfg of POOL_REGISTRY.filter(p => p.deployed)) {
@@ -20849,52 +20856,35 @@ async function updateSwapRate() {
       let expectedOutRaw = null;
       let source = 'PoolEngine (local)';
 
-      // ── Tower Exchange quote (agregador externo, preferido quando disponível) ──
-      // Tenta Tower primeiro para rotas diretas. Fallback automático para on-chain
-      // ou PoolEngine se Tower falhar, timeout ou retornar quote inválido.
-      if (typeof TowerAdapter !== 'undefined' && route.type === 'direct') {
+      // ── SwapAggregator: cotar Tower + pools locais em paralelo e escolher a melhor ──
+      // Tower é UMA FONTE ADICIONAL de liquidez/rota — não substitui os pools próprios.
+      // Ambas as fontes são cotadas; o SwapAggregator compara e seleciona a melhor.
+      if (typeof SwapAggregator !== 'undefined' && typeof SwapAggregator.getBestQuote === 'function') {
         try {
-          const towerRes = await TowerAdapter.fetchQuote({
+          const agg = await SwapAggregator.getBestQuote({
             tokenIn: tIn.sym,
             tokenOut: tOut.sym,
-            amountIn: amountInRaw.toString(),
+            amountInRaw: amountInRaw,
             slippageBps: Math.round(SWP.slippage * 100),
           });
-          if (towerRes.ok && towerRes.data) {
-            // Extrair expectedOut em raw BigInt — Tower pode retornar como string ou número
-            const towerOut = towerRes.data.expectedOut || towerRes.data.amountOut || towerRes.data.minAmountOut;
-            if (towerOut != null) {
-              try {
-                const towerOutRaw = BigInt(String(towerOut));
-                if (towerOutRaw > 0n) {
-                  expectedOutRaw = towerOutRaw;
-                  source = 'Tower Exchange';
-                  // Guardar calldata Tower no quote para uso na execução (se disponível)
-                  SWP._towerQuoteData = towerRes.data;
-                  _log('[swap] Tower quote OK:', towerOut.toString(), tOut.sym);
-                }
-              } catch (_) {}
+          if (agg.ok && agg.best) {
+            expectedOutRaw = agg.best.expectedOutRaw;
+            if (agg.best.source === 'tower') {
+              source = 'Tower Exchange';
+              SWP._towerQuoteData = agg.best.calldata ? agg.best : null;
+              _log('[swap] SwapAggregator: Tower venceu (', agg.best.expectedOutRaw.toString(), ')');
+            } else {
+              source = 'Elligentt Pool';
+              SWP._towerQuoteData = null;
+              _log('[swap] SwapAggregator: pool local venceu (', agg.best.expectedOutRaw.toString(), ')');
             }
           } else {
-            _warn('[swap] Tower quote indisponível — fallback local:', towerRes.error || towerRes.code);
+            _warn('[swap] SwapAggregator: nenhuma rota disponível:', agg.reason || '');
             SWP._towerQuoteData = null;
           }
-        } catch (towerErr) {
-          _warn('[swap] Tower quote erro — fallback local:', towerErr.message);
+        } catch (aggErr) {
+          _warn('[swap] SwapAggregator erro — fallback local:', aggErr.message);
           SWP._towerQuoteData = null;
-        }
-      }
-
-      // On-chain quote for direct pools (canonical raw BigInt)
-      if (expectedOutRaw === null && route.type === 'direct' && route.pools[0].address && route.pools[0].address !== '0x0000000000000000000000000000000000000000') {
-        try {
-          const readProvider = getCachedProvider('https://arc-testnet.drpc.org');
-          const pc = new ethers.Contract(route.pools[0].address, POOL_CONTRACT_ABI, readProvider);
-          const tokenInAddr = getTokAddr(tIn.sym);
-          const amtOutBig = await pc.getAmountOut(amountInRaw, tokenInAddr);
-          if (amtOutBig > 0n) { expectedOutRaw = amtOutBig; source = 'onchain'; }
-        } catch (contractErr) {
-          _warn('[swap] onchain getAmountOut failed — falling back to PoolEngine:', contractErr.message);
         }
       }
 
@@ -21048,6 +21038,8 @@ async function updateSwapRate() {
       }
 
       const _qState = (_PE && _PE.getPoolState) ? _PE.getPoolState(route.pools[0].id) : null;
+      // Race guard: discard this result if a newer quote request already started.
+      if (quoteSeq !== _swapQuoteSeq) return;
       SWP.lastQuote = { amtIn, amtOut, minReceived, rate, priceImpact, feeAmt, source, tIn, tOut, route, totalFee, expectedOutRaw, amountInRaw, quotedAt: Date.now(), stateUpdatedAt: _qState ? _qState.updatedAt : null };
       SwapEngine.notifyQuoteLoaded(SWP.lastQuote);
       // Stamp block number synchronously so it's ready before user clicks
@@ -21429,6 +21421,12 @@ async function executeSwap() {
         // Verificar receipt de approve — revertido = erro explícito
         if (!appReceipt || appReceipt.status !== 1) {
           throw new Error('Approve transaction reverted on-chain');
+        }
+        // Reler allowance após approve — somente continuar se de fato >= amtBig
+        let newAllowance = 0n;
+        try { newAllowance = await tokenContract.allowance(walletAddress, approveTarget); } catch(_) {}
+        if (newAllowance < amtBig) {
+          throw new Error('Approve allowance not reflected on-chain');
         }
         swpSetStep(i * 2, 'success', tx.hash);
       } else {
