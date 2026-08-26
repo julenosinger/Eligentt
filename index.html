@@ -21451,7 +21451,16 @@ async function executeSwap() {
       const amtBig = ethers.parseUnits(currentAmount.toFixed(currentDecimals), currentDecimals);
 
       // ── Tower calldata: usar se disponível, válido e for o hop final em rota direta ──
+      // NUNCA usar calldata Tower quando o par tem pool Arc local deployado.
+      // Para USDC/EURC e USDC/cirBTC, o pool Arc é estável (1:1) e a Tower usa
+      // preço EUR/USD real (~1.14) → minOut impossível → revert garantido.
+      // Tower serve apenas como fonte de quote para comparação de preço nesses pares.
+      const _poolAddr = route && route.pools && route.pools[0] && route.pools[0].address;
+      const _hasLocalPool = _poolAddr &&
+        _poolAddr !== '0x0000000000000000000000000000000000000000';
+
       const useTowerCalldata = (
+        !_hasLocalPool &&
         isLastHop &&
         route.type === 'direct' &&
         i === 0 &&
