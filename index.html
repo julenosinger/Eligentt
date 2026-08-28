@@ -41903,9 +41903,10 @@ function exitUnifiedBalanceMode() {
 //    (b) renders a status/preview panel below the destination selector,
 //    (c) gates the existing Bridge / Send buttons via a capture-phase
 //        click interceptor (block when destination has no gas).
-//  Scoped exclusively to #page-bridge and #page-xchain. Modular by
+//  Scoped to #page-bridge, #page-xchain, and #page-send (Send Assets
+//  only when the send is CROSS-CHAIN — destination ≠ Arc). Modular by
 //  design so Gas Station / Paymaster / AA sponsors can be plugged in
-//  later without refactoring either flow.
+//  later without refactoring any flow.
 // ============================================================
 (function(){
   'use strict';
@@ -42209,7 +42210,12 @@ function exitUnifiedBalanceMode() {
     }
 
     async function run(){
+      // Conditional pages (e.g. Send Assets only when cross-chain): hide the
+      // panel entirely when the condition is not met, and never gate the button.
+      if (cfg.condActive) { try { if (!cfg.condActive()) { hidePanel(); return; } } catch(_) {} }
       if (!els) { if (!buildPanel()) return; }
+      var p = document.getElementById(cfg.panelId);
+      if (p) p.style.display = '';
       var chainId = cfg.getChainId();
       var address = cfg.getAddress();
       var key = String(chainId) + ':' + String(address);
@@ -42233,9 +42239,19 @@ function exitUnifiedBalanceMode() {
       }
     }
 
+    function hidePanel(){
+      state = 'UNKNOWN';
+      var p = document.getElementById(cfg.panelId);
+      if (p) p.style.display = 'none';
+      var btn = document.getElementById(cfg.buttonId);
+      if (btn) { btn.style.opacity = ''; btn.style.filter = ''; }
+    }
+
     function isActive(){
       var pg = document.getElementById(cfg.pageId);
-      return !!(pg && pg.classList.contains('active'));
+      if (!(pg && pg.classList.contains('active'))) return false;
+      if (cfg.condActive) { try { if (!cfg.condActive()) return false; } catch(_) {} }
+      return true;
     }
 
     // Click gate is installed globally (capture phase) — see installGate().
@@ -42263,6 +42279,7 @@ function exitUnifiedBalanceMode() {
       lastKey: function(){ return lastKey; },
       gate: gate,
       ensure: function(){
+        if (cfg.condActive) { try { if (!cfg.condActive()) return; } catch(_) {} }
         var p = document.getElementById(cfg.panelId);
         // Build when missing, OR populate a pre-placed empty container (Cross-Chain).
         if (!p || !p.querySelector('.dgv-dot')) buildPanel();
@@ -42296,7 +42313,21 @@ function exitUnifiedBalanceMode() {
     getAddress: function(){ return safeGet(function(){ return (typeof walletAddress !== 'undefined' && walletAddress) ? walletAddress : null; }); }
   });
 
-  var controllers = [bridgeCtl, xcCtl];
+  var saCtl = createController({
+    pageId: 'page-send',
+    buttonId: 'sa-send-btn',
+    panelId: 'dgv-panel-send',
+    pillId: 'dgv-pill-send',
+    mountPill: null,
+    // Only active for CROSS-CHAIN sends (destination ≠ Arc). Same-chain sends
+    // (Arc → Arc, USDC = gas) are exempt and never show/gate the panel.
+    condActive: function(){ try { return (typeof saIsCrossChain === 'function') ? saIsCrossChain() : false; } catch(_) { return false; } },
+    getChainId: function(){ return safeGet(function(){ return saDestChainId; }); },
+    // Destination gas is paid by the CONNECTED wallet (the sender), same as Bridge/X-Chain.
+    getAddress: function(){ return safeGet(function(){ return (typeof walletAddress !== 'undefined' && walletAddress) ? walletAddress : null; }); }
+  });
+
+  var controllers = [bridgeCtl, xcCtl, saCtl];
 
   // ── Global capture-phase click gate (runs BEFORE the button's onclick) ──
   function installGate(){
@@ -42305,6 +42336,7 @@ function exitUnifiedBalanceMode() {
       if (!t || !t.closest) return;
       if (t.closest('#bridge-btn')) { bridgeCtl.gate(e); return; }
       if (t.closest('#xc-send-btn')) { xcCtl.gate(e); return; }
+      if (t.closest('#sa-send-btn')) { saCtl.gate(e); return; }
     }, true);
   }
 
@@ -42342,6 +42374,10 @@ function exitUnifiedBalanceMode() {
     // (2) Destination wallet (recipient) change → re-validate
     var rec = document.getElementById('xc-recipient');
     if (rec) rec.addEventListener('input', function(){ if (xcCtl.isActive()) xcCtl.run(); });
+
+    // (2b) Send Assets destination network change → toggle cross-chain gas check
+    var saDest = document.getElementById('sa-dest-network');
+    if (saDest) saDest.addEventListener('change', function(){ setTimeout(function(){ refreshActive(true); }, 80); });
 
     // (3) Fast local poll (no RPC): detect chain / wallet / recipient key change
     //     → instantaneous re-validate. Covers wallet reconnection & rapid switches.
