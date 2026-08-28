@@ -182,17 +182,20 @@
 
 
 
+
+
+
 <!-- Fixes z-index, overflow clipping on cards, dark dropdowns, portals    -->
 <!-- Does NOT affect any other page or component (Send/Swap/Bridge/etc)    -->
 
 
 
 
-<link rel="stylesheet" href="/app.css?h=6e708aff">
+<link rel="stylesheet" href="/app.css?h=af6419be">
 <!-- Core Bundle: 24 modules (synchronous) -->
-<script src="/bundles/core.d25b5291.js"></script>
-<!-- App Bundle: 97 modules (deferred) -->
-<script defer src="/bundles/app.6cd1c8cb.js"></script>
+<script src="/bundles/core.9bb99759.js"></script>
+<!-- App Bundle: 100 modules (deferred) -->
+<script defer src="/bundles/app.c1cd744e.js"></script>
 <!-- Dormant modules skipped: 10 (oracle + unused) -->
 <!-- Inline scripts extracted: 5 files -->
 </head>
@@ -1094,6 +1097,10 @@
           <!-- Swap Panel -->
           <div class="st-swap-panel">
             <div class="st-sheet-handle" id="st-sheet-handle"><div class="st-sheet-handle-bar"></div></div>
+            <div class="swp-mode-toggle" id="swp-mode-toggle">
+              <button class="swp-mode-btn active" id="swp-mode-standard" onclick="SwapUiModes.setMode('standard')">Standard</button>
+              <button class="swp-mode-btn" id="swp-mode-advanced" onclick="SwapUiModes.setMode('advanced')">Advanced</button>
+            </div>
             <div class="st-swap-tabs">
               <div class="st-swap-tab active" onclick="stSwapTab('swap')">Swap</div>
               <div class="st-swap-tab" onclick="stSwapTab('limit')">Limit<span class="st-swap-tab-soon">Soon</span></div>
@@ -1142,6 +1149,12 @@
                 <div class="st-swap-bal-row">
                   <span class="st-swap-bal">Balance: <span id="swp-bal-out-val">—</span></span>
                 </div>
+              </div>
+
+              <!-- Provider Comparison (Standard mode) -->
+              <div class="swp-comparison-card" id="swp-comparison-card" style="display:none">
+                <div class="swp-comparison-head"><i class="ti ti-zap" style="font-size:9px;color:var(--teal)"></i>Best execution</div>
+                <div class="swp-comparison-list" id="swp-comparison-list"></div>
               </div>
 
               <!-- Rate Details -->
@@ -5460,9 +5473,9 @@
                 <span id="ub-updating" style="display:none;font-size:8px;color:var(--teal)"><i class="ti ti-refresh"></i> Updating…</span>
               </div>
               <div style="display:flex;gap:4px;flex-wrap:wrap">
-                <button class="btn primary" onclick="UBScreen.openSend()" style="padding:5px 9px;font-size:8.5px"><i class="ti ti-send"></i>Send</button>
-                <button class="btn purple" onclick="UBScreen.openSwap()" style="padding:5px 9px;font-size:8.5px"><i class="ti ti-arrows-exchange"></i>Swap</button>
-                <button class="btn teal" onclick="UBScreen.openBridge()" style="padding:5px 9px;font-size:8.5px"><i class="ti ti-topology-star-3"></i>Move</button>
+                <button class="btn primary" onclick="enterUnifiedBalanceMode('send')" style="padding:5px 9px;font-size:8.5px"><i class="ti ti-send"></i>Send</button>
+                <button class="btn purple" onclick="enterUnifiedBalanceMode('swap')" style="padding:5px 9px;font-size:8.5px"><i class="ti ti-arrows-exchange"></i>Swap</button>
+                <button class="btn teal" onclick="enterUnifiedBalanceMode('move')" style="padding:5px 9px;font-size:8.5px"><i class="ti ti-topology-star-3"></i>Move</button>
                 <button class="btn" onclick="ubRefresh()" style="padding:5px 9px;font-size:8.5px"><i class="ti ti-refresh"></i></button>
               </div>
             </div>
@@ -5481,8 +5494,9 @@
                     <div class="ub-dash-chains" id="ub-scr-chains"></div>
                   </div>
                   <div class="ub-dash-feed" id="ub-scr-feed">
-                    <div class="ub-dash-feed-title"><i class="ti ti-activity" style="font-size:9px"></i> Recent Activity</div>
-                    <div class="ub-dash-feed-body" id="ub-scr-feed-body">Connect wallet to begin</div>
+                    <div class="ub-dash-feed-title"><i class="ti ti-activity" style="font-size:9px"></i> LIVE · Unified Operations</div>
+                    <div class="ub-dash-feed-body" id="ub-live-feed">Connect wallet to begin</div>
+                    <div id="ub-live-mode" style="display:none"></div>
                   </div>
                 </div>
                 <!-- Compact Operation Panel (slides in from right) -->
@@ -5497,8 +5511,6 @@
                   </div>
             </div>
           </div>
-          <!-- ═══ FINANCIAL CENTER (inside Screen Live) ═══ -->
-          <div id="ub-financial-center" style="display:none;flex-direction:column;gap:12px;padding:12px 16px;max-height:440px;overflow-y:auto"></div>
         </div>
             </div>
             <!-- Bottom status bar -->
@@ -5506,6 +5518,17 @@
               <span id="ub-screen-time">—</span>
               <span id="ub-scr-status" style="font-size:7.5px;color:var(--muted)">Ready</span>
               <span id="ub-screen-gas" style="font-size:8px;color:var(--muted)">Gas: —</span>
+            </div>
+          </div>
+          <!-- ── FINANCIAL TELEMETRY (collapsible) ── -->
+          <div class="card" id="ub-fin-card" style="display:none">
+            <div class="ch" style="cursor:pointer" onclick="ubToggleFinancial()">
+              <i class="ti ti-chart-line" style="font-size:13px;color:var(--teal)"></i><span class="ct">Financial Telemetry</span>
+              <span id="ub-fin-summary" style="font-size:9px;color:var(--muted2);margin-left:auto">—</span>
+              <i class="ti ti-chevron-down" id="ub-fin-chevron" style="font-size:11px;color:var(--muted2);margin-left:6px"></i>
+            </div>
+            <div class="cb" id="ub-fin-body" style="display:none;flex-direction:column">
+              <div id="ub-financial-center" style="display:flex;flex-direction:column;gap:12px;padding:12px 16px"></div>
             </div>
           </div>
           <!-- ── QUICK ACTIONS ── -->
@@ -6514,7 +6537,7 @@ window.__ARC_PAY_CONFIG__ = window.__ARC_PAY_CONFIG__ || {
 };
 </script>
 
-<script defer src="/bundles/inline-1.572c9d4c.js"></script>
+<script defer src="/bundles/inline-1.7caab44f.js"></script>
 
   <!-- ═══ SMART PAYMENT LANDING MODAL ═══ -->
   <div class="pay-modal-overlay" id="pay-landing-overlay" style="display:none !important; visibility:hidden !important; opacity:0 !important; pointer-events:none !important;">

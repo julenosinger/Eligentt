@@ -17,14 +17,20 @@ const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const hub = fs.readFileSync(path.join(root, 'shared', 'ubMerchantHub.js'), 'utf8');
 
 describe('Unified Balance — reorganized page composition', () => {
-  it('Screen Live has a financial-center container inside it', () => {
+  it('financial telemetry is a collapsible card OUTSIDE the Screen Live', () => {
     expect(html).toContain('id="ub-financial-center"');
-    // financial-center sits inside the screen (before the hero card closes)
-    const finIdx = html.indexOf('id="ub-financial-center"');
+    expect(html).toContain('id="ub-fin-card"');
+    expect(html).toContain('id="ub-fin-body"');
+    expect(html).toContain('function ubToggleFinancial');
+    // financial-center is nested inside the collapsible fin-card, not the live screen
+    const finCard = html.indexOf('id="ub-fin-card"');
+    const finCenter = html.indexOf('id="ub-financial-center"');
+    expect(finCenter).toBeGreaterThan(finCard);
+    // fin-card sits after the Screen Live and before Quick Actions
     const screenIdx = html.indexOf('id="ub-live-screen"');
-    const heroCloseIdx = html.indexOf('id="ub-quick-actions"');
-    expect(screenIdx).toBeLessThan(finIdx);
-    expect(finIdx).toBeLessThan(heroCloseIdx);
+    const qaIdx = html.indexOf('id="ub-quick-actions"');
+    expect(screenIdx).toBeLessThan(finCard);
+    expect(finCard).toBeLessThan(qaIdx);
   });
 
   it('order: Quick Actions after Screen Live, then Assets, then extended merchant hub', () => {
@@ -54,8 +60,7 @@ describe('Unified Balance — reorganized page composition', () => {
     expect(hub).toContain("qa.innerHTML = renderQuickActions()");
   });
 
-  it('renderAll targets three zones (financial-center, quick-actions, merchant-hub)', () => {
-    expect(hub).toContain("getElementById('ub-financial-center')");
+  it('renderAll targets quick-actions + merchant-hub (financial-center now owned by UBLive)', () => {
     expect(hub).toContain("getElementById('ub-quick-actions')");
     expect(hub).toContain("getElementById('ub-merchant-hub')");
   });

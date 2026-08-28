@@ -338,14 +338,25 @@
   }
 
   function renderQuickActions() {
+    // Send / Swap / Move open the matching MODE inside the Screen Live (never
+    // navigate away). Other actions keep their existing page navigation.
+    function mode(m) {
+      return "try{if(typeof enterUnifiedBalanceMode==='function'){enterUnifiedBalanceMode('" + m + "');}}catch(e){}";
+    }
+    function page(p) {
+      return "showPage('" + p + "')";
+    }
     return card(
       ch('bolt', 'Quick Actions'),
       '<div style="display:flex;flex-wrap:wrap;gap:6px">' +
-        '<button class="btn teal" onclick="showPage(\'send\')" style="font-size:8.5px;padding:5px 10px"><i class="ti ti-send"></i>Send</button>' +
+        '<button class="btn teal" onclick="' + mode('send') + '" style="font-size:8.5px;padding:5px 10px"><i class="ti ti-send"></i>Send</button>' +
+        '<button class="btn purple" onclick="' + mode('swap') + '" style="font-size:8.5px;padding:5px 10px;color:var(--purple);border-color:rgba(167,139,250,.25)"><i class="ti ti-arrows-exchange"></i>Swap</button>' +
+        '<button class="btn" onclick="' + mode('move') + '" style="font-size:8.5px;padding:5px 10px;color:var(--teal);border-color:rgba(45,212,191,.25)"><i class="ti ti-topology-star-3"></i>Move</button>' +
+        '<button class="btn" onclick="' + page('batch') + '" style="font-size:8.5px;padding:5px 10px;color:var(--yellow);border-color:rgba(245,158,11,.25)"><i class="ti ti-stack"></i>Batch</button>' +
+        '<button class="btn" onclick="' + page('bridge') + '" style="font-size:8.5px;padding:5px 10px;color:var(--blue);border-color:rgba(79,142,247,.25)"><i class="ti ti-world-share"></i>Bridge</button>' +
         '<button class="btn" onclick="showPage(\'links\')" style="font-size:8.5px;padding:5px 10px;color:var(--blue);border-color:rgba(79,142,247,.25)"><i class="ti ti-link"></i>Payment Link</button>' +
         '<button class="btn" onclick="showPage(\'invoices\')" style="font-size:8.5px;padding:5px 10px;color:#f59e0b;border-color:rgba(245,158,11,.25)"><i class="ti ti-file-invoice"></i>Invoice</button>' +
         '<button class="btn" onclick="showPage(\'schedule\')" style="font-size:8.5px;padding:5px 10px;color:var(--purple);border-color:rgba(167,139,250,.25)"><i class="ti ti-calendar-event"></i>Schedule</button>' +
-        '<button class="btn" onclick="showPage(\'batch\')" style="font-size:8.5px;padding:5px 10px;color:var(--yellow);border-color:rgba(245,158,11,.25)"><i class="ti ti-stack"></i>Payroll</button>' +
         '<button class="btn" onclick="showPage(\'reports\')" style="font-size:8.5px;padding:5px 10px"><i class="ti ti-download"></i>Export</button>' +
         '<button class="btn" onclick="showPage(\'recipients\')" style="font-size:8.5px;padding:5px 10px;color:var(--teal);border-color:rgba(45,212,191,.25)"><i class="ti ti-users"></i>Contacts</button>' +
       '</div>'
@@ -562,18 +573,15 @@
   }
 
   function renderAll() {
-    var fin = document.getElementById('ub-financial-center');
     var qa = document.getElementById('ub-quick-actions');
     var hub = document.getElementById('ub-merchant-hub');
 
     if (!(UB && UB.state && UB.state.assets && UB.state.assets.length)) {
       if (hub) hub.style.display = 'none';
-      if (fin) fin.style.display = 'none';
       if (qa) qa.style.display = 'none';
       return;
     }
 
-    if (fin) { fin.innerHTML = renderFinancialCenter(); fin.style.display = 'flex'; }
     if (qa) { qa.innerHTML = renderQuickActions(); qa.style.display = 'block'; }
     if (hub) { hub.innerHTML = renderExtendedHub(); hub.style.display = 'flex'; }
 

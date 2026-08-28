@@ -79,6 +79,8 @@
 <script src="/shared/autonomaCore.js"></script>
 <script src="/shared/autonomaLLM.js"></script>
 <script src="/shared/autonomaDocumentIntelligence.js"></script>
+<script src="/shared/unifiedBalanceOperationBus.js"></script>
+<script src="/shared/unifiedBalanceLive.js"></script>
 <script src="/shared/ubMerchantHub.js"></script>
 <script src="/shared/rpcManager.js"></script>
 <script src="/shared/chainSimulator.js"></script>
@@ -92,6 +94,7 @@
 <script src="/shared/TowerAdapter.js"></script>
 <script src="/shared/LocalAdapter.js"></script>
 <script src="/shared/SwapAggregator.js"></script>
+<script src="/shared/swapUiModes.js"></script>
 <script src="/shared/liquidityHealth.js"></script>
 <script src="/shared/liquidityProtection.js"></script>
 <script src="/shared/antiWhaleProtection.js"></script>
@@ -1161,6 +1164,30 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
 .st-swap-tab:not(.active):hover{color:var(--text)}
 .st-swap-tab-soon{font-size:6.5px;padding:1px 3px;border-radius:2px;background:rgba(255,255,255,.06);color:var(--muted2);margin-left:2px}
 .st-swap-body{flex:1;overflow-y:auto;padding:6px 8px;display:flex;flex-direction:column;gap:5px}
+/* ── Swap V2 — Standard / Advanced modes + provider comparison ── */
+.swp-mode-toggle{display:flex;gap:4px;padding:4px 8px;background:#0d0f17;border-bottom:1px solid #1a1f2e;flex-shrink:0}
+.swp-mode-btn{flex:1;padding:5px 0;font-size:9.5px;font-weight:700;border:1px solid #1a1f2e;border-radius:5px;background:transparent;color:var(--muted2);cursor:pointer;font-family:'JetBrains Mono',monospace;transition:all .12s}
+.swp-mode-btn.active{color:#06F7E9;background:rgba(6,247,233,.08);border-color:rgba(6,247,233,.3)}
+.swp-mode-btn:not(.active):hover{color:var(--text)}
+.swp-comparison-card{display:none;background:rgba(0,0,0,.22);border:1px solid #1a2030;border-radius:6px;padding:7px 9px}
+.swp-comparison-head{font-size:7.5px;color:var(--muted2);text-transform:uppercase;letter-spacing:.7px;margin-bottom:5px;display:flex;align-items:center;gap:4px}
+.swp-comparison-list{display:flex;flex-direction:column;gap:5px}
+.swp-comp-row{position:relative;display:flex;flex-direction:column;gap:2px;padding:6px 8px;border:1px solid #1a2030;border-radius:5px;background:rgba(0,0,0,.15)}
+.swp-comp-row.best{border-color:rgba(6,247,233,.35);background:rgba(6,247,233,.05)}
+.swp-comp-row.unavailable{opacity:.45}
+.swp-comp-badge{position:absolute;top:-6px;right:6px;font-size:6px;font-weight:800;letter-spacing:.5px;padding:1px 5px;border-radius:3px;background:rgba(6,247,233,.15);border:1px solid rgba(6,247,233,.35);color:#06F7E9}
+.swp-comp-top{display:flex;align-items:center;justify-content:space-between;gap:6px}
+.swp-comp-name{font-size:9.5px;font-weight:700;color:var(--text)}
+.swp-comp-out{font-size:10px;font-weight:700;color:var(--teal);font-family:'JetBrains Mono',monospace}
+.swp-comp-out.unavailable{color:var(--muted2);font-weight:600;font-size:8.5px}
+.swp-comp-sub{display:flex;align-items:center;gap:8px;font-size:7.5px;color:var(--muted2)}
+.swp-comparison-empty{font-size:8.5px;color:var(--muted2);padding:2px 0;text-align:center}
+/* Standard mode: hide chart + market bar, center the swap panel */
+#page-swap.swp-standard .st-chart-section{display:none}
+#page-swap.swp-standard .st-market-bar{display:none}
+#page-swap.swp-standard .st-right-panels{width:100%;max-width:480px;margin:0 auto;border-left:none}
+#page-swap.swp-standard .st-swap-panel{flex:1}
+#page-swap.swp-advanced .swp-comparison-card{display:none !important}
 .st-swap-input-panel{background:rgba(0,0,0,.25);border:1px solid #1a2030;border-radius:6px;padding:9px 10px;transition:border-color .2s}
 .st-swap-input-panel:focus-within{border-color:rgba(34,197,94,.3)}
 .st-swap-label{font-size:8.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;display:flex;align-items:center;justify-content:space-between;font-weight:600}
@@ -2637,7 +2664,7 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
 .ub-dash-chain-pill .bal{font-weight:700;color:var(--teal);font-size:9px}
 .ub-dash-feed{flex:1;display:flex;flex-direction:column;min-height:0;border-top:1px solid rgba(255,255,255,.04);padding-top:6px}
 .ub-dash-feed-title{font-size:8.5px;font-weight:600;color:var(--muted2);margin-bottom:4px;display:flex;align-items:center;gap:4px}
-.ub-dash-feed-body{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:2px;font-size:8.5px;color:var(--muted2);font-family:'JetBrains Mono',monospace}
+.ub-dash-feed-body{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:2px;font-size:8.5px;color:var(--muted2);font-family:'JetBrains Mono',monospace;-webkit-mask-image:linear-gradient(180deg,#000 0%,#000 82%,transparent 100%);mask-image:linear-gradient(180deg,#000 0%,#000 82%,transparent 100%)}
 .ub-dash-feed-line{display:flex;align-items:center;gap:5px;padding:2px 0;border-bottom:1px solid rgba(255,255,255,.02);font-size:8px}
 .ub-dash-feed-line .t{color:var(--muted);font-size:7px;min-width:40px}
 .ub-dash-feed-line .n{color:var(--blue);font-size:7.5px}
@@ -2683,6 +2710,26 @@ select.ub-op-input{cursor:pointer;-webkit-appearance:none;appearance:none;backgr
 .ub-op-step.active .dot{background:rgba(245,158,11,.15);color:var(--yellow)}
 .ub-op-step.done .dot{background:rgba(34,197,94,.15);color:var(--green)}
 .ub-op-step.error .dot{background:rgba(239,68,68,.15);color:var(--red)}
+
+/* ── Live screen: back-to-live + mode indicator + financial telemetry ── */
+.ub-op-btn.back{background:transparent;color:var(--muted2);border:1px solid var(--border);font-weight:600}
+.ub-op-btn.back:hover:not(:disabled){color:var(--text);border-color:var(--muted2)}
+.ub-live-mode-bar{display:flex;align-items:center;gap:8px;padding:7px 9px;border:1px solid rgba(6,247,233,.14);border-radius:5px;background:rgba(6,247,233,.03)}
+.ub-live-mode-title{font-size:8.5px;font-weight:800;color:#06F7E9;letter-spacing:.6px;font-family:'JetBrains Mono',monospace}
+.ub-live-mode-status{font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:.4px}
+.ub-live-mode-hint{font-size:7.5px;color:var(--muted2)}
+.ub-fin{display:flex;flex-direction:column;width:100%;gap:0}
+.ub-fin-head{padding:0 0 6px;border-bottom:1px solid rgba(255,255,255,.06);display:flex;align-items:center;gap:6px}
+.ub-fin-head-label{font-size:7px;color:var(--muted2);text-transform:uppercase;letter-spacing:1.2px}
+.ub-fin-cols{display:grid;grid-template-columns:1fr 1fr;gap:0 28px}
+.ub-fin-col{display:flex;flex-direction:column;min-width:0}
+.ub-fin-row{display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:5px 0;border-bottom:1px solid rgba(255,255,255,.035)}
+.ub-fin-label{font-size:7.5px;color:var(--muted2);text-transform:uppercase;letter-spacing:.5px;white-space:nowrap}
+.ub-fin-value{font-size:12px;font-weight:700;font-family:'JetBrains Mono',monospace;white-space:nowrap}
+.ub-fin-value.big{font-size:15px;color:var(--teal)}
+@media(max-width:768px){
+  .ub-fin-cols{grid-template-columns:1fr;gap:0}
+}
 
 @media(max-width:768px){
   /* UB Screen: full width, prominent */
@@ -6443,6 +6490,10 @@ select.cinput option { background: #161a24; color: #dde2f0; }
           <!-- Swap Panel -->
           <div class="st-swap-panel">
             <div class="st-sheet-handle" id="st-sheet-handle"><div class="st-sheet-handle-bar"></div></div>
+            <div class="swp-mode-toggle" id="swp-mode-toggle">
+              <button class="swp-mode-btn active" id="swp-mode-standard" onclick="SwapUiModes.setMode('standard')">Standard</button>
+              <button class="swp-mode-btn" id="swp-mode-advanced" onclick="SwapUiModes.setMode('advanced')">Advanced</button>
+            </div>
             <div class="st-swap-tabs">
               <div class="st-swap-tab active" onclick="stSwapTab('swap')">Swap</div>
               <div class="st-swap-tab" onclick="stSwapTab('limit')">Limit<span class="st-swap-tab-soon">Soon</span></div>
@@ -6491,6 +6542,12 @@ select.cinput option { background: #161a24; color: #dde2f0; }
                 <div class="st-swap-bal-row">
                   <span class="st-swap-bal">Balance: <span id="swp-bal-out-val">—</span></span>
                 </div>
+              </div>
+
+              <!-- Provider Comparison (Standard mode) -->
+              <div class="swp-comparison-card" id="swp-comparison-card" style="display:none">
+                <div class="swp-comparison-head"><i class="ti ti-zap" style="font-size:9px;color:var(--teal)"></i>Best execution</div>
+                <div class="swp-comparison-list" id="swp-comparison-list"></div>
               </div>
 
               <!-- Rate Details -->
@@ -10809,9 +10866,9 @@ select.cinput option { background: #161a24; color: #dde2f0; }
                 <span id="ub-updating" style="display:none;font-size:8px;color:var(--teal)"><i class="ti ti-refresh"></i> Updating…</span>
               </div>
               <div style="display:flex;gap:4px;flex-wrap:wrap">
-                <button class="btn primary" onclick="UBScreen.openSend()" style="padding:5px 9px;font-size:8.5px"><i class="ti ti-send"></i>Send</button>
-                <button class="btn purple" onclick="UBScreen.openSwap()" style="padding:5px 9px;font-size:8.5px"><i class="ti ti-arrows-exchange"></i>Swap</button>
-                <button class="btn teal" onclick="UBScreen.openBridge()" style="padding:5px 9px;font-size:8.5px"><i class="ti ti-topology-star-3"></i>Move</button>
+                <button class="btn primary" onclick="enterUnifiedBalanceMode('send')" style="padding:5px 9px;font-size:8.5px"><i class="ti ti-send"></i>Send</button>
+                <button class="btn purple" onclick="enterUnifiedBalanceMode('swap')" style="padding:5px 9px;font-size:8.5px"><i class="ti ti-arrows-exchange"></i>Swap</button>
+                <button class="btn teal" onclick="enterUnifiedBalanceMode('move')" style="padding:5px 9px;font-size:8.5px"><i class="ti ti-topology-star-3"></i>Move</button>
                 <button class="btn" onclick="ubRefresh()" style="padding:5px 9px;font-size:8.5px"><i class="ti ti-refresh"></i></button>
               </div>
             </div>
@@ -10830,8 +10887,9 @@ select.cinput option { background: #161a24; color: #dde2f0; }
                     <div class="ub-dash-chains" id="ub-scr-chains"></div>
                   </div>
                   <div class="ub-dash-feed" id="ub-scr-feed">
-                    <div class="ub-dash-feed-title"><i class="ti ti-activity" style="font-size:9px"></i> Recent Activity</div>
-                    <div class="ub-dash-feed-body" id="ub-scr-feed-body">Connect wallet to begin</div>
+                    <div class="ub-dash-feed-title"><i class="ti ti-activity" style="font-size:9px"></i> LIVE · Unified Operations</div>
+                    <div class="ub-dash-feed-body" id="ub-live-feed">Connect wallet to begin</div>
+                    <div id="ub-live-mode" style="display:none"></div>
                   </div>
                 </div>
                 <!-- Compact Operation Panel (slides in from right) -->
@@ -10846,8 +10904,6 @@ select.cinput option { background: #161a24; color: #dde2f0; }
                   </div>
             </div>
           </div>
-          <!-- ═══ FINANCIAL CENTER (inside Screen Live) ═══ -->
-          <div id="ub-financial-center" style="display:none;flex-direction:column;gap:12px;padding:12px 16px;max-height:440px;overflow-y:auto"></div>
         </div>
             </div>
             <!-- Bottom status bar -->
@@ -10855,6 +10911,17 @@ select.cinput option { background: #161a24; color: #dde2f0; }
               <span id="ub-screen-time">—</span>
               <span id="ub-scr-status" style="font-size:7.5px;color:var(--muted)">Ready</span>
               <span id="ub-screen-gas" style="font-size:8px;color:var(--muted)">Gas: —</span>
+            </div>
+          </div>
+          <!-- ── FINANCIAL TELEMETRY (collapsible) ── -->
+          <div class="card" id="ub-fin-card" style="display:none">
+            <div class="ch" style="cursor:pointer" onclick="ubToggleFinancial()">
+              <i class="ti ti-chart-line" style="font-size:13px;color:var(--teal)"></i><span class="ct">Financial Telemetry</span>
+              <span id="ub-fin-summary" style="font-size:9px;color:var(--muted2);margin-left:auto">—</span>
+              <i class="ti ti-chevron-down" id="ub-fin-chevron" style="font-size:11px;color:var(--muted2);margin-left:6px"></i>
+            </div>
+            <div class="cb" id="ub-fin-body" style="display:none;flex-direction:column">
+              <div id="ub-financial-center" style="display:flex;flex-direction:column;gap:12px;padding:12px 16px"></div>
             </div>
           </div>
           <!-- ── QUICK ACTIONS ── -->
@@ -20788,6 +20855,9 @@ async function updateSwapRate() {
 
   if (amtIn <= 0) {
     if (outEl) outEl.value = '';
+    SWP.aggQuotes = null;
+    SWP.aggBest = null;
+    try { if (typeof SwapUiModes !== 'undefined' && SwapUiModes.clearComparison) SwapUiModes.clearComparison(); } catch(_) {}
     const el = document.getElementById('swap-rate');
     if (el) {
       // Find route to display approximate rate
@@ -20874,6 +20944,8 @@ async function updateSwapRate() {
             amountInRaw: amountInRaw,
             slippageBps: Math.round(SWP.slippage * 100),
           });
+          SWP.aggQuotes = agg.quotes || [];
+          SWP.aggBest = agg.best || null;
           if (agg.ok && agg.best) {
             expectedOutRaw = agg.best.expectedOutRaw;
             if (agg.best.source === 'tower') {
@@ -21048,6 +21120,15 @@ async function updateSwapRate() {
       // Race guard: discard this result if a newer quote request already started.
       if (quoteSeq !== _swapQuoteSeq) return;
       SWP.lastQuote = { amtIn, amtOut, minReceived, rate, priceImpact, feeAmt, source, tIn, tOut, route, totalFee, expectedOutRaw, amountInRaw, quotedAt: Date.now(), stateUpdatedAt: _qState ? _qState.updatedAt : null };
+      // Render provider comparison (Standard mode) from the SAME aggregator quotes.
+      try {
+        if (typeof SwapUiModes !== 'undefined' && SwapUiModes.renderComparison) {
+          SwapUiModes.renderComparison(
+            { ok: !!(SWP.aggBest), best: SWP.aggBest || null, quotes: SWP.aggQuotes || [] },
+            { tokenOut: tOut.sym, tokenOutDecimals: tOut.decimals }
+          );
+        }
+      } catch(_) {}
       SwapEngine.notifyQuoteLoaded(SWP.lastQuote);
       // Stamp block number synchronously so it's ready before user clicks
       await stampQuoteBlock();
@@ -21063,6 +21144,9 @@ async function updateSwapRate() {
       swpSetBtn('disabled', 'Quote error');
       SWP.lastQuote = null;
       SWP._towerQuoteData = null;
+      SWP.aggQuotes = null;
+      SWP.aggBest = null;
+      try { if (typeof SwapUiModes !== 'undefined' && SwapUiModes.clearComparison) SwapUiModes.clearComparison(); } catch(_) {}
     }
   }, 380);
 }
@@ -23343,6 +23427,20 @@ function logToReports(type, amount, rcptCount, txHash, opts) {
   txHistory.unshift(entry);
   Store.save('txhistory', txHistory);
   try { if (typeof EventBus !== 'undefined') EventBus.emit('TX_HISTORY_UPDATED', entry); } catch(_) {}
+  // Publish to the global operation bus so the Screen Live updates in real time.
+  try {
+    if (typeof UBOperationBus !== 'undefined') {
+      UBOperationBus.publish('confirmed', {
+        id: txHash || entry.id,
+        type: entry.type,
+        asset: 'USDC',
+        amount: entry.amount,
+        destination: (opts && opts.destination) || null,
+        txHash: txHash || null,
+        metadata: { recipients: entry.recipients, fee: entry.fee }
+      });
+    }
+  } catch(_) {}
   // Resolve any pending manual schedule run (idempotent — only fires if a
   // schedule was routed via the Play button).
   try { if (typeof schCompleteRun === 'function') schCompleteRun(txHash || ''); } catch(_) {}
@@ -37777,7 +37875,8 @@ const UB = {
   loading: false,
   _refreshQueued: false,
   memory: null,
-  recs: []
+  recs: [],
+  liveMode: 'live'
 };
 
 // ── UB-2.1: generation guard + wallet snapshot ─────────────────
@@ -38701,6 +38800,8 @@ function ubRenderAll() {
   ubRenderNetworks();
   // Take financial memory snapshot
   try { FinancialMemory.takeSnapshot(); } catch(_) {}
+  // Global Live Operations Center: init once + refresh indicators/stream.
+  try { if (typeof UBLive !== 'undefined') { UBLive.init(); UBLive.refresh(); } } catch(_) {}
 }
 
 function ubRenderHero() {
@@ -39170,11 +39271,21 @@ function ubToggleNetworksAdvanced() {
   if (chev) chev.className = 'ti ti-chevron-' + (open ? 'down' : 'up');
 }
 
+function ubToggleFinancial() {
+  var body = document.getElementById('ub-fin-body');
+  var chev = document.getElementById('ub-fin-chevron');
+  if (!body) return;
+  var open = body.style.display !== 'none';
+  body.style.display = open ? 'none' : 'flex';
+  if (chev) chev.className = 'ti ti-chevron-' + (open ? 'down' : 'up');
+}
+
 window.ubInit = ubInit;
 window.ubRefresh = ubRefresh;
 window.ubToggleNetworks = ubToggleNetworks;
 window.ubRenderNetworks = ubRenderNetworks;
 window.ubToggleNetworksAdvanced = ubToggleNetworksAdvanced;
+window.ubToggleFinancial = ubToggleFinancial;
 
 // ══════════════════════════════════════════════════════════
 //  AUTONOMOUS FINANCE LAYER — Action Planning + Permissions + Goals
@@ -40951,7 +41062,8 @@ const UBScreen = (function() {
         '<div class="ub-scr-info-row"><span>Network</span><span style="color:var(--text)">Arc Testnet</span></div>' +
         '<div class="ub-scr-info-row"><span>Fee</span><span style="color:var(--yellow)">0.20%</span></div>' +
         '<div class="ub-scr-info-row" style="font-weight:600"><span>Total</span><span id="ub-scr-send-total" style="color:var(--blue)">—</span></div>' +
-        '<button class="ub-op-btn send" onclick="UBScreen.execSend()">Send</button>';
+        '<button class="ub-op-btn send" onclick="UBScreen.execSend()">Send</button>' +
+        '<button class="ub-op-btn back" onclick="exitUnifiedBalanceMode()"><i class="ti ti-arrow-left"></i> Back to Live</button>';
       // Bind amount change to update total
       setTimeout(function(){
         var amtEl = document.getElementById('ub-scr-send-amt');
@@ -40975,7 +41087,8 @@ const UBScreen = (function() {
           '</div>' +
           '<div class="ub-scr-info-row"><span>Slippage</span><span style="color:var(--text)">0.5%</span></div>' +
           '<div class="ub-scr-info-row"><span>Route</span><span style="color:var(--teal)">Direct Pool</span></div>' +
-          '<button class="ub-op-btn swap" onclick="UBScreen.execSwap()">Swap</button>';
+          '<button class="ub-op-btn swap" onclick="UBScreen.execSwap()">Swap</button>' +
+          '<button class="ub-op-btn back" onclick="exitUnifiedBalanceMode()"><i class="ti ti-arrow-left"></i> Back to Live</button>';
         setTimeout(function(){
           var amtEl = document.getElementById('ub-scr-swap-amt');
           if (amtEl) amtEl.addEventListener('input', UBScreen._refreshSwap);
@@ -41000,7 +41113,8 @@ const UBScreen = (function() {
           '<div class="ub-scr-info-row"><span>Fee</span><span id="ub-scr-br-fee" style="color:var(--yellow)">—</span></div>' +
           '<div class="ub-scr-info-row"><span>Est. Time</span><span id="ub-scr-br-time" style="color:var(--teal)">—</span></div>' +
           '<div class="ub-scr-info-row" style="font-weight:600"><span>You Receive</span><span id="ub-scr-br-recv" style="color:var(--green)">—</span></div>' +
-          '<button class="ub-op-btn bridge" onclick="UBScreen.execBridge()">Move</button>';
+          '<button class="ub-op-btn bridge" onclick="UBScreen.execBridge()">Move</button>' +
+          '<button class="ub-op-btn back" onclick="exitUnifiedBalanceMode()"><i class="ti ti-arrow-left"></i> Back to Live</button>';
         setTimeout(function(){
           UBScreen._populateBridge();
           var amtEl = document.getElementById('ub-scr-bridge-amt');
@@ -41016,6 +41130,9 @@ const UBScreen = (function() {
 
   function _cleanupAll() {
     _currentOp = null;
+    // Closing the operation panel always returns the Live screen to 'live'.
+    try { if (typeof UB !== 'undefined') UB.liveMode = 'live'; } catch(_) {}
+    try { if (typeof UBLive !== 'undefined') UBLive.setMode('live'); } catch(_) {}
     // Remove backdrop with opacity fade
     try {
       var backdrop = document.getElementById('ub-op-backdrop');
@@ -41387,6 +41504,37 @@ const UBScreen = (function() {
     }
   }
 })();
+
+// ══════════════════════════════════════════════════════════
+//  UB MODE ORCHESTRATION — Send/Swap/Move as LIVE screen modes
+//  ----------------------------------------------------------
+//  Single source of truth: UB.liveMode ('live'|'send'|'swap'|'move').
+//  The Unified Balance is a PRESENTATION/ORCHESTRATION layer only:
+//    - Send  → UBScreen.openSend()  → reuses saExecuteSend()
+//    - Swap  → UBScreen.openSwap()  → reuses executeSwap()
+//    - Move  → UBScreen.openBridge() → reuses xcExecuteSend()
+//  Never navigates (no showPage). No duplicated execution logic.
+// ══════════════════════════════════════════════════════════
+var UB_ACTION_MODES = ['send', 'swap', 'move'];
+
+function enterUnifiedBalanceMode(mode) {
+  if (UB_ACTION_MODES.indexOf(mode) === -1) return;
+  try { if (typeof UB !== 'undefined') UB.liveMode = mode; } catch (_) {}
+  try { if (typeof UBLive !== 'undefined') { UBLive.init(); UBLive.setMode(mode); } } catch (_) {}
+  try {
+    if (typeof UBScreen !== 'undefined') {
+      if (mode === 'send') UBScreen.openSend();
+      else if (mode === 'swap') UBScreen.openSwap();
+      else if (mode === 'move') UBScreen.openBridge();
+    }
+  } catch (_) {}
+}
+
+function exitUnifiedBalanceMode() {
+  try { if (typeof UB !== 'undefined') UB.liveMode = 'live'; } catch (_) {}
+  try { if (typeof UBLive !== 'undefined') UBLive.setMode('live'); } catch (_) {}
+  try { if (typeof UBScreen !== 'undefined') UBScreen.hideOperation(); } catch (_) {}
+}
 
 //  AUTONOMA — AI Agent Engine (v3) + AIResponseRenderer
 // ══════════════════════════════════════════════════════════
