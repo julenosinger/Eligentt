@@ -2,9 +2,21 @@
  * SwapAggregator — orchestrator that compares Tower + local pools and selects
  * the best execution for the user.
  * ═══════════════════════════════════════════════════════════════════════
- * Both sources are quoted INDEPENDENTLY (in parallel). A rejection/timeout in
- * one source never breaks the other. The best quote is chosen deterministically:
+ * QUOTE EVERYTHING, EXECUTE ONLY WHAT IS SAFE.
  *
+ * Both sources are ALWAYS quoted independently (in parallel), regardless of
+ * whether a local pool exists — a local pool is NEVER a reason to skip the
+ * Tower quote. A rejection/timeout in one source never breaks the other.
+ *
+ * QUOTE availability is separate from EXECUTION availability:
+ *   - bestQuote           → highest expectedOutRaw (any valid quote, reference)
+ *   - bestExecutableQuote → highest expectedOutRaw among quotes that can be
+ *                           executed by the Elligentt execution path.
+ * Tower executability is determined by calldata/target/spender validity AND the
+ * local-pool safety rule (f08cb02): Tower calldata is never executed when a
+ * local Arc pool exists for the pair. Tower remains visible as "Reference".
+ *
+ * Deterministic selection:
  *   1. primary  — highest expectedOutRaw (net token output)
  *   2. tiebreak — highest minOutRaw (safest floor)
  *   3. tiebreak — lowest feeBps
@@ -124,14 +136,16 @@
 
   /**
    * Validate a quote against the requested parameters. A quote that does not
-   * match the request (token/amount/chain) or is stale is rejected.
+   * match the request is rejected. chainId / tokenIn / tokenOut / amountInRaw
+   * are MANDATORY — a quote missing any of them is INVALID (not comparable).
+   * A stale (expired) quote is also rejected.
    */
   function validateAgainst(q, opts) {
     if (!q || q.ok !== true) return false;
-    if (opts.tokenIn && q.tokenIn && String(q.tokenIn) !== String(opts.tokenIn)) return false;
-    if (opts.tokenOut && q.tokenOut && String(q.tokenOut) !== String(opts.tokenOut)) return false;
-    if (opts.amountInRaw && q.amountInRaw != null && String(q.amountInRaw) !== String(opts.amountInRaw)) return false;
-    if (opts.chainId && q.chainId != null && Number(q.chainId) !== Number(opts.chainId)) return false;
+    if (opts.tokenIn != null && (q.tokenIn == null || String(q.tokenIn) !== String(opts.tokenIn))) return false;
+    if (opts.tokenOut != null && (q.tokenOut == null || String(q.tokenOut) !== String(opts.tokenOut))) return false;
+    if (opts.amountInRaw != null && (q.amountInRaw == null || String(q.amountInRaw) !== String(opts.amountInRaw))) return false;
+    if (opts.chainId != null && (q.chainId == null || Number(q.chainId) !== Number(opts.chainId))) return false;
     if (q.expiresAt != null && Date.now() > q.expiresAt) return false; // stale
     return true;
   }

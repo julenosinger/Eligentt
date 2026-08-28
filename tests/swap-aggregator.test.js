@@ -276,13 +276,127 @@ describe('LocalAdapter.getQuote — local pools independentes', () => {
   });
 });
 
+describe('SwapAggregator — Tower quoted for ALL pairs + strict validation', () => {
+  beforeEach(() => { delete globalThis.TowerAdapter; delete globalThis.LocalAdapter; });
+  afterEach(() => { delete globalThis.TowerAdapter; delete globalThis.LocalAdapter; });
+
+  function evalAgg() {
+    const w = makeWindow(); evalModule(aggSrc, w); return w.SwapAggregator;
+  }
+  const opts = { tokenIn: 'USDC', tokenOut: 'EURC', amountInRaw: 1000000n, slippageBps: 50, chainId: 5042002 };
+  const ADDR = '0x2de8906a641d65d490bc60a4179d961d59742bcb';
+
+  it('1/27. Tower é consultada mesmo quando existe pool local (hasLocalPool=true)', async () => {
+    let towerCalls = 0, localCalls = 0;
+    globalThis.TowerAdapter = { getQuote: async () => { towerCalls++; return towerQuote('tower', { expectedOutRaw: 1001400n, calldata: '0xabcd', to: ADDR }); } };
+    globalThis.LocalAdapter = { getQuote: async () => { localCalls++; return towerQuote('local', { expectedOutRaw: 998200n, executable: true }); } };
+    const agg = evalAgg();
+    const r = await agg.getBestQuote(Object.assign({}, opts, { hasLocalPool: true }));
+    expect(towerCalls).toBe(1);
+    expect(localCalls).toBe(1);
+    expect(r.quotes.some(q => q.source === 'tower')).toBe(true);
+    expect(r.quotes.some(q => q.source === 'local')).toBe(true);
+  });
+
+  it('3. Tower + Local são cotados em paralelo (ambos chamados)', async () => {
+    const callOrder = [];
+    globalThis.TowerAdapter = { getQuote: async () => { callOrder.push('tower'); return towerQuote('tower', { calldata: '0xabcd', to: ADDR }); } };
+    globalThis.LocalAdapter = { getQuote: async () => { callOrder.push('local'); return towerQuote('local', { executable: true }); } };
+    const agg = evalAgg();
+    await agg.getBestQuote(Object.assign({}, opts, { hasLocalPool: true }));
+    expect(callOrder).toContain('tower');
+    expect(callOrder).toContain('local');
+  });
+
+  it('12. tokenIn mismatch → quote inválida (rejeitada)', async () => {
+    globalThis.TowerAdapter = { getQuote: async () => towerQuote('tower', { tokenIn: 'EURC' }) };
+    globalThis.LocalAdapter = { getQuote: async () => towerQuote('local', { executable: true }) };
+    const agg = evalAgg();
+    const r = await agg.getBestQuote(opts);
+    expect(r.best.source).toBe('local');
+  });
+
+  it('13. tokenOut mismatch → quote inválida (rejeitada)', async () => {
+    globalThis.TowerAdapter = { getQuote: async () => towerQuote('tower', { tokenOut: 'cirBTC' }) };
+    globalThis.LocalAdapter = { getQuote: async () => towerQuote('local', { executable: true }) };
+    const agg = evalAgg();
+    const r = await agg.getBestQuote(opts);
+    expect(r.best.source).toBe('local');
+  });
+
+  it('14. chain mismatch → quote inválida (rejeitada)', async () => {
+    globalThis.TowerAdapter = { getQuote: async () => towerQuote('tower', { chainId: 1 }) };
+    globalThis.LocalAdapter = { getQuote: async () => towerQuote('local', { executable: true }) };
+    const agg = evalAgg();
+    const r = await agg.getBestQuote(opts);
+    expect(r.best.source).toBe('local');
+  });
+
+  it('15. amount mismatch → quote inválida (rejeitada)', async () => {
+    globalThis.TowerAdapter = { getQuote: async () => towerQuote('tower', { amountInRaw: 999999n }) };
+    globalThis.LocalAdapter = { getQuote: async () => towerQuote('local', { executable: true }) };
+    const agg = evalAgg();
+    const r = await agg.getBestQuote(opts);
+    expect(r.best.source).toBe('local');
+  });
+
+  it('quote sem tokenIn (campo obrigatório ausente) → inválida', async () => {
+    globalThis.TowerAdapter = { getQuote: async () => ({ source: 'tower', ok: true, tokenOut: 'EURC', amountInRaw: 1000000n, chainId: 5042002, expectedOutRaw: 1000000n, minOutRaw: 995000n }) };
+    globalThis.LocalAdapter = { getQuote: async () => towerQuote('local', { executable: true }) };
+    const agg = evalAgg();
+    const r = await agg.getBestQuote(opts);
+    expect(r.best.source).toBe('local');
+  });
+
+  it('16. quote expirada → inválida (rejeitada)', async () => {
+    globalThis.TowerAdapter = { getQuote: async () => towerQuote('tower', { expiresAt: Date.now() - 1000 }) };
+    globalThis.LocalAdapter = { getQuote: async () => towerQuote('local', { executable: true }) };
+    const agg = evalAgg();
+    const r = await agg.getBestQuote(opts);
+    expect(r.best.source).toBe('local');
+  });
+
+  it('22/24. Tower calldata inválida/spender zero → não executável (towerExecutionValid)', () => {
+    const a = evalAgg();
+    expect(a.towerExecutionValid({ calldata: 'not-hex', to: ADDR, spender: ADDR })).toBe(false);
+    expect(a.towerExecutionValid({ calldata: '0xabcd', to: ADDR, spender: '0x0000000000000000000000000000000000000000' })).toBe(false);
+    expect(a.towerExecutionValid({ calldata: '0xabcd', to: '0x0000000000000000000000000000000000000000', spender: ADDR })).toBe(false);
+    expect(a.towerExecutionValid({ calldata: '0xabcd', to: ADDR, spender: ADDR })).toBe(true);
+  });
+
+  it('6/28/29. Tower pior NÃO desaparece — permanece em quotes[]', async () => {
+    globalThis.TowerAdapter = { getQuote: async () => towerQuote('tower', { expectedOutRaw: 900000n, calldata: '0xabcd', to: ADDR }) };
+    globalThis.LocalAdapter = { getQuote: async () => towerQuote('local', { expectedOutRaw: 998200n, executable: true }) };
+    const agg = evalAgg();
+    const r = await agg.getBestQuote(Object.assign({}, opts, { hasLocalPool: true }));
+    expect(r.best.source).toBe('local');
+    const tower = r.quotes.find(q => q.source === 'tower');
+    expect(tower).toBeTruthy(); // Tower stays in the comparison
+    expect(tower.executable).toBe(false); // reference-only (local pool exists)
+  });
+
+  it('10/11. Local offline → Tower ainda aparece; ambos offline → bloqueio', async () => {
+    globalThis.TowerAdapter = { getQuote: async () => towerQuote('tower', { calldata: '0xabcd', to: ADDR }) };
+    globalThis.LocalAdapter = { getQuote: async () => ({ source: 'local', ok: false }) };
+    const agg = evalAgg();
+    const r1 = await agg.getBestQuote(Object.assign({}, opts, { hasLocalPool: false }));
+    expect(r1.quotes.some(q => q.source === 'tower')).toBe(true);
+
+    globalThis.TowerAdapter = { getQuote: async () => ({ source: 'tower', ok: false }) };
+    const r2 = await agg.getBestQuote(Object.assign({}, opts, { hasLocalPool: false }));
+    expect(r2.bestExecutable).toBeNull();
+    expect(r2.executable).toBe(false);
+  });
+});
+
 describe('index.html — structural invariants', () => {
   it('SwapAggregator é usado no updateSwapRate (Tower não é mais prioridade)', () => {
     expect(srcHtml).toContain('SwapAggregator.getBestQuote');
     expect(srcHtml).toContain("source = 'Tower Exchange'");
     expect(srcHtml).toContain("source = 'Elligentt Pool'");
     expect(srcHtml).toContain('agg.bestExecutable');
-    expect(srcHtml).toContain('hasLocalPool: !!(route && !route.noLiq)');
+    expect(srcHtml).toContain('const hasLocalPool = !!(route && !route.noLiq)');
+    expect(srcHtml).toContain('chainId: 5042002');
     expect(srcHtml).toContain('resolveSelection');
     expect(srcHtml).toContain('SWP._towerQuoteData = selected.calldata ? selected : null');
   });
@@ -301,6 +415,12 @@ describe('index.html — structural invariants', () => {
 
   it('execution lock preservado (_swpExecuting)', () => {
     expect(srcHtml).toContain('_swpExecuting');
+  });
+
+  it('Tower-only execution path valida calldata + recompõe minOut localmente', () => {
+    expect(srcHtml).toContain('async function swpExecuteTowerOnly');
+    expect(srcHtml).toContain('TowerAdapter.validateResponse');
+    expect(srcHtml).toContain('SwapMath.calcMinOut(expectedOutRaw, slippageBps)');
   });
 
   it('módulos canônicos preservados (swapMath/poolEngine/poolRouter/poolExecutor)', () => {
