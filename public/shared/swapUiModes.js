@@ -78,16 +78,18 @@
 
   /**
    * Build the provider comparison rows from a SwapAggregator decision.
+   * Distinguishes bestExecutableQuote (what will run) from bestQuote (reference).
    * Deterministic ordering: valid quotes sorted by expectedOutRaw desc, then
    * minOutRaw desc, then feeBps asc — identical rule to SwapAggregator.pickBest.
-   * @param {object} decision { ok, best, quotes:[] }
+   * Executable rows are listed first; non-executable rows are "Reference only".
+   * @param {object} decision { ok, executable, best, bestExecutable, quotes:[] }
    * @param {object} opts { tokenOut, tokenOutDecimals }
    * @returns {string} HTML (rows only, no wrapper)
    */
   function buildComparisonHtml(decision, opts) {
     opts = opts || {};
     var quotes = (decision && decision.quotes) || [];
-    var best = (decision && decision.best) || null;
+    var bestExec = (decision && decision.bestExecutable) || null;
 
     var valid = [];
     for (var i = 0; i < quotes.length; i++) {
@@ -110,25 +112,52 @@
       return ((a.feeBps || 0) - (b.feeBps || 0));
     });
 
+    var execs = [], refs = [];
+    for (var j = 0; j < valid.length; j++) {
+      (valid[j].executable === true ? execs : refs).push(valid[j]);
+    }
+
     var out = '';
     var seen = {};
-    for (var j = 0; j < valid.length; j++) {
-      var v = valid[j];
-      seen[v.source] = true;
-      var isBest = !!best && best.source === v.source;
+
+    function row(v, kind) {
       var fee = v.feeBps != null ? ((Number(v.feeBps) / 100).toFixed(2) + '%') : '—';
-      out +=
-        '<div class="swp-comp-row' + (isBest ? ' best' : '') + '">' +
-          (isBest ? '<span class="swp-comp-badge">BEST PRICE</span>' : '') +
-          '<div class="swp-comp-top"><span class="swp-comp-name">' + providerName(v) + '</span>' +
-          '<span class="swp-comp-out">' + formatOut(v.expectedOutRaw, opts.tokenOutDecimals) + ' ' + (opts.tokenOut || '') + '</span></div>' +
-          '<div class="swp-comp-sub"><span>Fee: ' + fee + '</span><span>' + sourceLabel(v) + '</span></div>' +
+      var cls = '';
+      var badge = '';
+      var tag = '';
+      if (kind === 'best-executable') {
+        cls = ' best';
+        badge = '<span class="swp-comp-badge">BEST ROUTE</span>';
+        tag = '<span class="swp-comp-tag exec">✓ Executable</span>';
+      } else if (kind === 'executable') {
+        cls = ' exec';
+        tag = '<span class="swp-comp-tag exec">✓ Executable</span>';
+      } else {
+        cls = ' reference';
+        tag = '<span class="swp-comp-tag ref">Reference only</span>';
+      }
+      return '<div class="swp-comp-row' + cls + '">' + badge +
+        '<div class="swp-comp-top"><span class="swp-comp-name">' + providerName(v) + '</span>' +
+        '<span class="swp-comp-out">' + formatOut(v.expectedOutRaw, opts.tokenOutDecimals) + ' ' + (opts.tokenOut || '') + '</span></div>' +
+        '<div class="swp-comp-sub"><span>Fee: ' + fee + '</span><span>' + sourceLabel(v) + '</span>' + tag + '</div>' +
         '</div>';
     }
 
+    for (var k = 0; k < execs.length; k++) {
+      var e = execs[k];
+      seen[e.source] = true;
+      var isBestExec = !!bestExec && bestExec.source === e.source;
+      out += row(e, isBestExec ? 'best-executable' : 'executable');
+    }
+    for (var r = 0; r < refs.length; r++) {
+      var rq = refs[r];
+      seen[rq.source] = true;
+      out += row(rq, 'reference');
+    }
+
     // Unavailable sources shown discreetly (never a global error).
-    for (var k = 0; k < quotes.length; k++) {
-      var q2 = quotes[k];
+    for (var m = 0; m < quotes.length; m++) {
+      var q2 = quotes[m];
       if (!q2 || q2.ok === true) continue;
       if (seen[q2.source]) continue;
       seen[q2.source] = true;

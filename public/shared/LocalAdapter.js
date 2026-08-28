@@ -91,6 +91,7 @@
         feeBps: feeBps,
         route: route,
         executionType: 'local',
+        executable: true, // Elligentt pools are always executable when they quote
       };
     } catch (e) {
       return { source: 'local', ok: false, error: (e && e.message) || String(e) };

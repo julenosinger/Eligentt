@@ -23,6 +23,27 @@
     try { return typeof v === 'bigint' && v > 0n; } catch (_) { return false; }
   }
 
+  var ZERO_ADDR = '0x0000000000000000000000000000000000000000';
+
+  /**
+   * Whether an external (Tower) quote carries the fields required to be EXECUTED
+   * (valid calldata, non-zero target, valid spender). This mirrors the execution
+   * guard in executeSwap; a reference quote without these is never executable.
+   */
+  function towerExecutionValid(q) {
+    if (!q || !q.calldata || !/^0x[0-9a-fA-F]+$/.test(q.calldata)) return false;
+    if (!q.to || !/^0x[0-9a-fA-F]{40}$/.test(q.to) || q.to === ZERO_ADDR) return false;
+    if (q.spender != null && (!/^0x[0-9a-fA-F]{40}$/.test(q.spender) || q.spender === ZERO_ADDR)) return false;
+    return true;
+  }
+
+  /** Shared deterministic comparator: expectedOutRaw desc → minOutRaw desc → feeBps asc. */
+  function byBetter(a, b) {
+    if (a.expectedOutRaw !== b.expectedOutRaw) return (a.expectedOutRaw > b.expectedOutRaw) ? -1 : 1;
+    if (a.minOutRaw !== b.minOutRaw) return (a.minOutRaw > b.minOutRaw) ? -1 : 1;
+    return ((a.feeBps || 0) - (b.feeBps || 0));
+  }
+
   /**
    * Wrap a quote promise so it settles (never hangs) after `ms`, returning the
    * fallback. A slow source is isolated: it cannot block the other source beyond
@@ -70,11 +91,33 @@
       return { ok: false, reason: 'NO_ROUTE_AVAILABLE', quotes: quotes.slice() };
     }
 
-    valid.sort(function (a, b) {
-      if (a.expectedOutRaw !== b.expectedOutRaw) return (a.expectedOutRaw > b.expectedOutRaw) ? -1 : 1;
-      if (a.minOutRaw !== b.minOutRaw) return (a.minOutRaw > b.minOutRaw) ? -1 : 1;
-      return ((a.feeBps || 0) - (b.feeBps || 0));
-    });
+    valid.sort(byBetter);
+
+    return { ok: true, best: valid[0], alternatives: valid.slice(1), quotes: quotes.slice() };
+  }
+
+  /**
+   * Deterministic selection of the best EXECUTABLE quote (same ordering rule,
+   * but only quotes with `executable === true` are considered). This is the only
+   * quote the UI may ever promise/execute.
+   */
+  function pickBestExecutable(quotes) {
+    quotes = quotes || [];
+    var valid = [];
+    for (var i = 0; i < quotes.length; i++) {
+      var q = quotes[i];
+      if (!q || q.ok !== true) continue;
+      if (q.executable !== true) continue;
+      if (!positiveBig(q.expectedOutRaw)) continue;
+      if (!positiveBig(q.minOutRaw)) continue;
+      valid.push(q);
+    }
+
+    if (valid.length === 0) {
+      return { ok: false, reason: 'NO_EXECUTABLE_ROUTE', quotes: quotes.slice() };
+    }
+
+    valid.sort(byBetter);
 
     return { ok: true, best: valid[0], alternatives: valid.slice(1), quotes: quotes.slice() };
   }
@@ -95,12 +138,15 @@
 
   /**
    * Quote Tower + local pools in parallel and select the best route.
-   * @param {object} opts { tokenIn, tokenOut, amountInRaw: bigint, slippageBps, userAddress?, chainId? }
-   * @returns {Promise<{ok:boolean, best?:object, alternatives?:object[], reason?:string, quotes:object[]}>}
+   * Distinguishes bestQuote (highest expectedOutRaw) from bestExecutableQuote
+   * (highest expectedOutRaw among quotes that can actually be executed).
+   * @param {object} opts { tokenIn, tokenOut, amountInRaw: bigint, slippageBps, userAddress?, chainId?, hasLocalPool? }
+   * @returns {Promise<{ok:boolean, executable:boolean, best?:object, bestExecutable?:object, alternatives?:object[], reason?:string, quotes:object[]}>}
    */
   async function getBestQuote(opts) {
     opts = opts || {};
     var timeoutMs = opts.timeoutMs != null ? Number(opts.timeoutMs) : 8000;
+    var hasLocalPool = opts.hasLocalPool === true;
 
     var towerPromise = (typeof TowerAdapter !== 'undefined' && TowerAdapter.getQuote)
       ? TowerAdapter.getQuote(opts)
@@ -132,14 +178,35 @@
       }
     }
 
-    var decision = pickBest(quotes);
+    // Finalize executability (single source of truth for bestExecutableQuote).
+    //   local  → executable only when a local route actually exists (hasLocalPool)
+    //   tower  → executable only when NO local pool exists AND calldata is valid
+    for (var j = 0; j < quotes.length; j++) {
+      var qq = quotes[j];
+      if (qq && qq.ok === true) {
+        if (qq.source === 'local') qq.executable = hasLocalPool;
+        else if (qq.source === 'tower') qq.executable = (!hasLocalPool && towerExecutionValid(qq));
+        else qq.executable = false;
+      } else if (qq) {
+        qq.executable = false;
+      }
+    }
+
+    var decision = pickBest(quotes);             // bestQuote (highest expectedOutRaw)
     decision.quotes = quotes;
+    var exec = pickBestExecutable(quotes);       // bestExecutableQuote
+    decision.bestExecutable = exec.ok ? exec.best : null;
+    decision.executable = exec.ok;
+    if (!decision.ok) decision.reason = 'NO_ROUTE_AVAILABLE';
+    else if (!decision.executable) decision.reason = 'NO_EXECUTABLE_ROUTE';
     return decision;
   }
 
   window.SwapAggregator = {
     getBestQuote: getBestQuote,
     pickBest: pickBest,
-    version: '1.0.0',
+    pickBestExecutable: pickBestExecutable,
+    towerExecutionValid: towerExecutionValid,
+    version: '1.1.0',
   };
 })();

@@ -1174,6 +1174,8 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
 .swp-comparison-list{display:flex;flex-direction:column;gap:5px}
 .swp-comp-row{position:relative;display:flex;flex-direction:column;gap:2px;padding:6px 8px;border:1px solid #1a2030;border-radius:5px;background:rgba(0,0,0,.15)}
 .swp-comp-row.best{border-color:rgba(6,247,233,.35);background:rgba(6,247,233,.05)}
+.swp-comp-row.exec{border-color:rgba(34,197,94,.25)}
+.swp-comp-row.reference{opacity:.72;border-style:dashed}
 .swp-comp-row.unavailable{opacity:.45}
 .swp-comp-badge{position:absolute;top:-6px;right:6px;font-size:6px;font-weight:800;letter-spacing:.5px;padding:1px 5px;border-radius:3px;background:rgba(6,247,233,.15);border:1px solid rgba(6,247,233,.35);color:#06F7E9}
 .swp-comp-top{display:flex;align-items:center;justify-content:space-between;gap:6px}
@@ -1181,6 +1183,9 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
 .swp-comp-out{font-size:10px;font-weight:700;color:var(--teal);font-family:'JetBrains Mono',monospace}
 .swp-comp-out.unavailable{color:var(--muted2);font-weight:600;font-size:8.5px}
 .swp-comp-sub{display:flex;align-items:center;gap:8px;font-size:7.5px;color:var(--muted2)}
+.swp-comp-tag{font-size:6.5px;font-weight:700;letter-spacing:.3px;padding:1px 5px;border-radius:3px;margin-left:auto}
+.swp-comp-tag.exec{background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.3);color:var(--green)}
+.swp-comp-tag.ref{background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.25);color:var(--yellow)}
 .swp-comparison-empty{font-size:8.5px;color:var(--muted2);padding:2px 0;text-align:center}
 /* Standard mode: hide chart + market bar, center the swap panel */
 #page-swap.swp-standard .st-chart-section{display:none}
@@ -20943,22 +20948,29 @@ async function updateSwapRate() {
             tokenOut: tOut.sym,
             amountInRaw: amountInRaw,
             slippageBps: Math.round(SWP.slippage * 100),
+            hasLocalPool: !!(route && !route.noLiq),
           });
           SWP.aggQuotes = agg.quotes || [];
-          SWP.aggBest = agg.best || null;
-          if (agg.ok && agg.best) {
-            expectedOutRaw = agg.best.expectedOutRaw;
-            if (agg.best.source === 'tower') {
+          SWP.aggBest = agg.best || null;                    // bestQuote (referência — maior expectedOutRaw)
+          SWP.aggBestExecutable = agg.bestExecutable || null; // bestExecutableQuote (o que SERÁ executado)
+          // Execução usa SEMPRE o bestExecutableQuote — nunca prometer um output
+          // que a execução real não conseguirá entregar.
+          if (agg.bestExecutable) {
+            expectedOutRaw = agg.bestExecutable.expectedOutRaw;
+            if (agg.bestExecutable.source === 'tower') {
               source = 'Tower Exchange';
-              SWP._towerQuoteData = agg.best.calldata ? agg.best : null;
-              _log('[swap] SwapAggregator: Tower venceu (', agg.best.expectedOutRaw.toString(), ')');
+              SWP._towerQuoteData = agg.bestExecutable.calldata ? agg.bestExecutable : null;
+              _log('[swap] SwapAggregator: Tower é a rota executável (', agg.bestExecutable.expectedOutRaw.toString(), ')');
             } else {
               source = 'Elligentt Pool';
               SWP._towerQuoteData = null;
-              _log('[swap] SwapAggregator: pool local venceu (', agg.best.expectedOutRaw.toString(), ')');
+              _log('[swap] SwapAggregator: pool local é a rota executável (', agg.bestExecutable.expectedOutRaw.toString(), ')');
+            }
+            if (agg.best && agg.best !== agg.bestExecutable && agg.best.source === 'tower') {
+              _log('[swap] SwapAggregator: Tower tem maior expectedOutRaw mas é apenas referência (não executável).');
             }
           } else {
-            _warn('[swap] SwapAggregator: nenhuma rota disponível:', agg.reason || '');
+            _warn('[swap] SwapAggregator: nenhuma rota EXECUTÁVEL:', agg.reason || '');
             SWP._towerQuoteData = null;
           }
         } catch (aggErr) {
@@ -21124,7 +21136,7 @@ async function updateSwapRate() {
       try {
         if (typeof SwapUiModes !== 'undefined' && SwapUiModes.renderComparison) {
           SwapUiModes.renderComparison(
-            { ok: !!(SWP.aggBest), best: SWP.aggBest || null, quotes: SWP.aggQuotes || [] },
+            { ok: !!(SWP.aggBest), executable: !!(SWP.aggBestExecutable), best: SWP.aggBest || null, bestExecutable: SWP.aggBestExecutable || null, quotes: SWP.aggQuotes || [] },
             { tokenOut: tOut.sym, tokenOutDecimals: tOut.decimals }
           );
         }

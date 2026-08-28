@@ -138,6 +138,9 @@
       approval: d.approval || null,
       expiresAt: Date.now() + QUOTE_TTL_MS,
       executionType: 'tower',
+      // Reference-only by default: Tower executability is finalized by the
+      // SwapAggregator (hasLocalPool + calldata validity), never self-declared.
+      executable: false,
     };
   }
 

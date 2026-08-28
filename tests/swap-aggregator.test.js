@@ -281,7 +281,9 @@ describe('index.html — structural invariants', () => {
     expect(srcHtml).toContain('SwapAggregator.getBestQuote');
     expect(srcHtml).toContain("source = 'Tower Exchange'");
     expect(srcHtml).toContain("source = 'Elligentt Pool'");
-    expect(srcHtml).toContain('SWP._towerQuoteData = agg.best.calldata ? agg.best : null');
+    expect(srcHtml).toContain('SWP._towerQuoteData = agg.bestExecutable.calldata ? agg.bestExecutable : null');
+    expect(srcHtml).toContain('agg.bestExecutable');
+    expect(srcHtml).toContain('hasLocalPool: !!(route && !route.noLiq)');
   });
 
   it('approval exato (não 2×) + receipt + re-read de allowance', () => {
