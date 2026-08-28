@@ -1,14 +1,17 @@
 /**
- * SwapUiModes — Standard / Advanced presentation controller + provider comparison.
+ * SwapUiModes — Standard/Advanced presentation controller + ROUTES comparison selector.
  * ═══════════════════════════════════════════════════════════════════════
  * Presentation-only layer for the Swap page. It never quotes or executes
- * anything — it only switches how the SAME Swap Engine is presented and renders
- * the provider comparison from quotes already produced by SwapAggregator.
+ * anything — it switches how the SAME Swap Engine is presented, and renders the
+ * side-by-side route comparison from quotes already produced by SwapAggregator.
  *
- *   Standard  → clean DEX: no chart, no market bar, provider comparison visible
- *   Advanced  → full terminal: chart + market data + technical details
+ *   Standard  → clean DEX: no chart/market bar, ROUTES selector on the right
+ *   Advanced  → full terminal: chart + market data + technical details (unchanged)
  *
- * Execution stays in the existing flow (executeSwap). No duplicated logic.
+ * Selection is a canonical source string (e.g. 'local' | 'tower') resolved here
+ * and consumed by the caller (index.html) to drive the executed route. Providers
+ * are rendered from metadata, so a future provider only needs a normalized quote
+ * (no rendering rewrite).
  *
  * Attached to window.SwapUiModes
  */
@@ -20,6 +23,13 @@
   var MODES = ['standard', 'advanced'];
   var _mode = 'standard';
 
+  // Provider metadata — the UI renders these dynamically. A future provider only
+  // needs a normalized quote + an entry here (the engine already normalizes).
+  var PROVIDER_META = {
+    local: { id: 'local', name: 'Elligentt', type: 'AMM', sourceLabel: 'Local AMM' },
+    tower: { id: 'tower', name: 'Tower', type: 'AGG', sourceLabel: 'Aggregator' },
+  };
+
   function getMode() { return _mode; }
 
   function setMode(mode) {
@@ -29,42 +39,17 @@
     return _mode;
   }
 
-  /** Toggle the page-level class + segmented buttons + comparison visibility. */
-  function applyMode() {
-    try {
-      var page = document.getElementById('page-swap');
-      if (page) {
-        page.classList.remove('swp-standard', 'swp-advanced');
-        page.classList.add('swp-' + _mode);
-      }
-      var stdBtn = document.getElementById('swp-mode-standard');
-      var advBtn = document.getElementById('swp-mode-advanced');
-      if (stdBtn) stdBtn.classList.toggle('active', _mode === 'standard');
-      if (advBtn) advBtn.classList.toggle('active', _mode === 'advanced');
-      var cmp = document.getElementById('swp-comparison-card');
-      if (cmp) {
-        var hasRows = !!(cmp.querySelector && cmp.querySelector('.swp-comp-row, .swp-comparison-empty'));
-        cmp.style.display = (_mode === 'standard' && hasRows) ? '' : 'none';
-      }
-    } catch (_) {}
+  function providerMeta(source) {
+    if (PROVIDER_META[source]) return PROVIDER_META[source];
+    return { id: source, name: source || 'Provider', type: '', sourceLabel: source || '' };
   }
 
-  /** Human display name for a quote source (never trusts a UI-only hardcode). */
-  function providerName(q) {
-    if (!q) return 'Provider';
-    if (q.source === 'tower') return 'Tower';
-    if (q.source === 'local') return 'Elligentt';
-    return q.provider || q.source || 'Provider';
+  function tryBig(v) {
+    if (typeof v === 'bigint') return v;
+    if (v == null) return null;
+    try { var b = BigInt(String(v)); return b; } catch (_) { return null; }
   }
 
-  function sourceLabel(q) {
-    if (!q) return '';
-    if (q.source === 'tower') return 'Tower';
-    if (q.source === 'local') return 'Local Pool';
-    return q.source || '';
-  }
-
-  /** Format a raw BigInt output into human units (presentation only). */
   function formatOut(raw, decimals) {
     try {
       if (typeof SwapMath !== 'undefined' && SwapMath.formatUnits) {
@@ -76,20 +61,72 @@
     return String(raw);
   }
 
+  function isExecutableQuote(q) {
+    if (!q || q.ok !== true || q.executable !== true) return false;
+    var eo = tryBig(q.expectedOutRaw);
+    var mo = tryBig(q.minOutRaw);
+    return eo !== null && eo > 0n && mo !== null && mo > 0n;
+  }
+
   /**
-   * Build the provider comparison rows from a SwapAggregator decision.
-   * Distinguishes bestExecutableQuote (what will run) from bestQuote (reference).
-   * Deterministic ordering: valid quotes sorted by expectedOutRaw desc, then
-   * minOutRaw desc, then feeBps asc — identical rule to SwapAggregator.pickBest.
-   * Executable rows are listed first; non-executable rows are "Reference only".
-   * @param {object} decision { ok, executable, best, bestExecutable, quotes:[] }
-   * @param {object} opts { tokenOut, tokenOutDecimals }
-   * @returns {string} HTML (rows only, no wrapper)
+   * Resolve the selected route after a new aggregator decision.
+   * A manual selection persists across refreshes with the SAME params key; it
+   * resets to the best executable when the params changed or the selection is no
+   * longer valid (provider became invalid / disappeared / failed validation).
+   * @param {object} decision SwapAggregator decision
+   * @param {string|null} prevSource previous selected source
+   * @param {string|null} prevKey previous params key
+   * @param {string} currentKey current params key
+   * @returns {string|null} selected source (or null = none executable)
    */
-  function buildComparisonHtml(decision, opts) {
+  function resolveSelection(decision, prevSource, prevKey, currentKey) {
+    var quotes = (decision && decision.quotes) || [];
+    var exec = {};
+    for (var i = 0; i < quotes.length; i++) {
+      if (isExecutableQuote(quotes[i])) exec[quotes[i].source] = true;
+    }
+    if (prevSource && prevKey === currentKey && exec[prevSource]) return prevSource;
+    var bestExec = (decision && decision.bestExecutable) || null;
+    if (bestExec && exec[bestExec.source]) return bestExec.source;
+    return null;
+  }
+
+  /** Find the executable quote object for a source. */
+  function findExecutableQuote(quotes, source) {
+    for (var i = 0; i < (quotes || []).length; i++) {
+      var q = quotes[i];
+      if (q && q.source === source && isExecutableQuote(q)) return q;
+    }
+    return null;
+  }
+
+  /** Apply the mode classes (removes the routes class when leaving Standard). */
+  function applyMode() {
+    try {
+      var page = document.getElementById('page-swap');
+      if (page) {
+        page.classList.remove('swp-standard', 'swp-advanced');
+        page.classList.add('swp-' + _mode);
+        if (_mode !== 'standard') page.classList.remove('swp-routes');
+      }
+      var stdBtn = document.getElementById('swp-mode-standard');
+      var advBtn = document.getElementById('swp-mode-advanced');
+      if (stdBtn) stdBtn.classList.toggle('active', _mode === 'standard');
+      if (advBtn) advBtn.classList.toggle('active', _mode === 'advanced');
+    } catch (_) {}
+  }
+
+  /**
+   * Build the ROUTES comparison list from a SwapAggregator decision.
+   * Executable quotes are selectable; non-executable quotes are "Reference only".
+   * @param {object} decision { quotes:[], bestExecutable }
+   * @param {string|null} selectedSource
+   * @param {object} opts { tokenIn, tokenInDecimals, tokenOut, tokenOutDecimals, amountInRaw }
+   * @returns {string} HTML (rows only)
+   */
+  function buildRouteListHtml(decision, selectedSource, opts) {
     opts = opts || {};
     var quotes = (decision && decision.quotes) || [];
-    var bestExec = (decision && decision.bestExecutable) || null;
 
     var valid = [];
     for (var i = 0; i < quotes.length; i++) {
@@ -101,7 +138,7 @@
     }
 
     if (!valid.length) {
-      return '<div class="swp-comparison-empty">No quotes available</div>';
+      return '<div class="route-empty">No routes available</div>';
     }
 
     valid.sort(function (a, b) {
@@ -120,39 +157,50 @@
     var out = '';
     var seen = {};
 
-    function row(v, kind) {
-      var fee = v.feeBps != null ? ((Number(v.feeBps) / 100).toFixed(2) + '%') : '—';
-      var cls = '';
-      var badge = '';
-      var tag = '';
-      if (kind === 'best-executable') {
-        cls = ' best';
-        badge = '<span class="swp-comp-badge">BEST ROUTE</span>';
-        tag = '<span class="swp-comp-tag exec">✓ Executable</span>';
-      } else if (kind === 'executable') {
-        cls = ' exec';
-        tag = '<span class="swp-comp-tag exec">✓ Executable</span>';
+    function row(q, executable, selected) {
+      var meta = providerMeta(q.source);
+      var o = formatOut(q.expectedOutRaw, opts.tokenOutDecimals);
+      var fee = q.feeBps != null ? ((Number(q.feeBps) / 100).toFixed(2) + '%') : '';
+      var impact = q.priceImpactBps != null ? ((Number(q.priceImpactBps) / 100).toFixed(2) + '% impact') : '';
+
+      var state;
+      if (!executable) {
+        state = '<span class="route-state ref">Reference only</span>';
+      } else if (selected) {
+        state = '<span class="route-state sel">✓ Selected</span>';
       } else {
-        cls = ' reference';
-        tag = '<span class="swp-comp-tag ref">Reference only</span>';
+        state = '<span class="route-state">Select</span>';
       }
-      return '<div class="swp-comp-row' + cls + '">' + badge +
-        '<div class="swp-comp-top"><span class="swp-comp-name">' + providerName(v) + '</span>' +
-        '<span class="swp-comp-out">' + formatOut(v.expectedOutRaw, opts.tokenOutDecimals) + ' ' + (opts.tokenOut || '') + '</span></div>' +
-        '<div class="swp-comp-sub"><span>Fee: ' + fee + '</span><span>' + sourceLabel(v) + '</span>' + tag + '</div>' +
-        '</div>';
+
+      var cls = 'route-row' + (selected ? ' selected' : '') + (executable ? '' : ' reference');
+      var click = executable ? (' onclick="swpSelectRoute(\'' + q.source + '\')"') : '';
+
+      var line2 = '';
+      if (fee) line2 += '<span>Fee ' + fee + '</span>';
+      if (impact) line2 += '<span>' + impact + '</span>';
+      line2 += '<span>' + meta.sourceLabel + '</span>';
+
+      return '<div class="' + cls + '"' + click + ' data-source="' + q.source + '">' +
+        '<div class="route-radio">' + (selected ? '<span></span>' : '') + '</div>' +
+        '<div class="route-main">' +
+          '<div class="route-line1"><span class="route-name">' + meta.name + '</span>' +
+            '<span class="route-tag">' + meta.type + '</span>' +
+            '<span class="route-out">' + o + ' ' + (opts.tokenOut || '') + '</span></div>' +
+          '<div class="route-line2">' + line2 + '</div>' +
+        '</div>' +
+        state +
+      '</div>';
     }
 
     for (var k = 0; k < execs.length; k++) {
       var e = execs[k];
       seen[e.source] = true;
-      var isBestExec = !!bestExec && bestExec.source === e.source;
-      out += row(e, isBestExec ? 'best-executable' : 'executable');
+      out += row(e, true, selectedSource === e.source);
     }
     for (var r = 0; r < refs.length; r++) {
       var rq = refs[r];
       seen[rq.source] = true;
-      out += row(rq, 'reference');
+      out += row(rq, false, false);
     }
 
     // Unavailable sources shown discreetly (never a global error).
@@ -161,43 +209,59 @@
       if (!q2 || q2.ok === true) continue;
       if (seen[q2.source]) continue;
       seen[q2.source] = true;
+      var meta2 = providerMeta(q2.source);
       out +=
-        '<div class="swp-comp-row unavailable">' +
-          '<div class="swp-comp-top"><span class="swp-comp-name">' + providerName(q2) + '</span>' +
-          '<span class="swp-comp-out unavailable">unavailable</span></div>' +
+        '<div class="route-row unavailable" data-source="' + q2.source + '">' +
+          '<div class="route-radio"></div>' +
+          '<div class="route-main"><div class="route-line1"><span class="route-name">' + meta2.name + '</span>' +
+            '<span class="route-out unavailable">unavailable</span></div></div>' +
+          '<span class="route-state ref">Unavailable</span>' +
         '</div>';
     }
 
     return out;
   }
 
-  /** Render the comparison card into the DOM (Standard mode only). */
-  function renderComparison(decision, opts) {
+  /** Render the ROUTES selector into the DOM (Standard mode only). */
+  function renderRouteSelector(decision, selectedSource, opts) {
     try {
-      var list = document.getElementById('swp-comparison-list');
-      if (list) list.innerHTML = buildComparisonHtml(decision, opts);
-      var card = document.getElementById('swp-comparison-card');
-      if (card) {
-        var hasRows = !!(card.querySelector && card.querySelector('.swp-comp-row, .swp-comparison-empty'));
-        card.style.display = (_mode === 'standard' && hasRows) ? '' : 'none';
+      var list = document.getElementById('swap-route-list');
+      if (list) list.innerHTML = buildRouteListHtml(decision, selectedSource, opts);
+      var page = document.getElementById('page-swap');
+      var status = document.getElementById('swap-route-status');
+      if (status) status.textContent = 'Compare execution routes';
+      var hasValid = !!((decision && decision.quotes || []).some(function (q) {
+        return q && q.ok === true;
+      }));
+      if (page && _mode === 'standard' && hasValid) {
+        page.classList.add('swp-routes');
+      } else if (page) {
+        page.classList.remove('swp-routes');
       }
     } catch (_) {}
   }
 
-  /** Hide + empty the comparison card (no quote / route unavailable). */
-  function clearComparison() {
+  /** Show the loading state inside the route card (Standard mode). */
+  function showRouteLoading() {
     try {
-      var list = document.getElementById('swp-comparison-list');
-      if (list) list.innerHTML = '';
-      var card = document.getElementById('swp-comparison-card');
-      if (card) card.style.display = 'none';
+      var page = document.getElementById('page-swap');
+      var list = document.getElementById('swap-route-list');
+      var status = document.getElementById('swap-route-status');
+      if (_mode === 'standard' && page) page.classList.add('swp-routes');
+      if (status) status.textContent = 'Finding routes...';
+      if (list) list.innerHTML =
+        '<div class="route-empty"><i class="ti ti-loader-2 spin"></i> Finding routes...</div>';
     } catch (_) {}
   }
 
-  function tryBig(v) {
-    if (typeof v === 'bigint') return v;
-    if (v == null) return null;
-    try { var b = BigInt(String(v)); return b; } catch (_) { return null; }
+  /** Hide + empty the route card (no amount / no route / error / leaving Standard). */
+  function clearRouteSelector() {
+    try {
+      var page = document.getElementById('page-swap');
+      var list = document.getElementById('swap-route-list');
+      if (page) page.classList.remove('swp-routes');
+      if (list) list.innerHTML = '';
+    } catch (_) {}
   }
 
   // Apply the default mode (standard) once the DOM is ready.
@@ -209,12 +273,18 @@
 
   window.SwapUiModes = {
     MODES: MODES.slice(),
+    PROVIDER_META: PROVIDER_META,
     getMode: getMode,
     setMode: setMode,
     applyMode: applyMode,
-    buildComparisonHtml: buildComparisonHtml,
-    renderComparison: renderComparison,
-    clearComparison: clearComparison,
-    version: '1.0.0',
+    providerMeta: providerMeta,
+    isExecutableQuote: isExecutableQuote,
+    resolveSelection: resolveSelection,
+    findExecutableQuote: findExecutableQuote,
+    buildRouteListHtml: buildRouteListHtml,
+    renderRouteSelector: renderRouteSelector,
+    showRouteLoading: showRouteLoading,
+    clearRouteSelector: clearRouteSelector,
+    version: '2.0.0',
   };
 })();

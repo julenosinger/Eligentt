@@ -1,11 +1,11 @@
 /**
- * SWAP V2 — Standard/Advanced modes + provider comparison (bestQuote vs bestExecutableQuote).
+ * SWAP V2 — ROUTES comparison selector (Standard mode) + route selection.
  * ═══════════════════════════════════════════════════════════════════════
- * Proves: (a) the mode controller is a pure presentation state machine,
- * (b) the provider comparison renders SwapAggregator quotes deterministically and
- * separates "best executable" (what runs) from "reference only" (never promised),
- * and (c) the existing execution/quote infrastructure is preserved (no duplication,
- * no hardcoded Tower winner, Tower unavailable never breaks the local pool).
+ * Proves: (a) mode state machine, (b) the ROUTES list renders real quotes with
+ * explicit selection (best-executable auto-selected; reference-only non-selectable),
+ * (c) manual selection persists across refreshes with the same params and resets
+ * when params change / provider becomes invalid, and (d) the existing execution
+ * architecture is preserved (no duplication, no hardcoded Tower winner).
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'fs';
@@ -25,7 +25,6 @@ function evalModule(src) {
   fn.call(null, win);
   return win;
 }
-
 function modes() { return evalModule(modeSrc).SwapUiModes; }
 function agg() { return evalModule(aggSrc).SwapAggregator; }
 
@@ -36,6 +35,8 @@ function q(source, over) {
     feeBps: 30, provider: null, executable: false,
   }, over || {});
 }
+
+const OPTS = { tokenIn: 'USDC', tokenInDecimals: 6, tokenOut: 'EURC', tokenOutDecimals: 6, amountInRaw: 1000000n };
 
 describe('SwapUiModes — mode state machine', () => {
   it('defaults to standard', () => { expect(modes().getMode()).toBe('standard'); });
@@ -50,199 +51,210 @@ describe('SwapUiModes — mode state machine', () => {
   });
 });
 
-describe('SwapUiModes — provider comparison (executable vs reference)', () => {
-  it('Tower best executable → BEST ROUTE on Tower, Executable tag', () => {
+describe('SwapUiModes — route selection (canonical state)', () => {
+  it('auto-selects best executable when nothing selected', () => {
     const m = modes();
-    const h = m.buildComparisonHtml({
-      bestExecutable: { source: 'tower' },
-      quotes: [
-        q('local', { expectedOutRaw: 990000n, executable: true }),
-        q('tower', { expectedOutRaw: 1000000n, executable: true }),
-      ],
-    }, { tokenOut: 'EURC', tokenOutDecimals: 6 });
-    expect(h).toContain('BEST ROUTE');
-    expect(h).toContain('✓ Executable');
-    expect(h.indexOf('BEST ROUTE')).toBeLessThan(h.indexOf('Tower'));
-    expect(h.indexOf('Tower')).toBeLessThan(h.indexOf('Elligentt'));
-  });
-
-  it('Elligentt best executable → BEST ROUTE on Elligentt', () => {
-    const m = modes();
-    const h = m.buildComparisonHtml({
+    const decision = {
       bestExecutable: { source: 'local' },
       quotes: [
-        q('tower', { expectedOutRaw: 990000n, executable: true }),
-        q('local', { expectedOutRaw: 1000000n, executable: true }),
-      ],
-    }, { tokenOut: 'EURC', tokenOutDecimals: 6 });
-    expect(h).toContain('BEST ROUTE');
-    expect(h.indexOf('BEST ROUTE')).toBeLessThan(h.indexOf('Elligentt'));
-    expect(h.indexOf('Elligentt')).toBeLessThan(h.indexOf('Tower'));
-  });
-
-  it('Tower higher expectedOut but NOT executable → "Reference only", local BEST ROUTE', () => {
-    const m = modes();
-    const h = m.buildComparisonHtml({
-      bestExecutable: { source: 'local' },
-      quotes: [
-        q('tower', { expectedOutRaw: 1001400n, executable: false, calldata: null }),
+        q('tower', { expectedOutRaw: 1001400n, executable: false }),
         q('local', { expectedOutRaw: 998200n, executable: true }),
       ],
-    }, { tokenOut: 'EURC', tokenOutDecimals: 6 });
-    expect(h).toContain('Reference only');
-    expect(h).toContain('BEST ROUTE');
-    // Best route badge must be on Elligentt (executable), not Tower (reference).
-    expect(h.indexOf('BEST ROUTE')).toBeLessThan(h.indexOf('Elligentt'));
-    // Executable rows come before reference rows.
-    expect(h.indexOf('Elligentt')).toBeLessThan(h.indexOf('Tower'));
+    };
+    expect(m.resolveSelection(decision, null, null, 'USDC|EURC|1000000')).toBe('local');
   });
 
-  it('Tower unavailable → discreet "unavailable", local still executable', () => {
+  it('manual selection persists across refresh with the SAME params', () => {
     const m = modes();
-    const h = m.buildComparisonHtml({
+    const decision = {
+      bestExecutable: { source: 'local' },
+      quotes: [
+        q('tower', { expectedOutRaw: 1001400n, executable: true }),
+        q('local', { expectedOutRaw: 998200n, executable: true }),
+      ],
+    };
+    expect(m.resolveSelection(decision, 'tower', 'USDC|EURC|1000000', 'USDC|EURC|1000000')).toBe('tower');
+  });
+
+  it('amount change resets provider selection', () => {
+    const m = modes();
+    const decision = {
+      bestExecutable: { source: 'local' },
+      quotes: [
+        q('tower', { expectedOutRaw: 1001400n, executable: true }),
+        q('local', { expectedOutRaw: 998200n, executable: true }),
+      ],
+    };
+    expect(m.resolveSelection(decision, 'tower', 'USDC|EURC|1000000', 'USDC|EURC|10000000')).toBe('local');
+  });
+
+  it('token change resets provider selection', () => {
+    const m = modes();
+    const decision = {
+      bestExecutable: { source: 'local' },
+      quotes: [
+        q('tower', { expectedOutRaw: 1001400n, executable: true }),
+        q('local', { expectedOutRaw: 998200n, executable: true }),
+      ],
+    };
+    expect(m.resolveSelection(decision, 'tower', 'USDC|EURC|1000000', 'USDC|cirBTC|1000000')).toBe('local');
+  });
+
+  it('selected provider became invalid → falls back to best executable', () => {
+    const m = modes();
+    const decision = {
       bestExecutable: { source: 'local' },
       quotes: [
         { source: 'tower', ok: false, error: 'TOWER_UNAVAILABLE' },
-        q('local', { expectedOutRaw: 1000000n, executable: true }),
+        q('local', { expectedOutRaw: 998200n, executable: true }),
       ],
-    }, { tokenOut: 'EURC' });
-    expect(h).toContain('BEST ROUTE');
-    expect(h).toContain('Elligentt');
-    expect(h).toContain('Tower');
-    expect(h).toContain('unavailable');
+    };
+    expect(m.resolveSelection(decision, 'tower', 'USDC|EURC|1000000', 'USDC|EURC|1000000')).toBe('local');
   });
 
-  it('both unavailable → "No quotes available" (never a global error)', () => {
+  it('no executable quote → null (nothing to execute)', () => {
     const m = modes();
-    const h = m.buildComparisonHtml({
-      ok: false, bestExecutable: null,
+    const decision = {
+      bestExecutable: null,
       quotes: [
-        { source: 'tower', ok: false },
+        q('tower', { expectedOutRaw: 1001400n, executable: false }),
         { source: 'local', ok: false },
       ],
-    }, { tokenOut: 'EURC' });
-    expect(h).toContain('No quotes available');
-    expect(h).not.toContain('BEST ROUTE');
+    };
+    expect(m.resolveSelection(decision, null, null, 'USDC|EURC|1000000')).toBeNull();
   });
 
-  it('invalid quote (non-positive expectedOutRaw) is filtered out', () => {
+  it('findExecutableQuote returns only executable quotes', () => {
     const m = modes();
-    const h = m.buildComparisonHtml({
+    const quotes = [
+      q('tower', { expectedOutRaw: 1001400n, executable: false }),
+      q('local', { expectedOutRaw: 998200n, executable: true }),
+    ];
+    expect(m.findExecutableQuote(quotes, 'tower')).toBeNull();
+    expect(m.findExecutableQuote(quotes, 'local').source).toBe('local');
+  });
+});
+
+describe('SwapUiModes — ROUTES list rendering (real quotes, no mock)', () => {
+  it('renders Elligentt + Tower side-by-side from real quotes', () => {
+    const m = modes();
+    const h = m.buildRouteListHtml({
       bestExecutable: { source: 'local' },
       quotes: [
-        q('tower', { expectedOutRaw: 0n, minOutRaw: 0n }),
-        q('local', { expectedOutRaw: 1000000n, executable: true }),
+        q('tower', { expectedOutRaw: 1001400n, feeBps: 25, executable: false }),
+        q('local', { expectedOutRaw: 998200n, feeBps: 10, executable: true }),
       ],
-    }, { tokenOut: 'EURC' });
-    expect(h).not.toContain('Tower');
+    }, 'local', OPTS);
+    expect(h).toContain('Elligentt');
+    expect(h).toContain('Tower');
+    expect(h).toContain('Selected');
+  });
+
+  it('best executable is auto-selected (✓ Selected on Elligentt)', () => {
+    const m = modes();
+    const h = m.buildRouteListHtml({
+      bestExecutable: { source: 'local' },
+      quotes: [q('local', { expectedOutRaw: 998200n, executable: true })],
+    }, 'local', OPTS);
+    expect(h).toContain('✓ Selected');
+    expect(h.indexOf('Elligentt')).toBeLessThan(h.indexOf('Selected'));
+  });
+
+  it('Tower reference-only is not selectable (no onclick, Reference only)', () => {
+    const m = modes();
+    const h = m.buildRouteListHtml({
+      bestExecutable: { source: 'local' },
+      quotes: [
+        q('tower', { expectedOutRaw: 1001400n, executable: false }),
+        q('local', { expectedOutRaw: 998200n, executable: true }),
+      ],
+    }, 'local', OPTS);
+    expect(h).toContain('Reference only');
+    // The tower row must not carry a selection onclick.
+    const towerRow = h.slice(h.indexOf('data-source="tower"'));
+    expect(towerRow).not.toContain('swpSelectRoute');
+  });
+
+  it('executable row carries the selection click', () => {
+    const m = modes();
+    const h = m.buildRouteListHtml({
+      bestExecutable: { source: 'local' },
+      quotes: [q('local', { expectedOutRaw: 998200n, executable: true })],
+    }, null, OPTS);
+    expect(h).toContain("swpSelectRoute('local')");
+  });
+
+  it('unavailable provider shows discreetly (Tower failure does not hide Elligentt)', () => {
+    const m = modes();
+    const h = m.buildRouteListHtml({
+      bestExecutable: { source: 'local' },
+      quotes: [
+        { source: 'tower', ok: false, error: 'TOWER_UNAVAILABLE' },
+        q('local', { expectedOutRaw: 998200n, executable: true }),
+      ],
+    }, 'local', OPTS);
+    expect(h).toContain('unavailable');
     expect(h).toContain('Elligentt');
   });
 
-  it('ordering uses BigInt (not float) for expectedOutRaw', () => {
+  it('both unavailable → "No routes available"', () => {
     const m = modes();
-    const big = 1000000000000000000000n;
-    const small = 999999999999999999999n;
-    const h = m.buildComparisonHtml({
+    const h = m.buildRouteListHtml({
+      bestExecutable: null,
+      quotes: [{ source: 'tower', ok: false }, { source: 'local', ok: false }],
+    }, null, OPTS);
+    expect(h).toContain('No routes available');
+  });
+
+  it('ordering uses BigInt (expectedOutRaw desc)', () => {
+    const m = modes();
+    const big = 1000000000000000000000n, small = 999999999999999999999n;
+    const h = m.buildRouteListHtml({
       bestExecutable: { source: 'tower' },
       quotes: [
         q('local', { expectedOutRaw: small, executable: true }),
         q('tower', { expectedOutRaw: big, executable: true }),
       ],
-    }, { tokenOut: 'EURC' });
+    }, 'tower', OPTS);
     expect(h.indexOf('Tower')).toBeLessThan(h.indexOf('Elligentt'));
   });
 
-  it('output label includes the target token symbol', () => {
+  it('providers rendered from metadata (no hardcoded tower/local if)', () => {
+    expect(modeSrc).not.toContain('if (source === tower)');
     const m = modes();
-    const h = m.buildComparisonHtml({
-      bestExecutable: { source: 'local' },
-      quotes: [q('local', { expectedOutRaw: 1000000n, executable: true })],
-    }, { tokenOut: 'EURC' });
-    expect(h).toContain('EURC');
-  });
-
-  it('no hardcoded Tower winner in the renderer', () => {
-    expect(modeSrc).not.toContain('if (tower)');
+    expect(m.providerMeta('local').name).toBe('Elligentt');
+    expect(m.providerMeta('tower').name).toBe('Tower');
   });
 });
 
-describe('SwapAggregator — bestQuote vs bestExecutableQuote', () => {
-  const opts = { tokenIn: 'USDC', tokenOut: 'EURC', amountInRaw: 1000000n, slippageBps: 50, chainId: 5042002 };
-
-  beforeEach(() => { delete globalThis.TowerAdapter; delete globalThis.LocalAdapter; });
-  afterEach(() => { delete globalThis.TowerAdapter; delete globalThis.LocalAdapter; });
-
-  it('hasLocalPool → Tower (higher) is bestQuote/reference, local is bestExecutable', async () => {
-    globalThis.TowerAdapter = { getQuote: async () => q('tower', { expectedOutRaw: 1001400n, minOutRaw: 1001393n, calldata: '0xabcd', to: '0x2de8906a641d65d490bc60a4179d961d59742bcb' }) };
-    globalThis.LocalAdapter = { getQuote: async () => q('local', { expectedOutRaw: 998200n, minOutRaw: 993209n, executable: true }) };
-    const r = await agg().getBestQuote(Object.assign({}, opts, { hasLocalPool: true }));
-    expect(r.best.source).toBe('tower');           // bestQuote (reference)
-    expect(r.bestExecutable.source).toBe('local');  // bestExecutableQuote (what runs)
-    expect(r.executable).toBe(true);
-  });
-
-  it('no local pool + valid Tower calldata → Tower is bestExecutable', async () => {
-    globalThis.TowerAdapter = { getQuote: async () => q('tower', { expectedOutRaw: 1001400n, minOutRaw: 1001393n, calldata: '0xabcd', to: '0x2de8906a641d65d490bc60a4179d961d59742bcb' }) };
-    globalThis.LocalAdapter = { getQuote: async () => ({ source: 'local', ok: false }) };
-    const r = await agg().getBestQuote(Object.assign({}, opts, { hasLocalPool: false }));
-    expect(r.bestExecutable.source).toBe('tower');
-  });
-
-  it('no local pool + Tower calldata missing → NO_EXECUTABLE_ROUTE', async () => {
-    globalThis.TowerAdapter = { getQuote: async () => q('tower', { expectedOutRaw: 1001400n, minOutRaw: 1001393n, calldata: null, to: null }) };
-    globalThis.LocalAdapter = { getQuote: async () => ({ source: 'local', ok: false }) };
-    const r = await agg().getBestQuote(Object.assign({}, opts, { hasLocalPool: false }));
-    expect(r.bestExecutable).toBeNull();
-    expect(r.executable).toBe(false);
-    expect(r.reason).toBe('NO_EXECUTABLE_ROUTE');
-  });
-
-  it('pickBestExecutable ignores non-executable (reference-only) quotes', () => {
-    const a = agg();
-    const r = a.pickBestExecutable([
-      q('tower', { expectedOutRaw: 1010000n, minOutRaw: 1005000n, executable: false }),
-      q('local', { expectedOutRaw: 1000000n, minOutRaw: 995000n, executable: true }),
-    ]);
-    expect(r.ok).toBe(true);
-    expect(r.best.source).toBe('local');
-  });
-
-  it('pickBestExecutable → NO_EXECUTABLE_ROUTE when nothing executable', () => {
-    const a = agg();
-    const r = a.pickBestExecutable([
-      q('tower', { expectedOutRaw: 1010000n, executable: false }),
-      q('local', { expectedOutRaw: 1000000n, executable: false }),
-    ]);
-    expect(r.ok).toBe(false);
-    expect(r.reason).toBe('NO_EXECUTABLE_ROUTE');
-  });
-});
-
-describe('index.html — Swap V2 structural invariants', () => {
-  it('mode toggle is present and drives SwapUiModes', () => {
+describe('index.html — Swap V2 ROUTES structural invariants', () => {
+  it('mode toggle present and drives SwapUiModes', () => {
     expect(html).toContain('id="swp-mode-toggle"');
     expect(html).toContain("SwapUiModes.setMode('standard')");
     expect(html).toContain("SwapUiModes.setMode('advanced')");
   });
 
-  it('provider comparison card is present inside the swap panel', () => {
-    expect(html).toContain('id="swp-comparison-card"');
-    expect(html).toContain('id="swp-comparison-list"');
+  it('ROUTES selector card present (right panel)', () => {
+    expect(html).toContain('id="swap-route-selector"');
+    expect(html).toContain('id="swap-route-list"');
   });
 
-  it('swapUiModes.js is loaded as a module', () => {
-    expect(html).toContain('/shared/swapUiModes.js');
-  });
-
-  it('Standard mode hides chart + market bar; Advanced keeps the full terminal', () => {
+  it('Standard hides chart/market; routes card only in Standard via swp-routes', () => {
     expect(html).toContain('#page-swap.swp-standard .st-chart-section{display:none}');
-    expect(html).toContain('#page-swap.swp-standard .st-market-bar{display:none}');
+    expect(html).toContain('#page-swap.swp-standard.swp-routes .st-right-panels');
+    expect(html).toContain('.swap-route-selector{display:none');
   });
 
-  it('execution uses bestExecutableQuote (never the reference bestQuote)', () => {
-    expect(html).toContain('agg.bestExecutable');
-    expect(html).toContain('hasLocalPool: !!(route && !route.noLiq)');
-    expect(html).toContain('SWP.aggBestExecutable = agg.bestExecutable');
+  it('selection is canonical + persisted in SWP', () => {
+    expect(html).toContain('selectedSource');
+    expect(html).toContain('selectedParamsKey');
+    expect(html).toContain('resolveSelection');
+    expect(html).toContain('swpSelectRoute');
+  });
+
+  it('execution follows selected route (no silent fallback)', () => {
+    expect(html).toContain('SWP._towerQuoteData = selected.calldata ? selected : null');
+    expect(html).toContain('findExecutableQuote');
   });
 
   it('execution is not duplicated — canonical swap modules preserved', () => {
