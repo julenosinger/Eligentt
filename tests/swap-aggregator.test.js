@@ -364,7 +364,7 @@ describe('SwapAggregator — Tower quoted for ALL pairs + strict validation', ()
     expect(a.towerExecutionValid({ calldata: '0xabcd', to: ADDR, spender: ADDR })).toBe(true);
   });
 
-  it('6/28/29. Tower pior NÃO desaparece — permanece em quotes[]', async () => {
+  it('6/28/29. Tower pior NÃO desaparece — permanece em quotes[] e continua executável', async () => {
     globalThis.TowerAdapter = { getQuote: async () => towerQuote('tower', { expectedOutRaw: 900000n, calldata: '0xabcd', to: ADDR }) };
     globalThis.LocalAdapter = { getQuote: async () => towerQuote('local', { expectedOutRaw: 998200n, executable: true }) };
     const agg = evalAgg();
@@ -372,7 +372,7 @@ describe('SwapAggregator — Tower quoted for ALL pairs + strict validation', ()
     expect(r.best.source).toBe('local');
     const tower = r.quotes.find(q => q.source === 'tower');
     expect(tower).toBeTruthy(); // Tower stays in the comparison
-    expect(tower.executable).toBe(false); // reference-only (local pool exists)
+    expect(tower.executable).toBe(true); // valid calldata → executable (independent of local pool)
   });
 
   it('10/11. Local offline → Tower ainda aparece; ambos offline → bloqueio', async () => {

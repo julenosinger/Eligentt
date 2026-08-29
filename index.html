@@ -1183,9 +1183,10 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
 #page-swap.swp-standard .st-swap-tabs{display:none}
 #page-swap.swp-standard .st-pair-switch{display:none}
 #page-swap.swp-standard .st-protocol-info{display:none}
+#page-swap.swp-standard .st-pool-status{display:none}
 
 /* Swap panel → clean centered card (legacy .swap-card look) */
-#page-swap.swp-standard .st-main-area{flex:0 0 auto;height:auto;min-height:0;overflow:visible;display:block}
+#page-swap.swp-standard .st-main-area{flex:0 0 auto;height:auto;min-height:0;overflow:visible;display:block;padding:28px 16px 48px}
 #page-swap.swp-standard .st-right-panels{width:100%;max-width:920px;margin:0 auto;border-left:none;overflow:visible;height:auto;flex-direction:row;align-items:flex-start;gap:16px}
 #page-swap.swp-standard .st-swap-panel{flex:0 0 auto;height:auto;width:100%;max-width:480px;background:var(--card);border:1px solid var(--border);border-radius:10px;overflow:visible}
 #page-swap.swp-standard .st-swap-body{overflow:visible;padding:14px 16px;gap:8px}
@@ -1196,6 +1197,9 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
 .swap-route-selector{display:none;flex-direction:column;background:#0b0d13;border:1px solid #1a1f2e;border-radius:10px;overflow:hidden;animation:routeFadeIn .2s ease}
 @keyframes routeFadeIn{from{opacity:0;transform:translateX(8px)}to{opacity:1;transform:translateX(0)}}
 #page-swap.swp-standard.swp-routes .swap-route-selector{display:flex}
+/* Swap Summary appears only once a valid quote exists (same trigger as ROUTES). */
+#page-swap.swp-standard #swa-summary{display:none}
+#page-swap.swp-standard.swp-routes #swa-summary{display:block}
 .swp-source-badge{font-size:8px;font-weight:700;padding:2px 7px;border-radius:999px;background:rgba(167,139,250,.12);border:1px solid rgba(167,139,250,.25);color:var(--purple)}
 
 /* Standard-mode page header (like other tabs) — hidden in Advanced */
@@ -1264,6 +1268,8 @@ body.swap-standard-mode .site-footer{display:block !important}
 .st-swap-submit.active{background:linear-gradient(180deg,#1fd18f,#16a34a);color:#000;box-shadow:0 1px 4px rgba(31,209,143,.3)}
 .st-swap-submit.active:hover{transform:translateY(-1px);box-shadow:0 2px 12px rgba(31,209,143,.45)}
 .st-swap-submit.disabled{background:rgba(255,255,255,.02);border:1px solid #1a1f2e;color:var(--muted2);cursor:not-allowed}
+.st-swap-submit.connect{background:linear-gradient(180deg,#3b82f6,#2563eb);color:#fff;box-shadow:0 1px 4px rgba(59,130,246,.3)}
+.st-swap-submit.connect:hover{transform:translateY(-1px);box-shadow:0 2px 12px rgba(59,130,246,.45)}
 .st-swap-submit.loading{background:linear-gradient(180deg,#1fd18f,#16a34a);color:#000;cursor:wait}
 .st-swap-submit.loading .swp-btn-content,.st-swap-submit.loading .swp-btn-done{display:none!important}
 .st-swap-submit.loading .swp-btn-loading{display:flex!important}
@@ -6460,7 +6466,11 @@ select.cinput option { background: #161a24; color: #dde2f0; }
         </div>
         <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
           <button class="btn" onclick="swpToggleSettings()" title="Slippage settings"><i class="ti ti-settings"></i>Slippage</button>
-          <a href="https://docs.arc.network/app-kit/quickstarts/swap-tokens-same-chain" target="_blank" class="btn" style="font-size:9px"><i class="ti ti-book"></i>Docs</a>
+          <div class="st-wallet-btn" onclick="walletChipClick()" title="Connect wallet">
+            <span class="st-wallet-dot" id="swp-std-wallet-indicator"></span>
+            <span id="swp-std-wallet-label">Connect Wallet</span>
+          </div>
+          <div class="st-net-pill" id="swp-std-network" onclick="openNetworkSelector()" title="Switch network"><div class="pulse"></div>Arc Testnet</div>
         </div>
       </div>
       <!-- Terminal Header -->
@@ -6653,10 +6663,10 @@ select.cinput option { background: #161a24; color: #dde2f0; }
                 </span>
               </button>
 
-              <!-- Pool Status -->
+              <!-- Pool Status (shown only once pool data exists; never a blocking state) -->
               <div class="st-pool-status" id="swp-pool-status" style="display:none">
                 <div class="st-pool-dot" id="swp-pool-dot"></div>
-                <span id="swp-pool-label">Loading pools…</span>
+                <span id="swp-pool-label"></span>
                 <span id="swp-pool-tvl"></span>
               </div>
 
@@ -15697,6 +15707,7 @@ function updateNetworkBadge(chain) {
     const scoreEl = document.getElementById('sb-score');
     if (scoreEl) { scoreEl.textContent = c.name; scoreEl.style.color = c.color; }
   }
+  if (typeof swpSyncStdHeader === 'function') swpSyncStdHeader();
 }
 
 // ── Finalize: called after any wallet grants access ────────
@@ -15731,6 +15742,7 @@ async function finalizeConnection(raw, walletType) {
   set('wm-type-badge', badges[walletType] || 'External', 'textContent');
 
   updateNetworkBadge(chain);
+  swpSyncStdHeader();
   await refreshBalance();
   updateSwapBalancesDisplay(); // ensure swap widget shows correct token balances right after connect
   _refreshAllSurfaceBalances();
@@ -15812,6 +15824,7 @@ function disconnectWallet() {
   if(sbChip) sbChip.style.display = 'none';
   const pill = document.getElementById('active-network-pill');
   if(pill) { pill.textContent='No wallet'; pill.style.cssText=''; }
+  swpSyncStdHeader();
   toast('Wallet disconnected', 'info');
   // Notify UB page
   try { document.dispatchEvent(new CustomEvent('WALLET_DISCONNECTED')); } catch(_) {}
@@ -20719,6 +20732,11 @@ function swpSetBtn(state, label) {
   } else if (state === 'ready') {
     btn.classList.add('active');
     if (lbl) lbl.textContent = label || 'Swap';
+  } else if (state === 'nowallt') {
+    // Disconnected wallet → primary action becomes "Connect Wallet" (enabled,
+    // opens the wallet modal via executeSwap). Not a disabled block.
+    btn.classList.add('connect'); btn.disabled = false;
+    if (lbl) lbl.textContent = label || 'Connect Wallet';
   } else if (state === 'warning') {
     btn.classList.add('warn'); btn.disabled = false;
     if (lbl) lbl.textContent = label || 'Swap Anyway';
@@ -20819,16 +20837,22 @@ function swpUpdatePoolInfo() {
   }
 
   if (pel) {
+    // Pool status is shown ONLY when pool data actually exists — there is never
+    // a "Loading pools…" placeholder. When no route/pool data is available yet,
+    // keep the status hidden so it can never block or clutter the Swap UI.
+    if (!pd) {
+      pel.style.display = 'none';
+      return;
+    }
     pel.style.display = '';
-    const hasLiq = pd && pd.loaded && pd.reserveA > 0 && pd.reserveB > 0;
-    const risk = poolCfg ? getPoolRiskIndicator(poolCfg.id) : 'unknown';
+    const hasLiq = pd.loaded && pd.reserveA > 0 && pd.reserveB > 0;
+    const risk = getPoolRiskIndicator(poolCfg.id);
     const riskInfo = getRiskLabel(risk);
-    const isActive = poolCfg ? PROTECTION.isPoolActive(poolCfg.id) : false;
-    const inactiveReason = poolCfg ? PROTECTION.getInactiveReason(poolCfg.id) : null;
+    const isActive = PROTECTION.isPoolActive(poolCfg.id);
+    const inactiveReason = PROTECTION.getInactiveReason(poolCfg.id);
     if (dot) dot.style.background = isActive && hasLiq ? riskInfo.color : 'var(--yellow)';
     if (lbl) {
-      if (!pd) lbl.textContent = 'Loading pools…';
-      else if (!isActive) lbl.textContent = inactiveReason || 'Pool inactive';
+      if (!isActive) lbl.textContent = inactiveReason || 'Pool inactive';
       else lbl.textContent = `${poolCfg.tokenA}/${poolCfg.tokenB} · ${riskInfo.text}`;
     }
     if (tvlE2) tvlE2.textContent = '';
@@ -20988,6 +21012,7 @@ function swpApplySelectedQuote(q) {
 
 // ── Quote Engine ──────────────────────────────────────────
 let swapRateTimer = null;
+let _swapPoolWarmupStarted = false; // single background pool-discovery trigger (never blocks quotes)
 let _swpExecuting = false; // guard: prevent updateSwapRate from resetting button during execution
 
 async function updateSwapRate() {
@@ -21044,11 +21069,18 @@ async function updateSwapRate() {
   swapRateTimer = setTimeout(async () => {
     const quoteSeq = ++_swapQuoteSeq;
     try {
-      // Ensure pool data is loaded
-      for (const pcfg of POOL_REGISTRY.filter(p => p.deployed)) {
-        if (!poolData[pcfg.id] || !poolData[pcfg.id].loaded) {
-          await loadSinglePool(pcfg);
-        }
+      // ── Pool discovery/loading runs in the BACKGROUND — it NEVER blocks the ──
+      // quote. Tower and local pools are quoted in parallel via SwapAggregator;
+      // the local adapter simply reports "unavailable" until pools are ready.
+      // A single guarded re-quote surfaces the local route once pools finish
+      // loading. No `await` here: the Tower quote must never wait for pools.
+      if (!_swapPoolWarmupStarted &&
+          !POOL_REGISTRY.filter(function (p) { return p.deployed; })
+            .every(function (p) { return poolData[p.id] && poolData[p.id].loaded; })) {
+        _swapPoolWarmupStarted = true;
+        loadAllPools().then(function () {
+          if (_swapQuoteSeq === quoteSeq) updateSwapRate();
+        }).catch(function () { _swapPoolWarmupStarted = false; });
       }
 
       const route = findBestRouteForAmount(tIn.sym, tOut.sym, amtIn);
@@ -21490,9 +21522,9 @@ async function swpRunPrecheck(amtIn, amtOut, minReceived, route) {
   }
 }
 
-// ── Tower-only execution (no local pool) — approve → validate → execute calldata ──
-// QUOTE ≠ EXECUTION: Tower calldata is executed ONLY when there is no local pool
-// (f08cb02) AND it passes every validation. minOut is ALWAYS recomputed locally.
+// ── Tower execution — approve → validate → execute calldata ──
+// QUOTE ≠ EXECUTION: Tower calldata is executed ONLY when Tower is the selected
+// route and it passes every validation. minOut is ALWAYS recomputed locally.
 async function swpExecuteTowerOnly(tIn, tOut, amtIn, slippageBps) {
   const q = SWP._towerQuoteData;
   if (!q || !q.calldata) { toast('Tower quote unavailable', 'error'); return; }
@@ -21565,8 +21597,8 @@ async function swpExecuteTowerOnly(tIn, tOut, amtIn, slippageBps) {
 // ── Execute Swap (supports direct + multi-hop routes) ──────
 async function executeSwap() {
   if (_swpExecuting) return;
+  if (!walletAddress) { openWalletModal(); return; }
   _swpExecuting = true;
-  if (!walletAddress) { toast('Connect wallet first','error'); _swpExecuting = false; return; }
   if (!signer) { toast('Connect a signing wallet to execute swaps','warning'); _swpExecuting = false; return; }
 
   const amtIn = parseFloat(document.getElementById('swap-amount-in').value) || 0;
@@ -21588,11 +21620,12 @@ async function executeSwap() {
   const tOut = TOKEN_LIST[SWP.tokenOutIdx];
   const route = SWP.lastRoute;
 
-  // ── Tower-only execution (no local pool for this pair) ──────────────
-  // QUOTE ≠ EXECUTION: Tower is quoted always; it executes ONLY when there is
-  // no local pool (f08cb02) AND its calldata/target/spender pass validation.
-  // minOut is recomputed locally (Tower minOut is never trusted blindly).
-  if ((!route || route.noLiq) && SWP._towerQuoteData && SWP._towerQuoteData.calldata) {
+  // ── Tower execution (when Tower is the SELECTED route) ──────────────
+  // QUOTE ≠ EXECUTION: Tower is quoted always and executes whenever the user
+  // selected it AND its calldata/target/spender pass validation — the existence
+  // of a local pool never blocks it (Tower and Elligentt are independent
+  // providers). minOut is recomputed locally (Tower minOut is never trusted).
+  if (SWP._towerQuoteData && SWP._towerQuoteData.calldata) {
     await swpExecuteTowerOnly(tIn, tOut, amtIn, slippageBps);
     _swpExecuting = false;
     return;
@@ -21849,71 +21882,10 @@ async function executeSwap() {
     try {
       const amtBig = ethers.parseUnits(currentAmount.toFixed(currentDecimals), currentDecimals);
 
-      // ── Tower calldata: usar se disponível, válido e for o hop final em rota direta ──
-      // NUNCA usar calldata Tower quando o par tem pool Arc local deployado.
-      // Para USDC/EURC e USDC/cirBTC, o pool Arc é estável (1:1) e a Tower usa
-      // preço EUR/USD real (~1.14) → minOut impossível → revert garantido.
-      // Tower serve apenas como fonte de quote para comparação de preço nesses pares.
-      const _poolAddr = route && route.pools && route.pools[0] && route.pools[0].address;
-      const _hasLocalPool = _poolAddr &&
-        _poolAddr !== '0x0000000000000000000000000000000000000000';
-
-      const useTowerCalldata = (
-        !_hasLocalPool &&
-        isLastHop &&
-        route.type === 'direct' &&
-        i === 0 &&
-        SWP._towerQuoteData &&
-        SWP._towerQuoteData.calldata &&
-        /^0x[0-9a-fA-F]+$/.test(SWP._towerQuoteData.calldata) &&
-        SWP._towerQuoteData.to &&
-        /^0x[0-9a-fA-F]{40}$/.test(SWP._towerQuoteData.to) &&
-        SWP._towerQuoteData.to !== '0x0000000000000000000000000000000000000000'
-      );
-
-      if (useTowerCalldata) {
-        // Validar segurança antes de usar calldata externo
-        const towerValidation = (typeof TowerAdapter !== 'undefined' && TowerAdapter.validateResponse)
-          ? TowerAdapter.validateResponse(SWP._towerQuoteData, { amountInRaw: amtBig, slippageBps })
-          : { ok: true };
-
-        if (!towerValidation.ok) {
-          _warn('[swap] Tower calldata rejeitado:', towerValidation.reason, '— usando pool local');
-          // Fallback para execução local (prossegue com poolCtr abaixo)
-        } else {
-          // Executar via calldata Tower
-          let swapGas = SWP.FALLBACK_GAS;
-          try {
-            swapGas = await signer.estimateGas({ to: SWP._towerQuoteData.to, data: SWP._towerQuoteData.calldata });
-            swapGas = swapGas * 130n / 100n;
-          } catch(_) {}
-          const swapTx = await signer.sendTransaction({
-            to: SWP._towerQuoteData.to,
-            data: SWP._towerQuoteData.calldata,
-            gasLimit: swapGas,
-          });
-          lastTxHash = swapTx.hash;
-          toast(`Swap via Tower submitted...`, 'info');
-          const swapReceipt = await swapTx.wait(1, 25000);
-          if (!swapReceipt || swapReceipt.status !== 1) {
-            throw new Error('Tower swap transaction reverted (status: ' + (swapReceipt ? swapReceipt.status : 'null') + ')');
-          }
-          _log('[swap] Tower hop', i + 1, 'confirmed:', swapTx.hash, 'block:', swapReceipt.blockNumber);
-          swpSetStep(i * 2 + 1, 'success', swapTx.hash);
-          await new Promise(function(r) { setTimeout(r, 3000); });
-          SwapEngine.notifyExecutionComplete(swapReceipt);
-          trackPoolVolume(poolCfg.id, currentAmount, currentTokenSym);
-          // Limpar dados Tower após execução bem-sucedida
-          SWP._towerQuoteData = null;
-          // Avançar no loop normalmente
-          currentTokenAddr = nextTokenAddr;
-          currentTokenSym = nextTokenSym;
-          currentDecimals = nextToken.decimals;
-          continue; // próximo hop (ou fim do loop)
-        }
-      }
-
-      // ── Execução local (fallback ou multi-hop) ─────────────────────────────
+      // ── Execução local (rota Elligentt selecionada) ────────────────────────
+      // Tower execution happens exclusively via swpExecuteTowerOnly() when Tower
+      // is the SELECTED route (early return in executeSwap). This loop therefore
+      // runs only for the local route — there is no silent Tower→local fallback.
       const poolCtr = new ethers.Contract(poolAddr, POOL_CONTRACT_ABI, signer);
       // Per-hop min: final hop uses global minReceived, intermediate hops use computed hop min
       let hopMin;
@@ -28790,9 +28762,26 @@ async function executeRemoveLiquidity() {
     if (DEPLOYED.ElligentBatch)  window.__BATCH_ADDRESS__  = DEPLOYED.ElligentBatch;
     if (DEPLOYED.ElligentBridge) window.__BRIDGE_ADDRESS__ = DEPLOYED.ElligentBridge;
   })();
+
+// ── Standard header wallet/network sync ─────────────────────
+// Keeps the Swap Standard header's Connect Wallet button + network pill in sync
+// with the existing global wallet state (no new wallet manager, no new listeners).
+function swpSyncStdHeader() {
+  const lbl = document.getElementById('swp-std-wallet-label');
+  const ind = document.getElementById('swp-std-wallet-indicator');
+  const net = document.getElementById('swp-std-network');
+  if (lbl) lbl.textContent = walletAddress ? shortAddr(walletAddress) : 'Connect Wallet';
+  if (ind) ind.style.background = walletAddress ? '#22c55e' : '#6b7280';
+  if (net) {
+    const chain = walletAddress ? getActiveChain() : null;
+    net.textContent = walletAddress ? (chain ? (chain.shortName || chain.name) : 'Arc Testnet') : 'No wallet';
+  }
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   // Initialize swap button state
   swpSetBtn('nowallt', 'Connect Wallet');
+  swpSyncStdHeader();
   applySwapTokens();
   renderSwapTokenList();
 
@@ -28807,15 +28796,16 @@ document.addEventListener("DOMContentLoaded", () => {
     _warn('Send Assets initialization skipped:', e);
   }
 
-  // Load all pools from chain immediately (read-only, no wallet needed)
+  // Pool discovery/loading runs in the BACKGROUND (read-only, no wallet needed).
+  // It feeds the Pool tab only. The Swap page renders immediately and is NEVER
+  // chained to this promise — its quote engine lazily warms pools on demand via
+  // _swapPoolWarmupStarted (Tower stays fully independent of pool loading).
   loadAllPools().then(() => {
     renderPoolList();
     updatePoolStats();
-    updateSwapRate();
-    swpUpdatePoolInfo();
   });
 
-  // Auto-sync: re-read all pools from chain every 12 seconds
+  // Auto-sync: re-read all pools from chain every 12 seconds (background).
   _setInterval(() => {
     loadAllPools();
     swpUpdatePoolInfo();

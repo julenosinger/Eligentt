@@ -12,9 +12,10 @@
  *   - bestQuote           → highest expectedOutRaw (any valid quote, reference)
  *   - bestExecutableQuote → highest expectedOutRaw among quotes that can be
  *                           executed by the Elligentt execution path.
- * Tower executability is determined by calldata/target/spender validity AND the
- * local-pool safety rule (f08cb02): Tower calldata is never executed when a
- * local Arc pool exists for the pair. Tower remains visible as "Reference".
+ * Tower executability is determined SOLELY by the full validity of the Tower
+ * route (calldata/target/spender + quote validation). The existence of a local
+ * Arc pool NEVER makes Tower non-executable: Tower and Elligentt are INDEPENDENT
+ * providers/roles that are quoted and compared side-by-side in the UI.
  *
  * Deterministic selection:
  *   1. primary  — highest expectedOutRaw (net token output)
@@ -194,12 +195,14 @@
 
     // Finalize executability (single source of truth for bestExecutableQuote).
     //   local  → executable only when a local route actually exists (hasLocalPool)
-    //   tower  → executable only when NO local pool exists AND calldata is valid
+    //   tower  → executable whenever its route is fully valid (calldata/target/
+    //            spender), INDEPENDENT of local-pool existence (Tower and
+    //            Elligentt are separate providers — never each other's gate).
     for (var j = 0; j < quotes.length; j++) {
       var qq = quotes[j];
       if (qq && qq.ok === true) {
         if (qq.source === 'local') qq.executable = hasLocalPool;
-        else if (qq.source === 'tower') qq.executable = (!hasLocalPool && towerExecutionValid(qq));
+        else if (qq.source === 'tower') qq.executable = towerExecutionValid(qq);
         else qq.executable = false;
       } else if (qq) {
         qq.executable = false;
@@ -221,6 +224,6 @@
     pickBest: pickBest,
     pickBestExecutable: pickBestExecutable,
     towerExecutionValid: towerExecutionValid,
-    version: '1.1.0',
+    version: '1.2.0',
   };
 })();
