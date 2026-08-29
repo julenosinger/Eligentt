@@ -23,6 +23,17 @@ describe('Swap — Standard legacy-DEX layout (presentation isolation)', () => {
     expect(html).toContain('#page-swap.swp-standard .st-swap-tabs{display:none}');
   });
 
+  it('Standard mode has a page header (like other tabs), hidden in Advanced', () => {
+    expect(html).toContain('id="swp-std-header"');
+    expect(html).toContain('#page-swap.swp-standard .swp-std-header{display:flex}');
+    expect(html).toContain('.swp-std-header{display:none}');
+  });
+
+  it('site footer is shown only in Standard swap mode', () => {
+    expect(html).toContain('body.swap-standard-mode .site-footer{display:block !important}');
+    expect(html).toContain('swap-standard-mode');
+  });
+
   it('Standard swap panel is styled as a clean centered card', () => {
     expect(html).toContain('#page-swap.swp-standard .st-swap-panel');
     expect(html).toContain('max-width:480px');

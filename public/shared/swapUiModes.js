@@ -109,6 +109,12 @@
         page.classList.add('swp-' + _mode);
         if (_mode !== 'standard') page.classList.remove('swp-routes');
       }
+      // Body-level class so the site footer (a sibling of the app shell) can be
+      // shown only in Standard swap mode.
+      if (document.body) {
+        document.body.classList.remove('swap-standard-mode', 'swap-advanced-mode');
+        document.body.classList.add(_mode === 'standard' ? 'swap-standard-mode' : 'swap-advanced-mode');
+      }
       var stdBtn = document.getElementById('swp-mode-standard');
       var advBtn = document.getElementById('swp-mode-advanced');
       if (stdBtn) stdBtn.classList.toggle('active', _mode === 'standard');
