@@ -241,8 +241,9 @@ describe('index.html — Swap V2 ROUTES structural invariants', () => {
 
   it('Standard hides chart/market; routes card only in Standard via swp-routes', () => {
     expect(html).toContain('#page-swap.swp-standard .st-chart-section{display:none}');
-    expect(html).toContain('#page-swap.swp-standard.swp-routes .st-right-panels');
+    expect(html).toContain('#page-swap.swp-standard.swp-routes .swap-route-selector{display:flex}');
     expect(html).toContain('.swap-route-selector{display:none');
+    expect(html).toContain('.swp-side-col');
   });
 
   it('selection is canonical + persisted in SWP', () => {
