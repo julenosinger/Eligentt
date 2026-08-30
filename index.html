@@ -545,6 +545,9 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
 .wf-step.signing.active, .wf-step.sending.active{ background:linear-gradient(180deg, rgba(245,158,11,.16), rgba(245,158,11,.05)); outline-color:rgba(245,158,11,.6); }
 .wf-step.signing.active .step-n, .wf-step.sending.active .step-n{ background:rgba(245,158,11,.22); box-shadow:0 0 10px rgba(245,158,11,.75); }
 #wf-live { font-size:9px; align-items:center; }
+/* Batch stepper wrapper — hidden by default; toggled by showPage (batch only). */
+.wf-stepper{display:none;align-items:center;height:100%;flex-shrink:0}
+.wf-stepper.show{display:flex}
 .wf-bar-mini { width:48px; height:2px; background:rgba(255,255,255,.1); border-radius:1px; overflow:hidden; }
 .wf-fill { height:100%; width:0; background:linear-gradient(90deg,var(--blue),#2dd4bf); transition:width .18s linear; }
 #wf-ln-2-3.sending { background:linear-gradient(90deg,var(--border),var(--blue),var(--border)); background-size:200% 100%; animation:wf-route-move 1.1s linear infinite; }
@@ -1239,6 +1242,17 @@ body.swap-standard-mode .site-footer{display:block !important}
   #page-swap.swp-standard .st-swap-panel{max-width:100%}
   #page-swap.swp-standard .swp-side-col{flex:none;width:100%}
   .swap-route-selector{max-height:260px}
+}
+
+/* ── Standard mode: in-document flow (page grows vertically + footer reachable) ──
+   The swap page is an absolute, viewport-pinned overlay by default (Advanced
+   keeps that). Standard returns it to normal flow so the app shell grows past
+   the viewport and the site footer scrolls into view. Layout only — no logic. */
+@media(min-width:769px){
+  body:has(#page-swap.swp-standard.active) .app{height:auto;min-height:100vh}
+  body:has(#page-swap.swp-standard.active) .main{overflow:visible}
+  body:has(#page-swap.swp-standard.active) .topbar{display:none}
+  #page-swap.swp-standard{position:static;top:auto;left:auto;right:auto;bottom:auto;height:auto;min-height:0;overflow:visible;z-index:auto;background:transparent;border-left:none;flex:0 0 auto}
 }
 .st-swap-input-panel{background:rgba(0,0,0,.25);border:1px solid #1a2030;border-radius:6px;padding:9px 10px;transition:border-color .2s}
 .st-swap-input-panel:focus-within{border-color:rgba(34,197,94,.3)}
@@ -6258,16 +6272,19 @@ select.cinput option { background: #161a24; color: #dde2f0; }
     <!-- Topbar -->
     <div class="topbar">
       <button class="mobile-hamburger" id="mobile-hamburger" onclick="toggleMobileSidebar()"><i class="ti ti-menu-2"></i></button>
-      <div id="wf-step-1" class="step done wf-step"><div class="step-n"><i class="ti ti-check" style="font-size:7px"></i></div><span class="wf-label">Recipients</span><span id="wf-step1-detail" class="wf-detail"></span></div>
-      <div class="step-ln"></div>
-      <div id="wf-step-2" class="step active wf-step"><div class="step-n">2</div><span class="wf-label">Review &amp; Sign</span><span id="wf-step2-detail" class="wf-detail"></span></div>
-      <div class="step-ln" id="wf-ln-2-3"></div>
-      <div id="wf-step-3" class="step wf-step"><div class="step-n">3</div><span class="wf-label">Pay Fee &amp; Send</span><span id="wf-step3-detail" class="wf-detail"></span></div>
-      <div class="step-ln" id="wf-ln-3-4"></div>
-      <div id="wf-step-4" class="step wf-step"><div class="step-n">4</div><span class="wf-label">Completed</span><span id="wf-step4-detail" class="wf-detail"></span></div>
-      <div id="wf-live" style="display:none;margin-left:6px;font-size:9px;color:var(--yellow);align-items:center;gap:3px;flex-shrink:0">
-        <span id="wf-live-text"></span>
-        <div class="wf-bar-mini"><div id="wf-live-fill" class="wf-fill"></div></div>
+      <!-- Batch Payments workflow stepper (contextual: shown only on the Batch Payments page) -->
+      <div class="wf-stepper" id="wf-stepper">
+        <div id="wf-step-1" class="step done wf-step"><div class="step-n"><i class="ti ti-check" style="font-size:7px"></i></div><span class="wf-label">Recipients</span><span id="wf-step1-detail" class="wf-detail"></span></div>
+        <div class="step-ln"></div>
+        <div id="wf-step-2" class="step active wf-step"><div class="step-n">2</div><span class="wf-label">Review &amp; Sign</span><span id="wf-step2-detail" class="wf-detail"></span></div>
+        <div class="step-ln" id="wf-ln-2-3"></div>
+        <div id="wf-step-3" class="step wf-step"><div class="step-n">3</div><span class="wf-label">Pay Fee &amp; Send</span><span id="wf-step3-detail" class="wf-detail"></span></div>
+        <div class="step-ln" id="wf-ln-3-4"></div>
+        <div id="wf-step-4" class="step wf-step"><div class="step-n">4</div><span class="wf-label">Completed</span><span id="wf-step4-detail" class="wf-detail"></span></div>
+        <div id="wf-live" style="display:none;margin-left:6px;font-size:9px;color:var(--yellow);align-items:center;gap:3px;flex-shrink:0">
+          <span id="wf-live-text"></span>
+          <div class="wf-bar-mini"><div id="wf-live-fill" class="wf-fill"></div></div>
+        </div>
       </div>
       <div class="tb-right">
         <div class="net-pill" id="active-network-pill" onclick="openNetworkSelector()" title="Click to switch network" style="cursor:pointer;transition:all .2s"><div class="pulse"></div>Arc Testnet</div>
@@ -15374,6 +15391,9 @@ function showPage(id) {
       sidebar.classList.remove('collapsed');
     }
   }
+  // Batch Payments workflow stepper is contextual: visible only on the Batch page.
+  var wfStepper = document.getElementById('wf-stepper');
+  if (wfStepper) wfStepper.classList.toggle('show', id === 'batch');
   // Immediate visual switch — no delay
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   var pageEl = document.getElementById('page-'+id);
