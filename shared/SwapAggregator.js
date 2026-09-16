@@ -39,16 +39,20 @@
   var ZERO_ADDR = '0x0000000000000000000000000000000000000000';
 
   /**
-   * Whether an external (Tower) quote carries the fields required to be EXECUTED
-   * (valid calldata, non-zero target, valid spender). This mirrors the execution
-   * guard in executeSwap; a reference quote without these is never executable.
+   * Whether an external (Tower / LI.FI) quote carries the fields required to be
+   * EXECUTED (valid calldata, non-zero target, valid spender). This mirrors the
+   * execution guard in executeSwap; a reference quote without these is never
+   * executable.
    */
-  function towerExecutionValid(q) {
+  function externalExecutionValid(q) {
     if (!q || !q.calldata || !/^0x[0-9a-fA-F]+$/.test(q.calldata)) return false;
     if (!q.to || !/^0x[0-9a-fA-F]{40}$/.test(q.to) || q.to === ZERO_ADDR) return false;
     if (q.spender != null && (!/^0x[0-9a-fA-F]{40}$/.test(q.spender) || q.spender === ZERO_ADDR)) return false;
     return true;
   }
+
+  // Backward-compatible alias (Tower-only semantics preserved).
+  function towerExecutionValid(q) { return externalExecutionValid(q); }
 
   /** Shared deterministic comparator: expectedOutRaw desc → minOutRaw desc → feeBps asc. */
   function byBetter(a, b) {
@@ -146,7 +150,16 @@
     if (opts.tokenIn != null && (q.tokenIn == null || String(q.tokenIn) !== String(opts.tokenIn))) return false;
     if (opts.tokenOut != null && (q.tokenOut == null || String(q.tokenOut) !== String(opts.tokenOut))) return false;
     if (opts.amountInRaw != null && (q.amountInRaw == null || String(q.amountInRaw) !== String(opts.amountInRaw))) return false;
-    if (opts.chainId != null && (q.chainId == null || Number(q.chainId) !== Number(opts.chainId))) return false;
+    if (opts.chainId != null && (q.chainId == null || Number(q.chainId) !== Number(opts.chainId))) {
+      // LI.FI quotes carry fromChainId/toChainId instead of chainId.
+      if (q.fromChainId != null && Number(q.fromChainId) === Number(opts.chainId)) {
+        // same-chain source matches — allowed
+      } else {
+        return false;
+      }
+    }
+    if (opts.fromChainId != null && (q.fromChainId == null || Number(q.fromChainId) !== Number(opts.fromChainId))) return false;
+    if (opts.toChainId != null && (q.toChainId == null || Number(q.toChainId) !== Number(opts.toChainId))) return false;
     if (q.expiresAt != null && Date.now() > q.expiresAt) return false; // stale
     return true;
   }
@@ -171,11 +184,24 @@
       ? LocalAdapter.getQuote(opts)
       : Promise.resolve({ source: 'local', ok: false, error: 'LOCAL_UNAVAILABLE' });
 
+    var lifiPromise = (typeof LiFiAdapter !== 'undefined' && LiFiAdapter.getQuote)
+      ? LiFiAdapter.getQuote({
+          tokenIn: opts.tokenIn,
+          tokenOut: opts.tokenOut,
+          amountInRaw: opts.amountInRaw,
+          slippageBps: opts.slippageBps,
+          fromChainId: opts.fromChainId != null ? Number(opts.fromChainId) : (opts.chainId != null ? Number(opts.chainId) : null),
+          toChainId: opts.toChainId != null ? Number(opts.toChainId) : (opts.chainId != null ? Number(opts.chainId) : null),
+          fromAddress: opts.userAddress,
+        })
+      : Promise.resolve({ source: 'lifi', ok: false, error: 'LIFI_UNAVAILABLE' });
+
     // Isolated failures: a slow/rejecting source settles to an error quote after
     // its own timeout, never blocking the other source beyond `timeoutMs`.
     var wrapped = [
       withTimeout(towerPromise, timeoutMs, { source: 'tower', ok: false, error: 'TIMEOUT' }),
       withTimeout(localPromise, timeoutMs, { source: 'local', ok: false, error: 'TIMEOUT' }),
+      withTimeout(lifiPromise, timeoutMs, { source: 'lifi', ok: false, error: 'TIMEOUT' }),
     ];
 
     var results = await Promise.allSettled(wrapped);
@@ -198,11 +224,14 @@
     //   tower  → executable whenever its route is fully valid (calldata/target/
     //            spender), INDEPENDENT of local-pool existence (Tower and
     //            Elligentt are separate providers — never each other's gate).
+    //   lifi   → executable whenever its route is fully valid (LI.FI calldata/
+    //            target + chain match). LI.FI is an independent provider too.
     for (var j = 0; j < quotes.length; j++) {
       var qq = quotes[j];
       if (qq && qq.ok === true) {
         if (qq.source === 'local') qq.executable = hasLocalPool;
-        else if (qq.source === 'tower') qq.executable = towerExecutionValid(qq);
+        else if (qq.source === 'tower') qq.executable = externalExecutionValid(qq);
+        else if (qq.source === 'lifi') qq.executable = externalExecutionValid(qq);
         else qq.executable = false;
       } else if (qq) {
         qq.executable = false;
@@ -224,6 +253,7 @@
     pickBest: pickBest,
     pickBestExecutable: pickBestExecutable,
     towerExecutionValid: towerExecutionValid,
-    version: '1.2.0',
+    externalExecutionValid: externalExecutionValid,
+    version: '1.3.0',
   };
 })();

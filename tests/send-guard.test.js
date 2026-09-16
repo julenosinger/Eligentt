@@ -15,7 +15,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const indexPath = path.resolve(__dirname, '..', 'public', 'index.html');
+const indexPath = path.resolve(__dirname, '..', 'index.html');
 const html = fs.readFileSync(indexPath, 'utf8');
 
 const ARC = 5042002;
@@ -222,7 +222,7 @@ describe('Send flow wiring — source-level regression checks', () => {
     const fnStart = html.indexOf('async function saExecuteSend()');
     const fnBody = html.slice(fnStart, fnStart + 16000);
     const switchIdx = fnBody.indexOf('wallet_switchEthereumChain');
-    const recheck = fnBody.indexOf('if (activeChainId !== 5042002)', switchIdx);
+    const recheck = fnBody.indexOf('if (!isArcChainId(activeChainId))', switchIdx);
     expect(recheck).toBeGreaterThan(switchIdx);
   });
 

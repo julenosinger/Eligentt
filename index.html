@@ -93,6 +93,7 @@
 <script src="/shared/poolExecutor.js"></script>
 <script src="/shared/TowerAdapter.js"></script>
 <script src="/shared/LocalAdapter.js"></script>
+<script src="/shared/LiFiAdapter.js"></script>
 <script src="/shared/SwapAggregator.js"></script>
 <script src="/shared/swapUiModes.js"></script>
 <script src="/shared/liquidityHealth.js"></script>
@@ -7288,7 +7289,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
             <div class="sa-header-title">Send Assets</div>
             <div class="sa-header-sub">Transfer assets to any wallet on supported networks</div>
           </div>
-          <div class="sa-network-badge" id="sa-network-badge"><span style="width:6px;height:6px;border-radius:50%;background:var(--green);display:inline-block"></span><span id="sa-network-badge-text">Arc Testnet</span></div>
+          <div class="sa-network-badge" id="sa-network-badge"><span style="width:6px;height:6px;border-radius:50%;background:var(--green);display:inline-block"></span><span id="sa-network-badge-text">Arc</span></div>
         </div>
 
         <!-- Body -->
@@ -7354,7 +7355,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
                 <label class="sa-label">From Network</label>
                 <div class="sa-input-wrap">
                   <i class="ti ti-topology-star-3 sa-input-icon"></i>
-                  <input id="sa-network-display" class="sa-input" value="Arc Testnet (Chain ID: 5042002)" readonly style="color:var(--blue);background:rgba(79,142,247,.04)">
+                  <input id="sa-network-display" class="sa-input" value="Arc" readonly style="color:var(--blue);background:rgba(79,142,247,.04)">
                 </div>
               </div>
 
@@ -7364,12 +7365,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
                 <div class="sa-input-wrap" style="position:relative">
                   <i class="ti ti-world-share sa-input-icon"></i>
                   <select id="sa-dest-network" class="sa-input sa-select" onchange="saOnDestChange()" style="color:#f59e0b;background:#12141c;cursor:pointer;appearance:none;-webkit-appearance:none;padding-right:28px">
-                    <option value="5042002" style="background:#12141c;color:#dde2f0">Arc Testnet</option>
-                    <option value="11155111" style="background:#12141c;color:#dde2f0">Ethereum Sepolia</option>
-                    <option value="84532" style="background:#12141c;color:#dde2f0">Base Sepolia</option>
-                    <option value="421614" style="background:#12141c;color:#dde2f0">Arbitrum Sepolia</option>
-                    <option value="11155420" style="background:#12141c;color:#dde2f0">Optimism Sepolia</option>
-                    <option value="80002" style="background:#12141c;color:#dde2f0">Polygon Amoy</option>
+                    <!-- Options populated dynamically by saPopulateDestNetworks() -->
                   </select>
                   <i class="ti ti-chevron-down" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);color:#f59e0b;font-size:10px;pointer-events:none"></i>
                 </div>
@@ -12133,11 +12129,14 @@ const USDC_ABI = [
 // ═══════════════════════════════════════════════════════════
 const SendGuard = (() => {
   const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
-  // Arc-native USDC address — ONLY valid on Arc Testnet (5042002).
+  // Arc-native USDC predeploy — valid on Arc Mainnet (5042) and Arc Testnet (5042002).
   // On any other chain this address has no contract code and every
   // eth_call against it fails with CALL_EXCEPTION / missing revert data.
   const ARC_USDC = '0x3600000000000000000000000000000000000000';
-  const ARC_CHAIN_ID = 5042002;
+  const ARC_CHAIN_ID = 5042002; // backward-compat: Arc Testnet
+  const ARC_CHAIN_IDS = [5042002, 5042];
+
+  function isArcChain(chainId) { return ARC_CHAIN_IDS.indexOf(Number(chainId)) !== -1; }
 
   function isValidAddress(addr) {
     if (typeof addr !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(addr)) return false;
@@ -12151,7 +12150,7 @@ const SendGuard = (() => {
     if (!addr) return true;
     const a = String(addr).toLowerCase();
     if (a === ZERO_ADDRESS) return true;
-    if (a === ARC_USDC && Number(chainId) !== ARC_CHAIN_ID) return true;
+    if (a === ARC_USDC && !isArcChain(chainId)) return true;
     return false;
   }
 
@@ -12637,6 +12636,44 @@ function loadBatcherAddresses() {
 //  nativeCurrency (for wallet_addEthereumChain), UI colors
 // ═════════════════════════════════════════════════════════
 const CHAIN_REGISTRY = {
+  5042: {
+    id: 'Arc_Mainnet', name: 'Arc Mainnet', shortName: 'Arc',
+    color: '#22c55e', symbol: 'A', testnet: false,
+    chainId: 5042, chainHex: '0x13b2',
+    rpc: 'https://rpc.mainnet.arc.io',
+    explorer: 'https://explorer.arc.io',
+    nativeCurrency: { name: 'USDC', symbol: 'USDC', decimals: 18 },
+    tokens: {
+      USDC: { address: '0x3600000000000000000000000000000000000000', decimals: 6 },
+      EURC: { address: '0xbEf5f6d51CB62b58e6A8f77868681825C6fe21c1', decimals: 6 },
+      cirBTC: { address: '0x171A4217b86A807A64eB94757Db6849fb4bDbAA0', decimals: 8 },
+    },
+    cctp: null,
+    lifiDiamond: '0xA4072583658Fae592A3506A42431cb6316a8d40b',
+    isEvm: true,
+  },
+  // ── LI.FI-supported Mainnet destinations (verified USDC addresses via LI.FI /v1/tokens) ──
+  1: {
+    id: 'Ethereum', name: 'Ethereum', shortName: 'ETH', color: '#627eea', symbol: 'Ξ', testnet: false,
+    chainId: 1, chainHex: '0x1', rpc: 'https://cloudflare-eth.com', explorer: 'https://etherscan.io',
+    nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+    tokens: { USDC: { address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', decimals: 6 } },
+    isEvm: true,
+  },
+  8453: {
+    id: 'Base', name: 'Base', shortName: 'Base', color: '#0052ff', symbol: 'B', testnet: false,
+    chainId: 8453, chainHex: '0x2105', rpc: 'https://mainnet.base.org', explorer: 'https://basescan.org',
+    nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+    tokens: { USDC: { address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', decimals: 6 } },
+    isEvm: true,
+  },
+  42161: {
+    id: 'Arbitrum', name: 'Arbitrum', shortName: 'Arb', color: '#12aaff', symbol: 'Ar', testnet: false,
+    chainId: 42161, chainHex: '0xa4b1', rpc: 'https://arb1.arbitrum.io/rpc', explorer: 'https://arbiscan.io',
+    nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+    tokens: { USDC: { address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', decimals: 6 } },
+    isEvm: true,
+  },
   5042002: {
     id: 'Arc_Testnet', name: 'Arc Testnet', shortName: 'Arc',
     color: '#ff0202', symbol: 'A', testnet: true,
@@ -12773,8 +12810,22 @@ const ALL_CHAINS = [...CHAINS, CHAIN_REGISTRY.solana_devnet];
 // Active chain state — updated by refreshProviderState() and chainChanged listener
 let activeChainId = 5042002; // default: Arc Testnet
 
+const ARC_MAINNET_ID = 5042;
+const ARC_TESTNET_ID = 5042002;
+
 function getChainById(id) { return CHAIN_REGISTRY[id] || null; }
-function getActiveChain() { return getChainById(activeChainId) || CHAIN_REGISTRY[5042002]; }
+function getActiveChain() { return getChainById(activeChainId) || CHAIN_REGISTRY[ARC_TESTNET_ID]; }
+function isArcChainId(id) { return Number(id) === ARC_MAINNET_ID || Number(id) === ARC_TESTNET_ID; }
+// The Arc chain the app should land on when the wallet is off-Arc.
+// Production (non-localhost, external wallet) → Arc Mainnet once registered;
+// localhost / internal wallet / no-mainnet → Arc Testnet (dev).
+function arcTargetChainId() {
+  var isDev = false;
+  try { isDev = (typeof window !== 'undefined') && (window.location && window.location.hostname === 'localhost'); } catch (_) {}
+  var isInternal = (typeof activeWalletType !== 'undefined' && activeWalletType === 'intelligent');
+  if (!isDev && !isInternal && CHAIN_REGISTRY[ARC_MAINNET_ID]) return ARC_MAINNET_ID;
+  return ARC_TESTNET_ID;
+}
 function getTokenAddress(sym) { return getActiveChain()?.tokens?.[sym]?.address || null; }
 function getTokenAddressForChain(chainId, sym) { return getChainById(chainId)?.tokens?.[sym]?.address || null; }
 function cctpDomainForChain(key) {
@@ -31193,7 +31244,7 @@ const SA_TOKENS = {
   USDC:  { symbol: 'USDC',  name: 'USD Coin',    decimals: 6,  icon: 'U', color: '#2775ca', address: () => activeUSDC(),   isNative: false },
   EURC:  { symbol: 'EURC',  name: 'Euro Coin',    decimals: 6,  icon: 'E', color: '#1a56a0', address: () => activeEURC(),   isNative: false },
   cirBTC:{ symbol: 'cirBTC',name: 'Circle BTC',   decimals: 8,  icon: '₿', color: '#f7931a',
-    address: () => getTokenAddress('cirBTC') || '0xf0C4a4CE82A5746AbAAd9425360Ab04fbBA432BF', isNative: false
+    address: () => getTokenAddress('cirBTC'), isNative: false
   }
 };
 
@@ -31213,32 +31264,72 @@ function saUpdateNetwork() {
   var netDisplay = document.getElementById('sa-network-display');
   var netBadgeText = document.getElementById('sa-network-badge-text');
   var sel = document.getElementById('sa-src-network');
-  if (netDisplay) netDisplay.value = 'Arc Testnet (Chain ID: 5042002)';
-  if (netBadgeText) netBadgeText.textContent = 'Arc Testnet';
-  // Reset source to Arc if selector exists
-  if (sel) sel.value = '5042002';
+  var chain = getActiveChain();
+  var chainName = chain ? chain.name : 'Arc Testnet';
+  var chainId   = chain ? chain.chainId : activeChainId;
+  if (netDisplay) netDisplay.value = chainName + ' (Chain ID: ' + chainId + ')';
+  if (netBadgeText) netBadgeText.textContent = chainName;
+  // Reset source to the active Arc chain if selector exists
+  if (sel) sel.value = String(chainId);
+  saPopulateDestNetworks();
   saRefreshBalance();
   saUpdateRoute();
 }
 
+// ── Populate destination networks dynamically ─────────────
+// Production (non-localhost, mainnet wallet) hides testnets; localhost and
+// testnet wallets keep them for development.
+function saPopulateDestNetworks() {
+  var sel = document.getElementById('sa-dest-network');
+  if (!sel) return;
+  var hostname = 'localhost';
+  try { hostname = window.location.hostname || 'localhost'; } catch (_) {}
+  var showTestnets = (activeChainId === ARC_TESTNET_ID) || (hostname === 'localhost');
+  var srcChain = getChainById(activeChainId) || CHAIN_REGISTRY[ARC_MAINNET_ID] || CHAIN_REGISTRY[ARC_TESTNET_ID];
+  var srcId = srcChain ? srcChain.chainId : ARC_TESTNET_ID;
+
+  var candidates = [];
+  for (var k in CHAIN_REGISTRY) {
+    var c = CHAIN_REGISTRY[k];
+    if (!c || c.isEvm === false) continue;
+    candidates.push(c);
+  }
+
+  var html = '';
+  if (srcChain) {
+    html += '<option value="' + srcChain.chainId + '" style="background:#12141c;color:#dde2f0">' + srcChain.name + ' (same chain)</option>';
+  }
+  for (var i = 0; i < candidates.length; i++) {
+    var ch = candidates[i];
+    if (ch.chainId === srcId) continue;
+    if (ch.testnet && !showTestnets) continue;
+    html += '<option value="' + ch.chainId + '" style="background:#12141c;color:#dde2f0">' + ch.name + '</option>';
+  }
+  sel.innerHTML = html;
+  saDestChainId = srcId;
+  sel.value = String(srcId);
+}
+
 function saOnDestChange() {
   var sel = document.getElementById('sa-dest-network');
-  saDestChainId = sel ? parseInt(sel.value) : 5042002;
+  var fallback = arcTargetChainId();
+  saDestChainId = sel && sel.value ? parseInt(sel.value) : fallback;
   saUpdateRoute();
 }
 
 function saIsCrossChain() {
-  return saDestChainId !== 5042002;
+  return saDestChainId !== activeChainId;
 }
 
 function saGetDestChainName() {
   var sel = document.getElementById('sa-dest-network');
-  return sel ? sel.options[sel.selectedIndex]?.textContent || 'Arc Testnet' : 'Arc Testnet';
+  var fallback = (getActiveChain() && getActiveChain().name) || 'Arc Testnet';
+  return sel && sel.options[sel.selectedIndex] ? (sel.options[sel.selectedIndex].textContent || fallback) : fallback;
 }
 
 function saGetExplorer() {
   var chain = getActiveChain();
-  return chain ? chain.explorer : 'https://testnet.arcscan.app';
+  return chain ? chain.explorer : (CHAIN_REGISTRY[ARC_MAINNET_ID] ? 'https://explorer.arc.io' : 'https://testnet.arcscan.app');
 }
 
 function saSelectAsset(asset, btn) {
@@ -31306,7 +31397,7 @@ function saUpdateRoute() {
   set('sa-rt-amount',   amount > 0 ? amount.toFixed(saGetTokenDecimals() > 8 ? 6 : 4) + ' ' + saCurrentAsset : '—');
   set('sa-rt-dest',     recipient ? '<a href="' + explorer + '/address/' + recipient + '" target="_blank" style="color:var(--blue);text-decoration:none">' + shortAddr(recipient) + '</a>' : '—');
   set('sa-rt-contract', '<a href="' + explorer + '/address/' + tokenAddr + '" target="_blank" style="color:var(--blue);text-decoration:none">' + shortAddr(tokenAddr) + '</a> (' + saGetTokenDecimals() + ' dec)');
-  set('sa-rt-network',  chainName + ' (' + (activeChainId || '5042002') + ')');
+  set('sa-rt-network',  chainName + ' (' + activeChainId + ')');
 
   var isXChain = saIsCrossChain();
   // Route visualization
@@ -31319,7 +31410,7 @@ function saUpdateRoute() {
   if (isXChain) {
     var fromEl = document.getElementById('sa-xroute-from');
     var toEl = document.getElementById('sa-xroute-to');
-    if (fromEl) fromEl.textContent = 'Arc Testnet';
+    if (fromEl) fromEl.textContent = chainName;
     if (toEl) toEl.textContent = saGetDestChainName();
     set('sa-rt-type', '<span style="color:#f59e0b"><i class="ti ti-world-share" style="margin-right:3px"></i>Cross-Chain (CCTP V2)</span>');
   } else {
@@ -31374,12 +31465,22 @@ function saExecuteCrossChain() {
   if (amount <= 0) { toast('Amount must be greater than 0', 'error'); return; }
 
   var destChainId = saDestChainId;
+  var destChain = getChainById(destChainId);
+
+  // ── LI.FI cross-chain (production Mainnet path) ─────────────────────
+  // Arc Mainnet → LI.FI-supported mainnet destinations route through LI.FI.
+  // The existing CCTP testnet path remains for testnet cross-chain.
+  if (activeChainId === ARC_MAINNET_ID && destChain && destChain.testnet === false) {
+    saExecuteLiFiCrossChain();
+    return;
+  }
+
   var destIdx = 0;
   for (var i = 0; i < (typeof CHAINS !== 'undefined' ? CHAINS.length : 0); i++) {
     if (CHAINS[i] && CHAINS[i].chainId === destChainId) { destIdx = i; break; }
   }
 
-  // Set xchain state (source is always Arc, index 0)
+  // Set xchain state (source is always Arc Testnet, index 0)
   xcFromIdx = 0; // Arc Testnet
   xcToIdx = destIdx;
   xcToken = saCurrentAsset;
@@ -31395,6 +31496,158 @@ function saExecuteCrossChain() {
     xcExecuteSend();
   } else {
     toast('Cross-chain bridge unavailable', 'error');
+  }
+}
+
+// ── LI.FI cross-chain Send (Arc Mainnet → supported mainnet) ──────────
+// Executes ONLY when LI.FI returns a route that validates against the request.
+// Cross-chain LI.FI calldata is untrusted: validateRoute() must pass first.
+async function saExecuteLiFiCrossChain() {
+  var recipient = document.getElementById('sa-recipient')?.value.trim() || '';
+  var amount    = parseFloat(document.getElementById('sa-amount')?.value) || 0;
+  if (!walletAddress || !signer) { toast('Connect your wallet first', 'error'); return; }
+  if (!isAddr(recipient)) { toast('Invalid recipient address', 'error'); return; }
+  if (amount <= 0) { toast('Amount must be greater than 0', 'error'); return; }
+  if (typeof LiFiAdapter === 'undefined' || typeof LiFiAdapter.getQuote !== 'function') {
+    toast('LI.FI routing unavailable', 'error'); return;
+  }
+
+  var srcChain = getActiveChain();
+  var destChain = getChainById(saDestChainId);
+  if (!srcChain || !destChain) { toast('Unsupported network', 'error'); return; }
+
+  var srcTokenAddr = saGetTokenAddr();
+  var destTokenAddr = getTokenAddressForChain(saDestChainId, saCurrentAsset);
+  if (!srcTokenAddr || !destTokenAddr) { toast('Asset not available on destination chain', 'error'); return; }
+
+  var rawAmt = saToRaw(amount);
+  var dec = saGetTokenDecimals();
+  var btn = document.getElementById('sa-send-btn');
+  var btnContent = document.getElementById('sa-send-btn-content');
+  if (btn) btn.disabled = true;
+  if (btnContent) btnContent.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i> Routing via LI.FI...';
+
+  // 1. Obtain the route
+  var quote;
+  try {
+    quote = await LiFiAdapter.getQuote({
+      tokenIn: saCurrentAsset,
+      tokenOut: saCurrentAsset,
+      amountInRaw: rawAmt,
+      slippageBps: 50,
+      fromChainId: srcChain.chainId,
+      toChainId: destChain.chainId,
+      fromAddress: walletAddress,
+      toAddress: recipient,
+    });
+  } catch (e) {
+    quote = { ok: false, error: (e && e.message) || String(e) };
+  }
+
+  if (!quote || quote.ok !== true) {
+    if (btn) btn.disabled = false;
+    if (btnContent) btnContent.innerHTML = '<i class="ti ti-world-share"></i> Review &amp; Send';
+    toast('LI.FI route unavailable: ' + ((quote && quote.error) || 'NO_ROUTE'), 'error');
+    return;
+  }
+
+  // 2. Validate the route against the exact request (chain/token/amount/recipient)
+  var vres = LiFiAdapter.validateRoute(quote.route, {
+    fromChainId: srcChain.chainId,
+    toChainId: destChain.chainId,
+    fromToken: srcTokenAddr,
+    toToken: destTokenAddr,
+    amountRaw: rawAmt.toString(),
+    recipient: recipient,
+  });
+  if (!vres.ok) {
+    if (btn) btn.disabled = false;
+    if (btnContent) btnContent.innerHTML = '<i class="ti ti-world-share"></i> Review &amp; Send';
+    toast('LI.FI route rejected: ' + vres.reason, 'error');
+    return;
+  }
+
+  var outAmt = Number(quote.expectedOutRaw) / Math.pow(10, dec);
+  var minAmt = Number(quote.minOutRaw) / Math.pow(10, dec);
+  var feePct = quote.feeBps != null ? (quote.feeBps / 100).toFixed(2) : '—';
+  var toolName = quote.tool || 'LI.FI';
+
+  // 3. Cross-chain confirmation (never presented as a normal ERC-20 send)
+  var confHtml = '<div id="sa-confirm-overlay" style="position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center"><div class="card" style="width:400px;max-width:95vw" onclick="event.stopPropagation()"><div class="ch"><i class="ti ti-world-share" style="color:var(--yellow)"></i><span class="ct">Confirm Cross-Chain Send (LI.FI)</span></div><div class="cb" style="display:flex;flex-direction:column;gap:8px"><div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:10px">'
+    + '<div style="color:var(--muted2)">From</div><div style="color:var(--text);font-weight:600">' + srcChain.name + '</div>'
+    + '<div style="color:var(--muted2)">To</div><div style="color:var(--text);font-weight:600">' + destChain.name + '</div>'
+    + '<div style="color:var(--muted2)">Asset</div><div style="color:var(--text);font-weight:600">' + amount.toFixed(4) + ' ' + saCurrentAsset + '</div>'
+    + '<div style="color:var(--muted2)">Expected</div><div style="color:var(--text);font-weight:600">' + outAmt.toFixed(4) + ' ' + saCurrentAsset + '</div>'
+    + '<div style="color:var(--muted2)">Minimum</div><div style="color:var(--green);font-weight:600">' + minAmt.toFixed(4) + ' ' + saCurrentAsset + '</div>'
+    + '<div style="color:var(--muted2)">Bridge</div><div style="color:var(--yellow)">' + escHtml(toolName) + '</div>'
+    + '<div style="color:var(--muted2)">LI.FI Fees</div><div style="color:var(--yellow)">' + feePct + '%</div>'
+    + '<div style="color:var(--muted2)">Recipient</div><div style="font-family:monospace;color:var(--blue);font-size:9px">' + shortAddr(recipient) + '</div>'
+    + '</div><div style="font-size:8.5px;color:var(--muted2);padding:8px;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.25);border-radius:6px">Cross-chain transfer via LI.FI. Funds are bridged to ' + destChain.name + ' — this is not a simple same-chain transfer.</div>'
+    + '<div style="display:flex;gap:8px;margin-top:4px"><button class="action-btn" style="flex:1;background:linear-gradient(135deg,#f59e0b,#a78bfa)" onclick="document.getElementById(\'sa-confirm-overlay\').remove();window._saResolve && window._saResolve(true)"><i class="ti ti-check"></i>Confirm</button><button class="btn" style="flex:1;color:var(--muted2)" onclick="document.getElementById(\'sa-confirm-overlay\').remove();window._saResolve && window._saResolve(false)">Cancel</button></div></div></div></div>';
+  var overlay = document.createElement('div'); overlay.innerHTML = confHtml; document.body.appendChild(overlay.firstElementChild);
+  var confirmed = await new Promise(function(resolve) { window._saResolve = resolve; });
+  delete window._saResolve;
+  if (!confirmed) {
+    if (btn) btn.disabled = false;
+    if (btnContent) btnContent.innerHTML = '<i class="ti ti-world-share"></i> Review &amp; Send';
+    return;
+  }
+
+  try {
+    // 4. Approval (if the route requires it and allowance is insufficient)
+    var approvalAddr = quote.spender; // LI.FI estimate.approvalAddress
+    if (approvalAddr && /^0x[0-9a-fA-F]{40}$/.test(approvalAddr)) {
+      var tc = new ethers.Contract(srcTokenAddr, USDC_ABI, provider);
+      var allowance = await tc.allowance(walletAddress, approvalAddr);
+      if (allowance < rawAmt) {
+        if (btnContent) btnContent.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i> Approving...';
+        var appC = new ethers.Contract(srcTokenAddr, USDC_ABI, signer);
+        var appTx = await appC.approve(approvalAddr, rawAmt);
+        await appTx.wait();
+      }
+    }
+
+    // 5. Sign + broadcast the LI.FI transactionRequest (validated calldata)
+    if (btnContent) btnContent.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i> Sending...';
+    var tr = quote.route.transactionRequest;
+    var tx = await signer.sendTransaction({
+      from: tr.from || walletAddress,
+      to: tr.to,
+      data: tr.data,
+      value: tr.value != null ? BigInt(tr.value) : 0n,
+      chainId: Number(tr.chainId),
+    });
+    if (btnContent) btnContent.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i> Confirming...';
+    var receipt = await tx.wait(1, 25000);
+    if (!receipt || receipt.status !== 1) throw new Error('Transaction not confirmed');
+
+    // 6. Record with LI.FI metadata (provider, route, chains, status)
+    saLogTx({
+      hash: tx.hash,
+      txHash: tx.hash,
+      amount: amount,
+      asset: saCurrentAsset,
+      recipient: recipient,
+      type: 'crosschain',
+      provider: 'lifi',
+      fromChain: srcChain.name,
+      toChain: destChain.name,
+      lifiRouteId: quote.lifiRouteId || null,
+      lifiTxHash: tx.hash,
+      tool: toolName,
+      explorer: srcChain.explorer,
+      timestamp: Date.now(),
+    });
+    toast(amount + ' ' + saCurrentAsset + ' bridged to ' + destChain.name + ' via LI.FI | Tx: ' + shortAddr(tx.hash), 'success');
+    refreshBalance();
+    saRefreshBalance();
+    if (btnContent) btnContent.innerHTML = '<i class="ti ti-world-share"></i> Review &amp; Send';
+    if (btn) btn.disabled = false;
+  } catch (e) {
+    if (btnContent) btnContent.innerHTML = '<i class="ti ti-world-share"></i> Review &amp; Send';
+    if (btn) btn.disabled = false;
+    if (e.code === 4001 || (e.message || '').includes('rejected')) toast('Transaction rejected by user', 'error');
+    else toast('Cross-chain send failed: ' + (e.shortMessage || e.message || 'unknown error'), 'error');
   }
 }
 
@@ -31490,13 +31743,16 @@ async function saExecuteSend() {
 
   if (saTokenCfg.isNative) { toast(saCurrentAsset + ' is a native asset', 'error'); return; }
 
-  if (activeChainId !== 5042002) {
-    toast('Switching to Arc Testnet...', 'info');
+  var arcTarget = arcTargetChainId();
+  var arcName = arcTarget === ARC_MAINNET_ID ? 'Arc Mainnet' : 'Arc Testnet';
+  var arcHex  = arcTarget === ARC_MAINNET_ID ? '0x13b2' : '0x4cef52';
+  if (!isArcChainId(activeChainId)) {
+    toast('Switching to ' + arcName + '...', 'info');
     try {
-      if (!isExternalWallet && typeof WalletManager !== 'undefined') await WalletManager.switchInternalChain(5042002);
-      else { await saEth?.request({ method:'wallet_switchEthereumChain', params:[{chainId:'0x4cef52'}] }); if (isExternalWallet && typeof refreshProviderState === 'function') await refreshProviderState(); }
-    } catch(e) { toast('Please switch to Arc Testnet manually', 'error'); return; }
-    if (activeChainId !== 5042002) { toast('Please switch to Arc Testnet manually', 'error'); return; }
+      if (!isExternalWallet && typeof WalletManager !== 'undefined') await WalletManager.switchInternalChain(arcTarget);
+      else { await saEth?.request({ method:'wallet_switchEthereumChain', params:[{chainId: arcHex}] }); if (isExternalWallet && typeof refreshProviderState === 'function') await refreshProviderState(); }
+    } catch(e) { toast('Please switch to ' + arcName + ' manually', 'error'); return; }
+    if (!isArcChainId(activeChainId)) { toast('Please switch to ' + arcName + ' manually', 'error'); return; }
   }
 
   if (!saTokenCfg.isNative && typeof SendGuard !== 'undefined') {
@@ -31634,7 +31890,7 @@ function saRenderActivity() {
 
   allTxs.forEach(tx => {
     var item = document.createElement('div');
-    var explorer = tx.explorer || 'https://testnet.arcscan.app';
+    var explorer = tx.explorer || (CHAIN_REGISTRY[ARC_MAINNET_ID] ? 'https://explorer.arc.io' : 'https://testnet.arcscan.app');
     var isXChain = tx.type === 'crosschain';
     var asset = tx.asset || 'USDC';
     var amount = tx.amount;
@@ -31645,7 +31901,7 @@ function saRenderActivity() {
     var fromChain = tx.fromChain || '';
     var toChain = tx.toChain || '';
     // Use destination chain explorer for mint tx
-    var mintExplorer = 'https://testnet.arcscan.app';
+    var mintExplorer = CHAIN_REGISTRY[ARC_MAINNET_ID] ? 'https://explorer.arc.io' : 'https://testnet.arcscan.app';
     if (toChain && typeof CHAINS !== 'undefined') {
       for (var ci = 0; ci < CHAINS.length; ci++) {
         if (CHAINS[ci] && CHAINS[ci].name === toChain) {
@@ -31739,6 +31995,9 @@ const _origShowPage = showPage;
 })();
 
 document.addEventListener('DOMContentLoaded', () => {
+  // Populate the Send Assets destination networks + source network display
+  // using the active chain (Arc Mainnet in production, Arc Testnet in dev).
+  try { saUpdateNetwork(); } catch (_) {}
   // Init balance when page-send becomes visible (via MutationObserver)
   const sendPage = document.getElementById('page-send');
   if (sendPage) {
@@ -41930,6 +42189,7 @@ function exitUnifiedBalanceMode() {
   // exempt:true → destination's incoming asset IS the native gas token
   // (Arc uses USDC as gas), so receiving funds guarantees gas → never block.
   var THRESHOLDS = {
+    5042:     { req: 0,       warn: 0,      exempt: true },  // Arc Mainnet (USDC = gas)
     5042002:  { req: 0,       warn: 0,      exempt: true },  // Arc Testnet (USDC = gas)
     11155111: { req: 0.003,   warn: 0.005 },                 // Ethereum Sepolia (ETH)
     84532:    { req: 0.001,   warn: 0.002 },                 // Base Sepolia (ETH)
