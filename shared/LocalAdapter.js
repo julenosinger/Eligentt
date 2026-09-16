@@ -20,6 +20,13 @@
     try { return typeof v === 'bigint' && v > 0n; } catch (_) { return false; }
   }
 
+  // Local pools are deployed on Arc Testnet only. On any other chain the local
+  // adapter must NOT quote — it must not leak Testnet liquidity/balances.
+  // Defaults to Testnet when no active chain is set (pre-connect / test env).
+  function _isTestnetActive() {
+    try { if (typeof activeChainId === 'undefined') return true; return Number(activeChainId) === 5042002; } catch (_) { return true; }
+  }
+
   /**
    * Quote the Elligentt local pools for a swap.
    * @param {object} opts { tokenIn, tokenOut, amountInRaw: bigint, slippageBps }
@@ -27,6 +34,9 @@
    */
   async function getQuote(opts) {
     opts = opts || {};
+    if (!_isTestnetActive()) {
+      return { source: 'local', ok: false, error: 'LOCAL_POOLS_TESTNET_ONLY' };
+    }
     var tokenIn = opts.tokenIn;
     var tokenOut = opts.tokenOut;
     var amountInRaw = opts.amountInRaw;

@@ -230,7 +230,7 @@
       var qq = quotes[j];
       if (qq && qq.ok === true) {
         if (qq.source === 'local') qq.executable = hasLocalPool;
-        else if (qq.source === 'tower') qq.executable = externalExecutionValid(qq);
+        else if (qq.source === 'tower') qq.executable = towerExecutionValid(qq);
         else if (qq.source === 'lifi') qq.executable = externalExecutionValid(qq);
         else qq.executable = false;
       } else if (qq) {

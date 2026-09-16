@@ -20928,13 +20928,16 @@ async function updateSwapBalancesDisplay() {
     return;
   }
   try {
-    const prov = getCachedProvider('https://arc-testnet.drpc.org');
+    // Chain-aware: read balances on the ACTIVE chain (Arc Mainnet → Mainnet RPC,
+    // Arc Testnet → Testnet RPC). Never a fixed Testnet provider.
+    const activeChain = getActiveChain();
+    const prov = getCachedProvider((activeChain && activeChain.rpc) || 'https://arc-testnet.drpc.org');
     const tIn  = TOKEN_LIST[SWP.tokenInIdx];
     const tOut = TOKEN_LIST[SWP.tokenOutIdx];
 
     const [balIn, balOut] = await Promise.all([
       (async () => {
-        const addr = getTokAddr(tIn.sym);
+        const addr = getTokenAddress(tIn.sym) || getTokAddr(tIn.sym);
         if (!addr || addr === '0x0000000000000000000000000000000000000000') {
           // Native token balance via provider
           try { const b = await prov.getBalance(walletAddress); return parseFloat(ethers.formatUnits(b, 18)).toFixed(4); } catch(_) { return '—'; }
@@ -20944,7 +20947,7 @@ async function updateSwapBalancesDisplay() {
         return parseFloat(ethers.formatUnits(b, tIn.decimals)).toFixed(4);
       })(),
       (async () => {
-        const addr = getTokAddr(tOut.sym);
+        const addr = getTokenAddress(tOut.sym) || getTokAddr(tOut.sym);
         if (!addr || addr === '0x0000000000000000000000000000000000000000') {
           try { const b = await prov.getBalance(walletAddress); return parseFloat(ethers.formatUnits(b, 18)).toFixed(4); } catch(_) { return '—'; }
         }
@@ -21146,7 +21149,9 @@ async function updateSwapRate() {
             tokenOut: tOut.sym,
             amountInRaw: amountInRaw,
             slippageBps: Math.round(SWP.slippage * 100),
-            chainId: 5042002,
+            chainId: activeChainId,
+            fromChainId: activeChainId,
+            toChainId: activeChainId,
             hasLocalPool: hasLocalPool,
           });
           SWP.aggQuotes = agg.quotes || [];
@@ -21174,6 +21179,10 @@ async function updateSwapRate() {
               source = 'Tower Exchange';
               SWP._towerQuoteData = selected.calldata ? selected : null;
               _log('[swap] SwapAggregator: Tower selecionada/executável (', selected.expectedOutRaw.toString(), ')');
+            } else if (selected.source === 'lifi') {
+              source = 'LI.FI';
+              SWP._towerQuoteData = selected.calldata ? selected : null;
+              _log('[swap] SwapAggregator: LI.FI selecionada/executável (', selected.expectedOutRaw.toString(), ')');
             } else {
               source = 'Elligentt Pool';
               SWP._towerQuoteData = null;
@@ -21192,10 +21201,11 @@ async function updateSwapRate() {
         }
       }
 
-      // ── Tower-selected execution (no local pool for this pair) ─────────
-      // QUOTE ≠ EXECUTION: Tower is quoted always, but executed only when there
-      // is no local pool (f08cb02) AND its calldata/target/spender are valid.
-      if (selected && selected.source === 'tower') {
+      // ── External-calldata execution (Tower or LI.FI, no local pool for this pair) ──
+      // QUOTE ≠ EXECUTION: external providers are quoted always, but executed only
+      // when their calldata/target/spender are valid.
+      if (selected && (selected.source === 'tower' || selected.source === 'lifi')) {
+        const isLifi = selected.source === 'lifi';
         const tOutAmt = Number((typeof SwapMath !== 'undefined' && SwapMath.formatUnits) ? SwapMath.formatUnits(selected.expectedOutRaw, tOut.decimals) : ethers.formatUnits(selected.expectedOutRaw, tOut.decimals));
         const tMinReceived = Number((typeof SwapMath !== 'undefined' && SwapMath.formatUnits) ? SwapMath.formatUnits(selected.minOutRaw, tOut.decimals) : ethers.formatUnits(selected.minOutRaw, tOut.decimals));
         const tRate = tOutAmt / amtIn;
@@ -21207,14 +21217,14 @@ async function updateSwapRate() {
         swpSet('swp-rate-detail', '1 ' + tIn.sym + ' = ' + tRate.toFixed(6) + ' ' + tOut.sym);
         swpSet('swp-min-received', tMinReceived.toFixed(6) + ' ' + tOut.sym);
         swpSet('swp-fee-val', (amtIn * (tFeeBps / 10000)).toFixed(6) + ' ' + tIn.sym + (tFeeBps ? ' (' + (tFeeBps / 100).toFixed(1) + '%)' : ''));
-        swpSet('swp-source-val', 'Tower Aggregator');
+        swpSet('swp-source-val', isLifi ? 'LI.FI' : 'Tower Aggregator');
         if (tImpact != null) swpSet('swp-impact-val', tImpact.toFixed(3) + '%', tImpact < 1 ? 'green' : tImpact < 3 ? 'yellow' : 'red');
         else swpSet('swp-impact-val', '—');
         const tRoutePool = document.getElementById('swp-route-pool');
-        if (tRoutePool) tRoutePool.textContent = 'Tower';
+        if (tRoutePool) tRoutePool.textContent = isLifi ? 'LI.FI' : 'Tower';
 
         SWP._towerQuoteData = selected.calldata ? selected : null;
-        SWP.lastQuote = { amtIn, amtOut: tOutAmt, minReceived: tMinReceived, rate: tRate, priceImpact: tImpact, feeAmt: amtIn * (tFeeBps / 10000), source: 'Tower Exchange', tIn, tOut, route: null, totalFee: tFeeBps, expectedOutRaw: selected.expectedOutRaw, amountInRaw, quotedAt: Date.now(), stateUpdatedAt: null };
+        SWP.lastQuote = { amtIn, amtOut: tOutAmt, minReceived: tMinReceived, rate: tRate, priceImpact: tImpact, feeAmt: amtIn * (tFeeBps / 10000), source: isLifi ? 'LI.FI' : 'Tower Exchange', tIn, tOut, route: null, totalFee: tFeeBps, expectedOutRaw: selected.expectedOutRaw, amountInRaw, quotedAt: Date.now(), stateUpdatedAt: null };
         SwapEngine.notifyQuoteLoaded(SWP.lastQuote);
         try {
           if (typeof SwapUiModes !== 'undefined' && SwapUiModes.renderRouteSelector) {
@@ -21622,6 +21632,80 @@ async function swpExecuteTowerOnly(tIn, tOut, amtIn, slippageBps) {
   setTimeout(function(){ swpSetBtn('ready', `Swap ${tIn.sym} → ${tOut.sym}`); }, 2800);
 }
 
+// ── Execute a LI.FI swap route (Arc Mainnet same-chain) ──────────────
+// LI.FI calldata is UNTRUSTED external data: validateRoute() must pass before
+// any signature. Chain/token/amount/recipient must match the approved intent.
+async function swpExecuteLiFi(tIn, tOut, amtIn, slippageBps) {
+  const q = SWP._towerQuoteData;
+  if (!q || !q.calldata) { toast('LI.FI quote unavailable', 'error'); return; }
+  if (typeof LiFiAdapter === 'undefined' || typeof LiFiAdapter.validateRoute !== 'function') {
+    toast('LI.FI routing unavailable', 'error'); return;
+  }
+
+  // Chain-aware token addresses (Mainnet addresses on Arc Mainnet).
+  const fromToken = (typeof getTokenAddress === 'function') ? getTokenAddress(tIn.sym) : getTokAddr(tIn.sym);
+  const toToken   = (typeof getTokenAddress === 'function') ? getTokenAddress(tOut.sym) : getTokAddr(tOut.sym);
+  const vres = LiFiAdapter.validateRoute(q.route, {
+    fromChainId: activeChainId,
+    toChainId: activeChainId,
+    fromToken: fromToken,
+    toToken: toToken,
+    amountRaw: (typeof q.amountInRaw === 'bigint') ? q.amountInRaw.toString() : String(q.amountInRaw || ''),
+    recipient: walletAddress,
+  });
+  if (!vres.ok) {
+    toast('LI.FI route rejected: ' + vres.reason, 'error');
+    swpShowPrecheck('error', 'LI.FI route rejected — ' + vres.reason);
+    return;
+  }
+
+  const expectedOutRaw = q.expectedOutRaw;
+  const isNative = !fromToken || fromToken === '0x0000000000000000000000000000000000000000';
+
+  // 1) Approve the LI.FI spender (approvalAddress) for the source token.
+  if (!isNative) {
+    swpSetBtn('approving', `Approving ${tIn.sym} for LI.FI…`);
+    const tokenContract = new ethers.Contract(fromToken, USDC_ABI, signer);
+    const amtBig = ethers.parseUnits(amtIn.toFixed(tIn.decimals), tIn.decimals);
+    const spender = (q.spender && /^0x[0-9a-fA-F]{40}$/.test(q.spender) && q.spender !== '0x0000000000000000000000000000000000000000')
+      ? q.spender : q.to;
+    let allowance = 0n;
+    try { allowance = await tokenContract.allowance(walletAddress, spender); } catch(_) {}
+    if (allowance < amtBig) {
+      let gas = SWP.FALLBACK_GAS;
+      try { gas = await tokenContract.approve.estimateGas(spender, amtBig); gas = gas * 120n / 100n; } catch(_) {}
+      const tx = await tokenContract.approve(spender, amtBig, { gasLimit: gas });
+      toast(`Approve ${tIn.sym} submitted...`, 'info');
+      const appReceipt = await tx.wait();
+      if (!appReceipt || appReceipt.status !== 1) throw new Error('Approve transaction reverted on-chain');
+      let newAllowance = 0n;
+      try { newAllowance = await tokenContract.allowance(walletAddress, spender); } catch(_) {}
+      if (newAllowance < amtBig) throw new Error('Approve allowance not reflected on-chain');
+    }
+  }
+
+  // 2) Execute LI.FI calldata (validated target).
+  swpSetBtn('swapping', `Swapping ${tIn.sym} → ${tOut.sym} via LI.FI…`);
+  let swapGas = SWP.FALLBACK_GAS;
+  try { swapGas = await signer.estimateGas({ to: q.to, data: q.calldata }); swapGas = swapGas * 130n / 100n; } catch(_) {}
+  const swapTx = await signer.sendTransaction({ to: q.to, data: q.calldata, value: q.value != null ? BigInt(q.value) : 0n, gasLimit: swapGas });
+  toast(`Swap via LI.FI submitted...`, 'info');
+  const swapReceipt = await swapTx.wait(1, 25000);
+  if (!swapReceipt || swapReceipt.status !== 1) {
+    throw new Error('LI.FI swap transaction reverted (status: ' + (swapReceipt ? swapReceipt.status : 'null') + ')');
+  }
+  _log('[swap] LI.FI swap confirmed:', swapTx.hash, 'block:', swapReceipt.blockNumber);
+  SwapEngine.notifyExecutionComplete(swapReceipt);
+  SWP._towerQuoteData = null;
+
+  if (signer) refreshBalance().catch(() => {});
+  updateSwapBalancesDisplay();
+  swpAddHistory(tIn.sym, tOut.sym, amtIn, (Number((typeof SwapMath !== 'undefined' && SwapMath.formatUnits) ? SwapMath.formatUnits(expectedOutRaw, tOut.decimals) : ethers.formatUnits(expectedOutRaw, tOut.decimals))), swapTx.hash);
+  toast(`Swapped ${amtIn} ${tIn.sym} → ${tOut.sym} via LI.FI`, 'success');
+  swpSetBtn('done', 'Swapped!');
+  setTimeout(function(){ swpSetBtn('ready', `Swap ${tIn.sym} → ${tOut.sym}`); }, 2800);
+}
+
 // ── Execute Swap (supports direct + multi-hop routes) ──────
 async function executeSwap() {
   if (_swpExecuting) return;
@@ -21648,13 +21732,16 @@ async function executeSwap() {
   const tOut = TOKEN_LIST[SWP.tokenOutIdx];
   const route = SWP.lastRoute;
 
-  // ── Tower execution (when Tower is the SELECTED route) ──────────────
-  // QUOTE ≠ EXECUTION: Tower is quoted always and executes whenever the user
-  // selected it AND its calldata/target/spender pass validation — the existence
-  // of a local pool never blocks it (Tower and Elligentt are independent
-  // providers). minOut is recomputed locally (Tower minOut is never trusted).
+  // ── External provider execution (Tower / LI.FI, when it is the SELECTED route) ──
+  // QUOTE ≠ EXECUTION: external providers are quoted always and execute whenever
+  // the user selected them AND their calldata/target/spender pass validation.
+  // No silent provider substitution: LI.FI executes LI.FI, Tower executes Tower.
   if (SWP._towerQuoteData && SWP._towerQuoteData.calldata) {
-    await swpExecuteTowerOnly(tIn, tOut, amtIn, slippageBps);
+    if (SWP._towerQuoteData.source === 'lifi') {
+      await swpExecuteLiFi(tIn, tOut, amtIn, slippageBps);
+    } else {
+      await swpExecuteTowerOnly(tIn, tOut, amtIn, slippageBps);
+    }
     _swpExecuting = false;
     return;
   }
@@ -32018,6 +32105,27 @@ document.addEventListener('DOMContentLoaded', () => {
 // ═════════════════════════════════════════════════════════
 //  NETWORK SELECTOR — switch chains from anywhere in the app
 // ═════════════════════════════════════════════════════════
+// ── Selectable networks for the GLOBAL network selector ─────────────
+// Production (non-localhost) shows Arc Mainnet + supported Mainnet networks.
+// localhost / a testnet-connected wallet keeps Testnets for development.
+// Uses CHAIN_REGISTRY (single source of truth) — does NOT touch the shared
+// `CHAINS` array (whose order drives Bridge/Cross-Chain testnet indices).
+function getSelectableNetworks() {
+  var hostname = 'localhost';
+  try { hostname = (typeof window !== 'undefined' && window.location) ? (window.location.hostname || 'localhost') : 'localhost'; } catch (_) {}
+  var showTestnets = (activeChainId === ARC_TESTNET_ID) || (hostname === 'localhost');
+
+  var order = [ARC_MAINNET_ID, 1, 8453, 42161];
+  if (showTestnets) order = order.concat([ARC_TESTNET_ID, 11155111, 84532, 421614, 11155420, 80002]);
+
+  var out = [];
+  for (var i = 0; i < order.length; i++) {
+    var c = CHAIN_REGISTRY[order[i]];
+    if (c && c.isEvm) out.push(c);
+  }
+  return out;
+}
+
 function openNetworkSelector() {
   let modal = document.getElementById('network-selector-modal');
   if (!modal) {
@@ -32040,7 +32148,7 @@ function openNetworkSelector() {
   // Build chain list
   const list = modal.querySelector('#network-list');
   list.innerHTML = '';
-  CHAINS.forEach(chain => {
+  getSelectableNetworks().forEach(chain => {
     const isActive = chain.chainId === activeChainId;
     const btn = document.createElement('button');
     btn.style.cssText = `display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;

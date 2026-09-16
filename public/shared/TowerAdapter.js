@@ -28,6 +28,13 @@
   var API = '/api/tower/swap-quote';
   var QUOTE_TTL_MS = 60000; // conservative freshness window (ms)
 
+  // Tower Exchange integrates Arc Testnet only. On any other chain the Tower
+  // adapter must NOT quote — it must not leak Testnet liquidity/balances.
+  // Defaults to Testnet when no active chain is set (pre-connect / test env).
+  function _isTestnetActive() {
+    try { if (typeof activeChainId === 'undefined') return true; return Number(activeChainId) === 5042002; } catch (_) { return true; }
+  }
+
   function _postJson(path, body) {
     return fetch(path, {
       method: 'POST',
@@ -75,6 +82,9 @@
    */
   async function getQuote(opts) {
     opts = opts || {};
+    if (!_isTestnetActive()) {
+      return { source: 'tower', ok: false, error: 'TOWER_TESTNET_ONLY' };
+    }
     var amountInRaw = opts.amountInRaw;
     var amountInStr = (typeof amountInRaw === 'bigint')
       ? amountInRaw.toString()
