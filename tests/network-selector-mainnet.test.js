@@ -107,3 +107,27 @@ describe('Swap — LI.FI execution validates the untrusted route', () => {
     expect(html).toContain("SWP._towerQuoteData.source === 'lifi'");
   });
 });
+
+describe('Bridge — Arc Mainnet CCTP (verified addresses)', () => {
+  it('Arc Mainnet (5042) has verified CCTP v2 config', () => {
+    const reg = between('const CHAIN_REGISTRY = {', 'const CHAINS = [');
+    expect(reg).toContain("tokenMessenger:     '0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d'");
+    expect(reg).toContain("messageTransmitter: '0x81D40F21F12A8F0E3252Bccb954D722d4c464B64'");
+    expect(reg).toContain("tokenMinter:        '0xfd78EE919681417d192449715b2594ab58f5D002'");
+    expect(reg).toContain('domain: 26');
+  });
+
+  it('Arc Mainnet CCTP addresses differ from Arc Testnet (never reused)', () => {
+    const reg = between('const CHAIN_REGISTRY = {', 'const CHAINS = [');
+    expect(reg).not.toContain("0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA'.*5042");
+    // Mainnet messenger is distinct from the Testnet messenger 0x8FE6B999…
+    expect(reg).toContain('0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d');
+  });
+
+  it('Swap balance read is fail-closed (no Testnet RPC fallback on Mainnet)', () => {
+    const fn = between('async function updateSwapBalancesDisplay', 'function swapTokens');
+    expect(fn).toContain('getCachedProvider(activeChain.rpc)');
+    expect(fn).not.toContain("|| 'https://arc-testnet.drpc.org'");
+  });
+});
+

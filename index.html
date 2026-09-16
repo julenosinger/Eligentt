@@ -12648,7 +12648,13 @@ const CHAIN_REGISTRY = {
       EURC: { address: '0xbEf5f6d51CB62b58e6A8f77868681825C6fe21c1', decimals: 6 },
       cirBTC: { address: '0x171A4217b86A807A64eB94757Db6849fb4bDbAA0', decimals: 8 },
     },
-    cctp: null,
+    cctp: {
+      // Arc Mainnet CCTP v2 — VERIFIED against docs.arc.io/arc/references/contract-addresses
+      domain: 26,
+      tokenMessenger:     '0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d',
+      messageTransmitter: '0x81D40F21F12A8F0E3252Bccb954D722d4c464B64',
+      tokenMinter:        '0xfd78EE919681417d192449715b2594ab58f5D002',
+    },
     lifiDiamond: '0xA4072583658Fae592A3506A42431cb6316a8d40b',
     isEvm: true,
   },
@@ -20929,9 +20935,10 @@ async function updateSwapBalancesDisplay() {
   }
   try {
     // Chain-aware: read balances on the ACTIVE chain (Arc Mainnet → Mainnet RPC,
-    // Arc Testnet → Testnet RPC). Never a fixed Testnet provider.
+    // Arc Testnet → Testnet RPC). Fail-closed — never a Testnet fallback on Mainnet.
     const activeChain = getActiveChain();
-    const prov = getCachedProvider((activeChain && activeChain.rpc) || 'https://arc-testnet.drpc.org');
+    if (!activeChain || !activeChain.rpc) return;
+    const prov = getCachedProvider(activeChain.rpc);
     const tIn  = TOKEN_LIST[SWP.tokenInIdx];
     const tOut = TOKEN_LIST[SWP.tokenOutIdx];
 
