@@ -6238,7 +6238,6 @@ select.cinput option { background: #161a24; color: #dde2f0; }
       <div class="nav-item" id="nav-aiwallet" onclick="showPage('aiwallet')" title="AI Smart Wallet"><i class="ti ti-wallet"></i>AI Smart Wallet<span class="nav-new">New</span></div>
       <div class="nav-group" style="margin-top:4px">Protocol</div>
       <div class="nav-item" id="nav-treasury" onclick="showPage('treasury')" title="Treasury Vault"><i class="ti ti-vault"></i>Treasury<span class="nav-kit" style="background:rgba(79,142,247,.12);color:#7b9ef7;border:1px solid rgba(79,142,247,.25)">Vault</span></div>
-      <div class="nav-item" id="nav-xcdashboard" onclick="showPage('xcdashboard')" title="CrossChain" style="padding-left:28px;font-size:10px"><i class="ti ti-topology-star-3"></i>CrossChain</div>
       <div class="nav-group" style="margin-top:4px">Manage</div>
       <div class="nav-item" id="nav-recipients" onclick="showPage('recipients')" title="Recipients"><i class="ti ti-users"></i>Recipients</div>
       <div class="nav-item" id="nav-templates" onclick="showPage('templates')" title="Templates"><i class="ti ti-template"></i>Templates</div>
@@ -6805,7 +6804,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
         <div class="page-icon" style="background:rgba(45,212,191,.1);color:var(--teal)"><i class="ti ti-topology-star-3"></i></div>
         <div>
           <div class="page-title">Bridge Tokens</div>
-          <div class="page-sub">Cross-chain bridge · CCTP v2 · Arc Testnet</div>
+          <div class="page-sub" id="bridge-page-sub">Cross-chain bridge · CCTP v2 + LI.FI</div>
         </div>
         <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
           <div class="kit-badge" style="background:rgba(45,212,191,.1);border-color:rgba(45,212,191,.25);color:var(--teal)"><i class="ti ti-apps" style="font-size:9px"></i>App Kit SDK</div>
@@ -6841,7 +6840,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
             <div class="chain-row">
               <div class="chain-sel" onclick="cycleToChain()" id="to-chain-sel">
                 <div class="chain-dot" id="to-chain-dot" style="background:#ff0202"></div>
-                <span id="to-chain-name">Arc Testnet</span>
+                <span id="to-chain-name">Arc</span>
                 <i class="ti ti-chevron-down" style="font-size:10px;color:var(--muted2)"></i>
               </div>
               <div style="flex:1;padding-left:10px">
@@ -12801,7 +12800,9 @@ const CHAIN_REGISTRY = {
 
 // ── Derived helpers ───────────────────────────────────────────
 // EVM chains as ordered array (for Bridge/XC selectors — explicit order,
-// NOT Object.values() which reorders numeric keys in ascending order)
+// NOT Object.values() which reorders numeric keys in ascending order).
+// Testnets keep their historical indices 0–5 (Bridge/CCTP/Cross-Chain/Schedule
+// depend on them); Mainnet networks are APPENDED (6–9) to avoid regressions.
 const CHAINS = [
   CHAIN_REGISTRY[5042002],   // 0: Arc Testnet
   CHAIN_REGISTRY[11155111],  // 1: Ethereum Sepolia
@@ -12809,6 +12810,10 @@ const CHAINS = [
   CHAIN_REGISTRY[421614],    // 3: Arbitrum Sepolia
   CHAIN_REGISTRY[11155420],  // 4: Optimism Sepolia
   CHAIN_REGISTRY[80002],     // 5: Polygon Amoy
+  CHAIN_REGISTRY[5042],      // 6: Arc Mainnet
+  CHAIN_REGISTRY[1],         // 7: Ethereum
+  CHAIN_REGISTRY[8453],      // 8: Base
+  CHAIN_REGISTRY[42161],     // 9: Arbitrum
 ].filter(Boolean);
 // All chains including Solana
 const ALL_CHAINS = [...CHAINS, CHAIN_REGISTRY.solana_devnet];
@@ -15046,7 +15051,7 @@ const BridgeEngine = {
 };
 
 let swapTokenInIdx  = 0, swapTokenOutIdx = 1;
-let bridgeFromIdx   = 1, bridgeToIdx     = 0;  // Sepolia → Arc
+let bridgeFromIdx   = 1, bridgeToIdx     = 0;  // testnet default (Sepolia → Arc Testnet); re-inited by initBridgeChains()
 
 // ── Utilities ──────────────────────────────────────────────
 const toUsdc   = n  => BigInt(Math.round((parseFloat(n)||0)*1e6));
@@ -15456,9 +15461,7 @@ function showPage(id) {
       setTimeout(() => { if (typeof vaultRefreshUI === 'function') vaultRefreshUI(); }, 50);
     }
     if (id === 'reports') { renderReports(); }
-    if (id === 'xcdashboard') {
-      setTimeout(function(){ if(typeof xdOnShow === 'function') xdOnShow(); }, 100);
-    }
+    if (id === 'xcdashboard') { showPage('send'); return; }
     if (id === 'recipients') { renderContacts(); updateSelectedCount(); }
     if (id === 'batch') { setTimeout(() => { renderTable(); updateBottomBar(); }, 50); }
     if (id === 'bridge') { setTimeout(() => { refreshBridgeBalances(); }, 50); }
@@ -23016,6 +23019,17 @@ function stStopAutoRefresh() {
 //  Real SDK: npm install @circle-fin/app-kit @circle-fin/adapter-viem-v2
 //  Docs: https://docs.arc.network/app-kit/quickstarts/bridge-tokens-across-blockchains
 // ══════════════════════════════════════════════════════════
+// Initialize Bridge direction from the active Arc network (production → Mainnet).
+function initBridgeChains(){
+  if (arcTargetChainId() === ARC_MAINNET_ID) {
+    bridgeFromIdx = 7; // Ethereum
+    bridgeToIdx   = 6; // Arc Mainnet
+  } else {
+    bridgeFromIdx = 1; // Ethereum Sepolia
+    bridgeToIdx   = 0; // Arc Testnet
+  }
+  applyBridgeChains(); updateBridgeEst();
+}
 function cycleFromChain(){
   bridgeFromIdx=(bridgeFromIdx+1)%CHAINS.length;
   if(bridgeFromIdx===bridgeToIdx)bridgeFromIdx=(bridgeFromIdx+1)%CHAINS.length;
@@ -23040,7 +23054,7 @@ function applyBridgeChains(){
 }
 function updateBridgeEst(){
   const amt=parseFloat(document.getElementById('bridge-amount').value)||0;
-  const toIsArc = CHAINS[bridgeToIdx]?.id === 'Arc_Testnet';
+  const toIsArc = ['Arc_Testnet', 'Arc_Mainnet'].includes(CHAINS[bridgeToIdx]?.id);
   const useTurbo = selectedBridgeMode === 'turbo';
   const protocolEl = document.getElementById('bridge-protocol');
   if (protocolEl) protocolEl.textContent = 'CCTP v2';
@@ -23691,6 +23705,7 @@ document.addEventListener('DOMContentLoaded',()=>{
   const savedPage = _routeFromPath || (localStorage.getItem('elligente_current_page')) || 'send';
   showPage(savedPage);
   updateSwapRate();
+  initBridgeChains();
   updateBridgeEst();
   initChainList();
   // Enhance ONLY the 5 selects used by Schedule + Settings pages to use body-portal custom dropdowns.
@@ -35066,7 +35081,15 @@ try {
 // ARC → External chains = Standard Bridge (real CCTP)
 // Manual mode selection overrides auto-routing.
 function executeBridgeOrTurbo() {
-  const toChain = CHAINS[bridgeToIdx];
+  const fromChain = CHAINS[bridgeFromIdx];
+  const toChain   = CHAINS[bridgeToIdx];
+
+  // LI.FI routing for Mainnet cross-chain (Arc Mainnet ↔ Ethereum/Base/Arbitrum).
+  // CCTP native remains the fallback for Testnet and explicit 'cctp' mode.
+  const useLifi = selectedBridgeMode !== 'cctp' && selectedBridgeMode !== 'turbo'
+    && ((fromChain && fromChain.testnet === false) || (toChain && toChain.testnet === false));
+  if (useLifi) { executeBridgeViaLiFi(); return; }
+
   if (selectedBridgeMode === 'cctp') {
     executeBridge();
   } else if (selectedBridgeMode === 'turbo') {
@@ -35077,6 +35100,89 @@ function executeBridgeOrTurbo() {
     executeBridge();
   }
 }
+
+// ── Bridge via LI.FI (Arc Mainnet ↔ mainnet destinations) ──────────────
+// LI.FI calldata is UNTRUSTED external data: validateRoute() must pass first.
+async function executeBridgeViaLiFi() {
+  if (!walletAddress) { toast('Connect wallet first', 'error'); return; }
+  if (typeof LiFiAdapter === 'undefined' || typeof LiFiAdapter.getQuote !== 'function') { toast('LI.FI routing unavailable', 'error'); return; }
+  const amt = parseFloat(document.getElementById('bridge-amount')?.value) || 0;
+  if (amt <= 0) { toast('Enter an amount to bridge', 'error'); return; }
+
+  const fromChain = CHAINS[bridgeFromIdx];
+  const toChain   = CHAINS[bridgeToIdx];
+  if (!fromChain || !toChain || fromChain.chainId === toChain.chainId) { toast('Cannot bridge to the same network', 'error'); return; }
+
+  const srcToken = getTokenAddressForChain(fromChain.chainId, 'USDC');
+  const dstToken = getTokenAddressForChain(toChain.chainId, 'USDC');
+  if (!srcToken || !dstToken) { toast('USDC not available on this route', 'error'); return; }
+  const amountInRaw = toUsdc(amt);
+
+  const btn = document.getElementById('bridge-btn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader spin"></i> Routing via LI.FI...'; }
+
+  // 1. Obtain + validate route
+  let quote;
+  try {
+    quote = await LiFiAdapter.getQuote({
+      tokenIn: 'USDC', tokenOut: 'USDC', amountInRaw,
+      slippageBps: 50,
+      fromChainId: fromChain.chainId, toChainId: toChain.chainId,
+      fromAddress: walletAddress, toAddress: walletAddress,
+    });
+  } catch (e) { quote = { ok: false, error: (e && e.message) || String(e) }; }
+
+  if (!quote || quote.ok !== true) {
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-topology-star-3"></i>Bridge USDC'; }
+    toast('LI.FI route unavailable: ' + ((quote && quote.error) || 'NO_ROUTE'), 'error');
+    return;
+  }
+
+  const vres = LiFiAdapter.validateRoute(quote.route, {
+    fromChainId: fromChain.chainId, toChainId: toChain.chainId,
+    fromToken: srcToken, toToken: dstToken,
+    amountRaw: amountInRaw.toString(), recipient: walletAddress,
+  });
+  if (!vres.ok) {
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-topology-star-3"></i>Bridge USDC'; }
+    toast('LI.FI route rejected: ' + vres.reason, 'error');
+    return;
+  }
+
+  try {
+    // 2. ERC-20 approval on the LI.FI spender (approvalAddress / LiFiDiamond)
+    const spender = quote.spender;
+    if (spender && /^0x[0-9a-fA-F]{40}$/.test(spender)) {
+      const tc = new ethers.Contract(srcToken, USDC_ABI, signer);
+      const allowance = await tc.allowance(walletAddress, spender);
+      if (allowance < amountInRaw) {
+        if (btn) btn.innerHTML = '<i class="ti ti-loader spin"></i> Approving...';
+        const appTx = await tc.approve(spender, amountInRaw);
+        await appTx.wait();
+      }
+    }
+
+    // 3. Sign + broadcast the LI.FI transactionRequest (validated calldata)
+    if (btn) btn.innerHTML = '<i class="ti ti-loader spin"></i> Bridging...';
+    const tr = quote.route.transactionRequest;
+    const tx = await signer.sendTransaction({
+      from: tr.from || walletAddress, to: tr.to, data: tr.data,
+      value: tr.value != null ? BigInt(tr.value) : 0n, chainId: Number(tr.chainId),
+    });
+    const receipt = await tx.wait(1, 25000);
+    if (!receipt || receipt.status !== 1) throw new Error('Transaction not confirmed');
+
+    toast(amt + ' USDC bridged via LI.FI (' + fromChain.name + ' → ' + toChain.name + ') | Tx: ' + shortAddr(tx.hash), 'success');
+    if (typeof logToReports === 'function') logToReports('Bridge', amt, 1, tx.hash, { provider: 'lifi', from: fromChain.name, to: toChain.name, fee: 0 });
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-topology-star-3"></i>Bridge USDC'; }
+    refreshBridgeBalances(); refreshBalance().catch(() => {});
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-topology-star-3"></i>Bridge USDC'; }
+    if (e.code === 4001 || (e.message || '').includes('rejected')) toast('Transaction rejected by user', 'error');
+    else toast('Bridge failed: ' + (e.shortMessage || e.message || 'unknown error'), 'error');
+  }
+}
+
 
 // ── turboBridgeFromCard ─ called from Fast Bridge route cards ────────────
 // Navigates to Bridge page, pre-selects the source chain + ARC destination

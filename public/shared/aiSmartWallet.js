@@ -109,6 +109,10 @@
   const chatLog = [];                          // assistant conversation (session only)
 
   const NETWORKS = {
+    Arc_Mainnet: { chainId: 5042, label: 'Arc Mainnet' },
+    Ethereum: { chainId: 1, label: 'Ethereum' },
+    Base: { chainId: 8453, label: 'Base' },
+    Arbitrum: { chainId: 42161, label: 'Arbitrum' },
     Arc_Testnet: { chainId: 5042002, label: 'Arc Testnet' },
     Ethereum_Sepolia: { chainId: 11155111, label: 'Ethereum Sepolia' },
     Base_Sepolia: { chainId: 84532, label: 'Base Sepolia' },
@@ -133,8 +137,10 @@
   };
   function arcTokens() {
     try {
-      if (typeof CHAIN_REGISTRY !== 'undefined' && CHAIN_REGISTRY[5042002] && CHAIN_REGISTRY[5042002].tokens) {
-        return CHAIN_REGISTRY[5042002].tokens;
+      if (typeof CHAIN_REGISTRY !== 'undefined') {
+        var cid = (typeof getActiveChain === 'function' && getActiveChain() && getActiveChain().chainId) || 5042002;
+        var c = CHAIN_REGISTRY[cid];
+        if (c && c.tokens) return c.tokens;
       }
     } catch (_e) { /* ignore */ }
     return FALLBACK_TOKENS;
@@ -206,9 +212,12 @@
   }
   function arcRpc() {
     try {
+      if (typeof getActiveChain === 'function' && getActiveChain() && getActiveChain().rpc) return getActiveChain().rpc;
+    } catch (_e) { /* ignore */ }
+    try {
       if (typeof AgentWalletManager !== 'undefined' && AgentWalletManager.ARC_RPC) return AgentWalletManager.ARC_RPC;
     } catch (_e) { /* ignore */ }
-    return 'https://rpc.testnet.arc.network';
+    return 'https://rpc.testnet.arc.io';
   }
   function getProvider() {
     if (typeof ethers === 'undefined') return null;
@@ -898,6 +907,11 @@
   }
 
   function explorerTx(hash) {
+    try {
+      if (typeof getActiveChain === 'function' && getActiveChain() && getActiveChain().explorer) {
+        return getActiveChain().explorer.replace(/\/$/, '') + '/tx/' + hash;
+      }
+    } catch (_e) { /* ignore */ }
     return 'https://testnet.arcscan.app/tx/' + hash;
   }
 
@@ -958,8 +972,8 @@
     const meta = arcTokens()[token];
     if (!meta) { notify('Token not supported on Arc', 'error'); return false; }
     try {
-      try { if (typeof ensureNetwork === 'function') await ensureNetwork(5042002); } catch (_e) { /* wallet may reject */ }
-      try { if (typeof activeChainId !== 'undefined' && Number(activeChainId) !== 5042002) { notify('Switch your wallet to Arc Testnet first', 'error'); return false; } } catch (_e) { /* ignore */ }
+      try { if (typeof ensureNetwork === 'function') { var _arcTarget = (typeof arcTargetChainId === 'function') ? arcTargetChainId() : 5042002; await ensureNetwork(_arcTarget); } } catch (_e) { /* wallet may reject */ }
+      try { if (typeof activeChainId !== 'undefined' && !(Number(activeChainId) === 5042002 || Number(activeChainId) === 5042)) { notify('Switch your wallet to Arc first', 'error'); return false; } } catch (_e) { /* ignore */ }
       const c = new ethers.Contract(meta.address, ERC20_ABI, userSigner);
       // [A6 FIX] Gas limit enforcement
       var gasCheck = await _estimateGasSafe(c, 'transfer', [agent, ethers.parseUnits(String(amount), meta.decimals || 6)]);
