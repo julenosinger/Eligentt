@@ -60,17 +60,29 @@ describe('CCTP config — official Mainnet contracts + Iris production', () => {
   });
 });
 
-describe('Bridge — Mainnet root fix', () => {
-  it('bridge subtitle is CCTP v2 Arc Mainnet', () => {
-    expect(html).toContain('Cross-chain bridge · CCTP v2 · Arc Mainnet');
+describe('Bridge — LI.FI only (CCTP removed from active path)', () => {
+  it('bridge subtitle is LI.FI Arc Mainnet', () => {
+    expect(html).toContain('Cross-chain bridge · LI.FI · Arc Mainnet');
   });
 
-  it('Turbo Bridge is disabled in the executor (CCTP v2 only)', () => {
+  it('executor routes exclusively through LI.FI (no CCTP/Turbo in active path)', () => {
     const fn = between('function executeBridgeOrTurbo', '// ── Bridge via LI.FI');
-    expect(fn).toContain("selectedBridgeMode === 'turbo'");
-    expect(fn).toContain('Turbo Bridge is disabled');
-    expect(fn).toContain('executeBridge()');
-    expect(fn).not.toContain('executeBridgeViaLiFi()');
+    expect(fn).toContain('executeBridgeViaLiFi()');
+    expect(fn).not.toContain('executeBridge()');
+    expect(fn).not.toContain('Turbo Bridge is disabled');
+  });
+
+  it('LI.FI bridge validates the untrusted route before signing', () => {
+    const fn = between('async function executeBridgeViaLiFi', '// ── LI.FI cross-chain status polling');
+    expect(fn).toContain('LiFiAdapter.getQuote');
+    expect(fn).toContain('LiFiAdapter.validateRoute');
+    expect(fn).toContain('sendTransaction');
+  });
+
+  it('LI.FI bridge tracks cross-chain status (never source-confirmed == completed)', () => {
+    const fn = between('async function _lifiPollBridgeStatus', '// ── Pending bridge recovery');
+    expect(fn).toContain('LiFiAdapter.getStatus');
+    expect(fn).toContain("status === 'DONE'");
   });
 
   it('Treasury nav item is hidden', () => {
