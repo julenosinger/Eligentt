@@ -99,7 +99,7 @@
       var type = String(op.type || op.source || 'op').toUpperCase();
       var dest = op.destination ? ' → ' + _short(op.destination) : '';
       var hash = op.txHash
-        ? '<a href="https://testnet.arcscan.app/tx/' + op.txHash + '" target="_blank" style="color:var(--blue);font-size:7px;text-decoration:none" title="' + op.txHash + '">' + _short(op.txHash) + '</a>'
+        ? '<a href="https://explorer.arc.io/tx/' + op.txHash + '" target="_blank" style="color:var(--blue);font-size:7px;text-decoration:none" title="' + op.txHash + '">' + _short(op.txHash) + '</a>'
         : '';
       var prog = (op.progress != null)
         ? '<span style="display:inline-block;width:34px;height:3px;background:rgba(255,255,255,.08);border-radius:2px;overflow:hidden;vertical-align:middle"><span style="display:block;width:' + Math.max(0, Math.min(100, Number(op.progress))) + '%;height:100%;background:var(--teal)"></span></span>'

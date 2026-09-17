@@ -33,7 +33,7 @@ function assemble(timeoutMs) {
   const engineFetch = slice('function _ubProvider', 'function ubRenderAll');
   const render = slice('function ubRenderAll()', 'window.ubInit = ubInit;');
   if (timeoutMs != null) constants = constants.replace('const UB_RPC_TIMEOUT_MS = 8000', 'const UB_RPC_TIMEOUT_MS = ' + timeoutMs);
-  return 'let walletAddress = "";\nlet activeChainId = 5042002;\n' +
+  return 'let walletAddress = "";\nlet activeChainId = 5042;\n' +
     engineObj + '\n' + ubState + '\n' + constants + '\n' + analyze + '\n' + finMem + '\n' + refresh + '\n' + engineFetch + '\n' + render;
 }
 

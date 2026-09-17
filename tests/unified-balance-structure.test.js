@@ -17,20 +17,27 @@ const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const hub = fs.readFileSync(path.join(root, 'shared', 'ubMerchantHub.js'), 'utf8');
 
 describe('Unified Balance — reorganized page composition', () => {
-  it('financial telemetry is a collapsible card OUTSIDE the Screen Live', () => {
-    expect(html).toContain('id="ub-financial-center"');
-    expect(html).toContain('id="ub-fin-card"');
-    expect(html).toContain('id="ub-fin-body"');
-    expect(html).toContain('function ubToggleFinancial');
-    // financial-center is nested inside the collapsible fin-card, not the live screen
-    const finCard = html.indexOf('id="ub-fin-card"');
-    const finCenter = html.indexOf('id="ub-financial-center"');
-    expect(finCenter).toBeGreaterThan(finCard);
-    // fin-card sits after the Screen Live and before Quick Actions
-    const screenIdx = html.indexOf('id="ub-live-screen"');
-    const qaIdx = html.indexOf('id="ub-quick-actions"');
-    expect(screenIdx).toBeLessThan(finCard);
-    expect(finCard).toBeLessThan(qaIdx);
+  it('removed sections are gone from the Unified Balance UI (FASE 3)', () => {
+    // Financial Telemetry / AI Intelligence / Agent Economy / AI Command Center /
+    // Automation Rules / System Center must no longer appear in the UB page.
+    expect(html).not.toContain('id="ub-financial-center"');
+    expect(html).not.toContain('id="ub-fin-card"');
+    expect(html).not.toContain('id="ub-fin-body"');
+    expect(html).not.toContain('id="ub-intelligence"');
+    expect(html).not.toContain('id="ub-agents-card"');
+    expect(html).not.toContain('id="ub-aos-card"');
+    expect(html).not.toContain('id="ub-automation-card"');
+    expect(html).not.toContain('id="ub-system-card"');
+    // Unified Activity + Assets remain.
+    expect(html).toContain('id="ub-activity"');
+    expect(html).toContain('id="ub-asset-tbody"');
+  });
+
+  it('Unified Balance has an Arc Mainnet network guard (FASE 3)', () => {
+    expect(html).toContain('function ubIsMainnet');
+    expect(html).toContain('Arc Mainnet Required');
+    expect(html).toContain('id="ub-guard"');
+    expect(html).toContain("Number(activeChainId) === 5042");
   });
 
   it('order: Quick Actions after Screen Live, then Assets, then extended merchant hub', () => {

@@ -100,7 +100,7 @@
   function collectAgentBalance() {
     try {
       if (UB && UB.state && UB.state.assets) {
-        var agent = UB.state.assets.filter(function(a){ return a.chainId === 'Arc Testnet' || a.chainName === 'Arc Testnet'; });
+        var agent = UB.state.assets.filter(function(a){ return a.chainId === 'Arc_Mainnet' || a.chainName === 'Arc'; });
         return agent.reduce(function(s,a){ return s + a.usd; }, 0);
       }
     } catch(e) {}

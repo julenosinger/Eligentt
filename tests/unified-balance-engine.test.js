@@ -30,7 +30,7 @@ function assemble(timeoutMs, retries) {
   const engine = slice('function _ubProvider', 'function ubRenderAll');
   if (timeoutMs != null) constants = constants.replace('const UB_RPC_TIMEOUT_MS = 8000', 'const UB_RPC_TIMEOUT_MS = ' + timeoutMs);
   if (retries != null) constants = constants.replace('const UB_RPC_MAX_RETRIES = 1', 'const UB_RPC_MAX_RETRIES = ' + retries);
-  return 'let walletAddress = "";\n' + ubState + '\n' + constants + '\n' + refresh + '\n' + engine;
+  return 'let walletAddress = "";\nlet activeChainId = 5042;\n' + ubState + '\n' + constants + '\n' + refresh + '\n' + engine;
 }
 
 function makeEthers(balanceOf, getBalance) {
