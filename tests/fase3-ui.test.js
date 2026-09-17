@@ -130,11 +130,8 @@ describe('Swap — Base network + LI.FI tokens (FASE 4)', () => {
     expect(html).toContain("t.sym === 'ETH'");
   });
 
-  it('asset market panel exists with real-data-only tabs', () => {
-    expect(html).toContain('id="swap-assets-panel"');
-    expect(html).toContain('id="swap-assets-list"');
-    expect(html).toContain('function renderAssetMarket');
-    expect(html).toContain('function selectSwapAsset');
-    expect(html).toContain("_assetTab !== 'watchlist'");
+  it('no left asset-market column (reverted — production keeps prior layout)', () => {
+    expect(html).not.toContain('id="swap-assets-panel"');
+    expect(html).not.toContain('function renderAssetMarket');
   });
 });

@@ -1106,25 +1106,6 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
 .st-market-stat-val.green{color:var(--green)}.st-market-stat-val.red{color:var(--red)}.st-market-stat-val.muted{color:var(--muted2)}
 .st-market-spacer{flex:1}
 .st-main-area{flex:1;display:flex;min-height:480px;overflow:hidden}
-/* ── Swap 3-column terminal: left asset market panel ── */
-.swap-assets-panel{width:320px;flex-shrink:0;display:flex;flex-direction:column;background:#0b0d13;border-right:1px solid #1a1f2e;overflow:hidden}
-.swap-assets-search{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid #141a26;flex-shrink:0}
-.swap-assets-search i{font-size:13px;color:var(--muted2);flex-shrink:0}
-.swap-assets-search input{flex:1;background:transparent;border:none;outline:none;color:var(--text);font-size:11px;font-family:inherit}
-.swap-assets-tabs{display:flex;border-bottom:1px solid #141a26;flex-shrink:0;overflow-x:auto}
-.swap-assets-tab{flex:1;padding:8px 6px;font-size:8.5px;font-weight:600;color:var(--muted2);background:transparent;border:none;border-bottom:2px solid transparent;cursor:pointer;white-space:nowrap;text-transform:uppercase;letter-spacing:.3px;font-family:inherit}
-.swap-assets-tab.active{color:var(--teal);border-bottom-color:var(--teal)}
-.swap-assets-list{flex:1;overflow-y:auto}
-.asset-item{display:flex;align-items:center;gap:10px;padding:10px 12px;cursor:pointer;border-bottom:1px solid rgba(255,255,255,.03)}
-.asset-item:hover{background:rgba(255,255,255,.03)}
-.asset-icon{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;color:#fff;flex-shrink:0}
-.asset-info{flex:1;min-width:0}
-.asset-sym{font-size:11px;font-weight:700;color:var(--text)}
-.asset-name{font-size:8.5px;color:var(--muted2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.asset-price{font-size:11px;font-weight:600;color:var(--text);font-family:'JetBrains Mono',monospace}
-.asset-empty{padding:20px;text-align:center;font-size:9px;color:var(--muted2)}
-@media (max-width:1200px){.swap-assets-panel{width:260px}}
-@media (max-width:1024px){.swap-assets-panel{display:none}}
 .st-chart-section{flex:1;display:flex;flex-direction:column;min-width:0;background:#060a10;border-right:1px solid #141a26}
 .st-chart-toolbar{display:flex;align-items:center;gap:2px;padding:3px 8px;height:32px;background:#0a0d14;border-bottom:1px solid #141a26;flex-shrink:0;overflow-x:auto}
 .st-tf-btn{padding:2px 8px;border-radius:3px;font-size:9px;font-weight:600;cursor:pointer;border:1px solid transparent;background:transparent;color:var(--muted2);font-family:'JetBrains Mono',monospace;transition:all .12s;flex-shrink:0}
@@ -6553,20 +6534,6 @@ select.cinput option { background: #161a24; color: #dde2f0; }
 
       <!-- Main Trading Area -->
       <div class="st-main-area">
-        <!-- Asset Market Panel (left column) -->
-        <div class="swap-assets-panel" id="swap-assets-panel">
-          <div class="swap-assets-search">
-            <i class="ti ti-search"></i>
-            <input id="asset-search" type="text" placeholder="Search for asset..." oninput="renderAssetMarket()" autocomplete="off"/>
-          </div>
-          <div class="swap-assets-tabs">
-            <button class="swap-assets-tab active" data-tab="watchlist" onclick="setAssetTab('watchlist',this)">Watchlist</button>
-            <button class="swap-assets-tab" data-tab="trending" onclick="setAssetTab('trending',this)">Trending</button>
-            <button class="swap-assets-tab" data-tab="gainers" onclick="setAssetTab('gainers',this)">Top Gainers</button>
-            <button class="swap-assets-tab" data-tab="losers" onclick="setAssetTab('losers',this)">Top Losers</button>
-          </div>
-          <div class="swap-assets-list" id="swap-assets-list"></div>
-        </div>
         <!-- Chart Section -->
         <div class="st-chart-section">
           <div class="st-chart-toolbar">
@@ -14023,7 +13990,6 @@ function showPage(id) {
         if (id === 'pool') { renderPoolList(); updatePoolStats(); }
         if (id === 'swap') {
           updateSwapRate();
-          try { if (typeof renderAssetMarket === 'function') renderAssetMarket(); } catch(_) {}
           setTimeout(function() {
             stInitTerminal();
             stStartAutoRefresh();
@@ -14497,8 +14463,6 @@ function setupProviderEvents(raw) {
       _log('[chainChanged] new chainId:', newChainId);
       await refreshProviderState();
       updateNetworkBadge();
-      // Re-render the swap asset market for the new chain (chain-aware token list).
-      try { if (typeof renderAssetMarket === 'function') renderAssetMarket(); } catch(_) {}
       // Re-evaluate Unified Balance network guard (Arc Mainnet only).
       try {
         var _ubPage = document.getElementById('page-unified-balance');
@@ -19339,65 +19303,6 @@ function cycleTokenOut(){
   SWP.tokenOutIdx = _swapNextTokenIdx(SWP.tokenOutIdx, SWP.tokenInIdx);
   applySwapTokens();
   updateSwapRate();
-}
-
-// ── Asset Market Panel (left column) ───────────────────────
-// Real tokens + real prices only. No fabricated trending/gainer data.
-var _assetTab = 'watchlist';
-function setAssetTab(tab, btn) {
-  _assetTab = tab;
-  document.querySelectorAll('.swap-assets-tab').forEach(function(b){ b.classList.toggle('active', b.dataset.tab === tab); });
-  renderAssetMarket();
-}
-function _assetPrice(sym) {
-  try {
-    if (typeof getTokenUSDRate === 'function') {
-      var r = getTokenUSDRate(sym);
-      if (r != null && r > 0) return r;
-    }
-  } catch(_) {}
-  return null;
-}
-function selectSwapAsset(sym) {
-  var idx = TOKEN_LIST.findIndex(function(t){ return t.sym === sym; });
-  if (idx < 0) return;
-  SWP.tokenInIdx = idx;
-  if (SWP.tokenInIdx === SWP.tokenOutIdx) {
-    var alt = swapAvailableTokens(activeChainId).filter(function(t){ return t.sym !== sym; });
-    if (alt.length) SWP.tokenOutIdx = TOKEN_LIST.findIndex(function(t){ return t.sym === alt[0].sym; });
-  }
-  applySwapTokens();
-  updateSwapRate();
-}
-function renderAssetMarket() {
-  var list = document.getElementById('swap-assets-list');
-  if (!list) return;
-  var q = (document.getElementById('asset-search')?.value || '').toLowerCase();
-
-  // Only Watchlist has real data (the app's real tokens). Trending/Gainers/Losers
-  // have no real market source → empty state (never fabricated numbers).
-  if (_assetTab !== 'watchlist') {
-    list.innerHTML = '<div class="asset-empty">No data</div>';
-    return;
-  }
-
-  var tokens = swapAvailableTokens(activeChainId);
-  if (q) tokens = tokens.filter(function(t){ return t.sym.toLowerCase().includes(q) || t.name.toLowerCase().includes(q); });
-
-  if (!tokens.length) {
-    list.innerHTML = '<div class="asset-empty">No tokens found</div>';
-    return;
-  }
-
-  list.innerHTML = tokens.map(function(t){
-    var price = _assetPrice(t.sym);
-    var priceTxt = (price != null) ? (t.sym === 'EURC' ? '€' : '$') + price.toFixed(price >= 1000 ? 0 : price >= 1 ? 2 : 4) : '--';
-    return '<div class="asset-item" onclick="selectSwapAsset(\'' + t.sym + '\')" role="button" tabindex="0" aria-label="Select ' + t.sym + '">' +
-      '<div class="asset-icon" style="background:' + t.color + '">' + t.icon + '</div>' +
-      '<div class="asset-info"><div class="asset-sym">' + t.sym + '</div><div class="asset-name">' + t.name + '</div></div>' +
-      '<div class="asset-price">' + priceTxt + '</div>' +
-      '</div>';
-  }).join('');
 }
 
 // ── Swap button state machine ─────────────────────────────
