@@ -135,6 +135,24 @@ describe('LiFiAdapter — route validation (untrusted calldata)', () => {
     step.transactionRequest.data = '';
     expect(LiFiAdapter.validateRoute(step, CTX)).toMatchObject({ ok: false, reason: 'invalid_calldata' });
   });
+
+  it('rejects a transactionRequest chain mismatch', () => {
+    const step = makeStep();
+    step.transactionRequest.chainId = 8453; // not the requested source chain
+    expect(LiFiAdapter.validateRoute(step, CTX)).toMatchObject({ ok: false, reason: 'transaction_chain_mismatch' });
+  });
+
+  it('rejects a sender mismatch', () => {
+    const step = makeStep();
+    step.transactionRequest.from = '0x0000000000000000000000000000000000000001';
+    expect(LiFiAdapter.validateRoute(step, { ...CTX, sender: RECIPIENT })).toMatchObject({ ok: false, reason: 'sender_mismatch' });
+  });
+
+  it('rejects an invalid transaction value', () => {
+    const step = makeStep();
+    step.transactionRequest.value = 'not-a-number';
+    expect(LiFiAdapter.validateRoute(step, CTX)).toMatchObject({ ok: false, reason: 'invalid_value' });
+  });
 });
 
 describe('SwapAggregator — three providers (Local / Tower / LiFi)', () => {

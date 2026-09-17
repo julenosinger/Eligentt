@@ -216,6 +216,22 @@
     if (!tr.data || !/^0x[0-9a-fA-F]+$/.test(tr.data)) {
       return { ok: false, reason: 'invalid_calldata' };
     }
+    // transactionRequest.chainId must match the requested SOURCE chain (fail closed).
+    if (ctx.fromChainId != null && tr.chainId != null && Number(tr.chainId) !== Number(ctx.fromChainId)) {
+      return { ok: false, reason: 'transaction_chain_mismatch' };
+    }
+    // If LI.FI returns a `from`, it must be the connected wallet (never a third party).
+    if (ctx.sender && tr.from && String(tr.from).toLowerCase() !== String(ctx.sender).toLowerCase()) {
+      return { ok: false, reason: 'sender_mismatch' };
+    }
+    // Native value must be a valid non-negative integer; for ERC-20 bridges it must
+    // match the expected value (0 unless the route explicitly requires otherwise).
+    if (tr.value != null && String(tr.value) !== '') {
+      var v = String(tr.value);
+      if (!/^[0-9]+$/.test(v) && !/^0x[0-9a-fA-F]+$/.test(v)) return { ok: false, reason: 'invalid_value' };
+      try { if (BigInt(v) < 0n) return { ok: false, reason: 'invalid_value' }; } catch (_) { return { ok: false, reason: 'invalid_value' }; }
+      if (ctx.value != null && String(ctx.value) !== v) return { ok: false, reason: 'value_mismatch' };
+    }
     if (ctx.recipient && action.toAddress && String(action.toAddress).toLowerCase() !== String(ctx.recipient).toLowerCase()) {
       return { ok: false, reason: 'recipient_mismatch' };
     }

@@ -80,15 +80,20 @@ describe('Swap — network context follows the active chain', () => {
   });
 });
 
-describe('Swap — Local/Tower adapters are Testnet-gated (no leak on Mainnet)', () => {
+describe('Swap — Local pools Testnet-gated; Tower supports Arc Mainnet', () => {
   it('LocalAdapter refuses to quote off Arc Testnet', () => {
     expect(localSrc).toContain('_isTestnetActive');
     expect(localSrc).toContain('LOCAL_POOLS_TESTNET_ONLY');
   });
 
-  it('TowerAdapter refuses to quote off Arc Testnet', () => {
-    expect(towerSrc).toContain('_isTestnetActive');
-    expect(towerSrc).toContain('TOWER_TESTNET_ONLY');
+  it('TowerAdapter quotes on Arc Mainnet (no Testnet-only gate)', () => {
+    expect(towerSrc).toContain('_isArcActive');
+    expect(towerSrc).toContain('TOWER_CHAIN_UNSUPPORTED');
+    expect(towerSrc).not.toContain('TOWER_TESTNET_ONLY');
+  });
+
+  it('TowerAdapter does not hardcode the Arc Testnet chain id', () => {
+    expect(towerSrc).not.toContain('chainId: 5042002');
   });
 });
 

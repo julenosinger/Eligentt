@@ -35140,6 +35140,7 @@ async function executeBridgeViaLiFi() {
     fromChainId: fromChain.chainId, toChainId: toChain.chainId,
     fromToken: srcToken, toToken: dstToken,
     amountRaw: amountInRaw.toString(), recipient: walletAddress,
+    sender: walletAddress,
   });
   if (!vres.ok) {
     renderBridgeStep(0, 'error', null);
@@ -35149,6 +35150,40 @@ async function executeBridgeViaLiFi() {
     return;
   }
   renderBridgeStep(0, 'success', null);
+
+  // A4 — quote expiry: never sign a stale quote. Re-fetch + re-validate once.
+  if (quote.expiresAt && Date.now() > quote.expiresAt) {
+    let fresh;
+    try {
+      fresh = await LiFiAdapter.getQuote({
+        tokenIn: 'USDC', tokenOut: 'USDC', amountInRaw,
+        slippageBps: (typeof SlippageConfig !== 'undefined' && SlippageConfig.DEFAULT_BPS) || 100,
+        fromChainId: fromChain.chainId, toChainId: toChain.chainId,
+        fromAddress: walletAddress, toAddress: walletAddress,
+      });
+    } catch (e) { fresh = { ok: false, error: (e && e.message) || String(e) }; }
+    if (!fresh || fresh.ok !== true) {
+      renderBridgeStep(0, 'error', null);
+      if (statusEl) { statusEl.textContent = 'No route'; statusEl.style.color = 'var(--red)'; }
+      toast('No LI.FI route available for this transfer', 'error');
+      resetBtn();
+      return;
+    }
+    const vres2 = LiFiAdapter.validateRoute(fresh.route, {
+      fromChainId: fromChain.chainId, toChainId: toChain.chainId,
+      fromToken: srcToken, toToken: dstToken,
+      amountRaw: amountInRaw.toString(), recipient: walletAddress,
+      sender: walletAddress,
+    });
+    if (!vres2.ok) {
+      renderBridgeStep(0, 'error', null);
+      if (statusEl) { statusEl.textContent = 'Route rejected'; statusEl.style.color = 'var(--red)'; }
+      toast('LI.FI route rejected: ' + vres2.reason, 'error');
+      resetBtn();
+      return;
+    }
+    quote = fresh;
+  }
 
   const toolName = quote.tool || 'LI.FI';
 
@@ -35204,6 +35239,7 @@ async function executeBridgeViaLiFi() {
     });
 
     const destTxHash = pollResult && pollResult.destTxHash ? pollResult.destTxHash : null;
+    const feeMeta = { provider: 'lifi', tool: toolName, from: fromChain.name, to: toChain.name, feeBps: (quote.feeBps != null ? quote.feeBps : null) };
     if (pollResult && pollResult.completed) {
       renderBridgeStep(3, 'success', destTxHash || tx.hash);
       renderBridgeStep(4, 'success', destTxHash || tx.hash);
@@ -35216,8 +35252,21 @@ async function executeBridgeViaLiFi() {
         txHash: destTxHash || tx.hash, dotColor: '#2dd4bf', explorer: toChain.explorer,
       });
       toast(`✓ Bridged ${amt} USDC from ${fromChain.name} to ${toChain.name} via ${toolName}`, 'success');
-      if (typeof logToReports === 'function') logToReports('Bridge', amt, 1, tx.hash, { provider: 'lifi', tool: toolName, from: fromChain.name, to: toChain.name, fee: 0 });
+      if (typeof logToReports === 'function') logToReports('Bridge', amt, 1, tx.hash, feeMeta);
       if (typeof BridgeEngine !== 'undefined') BridgeEngine.notifyExecutionComplete({ txHash: tx.hash, destinationTxHash: destTxHash });
+    } else if (pollResult && pollResult.failed) {
+      // LI.FI explicitly reported FAILED/ERROR — an explicit failed state.
+      renderBridgeStep(3, 'error', tx.hash);
+      renderBridgeStep(4, 'error', null);
+      if (statusEl) { statusEl.textContent = 'Failed'; statusEl.style.color = 'var(--red)'; }
+      addToHistory('bridge-history', {
+        icon: 'ti-topology-star-3', color: 'var(--red)',
+        label: `${amt} USDC: ${fromChain.name} → ${toChain.name}`,
+        sub: `${toolName} · LI.FI status: FAILED`,
+        txHash: tx.hash, dotColor: '#ef4444', explorer: fromChain.explorer,
+      });
+      toast('Bridge failed: LI.FI status FAILED/ERROR', 'error');
+      if (typeof BridgeEngine !== 'undefined') BridgeEngine.notifyExecutionFailed(new Error('LI.FI status FAILED'));
     } else {
       // Source confirmed but cross-chain completion not yet observed.
       renderBridgeStep(3, 'success', tx.hash);
@@ -35231,7 +35280,7 @@ async function executeBridgeViaLiFi() {
         txHash: tx.hash, dotColor: '#f59e0b', explorer: fromChain.explorer,
       });
       toast('Source transaction confirmed. LI.FI is settling on the destination chain.', 'info');
-      if (typeof logToReports === 'function') logToReports('Bridge', amt, 1, tx.hash, { provider: 'lifi', tool: toolName, from: fromChain.name, to: toChain.name, fee: 0 });
+      if (typeof logToReports === 'function') logToReports('Bridge', amt, 1, tx.hash, feeMeta);
     }
 
     refreshBridgeBalances(); refreshBalance().catch(() => {});
@@ -35258,10 +35307,10 @@ async function _lifiPollBridgeStatus(txHash, opts) {
   if (typeof LiFiAdapter === 'undefined' || typeof LiFiAdapter.getStatus !== 'function') {
     return { completed: false, destTxHash: null };
   }
-  const maxPolls = 120;        // ~20 min at 10s intervals
-  const intervalMs = 10000;
+  var maxPolls = opts.maxPolls != null ? Number(opts.maxPolls) : 120;   // ~20 min at 10s
+  var intervalMs = opts.intervalMs != null ? Number(opts.intervalMs) : 10000;
   for (let i = 0; i < maxPolls; i++) {
-    await new Promise(r => setTimeout(r, intervalMs));
+    if (intervalMs > 0) await new Promise(r => setTimeout(r, intervalMs));
     let res;
     try {
       res = await LiFiAdapter.getStatus(txHash, {
@@ -35294,15 +35343,18 @@ function _savePendingBridge(rec) {
 async function recoverPendingBridges() {
   try {
     const list = JSON.parse(localStorage.getItem('elligentt_bridge_pending') || '[]');
-    if (!list || !list.length) return;
+    if (!Array.isArray(list) || !list.length) return;
+    const remaining = [];
     for (const rec of list) {
       if (!rec || !rec.sourceTxHash) continue;
+      // Bounded single-check recovery: a long-lived bridge stays pending (retained).
       const result = await _lifiPollBridgeStatus(rec.sourceTxHash, {
         bridge: rec.tool, fromChainId: rec.fromChainId, toChainId: rec.toChainId,
+        maxPolls: 1, intervalMs: 0,
       });
+      const fromChain = getChainById(rec.fromChainId);
+      const toChain = getChainById(rec.toChainId);
       if (result && result.completed) {
-        const fromChain = getChainById(rec.fromChainId);
-        const toChain = getChainById(rec.toChainId);
         if (fromChain && toChain) {
           addToHistory('bridge-history', {
             icon: 'ti-topology-star-3', color: 'var(--teal)',
@@ -35312,9 +35364,16 @@ async function recoverPendingBridges() {
           });
         }
         toast('Recovered a completed bridge', 'success');
+        // DONE → removed from pending.
+      } else if (result && result.failed) {
+        // FAILED/ERROR → terminal, removed from pending (no false success record).
+      } else {
+        // PENDING/BRIDGING → retained for a later recovery attempt.
+        remaining.push(rec);
       }
     }
-    localStorage.removeItem('elligentt_bridge_pending');
+    if (remaining.length) localStorage.setItem('elligentt_bridge_pending', JSON.stringify(remaining));
+    else localStorage.removeItem('elligentt_bridge_pending');
   } catch (e) {}
 }
 
@@ -38847,7 +38906,7 @@ const UB_RPC_MAX_RETRIES = 1;     // 1 retry after the initial attempt (conserva
 // (queried on unsupported chains = "not_supported", NOT an RPC failure).
 // Keyed by CANONICAL numeric chain ID (unambiguous, matches CHAIN_REGISTRY.chainId).
 const UB_TOKEN_DEPLOYMENT = {
-  cirBTC: { 5042002: true },   // Arc Testnet only
+  cirBTC: { 5042: true },   // Arc Mainnet only
 };
 function ubTokenDeployed(sym, chainId) {
   var d = UB_TOKEN_DEPLOYMENT[sym];
@@ -39510,7 +39569,7 @@ function ubFetchAllBalances(walletKey) {
       }
       erc20.push({ sym: sym, tokenAddr: tokenAddr, decimals: (chain.tokens[sym].decimals || 6) });
     }
-    var nativeSym = (chain.chainId !== 5042002 && chain.nativeCurrency && chain.nativeCurrency.symbol === 'ETH') ? 'ETH' : null;
+    var nativeSym = (chain.chainId !== 5042 && chain.nativeCurrency && chain.nativeCurrency.symbol === 'ETH') ? 'ETH' : null;
     if (!erc20.length && !nativeSym) return Promise.resolve();
 
     return _ubMulticallChain(chain, erc20, walletKey, nativeSym).then(function(mcResults) {
@@ -39795,7 +39854,7 @@ function ubRenderAssets() {
     if (isArcAsset) {
       actions +=
         '<button class="btn" style="padding:2px 7px;font-size:8px" onclick="UBAction.openSwap(\'' + a.token + '\',\'' + (a.token === 'USDC' ? 'EURC' : 'USDC') + '\',' + a.balance + ')" title="Swap"><i class="ti ti-arrows-exchange"></i></button>' +
-        '<button class="btn" style="padding:2px 7px;font-size:8px" onclick="UBAction.openBridge(\'Ethereum_Sepolia\',\'Arc_Testnet\',' + a.balance + ')" title="Bridge"><i class="ti ti-topology-star-3"></i></button>';
+        '<button class="btn" style="padding:2px 7px;font-size:8px" onclick="UBAction.openBridge(\'Ethereum\',\'Arc_Mainnet\',' + a.balance + ')" title="Bridge"><i class="ti ti-topology-star-3"></i></button>';
     }
     rows += '<tr>' +
       '<td><div style="display:flex;align-items:center;gap:6px"><div style="width:28px;height:28px;border-radius:50%;background:#fff;display:flex;align-items:center;justify-content:center;flex-shrink:0">' + tokenInfo.icon + '</div><div><div style="font-weight:600;font-size:10px">' + a.token + '</div><div style="font-size:8px;color:var(--muted2)">' + a.tokenName + '</div></div></div></td>' +
@@ -41753,9 +41812,64 @@ const UBAction = (function() {
     if(prefillAmt) setTimeout(function(){ _refreshSwap(); },200);
   }
 
-  function _refreshSwap(){ var ae=document.getElementById('ub-swap-amt'),qe=document.getElementById('ub-swap-q'),re=document.getElementById('ub-swap-r'),ee=document.getElementById('ub-swap-e'); if(!ae)return; var amt=parseFloat(ae.value)||0; if(amt<=0||SWP.tokenInIdx===SWP.tokenOutIdx){if(qe)qe.textContent='—';hideReview();return;} try{var ti2=TOKEN_LIST[SWP.tokenInIdx],to2=TOKEN_LIST[SWP.tokenOutIdx];var rt=typeof findBestRouteForAmount==='function'?findBestRouteForAmount(ti2.sym,to2.sym,amt):null;if(!rt){if(qe)qe.textContent='No route';hideReview();return;}var out=typeof calcRouteOutput==='function'?calcRouteOutput(amt,rt):0;if(qe)qe.textContent=out.toFixed(4)+' '+to2.sym;if(re)re.textContent='1 '+ti2.sym+' ≈ '+(out/amt).toFixed(4)+' '+to2.sym;SWP.lastRoute=rt;SWP.lastQuote={amtIn:amt,amtOut:out,tIn:ti2,tOut:to2,route:rt}; var imp=typeof calcRoutePriceImpact==='function'?calcRoutePriceImpact(amt,rt):0; var fee='~0.3%'; showReview({title:'Swap Review',icon:'arrows-exchange',iconColor:'var(--teal)',rows:[['From',amt.toFixed(4)+' '+ti2.sym],['To',out.toFixed(4)+' '+to2.sym],['Rate','1 '+ti2.sym+' ≈ '+(out/amt).toFixed(4)+' '+to2.sym],['Min Received',(out*0.995).toFixed(4)+' '+to2.sym],['Price Impact',(imp*100).toFixed(2)+'%'],['Fee',fee],['Route',(rt.pools&&rt.pools.length?rt.pools.length+' hop(s)':'Direct')]],confirmFn:'UBAction._execSwap()'}); }catch(e){if(ee){ee.style.display='';ee.textContent=e.message||'Quote failed';}} }
+  var _ubSwapSeq = 0, _ubSwapTimer = null;
+  function _refreshSwap(){
+    var ae=document.getElementById('ub-swap-amt'),qe=document.getElementById('ub-swap-q'),re=document.getElementById('ub-swap-r'),ee=document.getElementById('ub-swap-e');
+    if(!ae)return;
+    var amt=parseFloat(ae.value)||0;
+    if(amt<=0||SWP.tokenInIdx===SWP.tokenOutIdx){if(qe)qe.textContent='—';hideReview();return;}
+    var ti2=TOKEN_LIST[SWP.tokenInIdx],to2=TOKEN_LIST[SWP.tokenOutIdx];
+    if(!ti2||!to2){hideReview();return;}
+    if(_ubSwapTimer)clearTimeout(_ubSwapTimer);
+    _ubSwapTimer=setTimeout(function(){_ubFetchSwapQuote(ti2,to2,amt,qe,re,ee);},450);
+  }
+  async function _ubFetchSwapQuote(ti2,to2,amt,qe,re,ee){
+    var seq=++_ubSwapSeq;
+    var amountInRaw=(typeof SwapMath!=='undefined'&&SwapMath.parseUnits)?SwapMath.parseUnits(String(amt),ti2.decimals):null;
+    if(amountInRaw===null||amountInRaw<=0n)return;
+    var rt=typeof findBestRouteForAmount==='function'?findBestRouteForAmount(ti2.sym,to2.sym,amt):null;
+    var hasLocalPool=!!(rt&&!rt.noLiq);
+    SWP.lastRoute=rt;
+    var agg=null;
+    if(typeof SwapAggregator!=='undefined'&&typeof SwapAggregator.getBestQuote==='function'){
+      try{agg=await SwapAggregator.getBestQuote({tokenIn:ti2.sym,tokenOut:to2.sym,amountInRaw:amountInRaw,slippageBps:Math.round((SWP.slippage||0.5)*100),chainId:activeChainId,fromChainId:activeChainId,toChainId:activeChainId,hasLocalPool:hasLocalPool});}catch(e){agg=null;}
+    }
+    if(seq!==_ubSwapSeq)return;
+    var selected=agg&&agg.bestExecutable?agg.bestExecutable:null;
+    SWP.aggQuotes=agg?agg.quotes:[];SWP.aggBestExecutable=selected;SWP.selectedSource=selected?selected.source:null;
+    var out,minAmt,feePct,impact,provider;
+    if(selected&&(selected.source==='lifi'||selected.source==='tower')){
+      var outRaw=selected.expectedOutRaw;
+      out=Number((typeof SwapMath!=='undefined'&&SwapMath.formatUnits)?SwapMath.formatUnits(outRaw,to2.decimals):ethers.formatUnits(outRaw,to2.decimals));
+      minAmt=Number((typeof SwapMath!=='undefined'&&SwapMath.formatUnits)?SwapMath.formatUnits(selected.minOutRaw,to2.decimals):ethers.formatUnits(selected.minOutRaw,to2.decimals));
+      feePct=selected.feeBps!=null?(selected.feeBps/100):null;
+      impact=selected.priceImpactBps!=null?(selected.priceImpactBps/100):null;
+      provider=selected.source==='lifi'?'LI.FI':'Tower';
+      SWP._towerQuoteData=selected.calldata?selected:null;
+      SWP.lastQuote={amtIn:amt,amtOut:out,minReceived:minAmt,rate:out/amt,priceImpact:impact,feeAmt:amt*(feePct!=null?feePct/100:0),source:provider,tIn:ti2,tOut:to2,route:null,totalFee:selected.feeBps,expectedOutRaw:outRaw,amountInRaw:amountInRaw,quotedAt:Date.now(),stateUpdatedAt:null};
+    }else if(hasLocalPool&&rt){
+      out=typeof calcRouteOutput==='function'?calcRouteOutput(amt,rt):0;
+      minAmt=out*0.995;feePct=0.3;impact=typeof calcRoutePriceImpact==='function'?calcRoutePriceImpact(amt,rt):0;
+      provider='Elligentt Pool';
+      SWP._towerQuoteData=null;
+      SWP.lastQuote={amtIn:amt,amtOut:out,tIn:ti2,tOut:to2,route:rt};
+    }else{
+      if(qe)qe.textContent='No route';if(re)re.textContent='';hideReview();return;
+    }
+    if(qe)qe.textContent=out.toFixed(4)+' '+to2.sym;
+    if(re)re.textContent='1 '+ti2.sym+' ≈ '+(out/amt).toFixed(4)+' '+to2.sym+' · '+provider;
+    showReview({title:'Swap Review',icon:'arrows-exchange',iconColor:'var(--teal)',rows:[
+      ['From',amt.toFixed(4)+' '+ti2.sym],
+      ['To',out.toFixed(4)+' '+to2.sym],
+      ['Rate','1 '+ti2.sym+' ≈ '+(out/amt).toFixed(4)+' '+to2.sym],
+      ['Min Received',minAmt.toFixed(4)+' '+to2.sym],
+      ['Price Impact',impact!=null?(impact*100).toFixed(2)+'%':'—'],
+      ['Fee',feePct!=null?feePct.toFixed(3)+'%':'—'],
+      ['Route',provider]
+    ],confirmFn:'UBAction._execSwap()'});
+  }
 
-  async function _execSwap(){ if(!_ensure())return; var q=SWP.lastQuote;if(!q||!q.amtIn){toast('No quote','warning');return;} updateReviewState('executing','Executing swap...'); var ha=document.getElementById('swap-amount-in');if(!ha){ha=document.createElement('input');ha.id='swap-amount-in';ha.type='hidden';document.body.appendChild(ha);} ha.value=q.amtIn.toString(); var t0=Date.now(); try{await executeSwap(); var tx=_getTxHashFromHistory(); var dur=((Date.now()-t0)/1000).toFixed(1); _showResult({prefix:'Swap',txHash:tx,explorer:_getExplorer(),rows:[['From',q.amtIn.toFixed(4)+' '+q.tIn.sym],['To',q.amtOut.toFixed(4)+' '+q.tOut.sym],['Fee','~0.3%'],['Duration',dur+'s'],['Network',(typeof getActiveChain==='function'?getActiveChain():{}).name||'Arc Testnet'],['Tx Hash',tx?tx.slice(0,10)+'...'+tx.slice(-6):'Confirming...']]}); }catch(e){updateReviewState('error',e.shortMessage||e.message||'Swap failed');} }
+  async function _execSwap(){ if(!_ensure())return; var q=SWP.lastQuote;if(!q||!q.amtIn){toast('No quote','warning');return;} updateReviewState('executing','Executing swap...'); var ha=document.getElementById('swap-amount-in');if(!ha){ha=document.createElement('input');ha.id='swap-amount-in';ha.type='hidden';document.body.appendChild(ha);} ha.value=q.amtIn.toString(); var t0=Date.now(); try{await executeSwap(); var tx=_getTxHashFromHistory(); var dur=((Date.now()-t0)/1000).toFixed(1); _showResult({prefix:'Swap',txHash:tx,explorer:_getExplorer(),rows:[['From',q.amtIn.toFixed(4)+' '+q.tIn.sym],['To',q.amtOut.toFixed(4)+' '+q.tOut.sym],['Fee',q.totalFee!=null?(q.totalFee/100).toFixed(2)+'%':'—'],['Route',q.source||'Elligentt Pool'],['Duration',dur+'s'],['Network',(typeof getActiveChain==='function'?getActiveChain():{}).name||'Arc Mainnet'],['Tx Hash',tx?tx.slice(0,10)+'...'+tx.slice(-6):'Confirming...']]}); }catch(e){updateReviewState('error',e.shortMessage||e.message||'Swap failed');} }
 
   // ═══════════════════════ BRIDGE ═══════════════════════
   function openBridge(pfFrom,pfTo,pfAmt){
@@ -41763,25 +41877,59 @@ const UBAction = (function() {
     var cs=typeof CHAINS!=='undefined'?CHAINS:[];
     if(!cs.length){toast('No chains','error');return;}
     var fi=1,ti3=0,i;
-    for(i=0;i<cs.length;i++){if(cs[i]&&cs[i].id===(pfFrom||'Ethereum_Sepolia'))fi=i;if(cs[i]&&cs[i].id===(pfTo||'Arc_Testnet'))ti3=i;}
+    for(i=0;i<cs.length;i++){if(cs[i]&&cs[i].id===(pfFrom||'Ethereum'))fi=i;if(cs[i]&&cs[i].id===(pfTo||'Arc_Mainnet'))ti3=i;}
     if(typeof bridgeFromIdx!=='undefined')bridgeFromIdx=fi;if(typeof bridgeToIdx!=='undefined')bridgeToIdx=ti3;
     var co=cs.map(function(c,i){return'<option value="'+i+'"'+(i===fi?' selected':'')+'>'+(c?c.shortName||c.name:'?')+'</option>';}).join('');
     var co2=cs.map(function(c,i){return'<option value="'+i+'"'+(i===ti3?' selected':'')+'>'+(c?c.shortName||c.name:'?')+'</option>';}).join('');
-    var a=pfAmt?pfAmt.toFixed(2):'',fee=ti3===0?'1.00%':'0.05%';
+    var a=pfAmt?pfAmt.toFixed(2):'';
     var b='<div style="font-size:13px;font-weight:700;margin-bottom:12px">Bridge</div>'+
       '<div style="display:flex;flex-direction:column;gap:10px">'+
       '<div><div style="font-size:8px;color:var(--muted2);margin-bottom:2px">From</div><select class="cinput" style="cursor:pointer" onchange="bridgeFromIdx=parseInt(this.value);if(typeof applyBridgeChains===\'function\')applyBridgeChains();UBAction._refreshBridge();">'+co+'</select></div>'+
       '<div style="text-align:center"><i class="ti ti-arrow-down" style="color:var(--muted2);font-size:14px"></i></div>'+
       '<div><div style="font-size:8px;color:var(--muted2);margin-bottom:2px">To</div><select class="cinput" style="cursor:pointer" onchange="bridgeToIdx=parseInt(this.value);if(typeof applyBridgeChains===\'function\')applyBridgeChains();UBAction._refreshBridge();">'+co2+'</select></div>'+
       '<div><div style="font-size:8px;color:var(--muted2);margin-bottom:2px">Amount</div><input id="ub-bridge-amt" class="cinput" type="number" placeholder="0.00" value="'+a+'" oninput="UBAction._refreshBridge()" style="font-family:\'JetBrains Mono\',monospace"/></div>'+
-      '<div style="font-size:8px;color:var(--muted2)">Fee: '+fee+'</div><div id="ub-bridge-e" style="font-size:8px;color:var(--red);display:none"></div></div>';
+      '<div style="font-size:8px;color:var(--muted2)">Provider: LI.FI</div><div id="ub-bridge-e" style="font-size:8px;color:var(--red);display:none"></div></div>';
     _modalWrap('Bridge','topology-star-3','var(--purple)',b,'UBAction._hideReview();');
     if(pfAmt) setTimeout(function(){ _refreshBridge(); },200);
   }
 
-  function _refreshBridge(){ var ae=document.getElementById('ub-bridge-amt'); if(!ae)return; var a=parseFloat(ae.value)||0; if(a<=0){hideReview();return;} var cs=typeof CHAINS!=='undefined'?CHAINS:[]; var fc=cs[bridgeFromIdx],tc=cs[bridgeToIdx]; if(!fc||!tc)return; var fee=tc.id==='Arc_Testnet'?'1.00%':'0.05%'; var feeAmt=a*(bridgeToIdx===0?0.01:0.0005); var recv=a-feeAmt; showReview({title:'Bridge Review',icon:'topology-star-3',iconColor:'var(--purple)',rows:[['Token','USDC'],['Amount',a.toFixed(4)+' USDC'],['From',fc.shortName||fc.name],['To',tc.shortName||tc.name],['You receive',recv.toFixed(4)+' USDC'],['Fee',fee+' (~'+feeAmt.toFixed(4)+' USDC)'],['Time',tc.id==='Arc_Testnet'?'~30s (Turbo)':'~5-15 min (CCTP)'],['Security',tc.id==='Arc_Testnet'?'Turbo Bridge secured by relayer':'CCTP — Circle verified']],confirmFn:'UBAction._execBridge()'}); }
+  var _ubBridgeSeq = 0, _ubBridgeTimer = null, _ubBridgeQuote = null;
+  function _refreshBridge(){
+    var ae=document.getElementById('ub-bridge-amt'); if(!ae)return;
+    var a=parseFloat(ae.value)||0; if(a<=0){hideReview();return;}
+    var cs=typeof CHAINS!=='undefined'?CHAINS:[];
+    var fc=cs[bridgeFromIdx],tc=cs[bridgeToIdx]; if(!fc||!tc)return;
+    if(_ubBridgeTimer)clearTimeout(_ubBridgeTimer);
+    _ubBridgeTimer=setTimeout(function(){_ubFetchBridgeQuote(fc,tc,a);},450);
+  }
+  async function _ubFetchBridgeQuote(fc,tc,a){
+    var seq=++_ubBridgeSeq;
+    if(!walletAddress){ showReview({title:'Bridge Review',icon:'topology-star-3',iconColor:'var(--purple)',rows:[['Token','USDC'],['Amount',a.toFixed(4)+' USDC'],['From',fc.shortName||fc.name],['To',tc.shortName||tc.name],['Expected received','Connect wallet'],['Route','LI.FI']],confirmFn:'UBAction._execBridge()'}); return; }
+    if(typeof LiFiAdapter==='undefined'||typeof LiFiAdapter.getQuote!=='function'){ showReview({title:'Bridge Review',icon:'topology-star-3',iconColor:'var(--purple)',rows:[['Route','LI.FI routing unavailable']],confirmFn:'UBAction._execBridge()'}); return; }
+    var q;
+    try{ q=await LiFiAdapter.getQuote({tokenIn:'USDC',tokenOut:'USDC',amountInRaw:toUsdc(a),slippageBps:(typeof SlippageConfig!=='undefined'&&SlippageConfig.DEFAULT_BPS)||100,fromChainId:fc.chainId,toChainId:tc.chainId,fromAddress:walletAddress,toAddress:walletAddress}); }catch(e){ q={ok:false,error:(e&&e.message)||String(e)}; }
+    if(seq!==_ubBridgeSeq)return;
+    if(!q||q.ok!==true){ showReview({title:'Bridge Review',icon:'topology-star-3',iconColor:'var(--purple)',rows:[['Token','USDC'],['Amount',a.toFixed(4)+' USDC'],['From',fc.shortName||fc.name],['To',tc.shortName||tc.name],['Route','No LI.FI route']],confirmFn:'UBAction._execBridge()'}); return; }
+    _ubBridgeQuote=q;
+    var outAmt=Number(q.expectedOutRaw)/1e6;
+    var minAmt=q.minOutRaw!=null?Number(q.minOutRaw)/1e6:outAmt;
+    var feePct=q.feeBps!=null?(q.feeBps/100):null;
+    var est=q.route&&q.route.estimate;
+    var execSec=est&&est.executionDuration!=null?Number(est.executionDuration):null;
+    showReview({title:'Bridge Review',icon:'topology-star-3',iconColor:'var(--purple)',rows:[
+      ['Token','USDC'],
+      ['Amount',a.toFixed(4)+' USDC'],
+      ['From',fc.shortName||fc.name],
+      ['To',tc.shortName||tc.name],
+      ['Expected received',outAmt.toFixed(4)+' USDC'],
+      ['Minimum received',minAmt.toFixed(4)+' USDC'],
+      ['Fee',feePct!=null?feePct.toFixed(3)+'%':'Not available'],
+      ['Estimated time',execSec!=null?(typeof _bridgeFmtDuration==='function'?_bridgeFmtDuration(execSec):execSec+'s'):'Not available'],
+      ['Route',q.tool||'LI.FI']
+    ],confirmFn:'UBAction._execBridge()'});
+  }
 
-  async function _execBridge(){ if(!_ensure())return;var a=parseFloat((document.getElementById('ub-bridge-amt')||{}).value)||0;if(a<=0){toast('Enter amount','warning');return;} updateReviewState('executing','Bridging...');var ha=document.getElementById('bridge-amount');if(!ha){ha=document.createElement('input');ha.id='bridge-amount';ha.type='hidden';document.body.appendChild(ha);}ha.value=a.toString();if(typeof applyBridgeChains==='function')applyBridgeChains(); var cs=typeof CHAINS!=='undefined'?CHAINS:[]; var fc=cs[bridgeFromIdx],tc=cs[bridgeToIdx]; var feeAmt=a*(bridgeToIdx===0?0.01:0.0005); var recv=a-feeAmt; var t0=Date.now(); try{if(typeof executeBridgeOrTurbo==='function')await executeBridgeOrTurbo();else{toast('Bridge unavailable','error');updateReviewState('error','Bridge unavailable');return;} var tx=_getTxHashFromHistory(); var dur=((Date.now()-t0)/1000).toFixed(1); _showResult({prefix:'Bridge',txHash:tx,explorer:_getExplorer(),rows:[['Token','USDC'],['Sent',a.toFixed(4)+' USDC'],['Received',recv.toFixed(4)+' USDC'],['From',fc?fc.shortName||fc.name:'?'],['To',tc?tc.shortName||tc.name:'?'],['Fee','~'+feeAmt.toFixed(4)+' USDC'],['Duration',dur+'s'],['Tx Hash',tx?tx.slice(0,10)+'...'+tx.slice(-6):'Confirming...']]}); }catch(e){updateReviewState('error',e.shortMessage||e.message||'Bridge failed');} }
+  async function _execBridge(){ if(!_ensure())return;var a=parseFloat((document.getElementById('ub-bridge-amt')||{}).value)||0;if(a<=0){toast('Enter amount','warning');return;} updateReviewState('executing','Bridging via LI.FI...');var ha=document.getElementById('bridge-amount');if(!ha){ha=document.createElement('input');ha.id='bridge-amount';ha.type='hidden';document.body.appendChild(ha);}ha.value=a.toString();if(typeof applyBridgeChains==='function')applyBridgeChains(); var cs=typeof CHAINS!=='undefined'?CHAINS:[]; var fc=cs[bridgeFromIdx],tc=cs[bridgeToIdx]; var t0=Date.now(); try{if(typeof executeBridgeOrTurbo==='function')await executeBridgeOrTurbo();else{toast('Bridge unavailable','error');updateReviewState('error','Bridge unavailable');return;} var tx=_getTxHashFromHistory(); var dur=((Date.now()-t0)/1000).toFixed(1); _showResult({prefix:'Bridge',txHash:tx,explorer:_getExplorer(),rows:[['Token','USDC'],['Sent',a.toFixed(4)+' USDC'],['From',fc?fc.shortName||fc.name:'?'],['To',tc?tc.shortName||tc.name:'?'],['Provider','LI.FI'],['Duration',dur+'s'],['Tx Hash',tx?tx.slice(0,10)+'...'+tx.slice(-6):'Confirming...']]}); }catch(e){updateReviewState('error',e.shortMessage||e.message||'Bridge failed');} }
 
   // ═══════════════════════ SEND ═══════════════════════
   function openSend(pfToken,pfAmt){
@@ -41793,13 +41941,13 @@ const UBAction = (function() {
       '<div><div style="font-size:8px;color:var(--muted2);margin-bottom:2px">Token</div><select class="cinput" style="cursor:pointer" onchange="saCurrentAsset=this.value;UBAction._refreshSend();"><option value="USDC"'+(tk==='USDC'?' selected':'')+'>USDC</option><option value="EURC"'+(tk==='EURC'?' selected':'')+'>EURC</option></select></div>'+
       '<div><div style="font-size:8px;color:var(--muted2);margin-bottom:2px">Recipient</div><input id="ub-send-addr" class="cinput" type="text" placeholder="0x..." oninput="UBAction._refreshSend()" style="font-family:\'JetBrains Mono\',monospace"/></div>'+
       '<div><div style="font-size:8px;color:var(--muted2);margin-bottom:2px">Amount</div><input id="ub-send-amt" class="cinput" type="number" placeholder="0.00" value="'+a+'" oninput="UBAction._refreshSend()" style="font-family:\'JetBrains Mono\',monospace"/></div>'+
-      '<div style="font-size:8px;color:var(--muted2)">Network: Arc Testnet | Fee: 0.20%</div><div id="ub-send-e" style="font-size:8px;color:var(--red);display:none"></div></div>';
+      '<div style="font-size:8px;color:var(--muted2)">Network: Arc Mainnet | Fee: 0.20%</div><div id="ub-send-e" style="font-size:8px;color:var(--red);display:none"></div></div>';
     _modalWrap('Send','send','var(--blue)',b,'UBAction._hideReview();');
   }
 
-  function _refreshSend(){ var ae=document.getElementById('ub-send-amt'),ad=document.getElementById('ub-send-addr'); if(!ae||!ad)return; var a=parseFloat(ae.value)||0,addr=ad.value||''; if(a<=0||!/^0x[0-9a-fA-F]{40}$/.test(addr)){hideReview();return;} var fee=a*0.002;var total=a+fee; showReview({title:'Send Review',icon:'send',iconColor:'var(--blue)',rows:[['Token',saCurrentAsset||'USDC'],['Amount',a.toFixed(4)+' '+(saCurrentAsset||'USDC')],['Recipient',addr.slice(0,8)+'...'+addr.slice(-4)],['Network','Arc Testnet'],['Fee','0.20% (~'+fee.toFixed(4)+' '+(saCurrentAsset||'USDC')+')'],['Total',total.toFixed(4)+' '+(saCurrentAsset||'USDC')]],confirmFn:'UBAction._execSend()'}); }
+  function _refreshSend(){ var ae=document.getElementById('ub-send-amt'),ad=document.getElementById('ub-send-addr'); if(!ae||!ad)return; var a=parseFloat(ae.value)||0,addr=ad.value||''; if(a<=0||!/^0x[0-9a-fA-F]{40}$/.test(addr)){hideReview();return;} var fee=a*0.002;var total=a+fee; showReview({title:'Send Review',icon:'send',iconColor:'var(--blue)',rows:[['Token',saCurrentAsset||'USDC'],['Amount',a.toFixed(4)+' '+(saCurrentAsset||'USDC')],['Recipient',addr.slice(0,8)+'...'+addr.slice(-4)],['Network','Arc Mainnet'],['Fee','0.20% (~'+fee.toFixed(4)+' '+(saCurrentAsset||'USDC')+')'],['Total',total.toFixed(4)+' '+(saCurrentAsset||'USDC')]],confirmFn:'UBAction._execSend()'}); }
 
-  async function _execSend(){ if(!_ensure())return;var ad=(document.getElementById('ub-send-addr')||{}).value||'';var a=parseFloat((document.getElementById('ub-send-amt')||{}).value)||0;if(!/^0x[0-9a-fA-F]{40}$/.test(ad)){toast('Enter valid 0x address','warning');return;}if(a<=0){toast('Enter amount','warning');return;}updateReviewState('executing','Sending...');var hr=document.getElementById('sa-recipient');if(!hr){hr=document.createElement('input');hr.id='sa-recipient';hr.type='hidden';document.body.appendChild(hr);}hr.value=ad;var ha=document.getElementById('sa-amount');if(!ha){ha=document.createElement('input');ha.id='sa-amount';ha.type='hidden';document.body.appendChild(ha);}ha.value=a.toString(); var feeAmt=a*0.002; var total=a+feeAmt; var t0=Date.now(); try{await saExecuteSend(); var tx=_getTxHashFromHistory(); var dur=((Date.now()-t0)/1000).toFixed(1); _showResult({prefix:'Send',txHash:tx,explorer:_getExplorer(),rows:[['Token',saCurrentAsset||'USDC'],['Sent',a.toFixed(4)+' '+(saCurrentAsset||'USDC')],['Recipient',ad.slice(0,8)+'...'+ad.slice(-4)],['Network','Arc Testnet'],['Fee','~'+feeAmt.toFixed(4)+' '+(saCurrentAsset||'USDC')],['Total',total.toFixed(4)+' '+(saCurrentAsset||'USDC')],['Duration',dur+'s'],['Tx Hash',tx?tx.slice(0,10)+'...'+tx.slice(-6):'Confirming...']]}); }catch(e){updateReviewState('error',e.shortMessage||e.message||'Send failed');} }
+  async function _execSend(){ if(!_ensure())return;var ad=(document.getElementById('ub-send-addr')||{}).value||'';var a=parseFloat((document.getElementById('ub-send-amt')||{}).value)||0;if(!/^0x[0-9a-fA-F]{40}$/.test(ad)){toast('Enter valid 0x address','warning');return;}if(a<=0){toast('Enter amount','warning');return;}updateReviewState('executing','Sending...');var hr=document.getElementById('sa-recipient');if(!hr){hr=document.createElement('input');hr.id='sa-recipient';hr.type='hidden';document.body.appendChild(hr);}hr.value=ad;var ha=document.getElementById('sa-amount');if(!ha){ha=document.createElement('input');ha.id='sa-amount';ha.type='hidden';document.body.appendChild(ha);}ha.value=a.toString(); var feeAmt=a*0.002; var total=a+feeAmt; var t0=Date.now(); try{await saExecuteSend(); var tx=_getTxHashFromHistory(); var dur=((Date.now()-t0)/1000).toFixed(1); _showResult({prefix:'Send',txHash:tx,explorer:_getExplorer(),rows:[['Token',saCurrentAsset||'USDC'],['Sent',a.toFixed(4)+' '+(saCurrentAsset||'USDC')],['Recipient',ad.slice(0,8)+'...'+ad.slice(-4)],['Network','Arc Mainnet'],['Fee','~'+feeAmt.toFixed(4)+' '+(saCurrentAsset||'USDC')],['Total',total.toFixed(4)+' '+(saCurrentAsset||'USDC')],['Duration',dur+'s'],['Tx Hash',tx?tx.slice(0,10)+'...'+tx.slice(-6):'Confirming...']]}); }catch(e){updateReviewState('error',e.shortMessage||e.message||'Send failed');} }
 
   // ═══════════════════════ HELPERS ═══════════════════════
   function _modalWrap(title,icon,color,body,onClose){

@@ -28,11 +28,15 @@
   var API = '/api/tower/swap-quote';
   var QUOTE_TTL_MS = 60000; // conservative freshness window (ms)
 
-  // Tower Exchange integrates Arc Testnet only. On any other chain the Tower
-  // adapter must NOT quote — it must not leak Testnet liquidity/balances.
-  // Defaults to Testnet when no active chain is set (pre-connect / test env).
-  function _isTestnetActive() {
-    try { if (typeof activeChainId === 'undefined') return true; return Number(activeChainId) === 5042002; } catch (_) { return true; }
+  // Tower Exchange integrates Arc. Quote on Arc Mainnet (5042) and Arc Testnet
+  // (5042002). Any other chain must NOT quote (no stale Testnet leakage, no
+  // unsupported chain calls). Defaults to Arc when no active chain is set.
+  function _isArcActive() {
+    try {
+      if (typeof activeChainId === 'undefined') return true;
+      var id = Number(activeChainId);
+      return id === 5042 || id === 5042002;
+    } catch (_) { return true; }
   }
 
   function _postJson(path, body) {
@@ -82,8 +86,8 @@
    */
   async function getQuote(opts) {
     opts = opts || {};
-    if (!_isTestnetActive()) {
-      return { source: 'tower', ok: false, error: 'TOWER_TESTNET_ONLY' };
+    if (!_isArcActive()) {
+      return { source: 'tower', ok: false, error: 'TOWER_CHAIN_UNSUPPORTED' };
     }
     var amountInRaw = opts.amountInRaw;
     var amountInStr = (typeof amountInRaw === 'bigint')
@@ -134,7 +138,7 @@
       ok: true,
       tokenIn: opts.tokenIn || null,
       tokenOut: opts.tokenOut || null,
-      chainId: 5042002,
+      chainId: (typeof activeChainId !== 'undefined' ? Number(activeChainId) : 5042),
       amountInRaw: (typeof amountInRaw === 'bigint') ? amountInRaw : null,
       expectedOutRaw: expectedOutRaw,
       minOutRaw: minOutRaw,

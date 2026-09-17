@@ -72,7 +72,7 @@ function load({ findPool, poolData, OracleInterop, balanceOf, getBalance, chains
 
 function arcChain() {
   return {
-    id: 'Arc_Testnet', name: 'Arc Testnet', shortName: 'Arc', chainId: 5042002, rpc: 'https://arc', isEvm: true,
+    id: 'Arc_Testnet', name: 'Arc Testnet', shortName: 'Arc', chainId: 5042, rpc: 'https://arc', isEvm: true,
     nativeCurrency: { name: 'USDC', symbol: 'USDC', decimals: 18 },
     tokens: { USDC: { address: '0xA0', decimals: 6 }, EURC: { address: '0xA1', decimals: 6 }, cirBTC: { address: '0xA2', decimals: 8 } },
   };
