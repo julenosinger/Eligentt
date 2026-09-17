@@ -30,14 +30,14 @@ describe('Global network selector — Arc Mainnet', () => {
   it('exposes a selector list that includes Arc Mainnet (5042) first', () => {
     const fn = between('function getSelectableNetworks', 'function openNetworkSelector');
     expect(fn).toContain('ARC_MAINNET_ID');
-    expect(fn).toContain('1, 8453, 42161'); // Ethereum / Base / Arbitrum mainnets
-    expect(fn).toContain('showTestnets');
+    expect(fn).toContain('1, 8453, 42161, 10, 137'); // Ethereum / Base / Arbitrum / Optimism / Polygon mainnets
   });
 
-  it('hides Testnets in production (non-localhost)', () => {
+  it('is Mainnet only (no testnets anywhere in the selector)', () => {
     const fn = between('function getSelectableNetworks', 'function openNetworkSelector');
-    expect(fn).toContain("hostname === 'localhost'");
-    expect(fn).toContain('showTestnets = (activeChainId === ARC_TESTNET_ID)');
+    expect(fn).not.toContain('ARC_TESTNET_ID');
+    expect(fn).not.toContain('5042002');
+    expect(fn).not.toContain('showTestnets');
   });
 
   it('derives from CHAIN_REGISTRY (no duplicate network registry)', () => {
@@ -46,14 +46,15 @@ describe('Global network selector — Arc Mainnet', () => {
     expect(fn).not.toContain('CHAINS.forEach');
   });
 
-  it('openNetworkSelector uses the selectable list (not the testnet-only CHAINS)', () => {
+  it('openNetworkSelector uses the selectable list', () => {
     const fn = between('function openNetworkSelector', '// ══════════════════════════════════════════');
     expect(fn).toContain('getSelectableNetworks().forEach');
   });
 
-  it('keeps Testnet available for development', () => {
+  it('excludes all Testnet networks (Mainnet only)', () => {
     const fn = between('function getSelectableNetworks', 'function openNetworkSelector');
-    expect(fn).toContain('ARC_TESTNET_ID');
+    expect(fn).not.toContain('ARC_TESTNET_ID');
+    expect(fn).not.toContain('11155111');
   });
 });
 

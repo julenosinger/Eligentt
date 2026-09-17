@@ -38,18 +38,18 @@ describe('Send Assets — Arc Mainnet in the chain registry', () => {
     expect(reg).toContain("cirBTC: { address: '0x171A4217b86A807A64eB94757Db6849fb4bDbAA0'");
   });
 
-  it('Arc Testnet is retained and untouched', () => {
+  it('Arc Testnet is removed (Mainnet only)', () => {
     const reg = between('const CHAIN_REGISTRY = {', '};');
-    expect(reg).toContain('5042002:');
-    expect(reg).toContain("id: 'Arc_Testnet'");
+    expect(reg).not.toContain('5042002:');
+    expect(reg).not.toContain("id: 'Arc_Testnet'");
   });
 });
 
 describe('Send Assets — network detection helpers', () => {
-  it('isArcChainId accepts Arc Mainnet and Arc Testnet', () => {
+  it('isArcChainId accepts only Arc Mainnet', () => {
     const fn = between('function isArcChainId', 'function arcTargetChainId');
     expect(fn).toContain('ARC_MAINNET_ID');
-    expect(fn).toContain('ARC_TESTNET_ID');
+    expect(fn).not.toContain('ARC_TESTNET_ID');
   });
 
   it('saIsCrossChain compares destination against the ACTIVE chain (not a hardcoded testnet)', () => {
@@ -58,12 +58,11 @@ describe('Send Assets — network detection helpers', () => {
     expect(fn).not.toContain('5042002');
   });
 
-  it('saPopulateDestNetworks dynamically populates destinations and hides testnets in production', () => {
+  it('saPopulateDestNetworks populates Mainnet-only destinations', () => {
     const fn = between('function saPopulateDestNetworks', 'function saOnDestChange');
-    expect(fn).toContain('showTestnets');
-    expect(fn).toContain('hostname');
     expect(fn).toContain('sa-dest-network');
-    expect(fn).toContain("ch.testnet && !showTestnets");
+    expect(fn).toContain('ARC_MAINNET_ID');
+    expect(fn).not.toContain('ARC_TESTNET_ID');
   });
 });
 

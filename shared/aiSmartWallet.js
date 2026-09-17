@@ -113,12 +113,8 @@
     Ethereum: { chainId: 1, label: 'Ethereum' },
     Base: { chainId: 8453, label: 'Base' },
     Arbitrum: { chainId: 42161, label: 'Arbitrum' },
-    Arc_Testnet: { chainId: 5042002, label: 'Arc Testnet' },
-    Ethereum_Sepolia: { chainId: 11155111, label: 'Ethereum Sepolia' },
-    Base_Sepolia: { chainId: 84532, label: 'Base Sepolia' },
-    Arbitrum_Sepolia: { chainId: 421614, label: 'Arbitrum Sepolia' },
-    Optimism_Sepolia: { chainId: 11155420, label: 'Optimism Sepolia' },
-    Polygon_Amoy: { chainId: 80002, label: 'Polygon Amoy' }
+    Optimism: { chainId: 10, label: 'Optimism' },
+    Polygon: { chainId: 137, label: 'Polygon' }
   };
   const OP_TO_SCHED = {
     payment: 'payment', transfer: 'payment', recurring: 'payment', treasury: 'payment',
