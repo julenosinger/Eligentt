@@ -116,3 +116,25 @@ describe('Swap — unchanged (FASE 3 regression guard)', () => {
     expect(html).toContain("source = 'LI.FI'");
   });
 });
+
+describe('Swap — Base network + LI.FI tokens (FASE 4)', () => {
+  it('Base (8453) registers USDC + EURC for LI.FI swaps', () => {
+    const reg = between('8453: {', '42161: {');
+    expect(reg).toContain("0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"); // Base USDC
+    expect(reg).toContain("0x60a3E35Cc302bFA44Cb288Bc5a4F316Fdb1adb42"); // Base EURC
+  });
+
+  it('swap token list is chain-aware (swapAvailableTokens)', () => {
+    expect(html).toContain('function swapAvailableTokens');
+    expect(html).toContain("getTokenAddressForChain(cid, t.sym)");
+    expect(html).toContain("t.sym === 'ETH'");
+  });
+
+  it('asset market panel exists with real-data-only tabs', () => {
+    expect(html).toContain('id="swap-assets-panel"');
+    expect(html).toContain('id="swap-assets-list"');
+    expect(html).toContain('function renderAssetMarket');
+    expect(html).toContain('function selectSwapAsset');
+    expect(html).toContain("_assetTab !== 'watchlist'");
+  });
+});
