@@ -7,7 +7,8 @@
 (function(){
   'use strict';
 
-  var SESSION_KEY = 'elligentt_agent_session_v2';
+  var SESSION_KEY = 'elligentt_agent_conversation_v2';
+  var LEGACY_COLLISION_KEY = 'elligentt_agent_session_v2';
   var session = null;
 
   function defaultSession(){
@@ -36,6 +37,18 @@
   function load(){
     try {
       var r=localStorage.getItem(SESSION_KEY);
+      if(!r){
+        var legacy=localStorage.getItem(LEGACY_COLLISION_KEY);
+        if(legacy && legacy.indexOf('ENC')!==0){
+          try {
+            var parsed=JSON.parse(legacy);
+            if(parsed && parsed.sessionId){
+              r=legacy;
+              localStorage.setItem(SESSION_KEY, legacy);
+            }
+          } catch(_e){}
+        }
+      }
       if(r) session=JSON.parse(r);
     } catch(e){ session=null; }
     if(!session||isExpired()){

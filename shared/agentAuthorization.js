@@ -71,15 +71,15 @@
       bridgeDestinations:opts.bridgeDestinations||['*'],
       treasuryPermissions:opts.treasuryPermissions||false,
       // Operations
-      allowSwap:opts.allowSwap!==undefined?opts.allowSwap:true,
-      allowBridge:opts.allowBridge!==undefined?opts.allowBridge:true,
-      allowTreasury:opts.allowTreasury!==undefined?opts.allowTreasury:false,
-      allowPayments:opts.allowPayments!==undefined?opts.allowPayments:true,
-      allowContracts:opts.allowContracts!==undefined?opts.allowContracts:false,
-      allowVault:opts.allowVault!==undefined?opts.allowVault:false,
-      allowCrosschain:opts.allowCrosschain!==undefined?opts.allowCrosschain:true,
-      allowRecurring:opts.allowRecurring!==undefined?opts.allowRecurring:false,
-      allowScheduled:opts.allowScheduled!==undefined?opts.allowScheduled:false,
+      allowSwap:opts.allowSwap===true,
+      allowBridge:opts.allowBridge===true,
+      allowTreasury:opts.allowTreasury===true,
+      allowPayments:opts.allowPayments===true,
+      allowContracts:opts.allowContracts===true,
+      allowVault:opts.allowVault===true,
+      allowCrosschain:opts.allowCrosschain===true,
+      allowRecurring:opts.allowRecurring===true,
+      allowScheduled:opts.allowScheduled===true,
       // Meta
       grantedBy:opts.grantedBy||(typeof walletAddress!=='undefined'?walletAddress:null),
       agentWallet:opts.agentWallet||(typeof AgentWalletManager!=='undefined'?AgentWalletManager.getAgentAddress():null),
@@ -292,7 +292,22 @@
   }
 
   /* ── Queries ── */
-  function getActive(){ invalidateExpired(); var now=Date.now(); return authorizations.filter(function(a){return a.status==='active'&&a.expiresAt>now;}); }
+  function getActive(){
+    invalidateExpired();
+    var now=Date.now();
+    var list=authorizations.filter(function(a){return a.status==='active'&&a.expiresAt>now;});
+    try {
+      var w = (typeof walletAddress === 'string' && walletAddress) ? walletAddress.toLowerCase() : null;
+      if (w) {
+        list = list.filter(function(a){
+          return a.grantedBy && String(a.grantedBy).toLowerCase() === w;
+        });
+      } else if (typeof document !== 'undefined') {
+        list = list.filter(function(a){ return !a.grantedBy; });
+      }
+    } catch(e){}
+    return list;
+  }
   function getAll(){ return authorizations.slice(); }
   function getAuthSummary(){
     var active=getActive();

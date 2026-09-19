@@ -1,0 +1,1016 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Elligente — Blockchain Payment Infrastructure</title>
+  <meta name="description" content="Elligente provides modular infrastructure to transfer assets, create payment flows and connect blockchain-based financial operations." />
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
+  <style>
+    /* ─── RESET & BASE ─── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:          #050508;
+      --bg2:         #08080f;
+      --bg3:         #0d0d1a;
+      --blue:        #2563eb;
+      --blue-glow:   #3b82f6;
+      --blue-light:  #60a5fa;
+      --purple:      #7c3aed;
+      --purple-glow: #a855f7;
+      --cyan:        #06b6d4;
+      --white:       #f8fafc;
+      --gray:        #94a3b8;
+      --gray-dim:    #334155;
+      --border:      rgba(59,130,246,.12);
+      --border-glow: rgba(59,130,246,.28);
+      --font:        'Inter', sans-serif;
+      --mono:        'JetBrains Mono', monospace;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--white);
+      overflow-x: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ─── SCROLLBAR ─── */
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: var(--bg); }
+    ::-webkit-scrollbar-thumb { background: var(--blue); border-radius: 2px; }
+
+    /* ─── NOISE OVERLAY ─── */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
+      pointer-events: none;
+      z-index: 0;
+      opacity: .35;
+    }
+
+    /* ─── NAVBAR ─── */
+    nav {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 5%;
+      height: 64px;
+      background: rgba(5,5,8,.82);
+      backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .nav-logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      text-decoration: none;
+    }
+
+    .nav-logo-mark {
+      width: 32px; height: 32px;
+      background: linear-gradient(135deg, var(--blue) 0%, var(--purple) 100%);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 900;
+      font-size: 14px;
+      letter-spacing: -1px;
+      color: #fff;
+      box-shadow: 0 0 16px rgba(59,130,246,.45);
+    }
+
+    .nav-logo-text {
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: -.5px;
+      color: var(--white);
+    }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 32px;
+      list-style: none;
+    }
+
+    .nav-links a {
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--gray);
+      text-decoration: none;
+      transition: color .2s;
+    }
+    .nav-links a:hover { color: var(--white); }
+
+    .btn-launch-nav {
+      padding: 8px 20px;
+      background: linear-gradient(135deg, var(--blue) 0%, var(--purple) 100%);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      text-decoration: none;
+      transition: opacity .2s, box-shadow .2s;
+      box-shadow: 0 0 20px rgba(59,130,246,.3);
+    }
+    .btn-launch-nav:hover { opacity: .88; box-shadow: 0 0 32px rgba(59,130,246,.5); }
+
+    /* ─── SECTION WRAPPER ─── */
+    section { position: relative; z-index: 1; }
+
+    /* ─── HERO ─── */
+    #hero {
+      min-height: 100vh;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      align-items: center;
+      gap: 48px;
+      padding: 120px 7% 80px;
+      overflow: hidden;
+    }
+
+    /* animated grid background */
+    #hero::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(59,130,246,.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(59,130,246,.035) 1px, transparent 1px);
+      background-size: 48px 48px;
+      pointer-events: none;
+    }
+
+    /* radial glow top-right */
+    #hero::before {
+      content: '';
+      position: absolute;
+      top: -120px; right: -80px;
+      width: 700px; height: 700px;
+      background: radial-gradient(ellipse, rgba(124,58,237,.18) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    .hero-content { position: relative; z-index: 2; }
+
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 14px;
+      background: rgba(59,130,246,.1);
+      border: 1px solid rgba(59,130,246,.25);
+      border-radius: 100px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--blue-light);
+      letter-spacing: .5px;
+      text-transform: uppercase;
+      margin-bottom: 24px;
+    }
+
+    .hero-badge::before {
+      content: '';
+      width: 6px; height: 6px;
+      background: var(--blue-light);
+      border-radius: 50%;
+      box-shadow: 0 0 8px var(--blue-light);
+      animation: pulse-dot 2s infinite;
+    }
+
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 1; }
+      50% { opacity: .3; }
+    }
+
+    .hero-title {
+      font-size: clamp(2.8rem, 5.5vw, 5rem);
+      font-weight: 900;
+      line-height: 1.04;
+      letter-spacing: -2px;
+      margin-bottom: 16px;
+    }
+
+    .hero-title .accent {
+      background: linear-gradient(90deg, var(--blue-glow) 0%, var(--purple-glow) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .hero-sub {
+      font-size: clamp(1.1rem, 2vw, 1.4rem);
+      font-weight: 500;
+      color: var(--gray);
+      margin-bottom: 20px;
+      letter-spacing: -.3px;
+    }
+
+    .hero-desc {
+      font-size: 16px;
+      color: var(--gray);
+      line-height: 1.7;
+      max-width: 480px;
+      margin-bottom: 40px;
+    }
+
+    .hero-actions {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .btn-primary {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 14px 32px;
+      background: linear-gradient(135deg, var(--blue) 0%, var(--purple) 100%);
+      color: #fff;
+      border-radius: 10px;
+      font-size: 15px;
+      font-weight: 700;
+      text-decoration: none;
+      transition: all .25s;
+      box-shadow: 0 0 28px rgba(59,130,246,.35), 0 4px 20px rgba(0,0,0,.4);
+      letter-spacing: -.2px;
+    }
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 0 48px rgba(59,130,246,.55), 0 8px 28px rgba(0,0,0,.4);
+    }
+
+    .btn-secondary {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 14px 28px;
+      background: transparent;
+      color: var(--white);
+      border: 1px solid var(--border-glow);
+      border-radius: 10px;
+      font-size: 15px;
+      font-weight: 600;
+      text-decoration: none;
+      transition: all .25s;
+    }
+    .btn-secondary:hover {
+      background: rgba(59,130,246,.08);
+      border-color: var(--blue-glow);
+    }
+
+    .hero-img-wrap {
+      position: relative;
+      z-index: 2;
+      border-radius: 20px;
+      overflow: hidden;
+      box-shadow:
+        0 0 0 1px rgba(59,130,246,.2),
+        0 0 80px rgba(59,130,246,.12),
+        0 32px 80px rgba(0,0,0,.6);
+      animation: float 6s ease-in-out infinite;
+    }
+
+    @keyframes float {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-12px); }
+    }
+
+    .hero-img-wrap img { width: 100%; display: block; }
+
+    /* asset badges on hero image */
+    .hero-img-wrap::after {
+      content: 'USDC · EURC · BTC';
+      position: absolute;
+      bottom: 16px; left: 50%;
+      transform: translateX(-50%);
+      background: rgba(5,5,8,.75);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(59,130,246,.2);
+      border-radius: 100px;
+      padding: 6px 18px;
+      font-size: 12px;
+      font-family: var(--mono);
+      color: var(--blue-light);
+      letter-spacing: 1px;
+      white-space: nowrap;
+    }
+
+    /* ─── SECTION SHARED ─── */
+    .sec-label {
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--blue-light);
+      margin-bottom: 12px;
+    }
+
+    .sec-title {
+      font-size: clamp(1.8rem, 3.5vw, 2.8rem);
+      font-weight: 800;
+      letter-spacing: -1px;
+      line-height: 1.15;
+      margin-bottom: 16px;
+    }
+
+    .sec-desc {
+      font-size: 16px;
+      color: var(--gray);
+      line-height: 1.75;
+      max-width: 560px;
+    }
+
+    /* ─── WHAT IS ELLIGENTE ─── */
+    #what {
+      padding: 110px 7%;
+      background: linear-gradient(180deg, var(--bg) 0%, var(--bg2) 100%);
+    }
+
+    #what .inner { text-align: center; margin-bottom: 64px; }
+    #what .sec-desc { margin: 0 auto; }
+
+    .cards-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 24px;
+      margin-top: 48px;
+    }
+
+    .card {
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 32px 28px;
+      position: relative;
+      overflow: hidden;
+      transition: border-color .3s, transform .3s, box-shadow .3s;
+      cursor: default;
+    }
+
+    .card::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(ellipse at top left, rgba(59,130,246,.07) 0%, transparent 60%);
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity .3s;
+    }
+
+    .card:hover {
+      border-color: var(--border-glow);
+      transform: translateY(-4px);
+      box-shadow: 0 0 40px rgba(59,130,246,.1);
+    }
+    .card:hover::before { opacity: 1; }
+
+    .card-icon {
+      width: 48px; height: 48px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 22px;
+      margin-bottom: 20px;
+      position: relative;
+    }
+
+    .card-icon.blue  { background: rgba(59,130,246,.12); color: var(--blue-glow); }
+    .card-icon.purple{ background: rgba(124,58,237,.12); color: var(--purple-glow); }
+    .card-icon.cyan  { background: rgba(6,182,212,.12);  color: var(--cyan); }
+    .card-icon.indigo{ background: rgba(99,102,241,.12); color: #818cf8; }
+
+    .card-title {
+      font-size: 17px;
+      font-weight: 700;
+      margin-bottom: 10px;
+      letter-spacing: -.3px;
+    }
+
+    .card-text {
+      font-size: 14px;
+      color: var(--gray);
+      line-height: 1.65;
+    }
+
+    /* card animated border glow */
+    @keyframes border-glow {
+      0%, 100% { opacity: .5; }
+      50% { opacity: 1; }
+    }
+
+    /* ─── HOW IT WORKS ─── */
+    #how {
+      padding: 110px 7%;
+    }
+
+    #how .inner { text-align: center; margin-bottom: 72px; }
+
+    .steps {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0;
+      position: relative;
+      max-width: 920px;
+      margin: 0 auto;
+    }
+
+    .steps::before {
+      content: '';
+      position: absolute;
+      top: 32px;
+      left: calc(16.6% + 16px);
+      right: calc(16.6% + 16px);
+      height: 1px;
+      background: linear-gradient(90deg,
+        rgba(59,130,246,.6) 0%,
+        rgba(124,58,237,.6) 50%,
+        rgba(59,130,246,.6) 100%);
+    }
+
+    .step {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      padding: 0 24px;
+      position: relative;
+    }
+
+    .step-num {
+      width: 64px; height: 64px;
+      border-radius: 50%;
+      border: 1px solid var(--border-glow);
+      background: var(--bg3);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: var(--mono);
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--blue-light);
+      letter-spacing: 1px;
+      margin-bottom: 28px;
+      position: relative;
+      z-index: 2;
+      box-shadow: 0 0 24px rgba(59,130,246,.18);
+    }
+
+    .step-title {
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 10px;
+      letter-spacing: -.3px;
+    }
+
+    .step-text {
+      font-size: 14px;
+      color: var(--gray);
+      line-height: 1.65;
+    }
+
+    /* ─── CROSS-CHAIN ─── */
+    #crosschain {
+      padding: 110px 7%;
+      background: var(--bg2);
+    }
+
+    #crosschain .inner-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 72px;
+      align-items: center;
+    }
+
+    #crosschain .img-wrap {
+      border-radius: 20px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      box-shadow: 0 0 60px rgba(59,130,246,.1);
+    }
+
+    #crosschain img { width: 100%; display: block; }
+
+    .tag-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 28px;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      border: 1px solid var(--border);
+      border-radius: 100px;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--gray);
+      background: var(--bg3);
+    }
+
+    .tag span { font-size: 10px; }
+
+    /* ─── BUILT FOR BUILDERS ─── */
+    #builders {
+      padding: 110px 7%;
+    }
+
+    #builders .inner-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 72px;
+      align-items: center;
+    }
+
+    #builders .img-wrap {
+      order: 2;
+      border-radius: 20px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      box-shadow: 0 0 60px rgba(124,58,237,.1);
+    }
+
+    #builders img { width: 100%; display: block; }
+
+    .feature-list {
+      list-style: none;
+      margin-top: 32px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    .feature-list li {
+      display: flex;
+      align-items: flex-start;
+      gap: 14px;
+      font-size: 15px;
+      color: var(--gray);
+      line-height: 1.6;
+    }
+
+    .feature-list li::before {
+      content: '◆';
+      font-size: 10px;
+      color: var(--blue-glow);
+      margin-top: 5px;
+      flex-shrink: 0;
+    }
+
+    .feature-list li strong { color: var(--white); }
+
+    /* ─── CTA FINAL ─── */
+    #cta {
+      padding: 140px 7%;
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+    }
+
+    #cta::before {
+      content: '';
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      width: 900px; height: 500px;
+      background: radial-gradient(ellipse,
+        rgba(59,130,246,.12) 0%,
+        rgba(124,58,237,.08) 40%,
+        transparent 70%);
+      pointer-events: none;
+    }
+
+    #cta .cta-inner { position: relative; z-index: 2; }
+
+    #cta .cta-title {
+      font-size: clamp(2rem, 4vw, 3.5rem);
+      font-weight: 900;
+      letter-spacing: -2px;
+      margin-bottom: 20px;
+    }
+
+    #cta .cta-sub {
+      font-size: 17px;
+      color: var(--gray);
+      max-width: 540px;
+      margin: 0 auto 48px;
+      line-height: 1.7;
+    }
+
+    .btn-cta {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 18px 48px;
+      background: linear-gradient(135deg, var(--blue) 0%, var(--purple) 100%);
+      color: #fff;
+      border-radius: 12px;
+      font-size: 17px;
+      font-weight: 700;
+      text-decoration: none;
+      transition: all .25s;
+      box-shadow: 0 0 48px rgba(59,130,246,.4), 0 8px 32px rgba(0,0,0,.4);
+      letter-spacing: -.3px;
+    }
+    .btn-cta:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 0 72px rgba(59,130,246,.6), 0 12px 40px rgba(0,0,0,.4);
+    }
+
+    /* ─── FOOTER ─── */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 40px 7%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 20px;
+    }
+
+    .footer-logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      text-decoration: none;
+    }
+
+    .footer-text {
+      font-size: 13px;
+      color: var(--gray-dim);
+    }
+
+    /* ─── PARTICLES CANVAS ─── */
+    #particles-canvas {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 0;
+      opacity: .5;
+    }
+
+    /* ─── RESPONSIVE ─── */
+    @media (max-width: 900px) {
+      #hero { grid-template-columns: 1fr; padding: 100px 6% 60px; }
+      #hero .hero-img-wrap { max-width: 540px; margin: 0 auto; }
+      #crosschain .inner-grid,
+      #builders .inner-grid { grid-template-columns: 1fr; gap: 40px; }
+      #builders .img-wrap { order: 0; }
+      .steps { grid-template-columns: 1fr; gap: 40px; }
+      .steps::before { display: none; }
+      .nav-links { display: none; }
+    }
+
+    @media (max-width: 600px) {
+      .cards-grid { grid-template-columns: 1fr; }
+      .hero-actions { flex-direction: column; }
+      .btn-primary, .btn-secondary, .btn-cta { justify-content: center; }
+    }
+
+    /* ─── ANIMATIONS ─── */
+    .fade-in {
+      opacity: 0;
+      transform: translateY(30px);
+      transition: opacity .7s ease, transform .7s ease;
+    }
+    .fade-in.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  </style>
+</head>
+<body>
+
+  <canvas id="particles-canvas"></canvas>
+
+  <!-- NAV -->
+  <nav>
+    <a class="nav-logo" href="/">
+      <div class="nav-logo-mark">E</div>
+      <span class="nav-logo-text">Elligente</span>
+    </a>
+    <ul class="nav-links">
+      <li><a href="#what">Infrastructure</a></li>
+      <li><a href="#how">How it works</a></li>
+      <li><a href="#crosschain">Cross-Chain</a></li>
+      <li><a href="#builders">Builders</a></li>
+    </ul>
+    <a href="/app" class="btn-launch-nav">Launch App →</a>
+  </nav>
+
+  <!-- HERO -->
+  <section id="hero">
+    <div class="hero-content fade-in">
+      <div class="hero-badge">Payment Infrastructure</div>
+      <h1 class="hero-title">
+        Move digital<br/>
+        <span class="accent">value.</span>
+      </h1>
+      <p class="hero-sub">The infrastructure for blockchain payments.</p>
+      <p class="hero-desc">
+        Elligente provides modular infrastructure to transfer assets, create payment flows and connect blockchain-based financial operations.
+      </p>
+      <div class="hero-actions">
+        <a href="/app" class="btn-primary">
+          Launch App
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/>
+          </svg>
+        </a>
+        <a href="#what" class="btn-secondary">
+          Explore Infrastructure
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="6 9 12 15 18 9"/>
+          </svg>
+        </a>
+      </div>
+    </div>
+
+    <div class="hero-img-wrap fade-in" style="transition-delay:.15s">
+      <img src="/assets/landing/hero.jpg" alt="Elligente blockchain infrastructure" loading="eager" />
+    </div>
+  </section>
+
+  <!-- WHAT IS ELLIGENTE -->
+  <section id="what">
+    <div class="inner fade-in">
+      <div class="sec-label">What is Elligente</div>
+      <h2 class="sec-title">One infrastructure layer<br/>for digital payments.</h2>
+      <p class="sec-desc">
+        A modular set of on-chain capabilities built to handle how value moves — from individual transfers to complex payment orchestration.
+      </p>
+    </div>
+
+    <div class="cards-grid">
+      <div class="card fade-in" style="transition-delay:.05s">
+        <div class="card-icon blue">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <circle cx="12" cy="12" r="9"/><path d="M12 8v4l3 3"/>
+          </svg>
+        </div>
+        <h3 class="card-title">Asset Transfers</h3>
+        <p class="card-text">Send digital assets directly to wallets on supported networks. Precise, on-chain, verifiable.</p>
+      </div>
+
+      <div class="card fade-in" style="transition-delay:.1s">
+        <div class="card-icon purple">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/>
+            <line x1="12" y1="12" x2="12" y2="16"/><line x1="10" y1="14" x2="14" y2="14"/>
+          </svg>
+        </div>
+        <h3 class="card-title">Batch Payments</h3>
+        <p class="card-text">Distribute assets to multiple recipients in a single operation. Optimized for efficiency and gas.</p>
+      </div>
+
+      <div class="card fade-in" style="transition-delay:.15s">
+        <div class="card-icon cyan">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+          </svg>
+        </div>
+        <h3 class="card-title">Payment Links</h3>
+        <p class="card-text">Generate on-chain payment requests with defined assets and amounts. Share and receive with precision.</p>
+      </div>
+
+      <div class="card fade-in" style="transition-delay:.2s">
+        <div class="card-icon indigo">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/>
+            <line x1="8" y1="17" x2="12" y2="17"/>
+          </svg>
+        </div>
+        <h3 class="card-title">Invoices</h3>
+        <p class="card-text">Structure blockchain-based billing. Create, track and settle payment obligations on-chain.</p>
+      </div>
+
+      <div class="card fade-in" style="transition-delay:.25s">
+        <div class="card-icon blue">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+          </svg>
+        </div>
+        <h3 class="card-title">Cross-Chain Infrastructure</h3>
+        <p class="card-text">Move assets through connected blockchain environments using battle-tested bridge protocols.</p>
+      </div>
+
+      <div class="card fade-in" style="transition-delay:.3s">
+        <div class="card-icon purple">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
+            <rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
+          </svg>
+        </div>
+        <h3 class="card-title">App Kit Modular</h3>
+        <p class="card-text">A composable set of modules. Use only what your product needs — treasury, bridge, settlements, and more.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- HOW IT WORKS -->
+  <section id="how">
+    <div class="inner fade-in">
+      <div class="sec-label">How it works</div>
+      <h2 class="sec-title">Three steps.<br/>One transaction.</h2>
+      <p class="sec-desc">
+        Every operation on Elligente follows a clear, auditable path — from asset selection to on-chain confirmation.
+      </p>
+    </div>
+
+    <div class="steps">
+      <div class="step fade-in" style="transition-delay:.05s">
+        <div class="step-num">01</div>
+        <h3 class="step-title">Select Asset</h3>
+        <p class="step-text">Choose the digital asset and the network you want to operate on.</p>
+      </div>
+      <div class="step fade-in" style="transition-delay:.15s">
+        <div class="step-num">02</div>
+        <h3 class="step-title">Define Payment</h3>
+        <p class="step-text">Specify the recipient, amount, or batch configuration for the operation.</p>
+      </div>
+      <div class="step fade-in" style="transition-delay:.25s">
+        <div class="step-num">03</div>
+        <h3 class="step-title">Confirm On-chain</h3>
+        <p class="step-text">Sign the transaction with your wallet. The operation executes directly on-chain.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- CROSS-CHAIN -->
+  <section id="crosschain">
+    <div class="inner-grid">
+      <div class="img-wrap fade-in">
+        <img src="/assets/landing/crosschain.jpg" alt="Cross-chain network infrastructure" loading="lazy" />
+      </div>
+      <div class="fade-in" style="transition-delay:.1s">
+        <div class="sec-label">Cross-Chain</div>
+        <h2 class="sec-title">Connected<br/>blockchain infrastructure.</h2>
+        <p class="sec-desc">
+          Move assets through connected blockchain infrastructure. Elligente uses proven cross-chain protocols to bridge value between environments without leaving the application.
+        </p>
+        <div class="tag-list">
+          <span class="tag"><span>◆</span> CCTP V2</span>
+          <span class="tag"><span>◆</span> Circle Attestation</span>
+          <span class="tag"><span>◆</span> USDC Native</span>
+          <span class="tag"><span>◆</span> EURC Support</span>
+          <span class="tag"><span>◆</span> On-chain Settlement</span>
+          <span class="tag"><span>◆</span> Operator Relay</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- BUILT FOR BUILDERS -->
+  <section id="builders">
+    <div class="inner-grid">
+      <div class="fade-in">
+        <div class="sec-label">Built for builders</div>
+        <h2 class="sec-title">Designed<br/>for builders.</h2>
+        <p class="sec-desc">
+          Elligente exposes a modular architecture that can integrate into existing products. Each component is independent, composable and built for blockchain-native environments.
+        </p>
+        <ul class="feature-list">
+          <li><strong>Modular architecture</strong> — use only the modules your product requires</li>
+          <li><strong>API ready</strong> — server-side endpoints for treasury, relayer and payment operations</li>
+          <li><strong>SDK friendly</strong> — structured for integration into any Web3 frontend</li>
+          <li><strong>Blockchain integrations</strong> — EVM-compatible networks with multi-chain support</li>
+          <li><strong>Operator infrastructure</strong> — server-side relayer for gasless UX patterns</li>
+        </ul>
+      </div>
+      <div class="img-wrap fade-in" style="transition-delay:.1s">
+        <img src="/assets/landing/infra.jpg" alt="Modular infrastructure architecture" loading="lazy" />
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA FINAL -->
+  <section id="cta">
+    <div class="cta-inner fade-in">
+      <div class="sec-label" style="justify-content:center;display:flex">Elligente</div>
+      <h2 class="cta-title">Enter the Elligente<br/><span style="background:linear-gradient(90deg,#3b82f6,#a855f7);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text">ecosystem.</span></h2>
+      <p class="cta-sub">
+        Access the full infrastructure — transfers, batch payments, cross-chain bridging, treasury management and more.
+      </p>
+      <a href="/app" class="btn-cta">
+        Launch App
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/>
+        </svg>
+      </a>
+    </div>
+  </section>
+
+  <!-- FOOTER -->
+  <footer>
+    <a class="footer-logo" href="/">
+      <div class="nav-logo-mark">E</div>
+      <span class="nav-logo-text">Elligente</span>
+    </a>
+    <p class="footer-text">Blockchain payment infrastructure.</p>
+    <p class="footer-text">© 2025 Elligente</p>
+  </footer>
+
+  <script>
+    // ─── PARTICLES ───────────────────────────────────────────
+    (function () {
+      const canvas = document.getElementById('particles-canvas');
+      const ctx    = canvas.getContext('2d');
+      let W, H, particles = [];
+
+      function resize() {
+        W = canvas.width  = window.innerWidth;
+        H = canvas.height = window.innerHeight;
+      }
+
+      function rand(a, b) { return a + Math.random() * (b - a); }
+
+      function init() {
+        particles = [];
+        const count = Math.floor((W * H) / 14000);
+        for (let i = 0; i < count; i++) {
+          particles.push({
+            x:  rand(0, W),
+            y:  rand(0, H),
+            r:  rand(.6, 2),
+            vx: rand(-.25, .25),
+            vy: rand(-.18, -.06),
+            a:  rand(.2, .65),
+            pulse: rand(0, Math.PI * 2)
+          });
+        }
+      }
+
+      function draw() {
+        ctx.clearRect(0, 0, W, H);
+        const t = Date.now() * .001;
+        particles.forEach(p => {
+          p.x += p.vx;
+          p.y += p.vy;
+          p.pulse += .025;
+          if (p.y < -4) { p.y = H + 4; p.x = rand(0, W); }
+          if (p.x < -4) p.x = W + 4;
+          if (p.x > W + 4) p.x = -4;
+          const alpha = p.a * (.6 + .4 * Math.sin(p.pulse));
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(96,165,250,${alpha})`;
+          ctx.fill();
+        });
+        requestAnimationFrame(draw);
+      }
+
+      window.addEventListener('resize', () => { resize(); init(); });
+      resize(); init(); draw();
+    })();
+
+    // ─── INTERSECTION OBSERVER — FADE IN ─────────────────────
+    (function () {
+      const els = document.querySelectorAll('.fade-in');
+      const obs = new IntersectionObserver((entries) => {
+        entries.forEach(e => {
+          if (e.isIntersecting) {
+            e.target.classList.add('visible');
+            obs.unobserve(e.target);
+          }
+        });
+      }, { threshold: .12 });
+      els.forEach(el => obs.observe(el));
+    })();
+
+    // ─── SMOOTH SCROLL ───────────────────────────────────────
+    document.querySelectorAll('a[href^="#"]').forEach(a => {
+      a.addEventListener('click', e => {
+        const target = document.querySelector(a.getAttribute('href'));
+        if (target) {
+          e.preventDefault();
+          target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      });
+    });
+  </script>
+</body>
+</html>

@@ -119,6 +119,7 @@
 <script src="/shared/policyEngine.js"></script>
 <script src="/shared/agentAudit.js"></script>
 <script src="/shared/agentScheduleExecutor.js"></script>
+<script src="/shared/autonomaExecutionGate.js"></script>
 <script src="/shared/trustLayer.js"></script>
 <script src="/shared/missionEngine.js"></script>
 <script src="/shared/agentTreasury.js"></script>
@@ -42878,7 +42879,11 @@ const UBScreen = (function() {
 
 (function(){
   const AUT_KEY = 'elligentt_autonoma_chats';
-  let autChats = [], autCurId = null, autReady = false, autPendingOps = {}, autOpenMenuId = null, autMenuListenerInstalled = false;
+  let autChats = [], autCurId = null, autReady = false, autPendingOps = {}, autOpenMenuId = null, autMenuListenerInstalled = false, _autSendInFlight = false;
+  function _autStorageKey(){
+    var w = (typeof walletAddress === 'string' && walletAddress) ? walletAddress.toLowerCase() : 'anon';
+    return AUT_KEY + '_' + w;
+  }
 
   // ── AIResponseRenderer ──
   const R = {
@@ -42966,6 +42971,7 @@ const UBScreen = (function() {
     el.value=''; el.style.height='auto'; autonomaSendQuick(msg);
   };
   window.autonomaSendQuick = function(msg) {
+    if(_autSendInFlight) return;
     if(!autCurId) window.autonomaNewChat();
     const chat=autChats.find(c=>c.id===autCurId); if(!chat) return;
     const w=document.getElementById('aut-welcome'); if(w) w.style.display='none';
@@ -42983,6 +42989,7 @@ const UBScreen = (function() {
       if(meta.op) chat.meta = Object.assign(chat.meta, meta);
     } catch(e){}
     setTimeout(async()=>{
+      _autSendInFlight = true;
       try{
         const r=await autProcess(msg); autHideTyping();
         chat.messages.push({role:'ai',content:r,ts:Date.now()});
@@ -42996,6 +43003,8 @@ const UBScreen = (function() {
         autHideTyping();
         autUI('ai','<div class="aut-intro" style="color:#ef4444">Error: '+(e&&e.message?e.message:String(e)).substring(0,200)+'</div>');
         console.error('Autonoma error:', e);
+      } finally {
+        _autSendInFlight = false;
       }
     },500+Math.random()*600);
   };
@@ -43468,16 +43477,25 @@ const UBScreen = (function() {
       var enc = new TextEncoder();
       var ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv }, key, enc.encode(JSON.stringify(autChats)));
       var payload = { v:1, iv: Array.from(iv).join(','), ct: Array.from(new Uint8Array(ct)).join(',') };
-      localStorage.setItem(AUT_KEY, JSON.stringify(payload));
+      localStorage.setItem(_autStorageKey(), JSON.stringify(payload));
     } catch(e) {
       // Fallback: plaintext (old browsers)
-      try { localStorage.setItem(AUT_KEY, JSON.stringify(autChats)); } catch(e2) {}
+      try { localStorage.setItem(_autStorageKey(), JSON.stringify(autChats)); } catch(e2) {}
     }
   }
   async function autLoad(){
     try {
-      var r = localStorage.getItem(AUT_KEY);
-      if (!r) return;
+      var scoped = _autStorageKey();
+      var r = localStorage.getItem(scoped);
+      if (!r) {
+        var legacy = localStorage.getItem(AUT_KEY);
+        if (legacy && typeof walletAddress === 'string' && walletAddress) {
+          r = legacy;
+          localStorage.setItem(scoped, legacy);
+          try { localStorage.removeItem(AUT_KEY); } catch(_e) {}
+        }
+      }
+      if (!r) { autChats = []; autCurId = null; return; }
       var parsed = JSON.parse(r);
       if (parsed.v === 1 && parsed.iv && parsed.ct) {
         var key = await _autGetEncKey();
@@ -43485,14 +43503,26 @@ const UBScreen = (function() {
         var ct = new Uint8Array(parsed.ct.split(',').map(Number));
         var dec = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: iv }, key, ct);
         autChats = JSON.parse(new TextDecoder().decode(dec));
-      } else {
-        // Legacy plaintext
+      } else if (Array.isArray(parsed)) {
         autChats = parsed;
-        // Auto-migrate to encrypted on next save
+      } else {
+        autChats = [];
       }
       if (autChats.length) autCurId = autChats[0].id;
-    } catch(e) { autChats = []; }
+      else autCurId = null;
+    } catch(e) { autChats = []; autCurId = null; }
   }
+  try {
+    document.addEventListener('WALLET_SWITCHED', function(){
+      _ctxClear();
+      autPendingOps = {};
+      autLoad().then(function(){ try { autRenderSidebar(); autRenderChat(); } catch(_e){} });
+    });
+    document.addEventListener('WALLET_DISCONNECTED', function(){
+      _ctxClear();
+      autPendingOps = {};
+    });
+  } catch(_e) {}
 
   // ══════════════════════════════════════════════════════════
   //  AUTONOMA v4 — Enhanced AI Agent Engine
@@ -43954,26 +43984,28 @@ const UBScreen = (function() {
           var targetIso = targetDate.toISOString();
           var rcptArr = sentAddr && sentAmt ? [{ addr: sentAddr, amount: sentAmt, note: 'Quick Schedule', chainId: 'Arc_Testnet', token: sentTok }] : [];
           var schedName = 'Quick ' + sentTok + ' send in ' + tNum + ' ' + (tUnit.indexOf('min')===0 ? 'min' : 'hr') + (sentAddr ? ' to ' + sentAddr.slice(0,6)+'...'+sentAddr.slice(-4) : '');
-          ScheduleEngine.create({
-            type: 'payment', name: schedName, token: sentTok, amount: sentAmt || 0, total: sentAmt || 0,
-            network: 'Arc_Testnet', fromNetwork: 'Arc_Testnet', toNetwork: 'Arc_Testnet',
-            recipients: rcptArr, address: sentAddr,
-            freq: 'once', maxEx: 1, gas: 0.10,
-            nextRun: targetIso, execCount: 0, executionHistory: [],
-            status: 'Active', created: new Date().toISOString(), createdBy: 'autonoma',
-            agentExecution: true, executionMode: 'agent', walletAddress: walletAddress || ''
-          });
-          schedules = ScheduleEngine.getAll();
-          try { if(typeof AgentScheduleExecutor !== 'undefined') AgentScheduleExecutor.start(); } catch(_e){}
-          return R.intro('I scheduled a payment of <strong>' + (sentAmt||'') + ' ' + sentTok + '</strong>' + (sentAddr ? ' to <code style="font-size:9px">' + sentAddr.slice(0,6) + '...' + sentAddr.slice(-4) + '</code>' : '') + '.') +
+          var oidQuick=opId();
+          autPendingOps[oidQuick]={execute:function(){
+            ScheduleEngine.create({
+              type: 'payment', name: schedName, token: sentTok, amount: sentAmt || 0, total: sentAmt || 0,
+              network: 'Arc_Testnet', fromNetwork: 'Arc_Testnet', toNetwork: 'Arc_Testnet',
+              recipients: rcptArr, address: sentAddr,
+              freq: 'once', maxEx: 1, gas: 0.10,
+              nextRun: targetIso, execCount: 0, executionHistory: [],
+              status: 'Active', created: new Date().toISOString(), createdBy: 'autonoma',
+              agentExecution: true, executionMode: 'agent', walletAddress: walletAddress || ''
+            });
+            schedules = ScheduleEngine.getAll();
+          }};
+          return R.intro('Confirm to schedule a payment of <strong>' + (sentAmt||'') + ' ' + sentTok + '</strong>' + (sentAddr ? ' to <code style="font-size:9px">' + sentAddr.slice(0,6) + '...' + sentAddr.slice(-4) + '</code>' : '') + '.') +
             R.card(R.head('clock','Quick Schedule Created',{text:'Auto-execute',cls:'live'}),
               R.row('Amount', (sentAmt||0).toFixed(2) + ' ' + sentTok, 'green') +
               (sentAddr ? R.row('To', sentAddr.slice(0,10) + '...' + sentAddr.slice(-6), 'teal') : '') +
               R.row('Executes in', tNum + ' ' + (tUnit.indexOf('min')===0 ? 'minute'+(tNum>1?'s':'') : 'hour'+(tNum>1?'s':'')), 'yellow') +
               R.row('ETA', targetDate.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true}), ''),
               R.actions(
-                {icon:'external-link',label:'View Schedule',cls:'primary',action:"showPage('schedule')"},
-                {icon:'x',label:'Cancel',cls:'danger',action:"autonomaSendQuick('cancel')"}
+                {icon:'check',label:'Confirm Schedule',cls:'confirm',action:"autConfirmOp('"+oidQuick+"')"},
+                {icon:'x',label:'Cancel',cls:'danger',action:"autCancelOp('"+oidQuick+"')"}
               ));
         }
       }
@@ -44272,81 +44304,30 @@ const UBScreen = (function() {
           ));
     }
 
-    // Direct execution: create the payment link
     const stepsHtml=_buildProgress(steps,0);
     try{
-      // Step 1: set up the form
-      const plAmount=document.getElementById('pl-amount');
-      const plLabel=document.getElementById('pl-label');
-      const plExpiry=document.getElementById('pl-expiry');
-
       const steps1=_buildProgress(steps,1);
-      const steps2=_buildProgress(steps,2);
-
-      // Pre-fill the form
-      if(plAmount) plAmount.value=amount;
-      if(plLabel) plLabel.value=label;
-      if(plExpiry && plExpiry.options.length>1) plExpiry.value=plExpiry.options[1].value; // 24h default
-
-      // Call createPayLink directly
-      if(typeof createPayLink==='function'){
-        createPayLink();
-        const steps3=_buildProgress(steps,3);
-
-        // Get the last created link
-        setTimeout(()=>{
-          try{
-            const lastLink=payLinks&&payLinks.length?payLinks[payLinks.length-1]:null;
-            if(lastLink){
-              const linkUrl=lastLink.url||(typeof buildPayLinkUrl==='function'?buildPayLinkUrl(lastLink.id):'');
-              const resultHtml=
-                '<div class="aut-result">'+
-                '<div class="aut-result-title"><i class="ti ti-check-circle"></i> Payment Link Created!</div>'+
-                '<div class="aut-result-body">'+
-                '<strong>Amount:</strong> $'+esc(String(amount))+' '+esc(token)+'<br>'+
-                '<strong>Label:</strong> '+esc(label)+'<br>'+
-                (linkUrl?'<strong>URL:</strong> <code>'+esc(linkUrl)+'</code><br>':'')+
-                '</div></div>';
-              // Render step completion then result
-              const c=document.getElementById('aut-messages');
-              if(c){
-                // Append the completion
-                const lastAi=c.querySelector('.aut-msg.ai:last-child .aut-msg-body');
-                if(lastAi){
-                  lastAi.innerHTML+=steps3+resultHtml;
-                  c.scrollTop=c.scrollHeight;
-                }
-              }
-            }
-          }catch(e2){}
-        },300);
-
-        return steps1+steps2+
-          R.intro('Creating your payment link...')+
-          R.card(R.head('link','Payment Link',{text:'Creating...',cls:'live'}),
-            R.row('Amount','<strong>$'+esc(String(amount))+' '+esc(token)+'</strong>','green')+
-            R.row('Label',esc(label),'')+
-            R.row('Token','USDC','teal')+
-            R.row('Network',R.chainPill('Arc Testnet','#ff0202'),''),
-            R.actions(
-              {icon:'external-link',label:'View Links',cls:'primary',action:"showPage('links')"},
-              {icon:'refresh',label:'Create Another',cls:'',action:"autonomaSendQuick('create payment link')"}
-            ));
-      }
-
-      // Fallback: route to links page with pre-filled values
-      const oid=opId();
-      autPendingOps[oid]={execute:()=>{showPage('links');setTimeout(()=>{const a=document.getElementById('pl-amount');if(a)a.value=amount;a.focus();const l=document.getElementById('pl-label');if(l)l.value=label;},200);}};
+      const oidLink=opId();
+      autPendingOps[oidLink]={execute:function(){
+        const plAmount=document.getElementById('pl-amount');
+        const plLabel=document.getElementById('pl-label');
+        const plExpiry=document.getElementById('pl-expiry');
+        if(plAmount) plAmount.value=amount;
+        if(plLabel) plLabel.value=label;
+        if(plExpiry && plExpiry.options.length>1) plExpiry.value=plExpiry.options[1].value;
+        if(typeof createPayLink==='function') createPayLink();
+        showPage('links');
+      }};
       return steps1+
-        R.intro('Opening payment link creator for your review:')+
-        R.card(R.head('link','Payment Link',{text:'Pending',cls:'pending'}),
+        R.intro('Confirm to create this payment link.')+
+        R.card(R.head('link','Payment Link',{text:'Confirm',cls:'pending'}),
           R.row('Amount','<strong>$'+esc(String(amount))+' '+esc(token)+'</strong>','green')+
           R.row('Label',esc(label),'')+
-          R.row('Token','USDC','teal')+
+          R.row('Token',esc(token),'teal')+
           R.row('Network',R.chainPill('Arc Testnet','#ff0202'),''),
           R.actions(
-            {icon:'check',label:'Open & Create',cls:'confirm',action:"autConfirmOp('"+oid+"')"},
-            {icon:'x',label:'Cancel',cls:'danger',action:"autCancelOp('"+oid+"')"}
+            {icon:'check',label:'Create Payment Link',cls:'confirm',action:"autConfirmOp('"+oidLink+"')"},
+            {icon:'x',label:'Cancel',cls:'danger',action:"autCancelOp('"+oidLink+"')"}
           ));
     }catch(e){
       return R.intro('I prepared the payment link form for you.')+
@@ -44462,27 +44443,25 @@ const UBScreen = (function() {
       recipientName: rcptName, recipientAddress: rcptAddr
     };
 
-    // Persist via ScheduleEngine (single source of truth)
-    ScheduleEngine.create(sched);
+    const oidSch=opId();
+    autPendingOps[oidSch]={execute:function(){
+      ScheduleEngine.create(sched);
+      try { schedules = ScheduleEngine.getAll(); } catch(_e){}
+      try{
+        var logEl = document.getElementById('sch-log');
+        if(logEl){
+          var empty = logEl.querySelector('[style*="text-align"]');
+          if(empty)empty.remove();
+          var entry = document.createElement('div');
+          entry.style.cssText='display:flex;align-items:center;gap:6px;font-size:9px;padding:5px 0;border-bottom:1px solid var(--border)';
+          entry.innerHTML='<i class="ti ti-robot" style="color:var(--purple);font-size:10px"></i><span style="flex:1">"'+escHtml(schName)+'" created by Autonoma ('+typeLabel+' · '+freqLabels[freq]+')</span><span style="color:var(--muted2)">'+new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})+'</span>';
+          logEl.prepend(entry);
+        }
+      }catch(_){}
+    }};
 
-    // Log creation
-    try{
-      var logEl = document.getElementById('sch-log');
-      if(logEl){
-        var empty = logEl.querySelector('[style*="text-align"]');
-        if(empty)empty.remove();
-        var entry = document.createElement('div');
-        entry.style.cssText='display:flex;align-items:center;gap:6px;font-size:9px;padding:5px 0;border-bottom:1px solid var(--border)';
-        entry.innerHTML='<i class="ti ti-robot" style="color:var(--purple);font-size:10px"></i><span style="flex:1">"'+escHtml(schName)+'" created by Autonoma ('+typeLabel+' · '+freqLabels[freq]+')</span><span style="color:var(--muted2)">'+new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})+'</span>';
-        logEl.prepend(entry);
-      }
-    }catch(_){}
-
-    // Update legacy reference — ScheduleEngine fires SCHEDULE_CREATED event automatically
-    schedules = ScheduleEngine.getAll();
-
-    return R.intro('Schedule created successfully!')+
-      R.card(R.head('calendar-check','Schedule '+typeLabel,{text:'Created',cls:'live'}),
+    return R.intro('Confirm to create this schedule.')+
+      R.card(R.head('calendar-check','Schedule '+typeLabel,{text:'Confirm',cls:'pending'}),
         R.row('Type',typeLabel,'yellow')+
         (rcptName ? R.row('Recipient',rcptName,'purple')+R.row('Address',rcptAddr?rcptAddr.slice(0,8)+'...'+rcptAddr.slice(-4):'—','teal') : '')+
         R.row('Amount',(amount||0).toFixed(2)+' '+token,'green')+
@@ -44490,8 +44469,8 @@ const UBScreen = (function() {
         R.row('Next Run',formatUSDateTime(nextRunIso),'')+
         R.row('Created','by Autonoma AI','purple'),
         R.actions(
-          {icon:'external-link',label:'View Schedules',cls:'primary',action:"showPage('schedule')"},
-          {icon:'refresh',label:'Create Another',cls:'',action:"autonomaSendQuick('schedule a payment of 50 USDC weekly')"}
+          {icon:'check',label:'Confirm Schedule',cls:'confirm',action:"autConfirmOp('"+oidSch+"')"},
+          {icon:'x',label:'Cancel',cls:'danger',action:"autCancelOp('"+oidSch+"')"}
         ));
   }
 
@@ -45242,7 +45221,9 @@ const UBScreen = (function() {
   // ── Safety check helpers (Phase 11) ──────────────────
   var _lastRecTime = 0;
   function _isFinancialIntent(intent){
-    var financial = ['SWAP_EXECUTE','BRIDGE','SEND_PAYMENT','MULTISEND','SWAP_GUIDE','ADD_LIQUIDITY','REMOVE_LIQUIDITY'];
+    var financial = ['SWAP_EXECUTE','BRIDGE','SEND_PAYMENT','MULTISEND','SWAP_GUIDE','ADD_LIQUIDITY','REMOVE_LIQUIDITY',
+      'CREATE_PAYMENT_LINK','CREATE_SCHEDULE','MASS_PAYMENT','BATCH_SWAP','BRIDGE_TURBO','CROSSCHAIN_PAYROLL',
+      'EXECUTE_SCHEDULES','EXECUTE_ALL_SCHEDULES','CROSS_CHAIN','MULTI_STEP_WORKFLOW'];
     return financial.indexOf(intent) !== -1;
   }
 
@@ -45954,7 +45935,6 @@ const UBScreen = (function() {
         } catch(e){}
       });
       try { schedules = ScheduleEngine.getAll(); if(typeof renderSchedules === 'function') renderSchedules(); } catch(e){}
-      try { if(typeof AgentScheduleExecutor !== 'undefined') AgentScheduleExecutor.start(); } catch(e){}
       autUI('ai',
         R.intro(mode === 'recurring' ? 'Created ' + created + ' recurring schedules.' : 'Scheduled ' + created + ' payments for execution.') +
         R.card(R.head('check','Operation Complete'),
@@ -45968,35 +45948,33 @@ const UBScreen = (function() {
     }
 
     if(mode === 'crosschain'){
-      if(typeof window !== 'undefined' && typeof window._agentExecuteBridge === 'function'){
-        (async function(){
-          var bridged = 0;
-          for(var i = 0; i < rows.length; i++){
-            var r = rows[i];
-            try {
-              var domain = {Base_Sepolia:6,Arbitrum_Sepolia:3,Ethereum_Sepolia:0,Optimism_Sepolia:2,Polygon_Amoy:7}[r._chain]||6;
-              autUI('ai',
-                R.intro('Executing crosschain ' + (i+1) + '/' + rows.length + '...') +
-                R.card(R.head('arrows-cross','Crosschain Bridge'),
-                  R.row('Progress',(i+1)+'/'+rows.length,'blue')+
-                  R.row('Amount',r._amount.toLocaleString('en-US',{maximumFractionDigits:2})+' '+r._token,'')+
-                  R.row('Destination',r._chain.replace('_',' ')+' → '+r.address.slice(0,6)+'...',''),
-                  R.actions({icon:'external-link',label:'View Bridge',cls:'primary',action:"showPage('bridge')"})
-                )
-              );
-              await window._agentExecuteBridge(r._amount,domain,r._chain.replace('_',' '),'doc_xc_'+Date.now()+'_'+i,5042002,r.address);
-              bridged++;
-            } catch(e){}
-          }
-          autUI('ai',
-            R.intro('Completed ' + bridged + ' crosschain bridge operations.') +
-            R.card(R.head('arrows-cross','Crosschain Bridge'),
-              R.row('Operations',bridged+'/'+rows.length,'green')+
-              R.row('Total',total.toLocaleString('en-US',{maximumFractionDigits:2}),'green'),
-              R.actions({icon:'external-link',label:'View Bridge',cls:'primary',action:"showPage('bridge')"})
-            )
-          );
-})();
+      if(typeof ScheduleEngine !== 'undefined'){
+        var createdXc = 0;
+        rows.forEach(function(r){
+          try {
+            ScheduleEngine.create({
+              type: 'crosschain', name: (r.note||'Doc Crosschain')+' to '+r.address.slice(0,6)+'...', token: r._token,
+              amount: r._amount, total: r._amount,
+              network: r._chain, fromNetwork: 'Arc_Testnet', toNetwork: r._chain,
+              recipients: [{ addr: r.address, amount: r._amount, note: r.note||'', chainId: r._chain, token: r._token }],
+              address: r.address, freq: 'once', maxEx: 1, gas: 0.10,
+              nextRun: new Date(Date.now() + 60000).toISOString(),
+              execCount: 0, executionHistory: [],
+              status: 'Active', created: new Date().toISOString(), createdBy: 'autonoma_doc',
+              agentExecution: true, walletAddress: (typeof walletAddress !== 'undefined' ? walletAddress : '')
+            });
+            createdXc++;
+          } catch(e){}
+        });
+        try { schedules = ScheduleEngine.getAll(); if(typeof renderSchedules === 'function') renderSchedules(); } catch(e){}
+        autUI('ai',
+          R.intro('Created ' + createdXc + ' crosschain schedules. They will not broadcast until you confirm execution in the Schedule tab.') +
+          R.card(R.head('arrows-cross','Crosschain Schedules'),
+            R.row('Created',createdXc+'/'+rows.length,'green')+
+            R.row('Total',total.toLocaleString('en-US',{maximumFractionDigits:2}),'green'),
+            R.actions({icon:'external-link',label:'View Schedules',cls:'primary',action:"showPage('schedule')"})
+          )
+        );
 
 // Agent Wallet recovery phrase backup prompt (runs after auto-create)
 setTimeout(function() {
@@ -46293,6 +46271,8 @@ setTimeout(function() {
     if(/\b(schedul\w*|agend\w*|recurring|recorrent\w*)\b/.test(low)) ops.push('scheduled');
     if(/\b(multisend|batch|lote|em massa|m[uú]ltiplos|v[aá]rios|diversos)\b/.test(low)) ops.push('multisend');
 
+    if(ops.indexOf('scheduled')!==-1 && ops.indexOf('payment')===-1) ops.push('payment');
+
     if(ops.length===0){
       return R.intro('What should I allow the Agent to do?')+
         R.card(R.head('question','Grant Agent Permission'),
@@ -46316,6 +46296,9 @@ setTimeout(function() {
     }
 
     var auth=AgentAuthorization.createAuthorization(authOpts);
+    if (ops.indexOf('scheduled') !== -1) {
+      try { if (typeof AgentScheduleExecutor !== 'undefined' && AgentScheduleExecutor.setAutoEnabled) AgentScheduleExecutor.setAutoEnabled(true); } catch(_e){}
+    }
     var allowedOps=AgentAuthorization.fmtAllowedOps(auth);
     return R.intro('<i class="ti ti-shield-check" style="color:#22c55e"></i> Agent authorized for <strong style="color:#06F7E9">'+allowedOps+'</strong>!')+
       '<div class="aut-rc" style="border-color:rgba(34,197,94,.2);margin-top:8px">'+
@@ -47134,19 +47117,8 @@ setTimeout(function() {
           summary.executed++;
           summary.results.push({ num: i+1, op: 'SWAP ' + swapAmt + ' ' + tIn + ' → ' + tOut, status: 'submitted', intentId: intentId || '' });
         } else {
-          try {
-            if(typeof _agentExecuteOp === 'function'){
-              await _agentExecuteOp('swap', swapAmt, tIn, JSON.stringify({swapTo: tOut}));
-              summary.executed++;
-              summary.results.push({ num: i+1, op: 'SWAP ' + swapAmt + ' ' + tIn + ' → ' + tOut, status: 'executed' });
-            } else {
-              summary.failed++;
-              summary.results.push({ num: i+1, op: 'SWAP ' + swapAmt + ' ' + tIn + ' → ' + tOut, status: 'failed', reason: 'Agent executor unavailable' });
-            }
-          } catch(swErr){
-            summary.failed++;
-            summary.results.push({ num: i+1, op: 'SWAP ' + swapAmt + ' ' + tIn + ' → ' + tOut, status: 'failed', reason: (swErr.message || 'Execution error').slice(0,80) });
-          }
+          summary.failed++;
+          summary.results.push({ num: i+1, op: 'SWAP ' + swapAmt + ' ' + tIn + ' → ' + tOut, status: 'failed', reason: 'AI Wallet did not accept the intent — Agent broadcast fallback is disabled' });
         }
 
         if(i < count - 1) await new Promise(function(r){ setTimeout(r, 1200); });
@@ -47745,7 +47717,13 @@ setTimeout(function() {
       var names = selected.map(function(c){ return c.name; }).join(', ');
       var addrs = selected.map(function(c){ return c.addr; }).join(' ');
 
-      var amt = _extractNumber(msg) || 100;
+      var amt = _extractNumber(msg);
+      if (!amt) {
+        return R.intro('How much should I send to each of these ' + selected.length + ' contact(s)?') +
+          R.card(R.head('users','Batch Payment — ' + selected.length + ' recipients',{text:'Need amount',cls:'pending'}),
+            selected.map(function(c, i){ return R.row((i+1)+'. '+esc(c.name), (c.addr||'').slice(0,6)+'...'+(c.addr||'').slice(-4), 'teal'); }).join(''),
+            R.actions({icon:'x',label:'Cancel',cls:'danger',action:"autonomaSendQuick('cancel')"}));
+      }
       var token = 'USDC';
       if (msg.toLowerCase().indexOf('eurc') !== -1) token = 'EURC';
       if (msg.toLowerCase().indexOf('cirbtc') !== -1) token = 'cirBTC';
@@ -47788,20 +47766,20 @@ setTimeout(function() {
 
   function _agentGetPrivateKey(){
     // [C1 FIX] Deprecated — use _agentGetSigner() instead which uses encrypted v2 storage.
-    // Kept for backwards compat only.
+    // v1 plaintext is migrated then deleted; never returned to callers.
     try {
-      var sess = JSON.parse(localStorage.getItem('elligentt_agent_session_v1'));
-      if(sess && sess.privateKey) {
-        // Migrate to encrypted v2 if AgentWalletManager is available
-        if(typeof AgentWalletManager !== 'undefined'){
-          try { AgentWalletManager._migrateV1Key(sess.privateKey); } catch(e) {}
+      var raw = localStorage.getItem('elligentt_agent_session_v1');
+      if(raw){
+        var sess = JSON.parse(raw);
+        if(sess && sess.privateKey) {
+          if(typeof AgentWalletManager !== 'undefined'){
+            try { AgentWalletManager._migrateV1Key(sess.privateKey); } catch(e) {}
+          }
         }
-        return sess.privateKey;
+        try { localStorage.removeItem('elligentt_agent_session_v1'); } catch(e) {}
       }
     } catch(e) {}
     if(typeof AgentWalletManager !== 'undefined'){
-      var w = AgentWalletManager.getOrCreateWallet();
-      if(w && w.privateKey) return w.privateKey;
       var sk = AgentWalletManager.getSessionKey();
       if(sk) return sk;
     }
@@ -47812,47 +47790,46 @@ setTimeout(function() {
    * [C1 FIX] Secure signer retrieval — uses encrypted v2 storage via AgentWalletManager.
    * Falls back to legacy v1 only if v2 is unavailable.
    */
-  async function _agentGetSigner(){
-    if(typeof AgentWalletManager !== 'undefined'){
-      try {
-        var signer = await AgentWalletManager.getSessionSigner();
-        if(signer) return signer;
-      } catch(e){}
-      // Sync fallback
-      try {
-        var key = _agentGetPrivateKey();
-        if(key){
-          if(typeof ethers !== 'undefined'){
-            var provider = _agentGetProvider();
-            return new ethers.Wallet(key, provider);
-          }
-        }
-      } catch(e){}
-    }
+  async function _agentGetSigner(provider){
+    if(typeof AgentWalletManager === 'undefined' || typeof AgentWalletManager.getSessionSigner !== 'function') return null;
+    try {
+      var signer = await AgentWalletManager.getSessionSigner(provider || _agentGetProvider());
+      if(signer) return signer;
+    } catch(e){}
     return null;
   }
 
-  /** [C1+A4 FIX] Get provider using RPCManager when available, with hardcoded fallback */
-  function _agentGetProvider(){
+  /** Provider for a CCTP chain. Defaults to Arc Testnet. */
+  function _agentGetProvider(chainId){
+    var cid = Number(chainId) || 5042002;
     try {
       if(typeof RPCManager !== 'undefined' && typeof RPCManager.getHealthyRPC === 'function'){
-        var rpc = RPCManager.getHealthyRPC(5042002);
+        var rpc = RPCManager.getHealthyRPC(cid);
         if(rpc) return new ethers.JsonRpcProvider(rpc);
       }
     } catch(e){}
+    var fallbackRpc = {
+      5042002: 'https://rpc.testnet.arc.network',
+      11155111: 'https://ethereum-sepolia-rpc.publicnode.com',
+      84532: 'https://sepolia.base.org',
+      421614: 'https://sepolia-rollup.arbitrum.io/rpc',
+      11155420: 'https://sepolia.optimism.io',
+      80002: 'https://rpc-amoy.polygon.technology'
+    };
+    var url = fallbackRpc[cid] || fallbackRpc[5042002];
     try {
-      if(typeof getCachedProvider === 'function') return getCachedProvider('https://rpc.testnet.arc.network');
+      if(typeof getCachedProvider === 'function') return getCachedProvider(url);
     } catch(e){}
-    return new ethers.JsonRpcProvider('https://rpc.testnet.arc.network');
+    return new ethers.JsonRpcProvider(url);
   }
 
   /** [C2 FIX] Re-validate authorization immediately before signing — TOCTOU guard */
-  function _agentRevalidateAuth(operation, amount, asset){
-    if(typeof AgentAuthorization === 'undefined') return { ok: true };
+  function _agentRevalidateAuth(operation, amount, asset, destination){
+    if(typeof AgentAuthorization === 'undefined') return { ok: false, reason: 'Authorization system unavailable' };
     try {
       var result = AgentAuthorization.validateExecution({
         operation: operation, amount: Number(amount) || 0, asset: asset || 'USDC',
-        network: 'Arc Testnet', contract: '', destination: ''
+        network: 'Arc Testnet', contract: '', destination: destination || ''
       });
       if(!result || !result.valid){
         return { ok: false, reason: (result && result.reason) || 'Authorization scope denied at signing time' };
@@ -47876,10 +47853,53 @@ setTimeout(function() {
     if(AgentWalletManager.isPaused()) return false;
     var agentAddr=AgentWalletManager.getAgentAddress();
     if(!agentAddr) return false;
-    if(typeof AgentAuthorization!=='undefined'){
-      return AgentAuthorization.hasOperationAuth(operation);
+    if(typeof AgentAuthorization==='undefined') return false;
+    return AgentAuthorization.hasOperationAuth(operation);
+  }
+
+  function _agentMarkBroadcastSubmitted(executionId, txHash){
+    try {
+      if (typeof AutonomaExecutionGate !== 'undefined' && AutonomaExecutionGate.markSubmitted) {
+        AutonomaExecutionGate.markSubmitted(executionId, txHash);
+      }
+    } catch(e){}
+  }
+
+  function _agentGuardBroadcast(operation, amount, asset, destination, extra){
+    extra = extra || {};
+    if (typeof AutonomaExecutionGate === 'undefined' || typeof AutonomaExecutionGate.evaluate !== 'function') {
+      return { ok: false, reason: 'AutonomaExecutionGate unavailable' };
     }
-    return true;
+    var dest = destination || extra.destination || '';
+    if (dest && !/^0x[a-fA-F0-9]{40}$/i.test(String(dest))) dest = extra.recipient || '';
+    var result = AutonomaExecutionGate.evaluate({
+      operation: operation,
+      amount: amount,
+      asset: asset || 'USDC',
+      destination: dest,
+      executionId: extra.executionId,
+      sourceChainId: extra.sourceChainId,
+      destChainId: extra.destChainId,
+      destDomain: extra.destDomain,
+      network: extra.network || 'Arc Testnet',
+      userWallet: extra.userWallet,
+      simulationHash: extra.simulationHash || null
+    });
+    if (!result || !result.ok) {
+      var reason = (result && result.reason) || 'Execution blocked';
+      if (result && result.duplicate) {
+        reason = 'Autonomous financial execution is currently blocked because this intent was already submitted.';
+      }
+      return { ok: false, reason: reason, executionId: result && result.executionId, duplicate: !!(result && result.duplicate) };
+    }
+    return { ok: true, executionId: result.executionId, lockKey: result.executionId };
+  }
+
+  async function _agentBroadcast(rawTx, signer, provider){
+    if (typeof AgentScheduleExecutor === 'undefined' || typeof AgentScheduleExecutor.broadcast !== 'function') {
+      throw new Error('Central execution authority unavailable');
+    }
+    return AgentScheduleExecutor.broadcast(rawTx, signer, provider);
   }
 
   function _agentExecutionBanner(operation, amount, asset){
@@ -47925,9 +47945,20 @@ setTimeout(function() {
     var execId = 'exec_' + Date.now();
     _agentStopRequested = false;
 
+    var paramsEarly = null;
+    try { paramsEarly = typeof paramsJson === 'string' ? JSON.parse(paramsJson) : paramsJson; } catch(e){}
+    var destEarly = '';
+    if (paramsEarly && typeof paramsEarly === 'object') destEarly = paramsEarly.address || paramsEarly.recipient || '';
+    else if (typeof paramsEarly === 'string') destEarly = paramsEarly;
+    var opNormExec = {add_liquidity:'swap', remove_liquidity:'swap', turbo:'bridge', multisend:'payment'};
+    var guardOp = opNormExec[operation] || operation;
+    var guard = _agentGuardBroadcast(guardOp, amount, asset, destEarly, { destination: destEarly });
+    if(!guard.ok){ _agentStateMsg(execId, 'REJECTED', guard.reason); return { ok: false, error: guard.reason, duplicate: !!guard.duplicate }; }
+    execId = guard.executionId || execId;
+
     // [C1 FIX] Use encrypted v2 signer via AgentWalletManager instead of plaintext localStorage
     var signer = await _agentGetSigner();
-    if(!signer){ return; }
+    if(!signer){ return { ok: false, error: 'Agent signer unavailable' }; }
     if (_agentStopCheck(execId)) return;
 
     var provider = signer.provider;
@@ -47967,12 +47998,11 @@ setTimeout(function() {
           maxPriorityFeePerGas: ethers.toBeHex(gasParams.maxPriorityFeePerGas)
         };
 
-        if(!_agentPreValidate(execId, 'payment', rawTx.maxFeePerGas, rawTx.gasLimit)) return;
-        // [C2 FIX] TOCTOU: re-validate authorization immediately before signing
-        var recheck = _agentRevalidateAuth('payment', amount, asset);
-        if(!recheck.ok){ _agentStateMsg(execId, 'REJECTED', recheck.reason); return; }
-        var signedTx = await signer.signTransaction(rawTx);
-        txHash = await provider.send('eth_sendRawTransaction', [signedTx]);
+        if(!_agentPreValidate(execId, 'payment', rawTx.maxFeePerGas, rawTx.gasLimit)) return { ok: false, error: 'Pre-execution validation failed' };
+        var recheck = _agentRevalidateAuth('payment', amount, asset, dest);
+        if(!recheck.ok){ _agentStateMsg(execId, 'REJECTED', recheck.reason); return { ok: false, error: recheck.reason }; }
+        txHash = await _agentBroadcast(rawTx, signer, provider);
+        _agentMarkBroadcastSubmitted(guard.executionId, txHash);
       } catch(sendErr){
         var eMsg = (sendErr.message || String(sendErr)).substring(0, 150);
         if(/user.rejected|denied/i.test(eMsg)) _agentStateMsg(execId, 'REJECTED', 'User rejected');
@@ -47991,7 +48021,7 @@ setTimeout(function() {
 
       var receipt;
       try { receipt = await provider.waitForTransaction(txHash, 1, 60000); }
-      catch(e){ _agentStateMsg(execId, 'DROPPED', 'Not confirmed'); return; }
+      catch(e){ _agentStateMsg(execId, 'DROPPED', 'Not confirmed'); return { ok: false, error: 'Not confirmed', txHash: txHash }; }
 
       if(!receipt || receipt.status !== 1){
         _agentStateMsg(execId, 'REVERTED', '<a href="https://testnet.arcscan.app/tx/'+txHash+'" target="_blank" style="color:#ef4444">View on ArcScan ↗</a>');
@@ -48188,6 +48218,9 @@ setTimeout(function() {
 
   async function _agentExecuteSwap(amount, tokenIn, tokenOut, calldataId){
     var execId = 'exec_' + Date.now();
+    var swapGuard = _agentGuardBroadcast('swap', amount, tokenIn, '');
+    if(!swapGuard.ok){ _agentStateMsg(execId, 'REJECTED', swapGuard.reason); return { ok: false, error: swapGuard.reason, duplicate: !!swapGuard.duplicate }; }
+    execId = swapGuard.executionId || execId;
 
     // [C1 FIX] Use encrypted v2 signer via AgentWalletManager
     var signer = await _agentGetSigner();
@@ -48250,11 +48283,11 @@ setTimeout(function() {
 
         if(!_agentPreValidate(execId, 'swap', rawTx.maxFeePerGas, rawTx.gasLimit)) return { ok: false, error: 'Pre-execution validation failed' };
         // [C2 FIX] TOCTOU: re-validate swap authorization immediately before signing
-        var swapRecheck = _agentRevalidateAuth('swap', amount, tokenIn);
+        var swapRecheck = _agentRevalidateAuth('swap', amount, tokenIn, '');
         if(!swapRecheck.ok){ _agentStateMsg(execId, 'REJECTED', swapRecheck.reason); return { ok: false, error: swapRecheck.reason }; }
-        var signedTx = await signer.signTransaction(rawTx);
-        var txHash = await provider.send('eth_sendRawTransaction', [signedTx]);
+        var txHash = await _agentBroadcast(rawTx, signer, provider);
         lastTxHash = txHash;
+        _agentMarkBroadcastSubmitted(swapGuard.executionId, txHash);
 
         _addAgentResultMsg(
           '<div style="font-size:10px"><span style="color:#06F7E9">Step '+(i+1)+': '+step.label+' submitted</span><br>'+
@@ -48332,6 +48365,8 @@ setTimeout(function() {
 
   async function _agentExecuteBridge(amount, destDomain, destChainName, calldataId, sourceChainId, recipientAddr){
     var execId = 'exec_' + Date.now();
+    var brGuard = _agentGuardBroadcast('bridge', amount, 'USDC', recipientAddr || destChainName || '');
+    if(!brGuard.ok){ _agentStateMsg(execId, 'REJECTED', brGuard.reason); return { ok: false, error: brGuard.reason }; }
     var chainId = Number(sourceChainId) || 5042002; // default: Arc Testnet
     var cctpCfg = (typeof ElligenteCCTP !== 'undefined' && ElligenteCCTP.CCTP_CONFIG) ? ElligenteCCTP.CCTP_CONFIG[String(chainId)] : null;
     if(!cctpCfg){
@@ -48435,9 +48470,9 @@ setTimeout(function() {
         };
 
         if(!_agentPreValidate(execId, 'bridge', rawTx.maxFeePerGas, rawTx.gasLimit)) return { ok: false, error: 'Pre-execution validation failed' };
-        var signedTx = await signer.signTransaction(rawTx);
-        var txHash = await provider.send('eth_sendRawTransaction', [signedTx]);
+        var txHash = await _agentBroadcast(rawTx, signer, provider);
         lastTxHash = txHash;
+        _agentMarkBroadcastSubmitted(brGuard.executionId, txHash);
 
         _addAgentResultMsg(
           '<div style="font-size:10px"><span style="color:#06F7E9">Step '+(i+1)+': '+step.label+' submitted</span><br>'+
@@ -48610,6 +48645,8 @@ setTimeout(function() {
 
   async function _agentExecuteTurboBridge(amount, fromChainId, fromChainName, toChainName, calldataId){
     var execId = 'exec_' + Date.now();
+    var tbGuard = _agentGuardBroadcast('bridge', amount, 'USDC', toChainName || '');
+    if(!tbGuard.ok){ _agentStateMsg(execId, 'REJECTED', tbGuard.reason); return { ok: false, error: tbGuard.reason }; }
     var chainId = Number(fromChainId) || 11155111; // default: Ethereum Sepolia
     var cctpCfg = (typeof ElligenteCCTP !== 'undefined' && ElligenteCCTP.CCTP_CONFIG) ? ElligenteCCTP.CCTP_CONFIG[String(chainId)] : null;
     var fallbackConfigs = {
@@ -48692,9 +48729,9 @@ setTimeout(function() {
         var nonce = await provider.send('eth_getTransactionCount', [agentAddr, 'pending']);
         var rawTx = { type:2, chainId:chainId, to:contractAddr, data:calldata, value:'0x0', gasLimit:ethers.toBeHex(gasParams.gasLimit), nonce:nonce, maxFeePerGas:ethers.toBeHex(gasParams.maxFeePerGas), maxPriorityFeePerGas:ethers.toBeHex(gasParams.maxPriorityFeePerGas) };
         if(!_agentPreValidate(execId, 'bridge', rawTx.maxFeePerGas, rawTx.gasLimit)) return { ok: false, error: 'Pre-execution validation failed' };
-        var signedTx = await signer.signTransaction(rawTx);
-        var txHash = await provider.send('eth_sendRawTransaction', [signedTx]);
+        var txHash = await _agentBroadcast(rawTx, signer, provider);
         lastTxHash = txHash;
+        _agentMarkBroadcastSubmitted(tbGuard.executionId, txHash);
         _addAgentResultMsg('<div style="font-size:10px"><span style="color:#06F7E9">Step '+(i+1)+': '+step.label+' submitted</span><br><code style="font-size:8px;color:#a78bfa">'+txHash+'</code><br><a href="'+EXPLORER_URL+'/tx/'+txHash+'" target="_blank" style="color:#a78bfa;font-size:8px">View on Explorer ↗</a></div>', 'pending');
       } catch(sendErr){
         var eMsg = (sendErr.message || String(sendErr)).substring(0, 150);
@@ -48794,6 +48831,8 @@ setTimeout(function() {
 
   async function _agentExecuteLiquidity(operation, amountA, tokenA, amountB, tokenB, poolId){
     var execId = 'exec_' + Date.now();
+    var liqGuard = _agentGuardBroadcast('swap', amountA, tokenA, poolId || '');
+    if(!liqGuard.ok){ _agentStateMsg(execId, 'REJECTED', liqGuard.reason); return { ok: false, error: liqGuard.reason }; }
 
     // [C1 FIX] Use encrypted v2 signer via AgentWalletManager
     var signer = await _agentGetSigner();
@@ -48895,9 +48934,9 @@ setTimeout(function() {
           maxPriorityFeePerGas: ethers.toBeHex(gasParams.maxPriorityFeePerGas)
         };
         if(!_agentPreValidate(execId, opType||'liquidity', rawTx.maxFeePerGas, rawTx.gasLimit)) return;
-        var signedTx = await signer.signTransaction(rawTx);
-        var txHash = await provider.send('eth_sendRawTransaction', [signedTx]);
+        var txHash = await _agentBroadcast(rawTx, signer, provider);
         lastTxHash = txHash;
+        _agentMarkBroadcastSubmitted(liqGuard.executionId, txHash);
         _addAgentResultMsg('<div style="font-size:10px"><span style="color:#06F7E9">Step '+(i+1)+': '+step.label+' submitted</span><br><code style="font-size:8px;color:#a78bfa">'+txHash+'</code></div>', 'pending');
       } catch(sendErr){
         var eMsg = (sendErr.message || String(sendErr)).substring(0, 150);
@@ -48950,6 +48989,11 @@ setTimeout(function() {
 
   async function _agentExecuteMultiSend(token, recipients, amounts){
     var execId = 'exec_' + Date.now();
+    var msDest = (Array.isArray(recipients) && recipients[0]) ? recipients[0] : '';
+    var msTotal = 0;
+    if (Array.isArray(amounts)) { for (var _mi=0;_mi<amounts.length;_mi++) msTotal += Number(amounts[_mi])||0; }
+    var msGuard = _agentGuardBroadcast('payment', msTotal, token, msDest);
+    if(!msGuard.ok){ _agentStateMsg(execId, 'REJECTED', msGuard.reason); return { ok: false, error: msGuard.reason }; }
 
     // [C1 FIX] Use encrypted v2 signer via AgentWalletManager
     var signer = await _agentGetSigner();
@@ -49010,9 +49054,9 @@ setTimeout(function() {
         maxPriorityFeePerGas: ethers.toBeHex(gasParams.maxPriorityFeePerGas)
       };
       if(!_agentPreValidate(execId, 'multisend', rawTx.maxFeePerGas, rawTx.gasLimit)) return { ok: false, error: 'Pre-execution validation failed (approve)' };
-      var signedTx = await signer.signTransaction(rawTx);
-      var txHash = await provider.send('eth_sendRawTransaction', [signedTx]);
+      var txHash = await _agentBroadcast(rawTx, signer, provider);
       lastTxHash = txHash;
+      _agentMarkBroadcastSubmitted(msGuard.executionId, txHash);
       _addAgentResultMsg('<div style="font-size:10px"><span style="color:#06F7E9">Step 1: Approve submitted</span><br><code style="font-size:8px;color:#a78bfa">'+txHash+'</code></div>', 'pending');
     } catch(sendErr){
       _agentStateMsg(execId, 'FAILED', (sendErr.message||String(sendErr)).substring(0,150));
@@ -49045,8 +49089,7 @@ setTimeout(function() {
         maxPriorityFeePerGas: ethers.toBeHex(gasParams2.maxPriorityFeePerGas)
       };
       if(!_agentPreValidate(execId, 'multisend', rawTx2.maxFeePerGas, rawTx2.gasLimit)) return { ok: false, error: 'Pre-execution validation failed (multisend)' };
-      var signedTx2 = await signer.signTransaction(rawTx2);
-      var txHash2 = await provider.send('eth_sendRawTransaction', [signedTx2]);
+      var txHash2 = await _agentBroadcast(rawTx2, signer, provider);
       lastTxHash = txHash2;
       _addAgentResultMsg('<div style="font-size:10px"><span style="color:#06F7E9">Step 2: Multi-send submitted</span><br><code style="font-size:8px;color:#a78bfa">'+txHash2+'</code><br><a href="https://testnet.arcscan.app/tx/'+txHash2+'" target="_blank" style="color:#a78bfa;font-size:8px">View on ArcScan →</a></div>', 'pending');
     } catch(sendErr){
@@ -49577,44 +49620,43 @@ const AutonomaAgent = (() => {
             rcptList = [{ addr: rcptAddress, amount: amount, note: rcptName, chainId: rcptResolved.chainId || 'Arc_Testnet', token: token }];
           }
 
+          window._pendingAgentSchedule = {
+            type: schType, name: name, token: token, amount: amount, total: amount,
+            network: network, fromNetwork: fromNet, toNetwork: toNet,
+            swapToToken: schType === 'swap' ? (token === 'USDC' ? 'EURC' : 'USDC') : undefined,
+            recipients: rcptList, address: rcptAddress,
+            freq: freq, maxEx: 0, gas: 0.10,
+            nextRun: new Date(sch.when).toISOString(),
+            execCount: 0, executionHistory: [],
+            status: 'Active',
+            created: new Date().toISOString(),
+            createdBy: 'autonoma',
+            agentExecution: true,
+            walletAddress: (typeof walletAddress !== 'undefined') ? (walletAddress || '') : '',
+            recipientName: rcptName, recipientAddress: rcptAddress
+          };
           if (typeof ScheduleEngine !== 'undefined' && ScheduleEngine.create) {
-            ScheduleEngine.create({
-              type: schType, name: name, token: token, amount: amount, total: amount,
-              network: network, fromNetwork: fromNet, toNetwork: toNet,
-              swapToToken: schType === 'swap' ? (token === 'USDC' ? 'EURC' : 'USDC') : undefined,
-              recipients: rcptList, address: rcptAddress,
-              freq: freq, maxEx: 0, gas: 0.10,
-              nextRun: new Date(sch.when).toISOString(),
-              execCount: 0, executionHistory: [],
-              status: 'Active',
-              created: new Date().toISOString(),
-              createdBy: 'autonoma',
-              agentExecution: true,
-              walletAddress: (typeof walletAddress !== 'undefined') ? (walletAddress || '') : '',
-              recipientName: rcptName, recipientAddress: rcptAddress
-            });
-            _log2('schedule:engine', schType + ' ' + (amount||0) + ' ' + token + ' @ ' + freq + (rcptName ? (' for ' + rcptName) : ''));
+            window._autConfirmAgentSchedule = function(){
+              try {
+                if (window._pendingAgentSchedule) ScheduleEngine.create(window._pendingAgentSchedule);
+                window._pendingAgentSchedule = null;
+              } catch(e) { _log2('schedule:engine:error', null, e); }
+            };
+            _log2('schedule:engine:pending', schType + ' ' + (amount||0) + ' ' + token + ' @ ' + freq + (rcptName ? (' for ' + rcptName) : ''));
           }
         } catch(e) { _log2('schedule:engine:error', null, e); }
       })();
 
       _log2('schedule', p.tool+' @ '+new Date(sch.when).toISOString());
-      return card(head('calendar-plus','Schedule Created',{text:sch.type,cls:'live'}),
+      return card(head('calendar-plus','Confirm Schedule',{text:sch.type,cls:'pending'}),
         row('Type', (function(){var m={payment:'Payment',bridge:'Bridge',swap:'Swap',crosschain:'CrossChain',multisend:'MultiSend',link_payment:'Payment Link'}; var t='payment'; if(/\b(bridge|ponte)\b/.test(low))t='bridge';else if(/\b(swap|troc)\b/.test(low))t='swap';else if(/\b(cross[ -]?chain)\b/.test(low))t='crosschain';else if(/\b(multi[ -]?send|batch|lote|vários)\b/.test(low))t='multisend';else if(/\b(link|payment link)\b/.test(low))t='link_payment';return m[t]||t;})(),'yellow') +
         (rcptName ? row('Recipient', rcptName, 'purple') + row('Address', rcptAddress ? rcptAddress.slice(0,8)+'...'+rcptAddress.slice(-4) : '—', 'teal') : '') +
         row('Amount', (parseFloat(p.params.amount)||0).toFixed(2)+' '+(/\beurc\b/i.test(raw)?'EURC':/\bcirbtc\b/i.test(raw)?'cirBTC':'USDC'),'green') +
         row('Frequency', sch.type==='daily'?'Daily':sch.type==='weekly'?'Weekly':sch.type==='monthly'?'Monthly':sch.type==='biweekly'?'Bi-weekly':'One-time','teal') +
         row('When', new Date(sch.when).toLocaleString('en-US',{month:'2-digit',day:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit',hour12:true}),'') +
-        row('Status','Active — view in Schedule page','green') +
-        (function(){
-          try {
-            if (typeof AgentScheduleExecutor !== 'undefined' && AgentScheduleExecutor.hasScheduledAuth()) {
-              return intro('Assigned to the Agent Wallet: it will auto-execute on-chain when due, within your authorized limits (revocable anytime).');
-            }
-          } catch(e) {}
-          return intro('Assigned to the Agent Wallet. To enable autonomous execution say "allow agent to execute schedules" — until authorized I will notify you to run it manually.');
-        })(),
-        acts({icon:'external-link',label:'View Schedules',cls:'primary',action:"showPage('schedule')"},
+        row('Status','Waiting for confirmation','yellow') +
+        intro('Nothing is created until you confirm. Autonomous execution also requires "allow agent to execute schedules".'),
+        acts({icon:'check',label:'Confirm Schedule',cls:'confirm',action:"window._autConfirmAgentSchedule && window._autConfirmAgentSchedule()"},
              {icon:'x',label:'Cancel',cls:'',action:"autonomaSendQuick('cancel task "+id+"')"}));
     }
 

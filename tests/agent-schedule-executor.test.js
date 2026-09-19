@@ -153,6 +153,24 @@ beforeEach(() => {
 });
 
 describe('AgentScheduleExecutor — authorization gating', () => {
+  it('does not treat payment/swap/bridge auth as scheduled auth', () => {
+    const env = boot();
+    env.auth.createAuthorization({
+      maxSpending: 500, dailyLimit: 200,
+      allowedTokens: ['USDC'], allowedNetworks: ['Arc Testnet'],
+      allowedOperations: ['payment'], allowPayments: true, allowSwap: true, allowBridge: true,
+      allowScheduled: false, durationMs: 3600000,
+    });
+    expect(env.executor.hasScheduledAuth()).toBe(false);
+  });
+
+  it('auto-execution is opt-in (unset key is disabled)', () => {
+    const env = boot();
+    expect(env.executor.isAutoEnabled()).toBe(false);
+    env.executor.setAutoEnabled(true);
+    expect(env.executor.isAutoEnabled()).toBe(true);
+  });
+
   it('never executes without an active scheduled authorization', async () => {
     const env = boot();
     const summary = await env.executor.tickNow();
@@ -626,7 +644,7 @@ describe('Schedules tab + Autonoma wiring (index.html)', () => {
   });
 
   it('chat-created schedules are assigned to the Agent Wallet too', () => {
-    const fn = html.slice(html.indexOf('function _agentScheduleToEngine'), html.indexOf('function _agentScheduleToEngine') + 6000);
+    const fn = srcHtml.slice(srcHtml.indexOf('function _agentScheduleToEngine'), srcHtml.indexOf('function _agentScheduleToEngine') + 6000);
     expect(fn).toContain("createdBy: 'autonoma'");
     expect(fn).toContain('agentExecution: true');
   });
@@ -644,12 +662,12 @@ describe('Schedules tab + Autonoma wiring (index.html)', () => {
   });
 
   it('Autonoma "allow agent" understands scheduled execution grants', () => {
-    const fn = html.slice(html.indexOf('function _handleAgentAllow'), html.indexOf('function _handleAgentLimit'));
+    const fn = srcHtml.slice(srcHtml.indexOf('function _handleAgentAllow'), srcHtml.indexOf('function _handleAgentLimit'));
     expect(fn).toContain("ops.push('scheduled')");
   });
 
   it('Autonoma "execute schedules" integrates the Agent Wallet executor', () => {
-    const fn = html.slice(html.indexOf('function _handleExecuteSchedules'), html.indexOf('function _handleMultiStepWorkflow'));
+    const fn = srcHtml.slice(srcHtml.indexOf('function _handleExecuteSchedules'), srcHtml.indexOf('function _handleMultiStepWorkflow'));
     expect(fn).toContain('AgentScheduleExecutor.getDueSchedules');
     expect(fn).toContain('AgentScheduleExecutor.tickNow');
     expect(fn).toContain('hasScheduledAuth');

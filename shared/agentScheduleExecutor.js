@@ -90,7 +90,7 @@
   }
 
   function isAutoEnabled(){
-    try { return localStorage.getItem(ENABLED_KEY) !== 'off'; } catch(e){ return true; }
+    try { return localStorage.getItem(ENABLED_KEY) === 'on'; } catch(e){ return false; }
   }
 
   function setAutoEnabled(on){
@@ -260,12 +260,8 @@
     var az = _authz();
     if (!az) return false;
     try {
-      if (az.hasOperationAuth('scheduled')) return true;
-      if (az.hasOperationAuth('payment')) return true;
-      if (az.hasOperationAuth('swap')) return true;
-      if (az.hasOperationAuth('bridge')) return true;
+      return az.hasOperationAuth('scheduled') === true;
     } catch(e){ return false; }
-    return false;
   }
 
   /* ÔöÇÔöÇ Validation pipeline (returns {ok, reason, auth, transfers, token} ) ÔöÇÔöÇ */
@@ -408,7 +404,7 @@
         return { ok: false, reason: 'Policy: ' + reasons, report: report };
       }
       return { ok: true, report: report };
-    } catch(e){ return { ok: true, report: null }; }
+    } catch(e){ return { ok: false, reason: 'Policy engine error: ' + ((e && (e.message || e)) || 'unknown'), report: null }; }
   }
 
   /* ÔöÇÔöÇ Broadcast one ERC-20 transfer signed by the Agent Wallet ÔöÇÔöÇ */
@@ -459,6 +455,14 @@
     var signedTx = await signer.signTransaction(rawTx);
     var txHash = await provider.send('eth_sendRawTransaction', [signedTx]);
     return txHash;
+  }
+
+  /* Chat/adapter entry to the SAME broadcast authority. Does not touch schedule ledger. */
+  async function broadcast(rawTx, signer, provider){
+    if (!rawTx) throw new Error('broadcast: missing rawTx');
+    if (!signer || typeof signer.signTransaction !== 'function') throw new Error('broadcast: missing signer');
+    if (!provider || typeof provider.send !== 'function') throw new Error('broadcast: missing provider');
+    return _signAndSend(signer, provider, rawTx);
   }
 
   function _txFingerprint(from, nonce, to, data){
@@ -1094,8 +1098,8 @@
       return { status: 'failed', reason: delFailReason };
     }
 
-    if (delResult && (delResult === false || delResult.ok === false || delResult.success === false)) {
-      var failReason = (delResult && (delResult.reason || delResult.error || delResult.message)) || 'Unknown delegation failure';
+    if (!delResult || delResult.ok !== true || !delResult.txHash) {
+      var failReason = (delResult && (delResult.reason || delResult.error || delResult.message)) || 'Delegated execution did not return a confirmed txHash';
       ledger[key] = { status: 'failed', reason: failReason, ts: Date.now(), attempts: attempts };
       _saveLedger();
       _recordOutcome(sched, v.auth, v.total, v.token, 'failed', delResult && delResult.txHash || null, Date.now() - startTime, 0, failReason, { token: v.token, amount: v.total });
@@ -1129,10 +1133,10 @@
     return false;
   }
 
-  async function _tick(){
+  async function _tick(opts){
     if (_ticking) return { status: 'busy' };
     if (_isEmergencyStopped()) return { status: 'emergency_stopped' };
-    if (!isAutoEnabled()) return { status: 'disabled' };
+    if (!(opts && opts.force) && !isAutoEnabled()) return { status: 'disabled' };
     var eng = _engine();
     var E = _ethers();
     if (!eng || !E || !_wm() || !_authz()) return { status: 'deps_missing' };
@@ -1173,7 +1177,7 @@
 
   function isRunning(){ return !!_timer; }
 
-  function tickNow(){ return _tick(); }
+  function tickNow(){ return _tick({ force: true }); }
 
   function getExecutionLog(limit){
     var keys = Object.keys(ledger);
@@ -1208,6 +1212,7 @@
     getNotifications: getNotifications,
     setAutoEnabled: setAutoEnabled,
     isAutoEnabled: isAutoEnabled,
+    broadcast: broadcast,
     SUPPORTED_TYPES: SUPPORTED_TYPES.slice(),
     ARC_CHAIN_ID: ARC_CHAIN_ID,
     version: '1.0.0'

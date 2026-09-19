@@ -90,10 +90,14 @@
       bridgeAvailable: true,
       gasEstimate: 'N/A'
     };
-    if(typeof document !== 'undefined'){
-      var balEl = document.getElementById('sb-bal');
-      if(balEl) state.balances.USDC = balEl.textContent || '—';
-    }
+    try {
+      if (typeof FinancialContext !== 'undefined' && typeof FinancialContext.getSnapshot === 'function') {
+        var snap = FinancialContext.getSnapshot();
+        if (snap && snap.balance && snap.balance.personalBalances && snap.balance.personalBalances.USDC != null) {
+          state.balances.USDC = snap.balance.personalBalances.USDC;
+        }
+      }
+    } catch(e){}
     // Enrich with Financial OS context when available
     try {
       if (typeof FinancialContext !== 'undefined') {

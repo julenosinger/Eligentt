@@ -117,7 +117,7 @@
     // 4. Simulation success
     if(defaults.requireSimulation&&opts.simulationHash){
       results.push({rule:'Simulation',passed:true,reason:'Simulation hash: '+opts.simulationHash.substring(0,12)+'...'});
-    } else if(defaults.requireSimulation&&!opts.simulationHash&&opts.operation!=='payment'&&opts.operation!=='swap'){
+    } else if(defaults.requireSimulation&&!opts.simulationHash&&opts.operation!=='payment'&&opts.operation!=='swap'&&opts.operation!=='bridge'&&opts.operation!=='crosschain'&&opts.operation!=='multisend'){
       results.push({rule:'Simulation',passed:false,reason:'No simulation performed'});
       allValid=false;
     }

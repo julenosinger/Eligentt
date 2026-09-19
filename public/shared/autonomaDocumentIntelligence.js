@@ -442,20 +442,25 @@
     }
 
     if (plan.mode === 'crosschain') {
-      if (typeof window !== 'undefined' && typeof window._agentExecuteBridge === 'function') {
-        (async function(){
-          for(var i = 0; i < plan.rows.length; i++){
-            var r = plan.rows[i];
-            try {
-              var domain = {Base_Sepolia:6, Arbitrum_Sepolia:3, Ethereum_Sepolia:0, Optimism_Sepolia:2, Polygon_Amoy:7}[r._chain] || 6;
-              await window._agentExecuteBridge(r._amount, domain, r._chain.replace('_',' '), 'doc_crosschain_' + Date.now() + '_' + i, 5042002, r.address);
-              results.success++;
-            } catch(e) { results.failed++; results.errors.push('Crosschain for ' + r.address + ': ' + (e.message || 'error')); }
-          }
-        })();
-      } else {
-        return { success: 0, failed: plan.rows.length, errors: ['Crosschain engine unavailable'] };
-      }
+      if (typeof ScheduleEngine === 'undefined') return { success: 0, failed: plan.rows.length, errors: ['ScheduleEngine unavailable'] };
+      plan.rows.forEach(function(r){
+        try {
+          var recips = [{ addr: r.address, amount: r._amount, note: r.note || '', chainId: r._chain, token: r._token }];
+          ScheduleEngine.create({
+            type: 'crosschain', name: (r.note || 'Crosschain Payment'), token: r._token,
+            amount: r._amount, total: r._amount,
+            network: r._chain, fromNetwork: 'Arc_Testnet', toNetwork: r._chain,
+            recipients: recips, address: r.address,
+            freq: 'once', maxEx: 1, gas: 0.10,
+            nextRun: new Date(Date.now() + 60000).toISOString(),
+            execCount: 0, executionHistory: [],
+            status: 'Active', created: new Date().toISOString(), createdBy: 'autonoma',
+            agentExecution: true, walletAddress: (typeof walletAddress !== 'undefined' ? walletAddress : '')
+          });
+          results.success++;
+        } catch(e) { results.failed++; results.errors.push('Crosschain for ' + r.address + ': ' + (e.message || 'error')); }
+      });
+      try { schedules = ScheduleEngine.getAll(); if (typeof renderSchedules === 'function') renderSchedules(); } catch(e){}
       return results;
     }
 

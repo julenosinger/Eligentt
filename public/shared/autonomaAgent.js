@@ -187,12 +187,7 @@
           }
         }
       } catch(e){}
-      // Fallback to DOM element
-      if(balFloat === null){
-        var balEl = document.getElementById('sb-bal');
-        var balance = balEl ? parseFloat(balEl.textContent) : null;
-        if(balance !== null && !isNaN(balance)) balFloat = balance;
-      }
+      // Do not use DOM (#sb-bal) as financial truth.
       if(balFloat !== null && !isNaN(balFloat) && balFloat < 10 && balFloat > 0 && !wasShown('low_bal', 1800000)){
         alerts.push({ type: 'low_balance', priority: 'medium', text: 'Balance is low: ' + balFloat.toFixed(2) + ' USDC. Consider topping up.', action: 'show my balance' });
       }
@@ -200,10 +195,8 @@
 
     // 4. Idle funds detection (portfolio)
     try {
-      var balEl2 = document.getElementById('sb-bal');
-      var bal = balEl2 ? parseFloat(balEl2.textContent) : null;
-      if(bal !== null && !isNaN(bal) && bal > 50 && !wasShown('idle_funds', 7200000)){
-        alerts.push({ type: 'idle_funds', priority: 'low', text: 'You have ' + bal.toFixed(2) + ' USDC idle. Consider depositing into Treasury for yield.', action: 'open treasury' });
+      if(balFloat !== null && !isNaN(balFloat) && balFloat > 50 && !wasShown('idle_funds', 7200000)){
+        alerts.push({ type: 'idle_funds', priority: 'low', text: 'You have ' + balFloat.toFixed(2) + ' USDC idle. Consider depositing into Treasury for yield.', action: 'open treasury' });
       }
     } catch(e){}
 
