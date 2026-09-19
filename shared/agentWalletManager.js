@@ -10,6 +10,19 @@
  *   A1 — BIP-39 mnemonic backup on wallet creation
  *   M2 — Single source: getSessionSigner() unifies all key reads
  *   M4 — emergencyShutdown() kills all operations
+ *
+ * AUTONOMA-2 — KEY ISOLATION & SIGNING AUTHORITY:
+ *   - The private key is NEVER persisted as plaintext; it is AES-256-GCM (ENC6)
+ *     encrypted. The only raw-key getter (getSessionKey) has been removed from the
+ *     public API. The sole signing interface is getSessionSigner(provider), which
+ *     returns an ethers.Wallet signer (never a raw key string).
+ *   - SECURITY BOUNDARY (honest): ethers v6 signs EIP-1559 txs with secp256k1
+ *     (keccak256 + ECDSA recovery id). WebCrypto non-exportable CryptoKey does NOT
+ *     support secp256k1, so a true non-exportable signing key is not achievable in
+ *     this browser stack. The key must be decryptable to a raw byte string in RAM
+ *     to sign. This protects against (A) accidental application exposure and
+ *     (B) ordinary plaintext-storage extraction, but NOT (C) malicious JS/DevTools
+ *     or (D) true custody. See the AUTONOMA-2 report.
  */
 (function(){
   'use strict';
@@ -711,9 +724,11 @@
         localStorage.setItem(SESSION_KEY_ENC, encrypted);
         return;
       }
-    } catch(e) { console.warn('[AgentWallet] Session encryption failed, using plaintext fallback'); }
-    // Fallback: store as plaintext (will be auto-migrated next time)
-    try { localStorage.setItem(SESSION_KEY_ENC, payload); } catch(e) {}
+    } catch(e) { console.warn('[AgentWallet] Session encryption failed — key NOT persisted (fail-closed)'); }
+    // [AUTONOMA-2] Fail-closed: never persist a plaintext private key. If the
+    // encrypted write fails, the key stays in RAM only (it will not survive a
+    // reload) — there is NO plaintext fallback.
+    return;
   }
 
   async function _loadSessionKeyEncrypted() {
@@ -892,11 +907,6 @@
     _noteActivity();
     var p = provider || getAgentProvider();
     return new ethers.Wallet(key, p);
-  }
-
-  function getSessionKey() {
-    // Synchronous — returns key if already loaded in RAM
-    return _sessionPrivateKey || null;
   }
 
   /* ════════════════════════════════════════
@@ -1528,11 +1538,13 @@
    * Called immediately before signing — NOT at planning time.
    */
   function validatePreExecution(operation, maxFeePerGasWei, gasLimit, agentAddr) {
-    // C2 — TOCTOU: re-validate authorization right before signing
-    if (typeof AgentAuthorization !== 'undefined') {
-      if (!AgentAuthorization.hasOperationAuth(operation)) {
-        return { ok: false, reason: 'Authorization revoked or expired' };
-      }
+    // C2 — TOCTOU: re-validate authorization right before signing.
+    // [AUTONOMA-0] Fail-closed: a missing authorization system BLOCKS execution.
+    if (typeof AgentAuthorization === 'undefined') {
+      return { ok: false, reason: 'Authorization system unavailable' };
+    }
+    if (!AgentAuthorization.hasOperationAuth(operation)) {
+      return { ok: false, reason: 'Authorization revoked or expired' };
     }
 
     // A2 — Gas limit: enforce AGENT_MAX_GAS_USD
@@ -1622,7 +1634,6 @@
     validatePreExecution: validatePreExecution,
     /* FASE 4 — Hardening */
     getSessionSigner: getSessionSigner,
-    getSessionKey: getSessionKey,
     hasEncryptionPassword: hasEncryptionPassword,
     setEncryptionPassword: setEncryptionPassword,
     /* [C1 FIX] Public migration helper — encrypts a legacy v1 key into v2 */

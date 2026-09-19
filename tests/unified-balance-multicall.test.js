@@ -33,7 +33,7 @@ function assemble(timeoutMs, retries) {
   const engine = slice('function _ubProvider', 'function ubRenderAll');
   if (timeoutMs != null) constants = constants.replace('const UB_RPC_TIMEOUT_MS = 8000', 'const UB_RPC_TIMEOUT_MS = ' + timeoutMs);
   if (retries != null) constants = constants.replace('const UB_RPC_MAX_RETRIES = 1', 'const UB_RPC_MAX_RETRIES = ' + retries);
-  return 'let walletAddress = "";\n' + ubState + '\n' + constants + '\n' + refresh + '\n' + engine;
+  return 'let walletAddress = "";\nlet activeChainId = 5042;\n' + ubState + '\n' + constants + '\n' + refresh + '\n' + engine;
 }
 
 function makeEthers({ multicall = true, balanceOf, getBalance, aggregate3 } = {}) {
@@ -143,7 +143,7 @@ function evmChain(o) {
   }, o);
 }
 function arcChain() {
-  return evmChain({ id: 'Arc_Testnet', name: 'Arc Testnet', shortName: 'Arc', chainId: 5042002, nativeCurrency: { name: 'USDC', symbol: 'USDC', decimals: 18 } });
+  return evmChain({ id: 'Arc_Testnet', name: 'Arc Testnet', shortName: 'Arc', chainId: 5042, nativeCurrency: { name: 'USDC', symbol: 'USDC', decimals: 18 } });
 }
 function sepoliaChain() {
   return evmChain({ id: 'Ethereum_Sepolia', name: 'Ethereum Sepolia', shortName: 'Sepolia', chainId: 11155111, nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 } });
@@ -186,7 +186,7 @@ describe('Multicall — ERC20 aggregation', () => {
   it('cirBTC is included only in the Arc multicall (deployment guard)', async () => {
     const eng = load({ balanceOf: async () => 1n, chains: realChains() });
     await eng.ubFetchAllBalances('0xwallet');
-    const arcCir = '0x5042002C';
+    const arcCir = '0x5042C';
     const sepCir = '0x11155111C';
     const allTargets = eng.calls.aggregate3.flat().map((c) => c.target);
     expect(allTargets.includes(arcCir)).toBe(true);      // Arc cirBTC batched

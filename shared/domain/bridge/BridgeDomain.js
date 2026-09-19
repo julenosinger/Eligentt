@@ -22,7 +22,9 @@
 
   function executeStandard(fromChain, toChain, amount, token) {
     try {
-      if (typeof executeBridge === 'function') { executeBridge(); return true; }
+      // FASE 1 — LI.FI is the only bridge provider for /bridge.
+      if (typeof executeBridgeViaLiFi === 'function') { executeBridgeViaLiFi(); return true; }
+      if (typeof executeBridgeOrTurbo === 'function') { executeBridgeOrTurbo(); return true; }
     } catch (e) {
       try { if (typeof ErrorHandler !== 'undefined') ErrorHandler.handle(e, { source: 'bridge', operation: 'standard' }); } catch (_e) {}
     }

@@ -25,16 +25,14 @@
     window.__agentExecuteBridgeOriginal = window._agentExecuteBridge;
 
     // Replace with routing wrapper
-    window._agentExecuteBridge = async function (amount, destDomain, destChainName, calldataId, sourceChainId, recipientAddr) {
-      var src = Number(sourceChainId);
-
-      // ONLY intercept: other chain → Arc inbound
-      if (src !== ARC_CHAIN_ID && destDomain === ARC_DOMAIN) {
-        return _executeInboundCCTPV2(amount, src, destChainName, recipientAddr);
-      }
-
-      // All other routes → pass through to original (unchanged!)
-      return window.__agentExecuteBridgeOriginal(amount, destDomain, destChainName, calldataId, sourceChainId, recipientAddr);
+    window._agentExecuteBridge = async function (amount, destDomain, destChainName, calldataId, sourceChainId, recipientAddr, executionId) {
+      // [AUTONOMA-4] Normal bridge (Arc → external AND external → Arc) is executed by the
+      // gated CCTP V2 _agentExecuteBridge (AutonomaExecutionGate → AgentScheduleExecutor).
+      // Do NOT redirect inbound to CCTPV2InboundEngine — that path bypasses the gate and the
+      // single broadcast authority. The original adapter handles inbound CCTP V2 correctly
+      // (depositForBurn on source → attestation → receiveMessage on Arc) and preserves the
+      // AUTONOMA-3 executionId (7th argument).
+      return window.__agentExecuteBridgeOriginal(amount, destDomain, destChainName, calldataId, sourceChainId, recipientAddr, executionId);
     };
   }
 

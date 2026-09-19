@@ -30,7 +30,7 @@ function assemble(timeoutMs, retries) {
   const engine = slice('function _ubProvider', 'function ubRenderAll');
   if (timeoutMs != null) constants = constants.replace('const UB_RPC_TIMEOUT_MS = 8000', 'const UB_RPC_TIMEOUT_MS = ' + timeoutMs);
   if (retries != null) constants = constants.replace('const UB_RPC_MAX_RETRIES = 1', 'const UB_RPC_MAX_RETRIES = ' + retries);
-  return 'let walletAddress = "";\n' + ubState + '\n' + constants + '\n' + refresh + '\n' + engine;
+  return 'let walletAddress = "";\nlet activeChainId = 5042;\n' + ubState + '\n' + constants + '\n' + refresh + '\n' + engine;
 }
 
 function makeEthers(balanceOf, getBalance) {
@@ -104,7 +104,7 @@ function load({ balanceOf, getBalance, chains, timeoutMs, retries } = {}) {
 
 function arcChain(o = {}) {
   return Object.assign({
-    id: 'Arc_Testnet', name: 'Arc Testnet', shortName: 'Arc', chainId: 5042002, rpc: 'https://arc', isEvm: true,
+    id: 'Arc_Testnet', name: 'Arc Testnet', shortName: 'Arc', chainId: 5042, rpc: 'https://arc', isEvm: true,
     nativeCurrency: { name: 'USDC', symbol: 'USDC', decimals: 18 },
     tokens: {
       USDC: { address: '0xA0', decimals: 6 },
@@ -126,7 +126,7 @@ function sepoliaChain(o = {}) {
 }
 function singleChain(o = {}) {
   return Object.assign({
-    id: 'Arc_Testnet', name: 'Arc Testnet', shortName: 'Arc', chainId: 5042002, rpc: 'https://arc', isEvm: true,
+    id: 'Arc_Testnet', name: 'Arc Testnet', shortName: 'Arc', chainId: 5042, rpc: 'https://arc', isEvm: true,
     nativeCurrency: { name: 'USDC', symbol: 'USDC', decimals: 18 },
     tokens: { USDC: { address: '0xA0', decimals: 6 } },
   }, o);
@@ -351,7 +351,7 @@ describe('cirBTC canonical chain-ID deployment guard', () => {
     };
   }
   const ALL_CHAINS = [
-    chainWithCir('Arc_Testnet', 'Arc', 5042002, '0xA2'),
+    chainWithCir('Arc_Testnet', 'Arc', 5042, '0xA2'),
     chainWithCir('Ethereum_Sepolia', 'Sepolia', 11155111, '0xB2'),
     chainWithCir('Base_Sepolia', 'Base', 84532, '0xC2'),
     chainWithCir('Arbitrum_Sepolia', 'Arb', 421614, '0xD2'),
@@ -368,7 +368,7 @@ describe('cirBTC canonical chain-ID deployment guard', () => {
     expect(arcCir.status).toBe('available');
 
     // Non-Arc chains → not_supported + no balanceOf for their cirBTC address.
-    for (const c of ALL_CHAINS.filter((c) => c.chainId !== 5042002)) {
+    for (const c of ALL_CHAINS.filter((c) => c.chainId !== 5042)) {
       const r = results.find((x) => x.token === 'cirBTC' && x.chainId === c.id);
       expect(r.status).toBe('not_supported');
       const call = eng.calls.balanceOf.find((x) => x.token === c.tokens.cirBTC.address);

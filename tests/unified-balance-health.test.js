@@ -32,7 +32,7 @@ function assemble() {
   const refresh = slice('function ubRefresh()', 'function ubFetchAllBalances');
   const engineFetch = slice('function _ubProvider', 'function ubRenderAll');
   const render = slice('function ubRenderAll()', 'window.ubInit = ubInit;');
-  return 'let walletAddress = "";\nlet activeChainId = 5042002;\n' +
+  return 'let walletAddress = "";\nlet activeChainId = 5042;\n' +
     engineObj + '\n' + ubState + '\n' + constants + '\n' + analyze + '\n' + finMem + '\n' + refresh + '\n' + engineFetch + '\n' + render;
 }
 

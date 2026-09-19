@@ -113,7 +113,11 @@
         return;
       }
 
-      if (attempts < maxAttempts) setTimeout(tryInstall, 300);
+      if (attempts < maxAttempts) {
+        setTimeout(tryInstall, 300);
+      } else {
+        console.error('[MultisendDedup] CRITICAL: Failed to install dedup patch after ' + maxAttempts + ' attempts. AgentScheduleExecutor and/or executeMultiSendV4 not found. Duplicate recipients will NOT be blocked for scheduled batches.');
+      }
     }
 
     tryInstall();

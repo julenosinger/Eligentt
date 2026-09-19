@@ -32,7 +32,7 @@ function assemble() {
   const finMem = slice('const FinancialMemory = (function()', 'UB.getRecommendations');
   const refresh = slice('function ubRefresh()', 'function ubFetchAllBalances');
   const engineFetch = slice('function _ubProvider', 'function ubRenderAll');
-  return 'let walletAddress = "";\nlet activeChainId = 5042002;\n' +
+  return 'let walletAddress = "";\nlet activeChainId = 5042;\n' +
     engineObj + '\n' + ubState + '\n' + constants + '\n' + finMem + '\n' + refresh + '\n' + engineFetch;
 }
 
@@ -326,7 +326,7 @@ describe('Network switch — multi-chain invariant', () => {
     eng.setWallet('0xaaaa');
     eng.ubRefresh();               // A in-flight (gated)
     eng.setWallet('0xbbbb');
-    eng.setActiveChain(11155111); // network also switched
+    eng.setActiveChain(5042); // UB is Arc Mainnet-only — stay on Mainnet
     eng.bumpGeneration();
     eng.ubRefresh();               // queued
     releaseA();

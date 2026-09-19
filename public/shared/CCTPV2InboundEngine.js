@@ -181,7 +181,11 @@
         var fallbackUrl = _fallbackRPCs[t.sourceChainId];
         if (fallbackUrl && burnErr.message && (burnErr.message.indexOf('fetch') >= 0 || burnErr.message.indexOf('network') >= 0 || burnErr.message.indexOf('timeout') >= 0)) {
           var fbProvider = new ethers.JsonRpcProvider(fallbackUrl);
-          var fbSigner = new ethers.Wallet(AgentWalletManager.getSessionKey(), fbProvider);
+          // [AUTONOMA-2] Get a signer (never the raw key) via the canonical signer source.
+          var _fbSigner = (typeof AgentWalletManager !== 'undefined' && typeof AgentWalletManager.getSessionSigner === 'function')
+            ? await AgentWalletManager.getSessionSigner(fbProvider) : null;
+          if (!_fbSigner) throw burnErr;
+          var fbSigner = _fbSigner;
           var fbMessenger = new ethers.Contract(t.tokenMessenger, CCTP_ABI, fbSigner);
           var fbUsdc = new ethers.Contract(t.sourceUSDC, ['function approve(address,uint256) returns (bool)'], fbSigner);
           await fbUsdc.approve(t.tokenMessenger, ethers.parseUnits(String(t.amount), 6)).then(function(tx){ return tx.wait(); });

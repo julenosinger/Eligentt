@@ -38,6 +38,7 @@
     'shared/agentWalletManager.js', 'shared/agentAuthorization.js',
     'shared/agentIdentity.js', 'shared/agentSession.js', 'shared/agentAudit.js',
     'shared/agentReputation.js', 'shared/agentScheduleExecutor.js',
+    'shared/autonomaExecutionGate.js',
     'shared/executionQueue.js', 'shared/executionPlanner.js',
     'shared/executionWatchdog.js', 'shared/invariantEngine.js',
     'shared/securityAttackLab.js', 'shared/permissionCards.js',

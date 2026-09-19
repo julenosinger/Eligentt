@@ -72,7 +72,7 @@
     try {
       if (typeof ethers !== 'undefined') {
         var rpc = 'https://arc-testnet.drpc.org';
-        try { if (typeof ElligenteChains !== 'undefined' && ElligenteChains.CHAIN_REGISTRY[5042002]) rpc = ElligenteChains.CHAIN_REGISTRY[5042002].rpc; } catch (_e) {}
+        try { if (typeof ElligenteChains !== 'undefined' && ElligenteChains.CHAIN_REGISTRY[5042]) rpc = ElligenteChains.CHAIN_REGISTRY[5042].rpc; } catch (_e) {}
         var provider = new ethers.JsonRpcProvider(rpc);
         await provider.getBlockNumber();
         status = 'HEALTHY';

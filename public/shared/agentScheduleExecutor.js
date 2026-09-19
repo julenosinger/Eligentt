@@ -434,7 +434,7 @@
       var gasEst = await provider.estimateGas({ from: agentAddr, to: tokenInfo.address, data: transfer._calldata });
       if (gasEst) TX_GAS_LIMIT = Math.min(Math.floor(Number(gasEst) * 1.3), 300000);
     } catch(e){}
-    var nonceHex = await provider.send('eth_getTransactionCount', [agentAddr, 'pending']);
+    var nonceHex = await _nextNonce(provider, agentAddr);
     var nonce = parseInt(nonceHex, 16);
     var rawTx = {
       type: 2, chainId: ARC_CHAIN_ID, to: tokenInfo.address,
@@ -450,11 +450,31 @@
     };
   }
 
-  /* ── Sign + broadcast a prepared raw transaction. Throws on ambiguous failure. ── */
-  async function _signAndSend(signer, provider, rawTx){
+  /* ── Sign + broadcast a prepared raw transaction. Throws on ambiguous failure.
+        This is the SINGLE execution authority broadcast primitive for Autonoma —
+        the only place that calls eth_sendRawTransaction. ── */
+  async function _signAndSend(signer, provider, rawTx, opts){
+    // [AUTONOMA-6B/6C] Secure signer provider. Browser mode is unchanged (the
+    // single broadcast primitive below). Circle mode delegates sign+broadcast
+    // to the server (FAIL-CLOSED — SecureSignerProvider throws, never falls
+    // back to the browser signer). `opts` carries the structured Circle request
+    // and execution identity (AUTONOMA-6C).
+    if (typeof SecureSignerProvider !== 'undefined' && SecureSignerProvider.isCircleMode()) {
+      return await SecureSignerProvider.broadcast(signer, provider, rawTx, opts);
+    }
     var signedTx = await signer.signTransaction(rawTx);
     var txHash = await provider.send('eth_sendRawTransaction', [signedTx]);
     return txHash;
+  }
+
+  /* ── Single nonce source (read-only) for the execution authority. ── */
+  function _nextNonce(provider, from){
+    // [AUTONOMA-6B] Circle mode resolves the nonce server-side (for the Circle
+    // wallet). Browser mode is unchanged.
+    if (typeof SecureSignerProvider !== 'undefined' && SecureSignerProvider.isCircleMode()) {
+      return SecureSignerProvider.nextNonce(provider, from);
+    }
+    return provider.send('eth_getTransactionCount', [from, 'pending']);
   }
 
   function _txFingerprint(from, nonce, to, data){
@@ -1078,6 +1098,12 @@
     _saveLedger();
 
     var delResult = null;
+    // [AUTONOMA-0] Mark this invocation as a schedule delegation so the centralized
+    // execution gate recognizes the already-validated + claimed occurrence and does
+    // not re-claim it (avoiding a second idempotency authority for the same tx).
+    var _prevDeleg = undefined;
+    try { _prevDeleg = window.__autonomaScheduledDelegation; } catch(_e) {}
+    try { window.__autonomaScheduledDelegation = { schedId: sched.id, key: key, ts: Date.now() }; } catch(_e) {}
     try {
       delResult = await fn.apply(null, args);
     } catch(delErr) {
@@ -1088,6 +1114,9 @@
       _advanceSchedule(sched, 'Delegated ' + sched.type + ' failed: ' + delFailReason, 'failed', null, { token: v.token, amount: v.total });
       _notify(sched, 'failed', 'Delegated ' + sched.type + ' failed to execute: ' + delFailReason, 'error');
       return { status: 'failed', reason: delFailReason };
+    } finally {
+      if (_prevDeleg !== undefined) { try { window.__autonomaScheduledDelegation = _prevDeleg; } catch(_e) {} }
+      else { try { delete window.__autonomaScheduledDelegation; } catch(_e) {} }
     }
 
     if (!delResult || delResult.ok !== true || !delResult.txHash) {
@@ -1204,9 +1233,15 @@
     getNotifications: getNotifications,
     setAutoEnabled: setAutoEnabled,
     isAutoEnabled: isAutoEnabled,
+    /* ── AUTONOMA-1 — single execution authority primitives ──
+       Every Autonoma financial broadcast, nonce read and receipt wait must
+       go through these (the ONLY eth_sendRawTransaction lives in `broadcast`). */
+    broadcast: _signAndSend,
+    waitReceipt: _waitReceipt,
+    nextNonce: _nextNonce,
     SUPPORTED_TYPES: SUPPORTED_TYPES.slice(),
     ARC_CHAIN_ID: ARC_CHAIN_ID,
-    version: '1.0.0'
+    version: '1.1.0'
   };
 
   if (typeof window !== 'undefined') window.AgentScheduleExecutor = API;
