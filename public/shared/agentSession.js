@@ -7,13 +7,9 @@
 (function(){
   'use strict';
 
-<<<<<<< HEAD
-  var SESSION_KEY = 'elligentt_agent_conversation_v2';
-  var LEGACY_COLLISION_KEY = 'elligentt_agent_session_v2';
-=======
   var SESSION_KEY = 'elligentt_agent_session_state_v2';
   var LEGACY_SESSION_KEY = 'elligentt_agent_session_v2'; // shared with AgentWalletManager — no longer written here
->>>>>>> c09da7105bf57fc05d85067c149a3a71a1b108cc
+  var LEGACY_CONVERSATION_KEY = 'elligentt_agent_conversation_v2'; // earlier build's session-state key
   var session = null;
 
   function defaultSession(){
@@ -43,7 +39,9 @@
     try {
       var r=localStorage.getItem(SESSION_KEY);
       if(!r){
-        var legacy=localStorage.getItem(LEGACY_COLLISION_KEY);
+        // Migration: an earlier build stored session state under
+        // `elligentt_agent_conversation_v2`. Adopt it, never an encrypted blob.
+        var legacy=localStorage.getItem(LEGACY_CONVERSATION_KEY);
         if(legacy && legacy.indexOf('ENC')!==0){
           try {
             var parsed=JSON.parse(legacy);

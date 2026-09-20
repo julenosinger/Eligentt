@@ -1,15 +1,20 @@
 /**
-<<<<<<< HEAD
- * AutonomaExecutionGate — Chat financial-execution identity + policy/auth gate
+ * AutonomaExecutionGate — Autonoma financial-execution safety gate (fail-closed)
+ * ═══════════════════════════════════════════════════════════════════════
  *
+ * This module exposes TWO complementary layers on window.AutonomaExecutionGate:
+ *
+ * 1) Chat execution identity + in-flight dedupe (`evaluate`, `markSubmitted`,
+ *    `markConfirmed`, `markFailed`, `fingerprint`, `resolveExecutionId`).
+
  * Chat-layer only. Does NOT modify ScheduleEngine / MS-2/MS-3/MS-4 claims.
- *
+
  * NEW user Chat action → unique executionId
  * Same Chat action routed twice → SAME executionId → one claim
  * Completed execution does NOT permanently block a NEW Chat command
  * with identical financial parameters.
-=======
- * AUTONOMA-0 — Centralized Execution Safety Gate (fail-closed)
+ *
+ * 2) AUTONOMA-0 centralized authorization (`authorizeAutonomaExecution`).
  * ═══════════════════════════════════════════════════════════════════════
  * Single controlled execution authority for Autonoma financial broadcasts.
  *
@@ -34,14 +39,14 @@
  *      intent key) — duplicate/held claim → BLOCK. Skipped ONLY for a call
  *      that was already validated + claimed by AgentScheduleExecutor
  *      (schedule delegation), which owns the authoritative claim.
->>>>>>> c09da7105bf57fc05d85067c149a3a71a1b108cc
  *
  * Attached to window.AutonomaExecutionGate
  */
 (function () {
   'use strict';
 
-<<<<<<< HEAD
+  if (typeof window !== 'undefined' && window.AutonomaExecutionGate) return;
+
   var STORE_KEY = 'elligentt_autonoma_exec_gate_v1';
   var IN_FLIGHT_MS = 90000;
   var ARC_CHAIN_ID = 5042002;
@@ -295,12 +300,10 @@
     version: '3.0.0'
   };
 
-  if (typeof window !== 'undefined') window.AutonomaExecutionGate = API;
-  else if (typeof globalThis !== 'undefined') globalThis.AutonomaExecutionGate = API;
-=======
-  if (typeof window !== 'undefined' && window.AutonomaExecutionGate) return;
+  // ═══════════════════════════════════════════════════════════════════════
+  //  AUTONOMA-0 — centralized authorization layer (fail-closed)
+  // ═══════════════════════════════════════════════════════════════════════
 
-  var ARC_CHAIN_ID = 5042002;
   var GATE_EXECUTOR = 'autonoma_execution_gate';
 
   // Trusted CCTP source chains the Agent Wallet may originate a bridge from.
@@ -542,13 +545,13 @@
 
   function blockedMessage(code) { return MSG[code] || MSG.gate_unavailable; }
 
-  window.AutonomaExecutionGate = {
-    authorizeAutonomaExecution: authorizeAutonomaExecution,
-    isScheduledDelegation: isScheduledDelegation,
-    blockedMessage: blockedMessage,
-    intentKey: _intentKey,
-    ARC_CHAIN_ID: ARC_CHAIN_ID,
-    version: 'AUTONOMA-0'
-  };
->>>>>>> c09da7105bf57fc05d85067c149a3a71a1b108cc
+  // Merge the AUTONOMA-0 authorization surface onto the gate API.
+  API.authorizeAutonomaExecution = authorizeAutonomaExecution;
+  API.isScheduledDelegation = isScheduledDelegation;
+  API.blockedMessage = blockedMessage;
+  API.intentKey = _intentKey;
+  API.ARC_CHAIN_ID = ARC_CHAIN_ID;
+
+  if (typeof window !== 'undefined') window.AutonomaExecutionGate = API;
+  else if (typeof globalThis !== 'undefined') globalThis.AutonomaExecutionGate = API;
 })();

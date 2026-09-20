@@ -467,14 +467,6 @@
     return txHash;
   }
 
-<<<<<<< HEAD
-  /* Chat/adapter entry to the SAME broadcast authority. Does not touch schedule ledger. */
-  async function broadcast(rawTx, signer, provider){
-    if (!rawTx) throw new Error('broadcast: missing rawTx');
-    if (!signer || typeof signer.signTransaction !== 'function') throw new Error('broadcast: missing signer');
-    if (!provider || typeof provider.send !== 'function') throw new Error('broadcast: missing provider');
-    return _signAndSend(signer, provider, rawTx);
-=======
   /* ── Single nonce source (read-only) for the execution authority. ── */
   function _nextNonce(provider, from){
     // [AUTONOMA-6B] Circle mode resolves the nonce server-side (for the Circle
@@ -483,7 +475,6 @@
       return SecureSignerProvider.nextNonce(provider, from);
     }
     return provider.send('eth_getTransactionCount', [from, 'pending']);
->>>>>>> c09da7105bf57fc05d85067c149a3a71a1b108cc
   }
 
   function _txFingerprint(from, nonce, to, data){
@@ -1242,16 +1233,12 @@
     getNotifications: getNotifications,
     setAutoEnabled: setAutoEnabled,
     isAutoEnabled: isAutoEnabled,
-<<<<<<< HEAD
-    broadcast: broadcast,
-=======
     /* ── AUTONOMA-1 — single execution authority primitives ──
        Every Autonoma financial broadcast, nonce read and receipt wait must
        go through these (the ONLY eth_sendRawTransaction lives in `broadcast`). */
     broadcast: _signAndSend,
     waitReceipt: _waitReceipt,
     nextNonce: _nextNonce,
->>>>>>> c09da7105bf57fc05d85067c149a3a71a1b108cc
     SUPPORTED_TYPES: SUPPORTED_TYPES.slice(),
     ARC_CHAIN_ID: ARC_CHAIN_ID,
     version: '1.1.0'
