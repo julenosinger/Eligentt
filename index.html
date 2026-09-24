@@ -33837,11 +33837,15 @@ try {
 // the active bridge execution path and are preserved for future reactivation.
 function executeBridgeOrTurbo() {
   // ── CCTP-primary routing: USDC/EURC between CCTP domains → Bridge Kit.
-  //    Everything else (and any CCTP failure) falls back to LI.FI. ────────
+  //    Everything else (and any CCTP failure) falls back to LI.FI. The user
+  //    can force LI.FI via the "Use LI.FI" button next to the route pill. ──
   const fromChain = CHAINS[bridgeFromIdx];
   const toChain = CHAINS[bridgeToIdx];
   const token = 'USDC'; // bridge UI is USDC-only (EURC via Send Assets)
+  let forceLiFi = false;
+  try { forceLiFi = !!window.__bridgeForceLiFi; } catch (_e) {}
   if (
+    !forceLiFi &&
     fromChain && toChain &&
     typeof BridgeKitRouter !== 'undefined' &&
     BridgeKitRouter.route(fromChain.chainId, toChain.chainId, token).provider === 'cctp'
@@ -33958,6 +33962,13 @@ async function executeBridgeViaCCTP() {
   const mintTx = (result && result.steps && result.steps.find(function (s) { return s.name === 'mint'; })) || null;
   const txHash = (burnTx && burnTx.txHash) || null;
   const mintTxHash = (mintTx && mintTx.txHash) || null;
+  // Surface the real failure reason (a failed step's error), never a generic message.
+  var errReason = null;
+  try {
+    var failedStep = (result && result.steps && result.steps.find(function (s) { return s.state === 'error'; })) || null;
+    if (failedStep) errReason = failedStep.error || failedStep.reason || (failedStep.message) || null;
+    if (!errReason && result && result.error) errReason = (typeof result.error === 'string') ? result.error : (result.error.message || null);
+  } catch (_e) {}
 
   if (done) {
     renderBridgeStep(2, 'success', null);
@@ -33977,11 +33988,11 @@ async function executeBridgeViaCCTP() {
     addToHistory('bridge-history', {
       icon: 'ti-topology-star-3', color: 'var(--red)',
       label: `${amt} USDC: ${fromChain.name} → ${toChain.name}`,
-      sub: `CCTP v2 · failed`,
+      sub: `CCTP v2 · failed` + (errReason ? ` · ${errReason}` : ''),
       txHash: txHash, dotColor: '#ef4444', explorer: fromChain.explorer,
     });
-    toast('CCTP bridge failed after retry', 'error');
-    if (typeof BridgeEngine !== 'undefined') BridgeEngine.notifyExecutionFailed(new Error('CCTP bridge failed'));
+    toast('CCTP bridge failed' + (errReason ? ': ' + errReason : '') + '. Use "Use LI.FI" to route via LI.FI.', 'error');
+    if (typeof BridgeEngine !== 'undefined') BridgeEngine.notifyExecutionFailed(new Error('CCTP bridge failed' + (errReason ? ': ' + errReason : '')));
   }
   refreshBridgeBalances(); refreshBalance().catch(() => {});
   resetBtn();
