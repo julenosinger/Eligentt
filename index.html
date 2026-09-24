@@ -56,6 +56,7 @@
 <script src="/shared/bridgeInboundFix.js"></script>
 <script src="/shared/autonomaScheduleRoute.js"></script>
 <script src="/shared/bridgeRouteSelector.js"></script>
+<script src="/shared/bridgeKitRouter.js"></script>
 <script src="/shared/moduleLoader.js"></script>
 <script src="/remediation/bootstrap.js"></script><script src="/shared/memoIndexer.js"></script>
 <script src="/shared/treasuryIndexer.js"></script>
@@ -30267,10 +30268,16 @@ function saExecuteCrossChain() {
   var destChainId = saDestChainId;
   var destChain = getChainById(destChainId);
 
-  // ── LI.FI cross-chain (production Mainnet path) ─────────────────────
-  // Arc Mainnet → LI.FI-supported mainnet destinations route through LI.FI.
-  // The existing CCTP testnet path remains for testnet cross-chain.
+  // ── CCTP-primary routing (Send Assets cross-chain) ────────────────────
+  // USDC/EURC between CCTP domains → Bridge Kit (CCTP). LI.FI stays as fallback.
   if (activeChainId === ARC_MAINNET_ID && destChain && destChain.testnet === false) {
+    if (
+      typeof BridgeKitRouter !== 'undefined' &&
+      BridgeKitRouter.route(activeChainId, destChainId, saCurrentAsset).provider === 'cctp'
+    ) {
+      saExecuteCCTPCrossChain();
+      return;
+    }
     saExecuteLiFiCrossChain();
     return;
   }
@@ -30297,6 +30304,72 @@ function saExecuteCrossChain() {
   } else {
     toast('Cross-chain bridge unavailable', 'error');
   }
+}
+
+// ── CCTP cross-chain Send (Bridge Kit) — PRIMARY for USDC/EURC ─────────
+// Executes via Circle CCTP v2 with recipientAddress = the user's destination.
+// LI.FI is never called on this path. Falls back to LI.FI if unavailable.
+async function saExecuteCCTPCrossChain() {
+  var recipient = document.getElementById('sa-recipient')?.value.trim() || '';
+  var amount    = parseFloat(document.getElementById('sa-amount')?.value) || 0;
+  if (!walletAddress || !signer) { toast('Connect your wallet first', 'error'); return; }
+  if (!isAddr(recipient)) { toast('Invalid recipient address', 'error'); return; }
+  if (amount <= 0) { toast('Amount must be greater than 0', 'error'); return; }
+  if (typeof BridgeKitRouter === 'undefined' || !BridgeKitRouter.isAvailable()) { saExecuteLiFiCrossChain(); return; }
+  var eth = (typeof _safeEth === 'function') ? _safeEth() : (window.ethereum || null);
+  if (!eth || !eth.request) { toast('CCTP requires an external wallet — using LI.FI instead', 'info'); saExecuteLiFiCrossChain(); return; }
+
+  var srcChain = getActiveChain();
+  var destChain = getChainById(saDestChainId);
+  if (!srcChain || !destChain) { toast('Unsupported network', 'error'); return; }
+
+  var btn = document.getElementById('sa-send-btn');
+  var btnContent = document.getElementById('sa-send-btn-content');
+  if (btn) btn.disabled = true;
+  if (btnContent) btnContent.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i> Routing via CCTP...';
+  saUpdateXCStep('burn', 'starting');
+
+  let adapter;
+  try {
+    adapter = await BridgeKitRouter.createAdapter(eth);
+  } catch (e) {
+    if (btn) btn.disabled = false;
+    if (btnContent) btnContent.innerHTML = '<i class="ti ti-world-share"></i> Review &amp; Send';
+    toast('Could not initialize CCTP adapter: ' + (e.message || e), 'error');
+    return;
+  }
+
+  let result;
+  try {
+    result = await BridgeKitRouter.bridge(srcChain.chainId, destChain.chainId, amount, saCurrentAsset, recipient, adapter);
+  } catch (e) {
+    if (btn) btn.disabled = false;
+    if (btnContent) btnContent.innerHTML = '<i class="ti ti-world-share"></i> Review &amp; Send';
+    toast('CCTP cross-chain send failed: ' + (e.shortMessage || e.message || e), 'error');
+    return;
+  }
+
+  // Retry on a retryable post-burn failure (single burn — no second depositForBurn).
+  if (result && result.state === 'error') {
+    try { result = await BridgeKitRouter.retry(result, adapter); } catch (_e) {}
+  }
+
+  const done = result && result.state !== 'error';
+  const burnTx = (result && result.steps && result.steps.find(function (s) { return s.name === 'burn'; })) || null;
+  const mintTx = (result && result.steps && result.steps.find(function (s) { return s.name === 'mint'; })) || null;
+  const txHash = (burnTx && burnTx.txHash) || null;
+  const mintTxHash = (mintTx && mintTx.txHash) || null;
+
+  if (done) {
+    if (btnContent) btnContent.innerHTML = '<i class="ti ti-check-circle"></i> Bridged via CCTP!';
+    toast(amount + ' ' + saCurrentAsset + ' bridged to ' + shortAddr(recipient) + ' via CCTP', 'success');
+    saLogTx({ hash: txHash, amount: amount, asset: saCurrentAsset, recipient: recipient, memo: 'CCTP cross-chain', provider: 'cctp', mintHash: mintTxHash });
+  } else {
+    if (btn) btn.disabled = false;
+    if (btnContent) btnContent.innerHTML = '<i class="ti ti-world-share"></i> Review &amp; Send';
+    toast('CCTP cross-chain send failed after retry', 'error');
+  }
+  refreshBalance().catch(() => {});
 }
 
 // ── LI.FI cross-chain Send (Arc Mainnet → supported mainnet) ──────────
@@ -33763,7 +33836,155 @@ try {
 // The legacy CCTP v2 (executeBridge) and Turbo paths are no longer part of
 // the active bridge execution path and are preserved for future reactivation.
 function executeBridgeOrTurbo() {
+  // ── CCTP-primary routing: USDC/EURC between CCTP domains → Bridge Kit.
+  //    Everything else (and any CCTP failure) falls back to LI.FI. ────────
+  const fromChain = CHAINS[bridgeFromIdx];
+  const toChain = CHAINS[bridgeToIdx];
+  const token = 'USDC'; // bridge UI is USDC-only (EURC via Send Assets)
+  if (
+    fromChain && toChain &&
+    typeof BridgeKitRouter !== 'undefined' &&
+    BridgeKitRouter.route(fromChain.chainId, toChain.chainId, token).provider === 'cctp'
+  ) {
+    executeBridgeViaCCTP();
+    return;
+  }
   executeBridgeViaLiFi();
+}
+
+// ── Bridge via Circle CCTP v2 (Bridge Kit) — PRIMARY route for USDC/EURC ──
+// Orchestrates approve → burn → attestation → mint through the Bridge Kit.
+// LI.FI is NOT called on this path. Events are rendered from kit.on('*').
+async function executeBridgeViaCCTP() {
+  if (!walletAddress) { toast('Connect wallet first', 'error'); return; }
+  if (_walletOpInProgress) { toast('A wallet operation is already in progress', 'warning'); return; }
+  if (typeof BridgeKitRouter === 'undefined' || !BridgeKitRouter.isAvailable()) {
+    executeBridgeViaLiFi(); return; // vendor bundle missing → LI.FI fallback
+  }
+  const eth = (typeof _safeEth === 'function') ? _safeEth() : (window.ethereum || null);
+  if (!eth || !eth.request) {
+    toast('CCTP requires an external wallet — using LI.FI instead', 'info');
+    executeBridgeViaLiFi(); return;
+  }
+
+  const amt = parseFloat(document.getElementById('bridge-amount')?.value) || 0;
+  if (amt <= 0) { toast('Enter an amount to bridge', 'error'); return; }
+  const fromChain = CHAINS[bridgeFromIdx];
+  const toChain = CHAINS[bridgeToIdx];
+  if (!fromChain || !toChain || fromChain.chainId === toChain.chainId) { toast('Cannot bridge to the same network', 'error'); return; }
+  const token = 'USDC';
+
+  _walletOpInProgress = true;
+  const btn = document.getElementById('bridge-btn');
+  const stepsCard = document.getElementById('bridge-steps-card');
+  const stepList = document.getElementById('bridge-step-list');
+  const stdStepsEl = document.getElementById('bridge-standard-steps');
+  const turboWrapEl = document.getElementById('turbo-steps-wrap');
+  const statusEl = document.getElementById('bridge-step-status');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader spin"></i> Routing via CCTP...'; }
+  if (stepsCard) stepsCard.style.display = '';
+  if (stepList) stepList.innerHTML = '';
+  if (stdStepsEl) stdStepsEl.style.display = '';
+  if (turboWrapEl) turboWrapEl.style.display = 'none';
+  if (statusEl) { statusEl.textContent = 'Pending'; statusEl.style.color = 'var(--muted2)'; }
+
+  const steps = [
+    { name: 'approve',        label: `Approve USDC on ${fromChain.name}`, detail: 'CCTP v2 (Bridge Kit)' },
+    { name: 'burn',           label: `Burn USDC on ${fromChain.name}`,    detail: 'Circle CCTP v2 depositForBurn' },
+    { name: 'attestation',    label: 'Circle attestation',                detail: 'Iris (production)' },
+    { name: 'mint',           label: `Mint USDC on ${toChain.name}`,      detail: 'Circle CCTP v2 mint' },
+  ];
+  function renderBridgeStep(idx, state, txHash) {
+    const s = steps[idx]; if (!s) return;
+    let el = document.getElementById(`bridge-step-${idx}`);
+    if (!el) { el = document.createElement('div'); el.id = `bridge-step-${idx}`; el.className = 'step-item'; stepList.appendChild(el); }
+    const stateIcon = { pending:'…', active:'<span class="spin">↻</span>', success:'✓', error:'✕' }[state];
+    const stateClass = { pending:'', active:'active', success:'success', error:'error' }[state];
+    const explorerBase = (state === 'mint' || state === 'success') ? toChain.explorer : fromChain.explorer;
+    const txLink = txHash ? `Tx: <a href="${escHtml(explorerBase.replace(/\/$/,''))}/tx/${escHtml(txHash)}" target="_blank" style="color:var(--teal);text-decoration:none">${shortAddr(txHash)}</a>` : _safePurify(s.detail);
+    setSafeHTML(el, `<div class="step-ico ${stateClass}">${stateIcon}</div><div style="flex:1"><div style="font-weight:600">${_safePurify(s.label)}</div><div style="font-size:8.5px;color:var(--muted2)">${txLink}</div></div>`);
+  }
+  const stepIndex = { approve: 0, burn: 1, fetchAttestation: 2, mint: 3 };
+  function resetBtn() { _walletOpInProgress = false; if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-topology-star-3"></i>Bridge USDC'; } }
+  steps.forEach((_, i) => renderBridgeStep(i, 'pending', null));
+
+  if (typeof BridgeEngine !== 'undefined') BridgeEngine.notifyStandardStart({ from: fromChain.id, to: toChain.id, amt: amt, type: 'cctp' });
+
+  let adapter;
+  try {
+    adapter = await BridgeKitRouter.createAdapter(eth);
+  } catch (e) {
+    renderBridgeStep(0, 'error', null);
+    if (statusEl) { statusEl.textContent = 'Adapter failed'; statusEl.style.color = 'var(--red)'; }
+    toast('Could not initialize CCTP adapter: ' + (e.message || e), 'error');
+    resetBtn();
+    return;
+  }
+
+  // Subscribe to Bridge Kit lifecycle events → render steps.
+  const kit = BridgeKitRouter.onEvent(function (payload) {
+    try {
+      const v = payload && payload.values ? payload.values : null;
+      const name = v && v.name ? v.name : null;
+      const idx = stepIndex[name];
+      if (idx == null) return;
+      if (v.state === 'success') renderBridgeStep(idx, 'success', v.txHash || null);
+      else if (v.state === 'error') { renderBridgeStep(idx, 'error', null); if (statusEl) { statusEl.textContent = 'Failed'; statusEl.style.color = 'var(--red)'; } }
+      else renderBridgeStep(idx, 'active', v.txHash || null);
+    } catch (_e) {}
+  });
+
+  let result;
+  try {
+    result = await BridgeKitRouter.bridge(fromChain.chainId, toChain.chainId, amt, token, walletAddress, adapter);
+  } catch (e) {
+    renderBridgeStep(0, 'error', null);
+    if (statusEl) { statusEl.textContent = 'Failed'; statusEl.style.color = 'var(--red)'; }
+    toast('CCTP bridge failed: ' + (e.shortMessage || e.message || e), 'error');
+    if (typeof BridgeEngine !== 'undefined') BridgeEngine.notifyExecutionFailed(e);
+    resetBtn();
+    return;
+  }
+
+  // Retry on a retryable post-burn failure (single burn — no second depositForBurn).
+  if (result && result.state === 'error') {
+    try {
+      result = await BridgeKitRouter.retry(result, adapter);
+    } catch (_e) { /* keep the original error result */ }
+  }
+
+  const done = result && result.state !== 'error';
+  const burnTx = (result && result.steps && result.steps.find(function (s) { return s.name === 'burn'; })) || null;
+  const mintTx = (result && result.steps && result.steps.find(function (s) { return s.name === 'mint'; })) || null;
+  const txHash = (burnTx && burnTx.txHash) || null;
+  const mintTxHash = (mintTx && mintTx.txHash) || null;
+
+  if (done) {
+    renderBridgeStep(2, 'success', null);
+    renderBridgeStep(3, 'success', mintTxHash);
+    if (statusEl) { statusEl.textContent = 'Completed'; statusEl.style.color = 'var(--green)'; }
+    addToHistory('bridge-history', {
+      icon: 'ti-topology-star-3', color: 'var(--teal)',
+      label: `${amt} USDC: ${fromChain.name} → ${toChain.name}`,
+      sub: `CCTP v2 · ${new Date().toLocaleTimeString('en-US', {hour:'numeric', minute:'2-digit', hour12:true})}`,
+      txHash: mintTxHash || txHash, dotColor: '#2dd4bf', explorer: toChain.explorer,
+    });
+    toast(`✓ Bridged ${amt} USDC from ${fromChain.name} to ${toChain.name} via CCTP`, 'success');
+    if (typeof logToReports === 'function') logToReports('Bridge', amt, 1, txHash, { provider: 'cctp', from: fromChain.name, to: toChain.name });
+    if (typeof BridgeEngine !== 'undefined') BridgeEngine.notifyExecutionComplete({ txHash: txHash, destinationTxHash: mintTxHash });
+  } else {
+    if (statusEl) { statusEl.textContent = 'Failed'; statusEl.style.color = 'var(--red)'; }
+    addToHistory('bridge-history', {
+      icon: 'ti-topology-star-3', color: 'var(--red)',
+      label: `${amt} USDC: ${fromChain.name} → ${toChain.name}`,
+      sub: `CCTP v2 · failed`,
+      txHash: txHash, dotColor: '#ef4444', explorer: fromChain.explorer,
+    });
+    toast('CCTP bridge failed after retry', 'error');
+    if (typeof BridgeEngine !== 'undefined') BridgeEngine.notifyExecutionFailed(new Error('CCTP bridge failed'));
+  }
+  refreshBridgeBalances(); refreshBalance().catch(() => {});
+  resetBtn();
 }
 
 // ── Bridge via LI.FI (Arc Mainnet ↔ mainnet destinations) ──────────────

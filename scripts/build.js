@@ -25,12 +25,51 @@ const SOURCE_HTML = path.join(ROOT, 'index.html');
 const SRC_HTML = path.join(PUBLIC, 'index.html');
 const BACKUP_HTML = path.join(PUBLIC, 'index.original.html');
 const BUNDLE_DIR = path.join(PUBLIC, 'bundles');
+const VENDOR_DIR = path.join(PUBLIC, 'vendor');
+const VENDOR_ENTRY = path.join(ROOT, 'vendor', 'bridge-kit-entry.js');
+const VENDOR_OUT = path.join(VENDOR_DIR, 'bridge-kit.js');
 
 const SYNC_MAP = [
   { from: 'shared', to: 'public/shared' },
   { from: 'config', to: 'public/config' },
   { from: 'remediation', to: 'public/remediation' },
 ];
+
+// ═══════════════════════════════════════
+// PHASE 1.5: VENDOR BUNDLE (Circle Bridge Kit)
+// ═══════════════════════════════════════
+// Bundles the ESM-only Circle Bridge Kit + viem adapter into a single IIFE
+// (classic script) exposing window.__BridgeKitVendor. Skipped gracefully when
+// the SDK is not installed or the entry is missing.
+function bundleVendor() {
+  if (!fs.existsSync(VENDOR_ENTRY)) { log('Bridge Kit entry missing — vendor bundle skipped', 'warn'); return false; }
+  let esbuild;
+  try { esbuild = require('esbuild'); } catch (_) { log('esbuild unavailable — vendor bundle skipped', 'warn'); return false; }
+  ensureDir(VENDOR_DIR);
+  try {
+    const res = esbuild.buildSync({
+      entryPoints: [VENDOR_ENTRY],
+      bundle: true,
+      format: 'iife',
+      platform: 'browser',
+      target: ['es2020'],
+      minify: true,
+      outfile: VENDOR_OUT,
+      legalComments: 'none',
+      logLevel: 'silent',
+    });
+    if (res.errors && res.errors.length) {
+      log('Bridge Kit bundle failed: ' + res.errors.map(e => e.text).join('; '), 'error');
+      return false;
+    }
+    const kb = Math.round(fs.statSync(VENDOR_OUT).size / 1024);
+    log(`Vendor: bridge-kit.js (${kb} KB)`, 'h2');
+    return true;
+  } catch (e) {
+    log('Bridge Kit bundle failed: ' + (e && e.message ? e.message : String(e)), 'error');
+    return false;
+  }
+}
 
 // ═══════════════════════════════════════
 // UTILS
@@ -392,6 +431,11 @@ function rebuildHTML(html, coreBundle, appBundle, classResult, cssResult, extrac
     insert += `\n<link rel="stylesheet" href="/app.css?h=${cssResult.hash}">`;
   }
 
+  if (fs.existsSync(VENDOR_OUT)) {
+    insert += `\n<!-- Bridge Kit vendor bundle (Circle CCTP) -->`;
+    insert += `\n<script defer src="/vendor/bridge-kit.js"></script>`;
+  }
+
   insert += `\n<!-- Core Bundle: ${coreBundle.count} modules (synchronous) -->`;
   insert += `\n<script src="/bundles/${coreBundle.filename}"></script>`;
 
@@ -483,6 +527,10 @@ async function main() {
   log('Syncing source → public/', 'h1');
   const syncStats = syncSourceToPublic();
   log(`Synced: ${syncStats.synced} | Skipped: ${syncStats.skipped} | Errors: ${syncStats.errors}`, 'h2');
+
+  // ── Phase 1.5: Vendor bundle (Circle Bridge Kit) ──
+  log('Bundling vendor SDK (Circle Bridge Kit)...', 'h1');
+  bundleVendor();
 
   // ── Verify ──
   if (!fs.existsSync(SOURCE_HTML)) { log('source index.html not found', 'error'); process.exit(1); }
