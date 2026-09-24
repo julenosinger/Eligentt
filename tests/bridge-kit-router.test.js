@@ -111,6 +111,14 @@ describe('BridgeKitRouter — integration surface', () => {
   it('is not available when the vendor bundle is absent', () => {
     expect(R.isAvailable()).toBe(false);
   });
+
+  it('pins the public client to the app RPC (never public-node fallback)', () => {
+    // The adapter must override getPublicClient so read/simulation calls use the
+    // app's configured RPC, never base.publicnode.com or similar fallbacks.
+    expect(src).toContain('getPublicClient');
+    expect(src).toContain('_appRpcForChain');
+    expect(src).toContain('getChainById');
+  });
 });
 
 describe('Bridge Kit vendor bundle — CCTP contracts (Mainnet)', () => {

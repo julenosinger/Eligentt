@@ -14,6 +14,7 @@ import {
   isNetworkError,
 } from '@circle-fin/bridge-kit';
 import { createViemAdapterFromProvider } from '@circle-fin/adapter-viem-v2';
+import { createPublicClient, http } from 'viem';
 
 window.__BridgeKitVendor = {
   BridgeKit,
@@ -23,4 +24,8 @@ window.__BridgeKitVendor = {
   isRetryableError,
   isFatalError,
   isNetworkError,
+  // viem primitives so the router can pin a reliable RPC for read calls
+  // (simulation) instead of the Bridge Kit's public-node fallback.
+  createPublicClient,
+  http,
 };
