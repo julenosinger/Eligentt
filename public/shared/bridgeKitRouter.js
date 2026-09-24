@@ -102,10 +102,10 @@
     return null;
   }
 
-  // Resolve the app's authoritative RPC for a Bridge Kit / viem chain (read
-  // calls / simulation). Never use the Bridge Kit's public-node fallback (e.g.
-  // base.publicnode.com) when the app already has a reliable, configured RPC.
-  function _appRpcForChain(chain) {
+  // Resolve the app's authoritative RPC list for a Bridge Kit / viem chain
+  // (read calls / simulation). Never use the Bridge Kit's public-node fallback
+  // (e.g. base.publicnode.com) when the app already has reliable RPCs.
+  function _rpcListForChain(chain) {
     var cid = null;
     try {
       if (chain && chain.id != null) cid = Number(chain.id);
@@ -115,16 +115,16 @@
       try {
         if (typeof getChainById === 'function') {
           var c = getChainById(cid);
-          if (c && c.rpc) return c.rpc;
+          if (c && c.rpc) return [c.rpc];
         }
       } catch (_e) {}
     }
     // Fallbacks: viem chain rpcUrls, then Bridge Kit rpcEndpoints.
     try {
-      if (chain && chain.rpcUrls && chain.rpcUrls.default && Array.isArray(chain.rpcUrls.default.http) && chain.rpcUrls.default.http[0]) return chain.rpcUrls.default.http[0];
+      if (chain && chain.rpcUrls && chain.rpcUrls.default && Array.isArray(chain.rpcUrls.default.http) && chain.rpcUrls.default.http[0]) return [chain.rpcUrls.default.http[0]];
     } catch (_e) {}
     try {
-      if (chain && Array.isArray(chain.rpcEndpoints) && chain.rpcEndpoints[0]) return chain.rpcEndpoints[0];
+      if (chain && Array.isArray(chain.rpcEndpoints) && chain.rpcEndpoints[0]) return [chain.rpcEndpoints[0]];
     } catch (_e) {}
     return null;
   }
@@ -138,13 +138,13 @@
     return v.createViemAdapterFromProvider({
       provider: p,
       // Pin the public client (read calls / simulation) to the app's reliable
-      // RPC so on-chain simulation never fails against a public-node fallback.
+      // RPCs so on-chain simulation never fails against a public-node fallback.
       // Called as getPublicClient({ chain: viemChain }) — chain is a viem Chain.
       getPublicClient: function (opts) {
         var chain = (opts && opts.chain) ? opts.chain : null;
-        var rpc = _appRpcForChain(chain);
-        if (rpc && chain && v.createPublicClient && v.http) {
-          return v.createPublicClient({ chain: chain, transport: v.http(rpc) });
+        var rpcs = _rpcListForChain(chain);
+        if (rpcs && rpcs.length && chain && v.createPublicClient && v.http) {
+          return v.createPublicClient({ chain: chain, transport: v.http(rpcs[0]) });
         }
         // No reliable RPC resolved — fail the read path explicitly rather than
         // silently falling back to the Bridge Kit's public-node RPC.

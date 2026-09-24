@@ -116,7 +116,7 @@ describe('BridgeKitRouter — integration surface', () => {
     // The adapter must override getPublicClient so read/simulation calls use the
     // app's configured RPC, never base.publicnode.com or similar fallbacks.
     expect(src).toContain('getPublicClient');
-    expect(src).toContain('_appRpcForChain');
+    expect(src).toContain('_rpcListForChain');
     expect(src).toContain('getChainById');
   });
 });
