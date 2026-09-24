@@ -11373,6 +11373,29 @@ function requireArcMainnet(action) {
 }
 function getTokenAddress(sym) { return getActiveChain()?.tokens?.[sym]?.address || null; }
 function getTokenAddressForChain(chainId, sym) { return getChainById(chainId)?.tokens?.[sym]?.address || null; }
+// ── Chain-consistent READ-ONLY provider ────────────────────────────────
+// Balance reads must NEVER reuse the wallet's signing provider (window.provider),
+// which reflects the wallet's CURRENT chain and can diverge from activeChainId.
+// Resolve: chainId → CHAIN_REGISTRY[chainId] → chain.rpc → cached JsonRpcProvider,
+// then verify provider.getNetwork().chainId matches. Returns null on mismatch.
+async function getChainProvider(chainId) {
+  const id = Number(chainId);
+  const c = getChainById(id) || CHAIN_REGISTRY[ARC_MAINNET_ID];
+  if (!c || !c.rpc) return null;
+  let prov;
+  try { prov = getCachedProvider(c.rpc); } catch (_e) { return null; }
+  if (!prov) return null;
+  try {
+    const net = await prov.getNetwork();
+    if (Number(net.chainId) !== id) {
+      _warn('[getChainProvider] provider network mismatch: requested ' + id + ', got ' + net.chainId);
+      return null;
+    }
+  } catch (_e) { /* network probe failed — fall through to a fresh provider */ }
+  return prov;
+}
+// Read-only provider for the ACTIVE chain.
+function activeChainProvider() { return getChainProvider(activeChainId); }
 function cctpDomainForChain(key) {
   if (key === null || key === undefined) return null;
   let c = (typeof CHAIN_REGISTRY !== 'undefined' && CHAIN_REGISTRY[key]) ? CHAIN_REGISTRY[key] : null;
@@ -14349,9 +14372,11 @@ async function refreshBalance() {
   _refreshBalancePending = true;
   const set = (id, val) => { const el = document.getElementById(id); if(el) el.textContent = val; };
   try {
-    // JsonRpcProvider avoids stale BrowserProvider cache for balance reads
+    // Chain-consistent read-only provider (chainId → registry → RPC → JsonRpcProvider,
+    // network verified). Never the wallet's signing provider, which may diverge.
     const chain    = getActiveChain();
-    const prov     = getCachedProvider(chain.rpc);
+    const prov     = await getChainProvider(activeChainId);
+    if (!prov) { _refreshBalancePending = false; return; }
     const usdcAddr = chain.tokens?.USDC?.address;
     // DEBUG LOGS for Sepolia (and all chains) balance audit
     // Arc vs Sepolia flow comparison: both use identical path via getActiveChain() + chain.rpc + chain.tokens[SYMBOL].address + JsonRpcProvider + balanceOf
@@ -14747,14 +14772,17 @@ function openMobileDeepLink(wallet) {
   }
 }
 
-function switchNetwork() {
-  if (_rawProvider) {
-    ensureArcMainnet(_rawProvider).then(() => {
-      toast('Switching to Arc Mainnet...', 'info');
-      refreshProviderState().then(() => {
-        updateNetworkBadge();
-        refreshBalance();
-      });
+function switchNetwork(chainId) {
+  // Honor an explicit target chain; default to Arc Mainnet for the legacy call path.
+  const target = (chainId != null && Number.isFinite(Number(chainId))) ? Number(chainId) : ARC_MAINNET_ID;
+  const targetName = (getChainById(target) || {}).name || ('chain ' + target);
+  const isInternal = (typeof WalletManager !== 'undefined' && typeof WalletManager.isInternalWallet === 'function' && WalletManager.isInternalWallet());
+  if (_rawProvider || isInternal) {
+    ensureNetwork(target).then(() => {
+      toast('Switched to ' + targetName, 'info');
+      updateNetworkBadge();
+      refreshBalance().catch(() => {});
+      _refreshAllSurfaceBalances();
     }).catch(e => {
       toast('Network switch failed: ' + (e.message || 'unknown error'), 'error');
     });
@@ -19506,35 +19534,31 @@ async function updateSwapBalancesDisplay() {
     return;
   }
   try {
-    // Chain-aware: read balances on the ACTIVE chain (Arc Mainnet → Mainnet RPC,
-    // Arc Mainnet → Testnet RPC). Fail-closed — never a Testnet fallback on Mainnet.
+    // Chain-aware + network-verified: read balances ONLY on the ACTIVE chain.
+    // No cross-chain token-address leak; never the wallet's signing provider.
     const activeChain = getActiveChain();
     if (!activeChain || !activeChain.rpc) return;
-    const prov = getCachedProvider(activeChain.rpc);
+    const prov = await getChainProvider(activeChainId);
+    if (!prov) return;
     const tIn  = TOKEN_LIST[SWP.tokenInIdx];
     const tOut = TOKEN_LIST[SWP.tokenOutIdx];
 
-    const [balIn, balOut] = await Promise.all([
-      (async () => {
-        const addr = getTokenAddress(tIn.sym) || getTokAddr(tIn.sym);
-        if (!addr || addr === '0x0000000000000000000000000000000000000000') {
-          // Native token balance via provider
-          try { const b = await prov.getBalance(walletAddress); return parseFloat(ethers.formatUnits(b, 18)).toFixed(4); } catch(_) { return '—'; }
+    const readBal = async (t) => {
+      // Chain-specific token address (null when the token is not deployed here).
+      const addr = getTokenAddress(t.sym);
+      const isNative = t.sym === 'ETH' && !isArcChainId(activeChainId);
+      if (!addr) {
+        if (isNative) {
+          try { const b = await prov.getBalance(walletAddress); return parseFloat(ethers.formatUnits(b, t.decimals)).toFixed(4); } catch(_) { return '—'; }
         }
-        const c = new ethers.Contract(addr, USDC_ABI, prov);
-        const b = await c.balanceOf(walletAddress);
-        return parseFloat(ethers.formatUnits(b, tIn.decimals)).toFixed(4);
-      })(),
-      (async () => {
-        const addr = getTokenAddress(tOut.sym) || getTokAddr(tOut.sym);
-        if (!addr || addr === '0x0000000000000000000000000000000000000000') {
-          try { const b = await prov.getBalance(walletAddress); return parseFloat(ethers.formatUnits(b, 18)).toFixed(4); } catch(_) { return '—'; }
-        }
-        const c = new ethers.Contract(addr, USDC_ABI, prov);
-        const b = await c.balanceOf(walletAddress);
-        return parseFloat(ethers.formatUnits(b, tOut.decimals)).toFixed(4);
-      })()
-    ]);
+        return '—'; // not deployed on this chain → no balance to display
+      }
+      const c = new ethers.Contract(addr, USDC_ABI, prov);
+      const b = await c.balanceOf(walletAddress);
+      return parseFloat(ethers.formatUnits(b, t.decimals)).toFixed(4);
+    };
+
+    const [balIn, balOut] = await Promise.all([readBal(tIn), readBal(tOut)]);
     document.getElementById('swp-bal-in-val').textContent = balIn;
     document.getElementById('swp-bal-out-val').textContent = balOut;
   } catch (e) { /* silent */ }

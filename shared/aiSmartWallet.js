@@ -213,7 +213,7 @@
     try {
       if (typeof AgentWalletManager !== 'undefined' && AgentWalletManager.ARC_RPC) return AgentWalletManager.ARC_RPC;
     } catch (_e) { /* ignore */ }
-    return 'https://rpc.testnet.arc.io';
+    return 'https://rpc.mainnet.arc.io';
   }
   function getProvider() {
     if (typeof ethers === 'undefined') return null;

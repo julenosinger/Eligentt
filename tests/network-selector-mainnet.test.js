@@ -69,7 +69,7 @@ describe('Swap — network context follows the active chain', () => {
   it('reads swap balances on the ACTIVE chain RPC (no fixed Testnet provider)', () => {
     const fn = between('async function updateSwapBalancesDisplay', 'function swapTokens');
     expect(fn).toContain('getActiveChain()');
-    expect(fn).toContain('getTokenAddress(tIn.sym)');
+    expect(fn).toContain('getTokenAddress(t.sym)');
     expect(fn).not.toContain("getCachedProvider('https://arc-testnet.drpc.org')");
   });
 
@@ -132,7 +132,7 @@ describe('Bridge — Arc Mainnet CCTP (verified addresses)', () => {
 
   it('Swap balance read is fail-closed (no Testnet RPC fallback on Mainnet)', () => {
     const fn = between('async function updateSwapBalancesDisplay', 'function swapTokens');
-    expect(fn).toContain('getCachedProvider(activeChain.rpc)');
+    expect(fn).toContain('getChainProvider(activeChainId)');
     expect(fn).not.toContain("|| 'https://arc-testnet.drpc.org'");
   });
 });

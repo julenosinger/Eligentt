@@ -379,10 +379,24 @@ const WalletManager = (() => {
 
   // ── Balance helpers ────────────────────────────────────────
 
-  /** Get ETH/native balance for the active wallet. */
+  // Resolve a chain-consistent READ-ONLY provider for the ACTIVE chain.
+  // Balance reads must never reuse the wallet's signing provider
+  // (window.provider), which reflects the wallet's CURRENT chain and can
+  // diverge from activeChainId. chainId → CHAIN_REGISTRY → RPC → JsonRpcProvider.
+  function _readProvider() {
+    const cid = window.activeChainId;
+    let rpc = null;
+    try { if (typeof getActiveChain === 'function' && getActiveChain() && getActiveChain().rpc) rpc = getActiveChain().rpc; } catch(_) {}
+    if (!rpc && Number(cid) === ARC_CHAIN_ID) rpc = ARC_RPC;
+    if (!rpc) return null;
+    try { if (typeof getCachedProvider === 'function') return getCachedProvider(rpc); } catch(_) {}
+    try { return new ethers.JsonRpcProvider(rpc); } catch(_) { return null; }
+  }
+
+  /** Get ETH/native balance for the active wallet on the ACTIVE chain. */
   async function getEthBalance() {
     const addr = getAddress();
-    const prov = getProvider();
+    const prov = _readProvider();
     if (!addr || !prov) return null;
     try {
       const bal = await prov.getBalance(addr);
@@ -390,10 +404,10 @@ const WalletManager = (() => {
     } catch(_) { return null; }
   }
 
-  /** Get ERC20 balance for the active wallet. */
+  /** Get ERC20 balance for the active wallet on the ACTIVE chain. */
   async function getTokenBalance(tokenAddress, decimals) {
     const addr = getAddress();
-    const prov = getProvider();
+    const prov = _readProvider();
     if (!addr || !prov || !tokenAddress) return null;
     try {
       const abi = ['function balanceOf(address) view returns (uint256)'];
