@@ -19,7 +19,7 @@
 
   function _checkRPC() {
     try {
-      if (typeof RPCService !== 'undefined' && RPCService.healthCheck) return RPCService.healthCheck('https://rpc.testnet.arc.network');
+      if (typeof RPCService !== 'undefined' && RPCService.healthCheck) return RPCService.healthCheck('https://rpc.mainnet.arc.io');
     } catch (_e) {}
     return true;
   }

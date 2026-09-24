@@ -2,8 +2,8 @@ const TreasuryGuard = (() => {
   'use strict';
 
   const USDC_ADDRESS = '0x3600000000000000000000000000000000000000';
-  const EURC_ADDRESS = '0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a';
-  const CIRBTC_ADDRESS = '0xf0C4a4CE82A5746AbAAd9425360Ab04fbBA432BF';
+  const EURC_ADDRESS = '0xbEf5f6d51CB62b58e6A8f77868681825C6fe21c1';
+  const CIRBTC_ADDRESS = '0x171A4217b86A807A64eB94757Db6849fb4bDbAA0';
   const TREASURY_VAULT = '0xbfC9E8F79bd30b912081ae88F9ad0A515F08c2F1';
   const ERC20_ABI = ['function balanceOf(address) view returns (uint256)'];
   const ALERT_KEY = 'elligente_treasury_alerts';

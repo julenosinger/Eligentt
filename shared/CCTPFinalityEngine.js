@@ -11,12 +11,12 @@
   'use strict';
 
   var FINALITY_CONFIG = {
-    11155111: { minConfirmations: 1, name: 'Ethereum Sepolia', estSeconds: 12 },
-    84532: { minConfirmations: 1, name: 'Base Sepolia', estSeconds: 2 },
-    421614: { minConfirmations: 1, name: 'Arbitrum Sepolia', estSeconds: 2 },
-    11155420: { minConfirmations: 1, name: 'Optimism Sepolia', estSeconds: 2 },
-    80002: { minConfirmations: 1, name: 'Polygon Amoy', estSeconds: 2 },
-    5042002: { minConfirmations: 1, name: 'Arc Testnet', estSeconds: 1 }
+    1: { minConfirmations: 1, name: 'Ethereum', estSeconds: 12 },
+    8453: { minConfirmations: 1, name: 'Base', estSeconds: 2 },
+    42161: { minConfirmations: 1, name: 'Arbitrum', estSeconds: 2 },
+    10: { minConfirmations: 1, name: 'Optimism', estSeconds: 2 },
+    137: { minConfirmations: 1, name: 'Polygon', estSeconds: 2 },
+    5042: { minConfirmations: 1, name: 'Arc Mainnet', estSeconds: 1 }
   };
 
   var STORAGE_KEY = 'elligentt_cfe_v1';

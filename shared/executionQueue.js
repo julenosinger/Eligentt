@@ -20,7 +20,7 @@
     var task = {
       id: id, type: opts.type || 'unknown', operation: opts.operation || '',
       amount: opts.amount || 0, asset: opts.asset || 'USDC',
-      chain: opts.chain || 'Arc Testnet', destination: opts.destination || '',
+      chain: opts.chain || 'Arc Mainnet', destination: opts.destination || '',
       status: 'pending', // pending|running|waiting_permit|waiting_confirm|completed|failed|cancelled
       created: Date.now(), started: null, elapsed: null,
       progress: 0, progressLabel: '', error: null, retryCount: 0,
@@ -109,7 +109,7 @@
       id: 'exec_' + Date.now() + '_' + Math.random().toString(36).substr(2,4),
       permitId: opts.permitId || '', wallet: (typeof walletAddress!=='undefined'?walletAddress:'unknown'),
       operation: opts.operation || '', amount: opts.amount || 0, asset: opts.asset || 'USDC',
-      chain: opts.chain || 'Arc Testnet', contract: opts.contract || '',
+      chain: opts.chain || 'Arc Mainnet', contract: opts.contract || '',
       gas: opts.gas || '', duration: opts.duration || 0, result: opts.result || 'success',
       txHash: opts.txHash || '', timestamp: Date.now(), status: opts.status || 'completed',
       displayText: opts.displayText || (opts.operation+' '+opts.amount+' '+opts.asset)

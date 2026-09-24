@@ -27,8 +27,8 @@
   ];
 
   var SUPPORTED_NETWORKS = [
-    'Arc Testnet', 'Ethereum Sepolia', 'Base Sepolia',
-    'Arbitrum Sepolia', 'Solana Devnet'
+    'Arc Mainnet', 'Ethereum', 'Base',
+    'Arbitrum', 'Solana Devnet'
   ];
 
   var SUPPORTED_TOKENS = ['USDC', 'EURC', 'cirBTC', 'ETH', 'Custom'];
@@ -186,7 +186,7 @@
       return {
         contact: match,
         preferredToken: p.paymentPrefs.preferredToken || 'USDC',
-        preferredChain: p.crosschainPrefs.preferredDestChain || match.chainId || 'Arc_Testnet',
+        preferredChain: p.crosschainPrefs.preferredDestChain || match.chainId || 'Arc_Mainnet',
         allowCrosschain: p.crosschainPrefs.allowCrosschain !== false,
         preferredRoute: p.crosschainPrefs.cheapestRoute ? 'cheapest' : 'default'
       };
@@ -260,7 +260,7 @@
           addr: found[i].contact.addr,
           amount: String(found[i].profile.paymentPrefs.defaultAmount || '0.00'),
           note: found[i].profile.paymentPrefs.paymentNotes || found[i].contact.note || '',
-          chainId: found[i].contact.chainId || 'Arc_Testnet',
+          chainId: found[i].contact.chainId || 'Arc_Mainnet',
           token: found[i].profile.paymentPrefs.preferredToken || 'USDC'
         });
         added++;

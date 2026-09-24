@@ -103,7 +103,7 @@
       timestamp: Date.now(), permitId: permitId,
       wallet: (typeof walletAddress !== 'undefined') ? walletAddress : (getSessionWalletAddress() || 'unknown'),
       operation: operation, contract: (data && data.contract) || '',
-      chain: (data && data.network) || 'Arc Testnet', amount: (data && data.amount) || 0,
+      chain: (data && data.network) || 'Arc Mainnet', amount: (data && data.amount) || 0,
       result: result || 'success'
     };
     auditLog.unshift(entry); if(auditLog.length > 500) auditLog.length = 500; save();
@@ -117,7 +117,7 @@
     var permit = {
       id: id, type: opts.type || 'spend', asset: opts.asset || 'USDC',
       maxAmount: opts.maxAmount || 0, usedAmount: 0,
-      destination: opts.destination || '*', network: opts.network || 'Arc Testnet',
+      destination: opts.destination || '*', network: opts.network || 'Arc Mainnet',
       expiresAt: now + (opts.durationMs || 1800000),
       allowedOps: opts.allowedOps || [], contract: opts.contract || '',
       purpose: opts.purpose || '', status: 'active', grantedAt: now, lastUsed: null,
@@ -178,7 +178,7 @@
   function checkCoverage(opts){
     invalidateExpired();
     var now = Date.now(), required = opts.amount || 0, asset = opts.asset || 'USDC';
-    var network = opts.network || 'Arc Testnet', operation = opts.operation || '', contract = opts.contract || '';
+    var network = opts.network || 'Arc Mainnet', operation = opts.operation || '', contract = opts.contract || '';
     for(var i=0;i<permits.length;i++){
       var p=permits[i];
       if(p.status!=='active') continue;
@@ -199,7 +199,7 @@
   }
 
   function checkCoverageBasic(opts){
-    var now=Date.now(),required=opts.amount||0,asset=opts.asset||'USDC',network=opts.network||'Arc Testnet',operation=opts.operation||'',contract=opts.contract||'';
+    var now=Date.now(),required=opts.amount||0,asset=opts.asset||'USDC',network=opts.network||'Arc Mainnet',operation=opts.operation||'',contract=opts.contract||'';
     for(var i=0;i<permits.length;i++){
       var p=permits[i];
       if(p.status!=='active') continue; if(p.expiresAt<=now) continue;
@@ -263,7 +263,7 @@
     var id='sched_'+Date.now()+'_'+Math.random().toString(36).substr(2,4);
     var sched={
       id:id, name:opts.name||'Scheduled permit',
-      basePermit:{type:opts.type||'spend',asset:opts.asset||'USDC',maxAmount:opts.maxAmount||0,destination:opts.destination||'*',network:opts.network||'Arc Testnet',allowedOps:opts.allowedOps||[],contract:opts.contract||'',purpose:opts.purpose||''},
+      basePermit:{type:opts.type||'spend',asset:opts.asset||'USDC',maxAmount:opts.maxAmount||0,destination:opts.destination||'*',network:opts.network||'Arc Mainnet',allowedOps:opts.allowedOps||[],contract:opts.contract||'',purpose:opts.purpose||''},
       recurrence:opts.recurrence||'weekly', customInterval:opts.customInterval||null,
       dayOfWeek:opts.dayOfWeek||null, dayOfMonth:opts.dayOfMonth||null,
       lastExecuted:null, nextExecution:calcNextExecution(opts), active:true,

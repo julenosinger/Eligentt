@@ -58,7 +58,7 @@
       executionCount:0,
       maxExecutions:opts.maxExecutions||null,
       // Chain
-      chain:opts.chain||'Arc Testnet',
+      chain:opts.chain||'Arc Mainnet',
       // Meta
       createdAt:Date.now(),
       agentWallet:typeof AgentWalletManager!=='undefined'?AgentWalletManager.getAgentAddress():null

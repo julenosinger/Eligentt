@@ -36,12 +36,12 @@ const USER_ADDR = '0x' + '33'.repeat(20);
 const OTHER_AGENT = '0x' + '44'.repeat(20);
 const OTHER_USER = '0x' + '55'.repeat(20);
 
-const ARC_CHAIN_ID = 5042002;
-const BASE_SEPOLIA = 84532;
-const ETH_SEPOLIA = 11155111;
-const ARB_SEPOLIA = 421614;
-const OP_SEPOLIA = 11155420;
-const POLY_AMOY = 80002;
+const ARC_CHAIN_ID = 5042;
+const BASE_SEPOLIA = 8453;
+const ETH_SEPOLIA = 1;
+const ARB_SEPOLIA = 42161;
+const OP_SEPOLIA = 10;
+const POLY_AMOY = 137;
 const UNSUPPORTED_CHAIN = 999999;
 
 function makeLocalStorage() {
@@ -120,7 +120,7 @@ function bootGate(opts = {}) {
     isShutdown: () => false,
     isPaused: () => false,
     getAgentAddress: () => AGENT_ADDR,
-    getSupportedChains: () => ['Arc Testnet'],
+    getSupportedChains: () => ['Arc Mainnet'],
     recordExecution: () => {},
     recordOperationSuccess: () => {},
   }, opts.wmOverrides || {});
@@ -142,7 +142,7 @@ function bootGate(opts = {}) {
 function grant(az, over = {}) {
   return az.createAuthorization(Object.assign({
     maxSpending: 1000, dailyLimit: 1000,
-    allowedTokens: ['USDC'], allowedNetworks: ['Arc Testnet'],
+    allowedTokens: ['USDC'], allowedNetworks: ['Arc Mainnet'],
     allowPayments: true, allowSwap: true, allowBridge: true,
     agentWallet: AGENT_ADDR, grantedBy: USER_ADDR,
     durationMs: 3600000, maxRiskLevel: 'MEDIUM',
@@ -150,13 +150,13 @@ function grant(az, over = {}) {
 }
 
 function paymentIntent(over = {}) {
-  return Object.assign({ operation: 'payment', amount: 50, asset: 'USDC', network: 'Arc Testnet', destination: RCPT, chainId: ARC_CHAIN_ID }, over);
+  return Object.assign({ operation: 'payment', amount: 50, asset: 'USDC', network: 'Arc Mainnet', destination: RCPT, chainId: ARC_CHAIN_ID }, over);
 }
 function swapIntent(over = {}) {
-  return Object.assign({ operation: 'swap', amount: 50, asset: 'USDC', network: 'Arc Testnet', destination: '', chainId: ARC_CHAIN_ID }, over);
+  return Object.assign({ operation: 'swap', amount: 50, asset: 'USDC', network: 'Arc Mainnet', destination: '', chainId: ARC_CHAIN_ID }, over);
 }
 function bridgeIntent(over = {}) {
-  return Object.assign({ operation: 'bridge', amount: 50, asset: 'USDC', network: 'Arc Testnet', destination: '', chainId: ARC_CHAIN_ID, simulationHash: '0x' + 'ab'.repeat(32) }, over);
+  return Object.assign({ operation: 'bridge', amount: 50, asset: 'USDC', network: 'Arc Mainnet', destination: '', chainId: ARC_CHAIN_ID, simulationHash: '0x' + 'ab'.repeat(32) }, over);
 }
 
 beforeEach(() => {

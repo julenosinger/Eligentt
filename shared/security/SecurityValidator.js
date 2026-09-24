@@ -136,7 +136,7 @@
   function fullCheck(intent) {
     var intentResult = validateIntent(intent);
     var permResult = validatePermissions(intent.op || 'payment', {});
-    var policyResult = validatePolicy(intent.op || 'payment', Number(intent.amount) || 0, intent.token || 'USDC', intent.network || 'Arc_Testnet');
+    var policyResult = validatePolicy(intent.op || 'payment', Number(intent.amount) || 0, intent.token || 'USDC', intent.network || 'Arc_Mainnet');
 
     var allChecks = []
       .concat(intentResult.checks)

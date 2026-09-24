@@ -11,7 +11,7 @@
 (function () {
   'use strict';
 
-  var ARC_CHAIN_ID = 5042002;
+  var ARC_CHAIN_ID = 5042;
   var ARC_DOMAIN = 26;
 
   /* ══════════════════════════════════════════════════════════════════
@@ -108,7 +108,7 @@
       '<span style="font-size:8px;color:var(--muted2)">' + ((Date.now() - attestStart) / 1000).toFixed(1) + 's · Iris V2 sandbox</span></div>');
 
     // 5. Mint on Arc
-    _addAutMsg(execId, 'MINTING', 'Step 3/3: Minting ' + amount + ' USDC on Arc Testnet…');
+    _addAutMsg(execId, 'MINTING', 'Step 3/3: Minting ' + amount + ' USDC on Arc Mainnet…');
 
     var mintStart = Date.now();
     var mintResult = await window.CCTPV2InboundEngine.executeMint(t.id);
@@ -125,7 +125,7 @@
     _addAutMsg(execId, 'COMPLETED',
       '<div style="font-size:10px">' +
       '<span style="color:#22c55e;font-size:12px">✓ CCTP V2 Transfer Completed</span><br><br>' +
-      '<strong>' + amount + ' USDC</strong> · ' + route.sourceChainName + ' → Arc Testnet<br>' +
+      '<strong>' + amount + ' USDC</strong> · ' + route.sourceChainName + ' → Arc Mainnet<br>' +
       (t.burnTxHash ? 'Burn: <code style="font-size:8px;color:#a78bfa">' + t.burnTxHash.substring(0, 16) + '…</code><br>' : '') +
       (t.mintTxHash ? 'Mint: <code style="font-size:8px;color:#a78bfa">' + t.mintTxHash.substring(0, 16) + '…</code><br>' : '') +
       '<span style="color:var(--muted);font-size:9px">' + ((Date.now() - t.createdAt) / 1000).toFixed(1) + 's total · CCTP v2</span>' +
@@ -207,7 +207,7 @@
           return {
             strategy: 'CCTP_V2_INBOUND',
             protocol: 'Circle CCTP V2',
-            steps: ['Burn on ' + route.sourceChainName, 'Circle Attestation', 'Mint on Arc Testnet'],
+            steps: ['Burn on ' + route.sourceChainName, 'Circle Attestation', 'Mint on Arc Mainnet'],
             estimatedTime: route.estimatedTimeSecs + ' seconds',
             sourceDomain: route.sourceDomain,
             destDomain: route.destDomain,

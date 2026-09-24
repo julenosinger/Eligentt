@@ -29,7 +29,7 @@ function baseIntent(over = {}) {
     grossAmount: 100,
     feeAmount: 1,
     wallet: '0x' + '1'.repeat(40),
-    sourceChain: 'Base_Sepolia',
+    sourceChain: 'Base',
     status: INTENT_STATUS.FULFILLED,
     fulfilledAt: Date.now(),
     settledAt: null,
@@ -45,14 +45,14 @@ afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe('Settlement — source domain resolution', () => {
   it('resolves domain from numeric chainId', () => {
-    expect(resolveSourceDomain({ sourceChain: '84532' })).toBe(6);
+    expect(resolveSourceDomain({ sourceChain: '8453' })).toBe(6);
   });
   it('resolves domain from symbolic chain name', () => {
-    expect(resolveSourceDomain({ sourceChain: 'Base_Sepolia' })).toBe(6);
-    expect(resolveSourceDomain({ sourceChain: 'ethereum_sepolia' })).toBe(0);
+    expect(resolveSourceDomain({ sourceChain: 'Base' })).toBe(6);
+    expect(resolveSourceDomain({ sourceChain: 'ethereum' })).toBe(0);
   });
   it('prefers an explicit sourceDomain', () => {
-    expect(resolveSourceDomain({ sourceDomain: 7, sourceChain: 'Base_Sepolia' })).toBe(7);
+    expect(resolveSourceDomain({ sourceDomain: 7, sourceChain: 'Base' })).toBe(7);
   });
   it('returns null when unresolvable', () => {
     expect(resolveSourceDomain({ sourceChain: 'nonsense_chain' })).toBe(null);

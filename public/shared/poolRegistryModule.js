@@ -10,12 +10,12 @@
 
   var REGISTRY_KEY = 'elligentt_pool_registry_v1';
 
-  // Primary pool — ElligentPool AMM on Arc Testnet
+  // Primary pool — ElligentPool AMM on Arc Mainnet
   var POOLS = {
     arc_testnet_usdc_cirbtc: {
       id: 'arc_testnet_usdc_cirbtc',
-      chainId: 5042002,
-      chainName: 'Arc Testnet',
+      chainId: 5042,
+      chainName: 'Arc Mainnet',
       poolType: 'Custom LP Token',
       abiVersion: 'custom_v1',
       poolAddress: '0x18076d992005186AeB13AC5270CaD6E27DB95247',
@@ -29,7 +29,7 @@
       feePct: 0.3,
       tokens: [
         { symbol: 'USDC', address: '0x3600000000000000000000000000000000000000', decimals: 6 },
-        { symbol: 'cirBTC', address: '0xf0C4a4CE82A5746AbAAd9425360Ab04fbBA432BF', decimals: 8 }
+        { symbol: 'cirBTC', address: '0x171A4217b86A807A64eB94757Db6849fb4bDbAA0', decimals: 8 }
       ],
       supportedFunctions: [
         'name', 'symbol', 'decimals', 'totalSupply',
@@ -89,8 +89,8 @@
   function registerPool(poolId, poolData) {
     customPools[poolId] = {
       id: poolId,
-      chainId: poolData.chainId || 5042002,
-      chainName: poolData.chainName || 'Arc Testnet',
+      chainId: poolData.chainId || 5042,
+      chainName: poolData.chainName || 'Arc Mainnet',
       poolType: poolData.poolType || 'Custom',
       abiVersion: poolData.abiVersion || 'custom_v1',
       poolAddress: poolData.poolAddress,

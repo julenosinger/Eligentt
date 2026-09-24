@@ -53,7 +53,7 @@ const EventIndexer = (() => {
       wallet: event.wallet || null,
       amount: event.amount || null,
       asset: event.asset || null,
-      chain: event.chain || 'Arc Testnet',
+      chain: event.chain || 'Arc Mainnet',
       intentId: event.intentId || null,
       metadata: event.metadata || null,
       createdAt: Date.now(),

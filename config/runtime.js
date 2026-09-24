@@ -7,23 +7,23 @@
  *
  * Sources (priority order):
  *   1. Cloudflare Function env vars (injected at runtime)
- *   2. This file (hardcoded defaults for Arc Testnet)
+ *   2. This file (hardcoded defaults for Arc Mainnet)
  */
 
 const RT = Object.freeze({
-  // ── Chain: Arc Testnet ──────────────────────────────────
-  ARC_CHAIN_ID:       5042002,
-  ARC_CHAIN_HEX:      '0x4cef52',
-  ARC_RPC_URL:        'https://arc-testnet.drpc.org',
-  ARC_EXPLORER_URL:   'https://testnet.arcscan.app',
+  // ── Chain: Arc Mainnet ──────────────────────────────────
+  ARC_CHAIN_ID:       5042,
+  ARC_CHAIN_HEX:      '0x13b2',
+  ARC_RPC_URL:        'https://rpc.mainnet.arc.io',
+  ARC_EXPLORER_URL:   'https://explorer.arc.io',
   ARC_NATIVE_NAME:    'USDC',
   ARC_NATIVE_SYMBOL:  'USDC',
   ARC_NATIVE_DECIMALS: 18,
 
-  // ── Token Addresses (Arc Testnet) ────────────────────────
+  // ── Token Addresses (Arc Mainnet) ────────────────────────
   USDC_ADDRESS:       '0x3600000000000000000000000000000000000000',
-  EURC_ADDRESS:       '0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a',
-  CIRBTC_ADDRESS:     '0xf0C4a4CE82A5746AbAAd9425360Ab04fbBA432BF',
+  EURC_ADDRESS:       '0xbEf5f6d51CB62b58e6A8f77868681825C6fe21c1',
+  CIRBTC_ADDRESS:     '0x171A4217b86A807A64eB94757Db6849fb4bDbAA0',
   USDC_DECIMALS:      6,
   EURC_DECIMALS:      6,
   CIRBTC_DECIMALS:    8,
@@ -37,11 +37,12 @@ const RT = Object.freeze({
   MULTICALL3_ADDRESS:         '0xcA11bde05977b3631167028862bE2a173976CA11',
 
   // ── CCTP Configuration ──────────────────────────────────
-  CCTP_TOKEN_MESSENGER:       '0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA',
-  CCTP_MESSAGE_TRANSMITTER:   '0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275',
+  CCTP_TOKEN_MESSENGER:       '0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d',
+  CCTP_MESSAGE_TRANSMITTER:   '0x81D40F21F12A8F0E3252Bccb954D722d4c464B64',
+  CCTP_TOKEN_MINTER:          '0xfd78EE919681417d192449715b2594ab58f5D002',
   CCTP_ARC_DOMAIN:            26,
-  CCTP_ATTEST_URL:            'https://iris-api-sandbox.circle.com/attestations/',
-  CCTP_IRIS_V2_URL:           'https://iris-api-sandbox.circle.com/v2/messages/',
+  CCTP_ATTEST_URL:            'https://iris-api.circle.com/attestations/',
+  CCTP_IRIS_V2_URL:           'https://iris-api.circle.com/v2/messages/',
 
   // ── Fee Configuration (basis points) ────────────────────
   PLATFORM_FEE_BPS:   100,    // 1.00% Multisend platform fee → OWNER_WALLET

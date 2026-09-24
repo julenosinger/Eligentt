@@ -45,7 +45,7 @@ function makeSchedule(over = {}) {
 function makeProvider(opts = {}) {
   return {
     sent: [], simCalls: [], sendCalls: 0,
-    async getNetwork() { return { chainId: BigInt(opts.chainId ?? 5042002) }; },
+    async getNetwork() { return { chainId: BigInt(opts.chainId ?? 5042) }; },
     async call(tx) { if (tx && tx.data && tx.data.startsWith('0xa9059cbb')) this.simCalls.push(tx); return BAL_HEX; },
     async getBalance() { return 10n ** 18n; },
     async send(method, params) {
@@ -95,7 +95,7 @@ function boot(opts = {}) {
     validatePreExecution: () => ({ ok: true }),
     recordExecution: () => {},
     recordOperationSuccess: () => {},
-    getSupportedChains: () => ['Arc Testnet'],
+    getSupportedChains: () => ['Arc Mainnet'],
   }, opts.wmOverrides || {});
 
   delete globalThis.RiskEngine;
@@ -124,7 +124,7 @@ function boot(opts = {}) {
 function grant(auth) {
   return auth.createAuthorization({
     maxSpending: 5000, dailyLimit: null,
-    allowedTokens: ['USDC'], allowedNetworks: ['Arc Testnet'],
+    allowedTokens: ['USDC'], allowedNetworks: ['Arc Mainnet'],
     allowedOperations: ['payment'], allowPayments: true, allowScheduled: true,
     durationMs: 3600000, maxRiskLevel: 'MEDIUM',
   });
@@ -233,7 +233,7 @@ describe('MS-3 — 3 simultaneous instances claim the same occurrence', () => {
     const ls = makeLocalStorage();
     const A = makeEngine(ls), B = makeEngine(ls), C = makeEngine(ls);
     const key = 'SCH1|2026-01-01T00:00:00.000Z';
-    const meta = { scheduleId: 'SCH1', occurrenceId: key, wallet: '0xaaa', chain: 'Arc Testnet' };
+    const meta = { scheduleId: 'SCH1', occurrenceId: key, wallet: '0xaaa', chain: 'Arc Mainnet' };
     const ra = await A.claimExecution(key, 'agent_schedule_executor', meta);
     const rb = await B.claimExecution(key, 'batch_execution_engine', meta);
     const rc = await C.claimExecution(key, 'manual', meta);

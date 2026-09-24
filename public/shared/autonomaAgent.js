@@ -98,14 +98,14 @@
     try {
       if(typeof ethers === 'undefined') return null;
       if(typeof RPCManager !== 'undefined' && typeof RPCManager.getHealthyRPC === 'function'){
-        var rpc = RPCManager.getHealthyRPC(5042002);
+        var rpc = RPCManager.getHealthyRPC(5042);
         if(rpc) return new ethers.JsonRpcProvider(rpc);
       }
     } catch(e){}
     try {
-      if(typeof getCachedProvider === 'function') return getCachedProvider('https://rpc.testnet.arc.network');
+      if(typeof getCachedProvider === 'function') return getCachedProvider('https://rpc.mainnet.arc.io');
     } catch(e){}
-    return new ethers.JsonRpcProvider('https://rpc.testnet.arc.network');
+    return new ethers.JsonRpcProvider('https://rpc.mainnet.arc.io');
   }
 
   function monitorTx(txHash, chainId, callback){

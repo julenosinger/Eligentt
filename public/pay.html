@@ -4,16 +4,15 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0"/>
 <title>Elligentt Pay — Secure Web3 Payment</title>
-<meta name="description" content="Secure Web3 payment powered by Elligentt. Pay USDC on Arc Testnet directly from your wallet."/>
+<meta name="description" content="Secure Web3 payment powered by Elligentt. Pay USDC on Arc Mainnet directly from your wallet."/>
 <meta name="robots" content="noindex"/>
 <meta name="theme-color" content="#050816"/>
 <link rel="icon" type="image/svg+xml" href="/favicon-main.svg"/>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.44.0/tabler-icons.min.css"/>
-<script src="https://cdn.jsdelivr.net/npm/ethers@6.13.5/dist/ethers.umd.min.js" integrity="sha384-NRAZj94DQk3dgtsOZzVYHbYVV1DFkF5QhL5RRxF0ILZLi6OQ7CsMlun748D42JbO" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/ethers@6.7.1/dist/ethers.umd.min.js" integrity="sha384-eoEZatO/ymJi+LdBilp3xt/M9N9Lla2JlMVPZuk48Fg1YGl2Mc+vmsky+nkOtlSi" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js" integrity="sha384-3zSEDfvllQohrq0PHL1fOXJuC/jSOO34H46t6UQfobFOmxE5BpjjaIJY5F2/bMnU" crossorigin="anonymous"></script>
-<script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.4/dist/purify.min.js" integrity="sha384-eEu5CTj3qGvu9PdJuS+YlkNi7d2XxQROAFYOr59zgObtlcux1ae1Il3u7jvdCSWu" crossorigin="anonymous"></script>
 <!-- Real config — single source of truth (addresses, chain, fees) -->
 <script src="/config/system.js"></script>
 <script src="/config/chains.js"></script>
@@ -196,7 +195,7 @@
       <div id="checkout" style="display:none">
         <div class="card-head">
           <span class="card-head-title">Payment Request</span>
-          <span class="net-pill"><span class="dot"></span> <span id="net-name">Arc Testnet</span></span>
+          <span class="net-pill"><span class="dot"></span> <span id="net-name">Arc Mainnet</span></span>
         </div>
         <div class="card-body">
           <div class="checkout-grid">
@@ -221,7 +220,7 @@
                 <div class="block-title">Details</div>
                 <div class="rows">
                   <div class="row"><span class="k">Recipient</span><span class="v addr" id="s-recipient">—</span></div>
-                  <div class="row"><span class="k">Network</span><span class="v net">Arc Testnet</span></div>
+                  <div class="row"><span class="k">Network</span><span class="v net">Arc Mainnet</span></div>
                   <div class="row"><span class="k">Token</span><span class="v tok" id="s-token">USDC</span></div>
                   <div class="row"><span class="k">Invoice</span><span class="v" id="s-label">—</span></div>
                   <div class="row"><span class="k">Status</span><span id="s-status"></span></div>
@@ -255,7 +254,7 @@
       </div>
     </div>
 
-    <div class="footer"><i class="ti ti-lock"></i> Powered by Elligentt · Arc Testnet</div>
+    <div class="footer"><i class="ti ti-lock"></i> Powered by Elligentt · Arc Mainnet</div>
   </div>
 
   <div class="toast" id="toast"></div>
@@ -270,10 +269,10 @@
   var CT = window.ElligenteContracts || {};
   var FE = window.ElligenteFees || {};
 
-  var ARC_CHAIN_ID  = SC.ARC_CHAIN_ID  || CH.ARC_CHAIN_ID  || 5042002;
-  var ARC_CHAIN_HEX = SC.ARC_CHAIN_HEX || CH.ARC_CHAIN_HEX || '0x4cef52';
-  var ARC_RPC_URL   = SC.ARC_RPC_URL   || CH.ARC_RPC_URL   || 'https://arc-testnet.drpc.org';
-  var ARC_EXPLORER  = SC.ARC_EXPLORER_URL || CH.ARC_EXPLORER_URL || 'https://testnet.arcscan.app';
+  var ARC_CHAIN_ID  = SC.ARC_CHAIN_ID  || CH.ARC_CHAIN_ID  || 5042;
+  var ARC_CHAIN_HEX = SC.ARC_CHAIN_HEX || CH.ARC_CHAIN_HEX || '0x13b2';
+  var ARC_RPC_URL   = SC.ARC_RPC_URL   || CH.ARC_RPC_URL   || 'https://rpc.mainnet.arc.io';
+  var ARC_EXPLORER  = SC.ARC_EXPLORER_URL || CH.ARC_EXPLORER_URL || 'https://explorer.arc.io';
   var USDC_ADDRESS  = CT.USDC_ADDRESS  || SC.USDC_ADDRESS  || '0x3600000000000000000000000000000000000000';
   var USDC_DECIMALS = CT.USDC_DECIMALS || SC.USDC_DECIMALS || 6;
   var MEMO_CONTRACT = SC.MEMO_CONTRACT_ADDRESS || '0x5294E9927c3306DcBaDb03fe70b92e01cCede505';
@@ -297,7 +296,7 @@
   function toast(msg, type){
     var el=$('toast'); if(!el) return;
     var ic={success:'ti-check',error:'ti-x',warning:'ti-alert-triangle',info:'ti-info-circle'}[type||'info']||'ti-info-circle';
-    el.innerHTML='<i class="ti '+ic+'"></i>'+DOMPurify.sanitize(String(msg));
+    el.innerHTML='<i class="ti '+ic+'"></i>'+String(msg);
     el.className='toast '+(type||'info')+' show';
     clearTimeout(_tt); _tt=setTimeout(function(){ el.classList.remove('show'); }, 4200);
   }
@@ -345,7 +344,7 @@
   // ── Render ──
   function statusBadge(status){
     var s = status || 'Active';
-    var cls = 'active', label = DOMPurify.sanitize(s);
+    var cls = 'active', label = s;
     if (s === 'Paid')                       { cls='paid'; }
     else if (s === 'Expired')               { cls='dead'; }
     else if (s === 'Disabled'||s==='Cancelled'){ cls='dead'; }
@@ -363,7 +362,7 @@
     $('amt-total').textContent = fmt(total);
     $('amt-token').textContent = tk;
     $('amt-desc').textContent  = link.desc || link.label || ('Payment ' + (link.number || ''));
-    $('net-name').textContent  = link.chain || 'Arc Testnet';
+    $('net-name').textContent  = link.chain || 'Arc Mainnet';
 
     $('s-total').textContent    = fmt(total) + ' ' + tk;
     $('s-receives').textContent = fmt(amt) + ' ' + tk;
@@ -440,7 +439,7 @@
     setBtn('<i class="ti ti-bolt"></i> Pay ' + fmt(total) + ' ' + tk);
   }
 
-  function showNotice(kind, html){ var n=$('notice'); n.className='notice show '+kind; n.innerHTML=DOMPurify.sanitize(html); }
+  function showNotice(kind, html){ var n=$('notice'); n.className='notice show '+kind; n.innerHTML=html; }
   function hideNotice(){ var n=$('notice'); n.className='notice'; n.innerHTML=''; }
   function explorerLink(hash){
     return ' <br><a href="'+ARC_EXPLORER+'/tx/'+hash+'" target="_blank" rel="noopener">'+shortHash(hash)+'</a>';
@@ -511,13 +510,13 @@
 
   function ensureArc(){
     if (chainId === ARC_CHAIN_ID) return Promise.resolve();
-    toast('Switching to Arc Testnet…', 'info');
+    toast('Switching to Arc Mainnet…', 'info');
     return window.ethereum.request({ method:'wallet_switchEthereumChain', params:[{ chainId: ARC_CHAIN_HEX }] })
       .catch(function(err){
         if (err && (err.code === 4902 || (err.data && err.data.originalError && err.data.originalError.code === 4902))) {
           return window.ethereum.request({ method:'wallet_addEthereumChain', params:[{
             chainId: ARC_CHAIN_HEX,
-            chainName: 'Arc Testnet',
+            chainName: 'Arc Mainnet',
             nativeCurrency: { name:'USDC', symbol:'USDC', decimals:18 },
             rpcUrls: [ARC_RPC_URL],
             blockExplorerUrls: [ARC_EXPLORER]

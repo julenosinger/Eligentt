@@ -34,7 +34,7 @@
   var CIRCLE_MODE = 'circle';
 
   var FLAG_KEY = 'elligentt_autonoma_signer_provider';
-  var ARC_CHAIN_ID = 5042002;
+  var ARC_CHAIN_ID = 5042;
 
   // Circle config resolved from the server (contains only public info:
   // availability + the circle wallet ADDRESS). No secret material.

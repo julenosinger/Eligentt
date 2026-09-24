@@ -60,7 +60,7 @@
           operation:opts.operation,
           amount:opts.amount,
           asset:opts.asset||'USDC',
-          network:opts.network||'Arc Testnet',
+          network:opts.network||'Arc Mainnet',
           contract:opts.contract||'',
           destination:opts.destination||''
         });
@@ -80,7 +80,7 @@
         amount:opts.amount||0,
         asset:opts.asset||'USDC',
         contract:opts.contract||'',
-        network:opts.network||'Arc Testnet',
+        network:opts.network||'Arc Mainnet',
         destination:opts.destination||''
       });
       var maxRisk=opts.maxRiskLevel||'MEDIUM';
@@ -239,7 +239,7 @@
   function quickCheck(operation, amount, asset, network){
     return validateExecution({
       operation:operation, amount:amount||0, asset:asset||'USDC',
-      network:network||'Arc Testnet', contract:'', destination:'',
+      network:network||'Arc Mainnet', contract:'', destination:'',
       simulationHash:null, authId:null, slippage:null
     });
   }

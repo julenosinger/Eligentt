@@ -27,12 +27,12 @@
 
   function normChain(s) {
     var t = String(s||'').toUpperCase().replace(/[_ ]/g,'');
-    if (t.indexOf('ARC') === 0) return 'Arc_Testnet';
-    if (t.indexOf('BASE') === 0) return 'Base_Sepolia';
-    if (t.indexOf('ARBITRUM') === 0 || t.indexOf('ARB') === 0) return 'Arbitrum_Sepolia';
-    if (t.indexOf('ETHEREUM') === 0 || t.indexOf('ETH') === 0) return 'Ethereum_Sepolia';
-    if (t.indexOf('OPTIMISM') === 0) return 'Optimism_Sepolia';
-    if (t.indexOf('POLYGON') === 0 || t.indexOf('MATIC') === 0) return 'Polygon_Amoy';
+    if (t.indexOf('ARC') === 0) return 'Arc_Mainnet';
+    if (t.indexOf('BASE') === 0) return 'Base';
+    if (t.indexOf('ARBITRUM') === 0 || t.indexOf('ARB') === 0) return 'Arbitrum';
+    if (t.indexOf('ETHEREUM') === 0 || t.indexOf('ETH') === 0) return 'Ethereum';
+    if (t.indexOf('OPTIMISM') === 0) return 'Optimism';
+    if (t.indexOf('POLYGON') === 0 || t.indexOf('MATIC') === 0) return 'Polygon';
     return null;
   }
 
@@ -81,7 +81,7 @@
       }
       row._amount = parseFloat(row.amount) || 0;
       row._token = normToken(row.token) || 'USDC';
-      row._chain = normChain(row.chain) || 'Arc_Testnet';
+      row._chain = normChain(row.chain) || 'Arc_Mainnet';
       row._rawAmount = _toRawInt(row._amount, row._token);
       var addrLower = (row.address||'').toLowerCase();
       if (seenAddrs[addrLower]) errors.push('Line ' + (i+1) + ': Duplicate address ' + row.address);
@@ -217,7 +217,7 @@
       }
       if (addrIdx === -1) { errors.push('Line ' + (i+1) + ': No valid address'); continue; }
       if (amtIdx === -1) { errors.push('Line ' + (i+1) + ': No valid amount'); continue; }
-      var token = 'USDC', chain = 'Arc_Testnet';
+      var token = 'USDC', chain = 'Arc_Mainnet';
       for (var q = 0; q < parts.length; q++) {
         if (q === addrIdx || q === amtIdx) continue;
         var nt = normToken(parts[q]);
@@ -250,12 +250,12 @@
         var addr = obj.address || obj.addr || obj.wallet || obj.to || '';
         var amount = parseFloat(obj.amount || obj.value || obj.amt || 0);
         var token = obj.token || obj.symbol || obj.asset || 'USDC';
-        var chain = obj.chain || obj.network || obj.chainId || 'Arc_Testnet';
+        var chain = obj.chain || obj.network || obj.chainId || 'Arc_Mainnet';
         var note = obj.note || obj.name || obj.label || '';
         var errs = validateRow({ address: addr, amount: String(amount), token: token, chain: chain, note: note }, i + 1);
         if (errs.length) { errors = errors.concat(errs); continue; }
         var nToken = normToken(token) || 'USDC';
-        var nChain = normChain(chain) || 'Arc_Testnet';
+        var nChain = normChain(chain) || 'Arc_Mainnet';
         var addrLower = addr.toLowerCase();
         if (seenAddrs[addrLower]) errors.push('Entry ' + (i+1) + ': Duplicate address ' + addr);
         else {
@@ -315,7 +315,7 @@
     var chains = {}; rows.forEach(function(r){ chains[r._chain] = (chains[r._chain]||0) + 1; });
     var chainList = Object.keys(chains);
     var totalSum = rows.reduce(function(s,r){ return s + r._amount; }, 0);
-    var isCrosschain = chainList.some(function(c){ return c !== 'Arc_Testnet'; });
+    var isCrosschain = chainList.some(function(c){ return c !== 'Arc_Mainnet'; });
     var multiToken = tokenList.length > 1;
     var isBatch = rows.length > 1;
     var msg = (userMsg||'').toLowerCase();
@@ -425,7 +425,7 @@
           ScheduleEngine.create({
             type: isXc ? 'crosschain' : 'payment', name: (r.note || 'Scheduled Payment'), token: r._token,
             amount: r._amount, total: r._amount,
-            network: r._chain, fromNetwork: 'Arc_Testnet', toNetwork: r._chain,
+            network: r._chain, fromNetwork: 'Arc_Mainnet', toNetwork: r._chain,
             recipients: recips, address: r.address,
             freq: plan.freq || 'once', maxEx: plan.mode === 'recurring' || plan.mode === 'recurring_crosschain' ? 0 : 1, gas: 0.10,
             nextRun: plan.scheduleDate || new Date(Date.now() + 60000).toISOString(),
@@ -442,25 +442,20 @@
     }
 
     if (plan.mode === 'crosschain') {
-      if (typeof ScheduleEngine === 'undefined') return { success: 0, failed: plan.rows.length, errors: ['ScheduleEngine unavailable'] };
-      plan.rows.forEach(function(r){
-        try {
-          var recips = [{ addr: r.address, amount: r._amount, note: r.note || '', chainId: r._chain, token: r._token }];
-          ScheduleEngine.create({
-            type: 'crosschain', name: (r.note || 'Crosschain Payment'), token: r._token,
-            amount: r._amount, total: r._amount,
-            network: r._chain, fromNetwork: 'Arc_Testnet', toNetwork: r._chain,
-            recipients: recips, address: r.address,
-            freq: 'once', maxEx: 1, gas: 0.10,
-            nextRun: new Date(Date.now() + 60000).toISOString(),
-            execCount: 0, executionHistory: [],
-            status: 'Active', created: new Date().toISOString(), createdBy: 'autonoma',
-            agentExecution: true, walletAddress: (typeof walletAddress !== 'undefined' ? walletAddress : '')
-          });
-          results.success++;
-        } catch(e) { results.failed++; results.errors.push('Crosschain for ' + r.address + ': ' + (e.message || 'error')); }
-      });
-      try { schedules = ScheduleEngine.getAll(); if (typeof renderSchedules === 'function') renderSchedules(); } catch(e){}
+      if (typeof window !== 'undefined' && typeof window._agentExecuteBridge === 'function') {
+        (async function(){
+          for(var i = 0; i < plan.rows.length; i++){
+            var r = plan.rows[i];
+            try {
+              var domain = {Base:6, Arbitrum:3, Ethereum:0, Optimism:2, Polygon:7}[r._chain] || 6;
+              await window._agentExecuteBridge(r._amount, domain, r._chain.replace('_',' '), 'doc_crosschain_' + Date.now() + '_' + i, 5042, r.address);
+              results.success++;
+            } catch(e) { results.failed++; results.errors.push('Crosschain for ' + r.address + ': ' + (e.message || 'error')); }
+          }
+        })();
+      } else {
+        return { success: 0, failed: plan.rows.length, errors: ['Crosschain engine unavailable'] };
+      }
       return results;
     }
 

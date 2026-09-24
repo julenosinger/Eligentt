@@ -32,7 +32,7 @@ const PE = w.PoolEngine;
 const Executor = w.PoolExecutor;
 
 const USDC = '0x3600000000000000000000000000000000000000';
-const EURC = '0x89b50855aa3be2f677cd6303cec089b5f319d72a';
+const EURC = '0xbef5f6d51cb62b58e6a8f77868681825c6fe21c1';
 
 function makeExecutor(opts = {}) {
   return Executor.createExecutor({ poolEngine: PE, swapMath: w.SwapMath, ethers, ...opts });
@@ -47,7 +47,7 @@ function makeAdapter(overrides = {}) {
   return {
     calls,
     getWalletAddress: async () => (overrides.wallet === undefined ? '0xuser' : overrides.wallet),
-    getChainId: async () => (overrides.chainId === undefined ? 5042002 : overrides.chainId),
+    getChainId: async () => (overrides.chainId === undefined ? 5042 : overrides.chainId),
     readBalance: async () => (overrides.balance === undefined ? 10_000_000_000n : overrides.balance),
     readAllowance: async () => allowance,
     approve: async () => { calls.approve++; allowance = 10_000_000_000_000n; return { hash: '0xapprove' }; },
@@ -113,7 +113,7 @@ describe('Final pre-submit guard (no silent parameter substitution)', () => {
     seed();
     const ex = makeExecutor();
     const adapter = makeAdapter({ allowance: 1_000_000_000n, chainId: 1 });
-    const res = await ex.executeDirectSwap({ tokenIn: 'USDC', tokenOut: 'EURC', amountInRaw: 100_000_000n, expectedChainId: 5042002, adapter });
+    const res = await ex.executeDirectSwap({ tokenIn: 'USDC', tokenOut: 'EURC', amountInRaw: 100_000_000n, expectedChainId: 5042, adapter });
     expect(res.ok).toBe(false);
     expect(res.code).toBe('WRONG_NETWORK');
   });

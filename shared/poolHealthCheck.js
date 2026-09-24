@@ -135,7 +135,7 @@
       if (p) return p;
     }
     if (typeof ethers !== 'undefined') {
-      return new ethers.JsonRpcProvider('https://arc-testnet.drpc.org');
+      return new ethers.JsonRpcProvider('https://rpc.mainnet.arc.io');
     }
     return null;
   }

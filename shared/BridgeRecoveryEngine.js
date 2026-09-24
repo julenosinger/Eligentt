@@ -106,7 +106,7 @@
 
   /** Retry attestation fetch with exponential backoff */
   async function retryAttestation(sourceDomain, burnTxHash, messageBytes) {
-    var irisUrl = 'https://iris-api-sandbox.circle.com/v2/messages/' + sourceDomain + '?transactionHash=' + burnTxHash;
+    var irisUrl = 'https://iris-api.circle.com/v2/messages/' + sourceDomain + '?transactionHash=' + burnTxHash;
 
     for (var attempt = 0; attempt < MAX_RETRIES; attempt++) {
       try {

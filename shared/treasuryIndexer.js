@@ -192,7 +192,7 @@ const TreasuryIndexer = (() => {
       application: settlement.application ?? 'ELLIGENT',
       client: settlement.client ?? 'default',
       srcChain: null,
-      dstChain: 'Arc_Testnet',
+      dstChain: 'Arc_Mainnet',
       status: 'Settled',
       txHash: null,
       sourceDomain: null,

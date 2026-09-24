@@ -17,8 +17,8 @@
           type: toNetwork ? 'crosschain' : 'multisend',
           name: 'Payment to ' + r.addr.slice(0,6) + '...',
           token: token || 'USDC', amount: r.amount, total: r.amount,
-          network: network || 'Arc_Testnet', fromNetwork: 'Arc_Testnet',
-          toNetwork: toNetwork || network || 'Arc_Testnet',
+          network: network || 'Arc_Mainnet', fromNetwork: 'Arc_Mainnet',
+          toNetwork: toNetwork || network || 'Arc_Mainnet',
           recipients: [{ addr: r.addr, amount: r.amount }], address: r.addr,
           freq: 'once', maxEx: 1, gas: 0.10, nextRun: now,
           execCount: 0, executionHistory: [], status: 'Active', created: now,
@@ -50,7 +50,7 @@
             addrs.slice(0, 50).forEach(function(a){ recipients.push({ addr: a, amount: amt || 10 }); });
           }
           if (recipients.length > 0) {
-            _createScheduleEntries(recipients, token, 'Arc_Testnet', null);
+            _createScheduleEntries(recipients, token, 'Arc_Mainnet', null);
             try { if (typeof showPage === 'function') setTimeout(function(){ showPage('schedule'); }, 200); } catch(_e) {}
           }
           return _m(p, msg);

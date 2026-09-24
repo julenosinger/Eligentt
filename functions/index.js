@@ -129,7 +129,7 @@ async function handleCircleProxy(request, env, url) {
 async function handleIrisProxy(request, env, url) {
   const corsOrigin = getAllowedOrigin(request, env);
   const irisPath = url.pathname.replace('/api/iris', '');
-  const irisUrl = 'https://iris-api-sandbox.circle.com' + irisPath + url.search;
+  const irisUrl = 'https://iris-api.circle.com' + irisPath + url.search;
 
   try {
     const resp = await fetch(irisUrl, { method: request.method });

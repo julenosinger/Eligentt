@@ -157,7 +157,7 @@
     if (hasScheduleEngine() && typeof ScheduleEngine.claimExecution === 'function') {
       var _claimRes = await ScheduleEngine.claimExecution(claimKey, 'batch_execution_engine', {
         scheduleId: sched.id, occurrenceId: claimKey,
-        wallet: sched.walletAddress || null, chain: 'Arc Testnet'
+        wallet: sched.walletAddress || null, chain: 'Arc Mainnet'
       });
       if (!_claimRes || !_claimRes.acquired) {
         return { ok: false, error: 'Schedule already claimed by another executor' };
@@ -335,7 +335,7 @@
       '<div style="font-size:8px;color:var(--muted2);margin-top:4px;display:flex;justify-content:space-between">' +
       '<span>' + escapeHTML(execEntry.progressLabel || '') + '</span>' +
       '<span>' + pct + '%' + (execEntry.startedAt ? ' ┬À ' + formatElapsed(Date.now() - execEntry.startedAt) : '') + '</span></div>' +
-      (execEntry.txHash ? '<div style="font-size:8px;color:var(--blue);margin-top:2px"><a href="https://testnet.arcscan.app/tx/' + execEntry.txHash + '" target="_blank" rel="noopener">' + escapeHTML(String(execEntry.txHash).substring(0, 14) + '...') + '</a></div>' : '') +
+      (execEntry.txHash ? '<div style="font-size:8px;color:var(--blue);margin-top:2px"><a href="https://explorer.arc.io/tx/' + execEntry.txHash + '" target="_blank" rel="noopener">' + escapeHTML(String(execEntry.txHash).substring(0, 14) + '...') + '</a></div>' : '') +
       (execEntry.status === 'failed' && execEntry.retries < MAX_RETRIES ?
         '<button class="btn" style="font-size:8.5px;padding:3px 8px;margin-top:4px" onclick="BatchExecutionEngine.retryExecution(\'' + escapeHTML(execEntry.id) + '\')">Retry</button>' : '') +
       '</div>';
@@ -419,7 +419,7 @@
           operation: 'batch_multisend',
           amount: params.total,
           asset: params.token,
-          chain: 'Arc Testnet',
+          chain: 'Arc Mainnet',
           txHash: execEntry.txHash || '',
           result: execEntry.status === 'completed' ? 'success' : 'failed',
           duration: execEntry.endTime ? execEntry.endTime - execEntry.startedAt : 0,
@@ -433,7 +433,7 @@
           operation: 'batch_multisend',
           amount: params.total,
           asset: params.token,
-          chain: 'Arc Testnet',
+          chain: 'Arc Mainnet',
           transactionHash: execEntry.txHash || '',
           result: execEntry.status === 'completed' ? 'success' : 'failed',
           duration: execEntry.endTime ? execEntry.endTime - execEntry.startedAt : 0,

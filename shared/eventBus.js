@@ -142,7 +142,7 @@
    * @returns {Promise<void>} Resolves after all listeners have run (including async ones)
    *
    * @example
-   *   EventBus.emit('WALLET_CONNECTED', { address: '0x...', chainId: 5042002 });
+   *   EventBus.emit('WALLET_CONNECTED', { address: '0x...', chainId: 5042 });
    */
   function emit(eventName, payload) {
     var list = _listeners[eventName];

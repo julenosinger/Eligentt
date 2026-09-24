@@ -25,10 +25,10 @@
     if (!poolConfig) {
       poolConfig = {
         poolAddress: '0x18076d992005186AeB13AC5270CaD6E27DB95247',
-        chainId: 5042002,
+        chainId: 5042,
         tokens: [
           { symbol: 'USDC', address: '0x3600000000000000000000000000000000000000', decimals: 6 },
-          { symbol: 'cirBTC', address: '0xf0C4a4CE82A5746AbAAd9425360Ab04fbBA432BF', decimals: 8 }
+          { symbol: 'cirBTC', address: '0x171A4217b86A807A64eB94757Db6849fb4bDbAA0', decimals: 8 }
         ]
       };
     }

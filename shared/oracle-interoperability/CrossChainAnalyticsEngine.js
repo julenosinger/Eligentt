@@ -74,7 +74,7 @@
   }
 
   function getCrossChainAnalytics(){
-    var chains = ['Ethereum_Sepolia','Base_Sepolia','Arbitrum_Sepolia','Optimism_Sepolia','Polygon_Amoy'];
+    var chains = ['Ethereum','Base','Arbitrum','Optimism','Polygon'];
     var results = [];
     chains.forEach(function(c){
       results.push(getOptimalRoute(c, 100, 'USDC'));

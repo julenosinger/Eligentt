@@ -103,7 +103,7 @@
     var safeType = escHtml(opts.type || 'spend');
     var safeAsset = escHtml(opts.asset || 'USDC');
     var safeDest = escHtml(opts.destination || '*');
-    var safeNet = escHtml(opts.network || 'Arc Testnet');
+    var safeNet = escHtml(opts.network || 'Arc Mainnet');
     var safeContract = escHtml(opts.contract || '');
     var safePurpose = escHtml(opts.purpose || '');
     var safeGas = escHtml(opts.estimatedGas || 'N/A');
@@ -120,7 +120,7 @@
         row('Asset', opts.asset || 'USDC', '') +
         row('Maximum Amount', '<strong style="font-size:13px">' + (opts.maxAmount || 0) + ' ' + (opts.asset || 'USDC') + '</strong>', 'green') +
         (opts.destination && opts.destination !== '*' ? row('Destination Contract', '<code style="font-size:8.5px;color:#06F7E9">' + (opts.destination.length > 12 ? opts.destination.substring(0,10) + '...' : opts.destination) + '</code>', '') : '') +
-        row('Network', chainPill(opts.network || 'Arc Testnet', '#4f8ef7'), '') +
+        row('Network', chainPill(opts.network || 'Arc Mainnet', '#4f8ef7'), '') +
         row('Expiration', PE.fmtTimeLeft(now + (opts.durationMs || 1800000)), 'yellow') +
         row('Purpose', (opts.purpose || 'General operation').substring(0, 40), '') +
         row('Estimated Gas', opts.estimatedGas || 'N/A', ''),
@@ -558,7 +558,7 @@
     var c = document.getElementById('aut-messages');
     if(c){
       if(typeof ExecutionQueue !== 'undefined'){
-        var task = ExecutionQueue.enqueue({type:'workflow',operation:plan.goal,amount:plan.riskDetails.length>0?0:0,asset:'USDC',chain:'Arc Testnet'});
+        var task = ExecutionQueue.enqueue({type:'workflow',operation:plan.goal,amount:plan.riskDetails.length>0?0:0,asset:'USDC',chain:'Arc Mainnet'});
         ExecutionQueue.updateStatus(task.id, 'running', {progress:10,progressLabel:'Starting workflow...'});
       }
       var lastAi = c.querySelector('.aut-msg.ai:last-child .aut-msg-body');
@@ -576,7 +576,7 @@
         for(var i=0;i<tasks.length;i++){ ExecutionQueue.updateStatus(tasks[i].id,'completed',{result:'success'}); }
       }
       if(typeof ExecutionHistory !== 'undefined'){
-        ExecutionHistory.recordExecution({operation:plan.goal,amount:plan.riskDetails.length>0?0:0,asset:'USDC',chain:'Arc Testnet',result:'success',displayText:plan.goal});
+        ExecutionHistory.recordExecution({operation:plan.goal,amount:plan.riskDetails.length>0?0:0,asset:'USDC',chain:'Arc Mainnet',result:'success',displayText:plan.goal});
       }
     }
   };

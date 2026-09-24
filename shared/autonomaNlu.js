@@ -17,12 +17,12 @@
   };
 
   var CHAINS = {
-    'arc': { name: 'Arc Testnet', aliases: ['arc','testnet','arc testnet'] },
-    'ethereum': { name: 'Ethereum', aliases: ['ethereum','eth','sepolia','mainnet'] },
-    'base': { name: 'Base', aliases: ['base','base sepolia'] },
-    'arbitrum': { name: 'Arbitrum', aliases: ['arbitrum','arb','arbitrum sepolia'] },
-    'optimism': { name: 'Optimism', aliases: ['optimism','op','optimism sepolia'] },
-    'polygon': { name: 'Polygon', aliases: ['polygon','poly','amoy'] }
+    'arc': { name: 'Arc Mainnet', aliases: ['arc','arc mainnet','mainnet'] },
+    'ethereum': { name: 'Ethereum', aliases: ['ethereum','eth'] },
+    'base': { name: 'Base', aliases: ['base'] },
+    'arbitrum': { name: 'Arbitrum', aliases: ['arbitrum','arb'] },
+    'optimism': { name: 'Optimism', aliases: ['optimism','op'] },
+    'polygon': { name: 'Polygon', aliases: ['polygon','poly'] }
   };
 
   var TIMEZONES = {

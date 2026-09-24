@@ -82,7 +82,7 @@
     var state = {
       wallet: typeof walletAddress !== 'undefined' ? walletAddress : null,
       chain: typeof activeChainId !== 'undefined' ? activeChainId : 'unknown',
-      chainName: typeof activeNetworkName !== 'undefined' ? activeNetworkName : 'Arc Testnet',
+      chainName: typeof activeNetworkName !== 'undefined' ? activeNetworkName : 'Arc Mainnet',
       balances: {},
       activePermits: typeof PermitEngine !== 'undefined' ? PermitEngine.getPermitCount() : 0,
       sessionWallet: typeof PermitEngine !== 'undefined' ? PermitEngine.getSessionWalletAddress() : null,
@@ -185,7 +185,7 @@
     }
 
     // Chain / Network
-    var chainMap = { arc: 'Arc Testnet', base: 'Base', ethereum: 'Ethereum', sepolia: 'Sepolia', arbitrum: 'Arbitrum', optimism: 'Optimism', polygon: 'Polygon' };
+    var chainMap = { arc: 'Arc Mainnet', base: 'Base', ethereum: 'Ethereum', arbitrum: 'Arbitrum', optimism: 'Optimism', polygon: 'Polygon' };
     var fromM = low.match(/from\s+(\w+)/), toM = low.match(/to\s+(\w+)/), paraM = low.match(/para\s+(?:a\s+)?(\w+)/);
     if(fromM && chainMap[fromM[1]]) p.fromChain = chainMap[fromM[1]];
     if(toM && chainMap[toM[1]]) p.toChain = chainMap[toM[1]];

@@ -25,11 +25,11 @@
   var checkCounts = { api: 0, rpc: 0, attestation: 0, mint: 0 };
 
   var SOURCE_RPCS = {
-    11155111: { rpc: 'https://ethereum-sepolia-rpc.publicnode.com', name: 'Ethereum Sepolia' },
-    84532: { rpc: 'https://sepolia.base.org', name: 'Base Sepolia' },
-    421614: { rpc: 'https://sepolia-rollup.arbitrum.io/rpc', name: 'Arbitrum Sepolia' },
-    11155420: { rpc: 'https://sepolia.optimism.io', name: 'Optimism Sepolia' },
-    80002: { rpc: 'https://rpc-amoy.polygon.technology', name: 'Polygon Amoy' }
+    1: { rpc: 'https://cloudflare-eth.com', name: 'Ethereum' },
+    8453: { rpc: 'https://mainnet.base.org', name: 'Base' },
+    42161: { rpc: 'https://arb1.arbitrum.io/rpc', name: 'Arbitrum' },
+    10: { rpc: 'https://mainnet.optimism.io', name: 'Optimism' },
+    137: { rpc: 'https://polygon-rpc.com', name: 'Polygon' }
   };
 
   function _statusFromLatency(ms, threshold) {
@@ -54,7 +54,7 @@
     var start = Date.now();
     var status = 'OFFLINE';
     try {
-      var resp = await fetch('https://iris-api-sandbox.circle.com/v2/messages/26?transactionHash=0x0000000000000000000000000000000000000000000000000000000000000000', { signal: AbortSignal.timeout(10000) });
+      var resp = await fetch('https://iris-api.circle.com/v2/messages/26?transactionHash=0x0000000000000000000000000000000000000000000000000000000000000000', { signal: AbortSignal.timeout(10000) });
       status = resp.ok || resp.status === 404 ? 'HEALTHY' : 'DEGRADED';
     } catch (_e) { status = 'OFFLINE'; }
 
@@ -71,7 +71,7 @@
     var status = 'OFFLINE';
     try {
       if (typeof ethers !== 'undefined') {
-        var rpc = 'https://arc-testnet.drpc.org';
+        var rpc = 'https://rpc.mainnet.arc.io';
         try { if (typeof ElligenteChains !== 'undefined' && ElligenteChains.CHAIN_REGISTRY[5042]) rpc = ElligenteChains.CHAIN_REGISTRY[5042].rpc; } catch (_e) {}
         var provider = new ethers.JsonRpcProvider(rpc);
         await provider.getBlockNumber();

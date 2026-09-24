@@ -22,7 +22,7 @@
     try {
       if (typeof contacts !== 'undefined') {
         var id = 'C' + Date.now();
-        contacts.push({ id: id, name: name, addr: addr, chainId: chainId || 'Arc_Testnet', note: note || '', favorite: false, lastUsed: new Date().toISOString() });
+        contacts.push({ id: id, name: name, addr: addr, chainId: chainId || 'Arc_Mainnet', note: note || '', favorite: false, lastUsed: new Date().toISOString() });
         if (typeof Store !== 'undefined' && Store.save) Store.save('contacts', contacts);
         refresh();
         return id;

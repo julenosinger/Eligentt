@@ -33,7 +33,7 @@
     },
 
     diagnostics: function () {
-      return { walletType: typeof activeWalletType !== 'undefined' ? activeWalletType : null, chainId: typeof activeChainId !== 'undefined' ? activeChainId : 5042002 };
+      return { walletType: typeof activeWalletType !== 'undefined' ? activeWalletType : null, chainId: typeof activeChainId !== 'undefined' ? activeChainId : 5042 };
     },
 
     capabilities: function () {

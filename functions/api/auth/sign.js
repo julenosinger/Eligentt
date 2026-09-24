@@ -135,7 +135,7 @@ export async function onRequestPost(context) {
     return json({ error: 'Failed to decrypt wallet key' }, 500);
   }
 
-  const rpc = env.ARC_RPC_URL || 'https://arc-testnet.drpc.org';
+  const rpc = env.ARC_RPC_URL || 'https://rpc.mainnet.arc.io';
   const provider = new ethers.JsonRpcProvider(rpc);
   const wallet = new ethers.Wallet(privateKey, provider);
 
@@ -180,7 +180,7 @@ export async function onRequestPost(context) {
         return json({ error: 'Transaction not allowed' }, 403);
       }
       const tx = { ...transaction };
-      if (!tx.chainId) tx.chainId = 5042002;
+      if (!tx.chainId) tx.chainId = 5042;
       const signed = await wallet.signTransaction(tx);
       return json({ ok: true, signedTransaction: signed, address: wallet.address });
     }

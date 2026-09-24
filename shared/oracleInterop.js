@@ -1,6 +1,6 @@
 /**
  * Oracle & Interoperability Layer — Chainlink Integration for Elligente
- * Arc Testnet only. Real on-chain data. Zero mock values.
+ * Arc Mainnet only. Real on-chain data. Zero mock values.
  *
  * Modules: OracleManager, PriceFeedEngine, MarketDataEngine,
  *          OracleSecurityEngine, TreasuryRiskEngine, CCIPEngine,
@@ -12,10 +12,10 @@
   'use strict';
 
   /* ═══════════════════════════════════════════════════════════
-     CONSTANTS — Arc Testnet Chainlink addresses
+     CONSTANTS — Arc Mainnet Chainlink addresses
      ═══════════════════════════════════════════════════════════ */
-  var ARC_CHAIN_ID = 5042002;
-  var ARC_RPC = 'https://arc-testnet.drpc.org';
+  var ARC_CHAIN_ID = 5042;
+  var ARC_RPC = 'https://rpc.mainnet.arc.io';
 
   // Chainlink AggregatorV3Interface ABI
   var AGGREGATOR_ABI = [
@@ -28,7 +28,7 @@
     'function latestTimestamp() view returns (uint256)'
   ];
 
-  // CCIP Router on Arc Testnet
+  // CCIP Router on Arc Mainnet
   var CCIP_ROUTER = '0xdE4E7FED43FAC37EB21aA0643d9852f75332eab8';
   var CCIP_CHAIN_SELECTOR = '3034092155422581607';
   var CCIP_ARM_PROXY = '0xD610B8f58689de7755947C05342A2DFaC30ebD57';
@@ -44,14 +44,14 @@
 
   // CCIP Chain Selectors for supported destination chains
   var CCIP_CHAIN_SELECTORS = {
-    Ethereum_Sepolia: '16015286601757825753',
-    Arbitrum_Sepolia: '3478487238524512106',
-    Base_Sepolia: '10344971235874465080',
-    Optimism_Sepolia: '5224473277236331295',
-    Polygon_Amoy: '16281711391670634445'
+    Ethereum: '16015286601757825753',
+    Arbitrum: '3478487238524512106',
+    Base: '10344971235874465080',
+    Optimism: '5224473277236331295',
+    Polygon: '16281711391670634445'
   };
 
-  // Known Chainlink Data Feed addresses on Arc Testnet
+  // Known Chainlink Data Feed addresses on Arc Mainnet
   // Format: aggregator address for each pair
   var FEED_REGISTRY = {
     'ETH/USD':  { address: '0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419', decimals: 8, heartbeat: 3600, description: 'ETH / USD' },

@@ -2,7 +2,7 @@
  * Elligentt Pool ABI Discovery (FASE 2.1)
  * ═══════════════════════════════════════
  * Discovers the actual ABI of the liquidity pool on-chain.
- * Tested against deploy 0x18076d992005186AeB13AC5270CaD6E27DB95247 on Arc Testnet.
+ * Tested against deploy 0x18076d992005186AeB13AC5270CaD6E27DB95247 on Arc Mainnet.
  * Attached to window.PoolAbiDiscovery
  *
  * DISCOVERED ABI (15/07/2026):
@@ -90,7 +90,7 @@
 
     DISCOVERY_RESULT = {
       contract: contractAddr,
-      chainId: 5042002,
+      chainId: 5042,
       totalFunctions: results.length,
       supportedCount: supported.length,
       unsupportedCount: unsupported.length,

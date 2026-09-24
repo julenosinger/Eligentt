@@ -10,7 +10,7 @@
 (function () {
   'use strict';
 
-  var ARC_CHAIN_ID = 5042002;
+  var ARC_CHAIN_ID = 5042;
   var ARC_DOMAIN = 26;
 
   var STORAGE_KEY = 'elligentt_cctp_inbound_v1';
@@ -46,16 +46,16 @@
   }
 
   var _fallbackRPCs = {
-    11155111: 'https://ethereum-sepolia-rpc.publicnode.com',
-    84532: 'https://sepolia.base.org',
-    421614: 'https://sepolia-rollup.arbitrum.io/rpc',
-    11155420: 'https://sepolia.optimism.io',
-    80002: 'https://rpc-amoy.polygon.technology',
+    1: 'https://cloudflare-eth.com',
+    8453: 'https://mainnet.base.org',
+    42161: 'https://arb1.arbitrum.io/rpc',
+    10: 'https://mainnet.optimism.io',
+    137: 'https://polygon-rpc.com',
   };
 
   async function _getDynamicMaxFee(srcDomain, destDomain) {
     try {
-      var resp = await fetch('https://iris-api-sandbox.circle.com/v2/fees/' + srcDomain + '/' + destDomain);
+      var resp = await fetch('https://iris-api.circle.com/v2/fees/' + srcDomain + '/' + destDomain);
       if (!resp.ok) return null;
       var data = await resp.json();
       return data.maxFee ? String(data.maxFee) : null;
@@ -77,7 +77,7 @@
       token: opts.token || 'USDC',
       sourceUSDC: srcCfg ? srcCfg.usdc : '',
       tokenMessenger: srcCfg ? srcCfg.tokenMessenger : '',
-      messageTransmitter: '0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275',
+      messageTransmitter: '0x81D40F21F12A8F0E3252Bccb954D722d4c464B64',
       sourceRPC: opts.sourceRPC || (srcCfg ? srcCfg.rpc : ''),
       mintRecipient: opts.mintRecipient || '',
       burnTxHash: null,
@@ -263,7 +263,7 @@
         });
       } else {
         // Manual Iris V2 polling with exponential backoff
-        var irisUrl = 'https://iris-api-sandbox.circle.com/v2/messages/' + t.sourceDomain + '?transactionHash=' + t.burnTxHash;
+        var irisUrl = 'https://iris-api.circle.com/v2/messages/' + t.sourceDomain + '?transactionHash=' + t.burnTxHash;
         var delay = 3000;
         for (var i = 0; i < 180; i++) {
           try {
@@ -340,7 +340,7 @@
       if (!t.mintTxHash) {
         if (typeof ethers === 'undefined') throw new Error('ethers not available for direct mint');
 
-        var arcRpc = 'https://arc-testnet.drpc.org';
+        var arcRpc = 'https://rpc.mainnet.arc.io';
         try { if (typeof ElligenteChains !== 'undefined' && ElligenteChains.CHAIN_REGISTRY[ARC_CHAIN_ID]) arcRpc = ElligenteChains.CHAIN_REGISTRY[ARC_CHAIN_ID].rpc; } catch (_e) {}
 
         var provider = _getProvider(arcRpc);

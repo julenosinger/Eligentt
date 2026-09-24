@@ -18,7 +18,7 @@
   var _state = {
     address: null,
     chainId: null,
-    networkName: 'Arc Testnet',
+    networkName: 'Arc Mainnet',
     walletType: null,    // 'metamask' | 'coinbase' | 'rabby' | 'injected' | 'walletconnect' | 'intelligent'
     balances: {},
     connected: false,
@@ -83,12 +83,12 @@
   function _getNetworkName() {
     var id = getChainId();
     var map = {
-      5042002: 'Arc Testnet',
-      11155111: 'Ethereum Sepolia',
-      84532: 'Base Sepolia',
-      421614: 'Arbitrum Sepolia',
-      11155420: 'Optimism Sepolia',
-      80002: 'Polygon Amoy'
+      5042: 'Arc Mainnet',
+      1: 'Ethereum',
+      8453: 'Base',
+      42161: 'Arbitrum',
+      10: 'Optimism',
+      137: 'Polygon'
     };
     return map[id] || ('Chain ' + id);
   }
@@ -161,7 +161,7 @@
   function reset() {
     _state.address = null;
     _state.chainId = null;
-    _state.networkName = 'Arc Testnet';
+    _state.networkName = 'Arc Mainnet';
     _state.walletType = null;
     _state.balances = {};
     _state.connected = false;

@@ -138,7 +138,7 @@
         return CHAIN_REGISTRY[chainId].explorer + '/tx/' + txHash;
       }
     } catch (_e) {}
-    return 'https://testnet.arcscan.app/tx/' + txHash;
+    return 'https://explorer.arc.io/tx/' + txHash;
   }
 
   function explorerAddressUrl(chainId, addr) {
@@ -147,7 +147,7 @@
         return CHAIN_REGISTRY[chainId].explorer + '/address/' + addr;
       }
     } catch (_e) {}
-    return 'https://testnet.arcscan.app/address/' + addr;
+    return 'https://explorer.arc.io/address/' + addr;
   }
 
   /* ════════════════════════════════════════

@@ -16,7 +16,7 @@
     var operation = opts.operation || 'unknown';
     var amount = opts.amount || 0;
     var asset = opts.asset || 'USDC';
-    var network = opts.network || 'Arc Testnet';
+    var network = opts.network || 'Arc Mainnet';
     var contract = opts.contract || '';
     var destination = opts.destination || '';
     var purpose = opts.purpose || '';
@@ -69,8 +69,8 @@
     }
 
     // 4. Chain risk
-    var mainnetChains = ['Ethereum','Polygon','Arbitrum','Optimism','Base'];
-    var testnetChains = ['Arc Testnet','Sepolia','Base Sepolia','Arbitrum Sepolia','Amoy'];
+    var mainnetChains = ['Arc Mainnet','Ethereum','Polygon','Arbitrum','Optimism','Base'];
+    var testnetChains = [];
     if(testnetChains.indexOf(network) >= 0){
       findings.push({ factor: 'Chain Risk', level: 'LOW', detail: 'Testnet — no real value at risk' });
     } else if(mainnetChains.indexOf(network) >= 0){
@@ -157,7 +157,7 @@
   function quickAssess(operation, amount, asset, contract, network){
     return analyze({
       operation: operation, amount: amount || 0, asset: asset || 'USDC',
-      contract: contract || '', destination: '', network: network || 'Arc Testnet', purpose: ''
+      contract: contract || '', destination: '', network: network || 'Arc Mainnet', purpose: ''
     });
   }
 

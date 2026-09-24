@@ -114,7 +114,7 @@ function bootGate(opts = {}) {
     isShutdown: () => false,
     isPaused: () => false,
     getAgentAddress: () => AGENT_ADDR,
-    getSupportedChains: () => ['Arc Testnet'],
+    getSupportedChains: () => ['Arc Mainnet'],
     recordExecution: () => {},
     recordOperationSuccess: () => {},
   }, opts.wmOverrides || {});
@@ -137,7 +137,7 @@ function bootGate(opts = {}) {
 function grant(az, over = {}) {
   return az.createAuthorization(Object.assign({
     maxSpending: 1000, dailyLimit: 1000,
-    allowedTokens: ['USDC'], allowedNetworks: ['Arc Testnet'],
+    allowedTokens: ['USDC'], allowedNetworks: ['Arc Mainnet'],
     allowPayments: true, allowSwap: true, allowBridge: true,
     agentWallet: AGENT_ADDR, grantedBy: USER_ADDR,
     durationMs: 3600000, maxRiskLevel: 'MEDIUM',
@@ -145,7 +145,7 @@ function grant(az, over = {}) {
 }
 
 function paymentIntent(over = {}) {
-  return Object.assign({ operation: 'payment', amount: 50, asset: 'USDC', network: 'Arc Testnet', destination: RCPT, chainId: 5042002 }, over);
+  return Object.assign({ operation: 'payment', amount: 50, asset: 'USDC', network: 'Arc Mainnet', destination: RCPT, chainId: 5042 }, over);
 }
 
 beforeEach(() => {
@@ -268,8 +268,8 @@ describe('AUTONOMA-0 — execution gate (fail-closed)', () => {
     const env = bootGate();
     grant(env.AgentAuthorization);
     // Simulate the schedule path claiming the same occurrence slot first.
-    const claimKey = env.gate.intentKey({ operation: 'payment', wallet: AGENT_ADDR, asset: 'USDC', amount: 50, destinations: [RCPT], destination: RCPT, chainId: 5042002 });
-    const schedClaim = await env.engine.claimExecution(claimKey, 'agent_schedule_executor', { scheduleId: 'SCH_X', occurrenceId: claimKey, wallet: AGENT_ADDR, chain: 'Arc Testnet' });
+    const claimKey = env.gate.intentKey({ operation: 'payment', wallet: AGENT_ADDR, asset: 'USDC', amount: 50, destinations: [RCPT], destination: RCPT, chainId: 5042 });
+    const schedClaim = await env.engine.claimExecution(claimKey, 'agent_schedule_executor', { scheduleId: 'SCH_X', occurrenceId: claimKey, wallet: AGENT_ADDR, chain: 'Arc Mainnet' });
     expect(schedClaim.acquired).toBe(true);
     // The gate must NOT broadcast a second time for the same financial intent.
     const res = await env.gate.authorizeAutonomaExecution(paymentIntent(), {});

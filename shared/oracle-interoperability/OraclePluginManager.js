@@ -75,7 +75,7 @@
         } catch(_e){}
         return [];
       },
-      metadata: { version: '1.0.0', provider: 'Chainlink', network: 'Arc Testnet', router: '0xdE4E7FED43FAC37EB21aA0643d9852f75332eab8' }
+      metadata: { version: '1.0.0', provider: 'Chainlink', network: 'Arc Mainnet', router: '0xdE4E7FED43FAC37EB21aA0643d9852f75332eab8' }
     });
     activatePlugin('chainlink');
   }, 2000);

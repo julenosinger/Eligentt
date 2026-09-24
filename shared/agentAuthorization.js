@@ -56,7 +56,7 @@
       maxSpending:opts.maxSpending||0, usedSpending:0,
       allowedTokens:opts.allowedTokens||['USDC'],
       allowedContracts:opts.allowedContracts||['*'],
-      allowedNetworks:opts.allowedNetworks||['Arc Testnet'],
+      allowedNetworks:opts.allowedNetworks||['Arc Mainnet'],
       allowedOperations:opts.allowedOperations||[],
       // Limits
       dailyLimit:opts.dailyLimit||null, dailyUsed:0, dailyReset:now,
@@ -115,7 +115,7 @@
     var operation=opts.operation||'';
     var amount=opts.amount||0;
     var asset=opts.asset||'USDC';
-    var network=opts.network||'Arc Testnet';
+    var network=opts.network||'Arc Mainnet';
     var contract=opts.contract||'';
     var destination=opts.destination||'';
     var now=Date.now();

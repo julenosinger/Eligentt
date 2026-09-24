@@ -79,7 +79,7 @@
 
     // Policy check
     var policyOk = true;
-    try { if (typeof PolicyEngine !== 'undefined') { var pv = PolicyEngine.quickCheck(operation, amount, params.token || 'USDC', params.network || 'Arc_Testnet'); policyOk = !!(pv && pv.valid); } } catch (_e2) {}
+    try { if (typeof PolicyEngine !== 'undefined') { var pv = PolicyEngine.quickCheck(operation, amount, params.token || 'USDC', params.network || 'Arc_Mainnet'); policyOk = !!(pv && pv.valid); } } catch (_e2) {}
     checks.push({ check: 'policy', risk: policyOk ? 0 : 40, passed: policyOk });
     if (!policyOk) score += 40;
 

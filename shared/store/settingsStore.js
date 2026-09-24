@@ -18,7 +18,7 @@
   var _state = {
     slippage: '0.5',
     gasLimit: 'auto',
-    defaultNetwork: 'Arc_Testnet',
+    defaultNetwork: 'Arc_Mainnet',
     theme: 'dark',
     language: 'en',
     notifications: true,
@@ -122,7 +122,7 @@
   function reset() {
     _state.slippage = '0.5';
     _state.gasLimit = 'auto';
-    _state.defaultNetwork = 'Arc_Testnet';
+    _state.defaultNetwork = 'Arc_Mainnet';
     _state.theme = 'dark';
     _state.language = 'en';
     _state.notifications = true;

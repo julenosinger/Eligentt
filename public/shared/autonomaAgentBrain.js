@@ -308,7 +308,7 @@
           operation: OP_TO_AUTH[c] || c,
           amount: Number(e.amount) || 0,
           asset: e.token || 'USDC',
-          network: e.chain || 'Arc Testnet',
+          network: e.chain || 'Arc Mainnet',
           purpose: ''
         });
         if (risk && risk.level) riskLevel = risk.level;
@@ -355,7 +355,7 @@
           return { allowed: false, riskLevel: plan.riskLevel, requiresConfirmation: false, reasons: ['No active agent authorization for "' + op + '"'], needsAuthorization: true };
         }
         if (typeof AA.validateExecution === 'function') {
-          var v = AA.validateExecution({ operation: op, amount: Number(e.amount) || 0, asset: e.token || 'USDC', network: e.chain || 'Arc Testnet', destination: e.address || '' });
+          var v = AA.validateExecution({ operation: op, amount: Number(e.amount) || 0, asset: e.token || 'USDC', network: e.chain || 'Arc Mainnet', destination: e.address || '' });
           if (v && !v.valid) {
             return { allowed: false, riskLevel: plan.riskLevel, requiresConfirmation: false, reasons: [v.reason || 'Authorization scope denied'] };
           }
@@ -369,7 +369,7 @@
     if (PE) {
       try {
         if (typeof PE.quickCheck === 'function') {
-          var pc = PE.quickCheck(op, Number(e.amount) || 0, e.token || 'USDC', e.chain || 'Arc Testnet');
+          var pc = PE.quickCheck(op, Number(e.amount) || 0, e.token || 'USDC', e.chain || 'Arc Mainnet');
           if (pc && pc.valid === false) {
             var failed = (pc.failedRules || []).map(function (r) { return r.rule + (r.reason ? ': ' + r.reason : ''); });
             return { allowed: false, riskLevel: plan.riskLevel, requiresConfirmation: false, reasons: failed.length ? failed : ['Policy check failed'] };
@@ -498,10 +498,10 @@
     if (rec) {
       var tx = rec.transactionHash || rec.txHash || null;
       var result = rec.result || '';
-      if (result === 'success') return { status: 'confirmed', transactionHash: tx, chainId: 5042002, effects: effects(understanding) };
-      if (result === 'failed' || result === 'reverted') return { status: 'failed', transactionHash: tx, chainId: 5042002, effects: effects(understanding) };
-      if (result === 'pre_validated' || result === 'submitted') return { status: 'pending', transactionHash: tx, chainId: 5042002, effects: effects(understanding) };
-      return { status: 'pending', transactionHash: tx, chainId: 5042002, effects: effects(understanding) };
+      if (result === 'success') return { status: 'confirmed', transactionHash: tx, chainId: 5042, effects: effects(understanding) };
+      if (result === 'failed' || result === 'reverted') return { status: 'failed', transactionHash: tx, chainId: 5042, effects: effects(understanding) };
+      if (result === 'pre_validated' || result === 'submitted') return { status: 'pending', transactionHash: tx, chainId: 5042, effects: effects(understanding) };
+      return { status: 'pending', transactionHash: tx, chainId: 5042, effects: effects(understanding) };
     }
 
     // No record → the router may have only routed (not broadcast). Treat as pending.
@@ -557,7 +557,7 @@
     // For writes, produce an honest status message reflecting real state.
     if (understanding.isWrite) {
       var statusText = {
-        confirmed: 'confirmed on Arc Testnet',
+        confirmed: 'confirmed on Arc Mainnet',
         pending: 'submitted and pending confirmation',
         failed: 'failed',
         reverted: 'reverted on-chain',
@@ -719,7 +719,7 @@
       summary: {
         amount: (e.amount != null ? e.amount + ' ' : '') + (e.token || 'USDC'),
         recipient: e.address || '(resolved)',
-        network: e.chain || 'Arc Testnet'
+        network: e.chain || 'Arc Mainnet'
       },
       riskLevel: planObj.riskLevel,
       expiresAt: Date.now() + 5 * 60 * 1000

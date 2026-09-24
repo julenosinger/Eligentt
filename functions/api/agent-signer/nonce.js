@@ -16,7 +16,7 @@ export async function onRequestPost(context) {
   } catch (_) {
     return err('Invalid JSON body', 400, env, request);
   }
-  const chainId = Number(body.chainId) || 5042002;
+  const chainId = Number(body.chainId) || 5042;
   try {
     const nonce = await fetchNonce(env, chainId, body.address || null);
     return json({ ok: true, nonce }, 200, env, request);

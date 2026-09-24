@@ -161,7 +161,7 @@
       type: mapPlanToScheduleType(plan.type),
       amount: plan.params.amount || 0,
       token: plan.params.token || 'USDC',
-      chain: 'Arc_Testnet',
+      chain: 'Arc_Mainnet',
       recurrence: null,
       firstExecution: null,
       metadata: { planId: plan.id }

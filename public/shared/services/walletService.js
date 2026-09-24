@@ -165,7 +165,7 @@
   }
 
   function _getChainId() {
-    try { return window.activeChainId || 5042002; } catch (_e) { return 5042002; }
+    try { return window.activeChainId || 5042; } catch (_e) { return 5042; }
   }
 
   function _getWalletType() {

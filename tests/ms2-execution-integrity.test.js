@@ -49,7 +49,7 @@ function makeSchedule(over = {}) {
 function makeTimeoutProvider() {
   return {
     sent: [], simCalls: [],
-    async getNetwork() { return { chainId: BigInt(5042002) }; },
+    async getNetwork() { return { chainId: BigInt(5042) }; },
     async call(tx) { if (tx && tx.data && tx.data.startsWith('0xa9059cbb')) this.simCalls.push(tx); return BAL_HEX; },
     async getBalance() { return 10n ** 18n; },
     async send(method, params) {
@@ -90,7 +90,7 @@ function boot(opts = {}) {
     validatePreExecution: () => ({ ok: true }),
     recordExecution: () => {},
     recordOperationSuccess: () => {},
-    getSupportedChains: () => ['Arc Testnet'],
+    getSupportedChains: () => ['Arc Mainnet'],
   }, opts.wmOverrides || {});
 
   delete globalThis.RiskEngine;
@@ -119,7 +119,7 @@ function boot(opts = {}) {
 function grant(auth) {
   return auth.createAuthorization({
     maxSpending: 5000, dailyLimit: null,
-    allowedTokens: ['USDC'], allowedNetworks: ['Arc Testnet'],
+    allowedTokens: ['USDC'], allowedNetworks: ['Arc Mainnet'],
     allowedOperations: ['payment'], allowPayments: true, allowScheduled: true,
     durationMs: 3600000, maxRiskLevel: 'MEDIUM',
   });

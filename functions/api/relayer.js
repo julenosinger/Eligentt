@@ -152,7 +152,7 @@ export async function onRequest(context) {
   // OBSERVABILITY: authorization accepted (no sensitive data).
   relayerEvent('relayer_auth_success', { endpoint: 'relayer', mode: (authResult && authResult.scheme) || 'open', application: appCtx.application, client: appCtx.client });
 
-  const rpc = env.ARC_RPC_URL || 'https://arc-testnet.drpc.org';
+  const rpc = env.ARC_RPC_URL || 'https://rpc.mainnet.arc.io';
 
   let provider, signer;
   try {

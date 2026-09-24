@@ -8,9 +8,9 @@
 const CCTPShared = (() => {
   // ── Constants (sourced from RT config) ──────────────────
   const IRIS_V2_URL  = (typeof RT !== 'undefined' && RT.CCTP_IRIS_V2_URL) ||
-    'https://iris-api-sandbox.circle.com/v2/messages/';
+    'https://iris-api.circle.com/v2/messages/';
   const IRIS_ATTEST_URL = (typeof RT !== 'undefined' && RT.CCTP_ATTEST_URL) ||
-    'https://iris-api-sandbox.circle.com/attestations/';
+    'https://iris-api.circle.com/attestations/';
 
   /**
    * Poll Circle Iris API V2 for attestation

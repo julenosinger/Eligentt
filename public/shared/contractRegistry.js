@@ -8,19 +8,19 @@
 
   var KNOWN_CONTRACTS = {
     /* Treasury / Vault */
-    '0xbfc9e': { name: 'Treasury Vault', type: 'treasury', trust: 'high', category: 'treasury', chains: ['Arc Testnet','Arc'], verified: true, interactions: 0, lastInteraction: null },
+    '0xbfc9e': { name: 'Treasury Vault', type: 'treasury', trust: 'high', category: 'treasury', chains: ['Arc Mainnet','Arc'], verified: true, interactions: 0, lastInteraction: null },
     /* Circle CCTP */
-    '0x8FE6': { name: 'CCTP TokenMessenger', type: 'bridge', trust: 'high', category: 'bridge', chains: ['Arc Testnet','Base Sepolia','Ethereum Sepolia'], verified: true, interactions: 0, lastInteraction: null },
-    '0xE737': { name: 'CCTP MsgTransmitter', type: 'bridge', trust: 'high', category: 'bridge', chains: ['Arc Testnet'], verified: true, interactions: 0, lastInteraction: null },
+    '0x8FE6': { name: 'CCTP TokenMessenger', type: 'bridge', trust: 'high', category: 'bridge', chains: ['Arc Mainnet','Base','Ethereum'], verified: true, interactions: 0, lastInteraction: null },
+    '0xE737': { name: 'CCTP MsgTransmitter', type: 'bridge', trust: 'high', category: 'bridge', chains: ['Arc Mainnet'], verified: true, interactions: 0, lastInteraction: null },
     /* Elligentt Contracts */
-    '0x18076d992005186AeB13AC5270CaD6E27DB95247': { name: 'ElligentPool AMM', type: 'swap', trust: 'high', category: 'swap', chains: ['Arc Testnet'], verified: true, interactions: 0, lastInteraction: null },
-    '0x5294': { name: 'Memo Contract', type: 'contract', trust: 'high', category: 'contract', chains: ['Arc Testnet'], verified: true, interactions: 0, lastInteraction: null },
+    '0x18076d992005186AeB13AC5270CaD6E27DB95247': { name: 'ElligentPool AMM', type: 'swap', trust: 'high', category: 'swap', chains: ['Arc Mainnet'], verified: true, interactions: 0, lastInteraction: null },
+    '0x5294': { name: 'Memo Contract', type: 'contract', trust: 'high', category: 'contract', chains: ['Arc Mainnet'], verified: true, interactions: 0, lastInteraction: null },
     /* Safe / Multisig */
     '0xd9db270c': { name: 'Safe (Gnosis)', type: 'multisig', trust: 'high', category: 'multisig', chains: ['*'], verified: true, interactions: 0, lastInteraction: null },
     /* Permit2 */
     '0x000000000022D473030F116dDEE9F6B43aC78BA3': { name: 'Permit2', type: 'permit2', trust: 'high', category: 'permit', chains: ['*'], verified: true, interactions: 0, lastInteraction: null },
     /* MultiSend */
-    '0xMultiSend': { name: 'MultiSend Executor', type: 'multisend', trust: 'high', category: 'payment', chains: ['Arc Testnet'], verified: true, interactions: 0, lastInteraction: null }
+    '0xMultiSend': { name: 'MultiSend Executor', type: 'multisend', trust: 'high', category: 'payment', chains: ['Arc Mainnet'], verified: true, interactions: 0, lastInteraction: null }
   };
 
   var REPUTATION_STORE = {};

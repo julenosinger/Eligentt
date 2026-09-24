@@ -24,8 +24,8 @@
     var PROTOCOL = {
       '0xbfc9e8f79bd30b912081ae88f9ad0a515f08c2f1': { name: 'Treasury Vault', trust: 'high' },
       '0x18076d992005186aeb13ac5270cad6e27db95247': { name: 'ElligentPool AMM', trust: 'high' },
-      '0x8fe6b999dc680ccfdd5bf7eb0974218be2542daa': { name: 'CCTP TokenMessenger', trust: 'high' },
-      '0xe737e5cebeeba77efe34d4aa090756590b1ce275': { name: 'CCTP MsgTransmitter', trust: 'high' },
+      '0x28b5a0e9c621a5badaa536219b3a228c8168cf5d': { name: 'CCTP TokenMessenger', trust: 'high' },
+      '0x81d40f21f12a8f0e3252bccb954d722d4c464b64': { name: 'CCTP MsgTransmitter', trust: 'high' },
       '0x17cfb1aacbc64d0f0c247ed261b66c3d56e3eb16': { name: 'CrossChain Batch', trust: 'high' },
       '0x5294e9927c3306dcbadb03fe70b92e01ccede505': { name: 'Memo Contract', trust: 'high' },
       '0xca11bde05977b3631167028862be2a173976ca11': { name: 'Multicall3', trust: 'high' },
@@ -40,8 +40,8 @@
     // Token contracts
     var TOKENS = {
       '0x3600000000000000000000000000000000000000': 'USDC',
-      '0x89b50855aa3be2f677cd6303cec089b5f319d72a': 'EURC',
-      '0xf0c4a4ce82a5746abaad9425360ab04fbba432bf': 'cirBTC'
+      '0xbef5f6d51cb62b58e6a8f77868681825c6fe21c1': 'EURC',
+      '0x171a4217b86a807a64eb94757db6849fb4bdbaa0': 'cirBTC'
     };
     if (TOKENS[lower]) return 'protocol';
 

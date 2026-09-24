@@ -38,7 +38,7 @@
   }
 
   function getChainId() {
-    try { return typeof activeChainId !== 'undefined' ? activeChainId : 5042002; } catch (_e) { return 5042002; }
+    try { return typeof activeChainId !== 'undefined' ? activeChainId : 5042; } catch (_e) { return 5042; }
   }
 
   function isConnected() { return getAddress() !== null; }

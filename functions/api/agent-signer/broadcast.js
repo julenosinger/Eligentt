@@ -86,7 +86,7 @@ export async function onRequestPost(context) {
 
   // ── 7. Binding checks (proof ↔ request) ──
   const p = proof.payload;
-  const chainId = body.chainId != null ? Number(body.chainId) : 5042002;
+  const chainId = body.chainId != null ? Number(body.chainId) : 5042;
   const operation = (typeof body.operation === 'string') ? body.operation : '';
   const executionId = (typeof body.executionId === 'string') ? body.executionId : '';
 

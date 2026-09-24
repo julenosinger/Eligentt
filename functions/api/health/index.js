@@ -10,7 +10,7 @@ export async function onRequestOptions() {
 
 export async function onRequestGet(context) {
   const { env } = context;
-  const rpcPrimary = env.ARC_RPC_URL || 'https://arc-testnet.drpc.org';
+  const rpcPrimary = env.ARC_RPC_URL || 'https://rpc.mainnet.arc.io';
   const rpcFallback = env.ARC_RPC_FALLBACK || null;
   const startTime = Date.now();
 
@@ -47,8 +47,8 @@ export async function onRequestGet(context) {
 
   const health = {
     status: primary.status === 'ok' ? 'ok' : (fallback?.status === 'ok' ? 'degraded' : 'error'),
-    network: 'Arc Testnet',
-    chainId: 5042002,
+    network: 'Arc Mainnet',
+    chainId: 5042,
     rpc: {
       primary,
       fallback: fallback || { status: 'not_configured' },

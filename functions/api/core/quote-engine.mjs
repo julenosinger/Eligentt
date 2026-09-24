@@ -10,7 +10,7 @@
 import { RELAYER_CONFIG } from '../shared-config.mjs';
 
 const DOMAINS = RELAYER_CONFIG.CCTP_DOMAINS || {};
-const ARC_CHAIN_ID = String(RELAYER_CONFIG.ARC_CHAIN_ID || 5042002);
+const ARC_CHAIN_ID = String(RELAYER_CONFIG.ARC_CHAIN_ID || 5042);
 
 // Turbo Bridge liquidity threshold: below this the Treasury fronts liquidity for
 // an instant payout (Turbo); above it we fall back to Standard CCTP settlement.
@@ -76,7 +76,7 @@ export function getQuote(req) {
     amount,
     bestRoute: {
       from: source ? source.name : (req.sourceChain != null ? String(req.sourceChain) : 'external'),
-      to: dest ? dest.name : 'Arc_Testnet',
+      to: dest ? dest.name : 'Arc_Mainnet',
       via: 'Circle CCTP v2',
     },
     bridge,
@@ -88,6 +88,6 @@ export function getQuote(req) {
     eta,
     liquidityAvailable,
     sourceChain: source ? source.name : (req.sourceChain != null ? String(req.sourceChain) : null),
-    destChain: dest ? dest.name : 'Arc_Testnet',
+    destChain: dest ? dest.name : 'Arc_Mainnet',
   };
 }

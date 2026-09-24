@@ -71,7 +71,7 @@
     // Gas
     try {
       if (typeof UB !== 'undefined' && UB.state && UB.state.assets) {
-        var arcEth = UB.state.assets.find(function (a) { return a.token === 'ETH' && (a.chainId === 'Arc_Testnet' || a.chainId === 5042002); });
+        var arcEth = UB.state.assets.find(function (a) { return a.token === 'ETH' && (a.chainId === 'Arc_Mainnet' || a.chainId === 5042); });
         snap.gas.arcEth = arcEth ? arcEth.balance : 0;
         if (snap.gas.arcEth < 0.01) snap.gas.status = 'Low';
       }

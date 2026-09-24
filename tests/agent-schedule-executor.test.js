@@ -41,7 +41,7 @@ function makeProvider(opts = {}) {
   return {
     sent: [],
     simCalls: [],
-    async getNetwork() { return { chainId: BigInt(opts.chainId ?? 5042002) }; },
+    async getNetwork() { return { chainId: BigInt(opts.chainId ?? 5042) }; },
     async call(tx) {
       if (tx && tx.data && tx.data.startsWith('0xa9059cbb')) {
         this.simCalls.push(tx);
@@ -108,7 +108,7 @@ function boot(opts = {}) {
     validatePreExecution: () => ({ ok: true }),
     recordExecution: () => {},
     recordOperationSuccess: () => {},
-    getSupportedChains: () => ['Arc Testnet'],
+    getSupportedChains: () => ['Arc Mainnet'],
   }, opts.wmOverrides || {});
 
   delete globalThis.RiskEngine;
@@ -142,7 +142,7 @@ function boot(opts = {}) {
 function grantScheduledAuth(auth, over = {}) {
   return auth.createAuthorization(Object.assign({
     maxSpending: 500, dailyLimit: 200,
-    allowedTokens: ['USDC'], allowedNetworks: ['Arc Testnet'],
+    allowedTokens: ['USDC'], allowedNetworks: ['Arc Mainnet'],
     allowedOperations: ['payment'], allowPayments: true, allowScheduled: true,
     durationMs: 3600000, maxRiskLevel: 'MEDIUM',
   }, over));
@@ -252,12 +252,12 @@ describe('AgentScheduleExecutor — on-chain execution (happy path)', () => {
     expect(env.toasts.some((t) => t.t === 'success')).toBe(true);
   });
 
-  it('signed transaction targets the Arc USDC contract on chain 5042002', async () => {
+  it('signed transaction targets the Arc USDC contract on chain 5042', async () => {
     const env = boot();
     grantScheduledAuth(env.auth);
     await env.executor.tickNow();
     const parsed = realEthers.Transaction.from(env.provider.sent[0]);
-    expect(Number(parsed.chainId)).toBe(5042002);
+    expect(Number(parsed.chainId)).toBe(5042);
     expect(parsed.to.toLowerCase()).toBe('0x3600000000000000000000000000000000000000');
     expect(parsed.from).toBe(env.signer.address);
   });
@@ -271,7 +271,7 @@ describe('AgentScheduleExecutor — on-chain execution (happy path)', () => {
     const log = [];
     const provider = {
       sent: [], simCalls: [], log,
-      async getNetwork() { return { chainId: BigInt(5042002) }; },
+      async getNetwork() { return { chainId: BigInt(5042) }; },
       async call(tx) { if (tx && tx.data && tx.data.startsWith('0xa9059cbb')) this.simCalls.push(tx); return BAL_HEX; },
       async getBalance() { return 10n ** 18n; },
       async send(method, params) {
@@ -313,7 +313,7 @@ describe('AgentScheduleExecutor — scheduled MultiSend (sequential execution)',
     const log = [];
     return {
       sent: [], simCalls: [], log,
-      async getNetwork() { return { chainId: BigInt(5042002) }; },
+      async getNetwork() { return { chainId: BigInt(5042) }; },
       async call(tx) { if (tx && tx.data && tx.data.startsWith('0xa9059cbb')) this.simCalls.push(tx); return BAL_HEX; },
       async getBalance() { return 10n ** 18n; },
       async send(method, params) {
@@ -372,7 +372,7 @@ describe('AgentScheduleExecutor — scheduled MultiSend (sequential execution)',
     let waitCalls = 0;
     const provider = {
       sent: [], simCalls: [],
-      async getNetwork() { return { chainId: BigInt(5042002) }; },
+      async getNetwork() { return { chainId: BigInt(5042) }; },
       async call(tx) { if (tx && tx.data && tx.data.startsWith('0xa9059cbb')) this.simCalls.push(tx); return BAL_HEX; },
       async getBalance() { return 10n ** 18n; },
       async send(method, params) {
@@ -472,7 +472,7 @@ describe('AgentScheduleExecutor — swap / bridge / crosschain schedule tx recor
 
   it('records the bridge transaction hash + mint hash from the delegated executor', async () => {
     const env = boot({
-      schedules: [makeSchedule({ type: 'bridge', amount: 30, total: 30, toNetwork: 'Base_Sepolia', recipients: [], address: '' })],
+      schedules: [makeSchedule({ type: 'bridge', amount: 30, total: 30, toNetwork: 'Base', recipients: [], address: '' })],
       bridgeStub: async function () { return { ok: true, txHash: '0x' + 'cd'.repeat(32), mintTxHash: '0x' + 'ef'.repeat(32) }; },
     });
     grantScheduledAuth(env.auth, { allowedOperations: ['bridge'] });
@@ -486,7 +486,7 @@ describe('AgentScheduleExecutor — swap / bridge / crosschain schedule tx recor
   it('passes the crosschain recipient to the delegated bridge executor', async () => {
     let capturedRecipient = null;
     const env = boot({
-      schedules: [makeSchedule({ type: 'crosschain', amount: 30, total: 30, toNetwork: 'Base_Sepolia', recipients: [{ addr: RCPT, amount: 30 }], address: RCPT })],
+      schedules: [makeSchedule({ type: 'crosschain', amount: 30, total: 30, toNetwork: 'Base', recipients: [{ addr: RCPT, amount: 30 }], address: RCPT })],
       bridgeStub: async function (amount, domain, chainName, calldataId, srcChain, recipientAddr) {
         capturedRecipient = recipientAddr;
         return { ok: true, txHash: '0x' + 'cd'.repeat(32) };
@@ -542,7 +542,7 @@ describe('AgentScheduleExecutor — replay, simulation and safety', () => {
   });
 
   it('aborts when connected to the wrong chain', async () => {
-    const env = boot({ providerOpts: { chainId: 11155111 } });
+    const env = boot({ providerOpts: { chainId: 1 } });
     grantScheduledAuth(env.auth);
     const summary = await env.executor.tickNow();
     expect(env.provider.sent.length).toBe(0);

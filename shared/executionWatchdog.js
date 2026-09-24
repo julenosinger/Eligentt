@@ -230,7 +230,7 @@
     try {
       if (typeof AgentAudit !== 'undefined') {
         AgentAudit.recordExecution({
-          operation: 'watchdog_timeout', amount: 0, asset: 'USDC', chain: 'Arc Testnet',
+          operation: 'watchdog_timeout', amount: 0, asset: 'USDC', chain: 'Arc Mainnet',
           result: 'timeout', duration: ms, metadata: { label: label, timeoutMs: ms }
         });
       }

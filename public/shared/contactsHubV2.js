@@ -206,7 +206,7 @@
     var perms = getContactPermissions(cid);
     var hist = getContactHistory(cid);
     var scheds = getContactSchedules(cid);
-    var chain = CHAINS.find(function (ch) { return ch.id === (c.chainId || 'Arc_Testnet'); }) || { name: 'Unknown', color: '#888' };
+    var chain = CHAINS.find(function (ch) { return ch.id === (c.chainId || 'Arc_Mainnet'); }) || { name: 'Unknown', color: '#888' };
     var isActive = activeContactId === cid;
 
     var html = '<div style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.7);z-index:9999;display:flex;align-items:center;justify-content:center" onclick="if(event.target===this)this.remove()">' +
@@ -506,7 +506,7 @@
       var parts = lines[i].split(',').map(function (s) { return s.trim(); });
       var name = nameIdx !== -1 ? parts[nameIdx] : '';
       var addr = addrIdx !== -1 ? parts[addrIdx] : '';
-      var chain = chainIdx !== -1 ? parts[chainIdx] : 'Arc_Testnet';
+      var chain = chainIdx !== -1 ? parts[chainIdx] : 'Arc_Mainnet';
       var group = groupIdx !== -1 ? parts[groupIdx] : '';
       var token = tokenIdx !== -1 ? parts[tokenIdx] : '';
       var type = typeIdx !== -1 ? parts[typeIdx] : '';
@@ -665,7 +665,7 @@
     if (empty) empty.style.display = 'none';
     var GRAD = ['linear-gradient(135deg,#4f8ef7,#a78bfa)', 'linear-gradient(135deg,#f59e0b,#ef4444)', 'linear-gradient(135deg,#22c55e,#4f8ef7)', 'linear-gradient(135deg,#a78bfa,#ef4444)'];
     grid.innerHTML = list.map(function (c, i) {
-      var chain = CHAINS.find(function (ch) { return ch.id === (c.chainId || 'Arc_Testnet'); }) || null;
+      var chain = CHAINS.find(function (ch) { return ch.id === (c.chainId || 'Arc_Mainnet'); }) || null;
       var addrShort = c.addr ? shortAddr(c.addr) : '<span style="color:var(--muted2);font-style:italic">No address</span>';
       var isSel = selectedContacts.has(c.id) ? 'checked' : '';
       var enriched = enrichContact(c);

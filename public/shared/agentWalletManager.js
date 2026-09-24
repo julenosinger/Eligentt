@@ -30,8 +30,8 @@
   var WALLET_KEY = 'elligentt_agent_wallet_v2';
   var SESSION_KEY_ENC = 'elligentt_agent_session_v2';
   var UNLOCK_SECRET_KEY = 'elligentt_agent_unlock_secret_v1';
-  var ARC_RPC = 'https://arc-testnet.drpc.org';
-  var ARC_CHAIN_ID = 5042002;
+  var ARC_RPC = 'https://rpc.mainnet.arc.io';
+  var ARC_CHAIN_ID = 5042;
 
   var agentWallet = null;
   var agentProvider = null;
@@ -1022,7 +1022,7 @@
       version: '1.0.0',
       metadataURI: null,
       capabilities: ['swap','bridge','treasury','payments','contracts','vault','crosschain','permit','recurring','scheduled','reimbursement','treasury_deposit'],
-      supportedChains: ['Arc Testnet','Base','Ethereum Sepolia','Arbitrum Sepolia','Optimism Sepolia','Polygon Amoy'],
+      supportedChains: ['Arc Mainnet','Base','Ethereum','Arbitrum','Optimism','Polygon'],
       status: 'active',
       sessionStatus: 'inactive',
       reputationScore: 50,
@@ -1591,7 +1591,7 @@
           operation: operation,
           amount: 0,
           asset: 'USDC',
-          chain: 'Arc Testnet',
+          chain: 'Arc Mainnet',
           agentWallet: agentAddr || (agentState ? agentState.walletAddress : null),
           result: 'pre_validated',
           duration: 0

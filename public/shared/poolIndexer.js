@@ -35,7 +35,7 @@
 
   // Cold-start bootstrap window. A fresh (MemoryStore) isolate indexes this many
   // RECENT blocks instead of scanning from block 0 — which could be tens of
-  // millions of blocks on Arc Testnet. ≈20000 blocks ≈ 11h at 2s/block.
+  // millions of blocks on Arc Mainnet. ≈20000 blocks ≈ 11h at 2s/block.
   var DEFAULT_RECENT_BOOTSTRAP_BLOCKS = 20000;
   // Bounded backfill progress per ingest request (older history, one chunk at a time).
   var DEFAULT_BACKFILL_CHUNK_BLOCKS = 2000;

@@ -20,7 +20,7 @@ describe('Core API — quote engine', () => {
     expect(q.receive).toBeCloseTo(99, 6);
     expect(q.provider).toBe('Circle CCTP');
     expect(q.slippage).toBe(0);
-    expect(q.destChain).toBe('Arc_Testnet');
+    expect(q.destChain).toBe('Arc_Mainnet');
     expect(q.liquidityAvailable).toBeGreaterThan(0);
   });
 
@@ -31,9 +31,9 @@ describe('Core API — quote engine', () => {
   });
 
   it('resolves named source/destination chains', () => {
-    const q = getQuote({ token: 'usdc', amount: 10, sourceChain: '11155111', destChain: '5042002' });
-    expect(q.sourceChain).toBe('Ethereum_Sepolia');
-    expect(q.destChain).toBe('Arc_Testnet');
+    const q = getQuote({ token: 'usdc', amount: 10, sourceChain: '1', destChain: '5042' });
+    expect(q.sourceChain).toBe('Ethereum');
+    expect(q.destChain).toBe('Arc_Mainnet');
     expect(q.eta.display).toBeTruthy();
   });
 });

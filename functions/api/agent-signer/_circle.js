@@ -22,13 +22,19 @@
 
 const W3S_BASE = 'https://api.circle.com/v1/w3s';
 
+// Canonical Circle-controlled wallet used by the Autonoma/AI Smart Wallet agent.
+// Read from the CIRCLE_WALLET_ADDRESS Cloudflare secret at runtime; this constant
+// is the single authoritative reference so no module can silently adopt a
+// different wallet identity.
+const CANONICAL_CIRCLE_WALLET = '0x794eb2f43a333e9eab9731d8f5e5423d5ec628eb';
+
 const CHAIN_RPC = {
-  5042002: 'https://arc-testnet.drpc.org',
-  11155111: 'https://ethereum-sepolia-rpc.publicnode.com',
-  84532: 'https://sepolia.base.org',
-  421614: 'https://sepolia-rollup.arbitrum.io/rpc',
-  11155420: 'https://sepolia.optimism.io',
-  80002: 'https://rpc-amoy.polygon.technology',
+  5042: 'https://rpc.mainnet.arc.io',
+  1: 'https://cloudflare-eth.com',
+  8453: 'https://mainnet.base.org',
+  42161: 'https://arb1.arbitrum.io/rpc',
+  10: 'https://mainnet.optimism.io',
+  137: 'https://polygon-rpc.com',
 };
 
 const DEFAULT_ALLOWED_ORIGINS = 'https://execdaat.xyz,https://elligentt.xyz,https://elligente.pages.dev';
@@ -185,21 +191,22 @@ async function fetchNonce(env, chainId, address) {
 // lowercased). A contractExecution request may ONLY target one of these.
 const SIGN_ALLOWLIST = [
   '0x3600000000000000000000000000000000000000', // USDC
-  '0x89b50855aa3be2f677cd6303cec089b5f319d72a', // EURC
-  '0xf0c4a4ce82a5746abaad9425360ab04fbba432bf', // CIRBTC
+  '0xbef5f6d51cb62b58e6a8f77868681825c6fe21c1', // EURC
+  '0x171a4217b86a807a64eb94757db6849fb4bdbaa0', // CIRBTC
   '0xbfc9e8f79bd30b912081ae88f9ad0a515f08c2f1', // TreasuryVault
   '0x18076d992005186aeb13ac5270cad6e27db95247', // Pool
   '0x17cfb1aacbc64d0f0c247ed261b66c3d56e3eb16', // CrosschainBatch
   '0xca11bde05977b3631167028862be2a173976ca11', // Multicall3
-  '0x8fe6b999dc680ccfdd5bf7eb0974218be2542daa', // CCTP TokenMessenger
-  '0xe737e5cebeeba77efe34d4aa090756590b1ce275', // CCTP MessageTransmitter
+  '0x28b5a0e9c621a5badaa536219b3a228c8168cf5d', // CCTP TokenMessenger
+  '0x81d40f21f12a8f0e3252bccb954d722d4c464b64', // CCTP MessageTransmitter
+  '0xfd78ee919681417d192449715b2594ab58f5d002', // CCTP TokenMinter
   '0x5294e9927c3306dcbadb03fe70b92e01ccede505', // Memo
   '0x0000000000000000000000000000000000000001', // SwapRouter
 ].map((a) => a.toLowerCase());
 
 const KNOWN_CONTRACTS = {
   USDC: '0x3600000000000000000000000000000000000000',
-  CCTP_TOKEN_MESSENGER: '0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA',
+  CCTP_TOKEN_MESSENGER: '0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d',
 };
 
 function isAddress(a) {
@@ -291,6 +298,6 @@ function mapStructuredRequest(req) {
 
 export {
   W3S_BASE, CHAIN_RPC, getCredentials, isConfigured, corsHeaders, json, err,
-  createContractExecution, fetchNonce,
+  createContractExecution, fetchNonce, CANONICAL_CIRCLE_WALLET,
   mapStructuredRequest, isKnownContract, isAddress, SIGN_ALLOWLIST, KNOWN_CONTRACTS,
 };

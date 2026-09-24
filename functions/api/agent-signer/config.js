@@ -19,7 +19,7 @@ export async function onRequestGet(context) {
     available: true,
     address: creds.walletAddress,
     walletId: creds.walletId,
-    chainId: 5042002,
+    chainId: 5042,
     requiresAuthorization: true,
     authorizationProofAvailable: proofAvailable(env),
     paused: pause.paused,

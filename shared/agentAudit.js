@@ -56,8 +56,8 @@
       // Execution data
       operation: opts.operation||'',
       executedContract: opts.executedContract||'',
-      chain: opts.chain||'Arc Testnet',
-      network: opts.network||'Arc Testnet',
+      chain: opts.chain||'Arc Mainnet',
+      network: opts.network||'Arc Mainnet',
       transactionHash: opts.transactionHash||'',
       amount: opts.amount||0,
       asset: opts.asset||'USDC',

@@ -10,7 +10,7 @@
  *   3. Underlying operation permission (allowPayments / allowSwap / allowBridge...)
  *   4. PolicyEngine.validateExecution (when loaded)
  *   5. RiskEngine level vs authorization maxRiskLevel (when loaded)
- *   6. Chain check (Arc Testnet 5042002), balance check, gas ceiling,
+ *   6. Chain check (Arc Mainnet 5042), balance check, gas ceiling,
  *      AgentWalletManager.validatePreExecution (TOCTOU + daily ops)
  *   7. eth_call simulation of every transfer before broadcast
  *   8. Persistent per-run ledger (schedId|nextRun) ÔÇö replay protection
@@ -29,7 +29,7 @@
   var LEDGER_KEY = 'elligentt_agent_sched_exec_v1';
   var NOTIF_KEY = 'elligentt_agent_sched_notifs_v1';
   var ENABLED_KEY = 'elligentt_agent_sched_enabled_v1';
-  var ARC_CHAIN_ID = 5042002;
+  var ARC_CHAIN_ID = 5042;
   var TICK_MS = 30000;
   var MISS_WINDOW_MS = 24 * 60 * 60 * 1000;
   var TX_GAS_LIMIT = 120000;
@@ -43,13 +43,13 @@
 
   var FALLBACK_TOKENS = {
     USDC:   { address: '0x3600000000000000000000000000000000000000', decimals: 6 },
-    EURC:   { address: '0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a', decimals: 6 },
-    cirBTC: { address: '0xf0C4a4CE82A5746AbAAd9425360Ab04fbBA432BF', decimals: 8 }
+    EURC:   { address: '0xbEf5f6d51CB62b58e6A8f77868681825C6fe21c1', decimals: 6 },
+    cirBTC: { address: '0x171A4217b86A807A64eB94757Db6849fb4bDbAA0', decimals: 8 }
   };
 
   var CCTP_FALLBACK_DOMAINS = {
-    Ethereum_Sepolia: 0, Base_Sepolia: 6, Arbitrum_Sepolia: 3,
-    Optimism_Sepolia: 2, Polygon_Amoy: 7
+    Ethereum: 0, Base: 6, Arbitrum: 3,
+    Optimism: 2, Polygon: 7
   };
 
   var _timer = null;
@@ -302,15 +302,15 @@
       total = parseFloat(sched.amount || 0);
       if (!(total > 0)) return { ok: false, reason: 'Invalid schedule amount' };
       if (sched.type === 'bridge' || sched.type === 'crosschain') {
-        if ((sched.fromNetwork || 'Arc_Testnet') !== 'Arc_Testnet') {
-          return { ok: false, reason: 'Agent bridge execution supports Arc Testnet source only' };
+        if ((sched.fromNetwork || 'Arc_Mainnet') !== 'Arc_Mainnet') {
+          return { ok: false, reason: 'Agent bridge execution supports Arc Mainnet source only' };
         }
       }
     }
 
     var vres = az.validateExecution({
       operation: underlyingOp, amount: total, asset: token,
-      network: 'Arc Testnet', destination: transfers.length === 1 ? transfers[0].to : ''
+      network: 'Arc Mainnet', destination: transfers.length === 1 ? transfers[0].to : ''
     });
     if (!vres.valid) return { ok: false, reason: 'Authorization: ' + vres.reason, needsAuthorization: !!vres.needsAuthorization };
     var auth = vres.auth;
@@ -327,7 +327,7 @@
 
     try {
       if (typeof RiskEngine !== 'undefined' && RiskEngine.quickAssess) {
-        var risk = RiskEngine.quickAssess(underlyingOp, total, token, '', 'Arc Testnet');
+        var risk = RiskEngine.quickAssess(underlyingOp, total, token, '', 'Arc Mainnet');
         var maxRisk = auth.maxRiskLevel || 'MEDIUM';
         if (risk && RISK_RANK[risk.level] > RISK_RANK[maxRisk]) {
           return { ok: false, reason: 'Risk ' + risk.level + ' exceeds authorized max ' + maxRisk };
@@ -338,7 +338,7 @@
     var net;
     try { net = await provider.getNetwork(); } catch(e){ return { ok: false, reason: 'RPC unavailable: ' + (e.message || 'network error') }; }
     if (net && Number(net.chainId) !== ARC_CHAIN_ID) {
-      return { ok: false, reason: 'Wrong chain: expected Arc Testnet (' + ARC_CHAIN_ID + '), got ' + Number(net.chainId) };
+      return { ok: false, reason: 'Wrong chain: expected Arc Mainnet (' + ARC_CHAIN_ID + '), got ' + Number(net.chainId) };
     }
 
     if (sched.type === 'payment' || sched.type === 'multisend' || sched.type === 'swap') {
@@ -394,7 +394,7 @@
     try {
       if (typeof PolicyEngine === 'undefined' || !PolicyEngine.validateExecution) return { ok: true, report: null };
       var report = PolicyEngine.validateExecution({
-        operation: underlyingOp || sched.type, amount: total, asset: token, network: 'Arc Testnet',
+        operation: underlyingOp || sched.type, amount: total, asset: token, network: 'Arc Mainnet',
         contract: '', destination: '', simulationHash: simulationHash,
         authId: auth.id, maxRiskLevel: auth.maxRiskLevel || 'MEDIUM',
         estimatedGas: 0.01, slippage: null
@@ -591,7 +591,7 @@
     try { if (az && auth && result === 'success') az.recordUsage(auth.id, total, 'scheduled:' + sched.type, 'success'); } catch(e){}
     try {
       if (typeof AgentAudit !== 'undefined') AgentAudit.recordExecution({
-        operation: 'scheduled:' + sched.type, amount: total, asset: token, chain: 'Arc Testnet',
+        operation: 'scheduled:' + sched.type, amount: total, asset: token, chain: 'Arc Mainnet',
         transactionHash: txHash || '', result: result, duration: duration || 0, gasUsed: gasUsed || 0,
         authorizationId: auth ? auth.id : null, error: reason || null,
         metadata: {
@@ -603,7 +603,7 @@
     } catch(e){}
     try {
       if (typeof ExecutionHistory !== 'undefined') ExecutionHistory.recordExecution({
-        operation: 'scheduled:' + sched.type, amount: total, asset: token, chain: 'Arc Testnet',
+        operation: 'scheduled:' + sched.type, amount: total, asset: token, chain: 'Arc Mainnet',
         txHash: txHash || '', result: result === 'success' ? 'success' : 'failed', duration: duration || 0,
         displayText: 'Schedule "' + sched.name + '" ÔÇö ' + total + ' ' + token + ' (' + result + ')'
       });
@@ -680,7 +680,7 @@
     if (eng0 && typeof eng0.claimExecution === 'function') {
       var claimRes = await eng0.claimExecution(key, 'agent_schedule_executor', {
         scheduleId: sched.id, occurrenceId: key,
-        wallet: sched.walletAddress || null, chain: 'Arc Testnet'
+        wallet: sched.walletAddress || null, chain: 'Arc Mainnet'
       });
       if (!claimRes || !claimRes.acquired) {
         delete _inFlight[key];
@@ -1062,10 +1062,10 @@
       fn = window._agentExecuteSwap;
       args = [v.total, v.token, sched.swapToToken || (v.token === 'USDC' ? 'EURC' : 'USDC'), 'sched_' + sched.id + '_' + Date.now()];
     } else if ((sched.type === 'bridge' || sched.type === 'crosschain') && typeof window !== 'undefined' && typeof window._agentExecuteBridge === 'function') {
-      var destNet = sched.toNetwork || 'Base_Sepolia';
+      var destNet = sched.toNetwork || 'Base';
       var domain = CCTP_FALLBACK_DOMAINS[destNet];
       try {
-        var netIds = { Ethereum_Sepolia: 11155111, Base_Sepolia: 84532, Arbitrum_Sepolia: 421614, Optimism_Sepolia: 11155420, Polygon_Amoy: 80002 };
+        var netIds = { Ethereum: 1, Base: 8453, Arbitrum: 42161, Optimism: 10, Polygon: 137 };
         if (typeof ElligenteCCTP !== 'undefined' && ElligenteCCTP.CCTP_CONFIG && netIds[destNet] && ElligenteCCTP.CCTP_CONFIG[String(netIds[destNet])]) {
           domain = ElligenteCCTP.CCTP_CONFIG[String(netIds[destNet])].domain;
         }

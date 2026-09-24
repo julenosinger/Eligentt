@@ -45,7 +45,7 @@
     var intent = opts.intent || 'payment';
     var amount = opts.amount || 0;
     var asset = opts.asset || 'USDC';
-    var fromChain = opts.fromChain || 'Arc Testnet';
+    var fromChain = opts.fromChain || 'Arc Mainnet';
     var toChain = opts.toChain || null;
     var needsSwap = opts.needsSwap || false;
     var needsBridge = opts.needsBridge || (!!toChain && toChain !== fromChain);

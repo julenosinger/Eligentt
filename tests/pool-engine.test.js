@@ -50,9 +50,9 @@ describe('PoolEngine — canonical registry', () => {
   it('verified token addresses are correct', () => {
     const usdcEurc = PE.getPool('usdc-eurc');
     expect(usdcEurc.tokenAAddress.toLowerCase()).toBe('0x3600000000000000000000000000000000000000');
-    expect(usdcEurc.tokenBAddress.toLowerCase()).toBe('0x89b50855aa3be2f677cd6303cec089b5f319d72a');
+    expect(usdcEurc.tokenBAddress.toLowerCase()).toBe('0xbef5f6d51cb62b58e6a8f77868681825c6fe21c1');
     const usdcBt = PE.getPool('usdc-cirbtc');
-    expect(usdcBt.tokenBAddress.toLowerCase()).toBe('0xf0c4a4ce82a5746abaad9425360ab04fbba432bf');
+    expect(usdcBt.tokenBAddress.toLowerCase()).toBe('0x171a4217b86a807a64eb94757db6849fb4bdbaa0');
   });
 
   it('token decimals are correct (USDC=6, EURC=6, cirBTC=8)', () => {

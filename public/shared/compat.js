@@ -78,7 +78,7 @@
               try { return window.signer || null; } catch (_e) { return null; }
             },
             get activeChainId() {
-              try { return window.activeChainId || 5042002; } catch (_e) { return 5042002; }
+              try { return window.activeChainId || 5042; } catch (_e) { return 5042; }
             },
             get activeWalletType() {
               try { return window.activeWalletType || null; } catch (_e) { return null; }

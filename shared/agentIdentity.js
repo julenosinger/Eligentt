@@ -7,10 +7,10 @@
 (function(){
   'use strict';
 
-  var ARC_RPC = 'https://arc-testnet.drpc.org';
-  var ARC_CHAIN_ID = 5042002;
+  var ARC_RPC = 'https://rpc.mainnet.arc.io';
+  var ARC_CHAIN_ID = 5042;
 
-  // ERC-8004 contract addresses on Arc Testnet
+  // ERC-8004 contract addresses on Arc Mainnet
   var IDENTITY_REGISTRY = '0x8004A818BFB912233c491871b3d84c89A494BD9e';
   var REPUTATION_REGISTRY = '0x8004B663056A597Dffe9eCcC1965A193B7388713';
   var VALIDATION_REGISTRY = '0x8004Cb1BF31DAf7788923b405b754f57acEB4272';

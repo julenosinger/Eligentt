@@ -49,7 +49,7 @@ describe('AUTONOMA-4 — Chat Bridge routing (CCTP V2, not Turbo)', () => {
 
   it('_agentExecuteBridge signs the burn on the SOURCE chain for inbound (external → Arc)', () => {
     const bridgeFn = fnSlice('async function _agentExecuteBridge(', 'async function _agentExecuteTurboBridge');
-    expect(bridgeFn).toContain('var isArcSource = chainId === 5042002');
+    expect(bridgeFn).toContain('var isArcSource = chainId === 5042');
     expect(bridgeFn).toContain('getSessionSigner(_srcProv)');
     expect(bridgeFn).toContain('new ethers.JsonRpcProvider(RPC_URL)');
     expect(bridgeFn).toContain('!isArcSource && RPC_URL');
@@ -78,13 +78,13 @@ describe('AUTONOMA-4 — CrossChainTransferRouter route classification', () => {
     // so they must be on globalThis for the new Function eval scope.
     globalThis.ElligenteCCTP = {
       CCTP_CONFIG: {
-        '5042002': { domain: 26, usdc: '0x3'.padEnd(42, '0'), tokenMessenger: '0xm', messageTransmitter: '0xmt', rpc: 'https://arc', explorer: 'https://arc' },
-        '11155111': { domain: 0, usdc: '0x1'.padEnd(42, '0'), tokenMessenger: '0xm', messageTransmitter: '0xmt', rpc: 'https://eth', explorer: 'https://eth' },
+        '5042': { domain: 26, usdc: '0x3'.padEnd(42, '0'), tokenMessenger: '0xm', messageTransmitter: '0xmt', rpc: 'https://arc', explorer: 'https://arc' },
+        '1': { domain: 0, usdc: '0x1'.padEnd(42, '0'), tokenMessenger: '0xm', messageTransmitter: '0xmt', rpc: 'https://eth', explorer: 'https://eth' },
       },
     };
     globalThis.ElligenteChains = {
       CHAIN_REGISTRY: {
-        '11155111': { name: 'Ethereum Sepolia', shortName: 'ETH', rpc: 'https://eth', explorer: 'https://eth' },
+        '1': { name: 'Ethereum', shortName: 'ETH', rpc: 'https://eth', explorer: 'https://eth' },
       },
     };
     const win = {};
@@ -94,18 +94,18 @@ describe('AUTONOMA-4 — CrossChainTransferRouter route classification', () => {
   }
 
   it('external → Arc is classified as CCTP_V2_INBOUND', () => {
-    const r = bootRouter().routeTransfer(11155111, 5042002);
+    const r = bootRouter().routeTransfer(1, 5042);
     expect(r.strategy).toBe('CCTP_V2_INBOUND');
     expect(r.destDomain).toBe(26);
   });
 
   it('Arc → external is classified as EXISTING_BRIDGE (outbound)', () => {
-    const r = bootRouter().routeTransfer(5042002, 11155111);
+    const r = bootRouter().routeTransfer(5042, 1);
     expect(r.strategy).toBe('EXISTING_BRIDGE');
   });
 
   it('unsupported source → INVALID (fail-closed)', () => {
-    const r = bootRouter().routeTransfer(999999, 5042002);
+    const r = bootRouter().routeTransfer(999999, 5042);
     expect(r.strategy).toBe('INVALID');
   });
 });

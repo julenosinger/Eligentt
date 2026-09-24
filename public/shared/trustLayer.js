@@ -45,8 +45,8 @@
 
       // Execution context
       executionTimestamp: Date.now(),
-      executionChain: opts.chain||'Arc Testnet',
-      executionNetwork: opts.network||'Arc Testnet',
+      executionChain: opts.chain||'Arc Mainnet',
+      executionNetwork: opts.network||'Arc Mainnet',
 
       // Reputation
       agentReputationScore: reputation?reputation.reputationScore:50,
@@ -95,7 +95,7 @@
       opts.operation||'',
       (opts.amount||0).toString(),
       opts.asset||'USDC',
-      opts.chain||'Arc Testnet',
+      opts.chain||'Arc Mainnet',
       trust.executionTimestamp.toString()
     ];
 

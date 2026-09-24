@@ -69,7 +69,7 @@ function req(body, cookie) {
 function baseBody(over = {}) {
   return Object.assign({
     executionId: EXEC,
-    chainId: 5042002,
+    chainId: 5042,
     operation: 'payment',
     request: { type: 'transfer', tokenAddress: USDC, to: RCPT, amount: '1000000' },
   }, over);
@@ -128,7 +128,7 @@ describe('AUTONOMA-6C — /broadcast authorization proof', () => {
     const desc = descriptorFor(baseBody().request);
     const token = (await signToken(env, {
       v: 1, proofId: 'f'.repeat(32),
-      executionId: EXEC, userId: 'USR-1', chainId: 5042002, operation: 'payment',
+      executionId: EXEC, userId: 'USR-1', chainId: 5042, operation: 'payment',
       walletId: WALLET_ID, walletAddress: WALLET_ADDRESS.toLowerCase(),
       contractAddress: desc.contractAddress, abiFunctionSignature: desc.abiFunctionSignature, abiParameters: desc.abiParameters,
       issuedAt: now - 200000, expiresAt: now - 1000,
@@ -157,7 +157,7 @@ describe('AUTONOMA-6C — /broadcast authorization proof', () => {
   it('6. chainId different from the proof → 403', async () => {
     const { env } = makeEnv();
     const proof = await proofFor(env);
-    const r = await postBroadcast(env, baseBody({ authorizationProof: proof.token, chainId: 11155111 }));
+    const r = await postBroadcast(env, baseBody({ authorizationProof: proof.token, chainId: 1 }));
     expect(r.status).toBe(403);
   });
 
@@ -180,7 +180,7 @@ describe('AUTONOMA-6C — /broadcast authorization proof', () => {
     const proof = await proofFor(env);
     const r = await postBroadcast(env, baseBody({
       authorizationProof: proof.token,
-      request: { type: 'transfer', tokenAddress: '0x89b50855aa3be2f677cd6303cec089b5f319d72a', to: RCPT, amount: '1000000' },
+      request: { type: 'transfer', tokenAddress: '0xbef5f6d51cb62b58e6a8f77868681825c6fe21c1', to: RCPT, amount: '1000000' },
     }));
     expect(r.status).toBe(403);
   });
@@ -208,9 +208,9 @@ describe('AUTONOMA-6C — /broadcast authorization proof', () => {
   it('12. duplicate nonce (locked by another execution) → 409', async () => {
     const { env, kv } = makeEnv();
     const proof = await proofFor(env);
-    await kv.put('agent:nonce:' + WALLET_ADDRESS.toLowerCase() + ':5042002:5', JSON.stringify({ executionId: 'other_exec' }));
+    await kv.put('agent:nonce:' + WALLET_ADDRESS.toLowerCase() + ':5042:5', JSON.stringify({ executionId: 'other_exec' }));
     globalThis.fetch = async (url) => {
-      if (String(url).includes('arc-testnet') || String(url).includes('drpc')) {
+      if (String(url).includes('rpc.mainnet.arc.io') || String(url).includes('drpc')) {
         return { ok: true, json: async () => ({ jsonrpc: '2.0', id: 1, result: '0x5' }) };
       }
       throw new Error('unexpected fetch ' + url);
@@ -283,7 +283,7 @@ describe('AUTONOMA-6C — /authorize session + happy path', () => {
       if (u.includes('api.circle.com') && u.includes('contractExecution')) {
         return { ok: true, json: async () => ({ data: { id: 'tx_1', state: 'PENDING', txHash: '0x' + 'cd'.repeat(32) } }) };
       }
-      if (u.includes('arc-testnet') || u.includes('drpc')) {
+      if (u.includes('rpc.mainnet.arc.io') || u.includes('drpc')) {
         return { ok: true, json: async () => ({ jsonrpc: '2.0', id: 1, result: '0x0' }) };
       }
       throw new Error('unexpected fetch ' + url);

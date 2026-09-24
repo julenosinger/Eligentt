@@ -91,7 +91,7 @@ function boot(opts = {}) {
     isShutdown: () => false,
     isPaused: () => false,
     getAgentAddress: () => AGENT_ADDR,
-    getSupportedChains: () => ['Arc Testnet'],
+    getSupportedChains: () => ['Arc Mainnet'],
     recordExecution: () => {},
     recordOperationSuccess: () => {},
   }, opts.wmOverrides || {});
@@ -119,7 +119,7 @@ function boot(opts = {}) {
 function grant(az, over = {}) {
   return az.createAuthorization(Object.assign({
     maxSpending: 1000, dailyLimit: 1000,
-    allowedTokens: ['USDC'], allowedNetworks: ['Arc Testnet'],
+    allowedTokens: ['USDC'], allowedNetworks: ['Arc Mainnet'],
     allowPayments: true, allowSwap: true, allowBridge: true,
     agentWallet: AGENT_ADDR, grantedBy: USER_ADDR,
     durationMs: 3600000, maxRiskLevel: 'MEDIUM',
@@ -127,7 +127,7 @@ function grant(az, over = {}) {
 }
 
 function paymentIntent(over = {}) {
-  return Object.assign({ operation: 'payment', amount: 50, asset: 'USDC', network: 'Arc Testnet', destination: RCPT, chainId: 5042002 }, over);
+  return Object.assign({ operation: 'payment', amount: 50, asset: 'USDC', network: 'Arc Mainnet', destination: RCPT, chainId: 5042 }, over);
 }
 
 beforeEach(() => {
@@ -200,7 +200,7 @@ describe('AUTONOMA-1 — single authority broadcast primitive (dynamic)', () => 
     };
     const signer = new realEthers.Wallet('0x' + '22'.repeat(32)).connect(provider);
     const rawTx = {
-      type: 2, chainId: 5042002, to: '0x3600000000000000000000000000000000000000',
+      type: 2, chainId: 5042, to: '0x3600000000000000000000000000000000000000',
       data: '0x', value: '0x0', gasLimit: '0x1d4c0', nonce: '0x0',
       maxFeePerGas: '0x2540be400', maxPriorityFeePerGas: '0x3b9aca00',
     };

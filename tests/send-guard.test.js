@@ -18,22 +18,22 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const indexPath = path.resolve(__dirname, '..', 'index.html');
 const html = fs.readFileSync(indexPath, 'utf8');
 
-const ARC = 5042002;
-const SEPOLIA = 11155111;
+const ARC = 5042;
+const SEPOLIA = 1;
 const ARC_USDC = '0x3600000000000000000000000000000000000000';
-const SEPOLIA_USDC = '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238';
+const SEPOLIA_USDC = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48';
 const MULTICALL3 = '0xcA11bde05977b3631167028862bE2a173976CA11';
 const ZERO = '0x0000000000000000000000000000000000000000';
 
 const REGISTRY = {
   [ARC]: {
     USDC: ARC_USDC,
-    EURC: '0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a',
-    cirBTC: '0xf0C4a4CE82A5746AbAAd9425360Ab04fbBA432BF',
+    EURC: '0xbEf5f6d51CB62b58e6A8f77868681825C6fe21c1',
+    cirBTC: '0x171A4217b86A807A64eB94757Db6849fb4bDbAA0',
   },
   [SEPOLIA]: {
     USDC: SEPOLIA_USDC,
-    EURC: '0x08210f9170f89ab7658f0b5e3ff39b0e03c2bfa4',
+    EURC: '0x1aBaEA1f7C830bD89Acc67eC4af516284b1bC33c',
   },
 };
 
@@ -73,13 +73,12 @@ describe('SendGuard — placeholder detection (Phase 4)', () => {
     expect(SendGuard.isPlaceholderToken(ZERO, SEPOLIA)).toBe(true);
   });
 
-  it('flags Arc USDC (0x3600...) as placeholder OUTSIDE Arc Testnet', () => {
+  it('flags Arc USDC (0x3600...) as placeholder OUTSIDE Arc Mainnet', () => {
     expect(SendGuard.isPlaceholderToken(ARC_USDC, SEPOLIA)).toBe(true);
-    expect(SendGuard.isPlaceholderToken(ARC_USDC, 1)).toBe(true);
     expect(SendGuard.isPlaceholderToken(ARC_USDC, 999999)).toBe(true);
   });
 
-  it('accepts Arc USDC (0x3600...) ON Arc Testnet (5042002)', () => {
+  it('accepts Arc USDC (0x3600...) ON Arc Mainnet (5042)', () => {
     expect(SendGuard.isPlaceholderToken(ARC_USDC, ARC)).toBe(false);
   });
 
@@ -95,11 +94,11 @@ describe('SendGuard — assertERC20Token (blocks the reported bug)', () => {
       .toThrow('Placeholder token detected.');
   });
 
-  it('allows Arc USDC on Arc Testnet', () => {
+  it('allows Arc USDC on Arc Mainnet', () => {
     expect(SendGuard.assertERC20Token(ARC_USDC, ARC, 'USDC')).toBe(true);
   });
 
-  it('allows Sepolia USDC on Sepolia', () => {
+  it('allows foreign-chain USDC on its own chain', () => {
     expect(SendGuard.assertERC20Token(SEPOLIA_USDC, SEPOLIA, 'USDC')).toBe(true);
   });
 
@@ -122,7 +121,7 @@ describe('SendGuard — assertERC20Token (blocks the reported bug)', () => {
 
   it('blocks a valid token resolved for the wrong chain', () => {
     expect(() => SendGuard.assertERC20Token(SEPOLIA_USDC, ARC, 'USDC'))
-      .toThrow('Token USDC resolved to a wrong-chain address for chain 5042002.');
+      .toThrow('Token USDC resolved to a wrong-chain address for chain 5042.');
   });
 
   it('blocks cirBTC fallback address outside chains where it is registered', () => {
@@ -184,7 +183,7 @@ describe('SendGuard — contract deployment check (missing revert data preventio
 
 describe('SendGuard — live chainId detection (Phase 2)', () => {
   it('reads the live chainId from the injected provider', async () => {
-    const eth = { request: async ({ method }) => (method === 'eth_chainId' ? '0x4cef52' : null) };
+    const eth = { request: async ({ method }) => (method === 'eth_chainId' ? '0x13b2' : null) };
     expect(await SendGuard.getLiveChainId(eth)).toBe(ARC);
   });
 

@@ -10,7 +10,7 @@ const ProfileManager = (() => {
       email: null,
       name: null,
       avatar: null,
-      wallet: { address: null, type: 'embedded', status: 'pending', network: 'Arc Testnet', chainId: 5042002 },
+      wallet: { address: null, type: 'embedded', status: 'pending', network: 'Arc Mainnet', chainId: 5042 },
       auth: { provider: null, verified: false, createdAt: null, lastLogin: null },
       preferences: { currency: 'USD', locale: 'en-US' },
       stats: { transactions: 0, volume: 0, swaps: 0, bridges: 0, payments: 0, chainsUsed: new Set() },
@@ -73,8 +73,8 @@ const ProfileManager = (() => {
       p.wallet.address = null;
       p.wallet.type = 'embedded';
       p.wallet.status = 'pending';
-      p.wallet.network = 'Arc Testnet';
-      p.wallet.chainId = 5042002;
+      p.wallet.network = 'Arc Mainnet';
+      p.wallet.chainId = 5042;
     }
 
     _save();
@@ -91,8 +91,8 @@ const ProfileManager = (() => {
       address: serverProfile.wallet.address,
       type: 'embedded',
       status: serverProfile.wallet.address ? 'active' : 'pending',
-      network: serverProfile.wallet.network || 'Arc Testnet',
-      chainId: serverProfile.wallet.chainId || 5042002,
+      network: serverProfile.wallet.network || 'Arc Mainnet',
+      chainId: serverProfile.wallet.chainId || 5042,
     };
     p.auth = {
       provider: 'email',
@@ -157,8 +157,8 @@ const ProfileManager = (() => {
     if (!provider || !address || typeof ethers === 'undefined') return [];
     const tokens = [
       { symbol: 'USDC', address: '0x3600000000000000000000000000000000000000', decimals: 6, color: '#2775ca' },
-      { symbol: 'EURC', address: '0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a', decimals: 6, color: '#4f8ef7' },
-      { symbol: 'cirBTC', address: '0xf0C4a4CE82A5746AbAAd9425360Ab04fbBA432BF', decimals: 8, color: '#f7931a' },
+      { symbol: 'EURC', address: '0xbEf5f6d51CB62b58e6A8f77868681825C6fe21c1', decimals: 6, color: '#4f8ef7' },
+      { symbol: 'cirBTC', address: '0x171A4217b86A807A64eB94757Db6849fb4bDbAA0', decimals: 8, color: '#f7931a' },
     ];
     const abi = ['function balanceOf(address) view returns (uint256)'];
     const results = [];

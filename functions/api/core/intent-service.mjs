@@ -36,7 +36,7 @@ export function intentBytes32(id) {
 
 export function explorerTx(hash) {
   if (!hash) return null;
-  const base = (RELAYER_CONFIG.CCTP_DOMAINS?.[String(RELAYER_CONFIG.ARC_CHAIN_ID)]?.explorer) || 'https://testnet.arcscan.app';
+  const base = (RELAYER_CONFIG.CCTP_DOMAINS?.[String(RELAYER_CONFIG.ARC_CHAIN_ID)]?.explorer) || 'https://explorer.arc.io';
   return base.replace(/\/$/, '') + '/tx/' + hash;
 }
 

@@ -44,7 +44,7 @@
       maxPerOp: 0,
       // Metadata
       supportedAssets: ['USDC','EURC','cirBTC'],
-      supportedChains: ['Arc Testnet','Base','Ethereum','Arbitrum','Polygon'],
+      supportedChains: ['Arc Mainnet','Base','Ethereum','Arbitrum','Polygon'],
       preferences: {}
     };
   }
@@ -200,7 +200,7 @@
 
     if(!treasury.history) treasury.history=[];
     treasury.history.unshift({
-      amount:amount, operation:operation, chain:chain||'Arc Testnet',
+      amount:amount, operation:operation, chain:chain||'Arc Mainnet',
       txHash:txHash||'', timestamp:Date.now()
     });
     if(treasury.history.length>200) treasury.history.length=200;

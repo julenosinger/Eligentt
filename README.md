@@ -1,7 +1,7 @@
-# Elligente — Batch Payments dApp on Arc Testnet
+# Elligente — Batch Payments dApp on Arc Mainnet
 
 ## Overview
-Elligente is a decentralized application (dApp) for **batch USDC payments, token swaps, and cross-chain bridging** on Arc Testnet. Send to 500 recipients in one transaction, powered by Circle USDC & App Kit.
+Elligente is a decentralized application (dApp) for **batch USDC payments, token swaps, and cross-chain bridging** on Arc Mainnet. Send to 500 recipients in one transaction, powered by Circle USDC & App Kit.
 
 ## Live URL
 - **Production**: https://elligente.pages.dev
@@ -16,7 +16,7 @@ Elligente is a decentralized application (dApp) for **batch USDC payments, token
 
 ## Technology Stack
 - **Frontend**: Vanilla HTML/CSS/JavaScript (single-file dApp)
-- **Blockchain**: Arc Testnet (Chain ID: 5042002)
+- **Blockchain**: Arc Mainnet (Chain ID: 5042)
 - **APIs**: Circle USDC, Circle App Kit
 - **Hosting**: Cloudflare Pages with Pages Functions for secure key injection
 - **Wallet**: ethers.js v6, WalletConnect v2
@@ -52,11 +52,10 @@ npm install
 npx wrangler pages dev public --port 3000
 ```
 
-## Arc Testnet Config
-- **RPC**: https://rpc.testnet.arc.network
-- **Chain ID**: 5042002 (0x4cef52)
-- **Explorer**: https://testnet.arcscan.app
-- **USDC Faucet**: https://faucet.circle.com
+## Arc Mainnet Config
+- **RPC**: https://rpc.mainnet.arc.io
+- **Chain ID**: 5042 (0x13b2)
+- **Explorer**: https://explorer.arc.io
 
 ## Environment Variables (Cloudflare Pages → Settings → Environment Variables)
 

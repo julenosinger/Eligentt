@@ -13,7 +13,7 @@
  * Body:
  *   {
  *     executionId,          // required — the Autonoma execution identity
- *     chainId,              // default 5042002
+ *     chainId,              // default 5042
  *     operation,            // e.g. 'payment' | 'bridge' | 'swap' | 'multisend'
  *     request,              // structured request (see _circle.mapStructuredRequest)
  *     amount,               // optional (audit binding)
@@ -47,7 +47,7 @@ export async function onRequestPost(context) {
     return err('executionId is required (min 8 chars)', 400, env, request);
   }
 
-  const chainId = body.chainId != null ? Number(body.chainId) : 5042002;
+  const chainId = body.chainId != null ? Number(body.chainId) : 5042;
   if (!CHAIN_RPC[chainId]) return err('Unsupported chain ' + chainId, 400, env, request);
 
   const operation = (body && typeof body.operation === 'string' && body.operation) ? body.operation : '';

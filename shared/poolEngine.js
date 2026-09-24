@@ -65,7 +65,7 @@
       address: '0x18076d992005186AeB13AC5270CaD6E27DB95247',
       tokenA: 'USDC', tokenB: 'EURC',
       tokenAAddress: '0x3600000000000000000000000000000000000000',
-      tokenBAddress: '0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a',
+      tokenBAddress: '0xbEf5f6d51CB62b58e6A8f77868681825C6fe21c1',
       tokenADecimals: 6, tokenBDecimals: 6,
       feeBps: 10, type: 'stable',
       deployed: true,
@@ -76,7 +76,7 @@
       address: '0x14590fB7dCbD5CeBabFF63B915ef23d008dB98F4',
       tokenA: 'USDC', tokenB: 'cirBTC',
       tokenAAddress: '0x3600000000000000000000000000000000000000',
-      tokenBAddress: '0xf0C4a4CE82A5746AbAAd9425360Ab04fbBA432BF',
+      tokenBAddress: '0x171A4217b86A807A64eB94757Db6849fb4bDbAA0',
       tokenADecimals: 6, tokenBDecimals: 8,
       feeBps: 30, type: 'crypto',
       deployed: true,
@@ -86,8 +86,8 @@
       id: 'eurc-cirbtc',
       address: '0x38076d992005186AeB13aC5270CaD6E27dB95249',
       tokenA: 'EURC', tokenB: 'cirBTC',
-      tokenAAddress: '0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a',
-      tokenBAddress: '0xf0C4a4CE82A5746AbAAd9425360Ab04fbBA432BF',
+      tokenAAddress: '0xbEf5f6d51CB62b58e6A8f77868681825C6fe21c1',
+      tokenBAddress: '0x171A4217b86A807A64eB94757Db6849fb4bDbAA0',
       tokenADecimals: 6, tokenBDecimals: 8,
       feeBps: 30, type: 'crypto',
       deployed: false, // verified no bytecode on-chain
@@ -329,8 +329,8 @@
      ══════════════════════════════════════════════════════════════ */
   var TOKENS = {
     USDC:   { sym: 'USDC',   name: 'USD Coin',  decimals: 6,  address: '0x3600000000000000000000000000000000000000' },
-    EURC:   { sym: 'EURC',   name: 'Euro Coin',  decimals: 6,  address: '0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a' },
-    cirBTC: { sym: 'cirBTC', name: 'Circle BTC', decimals: 8,  address: '0xf0C4a4CE82A5746AbAAd9425360Ab04fbBA432BF' },
+    EURC:   { sym: 'EURC',   name: 'Euro Coin',  decimals: 6,  address: '0xbEf5f6d51CB62b58e6A8f77868681825C6fe21c1' },
+    cirBTC: { sym: 'cirBTC', name: 'Circle BTC', decimals: 8,  address: '0x171A4217b86A807A64eB94757Db6849fb4bDbAA0' },
     ETH:    { sym: 'ETH',    name: 'Ether',      decimals: 18, address: '0x0000000000000000000000000000000000000000' }
   };
 

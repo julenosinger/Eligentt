@@ -29,7 +29,7 @@ import { ledgerKv } from './store.mjs';
 import { loadIntent, persistIntent, addTimeline, INTENT_STATUS } from './intent-service.mjs';
 import { onRequest as mintOnRequest } from '../relayer/mint.js';
 
-const IRIS_BASE = 'https://iris-api-sandbox.circle.com';
+const IRIS_BASE = 'https://iris-api.circle.com';
 
 // Map chainId → CCTP source domain, mirroring RELAYER_CONFIG.CCTP_DOMAINS and the
 // frontend's DOMAIN_LOOKUP. Used to resolve the Iris polling domain.
@@ -47,9 +47,8 @@ const NAME_TO_DOMAIN = (() => {
 // Same substring lookup the frontend recovery uses, so symbolic chain names still
 // resolve a domain when only a human name was provided.
 const DOMAIN_SUBSTRINGS = {
-  ethereum_sepolia: 0, base_sepolia: 6, arbitrum_sepolia: 3, optimism_sepolia: 2,
-  polygon_amoy: 7, ethereum: 0, base: 6, arbitrum: 3, optimism: 2, polygon: 7,
-  amoy: 7, sepolia: 0, arc_testnet: 26, arc: 26,
+  ethereum: 0, base: 6, arbitrum: 3, optimism: 2,
+  polygon: 7, arc: 26,
 };
 
 /**

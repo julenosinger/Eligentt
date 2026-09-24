@@ -12,10 +12,10 @@
 (function () {
   'use strict';
 
-  var ARC_CHAIN_ID = 5042002;
+  var ARC_CHAIN_ID = 5042;
 
   /** CCTP V2 supported source chains (inbound → Arc) */
-  var CCTP_V2_SOURCE_CHAINS = [11155111, 84532, 421614, 11155420, 80002]; // Sepolia testnets
+  var CCTP_V2_SOURCE_CHAINS = [1, 8453, 42161, 10, 137]; // mainnet source chains
 
   function _getCCTPCfg(chainId) {
     try {
@@ -78,7 +78,7 @@
         sourceExplorer: (srcInfo && srcInfo.explorer) || '',
         destExplorer: (destCfg && destCfg.explorer) || '',
         sourceChainName: srcInfo ? srcInfo.name : 'Unknown',
-        destChainName: 'Arc Testnet',
+        destChainName: 'Arc Mainnet',
         transferType: 'BURN_AND_MINT',
         estimatedTimeSecs: 120 // ~2 min CCTP V2 standard
       };

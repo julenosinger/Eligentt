@@ -1,15 +1,15 @@
 const SystemConfig = Object.freeze({
-  ARC_CHAIN_ID:       5042002,
-  ARC_CHAIN_HEX:      '0x4cef52',
-  ARC_RPC_URL:        'https://arc-testnet.drpc.org',
-  ARC_EXPLORER_URL:   'https://testnet.arcscan.app',
+  ARC_CHAIN_ID:       5042,
+  ARC_CHAIN_HEX:      '0x13b2',
+  ARC_RPC_URL:        'https://rpc.mainnet.arc.io',
+  ARC_EXPLORER_URL:   'https://explorer.arc.io',
   ARC_NATIVE_NAME:    'USDC',
   ARC_NATIVE_SYMBOL:  'USDC',
   ARC_NATIVE_DECIMALS: 18,
 
   USDC_ADDRESS:       '0x3600000000000000000000000000000000000000',
-  EURC_ADDRESS:       '0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a',
-  CIRBTC_ADDRESS:     '0xf0C4a4CE82A5746AbAAd9425360Ab04fbBA432BF',
+  EURC_ADDRESS:       '0xbEf5f6d51CB62b58e6A8f77868681825C6fe21c1',
+  CIRBTC_ADDRESS:     '0x171A4217b86A807A64eB94757Db6849fb4bDbAA0',
   USDC_DECIMALS:      6,
   EURC_DECIMALS:      6,
   CIRBTC_DECIMALS:    8,
@@ -23,11 +23,12 @@ const SystemConfig = Object.freeze({
   CROSSCHAIN_BATCH_ADDRESS:   '0x17cFB1AACbc64D0F0c247ED261b66C3d56e3EB16',
   MEMO_CONTRACT_ADDRESS:      '0x5294E9927c3306DcBaDb03fe70b92e01cCede505',
 
-  CCTP_TOKEN_MESSENGER:       '0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA',
-  CCTP_MESSAGE_TRANSMITTER:   '0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275',
+  CCTP_TOKEN_MESSENGER:       '0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d',
+  CCTP_MESSAGE_TRANSMITTER:   '0x81D40F21F12A8F0E3252Bccb954D722d4c464B64',
+  CCTP_TOKEN_MINTER:          '0xfd78EE919681417d192449715b2594ab58f5D002',
   CCTP_ARC_DOMAIN:            26,
-  CCTP_ATTEST_URL:         'https://iris-api-sandbox.circle.com/attestations/',
-  CCTP_IRIS_V2_URL:        'https://iris-api-sandbox.circle.com/v2/messages/',
+  CCTP_ATTEST_URL:         'https://iris-api.circle.com/attestations/',
+  CCTP_IRIS_V2_URL:        'https://iris-api.circle.com/v2/messages/',
 
   PLATFORM_FEE_BPS:     100,
   TURBO_FEE_BPS:        100,
@@ -59,8 +60,8 @@ const SystemConfig = Object.freeze({
 
   ASSETS: {
     usdc:   '0x3600000000000000000000000000000000000000',
-    eurc:   '0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a',
-    cirbtc: '0xf0C4a4CE82A5746AbAAd9425360Ab04fbBA432BF',
+    eurc:   '0xbEf5f6d51CB62b58e6A8f77868681825C6fe21c1',
+    cirbtc: '0x171A4217b86A807A64eB94757Db6849fb4bDbAA0',
   },
 
   REBAL_MIN:          10000,
@@ -93,7 +94,7 @@ const SystemConfig = Object.freeze({
   APP_NAME:           'Elligentt',
   APP_URL:            'https://elligente.pages.dev',
 
-  // ── ERC-8004 Identity Contracts (Arc Testnet) ──
+  // ── ERC-8004 Identity Contracts (Arc) ──
   ERC8004_IDENTITY_REGISTRY:    '0x8004A818BFB912233c491871b3d84c89A494BD9e',
   ERC8004_REPUTATION_REGISTRY:  '0x8004B663056A597Dffe9eCcC1965A193B7388713',
   ERC8004_VALIDATION_REGISTRY:  '0x8004Cb1BF31DAf7788923b405b754f57acEB4272',

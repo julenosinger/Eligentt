@@ -7,14 +7,14 @@
 (function(){
   'use strict';
 
-  var ARC_RPC = 'https://arc-testnet.drpc.org';
+  var ARC_RPC = 'https://rpc.mainnet.arc.io';
   var TREASURY_VAULT = '0xbfC9E8F79bd30b912081ae88F9ad0A515F08c2F1';
   var CACHE_TTL_MS = 15000;
 
   var TOKENS = {
     USDC:   { address: '0x3600000000000000000000000000000000000000', decimals: 6, symbol: 'USDC' },
-    EURC:   { address: '0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a', decimals: 6, symbol: 'EURC' },
-    cirBTC: { address: '0xf0C4a4CE82A5746AbAAd9425360Ab04fbBA432BF', decimals: 8, symbol: 'cirBTC' }
+    EURC:   { address: '0xbEf5f6d51CB62b58e6A8f77868681825C6fe21c1', decimals: 6, symbol: 'EURC' },
+    cirBTC: { address: '0x171A4217b86A807A64eB94757Db6849fb4bDbAA0', decimals: 8, symbol: 'cirBTC' }
   };
 
   var ERC20_ABI = [

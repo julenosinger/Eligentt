@@ -115,7 +115,7 @@
     var timeout = o.timeout || DEFAULT_TIMEOUT;
     var maxRetries = o.retries !== undefined ? o.retries : MAX_RETRIES;
     var rpcUrl = o.rpcUrl;
-    var chainId = o.chainId || 5042002;
+    var chainId = o.chainId || 5042;
 
     if (typeof ethers === 'undefined') {
       return Promise.reject(new Error('RPC_NOT_AVAILABLE: ethers library not loaded'));

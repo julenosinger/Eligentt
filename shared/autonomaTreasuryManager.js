@@ -50,7 +50,7 @@
       var assets = [];
       if (typeof UB !== 'undefined' && UB.state && UB.state.assets) assets = UB.state.assets;
       assets.forEach(function (a) {
-        if (a.token === 'USDC' && a.usd > config.idleThreshold && a.chainId !== 'Arc_Testnet') {
+        if (a.token === 'USDC' && a.usd > config.idleThreshold && a.chainId !== 'Arc_Mainnet') {
           findings.push({
             type: 'idle_funds', severity: 'info',
             title: 'Idle funds detected',
@@ -141,7 +141,7 @@
       if (typeof UB === 'undefined' || !UB.state || !UB.state.assets) return;
       var arcAsset = null;
       UB.state.assets.forEach(function (a) {
-        if (a.token === 'ETH' && (a.chainId === 'Arc_Testnet' || a.chainId === 5042002)) arcAsset = a;
+        if (a.token === 'ETH' && (a.chainId === 'Arc_Mainnet' || a.chainId === 5042)) arcAsset = a;
       });
       if (arcAsset && arcAsset.balance < config.minGasReserve) {
         findings.push({

@@ -22,8 +22,8 @@
 import { ethers } from 'ethers';
 import PoolIndexer from '../../../shared/poolIndexer.js';
 
-const CHAIN_ID = 5042002;
-const ARC_RPC_URL = 'https://arc-testnet.drpc.org';
+const CHAIN_ID = 5042;
+const ARC_RPC_URL = 'https://rpc.mainnet.arc.io';
 
 // Auto-ingest cooldown (memory mode). Bounded 30–120s window; 60s chosen.
 const INGEST_COOLDOWN_MS = 60_000;
@@ -34,18 +34,19 @@ const MAX_EVENT_LIMIT = 100;
 
 const STATUS_WARMING = 'INDEX_WARMING';
 
-// Verified deployed pools (Phase 3 + Phase 6.2). Only these are indexable.
+// Verified deployed pools. Only these are indexable. NOTE: the pool CONTRACT
+// addresses below are the app's own deployments; token addresses are Arc Mainnet.
 // swapEventType: 'standard' (Swap event) | 'swapped' (Swapped event) | 'none'.
 const DEPLOYED_POOLS = {
   '0x18076d992005186aeb13ac5270cad6e27db95247': {
     id: 'usdc-eurc', swapEventType: 'swapped',
     token0Address: '0x3600000000000000000000000000000000000000', token0Symbol: 'USDC',
-    token1Address: '0x89b50855aa3be2f677cd6303cec089b5f319d72a', token1Symbol: 'EURC',
+    token1Address: '0xbef5f6d51cb62b58e6a8f77868681825c6fe21c1', token1Symbol: 'EURC',
   },
   '0x14590fb7dcbd5cebabff63b915ef23d008db98f4': {
     id: 'usdc-cirbtc', swapEventType: 'standard',
     token0Address: '0x3600000000000000000000000000000000000000', token0Symbol: 'USDC',
-    token1Address: '0xf0c4a4ce82a5746abaad9425360ab04fbba432bf', token1Symbol: 'cirBTC',
+    token1Address: '0x171a4217b86a807a64eb94757db6849fb4bdbaa0', token1Symbol: 'cirBTC',
   },
 };
 

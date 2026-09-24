@@ -15,7 +15,7 @@
   var ATTEST_INTERVAL_MAX = 30000;
   var MAX_RETRIES = 3;
   var ARC_DOMAIN = 26;
-  var ARC_CHAIN_ID = 5042002;
+  var ARC_CHAIN_ID = 5042;
 
   /* ── Fee config ── */
   var TREASURY_VAULT = '0xbfC9E8F79bd30b912081ae88F9ad0A515F08c2F1';
@@ -55,7 +55,7 @@
   /* ── Dynamic maxFee via Circle fee endpoint ── */
   async function _fetchMaxFee(srcDomain, destDomain) {
     try {
-      var resp = await fetch('https://iris-api-sandbox.circle.com/v2/fees/' + srcDomain + '/' + destDomain);
+      var resp = await fetch('https://iris-api.circle.com/v2/fees/' + srcDomain + '/' + destDomain);
       if (resp.ok) {
         var data = await resp.json();
         if (data && data.fee) return data.fee;
@@ -67,7 +67,7 @@
 
   /* ── Iris V2 polling with exponential backoff ── */
   async function _pollAttestationV2(srcDomain, burnTxHash, messageBytes) {
-    var baseUrl = 'https://iris-api-sandbox.circle.com/v2/messages/' + srcDomain;
+    var baseUrl = 'https://iris-api.circle.com/v2/messages/' + srcDomain;
     var url = baseUrl + '?transactionHash=' + burnTxHash;
 
     for (var attempt = 0; attempt < MAX_ATTEST_POLLS; attempt++) {
@@ -90,7 +90,7 @@
       var msgHash = ethers.keccak256(messageBytes);
       for (var a = 0; a < 60; a++) {
         try {
-          var r1 = await fetch('https://iris-api-sandbox.circle.com/attestations/' + msgHash);
+          var r1 = await fetch('https://iris-api.circle.com/attestations/' + msgHash);
           if (r1.ok) { var d1 = await r1.json(); if (d1.attestation && d1.attestation !== 'PENDING') return { ok: true, attestation: d1.attestation, message: messageBytes, attempts: MAX_ATTEST_POLLS + a + 1, fallbackV1: true }; }
         } catch(e) {}
         await _sleep(5000);

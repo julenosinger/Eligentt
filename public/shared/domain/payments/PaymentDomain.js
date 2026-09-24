@@ -33,7 +33,7 @@
   function addRecipient(addr, amount, name, chainId) {
     try {
       if (typeof recipients !== 'undefined') {
-        recipients.push({ addr: addr, amount: String(amount || '0.00'), name: name || '', chainId: chainId || 'Arc_Testnet', note: '' });
+        recipients.push({ addr: addr, amount: String(amount || '0.00'), name: name || '', chainId: chainId || 'Arc_Mainnet', note: '' });
         if (typeof renderTable === 'function') renderTable();
         return true;
       }

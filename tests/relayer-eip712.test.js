@@ -7,7 +7,7 @@ function mockKV() {
   return { async get(k) { return s.get(k) ?? null; }, async put(k, v) { s.set(k, v); } };
 }
 
-const DOMAIN = { name: 'Elligentt', version: '1', chainId: 5042002 };
+const DOMAIN = { name: 'Elligentt', version: '1', chainId: 5042 };
 const TYPES = {
   Authorization: [
     { name: 'user', type: 'address' },

@@ -20,11 +20,11 @@
     try { return typeof v === 'bigint' && v > 0n; } catch (_) { return false; }
   }
 
-  // Local pools are deployed on Arc Testnet only. On any other chain the local
+  // Local pools are deployed on Arc Mainnet only. On any other chain the local
   // adapter must NOT quote — it must not leak Testnet liquidity/balances.
   // Defaults to Testnet when no active chain is set (pre-connect / test env).
   function _isTestnetActive() {
-    try { if (typeof activeChainId === 'undefined') return true; return Number(activeChainId) === 5042002; } catch (_) { return true; }
+    try { if (typeof activeChainId === 'undefined') return true; return Number(activeChainId) === 5042; } catch (_) { return true; }
   }
 
   /**
@@ -60,7 +60,7 @@
       // On-chain quote for direct pools (mirrors the existing swap flow).
       if (route.type === 'direct' && route.pools[0].address && route.pools[0].address !== '0x0000000000000000000000000000000000000000') {
         try {
-          var readProvider = getCachedProvider('https://arc-testnet.drpc.org');
+          var readProvider = getCachedProvider('https://rpc.mainnet.arc.io');
           var pc = new ethers.Contract(route.pools[0].address, POOL_CONTRACT_ABI, readProvider);
           var tokenInAddr = getTokAddr(tokenIn);
           var amtOutBig = await pc.getAmountOut(amountInRaw, tokenInAddr);
@@ -93,7 +93,7 @@
         ok: true,
         tokenIn: tokenIn,
         tokenOut: tokenOut,
-        chainId: 5042002,
+        chainId: 5042,
         amountInRaw: amountInRaw,
         expectedOutRaw: expectedOutRaw,
         minOutRaw: minOutRaw,

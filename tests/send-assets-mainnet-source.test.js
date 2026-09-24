@@ -74,9 +74,9 @@ describe('Send Assets — execution path uses the active Arc chain', () => {
     expect(fn).not.toContain('if (activeChainId !== 5042002)');
   });
 
-  it('SendGuard recognises 0x3600… USDC on both Arc Mainnet and Arc Testnet', () => {
+  it('SendGuard recognises 0x3600… USDC on Arc Mainnet (5042)', () => {
     const guard = between('const SendGuard = (() => {', 'window.SendGuard = SendGuard');
-    expect(guard).toContain('ARC_CHAIN_IDS = [5042002, 5042]');
+    expect(guard).toContain('ARC_CHAIN_IDS = [5042]');
     expect(guard).toContain('!isArcChain(chainId)');
   });
 
