@@ -9,10 +9,7 @@
   'use strict';
 
   var RPC_LIST = [
-    { url: 'https://rpc.mainnet.arc.io',          name: 'Arc (primary)',  priority: 0 },
-    { url: 'https://rpc.drpc.mainnet.arc.io',     name: 'dRPC',           priority: 1 },
-    { url: 'https://rpc.quicknode.mainnet.arc.io',name: 'QuickNode',      priority: 2 },
-    { url: 'https://rpc.blockdaemon.mainnet.arc.io', name: 'Blockdaemon', priority: 3 }
+    { url: 'https://rpc.mainnet.arc.io', name: 'Arc (primary)', priority: 0 }
   ];
 
   var HEALTH_CACHE_TTL = 30000;
