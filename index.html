@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
@@ -172,107 +172,118 @@
 <script src="/shared/oracle-interoperability/OraclePluginManager.js"></script>
 <script src="/shared/oracle-interoperability/OracleDashboardEngine.js"></script>
 <style>
-/* ── Wallet Modal ───────────────────────────────────────── */
-.wm-overlay{position:fixed;inset:0;background:rgba(0,0,0,.82);z-index:2000;display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .22s;backdrop-filter:blur(4px)}
+/* ── Network Selector Modal ────────────────────────────────────── */
+.ns-overlay{position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.82);backdrop-filter:blur(6px);opacity:0;animation:nsFadeIn .2s forwards}
+@keyframes nsFadeIn{to{opacity:1}}
+.ns-box{background:#111520;border:1px solid #232940;border-radius:18px;width:760px;max-width:96vw;max-height:90vh;overflow:hidden;box-shadow:0 32px 80px rgba(0,0,0,.85);position:relative;display:flex;flex-direction:column;transform:translateY(16px) scale(.97);animation:nsSlideIn .22s cubic-bezier(.23,1,.32,1) forwards}
+@keyframes nsSlideIn{to{transform:translateY(0) scale(1)}}
+.ns-close{position:absolute;top:13px;right:13px;width:30px;height:30px;border-radius:8px;border:1px solid #2a3045;background:rgba(255,255,255,.04);color:#8892aa;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:15px;z-index:2;transition:all .15s}
+.ns-close:hover{border-color:#4f8ef7;color:#dde2f0;background:rgba(79,142,247,.1)}
+.ns-cols{display:grid;grid-template-columns:1fr 1fr;min-height:480px}
+/* LEFT */
+.ns-left{border-right:1px solid #1e2436;display:flex;flex-direction:column;overflow:hidden}
+.ns-left-head{padding:20px 20px 0;font-size:16px;font-weight:700;color:#dde2f0;padding-right:44px}
+.ns-search-wrap{position:relative;margin:12px 16px 6px}
+.ns-search-ico{position:absolute;left:10px;top:50%;transform:translateY(-50%);color:#606880;font-size:13px;pointer-events:none}
+.ns-search{width:100%;background:#0d1020;border:1px solid #252b3b;border-radius:8px;padding:8px 10px 8px 30px;color:#dde2f0;font-size:11px;outline:none;box-sizing:border-box;transition:border-color .15s;font-family:inherit}
+.ns-search:focus{border-color:#4f8ef7}
+.ns-section-lbl{padding:8px 18px 4px;font-size:9px;font-weight:700;letter-spacing:.08em;color:#606880}
+.ns-list{flex:1;overflow-y:auto;padding:0 10px 12px}
+.ns-chain-row{display:flex;align-items:center;gap:11px;padding:10px 10px;border-radius:10px;cursor:pointer;transition:all .15s;border:1px solid transparent;margin-bottom:3px}
+.ns-chain-row:hover{background:rgba(79,124,255,.08);border-color:rgba(79,124,255,.2)}
+.ns-chain-row.ns-row-active{background:rgba(34,197,94,.07);border-color:rgba(34,197,94,.3)}
+.ns-row-logo{width:38px;height:38px;border-radius:10px;overflow:hidden;display:flex;align-items:center;justify-content:center;flex-shrink:0;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08)}
+.ns-row-info{flex:1;min-width:0}
+.ns-row-name{font-size:12.5px;font-weight:700;color:#dde2f0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ns-row-sub{font-size:9px;color:#606880;margin-top:1px}
+.ns-row-right{display:flex;align-items:center;gap:6px;flex-shrink:0}
+.ns-badge-connected{font-size:8.5px;font-weight:700;padding:2px 8px;border-radius:999px;border:1px solid;display:flex;align-items:center;gap:4px;white-space:nowrap}
+.ns-badge-avail{font-size:8.5px;font-weight:600;padding:2px 8px;border-radius:999px;background:rgba(79,142,247,.1);border:1px solid rgba(79,142,247,.25);color:#4f8ef7;white-space:nowrap}
+.ns-dot{width:6px;height:6px;border-radius:50%;display:inline-block;flex-shrink:0}
+/* RIGHT */
+.ns-right{padding:28px 24px 24px;display:flex;flex-direction:column;align-items:center;overflow-y:auto}
+.ns-detail-logo{margin-bottom:12px}
+.ns-detail-name{font-size:19px;font-weight:800;color:#dde2f0;text-align:center}
+.ns-detail-sub{font-size:10px;color:#606880;margin-top:3px;text-align:center}
+.ns-detail-connected{display:inline-flex;align-items:center;gap:5px;margin-top:8px;font-size:10px;font-weight:700;padding:3px 10px;border-radius:999px;border:1px solid;border-color:inherit}
+.ns-detail-desc{font-size:11px;color:#8892aa;line-height:1.65;text-align:center;margin:14px 0;max-width:260px}
+.ns-detail-table{width:100%;border:1px solid #1e2436;border-radius:10px;overflow:hidden;margin-bottom:18px}
+.ns-dt-row{display:flex;justify-content:space-between;align-items:center;padding:8px 13px;border-bottom:1px solid #1e2436;font-size:10px}
+.ns-dt-row:last-child{border-bottom:none}
+.ns-dt-lbl{color:#606880;display:flex;align-items:center;gap:5px}
+.ns-dt-val{color:#dde2f0;font-weight:600;text-align:right;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ns-dt-rpc{font-size:9px;font-family:monospace}
+.ns-switch-btn{width:100%;padding:11px 16px;border-radius:10px;background:transparent;border:1.5px solid;font-size:12px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:7px;transition:all .18s;font-family:inherit}
+.ns-switch-btn:hover:not(:disabled){opacity:.85;transform:translateY(-1px);box-shadow:0 4px 16px rgba(0,0,0,.4)}
+.ns-switch-btn:disabled{opacity:.5;cursor:not-allowed}
+.ns-switch-active{width:100%;padding:11px 16px;border-radius:10px;background:transparent;border:1.5px solid;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;gap:7px}
+@keyframes nsSpin{to{transform:rotate(360deg)}}
+.ns-spin{display:inline-block;animation:nsSpin .7s linear infinite}
+@media(max-width:600px){
+  .ns-box{max-height:95vh;border-radius:18px 18px 0 0;position:fixed;bottom:0;left:0;right:0;width:100%;max-width:100%}
+  .ns-overlay{align-items:flex-end}
+  .ns-cols{grid-template-columns:1fr}
+  .ns-right{display:none}
+  .ns-left{max-height:85vh}
+}
+/* ── Wallet Modal – two-column redesign ───────────────────────── */
+.wm-overlay{position:fixed;inset:0;background:rgba(0,0,0,.82);z-index:2000;display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .22s;backdrop-filter:blur(6px)}
 .wm-overlay.open{opacity:1;pointer-events:all}
-.wm-box{background:#161a24;border:1px solid #2e3548;border-radius:14px;padding:0;width:380px;max-width:92vw;max-height:90vh;overflow:hidden;box-shadow:0 24px 64px rgba(0,0,0,.7);transform:translateY(18px) scale(.97);transition:transform .22s}
+.wm-box{background:#111520;border:1px solid #232940;border-radius:18px;padding:0;width:780px;max-width:95vw;max-height:92vh;overflow:hidden;box-shadow:0 32px 80px rgba(0,0,0,.8);transform:translateY(20px) scale(.97);transition:transform .24s cubic-bezier(.23,1,.32,1);position:relative}
 .wm-overlay.open .wm-box{transform:translateY(0) scale(1)}
-.wm-head{padding:18px 20px 14px;border-bottom:1px solid #252b3b;display:flex;align-items:center;justify-content:space-between}
-.wm-title{font-size:14px;font-weight:700;color:#dde2f0}
-.wm-sub{font-size:10px;color:#606880;margin-top:2px}
-.wm-close{width:28px;height:28px;border-radius:6px;border:1px solid #2e3548;background:transparent;color:#8892aa;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:15px;transition:all .15s}
-.wm-close:hover{border-color:#4f8ef7;color:#dde2f0}
-.wm-body{padding:14px;max-height:58vh;overflow-y:auto}
-.wm-wallet{
-  display:flex;
-  align-items:center;
-  gap:14px;
-  padding:13px 16px;
-  border:1px solid rgba(120,140,255,0.12);
-  border-radius:12px;
-  cursor:pointer;
-  transition: all 0.2s cubic-bezier(0.23, 1, 0.32, 1);
-  margin-bottom:8px;
-  background: rgba(15,20,35,0.6);
-  backdrop-filter: blur(12px);
-  user-select:none;
-  position:relative;
-  overflow:hidden;
-}
-.wm-wallet:hover{
-  border-color:#4F7CFF;
-  background: rgba(15,20,35,0.85);
-  transform: translateY(-1px) scale(1.01);
-  box-shadow: 0 0 0 1px rgba(79,124,255,0.3), 0 8px 25px rgba(0,0,0,0.4);
-}
+/* Close button – top-right corner */
+.wm-close{position:absolute;top:14px;right:14px;width:32px;height:32px;border-radius:8px;border:1px solid #2a3045;background:rgba(255,255,255,.04);color:#8892aa;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:16px;transition:all .15s;z-index:2}
+.wm-close:hover{border-color:#4f8ef7;color:#dde2f0;background:rgba(79,142,247,.1)}
+/* Two-column grid */
+.wm-cols{display:grid;grid-template-columns:1fr 1fr;min-height:520px}
+/* LEFT column */
+.wm-left{padding:28px 24px 20px;border-right:1px solid #1e2438;overflow-y:auto;max-height:92vh;display:flex;flex-direction:column;gap:0}
+.wm-title{font-size:16px;font-weight:800;color:#f0f4ff;margin-bottom:16px;letter-spacing:-.2px}
+.wm-section-label{font-size:10px;font-weight:700;color:#4f8ef7;letter-spacing:.8px;text-transform:uppercase;margin-bottom:8px;margin-top:4px}
+/* wallet rows */
+.wm-wallet{display:flex;align-items:center;gap:13px;padding:11px 13px;border:1px solid transparent;border-radius:11px;cursor:pointer;transition:all .18s cubic-bezier(.23,1,.32,1);margin-bottom:5px;background:transparent;user-select:none}
+.wm-wallet:hover{border-color:rgba(79,124,255,.35);background:rgba(79,124,255,.07);transform:translateX(2px)}
 .wm-wallet:last-child{margin-bottom:0}
-
-.wm-wallet-ico{
-  width:48px;
-  height:48px;
-  border-radius:12px;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  flex-shrink:0;
-  background: rgba(255,255,255,0.06);
-  border:1px solid rgba(120,140,255,0.15);
-  position:relative;
-  transition: transform 0.2s ease;
-}
-.wm-wallet:hover .wm-wallet-ico{
-  transform: scale(1.05);
-  box-shadow: 0 0 18px rgba(79,124,255,0.25);
-}
-
-.wm-wallet-info{
-  flex:1;
-  min-width:0;
-}
-
-.wm-wallet-name{
-  font-size:13px;
-  font-weight:700;
-  color:#F5F7FF;
-  letter-spacing:0.3px;
-}
-.wm-wallet-desc{
-  font-size:9.5px;
-  color:#7C89B8;
-  margin-top:1px;
-}
-
-.wm-wallet-status{
-  display:flex;
-  align-items:center;
-  gap:8px;
-}
-
-.wm-wallet-arrow{
-  color:#4F7CFF;
-  font-size:15px;
-  opacity:0;
-  transition: all 0.2s ease;
-}
-.wm-wallet:hover .wm-wallet-arrow{
-  opacity:1;
-  transform: translateX(2px);
-}
-
-.installed-badge{
-  font-size:9px;
-  font-weight:700;
-  padding:2px 7px;
-  border-radius:999px;
-  background:rgba(34,197,94,0.15);
-  color:#22c55e;
-  border:1px solid rgba(34,197,94,0.3);
-  white-space:nowrap;
-}
-.wm-divider{display:flex;align-items:center;gap:8px;margin:10px 0;color:#606880;font-size:9px}
-.wm-divider::before,.wm-divider::after{content:'';flex:1;height:1px;background:#252b3b}
-.wm-foot{padding:10px 14px;border-top:1px solid #252b3b;font-size:9px;color:#606880;text-align:center}
+.wm-wallet-ico{width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.09);overflow:hidden;transition:transform .18s}
+.wm-wallet:hover .wm-wallet-ico{transform:scale(1.06);box-shadow:0 0 14px rgba(79,124,255,.2)}
+.wm-wallet-info{flex:1;min-width:0}
+.wm-wallet-name{font-size:13px;font-weight:700;color:#f0f4ff;letter-spacing:.1px}
+.wm-wallet-desc{font-size:9px;color:#606880;margin-top:1px}
+.wm-wallet-status{display:flex;align-items:center;gap:7px;flex-shrink:0}
+.wm-wallet-arrow{color:#4F7CFF;font-size:14px;opacity:0;transition:all .18s}
+.wm-wallet:hover .wm-wallet-arrow{opacity:1;transform:translateX(3px)}
+.installed-badge{font-size:8.5px;font-weight:700;padding:2px 7px;border-radius:999px;background:rgba(34,197,94,.13);color:#22c55e;border:1px solid rgba(34,197,94,.28);white-space:nowrap}
+.wm-divider{display:flex;align-items:center;gap:8px;margin:8px 0;color:#606880;font-size:9px}
+.wm-divider::before,.wm-divider::after{content:'';flex:1;height:1px;background:#1e2438}
+/* preview row */
+.wm-preview-row{display:flex;gap:7px;margin-top:12px;padding-top:12px;border-top:1px solid #1e2438}
+.wm-foot{padding:10px 0 0;font-size:9px;color:#606880;text-align:center;margin-top:auto}
 .wm-foot a{color:#4f8ef7;text-decoration:none}
+/* RIGHT column */
+.wm-right{padding:32px 28px 28px;background:rgba(255,255,255,.018);display:flex;flex-direction:column;gap:0}
+.wm-right-title{font-size:18px;font-weight:800;color:#f0f4ff;margin-bottom:24px;letter-spacing:-.3px}
+.wm-info-block{display:flex;align-items:flex-start;gap:14px;margin-bottom:22px}
+.wm-info-icon{flex-shrink:0;width:42px;height:42px;border-radius:11px;overflow:hidden}
+.wm-info-heading{font-size:12px;font-weight:700;color:#dde2f0;margin-bottom:4px}
+.wm-info-text{font-size:10.5px;color:#7a85a0;line-height:1.65}
+.wm-right-actions{margin-top:auto;display:flex;flex-direction:column;align-items:center;gap:10px;padding-top:24px}
+.wm-btn-primary{display:block;width:100%;padding:13px;background:linear-gradient(135deg,#4f8ef7,#7c6cf7);border:none;border-radius:10px;color:#fff;font-size:13px;font-weight:700;cursor:pointer;text-align:center;text-decoration:none;transition:opacity .15s;font-family:inherit}
+.wm-btn-primary:hover{opacity:.88}
+.wm-btn-link{font-size:11px;color:#4f8ef7;text-decoration:none;font-weight:600}
+.wm-btn-link:hover{text-decoration:underline}
+/* legacy kept for showPanel compat */
+.wm-head{display:none}
+.wm-sub{display:none}
+.wm-body{padding:0}
+/* Mobile: single column */
+@media(max-width:640px){
+  .wm-box{width:100%;max-width:100%;border-radius:18px 18px 0 0;position:fixed;bottom:0;left:0;right:0;max-height:92vh}
+  .wm-overlay{align-items:flex-end}
+  .wm-overlay.open .wm-box{transform:translateY(0) scale(1)}
+  .wm-cols{grid-template-columns:1fr;min-height:auto}
+  .wm-right{display:none}
+  .wm-left{border-right:none;max-height:85vh}
+}
 
 /* Connected dropdown */
 .w-dropdown{position:absolute;top:52px;right:14px;background:#161a24;border:1px solid #2e3548;border-radius:10px;width:240px;z-index:1500;box-shadow:0 12px 40px rgba(0,0,0,.6);display:none;overflow:hidden}
@@ -290,151 +301,43 @@
 /* ══════════════════════════════════════════════════════════
    FOOTER
 ══════════════════════════════════════════════════════════ */
-.site-footer{
-  background:#0a0c11;
-  border-top:1px solid #1e2435;
-  flex-shrink:0;
-  font-family:'JetBrains Mono',monospace;
-}
-/* top accent bar */
-.footer-accent{
-  height:2px;
-  background:linear-gradient(90deg,#4f8ef7 0%,#a78bfa 35%,#2dd4bf 65%,#22c55e 100%);
-}
-.footer-inner{
-  max-width:1400px;
-  margin:0 auto;
-  padding:32px 28px 0;
-  display:grid;
-  grid-template-columns:2fr 1fr 1fr 1fr 1fr;
-  gap:32px;
-}
-/* brand column */
-.footer-brand .fb-logo{
-  display:flex;align-items:center;gap:9px;margin-bottom:12px;
-}
-.footer-brand .fb-icon{
-  width:32px;height:32px;
-  border-radius:8px;display:flex;align-items:center;justify-content:center;
-  flex-shrink:0;overflow:hidden;
-}
-.footer-brand .fb-icon svg{width:100%;height:100%;display:block}
-.footer-brand .fb-name{font-size:16px;font-weight:700;color:#dde2f0;}
-.footer-brand .fb-kit{
-  font-size:8px;background:rgba(79,142,247,.14);
-  border:1px solid rgba(79,142,247,.28);color:#4f8ef7;
-  border-radius:3px;padding:1px 5px;margin-left:4px;vertical-align:middle;
-}
-.footer-brand .fb-tagline{
-  font-size:10px;color:#9aa3b8;line-height:1.7;max-width:240px;margin-bottom:16px;
-}
-.footer-brand .fb-badges{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px;}
-.footer-badge{
-  display:inline-flex;align-items:center;gap:4px;
-  background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);
-  border-radius:5px;padding:4px 9px;font-size:9px;color:#aab2c8;
-}
-.footer-badge i{font-size:11px;}
-.footer-badge.green{color:#22c55e;border-color:rgba(34,197,94,.25);background:rgba(34,197,94,.06);}
-.footer-badge.blue{color:#4f8ef7;border-color:rgba(79,142,247,.25);background:rgba(79,142,247,.06);}
-.footer-badge.purple{color:#a78bfa;border-color:rgba(167,139,250,.25);background:rgba(167,139,250,.06);}
-/* columns */
-.footer-col h4{
-  font-size:10px;font-weight:700;color:#dde2f0;
-  text-transform:uppercase;letter-spacing:1.1px;
-  margin-bottom:12px;display:flex;align-items:center;gap:6px;
-}
-.footer-col h4 i{font-size:12px;}
-.footer-col a,.footer-col span{
-  display:flex;align-items:center;gap:6px;
-  font-size:10px;color:#d8dce8;
-  text-decoration:none;padding:4px 0;
-  cursor:pointer;transition:none;
-  border:none;background:none;font-family:inherit;text-align:left;
-}
-.footer-col a:hover,.footer-col span:hover{color:#dde2f0}
-.footer-col button{
-  display:flex;align-items:center;gap:6px;
-  font-size:10px;color:#d8dce8;
-  text-decoration:none;padding:4px 0;
-  cursor:pointer;transition:none;
-  border:none;background:none;font-family:inherit;text-align:left;
-  width:100%;
-}
-.footer-col button:hover{color:#dde2f0;}
-.footer-col a i,.footer-col span i,.footer-col button i{font-size:11px;width:13px;flex-shrink:0;}
-.footer-tag{
-  display:inline-block;font-size:8px;
-  background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.28);
-  color:#f59e0b;border-radius:3px;padding:1px 4px;margin-left:4px;
-}
-/* newsletter */
-.footer-newsletter{
-  margin-top:8px;display:flex;gap:6px;
-}
-.footer-newsletter input{
-  flex:1;background:rgba(0,0,0,.25);border:1px solid rgba(255,255,255,.12);
-  border-radius:5px;padding:6px 9px;color:#dde2f0;
-  font-size:10px;font-family:inherit;outline:none;
-  transition:border .15s;
-}
-.footer-newsletter input:focus{border-color:#4f8ef7;}
-.footer-newsletter button{
-  background:#4f8ef7;border:none;border-radius:5px;
-  padding:6px 11px;color:#fff;font-size:10px;font-weight:700;
-  cursor:pointer;font-family:inherit;transition:background .15s;
-  white-space:nowrap;
-}
-.footer-newsletter button:hover{background:#3a7bef;}
-/* divider */
-.footer-divider{
-  height:1px;background:rgba(255,255,255,.07);
-  margin:24px 28px 0;
-}
-/* bottom bar */
+/* ── Site Footer ─────────────────────────────────────────── */
+.site-footer{background:#0a0c11;border-top:1px solid #1e2435;flex-shrink:0;}
+.footer-accent{height:2px;background:linear-gradient(90deg,#4f8ef7 0%,#a78bfa 35%,#2dd4bf 65%,#22c55e 100%);}
 .footer-bottom{
   display:flex;align-items:center;justify-content:space-between;
-  flex-wrap:wrap;gap:10px;
-  padding:14px 28px;
-  font-size:9px;color:#8892aa;
+  flex-wrap:wrap;gap:8px;
+  padding:11px 24px;
+  font-size:10px;color:#8892aa;
+  min-height:44px;
 }
-.footer-bottom-left{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+.footer-bottom-left{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
 .footer-bottom-right{display:flex;align-items:center;gap:14px;flex-wrap:wrap;}
-.footer-bottom-right a{
-  color:#8892aa;text-decoration:none;font-size:9px;
-  transition:color .15s;
-}
-.footer-bottom-right a:hover{color:#dde2f0;}
+.footer-sep{color:#2e3548;font-size:12px;user-select:none;}
 .footer-status{
-  display:flex;align-items:center;gap:5px;
+  display:inline-flex;align-items:center;gap:5px;
   background:rgba(34,197,94,.07);border:1px solid rgba(34,197,94,.2);
-  border-radius:4px;padding:3px 8px;
+  border-radius:4px;padding:3px 9px;
 }
-.footer-status .pulse{
-  width:5px;height:5px;border-radius:50%;
-  background:#22c55e;animation:pulse 1.5s ease-in-out infinite;
+.footer-status .pulse{width:5px;height:5px;border-radius:50%;background:#22c55e;animation:pulse 1.5s ease-in-out infinite;flex-shrink:0;}
+.footer-chain-pill{
+  display:inline-flex;align-items:center;gap:5px;
+  background:rgba(34,197,94,.07);border:1px solid rgba(34,197,94,.25);
+  border-radius:4px;padding:3px 9px;font-size:10px;color:#22c55e;font-weight:600;
 }
-/* social icons */
-.footer-socials{display:flex;gap:7px;margin-top:12px;}
-.footer-social-btn{
-  width:28px;height:28px;border-radius:6px;
-  border:1px solid rgba(255,255,255,.12);background:transparent;
-  display:flex;align-items:center;justify-content:center;
-  color:#9aa3b8;cursor:pointer;font-size:13px;
-  transition:all .15s;text-decoration:none;
+.footer-chain-pill .pulse{width:5px;height:5px;border-radius:50%;background:#22c55e;animation:pulse 1.5s ease-in-out infinite;flex-shrink:0;}
+/* keep unused classes around so nothing breaks */
+.footer-badge{display:inline-flex;align-items:center;gap:4px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:5px;padding:4px 9px;font-size:9px;color:#aab2c8;}
+.footer-badge.green{color:#22c55e;border-color:rgba(34,197,94,.25);background:rgba(34,197,94,.06);}
+.footer-badge.blue{color:#4f8ef7;border-color:rgba(79,142,247,.25);background:rgba(79,142,247,.06);}
+.footer-col a,.footer-col span,.footer-col button{display:flex;align-items:center;gap:6px;font-size:10px;color:#d8dce8;text-decoration:none;padding:4px 0;cursor:pointer;border:none;background:none;font-family:inherit;text-align:left;width:100%;}
+.footer-col a:hover,.footer-col span:hover,.footer-col button:hover{color:#dde2f0;}
+@media(max-width:640px){
+  .footer-bottom{flex-direction:column;align-items:flex-start;gap:8px;padding:12px 16px;}
+  .footer-bottom-right{gap:10px;}
 }
-.footer-social-btn:hover{border-color:#4f8ef7;color:#4f8ef7;background:rgba(79,142,247,.08);}
-/* network indicator */
-.footer-net{
-  display:flex;align-items:center;gap:6px;
-  background:rgba(79,142,247,.1);border:1px solid rgba(79,142,247,.25);
-  border-radius:5px;padding:5px 10px;margin-top:10px;font-size:9px;color:#aab2c8;
-}
-.footer-net i{font-size:11px;color:#4f8ef7;}
-@media(max-width:900px){
-  .footer-inner{grid-template-columns:1fr 1fr;gap:20px;}
-  .footer-brand{grid-column:1/-1;}
-}
+/* footer-inner/brand legacy stubs (no longer rendered, kept for compat) */
+.footer-inner{display:none}.footer-brand{display:none}
 </style>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -5335,11 +5238,8 @@ select.cinput option { background: #161a24; color: #dde2f0; }
   .action-btn{padding:12px;font-size:11px}
   .btn{font-size:9px;padding:4px 8px}
 
-  .wm-box{width:100%;max-width:100%;border-radius:0;border:none;height:100vh;max-height:100vh}
-  .wm-overlay{align-items:flex-end}
-  .wm-overlay.open .wm-box{transform:translateY(0) scale(1);border-radius:16px 16px 0 0;max-height:85vh;height:auto}
-  .wm-wallet-ico{width:40px;height:40px}
-  .wm-wallet{padding:12px 14px}
+  /* wm mobile handled in the wallet modal block above */
+  .wm-wallet{padding:10px 12px}
 
   .w-dropdown{top:44px;right:6px;width:calc(100vw - 12px);max-width:300px}
 
@@ -6037,164 +5937,180 @@ select.cinput option { background: #161a24; color: #dde2f0; }
 <!-- ── Wallet Connect Modal ──────────────────────────────── -->
 <div class="wm-overlay" id="wallet-modal">
   <div class="wm-box">
-    <div class="wm-head">
-      <div>
-        <div class="wm-title" id="wm-title">Connect Wallet</div>
-        <div class="wm-sub" id="wm-subtitle">Arc Mainnet · Chain ID 5042</div>
-      </div>
-      <button class="wm-close" onclick="closeWalletModal()"><i class="ti ti-x"></i></button>
-    </div>
 
-    <!-- ① iframe/no-extension warning panel -->
-    <div id="wm-panel-iframe" style="display:none;padding:16px">
-      <div style="text-align:center;margin-bottom:14px">
-        <div style="width:52px;height:52px;border-radius:12px;background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.25);display:flex;align-items:center;justify-content:center;margin:0 auto 10px;font-size:24px">🦊</div>
-        <div style="font-size:13px;font-weight:700;color:#dde2f0;margin-bottom:4px">Wallet extensions not available here</div>
-        <div style="font-size:10px;color:#606880;line-height:1.7">
-          This dApp is running inside an <strong style="color:#f59e0b">iframe</strong> (e.g. Claude.ai preview).<br/>
-          Browser wallet extensions only work on a <strong style="color:#dde2f0">direct browser tab</strong>.
+    <!-- Close button -->
+    <button class="wm-close" onclick="closeWalletModal()" aria-label="Close"><i class="ti ti-x"></i></button>
+
+    <!-- ══ TWO-COLUMN LAYOUT ══ -->
+    <div class="wm-cols">
+
+      <!-- LEFT: wallet list -->
+      <div class="wm-left">
+        <div class="wm-title">Connect a Wallet</div>
+
+        <!-- iframe warning (shown when inside iframe with no injected wallets) -->
+        <div id="wm-panel-iframe" style="display:none">
+          <div style="background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.2);border-radius:8px;padding:12px;margin-bottom:10px">
+            <div style="font-size:11px;font-weight:700;color:#f59e0b;margin-bottom:5px"><i class="ti ti-alert-triangle" style="margin-right:4px"></i>Extensions unavailable in iframe</div>
+            <div style="font-size:9.5px;color:#8892aa;line-height:1.6">Open this page in a direct browser tab to use wallet extensions.</div>
+          </div>
+          <button onclick="showPanel('pick')" style="width:100%;padding:8px;background:transparent;border:1px solid var(--border2);border-radius:6px;color:var(--muted2);font-size:10.5px;cursor:pointer;font-family:inherit;margin-bottom:10px">
+            ← Try wallets anyway
+          </button>
         </div>
-      </div>
-      <!-- Option A: Open in new tab -->
-      <div style="background:rgba(79,142,247,.07);border:1px solid rgba(79,142,247,.2);border-radius:8px;padding:12px;margin-bottom:10px">
-        <div style="font-size:10.5px;font-weight:700;color:#dde2f0;margin-bottom:6px;display:flex;align-items:center;gap:6px"><span style="background:var(--blue);color:#fff;border-radius:50%;width:16px;height:16px;display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-weight:800;flex-shrink:0">1</span>Open in your browser (recommended)</div>
-        <div style="font-size:9.5px;color:#8892aa;margin-bottom:9px">Download the file, open it directly in Chrome/Firefox/Brave, then connect MetaMask.</div>
-        <button onclick="closeWalletModal();toast('Download the index.html file and open it directly in your browser','info')" style="width:100%;padding:9px;background:var(--blue);border:none;border-radius:6px;color:#fff;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:5px">
-          <i class="ti ti-external-link"></i> Open in Browser Tab
-        </button>
-      </div>
-      <!-- Option B: Read-only with address -->
-      <div style="background:rgba(34,197,94,.05);border:1px solid rgba(34,197,94,.18);border-radius:8px;padding:12px;margin-bottom:10px">
-        <div style="font-size:10.5px;font-weight:700;color:#dde2f0;margin-bottom:6px;display:flex;align-items:center;gap:6px"><span style="background:var(--green);color:#fff;border-radius:50%;width:16px;height:16px;display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-weight:800;flex-shrink:0">2</span>Preview mode — paste your address</div>
-        <div style="font-size:9.5px;color:#8892aa;margin-bottom:8px">View balances and explore the UI. Transactions will be simulated (demo mode).</div>
-        <div style="display:flex;gap:7px">
-          <input id="manual-addr-input" class="cinput" type="text" placeholder="0x... or name.eth" style="flex:1;font-size:10px;padding:7px 9px"/>
-          <button onclick="connectManualAddress()" style="padding:7px 12px;background:var(--green);border:none;border-radius:5px;color:#fff;font-size:10.5px;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap;display:flex;align-items:center;gap:4px">
+
+        <!-- No-wallet banner -->
+        <div id="wm-no-wallet-banner" style="display:none;background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.2);border-radius:7px;padding:8px 11px;font-size:9.5px;color:#f59e0b;margin-bottom:10px;line-height:1.6">
+          <i class="ti ti-info-circle" style="font-size:11px;margin-right:4px"></i>
+          No wallet extension detected. Install one or use <strong>WalletConnect</strong>.
+        </div>
+
+        <!-- Detected section label -->
+        <div class="wm-section-label" id="wm-detected-label" style="display:none">Detected</div>
+
+        <!-- EIP-6963 dynamic list (populated by JS) -->
+        <div id="wm-eip6963-list"></div>
+
+        <!-- Fallback static wallets (hidden when EIP-6963 covers them; kept for compat) -->
+        <div id="wm-panel-pick">
+          <!-- MetaMask -->
+          <div class="wm-wallet" id="wm-metamask" onclick="connectMetaMask()">
+            <div class="wm-wallet-ico">
+              <img src="/assets/wallets/metamask.svg" alt="MetaMask" width="32" height="32" style="border-radius:6px" onerror="this.onerror=null;this.style.display='none';this.parentNode.style.background='#E2761B';this.parentNode.innerHTML='<span style=font-size:16px;font-weight:800;color:#fff>M</span>'"/>
+            </div>
+            <div class="wm-wallet-info">
+              <div class="wm-wallet-name">MetaMask</div>
+              <div class="wm-wallet-desc" id="wm-desc-metamask">Browser extension &amp; mobile app</div>
+            </div>
+            <div class="wm-wallet-status">
+              <span class="installed-badge" id="mm-installed" style="display:none">Installed</span>
+              <i class="ti ti-arrow-right wm-wallet-arrow"></i>
+            </div>
+          </div>
+          <!-- Coinbase Wallet -->
+          <div class="wm-wallet" id="wm-coinbase" onclick="connectCoinbase()">
+            <div class="wm-wallet-ico">
+              <img src="/assets/wallets/coinbase-wallet.svg" alt="Coinbase Wallet" width="32" height="32" style="border-radius:6px" onerror="this.onerror=null;this.style.display='none';this.parentNode.style.background='#0052FF';this.parentNode.innerHTML='<span style=font-size:16px;font-weight:800;color:#fff>C</span>'"/>
+            </div>
+            <div class="wm-wallet-info">
+              <div class="wm-wallet-name">Coinbase Wallet</div>
+              <div class="wm-wallet-desc" id="wm-desc-coinbase">Browser extension &amp; mobile app</div>
+            </div>
+            <div class="wm-wallet-status">
+              <span class="installed-badge" id="cb-installed" style="display:none">Installed</span>
+              <i class="ti ti-arrow-right wm-wallet-arrow"></i>
+            </div>
+          </div>
+          <!-- Rabby Wallet -->
+          <div class="wm-wallet" id="wm-rabby" onclick="connectRabby()">
+            <div class="wm-wallet-ico">
+              <img src="/assets/wallets/rabby.svg" alt="Rabby Wallet" width="32" height="32" style="border-radius:6px" onerror="this.onerror=null;this.style.display='none';this.parentNode.style.background='#7B6EF6';this.parentNode.innerHTML='<span style=font-size:16px;font-weight:800;color:#fff>R</span>'"/>
+            </div>
+            <div class="wm-wallet-info">
+              <div class="wm-wallet-name">Rabby Wallet</div>
+              <div class="wm-wallet-desc" id="wm-desc-rabby">Advanced multi-chain wallet</div>
+            </div>
+            <div class="wm-wallet-status">
+              <span class="installed-badge" id="rabby-installed" style="display:none">Installed</span>
+              <i class="ti ti-arrow-right wm-wallet-arrow"></i>
+            </div>
+          </div>
+          <!-- Trust Wallet -->
+          <div class="wm-wallet" id="wm-trust" onclick="connectTrustWallet()">
+            <div class="wm-wallet-ico">
+              <img src="/assets/wallets/trust-wallet.svg" alt="Trust Wallet" width="32" height="32" style="border-radius:6px" onerror="this.onerror=null;this.style.display='none';this.parentNode.style.background='#0500FF';this.parentNode.innerHTML='<span style=font-size:16px;font-weight:800;color:#fff>T</span>'"/>
+            </div>
+            <div class="wm-wallet-info">
+              <div class="wm-wallet-name">Trust Wallet</div>
+              <div class="wm-wallet-desc" id="wm-desc-trust">Mobile &amp; browser wallet</div>
+            </div>
+            <div class="wm-wallet-status">
+              <span class="installed-badge" id="tw-installed" style="display:none">Installed</span>
+              <i class="ti ti-arrow-right wm-wallet-arrow"></i>
+            </div>
+          </div>
+          <!-- WalletConnect -->
+          <div class="wm-wallet" id="wm-wc" onclick="connectWalletConnect()">
+            <div class="wm-wallet-ico">
+              <img src="/assets/wallets/walletconnect.svg" alt="WalletConnect" width="32" height="32" style="border-radius:6px" onerror="this.onerror=null;this.style.display='none';this.parentNode.style.background='#3396FF';this.parentNode.innerHTML='<span style=font-size:14px;font-weight:800;color:#fff>WC</span>'"/>
+            </div>
+            <div class="wm-wallet-info">
+              <div class="wm-wallet-name">WalletConnect</div>
+              <div class="wm-wallet-desc" id="wc-status">Scan QR · 300+ wallets</div>
+            </div>
+            <div class="wm-wallet-status">
+              <i class="ti ti-arrow-right wm-wallet-arrow"></i>
+            </div>
+          </div>
+        </div>
+
+        <!-- Install instructions panel -->
+        <div id="wm-panel-install" style="display:none;padding:4px 0">
+          <div id="wm-install-content"></div>
+          <div style="display:flex;gap:8px;margin-top:14px">
+            <button onclick="showPanel('pick')" style="flex:1;padding:8px;background:transparent;border:1px solid var(--border2);border-radius:5px;color:var(--muted2);font-size:11px;cursor:pointer;font-family:inherit">← Back</button>
+            <button id="wm-install-btn" onclick="openInstallLink()" style="flex:2;padding:8px;background:var(--blue);border:none;border-radius:5px;color:#fff;font-size:11.5px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:5px">
+              <i class="ti ti-external-link"></i> Install
+            </button>
+          </div>
+        </div>
+
+        <!-- Preview mode input -->
+        <div class="wm-preview-row">
+          <input id="manual-addr-input" class="cinput" type="text" placeholder="Paste 0x address to preview (read-only)" style="flex:1;font-size:10px;padding:7px 9px"/>
+          <input id="manual-addr-input2" class="cinput" type="text" style="display:none"/>
+          <button onclick="connectManualAddress()" style="padding:7px 11px;background:rgba(34,197,94,.15);border:1px solid rgba(34,197,94,.3);border-radius:5px;color:#22c55e;font-size:10px;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap;display:flex;align-items:center;gap:4px;flex-shrink:0">
             <i class="ti ti-eye"></i> Preview
           </button>
         </div>
-      </div>
-      <button onclick="showPanel('pick')" style="width:100%;padding:7px;background:transparent;border:1px solid var(--border2);border-radius:5px;color:var(--muted2);font-size:10.5px;cursor:pointer;font-family:inherit">
-        ← Try wallets anyway
-      </button>
-    </div>
 
-    <!-- ② Normal wallet picker -->
-    <div id="wm-panel-pick" class="wm-body" style="display:none">
-      <div id="wm-no-wallet-banner" style="display:none;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.22);border-radius:7px;padding:9px 12px;font-size:9.5px;color:#f59e0b;margin-bottom:10px;line-height:1.6">
-        <i class="ti ti-info-circle" style="font-size:12px;margin-right:4px"></i>
-        No wallet extension detected in this browser. Install one below or use <strong>Preview mode</strong>.
-      </div>
-
-      <!-- MetaMask -->
-      <div class="wm-wallet" id="wm-metamask" onclick="connectMetaMask()">
-        <div class="wm-wallet-ico">
-          <img src="/assets/wallets/metamask.svg" alt="MetaMask" width="32" height="32" style="border-radius:6px" onerror="this.onerror=null;this.style.display='none';this.parentNode.style.background='#E2761B';this.parentNode.innerHTML='<span style=font-size:16px;font-weight:800;color:#fff>M</span>'"/>
-        </div>
-        <div class="wm-wallet-info">
-          <div class="wm-wallet-name">MetaMask</div>
-          <div class="wm-wallet-desc" id="wm-desc-metamask">Browser extension &amp; mobile app</div>
-        </div>
-        <div class="wm-wallet-status">
-          <span class="installed-badge" id="mm-installed" style="display:none">Installed</span>
-          <i class="ti ti-arrow-right wm-wallet-arrow"></i>
+        <div class="wm-foot">
+          By connecting you agree to the
+          <a href="#" onclick="closeWalletModal();showTermsModal();return false">Terms of Service</a>
         </div>
       </div>
 
-      <!-- Coinbase Wallet -->
-      <div class="wm-wallet" id="wm-coinbase" onclick="connectCoinbase()">
-        <div class="wm-wallet-ico">
-          <img src="/assets/wallets/coinbase-wallet.svg" alt="Coinbase Wallet" width="32" height="32" style="border-radius:6px" onerror="this.onerror=null;this.style.display='none';this.parentNode.style.background='#0052FF';this.parentNode.innerHTML='<span style=font-size:16px;font-weight:800;color:#fff>C</span>'"/>
+      <!-- RIGHT: info panel -->
+      <div class="wm-right">
+        <div class="wm-right-title">What is a Wallet?</div>
+
+        <div class="wm-info-block">
+          <div class="wm-info-icon">
+            <svg width="38" height="38" viewBox="0 0 38 38" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect width="38" height="38" rx="10" fill="url(#wm-grad1)"/>
+              <defs><linearGradient id="wm-grad1" x1="0" y1="0" x2="38" y2="38" gradientUnits="userSpaceOnUse"><stop stop-color="#4F8EF7"/><stop offset="1" stop-color="#A78BFA"/></linearGradient></defs>
+              <path d="M10 14h18a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2z" stroke="#fff" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+              <circle cx="24" cy="19" r="1.5" fill="#fff"/>
+            </svg>
+          </div>
+          <div>
+            <div class="wm-info-heading">A home for your digital assets</div>
+            <div class="wm-info-text">Wallets are used to send, receive, store, and display your digital assets like USDC and NFTs.</div>
+          </div>
         </div>
-        <div class="wm-wallet-info">
-          <div class="wm-wallet-name">Coinbase Wallet</div>
-          <div class="wm-wallet-desc" id="wm-desc-coinbase">Browser extension &amp; mobile app</div>
+
+        <div class="wm-info-block">
+          <div class="wm-info-icon">
+            <svg width="38" height="38" viewBox="0 0 38 38" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect width="38" height="38" rx="10" fill="url(#wm-grad2)"/>
+              <defs><linearGradient id="wm-grad2" x1="0" y1="0" x2="38" y2="38" gradientUnits="userSpaceOnUse"><stop stop-color="#22c55e"/><stop offset="1" stop-color="#06b6d4"/></linearGradient></defs>
+              <path d="M19 11a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm-8 16c0-4 3.6-7 8-7s8 3 8 7" stroke="#fff" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </div>
+          <div>
+            <div class="wm-info-heading">A new way to log in</div>
+            <div class="wm-info-text">Instead of creating accounts and passwords on every site, just connect your wallet.</div>
+          </div>
         </div>
-        <div class="wm-wallet-status">
-          <span class="installed-badge" id="cb-installed" style="display:none">Installed</span>
-          <i class="ti ti-arrow-right wm-wallet-arrow"></i>
+
+        <div class="wm-right-actions">
+          <a href="https://ethereum.org/en/wallets/find-wallet/" target="_blank" rel="noopener" class="wm-btn-primary">Get a Wallet</a>
+          <a href="https://ethereum.org/en/wallets/" target="_blank" rel="noopener" class="wm-btn-link">Learn more</a>
         </div>
       </div>
 
-      <!-- Rabby Wallet -->
-      <div class="wm-wallet" id="wm-rabby" onclick="connectRabby()">
-        <div class="wm-wallet-ico">
-          <img src="/assets/wallets/rabby.svg" alt="Rabby Wallet" width="32" height="32" style="border-radius:6px" onerror="this.onerror=null;this.style.display='none';this.parentNode.style.background='#7B6EF6';this.parentNode.innerHTML='<span style=font-size:16px;font-weight:800;color:#fff>R</span>'"/>
-        </div>
-        <div class="wm-wallet-info">
-          <div class="wm-wallet-name">Rabby Wallet</div>
-          <div class="wm-wallet-desc" id="wm-desc-rabby">Advanced multi-chain wallet</div>
-        </div>
-        <div class="wm-wallet-status">
-          <span class="installed-badge" id="rabby-installed" style="display:none">Installed</span>
-          <i class="ti ti-arrow-right wm-wallet-arrow"></i>
-        </div>
-      </div>
-
-      <!-- Trust Wallet -->
-      <div class="wm-wallet" id="wm-trust" onclick="connectTrustWallet()">
-        <div class="wm-wallet-ico">
-          <img src="/assets/wallets/trust-wallet.svg" alt="Trust Wallet" width="32" height="32" style="border-radius:6px" onerror="this.onerror=null;this.style.display='none';this.parentNode.style.background='#0500FF';this.parentNode.innerHTML='<span style=font-size:16px;font-weight:800;color:#fff>T</span>'"/>
-        </div>
-        <div class="wm-wallet-info">
-          <div class="wm-wallet-name">Trust Wallet</div>
-          <div class="wm-wallet-desc" id="wm-desc-trust">Mobile &amp; browser wallet</div>
-        </div>
-        <div class="wm-wallet-status">
-          <span class="installed-badge" id="tw-installed" style="display:none">Installed</span>
-          <i class="ti ti-arrow-right wm-wallet-arrow"></i>
-        </div>
-      </div>
-
-      <div class="wm-divider">or scan with mobile</div>
-
-      <!-- WalletConnect -->
-      <div class="wm-wallet" id="wm-wc" onclick="connectWalletConnect()">
-        <div class="wm-wallet-ico">
-          <img src="/assets/wallets/walletconnect.svg" alt="WalletConnect" width="32" height="32" style="border-radius:6px" onerror="this.onerror=null;this.style.display='none';this.parentNode.style.background='#3396FF';this.parentNode.innerHTML='<span style=font-size:14px;font-weight:800;color:#fff>WC</span>'"/>
-        </div>
-        <div class="wm-wallet-info">
-          <div class="wm-wallet-name">WalletConnect</div>
-          <div class="wm-wallet-desc" id="wc-status">Trust, Rainbow, Uniswap &amp; 300+ wallets</div>
-        </div>
-        <div class="wm-wallet-status">
-          <i class="ti ti-arrow-right wm-wallet-arrow"></i>
-        </div>
-      </div>
-
-      <div class="wm-divider">or</div>
-      <!-- Manual address -->
-      <div style="padding:0 2px">
-        <div style="font-size:9.5px;color:#8892aa;margin-bottom:6px;display:flex;align-items:center;gap:5px">
-          <i class="ti ti-eye" style="font-size:11px;color:#606880"></i>
-          Preview mode — read-only, no signing required
-        </div>
-        <div style="display:flex;gap:7px">
-          <input id="manual-addr-input2" class="cinput" type="text" placeholder="Paste 0x address or ENS to preview" style="flex:1;font-size:10px;padding:7px 9px"/>
-          <button onclick="connectManualAddress(2)" style="padding:7px 12px;background:rgba(34,197,94,.15);border:1px solid rgba(34,197,94,.3);border-radius:5px;color:#22c55e;font-size:10px;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap;display:flex;align-items:center;gap:4px">
-            <i class="ti ti-eye"></i> Preview
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <!-- ③ Install instructions panel (shown when wallet not detected) -->
-    <div id="wm-panel-install" style="display:none;padding:14px">
-      <div id="wm-install-content"></div>
-      <div style="display:flex;gap:8px;margin-top:14px">
-        <button onclick="showPanel('pick')" style="flex:1;padding:8px;background:transparent;border:1px solid var(--border2);border-radius:5px;color:var(--muted2);font-size:11px;cursor:pointer;font-family:inherit">← Back</button>
-        <button id="wm-install-btn" onclick="openInstallLink()" style="flex:2;padding:8px;background:var(--blue);border:none;border-radius:5px;color:#fff;font-size:11.5px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:5px">
-          <i class="ti ti-external-link"></i> Copy Install URL
-        </button>
-      </div>
-      <div style="font-size:8.5px;color:#606880;text-align:center;margin-top:8px">After installing, reload the page in your browser tab.</div>
-    </div>
-
-    <div class="wm-foot">
-      By connecting you agree to the
-      <a href="#" onclick="closeWalletModal();showTermsModal();return false">Terms of Service</a>
-    </div>
-  </div>
+    </div><!-- /.wm-cols -->
+  </div><!-- /.wm-box -->
 </div>
 
 <!-- ── Connected wallet dropdown ────────────────────────── -->
@@ -10454,23 +10370,38 @@ select.cinput option { background: #161a24; color: #dde2f0; }
      SITE FOOTER
 ══════════════════════════════════════════════════════ -->
 <footer class="site-footer" id="site-footer">
+  <!-- gradient accent line -->
   <div class="footer-accent"></div>
 
-  <div class="footer-bottom" style="justify-content:center;padding:18px 20px">
-    <div class="footer-bottom-left" style="flex-direction:column;align-items:center;gap:7px;text-align:center;width:100%">
+  <!-- single slim bar -->
+  <div class="footer-bottom">
+    <!-- LEFT -->
+    <div class="footer-bottom-left">
       <div class="footer-status">
         <div class="pulse"></div>
-        <span style="color:#22c55e;font-weight:600">All systems operational</span>
+        <span style="color:#22c55e;font-weight:600;font-size:10px">All systems operational</span>
       </div>
-      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:center;font-size:11px;color:#8892aa">
-        <span>© 2025 Elligentt. Built on <a href="https://arc.network" target="_blank" rel="noopener" style="color:#4f8ef7;text-decoration:none" aria-label="Arc Network"><img src="assets/arc/arc-logo-on-dark.svg" alt="Arc" style="height:11px;width:auto;vertical-align:-2px;margin-left:3px"/></a></span>
-        <span>·</span>
-        <span>Powered by <a href="https://circle.com" target="_blank" style="color:#4f8ef7;text-decoration:none">Circle</a> USDC &amp; App Kit</span>
-      </div>
-      <div style="display:flex;gap:16px;flex-wrap:wrap;justify-content:center">
-        <a href="#" onclick="showPrivacyModal();return false" style="color:#8892aa;text-decoration:none;font-size:11px">Privacy Policy</a>
-        <a href="#" onclick="showTermsModal();return false" style="color:#8892aa;text-decoration:none;font-size:11px">Terms of Service</a>
-        <a href="#" onclick="showAboutModal();return false" style="color:#8892aa;text-decoration:none;font-size:11px">Cookie Policy</a>
+      <span class="footer-sep">·</span>
+      <span style="font-size:10px;color:#8892aa">© 2026 Elligentt. Built on</span>
+      <a href="https://arc.network" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:3px;color:#dde2f0;text-decoration:none;font-size:10px;font-weight:600" aria-label="Arc">
+        <svg width="13" height="13" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" style="flex-shrink:0"><circle cx="16" cy="16" r="16" fill="#22c55e"/><path d="M16 6 L26 26 H6 Z" fill="none" stroke="#fff" stroke-width="2.4" stroke-linejoin="round"/><circle cx="16" cy="16" r="3" fill="#fff"/></svg>
+        Arc
+      </a>
+      <span class="footer-sep">·</span>
+      <span style="font-size:10px;color:#8892aa">Powered by <a href="https://circle.com" target="_blank" rel="noopener" style="color:#4f8ef7;text-decoration:none;font-weight:600">Circle</a> USDC &amp; App Kit</span>
+      <span class="footer-sep">·</span>
+      <a href="https://github.com/julenosinger/Eligentt" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:4px;color:#8892aa;text-decoration:none;font-size:10px;transition:color .15s" onmouseover="this.style.color='#dde2f0'" onmouseout="this.style.color='#8892aa'">
+        <i class="ti ti-brand-github" style="font-size:13px"></i>GitHub
+      </a>
+    </div>
+    <!-- RIGHT -->
+    <div class="footer-bottom-right">
+      <a href="#" onclick="showPrivacyModal();return false" style="color:#8892aa;text-decoration:none;font-size:10px;transition:color .15s" onmouseover="this.style.color='#dde2f0'" onmouseout="this.style.color='#8892aa'">Privacy Policy</a>
+      <a href="#" onclick="showTermsModal();return false" style="color:#8892aa;text-decoration:none;font-size:10px;transition:color .15s" onmouseover="this.style.color='#dde2f0'" onmouseout="this.style.color='#8892aa'">Terms of Service</a>
+      <a href="#" onclick="showAboutModal();return false" style="color:#8892aa;text-decoration:none;font-size:10px;transition:color .15s" onmouseover="this.style.color='#dde2f0'" onmouseout="this.style.color='#8892aa'">Cookie Policy</a>
+      <div class="footer-chain-pill" id="footer-chain-pill">
+        <div class="pulse" style="background:#22c55e"></div>
+        <span id="footer-chain-label">Chain ID: 5042</span>
       </div>
     </div>
   </div>
@@ -14141,7 +14072,6 @@ async function assertWalletReady(needSigner = false) {
 
 function updateWalletBadges() {
   try {
-    const eth = _safeEth();
     const wallets = detectWallets();
     const mmBadge = document.getElementById('mm-installed');
     if (mmBadge && wallets.metamask) mmBadge.style.display = 'inline-flex';
@@ -14152,6 +14082,96 @@ function updateWalletBadges() {
     const twBadge = document.getElementById('tw-installed');
     if (twBadge && wallets.trust) twBadge.style.display = 'inline-flex';
   } catch(e) { _warn('updateWalletBadges:', e.message); }
+}
+
+// ── Build EIP-6963 dynamic wallet list ──────────────────────────
+// Known wallet UUIDs / names → existing connect functions
+const _wmKnownMap = [
+  { match: ['metamask'],        fn: 'connectMetaMask',      color: '#E2761B', letter: 'M' },
+  { match: ['rabby'],           fn: 'connectRabby',         color: '#7B6EF6', letter: 'R' },
+  { match: ['coinbase'],        fn: 'connectCoinbase',      color: '#0052FF', letter: 'C' },
+  { match: ['trust'],           fn: 'connectTrustWallet',   color: '#0500FF', letter: 'T' },
+  { match: ['walletconnect'],   fn: 'connectWalletConnect', color: '#3396FF', letter: 'WC' },
+];
+function _wmMatchFn(name) {
+  const n = (name || '').toLowerCase();
+  for (const k of _wmKnownMap) {
+    if (k.match.some(m => n.includes(m))) return k.fn;
+  }
+  return null; // will use generic EIP-6963 connect
+}
+function _buildEip6963List() {
+  const container = document.getElementById('wm-eip6963-list');
+  const label     = document.getElementById('wm-detected-label');
+  const staticList = document.getElementById('wm-panel-pick');
+  if (!container) return;
+  container.innerHTML = '';
+  if (!_eip6963.length) {
+    if (label) label.style.display = 'none';
+    if (staticList) staticList.style.display = '';
+    return;
+  }
+  if (label) label.style.display = '';
+  // Show EIP-6963 wallets and hide the static fallback list to avoid duplication
+  if (staticList) staticList.style.display = 'none';
+  _eip6963.forEach((w, idx) => {
+    const info = w.info || {};
+    const name = info.name || 'Wallet ' + (idx + 1);
+    const icon = info.icon || ''; // data: URI
+    const knownFn = _wmMatchFn(name);
+    const row = document.createElement('div');
+    row.className = 'wm-wallet';
+    row.setAttribute('role', 'button');
+    row.setAttribute('tabindex', '0');
+    // Icon: use EIP-6963 icon (data URI) if available
+    const iconHtml = icon
+      ? `<img src="${icon}" alt="${name}" width="32" height="32" style="border-radius:6px;width:32px;height:32px;object-fit:contain"/>`
+      : `<span style="font-size:15px;font-weight:800;color:#fff">${name.slice(0,2).toUpperCase()}</span>`;
+    row.innerHTML = `
+      <div class="wm-wallet-ico">${iconHtml}</div>
+      <div class="wm-wallet-info">
+        <div class="wm-wallet-name">${name}</div>
+        <div class="wm-wallet-desc">Detected · click to connect</div>
+      </div>
+      <div class="wm-wallet-status">
+        <span class="installed-badge">Detected</span>
+        <i class="ti ti-arrow-right wm-wallet-arrow"></i>
+      </div>`;
+    row.onclick = () => {
+      if (knownFn && typeof window[knownFn] === 'function') {
+        window[knownFn]();
+      } else {
+        // Generic EIP-6963 connect using the discovered provider directly
+        _connectEip6963Provider(w.provider, name);
+      }
+    };
+    row.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') row.click(); };
+    container.appendChild(row);
+  });
+  // Always append WalletConnect at the bottom of EIP-6963 list
+  const wcRow = document.createElement('div');
+  wcRow.className = 'wm-wallet';
+  wcRow.id = 'wm-wc';
+  wcRow.innerHTML = `
+    <div class="wm-wallet-ico"><img src="/assets/wallets/walletconnect.svg" alt="WalletConnect" width="32" height="32" style="border-radius:6px" onerror="this.onerror=null;this.style.display='none';this.parentNode.style.background='#3396FF';this.parentNode.innerHTML='<span style=font-size:13px;font-weight:800;color:#fff>WC</span>'"/></div>
+    <div class="wm-wallet-info"><div class="wm-wallet-name">WalletConnect</div><div class="wm-wallet-desc" id="wc-status">Scan QR · 300+ wallets</div></div>
+    <div class="wm-wallet-status"><i class="ti ti-arrow-right wm-wallet-arrow"></i></div>`;
+  wcRow.onclick = () => { if (typeof connectWalletConnect === 'function') connectWalletConnect(); };
+  container.appendChild(wcRow);
+}
+
+// Generic EIP-6963 connect (for wallets not mapped to a named function)
+async function _connectEip6963Provider(raw, walletName) {
+  if (!raw) { toast('Provider not available', 'error'); return; }
+  try {
+    closeWalletModal();
+    await raw.request({ method: 'eth_requestAccounts' });
+    await finalizeConnection(raw, walletName || 'injected');
+  } catch(e) {
+    _warn('_connectEip6963Provider:', e.message);
+    if (e.code === 4001) { toast('Connection rejected by user', 'warning'); }
+    else { toast('Could not connect: ' + (e.message || e), 'error'); }
+  }
 }
 function closeWalletModal() {
   document.getElementById('wallet-modal').classList.remove('open');
@@ -14316,6 +14336,11 @@ function updateNetworkBadge(chain) {
     const scoreEl = document.getElementById('sb-score');
     if (scoreEl) { scoreEl.textContent = c.name; scoreEl.style.color = c.color; }
   }
+  // Update footer chain pill
+  const footerLabel = document.getElementById('footer-chain-label');
+  if (footerLabel) footerLabel.textContent = 'Chain ID: ' + c.chainId;
+  const footerPill = document.getElementById('footer-chain-pill');
+  if (footerPill) { footerPill.style.borderColor = c.color + '55'; footerPill.style.color = c.color; }
   if (typeof swpSyncStdHeader === 'function') swpSyncStdHeader();
 }
 
@@ -14367,38 +14392,52 @@ async function finalizeConnection(raw, walletType) {
 
 // ── refreshBalance: fetch live USDC balance on active chain ─────────────
 let _refreshBalancePending = false;
+let _refreshBalanceChainId = null; // tracks which chain the last completed fetch belongs to
 async function refreshBalance() {
   if (!walletAddress) return;
   if (_refreshBalancePending) return;
   _refreshBalancePending = true;
   const set = (id, val) => { const el = document.getElementById(id); if(el) el.textContent = val; };
+  // Clear stale values from the previous chain immediately — before any async work —
+  // so the sidebar never shows a balance that belongs to a different chain.
+  const _snapshotChainId = activeChainId;
+  if (_refreshBalanceChainId !== _snapshotChainId) {
+    set('sb-bal',     '…');
+    set('dd-bal',     '…');
+    set('sender-bal', '');
+  }
   try {
-    // Chain-consistent read-only provider (chainId → registry → RPC → JsonRpcProvider,
-    // network verified). Never the wallet's signing provider, which may diverge.
+    // Chain-consistent read-only provider via cached JsonRpcProvider keyed by RPC URL.
+    // Avoids getChainProvider's async getNetwork() probe which can fail/hang on Arc.
     const chain    = getActiveChain();
-    const prov     = await getChainProvider(activeChainId);
-    if (!prov) { _refreshBalancePending = false; return; }
+    if (!chain || !chain.rpc) { set('sb-bal','—'); set('dd-bal','—'); _refreshBalancePending = false; return; }
+    const prov     = getCachedProvider(chain.rpc);
+    if (!prov) { set('sb-bal','—'); set('dd-bal','—'); _refreshBalancePending = false; return; }
     const usdcAddr = chain.tokens?.USDC?.address;
     // DEBUG LOGS for Sepolia (and all chains) balance audit
     // Arc vs Sepolia flow comparison: both use identical path via getActiveChain() + chain.rpc + chain.tokens[SYMBOL].address + JsonRpcProvider + balanceOf
     // Difference previously: Sepolia lacked cirBTC in registry (now added) and cirBTC in SA_TOKENS was always hardcoded (now falls back to getTokenAddress which uses activeChainId)
     _log('[refreshBalance] detected chainId:', activeChainId, 'chain:', chain?.id || chain?.name);
     _log('[refreshBalance] selected USDC token address:', usdcAddr, 'wallet:', walletAddress, 'RPC:', chain.rpc);
-    if (!usdcAddr) { _refreshBalancePending = false; return; }
+    if (!usdcAddr) { set('sb-bal','—'); set('dd-bal','—'); _refreshBalancePending = false; return; }
     const usdc  = new ethers.Contract(usdcAddr, USDC_ABI, prov);
     const bal   = await usdc.balanceOf(walletAddress);
     const fmt   = fromUsdc(bal);
     _log('[refreshBalance] fetched USDC balance:', bal.toString(), 'formatted:', fmt);
-    set('sb-bal',     fmt);
-    set('dd-bal',     fmt);
-    set('sender-bal', 'Balance: ' + fmt + ' USDC');
+    // Guard: only write to UI if the active chain hasn't changed again while we were awaiting
+    if (activeChainId === _snapshotChainId) {
+      set('sb-bal',     fmt);
+      set('dd-bal',     fmt);
+      set('sender-bal', 'Balance: ' + fmt + ' USDC');
+      _refreshBalanceChainId = _snapshotChainId;
+    }
     const eurcAddr = chain.tokens?.EURC?.address;
     if (eurcAddr) {
       try {
         const eurc = new ethers.Contract(eurcAddr, USDC_ABI, prov);
         const eurcBal = await eurc.balanceOf(walletAddress);
         _log('[refreshBalance] fetched EURC balance:', eurcBal.toString());
-        set('sb-eurc-bal', fromUsdc(eurcBal));
+        if (activeChainId === _snapshotChainId) set('sb-eurc-bal', fromUsdc(eurcBal));
       } catch(e) { _warn('silent-catch', e?.message||e); }
     }
     // cirBTC not fetched in main refresh (Send Assets specific)
@@ -14408,6 +14447,9 @@ async function refreshBalance() {
     return fmt;
   } catch(e) {
     _warn('refreshBalance error:', e.message);
+    // Clear stale display on error so wrong-chain value is never left visible
+    set('sb-bal', '—');
+    set('dd-bal', '—');
     _refreshBalancePending = false;
   }
 }
@@ -14487,6 +14529,8 @@ function setupProviderEvents(raw) {
     raw.on('chainChanged', async hexChainId => {
       const newChainId = parseInt(hexChainId, 16);
       _log('[chainChanged] new chainId:', newChainId);
+      // Reset pending guard so the chain-change refresh is never skipped
+      _refreshBalancePending = false;
       await refreshProviderState();
       updateNetworkBadge();
       // Re-evaluate Unified Balance network guard (Arc Mainnet only).
@@ -14573,56 +14617,53 @@ function showWalletPicker()  { showPanel('pick'); }
 function openWalletModal() {
   closeDropdown();
   document.getElementById('wallet-modal').classList.add('open');
+
+  const inFrame   = isInsideIframe();
+  const hasWallet = !!(_safeEth() || _eip6963.length);
+  const mobile    = isMobileDevice();
+
+  // Build EIP-6963 dynamic list (shows detected wallets with real icons)
+  _buildEip6963List();
   updateWalletBadges();
 
-  const inFrame    = isInsideIframe();
-  const hasWallet  = !!(_safeEth() || _eip6963.length);
-  const mobile     = isMobileDevice();
+  // iframe with no wallets: show warning panel
+  const iframePanel = document.getElementById('wm-panel-iframe');
+  if (iframePanel) iframePanel.style.display = (inFrame && !hasWallet) ? '' : 'none';
 
-  if(inFrame && !hasWallet) {
-    showPanel('iframe');
-  } else {
-    showPanel('pick');
+  // No-wallet banner (only when static list is showing, i.e. no EIP-6963)
+  const banner = document.getElementById('wm-no-wallet-banner');
+  if (banner) {
+    if (hasWallet || _eip6963.length) {
+      banner.style.display = 'none';
+    } else if (mobile) {
+      banner.style.display = '';
+      banner.innerHTML = '<i class="ti ti-device-mobile" style="font-size:12px;margin-right:4px"></i>No wallet detected. Tap a wallet below to open in your wallet app, or use <strong>WalletConnect</strong>.';
+    } else {
+      banner.style.display = '';
+    }
+  }
+
+  // Static fallback list: update descriptions
+  if (!_eip6963.length) {
     const wallets = detectWallets();
     const mm = detectInjected('isMetaMask');
     const cb = detectInjected('isCoinbaseWallet');
     const rb = detectInjected('isRabby');
     const tw = detectInjected('isTrust') || detectInjected('isTrustWallet');
-
-    const setDesc = (id, found, walletKey) => {
+    const setDesc = (id, found, appName) => {
       const el = document.getElementById(id);
-      if(!el) return;
-      if(found) {
-        el.textContent = '\u2713 Detected \u2014 click to connect';
-      } else if(mobile && walletKey) {
-        el.textContent = 'Tap to open in ' + walletKey + ' app';
-      } else {
-        el.textContent = 'Not installed \u2014 click for help';
-      }
+      if (!el) return;
+      el.textContent = found
+        ? '\u2713 Detected \u2014 click to connect'
+        : (mobile ? 'Tap to open in ' + appName + ' app' : 'Not installed \u2014 click for help');
     };
     setDesc('wm-desc-metamask', mm && mm.isMetaMask, 'MetaMask');
     setDesc('wm-desc-coinbase', cb && cb.isCoinbaseWallet, 'Coinbase');
     setDesc('wm-desc-rabby',    rb && rb.isRabby, 'Rabby');
     setDesc('wm-desc-trust',    tw, 'Trust Wallet');
-
-    const trustRow = document.getElementById('wm-trust');
-    if(trustRow) trustRow.style.display = '';
-
-    const banner = document.getElementById('wm-no-wallet-banner');
-    if(banner) {
-      if(hasWallet) {
-        banner.style.display = 'none';
-      } else if(mobile) {
-        banner.style.display = '';
-        banner.innerHTML = '<i class="ti ti-device-mobile" style="font-size:12px;margin-right:4px"></i>No wallet detected. Tap a wallet below to open this page in your wallet app, or use <strong>WalletConnect</strong>.';
-      } else {
-        banner.style.display = '';
-      }
-    }
-
-    if(mobile && !hasWallet) {
+    if (mobile && !hasWallet) {
       const wcEl = document.getElementById('wm-wc');
-      if(wcEl) wcEl.style.order = '-1';
+      if (wcEl) wcEl.style.order = '-1';
     }
   }
 }
@@ -19535,11 +19576,12 @@ async function updateSwapBalancesDisplay() {
     return;
   }
   try {
-    // Chain-aware + network-verified: read balances ONLY on the ACTIVE chain.
-    // No cross-chain token-address leak; never the wallet's signing provider.
+    // Chain-aware: read balances ONLY on the ACTIVE chain.
+    // Uses getCachedProvider directly (same as saRefreshBalance) to avoid
+    // getChainProvider's async getNetwork() probe which can fail/hang on Arc.
     const activeChain = getActiveChain();
     if (!activeChain || !activeChain.rpc) return;
-    const prov = await getChainProvider(activeChainId);
+    const prov = getCachedProvider(activeChain.rpc);
     if (!prov) return;
     const tIn  = TOKEN_LIST[SWP.tokenInIdx];
     const tOut = TOKEN_LIST[SWP.tokenOutIdx];
@@ -30911,76 +30953,164 @@ function getSelectableNetworks() {
   return out;
 }
 
-function openNetworkSelector() {
-  let modal = document.getElementById('network-selector-modal');
-  if (!modal) {
-    modal = document.createElement('div');
-    modal.id = 'network-selector-modal';
-    modal.style.cssText = 'position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.6);backdrop-filter:blur(4px)';
-    modal.innerHTML = `
-      <div style="background:var(--card);border:1px solid var(--border);border-radius:14px;padding:20px;width:340px;max-width:95vw;box-shadow:0 20px 60px #0009">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
-          <h3 style="margin:0;font-size:14px;font-weight:700">Select Network</h3>
-          <button onclick="document.getElementById('network-selector-modal').remove()" style="background:none;border:none;color:var(--muted2);cursor:pointer;font-size:18px;line-height:1">&times;</button>
-        </div>
-        <div id="network-list" style="display:flex;flex-direction:column;gap:6px"></div>
-        <p style="margin:12px 0 0;font-size:10px;color:var(--muted2);text-align:center">Wallet must be connected to switch networks</p>
-      </div>`;
-    modal.addEventListener('click', e => { if(e.target === modal) modal.remove(); });
-    document.body.appendChild(modal);
-  }
+// ── Network Selector Modal (two-column redesign) ─────────────────────────────
+var _nsSelectedChainId = null; // which chain is previewed in the right panel
 
-  // Build chain list
-  const list = modal.querySelector('#network-list');
-  list.innerHTML = '';
-  getSelectableNetworks().forEach(chain => {
-    const isActive = chain.chainId === activeChainId;
-    const btn = document.createElement('button');
-    btn.style.cssText = `display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;
-      background:${isActive ? chain.color+'18' : 'var(--card2)'};border:1px solid ${isActive ? chain.color+'66' : 'var(--border)'};
-      cursor:pointer;width:100%;text-align:left;transition:all .15s;color:inherit`;
-    btn.innerHTML = `
-      <span style="width:28px;height:28px;border-radius:50%;background:${chain.color}22;
-        border:1.5px solid ${chain.color}66;display:flex;align-items:center;justify-content:center;
-        font-size:10px;font-weight:700;color:${chain.color};flex-shrink:0">${chain.symbol}</span>
-      <span style="flex:1">
-        <span style="display:block;font-size:12px;font-weight:600">${chain.name}</span>
-        <span style="display:block;font-size:9px;color:var(--muted2)">Chain ID: ${chain.chainId}</span>
-      </span>
-      ${isActive ? '<span style="font-size:10px;color:' + chain.color + '">&#x2714; Active</span>' : ''}`;
-    if (!isActive) {
-      btn.addEventListener('click', async () => {
-        modal.remove();
-        if (!walletAddress) { toast('Connect wallet first', 'error'); return; }
-        try {
-          toast(`Switching to ${chain.name}…`, 'info');
-          await ensureNetwork(chain.chainId);
-          updateNetworkBadge();
-          await refreshBalance();
-          toast(`✓ Switched to ${chain.name}`, 'success');
-        } catch(e) {
-          toast(e.message || 'Network switch failed', 'error');
-        }
-      });
-    }
-    list.appendChild(btn);
+function _nsChainLogo(chain) {
+  // Returns an SVG/letter icon for the chain, coloured with chain.color
+  const logos = {
+    5042:  '<svg viewBox="0 0 40 40" width="36" height="36"><circle cx="20" cy="20" r="20" fill="' + chain.color + '22"/><text x="50%" y="55%" dominant-baseline="middle" text-anchor="middle" font-size="14" font-weight="800" fill="' + chain.color + '">A</text></svg>',
+    1:     '<svg viewBox="0 0 40 40" width="36" height="36"><circle cx="20" cy="20" r="20" fill="#627eea22"/><text x="50%" y="55%" dominant-baseline="middle" text-anchor="middle" font-size="14" font-weight="800" fill="#627eea">Ξ</text></svg>',
+    8453:  '<svg viewBox="0 0 40 40" width="36" height="36"><circle cx="20" cy="20" r="20" fill="#0052ff22"/><text x="50%" y="55%" dominant-baseline="middle" text-anchor="middle" font-size="14" font-weight="800" fill="#0052ff">B</text></svg>',
+    42161: '<svg viewBox="0 0 40 40" width="36" height="36"><circle cx="20" cy="20" r="20" fill="#12aaff22"/><text x="50%" y="55%" dominant-baseline="middle" text-anchor="middle" font-size="14" font-weight="800" fill="#12aaff">Ar</text></svg>',
+    10:    '<svg viewBox="0 0 40 40" width="36" height="36"><circle cx="20" cy="20" r="20" fill="#ff042022"/><text x="50%" y="55%" dominant-baseline="middle" text-anchor="middle" font-size="14" font-weight="800" fill="#ff0420">OP</text></svg>',
+    137:   '<svg viewBox="0 0 40 40" width="36" height="36"><circle cx="20" cy="20" r="20" fill="#8247e522"/><text x="50%" y="55%" dominant-baseline="middle" text-anchor="middle" font-size="14" font-weight="800" fill="#8247e5">P</text></svg>',
+  };
+  return logos[chain.chainId] || '<svg viewBox="0 0 40 40" width="36" height="36"><circle cx="20" cy="20" r="20" fill="' + chain.color + '22"/><text x="50%" y="55%" dominant-baseline="middle" text-anchor="middle" font-size="12" font-weight="800" fill="' + chain.color + '">' + (chain.symbol||'?') + '</text></svg>';
+}
+
+function _nsBigLogo(chain) {
+  return '<svg viewBox="0 0 80 80" width="56" height="56"><circle cx="40" cy="40" r="40" fill="' + chain.color + '18"/><circle cx="40" cy="40" r="36" fill="none" stroke="' + chain.color + '" stroke-width="2" opacity=".4"/><text x="50%" y="55%" dominant-baseline="middle" text-anchor="middle" font-size="22" font-weight="900" fill="' + chain.color + '">' + (chain.symbol||'?') + '</text></svg>';
+}
+
+function _nsChainDesc(chain) {
+  const descs = {
+    5042:  'Arc\'s mainnet — USDC as native gas, sub-second finality, built for global payments.',
+    1:     'Ethereum mainnet — the original smart contract platform with the largest ecosystem.',
+    8453:  'Base mainnet — Coinbase\'s low-cost L2, built on the OP Stack.',
+    42161: 'Arbitrum One — Ethereum L2 with ultra-low fees and high throughput.',
+    10:    'Optimism mainnet — fast, low-cost Ethereum L2 by the OP Labs team.',
+    137:   'Polygon PoS — EVM-compatible sidechain with low fees and fast finality.',
+  };
+  return descs[chain.chainId] || chain.name + ' — Chain ID ' + chain.chainId;
+}
+
+function _nsRenderDetail(chain) {
+  const modal = document.getElementById('ns-modal');
+  if (!modal) return;
+  const panel = modal.querySelector('#ns-detail');
+  if (!panel) return;
+  const isActive = chain.chainId === activeChainId;
+
+  panel.innerHTML = `
+    <div class="ns-detail-logo">${_nsBigLogo(chain)}</div>
+    <div class="ns-detail-name">${chain.name}</div>
+    <div class="ns-detail-sub">${chain.id || chain.shortName} · Chain ID ${chain.chainId}</div>
+    ${isActive ? '<div class="ns-detail-connected"><span class="ns-dot" style="background:' + chain.color + '"></span>Connected</div>' : ''}
+    <p class="ns-detail-desc">${_nsChainDesc(chain)}</p>
+    <div class="ns-detail-table">
+      <div class="ns-dt-row"><span class="ns-dt-lbl"><i class="ti ti-network"></i> Network name</span><span class="ns-dt-val">${chain.name}</span></div>
+      <div class="ns-dt-row"><span class="ns-dt-lbl"><i class="ti ti-hash"></i> Chain ID</span><span class="ns-dt-val">${chain.chainId}</span></div>
+      <div class="ns-dt-row"><span class="ns-dt-lbl"><i class="ti ti-coin"></i> Native token</span><span class="ns-dt-val">${chain.nativeCurrency ? chain.nativeCurrency.symbol : (chain.chainId === 5042 ? 'USDC' : 'ETH')}</span></div>
+      <div class="ns-dt-row"><span class="ns-dt-lbl"><i class="ti ti-link"></i> RPC</span><span class="ns-dt-val ns-dt-rpc" title="${chain.rpc}">${chain.rpc ? chain.rpc.replace(/https?:\/\//, '').slice(0,22) + '…' : '—'}</span></div>
+      ${chain.explorer ? '<div class="ns-dt-row"><span class="ns-dt-lbl"><i class="ti ti-compass"></i> Explorer</span><span class="ns-dt-val"><a href="' + chain.explorer + '" target="_blank" rel="noopener" style="color:var(--blue);text-decoration:none">' + chain.explorer.replace(/https?:\/\//, '').replace(/\/$/, '') + ' <i class="ti ti-external-link" style="font-size:8px"></i></a></span></div>' : ''}
+    </div>
+    ${!isActive ? `<button class="ns-switch-btn" id="ns-switch-btn" style="border-color:${chain.color};color:${chain.color}" onclick="_nsSwitchTo(${chain.chainId})"><i class="ti ti-arrows-exchange"></i> Switch to this network</button>` : `<div class="ns-switch-btn ns-switch-active" style="border-color:${chain.color};color:${chain.color};cursor:default;opacity:.7"><i class="ti ti-check"></i> Currently connected</div>`}
+  `;
+}
+
+function _nsSelectChain(chainId) {
+  _nsSelectedChainId = chainId;
+  const modal = document.getElementById('ns-modal');
+  if (!modal) return;
+  // Highlight active row
+  modal.querySelectorAll('.ns-chain-row').forEach(r => {
+    r.classList.toggle('ns-row-active', parseInt(r.dataset.chainId) === chainId);
   });
+  const chain = CHAIN_REGISTRY[chainId];
+  if (chain) _nsRenderDetail(chain);
+}
 
-  // Solana entry (non-EVM, informational)
-  const solana = CHAIN_REGISTRY.solana_devnet;
-  if (solana) {
-    const div = document.createElement('div');
-    div.style.cssText = 'display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;background:var(--card2);border:1px solid var(--border);opacity:.6';
-    div.innerHTML = `
-      <span style="width:28px;height:28px;border-radius:50%;background:${solana.color}22;
-        border:1.5px solid ${solana.color}66;display:flex;align-items:center;justify-content:center;
-        font-size:10px;font-weight:700;color:${solana.color};flex-shrink:0">◎</span>
-      <span style="flex:1">
-        <span style="display:block;font-size:12px;font-weight:600">Solana Devnet</span>
-        <span style="display:block;font-size:9px;color:var(--muted2)">Phantom wallet — coming soon</span>
-      </span>`;
-    list.appendChild(div);
+async function _nsSwitchTo(chainId) {
+  const modal = document.getElementById('ns-modal');
+  const chain = CHAIN_REGISTRY[chainId];
+  if (!chain) return;
+  if (!walletAddress) { toast('Connect your wallet first', 'warning'); if(modal) modal.remove(); openWalletModal(); return; }
+  const btn = document.getElementById('ns-switch-btn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2 ns-spin"></i> Switching…'; }
+  try {
+    await ensureNetwork(chainId);
+    updateNetworkBadge();
+    _refreshBalancePending = false;
+    await refreshBalance();
+    if (modal) modal.remove();
+    toast('✓ Switched to ' + chain.name, 'success');
+  } catch(e) {
+    toast(e.message || 'Network switch failed', 'error');
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-arrows-exchange"></i> Switch to this network'; }
   }
+}
+
+function openNetworkSelector() {
+  // Remove any stale instance
+  const old = document.getElementById('ns-modal');
+  if (old) { old.remove(); }
+
+  const networks = getSelectableNetworks();
+  const defaultChain = CHAIN_REGISTRY[activeChainId] || networks[0];
+  _nsSelectedChainId = defaultChain ? defaultChain.chainId : null;
+
+  // Build chain list HTML
+  function rowHtml(chain) {
+    const isActive = chain.chainId === activeChainId;
+    return `<div class="ns-chain-row${isActive ? ' ns-row-active' : ''}" data-chain-id="${chain.chainId}" onclick="_nsSelectChain(${chain.chainId})">
+      <div class="ns-row-logo">${_nsChainLogo(chain)}</div>
+      <div class="ns-row-info">
+        <div class="ns-row-name">${chain.name}</div>
+        <div class="ns-row-sub">${chain.id || chain.shortName} · Chain ID ${chain.chainId}</div>
+      </div>
+      <div class="ns-row-right">
+        ${isActive
+          ? `<span class="ns-badge-connected" style="border-color:${chain.color}55;color:${chain.color}"><span class="ns-dot" style="background:${chain.color}"></span>Connected</span><i class="ti ti-check" style="color:${chain.color};font-size:13px"></i>`
+          : `<span class="ns-badge-avail">Available</span><i class="ti ti-chevron-right" style="color:#606880;font-size:13px"></i>`
+        }
+      </div>
+    </div>`;
+  }
+
+  const listHtml = networks.map(rowHtml).join('');
+
+  const modal = document.createElement('div');
+  modal.id = 'ns-modal';
+  modal.className = 'ns-overlay';
+  modal.innerHTML = `
+    <div class="ns-box">
+      <button class="ns-close" onclick="document.getElementById('ns-modal').remove()" aria-label="Close"><i class="ti ti-x"></i></button>
+      <div class="ns-cols">
+        <!-- LEFT -->
+        <div class="ns-left">
+          <div class="ns-left-head">Select Network</div>
+          <div class="ns-search-wrap">
+            <i class="ti ti-search ns-search-ico"></i>
+            <input id="ns-search" class="ns-search" type="text" placeholder="Search network…" autocomplete="off" oninput="_nsFilter(this.value)"/>
+          </div>
+          <div class="ns-section-lbl">MAINNETS</div>
+          <div class="ns-list" id="ns-list">${listHtml}</div>
+        </div>
+        <!-- RIGHT -->
+        <div class="ns-right" id="ns-detail"></div>
+      </div>
+    </div>`;
+
+  modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+  document.body.appendChild(modal);
+
+  // Render right panel for default selection
+  if (defaultChain) _nsRenderDetail(defaultChain);
+
+  // Focus search
+  setTimeout(() => { const s = document.getElementById('ns-search'); if(s) s.focus(); }, 80);
+}
+
+function _nsFilter(q) {
+  const query = (q || '').toLowerCase().trim();
+  const list = document.getElementById('ns-list');
+  if (!list) return;
+  list.querySelectorAll('.ns-chain-row').forEach(row => {
+    const name = (row.querySelector('.ns-row-name')?.textContent || '').toLowerCase();
+    const sub  = (row.querySelector('.ns-row-sub')?.textContent || '').toLowerCase();
+    row.style.display = (!query || name.includes(query) || sub.includes(query)) ? '' : 'none';
+  });
 }
 
 // ══════════════════════════════════════════════════════════
