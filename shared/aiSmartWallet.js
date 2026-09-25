@@ -199,6 +199,18 @@
     } catch (_e) { /* ignore */ }
     return null;
   }
+  /* Canonical Circle agent wallet — the AI Smart Wallet is backed by this
+     server-side Circle wallet (mainnet). Never substituted by a local key. */
+  const CANONICAL_CIRCLE_WALLET = '0x794eb2f43a333e9eab9731d8f5e5423d5ec628eb';
+  function circleWalletAddr() {
+    try {
+      if (typeof CircleAgent !== 'undefined' && CircleAgent.getCachedAddress) {
+        const a = CircleAgent.getCachedAddress();
+        if (a) return a;
+      }
+    } catch (_e) { /* ignore */ }
+    return CANONICAL_CIRCLE_WALLET;
+  }
   function personalAddr() {
     try {
       if (window.__App && typeof window.__App.walletAddress !== 'undefined') return window.__App.walletAddress || null;
@@ -1051,7 +1063,7 @@
   function renderReceive() {
     const box = $id('aiw-receive-body');
     if (!box) return;
-    const addr = agentAddr();
+    const addr = circleWalletAddr();
     const addrEl = $id('aiw-receive-addr');
     if (addrEl) addrEl.textContent = addr || 'Agent Wallet not created yet';
     const qrEl = $id('aiw-receive-qr');
@@ -1069,8 +1081,8 @@
   }
 
   function copyAgentAddress() {
-    const addr = agentAddr();
-    if (!addr) { notify('Agent Wallet not created yet', 'error'); return; }
+    const addr = circleWalletAddr();
+    if (!addr) { notify('AI Smart Wallet not created yet', 'error'); return; }
     try {
       if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(addr).then(function () { notify('Address copied', 'success'); });

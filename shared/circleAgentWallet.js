@@ -154,6 +154,16 @@
   }
 
   /**
+   * getCachedAddress() → the Circle wallet address from the last status call,
+   * or null if status has not been fetched yet.
+   */
+  function getCachedAddress() {
+    var s = _cache.status;
+    if (!s) return null;
+    return s.walletAddress || (s.wallet && s.wallet.address) || null;
+  }
+
+  /**
    * refreshCard() — re-renders all .caw-mount elements on the page
    */
   async function refreshCard() {
@@ -217,6 +227,7 @@
     transfer: transfer,
     formatBalance: formatBalance,
     statusHTML: statusHTML,
+    getCachedAddress: getCachedAddress,
     refreshCard: refreshCard,
     mount: mount,
   };

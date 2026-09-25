@@ -10030,6 +10030,11 @@ select.cinput option { background: #161a24; color: #dde2f0; }
 
             <!-- Panel: Overview -->
             <div class="aiw-panel" id="aiw-panel-overview">
+              <!-- Circle Agent Wallet card — the AI Smart Wallet's canonical wallet -->
+              <div class="card" style="margin-bottom:10px;border-color:rgba(39,117,202,.2)">
+                <div class="ch"><i class="ti ti-building-bank" style="font-size:13px;color:#2775ca"></i><span class="ct">Circle Agent Wallet</span><button class="btn" onclick="CircleAgent && CircleAgent.refreshCard()" style="font-size:8px;padding:2px 7px;margin-left:auto"><i class="ti ti-refresh"></i>Refresh</button></div>
+                <div class="cb" id="aiw-overview-circle-card" style="padding-top:4px"></div>
+              </div>
               <div class="card">
                 <div class="ch"><span class="ct"><i class="ti ti-brain" style="color:var(--purple);margin-right:5px"></i>Portfolio Intelligence</span><button class="btn primary" style="font-size:8.5px;padding:2px 9px;margin-left:auto" onclick="AIWallet.wizOpen()"><i class="ti ti-coin"></i>Fund AI Wallet</button></div>
                 <div class="cb" id="aiw-pi-body" style="display:flex;gap:8px;flex-wrap:wrap"></div>
@@ -10541,7 +10546,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
     </div>
     <hr style="border:none;border-top:1px solid var(--border);margin:14px 0"/>
     <div style="font-size:10.5px;color:var(--muted2);line-height:1.8;display:flex;flex-direction:column;gap:10px">
-      <p><strong style="color:var(--text)">Elligentt</strong> is an open-source batch payment dApp built natively on the <strong style="color:var(--blue)">Arc Network</strong> (testnet, Chain ID 5042). It uses USDC as gas token and features on-chain <strong style="color:var(--teal)">ElligentPool</strong> for swaps, and CCTP v2 for cross-chain bridges.</p>
+      <p><strong style="color:var(--text)">Elligentt</strong> is an open-source batch payment dApp built natively on the <strong style="color:var(--blue)">Arc Network</strong> (mainnet, Chain ID 5042). It uses USDC as gas token and features on-chain <strong style="color:var(--teal)">ElligentPool</strong> for swaps, and CCTP v2 for cross-chain bridges.</p>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
         <div style="background:rgba(0,0,0,.18);border:1px solid var(--border);border-radius:6px;padding:10px">
           <div style="font-size:9px;color:var(--muted2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.7px">Stack</div>
@@ -10623,7 +10628,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
     <div style="display:flex;flex-direction:column;gap:0">
       <div style="display:flex;gap:12px;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--border)">
         <div style="width:28px;height:28px;border-radius:50%;background:rgba(34,197,94,.15);border:2px solid var(--green);display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--green);flex-shrink:0;margin-top:1px"><i class="ti ti-check"></i></div>
-        <div><div style="font-size:11px;font-weight:700;color:var(--green)">v1.0 — Testnet Launch ✓</div><div style="font-size:9.5px;color:var(--muted2);margin-top:3px;line-height:1.6">Batch payments · Swap · Bridge · Invoices · Recipients · Templates · Reports · Multi-wallet</div></div>
+        <div><div style="font-size:11px;font-weight:700;color:var(--green)">v1.0 — Mainnet Launch ✓</div><div style="font-size:9.5px;color:var(--muted2);margin-top:3px;line-height:1.6">Batch payments · Swap · Bridge · Invoices · Recipients · Templates · Reports · Multi-wallet</div></div>
         <span style="margin-left:auto;font-size:8.5px;color:var(--muted2);white-space:nowrap">May 2025</span>
       </div>
       <div style="display:flex;gap:12px;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--border)">
@@ -10857,7 +10862,7 @@ const SendGuard = (() => {
     if (isPlaceholderToken(tokenAddr, chainId)) throw new Error('Placeholder token detected.');
     // Cross-check against the chain registry: the resolved address MUST
     // match the token registered for the target chain. This blocks any
-    // wrong-chain fallback (e.g. Arc default address used on Sepolia).
+    // wrong-chain fallback (e.g. Arc default address used on another chain).
     if (symbol && typeof getTokenAddressForChain === 'function' && chainId) {
       const registered = getTokenAddressForChain(chainId, symbol);
       if (!registered) throw new Error('Token ' + symbol + ' is not available on chain ' + chainId + '.');
@@ -14112,6 +14117,7 @@ function showPage(id) {
     }
     if (id === 'aiwallet') {
       setTimeout(() => { if (typeof CircleAgent !== 'undefined') CircleAgent.mount('#aiw-circle-agent-card'); }, 300);
+      setTimeout(() => { if (typeof CircleAgent !== 'undefined') CircleAgent.mount('#aiw-overview-circle-card'); }, 300);
     }
     if (id === 'unified-balance') { setTimeout(() => { if (typeof ubInit === 'function') ubInit(); }, 50); }
   } catch (err) {
@@ -14541,9 +14547,9 @@ async function refreshBalance() {
     const prov     = getCachedProvider(chain.rpc);
     if (!prov) { set('sb-bal','—'); set('dd-bal','—'); _refreshBalancePending = false; return; }
     const usdcAddr = chain.tokens?.USDC?.address;
-    // DEBUG LOGS for Sepolia (and all chains) balance audit
-    // Arc vs Sepolia flow comparison: both use identical path via getActiveChain() + chain.rpc + chain.tokens[SYMBOL].address + JsonRpcProvider + balanceOf
-    // Difference previously: Sepolia lacked cirBTC in registry (now added) and cirBTC in SA_TOKENS was always hardcoded (now falls back to getTokenAddress which uses activeChainId)
+    // DEBUG LOGS for chain balance audit
+    // Both use identical path via getActiveChain() + chain.rpc + chain.tokens[SYMBOL].address + JsonRpcProvider + balanceOf
+    // cirBTC falls back to getTokenAddress which uses activeChainId
     _log('[refreshBalance] detected chainId:', activeChainId, 'chain:', chain?.id || chain?.name);
     _log('[refreshBalance] selected USDC token address:', usdcAddr, 'wallet:', walletAddress, 'RPC:', chain.rpc);
     if (!usdcAddr) { set('sb-bal','—'); set('dd-bal','—'); _refreshBalancePending = false; return; }
@@ -18000,7 +18006,7 @@ function loadTemplateDefault(){recipients.push({addr:'0xd8dA6BF26964aF9D7eEd9e03
 // ── Global CHAIN_MAP for CSV/contact import ──────────────
 const CHAIN_MAP={
   'arc':'Arc_Mainnet','arc mainnet':'Arc_Mainnet',
-  'ethereum':'Ethereum','eth':'Ethereum','sepolia':'Ethereum',
+  'ethereum':'Ethereum','eth':'Ethereum',
   'base':'Base','arbitrum':'Arbitrum','arb':'Arbitrum',
   'solana':'Solana_Devnet','sol':'Solana_Devnet'
 };
@@ -20552,7 +20558,7 @@ async function executeSwap() {
 
   // ── TWAP manipulation check ──────────────────────────────
   if (route.type === 'direct' && route.pools[0]) {
-    const manipCheck = detectPriceManipulation(route.pools[0].id, 0.10); // 10% tolerance for testnet
+    const manipCheck = detectPriceManipulation(route.pools[0].id, 0.10); // 10% tolerance
     if (!manipCheck.ok) {
       _warn('[swap] TWAP manipulation detected:', manipCheck.reason);
       swpShowPrecheck('warning', `Price may be manipulated: ${manipCheck.reason}. Consider a smaller trade.`);
@@ -22174,7 +22180,7 @@ async function executeBridge(){
       );
     } catch(e) {
       _log('[Bridge] v2 depositForBurn failed, trying v1 (4-param) ABI:', e.message || e);
-      // Fallback to v1 ABI for older TokenMessenger contracts (Sepolia, etc.)
+      // Fallback to v1 ABI for older TokenMessenger contracts (older deployments)
       const tmContractV1 = new ethers.Contract(fromConfig.tokenMessenger, tmAbiV1, srcSigner);
       let burnGasV1;
       try { burnGasV1 = await tmContractV1.depositForBurn.estimateGas(amtBig, toConfig.domain, destAddr32, fromConfig.usdc); burnGasV1 = burnGasV1 * 150n / 100n; }
@@ -22312,7 +22318,7 @@ async function executeBridge(){
     if (!attestationSig) {
       const isArcInbound = (toConfig && toConfig.domain === 26);
       if (isArcInbound) {
-        throw new Error("Attestation for transfer TO Arc timed out. Standard transfers to Arc on testnet sandbox can take 15+ minutes. Please wait longer and retry, or try again later when the network is less congested.");
+        throw new Error("Attestation for transfer TO Arc timed out. Standard transfers to Arc on mainnet can take 15+ minutes. Please wait longer and retry, or try again later when the network is less congested.");
       }
       throw new Error("Attestation timed out. Network may be congested — retry later.");
     }
@@ -26411,7 +26417,7 @@ const SettingsService = {
   },
 
   verifyContract() {
-    toast('Contract verification not available in testnet','info');
+    toast('Contract verification not available on this network','info');
   },
 
   _bankAccounts: [],
@@ -26729,8 +26735,8 @@ const PRIVACY_CONTENT = {
     We never store your private keys. Wallet connections use EIP-1193 standard provider interfaces. You remain in full control of your funds at all times.</p>`,
 
   'Terms of Service': `
-    <p><strong style="color:var(--text)">Testnet Software</strong><br/>
-    Elligentt is currently deployed on the Arc Mainnet. Testnet tokens have no real monetary value. This software is provided for testing and development purposes only.</p>
+    <p><strong style="color:var(--text)">Mainnet Software</strong><br/>
+    Elligentt is currently deployed on the Arc Mainnet. This software is provided for testing and development purposes only.</p>
     <p><strong style="color:var(--text)">No Warranty</strong><br/>
     This software is provided "as is" without warranty of any kind. Use at your own risk. Always verify transaction details before signing.</p>
     <p><strong style="color:var(--text)">Smart Contract Risk</strong><br/>
@@ -26783,7 +26789,7 @@ function renderPoolList() {
   if (!grid) return;
 
   // Arc Mainnet has no deployed liquidity pool contracts yet (FASE 1).
-  // Show a clear "no liquidity" state instead of Testnet pool data.
+  // Show a clear "no liquidity" state instead of stale pool data.
   if (typeof isArcChainId === 'function' && isArcChainId(activeChainId)) {
     grid.innerHTML = '<div style="text-align:center;padding:34px;color:var(--muted);font-size:10px;grid-column:1/-1"><i class="ti ti-droplet-off" style="display:block;font-size:22px;margin:0 auto 8px;opacity:.45"></i>No liquidity pools deployed on Arc Mainnet yet</div>';
     updateFilterCounts();
@@ -27736,7 +27742,7 @@ async function executeRemoveLiquidity() {
 
   // ── Auto-load deployed contract addresses (paste deployed.json content here after deploy) ──
   (function loadDeployedAddresses() {
-    // After running: npx hardhat run scripts/deploy.js --network arc_testnet
+    // After running: npx hardhat run scripts/deploy.js --network arc_mainnet
     // Paste the deployed.json values here:
     const DEPLOYED = {
       // ElligentBatch:  '0x...', // paste address after deploy
@@ -29093,7 +29099,7 @@ const RecipientResolver = (function() {
   // Extract recipient name from a message and resolve it
   function extractFromMessage(msg) {
     var low = String(msg || '').toLowerCase();
-    var chainWords = /^(ethereum|sepolia|base|arbitrum|optimism|polygon|amoy|arc|solana|devnet|testnet|mainnet)$/i;
+    var chainWords = /^(ethereum|base|arbitrum|optimism|polygon|arc|solana|mainnet)$/i;
     // PT: "para {name}", "pro {name}", "à {name}", "ao {name}", "o {name}", "a {name}", "paga o {name}", "envia ao {name}"
     // EN: "for {name}", "to {name}", "send to {name}", "pay {name}"
     var m = low.match(/\b(?:para|p(?:ara|ro|aga\s+o)|envia\s+(?:ao|para\s+o|p(?:ro|ara))|send\s+to|pay\s+to|pay|to|for|a[oò]?|o|a)\s+([a-záàâãéêíóôõúüç]{2,30})\b/i);
@@ -30249,8 +30255,7 @@ function saUpdateNetwork() {
 }
 
 // ── Populate destination networks dynamically ─────────────
-// Production (non-localhost, mainnet wallet) hides testnets; localhost and
-// testnet wallets keep them for development.
+// Mainnet only — testnets are never shown in the destination selector.
 function saPopulateDestNetworks() {
   var sel = document.getElementById('sa-dest-network');
   if (!sel) return;
@@ -31974,7 +31979,7 @@ const VaultSecurity = (() => {
   let _pauseMode      = false;
   let _reentrancyLock = false;
   const _roles        = new Set(['ADMIN', 'FULFILLER', 'REBALANCER']);
-  const _userRoles    = new Set(['ADMIN', 'FULFILLER', 'REBALANCER']); // testnet: grant all
+  const _userRoles    = new Set(['ADMIN', 'FULFILLER', 'REBALANCER']); // grant all
 
   function checkRole(role) {
     if (!_userRoles.has(role)) throw new Error('ACCESS_DENIED: missing role ' + role);
@@ -33334,7 +33339,7 @@ const FulfillerEngine = (() => {
       let domain = intent.sourceDomain ?? (fromConfig && fromConfig.domain);
       if (domain === undefined || domain === null) {
         const chainName = (intent.srcChain || intent.sourceChain || intent.route || '').toLowerCase();
-        const DOMAIN_LOOKUP = { 'ethereum_sepolia':0, 'base_sepolia':6, 'arbitrum_sepolia':3, 'optimism_sepolia':2, 'polygon_amoy':7, 'ethereum':0, 'base':6, 'arbitrum':3, 'optimism':2, 'polygon':7, 'amoy':7, 'sepolia':0 };
+        const DOMAIN_LOOKUP = { 'ethereum':0, 'base':6, 'arbitrum':3, 'optimism':2, 'polygon':7 };
         for (const [key, val] of Object.entries(DOMAIN_LOOKUP)) {
           if (chainName.includes(key)) { domain = val; break; }
         }
@@ -33554,7 +33559,7 @@ const FulfillerEngine = (() => {
     if (settling.length === 0) return;
     _log('[Recovery] Found ' + settling.length + ' stuck Settling/Awaiting intent(s)...');
 
-    const DOMAIN_LOOKUP = { 'ethereum_sepolia':0, 'base_sepolia':6, 'arbitrum_sepolia':3, 'optimism_sepolia':2, 'polygon_amoy':7, 'ethereum':0, 'base':6, 'arbitrum':3, 'optimism':2, 'polygon':7, 'amoy':7, 'sepolia':0 };
+    const DOMAIN_LOOKUP = { 'ethereum':0, 'base':6, 'arbitrum':3, 'optimism':2, 'polygon':7 };
 
     settling.forEach(async intent => {
       if (_activePollerTimers && _activePollerTimers[intent.id]) return;
@@ -35388,7 +35393,7 @@ const SettlementModule = (() => {
               }
             }
           }
-        } catch(e) { /* CORS/network expected in testnet */ }
+        } catch(e) { /* CORS/network expected */ }
       }
 
       // Try V1 fallback
@@ -41833,7 +41838,7 @@ const UBScreen = (function() {
         if (fSel && tSel) {
           var opts = CHAINS.map(function(c,i){ return '<option value="'+i+'">'+c.name.split(' ')[0]+'</option>'; }).join('');
           fSel.innerHTML = opts; tSel.innerHTML = opts;
-          // Default: from external (index 1 = Sepolia), to Arc (index 0)
+          // Default: from external (index 1), to Arc (index 0)
           fSel.value = (typeof xcFromIdx !== 'undefined' && xcFromIdx !== 0) ? xcFromIdx : 1;
           tSel.value = 0; // Arc is default destination for Turbo
           fSel.addEventListener('change', _refreshBridge);
@@ -42720,7 +42725,7 @@ function exitUnifiedBalanceMode() {
 
   // Words that must never be touched (params / identifiers).
   var TOKENS = ['usdc','eurc','cirbtc','ubtc','btc','eth','usd','eur','sol','matic','pol','avax','bnb','lp'];
-  var CHAINS = ['arc','ethereum','sepolia','base','arbitrum','optimism','polygon','amoy','solana','avalanche','bnb'];
+  var CHAINS = ['arc','ethereum','base','arbitrum','optimism','polygon','solana','avalanche','bnb'];
   var PROTECT = {};
   TOKENS.concat(CHAINS).forEach(function(w){ PROTECT[w] = 1; });
 
@@ -42884,7 +42889,7 @@ function exitUnifiedBalanceMode() {
     try {
       var m = text.match(/\b(usdc|eurc|cirbtc|eth|btc)\b/i); if (m) lastCtx.token = m[1].toUpperCase();
       var n = text.match(/(\d+(?:\.\d+)?)/); if (n) lastCtx.amount = n[1];
-      var c = text.match(/\b(arc|base|ethereum|arbitrum|optimism|polygon|sepolia|amoy)\b/i); if (c) lastCtx.chain = c[1];
+      var c = text.match(/\b(arc|base|ethereum|arbitrum|optimism|polygon)\b/i); if (c) lastCtx.chain = c[1];
     } catch(_){}
   }
   function expandPronoun(text){
@@ -44262,9 +44267,9 @@ function exitUnifiedBalanceMode() {
   }
   function _fuzzyChain(word){
     const w=word.toLowerCase();
-    const map={arc:['arc','testnet','arc mainnet'],ethereum:['ethereum','eth','sepolia','mainnet'],
-      base:['base','base sepolia'],arbitrum:['arbitrum','arb','arbitrum sepolia'],
-      optimism:['optimism','op','optimism sepolia'],polygon:['polygon','poly','amoy']};
+    const map={arc:['arc','arc mainnet','mainnet'],ethereum:['ethereum','eth'],
+      base:['base'],arbitrum:['arbitrum','arb'],
+      optimism:['optimism','op'],polygon:['polygon','poly']};
     for(const [k,v] of Object.entries(map)){ if(v.some(x=>w===x||w.includes(x))) return k; }
     return null;
   }
@@ -44530,7 +44535,7 @@ function exitUnifiedBalanceMode() {
       } catch(_rcptEx){}
     }
     // Chain/Network
-    const chains=['arc','ethereum','sepolia','base','arbitrum','optimism','polygon','amoy'];
+    const chains=['arc','ethereum','base','arbitrum','optimism','polygon'];
     for(const c of chains){ const re=new RegExp('\\b'+c+'\\b','i'); if(re.test(msg)){ const fc=_fuzzyChain(c); if(fc) p.chain=fc; break;} }
     // Bridge from/to
     const fromM=low.match(/from\s+(\w+)/),toM=low.match(/to\s+(\w+)/);
@@ -45817,8 +45822,8 @@ function exitUnifiedBalanceMode() {
     }
     if(!toChain){
       var clow = msg.toLowerCase();
-      var chainMap = { base: 'Base', ethereum: 'Ethereum', polygon: 'Polygon', arbitrum: 'Arbitrum', optimism: 'Optimism', sepolia: 'Ethereum', amoy: 'Polygon' };
-      var chM = clow.match(/\b(?:on|at|na|no|in|em|para a|pra)\s+(base|arbitrum|optimism|polygon|amoy|ethereum|sepolia)\b/);
+      var chainMap = { base: 'Base', ethereum: 'Ethereum', polygon: 'Polygon', arbitrum: 'Arbitrum', optimism: 'Optimism' };
+      var chM = clow.match(/\b(?:on|at|na|no|in|em|para a|pra)\s+(base|arbitrum|optimism|polygon|ethereum)\b/);
       if(chM && chainMap[chM[1]]) toChain = chainMap[chM[1]];
     }
 
@@ -45841,7 +45846,7 @@ function exitUnifiedBalanceMode() {
 
     var destinationChain = toChain || 'Base';
     // Map destination chain to CCTP domain for agent execution
-    var xDomainMap = { 'Arc':26, 'Ethereum':0, 'Sepolia':0, 'Base':6, 'Arbitrum':3, 'Optimism':2, 'Polygon':7 };
+    var xDomainMap = { 'Arc':26, 'Ethereum':0, 'Base':6, 'Arbitrum':3, 'Optimism':2, 'Polygon':7 };
     var xChainDomain = 6;
     for(var ck in xDomainMap){ if(destinationChain.toLowerCase().indexOf(ck.toLowerCase())!==-1){ xChainDomain=xDomainMap[ck]; break; } }
 
@@ -46335,7 +46340,7 @@ function exitUnifiedBalanceMode() {
   // ── BRIDGE CARD ──
   async function autBridge(msg) {
     if(!walletAddress) return R.intro('Connect your wallet first to use the bridge.')+R.card(R.head('topology-star-3','Bridge',{text:'Wallet Required',cls:'pending'}),R.row('Status','Not connected','yellow'));
-    const chainMap={arc:0,ethereum:1,sepolia:1,eth:1,base:2,arbitrum:3,arb:3,optimism:4,op:4,polygon:5,poly:5,amoy:5};
+    const chainMap={arc:0,ethereum:1,eth:1,base:2,arbitrum:3,arb:3,optimism:4,op:4,polygon:5,poly:5};
     const chainColors={0:'#ff0202',1:'#627eea',2:'#0052ff',3:'#28a0f0',4:'#ff0420',5:'#8247e5'};
     const amtM=msg.match(/(\d+(?:\.\d+)?)/); const amt=amtM?parseFloat(amtM[1]):0;
     if(amt<=0) return autBridgeGuide();
@@ -46545,9 +46550,9 @@ function exitUnifiedBalanceMode() {
   // ── PAYMENT CARD ──
   function autPayment(msg) {
     // Cross-chain payment: recipient + an explicit destination network in the message
-    var xNet = msg.toLowerCase().match(/\b(?:on|to|at|na|no|em|para a|pra)\s+(base|arbitrum|optimism|polygon|amoy|ethereum|sepolia)\b/);
+    var xNet = msg.toLowerCase().match(/\b(?:on|to|at|na|no|em|para a|pra)\s+(base|arbitrum|optimism|polygon|ethereum)\b/);
     if(xNet && /0x[a-fA-F0-9]{40}/.test(msg)){
-      var cMap = {base:'Base',arbitrum:'Arbitrum',optimism:'Optimism',polygon:'Polygon',amoy:'Polygon',ethereum:'Ethereum',sepolia:'Ethereum'};
+      var cMap = {base:'Base',arbitrum:'Arbitrum',optimism:'Optimism',polygon:'Polygon',ethereum:'Ethereum'};
       return _handleCrossChain(msg, {toChain: cMap[xNet[1]] || xNet[1]});
     }
     const addrM=msg.match(/0x[a-fA-F0-9]{40}/),amtM=msg.match(/(\d+(?:\.\d+)?)\s*(usdc|eurc|cirbtc)?/i);
@@ -48552,7 +48557,9 @@ setTimeout(function() {
     // is unavailable. Never falls back to the browser Agent Wallet.
     if(typeof SecureSignerProvider !== 'undefined' && SecureSignerProvider.isCircleMode()){
       try {
-        var remoteSigner = await SecureSignerProvider.getSigner();
+        // [AUTONOMA-6C] Attach a REAL read-only Arc provider to the remote stub so
+        // balance checks + receipt polling keep working while signing is server-side.
+        var remoteSigner = await SecureSignerProvider.getSigner(_agentGetProvider());
         if(remoteSigner) return remoteSigner;
       } catch(e){}
       return null;
@@ -49010,7 +49017,7 @@ setTimeout(function() {
             if (typeof ethers !== 'undefined') {
               var iface = new ethers.Interface(['function approve(address spender, uint256 amount)']);
               var approveAmt = ethers.parseUnits(String(inAmt.toFixed(tokenInDec)), tokenInDec);
-              approve = { step: steps.length + 1, label: 'Approve ' + inSym + ' (pool ' + poolCfg.id + ')', tx: { calldata: iface.encodeFunctionData('approve', [poolAddr, approveAmt * 2n]), contract: tokenAddr, method: 'approve', to: tokenAddr } };
+              approve = { step: steps.length + 1, label: 'Approve ' + inSym + ' (pool ' + poolCfg.id + ')', tx: { calldata: iface.encodeFunctionData('approve', [poolAddr, approveAmt * 2n]), contract: tokenAddr, method: 'approve', to: tokenAddr, abiSignature: 'approve(address,uint256)', abiParams: [poolAddr, (approveAmt * 2n).toString()] } };
             }
           } catch(e){}
           if (approve) steps.push(approve);
@@ -49023,7 +49030,7 @@ setTimeout(function() {
           var minBig = ethers.parseUnits(String(hopMinOut.toFixed(tokenOutDec)), tokenOutDec);
           var inBig = ethers.parseUnits(String(inAmt.toFixed(tokenInDec)), tokenInDec);
           var tokenInAddr = typeof getTokAddr === 'function' ? getTokAddr(inSym) : '';
-          swapStep = { step: steps.length + 1, label: 'Swap ' + inSym + ' → ' + nextSym + (route.pools.length > 1 ? ' (hop ' + (i + 1) + ')' : ''), tx: { calldata: swapIface.encodeFunctionData('swap', [tokenInAddr, inBig, minBig]), contract: poolAddr, method: 'swap', to: poolAddr } };
+          swapStep = { step: steps.length + 1, label: 'Swap ' + inSym + ' → ' + nextSym + (route.pools.length > 1 ? ' (hop ' + (i + 1) + ')' : ''), tx: { calldata: swapIface.encodeFunctionData('swap', [tokenInAddr, inBig, minBig]), contract: poolAddr, method: 'swap', to: poolAddr, abiSignature: 'swap(address,uint256,uint256)', abiParams: [tokenInAddr, inBig.toString(), minBig.toString()] } };
         }
       } catch(e){}
       if (!swapStep) return { valid: false, error: 'Could not build swap calldata' };
@@ -49107,8 +49114,20 @@ setTimeout(function() {
         // [C2 FIX] TOCTOU: re-validate swap authorization immediately before signing
         var swapRecheck = _agentRevalidateAuth('swap', amount, tokenIn);
         if(!swapRecheck.ok){ _agentStateMsg(execId, 'REJECTED', swapRecheck.reason); return { ok: false, error: swapRecheck.reason }; }
+        // [AUTONOMA-6C] Circle mode: attach the structured request (contract + ABI)
+        // so the server signs+broadcasts via the Circle wallet (never local).
+        var broadcastOpts = null;
+        if(typeof SecureSignerProvider !== 'undefined' && SecureSignerProvider.isCircleMode()){
+          broadcastOpts = {
+            operation: 'swap',
+            executionId: executionId,
+            amount: amount,
+            destination: null,
+            circle: { type: 'contractExecution', contractAddress: contractAddr, abiFunctionSignature: txData.abiSignature, abiParameters: txData.abiParams }
+          };
+        }
         // [AUTONOMA-1] Single execution authority broadcast (no direct send).
-        var txHash = await _agentBroadcast(signer, provider, rawTx);
+        var txHash = await _agentBroadcast(signer, provider, rawTx, broadcastOpts);
         lastTxHash = txHash;
         _agentGateClaimSubmit(swapGate.claimKey, txHash);
 
@@ -49341,8 +49360,30 @@ setTimeout(function() {
         };
 
         if(!_agentPreValidate(execId, 'bridge', rawTx.maxFeePerGas, rawTx.gasLimit)) return { ok: false, error: 'Pre-execution validation failed' };
+        // [AUTONOMA-6C] Circle mode: attach the structured request for the burn
+        // (bridge) or the approve (contractExecution), signed by the Circle wallet.
+        var broadcastOpts = null;
+        if(typeof SecureSignerProvider !== 'undefined' && SecureSignerProvider.isCircleMode()){
+          if(txData.method === 'depositForBurn'){
+            broadcastOpts = {
+              operation: 'bridge',
+              executionId: executionId,
+              amount: amount,
+              destination: payoutRecipient || agentAddr,
+              circle: { type: 'bridge', amount: ethers.parseUnits(String(amount), 6).toString(), destinationDomain: Number(destDomain) || 6, mintRecipient: mintRecipient }
+            };
+          } else if(txData.method === 'approve'){
+            broadcastOpts = {
+              operation: 'bridge',
+              executionId: executionId,
+              amount: amount,
+              destination: null,
+              circle: { type: 'contractExecution', contractAddress: USDC_ADDR, abiFunctionSignature: 'approve(address,uint256)', abiParameters: [MESSENGER_ADDR, ethers.parseUnits(String(amount), 6).toString()] }
+            };
+          }
+        }
         // [AUTONOMA-1] Single execution authority broadcast (no direct send).
-        var txHash = await _agentBroadcast(signer, provider, rawTx);
+        var txHash = await _agentBroadcast(signer, provider, rawTx, broadcastOpts);
         lastTxHash = txHash;
         _agentGateClaimSubmit(bridgeGate.claimKey, txHash);
 
@@ -49480,7 +49521,7 @@ setTimeout(function() {
         '<span style="color:var(--muted);font-size:8px">Domain: '+destDomainNum+' · Polls: '+attestResult.pollCount+'<br>'+
         'Attestation: <code style="font-size:7px;word-break:break-all;color:#a78bfa">'+attestResult.attestationSig.substring(0,42)+'...</code><br>'+
         'Destination: receiveMessage() ready on '+destChainName+'</span></div>'
-      : '<div style="margin-top:6px;color:#f59e0b;font-size:9px">⚠ Attestation still pending — check <a href="https://iris-sandbox.circle.com" target="_blank" style="color:#f59e0b">Circle Iris ↗</a></div>';
+      : '<div style="margin-top:6px;color:#f59e0b;font-size:9px">⚠ Attestation still pending — check <a href="https://iris-api.circle.com" target="_blank" style="color:#f59e0b">Circle Iris ↗</a></div>';
 
     _addAgentResultMsg(
       '<div style="font-size:10px">'+
@@ -49965,8 +50006,19 @@ setTimeout(function() {
         maxPriorityFeePerGas: ethers.toBeHex(gasParams.maxPriorityFeePerGas)
       };
       if(!_agentPreValidate(execId, 'multisend', rawTx.maxFeePerGas, rawTx.gasLimit)) return { ok: false, error: 'Pre-execution validation failed (approve)' };
+      // [AUTONOMA-6C] Circle mode: attach the structured approve request.
+      var broadcastOpts = null;
+      if(typeof SecureSignerProvider !== 'undefined' && SecureSignerProvider.isCircleMode()){
+        broadcastOpts = {
+          operation: 'multisend',
+          executionId: executionId,
+          amount: totalAmt,
+          destination: null,
+          circle: { type: 'contractExecution', contractAddress: tokenAddr, abiFunctionSignature: 'approve(address,uint256)', abiParameters: [EXECUTOR_V4_ADDRESS, (totalBig * 2n).toString()] }
+        };
+      }
       // [AUTONOMA-1] Single execution authority broadcast (no direct send).
-      var txHash = await _agentBroadcast(signer, provider, rawTx);
+      var txHash = await _agentBroadcast(signer, provider, rawTx, broadcastOpts);
       lastTxHash = txHash;
       _agentGateClaimSubmit(msGate.claimKey, txHash);
       _addAgentResultMsg('<div style="font-size:10px"><span style="color:#06F7E9">Step 1: Approve submitted</span><br><code style="font-size:8px;color:#a78bfa">'+txHash+'</code></div>', 'pending');
@@ -50001,8 +50053,20 @@ setTimeout(function() {
         maxPriorityFeePerGas: ethers.toBeHex(gasParams2.maxPriorityFeePerGas)
       };
       if(!_agentPreValidate(execId, 'multisend', rawTx2.maxFeePerGas, rawTx2.gasLimit)) return { ok: false, error: 'Pre-execution validation failed (multisend)' };
+      // [AUTONOMA-6C] Circle mode: attach the structured batch request.
+      var broadcastOpts2 = null;
+      if(typeof SecureSignerProvider !== 'undefined' && SecureSignerProvider.isCircleMode()){
+        var msAmountStrs = amountBigs.map(function(b){ return b.toString(); });
+        broadcastOpts2 = {
+          operation: 'multisend',
+          executionId: executionId,
+          amount: totalAmt,
+          destination: null,
+          circle: { type: 'contractExecution', contractAddress: EXECUTOR_V4_ADDRESS, abiFunctionSignature: 'sendTokenBatch(address,address[],uint256[])', abiParameters: [tokenAddr, recipients, msAmountStrs] }
+        };
+      }
       // [AUTONOMA-1] Single execution authority broadcast (no direct send).
-      var txHash2 = await _agentBroadcast(signer, provider, rawTx2);
+      var txHash2 = await _agentBroadcast(signer, provider, rawTx2, broadcastOpts2);
       lastTxHash = txHash2;
       _agentGateClaimSubmit(msGate.claimKey, txHash2);
       _addAgentResultMsg('<div style="font-size:10px"><span style="color:#06F7E9">Step 2: Multi-send submitted</span><br><code style="font-size:8px;color:#a78bfa">'+txHash2+'</code><br><a href="https://explorer.arc.io/tx/'+txHash2+'" target="_blank" style="color:#a78bfa;font-size:8px">View on ArcScan →</a></div>', 'pending');
@@ -50494,10 +50558,10 @@ const AutonomaAgent = (() => {
           var fromNet = 'Arc_Mainnet';
           var toNet = 'Base';
           function _detectChain(n) {
-            if (/ethereum|sepolia/.test(n)) return 'Ethereum';
+            if (/ethereum/.test(n)) return 'Ethereum';
             if (/base/.test(n)) return 'Base';
             if (/arbitrum/.test(n)) return 'Arbitrum';
-            if (/polygon|amoy/.test(n)) return 'Polygon';
+            if (/polygon/.test(n)) return 'Polygon';
             return null;
           }
           var toMM = low.match(/to\s+(\w+)/);
@@ -51148,7 +51212,7 @@ const AutonomaAgent = (() => {
       const low = String(text||'').toLowerCase();
       const tk = (low.match(/\b(usdc|eurc|cirbtc|eth|matic)\b/)||[])[1];
       if (tk) memory.setPref('favoriteToken', tk.toUpperCase());
-      const net = (low.match(/\b(arc|sepolia|base|arbitrum|optimism|polygon)\b/)||[])[1];
+      const net = (low.match(/\b(arc|base|arbitrum|optimism|polygon)\b/)||[])[1];
       if (net) memory.setPref('favoriteNetwork', net);
     } catch(_){}
   }
@@ -52030,11 +52094,11 @@ BP._addRecipients = function(rows){
     if(r.chain){
       var cl = r.chain.toLowerCase();
       if(cl.indexOf('arc')>=0) chainId = 'Arc_Mainnet';
-      else if(cl.indexOf('sepolia')>=0||cl.indexOf('eth')>=0) chainId = 'Ethereum';
+      else if(cl.indexOf('eth')>=0) chainId = 'Ethereum';
       else if(cl.indexOf('base')>=0) chainId = 'Base';
       else if(cl.indexOf('arb')>=0) chainId = 'Arbitrum';
       else if(cl.indexOf('op')>=0||cl.indexOf('optimism')>=0) chainId = 'Optimism';
-      else if(cl.indexOf('poly')>=0||cl.indexOf('amoy')>=0) chainId = 'Polygon';
+      else if(cl.indexOf('poly')>=0) chainId = 'Polygon';
     }
     var token = (r.token||'USDC').toUpperCase();
     if(token==='CIRBTC') token = 'cirBTC';

@@ -196,6 +196,7 @@ const SIGN_ALLOWLIST = [
   '0xbfc9e8f79bd30b912081ae88f9ad0a515f08c2f1', // TreasuryVault
   '0x18076d992005186aeb13ac5270cad6e27db95247', // Pool
   '0x17cfb1aacbc64d0f0c247ed261b66c3d56e3eb16', // CrosschainBatch
+  '0x0a127252248ded4499c910e7e187e77c804cf19a', // MultiSendExecutor V4
   '0xca11bde05977b3631167028862be2a173976ca11', // Multicall3
   '0x28b5a0e9c621a5badaa536219b3a228c8168cf5d', // CCTP TokenMessenger
   '0x81d40f21f12a8f0e3252bccb954d722d4c464b64', // CCTP MessageTransmitter

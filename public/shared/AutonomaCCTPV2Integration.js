@@ -105,7 +105,7 @@
 
     _addAutMsg(execId, 'ATTESTING',
       '<div style="font-size:10px"><span style="color:#22c55e">✓ Circle attestation received</span><br>' +
-      '<span style="font-size:8px;color:var(--muted2)">' + ((Date.now() - attestStart) / 1000).toFixed(1) + 's · Iris V2 sandbox</span></div>');
+      '<span style="font-size:8px;color:var(--muted2)">' + ((Date.now() - attestStart) / 1000).toFixed(1) + 's · Iris V2 mainnet</span></div>');
 
     // 5. Mint on Arc
     _addAutMsg(execId, 'MINTING', 'Step 3/3: Minting ' + amount + ' USDC on Arc Mainnet…');

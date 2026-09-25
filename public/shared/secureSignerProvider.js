@@ -44,16 +44,18 @@
   function _readFlag() {
     try {
       if (typeof window !== 'undefined') {
-        if (window.AUTONOMA_SIGNER_PROVIDER === CIRCLE_MODE) return CIRCLE_MODE;
         if (window.AUTONOMA_SIGNER_PROVIDER === BROWSER_MODE) return BROWSER_MODE;
+        if (window.AUTONOMA_SIGNER_PROVIDER === CIRCLE_MODE) return CIRCLE_MODE;
       }
       if (typeof localStorage !== 'undefined') {
         var v = localStorage.getItem(FLAG_KEY);
-        if (v === CIRCLE_MODE) return CIRCLE_MODE;
         if (v === BROWSER_MODE) return BROWSER_MODE;
+        if (v === CIRCLE_MODE) return CIRCLE_MODE;
       }
     } catch (e) {}
-    return BROWSER_MODE;
+    // [MAINNET] Autonoma execution is Circle-backed by default. The Circle
+    // wallet (server-side) is the single execution authority on Arc Mainnet.
+    return CIRCLE_MODE;
   }
 
   var _mode = _readFlag();

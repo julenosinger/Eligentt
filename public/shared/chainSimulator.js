@@ -16,7 +16,7 @@
   var SWAP_DEFAULT_DEADLINE = 300;
   var SWAP_DEFAULT_SLIPPAGE_BPS = 100;
 
-  var ARC_RPC = 'https://arc-testnet.drpc.org';
+  var ARC_RPC = 'https://rpc.mainnet.arc.io';
   var readProvider = null;
 
   function getProvider(){

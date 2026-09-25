@@ -13,7 +13,7 @@
   var MAX_SWAPS = 20;
 
   var VALID_TOKENS = ['USDC','EURC','CIRBTC','ETH'];
-  var VALID_CHAINS = ['ARC','ARBITRUM','BASE','ETHEREUM','OPTIMISM','POLYGON','ARC_TESTNET','ARB','BASE_SEPOLIA','ETH','OPTIMISM_SEPOLIA','POLYGON_AMOY'];
+  var VALID_CHAINS = ['ARC','ARBITRUM','BASE','ETHEREUM','OPTIMISM','POLYGON','ARB','ETH'];
 
   function normToken(s) {
     var t = String(s||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
