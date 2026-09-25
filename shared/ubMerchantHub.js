@@ -562,13 +562,15 @@
 
   function renderExtendedHub() {
     var html = '';
-    html += renderAvailableToSpend();
+    // Row 1: Available to Spend + Cash Flow side by side
+    html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">' + renderAvailableToSpend() + renderCashFlow() + '</div>';
+    // Row 2: Receivables + Upcoming Payments
     html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">' + renderReceivables() + renderUpcomingPayments() + '</div>';
-    html += renderFundAllocation();
+    // Row 3: Contacts + Customer Directory
     html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">' + renderContacts() + renderCustomerDirectory() + '</div>';
-    html += renderNetworkBreakdown();
-    html += renderBusinessHealth();
-    html += renderExports();
+    // Row 4: Network Breakdown + Export (side by side, export is compact)
+    html += '<div style="display:grid;grid-template-columns:2fr 1fr;gap:12px">' + renderNetworkBreakdown() + renderExports() + '</div>';
+    // Business Health intentionally removed
     return html;
   }
 

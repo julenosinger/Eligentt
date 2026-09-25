@@ -55,6 +55,18 @@ export async function onRequest(context) {
     return handleIrisProxy(request, env, url);
   }
 
+  if (url.pathname.startsWith('/api/agent')) {
+    if (request.method === 'OPTIONS') {
+      return new Response(null, { status: 204, headers: {
+        'Access-Control-Allow-Origin': getAllowedOrigin(request, env),
+        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type',
+        'Access-Control-Max-Age': '86400'
+      }});
+    }
+    return handleAgentWallet(request, env, url);
+  }
+
   const isApiPath = url.pathname.startsWith('/api/');
   const hasExtension = /\.\w+$/.test(url.pathname);
   const isSpaRoute = !isApiPath && !hasExtension;
@@ -218,6 +230,153 @@ async function handleOpenAIProxy(request, env) {
       status: 502, headers: { 'Content-Type': 'application/json' }
     });
   }
+}
+
+// ══════════════════════════════════════════════════════════
+//  CIRCLE AGENT WALLET — Developer-Controlled Wallets API
+//  Uses: CIRCLE_API_KEY, CIRCLE_ENTITY_SECRET, CIRCLE_WALLET_ID
+//  All secrets live server-side only (Cloudflare Secrets).
+//  Endpoints:
+//    GET  /api/agent/status          — wallet info + USDC balance
+//    GET  /api/agent/balance         — USDC balance on Arc + supported chains
+//    POST /api/agent/transfer        — initiate USDC transfer (requires body)
+//    GET  /api/agent/transactions    — recent tx history
+//    POST /api/agent/validate        — validate a transfer intent before execution
+// ══════════════════════════════════════════════════════════
+async function handleAgentWallet(request, env, url) {
+  const corsOrigin = getAllowedOrigin(request, env);
+  const headers = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': corsOrigin };
+
+  const apiKey = env.CIRCLE_API_KEY || env.TEST_API_KEY || '';
+  const entitySecret = env.CIRCLE_ENTITY_SECRET || '';
+  const walletId = env.CIRCLE_WALLET_ID || '';
+  const walletAddress = env.CIRCLE_WALLET_ADDRESS || '';
+  const paused = (env.AGENT_SIGNER_PAUSED || '').toLowerCase() === 'true';
+
+  if (!apiKey) {
+    return new Response(JSON.stringify({ error: 'Circle API key not configured', configured: false }), { status: 503, headers });
+  }
+
+  const action = url.pathname.replace('/api/agent', '').replace(/^\//, '') || 'status';
+
+  // ── Shared Circle API call helper ──
+  async function circleAPI(path, method = 'GET', body = null) {
+    const resp = await fetch('https://api.circle.com' + path, {
+      method,
+      headers: {
+        'Authorization': 'Bearer ' + apiKey,
+        'Content-Type': 'application/json',
+      },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const text = await resp.text();
+    try { return { ok: resp.ok, status: resp.status, data: JSON.parse(text) }; }
+    catch(_) { return { ok: false, status: resp.status, data: { error: text } }; }
+  }
+
+  // ── GET /api/agent/status ──
+  if (action === 'status' || action === '') {
+    try {
+      // Wallet details
+      const walletRes = walletId
+        ? await circleAPI('/v1/w3s/wallets/' + walletId)
+        : { ok: false, data: { error: 'CIRCLE_WALLET_ID not set' } };
+
+      // USDC balances on all chains for this wallet
+      const balRes = walletId
+        ? await circleAPI('/v1/w3s/wallets/' + walletId + '/balances')
+        : { ok: false, data: { error: 'CIRCLE_WALLET_ID not set' } };
+
+      return new Response(JSON.stringify({
+        configured: true,
+        paused,
+        walletId: walletId || null,
+        walletAddress: walletAddress || null,
+        wallet: walletRes.ok ? walletRes.data.data : null,
+        balances: balRes.ok ? balRes.data.data : null,
+        entitySecretSet: !!entitySecret,
+        error: !walletRes.ok ? walletRes.data : null,
+      }), { status: 200, headers });
+    } catch(e) {
+      return new Response(JSON.stringify({ error: e.message, configured: true }), { status: 500, headers });
+    }
+  }
+
+  // ── GET /api/agent/balance ──
+  if (action === 'balance') {
+    if (!walletId) return new Response(JSON.stringify({ error: 'CIRCLE_WALLET_ID not configured' }), { status: 503, headers });
+    try {
+      const res = await circleAPI('/v1/w3s/wallets/' + walletId + '/balances');
+      return new Response(JSON.stringify(res.ok ? res.data : { error: res.data }), { status: res.ok ? 200 : res.status, headers });
+    } catch(e) {
+      return new Response(JSON.stringify({ error: e.message }), { status: 500, headers });
+    }
+  }
+
+  // ── GET /api/agent/transactions ──
+  if (action === 'transactions') {
+    if (!walletId) return new Response(JSON.stringify({ error: 'CIRCLE_WALLET_ID not configured' }), { status: 503, headers });
+    try {
+      const res = await circleAPI('/v1/w3s/transactions?walletIds=' + walletId + '&pageSize=20');
+      return new Response(JSON.stringify(res.ok ? res.data : { error: res.data }), { status: res.ok ? 200 : res.status, headers });
+    } catch(e) {
+      return new Response(JSON.stringify({ error: e.message }), { status: 500, headers });
+    }
+  }
+
+  // ── POST /api/agent/transfer ──
+  if (action === 'transfer' && request.method === 'POST') {
+    if (paused) return new Response(JSON.stringify({ error: 'Agent signer is paused (kill switch active)' }), { status: 403, headers });
+    if (!walletId || !entitySecret) {
+      return new Response(JSON.stringify({ error: 'Agent wallet not fully configured (walletId or entitySecret missing)' }), { status: 503, headers });
+    }
+    try {
+      let body;
+      try { body = await request.json(); } catch(_) { return new Response(JSON.stringify({ error: 'Invalid JSON body' }), { status: 400, headers }); }
+      const { to, amount, tokenAddress, blockchain, idempotencyKey } = body;
+      if (!to || !amount || !tokenAddress || !blockchain) {
+        return new Response(JSON.stringify({ error: 'Missing required fields: to, amount, tokenAddress, blockchain' }), { status: 400, headers });
+      }
+      // Circle developer-controlled wallets transfer endpoint
+      const payload = {
+        idempotencyKey: idempotencyKey || crypto.randomUUID(),
+        walletId,
+        tokenId: tokenAddress,  // Circle uses tokenId (contract address) for ERC-20 transfers
+        destinationAddress: to,
+        amounts: [String(amount)],
+        blockchain: blockchain || 'ARC',
+        entitySecretCiphertext: entitySecret,  // server-side only — never reaches browser
+        fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
+      };
+      const res = await circleAPI('/v1/w3s/developer/transactions/transfer', 'POST', payload);
+      return new Response(JSON.stringify(res.ok ? res.data : { error: res.data }), { status: res.ok ? 201 : res.status, headers });
+    } catch(e) {
+      return new Response(JSON.stringify({ error: e.message }), { status: 500, headers });
+    }
+  }
+
+  // ── POST /api/agent/validate ──
+  if (action === 'validate' && request.method === 'POST') {
+    try {
+      let body;
+      try { body = await request.json(); } catch(_) { return new Response(JSON.stringify({ error: 'Invalid JSON body' }), { status: 400, headers }); }
+      const { to, amount } = body;
+      const valid = to && /^0x[a-fA-F0-9]{40}$/.test(to) && amount && parseFloat(amount) > 0;
+      return new Response(JSON.stringify({
+        valid,
+        checks: {
+          addressFormat: /^0x[a-fA-F0-9]{40}$/.test(to || ''),
+          amountPositive: parseFloat(amount || 0) > 0,
+          agentConfigured: !!walletId && !!apiKey,
+          agentNotPaused: !paused,
+        }
+      }), { status: 200, headers });
+    } catch(e) {
+      return new Response(JSON.stringify({ error: e.message }), { status: 500, headers });
+    }
+  }
+
+  return new Response(JSON.stringify({ error: 'Unknown agent action: ' + action }), { status: 404, headers });
 }
 
 async function handleAnthropicProxy(request, env) {
