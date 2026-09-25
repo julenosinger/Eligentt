@@ -98,7 +98,7 @@ async function handleTransactions(env) {
   const apiKey   = env.CIRCLE_API_KEY;
   if (!apiKey || !walletId) return err('Circle agent not configured', 503);
 
-  const res = await circleGet(`/wallets/${walletId}/transactions?pageSize=20`, apiKey);
+  const res = await circleGet(`/transactions?walletIds=${walletId}&pageSize=20`, apiKey);
   return json({
     ok: true,
     transactions: res.data?.transactions ?? [],
