@@ -116,12 +116,13 @@
    */
   async function statusHTML() {
     var s = await getStatus();
-    if (!s || !s.configured) {
+    if (!s || s.ok === false || s.error) {
+      var errMsg = (s && s.error) ? s.error : 'Could not reach /api/agent — check Cloudflare secrets';
       return '<div class="caw-card caw-unconfigured">' +
         '<div class="caw-card-icon"><i class="ti ti-robot-off"></i></div>' +
         '<div class="caw-card-body">' +
           '<div class="caw-card-title">Circle Agent Wallet</div>' +
-          '<div class="caw-card-sub">Not configured — add CIRCLE_API_KEY &amp; CIRCLE_WALLET_ID to Cloudflare secrets</div>' +
+          '<div class="caw-card-sub">' + errMsg + '</div>' +
         '</div></div>';
     }
     if (s.paused) {
@@ -132,7 +133,8 @@
           '<div class="caw-card-sub">Kill switch active — transfers are blocked</div>' +
         '</div></div>';
     }
-    var bals = formatBalance(s.balances);
+    // s.balances is already the flat array from the server
+    var bals = formatBalance({ tokenBalances: s.balances || [] });
     var balStr = Object.keys(bals).length
       ? Object.keys(bals).map(function (k) { return '<span class="caw-bal"><b>' + bals[k] + '</b> ' + k + '</span>'; }).join(' &nbsp; ')
       : '<span class="caw-bal muted">No balances</span>';
