@@ -1,10 +1,13 @@
 /**
  * Send Assets — recipient must be the FINAL transfer recipient.
  * ═══════════════════════════════════════════════════════════════════════
- * Regression tests proving the Send Assets execution path encodes the
- * user-supplied recipient as the `to` of the USDC transfer (never an
- * intermediate/executor address), uses the correct Arc Mainnet USDC address and
- * amount, and keeps SendGuard validation active.
+ * Regression tests proving the Send Assets execution path sends USDC straight
+ * to the user-supplied recipient (never an intermediate/executor address), uses
+ * the correct Arc Mainnet USDC address and amount, and keeps SendGuard active.
+ *
+ * On Arc (5042) the flow routes through the Arc Memo + Multicall3From (which
+ * preserves msg.sender via the CallFrom precompile), so it uses `transfer`
+ * directly to the recipient — no allowance/approve intermediary is required.
  */
 import { describe, it, expect } from 'vitest';
 import fs from 'fs';
@@ -27,8 +30,8 @@ function fn(from, to) {
 const send = html;
 
 describe('Send Assets — recipient encoding', () => {
-  it('encodes the user recipient as the `to` of the USDC transferFrom', () => {
-    expect(send).toContain("encodeFunctionData('transferFrom', [walletAddress, recipient, rawAmt])");
+  it('encodes the user recipient as the direct `to` of the Arc transfer', () => {
+    expect(send).toContain("erc20If.encodeFunctionData('transfer', [recipient, rawAmt])");
   });
 
   it('does NOT replace the recipient with any executor/intermediate address', () => {
@@ -39,14 +42,14 @@ describe('Send Assets — recipient encoding', () => {
     expect(send).not.toContain('0x0ad4c28f');
   });
 
-  it('routes the aggregate3 through the official Arc Memo + Multicall3', () => {
-    expect(send).toContain("var MC3_ADDR = '0xcA11bde05977b3631167028862bE2a173976CA11'");
-    expect(send).toContain('memoC.memo(MC3_ADDR, aggData');
+  it('routes the aggregate3 through the Arc Memo + Multicall3From (sender-preserving)', () => {
+    expect(send).toContain("var M3F_ADDR = '0x522fAf9A91c41c443c66765030741e4AaCe147D0'");
+    expect(send).toContain('memoC.memo(M3F_ADDR, aggData');
   });
 
-  it('only builds two aggregate calls: transfer-to-recipient + transfer-fee-to-vault', () => {
-    expect(send).toContain("encodeFunctionData('transferFrom', [walletAddress, recipient, rawAmt])");
-    expect(send).toContain("encodeFunctionData('transferFrom', [walletAddress, TREASURY_VAULT_ADDRESS, feeRaw])");
+  it('only builds two calls: transfer-to-recipient + transfer-fee-to-vault', () => {
+    expect(send).toContain("erc20If.encodeFunctionData('transfer', [recipient, rawAmt])");
+    expect(send).toContain("erc20If.encodeFunctionData('transfer', [TREASURY_VAULT_ADDRESS, feeRaw])");
   });
 
   it('fee destination is the treasury vault (not the recipient)', () => {
@@ -73,12 +76,12 @@ describe('Send Assets — Arc Mainnet + token + amount', () => {
 describe('Send Assets — SendGuard remains active', () => {
   it('validates token, spender and recipient via SendGuard before transfer', () => {
     expect(send).toContain('SendGuard.assertERC20Token(tokenAddr, activeChainId, saCurrentAsset)');
-    expect(send).toContain('SendGuard.assertSpender(MC3_ADDR)');
+    expect(send).toContain('SendGuard.assertSpender(isArcSend ? M3F_ADDR : MC3_ADDR)');
     expect(send).toContain('SendGuard.assertRecipient(recipient)');
   });
 
-  it('checks approval against Multicall3 before transferring', () => {
-    expect(send).toContain('contract.allowance(walletAddress, MC3_ADDR)');
-    expect(send).toContain('contract.approve(MC3_ADDR, totalNeed)');
+  it('uses sender-preserving Multicall3From on Arc (no allowance intermediary)', () => {
+    expect(send).toContain('var isArcSend = (activeChainId === 5042)');
+    expect(send).toContain("var M3F_ADDR = '0x522fAf9A91c41c443c66765030741e4AaCe147D0'");
   });
 });
