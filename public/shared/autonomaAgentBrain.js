@@ -352,7 +352,10 @@
       try {
         var authorized = (typeof AA.hasOperationAuth === 'function') ? AA.hasOperationAuth(op) : false;
         if (!authorized) {
-          return { allowed: false, riskLevel: plan.riskLevel, requiresConfirmation: false, reasons: ['No active agent authorization for "' + op + '"'], needsAuthorization: true };
+          // Signal that authorization is MISSING — not a hard block.
+          // The run() loop will intercept this before calling buildBlocked()
+          // and instead render an interactive authorization flow.
+          return { allowed: false, riskLevel: plan.riskLevel, requiresConfirmation: false, reasons: ['No active agent authorization for "' + op + '"'], needsAuthorization: true, missingOp: op };
         }
         if (typeof AA.validateExecution === 'function') {
           var v = AA.validateExecution({ operation: op, amount: Number(e.amount) || 0, asset: e.token || 'USDC', network: e.chain || 'Arc Mainnet', destination: e.address || '' });
@@ -646,6 +649,31 @@
       var policy = stage('policy', function () { return evaluatePolicy(planObj, understanding, context, runtime); });
       planObj.policy = policy;
       if (!policy.allowed) {
+        // Authorization missing → interactive authorization flow, NOT a hard block.
+        // Persist the intent so it can be resumed after the user authorizes.
+        if (policy.needsAuthorization) {
+          // Store pending context keyed by the op so _confirmPermission can resume it.
+          var _authPending = localGet(PENDING_KEY) || {};
+          var _authKey = 'auth_pending_' + (policy.missingOp || understanding.canonical);
+          _authPending[_authKey] = {
+            intent: understanding.intent,
+            params: understanding.params || understanding.entities || {},
+            msg: runtime.msg || '',
+            createdAt: Date.now()
+          };
+          localSet(PENDING_KEY, _authPending);
+          log();
+          return {
+            handled: true,
+            type: 'authorization_required',
+            understanding: understanding,
+            plan: planObj,
+            policy: policy,
+            missingOp: policy.missingOp || (OP_TO_AUTH[understanding.canonical] || understanding.canonical),
+            pendingKey: _authKey,
+            html: null  // autProcess will call _showPermissionCard
+          };
+        }
         log();
         return { handled: true, type: 'blocked', understanding: understanding, plan: planObj, policy: policy, html: buildBlocked(policy, understanding, runtime) };
       }
