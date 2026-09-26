@@ -119,6 +119,7 @@
 <script src="/shared/autonomaAgent.js"></script>
 <script src="/shared/autonomaNlu.js"></script>
 <script src="/shared/autonomaAgentBrain.js"></script>
+<script src="/shared/agentCapabilityRouter.js"></script>
 <script src="/shared/agentIdentity.js"></script>
 <script src="/shared/agentAuthorization.js"></script>
 <script src="/shared/agentWalletManager.js"></script>
@@ -2674,8 +2675,10 @@ body.swap-standard-mode .site-footer{display:block !important}
 .ub2-act-status.sched{background:rgba(79,142,247,.12);color:var(--blue)}
 .ub2-act-empty{text-align:center;padding:24px;font-size:9px;color:var(--muted2)}
 /* Network sidebar rows */
-.ub2-net-sidebar-row{display:flex;align-items:center;gap:5px;padding:4px 0;cursor:pointer;border-radius:4px;transition:background .12s}
+.ub2-net-sidebar-row{display:flex;align-items:center;gap:5px;padding:4px 8px 4px 6px;cursor:pointer;border-radius:4px;transition:background .12s;min-width:0;overflow:hidden}
 .ub2-net-sidebar-row:hover{background:rgba(6,247,233,.05)}
+.ub2-net-sidebar-row>span:nth-child(2){min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ub2-net-sidebar-row>span:nth-child(3),.ub2-net-sidebar-row>span:nth-child(4){flex-shrink:0;white-space:nowrap}
 /* Responsive */
 @media(max-width:900px){.ub2-grid{grid-template-columns:1fr}.ub2-side{order:2}.ub2-main{order:1}}
 @media(max-width:640px){.ub2-asset-actions{display:none}.ub2-asset-usd{font-size:11px}.ub2-qa-btn span{display:none}}
@@ -5519,6 +5522,118 @@ select.cinput option { background: #161a24; color: #dde2f0; }
 .aut-listening-hint .dot{width:6px;height:6px;border-radius:50%;background:#06F7E9;animation:autMicPulse 1.25s ease-in-out infinite}
 @media(max-width:768px){.aut-side{display:none}.aut-messages{padding:12px 10px}.aut-msg{max-width:100%}.aut-input-area{padding:10px 10px}.aut-welcome{padding:20px 10px}}
 
+/* ── Agent Workspace chrome ────────────────────────────────── */
+.aut-workspace-bar{display:flex;align-items:center;justify-content:space-between;padding:9px 20px;border-bottom:1px solid var(--border);background:var(--surface);flex-shrink:0;gap:8px}
+.aut-workspace-title{font-size:13px;font-weight:800;color:#06F7E9;letter-spacing:-.3px}
+.aut-workspace-status{display:flex;align-items:center;gap:6px;font-size:9px;color:var(--muted2);font-weight:600}
+.aut-online-dot{width:7px;height:7px;border-radius:50%;background:#22c55e;animation:pulse 1.5s ease-in-out infinite;flex-shrink:0}
+.aut-agent-status{display:flex;align-items:center;gap:6px;padding:6px 12px 0;font-size:9px;font-weight:700;color:#22c55e}
+.aut-agent-dot{width:7px;height:7px;border-radius:50%;background:#22c55e;animation:pulse 1.5s ease-in-out infinite}
+.aut-agent-label{color:var(--muted2);font-weight:600}
+
+/* ── Capability chips on welcome screen ─────────────────────── */
+.aut-cap-chips{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-top:14px;max-width:400px}
+.aut-cap-chip{display:inline-flex;align-items:center;gap:5px;padding:7px 12px;background:rgba(6,247,233,.07);border:1px solid rgba(6,247,233,.2);border-radius:20px;color:#06F7E9;font-size:9.5px;font-weight:600;cursor:pointer;font-family:inherit;transition:all .18s}
+.aut-cap-chip:hover{background:rgba(6,247,233,.16);border-color:rgba(6,247,233,.4);transform:translateY(-1px)}
+.aut-cap-chip i{font-size:12px}
+
+/* ════════════════════════════════════════════════════════════
+   DYNAMIC ACTION SURFACES (DAS)
+   Contextual proposal cards that appear when the Agent
+   has a plan ready. Temporary — replaced by result after exec.
+   ════════════════════════════════════════════════════════════ */
+.das-wrap{background:linear-gradient(135deg,rgba(6,247,233,.04),rgba(79,142,247,.04));border:1px solid rgba(6,247,233,.22);border-radius:12px;overflow:hidden;margin-top:8px;animation:dasFadeIn .28s cubic-bezier(.23,1,.32,1)}
+@keyframes dasFadeIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+
+.das-header{display:flex;align-items:center;gap:10px;padding:12px 16px;background:rgba(6,247,233,.06);border-bottom:1px solid rgba(6,247,233,.1)}
+.das-icon{width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0}
+.das-icon.send{background:rgba(79,142,247,.18);color:#4f8ef7}
+.das-icon.swap{background:rgba(6,247,233,.18);color:#06F7E9}
+.das-icon.bridge{background:rgba(167,139,250,.18);color:#a78bfa}
+.das-icon.schedule{background:rgba(245,158,11,.15);color:#f59e0b}
+.das-icon.batch{background:rgba(34,197,94,.15);color:#22c55e}
+.das-icon.xchain{background:rgba(45,212,191,.15);color:#2dd4bf}
+.das-icon{background:rgba(6,247,233,.12);color:#06F7E9}
+
+.das-title-area{flex:1;display:flex;flex-direction:column;gap:2px;min-width:0}
+.das-op-label{font-size:7.5px;font-weight:800;letter-spacing:1.2px;color:#06F7E9;text-transform:uppercase}
+.das-headline{font-size:11px;font-weight:600;color:var(--text);line-height:1.3}
+
+/* Risk badge */
+.das-risk{font-size:8px;font-weight:700;padding:2px 8px;border-radius:999px;white-space:nowrap;flex-shrink:0}
+.das-risk.low{background:rgba(34,197,94,.1);color:#22c55e;border:1px solid rgba(34,197,94,.25)}
+.das-risk.medium{background:rgba(245,158,11,.1);color:#f59e0b;border:1px solid rgba(245,158,11,.25)}
+.das-risk.high{background:rgba(239,68,68,.1);color:#ef4444;border:1px solid rgba(239,68,68,.25)}
+
+/* Body */
+.das-body{padding:14px 16px;display:flex;flex-direction:column;gap:8px}
+
+/* Flow row */
+.das-flow{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.das-flow-item{display:flex;flex-direction:column;gap:2px;min-width:80px}
+.das-flow-label{font-size:8px;color:var(--muted2);text-transform:uppercase;letter-spacing:.6px;font-weight:600}
+.das-flow-value{font-size:12px;font-weight:700;color:var(--text)}
+.das-flow-value.blue{color:#4f8ef7}
+.das-flow-value.teal{color:#06F7E9}
+.das-flow-value.purple{color:#a78bfa}
+.das-flow-value.green{color:#22c55e}
+.das-flow-arrow{color:var(--muted2);font-size:18px;flex-shrink:0}
+
+/* Detail rows */
+.das-detail-row{display:flex;align-items:center;gap:6px;font-size:9.5px;color:var(--muted2)}
+.das-detail-row i{font-size:12px;color:var(--muted);flex-shrink:0}
+
+/* Actions */
+.das-actions{display:flex;gap:8px;padding:12px 16px;border-top:1px solid rgba(6,247,233,.08);background:rgba(0,0,0,.12)}
+.das-btn{display:inline-flex;align-items:center;gap:5px;padding:9px 18px;border-radius:8px;font-size:10.5px;font-weight:700;cursor:pointer;border:1.5px solid;font-family:inherit;transition:all .18s;letter-spacing:.2px}
+.das-btn.review{background:rgba(6,247,233,.12);border-color:rgba(6,247,233,.4);color:#06F7E9}
+.das-btn.review:hover{background:rgba(6,247,233,.22);transform:translateY(-1px);box-shadow:0 4px 16px rgba(6,247,233,.2)}
+.das-btn.bridge-btn{background:rgba(167,139,250,.12);border-color:rgba(167,139,250,.4);color:#a78bfa}
+.das-btn.bridge-btn:hover{background:rgba(167,139,250,.22)}
+.das-btn.schedule-btn{background:rgba(245,158,11,.12);border-color:rgba(245,158,11,.4);color:#f59e0b}
+.das-btn.schedule-btn:hover{background:rgba(245,158,11,.22)}
+.das-btn.cancel{background:transparent;border-color:var(--border2);color:var(--muted2)}
+.das-btn.cancel:hover{border-color:#ef4444;color:#ef4444}
+
+/* Executing indicator */
+.das-executing{display:flex;align-items:center;gap:8px;padding:14px 16px;font-size:11px;color:#06F7E9;background:rgba(6,247,233,.04);border:1px solid rgba(6,247,233,.15);border-radius:12px;margin-top:8px}
+.das-exec-spinner{width:16px;height:16px;border:2px solid rgba(6,247,233,.25);border-top-color:#06F7E9;border-radius:50%;animation:spin .8s linear infinite;flex-shrink:0}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* Result card */
+.das-result{background:rgba(0,0,0,.12);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-top:8px;display:flex;flex-direction:column;gap:6px}
+.das-result-status{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:700}
+.das-result-op{font-size:9px;color:var(--muted2);text-transform:uppercase;letter-spacing:.8px;font-weight:700}
+.das-result-summary{font-size:12px;color:var(--text);font-weight:600}
+.das-result-tx{display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:rgba(0,0,0,.15);border-radius:6px;padding:7px 10px;margin-top:4px}
+.das-tx-label{font-size:8px;color:var(--muted2);text-transform:uppercase;letter-spacing:.6px;font-weight:700}
+.das-tx-copy,.das-tx-link{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:5px;color:var(--muted2);font-size:9.5px;padding:3px 8px;cursor:pointer;display:inline-flex;align-items:center;gap:3px;text-decoration:none;transition:all .15s}
+.das-tx-copy:hover,.das-tx-link:hover{border-color:var(--blue);color:var(--blue)}
+
+/* Cancelled indicator */
+.das-cancelled{padding:10px 14px;border-radius:8px;font-size:10px;color:var(--muted2);border:1px solid var(--border);display:flex;align-items:center;gap:6px;margin-top:8px;background:rgba(0,0,0,.08)}
+
+/* Balance surface */
+.das-balance{background:rgba(0,0,0,.12);border:1px solid rgba(79,142,247,.2);border-radius:10px;padding:14px 16px;margin-top:8px}
+.das-balance-header{display:flex;align-items:center;gap:7px;font-size:11px;font-weight:700;color:#4f8ef7;margin-bottom:8px}
+.das-balance-header i{font-size:14px}
+.das-balance-addr{font-size:8.5px;color:var(--muted2);font-family:monospace;margin-bottom:8px}
+.das-bal-row{display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid rgba(255,255,255,.04);font-size:11px}
+.das-bal-row:last-of-type{border:none}
+.das-bal-tok{color:var(--muted2);font-weight:600;font-size:10px}
+.das-bal-val{font-weight:700;color:var(--text);font-family:'JetBrains Mono',monospace}
+.das-balance-total{display:flex;justify-content:space-between;align-items:center;padding:8px 0 0;margin-top:6px;border-top:1px solid var(--border2);font-size:11px;font-weight:700}
+
+@media(max-width:768px){
+  .das-flow{flex-direction:column;align-items:flex-start}
+  .das-flow-arrow{transform:rotate(90deg)}
+  .das-actions{flex-direction:column}
+  .das-btn{justify-content:center}
+  .aut-workspace-bar{padding:7px 12px}
+  .aut-cap-chips{gap:5px}
+  .aut-cap-chip{font-size:9px;padding:6px 10px}
+}
+
 /* ── Autonoma Response Cards ──────────── */
 .aut-msg-meta{display:flex;align-items:center;gap:6px;margin-bottom:6px}
 .aut-msg-name{font-size:9px;font-weight:700;color:#06F7E9}
@@ -6212,7 +6327,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
       <div class="nav-item" id="nav-bridge" onclick="showPage('bridge')" title="Bridge"><i class="ti ti-topology-star-3"></i>Bridge<span class="nav-kit">Kit</span></div>
       <div class="nav-item" id="nav-pool" onclick="showPage('pool')" title="Liquidity Pool"><i class="ti ti-droplet"></i>Liquidity<span class="nav-kit">Pool</span></div>
       <div class="nav-item" id="nav-autonoma" onclick="showPage('autonoma')" title="Autonoma AI"><i class="ti ti-brain"></i>Autonoma<span class="nav-kit" style="background:rgba(6,247,233,.12);color:#06F7E9;border:1px solid rgba(6,247,233,.25)">AI</span></div>
-      <div class="nav-item" id="nav-aiwallet" onclick="showPage('aiwallet')" title="AI Smart Wallet"><i class="ti ti-wallet"></i>AI Smart Wallet<span class="nav-new">New</span></div>
+      <div class="nav-item" id="nav-aiwallet" onclick="showPage('aiwallet')" title="Circle Agent Wallet"><i class="ti ti-building-bank"></i>Circle Agent<span class="nav-new">New</span></div>
       <div class="nav-group" style="margin-top:4px">Protocol</div>
       <div class="nav-group" style="margin-top:4px">Manage</div>
       <div class="nav-item" id="nav-recipients" onclick="showPage('recipients')" title="Recipients"><i class="ti ti-users"></i>Recipients</div>
@@ -9809,8 +9924,8 @@ select.cinput option { background: #161a24; color: #dde2f0; }
                   <span id="ub-networks-summary" style="font-size:9px;color:var(--muted2);margin-left:auto">—</span>
                   <i class="ti ti-chevron-down" id="ub-networks-chevron" style="font-size:11px;color:var(--muted2);margin-left:6px"></i>
                 </div>
-                <div id="ub-networks-body" style="display:flex;flex-direction:column;gap:2px">
-                  <div id="ub-networks-list" style="display:flex;flex-direction:column;gap:2px"></div>
+                <div id="ub-networks-body" style="display:none;flex-direction:column;gap:2px;overflow:hidden">
+                  <div id="ub-networks-list" style="display:flex;flex-direction:column;gap:2px;overflow:hidden"></div>
                   <div id="ub-networks-advanced-toggle" onclick="ubToggleNetworksAdvanced()" style="display:none;cursor:pointer;font-size:8px;color:var(--muted2);padding:4px 0 0;border-top:1px solid var(--border);margin-top:4px">
                     Advanced <i class="ti ti-chevron-down" id="ub-networks-advanced-chevron" style="font-size:9px"></i>
                   </div>
@@ -9897,15 +10012,25 @@ select.cinput option { background: #161a24; color: #dde2f0; }
               </g>
             </svg>
             <div class="aut-side-logo-txt">
-              <span class="aut-name">Autonoma</span>
-              <span class="aut-sub">AI Agent</span>
-              <span class="aut-desc">Elligentt native intelligence</span>
+              <span class="aut-name">✦ AUTONOMA</span>
+              <span class="aut-sub">Circle Agent</span>
+              <span class="aut-desc">Agent-first financial workspace</span>
             </div>
+          </div>
+          <!-- Circle Agent Online status -->
+          <div class="aut-agent-status">
+            <span class="aut-agent-dot"></span>
+            <span class="aut-agent-label">Circle Agent Online</span>
           </div>
           <button class="aut-new-btn" onclick="autonomaNewChat()"><i class="ti ti-plus"></i> New Chat</button>
           <div class="aut-history" id="aut-history-list"></div>
         </div>
         <div class="aut-main">
+          <!-- Agent workspace top bar -->
+          <div class="aut-workspace-bar">
+            <span class="aut-workspace-title">✦ Autonoma</span>
+            <span class="aut-workspace-status"><span class="aut-online-dot"></span> Circle Agent · Arc Mainnet</span>
+          </div>
           <div class="aut-messages" id="aut-messages">
             <div class="aut-welcome" id="aut-welcome">
               <svg class="aut-welcome-avatar" viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg" fill="none">
@@ -9929,9 +10054,17 @@ select.cinput option { background: #161a24; color: #dde2f0; }
                   <circle cx="42" cy="29" r="4" fill="#06F7E9" opacity=".7"/>
                 </g>
               </svg>
-              <h2>Hello! I'm Autonoma</h2>
-              <p>Your AI agent for all operations on Elligentt.</p>
-              <p style="color:var(--muted);font-size:10px">How can I help you today?</p>
+              <h2>✦ Autonoma</h2>
+              <p style="color:var(--muted2);font-size:11px;max-width:360px;line-height:1.6">Ask me anything about your wallet. I understand intent and conduct every operation end-to-end.</p>
+              <!-- Agent capability chips -->
+              <div class="aut-cap-chips">
+                <button class="aut-cap-chip" onclick="autonomaSendQuick('show my balance')"><i class="ti ti-wallet"></i>My balance</button>
+                <button class="aut-cap-chip" onclick="autonomaSendQuick('swap 100 USDC to EURC')"><i class="ti ti-arrows-exchange"></i>Swap</button>
+                <button class="aut-cap-chip" onclick="autonomaSendQuick('send 50 USDC')"><i class="ti ti-send"></i>Send</button>
+                <button class="aut-cap-chip" onclick="autonomaSendQuick('bridge 100 USDC to Base')"><i class="ti ti-topology-star-3"></i>Bridge</button>
+                <button class="aut-cap-chip" onclick="autonomaSendQuick('schedule a weekly payment')"><i class="ti ti-calendar-event"></i>Schedule</button>
+                <button class="aut-cap-chip" onclick="autonomaSendQuick('show transaction history')"><i class="ti ti-history"></i>History</button>
+              </div>
               <!-- Circle Agent Wallet status card -->
               <div id="aut-circle-agent-card" style="margin-top:12px;width:100%;max-width:420px;text-align:left"></div>
             </div>
@@ -9940,7 +10073,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
             <div class="aut-listening-hint" id="aut-listening-hint" role="status" aria-live="polite"><span class="dot"></span>Listening…</div>
             <input type="file" id="aut-csv-input" accept=".csv,.xlsx,.xls,.txt,.json" style="display:none" onchange="autonomaHandleFile(this)"/>
             <button class="aut-send-btn" onclick="document.getElementById('aut-csv-input').click()" title="Upload Financial File (CSV, XLSX, TXT, JSON)" aria-label="Upload financial file" style="background:rgba(167,139,250,.12);border-color:rgba(167,139,250,.25);color:#a78bfa"><i class="ti ti-file-upload"></i></button>
-            <textarea class="aut-input" id="aut-input" placeholder="Type or speak your request..." rows="1" aria-label="Message Autonoma" aria-multiline="true" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();autonomaSend()}"></textarea>
+            <textarea class="aut-input" id="aut-input" placeholder="Ask the Agent…" rows="1" aria-label="Message Autonoma" aria-multiline="true" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();autonomaSend()}"></textarea>
       <button class="aut-send-btn aut-mic-btn" id="aut-mic-btn" type="button" title="Voice input" aria-label="Start voice input"><i class="ti ti-microphone"></i></button>
       <button class="aut-send-btn aut-stop-btn" id="aut-stop-btn" onclick="autonomaStop()" title="Stop" aria-label="Stop generating" style="display:none;background:#ef4444;border-color:#ef4444"><i class="ti ti-player-stop-filled" style="font-size:14px"></i></button>
       <button class="aut-send-btn" id="aut-send-btn" onclick="autonomaSend()" title="Send" aria-label="Send message"><i class="ti ti-send"></i></button>
@@ -9977,13 +10110,13 @@ select.cinput option { background: #161a24; color: #dde2f0; }
       <div class="page-header">
         <div class="page-icon" style="background:rgba(167,139,250,.12);color:var(--purple)"><i class="ti ti-wallet"></i></div>
         <div>
-          <div class="page-title">AI Smart Wallet</div>
+          <div class="page-title">Circle Agent <span style="font-size:10px;color:var(--muted2);font-weight:400;margin-left:6px">Wallet &amp; Execution Layer</span></div>
           <div class="page-sub">Independent financial execution layer · validates AI intents · executes via Agent Wallet · Arc Mainnet</div>
         </div>
         <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
           <select class="cinput" id="aiw-mode" style="width:150px;cursor:pointer" onchange="AIWallet.setMode(this.value)" title="Wallet mode">
             <option value="hybrid">Hybrid Mode (recommended)</option>
-            <option value="ai">AI Smart Wallet</option>
+            <option value="ai">Circle Agent (AI Mode)</option>
             <option value="personal">Personal Wallet</option>
           </select>
           <button class="btn" style="border-color:rgba(239,68,68,.4);color:var(--red);font-size:9px" onclick="AIWallet.toggleEmergencyStop()"><i class="ti ti-hand-stop"></i>Emergency Stop</button>
@@ -10049,7 +10182,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
               <div class="cb" id="aiw-receive-body" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
                 <div id="aiw-receive-qr" style="background:#fff;padding:6px;border-radius:6px;flex-shrink:0;min-width:120px;min-height:120px;display:flex;align-items:center;justify-content:center"></div>
                 <div style="flex:1;min-width:180px">
-                  <div class="swap-label">AI Smart Wallet Address (Arc Mainnet)</div>
+                  <div class="swap-label">Circle Agent Wallet Address (Arc Mainnet)</div>
                   <div id="aiw-receive-addr" style="font-size:9.5px;font-family:monospace;color:var(--text);word-break:break-all;margin-top:3px"></div>
                   <div style="font-size:8px;color:var(--muted2);margin-top:6px">Supported: USDC · EURC · cirBTC on Arc Mainnet (Chain ID 5042). Cross-chain deposits route via the existing Bridge.</div>
                 </div>
@@ -10080,7 +10213,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
               </div>
             </div>
             <div class="card">
-              <div class="ch"><span class="ct"><i class="ti ti-robot" style="color:var(--purple);margin-right:5px"></i>Agent Wallet Information</span></div>
+              <div class="ch"><span class="ct"><i class="ti ti-building-bank" style="color:#2775ca;margin-right:5px"></i>Circle Agent</span></div>
               <div class="cb" id="aiw-agent-body"></div>
             </div>
               </div>
@@ -10171,7 +10304,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
                 <button class="btn primary" style="font-size:9px" onclick="AIWallet.assistantSend()"><i class="ti ti-send"></i>Send</button>
               </div>
             </div>
-            <div style="font-size:8px;color:var(--muted2)">Autonoma remains the general AI of Elligente — this assistant is scoped to the AI Smart Wallet. Actions become intents/approvals; nothing bypasses the pipeline.</div>
+            <div style="font-size:8px;color:var(--muted2)">Autonoma is the general AI of Elligente — this assistant is scoped to the Circle Agent execution layer. Actions become intents/approvals; nothing bypasses the pipeline.</div>
             </div>
 
             <!-- Panel: Workflows -->
@@ -30019,7 +30152,7 @@ function renderSchedules(){
     var nextRun = formatUSDateTime(s.nextRun);
     var isDue = s.nextRun && new Date(s.nextRun) <= now && s.status === 'Active';
     var agentOn = s.agentExecution !== false;
-    var agentWarn = (agentOn && s.status === 'Active' && !agentReady) ? '<span style="font-size:8px;margin-left:5px;color:var(--red);font-weight:700" title="Agent Wallet / authorization missing — auto-execution will not run until configured">⚠ NO AGENT</span>' : '';
+    var agentWarn = (agentOn && s.status === 'Active' && !agentReady) ? '<span style="font-size:8px;margin-left:5px;color:var(--red);font-weight:700" title="Circle Agent not configured or authorization missing — auto-execution will not run">⚠ NO AGENT</span>' : '';
     var assetInfo = (s.amount || 0) > 0 ? (s.amount || 0).toFixed(2) + ' ' + s.token : (s.recipients && s.recipients.length ? s.recipients.length + ' rcpts' : '—');
 
     var historyHtml = '';
@@ -30090,7 +30223,8 @@ function schToggleHistory(id){
 // Check due schedules on init
 function schAgentStatus(){
   var wmReady = false, authReady = false;
-  try { wmReady = !!(typeof AgentWalletManager !== 'undefined' && !AgentWalletManager.isPaused() && AgentWalletManager.getAgentAddress()); } catch(_){}
+  // Circle Wallet is the canonical agent identity
+  try { wmReady = !!(typeof CircleAgent !== 'undefined' && CircleAgent.getCachedAddress()); } catch(_){}
   try { authReady = !!(typeof AgentScheduleExecutor !== 'undefined' && typeof AgentScheduleExecutor.hasScheduledAuth === 'function' && AgentScheduleExecutor.hasScheduledAuth()); } catch(_){}
   return { wmReady: wmReady, authReady: authReady, ready: !!(wmReady && authReady) };
 }
@@ -39515,9 +39649,8 @@ function ubRenderNetworks() {
   var ids = Object.keys(chainStatus);
   if (!ids.length) { card.style.display = 'none'; return; }
   card.style.display = '';
-  // Always show body in the new sidebar layout
-  var nbody = document.getElementById('ub-networks-body');
-  if (nbody) nbody.style.display = 'flex';
+  // Do NOT force-open the body — respect the current collapsed/expanded state.
+  // The body starts hidden (collapsed by default) and is toggled by ubToggleNetworks().
 
   var updated = 0;
   for (var i = 0; i < ids.length; i++) if (chainStatus[ids[i]] === 'available') updated++;
@@ -39554,9 +39687,9 @@ function ubRenderNetworks() {
       '<span style="color:var(--teal);font-size:8px;font-family:\'JetBrains Mono\',monospace;margin-right:4px">' + (nUSD > 0 ? '$'+nUSD.toFixed(2) : '—') + '</span>' +
       '<span style="color:' + l.color + ';font-size:7.5px">' + parseFloat(nPct).toFixed(1) + '%</span>' +
       '</div>' +
-      (nUSD > 0 ? '<div style="height:2px;background:var(--border);border-radius:1px;margin:0 0 3px 12px;overflow:hidden"><div style="height:100%;width:' + nPct + '%;background:' + ncol + ';border-radius:1px"></div></div>' : '');
+      (nUSD > 0 ? '<div style="height:2px;background:var(--border);border-radius:1px;margin:0 8px 3px 14px;overflow:hidden"><div style="height:100%;width:' + nPct + '%;background:' + ncol + ';border-radius:1px"></div></div>' : '');
     if ((st === 'stale' || st === 'unavailable') && h.reason) {
-      rows += '<div style="padding-left:12px;font-size:7px;color:var(--muted2);margin-bottom:2px">Reason: ' + h.reason + '</div>';
+      rows += '<div style="padding:0 8px 2px 14px;font-size:7px;color:var(--muted2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Reason: ' + h.reason + '</div>';
     }
   }
   if (listEl) listEl.innerHTML = rows;
@@ -43112,12 +43245,12 @@ function exitUnifiedBalanceMode() {
     } else if (/permission|authoriz|not authorized|permiss[ãa]o|autoriza[cç][ãa]o/i.test(low)){
       diag.type = 'permission';
       diag.explanation = 'The Agent Wallet lacks authorization for this operation.';
-      diag.fix = 'Say "allow agent to execute [operation]" or visit AI Smart Wallet → Permissions to grant access.';
+      diag.fix = 'Say "allow agent to execute [operation]" or visit Circle Agent → Permissions to grant access.';
       diag.canRetry = true;
     } else if (/balance|insufficient|saldo|funds|not enough/i.test(low)){
       diag.type = 'balance';
       diag.explanation = 'Insufficient balance in the Agent Wallet for this operation.';
-      diag.fix = 'Deposit funds to the AI Smart Wallet. Say "show my wallet" to check balances.';
+      diag.fix = 'Deposit funds to the Circle Agent Wallet. Say "balance" to check balances.';
       diag.canRetry = true;
     } else if (/gas|reserve|fuel/i.test(low)){
       diag.type = 'gas';
@@ -43622,6 +43755,9 @@ function exitUnifiedBalanceMode() {
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else init();
 })();
+
+// ── Enable Agent Brain + Capability Router (agent-first mode) ──
+window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
 
 (function(){
   const AUT_KEY = 'elligentt_autonoma_chats';
@@ -44588,7 +44724,12 @@ function exitUnifiedBalanceMode() {
     var _hasDocData = !!(typeof autDocData !== 'undefined' && autDocData && autDocData.rows);
     var _fastTrack = (_isBatchCmd || _isCrossChainCmd || _hasMultiAddr) && !_hasDocData;
 
-    // ── Agent Brain orchestration (Phase 1) — feature-flagged, additive ──
+    // ── Expose executeIntent globally for AgentCapabilityRouter ──
+    if (typeof window.__autExecuteIntent === 'undefined') {
+      window.__autExecuteIntent = _executeIntent;
+    }
+
+    // ── Agent Brain orchestration — full agent-first pipeline ──
     if(!_fastTrack && typeof AutonomaAgentBrain !== 'undefined' && AutonomaAgentBrain.isEnabled()){
       try{
         var _brainOut = await AutonomaAgentBrain.run(msg, {
@@ -44601,7 +44742,49 @@ function exitUnifiedBalanceMode() {
             try { if (typeof RecipientResolver !== 'undefined' && RecipientResolver.add) RecipientResolver.add({ name: name, addr: addr }); } catch(_e){}
           }
         });
-        if(_brainOut && _brainOut.handled) return _brainOut.html;
+        if(_brainOut && _brainOut.handled){
+          // ── Authorization missing: show interactive auth flow ─────────────────
+          // The Brain detected that AgentAuthorization has no active grant for
+          // this operation. Instead of showing a hard error, open the permission
+          // card so the user can authorize and the intent will auto-resume.
+          if(_brainOut.type === 'authorization_required'){
+            var _authU = _brainOut.understanding || {};
+            var _authIntent = (_authU.intent || '').toUpperCase() ||
+                              (_brainOut.plan && (_brainOut.plan.goal || '').toUpperCase()) || 'operation';
+            var _authOp = _brainOut.missingOp || _authIntent;
+            // Persist the original message so _confirmPermission can resume it.
+            window._lastPermissionMsg = msg;
+            // Call the existing _showPermissionCard, which shows amount presets,
+            // creates the AgentAuthorization grant on click, and re-sends the msg.
+            return _showPermissionCard(_authIntent, _authU.entities || _authU.params || {}, msg);
+          }
+
+          // ── Confirmation surface: Dynamic Action Surface ──────────────────────
+          // When the Brain wants user confirmation, generate a Dynamic Action Surface
+          // instead of the generic confirmation text — this is the agent-first UX.
+          if(_brainOut.type === 'confirmation_required' && typeof AgentCapabilityRouter !== 'undefined'){
+            var _u = _brainOut.understanding || {};
+            var _rawIntent = (_u.intent || '').toUpperCase();
+            var _surfaceParams = _u.entities || _u.params || {};
+            // Enrich params with any extras from plan
+            if(_brainOut.plan && _brainOut.plan.goal) _rawIntent = _rawIntent || _brainOut.plan.goal.toUpperCase();
+            var _surface = AgentCapabilityRouter.createSurface(_rawIntent, _surfaceParams, {
+              executeIntent: _executeIntent,
+              msg: msg
+            });
+            // Wrap in an agent intro message
+            var _planGoal = (_rawIntent || 'operation').replace(/_/g,' ').toLowerCase();
+            return R.intro('I\'m ready to <strong style="color:#06F7E9">' + esc(_planGoal) + '</strong>. Please review and approve.') + _surface;
+          }
+          // For balance / read queries: check if AgentCapabilityRouter has a richer surface
+          if(_brainOut.type === 'response' && _brainOut.understanding && !_brainOut.understanding.isWrite){
+            var _readCanon = (_brainOut.understanding.canonical || '');
+            if((_readCanon === 'query_balance' || _readCanon === 'balance') && typeof AgentCapabilityRouter !== 'undefined'){
+              return R.intro('Here\'s your <strong style="color:#2775ca">Circle Agent</strong> wallet balance:') + (await AgentCapabilityRouter.buildBalanceSurface());
+            }
+          }
+          return _brainOut.html;
+        }
         // else fall through to the existing pipeline
       }catch(_brainErr){ /* fall through to the existing pipeline */ }
     }
@@ -44905,10 +45088,10 @@ function exitUnifiedBalanceMode() {
   async function _executeIntent(intent, params, msg){
     _ctxClear(); // Clear context on execution
 
-    // Show permission card for financial operations if agent wallet exists but op not authorized
-    if(_isFinancialIntent(intent) && typeof AgentWalletManager !== 'undefined' && typeof AgentAuthorization !== 'undefined'){
-      var agentAddr = AgentWalletManager.getAgentAddress();
-      if(agentAddr){
+    // Show permission card for financial operations if Circle Agent is configured but op not authorized
+    if(_isFinancialIntent(intent) && typeof AgentAuthorization !== 'undefined'){
+      var _circleAgentReady = typeof CircleAgent !== 'undefined' && (CircleAgent.getCachedAddress() || false);
+      if(_circleAgentReady){
         var operation = intent.replace('_EXECUTE','').replace('_GUIDE','').toLowerCase();
         // Normalize operation names
         var opNorm = {send_payment:'payment',swap:'swap',bridge:'bridge',multisend:'payment',add_liquidity:'swap',remove_liquidity:'swap'};
@@ -45920,12 +46103,62 @@ function exitUnifiedBalanceMode() {
 
   // ── WALLET SUMMARY CARD ──
   async function autQueryWallet() {
-    if (!walletAddress) {
-      return R.intro('No wallet connected yet.') +
-        R.card(R.head('wallet','Wallet Status',{text:'Disconnected',cls:'pending'}),
-          R.row('Status','Not connected','yellow')+'<div style="font-size:9px;color:var(--muted2);margin-top:8px">Click <strong>Connect Wallet</strong> in the top right corner.</div>',
-          R.actions({icon:'plug',label:'Connect',cls:'primary',action:"document.getElementById('wchip')?.click()"}));
+    // ── Circle Agent Wallet — canonical primary wallet ─────────────────
+    var circleSection = '';
+    var circleAddr = null;
+    try {
+      if (typeof CircleAgent !== 'undefined') {
+        var _caStatus = await CircleAgent.getStatus();
+        circleAddr = _caStatus
+          ? (_caStatus.walletAddress || (_caStatus.wallet && _caStatus.wallet.address) || null)
+          : CircleAgent.getCachedAddress();
+        var _balData = await CircleAgent.getBalance();
+        var _fmtd = CircleAgent.formatBalance(_balData);
+        // Also fall back to status.balances
+        if (!Object.keys(_fmtd).length && _caStatus && _caStatus.balances) {
+          _fmtd = CircleAgent.formatBalance({ tokenBalances: _caStatus.balances });
+        }
+        var _circleRows = '', _circleTotal = 0;
+        Object.keys(_fmtd).forEach(function(sym) {
+          var v = parseFloat(_fmtd[sym] || 0);
+          _circleTotal += v;
+          _circleRows += R.token(sym, sym, null, '#2775ca', v.toLocaleString('en-US',{maximumFractionDigits:4}), '≈ $'+v.toFixed(2));
+        });
+        if (!_circleRows) _circleRows = '<div style="font-size:9px;color:var(--muted2);padding:4px 0">No token balances — Circle Wallet is ready.</div>';
+        var _caShort = circleAddr ? circleAddr.substring(0,8)+'…'+circleAddr.slice(-6) : '—';
+        var _walletState = _caStatus && _caStatus.wallet ? _caStatus.wallet.state : ((_caStatus && _caStatus.walletAddress) ? 'LIVE' : 'UNKNOWN');
+        var _stateCls = _walletState === 'LIVE' ? 'live' : _walletState === 'FROZEN' ? 'pending' : 'pending';
+        circleSection =
+          R.sep() +
+          R.section('✦ Circle Agent Wallet <span style="font-size:7.5px;padding:1px 5px;border-radius:3px;background:rgba(39,117,202,.14);color:#2775ca;margin-left:4px;font-weight:600">CANONICAL</span>') +
+          R.row('Address', '<span style="cursor:pointer;font-family:monospace;font-size:9px" onclick="autCopyText(\''+(circleAddr||'')+'\')">' +
+            _caShort + ' <i class="ti ti-copy" style="font-size:9px;color:var(--muted)"></i></span>', 'blue') +
+          R.row('State', '<span style="color:' + (_walletState==='LIVE'?'var(--green)':'var(--yellow)') + '">' + _walletState + '</span>', '') +
+          R.row('Network', 'Arc Mainnet · Circle Developer Wallet', 'muted') +
+          (_circleTotal > 0 ? R.row('Balance', '$'+_circleTotal.toFixed(2), 'green') : '') +
+          R.sep() + R.section('Circle Agent Assets') + _circleRows;
+      }
+    } catch (_e) {
+      circleSection = R.sep() + R.section('Circle Agent Wallet') +
+        R.row('Status', 'Unavailable — check /api/agent configuration', 'yellow');
     }
+
+    // ── Connected personal wallet (secondary) ─────────────────────────
+    if (!walletAddress) {
+      if (!circleSection) {
+        return R.intro('No wallet connected yet.') +
+          R.card(R.head('wallet','Wallet Status',{text:'Disconnected',cls:'pending'}),
+            R.row('Status','Not connected','yellow')+'<div style="font-size:9px;color:var(--muted2);margin-top:8px">Click <strong>Connect Wallet</strong> or configure the Circle Agent Wallet in settings.</div>',
+            R.actions({icon:'plug',label:'Connect',cls:'primary',action:"document.getElementById('wchip')?.click()"}));
+      }
+      return R.intro('Here\'s your <strong style="color:#2775ca">Circle Agent</strong> wallet:') +
+        R.card(R.head('building-bank','Circle Agent',{text:'Active',cls:'live'}), circleSection.replace(R.sep(),''),
+          R.actions(
+            {icon:'refresh',label:'Refresh',cls:'',action:"autonomaSendQuick('balance')"},
+            {icon:'user-circle',label:'Unified Balance',cls:'',action:"showPage('unified-balance')"}
+          ));
+    }
+
     let tokenRows='', totalUsd=0;
     var activeNetworkName = (typeof getActiveChain === 'function' ? getActiveChain() : CHAINS[0])?.name || 'Arc Mainnet';
     var activeNetworkColor = (typeof getActiveChain === 'function' ? getActiveChain() : CHAINS[0])?.color || '#ff0202';
@@ -45942,48 +46175,19 @@ function exitUnifiedBalanceMode() {
     }
     const short=walletAddress.substring(0,6)+'...'+walletAddress.substring(walletAddress.length-4);
 
-    // ── Agent Wallet section ──
-    var agentSection = '';
-    if(typeof AgentWalletManager !== 'undefined'){
-      var agentAddr = AgentWalletManager.getAgentAddress();
-      if(agentAddr){
-        var agentShort = agentAddr.substring(0,6)+'...'+agentAddr.substring(agentAddr.length-4);
-        var agentTokenRows = '', agentTotalUsd = 0;
-        for(const sym2 of ['USDC','EURC','cirBTC']){
-          const tok2=TOKEN_REGISTRY[sym2]; if(!tok2||!tok2.address) continue;
-          try{
-            const ac=new ethers.Contract(tok2.address,USDC_ABI,prov);
-            const abal=await ac.balanceOf(agentAddr);
-            const af=parseFloat(ethers.formatUnits(abal,tok2.decimals));
-            const ar=getTokenUSDRate(sym2); const auv=ar?af*ar:0; agentTotalUsd+=auv;
-            if(af > 0) agentTokenRows+=R.token(sym2,tok2.name,tok2.icon,tok2.color,af.toLocaleString('en-US',{maximumFractionDigits:tok2.decimals>6?8:4}),ar?'≈ $'+auv.toFixed(2):'—');
-          }catch(e){}
-        }
-        var agentStatus = AgentWalletManager.isPaused() ? 'Paused' : 'Active';
-        var agentStatusCls = AgentWalletManager.isPaused() ? 'pending' : 'live';
-        var authSummary = typeof AgentAuthorization !== 'undefined' ? AgentAuthorization.getAuthSummary() : null;
-        agentSection = R.sep() + R.section('Agent Wallet (Autonoma)') +
-          R.row('Agent Address','<span style="cursor:pointer" onclick="autCopyText(\''+agentAddr+'\')">'+agentShort+' <i class="ti ti-copy" style="font-size:9px;color:var(--muted)"></i></span>','purple') +
-          R.row('Status','<span>'+agentStatus+'</span>',agentStatus==='Active'?'green':'yellow') +
-          R.row('Reputation',String(AgentWalletManager.getReputationScore())+'/100','purple') +
-          (authSummary && authSummary.hasAuthorization ? R.row('Authorized','<span>'+String(authSummary.count)+' active</span>','green') : R.row('Authorized','<span>No</span>','yellow'));
-        if(agentTokenRows) agentSection += R.sep()+R.section('Agent Assets')+agentTokenRows;
-        if(agentTotalUsd > 0) agentSection += R.row('Agent Portfolio','$'+agentTotalUsd.toFixed(2),'purple');
-      }
-    }
-
-    return R.intro('Found your connected wallet. Here\'s the summary:') +
+    return R.intro('Here\'s your <strong style="color:#2775ca">Circle Agent</strong> wallet and connected wallet:') +
       R.card(
-        R.head('wallet','Wallet Summary',{text:'Connected',cls:'live'}),
+        R.head('building-bank','Wallet Summary',{text:'Active',cls:'live'}),
+        circleSection +
+        R.sep()+R.section('Connected Personal Wallet')+
         R.row('Address','<span style="cursor:pointer" onclick="autCopyText(\''+walletAddress+'\')">'+short+' <i class="ti ti-copy" style="font-size:9px;color:var(--muted)"></i></span>','teal') +
         R.row('Network',R.chainPill(activeNetworkName,activeNetworkColor),'') +
         R.row('Portfolio','$'+totalUsd.toFixed(2),'green') +
-        R.sep()+R.section('Assets')+tokenRows +
-        agentSection,
+        R.sep()+R.section('Personal Assets')+tokenRows,
         R.actions(
-          {icon:'copy',label:'Copy Address',cls:'',action:"autCopyText('"+walletAddress+"')"},
-          {icon:'refresh',label:'Refresh',cls:'',action:"autonomaSendQuick('Show my wallet summary')"},
-          {icon:'user-circle',label:'Balance',cls:'',action:"showPage('unified-balance')"}
+          {icon:'copy',label:'Copy Circle Address',cls:'primary',action:"autCopyText('"+(circleAddr||walletAddress)+"')"},
+          {icon:'refresh',label:'Refresh',cls:'',action:"autonomaSendQuick('balance')"},
+          {icon:'user-circle',label:'Unified Balance',cls:'',action:"showPage('unified-balance')"}
         )
       );
   }
@@ -46011,13 +46215,13 @@ function exitUnifiedBalanceMode() {
 
     var customBtn = '{icon:"pencil",label:"Custom",cls:"",action:"_promptCustomPermission(\''+intent+'\')"}';
 
-    return R.intro('Before I execute, let me set up your <strong style="color:#a78bfa">Agent Permission</strong>:')+
+    return R.intro('I need your <strong style="color:#a78bfa">authorization</strong> before I can execute <strong>' + opLabel + '</strong> operations on your behalf. Choose a spending limit — I\'ll continue automatically after you authorize.') +
       '<div class="aut-rc" style="border-color:rgba(167,139,250,.3);margin-top:8px">'+
-      R.head('shield-lock','Permission Required',{text:opLabel,cls:'pending'})+
+      R.head('shield-lock','Agent Authorization Required',{text:opLabel,cls:'pending'})+
       '<div class="aut-rc-body">'+
-      '<div style="font-size:10px;color:var(--muted2);margin-bottom:8px">Select your spending limit for <strong>'+opLabel+'</strong> operations:</div>'+
+      '<div style="font-size:10px;color:var(--muted2);margin-bottom:8px">Select a spending limit for <strong>'+opLabel+'</strong>. After authorizing, I\'ll resume your original request automatically.</div>'+
       presets.map(function(a){
-        return '<button class="aut-act primary" onclick="_confirmPermission('+a+',\''+intent+'\')" style="display:block;width:100%;margin-bottom:4px;text-align:left;padding:8px 12px"><i class="ti ti-cash" style="margin-right:8px"></i><strong>$'+a.toLocaleString()+'</strong><span style="float:right;color:var(--muted2);font-size:9px">'+opLabel+' budget →</span></button>';
+        return '<button class="aut-act primary" onclick="_confirmPermission('+a+',\''+intent+'\')" style="display:block;width:100%;margin-bottom:4px;text-align:left;padding:8px 12px"><i class="ti ti-cash" style="margin-right:8px"></i><strong>$'+a.toLocaleString()+'</strong><span style="float:right;color:var(--muted2);font-size:9px">'+opLabel+' daily limit → resume</span></button>';
       }).join('')+
       '<button class="aut-act" onclick="_promptCustomPermission(\''+intent+'\')" style="display:block;width:100%;text-align:left;padding:8px 12px;margin-top:2px"><i class="ti ti-pencil" style="margin-right:8px"></i>Custom amount</button>'+
       '</div></div>';
@@ -46774,7 +46978,7 @@ setTimeout(function() {
 
     if(mode === 'execute' || mode === 'swap_pay' || mode === 'workflow'){
       if(typeof AIWallet === 'undefined' || !AIWallet.submitIntent){
-        autUI('ai',R.intro('AI Smart Wallet unavailable. Please connect your wallet and try again.'));
+        autUI('ai',R.intro('Circle Agent Wallet unavailable. Please connect your wallet and try again.'));
         return;
       }
       var dispatched = 0;
@@ -46796,7 +47000,7 @@ setTimeout(function() {
           R.row('Mode',mode === 'workflow' ? 'Payroll Workflow' : mode === 'swap_pay' ? 'Swap & Pay' : 'Instant','purple') +
           R.row('Total Value',total.toLocaleString('en-US',{maximumFractionDigits:2}),'green'),
           R.actions(
-            {icon:'wallet',label:'Open AI Smart Wallet',cls:'primary',action:"showPage('aiwallet')"},
+            {icon:'building-bank',label:'Open Circle Agent Wallet',cls:'primary',action:"showPage('aiwallet')"},
             {icon:'external-link',label:'View Schedule',cls:'',action:"showPage('schedule')"}
           )
         )
@@ -46870,22 +47074,22 @@ setTimeout(function() {
   }
 
   function autAgentWalletGuide() {
-    var agentAddr = typeof AgentWalletManager !== 'undefined' ? AgentWalletManager.getAgentAddress() : null;
-    var agentShort = agentAddr ? agentAddr.substring(0,6)+'...'+agentAddr.substring(agentAddr.length-4) : 'Not created';
-    var agentStatus = (typeof AgentWalletManager !== 'undefined' && AgentWalletManager.isPaused()) ? 'Paused' : 'Active';
-    var agentStatusCls = agentStatus === 'Active' ? 'live' : 'pending';
+    var circleAddr = typeof CircleAgent !== 'undefined' ? (CircleAgent.getCachedAddress()||null) : null;
+    var circleShort = circleAddr ? circleAddr.substring(0,6)+'...'+circleAddr.substring(circleAddr.length-4) : 'Not configured';
+    var circleStatus = circleAddr ? 'Active' : 'Not configured';
+    var circleStatusCls = circleAddr ? 'live' : 'pending';
 
-    return R.intro('Welcome to the <strong style="color:#a78bfa">Agent Wallet Guide</strong>. Here is everything you need:') +
-      R.card(R.head('robot','Agent Wallet — Setup & Usage',{text:agentStatus,cls:agentStatusCls}),
-        R.row('Agent Address','<code style="font-size:8px;color:#a78bfa;cursor:pointer" onclick="autCopyText(\''+(agentAddr||'')+'\')">'+agentShort+' <i class="ti ti-copy" style="font-size:8px;color:var(--muted)"></i></code>','purple')+
-        R.row('Status',agentStatus,agentStatus==='Active'?'green':'yellow')+
+    return R.intro('Welcome to the <strong style="color:#2775ca">Circle Agent</strong> guide. Your Circle Wallet is the canonical execution identity:') +
+      R.card(R.head('building-bank','Circle Agent — Setup & Usage',{text:circleStatus,cls:circleStatusCls}),
+        R.row('Circle Wallet','<code style="font-size:8px;color:#2775ca;cursor:pointer" onclick="autCopyText(\''+(circleAddr||'')+'\')">'+circleShort+' <i class="ti ti-copy" style="font-size:8px;color:var(--muted)"></i></code>','blue')+
+        R.row('Status',circleStatus,circleAddr?'green':'yellow')+
         R.sep()+
-        R.section('Adding Funds to Agent Wallet')+
+        R.section('Adding Funds to Circle Wallet')+
         R.row('USDC Faucet','<a href="https://faucet.circle.com" target="_blank" style="color:#06F7E9">faucet.circle.com →</a>','green')+
         R.row('USDC Token','<code style="font-size:7.5px;color:var(--muted)">0x3600...0000</code> (Arc Mainnet)','')+
         R.row('EURC Token','<code style="font-size:7.5px;color:var(--muted)">0x89B5...D72a</code>','')+
         R.row('cirBTC Token','<code style="font-size:7.5px;color:var(--muted)">0xf0C4...32BF</code>','')+
-        R.row('How to fund','<span style="font-size:8px">1. Go to <a href="https://faucet.circle.com" target="_blank" style="color:#06F7E9">faucet.circle.com</a><br>2. Select Arc Mainnet<br>3. Paste agent address<br>4. Receive USDC</span>','')+
+        R.row('How to fund','<span style="font-size:8px">1. Go to <a href="https://faucet.circle.com" target="_blank" style="color:#06F7E9">faucet.circle.com</a><br>2. Select Arc Mainnet<br>3. Paste Circle Wallet address<br>4. Receive USDC</span>','')+
         R.sep()+
         R.section('Example Prompts')+
         R.row('Swap','<em style="font-size:9px">"Swap 100 USDC for cirBTC"</em>','')+
@@ -46897,14 +47101,13 @@ setTimeout(function() {
         R.row('Remove Liquidity','<em style="font-size:9px">"Remove 50 LP from USDC/EURC"</em>','')+
         R.row('Schedule','<em style="font-size:9px">"Schedule a weekly payment of 50 USDC"</em>','')+
         R.sep()+
-        R.section('Agent Controls')+
+        R.section('Circle Agent Controls')+
         R.row('Show wallet','"show my wallet"','')+
-        R.row('Pause agent','"pause agent"','')+
-        R.row('Resume agent','"resume agent"','')+
+        R.row('Balance','"balance"','')+
         R.row('Permissions','"show permissions"','')+
         R.row('Schedules','"show my schedules" / "execute schedules"',''),
         R.actions(
-          {icon:'refresh',label:'Show Agent Wallet',cls:'primary',action:"autonomaSendQuick('show my wallet')"},
+          {icon:'refresh',label:'Show Circle Wallet',cls:'primary',action:"autonomaSendQuick('show my wallet')"},
           {icon:'external-link',label:'Circle Faucet',cls:'confirm',action:"window.open('https://faucet.circle.com','_blank')"}
         )
       );
@@ -46957,7 +47160,7 @@ setTimeout(function() {
       (function(){
         try {
           if (typeof AgentWalletManager !== 'undefined' && AgentWalletManager.hasEncryptionPassword && !AgentWalletManager.hasEncryptionPassword()) {
-            return R.sep() + '<div style="padding:6px 8px;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.2);border-radius:6px;margin-top:4px"><div style="font-size:9px;color:#f59e0b;margin-bottom:4px"><i class="ti ti-shield-lock" style="font-size:10px;margin-right:3px"></i>Session password not set — your wallet key is only in memory and will be lost on reload.</div><button onclick="showPage(\'aiwallet\')" style="font-size:8px;background:rgba(245,158,11,.15);color:#f59e0b;border:1px solid rgba(245,158,11,.3);border-radius:4px;padding:3px 8px;cursor:pointer">Go to AI Wallet Security <i class="ti ti-arrow-right" style="font-size:7px"></i></button></div>';
+            return R.sep() + '<div style="padding:6px 8px;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.2);border-radius:6px;margin-top:4px"><div style="font-size:9px;color:#f59e0b;margin-bottom:4px"><i class="ti ti-shield-lock" style="font-size:10px;margin-right:3px"></i>Session password not set — your wallet key is only in memory and will be lost on reload.</div><button onclick="showPage(\'aiwallet\')" style="font-size:8px;background:rgba(245,158,11,.15);color:#f59e0b;border:1px solid rgba(245,158,11,.3);border-radius:4px;padding:3px 8px;cursor:pointer">Go to Circle Agent Security <i class="ti ti-arrow-right" style="font-size:7px"></i></button></div>';
           }
         } catch(_e) {}
         return '';
@@ -47071,8 +47274,9 @@ setTimeout(function() {
     };
     for(var i=0;i<ops.length;i++){ if(opMap[ops[i]]) authOpts[opMap[ops[i]]]=true; }
 
-    if(typeof AgentWalletManager!=='undefined'){
-      authOpts.agentWallet=AgentWalletManager.getAgentAddress();
+    // Use Circle Wallet as the canonical agent identity
+    if(typeof CircleAgent!=='undefined' && CircleAgent.getCachedAddress()){
+      authOpts.agentWallet=CircleAgent.getCachedAddress();
     }
 
     var auth=AgentAuthorization.createAuthorization(authOpts);
@@ -47782,7 +47986,7 @@ setTimeout(function() {
         '<div style="max-height:280px;overflow-y:auto">' + resultsHtml + '</div>',
         R.actions(
           {icon:'calendar-event',label:'Schedule Page',cls:'primary',action:"showPage('schedule')"},
-          {icon:'robot',label:'Open AI Wallet',cls:'',action:"showPage('aiwallet')"},
+          {icon:'building-bank',label:'Open Circle Agent',cls:'',action:"showPage('aiwallet')"},
           {icon:'refresh',label:'Execute Again',cls:'',action:"autonomaSendQuick('execute all schedules')"}
         )) +
       '<div style="font-size:8px;color:var(--muted2);margin-top:4px">Security layers applied: Permission Engine → Risk Engine → Policy Engine → Balance Check → Gas Reserve → eth_call Simulation → On-Chain Broadcast by Agent Wallet.</div>';
@@ -48614,10 +48818,9 @@ setTimeout(function() {
   }
 
   function _agentCanExecute(operation){
-    if(typeof AgentWalletManager==='undefined') return false;
-    if(AgentWalletManager.isPaused()) return false;
-    var agentAddr=AgentWalletManager.getAgentAddress();
-    if(!agentAddr) return false;
+    // Identity: Circle Agent Wallet is the canonical agent
+    var circleReady = typeof CircleAgent !== 'undefined' && !!CircleAgent.getCachedAddress();
+    if(!circleReady) return false;
     if(typeof AgentAuthorization!=='undefined'){
       return AgentAuthorization.hasOperationAuth(operation);
     }
@@ -48713,12 +48916,12 @@ setTimeout(function() {
 
   function _agentExecutionBanner(operation, amount, asset){
     if(!_agentCanExecute(operation)) return '';
-    var agentAddr=AgentWalletManager.getAgentAddress();
-    var agentShort=agentAddr?agentAddr.slice(0,6)+'...'+agentAddr.slice(-4):'--';
+    var circleAddr = typeof CircleAgent !== 'undefined' ? (CircleAgent.getCachedAddress()||'') : '';
+    var agentShort = circleAddr ? circleAddr.slice(0,6)+'...'+circleAddr.slice(-4) : 'Circle Agent';
     var auths=typeof AgentAuthorization!=='undefined'?AgentAuthorization.getActive():[];
     var hasAuth=auths.length>0;
-    return R.sep()+R.section('Agent Execution Available')+
-      R.row('Agent Wallet','<span style="color:#a78bfa">'+agentShort+'</span>','purple')+
+    return R.sep()+R.section('Circle Agent Execution Available')+
+      R.row('Circle Wallet','<span style="color:#2775ca">'+agentShort+'</span>','blue')+
       R.row('Operation',operation.charAt(0).toUpperCase()+operation.slice(1),'green')+
       (hasAuth?R.row('Authorized','<span>'+String(auths.length)+' active</span>','green'):
         R.row('Authorized','<span>Not authorized - use manual execution</span>','yellow'));
@@ -50148,10 +50351,8 @@ setTimeout(function() {
     _agentSchedulerRunning = true;
 
     try {
-      // Verify agent wallet is ready
-      if(typeof AgentWalletManager === 'undefined') return;
-      if(AgentWalletManager.isPaused()) return;
-      var agentAddr = AgentWalletManager.getAgentAddress();
+      // Verify Circle Agent Wallet is ready (canonical identity)
+      var agentAddr = typeof CircleAgent !== 'undefined' ? CircleAgent.getCachedAddress() : null;
       if(!agentAddr) return;
 
       var schedId = sched.id || sched.name || 'unknown';
