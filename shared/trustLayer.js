@@ -9,7 +9,7 @@
 
   /* ── Build trust metadata for a workflow execution ── */
   function buildTrustLayer(opts){
-    // Agent identity: Circle Wallet is canonical; ERC-8004 token from AgentIdentity.
+    // Agent identity: Circle Wallet address is canonical; ERC-8004 token from AgentIdentity.
     var agentWallet=null;
     try { if(typeof CircleAgent!=='undefined'&&CircleAgent.getCachedAddress) agentWallet=CircleAgent.getCachedAddress(); } catch(_e){}
     var agentId=null;

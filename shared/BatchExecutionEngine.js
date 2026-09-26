@@ -62,6 +62,7 @@
       var circleAddr = (typeof CircleAgent !== 'undefined' && CircleAgent.getCachedAddress)
         ? CircleAgent.getCachedAddress() : null;
       if (!circleAddr) return false;
+      // Honour execution-layer pause state without using AWM as identity
       var paused = false;
       try { if (typeof SecureSignerProvider !== 'undefined' && SecureSignerProvider.isPaused) paused = SecureSignerProvider.isPaused(); } catch(_e){}
       try { if (!paused && typeof AgentWalletManager !== 'undefined' && AgentWalletManager.isPaused) paused = AgentWalletManager.isPaused(); } catch(_e){}

@@ -173,11 +173,11 @@
     // 3. [M11 FIX] Low balance — use on-chain check when available, fallback to DOM
     try {
       var balFloat = null;
-      // On-chain balance: Circle Wallet is canonical agent address
+      // On-chain balance: use Circle Wallet address as canonical agent address
       try {
-        var _cwBal = (typeof CircleAgent!=='undefined'&&CircleAgent.getCachedAddress)?CircleAgent.getCachedAddress():null;
-        if(_cwBal && typeof walletAddress !== 'undefined' && walletAddress){
-          var agentAddr = _cwBal;
+        var _circleAddr = (typeof CircleAgent !== 'undefined' && CircleAgent.getCachedAddress) ? CircleAgent.getCachedAddress() : null;
+        if(_circleAddr && typeof walletAddress !== 'undefined' && walletAddress){
+          var agentAddr = _circleAddr;
           if(agentAddr && typeof ethers !== 'undefined'){
             var provider = _getAgentProvider();
             if(provider){
@@ -262,10 +262,10 @@
   function getAgentIdentityCard(R){
     if(!R) R={row:function(l,v,c){return '<div class="aut-rc-row"><span class="aut-rl">'+l+'</span><span class="aut-rv" style="color:var(--'+(c||'text')+')">'+v+'</span></div>';},head:function(i,t,b){return '<div class="aut-rc-head"><i class="ti ti-'+i+'"></i><span class="aut-rc-title">'+t+'</span>'+(b?'<span class="aut-rc-badge '+b.cls+'">'+b.text+'</span>':'')+'</div>';},sep:function(){return '<div class="aut-rc-sep"></div>';}};
     var identity=typeof AgentIdentity!=='undefined'?AgentIdentity.getDisplayIdentity():null;
-    // Agent identity: Circle Wallet is canonical
-    var _caId = null;
-    try { if(typeof CircleAgent!=='undefined'&&CircleAgent.getCachedAddress) _caId=CircleAgent.getCachedAddress(); } catch(_e){}
-    var state = _caId ? { walletAddress: _caId } : null;
+    // Agent identity: Circle Wallet is canonical — AWM state summary is replaced by CircleAgent
+    var _circleIdentityAddr = null;
+    try { if(typeof CircleAgent!=='undefined'&&CircleAgent.getCachedAddress) _circleIdentityAddr=CircleAgent.getCachedAddress(); } catch(_e){}
+    var state = _circleIdentityAddr ? { walletAddress: _circleIdentityAddr } : null;
     var reputation=typeof AgentReputation!=='undefined'?AgentReputation.getReputationGrade():null;
     var session=typeof AgentSession!=='undefined'?AgentSession.getSessionSummary():null;
     var authSummary=typeof AgentAuthorization!=='undefined'?AgentAuthorization.getAuthSummary():null;

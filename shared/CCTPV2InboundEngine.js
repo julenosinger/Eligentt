@@ -116,14 +116,24 @@
       // with the correct chain ID to avoid "invalid chain ID" errors.
       var signer = null;
 
-      if (typeof AgentWalletManager !== 'undefined') {
+      // SIGNER RESOLUTION — CCTP inbound requires a low-level EOA signer on the SOURCE chain.
+      // In Circle production mode: SecureSignerProvider handles this server-side.
+      // In dev/browser mode: AgentWalletManager._createSignerForChain is the fallback.
+      // NOTE: This is a LOW-LEVEL SIGNER dependency, NOT an Agent identity decision.
+      // The Agent identity (Circle Wallet address) is determined separately by CircleAgent.
+      // Replacing this signer with a Circle wallet API call would require Circle's
+      // server-side signing endpoint — that is handled by SecureSignerProvider in Circle mode.
+      if (typeof SecureSignerProvider !== 'undefined' && SecureSignerProvider.isCircleMode && SecureSignerProvider.isCircleMode()) {
+        try { signer = await SecureSignerProvider.getSignerForChain(provider); } catch(_se){}
+      }
+      if (!signer && typeof AgentWalletManager !== 'undefined') {
         signer = AgentWalletManager._createSignerForChain && AgentWalletManager._createSignerForChain(provider);
       }
       if (!signer && typeof window.signer !== 'undefined') {
         signer = window.signer;
       }
 
-      if (!signer) throw new Error('No agent wallet signer available');
+      if (!signer) throw new Error('No agent signer available — configure Circle Agent or browser wallet signing');
 
       // Verify chain ID matches the source chain
       try {
@@ -181,9 +191,14 @@
         var fallbackUrl = _fallbackRPCs[t.sourceChainId];
         if (fallbackUrl && burnErr.message && (burnErr.message.indexOf('fetch') >= 0 || burnErr.message.indexOf('network') >= 0 || burnErr.message.indexOf('timeout') >= 0)) {
           var fbProvider = new ethers.JsonRpcProvider(fallbackUrl);
-          // [AUTONOMA-2] Get a signer (never the raw key) via the canonical signer source.
-          var _fbSigner = (typeof AgentWalletManager !== 'undefined' && typeof AgentWalletManager.getSessionSigner === 'function')
-            ? await AgentWalletManager.getSessionSigner(fbProvider) : null;
+          // [AUTONOMA-2] Resolve fallback signer: SecureSignerProvider (Circle mode) → AWM (dev fallback).
+          var _fbSigner = null;
+          if (typeof SecureSignerProvider !== 'undefined' && SecureSignerProvider.isCircleMode && SecureSignerProvider.isCircleMode()) {
+            try { _fbSigner = await SecureSignerProvider.getSignerForChain(fbProvider); } catch(_sfe){}
+          }
+          if (!_fbSigner && typeof AgentWalletManager !== 'undefined' && typeof AgentWalletManager.getSessionSigner === 'function') {
+            try { _fbSigner = await AgentWalletManager.getSessionSigner(fbProvider); } catch(_sfe){}
+          }
           if (!_fbSigner) throw burnErr;
           var fbSigner = _fbSigner;
           var fbMessenger = new ethers.Contract(t.tokenMessenger, CCTP_ABI, fbSigner);
@@ -346,9 +361,15 @@
         var provider = _getProvider(arcRpc);
         if (!provider) throw new Error('Arc RPC unavailable');
 
+        // MINT SIGNER: low-level dependency on Arc. SecureSignerProvider (Circle mode) → AWM fallback.
         var signer = null;
         try {
-          if (typeof AgentWalletManager !== 'undefined' && AgentWalletManager.getSessionSigner) {
+          if (typeof SecureSignerProvider !== 'undefined' && SecureSignerProvider.isCircleMode && SecureSignerProvider.isCircleMode()) {
+            signer = await SecureSignerProvider.getSigner(provider);
+          }
+        } catch (_se) {}
+        try {
+          if (!signer && typeof AgentWalletManager !== 'undefined' && AgentWalletManager.getSessionSigner) {
             signer = await AgentWalletManager.getSessionSigner(provider);
           }
         } catch (_e) {}

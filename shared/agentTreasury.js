@@ -14,7 +14,7 @@
 
   function defaultTreasury(){
     return {
-      agentWallet: (function(){ try { return (typeof CircleAgent!=='undefined'&&CircleAgent.getCachedAddress) ? CircleAgent.getCachedAddress() : null; } catch(_e){ return null; } })(),
+      agentWallet: (function(){ try { return (typeof CircleAgent!=='undefined'&&CircleAgent.getCachedAddress)?CircleAgent.getCachedAddress():null; } catch(_){ return null; } })(),
       totalAllocated: 0,
       totalSpent: 0,
       totalYield: 0,
@@ -215,6 +215,7 @@
   function pause(){
     treasury.status='paused'; treasury.pausedAt=Date.now();
     save();
+    // Pause execution layer (not identity)
     try { if(typeof SecureSignerProvider!=='undefined'&&SecureSignerProvider.pause) SecureSignerProvider.pause(); } catch(_e){}
     try { if(typeof AgentWalletManager!=='undefined'&&AgentWalletManager.pause) AgentWalletManager.pause(); } catch(_e){}
     if(typeof AgentSession!=='undefined') AgentSession.pause();
@@ -223,6 +224,7 @@
   function resume(){
     treasury.status='active'; treasury.pausedAt=null;
     save();
+    // Resume execution layer (not identity)
     try { if(typeof SecureSignerProvider!=='undefined'&&SecureSignerProvider.resume) SecureSignerProvider.resume(); } catch(_e){}
     try { if(typeof AgentWalletManager!=='undefined'&&AgentWalletManager.resume) AgentWalletManager.resume(); } catch(_e){}
     if(typeof AgentSession!=='undefined') AgentSession.resume();

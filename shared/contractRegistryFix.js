@@ -72,8 +72,8 @@
     } catch(e) {}
     try {
       // Circle Wallet is the canonical agent identity
-      var _cReg = (typeof CircleAgent!=='undefined'&&CircleAgent.getCachedAddress)?CircleAgent.getCachedAddress():null;
-      if (_cReg && _cReg.toLowerCase() === addr) return true;
+      var _cAgent = (typeof CircleAgent !== 'undefined' && CircleAgent.getCachedAddress) ? CircleAgent.getCachedAddress() : null;
+      if (_cAgent && _cAgent.toLowerCase() === addr) return true;
     } catch(e) {}
     return false;
   }

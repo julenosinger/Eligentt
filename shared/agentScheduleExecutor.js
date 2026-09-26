@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Autonoma Agent Schedule Executor ÔÇö Delegated Scheduled-Intent Execution
  * Executes due ScheduleEngine intents on-chain through the existing Agent Wallet.
  * The Agent Wallet is the ONLY execution layer. The user's keys are never used.
@@ -106,7 +106,20 @@
     try { return (typeof AgentAuthorization !== 'undefined') ? AgentAuthorization : null; } catch(e){ return null; }
   }
   function _wm(){
+    // _wm() returns AgentWalletManager only for its internal signing/provider methods
+    // (getAgentProvider, getSessionSigner, validatePreExecution, recordExecution).
+    // It is NOT the Agent identity — that is always CircleAgent (see _agentIdentityAddr).
     try { return (typeof AgentWalletManager !== 'undefined') ? AgentWalletManager : null; } catch(e){ return null; }
+  }
+  function _agentIdentityAddr(){
+    // Circle Wallet is the canonical Agent identity for all schedule authorization checks.
+    try {
+      if (typeof CircleAgent !== 'undefined' && CircleAgent.getCachedAddress) {
+        var ca = CircleAgent.getCachedAddress();
+        if (ca) return ca;
+      }
+    } catch(_e){}
+    return null;
   }
   function _ethers(){
     try { return (typeof ethers !== 'undefined') ? ethers : null; } catch(e){ return null; }
@@ -267,13 +280,15 @@
   /* ÔöÇÔöÇ Validation pipeline (returns {ok, reason, auth, transfers, token} ) ÔöÇÔöÇ */
   async function _validateIntent(sched, provider, agentAddr){
     var az = _authz();
-    var wm = _wm();
+    var wm = _wm(); // signing/provider only — not identity
     var E = _ethers();
     if (!E) return { ok: false, reason: 'ethers unavailable' };
-    if (!wm) return { ok: false, reason: 'AgentWalletManager unavailable' };
     if (!az) return { ok: false, reason: 'Authorization system unavailable' };
-    if (wm.isShutdown && wm.isShutdown()) return { ok: false, reason: 'Agent wallet is shut down' };
-    if (wm.isPaused()) return { ok: false, reason: 'Agent wallet is paused' };
+    // Identity check: Circle Wallet must be configured
+    if (!_agentIdentityAddr()) return { ok: false, reason: 'Circle Agent Wallet not configured — set up the Circle Agent to enable scheduled execution' };
+    // Execution layer pause check (not identity)
+    if (wm && wm.isShutdown && wm.isShutdown()) return { ok: false, reason: 'Execution layer is shut down' };
+    if (wm && typeof wm.isPaused === 'function' && wm.isPaused()) return { ok: false, reason: 'Execution layer is paused' };
     if (!hasScheduledAuth()) return { ok: false, reason: 'No active authorization for scheduled execution ÔÇö say "allow agent to execute schedules" in Autonoma', needsAuthorization: true };
 
     var opMap = { payment: 'payment', multisend: 'payment', swap: 'swap', bridge: 'bridge', crosschain: 'crosschain' };
@@ -701,15 +716,30 @@
     _saveLedger();
 
     try {
-      var wm = _wm();
-      var provider = wm ? wm.getAgentProvider() : null;
-      var signer = wm ? await wm.getSessionSigner(provider) : null;
-      if (!provider || !signer) {
-        ledger[key] = { status: 'retry_pending', reason: 'Agent wallet signer unavailable', ts: Date.now(), attempts: attempts, lastAttempt: Date.now() };
+      // Identity: Circle Wallet. Signer: SecureSignerProvider (Circle mode) or AWM (dev/browser fallback).
+      var _identityAddr = _agentIdentityAddr();
+      if (!_identityAddr) {
+        ledger[key] = { status: 'retry_pending', reason: 'Circle Agent Wallet not configured', ts: Date.now(), attempts: attempts, lastAttempt: Date.now() };
         _saveLedger();
         return { status: 'retry_pending' };
       }
-      var agentAddr = signer.address;
+      var wm = _wm();
+      var provider = wm ? wm.getAgentProvider() : null;
+      // Resolve signer: SecureSignerProvider (Circle production mode) first, AWM fallback
+      var signer = null;
+      if (typeof SecureSignerProvider !== 'undefined' && SecureSignerProvider.isCircleMode && SecureSignerProvider.isCircleMode()) {
+        try { signer = await SecureSignerProvider.getSigner(provider); } catch(_se){}
+      }
+      if (!signer && wm && typeof wm.getSessionSigner === 'function') {
+        try { signer = await wm.getSessionSigner(provider); } catch(_se){}
+      }
+      if (!provider || !signer) {
+        ledger[key] = { status: 'retry_pending', reason: 'Execution signer unavailable — Circle Agent or signing layer not ready', ts: Date.now(), attempts: attempts, lastAttempt: Date.now() };
+        _saveLedger();
+        return { status: 'retry_pending' };
+      }
+      // Use Circle Wallet address as the canonical agentAddr (not signer.address which may be the EOA)
+      var agentAddr = _identityAddr;
 
       var v = await _validateIntent(sched, provider, agentAddr);
       if (!v.ok) {
