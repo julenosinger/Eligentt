@@ -10213,7 +10213,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
               </div>
             </div>
             <div class="card">
-              <div class="ch"><span class="ct"><i class="ti ti-robot" style="color:var(--purple);margin-right:5px"></i>Agent Wallet Information</span></div>
+              <div class="ch"><span class="ct"><i class="ti ti-building-bank" style="color:#2775ca;margin-right:5px"></i>Circle Agent</span></div>
               <div class="cb" id="aiw-agent-body"></div>
             </div>
               </div>
@@ -30152,7 +30152,7 @@ function renderSchedules(){
     var nextRun = formatUSDateTime(s.nextRun);
     var isDue = s.nextRun && new Date(s.nextRun) <= now && s.status === 'Active';
     var agentOn = s.agentExecution !== false;
-    var agentWarn = (agentOn && s.status === 'Active' && !agentReady) ? '<span style="font-size:8px;margin-left:5px;color:var(--red);font-weight:700" title="Agent Wallet / authorization missing — auto-execution will not run until configured">⚠ NO AGENT</span>' : '';
+    var agentWarn = (agentOn && s.status === 'Active' && !agentReady) ? '<span style="font-size:8px;margin-left:5px;color:var(--red);font-weight:700" title="Circle Agent not configured or authorization missing — auto-execution will not run">⚠ NO AGENT</span>' : '';
     var assetInfo = (s.amount || 0) > 0 ? (s.amount || 0).toFixed(2) + ' ' + s.token : (s.recipients && s.recipients.length ? s.recipients.length + ' rcpts' : '—');
 
     var historyHtml = '';
@@ -30223,7 +30223,8 @@ function schToggleHistory(id){
 // Check due schedules on init
 function schAgentStatus(){
   var wmReady = false, authReady = false;
-  try { wmReady = !!(typeof AgentWalletManager !== 'undefined' && !AgentWalletManager.isPaused() && AgentWalletManager.getAgentAddress()); } catch(_){}
+  // Circle Wallet is the canonical agent identity
+  try { wmReady = !!(typeof CircleAgent !== 'undefined' && CircleAgent.getCachedAddress()); } catch(_){}
   try { authReady = !!(typeof AgentScheduleExecutor !== 'undefined' && typeof AgentScheduleExecutor.hasScheduledAuth === 'function' && AgentScheduleExecutor.hasScheduledAuth()); } catch(_){}
   return { wmReady: wmReady, authReady: authReady, ready: !!(wmReady && authReady) };
 }
@@ -45087,10 +45088,10 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
   async function _executeIntent(intent, params, msg){
     _ctxClear(); // Clear context on execution
 
-    // Show permission card for financial operations if agent wallet exists but op not authorized
-    if(_isFinancialIntent(intent) && typeof AgentWalletManager !== 'undefined' && typeof AgentAuthorization !== 'undefined'){
-      var agentAddr = AgentWalletManager.getAgentAddress();
-      if(agentAddr){
+    // Show permission card for financial operations if Circle Agent is configured but op not authorized
+    if(_isFinancialIntent(intent) && typeof AgentAuthorization !== 'undefined'){
+      var _circleAgentReady = typeof CircleAgent !== 'undefined' && (CircleAgent.getCachedAddress() || false);
+      if(_circleAgentReady){
         var operation = intent.replace('_EXECUTE','').replace('_GUIDE','').toLowerCase();
         // Normalize operation names
         var opNorm = {send_payment:'payment',swap:'swap',bridge:'bridge',multisend:'payment',add_liquidity:'swap',remove_liquidity:'swap'};
@@ -46174,22 +46175,6 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
     }
     const short=walletAddress.substring(0,6)+'...'+walletAddress.substring(walletAddress.length-4);
 
-    // ── Agent EOA Wallet section (signing wallet, not balance wallet) ──
-    var agentSection = '';
-    if(typeof AgentWalletManager !== 'undefined'){
-      var agentAddr = AgentWalletManager.getAgentAddress();
-      if(agentAddr && (!circleAddr || agentAddr.toLowerCase() !== circleAddr.toLowerCase())){
-        var agentShort = agentAddr.substring(0,6)+'...'+agentAddr.substring(agentAddr.length-4);
-        var agentStatus = AgentWalletManager.isPaused() ? 'Paused' : 'Active';
-        var authSummary = typeof AgentAuthorization !== 'undefined' ? AgentAuthorization.getAuthSummary() : null;
-        agentSection = R.sep() + R.section('Agent EOA (Arc Signing Wallet)') +
-          R.row('Address','<span style="cursor:pointer" onclick="autCopyText(\''+agentAddr+'\')">'+agentShort+' <i class="ti ti-copy" style="font-size:9px;color:var(--muted)"></i></span>','purple') +
-          R.row('Status','<span>'+agentStatus+'</span>',agentStatus==='Active'?'green':'yellow') +
-          R.row('Reputation',String(AgentWalletManager.getReputationScore())+'/100','purple') +
-          (authSummary && authSummary.hasAuthorization ? R.row('Authorized','<span>'+String(authSummary.count)+' active</span>','green') : R.row('Authorized','<span>No</span>','yellow'));
-      }
-    }
-
     return R.intro('Here\'s your <strong style="color:#2775ca">Circle Agent</strong> wallet and connected wallet:') +
       R.card(
         R.head('building-bank','Wallet Summary',{text:'Active',cls:'live'}),
@@ -46198,8 +46183,7 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
         R.row('Address','<span style="cursor:pointer" onclick="autCopyText(\''+walletAddress+'\')">'+short+' <i class="ti ti-copy" style="font-size:9px;color:var(--muted)"></i></span>','teal') +
         R.row('Network',R.chainPill(activeNetworkName,activeNetworkColor),'') +
         R.row('Portfolio','$'+totalUsd.toFixed(2),'green') +
-        R.sep()+R.section('Personal Assets')+tokenRows +
-        agentSection,
+        R.sep()+R.section('Personal Assets')+tokenRows,
         R.actions(
           {icon:'copy',label:'Copy Circle Address',cls:'primary',action:"autCopyText('"+(circleAddr||walletAddress)+"')"},
           {icon:'refresh',label:'Refresh',cls:'',action:"autonomaSendQuick('balance')"},
@@ -47090,22 +47074,22 @@ setTimeout(function() {
   }
 
   function autAgentWalletGuide() {
-    var agentAddr = typeof AgentWalletManager !== 'undefined' ? AgentWalletManager.getAgentAddress() : null;
-    var agentShort = agentAddr ? agentAddr.substring(0,6)+'...'+agentAddr.substring(agentAddr.length-4) : 'Not created';
-    var agentStatus = (typeof AgentWalletManager !== 'undefined' && AgentWalletManager.isPaused()) ? 'Paused' : 'Active';
-    var agentStatusCls = agentStatus === 'Active' ? 'live' : 'pending';
+    var circleAddr = typeof CircleAgent !== 'undefined' ? (CircleAgent.getCachedAddress()||null) : null;
+    var circleShort = circleAddr ? circleAddr.substring(0,6)+'...'+circleAddr.substring(circleAddr.length-4) : 'Not configured';
+    var circleStatus = circleAddr ? 'Active' : 'Not configured';
+    var circleStatusCls = circleAddr ? 'live' : 'pending';
 
-    return R.intro('Welcome to the <strong style="color:#a78bfa">Agent Wallet Guide</strong>. Here is everything you need:') +
-      R.card(R.head('robot','Agent Wallet — Setup & Usage',{text:agentStatus,cls:agentStatusCls}),
-        R.row('Agent Address','<code style="font-size:8px;color:#a78bfa;cursor:pointer" onclick="autCopyText(\''+(agentAddr||'')+'\')">'+agentShort+' <i class="ti ti-copy" style="font-size:8px;color:var(--muted)"></i></code>','purple')+
-        R.row('Status',agentStatus,agentStatus==='Active'?'green':'yellow')+
+    return R.intro('Welcome to the <strong style="color:#2775ca">Circle Agent</strong> guide. Your Circle Wallet is the canonical execution identity:') +
+      R.card(R.head('building-bank','Circle Agent — Setup & Usage',{text:circleStatus,cls:circleStatusCls}),
+        R.row('Circle Wallet','<code style="font-size:8px;color:#2775ca;cursor:pointer" onclick="autCopyText(\''+(circleAddr||'')+'\')">'+circleShort+' <i class="ti ti-copy" style="font-size:8px;color:var(--muted)"></i></code>','blue')+
+        R.row('Status',circleStatus,circleAddr?'green':'yellow')+
         R.sep()+
-        R.section('Adding Funds to Agent Wallet')+
+        R.section('Adding Funds to Circle Wallet')+
         R.row('USDC Faucet','<a href="https://faucet.circle.com" target="_blank" style="color:#06F7E9">faucet.circle.com →</a>','green')+
         R.row('USDC Token','<code style="font-size:7.5px;color:var(--muted)">0x3600...0000</code> (Arc Mainnet)','')+
         R.row('EURC Token','<code style="font-size:7.5px;color:var(--muted)">0x89B5...D72a</code>','')+
         R.row('cirBTC Token','<code style="font-size:7.5px;color:var(--muted)">0xf0C4...32BF</code>','')+
-        R.row('How to fund','<span style="font-size:8px">1. Go to <a href="https://faucet.circle.com" target="_blank" style="color:#06F7E9">faucet.circle.com</a><br>2. Select Arc Mainnet<br>3. Paste agent address<br>4. Receive USDC</span>','')+
+        R.row('How to fund','<span style="font-size:8px">1. Go to <a href="https://faucet.circle.com" target="_blank" style="color:#06F7E9">faucet.circle.com</a><br>2. Select Arc Mainnet<br>3. Paste Circle Wallet address<br>4. Receive USDC</span>','')+
         R.sep()+
         R.section('Example Prompts')+
         R.row('Swap','<em style="font-size:9px">"Swap 100 USDC for cirBTC"</em>','')+
@@ -47117,14 +47101,13 @@ setTimeout(function() {
         R.row('Remove Liquidity','<em style="font-size:9px">"Remove 50 LP from USDC/EURC"</em>','')+
         R.row('Schedule','<em style="font-size:9px">"Schedule a weekly payment of 50 USDC"</em>','')+
         R.sep()+
-        R.section('Agent Controls')+
+        R.section('Circle Agent Controls')+
         R.row('Show wallet','"show my wallet"','')+
-        R.row('Pause agent','"pause agent"','')+
-        R.row('Resume agent','"resume agent"','')+
+        R.row('Balance','"balance"','')+
         R.row('Permissions','"show permissions"','')+
         R.row('Schedules','"show my schedules" / "execute schedules"',''),
         R.actions(
-          {icon:'refresh',label:'Show Agent Wallet',cls:'primary',action:"autonomaSendQuick('show my wallet')"},
+          {icon:'refresh',label:'Show Circle Wallet',cls:'primary',action:"autonomaSendQuick('show my wallet')"},
           {icon:'external-link',label:'Circle Faucet',cls:'confirm',action:"window.open('https://faucet.circle.com','_blank')"}
         )
       );
@@ -47291,8 +47274,9 @@ setTimeout(function() {
     };
     for(var i=0;i<ops.length;i++){ if(opMap[ops[i]]) authOpts[opMap[ops[i]]]=true; }
 
-    if(typeof AgentWalletManager!=='undefined'){
-      authOpts.agentWallet=AgentWalletManager.getAgentAddress();
+    // Use Circle Wallet as the canonical agent identity
+    if(typeof CircleAgent!=='undefined' && CircleAgent.getCachedAddress()){
+      authOpts.agentWallet=CircleAgent.getCachedAddress();
     }
 
     var auth=AgentAuthorization.createAuthorization(authOpts);
@@ -48834,10 +48818,9 @@ setTimeout(function() {
   }
 
   function _agentCanExecute(operation){
-    if(typeof AgentWalletManager==='undefined') return false;
-    if(AgentWalletManager.isPaused()) return false;
-    var agentAddr=AgentWalletManager.getAgentAddress();
-    if(!agentAddr) return false;
+    // Identity: Circle Agent Wallet is the canonical agent
+    var circleReady = typeof CircleAgent !== 'undefined' && !!CircleAgent.getCachedAddress();
+    if(!circleReady) return false;
     if(typeof AgentAuthorization!=='undefined'){
       return AgentAuthorization.hasOperationAuth(operation);
     }
@@ -48933,12 +48916,12 @@ setTimeout(function() {
 
   function _agentExecutionBanner(operation, amount, asset){
     if(!_agentCanExecute(operation)) return '';
-    var agentAddr=AgentWalletManager.getAgentAddress();
-    var agentShort=agentAddr?agentAddr.slice(0,6)+'...'+agentAddr.slice(-4):'--';
+    var circleAddr = typeof CircleAgent !== 'undefined' ? (CircleAgent.getCachedAddress()||'') : '';
+    var agentShort = circleAddr ? circleAddr.slice(0,6)+'...'+circleAddr.slice(-4) : 'Circle Agent';
     var auths=typeof AgentAuthorization!=='undefined'?AgentAuthorization.getActive():[];
     var hasAuth=auths.length>0;
-    return R.sep()+R.section('Agent Execution Available')+
-      R.row('Agent Wallet','<span style="color:#a78bfa">'+agentShort+'</span>','purple')+
+    return R.sep()+R.section('Circle Agent Execution Available')+
+      R.row('Circle Wallet','<span style="color:#2775ca">'+agentShort+'</span>','blue')+
       R.row('Operation',operation.charAt(0).toUpperCase()+operation.slice(1),'green')+
       (hasAuth?R.row('Authorized','<span>'+String(auths.length)+' active</span>','green'):
         R.row('Authorized','<span>Not authorized - use manual execution</span>','yellow'));
@@ -50368,10 +50351,8 @@ setTimeout(function() {
     _agentSchedulerRunning = true;
 
     try {
-      // Verify agent wallet is ready
-      if(typeof AgentWalletManager === 'undefined') return;
-      if(AgentWalletManager.isPaused()) return;
-      var agentAddr = AgentWalletManager.getAgentAddress();
+      // Verify Circle Agent Wallet is ready (canonical identity)
+      var agentAddr = typeof CircleAgent !== 'undefined' ? CircleAgent.getCachedAddress() : null;
       if(!agentAddr) return;
 
       var schedId = sched.id || sched.name || 'unknown';

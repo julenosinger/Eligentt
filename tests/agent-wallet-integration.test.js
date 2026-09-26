@@ -25,13 +25,14 @@ function buildCtx(overrides) {
   var store = {};
   var ctx = vm.createContext({
     walletAddress: '0xPersonal000000000000000000000000000000001',
-    AgentWalletManager: {
-      getAgentAddress: function() { return '0xAgentEOA00000000000000000000000000000001'; },
-      isPaused: function() { return false; },
-      getReputationScore: function() { return 95; }
+    // Circle Wallet is the canonical agent identity — AgentWalletManager is internal only
+    CircleAgent: {
+      getStatus: async function() { return { walletAddress: '0xCircle000000000000000000000000000000CAFE', wallet: { state: 'LIVE' } }; },
+      getBalance: async function() { return { tokenBalances: [] }; },
+      formatBalance: function() { return {}; },
+      getCachedAddress: function() { return '0xCircle000000000000000000000000000000CAFE'; }
     },
     AgentAuthorization: null,
-    CircleAgent: null,
     AutonomaAgentBrain: null,
     FinancialContext: null,
     AutonomaCore: null,
@@ -116,7 +117,7 @@ describe('buildBalanceSurface: CircleAgent canonical', function() {
     assert.ok(html.includes('CANONICAL'), 'CANONICAL badge required');
   });
 
-  it('shows Agent EOA Wallet as secondary section', async function() {
+  it('does NOT show Agent EOA Wallet — Circle Wallet is the only agent identity', async function() {
     var ctx = buildCtx({
       CircleAgent: {
         getStatus: async function() { return { walletAddress: '0xCAFE', wallet: { state: 'LIVE' } }; },
@@ -127,8 +128,10 @@ describe('buildBalanceSurface: CircleAgent canonical', function() {
     });
     loadRouter(ctx);
     var html = await ctx.AgentCapabilityRouter.buildBalanceSurface();
-    assert.ok(html.includes('Agent EOA Wallet'), 'must show Agent EOA section');
-    assert.ok(html.includes('0xAgentEOA'), 'must show EOA address');
+    assert.ok(!html.includes('Agent EOA'), 'Agent EOA must NOT appear in balance surface');
+    assert.ok(!html.includes('AgentWalletManager'), 'AgentWalletManager must NOT appear in UI');
+    // Circle Wallet should be shown
+    assert.ok(html.includes('Circle Agent Wallet'), 'Circle Agent Wallet must be shown');
   });
 
   it('does NOT show "Connect your wallet to see balances" when CircleAgent has data', async function() {
@@ -160,7 +163,7 @@ describe('buildBalanceSurface: CircleAgent canonical', function() {
   });
 
   it('shows fallback message when nothing is configured', async function() {
-    var ctx = buildCtx({ CircleAgent: null, AgentWalletManager: null, walletAddress: null });
+    var ctx = buildCtx({ CircleAgent: null, walletAddress: null });
     loadRouter(ctx);
     var html = await ctx.AgentCapabilityRouter.buildBalanceSurface();
     assert.ok(html.includes('wallet') || html.includes('balance') || html.includes('connect'), 'must show some guidance');

@@ -8,7 +8,7 @@
  *
  * It reuses (never duplicates) the existing modules:
  *   - AutonomaNLU / AutonomaCore / AutonomaLLM    (understand)
- *   - FinancialContext / AgentWalletManager / AgentSession / AgentAuthorization (context)
+ *   - FinancialContext / CircleAgent / AgentSession / AgentAuthorization (context)
  *   - ExecutionPlanner (plan)
  *   - AgentAuthorization / PolicyEngine / RiskEngine (policy)
  *   - the existing intent router (execute, injected as runtime.executeIntent)
@@ -210,10 +210,11 @@
   function buildContext(understanding, runtime) {
     runtime = runtime || {};
     var FC = mod('FinancialContext');
-    var AWM = mod('AgentWalletManager');
     var AA = mod('AgentAuthorization');
     var AS = mod('AgentSession');
     var Core = mod('AutonomaCore');
+    // Circle Wallet is the sole canonical agent identity
+    var CA = mod('CircleAgent');
 
     var ctx = {
       conversation: null,
@@ -235,9 +236,12 @@
       if (typeof window !== 'undefined' && window.activeChainId) ctx.network = { chainId: window.activeChainId };
     } catch (e) {}
 
-    // agent wallet
-    if (AWM) {
-      try { if (typeof AWM.getAgentAddress === 'function') ctx.agentWallet = { address: AWM.getAgentAddress() }; } catch (e) {}
+    // agent wallet — Circle Wallet only
+    if (CA) {
+      try {
+        var caAddr = typeof CA.getCachedAddress === 'function' ? CA.getCachedAddress() : null;
+        if (caAddr) ctx.agentWallet = { address: caAddr, type: 'circle' };
+      } catch (e) {}
     }
 
     // financial state / world state

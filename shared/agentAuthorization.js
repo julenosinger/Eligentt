@@ -82,7 +82,7 @@
       allowScheduled:opts.allowScheduled===true,
       // Meta
       grantedBy:opts.grantedBy||(typeof walletAddress!=='undefined'?walletAddress:null),
-      agentWallet:opts.agentWallet||(typeof AgentWalletManager!=='undefined'?AgentWalletManager.getAgentAddress():null),
+      agentWallet:opts.agentWallet||(typeof CircleAgent!=='undefined'&&CircleAgent.getCachedAddress?CircleAgent.getCachedAddress():null),
       purpose:opts.purpose||'',
       grantedAt:now, lastUsed:null,
       onChainAuthId:opts.onChainAuthId||null,

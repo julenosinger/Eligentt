@@ -433,7 +433,7 @@
      ──────────────────────────────────────────────────────────
      Priority order:
        1. CircleAgent (real Circle Developer Wallet via /api/agent)
-       2. AgentWalletManager (local EOA agent wallet on Arc)
+       2. Connected personal wallet (secondary, shown separately)
        3. FinancialContext / AutonomaCore world-state snapshot
        4. Connected personal wallet (walletAddress)
      ══════════════════════════════════════════════════════════ */
@@ -491,28 +491,10 @@
       }
     } catch (e) {}
 
-    /* ── 2. AgentWalletManager EOA (local arc agent wallet) ─────── */
-    try {
-      var AWM = mod('AgentWalletManager');
-      if (AWM && typeof AWM.getAgentAddress === 'function') {
-        var aAddr = AWM.getAgentAddress();
-        if (aAddr) {
-          var aShort = shortAddr(aAddr);
-          var aStatus = (typeof AWM.isPaused === 'function' && AWM.isPaused()) ? 'Paused' : 'Active';
-          var aStatusColor = aStatus === 'Active' ? 'var(--green)' : 'var(--yellow)';
-          sections.push(
-            '<div class="das-balance" style="border-color:rgba(167,139,250,.25);background:rgba(167,139,250,.04)">' +
-              '<div class="das-balance-header" style="color:var(--purple)"><i class="ti ti-robot"></i> Agent EOA Wallet</div>' +
-              '<div class="das-balance-addr"><code style="font-size:9px">' + esc(aAddr) + '</code></div>' +
-              '<div class="das-bal-row"><span class="das-bal-tok">Status</span><span class="das-bal-val" style="color:' + aStatusColor + '">' + aStatus + '</span></div>' +
-              '<div style="font-size:8.5px;color:var(--muted2);margin-top:4px">Arc Mainnet · Signing wallet for on-chain ops</div>' +
-            '</div>'
-          );
-        }
-      }
-    } catch (e) {}
-
-    /* ── 3. Connected personal wallet ────────────────────────────── */
+    /* ── 2. Connected personal wallet ───────────────────────────────
+       (Agent EOA / AgentWalletManager removed — Circle Wallet is the
+        sole canonical agent identity. The EOA is an internal signer
+        and must never appear in the Agent UI.) */
     try {
       var connAddr = (typeof window !== 'undefined') ? window.walletAddress : null;
       if (connAddr && connAddr !== (sections.length ? null : connAddr)) {
@@ -540,7 +522,7 @@
       sections.push(
         '<div class="das-balance">' +
           '<div class="das-balance-header"><i class="ti ti-wallet"></i> Wallet Balance</div>' +
-          '<div style="color:var(--muted2);font-size:10px;padding:4px 0">Connect your wallet or configure the Circle Agent Wallet to see balances.</div>' +
+          '<div style="color:var(--muted2);font-size:10px;padding:4px 0">Connect your wallet or configure the Circle Agent in settings to see balances.</div>' +
         '</div>'
       );
     }

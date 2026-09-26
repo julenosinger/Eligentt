@@ -37,7 +37,8 @@ function buildContext(overrides) {
   var ctx = vm.createContext({
     // stubs
     walletAddress: null,
-    AgentWalletManager: { getAgentAddress: function(){ return null; } },
+    // Circle Wallet is now the canonical agent identity — no AgentWalletManager
+    CircleAgent: { getCachedAddress: function(){ return '0xCircle0000000000000000000000000000000001'; } },
     AgentAuthorization: null,
     AgentCapabilityRouter: null,
     AutonomaAgentBrain: null,
