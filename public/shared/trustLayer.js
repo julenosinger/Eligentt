@@ -9,8 +9,11 @@
 
   /* ── Build trust metadata for a workflow execution ── */
   function buildTrustLayer(opts){
-    var agentWallet=typeof AgentWalletManager!=='undefined'?AgentWalletManager.getAgentAddress():null;
-    var agentId=typeof AgentWalletManager!=='undefined'?AgentWalletManager.getAgentId():null;
+    // Agent identity: Circle Wallet address is canonical; ERC-8004 token from AgentIdentity.
+    var agentWallet=null;
+    try { if(typeof CircleAgent!=='undefined'&&CircleAgent.getCachedAddress) agentWallet=CircleAgent.getCachedAddress(); } catch(_e){}
+    var agentId=null;
+    try { if(typeof AgentIdentity!=='undefined'&&AgentIdentity.getTokenId) agentId=AgentIdentity.getTokenId(); } catch(_e){}
     var identity=typeof AgentIdentity!=='undefined'?AgentIdentity.getDisplayIdentity():null;
     var reputation=typeof AgentReputation!=='undefined'?AgentReputation.getReputation():null;
     var authId=typeof AgentSession!=='undefined'?AgentSession.getAuthorizationId():null;

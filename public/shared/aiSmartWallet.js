@@ -192,12 +192,9 @@
     }, 0);
   }
   function agentAddr() {
-    try {
-      if (typeof AgentWalletManager !== 'undefined' && AgentWalletManager.getAgentAddress) {
-        return AgentWalletManager.getAgentAddress() || null;
-      }
-    } catch (_e) { /* ignore */ }
-    return null;
+    // Circle Wallet is the canonical Agent identity.
+    // AgentWalletManager.getAgentAddress() is intentionally not used here.
+    return circleWalletAddr();
   }
   /* Canonical Circle agent wallet — the AI Smart Wallet is backed by this
      server-side Circle wallet (mainnet). Never substituted by a local key. */
@@ -222,19 +219,10 @@
     try {
       if (typeof getActiveChain === 'function' && getActiveChain() && getActiveChain().rpc) return getActiveChain().rpc;
     } catch (_e) { /* ignore */ }
-    try {
-      if (typeof AgentWalletManager !== 'undefined' && AgentWalletManager.ARC_RPC) return AgentWalletManager.ARC_RPC;
-    } catch (_e) { /* ignore */ }
     return 'https://rpc.mainnet.arc.io';
   }
   function getProvider() {
     if (typeof ethers === 'undefined') return null;
-    try {
-      if (typeof AgentWalletManager !== 'undefined' && AgentWalletManager.getAgentProvider) {
-        var agentProv = AgentWalletManager.getAgentProvider();
-        if (agentProv) return agentProv;
-      }
-    } catch (_e) { /* ignore */ }
     try {
       if (typeof RPCManager !== 'undefined' && RPCManager.getHealthyRPC) {
         var r = RPCManager.getCurrentProvider();
@@ -381,13 +369,10 @@
 
     /* 10. Schedule / executor readiness */
     nextStage('Schedule Engine', 'Checking agent executor readiness');
-    var agentReady = false, agentReason = 'Agent Wallet unavailable';
+    var agentReady = false, agentReason = 'Circle Agent Wallet not configured';
     try {
-      if (typeof AgentWalletManager !== 'undefined') {
-        if (AgentWalletManager.isPaused && AgentWalletManager.isPaused()) agentReason = 'Agent Wallet is paused';
-        else if (!agentAddr()) agentReason = 'Agent Wallet not created yet';
-        else { agentReady = true; agentReason = 'Agent ' + short(agentAddr()) + ' ready'; }
-      }
+      var _cAddr = agentAddr(); // circleWalletAddr()
+      if (_cAddr) { agentReady = true; agentReason = 'Circle Agent ' + short(_cAddr) + ' ready'; }
     } catch (e) { agentReason = 'Agent check error: ' + (e.message || e); }
     add('Schedule Engine', agentReady && typeof ScheduleEngine !== 'undefined', agentReady ? (typeof ScheduleEngine !== 'undefined' ? agentReason : 'ScheduleEngine unavailable') : agentReason);
     doneStage('Schedule Engine', agentReady, '');
@@ -1006,19 +991,34 @@
   }
 
   async function agentSend(token, amount, to, kind) {
-    if (typeof AgentWalletManager === 'undefined' || !AgentWalletManager.getAgentSigner) { notify('Agent Wallet unavailable', 'error'); return; }
+    // Identity: Circle Wallet is the canonical agent.
+    // Signing: SecureSignerProvider (Circle mode) or AgentWalletManager (browser/dev fallback).
+    // The identity check uses circleWalletAddr(), never AgentWalletManager.getAgentAddress().
+    if (!agentAddr()) { notify('Circle Agent Wallet not configured', 'error'); return; }
     if (!to || (typeof ethers !== 'undefined' && !ethers.isAddress(to))) { notify(kind === 'vault' ? 'Treasury Vault address unavailable' : 'Enter a valid destination address', 'error'); return; }
     const isSelfWithdraw = kind === 'withdraw' && personalAddr() && to.toLowerCase() === String(personalAddr()).toLowerCase();
     if (emergencyStop && !isSelfWithdraw) { notify('Emergency Stop active — only withdrawals to your own Personal Wallet are allowed', 'error'); return; }
-    if (AgentWalletManager.isPaused && AgentWalletManager.isPaused() && !isSelfWithdraw) { notify('AI Wallet is paused — resume it in Security or withdraw to your own wallet', 'error'); return; }
+    // Pause check via SecureSignerProvider (Circle mode) or AWM (dev fallback) — does NOT affect identity
+    var _isPaused = false;
+    try {
+      if (typeof SecureSignerProvider !== 'undefined' && SecureSignerProvider.isPaused) _isPaused = SecureSignerProvider.isPaused();
+      else if (typeof AgentWalletManager !== 'undefined' && AgentWalletManager.isPaused) _isPaused = AgentWalletManager.isPaused();
+    } catch (_e) {}
+    if (_isPaused && !isSelfWithdraw) { notify('Circle Agent is paused — resume it in Security or withdraw to your own wallet', 'error'); return; }
     const meta = arcTokens()[token];
     if (!meta) { notify('Token not supported on Arc', 'error'); return; }
     try {
       const bal = await tokenBalance(agentAddr(), token);
       if (bal === null) { notify('Balance check failed (RPC) — aborting', 'error'); return; }
-      if (bal < amount) { notify('Insufficient AI Wallet balance: ' + bal.toFixed(4) + ' ' + token, 'error'); return; }
-      const aSigner = AgentWalletManager.getAgentSigner();
-      if (!aSigner) { notify('Agent signer unavailable', 'error'); return; }
+      if (bal < amount) { notify('Insufficient Circle Agent balance: ' + bal.toFixed(4) + ' ' + token, 'error'); return; }
+      // Resolve signer: Circle mode (SecureSignerProvider) → dev/browser fallback (AgentWalletManager)
+      var aSigner = null;
+      if (typeof SecureSignerProvider !== 'undefined' && SecureSignerProvider.isCircleMode && SecureSignerProvider.isCircleMode()) {
+        aSigner = await SecureSignerProvider.getSigner();
+      } else if (typeof AgentWalletManager !== 'undefined' && AgentWalletManager.getAgentSigner) {
+        aSigner = AgentWalletManager.getAgentSigner();
+      }
+      if (!aSigner) { notify('Agent signer unavailable — configure Circle Agent or enable browser wallet signing', 'error'); return; }
       const c = new ethers.Contract(meta.address, ERC20_ABI, aSigner);
       // [A6 FIX] Gas limit enforcement
       var agCheck = await _estimateGasSafe(c, 'transfer', [to, ethers.parseUnits(String(amount), meta.decimals || 6)]);
@@ -1109,7 +1109,10 @@
     try { if (typeof activeWalletType !== 'undefined' && activeWalletType) wtype = ' · ' + activeWalletType; } catch (_e) { /* ignore */ }
     const a = agentAddr();
     let paused = false;
-    try { paused = typeof AgentWalletManager !== 'undefined' && AgentWalletManager.isPaused && AgentWalletManager.isPaused(); } catch (_e) { /* ignore */ }
+    try {
+      if (typeof SecureSignerProvider !== 'undefined' && SecureSignerProvider.isPaused) paused = SecureSignerProvider.isPaused();
+      else if (typeof AgentWalletManager !== 'undefined' && AgentWalletManager.isPaused) paused = AgentWalletManager.isPaused();
+    } catch (_e) { /* ignore */ }
     function wRow(label, connected, detail, extra) {
       return '<div style="display:flex;align-items:center;gap:8px;padding:7px 9px;border:1px solid var(--border);border-radius:6px;margin-bottom:6px;background:rgba(0,0,0,.15)">' +
         '<span style="width:8px;height:8px;border-radius:50%;flex-shrink:0;background:' + (connected ? 'var(--green)' : 'var(--muted)') + '"></span>' +
@@ -1205,17 +1208,24 @@
      SECURITY CENTER — engine status, pause AI wallet, sessions
      ══════════════════════════════════════════════════════════════════ */
   function togglePauseAgent() {
-    if (typeof AgentWalletManager === 'undefined') return;
+    // Pause/resume the execution layer. Identity (Circle Wallet) is unaffected.
     try {
-      if (AgentWalletManager.isPaused()) {
+      var _paused = false;
+      try {
+        if (typeof SecureSignerProvider !== 'undefined' && SecureSignerProvider.isPaused) _paused = SecureSignerProvider.isPaused();
+        else if (typeof AgentWalletManager !== 'undefined' && AgentWalletManager.isPaused) _paused = AgentWalletManager.isPaused();
+      } catch (_e) {}
+      if (_paused) {
         if (emergencyStop) { notify('Lift Emergency Stop before resuming', 'error'); return; }
-        AgentWalletManager.resume();
+        if (typeof SecureSignerProvider !== 'undefined' && SecureSignerProvider.resume) SecureSignerProvider.resume();
+        else if (typeof AgentWalletManager !== 'undefined' && AgentWalletManager.resume) AgentWalletManager.resume();
         pushHistory({ kind: 'security', status: 'ai_wallet_resumed' });
-        notify('AI Wallet resumed', 'success');
+        notify('Circle Agent resumed', 'success');
       } else {
-        AgentWalletManager.pause();
+        if (typeof SecureSignerProvider !== 'undefined' && SecureSignerProvider.pause) SecureSignerProvider.pause();
+        else if (typeof AgentWalletManager !== 'undefined' && AgentWalletManager.pause) AgentWalletManager.pause();
         pushHistory({ kind: 'security', status: 'ai_wallet_paused' });
-        notify('AI Wallet paused — autonomous executions halted', 'info');
+        notify('Circle Agent paused — autonomous executions halted', 'info');
       }
     } catch (e) { notify('Pause toggle failed: ' + (e.message || e), 'error'); }
     renderStatus(); renderSecurityCenter(); renderWalletManager(); renderAgentInfo(); renderHistory();
@@ -1245,14 +1255,17 @@
         engRow('Permission Engine', permOk, permDetail) +
         engRow('Policy Engine', polOk, polDetail) +
         engRow('Risk Engine', riskOk, riskOk ? 'max accepted: ' + settings.maxRisk : 'unavailable') +
-        engRow('Schedule Engine', schedOk, schedOk ? 'executor: existing Agent Wallet scheduler' : 'unavailable') +
+        engRow('Schedule Engine', schedOk, schedOk ? 'executor: Circle Agent scheduler' : 'unavailable') +
         engRow('Audit Trail', audOk, audDetail);
     }
     const pauseBtn = $id('aiw-sec-pause-btn');
     if (pauseBtn) {
       let paused = false;
-      try { paused = typeof AgentWalletManager !== 'undefined' && AgentWalletManager.isPaused(); } catch (_e) { /* ignore */ }
-      pauseBtn.innerHTML = paused ? '<i class="ti ti-player-play"></i>Resume AI Wallet' : '<i class="ti ti-player-pause"></i>Pause AI Wallet';
+      try {
+        if (typeof SecureSignerProvider !== 'undefined' && SecureSignerProvider.isPaused) paused = SecureSignerProvider.isPaused();
+        else if (typeof AgentWalletManager !== 'undefined' && AgentWalletManager.isPaused) paused = AgentWalletManager.isPaused();
+      } catch (_e) { /* ignore */ }
+      pauseBtn.innerHTML = paused ? '<i class="ti ti-player-play"></i>Resume Circle Agent' : '<i class="ti ti-player-pause"></i>Pause Circle Agent';
       pauseBtn.style.color = paused ? 'var(--green)' : 'var(--yellow)';
       pauseBtn.style.borderColor = paused ? 'rgba(34,197,94,.4)' : 'rgba(245,158,11,.4)';
     }
@@ -1260,14 +1273,11 @@
     if (sess) {
       let html = '';
       try {
-        if (typeof AgentWalletManager !== 'undefined' && AgentWalletManager.getSecureWalletSummary) {
-          const s = AgentWalletManager.getSecureWalletSummary() || {};
-          Object.keys(s).slice(0, 6).forEach(function (k) {
-            const v = s[k];
-            if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
-              html += '<div style="display:flex;justify-content:space-between;font-size:9px;padding:2px 0"><span style="color:var(--muted2)">' + esc(k) + '</span><span style="color:var(--text)">' + esc(String(v)) + '</span></div>';
-            }
-          });
+        // Show Circle Agent session summary — no AWM-specific keys exposed
+        const cAddr = agentAddr();
+        if (cAddr) {
+          html += '<div style="display:flex;justify-content:space-between;font-size:9px;padding:2px 0"><span style="color:var(--muted2)">Circle Wallet</span><span style="color:#2775ca;font-family:monospace">' + esc(short(cAddr)) + '</span></div>';
+          html += '<div style="display:flex;justify-content:space-between;font-size:9px;padding:2px 0"><span style="color:var(--muted2)">Identity</span><span style="color:var(--green)">Canonical</span></div>';
         }
       } catch (_e) { /* ignore */ }
       if (!html) html = '<div style="font-size:9px;color:var(--muted2)">Session details unavailable.</div>';
@@ -1605,7 +1615,12 @@
     }, 0);
     let healthPts = 0;
     try { if (agentAddr()) healthPts += 25; } catch (_e) { /* ignore */ }
-    try { if (typeof AgentWalletManager !== 'undefined' && !AgentWalletManager.isPaused()) healthPts += 20; } catch (_e) { /* ignore */ }
+    try {
+      var _hPaused = false;
+      if (typeof SecureSignerProvider !== 'undefined' && SecureSignerProvider.isPaused) _hPaused = SecureSignerProvider.isPaused();
+      else if (typeof AgentWalletManager !== 'undefined' && AgentWalletManager.isPaused) _hPaused = AgentWalletManager.isPaused();
+      if (!_hPaused && agentAddr()) healthPts += 20;
+    } catch (_e) { /* ignore */ }
     try { if (typeof AgentAuthorization !== 'undefined' && AgentAuthorization.getAuthSummary().hasAuthorization) healthPts += 20; } catch (_e) { /* ignore */ }
     if (!emergencyStop) healthPts += 15;
     if (nativeCache.bal !== null && nativeCache.bal >= gasCfg.minReserve) healthPts += 20;
@@ -2135,7 +2150,10 @@
     const done = intents.filter(function (i) { return i.status === 'executed'; }).length;
     const pendAppr = approvals.filter(function (a) { return a.status === 'pending'; }).length;
     let paused = false;
-    try { paused = typeof AgentWalletManager !== 'undefined' && AgentWalletManager.isPaused(); } catch (_e) { /* ignore */ }
+    try {
+      if (typeof SecureSignerProvider !== 'undefined' && SecureSignerProvider.isPaused) paused = SecureSignerProvider.isPaused();
+      else if (typeof AgentWalletManager !== 'undefined' && AgentWalletManager.isPaused) paused = AgentWalletManager.isPaused();
+    } catch (_e) { /* ignore */ }
     const upcoming = activeScheds.filter(function (s) { return s.nextRun; })
       .sort(function (a, b) { return new Date(a.nextRun) - new Date(b.nextRun); }).slice(0, 3);
     const recentTx = history.filter(function (h) { return h.txHash; }).slice(0, 3);
@@ -2743,19 +2761,16 @@
   function renderStatus() {
     const el = $id('aiw-status-bar');
     if (!el) return;
-    let agentOk = false, paused = false, rep = null;
+    let agentOk = false, paused = false;
     try {
-      if (typeof AgentWalletManager !== 'undefined') {
-        agentOk = !!agentAddr();
-        paused = AgentWalletManager.isPaused && AgentWalletManager.isPaused();
-        rep = AgentWalletManager.getReputationScore ? AgentWalletManager.getReputationScore() : null;
-      }
+      agentOk = !!agentAddr(); // uses circleWalletAddr() — canonical identity
+      if (typeof SecureSignerProvider !== 'undefined' && SecureSignerProvider.isPaused) paused = SecureSignerProvider.isPaused();
+      else if (typeof AgentWalletManager !== 'undefined' && AgentWalletManager.isPaused) paused = AgentWalletManager.isPaused();
     } catch (_e) { /* ignore */ }
     el.innerHTML =
       chip('Mode: ' + mode.toUpperCase(), mode === 'personal' ? 'var(--muted2)' : 'var(--purple)') +
       chip(emergencyStop ? 'EMERGENCY STOP' : 'Operational', emergencyStop ? 'var(--red)' : 'var(--green)') +
-      chip(agentOk ? 'Agent ' + short(agentAddr()) + (paused ? ' (paused)' : ' active') : 'Agent not created', agentOk && !paused ? 'var(--green)' : 'var(--yellow)') +
-      (rep !== null ? chip('Reputation ' + rep, 'var(--blue)') : '') +
+      chip(agentOk ? 'Circle Agent ' + short(agentAddr()) + (paused ? ' (paused)' : ' active') : 'Circle Agent not configured', agentOk && !paused ? 'var(--green)' : 'var(--yellow)') +
       chip('v' + VERSION, 'var(--muted2)');
     const modeSel = $id('aiw-mode');
     if (modeSel && modeSel.value !== mode) modeSel.value = mode;
@@ -2925,20 +2940,22 @@
   function renderAgentInfo() {
     const box = $id('aiw-agent-body');
     if (!box) return;
-    if (typeof AgentWalletManager === 'undefined') { box.innerHTML = '<div style="font-size:9.5px;color:var(--muted2)">AgentWalletManager unavailable.</div>'; return; }
     try {
-      const addr = agentAddr();
-      const paused = AgentWalletManager.isPaused && AgentWalletManager.isPaused();
-      const rep = AgentWalletManager.getReputationScore ? AgentWalletManager.getReputationScore() : '—';
-      const chains = AgentWalletManager.getSupportedChains ? AgentWalletManager.getSupportedChains() : [];
+      const addr = agentAddr(); // circleWalletAddr() — Circle Wallet is the canonical identity
+      if (!addr) {
+        box.innerHTML = '<div style="font-size:9.5px;color:var(--muted2)">Circle Agent Wallet not yet configured. Set up the Circle Agent in settings to enable AI Smart Wallet execution.</div>';
+        return;
+      }
+      // Auth summary
+      var authCount = 0;
+      try { if (typeof AgentAuthorization !== 'undefined') authCount = (AgentAuthorization.getActive() || []).length; } catch (_e) {}
       box.innerHTML =
         '<div style="font-size:9.5px;display:flex;flex-direction:column;gap:5px">' +
-        '<div style="display:flex;justify-content:space-between"><span style="color:var(--muted2)">Address</span><span style="color:var(--text);font-family:monospace">' + (addr ? esc(short(addr)) : 'not created') + '</span></div>' +
-        '<div style="display:flex;justify-content:space-between"><span style="color:var(--muted2)">Status</span><span style="color:' + (paused ? 'var(--yellow)' : 'var(--green)') + '">' + (paused ? 'Paused' : 'Active') + '</span></div>' +
-        '<div style="display:flex;justify-content:space-between"><span style="color:var(--muted2)">Reputation</span><span style="color:var(--text)">' + esc(String(rep)) + '</span></div>' +
+        '<div style="display:flex;justify-content:space-between"><span style="color:var(--muted2)">Circle Wallet</span><span style="color:#2775ca;font-family:monospace">' + esc(short(addr)) + '</span></div>' +
+        '<div style="display:flex;justify-content:space-between"><span style="color:var(--muted2)">Type</span><span style="color:var(--text)">Circle Developer Wallet</span></div>' +
         '<div style="display:flex;justify-content:space-between"><span style="color:var(--muted2)">Execution chain</span><span style="color:var(--text)">Arc Mainnet · 5042</span></div>' +
-        '<div style="display:flex;justify-content:space-between"><span style="color:var(--muted2)">Supported chains</span><span style="color:var(--text)">' + (chains.length || 1) + '</span></div>' +
-        '</div><div style="font-size:8px;color:var(--muted2);margin-top:7px">Managed by the existing AgentWalletManager. The AI Smart Wallet never stores or exports keys.</div>';
+        '<div style="display:flex;justify-content:space-between"><span style="color:var(--muted2)">Active authorizations</span><span style="color:' + (authCount > 0 ? 'var(--green)' : 'var(--muted2)') + '">' + authCount + '</span></div>' +
+        '</div><div style="font-size:8px;color:var(--muted2);margin-top:7px">Circle Agent Wallet. The AI Smart Wallet never stores or exports keys — all execution is gated by AgentAuthorization.</div>';
     } catch (e) {
       box.innerHTML = '<div style="font-size:9.5px;color:var(--red)">Agent info error: ' + esc(e.message || e) + '</div>';
     }

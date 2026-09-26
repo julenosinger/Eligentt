@@ -192,12 +192,8 @@
     }, 0);
   }
   function agentAddr() {
-    try {
-      if (typeof AgentWalletManager !== 'undefined' && AgentWalletManager.getAgentAddress) {
-        return AgentWalletManager.getAgentAddress() || null;
-      }
-    } catch (_e) { /* ignore */ }
-    return null;
+    // Circle Wallet is the canonical agent address — AgentWalletManager.getAgentAddress() is not used here.
+    return circleWalletAddr();
   }
   /* Canonical Circle agent wallet — the AI Smart Wallet is backed by this
      server-side Circle wallet (mainnet). Never substituted by a local key. */
@@ -1006,18 +1002,25 @@
   }
 
   async function agentSend(token, amount, to, kind) {
-    if (typeof AgentWalletManager === 'undefined' || !AgentWalletManager.getAgentSigner) { notify('Agent Wallet unavailable', 'error'); return; }
+    // Identity check uses Circle Wallet; signer resolved below via SecureSignerProvider → AWM fallback
+    if (!circleWalletAddr()) { notify('Circle Agent Wallet unavailable — connect Circle Wallet first', 'error'); return; }
     if (!to || (typeof ethers !== 'undefined' && !ethers.isAddress(to))) { notify(kind === 'vault' ? 'Treasury Vault address unavailable' : 'Enter a valid destination address', 'error'); return; }
     const isSelfWithdraw = kind === 'withdraw' && personalAddr() && to.toLowerCase() === String(personalAddr()).toLowerCase();
     if (emergencyStop && !isSelfWithdraw) { notify('Emergency Stop active — only withdrawals to your own Personal Wallet are allowed', 'error'); return; }
-    if (AgentWalletManager.isPaused && AgentWalletManager.isPaused() && !isSelfWithdraw) { notify('AI Wallet is paused — resume it in Security or withdraw to your own wallet', 'error'); return; }
+    var _isPaused2 = false;
+    try { if(typeof SecureSignerProvider!=='undefined'&&SecureSignerProvider.isPaused) _isPaused2=SecureSignerProvider.isPaused(); } catch(_pe){}
+    try { if(!_isPaused2&&typeof AgentWalletManager!=='undefined'&&AgentWalletManager.isPaused) _isPaused2=AgentWalletManager.isPaused(); } catch(_pe){}
+    if (_isPaused2 && !isSelfWithdraw) { notify('Circle Agent is paused — resume it in Security or withdraw to your own wallet', 'error'); return; }
     const meta = arcTokens()[token];
     if (!meta) { notify('Token not supported on Arc', 'error'); return; }
     try {
       const bal = await tokenBalance(agentAddr(), token);
       if (bal === null) { notify('Balance check failed (RPC) — aborting', 'error'); return; }
-      if (bal < amount) { notify('Insufficient AI Wallet balance: ' + bal.toFixed(4) + ' ' + token, 'error'); return; }
-      const aSigner = AgentWalletManager.getAgentSigner();
+      if (bal < amount) { notify('Insufficient Circle Agent balance: ' + bal.toFixed(4) + ' ' + token, 'error'); return; }
+      // Resolve signer: SecureSignerProvider (Circle mode) → AWM (dev fallback)
+      let aSigner = null;
+      try { if(typeof SecureSignerProvider!=='undefined'&&SecureSignerProvider.getSigner) aSigner=await SecureSignerProvider.getSigner(); } catch(_se){}
+      if(!aSigner && typeof AgentWalletManager!=='undefined'&&AgentWalletManager.getAgentSigner) aSigner=AgentWalletManager.getAgentSigner();
       if (!aSigner) { notify('Agent signer unavailable', 'error'); return; }
       const c = new ethers.Contract(meta.address, ERC20_ABI, aSigner);
       // [A6 FIX] Gas limit enforcement
@@ -1260,13 +1263,13 @@
     if (sess) {
       let html = '';
       try {
-        if (typeof AgentWalletManager !== 'undefined' && AgentWalletManager.getSecureWalletSummary) {
-          const s = AgentWalletManager.getSecureWalletSummary() || {};
-          Object.keys(s).slice(0, 6).forEach(function (k) {
-            const v = s[k];
-            if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
-              html += '<div style="display:flex;justify-content:space-between;font-size:9px;padding:2px 0"><span style="color:var(--muted2)">' + esc(k) + '</span><span style="color:var(--text)">' + esc(String(v)) + '</span></div>';
-            }
+        // Circle Agent status summary — built from CircleAgent, not AgentWalletManager
+        var _cAddr = circleWalletAddr();
+        if (_cAddr) {
+          var _summary = { wallet: _cAddr, type: 'Circle Agent', status: 'active' };
+          Object.keys(_summary).forEach(function (k) {
+            var v = _summary[k];
+            html += '<div style="display:flex;justify-content:space-between;font-size:9px;padding:2px 0"><span style="color:var(--muted2)">' + esc(k) + '</span><span style="color:var(--text)">' + esc(String(v)) + '</span></div>';
           });
         }
       } catch (_e) { /* ignore */ }
@@ -3309,6 +3312,29 @@
       var total = 0; var wals = [];
       portfolioCache.rows.forEach(function(r) { total += r.totalUsd; wals.push(r); });
       return { totalUsd: total, wallets: wals, cacheAge: Date.now() - portfolioCache.at };
+    },
+    _vaultView: function(token) { return vaultView(token || 'USDC'); },
+    _getGasCfg: function() { return gasCfg; },
+    _getGasStatus: function() { return gasStatus(false); },
+    _getGasLog: function() { return gasLog.slice(); },
+    _getLimits: function() { return Object.assign({}, limits); },
+    _getSpendingCapacity: function() {
+      var spent = spentUsdSince(86400000);
+      var vv = vaultView('USDC');
+      return {
+        dailyLimit: limits.dailyUsd,
+        spentToday: spent,
+        remaining: Math.max(0, limits.dailyUsd - spent),
+        perOpMax: limits.perOpUsd,
+        monthlyLimit: limits.monthlyUsd,
+        spentMonth: spentUsdSince(2592000000),
+        operationalUSDC: vv.operational,
+        gasBalance: nativeCache.bal
+      };
+    }
+  };
+})();
+alUsd: total, wallets: wals, cacheAge: Date.now() - portfolioCache.at };
     },
     _vaultView: function(token) { return vaultView(token || 'USDC'); },
     _getGasCfg: function() { return gasCfg; },

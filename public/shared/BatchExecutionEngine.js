@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Batch Execution Engine ÔÇö Auto-Execution Layer for Multisend & Batch Intents
  * ADDITIVE module ÔÇö zero modifications to existing systems.
  *
@@ -57,10 +57,16 @@
     try { return typeof ScheduleEngine !== 'undefined'; } catch (e) { return false; }
   }
   function hasAgentWallet() {
+    // Identity check: Circle Wallet is canonical. AWM.isPaused() is a secondary execution-layer guard.
     try {
-      return typeof AgentWalletManager !== 'undefined' &&
-             !AgentWalletManager.isPaused() &&
-             AgentWalletManager.getAgentAddress();
+      var circleAddr = (typeof CircleAgent !== 'undefined' && CircleAgent.getCachedAddress)
+        ? CircleAgent.getCachedAddress() : null;
+      if (!circleAddr) return false;
+      // Honour execution-layer pause state without using AWM as identity
+      var paused = false;
+      try { if (typeof SecureSignerProvider !== 'undefined' && SecureSignerProvider.isPaused) paused = SecureSignerProvider.isPaused(); } catch(_e){}
+      try { if (!paused && typeof AgentWalletManager !== 'undefined' && AgentWalletManager.isPaused) paused = AgentWalletManager.isPaused(); } catch(_e){}
+      return !paused;
     } catch (e) { return false; }
   }
   function isEmergencyStopped() {

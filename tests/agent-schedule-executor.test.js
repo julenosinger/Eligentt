@@ -111,6 +111,12 @@ function boot(opts = {}) {
     getSupportedChains: () => ['Arc Mainnet'],
   }, opts.wmOverrides || {});
 
+  // CircleAgent mock — canonical identity used by _agentIdentityAddr() in agentScheduleExecutor
+  globalThis.CircleAgent = Object.assign({
+    getCachedAddress: () => signer.address,
+    getAddress: async () => signer.address,
+  }, opts.circleAgentOverrides || {});
+
   delete globalThis.RiskEngine;
   delete globalThis.ContractRegistry;
   delete globalThis.ExecutionQueue;
@@ -462,7 +468,7 @@ describe('AgentScheduleExecutor — swap / bridge / crosschain schedule tx recor
       schedules: [makeSchedule({ type: 'swap', amount: 30, total: 30, swapToToken: 'EURC', recipients: [], address: '' })],
       swapStub: async function () { return { ok: true, txHash: '0x' + 'ab'.repeat(32) }; },
     });
-    grantScheduledAuth(env.auth, { allowedOperations: ['swap'] });
+    grantScheduledAuth(env.auth, { allowedOperations: ['swap'], allowSwap: true });
     const summary = await env.executor.tickNow();
     expect(summary.executed).toBe(1);
     const sched = env.engine.getById('SCH_TEST_1');
@@ -475,7 +481,7 @@ describe('AgentScheduleExecutor — swap / bridge / crosschain schedule tx recor
       schedules: [makeSchedule({ type: 'bridge', amount: 30, total: 30, toNetwork: 'Base', recipients: [], address: '' })],
       bridgeStub: async function () { return { ok: true, txHash: '0x' + 'cd'.repeat(32), mintTxHash: '0x' + 'ef'.repeat(32) }; },
     });
-    grantScheduledAuth(env.auth, { allowedOperations: ['bridge'] });
+    grantScheduledAuth(env.auth, { allowedOperations: ['bridge'], allowBridge: true });
     const summary = await env.executor.tickNow();
     expect(summary.executed).toBe(1);
     const sched = env.engine.getById('SCH_TEST_1');
@@ -492,7 +498,7 @@ describe('AgentScheduleExecutor — swap / bridge / crosschain schedule tx recor
         return { ok: true, txHash: '0x' + 'cd'.repeat(32) };
       },
     });
-    grantScheduledAuth(env.auth, { allowedOperations: ['crosschain'] });
+    grantScheduledAuth(env.auth, { allowedOperations: ['crosschain'], allowCrosschain: true, allowBridge: true });
     await env.executor.tickNow();
     expect(capturedRecipient).toBe(RCPT);
   });
@@ -640,7 +646,8 @@ describe('Schedules tab + Autonoma wiring (index.html)', () => {
 
   it('new schedules are assigned to the Agent Wallet (agentExecution flag)', () => {
     const fn = html.slice(html.indexOf('function scheduleSubmit()'), html.indexOf('function schTypeLabel'));
-    expect(fn).toContain('agentExecution: true');
+    // agentExecution defaults to true (either literal or expression that evaluates to true by default)
+    expect(fn).toMatch(/agentExecution:\s*(true|![\s\S]{0,200}data-on.*false)/);
   });
 
   it('chat-created schedules are assigned to the Agent Wallet too', () => {

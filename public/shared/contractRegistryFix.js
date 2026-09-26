@@ -71,10 +71,9 @@
           walletAddress.toLowerCase() === addr) return true;
     } catch(e) {}
     try {
-      if (typeof AgentWalletManager !== 'undefined') {
-        var agent = AgentWalletManager.getAgentAddress();
-        if (agent && agent.toLowerCase() === addr) return true;
-      }
+      // Circle Wallet is the canonical agent identity
+      var _cAgent = (typeof CircleAgent !== 'undefined' && CircleAgent.getCachedAddress) ? CircleAgent.getCachedAddress() : null;
+      if (_cAgent && _cAgent.toLowerCase() === addr) return true;
     } catch(e) {}
     return false;
   }

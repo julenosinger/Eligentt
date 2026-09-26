@@ -73,11 +73,19 @@
     if(!session||isExpired()){
       session=defaultSession();
     }
-    // Sync agent wallet
-    if(typeof AgentWalletManager!=='undefined'){
-      session.agentWalletAddress=AgentWalletManager.getAgentAddress();
-      session.agentIdentityTokenId=AgentWalletManager.getAgentId();
-    }
+    // Sync agent wallet — Circle Wallet is the canonical identity
+    try {
+      if(typeof CircleAgent!=='undefined' && CircleAgent.getCachedAddress){
+        var _ca=CircleAgent.getCachedAddress();
+        if(_ca) session.agentWalletAddress=_ca;
+      }
+    } catch(_e){}
+    // ERC-8004 identity token ID (from AgentIdentity, not AWM)
+    try {
+      if(typeof AgentIdentity!=='undefined' && AgentIdentity.getTokenId){
+        session.agentIdentityTokenId=AgentIdentity.getTokenId();
+      }
+    } catch(_e){}
   }
 
   function save(){
@@ -93,9 +101,12 @@
 
   function touch(){
     session.lastActivity=Date.now();
-    if(typeof AgentWalletManager!=='undefined'){
-      session.agentWalletAddress=AgentWalletManager.getAgentAddress();
-    }
+    try {
+      if(typeof CircleAgent!=='undefined' && CircleAgent.getCachedAddress){
+        var _ta=CircleAgent.getCachedAddress();
+        if(_ta) session.agentWalletAddress=_ta;
+      }
+    } catch(_e){}
     save();
   }
 
@@ -195,14 +206,18 @@
   function pause(){
     session.status='paused';
     session.pausedAt=Date.now();
-    if(typeof AgentWalletManager!=='undefined') AgentWalletManager.pause();
+    // Propagate to execution layer (not identity)
+    try { if(typeof SecureSignerProvider!=='undefined' && SecureSignerProvider.pause) SecureSignerProvider.pause(); } catch(_e){}
+    try { if(typeof AgentWalletManager!=='undefined' && AgentWalletManager.pause) AgentWalletManager.pause(); } catch(_e){}
     save();
   }
 
   function resume(){
     session.status='active';
     session.pausedAt=null;
-    if(typeof AgentWalletManager!=='undefined') AgentWalletManager.resume();
+    // Propagate to execution layer (not identity)
+    try { if(typeof SecureSignerProvider!=='undefined' && SecureSignerProvider.resume) SecureSignerProvider.resume(); } catch(_e){}
+    try { if(typeof AgentWalletManager!=='undefined' && AgentWalletManager.resume) AgentWalletManager.resume(); } catch(_e){}
     save();
   }
 

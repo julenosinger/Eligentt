@@ -61,7 +61,7 @@
       chain:opts.chain||'Arc Mainnet',
       // Meta
       createdAt:Date.now(),
-      agentWallet:typeof AgentWalletManager!=='undefined'?AgentWalletManager.getAgentAddress():null
+      agentWallet:(function(){ try { return (typeof CircleAgent!=='undefined'&&CircleAgent.getCachedAddress)?CircleAgent.getCachedAddress():null; } catch(_){ return null; } })()
     };
 
     missions.unshift(mission); save();

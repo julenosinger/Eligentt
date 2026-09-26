@@ -28,8 +28,11 @@
 
   /* ── Record an execution audit entry ── */
   function recordExecution(opts){
-    var agentWallet=typeof AgentWalletManager!=='undefined'?AgentWalletManager.getAgentAddress():null;
-    var agentId=typeof AgentWalletManager!=='undefined'?AgentWalletManager.getAgentId():null;
+    // Agent identity: Circle Wallet address is canonical; ERC-8004 token ID from AgentIdentity.
+    var agentWallet=null;
+    try { if(typeof CircleAgent!=='undefined'&&CircleAgent.getCachedAddress) agentWallet=CircleAgent.getCachedAddress(); } catch(_e){}
+    var agentId=null;
+    try { if(typeof AgentIdentity!=='undefined'&&AgentIdentity.getTokenId) agentId=AgentIdentity.getTokenId(); } catch(_e){}
     var identity=typeof AgentIdentity!=='undefined'?AgentIdentity.getDisplayIdentity():null;
 
     var entry={
