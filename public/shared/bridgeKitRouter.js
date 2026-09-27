@@ -102,15 +102,34 @@
     return null;
   }
 
+  // Arc Mainnet chain ID (5042). Used to route RPC through the same-origin proxy.
+  var ARC_CHAIN_ID = 5042;
+
   // Resolve the app's authoritative RPC list for a Bridge Kit / viem chain
   // (read calls / simulation). Never use the Bridge Kit's public-node fallback
   // (e.g. base.publicnode.com) when the app already has reliable RPCs.
+  //
+  // For Arc Mainnet (5042) the primary transport is /api/rpc/arc (same-origin
+  // Cloudflare Pages Function that fans through Arc upstreams server-side).
+  // The secondary transports are the public Arc RPCs as a direct-fallback for
+  // environments where the proxy is unavailable (local dev, etc.).
   function _rpcListForChain(chain) {
     var cid = null;
     try {
       if (chain && chain.id != null) cid = Number(chain.id);
       else if (chain && chain.chainId != null) cid = Number(chain.chainId);
     } catch (_e) {}
+
+    // Arc Mainnet: proxy-first, then public RPCs.
+    if (cid === ARC_CHAIN_ID) {
+      return [
+        '/api/rpc/arc',
+        'https://rpc.mainnet.arc.io',          // arc-studio-allow-onchain-literal
+        'https://rpc.drpc.mainnet.arc.io',     // arc-studio-allow-onchain-literal
+        'https://rpc.quicknode.mainnet.arc.io', // arc-studio-allow-onchain-literal
+      ];
+    }
+
     if (cid != null) {
       try {
         if (typeof getChainById === 'function') {
@@ -143,8 +162,18 @@
       getPublicClient: function (opts) {
         var chain = (opts && opts.chain) ? opts.chain : null;
         var rpcs = _rpcListForChain(chain);
-        if (rpcs && rpcs.length && chain && v.createPublicClient && v.http) {
-          return v.createPublicClient({ chain: chain, transport: v.http(rpcs[0]) });
+        if (rpcs && rpcs.length && chain && v.createPublicClient) {
+          // For Arc (and any chain with multiple RPCs) use a fallback transport
+          // so the Kit auto-retries on the next upstream when one fails.
+          var transport;
+          if (v.fallback && v.http && rpcs.length > 1) {
+            transport = v.fallback(rpcs.map(function (u) { return v.http(u); }));
+          } else if (v.http) {
+            transport = v.http(rpcs[0]);
+          } else {
+            throw new Error('No reliable RPC configured for chain ' + (chain && chain.id != null ? chain.id : 'unknown'));
+          }
+          return v.createPublicClient({ chain: chain, transport: transport });
         }
         // No reliable RPC resolved — fail the read path explicitly rather than
         // silently falling back to the Bridge Kit's public-node RPC.

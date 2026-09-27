@@ -2378,6 +2378,12 @@ body.swap-standard-mode .site-footer{display:block !important}
 .step-ico.success{background:rgba(34,197,94,.15);border:1px solid rgba(34,197,94,.3);color:var(--green)}
 .step-ico.active{background:rgba(245,158,11,.15);border:1px solid rgba(245,158,11,.3);color:var(--yellow);animation:pulse 1s infinite}
 .step-ico.error{background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.3);color:var(--red)}
+.cctp-mint-banner{display:flex;align-items:flex-start;gap:10px;padding:10px 12px;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.3);border-radius:8px;font-size:9.5px;margin-bottom:10px}
+.cctp-mint-banner-ico{font-size:15px;color:var(--yellow);flex-shrink:0;margin-top:1px}
+.cctp-mint-banner-msg{flex:1;color:var(--text);line-height:1.5}
+.cctp-mint-banner-msg strong{display:block;font-size:10px;color:var(--yellow);margin-bottom:2px}
+.cctp-retry-btn{margin-top:6px;padding:5px 12px;background:rgba(245,158,11,.15);border:1px solid rgba(245,158,11,.4);border-radius:5px;color:var(--yellow);font-size:9px;font-weight:700;cursor:pointer;transition:all .15s}
+.cctp-retry-btn:hover{background:rgba(245,158,11,.25)}
 .page-header{padding:14px 20px;background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;flex-shrink:0}
 .page-title{font-size:15px;font-weight:700}
 .page-sub{font-size:10px;color:var(--muted2);margin-top:1px}
@@ -5897,7 +5903,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
 
     <!-- Network Card -->
     <div class="ms-network-card">
-      <div class="ms-network-icon">A</div>
+      <div class="ms-network-icon"><img src="/networks/arc.svg" width="28" height="28" alt="Arc" style="object-fit:contain;border-radius:5px;display:block;" onerror="this.outerHTML='A'"></div>
       <div class="ms-network-info">
         <div class="ms-network-name">Arc Network</div>
         <div class="ms-network-meta">Chain ID 5042 • Verified • Institutional Grade</div>
@@ -6904,6 +6910,9 @@ select.cinput option { background: #161a24; color: #dde2f0; }
       </div>
       <div class="page-content">
         <div class="swap-col">
+
+          <!-- Pending CCTP mint banner (shown when burn succeeded but mint failed) -->
+          <div id="cctp-mint-banner-wrap" style="display:none"></div>
 
           <!-- Bridge card -->
           <div class="swap-card">
@@ -22682,6 +22691,8 @@ document.addEventListener('DOMContentLoaded',()=>{
   initBridgeChains();
   updateBridgeEst();
   recoverPendingBridges();
+  // Show pending CCTP mint banner if wallet has an unresolved mint.
+  setTimeout(function () { try { _checkCctpPendingMintBanner(); } catch (_e) {} }, 500);
   initChainList();
   // Enhance ONLY the 5 selects used by Schedule + Settings pages to use body-portal custom dropdowns.
   // BEFORE loadSettings so restored values sync to visible triggers (via patched .value setter).
@@ -30533,8 +30544,16 @@ function saUpdateRoute() {
   var saFeeBps = (typeof ElligenteFees !== 'undefined' && ElligenteFees.SEND_ASSETS_FEE_BPS) || 20;
   var feeAmt   = amount > 0 ? (amount * saFeeBps / 10000) : 0;
   var totalAmt = amount + feeAmt;
+  // Format fee: show at least 6 significant decimal places so tiny amounts like
+  // 0.00002 (0.2% of 0.01) are visible. Show "< 0.0001" only when truly sub-dust.
+  function _saFmtFee(v) {
+    if (v <= 0) return '0';
+    if (v < 0.0001) return '< 0.0001';
+    if (v < 0.01)   return v.toFixed(6);
+    return v.toFixed(4);
+  }
   set('sa-rt-fee', amount > 0
-      ? '<span style="color:var(--yellow)">' + feeAmt.toFixed(saGetTokenDecimals() === 6 ? 4 : 8) + ' ' + saCurrentAsset + '</span> <span style="color:var(--muted2)">(' + (saFeeBps/100).toFixed(1) + '% Elligentt Fee)</span><br><span style="font-weight:700;color:var(--text)">Total: ' + totalAmt.toFixed(saGetTokenDecimals() === 6 ? 2 : 8) + ' ' + saCurrentAsset + '</span>'
+      ? '<span style="color:var(--yellow)">' + _saFmtFee(feeAmt) + ' ' + saCurrentAsset + '</span> <span style="color:var(--muted2)">(' + (saFeeBps/100).toFixed(1) + '% Elligentt Fee)</span><br><span style="font-weight:700;color:var(--text)">Total: ' + totalAmt.toFixed(saGetTokenDecimals() === 6 ? 2 : 8) + ' ' + saCurrentAsset + '</span>'
       : '—');
 
   var statusEl = document.getElementById('sa-rt-status');
@@ -30617,6 +30636,8 @@ function saExecuteCrossChain() {
 // ── CCTP cross-chain Send (Bridge Kit) — PRIMARY for USDC/EURC ─────────
 // Executes via Circle CCTP v2 with recipientAddress = the user's destination.
 // LI.FI is never called on this path. Falls back to LI.FI if unavailable.
+// Reuses BridgeKitRouter (same instance as Bridge page) and the same pending-mint
+// persistence / Retry mint flow implemented for the Bridge page.
 async function saExecuteCCTPCrossChain() {
   var recipient = document.getElementById('sa-recipient')?.value.trim() || '';
   var amount    = parseFloat(document.getElementById('sa-amount')?.value) || 0;
@@ -30635,14 +30656,40 @@ async function saExecuteCCTPCrossChain() {
   var btnContent = document.getElementById('sa-send-btn-content');
   if (btn) btn.disabled = true;
   if (btnContent) btnContent.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i> Routing via CCTP...';
-  saUpdateXCStep('burn', 'starting');
+
+  // Reset and show the Bridge Status tracker in the right panel.
+  saResetXCSteps();
+  saUpdateXCStep('burn', 'pending');
+  saUpdateXCStep('attest', 'pending');
+  saUpdateXCStep('mint', 'pending');
+
+  // Map Bridge Kit step names to the sa-xc-step dots.
+  var _saKitStepMap = { approve: null, burn: 'burn', fetchAttestation: 'attest', mint: 'mint' };
+  var _saKitUnsub = BridgeKitRouter.onEvent(function (payload) {
+    try {
+      var v = payload && payload.values ? payload.values : null;
+      var name = v && v.name ? v.name : null;
+      var xcStep = _saKitStepMap[name];
+      if (!xcStep) return;
+      if (v.state === 'success')     saUpdateXCStep(xcStep, 'done', v.txHash ? shortAddr(v.txHash) : '');
+      else if (v.state === 'error')  saUpdateXCStep(xcStep, 'error', 'failed');
+      else                           saUpdateXCStep(xcStep, 'active', '...');
+    } catch (_e) {}
+  });
+
+  function _saResetBtn() {
+    if (btn) btn.disabled = false;
+    if (btnContent) btnContent.innerHTML = '<i class="ti ti-world-share"></i> Review &amp; Send';
+    _walletOpInProgress = false;
+  }
+
+  _walletOpInProgress = true;
 
   let adapter;
   try {
     adapter = await BridgeKitRouter.createAdapter(eth);
   } catch (e) {
-    if (btn) btn.disabled = false;
-    if (btnContent) btnContent.innerHTML = '<i class="ti ti-world-share"></i> Review &amp; Send';
+    _saResetBtn();
     toast('Could not initialize CCTP adapter: ' + (e.message || e), 'error');
     return;
   }
@@ -30651,32 +30698,93 @@ async function saExecuteCCTPCrossChain() {
   try {
     result = await BridgeKitRouter.bridge(srcChain.chainId, destChain.chainId, amount, saCurrentAsset, recipient, adapter);
   } catch (e) {
-    if (btn) btn.disabled = false;
-    if (btnContent) btnContent.innerHTML = '<i class="ti ti-world-share"></i> Review &amp; Send';
-    toast('CCTP cross-chain send failed: ' + (e.shortMessage || e.message || e), 'error');
+    // Distinguish RPC error on Arc burn from other failures.
+    var _isRpcErr = (e.message || '').includes('RPC_ENDPOINT_ERROR') ||
+                   (e.message || '').includes('Failed to fetch') ||
+                   (e.message || '').includes('RPC endpoint error');
+    _saResetBtn();
+    saUpdateXCStep('burn', 'error', 'failed');
+    toast(_isRpcErr
+      ? 'RPC indisponível. Se USDC já queimado na Arc, use Retry mint.'
+      : 'CCTP cross-chain send failed: ' + (e.shortMessage || e.message || e), 'error');
     return;
   }
 
-  // Retry on a retryable post-burn failure (single burn — no second depositForBurn).
+  // Detect burn-succeeded / mint-failed: save for Retry mint (same key as Bridge page).
+  var _burnStep = result && result.steps && result.steps.find(function (s) { return s.name === 'burn'; });
+  var _mintStep = result && result.steps && result.steps.find(function (s) { return s.name === 'mint'; });
+  var _burnSucceeded = _burnStep && _burnStep.state === 'success';
+  var _mintFailed    = _mintStep && _mintStep.state === 'error';
+
+  if (_burnSucceeded && _mintFailed && result) {
+    // Persist for Retry mint — reuses the same _saveCctpPendingMint / _checkCctpPendingMintBanner
+    // from the Bridge page (both are global functions on this page).
+    try {
+      if (typeof _saveCctpPendingMint === 'function') {
+        _saveCctpPendingMint({
+          wallet:       walletAddress,
+          burnTx:       (_burnStep && _burnStep.txHash) || '',
+          srcChainId:   srcChain.chainId,
+          destChainId:  destChain.chainId,
+          amount:       String(amount),
+          token:        saCurrentAsset,
+          recipient:    recipient,
+          partialResult: result,
+          savedAt:      Date.now(),
+        });
+      }
+    } catch (_pe) {}
+  }
+
+  // Inline retry on retryable post-burn failure (no second depositForBurn).
   if (result && result.state === 'error') {
-    try { result = await BridgeKitRouter.retry(result, adapter); } catch (_e) {}
+    saUpdateXCStep('mint', 'active', 'retrying...');
+    try {
+      result = await BridgeKitRouter.retry(result, adapter);
+      // Clear pending record if retry succeeded.
+      if (result && result.state !== 'error') {
+        try {
+          if (typeof _clearCctpPendingMint === 'function') {
+            _clearCctpPendingMint(walletAddress, (_burnStep && _burnStep.txHash) || '');
+          }
+        } catch (_ce) {}
+      }
+    } catch (_e) {}
   }
 
   const done = result && result.state !== 'error';
-  const burnTx = (result && result.steps && result.steps.find(function (s) { return s.name === 'burn'; })) || null;
-  const mintTx = (result && result.steps && result.steps.find(function (s) { return s.name === 'mint'; })) || null;
-  const txHash = (burnTx && burnTx.txHash) || null;
-  const mintTxHash = (mintTx && mintTx.txHash) || null;
+  const txHash    = (_burnStep && _burnStep.txHash) || null;
+  const mintTxHash = (result && result.steps && result.steps.find(function (s) { return s.name === 'mint'; }) || {}).txHash || null;
 
   if (done) {
+    saUpdateXCStep('mint', 'done', mintTxHash ? shortAddr(mintTxHash) : '');
     if (btnContent) btnContent.innerHTML = '<i class="ti ti-check-circle"></i> Bridged via CCTP!';
+    setTimeout(function () { _saResetBtn(); if (btnContent) btnContent.innerHTML = '<i class="ti ti-world-share"></i> Review &amp; Send'; }, 4000);
     toast(amount + ' ' + saCurrentAsset + ' bridged to ' + shortAddr(recipient) + ' via CCTP', 'success');
     saLogTx({ hash: txHash, amount: amount, asset: saCurrentAsset, recipient: recipient, memo: 'CCTP cross-chain', provider: 'cctp', mintHash: mintTxHash });
+    // Update the pending-mint banner (clear if this was a retry).
+    try { if (typeof _checkCctpPendingMintBanner === 'function') _checkCctpPendingMintBanner(); } catch (_e) {}
   } else {
-    if (btn) btn.disabled = false;
-    if (btnContent) btnContent.innerHTML = '<i class="ti ti-world-share"></i> Review &amp; Send';
-    toast('CCTP cross-chain send failed after retry', 'error');
+    _saResetBtn();
+    // Surface the correct error copy when the mint step failed due to RPC.
+    var _errReason = null;
+    try {
+      var _fs = result && result.steps && result.steps.find(function (s) { return s.state === 'error'; });
+      if (_fs) _errReason = _fs.error || _fs.reason || _fs.message || null;
+      if (!_errReason && result && result.error) _errReason = (typeof result.error === 'string') ? result.error : (result.error.message || null);
+    } catch (_e) {}
+    var _isRpcFail = _errReason && (_errReason.includes('RPC_ENDPOINT_ERROR') || _errReason.includes('Failed to fetch') || _errReason.includes('RPC endpoint error'));
+    if (_burnSucceeded && _mintFailed) {
+      saUpdateXCStep('mint', 'error', 'failed');
+      toast(_isRpcFail
+        ? 'RPC indisponível. USDC já queimado na Arc. Use Retry mint.'
+        : 'Mint falhou. USDC queimado na Arc — use Retry mint.', 'error');
+      try { if (typeof _checkCctpPendingMintBanner === 'function') _checkCctpPendingMintBanner(); } catch (_e) {}
+    } else {
+      toast('CCTP cross-chain send failed' + (_errReason ? ': ' + _errReason : ''), 'error');
+    }
   }
+  _walletOpInProgress = false;
   refreshBalance().catch(() => {});
 }
 
@@ -31223,20 +31331,38 @@ function getSelectableNetworks() {
 var _nsSelectedChainId = null; // which chain is previewed in the right panel
 
 function _nsChainLogo(chain) {
-  // Returns an SVG/letter icon for the chain, coloured with chain.color
-  const logos = {
-    5042:  '<svg viewBox="0 0 40 40" width="36" height="36"><circle cx="20" cy="20" r="20" fill="' + chain.color + '22"/><text x="50%" y="55%" dominant-baseline="middle" text-anchor="middle" font-size="14" font-weight="800" fill="' + chain.color + '">A</text></svg>',
-    1:     '<svg viewBox="0 0 40 40" width="36" height="36"><circle cx="20" cy="20" r="20" fill="#627eea22"/><text x="50%" y="55%" dominant-baseline="middle" text-anchor="middle" font-size="14" font-weight="800" fill="#627eea">Ξ</text></svg>',
-    8453:  '<svg viewBox="0 0 40 40" width="36" height="36"><circle cx="20" cy="20" r="20" fill="#0052ff22"/><text x="50%" y="55%" dominant-baseline="middle" text-anchor="middle" font-size="14" font-weight="800" fill="#0052ff">B</text></svg>',
-    42161: '<svg viewBox="0 0 40 40" width="36" height="36"><circle cx="20" cy="20" r="20" fill="#12aaff22"/><text x="50%" y="55%" dominant-baseline="middle" text-anchor="middle" font-size="14" font-weight="800" fill="#12aaff">Ar</text></svg>',
-    10:    '<svg viewBox="0 0 40 40" width="36" height="36"><circle cx="20" cy="20" r="20" fill="#ff042022"/><text x="50%" y="55%" dominant-baseline="middle" text-anchor="middle" font-size="14" font-weight="800" fill="#ff0420">OP</text></svg>',
-    137:   '<svg viewBox="0 0 40 40" width="36" height="36"><circle cx="20" cy="20" r="20" fill="#8247e522"/><text x="50%" y="55%" dominant-baseline="middle" text-anchor="middle" font-size="14" font-weight="800" fill="#8247e5">P</text></svg>',
+  // Official network icons — local SVGs in /networks/, letter SVG fallback on error
+  const NETWORK_ICONS = {
+    5042:  { src: '/networks/arc.svg',       fb: 'A',  fbColor: chain.color },
+    1:     { src: '/networks/ethereum.svg',  fb: 'Ξ',  fbColor: '#627eea'  },
+    8453:  { src: '/networks/base.svg',      fb: 'B',  fbColor: '#0052ff'  },
+    42161: { src: '/networks/arbitrum.svg',  fb: 'Ar', fbColor: '#12aaff'  },
+    10:    { src: '/networks/optimism.svg',  fb: 'OP', fbColor: '#ff0420'  },
+    137:   { src: '/networks/polygon.svg',   fb: 'P',  fbColor: '#8247e5'  },
   };
-  return logos[chain.chainId] || '<svg viewBox="0 0 40 40" width="36" height="36"><circle cx="20" cy="20" r="20" fill="' + chain.color + '22"/><text x="50%" y="55%" dominant-baseline="middle" text-anchor="middle" font-size="12" font-weight="800" fill="' + chain.color + '">' + (chain.symbol||'?') + '</text></svg>';
+  const ico = NETWORK_ICONS[chain.chainId];
+  if (ico) {
+    const fbSvg = 'data:image/svg+xml,' + encodeURIComponent('<svg viewBox="0 0 40 40" width="36" height="36" xmlns="http://www.w3.org/2000/svg"><circle cx="20" cy="20" r="20" fill="' + ico.fbColor + '22"/><text x="50%" y="55%" dominant-baseline="middle" text-anchor="middle" font-size="14" font-weight="800" fill="' + ico.fbColor + '">' + ico.fb + '</text></svg>');
+    return '<img src="' + ico.src + '" width="36" height="36" alt="' + (chain.name||'') + '" style="object-fit:contain;border-radius:6px;" onerror="this.onerror=null;this.src=\'' + fbSvg + '\'">';
+  }
+  return '<svg viewBox="0 0 40 40" width="36" height="36" xmlns="http://www.w3.org/2000/svg"><circle cx="20" cy="20" r="20" fill="' + chain.color + '22"/><text x="50%" y="55%" dominant-baseline="middle" text-anchor="middle" font-size="12" font-weight="800" fill="' + chain.color + '">' + (chain.symbol||'?') + '</text></svg>';
 }
 
 function _nsBigLogo(chain) {
-  return '<svg viewBox="0 0 80 80" width="56" height="56"><circle cx="40" cy="40" r="40" fill="' + chain.color + '18"/><circle cx="40" cy="40" r="36" fill="none" stroke="' + chain.color + '" stroke-width="2" opacity=".4"/><text x="50%" y="55%" dominant-baseline="middle" text-anchor="middle" font-size="22" font-weight="900" fill="' + chain.color + '">' + (chain.symbol||'?') + '</text></svg>';
+  const BIG_ICONS = {
+    5042:  '/networks/arc.svg',
+    1:     '/networks/ethereum.svg',
+    8453:  '/networks/base.svg',
+    42161: '/networks/arbitrum.svg',
+    10:    '/networks/optimism.svg',
+    137:   '/networks/polygon.svg',
+  };
+  const src = BIG_ICONS[chain.chainId];
+  if (src) {
+    const fbSvg = 'data:image/svg+xml,' + encodeURIComponent('<svg viewBox="0 0 80 80" width="56" height="56" xmlns="http://www.w3.org/2000/svg"><circle cx="40" cy="40" r="40" fill="' + chain.color + '18"/><circle cx="40" cy="40" r="36" fill="none" stroke="' + chain.color + '" stroke-width="2" opacity=".4"/><text x="50%" y="55%" dominant-baseline="middle" text-anchor="middle" font-size="22" font-weight="900" fill="' + chain.color + '">' + (chain.symbol||'?') + '</text></svg>');
+    return '<img src="' + src + '" width="56" height="56" alt="' + (chain.name||'') + '" style="object-fit:contain;border-radius:10px;" onerror="this.onerror=null;this.src=\'' + fbSvg + '\'">';
+  }
+  return '<svg viewBox="0 0 80 80" width="56" height="56" xmlns="http://www.w3.org/2000/svg"><circle cx="40" cy="40" r="40" fill="' + chain.color + '18"/><circle cx="40" cy="40" r="36" fill="none" stroke="' + chain.color + '" stroke-width="2" opacity=".4"/><text x="50%" y="55%" dominant-baseline="middle" text-anchor="middle" font-size="22" font-weight="900" fill="' + chain.color + '">' + (chain.symbol||'?') + '</text></svg>';
 }
 
 function _nsChainDesc(chain) {
@@ -34346,15 +34472,63 @@ async function executeBridgeViaCCTP() {
   try {
     result = await BridgeKitRouter.bridge(fromChain.chainId, toChain.chainId, amt, token, walletAddress, adapter);
   } catch (e) {
+    // Distinguish a pre-burn failure (no USDC spent) from a post-burn RPC failure.
+    var isRpcErr = (e.message || '').includes('RPC_ENDPOINT_ERROR') ||
+                   (e.message || '').includes('Failed to fetch') ||
+                   (e.message || '').includes('RPC endpoint error');
     renderBridgeStep(0, 'error', null);
     if (statusEl) { statusEl.textContent = 'Failed'; statusEl.style.color = 'var(--red)'; }
-    toast('CCTP bridge failed: ' + (e.shortMessage || e.message || e), 'error');
+    var userMsg = isRpcErr
+      ? 'RPC da Arc indisponível. Se USDC já foi queimado na origem, use Retry mint — não inicie um novo bridge.'
+      : 'CCTP bridge failed: ' + (e.shortMessage || e.message || e);
+    toast(userMsg, 'error');
     if (typeof BridgeEngine !== 'undefined') BridgeEngine.notifyExecutionFailed(e);
     resetBtn();
     return;
   }
 
-  // Retry on a retryable post-burn failure (single burn — no second depositForBurn).
+  // ── Detect mint failure after a successful burn + attestation ──────────
+  // If only the mint step failed (burn tx confirmed, attestation received),
+  // persist the partial result so the user can retry without a new burn.
+  const _burnStep = (result && result.steps && result.steps.find(function (s) { return s.name === 'burn'; })) || null;
+  const _mintStep = (result && result.steps && result.steps.find(function (s) { return s.name === 'mint'; })) || null;
+  const _burnSucceeded = _burnStep && _burnStep.state === 'success' && _burnStep.txHash;
+  const _mintFailed = _mintStep && _mintStep.state === 'error';
+
+  if (result && result.state === 'error' && _burnSucceeded && _mintFailed) {
+    // Save partial result so the user can retry mint without a new burn.
+    _saveCctpPendingMint({
+      partialResult: result,
+      burnTx: _burnStep.txHash,
+      fromChainId: fromChain.chainId,
+      toChainId: toChain.chainId,
+      fromName: fromChain.name,
+      toName: toChain.name,
+      amount: amt,
+      wallet: walletAddress,
+      savedAt: Date.now(),
+    });
+    // Mark the mint step as failed and show the Retry mint button in the steps card.
+    renderBridgeStep(3, 'error', null);
+    if (statusEl) { statusEl.textContent = 'Mint failed'; statusEl.style.color = 'var(--red)'; }
+    // Inject Retry mint button at bottom of steps card — no reset, no new bridge.
+    const retryWrap = document.createElement('div');
+    retryWrap.style.cssText = 'margin-top:10px;padding-top:8px;border-top:1px solid var(--border)';
+    setSafeHTML(retryWrap,
+      '<div style="font-size:9px;color:var(--yellow);margin-bottom:6px"><i class="ti ti-alert-triangle" style="font-size:10px"></i> ' +
+      'USDC queimado na origem. Mint na ' + escHtml(toChain.name || 'destino') + ' pendente.</div>' +
+      '<button class="cctp-retry-btn" onclick="retryPendingCctpMint()" id="cctp-inline-retry-btn">' +
+      '<i class="ti ti-refresh" style="font-size:10px"></i> Retry mint na ' + escHtml(toChain.name || 'destino') + '</button>'
+    );
+    if (stepList) stepList.appendChild(retryWrap);
+    toast('USDC já queimado na origem. Use Retry mint — não inicie um novo bridge.', 'warning', 8000);
+    _checkCctpPendingMintBanner();
+    if (typeof BridgeEngine !== 'undefined') BridgeEngine.notifyExecutionFailed(new Error('Mint failed on Arc — retry pending'));
+    resetBtn();
+    return;
+  }
+
+  // Retry on any other retryable post-burn failure (single burn — no second depositForBurn).
   if (result && result.state === 'error') {
     try {
       result = await BridgeKitRouter.retry(result, adapter);
@@ -34362,9 +34536,9 @@ async function executeBridgeViaCCTP() {
   }
 
   const done = result && result.state !== 'error';
-  const burnTx = (result && result.steps && result.steps.find(function (s) { return s.name === 'burn'; })) || null;
-  const mintTx = (result && result.steps && result.steps.find(function (s) { return s.name === 'mint'; })) || null;
-  const txHash = (burnTx && burnTx.txHash) || null;
+  const burnTx = (_burnStep && _burnStep.txHash) || null;
+  const mintTx = (_mintStep) || (result && result.steps && result.steps.find(function (s) { return s.name === 'mint'; })) || null;
+  const txHash = burnTx;
   const mintTxHash = (mintTx && mintTx.txHash) || null;
   // Surface the real failure reason (a failed step's error), never a generic message.
   var errReason = null;
@@ -34375,6 +34549,8 @@ async function executeBridgeViaCCTP() {
   } catch (_e) {}
 
   if (done) {
+    // Clear any persisted pending mint for this burn tx (successfully minted).
+    if (txHash && walletAddress) _clearCctpPendingMint(walletAddress, txHash);
     renderBridgeStep(2, 'success', null);
     renderBridgeStep(3, 'success', mintTxHash);
     if (statusEl) { statusEl.textContent = 'Completed'; statusEl.style.color = 'var(--green)'; }
@@ -34387,6 +34563,7 @@ async function executeBridgeViaCCTP() {
     toast(`✓ Bridged ${amt} USDC from ${fromChain.name} to ${toChain.name} via CCTP`, 'success');
     if (typeof logToReports === 'function') logToReports('Bridge', amt, 1, txHash, { provider: 'cctp', from: fromChain.name, to: toChain.name });
     if (typeof BridgeEngine !== 'undefined') BridgeEngine.notifyExecutionComplete({ txHash: txHash, destinationTxHash: mintTxHash });
+    _checkCctpPendingMintBanner();
   } else {
     if (statusEl) { statusEl.textContent = 'Failed'; statusEl.style.color = 'var(--red)'; }
     addToHistory('bridge-history', {
@@ -34395,7 +34572,11 @@ async function executeBridgeViaCCTP() {
       sub: `CCTP v2 · failed` + (errReason ? ` · ${errReason}` : ''),
       txHash: txHash, dotColor: '#ef4444', explorer: fromChain.explorer,
     });
-    toast('CCTP bridge failed' + (errReason ? ': ' + errReason : '') + '. Use "Use LI.FI" to route via LI.FI.', 'error');
+    var errIsRpc = errReason && (errReason.includes('RPC_ENDPOINT_ERROR') || errReason.includes('Failed to fetch') || errReason.includes('RPC endpoint error'));
+    var errMsg = errIsRpc
+      ? 'RPC da Arc indisponível. USDC já queimado na origem. Use Retry mint.'
+      : ('CCTP bridge failed' + (errReason ? ': ' + errReason : '') + '. Use "Use LI.FI" to route via LI.FI.');
+    toast(errMsg, 'error');
     if (typeof BridgeEngine !== 'undefined') BridgeEngine.notifyExecutionFailed(new Error('CCTP bridge failed' + (errReason ? ': ' + errReason : '')));
   }
   refreshBridgeBalances(); refreshBalance().catch(() => {});
@@ -34729,6 +34910,219 @@ async function recoverPendingBridges() {
   } catch (e) {}
 }
 
+
+// ── CCTP pending mint persistence + retry ──────────────────────────────
+// When approve+burn+attest succeed but mint fails (RPC error on Arc), the
+// partial result is saved here. The user can retry the mint without a new burn.
+// Key: elligentt_cctp_pending_mint  Value: array of { wallet, burnTx, partialResult, … }
+
+var _CCTP_MINT_KEY = 'elligentt_cctp_pending_mint';
+
+function _cctpPendingMints() {
+  try { return JSON.parse(localStorage.getItem(_CCTP_MINT_KEY) || '[]'); } catch (_e) { return []; }
+}
+
+function _saveCctpPendingMint(rec) {
+  try {
+    var list = _cctpPendingMints();
+    // Remove duplicate for same wallet+burnTx before inserting.
+    list = list.filter(function (r) { return !(r.wallet === rec.wallet && r.burnTx === rec.burnTx); });
+    list.unshift(rec);
+    localStorage.setItem(_CCTP_MINT_KEY, JSON.stringify(list.slice(0, 10)));
+  } catch (_e) {}
+}
+
+function _clearCctpPendingMint(wallet, burnTx) {
+  try {
+    var list = _cctpPendingMints().filter(function (r) { return !(r.wallet === wallet && r.burnTx === burnTx); });
+    if (list.length) localStorage.setItem(_CCTP_MINT_KEY, JSON.stringify(list));
+    else localStorage.removeItem(_CCTP_MINT_KEY);
+  } catch (_e) {}
+}
+
+/** Render or hide the pending-mint banner on the Bridge page. */
+function _checkCctpPendingMintBanner() {
+  var wrap = document.getElementById('cctp-mint-banner-wrap');
+  if (!wrap) return;
+  var list = _cctpPendingMints().filter(function (r) { return r.wallet === walletAddress; });
+  if (!list.length) { wrap.style.display = 'none'; wrap.innerHTML = ''; return; }
+  var rec = list[0]; // show the most-recent pending mint
+  var shortBurn = rec.burnTx ? rec.burnTx.slice(0, 10) + '…' : '—';
+  setSafeHTML(wrap,
+    '<div class="cctp-mint-banner">' +
+    '<div class="cctp-mint-banner-ico"><i class="ti ti-alert-triangle"></i></div>' +
+    '<div class="cctp-mint-banner-msg">' +
+    '<strong>USDC já queimado na origem — Mint na ' + escHtml(rec.toName || 'destino') + ' pendente</strong>' +
+    'Burn: <code style="font-size:8.5px;color:var(--teal)">' + escHtml(shortBurn) + '</code> · ' +
+    escHtml(rec.fromName || '') + ' → ' + escHtml(rec.toName || '') + ' · ' +
+    escHtml(String(rec.amount || '?')) + ' USDC<br>' +
+    '<button class="cctp-retry-btn" onclick="retryPendingCctpMint()">' +
+    '<i class="ti ti-refresh" style="font-size:10px"></i> Retry mint na ' + escHtml(rec.toName || 'destino') + '</button>' +
+    '</div></div>'
+  );
+  wrap.style.display = '';
+}
+
+/** Retry the most-recent pending CCTP mint for the connected wallet.
+ *  Works for ANY destination chain (Arc inbound OR Polygon/Base/Arb/Opt/ETH outbound).
+ *  - Switches the wallet to the DESTINATION chain before calling receiveMessage.
+ *  - Uses the destination chain's RPC proxy when available (/api/rpc/polygon, etc.)
+ *  - Never touches the source chain after the burn is confirmed.
+ */
+async function retryPendingCctpMint() {
+  if (!walletAddress) { toast('Connect wallet first', 'error'); return; }
+  if (_walletOpInProgress) { toast('A wallet operation is already in progress', 'warning'); return; }
+  if (typeof BridgeKitRouter === 'undefined' || !BridgeKitRouter.isAvailable()) { toast('Bridge Kit unavailable', 'error'); return; }
+
+  var list = _cctpPendingMints().filter(function (r) { return r.wallet === walletAddress; });
+  if (!list.length) { toast('No pending mint found', 'info'); _checkCctpPendingMintBanner(); return; }
+  var rec = list[0];
+
+  var eth = (typeof _safeEth === 'function') ? _safeEth() : (window.ethereum || null);
+  if (!eth || !eth.request) { toast('Wallet not available for signing', 'error'); return; }
+
+  // Resolve destination chain metadata from the saved record.
+  var destChainId = rec.toChainId || rec.destChainId || null;
+  var destChain = destChainId ? (typeof chainByChainId === 'function' ? chainByChainId(destChainId) : null) : null;
+  var destName = (destChain && destChain.name) || rec.toName || 'destino';
+  var destHex = destChain ? (destChain.chainHex || ('0x' + Number(destChainId).toString(16))) : null;
+  var destExplorer = (destChain && destChain.explorer) || '';
+
+  _walletOpInProgress = true;
+
+  // Disable all retry buttons while running.
+  document.querySelectorAll('.cctp-retry-btn, #cctp-inline-retry-btn').forEach(function (el) {
+    el.disabled = true;
+    el.innerHTML = '<i class="ti ti-loader-2" style="font-size:10px;animation:spin 1s linear infinite"></i> Retrying…';
+  });
+
+  // Show / update the step-3 (mint) row in the Bridge Steps card.
+  var statusEl = document.getElementById('bridge-step-status');
+  var mintEl   = document.getElementById('bridge-step-3');
+  var stepsCard   = document.getElementById('bridge-steps-card');
+  var stdStepsEl  = document.getElementById('bridge-standard-steps');
+  if (stepsCard)  stepsCard.style.display  = '';
+  if (stdStepsEl) stdStepsEl.style.display = '';
+  if (mintEl) setSafeHTML(mintEl,
+    '<div class="step-ico active"><span class="spin">↻</span></div>' +
+    '<div style="flex:1"><div style="font-weight:600">Mint USDC on ' + escHtml(destName) + '</div>' +
+    '<div style="font-size:8.5px;color:var(--muted2)">Retrying via CCTP v2…</div></div>'
+  );
+  if (statusEl) { statusEl.textContent = 'Retrying mint on ' + destName + '…'; statusEl.style.color = 'var(--yellow)'; }
+
+  // ── Switch wallet to the destination chain ──────────────────────────────
+  // The mint (receiveMessage) must be submitted on the destination chain,
+  // not on the source. If the wallet refuses the switch, abort — never send
+  // receiveMessage to the wrong chain.
+  if (destHex) {
+    try {
+      await eth.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: destHex }] });
+    } catch (switchErr) {
+      var switchMsg = switchErr && switchErr.message ? switchErr.message : String(switchErr);
+      // Error code 4902 = chain not added to wallet — try wallet_addEthereumChain.
+      if (switchErr && switchErr.code === 4902 && destChain) {
+        try {
+          await eth.request({
+            method: 'wallet_addEthereumChain',
+            params: [{
+              chainId: destHex,
+              chainName: destChain.name,
+              nativeCurrency: destChain.nativeCurrency || { name: 'ETH', symbol: 'ETH', decimals: 18 },
+              rpcUrls: [destChain.rpc],
+              blockExplorerUrls: destChain.explorer ? [destChain.explorer] : undefined,
+            }]
+          });
+        } catch (_addErr) {
+          toast('Não foi possível mudar para ' + destName + '. Mude manualmente e tente novamente.', 'error');
+          _walletOpInProgress = false;
+          _checkCctpPendingMintBanner();
+          return;
+        }
+      } else if (switchErr && switchErr.code !== 4001) {
+        // 4001 = user rejected — treat as abort, not hard error.
+        // Any other error: warn but still try the retry (some wallets switch without resolving).
+        console.warn('[retryPendingCctpMint] chain switch warning:', switchMsg);
+      } else {
+        toast('Troca de rede recusada. Mude para ' + destName + ' manualmente e tente novamente.', 'warning');
+        _walletOpInProgress = false;
+        _checkCctpPendingMintBanner();
+        return;
+      }
+    }
+  }
+
+  // ── Create adapter (uses destination chain RPC via BridgeKitRouter) ─────
+  var adapter;
+  try {
+    adapter = await BridgeKitRouter.createAdapter(eth);
+  } catch (e) {
+    toast('Could not initialize adapter: ' + (e.message || e), 'error');
+    if (mintEl) setSafeHTML(mintEl,
+      '<div class="step-ico error">✕</div>' +
+      '<div style="flex:1"><div style="font-weight:600">Mint USDC on ' + escHtml(destName) + '</div>' +
+      '<div style="font-size:8.5px;color:var(--muted2)">Adapter init failed</div></div>'
+    );
+    _walletOpInProgress = false;
+    _checkCctpPendingMintBanner();
+    return;
+  }
+
+  // ── Call kit.retry on the destination ───────────────────────────────────
+  var retryResult;
+  try {
+    retryResult = await BridgeKitRouter.retry(rec.partialResult, adapter);
+  } catch (e) {
+    var isRpc = (e.message || '').includes('RPC_ENDPOINT_ERROR') || (e.message || '').includes('Failed to fetch');
+    toast(
+      isRpc
+        ? 'RPC de ' + destName + ' indisponível. USDC queimado está seguro — tente novamente.'
+        : 'Retry mint failed: ' + (e.shortMessage || e.message || e),
+      'error'
+    );
+    if (statusEl) { statusEl.textContent = 'Mint failed'; statusEl.style.color = 'var(--red)'; }
+    if (mintEl) setSafeHTML(mintEl,
+      '<div class="step-ico error">✕</div>' +
+      '<div style="flex:1"><div style="font-weight:600">Mint USDC on ' + escHtml(destName) + '</div>' +
+      '<div style="font-size:8.5px;color:var(--muted2)">Retry failed — USDC burn is safe, try again</div></div>'
+    );
+    _walletOpInProgress = false;
+    _checkCctpPendingMintBanner();
+    return;
+  }
+
+  var mintDone = retryResult && retryResult.state !== 'error';
+  var mintStep = retryResult && retryResult.steps && retryResult.steps.find(function (s) { return s.name === 'mint'; });
+  var mintTxHash = (mintStep && mintStep.txHash) || null;
+  var mintTxUrl = mintTxHash && destExplorer ? (destExplorer + '/tx/' + mintTxHash) : null;
+
+  if (mintDone) {
+    _clearCctpPendingMint(walletAddress, rec.burnTx);
+    if (mintEl) setSafeHTML(mintEl,
+      '<div class="step-ico success">✓</div>' +
+      '<div style="flex:1"><div style="font-weight:600">Mint USDC on ' + escHtml(destName) + '</div>' +
+      '<div style="font-size:8.5px;color:var(--muted2)">' +
+        (mintTxUrl
+          ? 'Tx: <a href="' + escHtml(mintTxUrl) + '" target="_blank" style="color:var(--teal);text-decoration:none">' + shortAddr(mintTxHash) + '</a>'
+          : 'Confirmed') +
+      '</div></div>'
+    );
+    if (statusEl) { statusEl.textContent = 'Mint complete ✓'; statusEl.style.color = 'var(--green)'; }
+    addToHistory('bridge-history', {
+      icon: 'ti-topology-star-3', color: 'var(--teal)',
+      label: (rec.amount || '?') + ' USDC: ' + (rec.fromName || '?') + ' → ' + destName,
+      sub: 'CCTP v2 · mint retry · ' + new Date().toLocaleTimeString('en-US', {hour:'numeric', minute:'2-digit', hour12:true}),
+      txHash: mintTxHash || rec.burnTx, dotColor: '#2dd4bf', explorer: destExplorer || '',
+    });
+    toast('✓ Mint concluído na ' + destName + '. USDC recebido.', 'success');
+    refreshBalance().catch(() => {});
+    _checkCctpPendingMintBanner();
+  } else {
+    toast('Mint retry incompleto na ' + destName + '. USDC queimado está seguro — tente novamente.', 'warning');
+    if (statusEl) { statusEl.textContent = 'Mint incompleto'; statusEl.style.color = 'var(--yellow)'; }
+    _checkCctpPendingMintBanner();
+  }
+  _walletOpInProgress = false;
+}
 
 // ── turboBridgeFromCard ─ called from Fast Bridge route cards ────────────
 // Navigates to Bridge page, pre-selects the source chain + ARC destination
@@ -35291,6 +35685,8 @@ async function vaultInit() {
   window.addEventListener('vault:walletConnected', async () => {
     await VaultChain.fetchVaultBalances();
     vaultRefreshUI();
+    // Refresh pending-mint banner when wallet connects.
+    try { _checkCctpPendingMintBanner(); } catch (_e) {}
   });
 
   _setInterval(async () => {
@@ -42234,17 +42630,44 @@ function exitUnifiedBalanceMode() {
     thresholds: THRESHOLDS,
     getThreshold: thresholdFor,
     // Live RPC balance read with graceful retry. Never uses cached balances.
+    // For CCTP destination chains, tries the same-origin RPC proxy first so that
+    // browser CORS / connectivity issues do not produce a false "Unavailable".
+    // Proxy slugs match functions/api/rpc/<slug>.js: arc, polygon, base, ethereum,
+    // arbitrum, optimism. Fallback to chain.rpc (direct) on any proxy failure.
     getNativeBalance: async function(chain, address){
-      var attempts = 3, lastErr;
-      for (var i = 0; i < attempts; i++){
-        try {
-          var provider = (typeof getCachedProvider === 'function')
-            ? getCachedProvider(chain.rpc)
-            : new ethers.JsonRpcProvider(chain.rpc);
-          return await provider.getBalance(address); // bigint (wei) — live
-        } catch(e){
-          lastErr = e;
-          await new Promise(function(r){ setTimeout(r, 300 * (i + 1)); });
+      // Build the ordered list of RPC URLs to try.
+      var rpcList = [];
+      if (chain && chain.name) {
+        // Map chain name to same-origin proxy slug.
+        var _slug = chain.name.toLowerCase()
+          .replace(/\s+mainnet.*$/, '')   // "Arc Mainnet" → "arc"
+          .replace(/\s+one.*$/, '')       // "Arbitrum One" → "arbitrum"
+          .replace(/\s+/g, '')
+          .replace(/[^a-z0-9]/g, '');
+        var _slugMap = { arcmainnet: 'arc', ethereummainnet: 'ethereum', basemainnet: 'base',
+                         arbitrumonemainnet: 'arbitrum', optimismmainnet: 'optimism', polygonmainnet: 'polygon',
+                         arc: 'arc', ethereum: 'ethereum', base: 'base',
+                         arbitrum: 'arbitrum', arbitrumone: 'arbitrum',
+                         optimism: 'optimism', polygon: 'polygon' };
+        var _proxySlug = _slugMap[_slug] || null;
+        if (_proxySlug) rpcList.push('/api/rpc/' + _proxySlug);
+      }
+      if (chain && chain.rpc) rpcList.push(chain.rpc);
+      if (!rpcList.length) throw new Error('No RPC available for chain');
+
+      var lastErr;
+      for (var ri = 0; ri < rpcList.length; ri++) {
+        var rpcUrl = rpcList[ri];
+        for (var attempt = 0; attempt < 2; attempt++) {
+          try {
+            var provider = (typeof getCachedProvider === 'function' && !rpcUrl.startsWith('/'))
+              ? getCachedProvider(rpcUrl)
+              : new ethers.JsonRpcProvider(rpcUrl);
+            return await provider.getBalance(address); // bigint (wei) — live
+          } catch(e){
+            lastErr = e;
+            if (attempt === 0) await new Promise(function(r){ setTimeout(r, 300); });
+          }
         }
       }
       throw lastErr || new Error('RPC balance query failed');
