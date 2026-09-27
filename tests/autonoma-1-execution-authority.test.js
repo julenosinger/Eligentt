@@ -96,6 +96,15 @@ function boot(opts = {}) {
     recordOperationSuccess: () => {},
   }, opts.wmOverrides || {});
 
+  // CircleAgent is the canonical agent identity source (gate reads getCachedAddress).
+  const circleAgentAddr = (opts.circleOverrides && opts.circleOverrides.getCachedAddress)
+    ? opts.circleOverrides.getCachedAddress()
+    : AGENT_ADDR;
+  globalThis.CircleAgent = Object.assign(
+    { getCachedAddress: () => circleAgentAddr },
+    opts.circleOverrides || {}
+  );
+
   globalThis.localStorage = ls;
   globalThis.ScheduleEngine = engine;
   globalThis.AgentAuthorization = AgentAuthorization;
@@ -135,6 +144,7 @@ beforeEach(() => {
   delete globalThis.AgentAuthorization;
   delete globalThis.PolicyEngine;
   delete globalThis.AgentWalletManager;
+  delete globalThis.CircleAgent;
   delete globalThis.walletAddress;
   delete globalThis.AgentScheduleExecutor;
 });

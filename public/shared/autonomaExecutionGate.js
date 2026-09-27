@@ -171,11 +171,19 @@
     if (!pol) return _block('policy_unavailable');
 
     // 2. Agent wallet identity — fail closed.
+    // IDENTITY: Circle Wallet (CircleAgent.getCachedAddress) is the ONLY agent identity.
+    // AgentWalletManager is used here ONLY for pause/shutdown state checks (execution
+    // layer), never for agent identity resolution.
     var isShutdown = (typeof wm.isShutdown === 'function') ? wm.isShutdown() : false;
     if (isShutdown) return _block('wallet_shutdown');
     if (typeof wm.isPaused === 'function' && wm.isPaused()) return _block('wallet_paused');
     var agentAddr = null;
-    try { agentAddr = (typeof wm.getAgentAddress === 'function') ? wm.getAgentAddress() : null; } catch (e) { agentAddr = null; }
+    // Resolve identity from CircleAgent (canonical). Never from AgentWalletManager.
+    try {
+      if (typeof CircleAgent !== 'undefined' && typeof CircleAgent.getCachedAddress === 'function') {
+        agentAddr = CircleAgent.getCachedAddress() || null;
+      }
+    } catch (_e) { agentAddr = null; }
     if (!_isAddr(agentAddr)) return _block('agent_wallet_unavailable');
 
     // 2b. Schedule delegation passthrough — AgentScheduleExecutor has ALREADY

@@ -113,17 +113,27 @@ function bootGate(opts = {}) {
   const wm = Object.assign({
     isShutdown: () => false,
     isPaused: () => false,
+    // NOTE: getAgentAddress is kept for backward compat but the gate no longer
+    // uses it for identity. Identity is read from CircleAgent.getCachedAddress().
     getAgentAddress: () => AGENT_ADDR,
     getSupportedChains: () => ['Arc Mainnet'],
     recordExecution: () => {},
     recordOperationSuccess: () => {},
   }, opts.wmOverrides || {});
 
+  // CircleAgent is the canonical agent identity source for the gate.
+  // Default: same AGENT_ADDR as before. Tests that need a different identity
+  // supply opts.circleOverrides = { getCachedAddress: () => otherAddr }.
+  const circleAgent = Object.assign({
+    getCachedAddress: () => AGENT_ADDR,
+  }, opts.circleOverrides || {});
+
   globalThis.localStorage = ls;
   globalThis.ScheduleEngine = engine;
   globalThis.AgentAuthorization = AgentAuthorization;
   globalThis.PolicyEngine = PolicyEngine;
   globalThis.AgentWalletManager = wm;
+  globalThis.CircleAgent = circleAgent;
   if (opts.walletAddress !== undefined) globalThis.walletAddress = opts.walletAddress;
   else globalThis.walletAddress = USER_ADDR;
 
@@ -153,6 +163,7 @@ beforeEach(() => {
   delete globalThis.AgentAuthorization;
   delete globalThis.PolicyEngine;
   delete globalThis.AgentWalletManager;
+  delete globalThis.CircleAgent;
   delete globalThis.walletAddress;
   delete globalThis.getCachedProvider;
   delete globalThis._agentStateMsg;
@@ -317,7 +328,8 @@ describe('AUTONOMA-0 — execution gate (fail-closed)', () => {
   });
 
   it('14. Agent Wallet A cannot execute using Wallet B authorization', async () => {
-    const env = bootGate({ wmOverrides: { getAgentAddress: () => OTHER_AGENT } });
+    // Identity is now CircleAgent. Gate runs as OTHER_AGENT; auth was granted for AGENT_ADDR.
+    const env = bootGate({ circleOverrides: { getCachedAddress: () => OTHER_AGENT } });
     grant(env.AgentAuthorization, { agentWallet: AGENT_ADDR });
     const res = await env.gate.authorizeAutonomaExecution(paymentIntent(), {});
     expect(res.ok).toBe(false);
@@ -333,7 +345,8 @@ describe('AUTONOMA-0 — execution gate (fail-closed)', () => {
   });
 
   it('16. missing Agent Wallet state → BLOCK, never fallback unsafely', async () => {
-    const env = bootGate({ wmOverrides: { getAgentAddress: () => null } });
+    // Identity is now CircleAgent. When CircleAgent returns null, the gate must block.
+    const env = bootGate({ circleOverrides: { getCachedAddress: () => null } });
     grant(env.AgentAuthorization);
     const res = await env.gate.authorizeAutonomaExecution(paymentIntent(), {});
     expect(res.ok).toBe(false);

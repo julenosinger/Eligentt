@@ -46,9 +46,13 @@
       try { ctx.walletMode = aiw.getMode ? aiw.getMode() : 'personal'; } catch(_e){}
       try { ctx.emergencyStop = aiw.isEmergencyStopped ? aiw.isEmergencyStopped() : false; } catch(_e){}
     }
+    // Agent identity is ALWAYS the Circle Wallet.
+    // AgentWalletManager.getAgentAddress() is intentionally NOT called here;
+    // it may resolve to the legacy browser EOA which is NOT the Agent identity.
     try {
-      var awm = _agentWallet();
-      if (awm && awm.getAgentAddress) ctx.agentAddress = awm.getAgentAddress() || null;
+      if (typeof CircleAgent !== 'undefined' && CircleAgent.getCachedAddress) {
+        ctx.agentAddress = CircleAgent.getCachedAddress() || null;
+      }
     } catch(_e){}
     return ctx;
   }

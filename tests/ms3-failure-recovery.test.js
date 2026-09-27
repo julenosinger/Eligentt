@@ -86,6 +86,8 @@ function boot(opts = {}) {
   globalThis.ScheduleEngine = engine;
   globalThis.toast = () => {};
   globalThis.walletAddress = opts.walletAddress; // simulate a user wallet switch
+  // CircleAgent is the canonical agent identity source; signer.address is the signing key only.
+  globalThis.CircleAgent = { getCachedAddress: () => signer.address };
   globalThis.AgentWalletManager = Object.assign({
     isShutdown: () => false,
     isPaused: () => false,

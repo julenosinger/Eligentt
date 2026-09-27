@@ -90,6 +90,15 @@ function boot(opts = {}) {
     recordOperationSuccess: () => {},
   }, opts.wmOverrides || {});
 
+  // CircleAgent is the canonical agent identity source (gate reads getCachedAddress).
+  const circleAgentAddr = (opts.circleOverrides && opts.circleOverrides.getCachedAddress)
+    ? opts.circleOverrides.getCachedAddress()
+    : AGENT_ADDR;
+  globalThis.CircleAgent = Object.assign(
+    { getCachedAddress: () => circleAgentAddr },
+    opts.circleOverrides || {}
+  );
+
   globalThis.localStorage = ls;
   globalThis.ScheduleEngine = engine;
   globalThis.AgentAuthorization = AgentAuthorization;
@@ -123,6 +132,7 @@ beforeEach(() => {
   delete globalThis.AgentAuthorization;
   delete globalThis.PolicyEngine;
   delete globalThis.AgentWalletManager;
+  delete globalThis.CircleAgent;
   delete globalThis.walletAddress;
 });
 
@@ -250,7 +260,8 @@ describe('AUTONOMA-2 — fail-closed execution (zero broadcast)', () => {
   });
 
   it('12. missing Agent Wallet → blocked', async () => {
-    const env = boot({ wmOverrides: { getAgentAddress: () => null } });
+    // Identity is now CircleAgent. Returning null from getCachedAddress must block.
+    const env = boot({ circleOverrides: { getCachedAddress: () => null } });
     grant(env.AgentAuthorization);
     const r = await env.gate.authorizeAutonomaExecution(paymentIntent(), {});
     expect(r.ok).toBe(false);
