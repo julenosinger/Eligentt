@@ -11484,7 +11484,16 @@ const CHAIN_REGISTRY = {
     id: 'Arc_Mainnet', name: 'Arc Mainnet', shortName: 'Arc',
     color: '#22c55e', symbol: 'A', testnet: false,
     chainId: 5042, chainHex: '0x13b2',
-    rpc: 'https://rpc.mainnet.arc.io',
+    // Primary: same-origin CF Pages proxy (avoids browser CORS/connectivity to rpc.mainnet.arc.io).
+    // Fallbacks used by getCachedProvider when the primary fails.
+    rpc: '/api/rpc/arc',
+    rpcFallbacks: [
+      'https://rpc.mainnet.arc.io',
+      'https://rpc.drpc.mainnet.arc.io',
+      'https://rpc.quicknode.mainnet.arc.io',
+      'https://rpc.blockdaemon.mainnet.arc.io',
+      'https://arc-rpc.publicnode.com',
+    ],
     explorer: 'https://explorer.arc.io',
     nativeCurrency: { name: 'USDC', symbol: 'USDC', decimals: 18 },
     tokens: {
@@ -14668,13 +14677,51 @@ async function finalizeConnection(raw, walletType) {
 // ── refreshBalance: fetch live USDC balance on active chain ─────────────
 let _refreshBalancePending = false;
 let _refreshBalanceChainId = null; // tracks which chain the last completed fetch belongs to
+
+// Helper: build an ordered RPC list for a chain — proxy first, then fallbacks, then chain.rpc.
+function _arcRpcList(chain) {
+  if (!chain) return [];
+  var list = [];
+  // Primary: chain.rpc (now '/api/rpc/arc' for Arc — same-origin proxy).
+  if (chain.rpc) list.push(chain.rpc);
+  // Additional fallbacks stored in chain.rpcFallbacks (Arc only; other chains have none).
+  if (Array.isArray(chain.rpcFallbacks)) {
+    chain.rpcFallbacks.forEach(function(u){ if (u && list.indexOf(u) === -1) list.push(u); });
+  }
+  return list;
+}
+
+// Helper: try balanceOf across an ordered RPC list with a per-attempt timeout.
+// Returns the first successful bigint balance, or throws if all fail.
+async function _balanceOfWithFallback(usdcAddr, wallet, rpcList, timeoutMs) {
+  timeoutMs = timeoutMs || 10000;
+  var lastErr;
+  for (var ri = 0; ri < rpcList.length; ri++) {
+    var rpcUrl = rpcList[ri];
+    try {
+      var prov = (typeof getCachedProvider === 'function')
+        ? getCachedProvider(rpcUrl)
+        : new ethers.JsonRpcProvider(rpcUrl);
+      var contract = new ethers.Contract(usdcAddr, USDC_ABI, prov);
+      var bal = await Promise.race([
+        contract.balanceOf(wallet),
+        new Promise(function(_, rej){ setTimeout(function(){ rej(new Error('timeout')); }, timeoutMs); })
+      ]);
+      return bal;
+    } catch(e) {
+      lastErr = e;
+      _warn('[_balanceOfWithFallback] RPC failed (' + rpcUrl + '):', e && e.message || e);
+    }
+  }
+  throw lastErr || new Error('All Arc RPC endpoints failed');
+}
+
 async function refreshBalance() {
   if (!walletAddress) return;
   if (_refreshBalancePending) return;
   _refreshBalancePending = true;
   const set = (id, val) => { const el = document.getElementById(id); if(el) el.textContent = val; };
-  // Clear stale values from the previous chain immediately — before any async work —
-  // so the sidebar never shows a balance that belongs to a different chain.
+  // Clear stale values from the previous chain immediately.
   const _snapshotChainId = activeChainId;
   if (_refreshBalanceChainId !== _snapshotChainId) {
     set('sb-bal',     '…');
@@ -14682,47 +14729,65 @@ async function refreshBalance() {
     set('sender-bal', '');
   }
   try {
-    // Chain-consistent read-only provider via cached JsonRpcProvider keyed by RPC URL.
-    // Avoids getChainProvider's async getNetwork() probe which can fail/hang on Arc.
     const chain    = getActiveChain();
     if (!chain || !chain.rpc) { set('sb-bal','—'); set('dd-bal','—'); _refreshBalancePending = false; return; }
-    const prov     = getCachedProvider(chain.rpc);
-    if (!prov) { set('sb-bal','—'); set('dd-bal','—'); _refreshBalancePending = false; return; }
     const usdcAddr = chain.tokens?.USDC?.address;
-    // DEBUG LOGS for chain balance audit
-    // Both use identical path via getActiveChain() + chain.rpc + chain.tokens[SYMBOL].address + JsonRpcProvider + balanceOf
-    // cirBTC falls back to getTokenAddress which uses activeChainId
-    _log('[refreshBalance] detected chainId:', activeChainId, 'chain:', chain?.id || chain?.name);
-    _log('[refreshBalance] selected USDC token address:', usdcAddr, 'wallet:', walletAddress, 'RPC:', chain.rpc);
+    _log('[refreshBalance] chainId:', activeChainId, 'chain:', chain?.id || chain?.name, 'rpc:', chain.rpc);
+    _log('[refreshBalance] USDC addr:', usdcAddr, 'wallet:', walletAddress);
     if (!usdcAddr) { set('sb-bal','—'); set('dd-bal','—'); _refreshBalancePending = false; return; }
-    const usdc  = new ethers.Contract(usdcAddr, USDC_ABI, prov);
-    const bal   = await usdc.balanceOf(walletAddress);
-    const fmt   = fromUsdc(bal);
-    _log('[refreshBalance] fetched USDC balance:', bal.toString(), 'formatted:', fmt);
-    // Guard: only write to UI if the active chain hasn't changed again while we were awaiting
+
+    // Try proxy-first RPC list with 10s timeout per attempt.
+    const rpcList = _arcRpcList(chain);
+    let bal;
+    try {
+      bal = await _balanceOfWithFallback(usdcAddr, walletAddress, rpcList, 10000);
+    } catch(_rpcErr) {
+      // All RPCs failed — fall back to the injected browser provider (signer) if available.
+      if (provider) {
+        try {
+          const usdc = new ethers.Contract(usdcAddr, USDC_ABI, provider);
+          bal = await Promise.race([
+            usdc.balanceOf(walletAddress),
+            new Promise(function(_, rej){ setTimeout(function(){ rej(new Error('timeout')); }, 10000); })
+          ]);
+        } catch(_e) {
+          _warn('refreshBalance: browser provider also failed:', _e && _e.message || _e);
+          set('sb-bal', '—'); set('dd-bal', '—');
+          _refreshBalancePending = false;
+          return;
+        }
+      } else {
+        set('sb-bal', '—'); set('dd-bal', '—');
+        _refreshBalancePending = false;
+        return;
+      }
+    }
+
+    const fmt = fromUsdc(bal);
+    _log('[refreshBalance] USDC balance:', bal.toString(), 'formatted:', fmt);
     if (activeChainId === _snapshotChainId) {
       set('sb-bal',     fmt);
       set('dd-bal',     fmt);
       set('sender-bal', 'Balance: ' + fmt + ' USDC');
       _refreshBalanceChainId = _snapshotChainId;
     }
+
+    // EURC (best-effort, silent on failure).
     const eurcAddr = chain.tokens?.EURC?.address;
     if (eurcAddr) {
       try {
-        const eurc = new ethers.Contract(eurcAddr, USDC_ABI, prov);
-        const eurcBal = await eurc.balanceOf(walletAddress);
-        _log('[refreshBalance] fetched EURC balance:', eurcBal.toString());
+        const eurcBal = await _balanceOfWithFallback(eurcAddr, walletAddress, rpcList, 8000);
+        _log('[refreshBalance] EURC balance:', eurcBal.toString());
         if (activeChainId === _snapshotChainId) set('sb-eurc-bal', fromUsdc(eurcBal));
-      } catch(e) { _warn('silent-catch', e?.message||e); }
+      } catch(e) { _warn('refreshBalance EURC silent-catch:', e?.message||e); }
     }
-    // cirBTC not fetched in main refresh (Send Assets specific)
-    updateSwapBalancesDisplay(); // keep swap widget balances fresh
+
+    updateSwapBalancesDisplay();
     UnifiedBalanceEngine.reconcile();
     _refreshBalancePending = false;
     return fmt;
   } catch(e) {
     _warn('refreshBalance error:', e.message);
-    // Clear stale display on error so wrong-chain value is never left visible
     set('sb-bal', '—');
     set('dd-bal', '—');
     _refreshBalancePending = false;
@@ -30471,19 +30536,29 @@ async function saRefreshBalance() {
   if (!balEl) return;
   if (!walletAddress) { balEl.textContent = '—'; return; }
   try {
-    var human;
     var tokenAddr = saGetTokenAddr();
     if (!tokenAddr) { balEl.textContent = '—'; return; }
-    // Use chain RPC for reads, fall back to BrowserProvider
     var chain = getActiveChain();
-    var readProv = null;
-    if (chain && chain.rpc) { try { if (typeof getCachedProvider === 'function') readProv = getCachedProvider(chain.rpc); } catch(_) {} }
-    if (!readProv) readProv = provider;
-    if (!readProv) { balEl.textContent = '—'; return; }
-    var contract = new ethers.Contract(tokenAddr, USDC_ABI, readProv);
-    var bal = await contract.balanceOf(walletAddress);
+    // Use proxy-first RPC list (Arc: /api/rpc/arc first; other chains: direct rpc only).
+    var rpcList = (typeof _arcRpcList === 'function') ? _arcRpcList(chain) : (chain && chain.rpc ? [chain.rpc] : []);
+    var bal;
+    try {
+      bal = await _balanceOfWithFallback(tokenAddr, walletAddress, rpcList, 10000);
+    } catch(_rpcErr) {
+      // Fall back to the injected browser provider.
+      if (provider) {
+        var _fb = new ethers.Contract(tokenAddr, USDC_ABI, provider);
+        bal = await Promise.race([
+          _fb.balanceOf(walletAddress),
+          new Promise(function(_, rej){ setTimeout(function(){ rej(new Error('timeout')); }, 10000); })
+        ]);
+      } else {
+        balEl.textContent = '—';
+        return;
+      }
+    }
     var dec = saGetTokenDecimals();
-    human = (Number(bal) / Math.pow(10, dec)).toFixed(dec === 6 ? 2 : 6);
+    var human = (Number(bal) / Math.pow(10, dec)).toFixed(dec === 6 ? 2 : 6);
     balEl.textContent = human + ' ' + saCurrentAsset;
   } catch(e) {
     balEl.textContent = '—';
@@ -42652,7 +42727,12 @@ function exitUnifiedBalanceMode() {
         var _proxySlug = _slugMap[_slug] || null;
         if (_proxySlug) rpcList.push('/api/rpc/' + _proxySlug);
       }
-      if (chain && chain.rpc) rpcList.push(chain.rpc);
+      // chain.rpc may already be the proxy (Arc): add only if not a duplicate.
+      if (chain && chain.rpc && rpcList.indexOf(chain.rpc) === -1) rpcList.push(chain.rpc);
+      // Add chain.rpcFallbacks (Arc has explicit fallback list after the proxy).
+      if (chain && Array.isArray(chain.rpcFallbacks)) {
+        chain.rpcFallbacks.forEach(function(u){ if (u && rpcList.indexOf(u) === -1) rpcList.push(u); });
+      }
       if (!rpcList.length) throw new Error('No RPC available for chain');
 
       var lastErr;
