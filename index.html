@@ -19917,28 +19917,36 @@ async function updateSwapBalancesDisplay() {
   }
   try {
     // Chain-aware: read balances ONLY on the ACTIVE chain.
-    // Uses getCachedProvider directly (same as saRefreshBalance) to avoid
-    // getChainProvider's async getNetwork() probe which can fail/hang on Arc.
+    // Uses proxy-first _arcRpcList + _balanceOfWithFallback (same as Send Assets)
+    // so Arc balances route through /api/rpc/arc and never fail with publicnode CORS.
     const activeChain = getActiveChain();
-    if (!activeChain || !activeChain.rpc) return;
-    const prov = getCachedProvider(activeChain.rpc);
-    if (!prov) return;
+    if (!activeChain) return;
+    const rpcList = (typeof _arcRpcList === 'function') ? _arcRpcList(activeChain) : (activeChain.rpc ? [activeChain.rpc] : []);
     const tIn  = TOKEN_LIST[SWP.tokenInIdx];
     const tOut = TOKEN_LIST[SWP.tokenOutIdx];
 
     const readBal = async (t) => {
-      // Chain-specific token address (null when the token is not deployed here).
       const addr = getTokenAddress(t.sym);
       const isNative = t.sym === 'ETH' && !isArcChainId(activeChainId);
       if (!addr) {
         if (isNative) {
-          try { const b = await prov.getBalance(walletAddress); return parseFloat(ethers.formatUnits(b, t.decimals)).toFixed(4); } catch(_) { return '—'; }
+          // ETH native balance — use first available provider with timeout.
+          try {
+            const prov = getCachedProvider(rpcList[0] || activeChain.rpc);
+            const b = await Promise.race([
+              prov.getBalance(walletAddress),
+              new Promise((_,rej) => setTimeout(() => rej(new Error('timeout')), 10000)),
+            ]);
+            return parseFloat(ethers.formatUnits(b, t.decimals)).toFixed(4);
+          } catch(_) { return '—'; }
         }
-        return '—'; // not deployed on this chain → no balance to display
+        return '—';
       }
-      const c = new ethers.Contract(addr, USDC_ABI, prov);
-      const b = await c.balanceOf(walletAddress);
-      return parseFloat(ethers.formatUnits(b, t.decimals)).toFixed(4);
+      // ERC-20: proxy-first fallback list with 10s timeout per attempt.
+      try {
+        const b = await _balanceOfWithFallback(addr, walletAddress, rpcList, 10000);
+        return parseFloat(ethers.formatUnits(b, t.decimals)).toFixed(4);
+      } catch(_) { return '—'; }
     };
 
     const [balIn, balOut] = await Promise.all([readBal(tIn), readBal(tOut)]);
@@ -22128,8 +22136,22 @@ async function refreshBridgeBalances(){
   const set=(id,v)=>{const el=document.getElementById(id);if(el)el.textContent=v;};
   if(!walletAddress){set('bridge-from-bal','—');set('bridge-to-bal','—');return;}
   const from=CHAINS[bridgeFromIdx],to=CHAINS[bridgeToIdx];
-  try{const p=getCachedProvider(from.rpc);const a=from.tokens?.USDC?.address;if(a){const c=new ethers.Contract(a,USDC_ABI,p);const b=await c.balanceOf(walletAddress);set('bridge-from-bal',fromUsdc(b));}else{set('bridge-from-bal','—');}}catch(e){set('bridge-from-bal','—');}
-  try{const p=getCachedProvider(to.rpc);const a=to.tokens?.USDC?.address;if(a){const c=new ethers.Contract(a,USDC_ABI,p);const b=await c.balanceOf(walletAddress);set('bridge-to-bal',fromUsdc(b));}else{set('bridge-to-bal','—');}}catch(e){set('bridge-to-bal','—');}
+  // Use same proxy-first reader as Send Assets / refreshBalance.
+  // _arcRpcList returns ['/api/rpc/arc', ...fallbacks] for Arc (chain.rpc = '/api/rpc/arc'),
+  // and [chain.rpc] for other chains. _balanceOfWithFallback tries each in order.
+  async function _bridgeReadBal(chain, elId) {
+    const a = chain && chain.tokens?.USDC?.address;
+    if (!a) { set(elId, '—'); return; }
+    try {
+      const rpcList = (typeof _arcRpcList === 'function') ? _arcRpcList(chain) : (chain.rpc ? [chain.rpc] : []);
+      const b = await _balanceOfWithFallback(a, walletAddress, rpcList, 10000);
+      set(elId, fromUsdc(b));
+    } catch (_e) { set(elId, '—'); }
+  }
+  await Promise.all([
+    _bridgeReadBal(from, 'bridge-from-bal'),
+    _bridgeReadBal(to,   'bridge-to-bal'),
+  ]);
 }
 
 // ── Chain verification: quick check before any transaction ─────────────
