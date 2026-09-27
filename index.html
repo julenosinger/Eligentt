@@ -39167,6 +39167,20 @@ function _ubProvider(rpc) {
   try { return new ethers.JsonRpcProvider(rpc); } catch(e2) { return null; }
 }
 
+// Chain-aware provider: uses _arcRpcList (proxy-first for Arc, direct rpc for others).
+// Falls back through the list in order until one provider is constructable.
+// This is the single source of truth for Unified Balance RPC access — no caller
+// should hardcode chain.rpc directly.
+function _ubProviderForChain(chain) {
+  if (!chain) return null;
+  var rpcList = (typeof _arcRpcList === 'function') ? _arcRpcList(chain) : (chain.rpc ? [chain.rpc] : []);
+  for (var i = 0; i < rpcList.length; i++) {
+    var p = _ubProvider(rpcList[i]);
+    if (p) return p;
+  }
+  return null;
+}
+
 function _ubWithTimeout(promise, ms) {
   return new Promise(function(resolve, reject) {
     var timer = setTimeout(function() { reject(new Error('RPC_TIMEOUT')); }, ms);
@@ -39458,7 +39472,7 @@ function ubFetchNativeBalance(chain, walletKey) {
   var chainId = chain.id || chain.name;
   var priceRes = ubResolveTokenPrice('ETH');
   return _ubCallWithRetry(function() {
-    var prov = _ubProvider(chain.rpc);
+    var prov = _ubProviderForChain(chain);
     if (!prov) throw new Error('NO_PROVIDER');
     return prov.getBalance(walletKey);   // wallet snapshot, never the mutable global
   }, null, chainId).then(function(raw) {
@@ -39472,7 +39486,7 @@ function ubFetchOne(chain, sym, tokenAddr, walletKey) {
   var decimals = (chain.tokens && chain.tokens[sym]) ? (chain.tokens[sym].decimals || 6) : 6;
   var priceRes = ubResolveTokenPrice(sym);
   return _ubCallWithRetry(function() {
-    var prov = _ubProvider(chain.rpc);
+    var prov = _ubProviderForChain(chain);
     if (!prov) throw new Error('NO_PROVIDER');
     var contract = new ethers.Contract(tokenAddr, (typeof USDC_ABI !== 'undefined' ? USDC_ABI : ['function balanceOf(address) view returns (uint256)']), prov);
     return contract.balanceOf(walletKey);   // wallet snapshot, never the mutable global
@@ -39513,7 +39527,7 @@ async function _ubMulticallChain(chain, tokens, walletKey, nativeSym) {
   if (typeof ethers === 'undefined' || !ethers.Interface) return null;
   var hasNative = (nativeSym === 'ETH');
   if ((!tokens || !tokens.length) && !hasNative) return null;
-  var prov = _ubProvider(chain.rpc);
+  var prov = _ubProviderForChain(chain);
   if (!prov) return null;
   var erc20Iface, ethIface;
   try {
