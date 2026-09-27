@@ -9825,10 +9825,9 @@ select.cinput option { background: #161a24; color: #dde2f0; }
           <button class="btn primary" onclick="openWalletModal()"><i class="ti ti-wallet"></i>Connect Wallet</button>
         </div>
         <div id="ub-guard" style="display:none;text-align:center;padding:60px 20px">
-          <i class="ti ti-shield-lock" style="font-size:40px;color:var(--yellow);display:block;margin-bottom:10px;opacity:.6"></i>
-          <div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:6px">Arc Mainnet Required</div>
-          <div style="font-size:11px;color:var(--muted2);margin-bottom:14px">Please switch your wallet to Arc Mainnet to use Unified Balance.</div>
-          <button class="btn primary" onclick="openNetworkSelector()"><i class="ti ti-network"></i>Switch Network</button>
+          <i class="ti ti-wallet-off" style="font-size:40px;color:var(--muted2);display:block;margin-bottom:10px;opacity:.3"></i>
+          <div style="font-size:12px;color:var(--muted2);margin-bottom:12px">Connect your wallet to view portfolio</div>
+          <button class="btn primary" onclick="openWalletModal()"><i class="ti ti-wallet"></i>Connect Wallet</button>
         </div>
         <div id="ub-content" style="display:none;flex-direction:column;gap:12px">
 
@@ -14873,12 +14872,11 @@ function setupProviderEvents(raw) {
       _refreshBalancePending = false;
       await refreshProviderState();
       updateNetworkBadge();
-      // Re-evaluate Unified Balance network guard (Arc Mainnet only).
+      // Re-evaluate Unified Balance on any chain change — multi-chain portfolio, no guard.
       try {
         var _ubPage = document.getElementById('page-unified-balance');
-        if (_ubPage && _ubPage.classList.contains('active') && typeof ubIsMainnet === 'function') {
-          if (ubIsMainnet()) { if (typeof ubRefresh === 'function') ubRefresh(); }
-          else { if (typeof ubShowState === 'function') ubShowState('guard'); }
+        if (_ubPage && _ubPage.classList.contains('active')) {
+          if (typeof ubRefresh === 'function') ubRefresh();
         }
       } catch(_) {}
       await refreshBalance();
@@ -39033,7 +39031,6 @@ document.addEventListener('WALLET_SWITCHED', function() {
 });
 
 function ubRefresh() {
-  if (Number(activeChainId) !== 5042) { ubShowState('guard'); return; }
   var walletKey = _ubWalletKey();
   if (!walletKey) {
     _ubLastRenderedWallet = '';
