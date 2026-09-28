@@ -2421,6 +2421,53 @@ body.swap-standard-mode .site-footer{display:block !important}
 /* ── Steps card fade out ── */
 #xc-steps-card.xc-fade-out{opacity:0;transform:translateY(8px);transition:opacity .45s ease,transform .45s ease}
 @keyframes opStepsIn{from{opacity:0;transform:translateX(16px)}to{opacity:1;transform:none}}
+/* ── Bridge route panel — Jumper-style routes list (routes loaded, not executing) ── */
+@media(min-width:1080px){
+  .swap-col.bridge-routes-active{display:grid;grid-template-columns:minmax(0,420px) minmax(300px,1fr);align-items:start;gap:18px;transition:grid-template-columns .35s cubic-bezier(.4,0,.2,1)}
+  .swap-col.bridge-routes-active > .swap-card{grid-column:1;grid-row:1}
+  .swap-col.bridge-routes-active > #cctp-mint-banner-wrap{grid-column:1;grid-row:1;align-self:start}
+  /* bridge-routes-panel is always col 2 — bridge-steps-card is nested inside it */
+  .swap-col.bridge-routes-active > #bridge-routes-panel{grid-column:2;grid-row:1;align-self:start;animation:opStepsIn .4s cubic-bezier(.4,0,.2,1) both}
+}
+/* Panel is hidden until routes load OR execution starts */
+#bridge-routes-panel{display:none;flex-direction:column;gap:8px}
+#bridge-routes-panel.brs-visible{display:flex}
+/* bridge-steps-card inside the panel: no extra margin, full width */
+#bridge-routes-panel > #bridge-steps-card{margin:0;width:100%}
+/* bridge-routes-inner: the route cards area; hidden during execution */
+#bridge-routes-inner{display:flex;flex-direction:column;gap:8px}
+.brs-header{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.7px;color:var(--muted2);display:flex;align-items:center;gap:6px;padding:0 2px 4px}
+.brs-header i{font-size:11px;color:var(--teal)}
+.brs-header .brs-count{margin-left:auto;font-size:8px;color:var(--muted2)}
+.brs-loading{display:flex;align-items:center;gap:8px;font-size:9px;color:var(--muted2);padding:14px 12px;background:var(--card);border:1px solid var(--border);border-radius:8px}
+.brs-empty{font-size:9px;color:var(--muted2);padding:14px 12px;text-align:center;background:var(--card);border:1px solid var(--border);border-radius:8px}
+.brs-route{background:var(--card);border:1px solid var(--border);border-radius:9px;padding:13px 14px;cursor:pointer;transition:border-color .18s,box-shadow .18s,transform .15s;position:relative;display:flex;flex-direction:column;gap:9px}
+.brs-route:hover{border-color:rgba(45,212,191,.35);transform:translateY(-1px);box-shadow:0 4px 18px rgba(0,0,0,.25)}
+.brs-route.brs-selected{border-color:var(--teal);box-shadow:0 0 0 2px rgba(45,212,191,.2),0 4px 18px rgba(0,0,0,.28)}
+.brs-route.brs-best{border-color:rgba(45,212,191,.28)}
+.brs-best-badge{position:absolute;top:-1px;right:12px;font-size:7.5px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;background:var(--teal);color:#0a0f1a;padding:2px 8px;border-radius:0 0 6px 6px}
+.brs-route-top{display:flex;align-items:center;gap:9px}
+.brs-provider-icon{width:28px;height:28px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;flex-shrink:0;background:rgba(45,212,191,.12);color:var(--teal)}
+.brs-provider-name{font-size:11px;font-weight:700;color:var(--text)}
+.brs-protocol-tag{font-size:8px;color:var(--muted2);margin-top:1px}
+.brs-out-amount{margin-left:auto;text-align:right}
+.brs-out-val{font-size:14px;font-weight:800;color:var(--text);font-family:'JetBrains Mono',monospace}
+.brs-out-label{font-size:7.5px;color:var(--muted2)}
+.brs-meta{display:flex;gap:16px;flex-wrap:wrap}
+.brs-meta-item{display:flex;flex-direction:column;gap:1px}
+.brs-meta-val{font-size:9.5px;font-weight:600;color:var(--text)}
+.brs-meta-lbl{font-size:7.5px;color:var(--muted2)}
+.brs-route-steps{display:flex;align-items:center;gap:4px;font-size:8px;color:var(--muted2);padding-top:4px;border-top:1px solid var(--border)}
+.brs-step-dot{width:6px;height:6px;border-radius:50%;background:rgba(255,255,255,.15);flex-shrink:0}
+.brs-step-dot.brs-done{background:var(--teal)}
+.brs-unavail{opacity:.45;cursor:not-allowed;pointer-events:none}
+.brs-unavail-tag{font-size:8px;color:var(--red);font-weight:600}
+.brs-select-hint{font-size:8px;color:var(--teal);margin-left:auto;opacity:.7}
+/* Mobile: panel stacks below */
+@media(max-width:1080px){
+  .swap-col.bridge-routes-active{display:flex !important;flex-direction:column !important}
+  #bridge-routes-panel.brs-visible{animation:none}
+}
 /* Mobile: disable execution layout animation — steps stay below, no card movement */
 @media(max-width:1080px){
   .swap-col.op-exec-active{display:flex !important;flex-direction:column !important;grid-template-columns:none !important}
@@ -6970,7 +7017,13 @@ select.cinput option { background: #161a24; color: #dde2f0; }
             </button>
           </div>
 
-          <!-- Transaction steps -->
+          <!-- Right panel: shows routes while idle, steps during execution.
+               bridge-steps-card lives inside so both share the same grid cell. -->
+          <div id="bridge-routes-panel">
+            <!-- route cards injected by JS; hidden when steps are active -->
+            <div id="bridge-routes-inner"><!-- header + route cards --></div>
+
+            <!-- Transaction steps (nested so they occupy the same right column) -->
           <div class="card" id="bridge-steps-card" style="display:none">
             <div class="turbo-progress-wrap" id="turbo-steps-wrap" style="display:none">
               <div style="font-size:9.5px;font-weight:700;color:var(--yellow);margin-bottom:8px"><i class="ti ti-bolt"></i> Turbo Bridge Progress</div>
@@ -6989,6 +7042,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
               </div>
             </div>
           </div>
+          </div><!-- /bridge-routes-panel -->
 
         </div>
 
@@ -22045,6 +22099,285 @@ function _bridgeFmtDuration(sec) {
   return (sec / 3600).toFixed(1) + ' hr';
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+//  BRIDGE ROUTE AGGREGATOR
+//  Thin layer over the existing LiFiAdapter + BridgeKitRouter providers.
+//  Returns a normalized RouteResult[] from real API calls.  No mock data.
+// ═══════════════════════════════════════════════════════════════════════════
+var _bridgeRoutes = [];          // current loaded routes
+var _selectedBridgeRoute = null; // { provider, quote, idx }
+var _bridgeRoutesSeq = 0;        // stale-result guard
+
+// Normalize a LI.FI quote into RouteResult shape.
+function _brsFromLiFi(quote) {
+  if (!quote || quote.ok !== true) return null;
+  var est = quote.route && quote.route.estimate;
+  var steps = (quote.route && quote.route.steps && quote.route.steps.length) || 1;
+  var execSec = est && est.executionDuration != null ? Number(est.executionDuration) : null;
+  var outAmt  = Number(quote.expectedOutRaw || 0) / 1e6;
+  var minAmt  = quote.minOutRaw != null ? Number(quote.minOutRaw) / 1e6 : null;
+  var feePct  = quote.feeBps != null ? (quote.feeBps / 100) : null;
+  var gasUsd  = est && est.gasCosts && est.gasCosts[0] ? (Number(est.gasCosts[0].amountUSD) || 0) : null;
+  var feesUsd = est && est.feeCosts && est.feeCosts.length
+    ? est.feeCosts.reduce(function(s, f){ return s + (Number(f.amountUSD)||0); }, 0)
+    : null;
+  return {
+    provider:    'lifi',
+    id:          'lifi-' + (quote.tool || 'route'),
+    label:       quote.tool || 'LI.FI',
+    protocol:    'LI.FI aggregator',
+    available:   true,
+    inAmt:       Number(quote.inAmtRaw || 0) / 1e6,
+    outAmt:      outAmt,
+    minAmt:      minAmt,
+    feePct:      feePct,
+    gasUsd:      gasUsd,
+    feesUsd:     feesUsd,
+    execSec:     execSec,
+    steps:       steps,
+    quote:       quote,    // kept for execution
+  };
+}
+
+// Normalize a BridgeKitRouter estimate into RouteResult shape.
+function _brsFromCCTP(est, fromChainId, toChainId) {
+  if (!est || est.ok === false) return null;
+  var outAmt = est.outAmt != null ? Number(est.outAmt) : null;
+  var fee    = est.fee    != null ? Number(est.fee)    : null;
+  var execSec = est.execSec != null ? Number(est.execSec) : 120; // CCTP ~2min typical
+  var inAmt  = est.inAmt != null ? Number(est.inAmt)  : null;
+  return {
+    provider:    'cctp',
+    id:          'cctp-' + fromChainId + '-' + toChainId,
+    label:       'Circle CCTP',
+    protocol:    'CCTP V2',
+    available:   true,
+    inAmt:       inAmt,
+    outAmt:      outAmt,
+    minAmt:      outAmt,
+    feePct:      (fee != null && inAmt != null && inAmt > 0) ? (fee / inAmt * 100) : null,
+    gasUsd:      null,
+    feesUsd:     fee,
+    execSec:     execSec,
+    steps:       4,   // approve + burn + attest + mint
+    quote:       est,
+  };
+}
+
+// Fetch all available routes in parallel, normalize, sort by outAmt desc.
+async function _fetchBridgeRoutes(fromChain, toChain, amt, walletAddr) {
+  var seq = ++_bridgeRoutesSeq;
+  var promises = [];
+
+  // Provider 1: LI.FI
+  if (typeof LiFiAdapter !== 'undefined' && typeof LiFiAdapter.getQuote === 'function') {
+    promises.push(
+      LiFiAdapter.getQuote({
+        tokenIn: 'USDC', tokenOut: 'USDC',
+        amountInRaw: toUsdc(amt),
+        slippageBps: (typeof SlippageConfig !== 'undefined' && SlippageConfig.DEFAULT_BPS) || 100,
+        fromChainId: fromChain.chainId, toChainId: toChain.chainId,
+        fromAddress: walletAddr, toAddress: walletAddr,
+      }).then(function(q){ return _brsFromLiFi(q); }).catch(function(){ return null; })
+    );
+  }
+
+  // Provider 2: CCTP (BridgeKitRouter.estimate)
+  if (
+    typeof BridgeKitRouter !== 'undefined' &&
+    BridgeKitRouter.isAvailable() &&
+    typeof BridgeKitRouter.estimate === 'function' &&
+    BridgeKitRouter.route(fromChain.chainId, toChain.chainId, 'USDC').provider === 'cctp'
+  ) {
+    promises.push(
+      BridgeKitRouter.estimate(fromChain.chainId, toChain.chainId, amt, 'USDC')
+        .then(function(e){ return _brsFromCCTP(e, fromChain.chainId, toChain.chainId); })
+        .catch(function(){ return null; })
+    );
+  }
+
+  var results = await Promise.allSettled(promises);
+  if (seq !== _bridgeRoutesSeq) return null; // stale
+
+  var routes = [];
+  results.forEach(function(r){ if (r.status === 'fulfilled' && r.value) routes.push(r.value); });
+
+  // Sort: available first, then by outAmt desc (best rate first).
+  routes.sort(function(a, b){
+    if (a.available !== b.available) return a.available ? -1 : 1;
+    return (b.outAmt || 0) - (a.outAmt || 0);
+  });
+  return routes;
+}
+
+// ── Route panel rendering ────────────────────────────────────────────────────
+
+function _brsSetActive(state) {
+  var col = document.querySelector('#page-bridge .swap-col');
+  if (!col) return;
+  if (state) col.classList.add('bridge-routes-active');
+  else       col.classList.remove('bridge-routes-active');
+}
+
+function _brsFmtDur(sec) {
+  if (!sec) return '—';
+  if (sec < 60) return sec + 's';
+  var m = Math.round(sec / 60);
+  return m < 60 ? m + ' min' : Math.round(m/60) + 'h';
+}
+
+function _brsFmtUsd(v) {
+  if (v == null) return '—';
+  return '$' + Number(v).toFixed(3);
+}
+
+// ── Route/Steps panel swap helpers ───────────────────────────────────────
+// The right panel (#bridge-routes-panel) holds both #bridge-routes-inner
+// (route cards) and #bridge-steps-card (execution progress) as children.
+// Only one is visible at a time.
+function _brsShowRoutes() {
+  var inner = document.getElementById('bridge-routes-inner');
+  var steps = document.getElementById('bridge-steps-card');
+  if (inner) inner.style.display = 'flex';
+  if (steps) steps.style.display = 'none';
+}
+function _brsShowSteps() {
+  var inner = document.getElementById('bridge-routes-inner');
+  var steps = document.getElementById('bridge-steps-card');
+  if (inner) inner.style.display = 'none';
+  if (steps) { steps.style.display = ''; steps.style.removeProperty('display'); }
+  // Ensure panel is visible + grid is active.
+  var panel = document.getElementById('bridge-routes-panel');
+  if (panel) panel.classList.add('brs-visible');
+  _brsSetActive(true);
+}
+
+function _brsRenderRoutes(routes, fromChain, toChain) {
+  var panel = document.getElementById('bridge-routes-panel');
+  var inner = document.getElementById('bridge-routes-inner');
+  if (!panel || !inner) return;
+
+  if (!routes || routes.length === 0) {
+    panel.classList.remove('brs-visible');
+    inner.innerHTML = '';
+    _brsSetActive(false);
+    return;
+  }
+
+  panel.classList.add('brs-visible');
+  _brsSetActive(true);
+  _brsShowRoutes(); // make sure routes-inner is visible, steps hidden
+
+  var fromLabel = (fromChain && fromChain.name) || 'From';
+  var toLabel   = (toChain && toChain.name)   || 'To';
+
+  var html = '<div class="brs-header"><i class="ti ti-route"></i>Available Routes' +
+    '<span class="brs-count">' + routes.length + ' route' + (routes.length !== 1 ? 's' : '') + ' · ' +
+    fromLabel.split(' ')[0] + ' → ' + toLabel.split(' ')[0] + '</span></div>';
+
+  routes.forEach(function(route, i) {
+    var isBest = i === 0 && route.available;
+    var isSel  = _selectedBridgeRoute && _selectedBridgeRoute.id === route.id;
+    var classes = 'brs-route' +
+      (isBest ? ' brs-best' : '') +
+      (isSel  ? ' brs-selected' : '') +
+      (!route.available ? ' brs-unavail' : '');
+
+    var provLetter = (route.label || 'B').charAt(0).toUpperCase();
+    var outStr = route.outAmt != null ? route.outAmt.toFixed(4) : '—';
+    var feePctStr = route.feePct != null ? route.feePct.toFixed(3) + '%' : '—';
+    var gasStr    = route.gasUsd != null ? _brsFmtUsd(route.gasUsd) : '—';
+    var feesStr   = route.feesUsd != null ? _brsFmtUsd(route.feesUsd) : '—';
+    var timeStr   = _brsFmtDur(route.execSec);
+    var stepsStr  = route.steps;
+
+    html += '<div class="' + classes + '" onclick="brSelectRoute(' + i + ')" id="brs-card-' + i + '">' +
+      (isBest ? '<div class="brs-best-badge">Best Rate</div>' : '') +
+      '<div class="brs-route-top">' +
+        '<div class="brs-provider-icon">' + provLetter + '</div>' +
+        '<div style="flex:1;min-width:0">' +
+          '<div class="brs-provider-name">' + escHtml(route.label) + '</div>' +
+          '<div class="brs-protocol-tag">' + escHtml(route.protocol) + '</div>' +
+        '</div>' +
+        '<div class="brs-out-amount">' +
+          '<div class="brs-out-val">' + outStr + '</div>' +
+          '<div class="brs-out-label">USDC received</div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="brs-meta">' +
+        '<div class="brs-meta-item"><div class="brs-meta-val">' + feePctStr + '</div><div class="brs-meta-lbl">Bridge fee</div></div>' +
+        '<div class="brs-meta-item"><div class="brs-meta-val">' + feesStr + '</div><div class="brs-meta-lbl">Protocol fees</div></div>' +
+        '<div class="brs-meta-item"><div class="brs-meta-val">' + gasStr + '</div><div class="brs-meta-lbl">Est. gas</div></div>' +
+        '<div class="brs-meta-item"><div class="brs-meta-val">' + timeStr + '</div><div class="brs-meta-lbl">Est. time</div></div>' +
+        '<div class="brs-meta-item"><div class="brs-meta-val">' + stepsStr + '</div><div class="brs-meta-lbl">Steps</div></div>' +
+      '</div>' +
+      '<div class="brs-route-steps">' +
+        (route.available
+          ? (isSel
+              ? '<i class="ti ti-check" style="color:var(--teal);font-size:10px"></i><span style="color:var(--teal)">Selected — click Bridge to execute</span>'
+              : '<span class="brs-select-hint">Click to select</span>')
+          : '<span class="brs-unavail-tag">Unavailable</span>') +
+      '</div>' +
+    '</div>';
+  });
+
+  inner.innerHTML = html;
+}
+
+// Select a route (does NOT open wallet).
+function brSelectRoute(idx) {
+  var route = _bridgeRoutes[idx];
+  if (!route || !route.available) return;
+
+  _selectedBridgeRoute = route;
+
+  // Re-render cards to update selection highlight.
+  var cards = document.querySelectorAll('.brs-route');
+  cards.forEach(function(c, i) {
+    if (i === idx) c.classList.add('brs-selected');
+    else           c.classList.remove('brs-selected');
+  });
+
+  // Update the footer hint text.
+  cards.forEach(function(c, i) {
+    var hint = c.querySelector('.brs-route-steps');
+    if (!hint) return;
+    if (i === idx) hint.innerHTML = '<i class="ti ti-check" style="color:var(--teal);font-size:10px"></i><span style="color:var(--teal)">Selected — click Bridge to execute</span>';
+    else           hint.innerHTML = '<span class="brs-select-hint">Click to select</span>';
+  });
+
+  // Update the Bridge button label to reflect the chosen route.
+  var btn = document.getElementById('bridge-btn');
+  if (btn) btn.innerHTML = '<i class="ti ti-topology-star-3"></i>Bridge via ' + escHtml(route.label);
+}
+
+// Clear routes (on chain/amount change) — hides the right panel entirely.
+function _brsClearRoutes() {
+  _bridgeRoutes = [];
+  _selectedBridgeRoute = null;
+  var panel = document.getElementById('bridge-routes-panel');
+  var inner = document.getElementById('bridge-routes-inner');
+  var steps = document.getElementById('bridge-steps-card');
+  if (inner) inner.innerHTML = '';
+  if (steps) steps.style.display = 'none';
+  if (panel) panel.classList.remove('brs-visible');
+  _brsSetActive(false);
+  var btn = document.getElementById('bridge-btn');
+  if (btn) btn.innerHTML = '<i class="ti ti-topology-star-3"></i>Bridge USDC';
+}
+
+// Show loading skeleton in the routes-inner area.
+function _brsShowLoading() {
+  var panel = document.getElementById('bridge-routes-panel');
+  var inner = document.getElementById('bridge-routes-inner');
+  if (!panel || !inner) return;
+  panel.classList.add('brs-visible');
+  _brsSetActive(true);
+  _brsShowRoutes();
+  inner.innerHTML = '<div class="brs-header"><i class="ti ti-route"></i>Finding Routes…</div>' +
+    '<div class="brs-loading"><div class="aut-typing"><span></span><span></span><span></span></div>Fetching available routes…</div>';
+}
+
 function updateBridgeEst(){
   const amtInput = document.getElementById('bridge-amount');
   const amt = parseFloat(amtInput && amtInput.value) || 0;
@@ -22058,6 +22391,9 @@ function updateBridgeEst(){
   _bridgeSetText('bridge-fee-display', '—');
   _bridgeSetText('bridge-min', '—');
   _bridgeSetText('bridge-time', 'Fetching route…');
+
+  // Clear route panel while new routes are loading.
+  _brsClearRoutes();
 
   var fromId = fromChain && fromChain.id || '';
   var toId = toChain && toChain.id || '';
@@ -22074,52 +22410,56 @@ async function _fetchBridgeQuote(fromChain, toChain, amt) {
   if (!fromChain || !toChain) return;
   const seq = ++_bridgeQuoteSeq; // invalidate any in-flight/older response
 
-  if (amt <= 0 || fromChain.chainId === toChain.chainId) return;
+  if (amt <= 0 || fromChain.chainId === toChain.chainId) {
+    _brsClearRoutes();
+    return;
+  }
   if (!walletAddress) {
     _bridgeSetText('bridge-protocol', 'LI.FI');
     _bridgeSetText('bridge-receive', 'Connect wallet');
     _bridgeSetText('bridge-time', 'Connect a wallet to see a live route');
-    return;
-  }
-  if (typeof LiFiAdapter === 'undefined' || typeof LiFiAdapter.getQuote !== 'function') {
-    _bridgeSetText('bridge-time', 'LI.FI routing unavailable');
+    _brsClearRoutes();
     return;
   }
 
-  let quote;
-  try {
-    quote = await LiFiAdapter.getQuote({
-      tokenIn: 'USDC', tokenOut: 'USDC',
-      amountInRaw: toUsdc(amt),
-      slippageBps: (typeof SlippageConfig !== 'undefined' && SlippageConfig.DEFAULT_BPS) || 100,
-      fromChainId: fromChain.chainId, toChainId: toChain.chainId,
-      fromAddress: walletAddress, toAddress: walletAddress,
-    });
-  } catch (e) {
-    quote = { ok: false, error: (e && e.message) || String(e) };
-  }
+  // Show loading skeleton in route panel while fetching.
+  _brsShowLoading();
 
-  // Stale-quote protection: a delayed older response must not overwrite the latest.
-  if (seq !== _bridgeQuoteSeq) return;
+  // ── Fetch all routes in parallel ──────────────────────────────────────────
+  // This replaces the single LiFiAdapter.getQuote call with the aggregator
+  // that also tries CCTP. The LI.FI quote is still stored in _bridgeLastQuote
+  // for the existing rate-box display.
+  const routes = await _fetchBridgeRoutes(fromChain, toChain, amt, walletAddress);
+  if (seq !== _bridgeQuoteSeq) return; // stale
 
-  if (!quote || quote.ok !== true) {
+  if (!routes || routes.length === 0) {
     _bridgeLastQuote = null;
     _bridgeSetText('bridge-protocol', 'LI.FI');
     _bridgeSetText('bridge-receive', 'No route');
     _bridgeSetText('bridge-amount-out', '—');
     _bridgeSetText('bridge-fee-display', '—');
     _bridgeSetText('bridge-min', '—');
-    _bridgeSetText('bridge-time', 'This route is currently unavailable on LI.FI');
+    _bridgeSetText('bridge-time', 'No routes available for this pair');
+    _brsClearRoutes();
     return;
   }
 
-  _bridgeLastQuote = quote;
-  const outAmt = Number(quote.expectedOutRaw) / 1e6;
-  const minAmt = quote.minOutRaw != null ? Number(quote.minOutRaw) / 1e6 : null;
-  const toolName = quote.tool || 'LI.FI';
-  const feePct = quote.feeBps != null ? (quote.feeBps / 100) : null;
-  const est = quote.route && quote.route.estimate;
-  const execSec = est && est.executionDuration != null ? Number(est.executionDuration) : null;
+  // Store routes and render panel.
+  _bridgeRoutes = routes;
+  // Auto-select the best available route (highest outAmt).
+  _selectedBridgeRoute = routes[0];
+  _brsRenderRoutes(routes, fromChain, toChain);
+
+  // ── Update existing rate-box with best route data ──────────────────────────
+  const best = routes[0];
+  const outAmt  = best.outAmt != null ? best.outAmt : 0;
+  const minAmt  = best.minAmt;
+  const toolName = best.label || 'LI.FI';
+  const feePct   = best.feePct;
+  const execSec  = best.execSec;
+
+  if (best.provider === 'lifi') { _bridgeLastQuote = best.quote; }
+  else                          { _bridgeLastQuote = null; } // CCTP: no LI.FI tx to re-use
 
   _bridgeSetText('bridge-protocol', toolName);
   _bridgeSetText('bridge-amount-out', `~${outAmt.toFixed(4)}`);
@@ -34518,12 +34858,52 @@ try {
 // The legacy CCTP v2 (executeBridge) and Turbo paths are no longer part of
 // the active bridge execution path and are preserved for future reactivation.
 function executeBridgeOrTurbo() {
-  // ── CCTP-primary routing: USDC/EURC between CCTP domains → Bridge Kit.
-  //    Everything else (and any CCTP failure) falls back to LI.FI. The user
-  //    can force LI.FI via the "Use LI.FI" button next to the route pill. ──
+  // ── If routes have been loaded, honor the user's selection. ──────────────
+  // Pre-flight validation: check that the selected route still matches the
+  // current form state (chain, token, amount).
   const fromChain = CHAINS[bridgeFromIdx];
-  const toChain = CHAINS[bridgeToIdx];
-  const token = 'USDC'; // bridge UI is USDC-only (EURC via Send Assets)
+  const toChain   = CHAINS[bridgeToIdx];
+  const amt = parseFloat(document.getElementById('bridge-amount')?.value) || 0;
+  const token = 'USDC';
+
+  if (_selectedBridgeRoute && _bridgeRoutes.length > 0) {
+    const route = _selectedBridgeRoute;
+
+    // ── Pre-flight checks ──────────────────────────────────────────────────
+    // 1. Route must be available.
+    if (!route.available) {
+      toast('Selected route is unavailable. Please choose another route.', 'error');
+      return;
+    }
+    // 2. Amount must be > 0.
+    if (amt <= 0) { toast('Enter an amount to bridge', 'error'); return; }
+    // 3. Chain must not be same.
+    if (!fromChain || !toChain || fromChain.chainId === toChain.chainId) {
+      toast('Cannot bridge to the same network', 'error'); return;
+    }
+    // 4. Quote expiry: LI.FI quotes expire ~3 min; CCTP uses real-time Kit.
+    if (route.provider === 'lifi' && route.quote) {
+      var quoteAge = route.quote._fetchedAt ? (Date.now() - route.quote._fetchedAt) : 0;
+      if (quoteAge > 160000) { // 160s grace (LI.FI TTL ~3min)
+        toast('Quote expired. Fetching a fresh route…', 'warning');
+        _brsClearRoutes();
+        updateBridgeEst();
+        return;
+      }
+    }
+    // 5. Route provider must match expected chain pair.
+    if (route.provider === 'cctp') {
+      executeBridgeViaCCTP();
+      return;
+    }
+    if (route.provider === 'lifi') {
+      executeBridgeViaLiFi();
+      return;
+    }
+    // Unknown provider — fall through to default routing.
+  }
+
+  // ── Fallback: no routes loaded — use original routing logic. ─────────────
   let forceLiFi = false;
   try { forceLiFi = !!window.__bridgeForceLiFi; } catch (_e) {}
   if (
@@ -34569,6 +34949,7 @@ async function executeBridgeViaCCTP() {
   const statusEl = document.getElementById('bridge-step-status');
   if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader spin"></i> Routing via CCTP...'; }
   if (stepsCard) stepsCard.style.display = '';
+  if (typeof _brsShowSteps === 'function') _brsShowSteps(); // swap right panel to steps
   if (stepList) stepList.innerHTML = '';
   if (stdStepsEl) stdStepsEl.style.display = '';
   if (turboWrapEl) turboWrapEl.style.display = 'none';
@@ -34591,7 +34972,7 @@ async function executeBridgeViaCCTP() {
     setSafeHTML(el, `<div class="step-ico ${stateClass}">${stateIcon}</div><div style="flex:1"><div style="font-weight:600">${_safePurify(s.label)}</div><div style="font-size:8.5px;color:var(--muted2)">${txLink}</div></div>`);
   }
   const stepIndex = { approve: 0, burn: 1, fetchAttestation: 2, mint: 3 };
-  function resetBtn() { _walletOpInProgress = false; if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-topology-star-3"></i>Bridge USDC'; } }
+  function resetBtn() { _walletOpInProgress = false; if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-topology-star-3"></i>Bridge USDC'; } if (typeof _brsShowRoutes === 'function') _brsShowRoutes(); }
   steps.forEach((_, i) => renderBridgeStep(i, 'pending', null));
 
   if (typeof BridgeEngine !== 'undefined') BridgeEngine.notifyStandardStart({ from: fromChain.id, to: toChain.id, amt: amt, type: 'cctp' });
@@ -34716,6 +35097,7 @@ async function executeBridgeViaCCTP() {
     if (typeof logToReports === 'function') logToReports('Bridge', amt, 1, txHash, { provider: 'cctp', from: fromChain.name, to: toChain.name });
     if (typeof BridgeEngine !== 'undefined') BridgeEngine.notifyExecutionComplete({ txHash: txHash, destinationTxHash: mintTxHash });
     _checkCctpPendingMintBanner();
+    setTimeout(function() { _brsClearRoutes(); }, 5000);
   } else {
     if (statusEl) { statusEl.textContent = 'Failed'; statusEl.style.color = 'var(--red)'; }
     addToHistory('bridge-history', {
@@ -34767,6 +35149,7 @@ async function executeBridgeViaLiFi() {
 
   if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader spin"></i> Routing via LI.FI...'; }
   if (stepsCard) stepsCard.style.display = '';
+  if (typeof _brsShowSteps === 'function') _brsShowSteps(); // swap right panel to steps
   if (stepList) stepList.innerHTML = '';
   if (stdStepsEl) stdStepsEl.style.display = '';
   if (turboWrapEl) turboWrapEl.style.display = 'none';
@@ -34795,6 +35178,7 @@ async function executeBridgeViaLiFi() {
   function resetBtn() {
     _walletOpInProgress = false;
     if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-topology-star-3"></i>Bridge USDC'; }
+    if (typeof _brsShowRoutes === 'function') _brsShowRoutes();
   }
 
   steps.forEach((_, i) => renderBridgeStep(i, 'pending', null));
@@ -34939,6 +35323,7 @@ async function executeBridgeViaLiFi() {
       toast(`✓ Bridged ${amt} USDC from ${fromChain.name} to ${toChain.name} via ${toolName}`, 'success');
       if (typeof logToReports === 'function') logToReports('Bridge', amt, 1, tx.hash, feeMeta);
       if (typeof BridgeEngine !== 'undefined') BridgeEngine.notifyExecutionComplete({ txHash: tx.hash, destinationTxHash: destTxHash });
+      setTimeout(function() { _brsClearRoutes(); }, 5000);
     } else if (pollResult && pollResult.failed) {
       // LI.FI explicitly reported FAILED/ERROR — an explicit failed state.
       renderBridgeStep(3, 'error', tx.hash);
