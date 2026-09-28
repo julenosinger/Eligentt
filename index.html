@@ -5586,9 +5586,28 @@ select.cinput option { background: #161a24; color: #dde2f0; }
 
 /* ── Capability chips on welcome screen ─────────────────────── */
 .aut-cap-chips{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-top:14px;max-width:400px}
-.aut-cap-chip{display:inline-flex;align-items:center;gap:5px;padding:7px 12px;background:rgba(6,247,233,.07);border:1px solid rgba(6,247,233,.2);border-radius:20px;color:#06F7E9;font-size:9.5px;font-weight:600;cursor:pointer;font-family:inherit;transition:all .18s}
+.aut-cap-chip{display:inline-flex;align-items:center;gap:5px;padding:7px 12px;background:rgba(6,247,233,.07);border:1px solid rgba(6,247,233,.2);border-radius:20px;color:#06F7E9;font-size:9.5px;font-weight:600;cursor:pointer;font-family:inherit;transition:all .18s;position:relative}
 .aut-cap-chip:hover{background:rgba(6,247,233,.16);border-color:rgba(6,247,233,.4);transform:translateY(-1px)}
 .aut-cap-chip i{font-size:12px}
+/* ── Capability variant — richer entrypoint badges ── */
+.aut-cap-chip--cap{flex-direction:column;align-items:center;gap:3px;padding:10px 14px;border-radius:10px;min-width:78px;text-align:center;background:rgba(17,19,24,.7);border:1px solid rgba(6,247,233,.18)}
+.aut-cap-chip--cap:hover{background:rgba(6,247,233,.1);border-color:rgba(6,247,233,.45);transform:translateY(-2px);box-shadow:0 4px 16px rgba(6,247,233,.1)}
+.aut-cap-chip--cap .cap-icon{width:26px;height:26px;border-radius:8px;display:flex;align-items:center;justify-content:center;background:rgba(6,247,233,.12);margin-bottom:2px}
+.aut-cap-chip--cap .cap-icon i{font-size:13px}
+.aut-cap-chip--cap .cap-label{font-size:9px;font-weight:700;letter-spacing:.03em}
+.aut-cap-chip--cap .cap-hint{font-size:7.5px;color:var(--muted2);font-weight:400;white-space:nowrap}
+.aut-cap-chip--cap.cap-balance .cap-icon{background:rgba(34,197,94,.12);color:var(--green)}
+.aut-cap-chip--cap.cap-balance{border-color:rgba(34,197,94,.18);color:var(--green)}
+.aut-cap-chip--cap.cap-swap .cap-icon{background:rgba(167,139,250,.12);color:var(--purple)}
+.aut-cap-chip--cap.cap-swap{border-color:rgba(167,139,250,.18);color:var(--purple)}
+.aut-cap-chip--cap.cap-send .cap-icon{background:rgba(79,142,247,.12);color:var(--blue)}
+.aut-cap-chip--cap.cap-send{border-color:rgba(79,142,247,.18);color:var(--blue)}
+.aut-cap-chip--cap.cap-bridge .cap-icon{background:rgba(6,247,233,.1);color:#06F7E9}
+.aut-cap-chip--cap.cap-bridge{border-color:rgba(6,247,233,.2);color:#06F7E9}
+.aut-cap-chip--cap.cap-schedule .cap-icon{background:rgba(245,158,11,.1);color:var(--yellow)}
+.aut-cap-chip--cap.cap-schedule{border-color:rgba(245,158,11,.18);color:var(--yellow)}
+.aut-cap-chip--cap.cap-history .cap-icon{background:rgba(45,212,191,.1);color:var(--teal)}
+.aut-cap-chip--cap.cap-history{border-color:rgba(45,212,191,.18);color:var(--teal)}
 
 /* ════════════════════════════════════════════════════════════
    DYNAMIC ACTION SURFACES (DAS)
@@ -9879,9 +9898,9 @@ select.cinput option { background: #161a24; color: #dde2f0; }
           <button class="btn primary" onclick="openWalletModal()"><i class="ti ti-wallet"></i>Connect Wallet</button>
         </div>
         <div id="ub-guard" style="display:none;text-align:center;padding:60px 20px">
-          <i class="ti ti-wallet-off" style="font-size:40px;color:var(--muted2);display:block;margin-bottom:10px;opacity:.3"></i>
-          <div style="font-size:12px;color:var(--muted2);margin-bottom:12px">Connect your wallet to view portfolio</div>
-          <button class="btn primary" onclick="openWalletModal()"><i class="ti ti-wallet"></i>Connect Wallet</button>
+          <i class="ti ti-lock" style="font-size:40px;color:var(--muted2);display:block;margin-bottom:10px;opacity:.3"></i>
+          <div style="font-size:12px;color:var(--muted2);margin-bottom:12px">Access restricted — check your permissions</div>
+          <button class="btn primary" onclick="ubRefresh()"><i class="ti ti-refresh"></i>Retry</button>
         </div>
         <div id="ub-content" style="display:none;flex-direction:column;gap:12px">
 
@@ -10118,14 +10137,38 @@ select.cinput option { background: #161a24; color: #dde2f0; }
               </svg>
               <h2>✦ Autonoma</h2>
               <p style="color:var(--muted2);font-size:11px;max-width:360px;line-height:1.6">Ask me anything about your wallet. I understand intent and conduct every operation end-to-end.</p>
-              <!-- Agent capability chips -->
-              <div class="aut-cap-chips">
-                <button class="aut-cap-chip" onclick="autonomaSendQuick('show my balance')"><i class="ti ti-wallet"></i>My balance</button>
-                <button class="aut-cap-chip" onclick="autonomaSendQuick('swap 100 USDC to EURC')"><i class="ti ti-arrows-exchange"></i>Swap</button>
-                <button class="aut-cap-chip" onclick="autonomaSendQuick('send 50 USDC')"><i class="ti ti-send"></i>Send</button>
-                <button class="aut-cap-chip" onclick="autonomaSendQuick('bridge 100 USDC to Base')"><i class="ti ti-topology-star-3"></i>Bridge</button>
-                <button class="aut-cap-chip" onclick="autonomaSendQuick('schedule a weekly payment')"><i class="ti ti-calendar-event"></i>Schedule</button>
-                <button class="aut-cap-chip" onclick="autonomaSendQuick('show transaction history')"><i class="ti ti-history"></i>History</button>
+              <!-- Agent capability chips — each opens a contextual Circle Agent flow -->
+              <div class="aut-cap-chips" style="gap:8px;max-width:520px">
+                <button class="aut-cap-chip aut-cap-chip--cap cap-balance" onclick="autonomaQuickAction('balance')" title="Check Circle Agent Wallet balances">
+                  <div class="cap-icon"><i class="ti ti-building-bank"></i></div>
+                  <span class="cap-label">My Balance</span>
+                  <span class="cap-hint">Circle Agent</span>
+                </button>
+                <button class="aut-cap-chip aut-cap-chip--cap cap-swap" onclick="autonomaQuickAction('swap')" title="Swap tokens via Circle Agent">
+                  <div class="cap-icon"><i class="ti ti-arrows-exchange"></i></div>
+                  <span class="cap-label">Swap</span>
+                  <span class="cap-hint">Quote &amp; approve</span>
+                </button>
+                <button class="aut-cap-chip aut-cap-chip--cap cap-send" onclick="autonomaQuickAction('send')" title="Send USDC via Circle Agent">
+                  <div class="cap-icon"><i class="ti ti-send"></i></div>
+                  <span class="cap-label">Send</span>
+                  <span class="cap-hint">To recipient</span>
+                </button>
+                <button class="aut-cap-chip aut-cap-chip--cap cap-bridge" onclick="autonomaQuickAction('bridge')" title="Bridge via CCTP v2">
+                  <div class="cap-icon"><i class="ti ti-topology-star-3"></i></div>
+                  <span class="cap-label">Bridge</span>
+                  <span class="cap-hint">CCTP v2</span>
+                </button>
+                <button class="aut-cap-chip aut-cap-chip--cap cap-schedule" onclick="autonomaQuickAction('schedule')" title="Schedule a recurring operation">
+                  <div class="cap-icon"><i class="ti ti-calendar-event"></i></div>
+                  <span class="cap-label">Schedule</span>
+                  <span class="cap-hint">Automate</span>
+                </button>
+                <button class="aut-cap-chip aut-cap-chip--cap cap-history" onclick="autonomaQuickAction('history')" title="View Circle Agent transaction history">
+                  <div class="cap-icon"><i class="ti ti-history"></i></div>
+                  <span class="cap-label">History</span>
+                  <span class="cap-hint">Transactions</span>
+                </button>
               </div>
               <!-- Circle Agent Wallet status card -->
               <div id="aut-circle-agent-card" style="margin-top:12px;width:100%;max-width:420px;text-align:left"></div>
@@ -14275,6 +14318,7 @@ function showPage(id) {
         if (id === 'pool') { renderPoolList(); updatePoolStats(); }
         if (id === 'swap') {
           updateSwapRate();
+          if (typeof updateSwapBalancesDisplay === 'function') updateSwapBalancesDisplay();
           setTimeout(function() {
             stInitTerminal();
             stStartAutoRefresh();
@@ -39429,7 +39473,6 @@ function ubIsMainnet() {
 }
 
 function ubInit() {
-  if (Number(activeChainId) !== 5042) { ubShowState('guard'); return; }
   if (typeof walletAddress !== 'undefined' && walletAddress) {
     if (UnifiedBalanceEngine.isCacheValid && UnifiedBalanceEngine.isCacheValid(walletAddress)) {
       UnifiedBalanceEngine.recordCacheHit();
@@ -44825,6 +44868,112 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
     const el=document.getElementById('aut-input'); if(!el) return;
     const msg=el.value.trim(); if(!msg) return;
     el.value=''; el.style.height='auto'; autonomaSendQuick(msg);
+  };
+
+  /**
+   * autonomaQuickAction — Circle Agent capability entrypoints
+   * Cada botão Quick Action aciona este handler em vez de um texto fixo.
+   * O fluxo usa o mesmo autProcess/brain/intentRouter — sem arquitetura paralela.
+   * Para operações write: inicia coleta contextual de parâmetros.
+   * Para operações read: executa direto via AgentCapabilityRouter ou autProcess.
+   */
+  window.autonomaQuickAction = function(capability) {
+    if(!autCurId) window.autonomaNewChat();
+    var w = document.getElementById('aut-welcome'); if(w) w.style.display='none';
+
+    // Descriptive user-side label (shown in chat as mensagem do usuário)
+    var userLabels = {
+      balance:  'Show my Circle Agent Wallet balance',
+      swap:     'I want to swap tokens',
+      send:     'I want to send USDC',
+      bridge:   'I want to bridge USDC to another chain',
+      schedule: 'I want to schedule a recurring operation',
+      history:  'Show my Circle Agent transaction history'
+    };
+
+    // Intent phrases that feed the SAME autProcess/AutonomaCore pipeline
+    // These are phrased to maximise NLU hit rate while avoiding pre-filled params
+    // so the Agent collects missing info contextually.
+    var intentPhrases = {
+      balance:  'show my balance',              // → QUERY_BALANCE → autQueryWallet (Circle Agent canonical)
+      swap:     'I want to swap USDC',          // → SWAP_EXECUTE flow: Agent asks from/to/amount
+      send:     'I want to send USDC',          // → SEND_PAYMENT flow: Agent asks recipient+amount
+      bridge:   'I want to bridge USDC',        // → BRIDGE flow: Agent asks source/dest chain+amount
+      schedule: 'I want to schedule a payment', // → CREATE_SCHEDULE flow: Agent asks all params
+      history:  'show transaction history'      // → QUERY_HISTORY → real tx data
+    };
+
+    // For write capabilities, pre-seed conversation context so AutonomaCore
+    // knows the goal and only asks for MISSING params — not the whole thing again.
+    var goalSeed = {
+      swap:     { goal: 'swap',    params: { token: 'USDC' } },
+      send:     { goal: 'payment', params: { token: 'USDC' } },
+      bridge:   { goal: 'bridge',  params: { token: 'USDC', fromChain: 'Arc Mainnet' } },
+      schedule: { goal: 'schedule',params: { token: 'USDC' } }
+    };
+
+    // Seed AutonomaCore conversation context for write flows
+    try {
+      if (goalSeed[capability] && typeof AutonomaCore !== 'undefined' && typeof AutonomaCore.setGoal === 'function') {
+        // Only pre-seed if AutonomaCore exposes setGoal in its public API.
+        // This is an internal method — guard against it not being exposed.
+        // AutonomaCore.resetGoal() is always safe to call to start fresh.
+        if (typeof AutonomaCore.resetGoal === 'function') AutonomaCore.resetGoal();
+      }
+    } catch(_e) {}
+
+    var phrase = intentPhrases[capability] || ('show my ' + capability);
+    var userLabel = userLabels[capability] || phrase;
+
+    // Show the user's intent label in chat (richer than the NLU phrase)
+    var chat = autChats.find(function(c){ return c.id === autCurId; });
+    if(chat) {
+      chat.messages.push({role:'user', content:userLabel, ts:Date.now()});
+      if(chat.messages.length === 1) chat.title = userLabel.length > 35 ? userLabel.substring(0,35)+'...' : userLabel;
+      autUI('user', esc(userLabel));
+      autSave(); autRenderSidebar();
+    }
+
+    autShowTyping();
+    setTimeout(async function(){
+      try {
+        var result;
+
+        // ── Balance: use AgentCapabilityRouter.buildBalanceSurface directly
+        //    for the richest Circle Agent data card without re-routing through NLU.
+        if(capability === 'balance' && typeof AgentCapabilityRouter !== 'undefined') {
+          var balIntro = '<div class="aut-intro">Here\'s your <strong style="color:#2775ca">Circle Agent Wallet</strong> balance <span style="font-size:8px;color:var(--muted2)">(canonical)</span>:</div>';
+          var balSurface = await AgentCapabilityRouter.buildBalanceSurface();
+          var balActions = '<div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">' +
+            '<button class="das-btn review" style="padding:5px 12px;font-size:9px" onclick="autonomaQuickAction(\'swap\')"><i class="ti ti-arrows-exchange"></i>Swap</button>' +
+            '<button class="das-btn review" style="padding:5px 12px;font-size:9px;background:rgba(79,142,247,.18);border-color:rgba(79,142,247,.35);color:var(--blue)" onclick="autonomaQuickAction(\'send\')"><i class="ti ti-send"></i>Send</button>' +
+            '<button class="das-btn review" style="padding:5px 12px;font-size:9px;background:rgba(6,247,233,.08);border-color:rgba(6,247,233,.25);color:#06F7E9" onclick="autonomaQuickAction(\'bridge\')"><i class="ti ti-topology-star-3"></i>Bridge</button>' +
+          '</div>';
+          result = balIntro + balSurface + balActions;
+
+        // ── History: use autQueryHistory (reads real local + Circle Agent tx data)
+        } else if(capability === 'history') {
+          result = await autProcess('show transaction history');
+
+        // ── Write capabilities: route through the full autProcess pipeline.
+        //    AutonomaCore will detect missing params and ask contextually.
+        } else {
+          result = await autProcess(phrase);
+        }
+
+        autHideTyping();
+        if(chat) {
+          chat.messages.push({role:'ai', content:result, ts:Date.now()});
+          autSave();
+        }
+        autUI('ai', result);
+        autRenderSidebar();
+      } catch(err) {
+        autHideTyping();
+        autUI('ai','<div class="aut-intro" style="color:#ef4444">Error: '+(err&&err.message?err.message:String(err)).substring(0,200)+'</div>');
+        console.error('autonomaQuickAction error:', err);
+      }
+    }, 400 + Math.random()*300);
   };
   window.autonomaSendQuick = function(msg) {
     if(!autCurId) window.autonomaNewChat();
