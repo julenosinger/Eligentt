@@ -10062,7 +10062,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
           <!-- ub-op-panel: operation overlay — lives OUTSIDE ub-live-screen so
                display:flex works even when ub-live-screen is hidden. -->
           <div class="ub-op-panel" id="ub-op-panel" style="display:none;position:fixed;top:0;right:0;bottom:0;width:420px;max-width:92vw;z-index:1200;box-shadow:-4px 0 24px rgba(0,0,0,.55);flex-direction:column">
-            <div class="ub-op-panel-header"><span id="ub-op-panel-title">Operation</span><span class="ub-op-close" onclick="UBScreen.hideOperation()"><i class="ti ti-x"></i></span></div>
+            <div class="ub-op-panel-header"><span id="ub-op-panel-title">Operation</span><span class="ub-op-close" onclick="exitUnifiedBalanceMode();if(typeof UBScreen!=='undefined')UBScreen.hideOperation()"><i class="ti ti-x"></i></span></div>
             <div class="ub-op-panel-form" id="ub-op-panel-form"></div>
             <div class="ub-op-panel-progress" id="ub-op-panel-progress" style="display:none"><div class="ub-op-steps" id="ub-op-steps"></div></div>
           </div>
@@ -39480,6 +39480,12 @@ function ubIsMainnet() {
 }
 
 function ubInit() {
+  // Eagerly expose __autExecuteIntent so _ubPanelApprove can use it
+  // even if the user hasn't visited the Autonoma page yet.
+  if (typeof window.__autExecuteIntent === 'undefined' && typeof autonomaInit === 'function') {
+    autonomaInit();
+  }
+
   if (typeof walletAddress !== 'undefined' && walletAddress) {
     if (UnifiedBalanceEngine.isCacheValid && UnifiedBalanceEngine.isCacheValid(walletAddress)) {
       UnifiedBalanceEngine.recordCacheHit();
@@ -43057,34 +43063,350 @@ const UBScreen = (function() {
 })();
 
 // ══════════════════════════════════════════════════════════
-//  UB MODE ORCHESTRATION — Send/Swap/Move as LIVE screen modes
+//  UB MODE ORCHESTRATION — Send/Swap/Move as Circle Agent flows
 //  ----------------------------------------------------------
-//  Single source of truth: UB.liveMode ('live'|'send'|'swap'|'move').
-//  The Unified Balance is a PRESENTATION/ORCHESTRATION layer only:
-//    - Send  → UBScreen.openSend()  → reuses saExecuteSend()
-//    - Swap  → UBScreen.openSwap()  → reuses executeSwap()
-//    - Move  → UBScreen.openBridge() → reuses xcExecuteSend()
-//  Never navigates (no showPage). No duplicated execution logic.
+//  Architecture:
+//    Unified Balance → enterUnifiedBalanceMode(mode)
+//      → UBLive visual mode (presentation layer)
+//      → _ubOpenAgentPanel(mode): collects params in #ub-op-panel
+//      → on confirm: AgentCapabilityRouter.createSurface(intent, params)
+//          → user approval card (Approve/Cancel)
+//          → approve() → window.__autExecuteIntent (same as Autonoma chat)
+//              → Policy/Authorization → saExecuteSend/executeSwap/xcExecuteSend
+//              → Circle Agent Wallet → real on-chain execution
+//              → UBOperationBus → Unified Balance live status
+//
+//  'move' is an alias for BRIDGE (normalised internally).
+//  UBScreen.openSend/openSwap/openBridge remain for UBAction asset-row buttons.
+//  No new execution engines. No duplicate handlers.
 // ══════════════════════════════════════════════════════════
-var UB_ACTION_MODES = ['send', 'swap', 'move'];
+var UB_ACTION_MODES = ['send', 'swap', 'move', 'bridge'];
 
 function enterUnifiedBalanceMode(mode) {
+  // Normalise 'bridge' → 'move' for UI consistency (both map to BRIDGE intent)
+  if (mode === 'bridge') mode = 'move';
   if (UB_ACTION_MODES.indexOf(mode) === -1) return;
+  // Update UB live state (presentation layer only)
   try { if (typeof UB !== 'undefined') UB.liveMode = mode; } catch (_) {}
   try { if (typeof UBLive !== 'undefined') { UBLive.init(); UBLive.setMode(mode); } } catch (_) {}
-  try {
-    if (typeof UBScreen !== 'undefined') {
-      if (mode === 'send') UBScreen.openSend();
-      else if (mode === 'swap') UBScreen.openSwap();
-      else if (mode === 'move') UBScreen.openBridge();
-    }
-  } catch (_) {}
+  // Open the operation panel with an Agent-wired form
+  try { _ubOpenAgentPanel(mode); } catch (_) {}
 }
 
 function exitUnifiedBalanceMode() {
   try { if (typeof UB !== 'undefined') UB.liveMode = 'live'; } catch (_) {}
   try { if (typeof UBLive !== 'undefined') UBLive.setMode('live'); } catch (_) {}
   try { if (typeof UBScreen !== 'undefined') UBScreen.hideOperation(); } catch (_) {}
+}
+
+// ── UB Agent Panel ─────────────────────────────────────────────────────────
+// Opens #ub-op-panel with a param-collection form. On "Preview" the user's
+// inputs are packaged and sent to AgentCapabilityRouter.createSurface() which
+// renders a full proposal card (risk badge, Approve/Cancel). Approve() calls
+// window.__autExecuteIntent — the SAME function used by Autonoma chat — so
+// Policy, Authorization, Circle Agent Wallet and UBOperationBus are all in play.
+// This function only wires UI ↔ AgentCapabilityRouter. Zero execution logic here.
+// ──────────────────────────────────────────────────────────────────────────────
+function _ubOpenAgentPanel(mode) {
+  var panel = document.getElementById('ub-op-panel');
+  if (!panel) return;
+  var form  = document.getElementById('ub-op-panel-form');
+  var title = document.getElementById('ub-op-panel-title');
+  if (!form || !title) return;
+
+  // Reset progress area
+  var prog = document.getElementById('ub-op-panel-progress');
+  if (prog) prog.style.display = 'none';
+  form.style.display = '';
+
+  // Helper: safe html escape
+  function _esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+
+  // Helper: read chains array safely
+  function _chainOpts() {
+    try {
+      if (typeof CHAINS === 'undefined') return '<option value="0">Arc Mainnet</option><option value="1">Ethereum</option><option value="2">Base</option>';
+      return CHAINS.map(function(c,i){ return '<option value="'+i+'">'+_esc(c.name.split(' ')[0])+'</option>'; }).join('');
+    } catch(_) { return '<option value="0">Arc Mainnet</option><option value="2">Base</option>'; }
+  }
+
+  // ── Panel content per mode ──────────────────────────────────────────────
+  if (mode === 'send') {
+    title.innerHTML = '<i class="ti ti-send" style="color:var(--blue);margin-right:5px"></i>Send Assets <span style="font-size:8px;background:rgba(39,117,202,.15);color:#2775ca;border-radius:3px;padding:1px 5px;margin-left:4px;font-weight:600">Circle Agent</span>';
+    form.innerHTML =
+      '<div class="ub-op-field-label">Recipient Address</div>' +
+      '<div class="ub-scr-input-row"><i class="ti ti-wallet" style="color:var(--muted2);font-size:12px"></i><input class="ub-op-input ub-scr-plain" id="ub-ag-send-addr" type="text" placeholder="0x..." style="font-size:9.5px;flex:1"/></div>' +
+      '<div class="ub-op-row">' +
+        '<div style="flex:1"><div class="ub-op-field-label">Token</div><select class="ub-op-input" id="ub-ag-send-token"><option>USDC</option><option>EURC</option></select></div>' +
+        '<div style="flex:1"><div class="ub-op-field-label">Amount</div><div class="ub-scr-input-row"><span style="color:var(--muted2);font-size:12px;font-weight:700">$</span><input class="ub-op-input ub-scr-plain" id="ub-ag-send-amt" type="number" placeholder="0.00" style="font-size:14px;font-weight:700"/></div></div>' +
+      '</div>' +
+      '<div class="ub-scr-info-row"><span>Network</span><span style="color:var(--text)">Arc Mainnet</span></div>' +
+      '<div class="ub-scr-info-row"><span>Agent</span><span style="color:#2775ca">Circle Agent Wallet</span></div>' +
+      '<div style="font-size:8px;color:var(--muted2);padding:4px 0 6px">Policy and authorization will be verified before execution.</div>' +
+      '<button class="ub-op-btn send" onclick="_ubAgentPreview(\'send\')"><i class="ti ti-eye"></i> Preview via Circle Agent</button>' +
+      '<button class="ub-op-btn back" onclick="exitUnifiedBalanceMode()"><i class="ti ti-arrow-left"></i> Back to Live</button>';
+
+  } else if (mode === 'swap') {
+    title.innerHTML = '<i class="ti ti-arrows-exchange" style="color:var(--purple);margin-right:5px"></i>Swap Tokens <span style="font-size:8px;background:rgba(167,139,250,.15);color:#a78bfa;border-radius:3px;padding:1px 5px;margin-left:4px;font-weight:600">Circle Agent</span>';
+    form.innerHTML =
+      '<div class="ub-scr-swap-box">' +
+        '<div class="ub-scr-swap-side"><div class="ub-op-field-label">You Pay</div>' +
+          '<div class="ub-scr-input-row"><input class="ub-op-input ub-scr-plain" id="ub-ag-swap-amt" type="number" placeholder="0.00" style="font-size:16px;font-weight:700"/><select class="ub-op-input" id="ub-ag-swap-from" style="cursor:pointer;font-size:9px;width:auto;flex-shrink:0"><option>USDC</option><option>EURC</option></select></div>' +
+          '<div style="font-size:8.5px;color:#8892aa;margin-top:3px" id="ub-ag-swap-bal">Balance: —</div>' +
+        '</div>' +
+        '<div class="ub-scr-swap-arrow"><i class="ti ti-arrow-down"></i></div>' +
+        '<div class="ub-scr-swap-side"><div class="ub-op-field-label">You Receive (est.)</div>' +
+          '<div class="ub-scr-input-row"><input class="ub-op-input ub-scr-plain" id="ub-ag-swap-out" type="text" placeholder="0.00" readonly style="font-size:16px;font-weight:700;color:var(--teal)"/><select class="ub-op-input" id="ub-ag-swap-to" style="cursor:pointer;font-size:9px;width:auto;flex-shrink:0"><option>EURC</option><option>USDC</option></select></div>' +
+          '<div style="font-size:8.5px;color:#8892aa;margin-top:3px" id="ub-ag-swap-rate">Rate: —</div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="ub-scr-info-row"><span>Agent</span><span style="color:#2775ca">Circle Agent Wallet</span></div>' +
+      '<div class="ub-scr-info-row"><span>Route</span><span style="color:var(--teal)" id="ub-ag-swap-route">Computing…</span></div>' +
+      '<div style="font-size:8px;color:var(--muted2);padding:4px 0 6px">Live quote, policy and authorization before execution.</div>' +
+      '<button class="ub-op-btn swap" onclick="_ubAgentPreview(\'swap\')"><i class="ti ti-eye"></i> Preview via Circle Agent</button>' +
+      '<button class="ub-op-btn back" onclick="exitUnifiedBalanceMode()"><i class="ti ti-arrow-left"></i> Back to Live</button>';
+    // Live rate update
+    setTimeout(function(){
+      var amtEl = document.getElementById('ub-ag-swap-amt');
+      function _upd() {
+        var a = parseFloat((document.getElementById('ub-ag-swap-amt')||{}).value)||0;
+        var fr = (document.getElementById('ub-ag-swap-from')||{}).value||'USDC';
+        var to = (document.getElementById('ub-ag-swap-to')||{}).value||'EURC';
+        var ratio = fr === 'USDC' ? 0.998 : 1.002; if (fr===to) ratio=1;
+        var outEl = document.getElementById('ub-ag-swap-out'); if(outEl) outEl.value = a>0?(a*ratio).toFixed(4):'';
+        var rEl = document.getElementById('ub-ag-swap-rate'); if(rEl) rEl.textContent='1 '+fr+' ≈ '+ratio.toFixed(4)+' '+to;
+        var rteEl = document.getElementById('ub-ag-swap-route'); if(rteEl) rteEl.textContent = (typeof SWP!=='undefined'&&SWP.lastRoute&&!SWP.lastRoute.noLiq)?'Elligentt Pool':'Direct Pool';
+        try {
+          if(typeof UB!=='undefined'&&UB.state&&UB.state.assets){
+            var bal=0; for(var i=0;i<UB.state.assets.length;i++){ if(UB.state.assets[i].token===fr) bal+=UB.state.assets[i].balance; }
+            var bEl=document.getElementById('ub-ag-swap-bal'); if(bEl) bEl.textContent='Balance: '+bal.toFixed(2)+' '+fr;
+          }
+        } catch(_){}
+      }
+      if(amtEl){ amtEl.addEventListener('input',_upd); }
+      var fr2=document.getElementById('ub-ag-swap-from'); if(fr2) fr2.addEventListener('change',_upd);
+      var to2=document.getElementById('ub-ag-swap-to'); if(to2) to2.addEventListener('change',_upd);
+    }, 60);
+
+  } else { // mode === 'move' (BRIDGE)
+    title.innerHTML = '<i class="ti ti-topology-star-3" style="color:var(--teal);margin-right:5px"></i>Bridge Cross-Chain <span style="font-size:8px;background:rgba(6,247,233,.1);color:#06F7E9;border-radius:3px;padding:1px 5px;margin-left:4px;font-weight:600">Circle Agent</span>';
+    var chainOpts = _chainOpts();
+    form.innerHTML =
+      '<div class="ub-scr-bridge-chains">' +
+        '<div class="ub-scr-bridge-chain"><div class="ub-op-field-label">From</div><select class="ub-op-input" id="ub-ag-br-from" style="font-size:10px">'+chainOpts+'</select><div style="font-size:8.5px;color:#8892aa;margin-top:4px" id="ub-ag-br-from-bal">—</div></div>' +
+        '<div style="display:flex;align-items:center;padding-top:18px"><div style="width:26px;height:26px;border-radius:50%;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.16);display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--teal);font-size:13px" onclick="_ubBrFlip()" title="Swap chains"><i class="ti ti-arrows-exchange"></i></div></div>' +
+        '<div class="ub-scr-bridge-chain"><div class="ub-op-field-label">To</div><select class="ub-op-input" id="ub-ag-br-to" style="font-size:10px">'+chainOpts+'</select><div style="font-size:8.5px;color:#8892aa;margin-top:4px" id="ub-ag-br-to-bal">—</div></div>' +
+      '</div>' +
+      '<div class="ub-op-field-label" style="margin-top:6px">Amount (USDC)</div>' +
+      '<div class="ub-scr-input-row"><span style="color:var(--muted2);font-size:12px;font-weight:700">$</span><input class="ub-op-input ub-scr-plain" id="ub-ag-br-amt" type="number" placeholder="0.00" style="font-size:14px;font-weight:700"/></div>' +
+      '<div class="ub-scr-info-row"><span>Protocol</span><span style="color:var(--purple)">Circle CCTP v2</span></div>' +
+      '<div class="ub-scr-info-row"><span>Agent</span><span style="color:#2775ca">Circle Agent Wallet</span></div>' +
+      '<div class="ub-scr-info-row"><span>Fee</span><span id="ub-ag-br-fee" style="color:var(--yellow)">—</span></div>' +
+      '<div style="font-size:8px;color:var(--muted2);padding:4px 0 6px">Route validated against real CCTP providers. Policy and authorization before execution.</div>' +
+      '<button class="ub-op-btn bridge" onclick="_ubAgentPreview(\'move\')"><i class="ti ti-eye"></i> Preview via Circle Agent</button>' +
+      '<button class="ub-op-btn back" onclick="exitUnifiedBalanceMode()"><i class="ti ti-arrow-left"></i> Back to Live</button>';
+    // Default: from chain index 0 (Arc), to chain index 2 (Base)
+    setTimeout(function(){
+      var fr = document.getElementById('ub-ag-br-from'); if(fr) fr.value='0';
+      var to = document.getElementById('ub-ag-br-to');  if(to) to.value='2';
+      _ubBrRefreshFee();
+    }, 60);
+  }
+
+  panel.style.display = 'flex';
+}
+
+// Flip From↔To on the bridge panel
+function _ubBrFlip() {
+  var fr=document.getElementById('ub-ag-br-from'), to=document.getElementById('ub-ag-br-to');
+  if(fr&&to){ var t=fr.value; fr.value=to.value; to.value=t; _ubBrRefreshFee(); }
+}
+function _ubBrRefreshFee() {
+  var feeEl=document.getElementById('ub-ag-br-fee');
+  if(feeEl) feeEl.textContent='~0.0005 USDC';
+}
+
+// ── UB Agent Preview ────────────────────────────────────────────────────────
+// Reads the panel form values, validates them, then calls
+// AgentCapabilityRouter.createSurface() to generate a full proposal card
+// (with risk badge, Approve/Cancel). On Approve → window.__autExecuteIntent
+// routes through Policy/Authorization/Circle Agent/UBOperationBus.
+// The proposal card renders inside the #ub-op-panel-form so the user stays
+// in the Unified Balance experience.
+// ────────────────────────────────────────────────────────────────────────────
+function _ubAgentPreview(mode) {
+  var form  = document.getElementById('ub-op-panel-form');
+  var title = document.getElementById('ub-op-panel-title');
+  if (!form) return;
+
+  function _esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+
+  // Guard: wallet must be connected
+  if (typeof walletAddress === 'undefined' || !walletAddress) {
+    form.innerHTML = '<div style="text-align:center;padding:20px;color:var(--yellow);font-size:10px"><i class="ti ti-wallet" style="font-size:20px;display:block;margin-bottom:8px"></i>Connect your wallet first.</div>' +
+      '<button class="ub-op-btn back" onclick="exitUnifiedBalanceMode()"><i class="ti ti-arrow-left"></i> Back</button>';
+    return;
+  }
+
+  var intent, params;
+
+  if (mode === 'send') {
+    var addr = (document.getElementById('ub-ag-send-addr')||{}).value||'';
+    var amt  = parseFloat((document.getElementById('ub-ag-send-amt')||{}).value)||0;
+    var tok  = (document.getElementById('ub-ag-send-token')||{}).value||'USDC';
+    if (!/^0x[0-9a-fA-F]{40}$/.test(addr)) {
+      var addrEl = document.getElementById('ub-ag-send-addr'); if(addrEl) addrEl.style.borderColor='var(--red)';
+      return;
+    }
+    if (amt <= 0) {
+      var amtEl2 = document.getElementById('ub-ag-send-amt'); if(amtEl2) amtEl2.style.borderColor='var(--red)';
+      return;
+    }
+    intent = 'SEND_PAYMENT';
+    params = { amount: amt, token: tok, address: addr, chain: 'Arc Mainnet' };
+
+  } else if (mode === 'swap') {
+    var swpAmt = parseFloat((document.getElementById('ub-ag-swap-amt')||{}).value)||0;
+    var swpFr  = (document.getElementById('ub-ag-swap-from')||{}).value||'USDC';
+    var swpTo  = (document.getElementById('ub-ag-swap-to')||{}).value||'EURC';
+    if (swpAmt <= 0) {
+      var swpAmtEl = document.getElementById('ub-ag-swap-amt'); if(swpAmtEl) swpAmtEl.style.borderColor='var(--red)';
+      return;
+    }
+    if (swpFr === swpTo) { if(typeof toast==='function') toast('Select different tokens','warning'); return; }
+    intent = 'SWAP_EXECUTE';
+    // Build msg for autSwap (NLU-style) so _executeIntent('SWAP_EXECUTE') routes to autSwap(msg)
+    var swpMsg = swpAmt + ' ' + swpFr + ' for ' + swpTo;
+    params = { amount: swpAmt, token: swpFr, toToken: swpTo, chain: 'Arc Mainnet', _ubMsg: swpMsg };
+
+  } else { // move = BRIDGE
+    var brAmt  = parseFloat((document.getElementById('ub-ag-br-amt')||{}).value)||0;
+    var brFrIdx= parseInt((document.getElementById('ub-ag-br-from')||{}).value)||0;
+    var brToIdx= parseInt((document.getElementById('ub-ag-br-to')||{}).value)||2;
+    if (brAmt <= 0) {
+      var brAmtEl = document.getElementById('ub-ag-br-amt'); if(brAmtEl) brAmtEl.style.borderColor='var(--red)';
+      return;
+    }
+    if (brFrIdx === brToIdx) { if(typeof toast==='function') toast('Select different chains','warning'); return; }
+    var _cnames = (typeof CHAINS!=='undefined') ? CHAINS.map(function(c){ return c.name; }) : ['Arc Mainnet','Ethereum','Base'];
+    intent = 'BRIDGE';
+    var brMsg = brAmt + ' USDC from ' + (_cnames[brFrIdx]||'Arc') + ' to ' + (_cnames[brToIdx]||'Base');
+    params = { amount: brAmt, token: 'USDC', fromChain: _cnames[brFrIdx]||'Arc Mainnet', toChain: _cnames[brToIdx]||'Base', _ubMsg: brMsg };
+  }
+
+  // Use AgentCapabilityRouter to generate the proposal card with Approve/Cancel
+  if (typeof AgentCapabilityRouter === 'undefined' || typeof AgentCapabilityRouter.createSurface !== 'function') {
+    // Graceful fallback: direct execution via __autExecuteIntent
+    _ubDirectExec(intent, params, mode);
+    return;
+  }
+
+  var execFn = (typeof window.__autExecuteIntent === 'function')
+    ? window.__autExecuteIntent
+    : null;
+
+  // Store proposal and render card inside the panel form
+  var proposalHtml = AgentCapabilityRouter.createSurface(intent, params, { executeIntent: execFn, _ubPanel: true });
+
+  // Override the Approve/Cancel DOM targets: we want the result to appear IN the panel,
+  // not in the Autonoma chat. We wrap the proposal html and intercept approve/cancel.
+  // Strategy: inject the proposal, then monkey-patch the approve button to call
+  // _ubPanelApprove(propId) which routes to __autExecuteIntent and shows result in panel.
+  form.innerHTML =
+    '<div id="ub-proposal-wrap">' + proposalHtml + '</div>' +
+    '<button class="ub-op-btn back" style="margin-top:8px" onclick="exitUnifiedBalanceMode()"><i class="ti ti-arrow-left"></i> Edit / Back</button>';
+
+  // Patch the approve button: replace onclick to use _ubPanelApprove
+  setTimeout(function(){
+    var btns = form.querySelectorAll('[onclick*="AgentCapabilityRouter.approve"]');
+    for (var i=0; i<btns.length; i++){
+      var oc = btns[i].getAttribute('onclick')||'';
+      var m = oc.match(/AgentCapabilityRouter\.approve\('([^']+)'\)/);
+      if (m) {
+        var pid = m[1];
+        btns[i].setAttribute('onclick', "_ubPanelApprove('"+pid+"')");
+      }
+    }
+  }, 40);
+}
+
+// Executes the proposal from inside the UB panel (not in Autonoma chat)
+// Uses window.__autExecuteIntent — same path as Autonoma — then shows result in panel.
+async function _ubPanelApprove(propId) {
+  var entry = AgentCapabilityRouter._proposals && AgentCapabilityRouter._proposals[propId];
+  if (!entry) {
+    var f = document.getElementById('ub-op-panel-form');
+    if(f) f.innerHTML = '<div style="text-align:center;padding:18px;color:var(--muted2);font-size:10px"><i class="ti ti-clock" style="font-size:18px;display:block;margin-bottom:6px"></i>Proposal expired. Please try again.</div>' +
+      '<button class="ub-op-btn back" onclick="exitUnifiedBalanceMode()"><i class="ti ti-arrow-left"></i> Back</button>';
+    return;
+  }
+
+  var intent  = entry.intent;
+  var params  = entry.params;
+  delete AgentCapabilityRouter._proposals[propId];
+
+  var form = document.getElementById('ub-op-panel-form');
+  if(form) form.innerHTML = '<div style="display:flex;align-items:center;gap:10px;padding:18px;font-size:10px;color:var(--teal)"><span class="aut-typing"><span></span><span></span><span></span></span>Executing ' + intent.replace(/_/g,' ').toLowerCase() + '…</div>';
+
+  // Publish start event to UBOperationBus
+  var opTracker = null;
+  try {
+    if(typeof UBOperationBus!=='undefined')
+      opTracker = UBOperationBus.track({ type: intent.toLowerCase(), source: 'unified_balance', amount: params.amount, asset: params.token||'USDC', destination: params.address||params.toChain||null });
+    if(opTracker) opTracker.start({ status: 'started' });
+  } catch(_){}
+
+  try {
+    var execFn = (typeof window.__autExecuteIntent === 'function') ? window.__autExecuteIntent : null;
+    if (!execFn) { _ubDirectExec(intent, params, null); return; }
+
+    // For SWAP/BRIDGE: build the natural-language msg that autSwap/autBridge parses
+    var execMsg = params._ubMsg || '';
+    if (!execMsg) {
+      if (intent === 'SEND_PAYMENT') execMsg = params.amount + ' USDC to ' + (params.address||'');
+      else if (intent === 'SWAP_EXECUTE') execMsg = params.amount + ' ' + (params.token||'USDC') + ' for ' + (params.toToken||'EURC');
+      else if (intent === 'BRIDGE') execMsg = params.amount + ' USDC from ' + (params.fromChain||'Arc Mainnet') + ' to ' + (params.toChain||'Base');
+    }
+
+    var resultHtml = await execFn(intent, params, execMsg);
+
+    // Publish complete/pending to UBOperationBus
+    try {
+      var txH = null;
+      if(typeof txHistory!=='undefined'&&Array.isArray(txHistory)&&txHistory.length){ txH = txHistory[0].txHash||null; }
+      if(opTracker) opTracker.confirmed({ txHash: txH, status: 'confirmed' });
+    } catch(_){}
+
+    // Refresh UB after execution
+    try { if(typeof ubRefresh==='function') setTimeout(ubRefresh, 1200); } catch(_){}
+
+    if (form) {
+      var resultCard = (typeof AgentCapabilityRouter!=='undefined') ? AgentCapabilityRouter.buildResultCard(intent, params, null, 'pending') : '';
+      form.innerHTML =
+        (resultHtml || resultCard || '') +
+        '<button class="ub-op-btn back" style="margin-top:10px" onclick="exitUnifiedBalanceMode()"><i class="ti ti-check"></i> Done</button>';
+    }
+  } catch(e) {
+    try { if(opTracker) opTracker.failed({ status: 'failed', error: e && e.message }); } catch(_){}
+    if(form) form.innerHTML =
+      '<div style="text-align:center;padding:16px;color:var(--red);font-size:10px"><i class="ti ti-circle-x" style="font-size:20px;display:block;margin-bottom:8px"></i>' +
+      (e&&e.message?e.message.substring(0,160):'Execution failed') + '</div>' +
+      '<button class="ub-op-btn back" onclick="exitUnifiedBalanceMode()"><i class="ti ti-arrow-left"></i> Back</button>';
+  }
+}
+
+// Direct exec fallback when AgentCapabilityRouter is not available
+function _ubDirectExec(intent, params, mode) {
+  var execFn = (typeof window.__autExecuteIntent === 'function') ? window.__autExecuteIntent : null;
+  if (!execFn) {
+    // Last resort: navigate to relevant page
+    var pageMap = { SEND_PAYMENT:'send', SWAP_EXECUTE:'swap', BRIDGE:'bridge' };
+    var pg = pageMap[intent]; if(pg && typeof showPage==='function') showPage(pg);
+    if(typeof exitUnifiedBalanceMode==='function') exitUnifiedBalanceMode();
+    return;
+  }
+  var execMsg = params._ubMsg || '';
+  execFn(intent, params, execMsg).catch(function(){});
 }
 
 //  AUTONOMA — AI Agent Engine (v3) + AIResponseRenderer
@@ -44863,6 +45185,11 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
     if(!autMenuListenerInstalled){
       document.addEventListener('click', function(){ if(autOpenMenuId!==null){ autOpenMenuId=null; autRenderSidebar(); } });
       autMenuListenerInstalled=true;
+    }
+    // Expose __autExecuteIntent eagerly so UB panel can use it without
+    // requiring a prior autProcess call.
+    if (typeof window.__autExecuteIntent === 'undefined') {
+      window.__autExecuteIntent = _executeIntent;
     }
     autRenderSidebar();
   };

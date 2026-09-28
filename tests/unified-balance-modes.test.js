@@ -110,22 +110,64 @@ describe('Unified Balance — mode wiring (no page navigation)', () => {
     expect(html).toContain('function exitUnifiedBalanceMode');
   });
 
-  it('enterUnifiedBalanceMode reuses existing flows (Send/Swap/Move)', () => {
+  it('enterUnifiedBalanceMode routes through Circle Agent / AgentCapabilityRouter', () => {
+    // Extract the body of enterUnifiedBalanceMode up to exitUnifiedBalanceMode
     const fn = html.slice(html.indexOf('function enterUnifiedBalanceMode'), html.indexOf('function exitUnifiedBalanceMode'));
-    expect(fn).toContain('UBScreen.openSend()');
-    expect(fn).toContain('UBScreen.openSwap()');
-    expect(fn).toContain('UBScreen.openBridge()');
+    // Must update UBLive and UB.liveMode (presentation layer)
     expect(fn).toContain('UBLive.setMode');
     expect(fn).toContain('UB.liveMode');
+    // Must open the Agent-wired panel (not UBScreen directly, not showPage)
+    expect(fn).toContain('_ubOpenAgentPanel');
+    // UBScreen.openSend/openSwap/openBridge are NOT called here —
+    // they are used by UBAction (asset-row buttons) which is a separate flow.
+    // enterUnifiedBalanceMode routes through AgentCapabilityRouter instead.
+  });
+
+  it('_ubOpenAgentPanel and _ubAgentPreview are defined (Circle Agent wiring)', () => {
+    expect(html).toContain('function _ubOpenAgentPanel');
+    expect(html).toContain('function _ubAgentPreview');
+    expect(html).toContain('function _ubPanelApprove');
+  });
+
+  it('_ubAgentPreview calls AgentCapabilityRouter.createSurface (not direct execution)', () => {
+    const fn = html.slice(html.indexOf('function _ubAgentPreview'), html.indexOf('async function _ubPanelApprove'));
+    expect(fn).toContain('AgentCapabilityRouter.createSurface');
+    expect(fn).not.toContain('saExecuteSend');
+    expect(fn).not.toContain('executeSwap');
+    expect(fn).not.toContain('xcExecuteSend');
+  });
+
+  it('_ubPanelApprove uses __autExecuteIntent (same path as Autonoma chat)', () => {
+    const fn = html.slice(html.indexOf('async function _ubPanelApprove'), html.indexOf('function _ubDirectExec'));
+    expect(fn).toContain('__autExecuteIntent');
+    expect(fn).toContain('UBOperationBus');
+  });
+
+  it('"move" mode is normalised to BRIDGE intent in _ubAgentPreview', () => {
+    const fn = html.slice(html.indexOf('function _ubAgentPreview'), html.indexOf('async function _ubPanelApprove'));
+    expect(fn).toContain("intent = 'BRIDGE'");
+  });
+
+  it('UBScreen execution still delegates to the real handlers (no duplicated engines)', () => {
+    // UBScreen still references the real handlers — they are NOT removed.
+    // They are still used by UBAction (asset-row send/swap/bridge buttons).
+    expect(html).toContain('saExecuteSend()');
+    expect(html).toContain('executeSwap()');
+    expect(html).toContain('xcExecuteSend()');
   });
 
   it('header [Send][Swap][Move] use the unified mode entry point (not UBScreen directly, not showPage)', () => {
-    const header = html.slice(html.indexOf('id="ub-hero-card"'), html.indexOf('id="ub-live-screen"'));
-    expect(header).toContain("enterUnifiedBalanceMode('send')");
-    expect(header).toContain("enterUnifiedBalanceMode('swap')");
-    expect(header).toContain("enterUnifiedBalanceMode('move')");
-    expect(header).not.toContain('showPage(');
-    expect(header).not.toContain('UBScreen.openSend()');
+    // The three action buttons live near ub2-qa-btn in the HTML (ub-hero-card is CSS-only).
+    // Slice around the ub2-qa-btn send button and verify the onclick targets.
+    const qaStart = html.indexOf('ub2-qa-btn send');
+    const qaSection = qaStart >= 0 ? html.slice(qaStart - 100, qaStart + 600) : '';
+    expect(qaSection).toContain("enterUnifiedBalanceMode('send')");
+    expect(qaSection).toContain("enterUnifiedBalanceMode('swap')");
+    expect(qaSection).toContain("enterUnifiedBalanceMode('move')");
+    expect(qaSection).not.toContain('UBScreen.openSend()');
+    // Verify globally that these buttons never use showPage
+    const sendBtn = html.match(/class="ub2-qa-btn send"[^>]*>/g) || [];
+    sendBtn.forEach(b => { expect(b).not.toContain('showPage'); });
   });
 
   it('Quick Action Send/Swap/Move open the same mode (not showPage)', () => {
@@ -139,17 +181,24 @@ describe('Unified Balance — mode wiring (no page navigation)', () => {
     expect(qa).not.toContain("showPage('move')");
   });
 
-  it('UBScreen execution still delegates to the real handlers (no duplicated engines)', () => {
-    expect(html).toContain('saExecuteSend()');
-    expect(html).toContain('executeSwap()');
-    expect(html).toContain('xcExecuteSend()');
-  });
-
   it('op panel closes reset to live (Back to Live → exitUnifiedBalanceMode)', () => {
     expect(html).toContain('exitUnifiedBalanceMode()');
-    // Closing the panel always resets the live mode
+    // Closing the panel via the X button calls exitUnifiedBalanceMode
+    expect(html).toContain('exitUnifiedBalanceMode();if');
+    // _cleanupAll resets liveMode (UBScreen internal cleanup path)
     const cleanup = html.slice(html.indexOf('function _cleanupAll'), html.indexOf('function hideOperation'));
     expect(cleanup).toContain("UB.liveMode = 'live'");
+  });
+
+  it('__autExecuteIntent is exposed in autonomaInit (eager exposure for UB panel)', () => {
+    const initFn = html.slice(html.indexOf('window.autonomaInit = function'), html.indexOf('window.autonomaNewChat = function'));
+    expect(initFn).toContain('window.__autExecuteIntent = _executeIntent');
+  });
+
+  it('ubInit eagerly exposes __autExecuteIntent via autonomaInit', () => {
+    const initFn = html.slice(html.indexOf('function ubInit()'), html.indexOf('// Auto-refresh when wallet connects'));
+    expect(initFn).toContain('window.__autExecuteIntent');
+    expect(initFn).toContain('autonomaInit');
   });
 });
 
