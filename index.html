@@ -30812,39 +30812,96 @@ async function saExecuteCCTPCrossChain() {
   var _mintFailed    = _mintStep && _mintStep.state === 'error';
 
   if (_burnSucceeded && _mintFailed && result) {
-    // Persist for Retry mint — reuses the same _saveCctpPendingMint / _checkCctpPendingMintBanner
-    // from the Bridge page (both are global functions on this page).
+    // Persist for Retry mint — includes fromName/toName for correct banner copy.
     try {
       if (typeof _saveCctpPendingMint === 'function') {
         _saveCctpPendingMint({
-          wallet:       walletAddress,
-          burnTx:       (_burnStep && _burnStep.txHash) || '',
-          srcChainId:   srcChain.chainId,
-          destChainId:  destChain.chainId,
-          amount:       String(amount),
-          token:        saCurrentAsset,
-          recipient:    recipient,
+          wallet:        walletAddress,
+          burnTx:        (_burnStep && _burnStep.txHash) || '',
+          srcChainId:    srcChain.chainId,
+          destChainId:   destChain.chainId,
+          fromName:      srcChain.name  || 'Arc Mainnet',
+          toName:        destChain.name || 'destination',
+          amount:        String(amount),
+          token:         saCurrentAsset,
+          recipient:     recipient,
           partialResult: result,
-          savedAt:      Date.now(),
+          savedAt:       Date.now(),
         });
       }
     } catch (_pe) {}
   }
 
   // Inline retry on retryable post-burn failure (no second depositForBurn).
+  // CRITICAL: switch wallet to DESTINATION chain before calling receiveMessage.
+  // Max 3 attempts. Stop cleanly if user rejects the chain switch.
   if (result && result.state === 'error') {
-    saUpdateXCStep('mint', 'active', 'retrying...');
-    try {
-      result = await BridgeKitRouter.retry(result, adapter);
-      // Clear pending record if retry succeeded.
-      if (result && result.state !== 'error') {
-        try {
-          if (typeof _clearCctpPendingMint === 'function') {
-            _clearCctpPendingMint(walletAddress, (_burnStep && _burnStep.txHash) || '');
-          }
-        } catch (_ce) {}
+    var _retryAttempt = 0;
+    var _maxRetries = 3;
+    var _switchRejected = false;
+
+    while (result && result.state === 'error' && _retryAttempt < _maxRetries && !_switchRejected) {
+      _retryAttempt++;
+      saUpdateXCStep('mint', 'active', 'retrying... (' + _retryAttempt + '/' + _maxRetries + ')');
+
+      // Switch wallet to destination chain before retry.
+      try {
+        await ensureNetwork(destChain.chainId);
+        try { if (typeof refreshProviderState === 'function') await refreshProviderState(); } catch(_) {}
+      } catch (_swErr) {
+        var _swMsg = (_swErr.message || '').toLowerCase();
+        if (_swMsg.includes('rejected') || _swMsg.includes('user denied') || _swMsg.includes('user rejected')) {
+          _switchRejected = true;
+          // User refused switch — stop retrying, show Retry mint banner, never call mint on Arc.
+          saUpdateXCStep('mint', 'error', 'switch rejected');
+          try { if (typeof _checkCctpPendingMintBanner === 'function') _checkCctpPendingMintBanner(); } catch(_) {}
+          break;
+        }
+        // Other switch error (timeout etc.) — leave result.state === 'error', banner shown below.
+        break;
       }
-    } catch (_e) {}
+
+      if (_switchRejected) break;
+
+      // Quick gas check on destination — warn but don't block (destCaller=0 allows anyone to relay).
+      try {
+        var _destRpcSlug = (destChain.name || '').toLowerCase().replace(/\s+/g,'');
+        var _destRpcList = _arcRpcList ? _arcRpcList(destChain) : [destChain.rpc || destChain.cctp && destChain.cctp.rpc || ''];
+        var _destGasHex = null;
+        for (var _ri = 0; _ri < _destRpcList.length && !_destGasHex; _ri++) {
+          try {
+            var _gr = await fetch(_destRpcList[_ri], {
+              method: 'POST', headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_getBalance', params: [walletAddress, 'latest'] }),
+              signal: AbortSignal.timeout(5000)
+            });
+            if (_gr.ok) { var _gd = await _gr.json(); _destGasHex = _gd && _gd.result; }
+          } catch(_) {}
+        }
+        if (_destGasHex && _destGasHex !== '0x0' && BigInt(_destGasHex) === 0n) {
+          toast('Atenção: sem gas nativo (POL) na ' + destChain.name + '. Mint pode falhar. Use Retry mint com gas na carteira.', 'warning');
+        }
+      } catch (_ge) {}
+
+      // Recreate adapter pointing at destination chain (not Arc RPC).
+      var _destAdapter = adapter;
+      try { _destAdapter = await BridgeKitRouter.createAdapter(eth); } catch (_ae) {}
+
+      try {
+        result = await BridgeKitRouter.retry(result, { from: _destAdapter, to: _destAdapter });
+        if (result && result.state !== 'error') {
+          // Retry succeeded — clear pending record.
+          try {
+            if (typeof _clearCctpPendingMint === 'function') {
+              _clearCctpPendingMint(walletAddress, (_burnStep && _burnStep.txHash) || '');
+            }
+          } catch (_ce) {}
+          break;
+        }
+      } catch (_re) {
+        // Retry threw — treat as still failed, loop will check _maxRetries.
+      }
+    }
   }
 
   const done = result && result.state !== 'error';
@@ -30856,7 +30913,7 @@ async function saExecuteCCTPCrossChain() {
     if (btnContent) btnContent.innerHTML = '<i class="ti ti-check-circle"></i> Bridged via CCTP!';
     setTimeout(function () { _saResetBtn(); if (btnContent) btnContent.innerHTML = '<i class="ti ti-world-share"></i> Review &amp; Send'; }, 4000);
     toast(amount + ' ' + saCurrentAsset + ' bridged to ' + shortAddr(recipient) + ' via CCTP', 'success');
-    saLogTx({ hash: txHash, amount: amount, asset: saCurrentAsset, recipient: recipient, memo: 'CCTP cross-chain', provider: 'cctp', mintHash: mintTxHash });
+    saLogTx({ hash: txHash, amount: amount, asset: saCurrentAsset, recipient: recipient, memo: 'CCTP ' + (srcChain.name || 'Arc') + ' → ' + (destChain.name || 'destination'), provider: 'cctp', mintHash: mintTxHash });
     // Update the pending-mint banner (clear if this was a retry).
     try { if (typeof _checkCctpPendingMintBanner === 'function') _checkCctpPendingMintBanner(); } catch (_e) {}
   } else {
