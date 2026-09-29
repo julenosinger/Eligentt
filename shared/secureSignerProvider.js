@@ -211,9 +211,20 @@
   }
 
   function _postJson(path, body) {
+    // Attach the Circle Agent wallet address as X-Agent-Wallet so the server
+    // can verify identity when no email/password session cookie is present
+    // (wallet-connect users). The server validates it against CIRCLE_WALLET_ADDRESS env secret.
+    var agentWallet = '';
+    try {
+      if (typeof CircleAgent !== 'undefined' && CircleAgent.getCachedAddress) {
+        agentWallet = CircleAgent.getCachedAddress() || '';
+      }
+    } catch (_) {}
+    var hdrs = { 'Content-Type': 'application/json' };
+    if (agentWallet) hdrs['X-Agent-Wallet'] = agentWallet;
     return fetch(path, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: hdrs,
       credentials: 'same-origin',
       body: JSON.stringify(body)
     }).then(function (r) {
