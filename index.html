@@ -2463,6 +2463,9 @@ body.swap-standard-mode .site-footer{display:block !important}
 .brs-unavail{opacity:.45;cursor:not-allowed;pointer-events:none}
 .brs-unavail-tag{font-size:8px;color:var(--red);font-weight:600}
 .brs-select-hint{font-size:8px;color:var(--teal);margin-left:auto;opacity:.7}
+.brs-select-btn{font-size:8.5px;font-weight:700;padding:4px 14px;border-radius:6px;border:1px solid rgba(45,212,191,.4);background:rgba(45,212,191,.08);color:var(--teal);cursor:pointer;margin-left:auto;transition:background .15s,border-color .15s;letter-spacing:.3px}
+.brs-select-btn:hover{background:rgba(45,212,191,.18);border-color:rgba(45,212,191,.7)}
+.brs-select-btn--selected{background:rgba(45,212,191,.2);border-color:var(--teal);color:#fff}
 /* Mobile: panel stacks below */
 @media(max-width:1080px){
   .swap-col.bridge-routes-active{display:flex !important;flex-direction:column !important}
@@ -22168,7 +22171,29 @@ var _bridgeRoutes = [];          // current loaded routes
 var _selectedBridgeRoute = null; // { provider, quote, idx }
 var _bridgeRoutesSeq = 0;        // stale-result guard
 
-// Normalize a LI.FI quote into RouteResult shape.
+// Normalize a LI.FI advanced-route result into RouteResult shape.
+function _brsFromLiFiRoute(lifiRoute) {
+  if (!lifiRoute || lifiRoute.ok === false) return null;
+  return {
+    provider:    'lifi',
+    id:          lifiRoute.routeId || ('lifi-' + Math.random().toString(36).substr(2,8)),
+    label:       lifiRoute.label || 'LI.FI',
+    protocol:    lifiRoute.protocol || 'LI.FI aggregator',
+    available:   lifiRoute.available !== false,
+    inAmt:       Number(lifiRoute._rawRoute && lifiRoute._rawRoute.fromAmount || 0) / 1e6,
+    outAmt:      Number(lifiRoute.toAmountRaw || 0) / 1e6,
+    minAmt:      Number(lifiRoute.toAmountMinRaw || 0) / 1e6,
+    feePct:      null,
+    gasUsd:      lifiRoute.gasCostUSD || null,
+    feesUsd:     lifiRoute.feeCostUSD || null,
+    execSec:     lifiRoute.executionDuration || null,
+    steps:       lifiRoute.steps || 1,
+    stepsData:   lifiRoute.stepsData || [],
+    quote:       lifiRoute,    // kept for execution (contains _rawRoute + stepsData)
+  };
+}
+
+// Legacy: normalize a LI.FI single-quote (getQuote) into RouteResult — kept for fallback.
 function _brsFromLiFi(quote) {
   if (!quote || quote.ok !== true) return null;
   var est = quote.route && quote.route.estimate;
@@ -22195,7 +22220,8 @@ function _brsFromLiFi(quote) {
     feesUsd:     feesUsd,
     execSec:     execSec,
     steps:       steps,
-    quote:       quote,    // kept for execution
+    stepsData:   (quote.route && quote.route.steps) || [],
+    quote:       quote,
   };
 }
 
@@ -22227,19 +22253,36 @@ function _brsFromCCTP(est, fromChainId, toChainId) {
 // Fetch all available routes in parallel, normalize, sort by outAmt desc.
 async function _fetchBridgeRoutes(fromChain, toChain, amt, walletAddr) {
   var seq = ++_bridgeRoutesSeq;
-  var promises = [];
+  var lifiRoutes = [];
+  var cctpRoute  = null;
 
-  // Provider 1: LI.FI
-  if (typeof LiFiAdapter !== 'undefined' && typeof LiFiAdapter.getQuote === 'function') {
-    promises.push(
-      LiFiAdapter.getQuote({
+  // Provider 1: LI.FI /advanced/routes — returns ALL routes
+  if (typeof LiFiAdapter !== 'undefined' && typeof LiFiAdapter.getRoutes === 'function') {
+    try {
+      var res = await LiFiAdapter.getRoutes({
         tokenIn: 'USDC', tokenOut: 'USDC',
         amountInRaw: toUsdc(amt),
-        slippageBps: (typeof SlippageConfig !== 'undefined' && SlippageConfig.DEFAULT_BPS) || 100,
+        slippageBps: (typeof SlippageConfig !== 'undefined' && SlippageConfig.DEFAULT_BPS) || 50,
         fromChainId: fromChain.chainId, toChainId: toChain.chainId,
         fromAddress: walletAddr, toAddress: walletAddr,
-      }).then(function(q){ return _brsFromLiFi(q); }).catch(function(){ return null; })
-    );
+      });
+      if (res && res.ok && Array.isArray(res.routes)) {
+        lifiRoutes = res.routes.map(_brsFromLiFiRoute).filter(Boolean);
+      } else if (res && !res.ok && typeof LiFiAdapter.getQuote === 'function') {
+        // Fallback to single-quote if /advanced/routes is unavailable
+        var q = await LiFiAdapter.getQuote({
+          tokenIn: 'USDC', tokenOut: 'USDC',
+          amountInRaw: toUsdc(amt),
+          slippageBps: (typeof SlippageConfig !== 'undefined' && SlippageConfig.DEFAULT_BPS) || 100,
+          fromChainId: fromChain.chainId, toChainId: toChain.chainId,
+          fromAddress: walletAddr, toAddress: walletAddr,
+        });
+        var fbRoute = _brsFromLiFi(q);
+        if (fbRoute) lifiRoutes = [fbRoute];
+      }
+    } catch(_e) {
+      // LI.FI unavailable — proceed with CCTP only
+    }
   }
 
   // Provider 2: CCTP (BridgeKitRouter.estimate)
@@ -22249,20 +22292,19 @@ async function _fetchBridgeRoutes(fromChain, toChain, amt, walletAddr) {
     typeof BridgeKitRouter.estimate === 'function' &&
     BridgeKitRouter.route(fromChain.chainId, toChain.chainId, 'USDC').provider === 'cctp'
   ) {
-    promises.push(
-      BridgeKitRouter.estimate(fromChain.chainId, toChain.chainId, amt, 'USDC')
-        .then(function(e){ return _brsFromCCTP(e, fromChain.chainId, toChain.chainId); })
-        .catch(function(){ return null; })
-    );
+    try {
+      var cctpEst = await BridgeKitRouter.estimate(fromChain.chainId, toChain.chainId, amt, 'USDC');
+      cctpRoute = _brsFromCCTP(cctpEst, fromChain.chainId, toChain.chainId);
+    } catch(_e2) {}
   }
 
-  var results = await Promise.allSettled(promises);
-  if (seq !== _bridgeRoutesSeq) return null; // stale
+  if (seq !== _bridgeRoutesSeq) return null; // stale — newer request supersedes this one
 
-  var routes = [];
-  results.forEach(function(r){ if (r.status === 'fulfilled' && r.value) routes.push(r.value); });
+  var routes = lifiRoutes.slice();
+  if (cctpRoute) routes.push(cctpRoute);
 
   // Sort: available first, then by outAmt desc (best rate first).
+  // This determines card ORDER only — selection is always explicit by the user.
   routes.sort(function(a, b){
     if (a.available !== b.available) return a.available ? -1 : 1;
     return (b.outAmt || 0) - (a.outAmt || 0);
@@ -22335,24 +22377,46 @@ function _brsRenderRoutes(routes, fromChain, toChain) {
     '<span class="brs-count">' + routes.length + ' route' + (routes.length !== 1 ? 's' : '') + ' · ' +
     fromLabel.split(' ')[0] + ' → ' + toLabel.split(' ')[0] + '</span></div>';
 
+  // Identify FASTEST route (min execSec among available routes with execSec set)
+  var fastestIdx = -1;
+  var minExecSec = Infinity;
+  routes.forEach(function(r, i) {
+    if (r.available && r.execSec != null && r.execSec < minExecSec) {
+      minExecSec = r.execSec; fastestIdx = i;
+    }
+  });
+  // Only show FASTEST badge if it differs from BEST RATE (index 0)
+  if (fastestIdx === 0) fastestIdx = -1;
+
   routes.forEach(function(route, i) {
-    var isBest = i === 0 && route.available;
-    var isSel  = _selectedBridgeRoute && _selectedBridgeRoute.id === route.id;
-    var classes = 'brs-route' +
+    var isBest    = i === 0 && route.available;
+    var isFastest = i === fastestIdx && route.available;
+    var isSel     = _selectedBridgeRoute && _selectedBridgeRoute.id === route.id;
+    var classes   = 'brs-route' +
       (isBest ? ' brs-best' : '') +
       (isSel  ? ' brs-selected' : '') +
       (!route.available ? ' brs-unavail' : '');
 
     var provLetter = (route.label || 'B').charAt(0).toUpperCase();
-    var outStr = route.outAmt != null ? route.outAmt.toFixed(4) : '—';
-    var feePctStr = route.feePct != null ? route.feePct.toFixed(3) + '%' : '—';
-    var gasStr    = route.gasUsd != null ? _brsFmtUsd(route.gasUsd) : '—';
-    var feesStr   = route.feesUsd != null ? _brsFmtUsd(route.feesUsd) : '—';
+    var outStr    = route.outAmt  != null ? route.outAmt.toFixed(4)      : '—';
+    var feePctStr = route.feePct  != null ? route.feePct.toFixed(3) + '%': '—';
+    var gasStr    = route.gasUsd  != null ? _brsFmtUsd(route.gasUsd)     : '—';
+    var feesStr   = route.feesUsd != null ? _brsFmtUsd(route.feesUsd)    : '—';
     var timeStr   = _brsFmtDur(route.execSec);
     var stepsStr  = route.steps;
 
-    html += '<div class="' + classes + '" onclick="brSelectRoute(' + i + ')" id="brs-card-' + i + '">' +
-      (isBest ? '<div class="brs-best-badge">Best Rate</div>' : '') +
+    var badges = '';
+    if (isBest)    badges += '<div class="brs-best-badge">Best Rate</div>';
+    if (isFastest) badges += '<div class="brs-best-badge" style="right:auto;left:12px;background:var(--purple)">Fastest</div>';
+
+    var selectBtn = route.available
+      ? (isSel
+          ? '<button class="brs-select-btn brs-select-btn--selected" onclick="event.stopPropagation();brSelectRoute(' + i + ')"><i class="ti ti-check"></i> Selected</button>'
+          : '<button class="brs-select-btn" onclick="event.stopPropagation();brSelectRoute(' + i + ')">Select</button>')
+      : '<span class="brs-unavail-tag">Unavailable</span>';
+
+    html += '<div class="' + classes + '" id="brs-card-' + i + '">' +
+      badges +
       '<div class="brs-route-top">' +
         '<div class="brs-provider-icon">' + provLetter + '</div>' +
         '<div style="flex:1;min-width:0">' +
@@ -22371,42 +22435,54 @@ function _brsRenderRoutes(routes, fromChain, toChain) {
         '<div class="brs-meta-item"><div class="brs-meta-val">' + timeStr + '</div><div class="brs-meta-lbl">Est. time</div></div>' +
         '<div class="brs-meta-item"><div class="brs-meta-val">' + stepsStr + '</div><div class="brs-meta-lbl">Steps</div></div>' +
       '</div>' +
-      '<div class="brs-route-steps">' +
-        (route.available
-          ? (isSel
-              ? '<i class="ti ti-check" style="color:var(--teal);font-size:10px"></i><span style="color:var(--teal)">Selected — click Bridge to execute</span>'
-              : '<span class="brs-select-hint">Click to select</span>')
-          : '<span class="brs-unavail-tag">Unavailable</span>') +
-      '</div>' +
+      '<div class="brs-route-steps" style="justify-content:flex-end">' + selectBtn + '</div>' +
     '</div>';
   });
 
   inner.innerHTML = html;
 }
 
-// Select a route (does NOT open wallet).
+// Select a route explicitly (does NOT execute — user must click Bridge button).
 function brSelectRoute(idx) {
   var route = _bridgeRoutes[idx];
   if (!route || !route.available) return;
 
   _selectedBridgeRoute = route;
 
-  // Re-render cards to update selection highlight.
+  // Store quote for execution
+  if (route.provider === 'lifi') { _bridgeLastQuote = route.quote; }
+  else                           { _bridgeLastQuote = null; }
+
+  // Re-render cards to update selection highlight and SELECT buttons.
   var cards = document.querySelectorAll('.brs-route');
   cards.forEach(function(c, i) {
     if (i === idx) c.classList.add('brs-selected');
     else           c.classList.remove('brs-selected');
-  });
-
-  // Update the footer hint text.
-  cards.forEach(function(c, i) {
     var hint = c.querySelector('.brs-route-steps');
     if (!hint) return;
-    if (i === idx) hint.innerHTML = '<i class="ti ti-check" style="color:var(--teal);font-size:10px"></i><span style="color:var(--teal)">Selected — click Bridge to execute</span>';
-    else           hint.innerHTML = '<span class="brs-select-hint">Click to select</span>';
+    var r = _bridgeRoutes[i];
+    if (!r || !r.available) return;
+    if (i === idx) {
+      hint.innerHTML = '<button class="brs-select-btn brs-select-btn--selected" onclick="event.stopPropagation();brSelectRoute(' + i + ')"><i class="ti ti-check"></i> Selected</button>';
+    } else {
+      hint.innerHTML = '<button class="brs-select-btn" onclick="event.stopPropagation();brSelectRoute(' + i + ')">Select</button>';
+    }
   });
 
-  // Update the Bridge button label to reflect the chosen route.
+  // Update main rate-box with selected route data
+  var outAmt   = route.outAmt  != null ? route.outAmt  : 0;
+  var minAmt   = route.minAmt  != null ? route.minAmt  : null;
+  var feePct   = route.feePct  != null ? route.feePct  : null;
+  var execSec  = route.execSec != null ? route.execSec : null;
+  var toolName = route.label   || 'LI.FI';
+  _bridgeSetText('bridge-protocol',    toolName);
+  _bridgeSetText('bridge-amount-out',  '~' + outAmt.toFixed(4));
+  _bridgeSetText('bridge-receive',     '~' + outAmt.toFixed(4) + ' USDC');
+  _bridgeSetText('bridge-fee-display', feePct  != null ? '~' + feePct.toFixed(3)  + '%'    : '—');
+  _bridgeSetText('bridge-min',         minAmt  != null ? '~' + minAmt.toFixed(4)  + ' USDC': '—');
+  _bridgeSetText('bridge-time',        execSec != null ? '~' + _bridgeFmtDuration(execSec) : '—');
+
+  // Update Bridge button label
   var btn = document.getElementById('bridge-btn');
   if (btn) btn.innerHTML = '<i class="ti ti-topology-star-3"></i>Bridge via ' + escHtml(route.label);
 }
@@ -22504,10 +22580,9 @@ async function _fetchBridgeQuote(fromChain, toChain, amt) {
     return;
   }
 
-  // Store routes and render panel.
+  // Store routes. NO auto-selection — user must choose explicitly.
   _bridgeRoutes = routes;
-  // Auto-select the best available route (highest outAmt).
-  _selectedBridgeRoute = routes[0];
+  _selectedBridgeRoute = null;
   _brsRenderRoutes(routes, fromChain, toChain);
 
   // ── Update existing rate-box with best route data ──────────────────────────
@@ -22518,8 +22593,8 @@ async function _fetchBridgeQuote(fromChain, toChain, amt) {
   const feePct   = best.feePct;
   const execSec  = best.execSec;
 
-  if (best.provider === 'lifi') { _bridgeLastQuote = best.quote; }
-  else                          { _bridgeLastQuote = null; } // CCTP: no LI.FI tx to re-use
+  // _bridgeLastQuote is set only when the user explicitly selects a route (brSelectRoute).
+  // Do NOT set it here — no auto-selection.
 
   _bridgeSetText('bridge-protocol', toolName);
   _bridgeSetText('bridge-amount-out', `~${outAmt.toFixed(4)}`);
@@ -34926,6 +35001,12 @@ function executeBridgeOrTurbo() {
   const amt = parseFloat(document.getElementById('bridge-amount')?.value) || 0;
   const token = 'USDC';
 
+  // If routes were loaded but none selected yet, require explicit selection.
+  if (_bridgeRoutes.length > 0 && !_selectedBridgeRoute) {
+    toast('Please select a route before bridging.', 'warning');
+    return;
+  }
+
   if (_selectedBridgeRoute && _bridgeRoutes.length > 0) {
     const route = _selectedBridgeRoute;
 
@@ -35245,17 +35326,60 @@ async function executeBridgeViaLiFi() {
 
   if (typeof BridgeEngine !== 'undefined') BridgeEngine.notifyStandardStart({ from: fromChain.id, to: toChain.id, amt: amt, type: 'lifi' });
 
-  // 1. Obtain + validate route
+  // 1. Obtain transactionRequest for the SELECTED route step.
+  // If the user selected a route from the panel, use that step's data.
+  // Otherwise fall back to getQuote (for direct execution without route panel).
   let quote;
-  try {
-    renderBridgeStep(0, 'active', null);
-    quote = await LiFiAdapter.getQuote({
-      tokenIn: 'USDC', tokenOut: 'USDC', amountInRaw,
-      slippageBps: (typeof SlippageConfig !== 'undefined' && SlippageConfig.DEFAULT_BPS) || 100,
-      fromChainId: fromChain.chainId, toChainId: toChain.chainId,
-      fromAddress: walletAddress, toAddress: walletAddress,
-    });
-  } catch (e) { quote = { ok: false, error: (e && e.message) || String(e) }; }
+  renderBridgeStep(0, 'active', null);
+
+  const _selRoute = _selectedBridgeRoute;
+  const _selStepsData = (_selRoute && _selRoute.quote && _selRoute.quote.stepsData) || [];
+  const _selStep = _selStepsData.length > 0 ? _selStepsData[0] : null;
+
+  if (_selStep && typeof LiFiAdapter.getStepTransaction === 'function') {
+    // User selected a specific route — get transactionRequest for that step only.
+    let stepRes;
+    try { stepRes = await LiFiAdapter.getStepTransaction(_selStep); } catch(e) { stepRes = { ok: false, error: (e&&e.message)||String(e) }; }
+    if (!stepRes || stepRes.ok !== true || !stepRes.step) {
+      renderBridgeStep(0, 'error', null);
+      if (statusEl) { statusEl.textContent = 'Step tx failed'; statusEl.style.color = 'var(--red)'; }
+      toast('Could not get transaction for selected route: ' + ((stepRes && stepRes.error) || 'unknown'), 'error');
+      resetBtn(); return;
+    }
+    const populatedStep = stepRes.step;
+    const tr = populatedStep.transactionRequest;
+    if (!tr || !tr.to || !tr.data) {
+      renderBridgeStep(0, 'error', null);
+      toast('Invalid transactionRequest from LI.FI for selected route', 'error');
+      resetBtn(); return;
+    }
+    // Build a quote-compatible object from the populated step for downstream validation
+    quote = {
+      ok: true,
+      source: 'lifi',
+      tool: (_selRoute.label || 'LI.FI'),
+      to: tr.to,
+      calldata: tr.data,
+      value: tr.value != null ? String(tr.value) : '0',
+      spender: (populatedStep.estimate && populatedStep.estimate.approvalAddress) || null,
+      expectedOutRaw: (_selRoute.quote && _selRoute.quote.toAmountRaw) || 0n,
+      minOutRaw: (_selRoute.quote && _selRoute.quote.toAmountMinRaw) || 0n,
+      route: populatedStep,
+      expiresAt: Date.now() + 120000, // 2min grace for already-prepared step
+      _fetchedAt: Date.now(),
+      _fromSelectedRoute: true,
+    };
+  } else {
+    // Fallback: no route selected — use getQuote (single best quote)
+    try {
+      quote = await LiFiAdapter.getQuote({
+        tokenIn: 'USDC', tokenOut: 'USDC', amountInRaw,
+        slippageBps: (typeof SlippageConfig !== 'undefined' && SlippageConfig.DEFAULT_BPS) || 100,
+        fromChainId: fromChain.chainId, toChainId: toChain.chainId,
+        fromAddress: walletAddress, toAddress: walletAddress,
+      });
+    } catch (e) { quote = { ok: false, error: (e && e.message) || String(e) }; }
+  }
 
   if (!quote || quote.ok !== true) {
     renderBridgeStep(0, 'error', null);
@@ -35265,7 +35389,9 @@ async function executeBridgeViaLiFi() {
     return;
   }
 
-  const vres = LiFiAdapter.validateRoute(quote.route, {
+  // Validate route (uses the step's transactionRequest)
+  const _routeForValidation = quote._fromSelectedRoute ? quote.route : quote.route;
+  const vres = LiFiAdapter.validateRoute(_routeForValidation, {
     fromChainId: fromChain.chainId, toChainId: toChain.chainId,
     fromToken: srcToken, toToken: dstToken,
     amountRaw: amountInRaw.toString(), recipient: walletAddress,
@@ -35279,40 +35405,6 @@ async function executeBridgeViaLiFi() {
     return;
   }
   renderBridgeStep(0, 'success', null);
-
-  // A4 — quote expiry: never sign a stale quote. Re-fetch + re-validate once.
-  if (quote.expiresAt && Date.now() > quote.expiresAt) {
-    let fresh;
-    try {
-      fresh = await LiFiAdapter.getQuote({
-        tokenIn: 'USDC', tokenOut: 'USDC', amountInRaw,
-        slippageBps: (typeof SlippageConfig !== 'undefined' && SlippageConfig.DEFAULT_BPS) || 100,
-        fromChainId: fromChain.chainId, toChainId: toChain.chainId,
-        fromAddress: walletAddress, toAddress: walletAddress,
-      });
-    } catch (e) { fresh = { ok: false, error: (e && e.message) || String(e) }; }
-    if (!fresh || fresh.ok !== true) {
-      renderBridgeStep(0, 'error', null);
-      if (statusEl) { statusEl.textContent = 'No route'; statusEl.style.color = 'var(--red)'; }
-      toast('No LI.FI route available for this transfer', 'error');
-      resetBtn();
-      return;
-    }
-    const vres2 = LiFiAdapter.validateRoute(fresh.route, {
-      fromChainId: fromChain.chainId, toChainId: toChain.chainId,
-      fromToken: srcToken, toToken: dstToken,
-      amountRaw: amountInRaw.toString(), recipient: walletAddress,
-      sender: walletAddress,
-    });
-    if (!vres2.ok) {
-      renderBridgeStep(0, 'error', null);
-      if (statusEl) { statusEl.textContent = 'Route rejected'; statusEl.style.color = 'var(--red)'; }
-      toast('LI.FI route rejected: ' + vres2.reason, 'error');
-      resetBtn();
-      return;
-    }
-    quote = fresh;
-  }
 
   const toolName = quote.tool || 'LI.FI';
 

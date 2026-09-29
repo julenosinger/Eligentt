@@ -27,6 +27,8 @@
   if (typeof window !== 'undefined' && window.LiFiAdapter) return;
 
   var API = '/api/lifi/quote';
+  var ROUTES_API = '/api/lifi/routes';
+  var STEP_TX_API = '/api/lifi/step-transaction';
   var STATUS_API = '/api/lifi/status';
   var QUOTE_TTL_MS = 60000; // conservative freshness window (ms)
 
@@ -253,11 +255,141 @@
     }
   }
 
+  /**
+   * Fetch ALL available routes for a transfer via /advanced/routes.
+   * Returns a normalized array of route objects, each containing:
+   *   { ok, routeId, steps, toAmount, toAmountMin, gasCostUSD, feeCostUSD,
+   *     executionDuration, toolDetails, _rawRoute }
+   * Never throws — failures return { ok:false, routes:[] }.
+   */
+  async function getRoutes(opts) {
+    opts = opts || {};
+    var amountInRaw = opts.amountInRaw;
+    var fromChainId = Number(opts.fromChainId);
+    var toChainId   = Number(opts.toChainId);
+    var slippageBps = opts.slippageBps != null ? Number(opts.slippageBps) : 50;
+
+    if (!Number.isFinite(fromChainId) || !Number.isFinite(toChainId)) {
+      return { ok: false, error: 'INVALID_CHAIN_IDS', routes: [] };
+    }
+    var fromToken = _resolveTokenAddr(fromChainId, opts.tokenIn);
+    var toToken   = _resolveTokenAddr(toChainId,   opts.tokenOut);
+    if (!fromToken || !toToken) {
+      return { ok: false, error: 'TOKEN_NOT_REGISTERED', routes: [] };
+    }
+    var amountStr = _toStr(amountInRaw);
+    if (amountStr == null || !/^[0-9]+$/.test(amountStr)) {
+      return { ok: false, error: 'INVALID_AMOUNT', routes: [] };
+    }
+    var fromAddress = opts.fromAddress ||
+      ((typeof walletAddress !== 'undefined' && walletAddress) ? walletAddress : null);
+    if (!fromAddress) {
+      return { ok: false, error: 'NO_FROM_ADDRESS', routes: [] };
+    }
+
+    var res;
+    try {
+      res = await _postJson(ROUTES_API, {
+        fromChainId: fromChainId,
+        toChainId: toChainId,
+        fromTokenAddress: fromToken,
+        toTokenAddress: toToken,
+        fromAmount: amountStr,
+        fromAddress: fromAddress,
+        toAddress: opts.toAddress || fromAddress,
+        slippage: slippageBps / 10000,
+        integrator: 'elligentt',
+      });
+    } catch (e) {
+      return { ok: false, error: (e && e.message) || String(e), routes: [] };
+    }
+
+    if (!res || res.ok !== true || !Array.isArray(res.routes)) {
+      return { ok: false, error: (res && res.error) || 'LIFI_ROUTES_UNAVAILABLE', code: (res && res.code) || null, routes: [] };
+    }
+
+    // Normalize each route into a shape compatible with the bridge UI
+    var normalized = res.routes.map(function(r) {
+      var firstStep = Array.isArray(r.steps) && r.steps.length > 0 ? r.steps[0] : null;
+      var toolDetails = (firstStep && firstStep.toolDetails) || {};
+      var toolName = toolDetails.name || (firstStep && firstStep.tool) || 'LI.FI';
+
+      // Aggregate gas + fee costs across all steps
+      var gasCostUSD = 0, feeCostUSD = 0;
+      (r.steps || []).forEach(function(s) {
+        var est = s.estimate || {};
+        (est.gasCosts || []).forEach(function(g) { gasCostUSD += Number(g.amountUSD) || 0; });
+        (est.feeCosts || []).forEach(function(f) { feeCostUSD += Number(f.amountUSD) || 0; });
+      });
+
+      var toAmount = r.toAmount || (r.steps && r.steps.length && r.steps[r.steps.length-1].estimate && r.steps[r.steps.length-1].estimate.toAmount) || '0';
+      var toAmountMin = r.toAmountMin || toAmount;
+      var execDuration = r.steps
+        ? r.steps.reduce(function(s, step) { return s + (Number((step.estimate||{}).executionDuration)||0); }, 0)
+        : null;
+
+      var feeBps = null;
+      var amtIn = Number(amountStr);
+      if (feeCostUSD > 0 && amtIn > 0) {
+        // approximate feeBps from USD cost — not exact but sufficient for display
+        feeBps = null; // let UI show feeCostUSD directly
+      }
+
+      return {
+        ok: true,
+        source: 'lifi',
+        routeId: r.id || ('route-' + Math.random().toString(36).substr(2,8)),
+        label: toolName,
+        protocol: 'LI.FI aggregator',
+        available: true,
+        steps: Array.isArray(r.steps) ? r.steps.length : 1,
+        stepsData: r.steps || [],
+        toAmount: toAmount,
+        toAmountMin: toAmountMin,
+        toAmountRaw: (function(){ try { return BigInt(String(toAmount)); } catch(_){ return 0n; } })(),
+        toAmountMinRaw: (function(){ try { return BigInt(String(toAmountMin)); } catch(_){ return 0n; } })(),
+        gasCostUSD: gasCostUSD || null,
+        feeCostUSD: feeCostUSD || null,
+        feeBps: feeBps,
+        executionDuration: execDuration,
+        toolDetails: toolDetails,
+        _rawRoute: r,
+        _fetchedAt: Date.now(),
+      };
+    }).filter(function(r) { return r.toAmountRaw > 0n; });
+
+    return { ok: true, routes: normalized, count: normalized.length };
+  }
+
+  /**
+   * Obtain the transactionRequest for a specific route step (selected by the user).
+   * Called ONLY when the user has explicitly chosen a route.
+   * @param {object} step  The step object from the selected route's stepsData[0]
+   * @returns {object} { ok, step } where step.transactionRequest is populated
+   */
+  async function getStepTransaction(step) {
+    if (!step || !step.id || !step.action) {
+      return { ok: false, error: 'INVALID_STEP' };
+    }
+    var res;
+    try {
+      res = await _postJson(STEP_TX_API, { step: step });
+    } catch (e) {
+      return { ok: false, error: (e && e.message) || String(e) };
+    }
+    if (!res || res.ok !== true || !res.step) {
+      return { ok: false, error: (res && res.error) || 'STEP_TX_UNAVAILABLE', code: (res && res.code) || null };
+    }
+    return { ok: true, step: res.step };
+  }
+
   window.LiFiAdapter = {
     isAvailable: isAvailable,
     getQuote: getQuote,
+    getRoutes: getRoutes,
+    getStepTransaction: getStepTransaction,
     validateRoute: validateRoute,
     getStatus: getStatus,
-    version: '1.0.0',
+    version: '1.1.0',
   };
 })();
