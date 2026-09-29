@@ -1022,7 +1022,7 @@
       version: '1.0.0',
       metadataURI: null,
       capabilities: ['swap','bridge','treasury','payments','contracts','vault','crosschain','permit','recurring','scheduled','reimbursement','treasury_deposit'],
-      supportedChains: ['Arc Mainnet','Base','Ethereum','Arbitrum','Optimism','Polygon'],
+      supportedChains: ['Arc Mainnet','Base','Ethereum','Arbitrum','Optimism','Polygon','Solana'],
       status: 'active',
       sessionStatus: 'inactive',
       reputationScore: 50,

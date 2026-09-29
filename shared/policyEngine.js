@@ -117,7 +117,8 @@
     // 4. Simulation success
     if(defaults.requireSimulation&&opts.simulationHash){
       results.push({rule:'Simulation',passed:true,reason:'Simulation hash: '+opts.simulationHash.substring(0,12)+'...'});
-    } else if(defaults.requireSimulation&&!opts.simulationHash&&opts.operation!=='payment'&&opts.operation!=='swap'){
+    } else if(defaults.requireSimulation&&!opts.simulationHash&&opts.operation!=='payment'&&opts.operation!=='swap'&&opts.operation!=='bridge'&&opts.operation!=='crosschain'){
+      // bridge/crosschain build their simulation hash internally during execution
       results.push({rule:'Simulation',passed:false,reason:'No simulation performed'});
       allValid=false;
     }
@@ -196,7 +197,9 @@
     // 11. Chain availability
     if(opts.network){
       var supportedChains=typeof AgentWalletManager!=='undefined'?AgentWalletManager.getSupportedChains():[];
-      if(supportedChains.length>0&&supportedChains.indexOf(opts.network)===-1){
+      var netLower=(opts.network||'').toLowerCase();
+      var chainMatch=supportedChains.length===0||supportedChains.some(function(c){return c.toLowerCase()===netLower;});
+      if(!chainMatch){
         results.push({rule:'Chain Availability',passed:false,reason:'Chain '+opts.network+' not in supported chains'});
         allValid=false;
       } else {

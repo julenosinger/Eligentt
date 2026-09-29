@@ -745,9 +745,10 @@
   function buildConfirmation(planObj, understanding, policy, runtime) {
     var render = runtime.render || null;
     var e = understanding.entities || {};
+    var canonical = understanding.canonical || '';
     var confirmation = {
       type: 'confirmation_required',
-      action: understanding.canonical,
+      action: canonical,
       summary: {
         amount: (e.amount != null ? e.amount + ' ' : '') + (e.token || 'USDC'),
         recipient: e.address || '(resolved)',
@@ -763,9 +764,24 @@
     localSet(PENDING_KEY, pending);
     _lastPending = pending[planObj.id];
 
+    // For financial write intents, delegate to AgentCapabilityRouter.createSurface
+    // so that approval routes directly to _agentExecuteOp without a second proposal card.
+    var ACR = (typeof window !== 'undefined' && window.AgentCapabilityRouter) ? window.AgentCapabilityRouter : null;
+    var intentMap = { send_payment: 'SEND_PAYMENT', bridge: 'BRIDGE', cross_chain: 'CROSS_CHAIN', swap_execute: 'SWAP_EXECUTE' };
+    var acrIntent = intentMap[canonical] || null;
+    if (ACR && acrIntent && typeof ACR.createSurface === 'function') {
+      var surfaceParams = Object.assign({}, e, understanding.params || {});
+      var surfaceHtml = ACR.createSurface(acrIntent, surfaceParams, {
+        msg: runtime.msg || '',
+        executeIntent: runtime.executeIntent || (typeof window !== 'undefined' ? window.__autExecuteIntent : null)
+      });
+      confirmation.html = surfaceHtml || '';
+      return confirmation;
+    }
+
     var html = '';
     if (render && typeof render.intro === 'function') {
-      html = render.intro('Ready to <strong>' + escapeHtml(understanding.canonical.replace(/_/g, ' ')) + '</strong> ' +
+      html = render.intro('Ready to <strong>' + escapeHtml(canonical.replace(/_/g, ' ')) + '</strong> ' +
         escapeHtml(confirmation.summary.amount) + (e.address ? ' to <code>' + escapeHtml(String(e.address).slice(0, 8) + '...') + '</code>' : '') + ' on ' + escapeHtml(confirmation.summary.network) + '.') +
         (render.actions
           ? render.actions(
@@ -774,7 +790,7 @@
             )
           : '');
     } else {
-      html = 'Confirm ' + understanding.canonical + '? amount=' + confirmation.summary.amount + ' recipient=' + confirmation.summary.recipient;
+      html = 'Confirm ' + canonical + '? amount=' + confirmation.summary.amount + ' recipient=' + confirmation.summary.recipient;
     }
     confirmation.html = html;
     return confirmation;

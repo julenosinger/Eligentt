@@ -43537,7 +43537,6 @@ function _ubDirectExec(intent, params, mode) {
   // exempt:true → destination's incoming asset IS the native gas token
   // (Arc uses USDC as gas), so receiving funds guarantees gas → never block.
   var THRESHOLDS = {
-    5042:     { req: 0,       warn: 0,      exempt: true },  // Arc Mainnet (USDC = gas)
     5042:  { req: 0,       warn: 0,      exempt: true },  // Arc Mainnet (USDC = gas)
     1: { req: 0.003,   warn: 0.005 },                 // Ethereum (ETH)
     8453:    { req: 0.001,   warn: 0.002 },                 // Base (ETH)
@@ -43619,8 +43618,8 @@ function _ubDirectExec(intent, params, mode) {
       var bal = parseFloat(ethers.formatUnits(raw, dec));
       var state;
       if (t.exempt) state = 'SAFE';
-      else if (bal <= 0) state = 'BLOCKED';
-      else if (bal < t.req) state = 'WARNING';
+      else if (bal <= 0 || bal < t.req) state = 'BLOCKED';   // below minimum → cannot transact
+      else if (bal < t.warn) state = 'WARNING';               // above minimum but below comfort threshold
       else state = 'SAFE';
       return {
         state: state, balance: bal, required: t.req, warnAt: t.warn,
@@ -46559,7 +46558,8 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
     _ctxClear(); // Clear context on execution
 
     // Show permission card for financial operations if Circle Agent is configured but op not authorized
-    if(_isFinancialIntent(intent) && typeof AgentAuthorization !== 'undefined'){
+    // Skip when already approved via AgentCapabilityRouter (_capRouterApproved flag)
+    if(_isFinancialIntent(intent) && typeof AgentAuthorization !== 'undefined' && !(params && params._capRouterApproved)){
       var _circleAgentReady = typeof CircleAgent !== 'undefined' && (CircleAgent.getCachedAddress() || false);
       if(_circleAgentReady){
         var operation = intent.replace('_EXECUTE','').replace('_GUIDE','').toLowerCase();
@@ -46578,17 +46578,18 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
       case 'CREATE_SCHEDULE': return _handleCreateSchedule(params, msg);
       case 'MULTISEND': return _handleMultiSend(params, msg);
       case 'SWAP_EXECUTE':
-        // If params already approved via AgentCapabilityRouter, execute directly.
-        if (params && params.amount && (params.token || params.fromToken) && (params.toToken || params.toAsset) && _agentCanExecute('swap')) {
+        // If params already approved via AgentCapabilityRouter OR agent has active auth, execute directly.
+        if (params && params.amount && (params.token || params.fromToken) && (params.toToken || params.toAsset) && (params._capRouterApproved || _agentCanExecute('swap'))) {
           var _swFrom = params.token || params.fromToken || 'USDC';
           var _swTo   = params.toToken || params.toAsset || 'EURC';
-          return _agentExecuteOp('swap', params.amount, _swFrom, { swapTo: _swTo });
+          var _swCalldataId = params._capRouterApproved ? ('_cap_'+Date.now()) : ('swplan_'+Date.now());
+          return _agentExecuteOp('swap', params.amount, _swFrom, { swapTo: _swTo, calldataId: _swCalldataId });
         }
         return await autSwap(msg);
       case 'SWAP_GUIDE': return autSwapGuide();
       case 'BRIDGE':
-        // If params already approved via AgentCapabilityRouter, execute directly.
-        if (params && params.amount && params.toChain && _agentCanExecute('bridge')) {
+        // If params already approved via AgentCapabilityRouter OR agent has active auth, execute directly.
+        if (params && params.amount && params.toChain && (params._capRouterApproved || _agentCanExecute('bridge'))) {
           return _agentExecuteOp('bridge', params.amount, params.token || 'USDC', { toChain: params.toChain, fromChain: params.fromChain || 'Arc Mainnet' });
         }
         return autBridge(msg);
@@ -46597,9 +46598,10 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
       case 'SEND_PAYMENT':
         // If params already carry address + amount (approved via AgentCapabilityRouter),
         // execute directly via _agentExecuteOp — skip autPayment's re-confirmation card.
-        if (params && params.address && params.amount && _agentCanExecute('payment')) {
+        if (params && params.address && params.amount && (params._capRouterApproved || _agentCanExecute('payment'))) {
           var _spToken = (params.token || 'USDC').toUpperCase();
-          return _agentExecuteOp('payment', params.amount, _spToken, { address: params.address });
+          var _spExecId = params._capRouterApproved ? ('_cap_'+Date.now()) : undefined;
+          return _agentExecuteOp('payment', params.amount, _spToken, { address: params.address }, _spExecId);
         }
         return autPayment(msg);
       case 'ADD_LIQUIDITY': return autAddLiq(msg);
@@ -50498,7 +50500,8 @@ setTimeout(function() {
 
         if(!_agentPreValidate(execId, 'payment', rawTx.maxFeePerGas, rawTx.gasLimit)) return;
         // [C2 FIX] TOCTOU: re-validate authorization immediately before signing
-        var recheck = _agentRevalidateAuth('payment', amount, asset);
+        // Skip when approved via AgentCapabilityRouter (executionId starts with _cap_)
+        var recheck = (executionId && executionId.indexOf('_cap_') === 0) ? { ok: true } : _agentRevalidateAuth('payment', amount, asset);
         if(!recheck.ok){ _agentStateMsg(execId, 'REJECTED', recheck.reason); return; }
         // [AUTONOMA-6C] In circle mode the signer needs a structured request
         // (the adapter → Circle descriptor), carried alongside the rawTx.
@@ -50577,21 +50580,43 @@ setTimeout(function() {
     else if(operation==='bridge'){
       var brParams = null;
       try { brParams = typeof paramsJson === 'string' ? JSON.parse(paramsJson) : paramsJson; } catch(e){}
-      var destChain = (brParams && brParams.destChain) ? brParams.destChain : 'Base';
-      var brDomain = (brParams && brParams.cctpDomain) ? Number(brParams.cctpDomain) : 6;
+      // Accept both legacy keys (destChain/cctpDomain) and new keys (toChain/fromChain)
+      var destChain = (brParams && (brParams.destChain || brParams.toChain)) || 'Base';
+      var _brDomainMap = { 'Arc Mainnet':26, 'Arc':26, 'Ethereum':0, 'ETH':0, 'Base':6, 'Arbitrum':3, 'Optimism':2, 'Polygon':7 };
+      var brDomain = (brParams && brParams.cctpDomain) ? Number(brParams.cctpDomain) : (_brDomainMap[destChain] || 6);
       var brCid = (brParams && brParams.calldataId) ? brParams.calldataId : 'brplan_'+Date.now();
-      var brSrcChainId = (brParams && brParams.sourceChainId) ? Number(brParams.sourceChainId) : 5042;
-      _agentStateMsg(execId, 'PLANNING', amount+' USDC → '+destChain);
+      var _brSrcChainMap = { 'Arc Mainnet':5042, 'Arc':5042, 'Ethereum':1, 'Base':8453, 'Arbitrum':42161, 'Optimism':10, 'Polygon':137 };
+      var _brFromChain = (brParams && brParams.fromChain) || 'Arc Mainnet';
+      var brSrcChainId = (brParams && brParams.sourceChainId) ? Number(brParams.sourceChainId) : (_brSrcChainMap[_brFromChain] || 5042);
+      // Prepare calldata if not already done
+      if (!window['_agentCalldata_'+brCid] && typeof ChainSimulator !== 'undefined') {
+        try {
+          var _brRecip = typeof ethers !== 'undefined' ? ethers.zeroPadValue(walletAddress || '0x0000000000000000000000000000000000000001', 32) : '0x';
+          window['_agentCalldata_'+brCid] = ChainSimulator.prepareFullBridge(amount, brDomain, _brRecip);
+        } catch(e){}
+      }
+      _agentStateMsg(execId, 'PLANNING', amount+' USDC '+_brFromChain+' → '+destChain);
       await _agentExecuteBridge(amount, brDomain, destChain, brCid, brSrcChainId, null, executionId);
     }
     else if(operation==='crosschain'){
       var xParams = null;
       try { xParams = typeof paramsJson === 'string' ? JSON.parse(paramsJson) : paramsJson; } catch(e){}
-      var xDestChain = (xParams && xParams.destChain) ? xParams.destChain : 'Base';
-      var xDomain = (xParams && xParams.cctpDomain) ? Number(xParams.cctpDomain) : 6;
+      var xDestChain = (xParams && (xParams.destChain || xParams.toChain)) || 'Base';
+      var _xDomainMap = { 'Arc Mainnet':26, 'Arc':26, 'Ethereum':0, 'ETH':0, 'Base':6, 'Arbitrum':3, 'Optimism':2, 'Polygon':7 };
+      var xDomain = (xParams && xParams.cctpDomain) ? Number(xParams.cctpDomain) : (_xDomainMap[xDestChain] || 6);
       var xCid = (xParams && xParams.calldataId) ? xParams.calldataId : 'xplan_'+Date.now();
-      var xSrcChainId = (xParams && xParams.sourceChainId) ? Number(xParams.sourceChainId) : 5042;
+      var _xSrcChainMap = { 'Arc Mainnet':5042, 'Arc':5042, 'Ethereum':1, 'Base':8453, 'Arbitrum':42161, 'Optimism':10, 'Polygon':137 };
+      var _xFromChain = (xParams && xParams.fromChain) || 'Arc Mainnet';
+      var xSrcChainId = (xParams && xParams.sourceChainId) ? Number(xParams.sourceChainId) : (_xSrcChainMap[_xFromChain] || 5042);
       var xRecipient = (xParams && (xParams.recipient || xParams.address)) ? (xParams.recipient || xParams.address) : null;
+      // Prepare calldata if not already done
+      if (!window['_agentCalldata_'+xCid] && typeof ChainSimulator !== 'undefined') {
+        try {
+          var _xRecip = xRecipient && typeof ethers !== 'undefined' ? ethers.zeroPadValue(xRecipient, 32) :
+            (typeof ethers !== 'undefined' && walletAddress ? ethers.zeroPadValue(walletAddress, 32) : '0x');
+          window['_agentCalldata_'+xCid] = ChainSimulator.prepareFullBridge(amount, xDomain, _xRecip);
+        } catch(e){}
+      }
       _agentStateMsg(execId, 'PLANNING', 'Cross-chain '+amount+' USDC → '+xDestChain+(xRecipient ? ' for '+String(xRecipient).substring(0,8)+'...' : ''));
       await _agentExecuteBridge(amount, xDomain, xDestChain, xCid, xSrcChainId, xRecipient, executionId);
     }
@@ -50754,10 +50779,106 @@ setTimeout(function() {
 
     _agentStateMsg(execId, 'PLANNING', agentAddr.substring(0,8)+'... '+amount+' '+tokenIn+' → '+tokenOut);
 
-    // Get calldata
+    // Get calldata — try local pools first, then LI.FI as fallback
     var calldataPlan = null;
+    var lifiQuote = null;
     try { calldataPlan = _agentBuildSwapPlan(amount, tokenIn, tokenOut, 100); } catch(e){}
-    if(!calldataPlan||!calldataPlan.valid||!calldataPlan.steps.length){ _agentStateMsg(execId, 'FAILED', calldataPlan ? calldataPlan.error : 'No swap plan — check liquidity for '+tokenIn+' → '+tokenOut); return { ok: false, error: calldataPlan ? calldataPlan.error : 'No swap plan' }; }
+
+    if(!calldataPlan || !calldataPlan.valid || !calldataPlan.steps.length){
+      // Fallback: try LI.FI
+      _agentStateMsg(execId, 'PLANNING', 'Local liquidity unavailable — trying LI.FI…');
+      try {
+        if(typeof LiFiAdapter !== 'undefined'){
+          var _tokenInDec = (tokenIn === 'cirBTC' || tokenIn === 'ETH') ? 8 : 6;
+          var _tokenOutDec = (tokenOut === 'cirBTC' || tokenOut === 'ETH') ? 8 : 6;
+          var _amtRaw = typeof ethers !== 'undefined' ? ethers.parseUnits(String(amount), _tokenInDec) : BigInt(Math.round(amount * Math.pow(10, _tokenInDec)));
+          lifiQuote = await LiFiAdapter.getQuote({
+            tokenIn: tokenIn, tokenOut: tokenOut,
+            amountInRaw: _amtRaw,
+            fromChainId: 5042, toChainId: 5042,
+            slippageBps: 100,
+            fromAddress: agentAddr, toAddress: agentAddr
+          });
+        }
+      } catch(e){ lifiQuote = null; }
+
+      if(!lifiQuote || !lifiQuote.ok || !lifiQuote.calldata || !lifiQuote.to){
+        var _planErr = (calldataPlan && calldataPlan.error) || 'No liquidity for '+tokenIn+' → '+tokenOut;
+        var _lifiErr = lifiQuote && lifiQuote.error ? ' (LI.FI: '+lifiQuote.error+')' : '';
+        _agentStateMsg(execId, 'FAILED', _planErr + _lifiErr);
+        return { ok: false, error: _planErr + _lifiErr };
+      }
+
+      // Validate LI.FI route before signing
+      var _lifiValidation = LiFiAdapter.validateRoute(lifiQuote.route, {
+        fromChainId: 5042, toChainId: 5042,
+        fromToken: typeof getTokenAddressForChain === 'function' ? getTokenAddressForChain(5042, tokenIn) : null,
+        toToken: typeof getTokenAddressForChain === 'function' ? getTokenAddressForChain(5042, tokenOut) : null,
+        amountRaw: (lifiQuote.amountInRaw || '').toString(),
+        sender: agentAddr
+      });
+      if(!_lifiValidation.ok){
+        _agentStateMsg(execId, 'FAILED', 'LI.FI route validation failed: ' + _lifiValidation.reason);
+        return { ok: false, error: 'LI.FI route validation failed: ' + _lifiValidation.reason };
+      }
+
+      _agentStateMsg(execId, 'PLANNING', 'LI.FI route found — '+amount+' '+tokenIn+' → '+tokenOut);
+      _log('[agent swap] LI.FI fallback: tool=' + (lifiQuote.tool||'?') + ' est.out=' + lifiQuote.expectedOutRaw);
+
+      // Execute LI.FI single-step swap
+      try {
+        var _lifiGasParams = await _agentGetGasParams();
+        var _lifiNonce = await _agentNextNonce(provider, agentAddr);
+        var _lifiValue = lifiQuote.value && lifiQuote.value !== '0' ? ethers.toBeHex(BigInt(lifiQuote.value)) : '0x0';
+        var _lifiRawTx = {
+          type: 2, chainId: 5042,
+          to: lifiQuote.to,
+          data: lifiQuote.calldata,
+          value: _lifiValue,
+          gasLimit: ethers.toBeHex(_lifiGasParams.gasLimit),
+          nonce: _lifiNonce,
+          maxFeePerGas: ethers.toBeHex(_lifiGasParams.maxFeePerGas),
+          maxPriorityFeePerGas: ethers.toBeHex(_lifiGasParams.maxPriorityFeePerGas)
+        };
+        if(!_agentPreValidate(execId, 'swap', _lifiRawTx.maxFeePerGas, _lifiRawTx.gasLimit)) return { ok: false, error: 'Pre-execution validation failed' };
+        var _lifiRecheck = (calldataId && calldataId.indexOf('_cap_') === 0) ? { ok: true } : _agentRevalidateAuth('swap', amount, tokenIn);
+        if(!_lifiRecheck.ok){ _agentStateMsg(execId, 'REJECTED', _lifiRecheck.reason); return { ok: false, error: _lifiRecheck.reason }; }
+
+        _agentStateMsg(execId, 'BROADCASTING', 'LI.FI swap '+amount+' '+tokenIn+' → '+tokenOut);
+        if(_agentStopCheck(execId)) return { ok: false, error: 'Stopped by user' };
+
+        var _lifiBroadcastOpts = null;
+        if(typeof SecureSignerProvider !== 'undefined' && SecureSignerProvider.isCircleMode()){
+          _lifiBroadcastOpts = {
+            operation: 'swap', executionId: executionId, amount: amount, destination: lifiQuote.to,
+            circle: { type: 'contractExecution', contractAddress: lifiQuote.to, abiFunctionSignature: 'swap(bytes)', abiParameters: [lifiQuote.calldata] }
+          };
+        }
+        var _lifiTxHash = await _agentBroadcast(signer, provider, _lifiRawTx, _lifiBroadcastOpts);
+        _agentGateClaimSubmit(swapGate.claimKey, _lifiTxHash);
+        _agentStateMsg(execId, 'CONFIRMING', 'LI.FI swap awaiting block…');
+        var _lifiRec = await _agentWaitReceipt(provider, _lifiTxHash);
+        if(_lifiRec && _lifiRec.ok && _lifiRec.receipt && _lifiRec.receipt.status === 1){
+          var _lifiEstOut = lifiQuote.expectedOutRaw ? (Number(lifiQuote.expectedOutRaw) / Math.pow(10, _tokenOutDec)).toFixed(6) : '?';
+          _addAgentResultMsg(
+            '<div style="font-size:10px"><span style="color:#06F7E9">LI.FI Swap complete</span><br>'+
+            tokenIn+' → '+tokenOut+' · ~'+_lifiEstOut+' '+tokenOut+'<br>'+
+            'Route: <span style="color:var(--teal)">'+(lifiQuote.tool||'LI.FI')+'</span><br>'+
+            '<code style="font-size:8px;word-break:break-all;color:#a78bfa">'+_lifiTxHash+'</code><br>'+
+            '<a href="https://explorer.arc.io/tx/'+_lifiTxHash+'" target="_blank" style="color:#a78bfa;font-size:8px">View on ArcScan ↗</a></div>', 'success');
+          if(typeof UBOperationBus!=='undefined') try{ UBOperationBus.track({type:'swap',amount:amount,token:tokenIn,txHash:_lifiTxHash}).confirmed(_lifiTxHash); }catch(e){}
+        } else {
+          _agentStateMsg(execId, 'FAILED', 'LI.FI swap reverted');
+          return { ok: false, error: 'LI.FI swap reverted' };
+        }
+      } catch(_lifiErr2){
+        var _lifiErrMsg = (_lifiErr2 && _lifiErr2.message || String(_lifiErr2)).substring(0, 150);
+        _agentStateMsg(execId, 'FAILED', 'LI.FI execution error: ' + _lifiErrMsg);
+        return { ok: false, error: _lifiErrMsg };
+      }
+      return { ok: true, provider: 'lifi' };
+    }
+
     _log('[agent swap] plan built: ' + calldataPlan.steps.length + ' steps, est. output: ' + (calldataPlan.estimatedOutput || 'N/A'));
 
     // Verify balance first
@@ -50804,7 +50925,8 @@ setTimeout(function() {
 
         if(!_agentPreValidate(execId, 'swap', rawTx.maxFeePerGas, rawTx.gasLimit)) return { ok: false, error: 'Pre-execution validation failed' };
         // [C2 FIX] TOCTOU: re-validate swap authorization immediately before signing
-        var swapRecheck = _agentRevalidateAuth('swap', amount, tokenIn);
+        // Skip revalidation when already approved via AgentCapabilityRouter
+        var swapRecheck = (calldataId && calldataId.indexOf('_cap_') === 0) ? { ok: true } : _agentRevalidateAuth('swap', amount, tokenIn);
         if(!swapRecheck.ok){ _agentStateMsg(execId, 'REJECTED', swapRecheck.reason); return { ok: false, error: swapRecheck.reason }; }
         // [AUTONOMA-6C] Circle mode: attach the structured request (contract + ABI)
         // so the server signs+broadcasts via the Circle wallet (never local).

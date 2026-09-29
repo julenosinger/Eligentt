@@ -352,7 +352,9 @@
         return;
       }
 
-      var result = await execFn(intent, params, runtime.msg || '');
+      // Inject approval flag so _executeIntent skips _agentCanExecute check
+      var approvedParams = Object.assign({}, params || {}, { _capRouterApproved: true });
+      var result = await execFn(intent, approvedParams, runtime.msg || '');
 
       // Post result card
       var C = mod('AutonomaAgentBrain');
