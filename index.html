@@ -46577,12 +46577,31 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
       case 'CREATE_INVOICE': return _handleCreateInvoice(params);
       case 'CREATE_SCHEDULE': return _handleCreateSchedule(params, msg);
       case 'MULTISEND': return _handleMultiSend(params, msg);
-      case 'SWAP_EXECUTE': return await autSwap(msg);
+      case 'SWAP_EXECUTE':
+        // If params already approved via AgentCapabilityRouter, execute directly.
+        if (params && params.amount && (params.token || params.fromToken) && (params.toToken || params.toAsset) && _agentCanExecute('swap')) {
+          var _swFrom = params.token || params.fromToken || 'USDC';
+          var _swTo   = params.toToken || params.toAsset || 'EURC';
+          return _agentExecuteOp('swap', params.amount, _swFrom, { swapTo: _swTo });
+        }
+        return await autSwap(msg);
       case 'SWAP_GUIDE': return autSwapGuide();
-      case 'BRIDGE': return autBridge(msg);
+      case 'BRIDGE':
+        // If params already approved via AgentCapabilityRouter, execute directly.
+        if (params && params.amount && params.toChain && _agentCanExecute('bridge')) {
+          return _agentExecuteOp('bridge', params.amount, params.token || 'USDC', { toChain: params.toChain, fromChain: params.fromChain || 'Arc Mainnet' });
+        }
+        return autBridge(msg);
       case 'CROSS_CHAIN': return _handleCrossChain(msg, params);
       case 'QUERY_BALANCE': return await autQueryWallet();
-      case 'SEND_PAYMENT': return autPayment(msg);
+      case 'SEND_PAYMENT':
+        // If params already carry address + amount (approved via AgentCapabilityRouter),
+        // execute directly via _agentExecuteOp — skip autPayment's re-confirmation card.
+        if (params && params.address && params.amount && _agentCanExecute('payment')) {
+          var _spToken = (params.token || 'USDC').toUpperCase();
+          return _agentExecuteOp('payment', params.amount, _spToken, { address: params.address });
+        }
+        return autPayment(msg);
       case 'ADD_LIQUIDITY': return autAddLiq(msg);
       case 'REMOVE_LIQUIDITY': return autRemoveLiq(msg);
       case 'QUERY_LIQUIDITY': return await autQueryLiquidity();
