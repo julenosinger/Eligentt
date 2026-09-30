@@ -52,10 +52,18 @@ export async function onRequestPost(context) {
     return json({ ok: false, error: 'Missing step object', code: 'MISSING_STEP' }, 400, env, request);
   }
 
-  // Basic sanity: step must have an id and action
+  // Basic sanity: step must have id, action, AND tool (required by LI.FI)
   const step = body.step;
   if (!step.id || !step.action) {
     return json({ ok: false, error: 'Invalid step: missing id or action', code: 'INVALID_STEP' }, 400, env, request);
+  }
+  // Derive tool from toolDetails or id if missing (LI.FI requires this field)
+  if (!step.tool) {
+    if (step.toolDetails) {
+      step.tool = step.toolDetails.key || step.toolDetails.name || '';
+    }
+    // Last resort: use step type or id — any non-empty string satisfies LI.FI validation
+    if (!step.tool) step.tool = step.type || step.id || 'lifi';
   }
 
   const headers = { 'Content-Type': 'application/json' };
@@ -64,10 +72,11 @@ export async function onRequestPost(context) {
 
   let upstream;
   try {
+    // LI.FI /advanced/stepTransaction expects the step object directly (NOT wrapped in { step: ... })
     upstream = await fetch(LIFI_BASE + '/advanced/stepTransaction', {
       method: 'POST',
       headers,
-      body: JSON.stringify({ step }),
+      body: JSON.stringify(step),
     });
   } catch (e) {
     return json({ ok: false, error: 'LI.FI upstream unreachable: ' + (e.message || e), code: 'UPSTREAM_UNAVAILABLE' }, 502, env, request);
