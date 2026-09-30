@@ -30,7 +30,11 @@
   var ROUTES_API = '/api/lifi/routes';
   var STEP_TX_API = '/api/lifi/step-transaction';
   var STATUS_API = '/api/lifi/status';
+  var TOKENS_API = '/api/lifi/tokens';
   var QUOTE_TTL_MS = 60000; // conservative freshness window (ms)
+
+  // In-memory token cache: { chainId: { tokens: TokenObject[], fetchedAt: ms } }
+  var _tokCache = {};
 
   function _postJson(path, body) {
     return fetch(path, {
@@ -43,14 +47,57 @@
     });
   }
 
-  function _resolveTokenAddr(chainId, symbol) {
+  /**
+   * Resolve a token address for a given chain.
+   * Accepts:
+   *   - A token object { address, chainId, symbol, decimals, ... }
+   *   - A plain address string (0x...)
+   *   - A symbol string — looked up in TOKEN_REGISTRY then CHAIN_REGISTRY
+   */
+  function _resolveTokenAddr(chainId, tokenOrSymbol) {
+    if (!tokenOrSymbol) return null;
+    // Token object with explicit address
+    if (typeof tokenOrSymbol === 'object' && tokenOrSymbol.address) {
+      return tokenOrSymbol.address;
+    }
+    // Plain address (0x...)
+    if (typeof tokenOrSymbol === 'string' && /^0x[0-9a-fA-F]{40}$/.test(tokenOrSymbol)) {
+      return tokenOrSymbol;
+    }
+    // Symbol string — try CHAIN_REGISTRY first, then TOKEN_REGISTRY fallback
+    var sym = typeof tokenOrSymbol === 'string' ? tokenOrSymbol : (tokenOrSymbol && tokenOrSymbol.symbol);
+    if (!sym) return null;
     try {
       if (typeof getTokenAddressForChain === 'function') {
-        var a = getTokenAddressForChain(chainId, symbol);
+        var a = getTokenAddressForChain(chainId, sym);
         if (a) return a;
       }
     } catch (_) {}
+    // Fallback: TOKEN_REGISTRY (global, may not be chain-aware but covers Arc defaults)
+    try {
+      if (typeof TOKEN_REGISTRY !== 'undefined' && TOKEN_REGISTRY[sym] && TOKEN_REGISTRY[sym].address) {
+        return TOKEN_REGISTRY[sym].address;
+      }
+    } catch (_) {}
     return null;
+  }
+
+  /**
+   * Resolve decimals for a token (object or symbol).
+   */
+  function _resolveDecimals(chainId, tokenOrSymbol, fallback) {
+    if (typeof tokenOrSymbol === 'object' && tokenOrSymbol != null && tokenOrSymbol.decimals != null) {
+      return Number(tokenOrSymbol.decimals);
+    }
+    var sym = typeof tokenOrSymbol === 'string' ? tokenOrSymbol : (tokenOrSymbol && tokenOrSymbol.symbol);
+    if (sym) {
+      try {
+        if (typeof TOKEN_REGISTRY !== 'undefined' && TOKEN_REGISTRY[sym] && TOKEN_REGISTRY[sym].decimals != null) {
+          return Number(TOKEN_REGISTRY[sym].decimals);
+        }
+      } catch (_) {}
+    }
+    return fallback != null ? fallback : 18;
   }
 
   function _toStr(v) {
@@ -90,8 +137,11 @@
     var fromToken = _resolveTokenAddr(fromChainId, opts.tokenIn);
     var toToken = _resolveTokenAddr(toChainId, opts.tokenOut);
     if (!fromToken || !toToken) {
-      return { source: 'lifi', ok: false, error: 'TOKEN_NOT_REGISTERED' };
+      return { source: 'lifi', ok: false, error: 'TOKEN_NOT_REGISTERED', detail: 'fromToken=' + fromToken + ' toToken=' + toToken };
     }
+    // Capture decimals from token objects for downstream normalization
+    var fromDecimals = _resolveDecimals(fromChainId, opts.tokenIn, 18);
+    var toDecimals   = _resolveDecimals(toChainId,   opts.tokenOut, 18);
     var amountStr = _toStr(amountInRaw);
     if (amountStr == null || !/^[0-9]+$/.test(amountStr)) {
       return { source: 'lifi', ok: false, error: 'INVALID_AMOUNT' };
@@ -165,6 +215,10 @@
       ok: true,
       tokenIn: opts.tokenIn || null,
       tokenOut: opts.tokenOut || null,
+      tokenInAddr: fromToken,
+      tokenOutAddr: toToken,
+      fromDecimals: fromDecimals,
+      toDecimals: toDecimals,
       fromChainId: fromChainId,
       toChainId: toChainId,
       amountInRaw: (typeof amountInRaw === 'bigint') ? amountInRaw : null,
@@ -275,7 +329,7 @@
     var fromToken = _resolveTokenAddr(fromChainId, opts.tokenIn);
     var toToken   = _resolveTokenAddr(toChainId,   opts.tokenOut);
     if (!fromToken || !toToken) {
-      return { ok: false, error: 'TOKEN_NOT_REGISTERED', routes: [] };
+      return { ok: false, error: 'TOKEN_NOT_REGISTERED', detail: 'fromToken=' + fromToken + ' toToken=' + toToken, routes: [] };
     }
     var amountStr = _toStr(amountInRaw);
     if (amountStr == null || !/^[0-9]+$/.test(amountStr)) {
@@ -383,6 +437,49 @@
     return { ok: true, step: res.step };
   }
 
+  /**
+   * Fetch tokens available on given chains from the LI.FI token registry.
+   * Results are cached in memory (10 min) to avoid repeated fetches.
+   *
+   * @param {number|number[]} chainIds  One or more Elligentt-supported chain IDs.
+   * @returns {Promise<{ ok:boolean, tokens:{ [chainId]: TokenObject[] }, error?:string }>}
+   *
+   * TokenObject: { chainId, address, symbol, name, decimals, logoURI, priceUSD }
+   */
+  async function getTokens(chainIds) {
+    var ids = Array.isArray(chainIds) ? chainIds : [chainIds];
+    ids = ids.map(Number).filter(Number.isFinite);
+    if (!ids.length) return { ok: false, error: 'NO_CHAIN_IDS', tokens: {} };
+
+    var now = Date.now();
+    var TTL_MS = 600000; // 10 min in-memory
+
+    // Determine which chains are missing from the in-memory cache.
+    var missingIds = ids.filter(function(id) {
+      var c = _tokCache[id];
+      return !c || (now - c.fetchedAt > TTL_MS);
+    });
+
+    if (missingIds.length > 0) {
+      try {
+        var url = TOKENS_API + '?chainId=' + missingIds.join(',');
+        var res = await fetch(url, { credentials: 'same-origin' }).then(function(r) { return r.json(); });
+        if (res && res.ok && res.tokens) {
+          for (var cid in res.tokens) {
+            _tokCache[Number(cid)] = { tokens: res.tokens[cid], fetchedAt: now };
+          }
+        }
+      } catch (_) { /* network error — use whatever is cached */ }
+    }
+
+    var result = {};
+    for (var i = 0; i < ids.length; i++) {
+      var c2 = _tokCache[ids[i]];
+      result[ids[i]] = (c2 && c2.tokens) ? c2.tokens : [];
+    }
+    return { ok: true, tokens: result };
+  }
+
   window.LiFiAdapter = {
     isAvailable: isAvailable,
     getQuote: getQuote,
@@ -390,6 +487,7 @@
     getStepTransaction: getStepTransaction,
     validateRoute: validateRoute,
     getStatus: getStatus,
-    version: '1.1.0',
+    getTokens: getTokens,
+    version: '1.2.0',
   };
 })();

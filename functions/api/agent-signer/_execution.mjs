@@ -98,6 +98,16 @@ export async function reserveNonce(env, { walletAddress, chainId, nonce, executi
   }
 }
 
+// Release a nonce lock when broadcast fails before submitting to chain.
+// Safe to call even if the key doesn't exist (no-op).
+export async function releaseNonce(env, { walletAddress, chainId, nonce }) {
+  const kv = coreKv(env);
+  if (!kv || typeof kv.delete !== 'function') return;
+  const w = String(walletAddress || '').toLowerCase();
+  const key = NONCE_PREFIX + w + ':' + chainId + ':' + nonce;
+  try { await kv.delete(key); } catch (_) {}
+}
+
 /* ── Execution record + audit ────────────────────────────────────── */
 async function sha256Hex(str) {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));

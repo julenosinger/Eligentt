@@ -145,10 +145,33 @@
    * are MANDATORY — a quote missing any of them is INVALID (not comparable).
    * A stale (expired) quote is also rejected.
    */
+  function _tokenKey(t) {
+    // Normalize a token (string sym or object) to a comparable key.
+    if (!t) return null;
+    if (typeof t === 'object') return (t.address || '').toLowerCase() + ':' + String(t.chainId || '');
+    return String(t);
+  }
+
   function validateAgainst(q, opts) {
     if (!q || q.ok !== true) return false;
-    if (opts.tokenIn != null && (q.tokenIn == null || String(q.tokenIn) !== String(opts.tokenIn))) return false;
-    if (opts.tokenOut != null && (q.tokenOut == null || String(q.tokenOut) !== String(opts.tokenOut))) return false;
+    // Token comparison: accepts both symbol-strings and token objects.
+    if (opts.tokenIn != null) {
+      var reqKey = _tokenKey(opts.tokenIn);
+      var gotKey = _tokenKey(q.tokenIn);
+      // Also compare by tokenInAddr when the quote carries it.
+      var gotAddr = q.tokenInAddr ? q.tokenInAddr.toLowerCase() : null;
+      var reqAddr = (typeof opts.tokenIn === 'object' && opts.tokenIn && opts.tokenIn.address) ? opts.tokenIn.address.toLowerCase() : null;
+      if (reqAddr && gotAddr && reqAddr !== gotAddr) return false;
+      if (!reqAddr && !gotAddr && gotKey !== reqKey) return false;
+    }
+    if (opts.tokenOut != null) {
+      var reqKeyO = _tokenKey(opts.tokenOut);
+      var gotKeyO = _tokenKey(q.tokenOut);
+      var gotAddrO = q.tokenOutAddr ? q.tokenOutAddr.toLowerCase() : null;
+      var reqAddrO = (typeof opts.tokenOut === 'object' && opts.tokenOut && opts.tokenOut.address) ? opts.tokenOut.address.toLowerCase() : null;
+      if (reqAddrO && gotAddrO && reqAddrO !== gotAddrO) return false;
+      if (!reqAddrO && !gotAddrO && gotKeyO !== reqKeyO) return false;
+    }
     if (opts.amountInRaw != null && (q.amountInRaw == null || String(q.amountInRaw) !== String(opts.amountInRaw))) return false;
     if (opts.chainId != null && (q.chainId == null || Number(q.chainId) !== Number(opts.chainId))) {
       // LI.FI quotes carry fromChainId/toChainId instead of chainId.
@@ -184,14 +207,19 @@
       ? LocalAdapter.getQuote(opts)
       : Promise.resolve({ source: 'local', ok: false, error: 'LOCAL_UNAVAILABLE' });
 
+    // LI.FI accepts token objects (with .address) or symbol strings.
+    // When a token object is provided it resolves directly by address, bypassing
+    // the symbol→chain registry lookup — enables any token from LI.FI's catalog.
+    var lifiFromChain = opts.fromChainId != null ? Number(opts.fromChainId) : (opts.chainId != null ? Number(opts.chainId) : null);
+    var lifiToChain   = opts.toChainId   != null ? Number(opts.toChainId)   : (opts.chainId != null ? Number(opts.chainId) : null);
     var lifiPromise = (typeof LiFiAdapter !== 'undefined' && LiFiAdapter.getQuote)
       ? LiFiAdapter.getQuote({
-          tokenIn: opts.tokenIn,
-          tokenOut: opts.tokenOut,
+          tokenIn:     opts.tokenIn,
+          tokenOut:    opts.tokenOut,
           amountInRaw: opts.amountInRaw,
           slippageBps: opts.slippageBps,
-          fromChainId: opts.fromChainId != null ? Number(opts.fromChainId) : (opts.chainId != null ? Number(opts.chainId) : null),
-          toChainId: opts.toChainId != null ? Number(opts.toChainId) : (opts.chainId != null ? Number(opts.chainId) : null),
+          fromChainId: lifiFromChain,
+          toChainId:   lifiToChain,
           fromAddress: opts.userAddress,
         })
       : Promise.resolve({ source: 'lifi', ok: false, error: 'LIFI_UNAVAILABLE' });

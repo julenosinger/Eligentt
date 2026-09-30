@@ -37,7 +37,7 @@ import {
   mapStructuredRequest, createContractExecution, fetchNonce,
 } from './_circle.js';
 import { verifyProof, consumeProof, proofAvailable } from './_proof.mjs';
-import { isPaused, getExecution, reserveNonce, recordExecution, audit, hashRequest } from './_execution.mjs';
+import { isPaused, getExecution, reserveNonce, releaseNonce, recordExecution, audit, hashRequest } from './_execution.mjs';
 import { check as breakerCheck, guard as breakerGuard } from '../core/circuit-breaker.mjs';
 import { applyRateLimit } from '../core/rate-limit.mjs';
 import { getFlags } from '../core/flags.mjs';
@@ -175,6 +175,9 @@ export async function onRequestPost(context) {
       value: descriptor.value || null,
     }));
   } catch (e) {
+    // Release the nonce lock — the tx was never submitted to chain, so the
+    // nonce is still available. Without this, the next attempt gets nonce_conflict.
+    await releaseNonce(env, { walletAddress: serverWallet, chainId, nonce });
     await recordExecution(env, {
       executionId, operation, chainId, walletAddress: serverWallet,
       contractAddress: descriptor.contractAddress, abiFunctionSignature: descriptor.abiFunctionSignature,

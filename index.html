@@ -2279,9 +2279,27 @@ body.swap-standard-mode .site-footer{display:block !important}
 .swp-empty i{font-size:22px;display:block;margin-bottom:6px;opacity:.35}
 
 /* ── Token Selector Modal ───────────────────────────────── */
-.tok-modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:2500;display:none;align-items:center;justify-content:center;backdrop-filter:blur(3px)}
-.tok-modal-overlay.open{display:flex}
-.tok-modal{background:linear-gradient(160deg,#161a24,#12151e);border:1px solid #2e3548;border-radius:14px;width:380px;max-width:92vw;max-height:70vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.7)}
+/* ── Token selector: right-side slide-in panel ── */
+.tok-modal-overlay{position:fixed;inset:0;background:transparent;z-index:2500;display:none;pointer-events:none}
+.tok-modal-overlay.open{display:block;pointer-events:auto}
+/* thin backdrop only behind the panel */
+.tok-modal-overlay::before{content:'';position:fixed;inset:0;background:rgba(0,0,0,.45);opacity:0;transition:opacity .2s;pointer-events:none}
+.tok-modal-overlay.open::before{opacity:1;pointer-events:auto}
+.tok-modal{
+  position:fixed;top:0;right:0;bottom:0;
+  width:320px;max-width:90vw;
+  background:linear-gradient(180deg,#161a24 0%,#12151e 100%);
+  border-left:1px solid #2e3548;
+  border-radius:0;
+  display:flex;flex-direction:column;
+  overflow:hidden;
+  box-shadow:-8px 0 40px rgba(0,0,0,.6);
+  transform:translateX(100%);
+  transition:transform .22s cubic-bezier(.4,0,.2,1);
+  pointer-events:auto;
+  z-index:2501;
+}
+.tok-modal-overlay.open .tok-modal{transform:translateX(0)}
 .tok-modal-head{padding:14px 16px 10px;border-bottom:1px solid #252b3b;display:flex;align-items:center;gap:10px}
 .tok-modal-title{font-size:12px;font-weight:700;color:var(--text)}
 .tok-modal-close{width:26px;height:26px;border-radius:6px;border:1px solid #2e3548;background:transparent;color:var(--muted2);cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:center;margin-left:auto}
@@ -2290,7 +2308,7 @@ body.swap-standard-mode .site-footer{display:block !important}
 .tok-search{background:rgba(0,0,0,.25);border:1px solid #252b3b;border-radius:8px;padding:8px 10px 8px 32px;color:var(--text);font-size:10px;font-family:'JetBrains Mono',monospace;width:100%;outline:none;transition:border .15s}
 .tok-search:focus{border-color:var(--purple)}
 .tok-search-icon{position:absolute;left:22px;top:16px;font-size:12px;color:var(--muted2);pointer-events:none}
-.tok-list{flex:1;overflow-y:auto;padding:4px 8px 8px;max-height:380px}
+.tok-list{flex:1;overflow-y:auto;padding:4px 8px 8px;scrollbar-width:thin}
 .tok-item{display:flex;align-items:center;gap:10px;padding:10px 10px;border-radius:8px;cursor:pointer;transition:all .15s;margin-bottom:2px}
 .tok-item:hover{background:rgba(79,142,247,.06)}
 .tok-item.selected{background:rgba(167,139,250,.08);border:1px solid rgba(167,139,250,.25)}
@@ -2302,6 +2320,12 @@ body.swap-standard-mode .site-footer{display:block !important}
 .tok-item-bal-val{font-size:10px;font-weight:600;color:var(--text)}
 .tok-item-bal-usd{font-size:8px;color:var(--muted2);margin-top:1px}
 .tok-empty{text-align:center;padding:20px;color:var(--muted);font-size:9.5px}
+.tok-chain-pill{padding:4px 9px;border-radius:20px;border:1px solid #2e3548;background:rgba(0,0,0,.2);color:var(--muted2);font-size:8.5px;font-weight:600;cursor:pointer;white-space:nowrap;transition:all .15s;font-family:'JetBrains Mono',monospace}
+.tok-chain-pill.active{border-color:var(--teal);color:var(--teal);background:rgba(6,247,233,.08)}
+.tok-chain-pill:hover:not(.active){border-color:#4a5568;color:var(--text)}
+.tok-item-logo{width:32px;height:32px;border-radius:50%;flex-shrink:0;object-fit:cover}
+.tok-item-loading{text-align:center;padding:24px 0;color:var(--muted2);font-size:9px}
+.tok-item-loading i{font-size:16px;display:block;margin-bottom:6px;animation:spin .8s linear infinite}
 
 /* ── Pool List Page ────────────────────────────────────── */
 .plist-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:10px}
@@ -5387,8 +5411,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
   .modal{width:100%;max-width:100%;border-radius:12px 12px 0 0;max-height:90vh;overflow-y:auto}
   .modal-ov{align-items:flex-end}
 
-  .tok-modal{width:100%;max-width:100%;border-radius:14px 14px 0 0;max-height:85vh}
-  .tok-modal-overlay{align-items:flex-end}
+  .tok-modal{width:92vw;max-width:92vw;border-radius:0}
 
   .footer-inner{grid-template-columns:1fr 1fr;gap:16px;padding:20px 16px 0}
   .footer-brand{grid-column:1/-1}
@@ -6771,7 +6794,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
                 <div class="st-swap-label">You Pay</div>
                 <div class="st-swap-input-row">
                   <input class="st-swap-input" id="swap-amount-in" type="number" min="0" step="any" inputmode="decimal" placeholder="0.00" oninput="updateSwapRate()" autocomplete="off" spellcheck="false"/>
-                  <div class="st-token-pill" onclick="cycleTokenIn()">
+                  <div class="st-token-pill" onclick="openTokenSelector('in')">
                     <div class="st-token-icon" id="swap-icon-in" style="background:#2775ca">U</div>
                     <span id="swap-token-in">USDC</span>
                     <i class="ti ti-chevron-down" style="font-size:8px;color:var(--muted2)"></i>
@@ -6798,7 +6821,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
                 <div class="st-swap-label">You Receive</div>
                 <div class="st-swap-input-row">
                   <input class="st-swap-input" id="swap-amount-out" type="number" inputmode="decimal" placeholder="0.00" readonly autocomplete="off"/>
-                  <div class="st-token-pill" onclick="cycleTokenOut()">
+                  <div class="st-token-pill" onclick="openTokenSelector('out')">
                     <div class="st-token-icon" id="swap-icon-out" style="background:#2562de">E</div>
                     <span id="swap-token-out">EURC</span>
                     <i class="ti ti-chevron-down" style="font-size:8px;color:var(--muted2)"></i>
@@ -6972,9 +6995,11 @@ select.cinput option { background: #161a24; color: #dde2f0; }
           <span class="tok-modal-title" id="tok-modal-title">Select Token</span>
           <button class="tok-modal-close" onclick="closeTokenSelector()"><i class="ti ti-x"></i></button>
         </div>
+        <!-- Chain picker row -->
+        <div id="tok-chain-row" style="display:flex;gap:5px;padding:6px 14px 0;flex-wrap:wrap"></div>
         <div class="tok-search-wrap">
           <i class="ti ti-search tok-search-icon"></i>
-          <input class="tok-search" id="tok-search" type="text" placeholder="Search by name or symbol..." oninput="filterTokenList()" autocomplete="off"/>
+          <input class="tok-search" id="tok-search" type="text" placeholder="Search by name, symbol or address..." oninput="filterTokenList()" autocomplete="off"/>
         </div>
         <div class="tok-list" id="tok-list"></div>
       </div>
@@ -19470,14 +19495,20 @@ const SWP = {
   quoteTimer: null,
   checking:   false,
   FALLBACK_GAS: 300_000n,
-  tokenInIdx:  0,  // index into TOKEN_LIST
+  tokenInIdx:  0,  // index into TOKEN_LIST (Arc-local tokens; may be -1 for external)
   tokenOutIdx: 1,
   tokSelectorTarget: null, // 'in' | 'out' — which token pill was clicked
-  selectedSource: null,       // 'local' | 'tower' | null (auto) — canonical route selection
+  selectedSource: null,       // 'local' | 'tower' | 'lifi' | null (auto)
   selectedParamsKey: null,    // params signature at selection time (for persistence)
   aggQuotes: null,            // last SwapAggregator quotes[]
   aggBest: null,              // bestQuote (reference)
   aggBestExecutable: null,    // bestExecutableQuote (what runs)
+  // ── Multi-chain swap extension ─────────────────────────────────
+  fromChainId: 5042,          // source chain (default Arc Mainnet)
+  toChainId: 5042,            // dest chain (default Arc Mainnet — same-chain swap)
+  tokenInObj: null,           // full TokenObject { chainId, address, symbol, name, decimals, logoURI }
+  tokenOutObj: null,          // same for output token
+  _tokModalChainId: 5042,     // chain shown in token selector modal
 };
 
 // Quote race guard: monotonic request id. A stale async quote (older request
@@ -19737,74 +19768,201 @@ function swpSetPct(pct) {
 }
 
 // ── Token Selector Modal ────────────────────────────────────
+// Supported chains for the token selector (same as CHAIN_REGISTRY).
+const _TOK_SEL_CHAINS = [
+  { id: 5042,  name: 'Arc',      shortName: 'Arc' },
+  { id: 1,     name: 'Ethereum', shortName: 'ETH' },
+  { id: 8453,  name: 'Base',     shortName: 'Base' },
+  { id: 42161, name: 'Arbitrum', shortName: 'ARB' },
+  { id: 10,    name: 'Optimism', shortName: 'OP' },
+  { id: 137,   name: 'Polygon',  shortName: 'POL' },
+];
+
+function _renderTokChainPills() {
+  const row = document.getElementById('tok-chain-row');
+  if (!row) return;
+  row.innerHTML = _TOK_SEL_CHAINS.map(c => `
+    <button class="tok-chain-pill${SWP._tokModalChainId === c.id ? ' active' : ''}"
+      onclick="swpTokModalChain(${c.id})">${c.shortName}</button>
+  `).join('');
+}
+
+function swpTokModalChain(chainId) {
+  SWP._tokModalChainId = Number(chainId);
+  _renderTokChainPills();
+  renderTokenList();
+}
+
 function openTokenSelector(target) {
   SWP.tokSelectorTarget = target;
+  // Default the modal chain to the relevant side's current chain.
+  SWP._tokModalChainId = (target === 'in') ? (SWP.fromChainId || 5042) : (SWP.toChainId || 5042);
   document.getElementById('tok-modal-overlay').classList.add('open');
   document.getElementById('tok-modal-title').textContent =
     target === 'in' ? 'Select Input Token' : 'Select Output Token';
   document.getElementById('tok-search').value = '';
+  _renderTokChainPills();
   renderTokenList();
   setTimeout(() => document.getElementById('tok-search').focus(), 100);
 }
 
 function closeTokenSelector(ev) {
-  if (ev && ev.target !== document.getElementById('tok-modal-overlay')) return;
+  // Close when: no event (button click), or click landed on the overlay itself
+  // (not inside the panel). Works with both old overlay-click and new backdrop-click.
+  if (ev) {
+    var panel = document.getElementById('tok-modal');
+    if (panel && panel.contains(ev.target)) return; // click inside panel — ignore
+  }
   document.getElementById('tok-modal-overlay').classList.remove('open');
   SWP.tokSelectorTarget = null;
 }
+
+// Token list cache per-chain (populated by LiFiAdapter.getTokens).
+var _tokListCache = {};
 
 async function renderTokenList(filterText) {
   const list = document.getElementById('tok-list');
   if (!list) return;
   const search = (filterText || document.getElementById('tok-search')?.value || '').toLowerCase();
-  const otherIdx = SWP.tokSelectorTarget === 'in' ? SWP.tokenOutIdx : SWP.tokenInIdx;
+  const chainId = SWP._tokModalChainId || 5042;
 
-  let tokens = swapAvailableTokens(activeChainId);
+  // Show loading state if we don't have tokens yet.
+  if (!_tokListCache[chainId]) {
+    list.innerHTML = '<div class="tok-item-loading"><i class="ti ti-loader-2"></i>Loading tokens…</div>';
+    // Fetch from LI.FI via LiFiAdapter.getTokens (cached server-side 10min).
+    if (typeof LiFiAdapter !== 'undefined' && LiFiAdapter.getTokens) {
+      const res = await LiFiAdapter.getTokens(chainId);
+      if (res && res.ok && res.tokens && res.tokens[chainId]) {
+        _tokListCache[chainId] = res.tokens[chainId];
+      }
+    }
+    // Fallback: use TOKEN_REGISTRY if LiFi fetch fails.
+    if (!_tokListCache[chainId]) {
+      _tokListCache[chainId] = swapAvailableTokens(chainId).map(t => ({
+        chainId, address: t.address || getTokenAddressForChain(chainId, t.sym) || '',
+        symbol: t.sym, name: t.name, decimals: t.decimals, logoURI: null,
+      })).filter(t => t.address);
+    }
+  }
+
+  let tokens = _tokListCache[chainId] || [];
+
   if (search) {
-    tokens = tokens.filter(t =>
-      t.sym.toLowerCase().includes(search) || t.name.toLowerCase().includes(search)
-    );
+    tokens = tokens.filter(t => {
+      const s = search;
+      return (t.symbol && t.symbol.toLowerCase().includes(s)) ||
+             (t.name   && t.name.toLowerCase().includes(s))   ||
+             (t.address && t.address.toLowerCase().includes(s));
+    });
+  }
+
+  // Sort: put tokens that match the search exactly first, then by symbol length.
+  if (search) {
+    tokens = tokens.slice().sort((a, b) => {
+      const aExact = (a.symbol || '').toLowerCase() === search ? -1 : 0;
+      const bExact = (b.symbol || '').toLowerCase() === search ? -1 : 0;
+      if (aExact !== bExact) return aExact - bExact;
+      return (a.symbol || '').length - (b.symbol || '').length;
+    });
   }
 
   if (tokens.length === 0) {
-    list.innerHTML = '<div class="tok-empty">No tokens found</div>';
+    list.innerHTML = '<div class="tok-empty">No tokens found for this chain</div>';
     return;
   }
 
-  const prov = walletAddress ? getCachedProvider('/api/rpc/arc') : null;
-  const balPromises = walletAddress && prov
-    ? tokens.map(t => {
-        const addr = getTokAddr(t.sym);
-        if (!addr || addr === '0x0000000000000000000000000000000000000000') return Promise.resolve('—');
-        return new ethers.Contract(addr, USDC_ABI, prov).balanceOf(walletAddress)
-          .then(b => parseFloat(ethers.formatUnits(b, t.decimals)).toFixed(4))
-          .catch(() => '—');
-      })
-    : tokens.map(() => '—');
+  // Determine the "other" token object to mark as selected/disabled.
+  const otherObj = SWP.tokSelectorTarget === 'in' ? SWP.tokenOutObj : SWP.tokenInObj;
+  const otherAddr = otherObj ? (otherObj.address || '').toLowerCase() : '';
 
-  const balances = await Promise.all(balPromises);
+  // Load balances in the background (best-effort — never blocks rendering).
+  const rpcChain = typeof CHAIN_REGISTRY !== 'undefined' ? CHAIN_REGISTRY[chainId] : null;
+  const rpcUrl = (rpcChain && rpcChain.rpc) ? rpcChain.rpc : null;
+  const prov = walletAddress && rpcUrl ? getCachedProvider(rpcUrl) : null;
 
-  list.innerHTML = tokens.map((t, i) => {
-    const isSelected = TOKEN_LIST[otherIdx]?.sym === t.sym;
-    return `<div class="tok-item${isSelected ? ' selected' : ''}" onclick="selectToken('${t.sym}')">
-      <div class="tok-item-icon" style="background:${t.color}">${t.icon}</div>
+  // Render immediately with "—" balances, then update async.
+  const renderItem = (t, bal) => {
+    const addr = (t.address || '').toLowerCase();
+    const isOther = addr && addr === otherAddr;
+    const logoHtml = t.logoURI
+      ? `<img class="tok-item-logo" src="${escHtml(t.logoURI)}" alt="${escHtml(t.symbol)}" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
+        + `<div class="tok-item-icon" style="display:none;background:#334155">${escHtml((t.symbol||'?')[0].toUpperCase())}</div>`
+      : `<div class="tok-item-icon" style="background:#334155">${escHtml((t.symbol||'?')[0].toUpperCase())}</div>`;
+    const balHtml = bal != null ? `<div class="tok-item-bal-val">${bal}</div>` : '';
+    const usdHtml = (t.priceUSD && bal && bal !== '—')
+      ? `<div class="tok-item-bal-usd">$${(parseFloat(bal) * parseFloat(t.priceUSD)).toFixed(2)}</div>` : '';
+    return `<div class="tok-item${isOther ? ' selected' : ''}" onclick="selectTokenObj(${JSON.stringify({chainId: t.chainId, address: t.address, symbol: t.symbol, name: t.name, decimals: t.decimals, logoURI: t.logoURI||null})})">
+      ${logoHtml}
       <div class="tok-item-info">
-        <div class="tok-item-sym">${t.sym}</div>
-        <div class="tok-item-name">${t.name}</div>
+        <div class="tok-item-sym">${escHtml(t.symbol || '')}</div>
+        <div class="tok-item-name">${escHtml(t.name || '')}</div>
       </div>
-      <div class="tok-item-bal">
-        <div class="tok-item-bal-val">${balances[i]}</div>
-        <div class="tok-item-bal-usd">${(() => { if (balances[i] === '—') return ''; const r = getTokenUSDRate(t.sym); return r !== null ? '$' + (parseFloat(balances[i]) * r).toFixed(2) : 'Price unavailable'; })()}</div>
-      </div>
+      <div class="tok-item-bal">${balHtml}${usdHtml}</div>
     </div>`;
-  }).join('');
+  };
+
+  // Render first 50 tokens immediately (virtual scroll).
+  const visible = tokens.slice(0, 50);
+  list.innerHTML = visible.map(t => renderItem(t, '—')).join('')
+    + (tokens.length > 50 ? `<div class="tok-empty" style="padding:8px">${tokens.length - 50} more — search to narrow</div>` : '');
+
+  // Fetch balances async for visible tokens with a real wallet.
+  if (walletAddress && prov) {
+    visible.forEach(async (t, i) => {
+      const addr = (t.address || '').toLowerCase();
+      if (!addr || addr === '0x0000000000000000000000000000000000000000') return;
+      const isNative = addr === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee' ||
+                       addr === '0x0000000000000000000000000000000000000000';
+      try {
+        let bal;
+        if (isNative) {
+          const b = await Promise.race([prov.getBalance(walletAddress), new Promise((_,r)=>setTimeout(()=>r(),6000))]);
+          bal = parseFloat(ethers.formatUnits(b, t.decimals || 18)).toFixed(4);
+        } else {
+          const b = await Promise.race([
+            new ethers.Contract(addr, USDC_ABI, prov).balanceOf(walletAddress),
+            new Promise((_,r) => setTimeout(() => r(), 6000)),
+          ]);
+          bal = parseFloat(ethers.formatUnits(b, t.decimals || 18)).toFixed(4);
+        }
+        // Update the specific row if it still exists (no full re-render).
+        const items = list.querySelectorAll('.tok-item');
+        if (items[i]) {
+          const valEl = items[i].querySelector('.tok-item-bal-val');
+          if (valEl) valEl.textContent = bal;
+          if (t.priceUSD && bal && bal !== '—') {
+            const usdEl = items[i].querySelector('.tok-item-bal-usd');
+            if (usdEl) usdEl.textContent = '$' + (parseFloat(bal) * parseFloat(t.priceUSD)).toFixed(2);
+          }
+        }
+      } catch (_) {}
+    });
+  }
 }
 
 function filterTokenList() {
   renderTokenList();
 }
 
+// selectToken (legacy, by symbol — keeps backward compat with cycleToken* etc.)
 function selectToken(sym) {
+  // Find in current chain's token list or TOKEN_LIST.
+  let obj = null;
+  const chainId = SWP._tokModalChainId || 5042;
+  const cached = _tokListCache[chainId];
+  if (cached) {
+    obj = cached.find(t => t.symbol === sym) || null;
+  }
+  if (!obj) {
+    // Fallback to local TOKEN_REGISTRY.
+    const reg = typeof TOKEN_REGISTRY !== 'undefined' ? TOKEN_REGISTRY[sym] : null;
+    if (reg) {
+      obj = { chainId, address: getTokenAddressForChain(chainId, sym) || reg.address, symbol: sym, name: reg.name, decimals: reg.decimals, logoURI: null };
+    }
+  }
+  if (obj) { selectTokenObj(obj); return; }
+
+  // Last resort: index-based (Arc-local tokens only).
   if (SWP.tokSelectorTarget === 'in') {
     const idx = TOKEN_LIST.findIndex(t => t.sym === sym);
     if (idx >= 0) SWP.tokenInIdx = idx;
@@ -19821,6 +19979,51 @@ function selectToken(sym) {
   applySwapTokens();
   updateSwapRate();
   closeTokenSelector();
+}
+
+/**
+ * selectTokenObj — canonical token selection entry point.
+ * Accepts a full TokenObject { chainId, address, symbol, name, decimals, logoURI }.
+ * Updates SWP.tokenInObj / tokenOutObj and the corresponding chain ID.
+ * Also syncs the legacy TOKEN_LIST index for Arc-local tokens (backward compat).
+ */
+function selectTokenObj(tokenObj) {
+  if (!tokenObj || !tokenObj.address) return;
+  const chainId = Number(tokenObj.chainId || SWP._tokModalChainId || 5042);
+  if (SWP.tokSelectorTarget === 'in') {
+    SWP.tokenInObj = tokenObj;
+    SWP.fromChainId = chainId;
+    // Keep legacy index in sync for Arc-local tokens.
+    const legacyIdx = TOKEN_LIST.findIndex(t => t.sym === tokenObj.symbol);
+    SWP.tokenInIdx = legacyIdx >= 0 ? legacyIdx : 0;
+    // Avoid in==out on the same chain.
+    if (chainId === SWP.toChainId && SWP.tokenOutObj &&
+        (SWP.tokenOutObj.address || '').toLowerCase() === tokenObj.address.toLowerCase()) {
+      // Swap the sides.
+      const tmp = SWP.tokenOutObj;
+      SWP.tokenOutObj = null;
+      SWP.tokenInObj = tokenObj;
+      const legacyOut = TOKEN_LIST.findIndex(t => t.sym === (tmp && tmp.symbol));
+      SWP.tokenOutIdx = legacyOut >= 0 ? legacyOut : (SWP.tokenInIdx + 1) % TOKEN_LIST.length;
+    }
+  } else {
+    SWP.tokenOutObj = tokenObj;
+    SWP.toChainId = chainId;
+    const legacyIdx = TOKEN_LIST.findIndex(t => t.sym === tokenObj.symbol);
+    SWP.tokenOutIdx = legacyIdx >= 0 ? legacyIdx : 1;
+    if (chainId === SWP.fromChainId && SWP.tokenInObj &&
+        (SWP.tokenInObj.address || '').toLowerCase() === tokenObj.address.toLowerCase()) {
+      const tmp = SWP.tokenInObj;
+      SWP.tokenInObj = null;
+      SWP.tokenOutObj = tokenObj;
+      const legacyIn = TOKEN_LIST.findIndex(t => t.sym === (tmp && tmp.symbol));
+      SWP.tokenInIdx = legacyIn >= 0 ? legacyIn : (SWP.tokenOutIdx + 1) % TOKEN_LIST.length;
+    }
+  }
+  document.getElementById('tok-modal-overlay').classList.remove('open');
+  SWP.tokSelectorTarget = null;
+  applySwapTokens();
+  updateSwapRate();
 }
 
 // Inline token cycling (same UX as Bridge / Cross-Chain chain selectors — no modal).
@@ -20010,6 +20213,19 @@ function swpUpdatePoolInfo() {
 }
 
 // ── Token display sync ────────────────────────────────────
+function _applyTokenIcon(iconEl, nameEl, tokenObj, fallbackTok) {
+  if (!iconEl) return;
+  if (tokenObj && tokenObj.logoURI) {
+    iconEl.innerHTML = `<img src="${escHtml(tokenObj.logoURI)}" style="width:100%;height:100%;border-radius:50%;object-fit:cover" onerror="this.parentElement.innerHTML='${escHtml((tokenObj.symbol||'?')[0].toUpperCase())}';this.parentElement.style.background='#334155'">`;
+    iconEl.style.background = 'transparent';
+    iconEl.removeAttribute('data-tlogo');
+  } else if (fallbackTok) {
+    iconEl.innerHTML = fallbackTok.icon || fallbackTok.sym?.[0] || '?';
+    if (!iconEl.getAttribute('data-tlogo')) iconEl.style.background = fallbackTok.color || '#334155';
+  }
+  if (nameEl) nameEl.textContent = (tokenObj && tokenObj.symbol) || (fallbackTok && fallbackTok.sym) || '?';
+}
+
 function applySwapTokens() {
   const tIn  = TOKEN_LIST[SWP.tokenInIdx];
   const tOut = TOKEN_LIST[SWP.tokenOutIdx];
@@ -20017,10 +20233,8 @@ function applySwapTokens() {
   const iOut = document.getElementById('swap-icon-out');
   const nIn  = document.getElementById('swap-token-in');
   const nOut = document.getElementById('swap-token-out');
-  if (iIn)  { iIn.textContent = tIn.icon; if(!iIn.getAttribute('data-tlogo')) iIn.style.background = tIn.color; }
-  if (iOut) { iOut.textContent = tOut.icon; if(!iOut.getAttribute('data-tlogo')) iOut.style.background = tOut.color; }
-  if (nIn)  nIn.textContent  = tIn.sym;
-  if (nOut) nOut.textContent = tOut.sym;
+  _applyTokenIcon(iIn, nIn, SWP.tokenInObj, tIn);
+  _applyTokenIcon(iOut, nOut, SWP.tokenOutObj, tOut);
   const rIn  = document.getElementById('swp-route-in');
   const rOut = document.getElementById('swp-route-out');
   if (rIn)  rIn.textContent  = tIn.sym;
@@ -20272,14 +20486,21 @@ async function updateSwapRate() {
       // Ambas as fontes são cotadas; o SwapAggregator compara e seleciona a melhor.
       if (typeof SwapAggregator !== 'undefined' && typeof SwapAggregator.getBestQuote === 'function') {
         try {
+          // Use token objects when available (supports cross-chain and any LI.FI token).
+          // Fall back to sym string for Arc-local tokens (backward compat).
+          const aggFromChain = SWP.fromChainId || activeChainId;
+          const aggToChain   = SWP.toChainId   || activeChainId;
+          const aggTokenIn   = SWP.tokenInObj  || tIn.sym;
+          const aggTokenOut  = SWP.tokenOutObj || tOut.sym;
           const agg = await SwapAggregator.getBestQuote({
-            tokenIn: tIn.sym,
-            tokenOut: tOut.sym,
+            tokenIn: aggTokenIn,
+            tokenOut: aggTokenOut,
             amountInRaw: amountInRaw,
             slippageBps: Math.round(SWP.slippage * 100),
-            chainId: activeChainId,
-            fromChainId: activeChainId,
-            toChainId: activeChainId,
+            chainId: aggFromChain,
+            fromChainId: aggFromChain,
+            toChainId: aggToChain,
+            userAddress: walletAddress || null,
             hasLocalPool: hasLocalPool,
           });
           SWP.aggQuotes = agg.quotes || [];
@@ -20770,16 +20991,37 @@ async function swpExecuteLiFi(tIn, tOut, amtIn, slippageBps) {
     toast('LI.FI routing unavailable', 'error'); return;
   }
 
-  // Chain-aware token addresses (Mainnet addresses on Arc Mainnet).
-  const fromToken = (typeof getTokenAddress === 'function') ? getTokenAddress(tIn.sym) : getTokAddr(tIn.sym);
-  const toToken   = (typeof getTokenAddress === 'function') ? getTokenAddress(tOut.sym) : getTokAddr(tOut.sym);
+  // ── Resolve token objects (prefer SWP.tokenInObj/OutObj for address + decimals) ──
+  const lifiTokIn  = SWP.tokenInObj  || { address: (typeof getTokenAddress === 'function' ? getTokenAddress(tIn.sym) : getTokAddr(tIn.sym)), symbol: tIn.sym, decimals: tIn.decimals };
+  const lifiTokOut = SWP.tokenOutObj || { address: (typeof getTokenAddress === 'function' ? getTokenAddress(tOut.sym) : getTokAddr(tOut.sym)), symbol: tOut.sym, decimals: tOut.decimals };
+  const fromToken = (lifiTokIn.address || '').toLowerCase();
+  const toToken   = (lifiTokOut.address || '').toLowerCase();
+  const fromDecimals = Number(lifiTokIn.decimals  || q.fromDecimals || tIn.decimals  || 18);
+  const toDecimals   = Number(lifiTokOut.decimals || q.toDecimals   || tOut.decimals || 18);
+
+  // ── Chain consistency guard — never execute on wrong chain ──────────────────
+  const execFromChain = SWP.fromChainId || activeChainId;
+  const execToChain   = SWP.toChainId   || activeChainId;
+
+  // ── Quote freshness guard ───────────────────────────────────────────────────
+  const qAge = q.expiresAt ? (Date.now() > q.expiresAt) : false;
+  if (qAge) {
+    toast('LI.FI quote expired — refresh and try again', 'warning');
+    swpSetBtn('ready', 'Refresh Quote');
+    await updateSwapRate();
+    return;
+  }
+
+  // ── Route validation ────────────────────────────────────────────────────────
   const vres = LiFiAdapter.validateRoute(q.route, {
-    fromChainId: activeChainId,
-    toChainId: activeChainId,
-    fromToken: fromToken,
-    toToken: toToken,
+    fromChainId: execFromChain,
+    toChainId: execToChain,
+    fromToken: fromToken || null,
+    toToken: toToken || null,
     amountRaw: (typeof q.amountInRaw === 'bigint') ? q.amountInRaw.toString() : String(q.amountInRaw || ''),
     recipient: walletAddress,
+    sender: walletAddress,
+    value: q.value != null ? String(q.value) : null,
   });
   if (!vres.ok) {
     toast('LI.FI route rejected: ' + vres.reason, 'error');
@@ -20787,23 +21029,41 @@ async function swpExecuteLiFi(tIn, tOut, amtIn, slippageBps) {
     return;
   }
 
-  const expectedOutRaw = q.expectedOutRaw;
-  const isNative = !fromToken || fromToken === '0x0000000000000000000000000000000000000000';
+  // ── Calldata + target sanity ─────────────────────────────────────────────────
+  if (!q.to || !/^0x[0-9a-fA-F]{40}$/.test(q.to) || q.to === '0x0000000000000000000000000000000000000000') {
+    toast('LI.FI route has invalid target address', 'error'); return;
+  }
+  if (!q.calldata || !/^0x[0-9a-fA-F]+$/.test(q.calldata)) {
+    toast('LI.FI route has invalid calldata', 'error'); return;
+  }
+  // minOut guard — never execute if minOut is 0 or missing.
+  const minOutRaw = q.minOutRaw;
+  if (!minOutRaw || minOutRaw <= 0n) {
+    toast('LI.FI minOut invalid — refresh quote', 'error'); return;
+  }
 
-  // 1) Approve the LI.FI spender (approvalAddress) for the source token.
-  if (!isNative) {
-    swpSetBtn('approving', `Approving ${tIn.sym} for LI.FI…`);
+  const expectedOutRaw = q.expectedOutRaw;
+  const nativeSentinels = ['0x0000000000000000000000000000000000000000', '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'];
+  const isNative = !fromToken || nativeSentinels.includes(fromToken);
+
+  // 1) Approve the LI.FI spender for the source token (skip for native).
+  if (!isNative && fromToken) {
+    swpSetBtn('approving', `Approving ${lifiTokIn.symbol || tIn.sym} for LI.FI…`);
     const tokenContract = new ethers.Contract(fromToken, USDC_ABI, signer);
-    const amtBig = ethers.parseUnits(amtIn.toFixed(tIn.decimals), tIn.decimals);
+    const amtBig = ethers.parseUnits(amtIn.toFixed(fromDecimals), fromDecimals);
+    // Spender must be a valid non-zero address — fall back to target only if it passes the guard.
     const spender = (q.spender && /^0x[0-9a-fA-F]{40}$/.test(q.spender) && q.spender !== '0x0000000000000000000000000000000000000000')
       ? q.spender : q.to;
+    if (!spender || spender === '0x0000000000000000000000000000000000000000') {
+      toast('LI.FI returned invalid spender address', 'error'); return;
+    }
     let allowance = 0n;
     try { allowance = await tokenContract.allowance(walletAddress, spender); } catch(_) {}
     if (allowance < amtBig) {
       let gas = SWP.FALLBACK_GAS;
       try { gas = await tokenContract.approve.estimateGas(spender, amtBig); gas = gas * 120n / 100n; } catch(_) {}
       const tx = await tokenContract.approve(spender, amtBig, { gasLimit: gas });
-      toast(`Approve ${tIn.sym} submitted...`, 'info');
+      toast(`Approve ${lifiTokIn.symbol || tIn.sym} submitted...`, 'info');
       const appReceipt = await tx.wait();
       if (!appReceipt || appReceipt.status !== 1) throw new Error('Approve transaction reverted on-chain');
       let newAllowance = 0n;
@@ -20812,13 +21072,16 @@ async function swpExecuteLiFi(tIn, tOut, amtIn, slippageBps) {
     }
   }
 
-  // 2) Execute LI.FI calldata (validated target).
-  swpSetBtn('swapping', `Swapping ${tIn.sym} → ${tOut.sym} via LI.FI…`);
+  const symIn  = lifiTokIn.symbol  || tIn.sym;
+  const symOut = lifiTokOut.symbol || tOut.sym;
+
+  // 2) Execute LI.FI calldata on the SOURCE chain.
+  swpSetBtn('swapping', `Swapping ${symIn} → ${symOut} via LI.FI…`);
   let swapGas = SWP.FALLBACK_GAS;
   try { swapGas = await signer.estimateGas({ to: q.to, data: q.calldata }); swapGas = swapGas * 130n / 100n; } catch(_) {}
   const swapTx = await signer.sendTransaction({ to: q.to, data: q.calldata, value: q.value != null ? BigInt(q.value) : 0n, gasLimit: swapGas });
   toast(`Swap via LI.FI submitted...`, 'info');
-  const swapReceipt = await swapTx.wait(1, 25000);
+  const swapReceipt = await swapTx.wait(1, 30000);
   if (!swapReceipt || swapReceipt.status !== 1) {
     throw new Error('LI.FI swap transaction reverted (status: ' + (swapReceipt ? swapReceipt.status : 'null') + ')');
   }
@@ -20828,10 +21091,12 @@ async function swpExecuteLiFi(tIn, tOut, amtIn, slippageBps) {
 
   if (signer) refreshBalance().catch(() => {});
   updateSwapBalancesDisplay();
-  swpAddHistory(tIn.sym, tOut.sym, amtIn, (Number((typeof SwapMath !== 'undefined' && SwapMath.formatUnits) ? SwapMath.formatUnits(expectedOutRaw, tOut.decimals) : ethers.formatUnits(expectedOutRaw, tOut.decimals))), swapTx.hash);
-  toast(`Swapped ${amtIn} ${tIn.sym} → ${tOut.sym} via LI.FI`, 'success');
+  swpAddHistory(symIn, symOut, amtIn,
+    (Number((typeof SwapMath !== 'undefined' && SwapMath.formatUnits) ? SwapMath.formatUnits(expectedOutRaw, toDecimals) : ethers.formatUnits(expectedOutRaw, toDecimals))),
+    swapTx.hash);
+  toast(`Swapped ${amtIn} ${symIn} → ${symOut} via LI.FI`, 'success');
   swpSetBtn('done', 'Swapped!');
-  setTimeout(function(){ swpSetBtn('ready', `Swap ${tIn.sym} → ${tOut.sym}`); }, 2800);
+  setTimeout(function(){ swpSetBtn('ready', `Swap ${symIn} → ${symOut}`); }, 2800);
 }
 
 // ── Execute Swap (supports direct + multi-hop routes) ──────
