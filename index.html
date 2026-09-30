@@ -20226,9 +20226,33 @@ function _applyTokenIcon(iconEl, nameEl, tokenObj, fallbackTok) {
   if (nameEl) nameEl.textContent = (tokenObj && tokenObj.symbol) || (fallbackTok && fallbackTok.sym) || '?';
 }
 
+/**
+ * _swpTokIn / _swpTokOut — single source of truth for the currently selected
+ * token on each side. When the user picked a LI.FI token (SWP.tokenInObj /
+ * tokenOutObj is set), that takes priority over the legacy TOKEN_LIST index.
+ * Otherwise falls back to TOKEN_LIST[idx] for backward compat with Arc tokens.
+ *
+ * Returns a shape compatible with both token objects and TOKEN_LIST entries:
+ *   { sym, symbol, address, decimals, name, logoURI?, color?, icon? }
+ */
+function _swpTokIn() {
+  if (SWP.tokenInObj) {
+    var o = SWP.tokenInObj;
+    return Object.assign({ sym: o.symbol, color: '#334155', icon: (o.symbol||'?')[0].toUpperCase() }, o);
+  }
+  return TOKEN_LIST[SWP.tokenInIdx] || TOKEN_LIST[0];
+}
+function _swpTokOut() {
+  if (SWP.tokenOutObj) {
+    var o = SWP.tokenOutObj;
+    return Object.assign({ sym: o.symbol, color: '#334155', icon: (o.symbol||'?')[0].toUpperCase() }, o);
+  }
+  return TOKEN_LIST[SWP.tokenOutIdx] || TOKEN_LIST[1];
+}
+
 function applySwapTokens() {
-  const tIn  = TOKEN_LIST[SWP.tokenInIdx];
-  const tOut = TOKEN_LIST[SWP.tokenOutIdx];
+  const tIn  = _swpTokIn();
+  const tOut = _swpTokOut();
   const iIn  = document.getElementById('swap-icon-in');
   const iOut = document.getElementById('swap-icon-out');
   const nIn  = document.getElementById('swap-token-in');
@@ -20264,18 +20288,20 @@ async function updateSwapBalancesDisplay() {
     return;
   }
   try {
-    // Chain-aware: read balances ONLY on the ACTIVE chain.
-    // Uses proxy-first _arcRpcList + _balanceOfWithFallback (same as Send Assets)
-    // so Arc balances route through /api/rpc/arc and never fail with publicnode CORS.
+    // Chain-aware: read balances for the SELECTED token's chain.
     const activeChain = getActiveChain();
     if (!activeChain) return;
     const rpcList = (typeof _arcRpcList === 'function') ? _arcRpcList(activeChain) : (activeChain.rpc ? [activeChain.rpc] : []);
-    const tIn  = TOKEN_LIST[SWP.tokenInIdx];
-    const tOut = TOKEN_LIST[SWP.tokenOutIdx];
+    const tIn  = _swpTokIn();
+    const tOut = _swpTokOut();
 
     const readBal = async (t) => {
-      const addr = getTokenAddress(t.sym);
-      const isNative = t.sym === 'ETH' && !isArcChainId(activeChainId);
+      // Prefer token object address (LI.FI tokens), fallback to registry lookup.
+      const addr = (t.address && t.address !== '0x0000000000000000000000000000000000000000')
+        ? t.address
+        : getTokenAddress(t.sym);
+      const isNative = (t.sym === 'ETH' && !isArcChainId(activeChainId)) ||
+        addr === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
       if (!addr) {
         if (isNative) {
           // ETH native balance — use first available provider with timeout.
@@ -20304,7 +20330,15 @@ async function updateSwapBalancesDisplay() {
 }
 
 function swapTokens() {
+  // Flip legacy indices
   [SWP.tokenInIdx, SWP.tokenOutIdx] = [SWP.tokenOutIdx, SWP.tokenInIdx];
+  // Flip token objects + chain IDs when set
+  const tmpObj = SWP.tokenInObj;
+  SWP.tokenInObj  = SWP.tokenOutObj;
+  SWP.tokenOutObj = tmpObj;
+  const tmpChain = SWP.fromChainId;
+  SWP.fromChainId = SWP.toChainId;
+  SWP.toChainId   = tmpChain;
   const outVal = document.getElementById('swap-amount-out').value;
   if (outVal && parseFloat(outVal) > 0) {
     document.getElementById('swap-amount-in').value = outVal;
@@ -20329,7 +20363,7 @@ function swpSelectRoute(source) {
       SwapUiModes.renderRouteSelector(
         { ok: !!(SWP.aggBest), executable: true, best: SWP.aggBest || null, bestExecutable: SWP.aggBestExecutable || null, quotes: SWP.aggQuotes || [] },
         SWP.selectedSource,
-        { tokenIn: TOKEN_LIST[SWP.tokenInIdx].sym, tokenInDecimals: TOKEN_LIST[SWP.tokenInIdx].decimals, tokenOut: TOKEN_LIST[SWP.tokenOutIdx].sym, tokenOutDecimals: TOKEN_LIST[SWP.tokenOutIdx].decimals, amountInRaw: SWP.lastQuote ? SWP.lastQuote.amountInRaw : null }
+        { tokenIn: _swpTokIn().sym, tokenInDecimals: _swpTokIn().decimals, tokenOut: _swpTokOut().sym, tokenOutDecimals: _swpTokOut().decimals, amountInRaw: SWP.lastQuote ? SWP.lastQuote.amountInRaw : null }
       );
     }
   } catch(_) {}
@@ -20338,8 +20372,8 @@ function swpSelectRoute(source) {
 // Re-derive the main-card display + execution state from the newly selected quote
 // (already stored in SWP.aggQuotes — no re-quote, no duplicate request).
 function swpApplySelectedQuote(q) {
-  var tIn = TOKEN_LIST[SWP.tokenInIdx];
-  var tOut = TOKEN_LIST[SWP.tokenOutIdx];
+  var tIn = _swpTokIn();
+  var tOut = _swpTokOut();
   var amtIn = SWP.lastQuote ? SWP.lastQuote.amtIn : (parseFloat(document.getElementById('swap-amount-in').value) || 0);
   var amountInRaw = q.amountInRaw != null ? q.amountInRaw : (SWP.lastQuote ? SWP.lastQuote.amountInRaw : null);
   if (!amtIn || amtIn <= 0) return;
@@ -20391,8 +20425,8 @@ let _swpExecuting = false; // guard: prevent updateSwapRate from resetting butto
 async function updateSwapRate() {
   if (_swpExecuting) return; // don't touch button/quote during execution
   const amtIn   = parseFloat(document.getElementById('swap-amount-in').value) || 0;
-  const tIn     = TOKEN_LIST[SWP.tokenInIdx];
-  const tOut    = TOKEN_LIST[SWP.tokenOutIdx];
+  const tIn     = _swpTokIn();
+  const tOut    = _swpTokOut();
   const outEl   = document.getElementById('swap-amount-out');
   const detailEl = document.getElementById('swp-details');
 
