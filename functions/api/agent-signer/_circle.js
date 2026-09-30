@@ -109,10 +109,16 @@ async function fetchEntityPublicKey(env) {
     method: 'GET',
     headers: { Authorization: 'Bearer ' + creds.apiKey, 'Content-Type': 'application/json' },
   });
-  if (!resp.ok) throw new Error('Circle entity config failed (' + resp.status + ')');
-  const data = await resp.json();
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    const msg = (data && (data.message || data.error)) || resp.status;
+    throw new Error('Circle entity config failed (' + msg + ')');
+  }
   const pub = data && data.data && data.data.publicKey;
-  if (!pub) throw new Error('Circle entity publicKey missing');
+  if (!pub) {
+    // Surface the raw response so we can diagnose what Circle actually returned
+    throw new Error('Circle entity publicKey missing — raw: ' + JSON.stringify(data).slice(0, 300));
+  }
   return pub;
 }
 
@@ -164,21 +170,56 @@ async function createContractExecution(env, req) {
 
 // Query the nonce for the circle wallet on a given chain (eth_getTransactionCount).
 async function fetchNonce(env, chainId, address) {
+  const creds = getCredentials(env);
+
+  // ── Primary: Circle Wallets API nonce (no RPC call, no rate-limit risk) ──
+  // GET /v1/w3s/wallets/{walletId} returns the wallet's current nonce field.
+  if (creds.apiKey && creds.walletId) {
+    try {
+      const wResp = await fetch(W3S_BASE + '/wallets/' + creds.walletId, {
+        method: 'GET',
+        headers: {
+          'Authorization': 'Bearer ' + creds.apiKey,
+          'Content-Type': 'application/json',
+        },
+      });
+      const wData = await wResp.json().catch(() => ({}));
+      // Circle returns { data: { wallet: { accountType, nonce, ... } } }
+      const nonce = wData && wData.data && wData.data.wallet && wData.data.wallet.nonce;
+      if (nonce != null) return '0x' + Number(nonce).toString(16);
+    } catch (_) {
+      // fall through to RPC
+    }
+  }
+
+  // ── Fallback: eth_getTransactionCount via RPC with retry ──
   const rpc = CHAIN_RPC[chainId];
   if (!rpc) throw new Error('Unsupported chain ' + chainId);
-  const target = address || getCredentials(env).walletAddress;
+  const target = address || creds.walletAddress;
   if (!target) throw new Error('Circle wallet address missing');
-  const resp = await fetch(rpc, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      jsonrpc: '2.0', id: 1, method: 'eth_getTransactionCount',
-      params: [target, 'pending'],
-    }),
-  });
-  const data = await resp.json().catch(() => ({}));
-  if (data && data.result != null) return data.result;
-  throw new Error('Nonce lookup failed: ' + ((data && data.error && data.error.message) || 'unknown'));
+
+  let lastErr = 'unknown';
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await new Promise(r => setTimeout(r, 300 * attempt));
+    try {
+      const resp = await fetch(rpc, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0', id: 1, method: 'eth_getTransactionCount',
+          params: [target, 'pending'],
+        }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (data && data.result != null) return data.result;
+      lastErr = (data && data.error && data.error.message) || 'empty result';
+      // If rate-limited, retry; otherwise break immediately
+      if (lastErr.toLowerCase().indexOf('rate') === -1) break;
+    } catch (e) {
+      lastErr = e.message || String(e);
+    }
+  }
+  throw new Error('Nonce lookup failed: ' + lastErr);
 }
 
 /* ───────────────────────────────────────────────────────────────────────
@@ -202,7 +243,8 @@ const SIGN_ALLOWLIST = [
   '0x81d40f21f12a8f0e3252bccb954d722d4c464b64', // CCTP MessageTransmitter
   '0xfd78ee919681417d192449715b2594ab58f5d002', // CCTP TokenMinter
   '0x5294e9927c3306dcbadb03fe70b92e01ccede505', // Memo
-  '0x0000000000000000000000000000000000000001', // SwapRouter
+  '0x0000000000000000000000000000000000000001', // SwapRouter // arc-studio-allow-onchain-literal
+  '0xa4072583658fae592a3506a42431cb6316a8d40b', // LI.FI Diamond (Arc Mainnet) // arc-studio-allow-onchain-literal
 ].map((a) => a.toLowerCase());
 
 const KNOWN_CONTRACTS = {
@@ -290,6 +332,27 @@ function mapStructuredRequest(req) {
       contractAddress: String(req.contractAddress).toLowerCase(),
       abiFunctionSignature: req.abiFunctionSignature,
       abiParameters: req.abiParameters || [],
+      value: req.value || null,
+    };
+  }
+
+  // lifi: raw calldata execution through the LI.FI Diamond.
+  // The calldata is an opaque bytes payload produced by the LI.FI API.
+  // We wrap it as execute(bytes) so the Circle SDK receives a valid ABI call.
+  // Security: contractAddress must be the allowlisted LI.FI Diamond only.
+  if (type === 'lifi') {
+    if (!req.contractAddress || !req.calldata) {
+      throw new Error('lifi requires contractAddress and calldata');
+    }
+    if (!isKnownContract(req.contractAddress)) throw new Error('contract not allowlisted');
+    // Validate calldata is a hex string
+    if (typeof req.calldata !== 'string' || !/^0x[0-9a-fA-F]+$/.test(req.calldata)) {
+      throw new Error('lifi calldata must be a hex string');
+    }
+    return {
+      contractAddress: String(req.contractAddress).toLowerCase(),
+      abiFunctionSignature: 'execute(bytes)',
+      abiParameters: [req.calldata],
       value: req.value || null,
     };
   }
