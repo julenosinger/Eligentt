@@ -19819,6 +19819,9 @@ function closeTokenSelector(ev) {
 
 // Token list cache per-chain (populated by LiFiAdapter.getTokens).
 var _tokListCache = {};
+// Map of index → token object used by the current rendered list.
+// Avoids JSON injection inside onclick="" attributes (quote-escaping bugs).
+var _tokRenderMap = [];
 
 async function renderTokenList(filterText) {
   const list = document.getElementById('tok-list');
@@ -19891,7 +19894,10 @@ async function renderTokenList(filterText) {
     const balHtml = bal != null ? `<div class="tok-item-bal-val">${bal}</div>` : '';
     const usdHtml = (t.priceUSD && bal && bal !== '—')
       ? `<div class="tok-item-bal-usd">$${(parseFloat(bal) * parseFloat(t.priceUSD)).toFixed(2)}</div>` : '';
-    return `<div class="tok-item${isOther ? ' selected' : ''}" onclick="selectTokenObj(${JSON.stringify({chainId: t.chainId, address: t.address, symbol: t.symbol, name: t.name, decimals: t.decimals, logoURI: t.logoURI||null})})">
+    // Store token in render map by index to avoid JSON injection in onclick.
+    const idx = _tokRenderMap.length;
+    _tokRenderMap.push({chainId: t.chainId, address: t.address, symbol: t.symbol, name: t.name, decimals: t.decimals, logoURI: t.logoURI || null});
+    return `<div class="tok-item${isOther ? ' selected' : ''}" data-tok-idx="${idx}" onclick="selectTokenObj(_tokRenderMap[${idx}])">
       ${logoHtml}
       <div class="tok-item-info">
         <div class="tok-item-sym">${escHtml(t.symbol || '')}</div>
@@ -19901,6 +19907,8 @@ async function renderTokenList(filterText) {
     </div>`;
   };
 
+  // Reset render map each time we (re-)render the list.
+  _tokRenderMap = [];
   // Render first 50 tokens immediately (virtual scroll).
   const visible = tokens.slice(0, 50);
   list.innerHTML = visible.map(t => renderItem(t, '—')).join('')

@@ -1,6 +1,6 @@
 /**
  * swap-multitoken.test.js
- * Tests for multi-token/multi-chain swap expansion:
+ * Tests for multi-token/multi-chain swap expansion + token selector bug fix:
  * - LiFiAdapter _resolveTokenAddr handles objects, addresses, and symbols
  * - LiFiAdapter getTokens function is exported
  * - CF Function /api/lifi/tokens structure
@@ -210,5 +210,95 @@ describe('LiFiAdapter lifiPromise in SwapAggregator', () => {
     const aggBody = aggSrc.slice(aggSrc.indexOf('var lifiFromChain'));
     expect(aggBody.slice(0, 500)).toContain('tokenIn:     opts.tokenIn');
     expect(aggBody.slice(0, 500)).toContain('tokenOut:    opts.tokenOut');
+  });
+});
+
+// ── Token Selector Bug-fix tests ─────────────────────────────────────────────
+// Verifies that clicking a token in the panel calls selectTokenObj() with a
+// safe integer index reference — NOT inline JSON that breaks HTML parsing.
+describe('Token Selector onclick safety (bug fix)', () => {
+  it('renderItem uses _tokRenderMap index, not JSON.stringify inline', () => {
+    expect(indexSrc).toContain('_tokRenderMap = []');
+    expect(indexSrc).toContain('_tokRenderMap.push(');
+    // Must NOT inject JSON.stringify into onclick attribute
+    expect(indexSrc).not.toContain('onclick="selectTokenObj(${JSON.stringify(');
+    // Must use numeric index reference instead
+    expect(indexSrc).toContain('onclick="selectTokenObj(_tokRenderMap[');
+  });
+
+  it('_tokRenderMap is reset before each render to avoid stale indices', () => {
+    const render = indexSrc.slice(indexSrc.indexOf('async function renderTokenList('));
+    // The reset happens after the renderItem closure is defined (which contains push).
+    // Find the reset that appears after the closing of renderItem (i.e. after '  };')
+    const closureEnd = render.indexOf('\n  };\n\n  // Reset render map');
+    const resetIdx   = render.indexOf('_tokRenderMap = [];', closureEnd);
+    const pushIdx    = render.indexOf('_tokRenderMap.push(');
+    // push is inside the closure (defined first), reset fires at call time (after closure def)
+    expect(resetIdx).toBeGreaterThan(-1);
+    expect(render).toContain('// Reset render map each time');
+    expect(render.slice(resetIdx)).toContain('_tokRenderMap = [];');
+    // Ensure the reset comment precedes the first visible item render
+    expect(resetIdx).toBeLessThan(render.indexOf('visible.map(t => renderItem'));
+  });
+
+  it('selectTokenObj is declared as a function', () => {
+    expect(indexSrc).toContain('function selectTokenObj(tokenObj)');
+  });
+
+  it('selectTokenObj closes the panel and calls applySwapTokens + updateSwapRate', () => {
+    const fn = indexSrc.slice(
+      indexSrc.indexOf('function selectTokenObj(tokenObj)'),
+      indexSrc.indexOf('\n// Inline token cycling', indexSrc.indexOf('function selectTokenObj(tokenObj)'))
+    );
+    expect(fn).toContain("classList.remove('open')");
+    expect(fn).toContain('applySwapTokens()');
+    expect(fn).toContain('updateSwapRate()');
+  });
+
+  it('selectTokenObj sets SWP.tokenInObj when target is in', () => {
+    const fn = indexSrc.slice(
+      indexSrc.indexOf('function selectTokenObj(tokenObj)'),
+      indexSrc.indexOf('function swapTokens()')
+    );
+    expect(fn).toContain("SWP.tokSelectorTarget === 'in'");
+    expect(fn).toContain('SWP.tokenInObj = tokenObj');
+    expect(fn).toContain('SWP.fromChainId = chainId');
+  });
+
+  it('selectTokenObj sets SWP.tokenOutObj when target is out', () => {
+    const fn = indexSrc.slice(
+      indexSrc.indexOf('function selectTokenObj(tokenObj)'),
+      indexSrc.indexOf('function swapTokens()')
+    );
+    expect(fn).toContain('SWP.tokenOutObj = tokenObj');
+    expect(fn).toContain('SWP.toChainId = chainId');
+  });
+
+  it('openTokenSelector sets tokSelectorTarget to in or out', () => {
+    const fn = indexSrc.slice(
+      indexSrc.indexOf('function openTokenSelector(target)'),
+      indexSrc.indexOf('function closeTokenSelector(')
+    );
+    expect(fn).toContain('SWP.tokSelectorTarget = target');
+  });
+
+  it('_swpTokIn prefers tokenInObj over TOKEN_LIST index', () => {
+    const fn = indexSrc.slice(
+      indexSrc.indexOf('function _swpTokIn()'),
+      indexSrc.indexOf('function _swpTokOut()')
+    );
+    expect(fn).toContain('SWP.tokenInObj');
+    expect(fn).toContain('TOKEN_LIST[SWP.tokenInIdx]');
+  });
+
+  it('swapTokens() flips tokenInObj and tokenOutObj', () => {
+    const fn = indexSrc.slice(
+      indexSrc.indexOf('function swapTokens()'),
+      indexSrc.indexOf('// ── Route selection')
+    );
+    expect(fn).toContain('SWP.tokenInObj');
+    expect(fn).toContain('SWP.tokenOutObj');
+    expect(fn).toContain('SWP.fromChainId');
+    expect(fn).toContain('SWP.toChainId');
   });
 });
