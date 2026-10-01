@@ -156,7 +156,7 @@ describe('SwapUiModes — ROUTES list rendering (real quotes, no mock)', () => {
       bestExecutable: { source: 'local' },
       quotes: [q('local', { expectedOutRaw: 998200n, executable: true })],
     }, 'local', OPTS);
-    expect(h).toContain('✓ Selected');
+    expect(h).toContain('Selected');
     expect(h.indexOf('Elligentt')).toBeLessThan(h.indexOf('Selected'));
   });
 
@@ -169,7 +169,7 @@ describe('SwapUiModes — ROUTES list rendering (real quotes, no mock)', () => {
         q('local', { expectedOutRaw: 998200n, executable: true }),
       ],
     }, 'local', OPTS);
-    expect(h).toContain('Reference only');
+    expect(h).toContain('Reference');
     // The tower row must not carry a selection onclick.
     const towerRow = h.slice(h.indexOf('data-source="tower"'));
     expect(towerRow).not.toContain('swpSelectRoute');
@@ -193,7 +193,7 @@ describe('SwapUiModes — ROUTES list rendering (real quotes, no mock)', () => {
         q('local', { expectedOutRaw: 998200n, executable: true }),
       ],
     }, 'local', OPTS);
-    expect(h).toContain('unavailable');
+    expect(h).toContain('Unavailable');
     expect(h).toContain('Elligentt');
   });
 

@@ -28,6 +28,7 @@
   var PROVIDER_META = {
     local: { id: 'local', name: 'Elligentt', type: 'AMM', sourceLabel: 'Local AMM' },
     tower: { id: 'tower', name: 'Tower', type: 'AGG', sourceLabel: 'Aggregator' },
+    lifi:  { id: 'lifi',  name: 'LI.FI',    type: 'AGG', sourceLabel: 'LI.FI Aggregator' },
   };
 
   function getMode() { return _mode; }
@@ -122,18 +123,46 @@
     } catch (_) {}
   }
 
+  // Chain short names for cross-chain path display.
+  var CHAIN_SHORT = { 5042:'Arc', 1:'ETH', 8453:'Base', 42161:'ARB', 10:'OP', 137:'POL' };
+
+  function chainShort(id) {
+    return id != null ? (CHAIN_SHORT[Number(id)] || ('#' + id)) : '';
+  }
+
+  function fmtTime(sec) {
+    if (sec == null || isNaN(Number(sec))) return null;
+    var s = Number(sec);
+    if (s < 60) return '~' + Math.round(s) + 's';
+    return '~' + Math.round(s / 60) + 'm';
+  }
+
+  function fmtFee(feeBps, amountInRaw, decimals) {
+    // Returns a human-readable fee string from feeBps + input amount.
+    if (feeBps == null) return null;
+    try {
+      var pct = (Number(feeBps) / 100).toFixed(2) + '%';
+      return pct;
+    } catch (_) { return null; }
+  }
+
+  function escH(s) {
+    return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
   /**
    * Build the ROUTES comparison list from a SwapAggregator decision.
-   * Executable quotes are selectable; non-executable quotes are "Reference only".
+   * Executable quotes are selectable; non-executable are shown as reference.
    * @param {object} decision { quotes:[], bestExecutable }
    * @param {string|null} selectedSource
-   * @param {object} opts { tokenIn, tokenInDecimals, tokenOut, tokenOutDecimals, amountInRaw }
+   * @param {object} opts { tokenIn, tokenInDecimals, tokenOut, tokenOutDecimals, amountInRaw, fromChainId, toChainId }
    * @returns {string} HTML (rows only)
    */
   function buildRouteListHtml(decision, selectedSource, opts) {
     opts = opts || {};
     var quotes = (decision && decision.quotes) || [];
 
+    // Collect valid (ok + positive output) quotes.
     var valid = [];
     for (var i = 0; i < quotes.length; i++) {
       var q = quotes[i];
@@ -147,6 +176,7 @@
       return '<div class="route-empty">No routes available</div>';
     }
 
+    // Sort: best output first.
     valid.sort(function (a, b) {
       var ea = tryBig(a.expectedOutRaw), eb = tryBig(b.expectedOutRaw);
       if (ea !== eb) return ea > eb ? -1 : 1;
@@ -155,61 +185,115 @@
       return ((a.feeBps || 0) - (b.feeBps || 0));
     });
 
+    // Compute badge assignments from REAL data.
+    var bestRateIdx = 0; // index 0 after sort = best output = BEST RATE
+
+    // FASTEST: lowest execTime/estimatedTime among executable quotes.
+    var fastestIdx = -1;
+    var fastestTime = Infinity;
+    for (var fi = 0; fi < valid.length; fi++) {
+      if (valid[fi].executable !== true) continue;
+      var et = valid[fi].estimatedTime != null ? Number(valid[fi].estimatedTime)
+             : valid[fi].execSec != null ? Number(valid[fi].execSec) : null;
+      if (et !== null && et < fastestTime) { fastestTime = et; fastestIdx = fi; }
+    }
+    // Only show FASTEST badge if it differs from BEST RATE (index 0).
+    if (fastestIdx === 0) fastestIdx = -1;
+
+    // LOW FEE: lowest feeBps among executable quotes with valid feeBps.
+    var lowFeeIdx = -1;
+    var lowestFee = Infinity;
+    for (var lfi = 0; lfi < valid.length; lfi++) {
+      if (valid[lfi].executable !== true) continue;
+      var fb = valid[lfi].feeBps != null ? Number(valid[lfi].feeBps) : null;
+      if (fb !== null && fb < lowestFee) { lowestFee = fb; lowFeeIdx = lfi; }
+    }
+    // Only show LOW FEE when it differs from BEST RATE and FASTEST.
+    if (lowFeeIdx === bestRateIdx || lowFeeIdx === fastestIdx) lowFeeIdx = -1;
+
     var execs = [], refs = [];
     for (var j = 0; j < valid.length; j++) {
-      (valid[j].executable === true ? execs : refs).push(valid[j]);
+      (valid[j].executable === true ? execs : refs).push({ q: valid[j], vidx: j });
     }
 
     var out = '';
     var seen = {};
 
-    function row(q, executable, selected) {
-      var meta = providerMeta(q.source);
-      var o = formatOut(q.expectedOutRaw, opts.tokenOutDecimals);
-      var fee = q.feeBps != null ? ((Number(q.feeBps) / 100).toFixed(2) + '%') : '';
-      var impact = q.priceImpactBps != null ? ((Number(q.priceImpactBps) / 100).toFixed(2) + '% impact') : '';
+    var tokenOutSym = typeof opts.tokenOut === 'object' ? (opts.tokenOut.symbol || '') : (opts.tokenOut || '');
+    var fromId = opts.fromChainId != null ? opts.fromChainId : (opts.chainId != null ? opts.chainId : null);
+    var toId   = opts.toChainId   != null ? opts.toChainId   : (opts.chainId != null ? opts.chainId : null);
+    var isCross = fromId != null && toId != null && Number(fromId) !== Number(toId);
 
-      var state;
-      if (!executable) {
-        state = '<span class="route-state ref">Reference only</span>';
-      } else if (selected) {
-        state = '<span class="route-state sel">✓ Selected</span>';
-      } else {
-        state = '<span class="route-state">Select</span>';
+    function row(entry, executable) {
+      var q = entry.q; var vidx = entry.vidx;
+      var selected = selectedSource === q.source;
+      var meta = providerMeta(q.source);
+      var o = formatOut(q.expectedOutRaw, opts.tokenOutDecimals != null ? opts.tokenOutDecimals
+        : (typeof opts.tokenOut === 'object' && opts.tokenOut ? opts.tokenOut.decimals : null));
+
+      // Badges (only for executable quotes at correct positions).
+      var badgeHtml = '';
+      if (executable) {
+        if (vidx === bestRateIdx) badgeHtml += '<span class="swp-rbadge swp-rbadge-best">Best Rate</span>';
+        if (vidx === fastestIdx)  badgeHtml += '<span class="swp-rbadge swp-rbadge-fast">Fastest</span>';
+        if (vidx === lowFeeIdx)   badgeHtml += '<span class="swp-rbadge swp-rbadge-lowfee">Low Fee</span>';
       }
 
-      var cls = 'route-row' + (selected ? ' selected' : '') + (executable ? '' : ' reference');
-      var click = executable ? (' onclick="swpSelectRoute(\'' + q.source + '\')"') : '';
+      // Metrics: fee, time, steps.
+      var feeStr  = fmtFee(q.feeBps);
+      var timeStr = fmtTime(q.estimatedTime != null ? q.estimatedTime : q.execSec);
+      var stepsNum = (q.stepsData && q.stepsData.length) || (q.steps && q.steps.length) || null;
 
-      var line2 = '';
-      if (fee) line2 += '<span>Fee ' + fee + '</span>';
-      if (impact) line2 += '<span>' + impact + '</span>';
-      line2 += '<span>' + meta.sourceLabel + '</span>';
+      var metricsHtml = '';
+      if (feeStr)  metricsHtml += '<span class="swp-rm-item"><span class="swp-rm-val">' + escH(feeStr) + '</span><span class="swp-rm-lbl">Fee</span></span>';
+      if (timeStr) metricsHtml += '<span class="swp-rm-item"><span class="swp-rm-val">' + escH(timeStr) + '</span><span class="swp-rm-lbl">Time</span></span>';
+      if (stepsNum != null) metricsHtml += '<span class="swp-rm-item"><span class="swp-rm-val">' + stepsNum + '</span><span class="swp-rm-lbl">Steps</span></span>';
+      if (isCross) {
+        var pathStr = chainShort(fromId) + ' → ' + chainShort(toId);
+        metricsHtml += '<span class="swp-rm-item swp-rm-cross"><span class="swp-rm-val">' + escH(pathStr) + '</span><span class="swp-rm-lbl">Path</span></span>';
+      }
 
-      return '<div class="' + cls + '"' + click + ' data-source="' + q.source + '">' +
-        '<div class="route-radio">' + (selected ? '<span></span>' : '') + '</div>' +
-        '<div class="route-main">' +
-          '<div class="route-line1"><span class="route-name">' + meta.name + '</span>' +
-            '<span class="route-tag">' + meta.type + '</span>' +
-            '<span class="route-out">' + o + ' ' + (opts.tokenOut || '') + '</span></div>' +
-          '<div class="route-line2">' + line2 + '</div>' +
+      // Select button / state badge.
+      var selectHtml;
+      if (!executable) {
+        selectHtml = '<span class="route-state ref">Reference</span>';
+      } else if (selected) {
+        selectHtml = '<button class="brs-select-btn brs-select-btn--selected" onclick="event.stopPropagation();swpSelectRoute(\'' + q.source + '\')"><i class="ti ti-check"></i> Selected</button>';
+      } else {
+        selectHtml = '<button class="brs-select-btn" onclick="event.stopPropagation();swpSelectRoute(\'' + q.source + '\')">Select</button>';
+      }
+
+      var provLetter = (meta.name || '?').charAt(0).toUpperCase();
+      var cls = 'brs-route' + (selected ? ' brs-selected' : '') + (vidx === bestRateIdx && executable ? ' brs-best' : '') + (!executable ? ' brs-unavail reference' : '');
+
+      return '<div class="' + cls + '" data-source="' + q.source + '">' +
+        (badgeHtml ? '<div class="swp-rbadge-row">' + badgeHtml + '</div>' : '') +
+        '<div class="brs-route-top">' +
+          '<div class="brs-provider-icon">' + provLetter + '</div>' +
+          '<div style="flex:1;min-width:0;overflow:hidden">' +
+            '<div class="brs-provider-name">' + escH(meta.name) + '</div>' +
+            '<div class="brs-protocol-tag">' + escH(meta.sourceLabel) + '</div>' +
+          '</div>' +
+          '<div class="brs-out-amount" style="margin-left:8px">' +
+            '<div class="brs-out-val">' + escH(o) + '</div>' +
+            '<div class="brs-out-label">' + escH(tokenOutSym) + ' received</div>' +
+          '</div>' +
+          '<div class="brs-route-steps" style="margin-left:8px;flex-shrink:0;padding-top:0;border-top:none">' + selectHtml + '</div>' +
         '</div>' +
-        state +
+        (metricsHtml ? '<div class="brs-meta">' + metricsHtml + '</div>' : '') +
       '</div>';
     }
 
     for (var k = 0; k < execs.length; k++) {
-      var e = execs[k];
-      seen[e.source] = true;
-      out += row(e, true, selectedSource === e.source);
+      seen[execs[k].q.source] = true;
+      out += row(execs[k], true);
     }
     for (var r = 0; r < refs.length; r++) {
-      var rq = refs[r];
-      seen[rq.source] = true;
-      out += row(rq, false, false);
+      seen[refs[r].q.source] = true;
+      out += row(refs[r], false);
     }
 
-    // Unavailable sources shown discreetly (never a global error).
+    // Unavailable sources — discreet, never a global error.
     for (var m = 0; m < quotes.length; m++) {
       var q2 = quotes[m];
       if (!q2 || q2.ok === true) continue;
@@ -217,11 +301,12 @@
       seen[q2.source] = true;
       var meta2 = providerMeta(q2.source);
       out +=
-        '<div class="route-row unavailable" data-source="' + q2.source + '">' +
-          '<div class="route-radio"></div>' +
-          '<div class="route-main"><div class="route-line1"><span class="route-name">' + meta2.name + '</span>' +
-            '<span class="route-out unavailable">unavailable</span></div></div>' +
-          '<span class="route-state ref">Unavailable</span>' +
+        '<div class="brs-route brs-unavail" data-source="' + q2.source + '">' +
+          '<div class="brs-route-top">' +
+            '<div class="brs-provider-icon">' + escH((meta2.name || '?').charAt(0).toUpperCase()) + '</div>' +
+            '<div style="flex:1;min-width:0"><div class="brs-provider-name">' + escH(meta2.name) + '</div></div>' +
+            '<span class="brs-unavail-tag">Unavailable</span>' +
+          '</div>' +
         '</div>';
     }
 
@@ -231,14 +316,29 @@
   /** Render the ROUTES selector into the DOM (Standard mode only). */
   function renderRouteSelector(decision, selectedSource, opts) {
     try {
+      opts = opts || {};
       var list = document.getElementById('swap-route-list');
       if (list) list.innerHTML = buildRouteListHtml(decision, selectedSource, opts);
       var page = document.getElementById('page-swap');
       var status = document.getElementById('swap-route-status');
-      if (status) status.textContent = 'Compare execution routes';
-      var hasValid = !!((decision && decision.quotes || []).some(function (q) {
+      // Count valid quotes for the status label.
+      var validCount = ((decision && decision.quotes) || []).filter(function (q) {
         return q && q.ok === true;
-      }));
+      }).length;
+      // Cross-chain label.
+      var fromId = opts.fromChainId != null ? opts.fromChainId : (opts.chainId || null);
+      var toId   = opts.toChainId   != null ? opts.toChainId   : (opts.chainId || null);
+      var isCross = fromId != null && toId != null && Number(fromId) !== Number(toId);
+      if (status) {
+        var label = validCount ? (validCount + ' route' + (validCount !== 1 ? 's' : '')) : 'No routes';
+        if (isCross && fromId && toId) {
+          var cs = CHAIN_SHORT[Number(fromId)] || ('#' + fromId);
+          var cd = CHAIN_SHORT[Number(toId)]   || ('#' + toId);
+          label += ' · ' + cs + ' → ' + cd;
+        }
+        status.textContent = label;
+      }
+      var hasValid = validCount > 0;
       if (page && _mode === 'standard' && hasValid) {
         page.classList.add('swp-routes');
       } else if (page) {
