@@ -1019,6 +1019,29 @@
         aSigner = AgentWalletManager.getAgentSigner();
       }
       if (!aSigner) { notify('Agent signer unavailable — configure Circle Agent or enable browser wallet signing', 'error'); return; }
+
+      // Circle mode: aSigner is a remote stub — use SecureSignerProvider.broadcast with a structured transfer request
+      if (aSigner.isRemote) {
+        var rawAmt = ethers.parseUnits(String(amount), meta.decimals || 6).toString();
+        var rawTx  = { to: meta.address, data: '0x', value: '0' }; // placeholder; Circle server builds the real tx
+        var opts   = { circle: { type: 'transfer', tokenAddress: meta.address, to: to, amount: rawAmt } };
+        var provider = getCachedProvider(_resolveRpcUrl('/api/rpc/arc'));
+        notify(kind.charAt(0).toUpperCase() + kind.slice(1) + ' submitted — waiting for confirmation…', 'info');
+        pushHistory({ kind: 'funding', status: 'submitted', op: kind, amount: amount, token: token, to: to });
+        renderHistory();
+        var result = await SecureSignerProvider.broadcast(aSigner, provider, rawTx, opts);
+        var txHash = result && (result.txHash || result.hash || result);
+        if (typeof txHash === 'string') {
+          pushHistory({ kind: 'funding', status: 'confirmed', op: kind, amount: amount, token: token, to: to, txHash: txHash });
+          notify(kind + ' confirmed on-chain', 'success');
+        } else {
+          throw new Error((result && result.error) || 'Broadcast returned no txHash');
+        }
+        refreshPortfolio(true); renderHistory(); renderHistoryStats();
+        return;
+      }
+
+      // Browser/dev mode: use ethers signer directly
       const c = new ethers.Contract(meta.address, ERC20_ABI, aSigner);
       // [A6 FIX] Gas limit enforcement
       var agCheck = await _estimateGasSafe(c, 'transfer', [to, ethers.parseUnits(String(amount), meta.decimals || 6)]);

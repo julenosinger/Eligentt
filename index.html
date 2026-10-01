@@ -1171,6 +1171,13 @@ body.swap-standard-mode .site-footer{display:block !important}
 .st-swap-usd{font-size:8px;color:var(--muted2);margin-top:2px;min-height:12px;font-family:'JetBrains Mono',monospace}
 .st-token-pill{display:flex;align-items:center;gap:5px;padding:3px 8px 3px 5px;border-radius:20px;background:rgba(255,255,255,.03);border:1px solid #1a2030;cursor:pointer;font-size:9.5px;font-weight:700;flex-shrink:0;transition:all .15s}
 .st-token-pill:hover{border-color:rgba(34,197,94,.4);background:rgba(34,197,94,.05)}
+/* Network badge inside token pill */
+.swp-net-badge{display:inline-flex;align-items:center;gap:2px;padding:1px 5px;border-radius:3px;font-size:7.5px;font-weight:600;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);color:var(--muted2);letter-spacing:.2px;white-space:nowrap;margin-left:1px}
+.swp-net-badge img{width:9px;height:9px;border-radius:50%;object-fit:cover}
+/* Cross-chain indicator row */
+.swp-cross-row{display:none;align-items:center;justify-content:center;gap:6px;margin:-2px 0;font-size:8px;font-weight:600;color:#06F7E9;letter-spacing:.5px}
+.swp-cross-row.visible{display:flex}
+.swp-cross-row i{font-size:9px}
 .st-token-icon{width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:7px;font-weight:800;color:#fff;overflow:hidden}
 .st-token-icon img{width:100%;height:100%;object-fit:contain}
 .st-swap-arrow-wrap{display:flex;align-items:center;justify-content:center;margin:0;position:relative;z-index:2}
@@ -1186,12 +1193,13 @@ body.swap-standard-mode .site-footer{display:block !important}
 .st-swap-detail-val.green{color:var(--green)}.st-swap-detail-val.yellow{color:var(--yellow)}.st-swap-detail-val.red{color:var(--red)}.st-swap-detail-val.blue{color:var(--blue)}.st-swap-detail-val.purple{color:var(--purple)}
 /* Submit button states */
 .st-swap-submit{margin-top:6px;width:100%;padding:11px;border-radius:5px;font-size:11px;font-weight:700;cursor:pointer;border:none;font-family:'JetBrains Mono',monospace;display:flex;align-items:center;justify-content:center;gap:6px;transition:all .15s;position:relative;overflow:hidden}
-.st-swap-submit.active{background:linear-gradient(180deg,#1fd18f,#16a34a);color:#000;box-shadow:0 1px 4px rgba(31,209,143,.3)}
-.st-swap-submit.active:hover{transform:translateY(-1px);box-shadow:0 2px 12px rgba(31,209,143,.45)}
+.st-swap-submit.active{background:#06F7E9;color:#000;box-shadow:0 1px 4px rgba(6,247,233,.35)}
+.st-swap-submit.active:hover{background:#2ffaf2;transform:translateY(-1px);box-shadow:0 2px 14px rgba(6,247,233,.55)}
+.st-swap-submit.active:active{background:#04d9cc}
 .st-swap-submit.disabled{background:rgba(255,255,255,.02);border:1px solid #1a1f2e;color:var(--muted2);cursor:not-allowed}
 .st-swap-submit.connect{background:linear-gradient(180deg,#3b82f6,#2563eb);color:#fff;box-shadow:0 1px 4px rgba(59,130,246,.3)}
 .st-swap-submit.connect:hover{transform:translateY(-1px);box-shadow:0 2px 12px rgba(59,130,246,.45)}
-.st-swap-submit.loading{background:linear-gradient(180deg,#1fd18f,#16a34a);color:#000;cursor:wait}
+.st-swap-submit.loading{background:#06F7E9;color:#000;cursor:wait}
 .st-swap-submit.loading .swp-btn-content,.st-swap-submit.loading .swp-btn-done{display:none!important}
 .st-swap-submit.loading .swp-btn-loading{display:flex!important}
 .st-swap-submit.done{background:rgba(34,197,94,.15);border:1px solid rgba(34,197,94,.35);color:var(--green)}
@@ -6797,6 +6805,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
                   <div class="st-token-pill" onclick="openTokenSelector('in')">
                     <div class="st-token-icon" id="swap-icon-in" style="background:#2775ca">U</div>
                     <span id="swap-token-in">USDC</span>
+                    <span class="swp-net-badge" id="swp-net-in"></span>
                     <i class="ti ti-chevron-down" style="font-size:8px;color:var(--muted2)"></i>
                   </div>
                 </div>
@@ -6809,6 +6818,11 @@ select.cinput option { background: #161a24; color: #dde2f0; }
                     <button class="st-swap-max" id="swp-max-btn" type="button" onclick="swpSetMax()">MAX</button>
                   </div>
                 </div>
+              </div>
+
+              <!-- Cross-chain indicator -->
+              <div class="swp-cross-row" id="swp-cross-row">
+                <i class="ti ti-arrows-transfer-up"></i><span>Cross-chain</span>
               </div>
 
               <!-- Arrow -->
@@ -6824,6 +6838,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
                   <div class="st-token-pill" onclick="openTokenSelector('out')">
                     <div class="st-token-icon" id="swap-icon-out" style="background:#2562de">E</div>
                     <span id="swap-token-out">EURC</span>
+                    <span class="swp-net-badge" id="swp-net-out"></span>
                     <i class="ti ti-chevron-down" style="font-size:8px;color:var(--muted2)"></i>
                   </div>
                 </div>
@@ -20258,6 +20273,26 @@ function _swpTokOut() {
   return TOKEN_LIST[SWP.tokenOutIdx] || TOKEN_LIST[1];
 }
 
+/* Chain meta helper — used only for display in the Swap card */
+function _swpChainMeta(chainId) {
+  var id = Number(chainId);
+  var map = {
+    5042:  { name: 'Arc',      logo: '/networks/arc.svg' },
+    1:     { name: 'ETH',      logo: '/networks/ethereum.svg' },
+    8453:  { name: 'Base',     logo: '/networks/base.svg' },
+    42161: { name: 'ARB',      logo: '/networks/arbitrum.svg' },
+    10:    { name: 'OP',       logo: '/networks/optimism.svg' },
+    137:   { name: 'POL',      logo: '/networks/polygon.svg' }
+  };
+  return map[id] || { name: 'Chain ' + id, logo: null };
+}
+
+function _swpNetBadgeHtml(chainId) {
+  var m = _swpChainMeta(chainId);
+  var img = m.logo ? '<img src="' + m.logo + '" alt="">' : '';
+  return img + m.name;
+}
+
 function applySwapTokens() {
   const tIn  = _swpTokIn();
   const tOut = _swpTokOut();
@@ -20271,6 +20306,19 @@ function applySwapTokens() {
   const rOut = document.getElementById('swp-route-out');
   if (rIn)  rIn.textContent  = tIn.sym;
   if (rOut) rOut.textContent = tOut.sym;
+
+  // Network badges
+  var fromId = SWP.fromChainId || activeChainId;
+  var toId   = SWP.toChainId   || activeChainId;
+  var nbIn  = document.getElementById('swp-net-in');
+  var nbOut = document.getElementById('swp-net-out');
+  if (nbIn)  nbIn.innerHTML  = _swpNetBadgeHtml(fromId);
+  if (nbOut) nbOut.innerHTML = _swpNetBadgeHtml(toId);
+
+  // Cross-chain indicator
+  var crossRow = document.getElementById('swp-cross-row');
+  if (crossRow) crossRow.classList.toggle('visible', Number(fromId) !== Number(toId));
+
   updateSwapBalancesDisplay();
   renderSwapTokenList();
   if (typeof stUpdateMarket === 'function') { stUpdateMarket(); stPopulatePairs(); }
@@ -20399,13 +20447,23 @@ function swpApplySelectedQuote(q) {
   swpSet('swp-rate-detail', '1 ' + tIn.sym + ' = ' + rate.toFixed(6) + ' ' + tOut.sym);
   swpSet('swp-min-received', minReceived.toFixed(6) + ' ' + tOut.sym);
   swpSet('swp-fee-val', feeAmt.toFixed(6) + ' ' + tIn.sym + ' (' + (feeBps/100).toFixed(1) + '%)');
-  swpSet('swp-source-val', q.source === 'tower' ? 'Tower Aggregator' : 'Elligentt AMM');
+  var fromId = SWP.fromChainId || activeChainId;
+  var toId   = SWP.toChainId   || activeChainId;
+  var isCross = Number(fromId) !== Number(toId);
+  var srcLabel = q.source === 'tower' ? 'Tower Aggregator' : (q.source === 'lifi' ? 'LI.FI' : 'Elligentt AMM');
+  if (isCross) srcLabel += ' · Cross-chain';
+  swpSet('swp-source-val', srcLabel);
 
   var routePool = document.getElementById('swp-route-pool');
   if (routePool) {
-    routePool.textContent = q.source === 'tower'
-      ? 'Tower'
-      : (SWP.lastRoute ? SWP.lastRoute.pools.map(function(p){ return p.tokenA + '/' + p.tokenB; }).join(' → ') : '—');
+    if (isCross) {
+      var mIn = _swpChainMeta(fromId); var mOut = _swpChainMeta(toId);
+      routePool.textContent = tIn.sym + ' · ' + mIn.name + ' → ' + tOut.sym + ' · ' + mOut.name;
+    } else {
+      routePool.textContent = q.source === 'tower'
+        ? 'Tower'
+        : (q.source === 'lifi' ? 'LI.FI' : (SWP.lastRoute ? SWP.lastRoute.pools.map(function(p){ return p.tokenA + '/' + p.tokenB; }).join(' → ') : '—'));
+    }
   }
 
   // Execution state follows the selected route (Tower only when selected + executable).
@@ -20608,11 +20666,16 @@ async function updateSwapRate() {
         swpSet('swp-rate-detail', '1 ' + tIn.sym + ' = ' + tRate.toFixed(6) + ' ' + tOut.sym);
         swpSet('swp-min-received', tMinReceived.toFixed(6) + ' ' + tOut.sym);
         swpSet('swp-fee-val', (amtIn * (tFeeBps / 10000)).toFixed(6) + ' ' + tIn.sym + (tFeeBps ? ' (' + (tFeeBps / 100).toFixed(1) + '%)' : ''));
-        swpSet('swp-source-val', isLifi ? 'LI.FI' : 'Tower Aggregator');
+        var _fId = SWP.fromChainId || activeChainId; var _tId = SWP.toChainId || activeChainId;
+        var _isCross = Number(_fId) !== Number(_tId);
+        swpSet('swp-source-val', (isLifi ? 'LI.FI' : 'Tower Aggregator') + (_isCross ? ' · Cross-chain' : ''));
         if (tImpact != null) swpSet('swp-impact-val', tImpact.toFixed(3) + '%', tImpact < 1 ? 'green' : tImpact < 3 ? 'yellow' : 'red');
         else swpSet('swp-impact-val', '—');
         const tRoutePool = document.getElementById('swp-route-pool');
-        if (tRoutePool) tRoutePool.textContent = isLifi ? 'LI.FI' : 'Tower';
+        if (tRoutePool) {
+          if (_isCross) { var _mIn = _swpChainMeta(_fId); var _mOut = _swpChainMeta(_tId); tRoutePool.textContent = tIn.sym + ' · ' + _mIn.name + ' → ' + tOut.sym + ' · ' + _mOut.name; }
+          else tRoutePool.textContent = isLifi ? 'LI.FI' : 'Tower';
+        }
 
         SWP._towerQuoteData = selected.calldata ? selected : null;
         SWP.lastQuote = { amtIn, amtOut: tOutAmt, minReceived: tMinReceived, rate: tRate, priceImpact: tImpact, feeAmt: amtIn * (tFeeBps / 10000), source: isLifi ? 'LI.FI' : 'Tower Exchange', tIn, tOut, route: null, totalFee: tFeeBps, expectedOutRaw: selected.expectedOutRaw, amountInRaw, quotedAt: Date.now(), stateUpdatedAt: null };
@@ -39599,6 +39662,20 @@ const UB = {
 let _ubGeneration = 0;
 function _ubBumpGeneration() { _ubGeneration++; }
 function _ubWalletKey() { return (typeof walletAddress === 'string' && walletAddress) ? walletAddress.toLowerCase() : ''; }
+// Dual-wallet: returns the Circle Agent address (string) or '' when unavailable.
+function _ubGetCircleAddr() {
+  try { return (typeof CircleAgent !== 'undefined' && CircleAgent.getCachedAddress()) ? CircleAgent.getCachedAddress().toLowerCase() : ''; } catch(_) { return ''; }
+}
+// Returns [{type:'evm',addr},{type:'circle',addr}] — only entries with a real address.
+function _ubWalletKeys() {
+  var keys = [];
+  var evm = _ubWalletKey();
+  if (evm) keys.push({ type: 'evm', addr: evm });
+  var circle = _ubGetCircleAddr();
+  // Add Circle only when it exists and is a different address from EVM (never double-count same wallet).
+  if (circle && circle !== evm) keys.push({ type: 'circle', addr: circle });
+  return keys;
+}
 // UB-2.4: wallet of the currently rendered portfolio. Used to detect a wallet
 // switch mid-refresh so stale wallet-A data is never shown while wallet B loads.
 let _ubLastRenderedWallet = '';

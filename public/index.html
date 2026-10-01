@@ -867,6 +867,13 @@ body.swap-standard-mode .site-footer{display:block !important}
 .st-swap-usd{font-size:8px;color:var(--muted2);margin-top:2px;min-height:12px;font-family:'JetBrains Mono',monospace}
 .st-token-pill{display:flex;align-items:center;gap:5px;padding:3px 8px 3px 5px;border-radius:20px;background:rgba(255,255,255,.03);border:1px solid #1a2030;cursor:pointer;font-size:9.5px;font-weight:700;flex-shrink:0;transition:all .15s}
 .st-token-pill:hover{border-color:rgba(34,197,94,.4);background:rgba(34,197,94,.05)}
+/* Network badge inside token pill */
+.swp-net-badge{display:inline-flex;align-items:center;gap:2px;padding:1px 5px;border-radius:3px;font-size:7.5px;font-weight:600;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);color:var(--muted2);letter-spacing:.2px;white-space:nowrap;margin-left:1px}
+.swp-net-badge img{width:9px;height:9px;border-radius:50%;object-fit:cover}
+/* Cross-chain indicator row */
+.swp-cross-row{display:none;align-items:center;justify-content:center;gap:6px;margin:-2px 0;font-size:8px;font-weight:600;color:#06F7E9;letter-spacing:.5px}
+.swp-cross-row.visible{display:flex}
+.swp-cross-row i{font-size:9px}
 .st-token-icon{width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:7px;font-weight:800;color:#fff;overflow:hidden}
 .st-token-icon img{width:100%;height:100%;object-fit:contain}
 .st-swap-arrow-wrap{display:flex;align-items:center;justify-content:center;margin:0;position:relative;z-index:2}
@@ -882,12 +889,13 @@ body.swap-standard-mode .site-footer{display:block !important}
 .st-swap-detail-val.green{color:var(--green)}.st-swap-detail-val.yellow{color:var(--yellow)}.st-swap-detail-val.red{color:var(--red)}.st-swap-detail-val.blue{color:var(--blue)}.st-swap-detail-val.purple{color:var(--purple)}
 /* Submit button states */
 .st-swap-submit{margin-top:6px;width:100%;padding:11px;border-radius:5px;font-size:11px;font-weight:700;cursor:pointer;border:none;font-family:'JetBrains Mono',monospace;display:flex;align-items:center;justify-content:center;gap:6px;transition:all .15s;position:relative;overflow:hidden}
-.st-swap-submit.active{background:linear-gradient(180deg,#1fd18f,#16a34a);color:#000;box-shadow:0 1px 4px rgba(31,209,143,.3)}
-.st-swap-submit.active:hover{transform:translateY(-1px);box-shadow:0 2px 12px rgba(31,209,143,.45)}
+.st-swap-submit.active{background:#06F7E9;color:#000;box-shadow:0 1px 4px rgba(6,247,233,.35)}
+.st-swap-submit.active:hover{background:#2ffaf2;transform:translateY(-1px);box-shadow:0 2px 14px rgba(6,247,233,.55)}
+.st-swap-submit.active:active{background:#04d9cc}
 .st-swap-submit.disabled{background:rgba(255,255,255,.02);border:1px solid #1a1f2e;color:var(--muted2);cursor:not-allowed}
 .st-swap-submit.connect{background:linear-gradient(180deg,#3b82f6,#2563eb);color:#fff;box-shadow:0 1px 4px rgba(59,130,246,.3)}
 .st-swap-submit.connect:hover{transform:translateY(-1px);box-shadow:0 2px 12px rgba(59,130,246,.45)}
-.st-swap-submit.loading{background:linear-gradient(180deg,#1fd18f,#16a34a);color:#000;cursor:wait}
+.st-swap-submit.loading{background:#06F7E9;color:#000;cursor:wait}
 .st-swap-submit.loading .swp-btn-content,.st-swap-submit.loading .swp-btn-done{display:none!important}
 .st-swap-submit.loading .swp-btn-loading{display:flex!important}
 .st-swap-submit.done{background:rgba(34,197,94,.15);border:1px solid rgba(34,197,94,.35);color:var(--green)}
@@ -3369,13 +3377,13 @@ select.ub-op-input{cursor:pointer;-webkit-appearance:none;appearance:none;backgr
 <!-- Fixes z-index, overflow clipping on cards, dark dropdowns, portals    -->
 <!-- Does NOT affect any other page or component (Send/Swap/Bridge/etc)    -->
 
-<link rel="stylesheet" href="/app.css?h=c331107c">
+<link rel="stylesheet" href="/app.css?h=7f193c0d">
 <!-- Bridge Kit vendor bundle (Circle CCTP) -->
 <script defer src="/vendor/bridge-kit.js"></script>
 <!-- Core Bundle: 24 modules (synchronous) -->
-<script src="/bundles/core.611c02c6.js"></script>
+<script src="/bundles/core.3800a68f.js"></script>
 <!-- App Bundle: 104 modules (deferred) -->
-<script defer src="/bundles/app.a80c427c.js"></script>
+<script defer src="/bundles/app.586f1026.js"></script>
 <!-- Dormant modules skipped: 10 (oracle + unused) -->
 <!-- Inline scripts extracted: 5 files -->
 </head>
@@ -4321,6 +4329,7 @@ select.ub-op-input{cursor:pointer;-webkit-appearance:none;appearance:none;backgr
                   <div class="st-token-pill" onclick="openTokenSelector('in')">
                     <div class="st-token-icon" id="swap-icon-in" style="background:#2775ca">U</div>
                     <span id="swap-token-in">USDC</span>
+                    <span class="swp-net-badge" id="swp-net-in"></span>
                     <i class="ti ti-chevron-down" style="font-size:8px;color:var(--muted2)"></i>
                   </div>
                 </div>
@@ -4333,6 +4342,11 @@ select.ub-op-input{cursor:pointer;-webkit-appearance:none;appearance:none;backgr
                     <button class="st-swap-max" id="swp-max-btn" type="button" onclick="swpSetMax()">MAX</button>
                   </div>
                 </div>
+              </div>
+
+              <!-- Cross-chain indicator -->
+              <div class="swp-cross-row" id="swp-cross-row">
+                <i class="ti ti-arrows-transfer-up"></i><span>Cross-chain</span>
               </div>
 
               <!-- Arrow -->
@@ -4348,6 +4362,7 @@ select.ub-op-input{cursor:pointer;-webkit-appearance:none;appearance:none;backgr
                   <div class="st-token-pill" onclick="openTokenSelector('out')">
                     <div class="st-token-icon" id="swap-icon-out" style="background:#2562de">E</div>
                     <span id="swap-token-out">EURC</span>
+                    <span class="swp-net-badge" id="swp-net-out"></span>
                     <i class="ti ti-chevron-down" style="font-size:8px;color:var(--muted2)"></i>
                   </div>
                 </div>
@@ -8495,7 +8510,7 @@ window.__ARC_PAY_CONFIG__ = window.__ARC_PAY_CONFIG__ || {
 };
 </script>
 
-<script defer src="/bundles/inline-1.0c35bf6d.js"></script>
+<script defer src="/bundles/inline-1.abe9afdb.js"></script>
 
   <!-- ═══ SMART PAYMENT LANDING MODAL ═══ -->
   <div class="pay-modal-overlay" id="pay-landing-overlay" style="display:none !important; visibility:hidden !important; opacity:0 !important; pointer-events:none !important;">
