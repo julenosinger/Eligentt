@@ -49,7 +49,8 @@ describe('Chain-consistent provider resolution (HARD RULE)', () => {
 
   it('refreshBalance uses the chain-consistent provider (not window.provider)', () => {
     const fn = between(html, 'async function refreshBalance()', '// ── disconnectWallet');
-    expect(fn).toContain('getChainProvider(activeChainId)');
+    expect(fn).toContain('getActiveChain()');
+    expect(fn).toContain('_arcRpcList(chain)');
     expect(fn).not.toContain('provider.getBalance');
     expect(fn).not.toContain('window.provider.getBalance');
   });
@@ -63,18 +64,19 @@ describe('Chain-consistent provider resolution (HARD RULE)', () => {
 });
 
 describe('Swap balance reader — chain-aware', () => {
-  it('swap balance resolves token address from the ACTIVE chain registry', () => {
+  it('swap balance resolves each token on ITS OWN chain (never the wallet chain)', () => {
     const fn = between(html, 'async function updateSwapBalancesDisplay()', 'function swapTokens()');
-    expect(fn).toContain('getChainProvider(activeChainId)');
-    expect(fn).toContain('const addr = getTokenAddress(t.sym)');
-    // no cross-chain Arc-address leak via getTokAddr
-    expect(fn).not.toContain('getTokenAddress(t.sym) || getTokAddr(t.sym)');
+    expect(fn).toContain('_swpTokenChainId');
+    expect(fn).toContain('BalanceService.getTokenBalance');
+    // no cross-chain Arc-address leak via getTokAddr / active-chain getTokenAddress
     expect(fn).not.toContain('getTokAddr(t.sym)');
+    expect(fn).not.toContain('getTokenAddress(t.sym)');
   });
 
-  it('swap balance marks tokens not deployed on the active chain as unavailable', () => {
+  it('swap balance marks unavailable tokens/RPCs as "—" (never a fake balance)', () => {
     const fn = between(html, 'async function updateSwapBalancesDisplay()', 'function swapTokens()');
-    expect(fn).toContain("return '—'; // not deployed on this chain");
+    expect(fn).toContain("return { text: '—', offline: true }");
+    expect(fn).toContain("'RPC offline'");
   });
 
   it('Arc active (5042) → Arc token addresses are used (USDC/EURC mainnet)', () => {
@@ -144,7 +146,7 @@ describe('LI.FI — fromChain/toChain preserved', () => {
   });
 
   it('LiFiAdapter resolves token addresses from the Mainnet chain registry', () => {
-    expect(lifiAdapter).toContain('getTokenAddressForChain(chainId, symbol)');
+    expect(lifiAdapter).toContain('getTokenAddressForChain(chainId, sym)');
   });
 });
 

@@ -48,7 +48,7 @@ describe('Global network selector — Arc Mainnet', () => {
 
   it('openNetworkSelector uses the selectable list', () => {
     const fn = between('function openNetworkSelector', '// ══════════════════════════════════════════');
-    expect(fn).toContain('getSelectableNetworks().forEach');
+    expect(fn).toContain('getSelectableNetworks()');
   });
 
   it('excludes all Testnet networks (Mainnet only)', () => {
@@ -61,15 +61,15 @@ describe('Global network selector — Arc Mainnet', () => {
 describe('Swap — network context follows the active chain', () => {
   it('quotes with the ACTIVE chainId (never a hardcoded Testnet)', () => {
     const q = html.slice(html.indexOf('SwapAggregator.getBestQuote({'), html.indexOf('hasLocalPool: hasLocalPool') + 40);
-    expect(q).toContain('chainId: activeChainId');
-    expect(q).toContain('fromChainId: activeChainId');
+    expect(q).toContain('chainId: aggFromChain');
+    expect(q).toContain('fromChainId: aggFromChain');
     expect(q).not.toContain('chainId: 5042002');
   });
 
-  it('reads swap balances on the ACTIVE chain RPC (no fixed Testnet provider)', () => {
+  it('reads swap balances on each token chain (no fixed Testnet provider)', () => {
     const fn = between('async function updateSwapBalancesDisplay', 'function swapTokens');
-    expect(fn).toContain('getActiveChain()');
-    expect(fn).toContain('getTokenAddress(t.sym)');
+    expect(fn).toContain('_swpTokenChainId');
+    expect(fn).toContain('BalanceService.getTokenBalance');
     expect(fn).not.toContain("getCachedProvider('https://arc-testnet.drpc.org')");
   });
 
@@ -101,7 +101,7 @@ describe('Swap — LI.FI execution validates the untrusted route', () => {
   it('validates chain/token/amount/recipient before signing', () => {
     const fn = between('async function swpExecuteLiFi', '// ── Execute Swap');
     expect(fn).toContain('LiFiAdapter.validateRoute');
-    expect(fn).toContain('fromChainId: activeChainId');
+    expect(fn).toContain('fromChainId: execFromChain');
     expect(fn).toContain('getTokenAddress(tIn.sym)');
     expect(fn).toContain('signer.sendTransaction');
   });
@@ -132,7 +132,7 @@ describe('Bridge — Arc Mainnet CCTP (verified addresses)', () => {
 
   it('Swap balance read is fail-closed (no Testnet RPC fallback on Mainnet)', () => {
     const fn = between('async function updateSwapBalancesDisplay', 'function swapTokens');
-    expect(fn).toContain('getChainProvider(activeChainId)');
+    expect(fn).toContain('BalanceService.getTokenBalance');
     expect(fn).not.toContain("|| 'https://arc-testnet.drpc.org'");
   });
 });

@@ -84,6 +84,7 @@
 <script src="/shared/unifiedBalanceLive.js"></script>
 <script src="/shared/ubMerchantHub.js"></script>
 <script src="/shared/rpcManager.js"></script>
+<script src="/shared/BalanceService.js"></script>
 <script src="/shared/chainSimulator.js"></script>
 <script src="/shared/poolAbiDiscovery.js"></script>
 <script src="/shared/priceImpact.js"></script>
@@ -14416,12 +14417,14 @@ function showPage(id) {
         if (id === 'swap') {
           updateSwapRate();
           if (typeof updateSwapBalancesDisplay === 'function') updateSwapBalancesDisplay();
+          if (typeof swapBalStartPolling === 'function') swapBalStartPolling();
           setTimeout(function() {
             stInitTerminal();
             stStartAutoRefresh();
           }, 200);
         } else {
           stStopAutoRefresh();
+          if (typeof swapBalStopPolling === 'function') swapBalStopPolling();
         }
       });
     }
@@ -20357,52 +20360,77 @@ function renderSwapTokenList() {
   `).join('');
 }
 
+// ── Resolve the chain where a swap-side token actually lives ────────────────
+// GOLDEN RULE: a token balance is ALWAYS read on the chain where the token
+// exists, NEVER on the chain the wallet is connected to. LI.FI token objects
+// carry their own chainId; legacy Arc-local TOKEN_LIST entries fall back to the
+// selected source/destination chain (and ultimately the active chain).
+function _swpTokenChainId(t, side) {
+  if (t && t.chainId != null) return Number(t.chainId);
+  if (side === 'in') return Number(SWP.fromChainId || activeChainId);
+  return Number(SWP.toChainId || activeChainId);
+}
+
 async function updateSwapBalancesDisplay() {
+  const balInEl = document.getElementById('swp-bal-in-val');
+  const balOutEl = document.getElementById('swp-bal-out-val');
   if (!walletAddress) {
-    document.getElementById('swp-bal-in-val').textContent = '—';
-    document.getElementById('swp-bal-out-val').textContent = '—';
+    if (balInEl) balInEl.textContent = '—';
+    if (balOutEl) balOutEl.textContent = '—';
     return;
   }
-  try {
-    // Chain-aware: read balances for the SELECTED token's chain.
-    const activeChain = getActiveChain();
-    if (!activeChain) return;
-    const rpcList = (typeof _arcRpcList === 'function') ? _arcRpcList(activeChain) : (activeChain.rpc ? [activeChain.rpc] : []);
-    const tIn  = _swpTokIn();
-    const tOut = _swpTokOut();
 
-    const readBal = async (t) => {
-      // Prefer token object address (LI.FI tokens), fallback to registry lookup.
-      const addr = (t.address && t.address !== '0x0000000000000000000000000000000000000000')
-        ? t.address
-        : getTokenAddress(t.sym);
-      const isNative = (t.sym === 'ETH' && !isArcChainId(activeChainId)) ||
-        addr === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
-      if (!addr) {
-        if (isNative) {
-          // ETH native balance — use first available provider with timeout.
-          try {
-            const prov = getCachedProvider(rpcList[0] || activeChain.rpc);
-            const b = await Promise.race([
-              prov.getBalance(walletAddress),
-              new Promise((_,rej) => setTimeout(() => rej(new Error('timeout')), 10000)),
-            ]);
-            return parseFloat(ethers.formatUnits(b, t.decimals)).toFixed(4);
-          } catch(_) { return '—'; }
-        }
-        return '—';
+  // Loading state ("…") before any async read.
+  if (balInEl) { balInEl.textContent = '…'; balInEl.title = ''; }
+  if (balOutEl) { balOutEl.textContent = '…'; balOutEl.title = ''; }
+
+  const tIn  = _swpTokIn();
+  const tOut = _swpTokOut();
+
+  // Each side resolves its OWN chain: the input token lives on the source
+  // chain, the output token on the destination chain (they may differ).
+  const chainIn  = _swpTokenChainId(tIn, 'in');
+  const chainOut = _swpTokenChainId(tOut, 'out');
+
+  // BalanceService.getTokenBalance reads via a dedicated per-chain
+  // JsonRpcProvider (never window.ethereum / MetaMask / the wallet's signing
+  // provider). Returns null on error → "—" + "RPC offline" tooltip, which never
+  // blocks the route. Execution is guarded separately (fail-closed).
+  const readBal = async (t, chainId) => {
+    try {
+      if (typeof BalanceService !== 'undefined' && BalanceService.getTokenBalance) {
+        const v = await BalanceService.getTokenBalance(walletAddress, t, chainId);
+        if (v == null) return { text: '—', offline: true };
+        return { text: parseFloat(v).toFixed(4), offline: false };
       }
-      // ERC-20: proxy-first fallback list with 10s timeout per attempt.
-      try {
-        const b = await _balanceOfWithFallback(addr, walletAddress, rpcList, 10000);
-        return parseFloat(ethers.formatUnits(b, t.decimals)).toFixed(4);
-      } catch(_) { return '—'; }
-    };
+    } catch (_) { /* fall through */ }
+    return { text: '—', offline: true };
+  };
 
-    const [balIn, balOut] = await Promise.all([readBal(tIn), readBal(tOut)]);
-    document.getElementById('swp-bal-in-val').textContent = balIn;
-    document.getElementById('swp-bal-out-val').textContent = balOut;
-  } catch (e) { /* silent */ }
+  const [rIn, rOut] = await Promise.all([
+    readBal(tIn, chainIn),
+    readBal(tOut, chainOut),
+  ]);
+  if (balInEl) { balInEl.textContent = rIn.text; balInEl.title = rIn.offline ? 'RPC offline' : ''; }
+  if (balOutEl) { balOutEl.textContent = rOut.text; balOutEl.title = rOut.offline ? 'RPC offline' : ''; }
+}
+
+// ── Balance polling (20-30s) while the Swap page is active ────────────────
+let _swapBalPollTimer = null;
+function swapBalStartPolling() {
+  if (_swapBalPollTimer) return;
+  _swapBalPollTimer = setInterval(function () {
+    try {
+      const page = document.getElementById('page-swap');
+      if (!page || !page.classList.contains('active')) return;
+      if (walletAddress && typeof updateSwapBalancesDisplay === 'function') {
+        updateSwapBalancesDisplay();
+      }
+    } catch (_) {}
+  }, 25000);
+}
+function swapBalStopPolling() {
+  if (_swapBalPollTimer) { clearInterval(_swapBalPollTimer); _swapBalPollTimer = null; }
 }
 
 function swapTokens() {
@@ -21099,6 +21127,7 @@ async function swpExecuteTowerOnly(tIn, tOut, amtIn, slippageBps) {
   SWP._towerQuoteData = null;
 
   if (signer) refreshBalance().catch(() => {});
+  if (typeof BalanceService !== 'undefined' && BalanceService.invalidate) BalanceService.invalidate(walletAddress);
   updateSwapBalancesDisplay();
   swpAddHistory(tIn.sym, tOut.sym, amtIn, (Number((typeof SwapMath !== 'undefined' && SwapMath.formatUnits) ? SwapMath.formatUnits(expectedOutRaw, tOut.decimals) : ethers.formatUnits(expectedOutRaw, tOut.decimals))), swapTx.hash);
   toast(`Swapped ${amtIn} ${tIn.sym} → ${tOut.sym} via Tower`, 'success');
@@ -21215,6 +21244,7 @@ async function swpExecuteLiFi(tIn, tOut, amtIn, slippageBps) {
   SWP._towerQuoteData = null;
 
   if (signer) refreshBalance().catch(() => {});
+  if (typeof BalanceService !== 'undefined' && BalanceService.invalidate) BalanceService.invalidate(walletAddress);
   updateSwapBalancesDisplay();
   swpAddHistory(symIn, symOut, amtIn,
     (Number((typeof SwapMath !== 'undefined' && SwapMath.formatUnits) ? SwapMath.formatUnits(expectedOutRaw, toDecimals) : ethers.formatUnits(expectedOutRaw, toDecimals))),
@@ -21588,6 +21618,7 @@ async function executeSwap() {
   loadAllPools();
   updateSwapRate();
   if (signer) refreshBalance().catch(() => {});
+  if (typeof BalanceService !== 'undefined' && BalanceService.invalidate) BalanceService.invalidate(walletAddress);
   updateSwapBalancesDisplay();
 
   swpAddHistory(tIn.sym, tOut.sym, amtIn, amtOut, lastTxHash);
