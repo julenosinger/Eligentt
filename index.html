@@ -9968,6 +9968,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
                 </div>
                 <div id="ub-hero-valuation" style="display:none;font-size:8px"></div>
                 <div id="ub-hero-chain-status" style="display:none;font-size:8px;color:var(--muted2)"></div>
+                <div id="ub-hero-wallets" style="display:none;gap:8px;flex-wrap:wrap;margin-top:2px"></div>
               </div>
               <!-- Portfolio allocation mini-donut placeholder + token pills -->
               <div style="display:flex;flex-direction:column;gap:4px;min-width:120px">
@@ -40062,6 +40063,10 @@ document.addEventListener('WALLET_SWITCHED', function() {
 });
 
 function ubRefresh() {
+  // Proactively load the Circle status (non-blocking) so a configured Circle Wallet
+  // is detected even before the AI Smart Wallet page has been visited.
+  _ubEnsureCircleStatus();
+
   var walletKey = _ubWalletKey();
   var agentAddr = _ubGetCircleAddr();
   if (!walletKey && !agentAddr) {
@@ -40166,6 +40171,23 @@ function ubShowState(state) {
     var contentEl = document.getElementById('ub-content');
     if (contentEl) contentEl.style.display = 'flex';
   }
+}
+
+// One-time non-blocking Circle status load for the Unified Balance. When the
+// Circle Wallet is configured, this populates CircleAgent.getCachedAddress() and
+// triggers a re-render so agent balances appear even on first load (without
+// requiring a visit to the AI Smart Wallet page first). Never blocks ubRefresh.
+var _ubCircleStatusLoaded = false;
+function _ubEnsureCircleStatus() {
+  if (_ubCircleStatusLoaded) return;
+  _ubCircleStatusLoaded = true;
+  try {
+    if (typeof CircleAgent !== 'undefined' && typeof CircleAgent.getStatus === 'function') {
+      CircleAgent.getStatus().then(function() {
+        if (_ubGetCircleAddr()) { try { ubRefresh(); } catch(_) {} }
+      }).catch(function() {});
+    }
+  } catch(_) {}
 }
 
 // ── UB-2.4: refresh freshness UI (Updating… / Updated HH:MM:SS / Stale) ──
@@ -40505,33 +40527,58 @@ function ubFetchAllBalances(walletKey) {
   return Promise.all(workers).then(function() { return results; });
 }
 
-// ── UB: Circle Agent Wallet balances (Arc Mainnet, custodial address) ──
-// Reuses the SAME per-chain readers as the EVM flow (golden rule: balance is
-// read on the token's chain, never the connected wallet's chain). Results are
-// tagged source:'agent' so the UI can render a distinct "Agent" badge and never
-// silently merge them into EVM rows.
-function ubFetchAgentBalances(agentAddr) {
-  var arc = null;
+// ── UB: Circle Wallet / AI Smart Wallet balances (custodial, Circle API) ──
+// Reads the REAL balances returned by the existing Circle infrastructure
+// (/api/agent/balance → CircleAgent.getBalance()), which already spans every
+// chain the Circle wallet holds assets on (Arc 5042 included). Results are
+// tagged source:'agent' so the UI renders them distinctly from the EVM wallet
+// and never merges the two sources. No mocks, no localStorage, no hardcodes.
+function _ubCircleChainId(blockchain) {
+  var b = String(blockchain || '').toUpperCase();
+  var map = {
+    'ARC': 5042,
+    'ETH': 1,
+    'BASE': 8453,
+    'ARB': 42161, 'ARBITRUM': 42161,
+    'OP': 10, 'OPTIMISM': 10,
+    'MATIC': 137, 'POLYGON': 137, 'POLYGON-POS': 137,
+  };
+  return (map[b] != null) ? map[b] : null;
+}
+
+async function ubFetchAgentBalances(agentAddr) {
   try {
-    if (typeof CHAINS !== 'undefined') {
-      for (var i = 0; i < CHAINS.length; i++) {
-        if (CHAINS[i] && CHAINS[i].chainId === 5042) { arc = CHAINS[i]; break; }
-      }
+    if (typeof CircleAgent === 'undefined' || typeof CircleAgent.getBalance !== 'function') return [];
+    var res = await CircleAgent.getBalance();
+    if (!res || !Array.isArray(res.balances)) return [];
+    var results = [];
+    for (var i = 0; i < res.balances.length; i++) {
+      var tb = res.balances[i];
+      var tok = (tb && tb.token) ? tb.token : null;
+      if (!tok || !tok.symbol) continue;
+      var chainId = _ubCircleChainId(tok.blockchain);
+      if (chainId == null) continue;           // unsupported chain → skip, never fabricate
+      var chain = (typeof getChainById === 'function') ? getChainById(chainId) : null;
+      if (!chain) continue;
+      var sym = tok.symbol;
+      var decimals = (tok.decimals != null) ? Number(tok.decimals) : 6;
+      var amount = (tb.amount != null) ? parseFloat(tb.amount) : null;
+      var priceRes = ubResolveTokenPrice(sym);
+      results.push(ubResult({
+        sym: sym,
+        chain: chain,
+        address: tok.tokenAddress || null,
+        decimals: decimals,
+        raw: null,
+        amount: amount,
+        price: priceRes.price,
+        priceStatus: priceRes.status,
+        status: (amount != null) ? 'available' : 'unavailable',
+        source: 'agent',
+      }));
     }
-  } catch(_) {}
-  if (!arc || !agentAddr) return Promise.resolve([]);
-  var TOKENS = ['USDC', 'EURC', 'cirBTC'];
-  var jobs = [];
-  for (var t = 0; t < TOKENS.length; t++) {
-    var sym = TOKENS[t];
-    var tokenAddr = arc.tokens && arc.tokens[sym] ? arc.tokens[sym].address : null;
-    if (!tokenAddr || tokenAddr === '0x0000000000000000000000000000000000000000') continue;
-    jobs.push(ubFetchOne(arc, sym, tokenAddr, agentAddr).then(function(r) {
-      if (r) r.source = 'agent';
-      return r;
-    }));
-  }
-  return Promise.all(jobs);
+    return results;
+  } catch(e) { return []; }
 }
 
 function ubFetchNativeBalance(chain, walletKey) {
@@ -40751,6 +40798,38 @@ function ubRenderHero() {
     }
   }
 
+  // ── Wallet source breakdown (Circle AI Smart Wallet vs EVM Wallet) ──
+  var elWallets = document.getElementById('ub-hero-wallets');
+  if (elWallets) {
+    var circleTotal = 0, evmTotal = 0;
+    for (var wi = 0; wi < assets.length; wi++) {
+      if (assets[wi].usd != null) {
+        if (assets[wi].source === 'agent') circleTotal += assets[wi].usd;
+        else evmTotal += assets[wi].usd;
+      }
+    }
+    var circleAddr = _ubGetCircleAddr();
+    var walletParts = [];
+    if (circleTotal > 0 || circleAddr) {
+      walletParts.push(
+        '<span style="font-size:8px;color:var(--muted2);background:rgba(39,117,202,.1);border:1px solid rgba(39,117,202,.25);border-radius:6px;padding:2px 6px;display:inline-flex;align-items:center;gap:5px">' +
+          '<span style="width:5px;height:5px;border-radius:50%;background:#2775ca;display:inline-block"></span>' +
+          'Circle AI Smart Wallet' + (circleAddr ? ' <span style="font-family:\'JetBrains Mono\',monospace;font-size:7px;opacity:.8">' + circleAddr.slice(0,6) + '…' + circleAddr.slice(-4) + '</span>' : '') +
+          ' <b style="color:var(--text);font-family:\'JetBrains Mono\',monospace">' + (circleTotal > 0 ? '$' + circleTotal.toFixed(2) : '—') + '</b>' +
+        '</span>');
+    }
+    if (evmTotal > 0) {
+      walletParts.push(
+        '<span style="font-size:8px;color:var(--muted2);background:rgba(6,247,233,.08);border:1px solid rgba(6,247,233,.2);border-radius:6px;padding:2px 6px;display:inline-flex;align-items:center;gap:5px">' +
+          '<span style="width:5px;height:5px;border-radius:50%;background:var(--teal);display:inline-block"></span>' +
+          'EVM Wallet' +
+          ' <b style="color:var(--text);font-family:\'JetBrains Mono\',monospace">$' + evmTotal.toFixed(2) + '</b>' +
+        '</span>');
+    }
+    elWallets.innerHTML = walletParts.join('');
+    elWallets.style.display = walletParts.length ? 'flex' : 'none';
+  }
+
   // ── Wallet info ──
   var elWallet = document.getElementById('ub-hero-wallet');
   if (elWallet) {
@@ -40898,7 +40977,7 @@ function ubFilterAssets() {
       var rpct = (r.usd != null && totalUSD > 0) ? ((r.usd/totalUSD)*100).toFixed(0) + '%' : '';
       breakdownHtml += '<div class="ub2-net-row">' +
         '<span class="ub2-net-dot" style="background:' + rcol + (r.stale ? ';opacity:.4' : '') + '"></span>' +
-        '<span class="ub2-net-name">' + rname + (r.source === 'agent' ? ' <span style="color:#2775ca;font-size:7px;border:1px solid rgba(39,117,202,.32);border-radius:3px;padding:0 3px;margin-left:3px">Agent</span>' : '') + (r.stale ? ' <span style="color:var(--yellow);font-size:7px">stale</span>' : '') + '</span>' +
+        '<span class="ub2-net-name">' + rname + (r.source === 'agent' ? ' <span style="color:#2775ca;font-size:7px;border:1px solid rgba(39,117,202,.32);border-radius:3px;padding:0 3px;margin-left:3px">Circle</span>' : '') + (r.stale ? ' <span style="color:var(--yellow);font-size:7px">stale</span>' : '') + '</span>' +
         '<span class="ub2-net-bal" style="font-family:\'JetBrains Mono\',monospace">' + (r.balance != null ? r.balance.toFixed(4) : '—') + ' ' + sym + '</span>' +
         '<span class="ub2-net-usd">' + rusd + '</span>' +
         '<span class="ub2-net-pct">' + rpct + '</span>' +
