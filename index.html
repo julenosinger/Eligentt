@@ -7093,7 +7093,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
               </div>
               <div style="flex:1;padding-left:10px">
                 <div class="token-amt" style="font-size:18px;display:flex;align-items:center;gap:5px;padding-top:2px">
-                  <span id="bridge-amount-out" style="color:var(--text)">~1.00</span>
+                  <span id="bridge-amount-out" style="color:var(--text)">0.00</span>
                   <span style="font-size:10px;color:var(--muted2)">USDC</span>
                 </div>
                 <div style="font-size:9px;color:var(--muted2);margin-top:2px">After bridge fees</div>
@@ -22933,7 +22933,7 @@ function updateBridgeEst(){
 
   _bridgeSetText('bridge-usd', `≈ $${amt.toFixed(2)} USD`);
   _bridgeSetText('bridge-protocol', 'LI.FI');
-  _bridgeSetText('bridge-amount-out', '—');
+  _bridgeSetText('bridge-amount-out', '0.00');
   _bridgeSetText('bridge-receive', '—');
   _bridgeSetText('bridge-fee-display', '—');
   _bridgeSetText('bridge-min', '—');
@@ -22983,7 +22983,7 @@ async function _fetchBridgeQuote(fromChain, toChain, amt) {
     _bridgeLastQuote = null;
     _bridgeSetText('bridge-protocol', 'LI.FI');
     _bridgeSetText('bridge-receive', 'No route');
-    _bridgeSetText('bridge-amount-out', '—');
+    _bridgeSetText('bridge-amount-out', '0.00');
     _bridgeSetText('bridge-fee-display', '—');
     _bridgeSetText('bridge-min', '—');
     _bridgeSetText('bridge-time', 'No routes available for this pair');
@@ -39760,10 +39760,10 @@ function _ubPoolDerivedRate(sym) {
 }
 
 const UB_TOKEN_META = {
-  USDC:   { name:'USD Coin',    icon:'<img src="/assets/tokens/usdc/Symbol/USDC-symbol.png" style="width:18px;height:18px" alt="USDC">', color:'#2775ca' },
-  EURC:   { name:'Euro Coin',    icon:'<img src="/assets/tokens/eurc/Symbol/EURC-symbol.png" style="width:18px;height:18px" alt="EURC">', color:'#2562de' },
+  USDC:   { name:'USD Coin',    icon:'<img src="/assets/tokens/usdc-coin.svg" style="width:100%;height:100%;object-fit:contain" alt="USDC">', color:'#2775ca' },
+  EURC:   { name:'Euro Coin',    icon:'<img src="/assets/tokens/eurc-coin.svg" style="width:100%;height:100%;object-fit:contain" alt="EURC">', color:'#2562de' },
   cirBTC: { name:'Circle BTC',   icon:'<img src="/assets/tokens/cirbtc/Logos/PNG/cirBTC_Icon.png" style="width:18px;height:18px" alt="cirBTC">', color:'#f7931a' },
-  ETH:    { name:'Ether',        icon:'<img src="/assets/tokens/eth/eth-logo.png" style="width:18px;height:18px" alt="ETH" onerror="this.style.display=\'none\'">', color:'#627eea' }
+  ETH:    { name:'Ether',        icon:'<img src="/assets/tokens/eth.svg" style="width:100%;height:100%;object-fit:contain" alt="ETH">', color:'#627eea' }
 };
 const UB_FREQ_LABELS = { once:'One-time', daily:'Daily', weekly:'Weekly', biweekly:'Bi-weekly', monthly:'Monthly' };
 
@@ -40063,7 +40063,8 @@ document.addEventListener('WALLET_SWITCHED', function() {
 
 function ubRefresh() {
   var walletKey = _ubWalletKey();
-  if (!walletKey) {
+  var agentAddr = _ubGetCircleAddr();
+  if (!walletKey && !agentAddr) {
     _ubLastRenderedWallet = '';
     UB.state.results = []; UB.state.assets = []; UB.state.totalUSD = 0; UB.state.aggregateStatus = 'unavailable';
     ubShowState('empty');
@@ -40088,7 +40089,14 @@ function ubRefresh() {
   var emptyEl = document.getElementById('ub-empty');
   if (emptyEl) emptyEl.style.display = 'none';
 
-  ubFetchAllBalances(walletKey)
+  var evmFetch = walletKey ? ubFetchAllBalances(walletKey) : Promise.resolve([]);
+  evmFetch
+    .then(function(results) {
+      if (!agentAddr) return results;
+      return ubFetchAgentBalances(agentAddr).then(function(agentResults) {
+        return results.concat(agentResults);
+      });
+    })
     .then(function(results) {
       if (generation !== _ubGeneration) return; // stale wallet/network — discard results
       var newState = ubBuildState(results, generation);
@@ -40302,6 +40310,7 @@ function ubResult(o) {
     tokenName: meta.name,
     icon: meta.icon,
     color: meta.color,
+    source: o.source || 'evm',   // 'evm' (connected wallet) | 'agent' (Circle Agent)
     chainId: (o.chain.id || o.chain.name),
     chainName: (o.chain.shortName || o.chain.name),
     address: o.address || null,
@@ -40402,6 +40411,7 @@ function ubBuildState(results, generation) {
         if (usd != null) { totalUSD += usd; hasValuedUSD = true; }
         assets.push({
           token: r.token, tokenName: r.tokenName, icon: r.icon, color: r.color,
+          source: r.source,
           chainId: r.chainId, chainName: r.chainName,
           symbol: r.token, rawAmount: r.raw, price: r.price, priceStatus: r.priceStatus, balanceStatus: r.status,
           balance: r.amount, usd: usd, address: r.address,
@@ -40493,6 +40503,35 @@ function ubFetchAllBalances(walletKey) {
   var workers = [];
   for (var w = 0; w < workerCount; w++) workers.push(worker());
   return Promise.all(workers).then(function() { return results; });
+}
+
+// ── UB: Circle Agent Wallet balances (Arc Mainnet, custodial address) ──
+// Reuses the SAME per-chain readers as the EVM flow (golden rule: balance is
+// read on the token's chain, never the connected wallet's chain). Results are
+// tagged source:'agent' so the UI can render a distinct "Agent" badge and never
+// silently merge them into EVM rows.
+function ubFetchAgentBalances(agentAddr) {
+  var arc = null;
+  try {
+    if (typeof CHAINS !== 'undefined') {
+      for (var i = 0; i < CHAINS.length; i++) {
+        if (CHAINS[i] && CHAINS[i].chainId === 5042) { arc = CHAINS[i]; break; }
+      }
+    }
+  } catch(_) {}
+  if (!arc || !agentAddr) return Promise.resolve([]);
+  var TOKENS = ['USDC', 'EURC', 'cirBTC'];
+  var jobs = [];
+  for (var t = 0; t < TOKENS.length; t++) {
+    var sym = TOKENS[t];
+    var tokenAddr = arc.tokens && arc.tokens[sym] ? arc.tokens[sym].address : null;
+    if (!tokenAddr || tokenAddr === '0x0000000000000000000000000000000000000000') continue;
+    jobs.push(ubFetchOne(arc, sym, tokenAddr, agentAddr).then(function(r) {
+      if (r) r.source = 'agent';
+      return r;
+    }));
+  }
+  return Promise.all(jobs);
 }
 
 function ubFetchNativeBalance(chain, walletKey) {
@@ -40859,7 +40898,7 @@ function ubFilterAssets() {
       var rpct = (r.usd != null && totalUSD > 0) ? ((r.usd/totalUSD)*100).toFixed(0) + '%' : '';
       breakdownHtml += '<div class="ub2-net-row">' +
         '<span class="ub2-net-dot" style="background:' + rcol + (r.stale ? ';opacity:.4' : '') + '"></span>' +
-        '<span class="ub2-net-name">' + rname + (r.stale ? ' <span style="color:var(--yellow);font-size:7px">stale</span>' : '') + '</span>' +
+        '<span class="ub2-net-name">' + rname + (r.source === 'agent' ? ' <span style="color:#2775ca;font-size:7px;border:1px solid rgba(39,117,202,.32);border-radius:3px;padding:0 3px;margin-left:3px">Agent</span>' : '') + (r.stale ? ' <span style="color:var(--yellow);font-size:7px">stale</span>' : '') + '</span>' +
         '<span class="ub2-net-bal" style="font-family:\'JetBrains Mono\',monospace">' + (r.balance != null ? r.balance.toFixed(4) : '—') + ' ' + sym + '</span>' +
         '<span class="ub2-net-usd">' + rusd + '</span>' +
         '<span class="ub2-net-pct">' + rpct + '</span>' +
@@ -43615,6 +43654,48 @@ const UBScreen = (function() {
 // ══════════════════════════════════════════════════════════
 var UB_ACTION_MODES = ['send', 'swap', 'move', 'bridge'];
 
+// ── UB Fund Source — EVM Wallet vs Agent Wallet (Circle Agent) ──
+// Persistent selector shown in the operation panel header. Choosing a source
+// only changes the origin of funds + signer used; the Agent default is
+// preserved, and the EVM option now routes to the existing EVM flows
+// (UBScreen execSend/execSwap/execBridge → saExecuteSend/executeSwap/xcExecuteSend).
+let _ubSourceWallet = 'agent'; // 'agent' | 'evm'
+
+function _ubSetSource(v) {
+  _ubSourceWallet = (v === 'evm') ? 'evm' : 'agent';
+  var mode = (typeof UB !== 'undefined' && UB.liveMode) ? UB.liveMode : 'send';
+  if (mode === 'move') mode = 'bridge';
+  try {
+    if (_ubSourceWallet === 'evm') {
+      if (typeof UBScreen !== 'undefined') {
+        if (mode === 'send') UBScreen.openSend();
+        else if (mode === 'swap') UBScreen.openSwap();
+        else UBScreen.openBridge();
+      }
+    } else {
+      _ubOpenAgentPanel(mode === 'bridge' ? 'move' : mode);
+    }
+  } catch(_) {}
+}
+
+// Inject a persistent Fund Source selector into the UB operation panel header
+// (visible for both Agent and EVM operation forms). Idempotent.
+function _ubInjectSourceSelector() {
+  var header = document.getElementById('ub-op-panel-header');
+  if (!header || document.getElementById('ub-source-sel')) return;
+  try {
+    var sel = document.createElement('select');
+    sel.id = 'ub-source-sel';
+    sel.style.cssText = 'margin-left:auto;margin-right:8px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);border-radius:6px;color:var(--text);font-size:9px;padding:2px 6px;cursor:pointer;max-width:120px';
+    sel.innerHTML = '<option value="agent">Agent Wallet</option><option value="evm">EVM Wallet</option>';
+    sel.value = _ubSourceWallet;
+    sel.addEventListener('change', function(){ _ubSetSource(sel.value); });
+    var close = header.querySelector('.ub-op-close');
+    if (close) header.insertBefore(sel, close);
+    else header.appendChild(sel);
+  } catch(_) {}
+}
+
 function enterUnifiedBalanceMode(mode) {
   // Normalise 'bridge' → 'move' for UI consistency (both map to BRIDGE intent)
   if (mode === 'bridge') mode = 'move';
@@ -43622,8 +43703,20 @@ function enterUnifiedBalanceMode(mode) {
   // Update UB live state (presentation layer only)
   try { if (typeof UB !== 'undefined') UB.liveMode = mode; } catch (_) {}
   try { if (typeof UBLive !== 'undefined') { UBLive.init(); UBLive.setMode(mode); } } catch (_) {}
-  // Open the operation panel with an Agent-wired form
-  try { _ubOpenAgentPanel(mode); } catch (_) {}
+  // Ensure the persistent fund-source selector exists
+  _ubInjectSourceSelector();
+  // Route to Agent-wired panel (default) or EVM panel based on the chosen source.
+  if (_ubSourceWallet === 'evm') {
+    try {
+      if (typeof UBScreen !== 'undefined') {
+        if (mode === 'send') UBScreen.openSend();
+        else if (mode === 'swap') UBScreen.openSwap();
+        else UBScreen.openBridge();
+      }
+    } catch (_) {}
+  } else {
+    try { _ubOpenAgentPanel(mode); } catch (_) {}
+  }
 }
 
 function exitUnifiedBalanceMode() {
