@@ -43223,6 +43223,11 @@ const UBScreen = (function() {
   var _opPanelOriginalParent = null;
   function showOperation(op) {
     _currentOp = op;
+    // EVM-Wallet operation context — active from the moment the drawer opens
+    // (swap/bridge), so quoting/route selection happens under the SAME rules
+    // that execution will use. Circle Agent flow (agent panel) never reaches
+    // showOperation, so it is untouched.
+    _ubEVMOpActive = (_ubSourceWallet === 'evm') && (op === 'swap' || op === 'bridge');
     var isMobile = window.innerWidth <= 768;
     var panel = document.getElementById('ub-op-panel');
     if (!panel) return;
@@ -43298,7 +43303,7 @@ const UBScreen = (function() {
           '<div style="font-size:8.5px;color:#8892aa;margin-top:3px" id="ub-scr-swap-rate">Rate: —</div></div>' +
           '</div>' +
           '<div class="ub-scr-info-row"><span>Slippage</span><span style="color:var(--text)">0.5%</span></div>' +
-          '<div class="ub-scr-info-row"><span>Route</span><span style="color:var(--teal)">Direct Pool</span></div>' +
+          '<div class="ub-scr-info-row"><span>Route</span><span style="color:var(--teal)" id="ub-scr-swap-route">—</span></div>' +
           '<button class="ub-op-btn swap" onclick="UBScreen.execSwap()">Swap</button>' +
           '<button class="ub-op-btn back" onclick="exitUnifiedBalanceMode()"><i class="ti ti-arrow-left"></i> Back to Live</button>';
         setTimeout(function(){
@@ -43342,6 +43347,7 @@ const UBScreen = (function() {
 
   function _cleanupAll() {
     _currentOp = null;
+    _ubEVMOpActive = false; // closing/cancelling clears the EVM-op context
     // Closing the operation panel always returns the Live screen to 'live'.
     try { if (typeof UB !== 'undefined') UB.liveMode = 'live'; } catch(_) {}
     try { if (typeof UBLive !== 'undefined') UBLive.setMode('live'); } catch(_) {}
@@ -43588,16 +43594,15 @@ const UBScreen = (function() {
   };
 
   // ═══════════════ SCREEN HELPERS ═══════════════
+  var _ubSwapSeq = 0, _ubSwapTimer = null;
   function _refreshSwap() {
-    var amt = parseFloat(document.getElementById('ub-scr-swap-amt').value) || 0;
-    var from = document.getElementById('ub-scr-swap-from').value;
-    var to = document.getElementById('ub-scr-swap-to').value;
+    var amtEl = document.getElementById('ub-scr-swap-amt');
+    var amt = amtEl ? (parseFloat(amtEl.value) || 0) : 0;
+    var from = (document.getElementById('ub-scr-swap-from') || {}).value || 'USDC';
+    var to = (document.getElementById('ub-scr-swap-to') || {}).value || 'EURC';
     var rateEl = document.getElementById('ub-scr-swap-rate');
     var outEl = document.getElementById('ub-scr-swap-out');
-    var ratio = from === 'USDC' ? 0.998 : 1.002;
-    if (from === to) ratio = 1;
-    if (outEl) outEl.value = amt > 0 ? (amt * ratio).toFixed(4) : '';
-    if (rateEl) rateEl.textContent = '1 ' + from + ' ≈ ' + ratio.toFixed(4) + ' ' + to;
+    var rteEl = document.getElementById('ub-scr-swap-route');
     // Balance lookup
     try {
       if (typeof UB !== 'undefined' && UB.state && UB.state.assets) {
@@ -43612,6 +43617,61 @@ const UBScreen = (function() {
     // Button state
     var btn = document.querySelector('.ub-op-btn.swap');
     if (btn) btn.disabled = amt <= 0 || from === to;
+    if (amt <= 0 || from === to) {
+      if (outEl) outEl.value = '';
+      if (rateEl) rateEl.textContent = 'Rate: —';
+      if (rteEl) rteEl.textContent = '—';
+      return;
+    }
+    // Quote through the SAME canonical engine used at execution time
+    // (updateSwapRate → SwapAggregator.getBestQuote). Because _ubEVMOpActive is
+    // true in this drawer, the local pool is excluded (excludeLocal) and the
+    // displayed route is exactly the LI.FI / Tower route that will execute.
+    if (_ubSwapTimer) clearTimeout(_ubSwapTimer);
+    _ubSwapTimer = setTimeout(function(){ _ubQuoteSwap(from, to, amt); }, 450);
+  }
+
+  async function _ubQuoteSwap(from, to, amt) {
+    var seq = ++_ubSwapSeq;
+    if (typeof SWP === 'undefined') return;
+    // Map symbols → token indices (same mapping execSwap uses).
+    if (typeof TOKEN_LIST !== 'undefined') {
+      for (var i = 0; i < TOKEN_LIST.length; i++) {
+        if (TOKEN_LIST[i].sym === from) SWP.tokenInIdx = i;
+        if (TOKEN_LIST[i].sym === to) SWP.tokenOutIdx = i;
+      }
+    }
+    // Set the amount on the real swap input so updateSwapRate quotes it.
+    var swpAmt = document.getElementById('swap-amount-in');
+    if (!swpAmt) { swpAmt = document.createElement('input'); swpAmt.id = 'swap-amount-in'; swpAmt.type = 'hidden'; document.body.appendChild(swpAmt); }
+    swpAmt.value = String(amt);
+    if (typeof updateSwapRate === 'function') {
+      try {
+        if (typeof swapRateTimer !== 'undefined' && swapRateTimer) { clearTimeout(swapRateTimer); swapRateTimer = null; }
+        updateSwapRate();
+        await new Promise(function(r){ setTimeout(r, 650); });
+      } catch(_) {}
+    }
+    if (seq !== _ubSwapSeq) return;
+    var outEl = document.getElementById('ub-scr-swap-out');
+    var rateEl = document.getElementById('ub-scr-swap-rate');
+    var rteEl = document.getElementById('ub-scr-swap-route');
+    var q = SWP.lastQuote;
+    if (q && q.amtOut != null) {
+      if (outEl) outEl.value = q.amtOut.toFixed(4);
+      if (rateEl) rateEl.textContent = '1 ' + from + ' ≈ ' + (q.amtOut / amt).toFixed(4) + ' ' + to;
+      if (rteEl) rteEl.textContent = _ubSwapProviderLabel(q.source);
+    } else {
+      if (outEl) outEl.value = '';
+      if (rateEl) rateEl.textContent = 'No route';
+      if (rteEl) rteEl.textContent = 'No route';
+    }
+  }
+
+  function _ubSwapProviderLabel(source) {
+    if (source === 'lifi' || source === 'LI.FI') return 'LI.FI';
+    if (source === 'tower' || source === 'Tower' || source === 'Tower Exchange' || source === 'Tower Aggregator') return 'Tower';
+    return 'No route';
   }
 
   function _flipSwap() {
@@ -43633,7 +43693,7 @@ const UBScreen = (function() {
           fSel.innerHTML = opts; tSel.innerHTML = opts;
           // Default: from external (index 1), to Arc (index 0)
           fSel.value = (typeof xcFromIdx !== 'undefined' && xcFromIdx !== 0) ? xcFromIdx : 1;
-          tSel.value = 0; // Arc is default destination for Turbo
+          tSel.value = 0; // Arc Mainnet as the default destination
           fSel.addEventListener('change', _refreshBridge);
           tSel.addEventListener('change', _refreshBridge);
         }
@@ -43655,8 +43715,14 @@ const UBScreen = (function() {
       var sameChains = fIdx === tIdx;
       if (typeof CHAINS !== 'undefined') {
         var fc = CHAINS[fIdx], tc = CHAINS[tIdx];
-        var isTurbo = tc && tc.id === 'Arc_Mainnet';
-        var feePct = isTurbo ? 0.01 : 0.001;
+        // EVM-Wallet Unified Balance: routing is BridgeKitRouter → CCTP or LI.FI.
+        // Turbo Bridge is NEVER selected/displayed in this context.
+        var provider = 'lifi';
+        if (typeof BridgeKitRouter !== 'undefined' && typeof BridgeKitRouter.route === 'function' && fc && tc) {
+          provider = BridgeKitRouter.route(fc.chainId, tc.chainId, 'USDC').provider;
+        }
+        var isCctp = provider === 'cctp';
+        var feePct = 0.001;
         var fee = amt * feePct;
         var recv = Math.max(0, amt - fee);
         var feeEl = document.getElementById('ub-scr-br-fee');
@@ -43666,19 +43732,19 @@ const UBScreen = (function() {
         var engineEl = document.getElementById('ub-scr-br-engine');
         var routeLabel = document.getElementById('ub-scr-br-from-lbl');
         var routeTo = document.getElementById('ub-scr-br-to-lbl');
-        if (feeEl) feeEl.textContent = '~' + fee.toFixed(4) + ' USDC (' + (feePct*100).toFixed(2) + '%)';
-        if (timeEl) timeEl.textContent = isTurbo ? '10–30 sec (Turbo Instant)' : '~2 min (CCTP)';
-        if (recvEl) recvEl.textContent = recv.toFixed(4) + ' USDC';
+        if (feeEl) feeEl.textContent = isCctp ? '~' + fee.toFixed(4) + ' USDC (' + (feePct*100).toFixed(2) + '%)' : '—';
+        if (timeEl) timeEl.textContent = isCctp ? '~2 min (CCTP)' : 'LI.FI';
+        if (recvEl) recvEl.textContent = isCctp ? recv.toFixed(4) + ' USDC' : '—';
         if (badgeEl) {
-          badgeEl.textContent = isTurbo ? '⚡ Turbo' : 'CCTP';
-          badgeEl.style.background = isTurbo ? 'rgba(245,158,11,.14)' : 'rgba(45,212,191,.1)';
-          badgeEl.style.color = isTurbo ? 'var(--yellow)' : 'var(--teal)';
-          badgeEl.style.border = isTurbo ? '1px solid rgba(245,158,11,.3)' : '1px solid rgba(45,212,191,.2)';
+          badgeEl.textContent = isCctp ? 'CCTP' : 'LI.FI';
+          badgeEl.style.background = isCctp ? 'rgba(45,212,191,.1)' : 'rgba(148,163,184,.12)';
+          badgeEl.style.color = isCctp ? 'var(--teal)' : 'var(--muted2)';
+          badgeEl.style.border = isCctp ? '1px solid rgba(45,212,191,.2)' : '1px solid rgba(148,163,184,.3)';
         }
         if (engineEl) {
-          engineEl.textContent = isTurbo ? 'Turbo Engine' : 'Circle CCTP v2';
-          engineEl.style.background = isTurbo ? 'rgba(245,158,11,.1)' : 'rgba(45,212,191,.1)';
-          engineEl.style.color = isTurbo ? 'var(--yellow)' : 'var(--teal)';
+          engineEl.textContent = isCctp ? 'Circle CCTP v2' : 'LI.FI';
+          engineEl.style.background = isCctp ? 'rgba(45,212,191,.1)' : 'rgba(148,163,184,.1)';
+          engineEl.style.color = isCctp ? 'var(--teal)' : 'var(--muted2)';
         }
         if (routeLabel && fc) routeLabel.textContent = fc.name.split(' ')[0];
         if (routeTo && tc) routeTo.textContent = tc.name.split(' ')[0];
@@ -43754,6 +43820,9 @@ let _ubEVMOpActive = false;
 
 function _ubSetSource(v) {
   _ubSourceWallet = (v === 'evm') ? 'evm' : 'agent';
+  // Reset the EVM-op context whenever the source changes; the EVM drawer
+  // re-establishes it on open (showOperation), the Circle Agent panel does not.
+  _ubEVMOpActive = false;
   var mode = (typeof UB !== 'undefined' && UB.liveMode) ? UB.liveMode : 'send';
   if (mode === 'move') mode = 'bridge';
   try {
