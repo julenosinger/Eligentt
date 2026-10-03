@@ -43507,17 +43507,28 @@ const UBScreen = (function() {
       var swpAmt = document.getElementById('swap-amount-in');
       if (!swpAmt) { swpAmt = document.createElement('input'); swpAmt.id = 'swap-amount-in'; swpAmt.type = 'hidden'; document.body.appendChild(swpAmt); }
       swpAmt.value = amt.toString();
-      // Calculate route via updateSwapRate (skip if executing guard active)
+      // Re-quote via the SAME canonical engine the preview used
+      // (updateSwapRate → SwapAggregator.getBestQuote). In the EVM drawer the
+      // local pool is EXCLUDED (excludeLocal), so the executable route is
+      // LI.FI or Tower — never the local pool. Poll for the external quote to
+      // settle (the engine debounces internally and LI.FI/Tower resolve over
+      // the network); do NOT gate on the local pool route.
+      SWP._towerQuoteData = null;
       if (typeof updateSwapRate === 'function') {
         try {
           if (typeof swapRateTimer !== 'undefined' && swapRateTimer) { clearTimeout(swapRateTimer); swapRateTimer = null; }
-          await updateSwapRate();
-          await new Promise(function(r){ setTimeout(r, 600); });
+          updateSwapRate();
         } catch(_) {}
       }
-      if (!SWP.lastRoute || SWP.lastRoute.noLiq) {
+      var _ubSwapWait = 0;
+      while ((!SWP._towerQuoteData || !SWP._towerQuoteData.calldata) && _ubSwapWait < 6000) {
+        await new Promise(function(r){ setTimeout(r, 200); });
+        _ubSwapWait += 200;
+      }
+      // Gate on the external executable quote (LI.FI / Tower), never the local pool.
+      if (!SWP._towerQuoteData || !SWP._towerQuoteData.calldata) {
         setStep(0, 'No route available for ' + from + '→' + to, 'error');
-        showResult(false, 'No liquidity for this pair');
+        showResult(false, 'No route available for this pair');
         return;
       }
       setStep(0, 'Route found', 'done');

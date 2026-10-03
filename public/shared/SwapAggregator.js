@@ -181,8 +181,16 @@
         return false;
       }
     }
-    if (opts.fromChainId != null && (q.fromChainId == null || Number(q.fromChainId) !== Number(opts.fromChainId))) return false;
-    if (opts.toChainId != null && (q.toChainId == null || Number(q.toChainId) !== Number(opts.toChainId))) return false;
+    // Source/destination chain validation. LI.FI quotes carry explicit
+    // fromChainId/toChainId. Single-chain providers (Tower / local) carry only
+    // chainId; for a SAME-chain request, chainId stands in for both. A single
+    // chainId can never satisfy a CROSS-chain request (explicit from/to required).
+    var sameChainReq = opts.fromChainId != null && opts.toChainId != null &&
+      Number(opts.fromChainId) === Number(opts.toChainId);
+    var qFrom = q.fromChainId != null ? q.fromChainId : (sameChainReq ? q.chainId : null);
+    var qTo   = q.toChainId   != null ? q.toChainId   : (sameChainReq ? q.chainId : null);
+    if (opts.fromChainId != null && (qFrom == null || Number(qFrom) !== Number(opts.fromChainId))) return false;
+    if (opts.toChainId != null && (qTo == null || Number(qTo) !== Number(opts.toChainId))) return false;
     if (q.expiresAt != null && Date.now() > q.expiresAt) return false; // stale
     return true;
   }

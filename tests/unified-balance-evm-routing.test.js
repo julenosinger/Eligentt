@@ -215,6 +215,92 @@ describe('BridgeKitRouter — UB EVM routing matrix', () => {
   });
 });
 
+describe('SwapAggregator — LI.FI as a real selectable provider (UB EVM)', () => {
+  beforeEach(() => {
+    delete globalThis.TowerAdapter;
+    delete globalThis.LocalAdapter;
+    delete globalThis.LiFiAdapter;
+  });
+  afterEach(() => {
+    delete globalThis.TowerAdapter;
+    delete globalThis.LocalAdapter;
+    delete globalThis.LiFiAdapter;
+  });
+
+  const opts = { tokenIn: 'USDC', tokenOut: 'EURC', amountInRaw: 1000000n, slippageBps: 50, chainId: 5042, fromChainId: 5042, toChainId: 5042 };
+
+  it('LiFiAdapter.getQuote is called by SwapAggregator', async () => {
+    let lifiCalls = 0;
+    globalThis.TowerAdapter = { getQuote: async () => ({ source: 'tower', ok: false }) };
+    globalThis.LocalAdapter = { getQuote: async () => ({ source: 'local', ok: false }) };
+    globalThis.LiFiAdapter = { getQuote: async () => { lifiCalls++; return lifiQuote({ tokenIn: 'USDC', tokenOut: 'EURC', fromChainId: 5042, toChainId: 5042 }); } };
+    const agg = loadAggregator();
+    await agg.getBestQuote(Object.assign({}, opts, { excludeLocal: true }));
+    expect(lifiCalls).toBe(1);
+  });
+
+  it('a valid LI.FI quote enters candidates and can be bestExecutable', async () => {
+    globalThis.TowerAdapter = { getQuote: async () => ({ source: 'tower', ok: false }) };
+    globalThis.LocalAdapter = { getQuote: async () => ({ source: 'local', ok: false }) };
+    globalThis.LiFiAdapter = { getQuote: async () => lifiQuote({ tokenIn: 'USDC', tokenOut: 'EURC', fromChainId: 5042, toChainId: 5042 }) };
+    const agg = loadAggregator();
+    const r = await agg.getBestQuote(Object.assign({}, opts, { excludeLocal: true }));
+    expect(r.quotes.some(q => q.source === 'lifi' && q.ok === true)).toBe(true);
+    expect(r.bestExecutable).toBeTruthy();
+    expect(r.bestExecutable.source).toBe('lifi');
+  });
+
+  it('same-chain LI.FI works (fromChainId === toChainId)', async () => {
+    globalThis.TowerAdapter = { getQuote: async () => ({ source: 'tower', ok: false }) };
+    globalThis.LocalAdapter = { getQuote: async () => ({ source: 'local', ok: false }) };
+    globalThis.LiFiAdapter = { getQuote: async () => lifiQuote({ tokenIn: 'USDC', tokenOut: 'EURC', fromChainId: 5042, toChainId: 5042 }) };
+    const agg = loadAggregator();
+    const r = await agg.getBestQuote(Object.assign({}, opts, { excludeLocal: true }));
+    expect(r.bestExecutable.source).toBe('lifi');
+  });
+
+  it('Tower still works when LI.FI is unavailable (no LI.FI priority)', async () => {
+    globalThis.TowerAdapter = { getQuote: async () => towerQuote('tower', { calldata: '0xabcd', to: ADDR, spender: ADDR }) };
+    globalThis.LocalAdapter = { getQuote: async () => ({ source: 'local', ok: false }) };
+    globalThis.LiFiAdapter = { getQuote: async () => ({ source: 'lifi', ok: false }) };
+    const agg = loadAggregator();
+    const r = await agg.getBestQuote(Object.assign({}, opts, { excludeLocal: true }));
+    expect(r.bestExecutable.source).toBe('tower');
+  });
+});
+
+describe('Unified Balance EVM — LI.FI execution chain (source inspection)', () => {
+  it('execSwap gates on the external quote (LI.FI/Tower), never the local pool route', () => {
+    const fn = html.slice(html.indexOf('async function execSwap()'), html.indexOf('async function execBridge()'));
+    expect(fn).toContain('SWP._towerQuoteData');
+    expect(fn).toContain('SWP._towerQuoteData.calldata');
+    expect(fn).not.toContain('SWP.lastRoute || SWP.lastRoute.noLiq');
+  });
+
+  it('executeSwap dispatches a selected LI.FI quote to swpExecuteLiFi', () => {
+    const start = html.indexOf('async function executeSwap()');
+    const fn = html.slice(start, html.indexOf('function swpAddHistory', start));
+    expect(fn).toContain("SWP._towerQuoteData.source === 'lifi'");
+    expect(fn).toContain('swpExecuteLiFi(');
+    expect(fn).toContain('swpExecuteTowerOnly(');
+  });
+
+  it('swpExecuteLiFi executes the LI.FI calldata/to/value after validation', () => {
+    const fn = html.slice(html.indexOf('async function swpExecuteLiFi'), html.indexOf('// ── Execute Swap'));
+    expect(fn).toContain('LiFiAdapter.validateRoute');
+    expect(fn).toContain('q.calldata');
+    expect(fn).toContain('q.to');
+    expect(fn).toContain('q.value');
+    expect(fn).toContain('signer.sendTransaction');
+  });
+
+  it('updateSwapRate records the selected LI.FI provider and preserves its quote data', () => {
+    const fn = html.slice(html.indexOf('async function updateSwapRate'), html.indexOf('function calcRoutePriceImpact'));
+    expect(fn).toContain("source = 'LI.FI'");
+    expect(fn).toContain('SWP._towerQuoteData = selected.calldata ? selected : null');
+  });
+});
+
 describe('Circle AI Smart Wallet — flow unchanged', () => {
   it('agent panel still uses its own route label (Elligentt Pool / Direct Pool)', () => {
     expect(html).toContain('function _ubOpenAgentPanel');
