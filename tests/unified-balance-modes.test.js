@@ -110,17 +110,16 @@ describe('Unified Balance — mode wiring (no page navigation)', () => {
     expect(html).toContain('function exitUnifiedBalanceMode');
   });
 
-  it('enterUnifiedBalanceMode routes through Circle Agent / AgentCapabilityRouter', () => {
+  it('enterUnifiedBalanceMode opens the operation drawer (real flows, never page navigation)', () => {
     // Extract the body of enterUnifiedBalanceMode up to exitUnifiedBalanceMode
     const fn = html.slice(html.indexOf('function enterUnifiedBalanceMode'), html.indexOf('function exitUnifiedBalanceMode'));
-    // Must update UBLive and UB.liveMode (presentation layer)
-    expect(fn).toContain('UBLive.setMode');
-    expect(fn).toContain('UB.liveMode');
-    // Must open the Agent-wired panel (not UBScreen directly, not showPage)
+    // Quick Actions open the drawer via UBScreen (real handlers), never showPage.
+    expect(fn).toContain('UBScreen');
+    expect(fn).not.toContain('showPage');
+    // Circle Agent stays available as an explicit option (not the mandatory entry).
     expect(fn).toContain('_ubOpenAgentPanel');
-    // UBScreen.openSend/openSwap/openBridge are NOT called here —
-    // they are used by UBAction (asset-row buttons) which is a separate flow.
-    // enterUnifiedBalanceMode routes through AgentCapabilityRouter instead.
+    // Fund source defaults to the real EVM flows.
+    expect(html).toContain("let _ubSourceWallet = 'evm'");
   });
 
   it('_ubOpenAgentPanel and _ubAgentPreview are defined (Circle Agent wiring)', () => {

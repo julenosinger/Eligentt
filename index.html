@@ -10112,6 +10112,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
                display:flex works even when ub-live-screen is hidden. -->
           <div class="ub-op-panel" id="ub-op-panel" style="display:none;position:fixed;top:0;right:0;bottom:0;width:420px;max-width:92vw;z-index:1200;box-shadow:-4px 0 24px rgba(0,0,0,.55);flex-direction:column">
             <div class="ub-op-panel-header"><span id="ub-op-panel-title">Operation</span><span class="ub-op-close" onclick="exitUnifiedBalanceMode();if(typeof UBScreen!=='undefined')UBScreen.hideOperation()"><i class="ti ti-x"></i></span></div>
+            <div id="ub-source-row" style="padding:10px 14px;border-bottom:1px solid rgba(255,255,255,.08);background:rgba(0,0,0,.12)"></div>
             <div class="ub-op-panel-form" id="ub-op-panel-form"></div>
             <div class="ub-op-panel-progress" id="ub-op-panel-progress" style="display:none"><div class="ub-op-steps" id="ub-op-steps"></div></div>
           </div>
@@ -40727,6 +40728,8 @@ function ubRenderAll() {
   ubRenderActivity();
   ubRenderHistory();
   ubRenderNetworks();
+  // Keep the operation drawer's "From Wallet" selector fresh (balances + selection).
+  try { if (typeof _ubInjectSourceSelector === 'function') _ubInjectSourceSelector(); } catch(_) {}
   // Take financial memory snapshot
   try { FinancialMemory.takeSnapshot(); } catch(_) {}
   // Global Live Operations Center: init once + refresh indicators/stream.
@@ -43735,10 +43738,10 @@ var UB_ACTION_MODES = ['send', 'swap', 'move', 'bridge'];
 
 // ── UB Fund Source — EVM Wallet vs Agent Wallet (Circle Agent) ──
 // Persistent selector shown in the operation panel header. Choosing a source
-// only changes the origin of funds + signer used; the Agent default is
-// preserved, and the EVM option now routes to the existing EVM flows
-// (UBScreen execSend/execSwap/execBridge → saExecuteSend/executeSwap/xcExecuteSend).
-let _ubSourceWallet = 'agent'; // 'agent' | 'evm'
+// only changes the origin of funds + signer used. The REAL EVM flows are the
+// default; Circle Agent remains available as an explicit option (never the
+// mandatory content of the operation drawer).
+let _ubSourceWallet = 'evm'; // 'evm' | 'agent'
 
 function _ubSetSource(v) {
   _ubSourceWallet = (v === 'evm') ? 'evm' : 'agent';
@@ -43755,23 +43758,41 @@ function _ubSetSource(v) {
       _ubOpenAgentPanel(mode === 'bridge' ? 'move' : mode);
     }
   } catch(_) {}
+  _ubInjectSourceSelector();
 }
 
-// Inject a persistent Fund Source selector into the UB operation panel header
-// (visible for both Agent and EVM operation forms). Idempotent.
+// Render the "From Wallet" selector (Circle AI Smart Wallet vs EVM Wallet) with
+// real balances into #ub-source-row, inside the operation drawer. Re-rendered on
+// every source change and every UB refresh so balances + selection stay fresh.
 function _ubInjectSourceSelector() {
-  var header = document.getElementById('ub-op-panel-header');
-  if (!header || document.getElementById('ub-source-sel')) return;
+  var row = document.getElementById('ub-source-row');
+  if (!row) return;
   try {
-    var sel = document.createElement('select');
-    sel.id = 'ub-source-sel';
-    sel.style.cssText = 'margin-left:auto;margin-right:8px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);border-radius:6px;color:var(--text);font-size:9px;padding:2px 6px;cursor:pointer;max-width:120px';
-    sel.innerHTML = '<option value="agent">Agent Wallet</option><option value="evm">EVM Wallet</option>';
-    sel.value = _ubSourceWallet;
-    sel.addEventListener('change', function(){ _ubSetSource(sel.value); });
-    var close = header.querySelector('.ub-op-close');
-    if (close) header.insertBefore(sel, close);
-    else header.appendChild(sel);
+    var circleBal = 0, evmBal = 0;
+    if (typeof UB !== 'undefined' && UB.state && UB.state.assets) {
+      for (var i = 0; i < UB.state.assets.length; i++) {
+        var a = UB.state.assets[i];
+        if (a.usd == null) continue;
+        if (a.source === 'agent') circleBal += a.usd;
+        else evmBal += a.usd;
+      }
+    }
+    var circleAddr = _ubGetCircleAddr();
+    var evmAddr = (typeof walletAddress !== 'undefined' && walletAddress) ? walletAddress : '';
+    function short(ad){ return ad ? (ad.slice(0,6) + '…' + ad.slice(-4)) : '—'; }
+    function card(key, label, addr, bal, selected, dot, border) {
+      return '<div onclick="_ubSetSource(\'' + key + '\')" style="display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:7px;cursor:pointer;border:1px solid ' + (selected ? border : 'var(--border)') + ';background:' + (selected ? 'rgba(6,247,233,.06)' : 'rgba(0,0,0,.15)') + '">' +
+        '<span style="width:9px;height:9px;border-radius:50%;border:2px solid ' + (selected ? dot : 'var(--muted2)') + ';background:' + (selected ? dot : 'transparent') + ';flex-shrink:0"></span>' +
+        '<div style="flex:1;min-width:0"><div style="font-size:9px;font-weight:600;color:var(--text)">' + label + '</div><div style="font-size:7px;color:var(--muted2);font-family:JetBrains Mono,monospace">' + short(addr) + '</div></div>' +
+        '<div style="font-size:9px;font-weight:700;color:var(--teal);font-family:JetBrains Mono,monospace">' + (bal > 0 ? '$' + bal.toFixed(2) : '—') + '</div>' +
+        '</div>';
+    }
+    row.innerHTML =
+      '<div style="font-size:7.5px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted2);margin-bottom:5px">From Wallet</div>' +
+      '<div style="display:flex;flex-direction:column;gap:5px">' +
+        card('agent', 'Circle AI Smart Wallet', circleAddr, circleBal, _ubSourceWallet === 'agent', '#2775ca', 'rgba(39,117,202,.4)') +
+        card('evm', 'EVM Wallet', evmAddr, evmBal, _ubSourceWallet === 'evm', '#06F7E9', 'rgba(6,247,233,.4)') +
+      '</div>';
   } catch(_) {}
 }
 
@@ -43784,7 +43805,9 @@ function enterUnifiedBalanceMode(mode) {
   try { if (typeof UBLive !== 'undefined') { UBLive.init(); UBLive.setMode(mode); } } catch (_) {}
   // Ensure the persistent fund-source selector exists
   _ubInjectSourceSelector();
-  // Route to Agent-wired panel (default) or EVM panel based on the chosen source.
+  // Open the operation DRAWER (never page navigation) with the REAL flows —
+  // UBScreen delegates to saExecuteSend / executeSwap / xcExecuteSend. Circle
+  // Agent remains an explicit option via the fund-source selector.
   if (_ubSourceWallet === 'evm') {
     try {
       if (typeof UBScreen !== 'undefined') {
