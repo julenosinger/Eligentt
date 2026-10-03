@@ -198,14 +198,19 @@
     opts = opts || {};
     var timeoutMs = opts.timeoutMs != null ? Number(opts.timeoutMs) : 8000;
     var hasLocalPool = opts.hasLocalPool === true;
+    // excludeLocal: when true the local pool is NOT quoted at all (used by the
+    // Unified Balance EVM-Wallet flow, which must route through LI.FI/Tower only).
+    var excludeLocal = opts.excludeLocal === true;
 
     var towerPromise = (typeof TowerAdapter !== 'undefined' && TowerAdapter.getQuote)
       ? TowerAdapter.getQuote(opts)
       : Promise.resolve({ source: 'tower', ok: false, error: 'TOWER_UNAVAILABLE' });
 
-    var localPromise = (typeof LocalAdapter !== 'undefined' && LocalAdapter.getQuote)
-      ? LocalAdapter.getQuote(opts)
-      : Promise.resolve({ source: 'local', ok: false, error: 'LOCAL_UNAVAILABLE' });
+    var localPromise = excludeLocal
+      ? Promise.resolve({ source: 'local', ok: false, error: 'LOCAL_EXCLUDED' })
+      : ((typeof LocalAdapter !== 'undefined' && LocalAdapter.getQuote)
+        ? LocalAdapter.getQuote(opts)
+        : Promise.resolve({ source: 'local', ok: false, error: 'LOCAL_UNAVAILABLE' }));
 
     // LI.FI accepts token objects (with .address) or symbol strings.
     // When a token object is provided it resolves directly by address, bypassing

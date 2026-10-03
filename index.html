@@ -20580,7 +20580,7 @@ async function updateSwapRate() {
       // QUOTE EVERYTHING: Tower is ALWAYS quoted, regardless of local pool existence.
       // A local pool (or its absence) never blocks the Tower quote — it only affects
       // which routes are EXECUTABLE (hasLocalPool). No early return here.
-      const hasLocalPool = !!(route && !route.noLiq);
+      const hasLocalPool = _ubEVMOpActive ? false : !!(route && !route.noLiq);
 
       // ── Canonical raw quote (BigInt) — the ONLY source for expectedOut/minOut ──
       const amountInRaw = (typeof SwapMath !== 'undefined' && SwapMath.parseUnits) ? SwapMath.parseUnits(String(amtIn), tIn.decimals) : null;
@@ -20621,6 +20621,7 @@ async function updateSwapRate() {
             toChainId: aggToChain,
             userAddress: walletAddress || null,
             hasLocalPool: hasLocalPool,
+            excludeLocal: _ubEVMOpActive === true,
           });
           SWP.aggQuotes = agg.quotes || [];
           SWP.aggBest = agg.best || null;                    // bestQuote (referência — maior expectedOutRaw)
@@ -43485,6 +43486,7 @@ const UBScreen = (function() {
       if (typeof showPage === 'function') showPage('swap');
       hideOperation(); return;
     }
+    _ubEVMOpActive = true; // EVM drawer: exclude local pool (LI.FI/Tower only)
     showProgress('Swapping ' + from + ' → ' + to + '...');
     setStep(0, 'Configuring swap route', 'active');
     try {
@@ -43521,6 +43523,8 @@ const UBScreen = (function() {
     } catch(e) {
       setStep(1, (e.shortMessage || e.message || 'Failed'), 'error');
       showResult(false, e.shortMessage || 'Swap failed');
+    } finally {
+      _ubEVMOpActive = false;
     }
   }
 
@@ -43533,25 +43537,23 @@ const UBScreen = (function() {
     var tIdx = tSel ? (isNaN(parseInt(tSel.value)) ? 0 : parseInt(tSel.value)) : 0;
     if (amt <= 0) { alert('Enter amount'); return; }
     if (fIdx === tIdx) { alert('Different chains required'); return; }
-    if (typeof xcExecuteSend !== 'function') {
-      if (typeof showPage === 'function') { showPage('xchain'); hideOperation(); }
+    if (typeof executeBridgeOrTurbo !== 'function') {
+      if (typeof showPage === 'function') { showPage('bridge'); hideOperation(); }
       return;
     }
+    _ubEVMOpActive = true; // EVM drawer: CCTP/LI.FI routing only (no Turbo)
     showProgress('Moving ' + amt + ' USDC...');
     setStep(0, 'Setting up cross-chain route', 'active');
     try {
-      // Set cross-chain globals
-      if (typeof xcFromIdx !== 'undefined') xcFromIdx = fIdx;
-      if (typeof xcToIdx !== 'undefined') xcToIdx = tIdx;
-      if (typeof xcToken !== 'undefined') xcToken = 'USDC';
-      if (typeof xcApplyChains === 'function') xcApplyChains();
-      // Set amount on real xc page input
-      var xcAmt = document.getElementById('xc-amount');
-      if (!xcAmt) { xcAmt = document.createElement('input'); xcAmt.id = 'xc-amount'; xcAmt.type = 'hidden'; document.body.appendChild(xcAmt); }
-      xcAmt.value = amt.toString();
-      // Set recipient to own wallet
-      var xcRecip = document.getElementById('xc-recipient');
-      if (xcRecip) xcRecip.value = walletAddress || '';
+      // Use the real Bridge routing (BridgeKitRouter → CCTP / LI.FI), never the
+      // Turbo auto-route.
+      if (typeof bridgeFromIdx !== 'undefined') bridgeFromIdx = fIdx;
+      if (typeof bridgeToIdx !== 'undefined') bridgeToIdx = tIdx;
+      if (typeof applyBridgeChains === 'function') applyBridgeChains();
+      var bAmt = document.getElementById('bridge-amount');
+      if (!bAmt) { bAmt = document.createElement('input'); bAmt.id = 'bridge-amount'; bAmt.type = 'hidden'; document.body.appendChild(bAmt); }
+      bAmt.value = amt.toString();
+      if (typeof _brsClearRoutes === 'function') _brsClearRoutes();
       // Ensure _walletOpInProgress is clear
       if (typeof _walletOpInProgress !== 'undefined' && _walletOpInProgress) {
         setStep(0, 'Another operation in progress — wait and retry', 'error');
@@ -43560,13 +43562,15 @@ const UBScreen = (function() {
       }
       setStep(0, 'Route configured', 'done');
       setStep(1, 'Confirm bridge in wallet...', 'active');
-      await xcExecuteSend();
+      await executeBridgeOrTurbo();
       setStep(1, 'Move completed', 'done');
       setStep(2, 'Funds delivered to destination', 'done');
       showResult(true, 'Moved ' + amt + ' USDC');
     } catch(e) {
       setStep(1, (e.shortMessage || e.message || 'Failed'), 'error');
       showResult(false, e.shortMessage || 'Move failed');
+    } finally {
+      _ubEVMOpActive = false;
     }
   }
 
@@ -43742,6 +43746,11 @@ var UB_ACTION_MODES = ['send', 'swap', 'move', 'bridge'];
 // default; Circle Agent remains available as an explicit option (never the
 // mandatory content of the operation drawer).
 let _ubSourceWallet = 'evm'; // 'evm' | 'agent'
+
+// True while an EVM-Wallet operation is executing from the Unified Balance
+// drawer. When true: swap excludes the local pool (LI.FI/Tower only) and bridge
+// skips the Turbo auto-route (CCTP / LI.FI only). Circle Agent flow is untouched.
+let _ubEVMOpActive = false;
 
 function _ubSetSource(v) {
   _ubSourceWallet = (v === 'evm') ? 'evm' : 'agent';

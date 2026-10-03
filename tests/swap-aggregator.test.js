@@ -395,7 +395,7 @@ describe('index.html — structural invariants', () => {
     expect(srcHtml).toContain("source = 'Tower Exchange'");
     expect(srcHtml).toContain("source = 'Elligentt Pool'");
     expect(srcHtml).toContain('agg.bestExecutable');
-    expect(srcHtml).toContain('const hasLocalPool = !!(route && !route.noLiq)');
+    expect(srcHtml).toContain('const hasLocalPool = _ubEVMOpActive ? false : !!(route && !route.noLiq)');
     expect(srcHtml).toContain('chainId: 5042');
     expect(srcHtml).toContain('resolveSelection');
     expect(srcHtml).toContain('SWP._towerQuoteData = selected.calldata ? selected : null');
