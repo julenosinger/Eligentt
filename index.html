@@ -43309,6 +43309,10 @@ const UBScreen = (function() {
         setTimeout(function(){
           var amtEl = document.getElementById('ub-scr-swap-amt');
           if (amtEl) amtEl.addEventListener('input', UBScreen._refreshSwap);
+          var fromSel = document.getElementById('ub-scr-swap-from');
+          var toSel = document.getElementById('ub-scr-swap-to');
+          if (fromSel) fromSel.addEventListener('change', UBScreen._refreshSwap);
+          if (toSel) toSel.addEventListener('change', UBScreen._refreshSwap);
         }, 50);
     } else if (op === 'bridge') {
         title.innerHTML = '<i class="ti ti-topology-star-3" style="color:var(--teal);margin-right:4px"></i>Move Cross-Chain <span id="ub-scr-br-badge" style="font-size:7.5px;padding:2px 6px;border-radius:3px;margin-left:4px"></span>';
@@ -43545,6 +43549,22 @@ const UBScreen = (function() {
     }
   }
 
+  // ── Bridge completion tracking — reuses BridgeEngine's real lifecycle ──
+  // BridgeEngine emits `bridgeCompleted` ONLY when funds are delivered on the
+  // destination chain (and `bridgeFailed` on error). These are the single source
+  // of truth for "Done" in the drawer — never wallet-opened / signature / tx-hash.
+  var _ubBridgeOutcome = null;
+  var _ubBridgeWatching = false;
+
+  function _ubBridgeEnsureWatcher() {
+    if (_ubBridgeWatching) return;
+    _ubBridgeWatching = true;
+    if (typeof BridgeEngine !== 'undefined' && BridgeEngine.watch) {
+      BridgeEngine.watch('bridgeCompleted', function() { _ubBridgeOutcome = { ok: true }; });
+      BridgeEngine.watch('bridgeFailed', function(e) { _ubBridgeOutcome = { ok: false, err: (e && e.error) || 'Bridge failed' }; });
+    }
+  }
+
   async function execBridge() {
     if (!walletAddress || !signer) { alert('Connect wallet first'); return; }
     var amt = parseFloat(document.getElementById('ub-scr-bridge-amt').value) || 0;
@@ -43578,10 +43598,49 @@ const UBScreen = (function() {
         return;
       }
       setStep(0, 'Route configured', 'done');
-      setStep(1, 'Confirm bridge in wallet...', 'active');
-      await executeBridgeOrTurbo();
-      setStep(1, 'Move completed', 'done');
-      setStep(2, 'Funds delivered to destination', 'done');
+      setStep(1, 'Waiting for wallet confirmation', 'active');
+      setStep(2, 'Bridge processing', 'active');
+
+      // Start the REAL bridge flow. executeBridgeOrTurbo() only STARTS it — the
+      // async CCTP / LI.FI execution completes in the background and reports its
+      // real lifecycle through BridgeEngine (bridgeCompleted / bridgeFailed).
+      _ubBridgeEnsureWatcher();
+      _ubBridgeOutcome = null;
+      try {
+        executeBridgeOrTurbo();
+      } catch(e) {
+        _ubBridgeOutcome = { ok: false, err: (e.shortMessage || e.message || 'Bridge failed') };
+      }
+
+      // Await the real lifecycle (destination delivery). "Done" is NEVER driven
+      // by wallet-opened / signature / tx-hash / source-tx-mined. A bridge that
+      // is still settling simply stays pending.
+      var waitedMs = 0;
+      while (_ubBridgeOutcome === null && waitedMs < 1800000) {
+        await new Promise(function(r){ setTimeout(r, 250); });
+        waitedMs += 250;
+      }
+
+      // If the drawer was closed (or a different operation opened) while the
+      // bridge settled, do NOT clobber the current drawer UI — the bridge's own
+      // history / recovery already recorded the real outcome.
+      if (_currentOp !== 'bridge') return;
+
+      if (_ubBridgeOutcome === null) {
+        // Long-lived bridge still settling — remain pending (never a false Done).
+        setStep(1, 'Transaction submitted', 'done');
+        setStep(2, 'Bridge processing — still settling', 'active');
+        return;
+      }
+      if (!_ubBridgeOutcome.ok) {
+        setStep(1, 'Failed', 'error');
+        setStep(2, _ubBridgeOutcome.err || 'Bridge failed', 'error');
+        showResult(false, _ubBridgeOutcome.err || 'Move failed');
+        return;
+      }
+      setStep(1, 'Transaction submitted', 'done');
+      setStep(2, 'Bridge processing', 'done');
+      setStep(3, 'Funds delivered to destination', 'done');
       showResult(true, 'Moved ' + amt + ' USDC');
     } catch(e) {
       setStep(1, (e.shortMessage || e.message || 'Failed'), 'error');
@@ -43645,34 +43704,93 @@ const UBScreen = (function() {
   async function _ubQuoteSwap(from, to, amt) {
     var seq = ++_ubSwapSeq;
     if (typeof SWP === 'undefined') return;
-    // Map symbols → token indices (same mapping execSwap uses).
-    if (typeof TOKEN_LIST !== 'undefined') {
-      for (var i = 0; i < TOKEN_LIST.length; i++) {
-        if (TOKEN_LIST[i].sym === from) SWP.tokenInIdx = i;
-        if (TOKEN_LIST[i].sym === to) SWP.tokenOutIdx = i;
-      }
-    }
-    // Set the amount on the real swap input so updateSwapRate quotes it.
-    var swpAmt = document.getElementById('swap-amount-in');
-    if (!swpAmt) { swpAmt = document.createElement('input'); swpAmt.id = 'swap-amount-in'; swpAmt.type = 'hidden'; document.body.appendChild(swpAmt); }
-    swpAmt.value = String(amt);
-    if (typeof updateSwapRate === 'function') {
-      try {
-        if (typeof swapRateTimer !== 'undefined' && swapRateTimer) { clearTimeout(swapRateTimer); swapRateTimer = null; }
-        updateSwapRate();
-        await new Promise(function(r){ setTimeout(r, 650); });
-      } catch(_) {}
-    }
-    if (seq !== _ubSwapSeq) return;
     var outEl = document.getElementById('ub-scr-swap-out');
     var rateEl = document.getElementById('ub-scr-swap-rate');
     var rteEl = document.getElementById('ub-scr-swap-route');
-    var q = SWP.lastQuote;
-    if (q && q.amtOut != null) {
-      if (outEl) outEl.value = q.amtOut.toFixed(4);
-      if (rateEl) rateEl.textContent = '1 ' + from + ' ≈ ' + (q.amtOut / amt).toFixed(4) + ' ' + to;
-      if (rteEl) rteEl.textContent = _ubSwapProviderLabel(q.source);
+
+    // Map symbols → token objects (USDC/EURC → address + decimals).
+    var ti2 = null, to2 = null;
+    if (typeof TOKEN_LIST !== 'undefined') {
+      for (var i = 0; i < TOKEN_LIST.length; i++) {
+        if (TOKEN_LIST[i].sym === from) { ti2 = TOKEN_LIST[i]; SWP.tokenInIdx = i; }
+        if (TOKEN_LIST[i].sym === to)   { to2 = TOKEN_LIST[i]; SWP.tokenOutIdx = i; }
+      }
+    }
+    if (!ti2 || !to2) return;
+
+    // Loading state while the real quote is in flight.
+    if (outEl) outEl.value = 'Loading...';
+    if (rateEl) rateEl.textContent = 'Rate: —';
+    if (rteEl) rteEl.textContent = '—';
+
+    // Convert the human amount to raw units with the token's OWN decimals
+    // (USDC/EURC = 6 → 1 USDC = 1,000,000 raw units).
+    var amountInRaw = (typeof SwapMath !== 'undefined' && SwapMath.parseUnits)
+      ? SwapMath.parseUnits(String(amt), ti2.decimals)
+      : null;
+    if (amountInRaw === null || amountInRaw <= 0n) return;
+
+    // Same-chain Arc Mainnet (the UB EVM drawer has no chain selector).
+    var chain = (SWP.fromChainId || (typeof activeChainId !== 'undefined' ? activeChainId : 5042));
+
+    // Reuse the SAME aggregator as the canonical swap flow. In the EVM drawer the
+    // local pool is excluded (LI.FI / Tower only) — same rules as execution.
+    var agg = null;
+    if (typeof SwapAggregator !== 'undefined' && typeof SwapAggregator.getBestQuote === 'function') {
+      try {
+        agg = await SwapAggregator.getBestQuote({
+          tokenIn: ti2.sym,
+          tokenOut: to2.sym,
+          amountInRaw: amountInRaw,
+          slippageBps: Math.round((SWP.slippage || 0.5) * 100),
+          chainId: chain,
+          fromChainId: chain,
+          toChainId: chain,
+          userAddress: (typeof walletAddress !== 'undefined' && walletAddress) ? walletAddress : null,
+          hasLocalPool: false,
+          excludeLocal: true,
+        });
+      } catch(e) { agg = null; }
+    }
+    if (seq !== _ubSwapSeq) return; // stale response must never overwrite a newer one
+
+    var selected = (agg && agg.bestExecutable) ? agg.bestExecutable : null;
+    SWP.aggQuotes = agg ? (agg.quotes || []) : [];
+    SWP.aggBestExecutable = selected;
+    SWP.selectedSource = selected ? selected.source : null;
+
+    if (selected && (selected.source === 'lifi' || selected.source === 'tower')) {
+      var outRaw = selected.expectedOutRaw;
+      var out = Number((typeof SwapMath !== 'undefined' && SwapMath.formatUnits)
+        ? SwapMath.formatUnits(outRaw, to2.decimals)
+        : (typeof ethers !== 'undefined' ? ethers.formatUnits(outRaw, to2.decimals) : 0));
+      var provider = _ubSwapProviderLabel(selected.source);
+      SWP._towerQuoteData = selected.calldata ? selected : null;
+      SWP.lastQuote = {
+        amtIn: amt,
+        amtOut: out,
+        minReceived: selected.minOutRaw != null
+          ? Number((typeof SwapMath !== 'undefined' && SwapMath.formatUnits)
+            ? SwapMath.formatUnits(selected.minOutRaw, to2.decimals)
+            : (typeof ethers !== 'undefined' ? ethers.formatUnits(selected.minOutRaw, to2.decimals) : 0))
+          : out,
+        rate: out / amt,
+        priceImpact: selected.priceImpactBps != null ? (selected.priceImpactBps / 100) : null,
+        feeAmt: amt * (selected.feeBps != null ? (selected.feeBps / 10000) : 0),
+        source: selected.source === 'lifi' ? 'LI.FI' : 'Tower Exchange',
+        tIn: ti2, tOut: to2, route: null,
+        totalFee: selected.feeBps,
+        expectedOutRaw: outRaw,
+        amountInRaw: amountInRaw,
+        quotedAt: Date.now(),
+        stateUpdatedAt: null,
+      };
+      if (outEl) outEl.value = out.toFixed(4);
+      if (rateEl) rateEl.textContent = '1 ' + from + ' ≈ ' + (out / amt).toFixed(4) + ' ' + to;
+      if (rteEl) rteEl.textContent = provider;
     } else {
+      SWP._towerQuoteData = null;
+      SWP.lastQuote = null;
       if (outEl) outEl.value = '';
       if (rateEl) rateEl.textContent = 'No route';
       if (rteEl) rteEl.textContent = 'No route';

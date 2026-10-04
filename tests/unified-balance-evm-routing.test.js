@@ -161,10 +161,26 @@ describe('Unified Balance EVM — drawer context (source inspection)', () => {
     expect(fn).not.toContain('Direct Pool');
   });
 
-  it('swap drawer quotes through the canonical engine (updateSwapRate → SwapAggregator)', () => {
+  it('swap drawer quotes directly through SwapAggregator (excludeLocal, no fixed wait)', () => {
     const fn = html.slice(html.indexOf('async function _ubQuoteSwap'), html.indexOf('function _ubSwapProviderLabel'));
-    expect(fn).toContain('updateSwapRate()');
+    expect(fn).toContain('SwapAggregator.getBestQuote');
+    expect(fn).toContain('excludeLocal: true');
     expect(fn).toContain('SWP.lastQuote');
+    expect(fn).not.toContain('updateSwapRate()');
+  });
+
+  it('swap drawer converts the human amount to raw units with token decimals', () => {
+    const fn = html.slice(html.indexOf('async function _ubQuoteSwap'), html.indexOf('function _ubSwapProviderLabel'));
+    expect(fn).toContain('SwapMath.parseUnits');
+    expect(fn).toContain('ti2.decimals');
+    expect(fn).toContain('SwapMath.formatUnits');
+    expect(fn).toContain('to2.decimals');
+  });
+
+  it('swap drawer refreshes on amount AND token change', () => {
+    expect(html).toContain("amtEl.addEventListener('input', UBScreen._refreshSwap)");
+    expect(html).toContain("fromSel.addEventListener('change', UBScreen._refreshSwap)");
+    expect(html).toContain("toSel.addEventListener('change', UBScreen._refreshSwap)");
   });
 });
 
@@ -298,6 +314,38 @@ describe('Unified Balance EVM — LI.FI execution chain (source inspection)', ()
     const fn = html.slice(html.indexOf('async function updateSwapRate'), html.indexOf('function calcRoutePriceImpact'));
     expect(fn).toContain("source = 'LI.FI'");
     expect(fn).toContain('SWP._towerQuoteData = selected.calldata ? selected : null');
+  });
+});
+
+describe('Unified Balance EVM — bridge completion gating (source inspection)', () => {
+  const wfn = html.slice(html.indexOf('function _ubBridgeEnsureWatcher'), html.indexOf('async function execBridge()'));
+  const start = html.indexOf('async function execBridge()');
+  const fn = html.slice(start, html.indexOf('if (document.readyState', start));
+
+  it('reuses BridgeEngine lifecycle (bridgeCompleted / bridgeFailed) as the Done source of truth', () => {
+    expect(wfn).toContain("BridgeEngine.watch('bridgeCompleted'");
+    expect(wfn).toContain("BridgeEngine.watch('bridgeFailed'");
+  });
+
+  it('shows in-progress steps while the bridge settles (no premature Done)', () => {
+    expect(fn).toContain("setStep(1, 'Waiting for wallet confirmation', 'active')");
+    expect(fn).toContain("setStep(2, 'Bridge processing', 'active')");
+  });
+
+  it('only shows "Moved ..." (success/Done) AFTER the bridge outcome is confirmed', () => {
+    const okIdx = fn.indexOf('_ubBridgeOutcome.ok');
+    const movedIdx = fn.indexOf("showResult(true, 'Moved ' + amt + ' USDC')");
+    expect(okIdx).toBeGreaterThan(-1);
+    expect(movedIdx).toBeGreaterThan(-1);
+    expect(movedIdx).toBeGreaterThan(okIdx);
+  });
+
+  it('never marks the operation complete immediately after executeBridgeOrTurbo', () => {
+    expect(fn).not.toContain("setStep(1, 'Move completed', 'done')");
+  });
+
+  it('errors surface as Failed (not as a success result)', () => {
+    expect(fn).toContain("showResult(false, _ubBridgeOutcome.err || 'Move failed')");
   });
 });
 
