@@ -43698,7 +43698,15 @@ const UBScreen = (function() {
     // true in this drawer, the local pool is excluded (excludeLocal) and the
     // displayed route is exactly the LI.FI / Tower route that will execute.
     if (_ubSwapTimer) clearTimeout(_ubSwapTimer);
-    _ubSwapTimer = setTimeout(function(){ _ubQuoteSwap(from, to, amt); }, 450);
+    _ubSwapTimer = setTimeout(function(){
+      // Guarantee the async quote always terminates (success / no-route / error)
+      // — never leave the drawer stuck in Loading.
+      _ubQuoteSwap(from, to, amt).catch(function(){
+        if (outEl) outEl.value = '—';
+        if (rateEl) rateEl.textContent = 'No route available';
+        if (rteEl) rteEl.textContent = 'No route';
+      });
+    }, 450);
   }
 
   async function _ubQuoteSwap(from, to, amt) {
@@ -43716,85 +43724,105 @@ const UBScreen = (function() {
         if (TOKEN_LIST[i].sym === to)   { to2 = TOKEN_LIST[i]; SWP.tokenOutIdx = i; }
       }
     }
-    if (!ti2 || !to2) return;
+    if (!ti2 || !to2) { _ubSwapNoRoute(outEl, rateEl, rteEl); return; }
 
-    // Loading state while the real quote is in flight.
+    // Convert the human amount to raw units with the token's OWN decimals
+    // (USDC/EURC = 6 → 1 USDC = 1,000,000 raw units). Validate BEFORE entering
+    // the loading state so an invalid amount can never leave it stuck.
+    var amountInRaw = null;
+    try {
+      amountInRaw = (typeof SwapMath !== 'undefined' && SwapMath.parseUnits)
+        ? SwapMath.parseUnits(String(amt), ti2.decimals)
+        : null;
+    } catch(_) { amountInRaw = null; }
+    if (amountInRaw === null || amountInRaw <= 0n) { _ubSwapNoRoute(outEl, rateEl, rteEl); return; }
+
+    // Loading state — only after every synchronous validation has passed.
     if (outEl) outEl.value = 'Loading...';
     if (rateEl) rateEl.textContent = 'Rate: —';
     if (rteEl) rteEl.textContent = '—';
 
-    // Convert the human amount to raw units with the token's OWN decimals
-    // (USDC/EURC = 6 → 1 USDC = 1,000,000 raw units).
-    var amountInRaw = (typeof SwapMath !== 'undefined' && SwapMath.parseUnits)
-      ? SwapMath.parseUnits(String(amt), ti2.decimals)
-      : null;
-    if (amountInRaw === null || amountInRaw <= 0n) return;
-
     // Same-chain Arc Mainnet (the UB EVM drawer has no chain selector).
     var chain = (SWP.fromChainId || (typeof activeChainId !== 'undefined' ? activeChainId : 5042));
 
-    // Reuse the SAME aggregator as the canonical swap flow. In the EVM drawer the
-    // local pool is excluded (LI.FI / Tower only) — same rules as execution.
-    var agg = null;
-    if (typeof SwapAggregator !== 'undefined' && typeof SwapAggregator.getBestQuote === 'function') {
-      try {
-        agg = await SwapAggregator.getBestQuote({
-          tokenIn: ti2.sym,
-          tokenOut: to2.sym,
+    try {
+      var agg = null;
+      if (typeof SwapAggregator !== 'undefined' && typeof SwapAggregator.getBestQuote === 'function') {
+        // Reuse the SAME aggregator as the canonical swap flow (LI.FI / Tower
+        // only in the EVM drawer). Promise.race is a hard bound so a stuck
+        // provider can NEVER leave the drawer in an infinite Loading state —
+        // it always resolves to a quote or to the "No route" state below.
+        agg = await Promise.race([
+          SwapAggregator.getBestQuote({
+            tokenIn: ti2.sym,
+            tokenOut: to2.sym,
+            amountInRaw: amountInRaw,
+            slippageBps: Math.round((SWP.slippage || 0.5) * 100),
+            chainId: chain,
+            fromChainId: chain,
+            toChainId: chain,
+            userAddress: (typeof walletAddress !== 'undefined' && walletAddress) ? walletAddress : null,
+            hasLocalPool: false,
+            excludeLocal: true,
+          }),
+          new Promise(function(res){ setTimeout(function(){ res(null); }, 12000); })
+        ]);
+      }
+
+      if (seq !== _ubSwapSeq) return; // stale response must never overwrite a newer one
+
+      var selected = (agg && agg.bestExecutable) ? agg.bestExecutable : null;
+      SWP.aggQuotes = agg ? (agg.quotes || []) : [];
+      SWP.aggBestExecutable = selected;
+      SWP.selectedSource = selected ? selected.source : null;
+
+      if (selected && (selected.source === 'lifi' || selected.source === 'tower')) {
+        var outRaw = selected.expectedOutRaw;
+        var out = Number((typeof SwapMath !== 'undefined' && SwapMath.formatUnits)
+          ? SwapMath.formatUnits(outRaw, to2.decimals)
+          : (typeof ethers !== 'undefined' ? ethers.formatUnits(outRaw, to2.decimals) : 0));
+        if (!(out > 0)) { _ubSwapNoRoute(outEl, rateEl, rteEl); return; }
+        var provider = _ubSwapProviderLabel(selected.source);
+        SWP._towerQuoteData = selected.calldata ? selected : null;
+        SWP.lastQuote = {
+          amtIn: amt,
+          amtOut: out,
+          minReceived: selected.minOutRaw != null
+            ? Number((typeof SwapMath !== 'undefined' && SwapMath.formatUnits)
+              ? SwapMath.formatUnits(selected.minOutRaw, to2.decimals)
+              : (typeof ethers !== 'undefined' ? ethers.formatUnits(selected.minOutRaw, to2.decimals) : 0))
+            : out,
+          rate: out / amt,
+          priceImpact: selected.priceImpactBps != null ? (selected.priceImpactBps / 100) : null,
+          feeAmt: amt * (selected.feeBps != null ? (selected.feeBps / 10000) : 0),
+          source: selected.source === 'lifi' ? 'LI.FI' : 'Tower Exchange',
+          tIn: ti2, tOut: to2, route: null,
+          totalFee: selected.feeBps,
+          expectedOutRaw: outRaw,
           amountInRaw: amountInRaw,
-          slippageBps: Math.round((SWP.slippage || 0.5) * 100),
-          chainId: chain,
-          fromChainId: chain,
-          toChainId: chain,
-          userAddress: (typeof walletAddress !== 'undefined' && walletAddress) ? walletAddress : null,
-          hasLocalPool: false,
-          excludeLocal: true,
-        });
-      } catch(e) { agg = null; }
-    }
-    if (seq !== _ubSwapSeq) return; // stale response must never overwrite a newer one
-
-    var selected = (agg && agg.bestExecutable) ? agg.bestExecutable : null;
-    SWP.aggQuotes = agg ? (agg.quotes || []) : [];
-    SWP.aggBestExecutable = selected;
-    SWP.selectedSource = selected ? selected.source : null;
-
-    if (selected && (selected.source === 'lifi' || selected.source === 'tower')) {
-      var outRaw = selected.expectedOutRaw;
-      var out = Number((typeof SwapMath !== 'undefined' && SwapMath.formatUnits)
-        ? SwapMath.formatUnits(outRaw, to2.decimals)
-        : (typeof ethers !== 'undefined' ? ethers.formatUnits(outRaw, to2.decimals) : 0));
-      var provider = _ubSwapProviderLabel(selected.source);
-      SWP._towerQuoteData = selected.calldata ? selected : null;
-      SWP.lastQuote = {
-        amtIn: amt,
-        amtOut: out,
-        minReceived: selected.minOutRaw != null
-          ? Number((typeof SwapMath !== 'undefined' && SwapMath.formatUnits)
-            ? SwapMath.formatUnits(selected.minOutRaw, to2.decimals)
-            : (typeof ethers !== 'undefined' ? ethers.formatUnits(selected.minOutRaw, to2.decimals) : 0))
-          : out,
-        rate: out / amt,
-        priceImpact: selected.priceImpactBps != null ? (selected.priceImpactBps / 100) : null,
-        feeAmt: amt * (selected.feeBps != null ? (selected.feeBps / 10000) : 0),
-        source: selected.source === 'lifi' ? 'LI.FI' : 'Tower Exchange',
-        tIn: ti2, tOut: to2, route: null,
-        totalFee: selected.feeBps,
-        expectedOutRaw: outRaw,
-        amountInRaw: amountInRaw,
-        quotedAt: Date.now(),
-        stateUpdatedAt: null,
-      };
-      if (outEl) outEl.value = out.toFixed(4);
-      if (rateEl) rateEl.textContent = '1 ' + from + ' ≈ ' + (out / amt).toFixed(4) + ' ' + to;
-      if (rteEl) rteEl.textContent = provider;
-    } else {
+          quotedAt: Date.now(),
+          stateUpdatedAt: null,
+        };
+        if (outEl) outEl.value = out.toFixed(4);
+        if (rateEl) rateEl.textContent = '1 ' + from + ' ≈ ' + (out / amt).toFixed(4) + ' ' + to;
+        if (rteEl) rteEl.textContent = provider;
+      } else {
+        SWP._towerQuoteData = null;
+        SWP.lastQuote = null;
+        _ubSwapNoRoute(outEl, rateEl, rteEl);
+      }
+    } catch(e) {
+      // Any unexpected error must still terminate the loading state.
       SWP._towerQuoteData = null;
       SWP.lastQuote = null;
-      if (outEl) outEl.value = '';
-      if (rateEl) rateEl.textContent = 'No route';
-      if (rteEl) rteEl.textContent = 'No route';
+      _ubSwapNoRoute(outEl, rateEl, rteEl);
     }
+  }
+
+  function _ubSwapNoRoute(outEl, rateEl, rteEl) {
+    if (outEl) outEl.value = '—';
+    if (rateEl) rateEl.textContent = 'No route available';
+    if (rteEl) rteEl.textContent = 'No route';
   }
 
   function _ubSwapProviderLabel(source) {

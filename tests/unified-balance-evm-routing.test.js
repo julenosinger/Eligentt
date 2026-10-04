@@ -317,6 +317,54 @@ describe('Unified Balance EVM — LI.FI execution chain (source inspection)', ()
   });
 });
 
+describe('SwapAggregator — a stuck provider cannot block the others', () => {
+  beforeEach(() => { delete globalThis.TowerAdapter; delete globalThis.LocalAdapter; delete globalThis.LiFiAdapter; });
+  afterEach(() => { delete globalThis.TowerAdapter; delete globalThis.LocalAdapter; delete globalThis.LiFiAdapter; });
+
+  it('LI.FI hanging forever does not block Tower (resolves within the timeout)', async () => {
+    globalThis.LiFiAdapter = { getQuote: () => new Promise(() => {}) }; // hangs forever
+    globalThis.TowerAdapter = { getQuote: async () => towerQuote('tower', { calldata: '0xabcd', to: ADDR, spender: ADDR }) };
+    globalThis.LocalAdapter = { getQuote: async () => ({ source: 'local', ok: false }) };
+    const agg = loadAggregator();
+    const r = await agg.getBestQuote({ tokenIn: 'USDC', tokenOut: 'EURC', amountInRaw: 1000000n, slippageBps: 50, chainId: 5042, fromChainId: 5042, toChainId: 5042, excludeLocal: true, timeoutMs: 150 });
+    expect(r.bestExecutable).toBeTruthy();
+    expect(r.bestExecutable.source).toBe('tower');
+  });
+});
+
+describe('Unified Balance EVM — swap quote lifecycle (never stuck in Loading)', () => {
+  const qfn = html.slice(html.indexOf('async function _ubQuoteSwap'), html.indexOf('function _ubSwapNoRoute'));
+
+  it('bounds the aggregator await so a stuck provider cannot hang the drawer', () => {
+    expect(qfn).toContain('Promise.race');
+    expect(qfn).toContain('setTimeout');
+  });
+
+  it('wraps the quote pipeline in try/catch (no unhandled rejection leaves Loading)', () => {
+    expect(qfn).toContain('try {');
+    expect(qfn).toContain('} catch(e) {');
+  });
+
+  it('validates the amount BEFORE entering the loading state', () => {
+    const loadingIdx = qfn.indexOf("outEl.value = 'Loading...'");
+    const amountIdx = qfn.indexOf('SwapMath.parseUnits');
+    expect(loadingIdx).toBeGreaterThan(-1);
+    expect(amountIdx).toBeGreaterThan(-1);
+    expect(loadingIdx).toBeGreaterThan(amountIdx);
+  });
+
+  it('shows an explicit "No route available" state (never 0.00 as a valid quote)', () => {
+    const fn = html.slice(html.indexOf('function _ubSwapNoRoute'), html.indexOf('function _ubSwapProviderLabel'));
+    expect(fn).toContain("'No route available'");
+    expect(fn).toContain("outEl.value = '—'");
+  });
+
+  it('the debounced call catches any rejection (never stuck Loading)', () => {
+    const fn = html.slice(html.indexOf('function _refreshSwap()'), html.indexOf('async function _ubQuoteSwap'));
+    expect(fn).toContain('.catch(function(){');
+  });
+});
+
 describe('Unified Balance EVM — bridge completion gating (source inspection)', () => {
   const wfn = html.slice(html.indexOf('function _ubBridgeEnsureWatcher'), html.indexOf('async function execBridge()'));
   const start = html.indexOf('async function execBridge()');
