@@ -573,6 +573,34 @@ describe('AgentScheduleExecutor — replay, simulation and safety', () => {
     expect(env.provider.sent.length).toBe(0);
   });
 
+  it('executor: "evm" is NEVER picked up by the automatic tick', () => {
+    const env = boot({ schedules: [makeSchedule({ executor: 'evm' })] });
+    expect(env.executor.getDueSchedules().length).toBe(0);
+    expect(env.executor.isEligible(env.engine.getById('SCH_TEST_1'))).toBe(false);
+  });
+
+  it('executor: "agent" is eligible for the automatic tick', () => {
+    const env = boot({ schedules: [makeSchedule({ executor: 'agent' })] });
+    expect(env.executor.getDueSchedules().length).toBe(1);
+    expect(env.executor.isEligible(env.engine.getById('SCH_TEST_1'))).toBe(true);
+  });
+
+  it('legacy schedule without an executor field behaves as Agent', () => {
+    const sched = makeSchedule();
+    delete sched.executor;
+    const env = boot({ schedules: [sched] });
+    expect(env.executor.getDueSchedules().length).toBe(1);
+    expect(env.executor.isEligible(env.engine.getById('SCH_TEST_1'))).toBe(true);
+  });
+
+  it('evm schedule never broadcasts even with valid scheduled authorization', async () => {
+    const env = boot({ schedules: [makeSchedule({ executor: 'evm' })] });
+    grantScheduledAuth(env.auth);
+    const summary = await env.executor.tickNow();
+    expect(summary.processed).toBe(0);
+    expect(env.provider.sent.length).toBe(0);
+  });
+
   it('does not execute paused or completed schedules', async () => {
     const env = boot({ schedules: [makeSchedule({ status: 'Paused' }), makeSchedule({ id: 'SCH_TEST_2', status: 'Completed' })] });
     grantScheduledAuth(env.auth);

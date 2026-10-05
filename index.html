@@ -7520,6 +7520,13 @@ select.cinput option { background: #161a24; color: #dde2f0; }
             <div><div class="swap-label">Max Executions (0 = unlimited)</div><input id="sch-max" class="cinput" type="number" value="0" min="0"/></div>
             <div><div class="swap-label">Gas Budget (USDC)</div><input id="sch-gas" class="cinput" type="number" value="0.10" step="0.01"/></div>
             <div style="grid-column:1/-1;display:flex;align-items:center;gap:8px;padding:4px 0">
+              <div class="swap-label" style="margin:0;min-width:96px">Execution Mode</div>
+              <select id="sch-executor" class="cinput" style="width:auto;cursor:pointer;flex:1" onchange="schRefreshAgentWarning()">
+                <option value="agent">Agent (automatic)</option>
+                <option value="evm">EVM Wallet (manual — you sign)</option>
+              </select>
+            </div>
+            <div style="grid-column:1/-1;display:flex;align-items:center;gap:8px;padding:4px 0">
               <button class="stg-toggle on" id="sch-agent-toggle" data-on="true" style="cursor:pointer" onclick="schToggleAgentCreate(this)"><span class="knob"></span></button>
               <span style="font-size:9px;color:var(--muted2)">Agent auto-execution (uses Circle AI Smart Wallet)</span>
             </div>
@@ -30310,6 +30317,7 @@ const ScheduleEngine = (() => {
       nextRun: new Date(Date.now() + 86400000).toISOString(),
       execCount: 0, executionHistory: [], status: 'Active',
       created: new Date().toISOString(), createdBy: 'user',
+      executor: 'agent',
       walletAddress: (typeof walletAddress !== 'undefined') ? (walletAddress || '') : ''
     }, scheduleData);
     _schedules.unshift(sched);
@@ -30464,6 +30472,7 @@ const ScheduleEngine = (() => {
       if (!s.executionHistory) s.executionHistory = [];
       if (!s.createdBy) s.createdBy = 'user';
       if (!s.network) s.network = 'Arc_Mainnet';
+      if (!s.executor) { s.executor = 'agent'; changed = true; }
       if (s.type === 'payment' && s.recipients && s.recipients.length === 1) {
         if (!s.address) s.address = s.recipients[0].addr || '';
         if (!s.amount) s.amount = s.recipients[0].amount || s.total || 0;
@@ -30529,6 +30538,8 @@ function scheduleCreateNew(){
   // Reset agent-execution toggle to ON and refresh the warning banner
   var agentToggle = document.getElementById('sch-agent-toggle');
   if(agentToggle){ agentToggle.classList.add('on'); agentToggle.classList.remove('off'); agentToggle.setAttribute('data-on','true'); }
+  var execSel = document.getElementById('sch-executor');
+  if(execSel){ execSel.value = 'agent'; }
   schRefreshAgentWarning();
   // Re-enhance selects
   setTimeout(() => {
@@ -30699,8 +30710,10 @@ function schToggleAgentCreate(btn){
 function schRefreshAgentWarning(){
   var warn = document.getElementById('sch-agent-warning');
   if(!warn) return;
+  var execSel = document.getElementById('sch-executor');
+  var evmMode = execSel && execSel.value === 'evm';
   var toggle = document.getElementById('sch-agent-toggle');
-  var agentOn = !toggle || toggle.getAttribute('data-on') === 'true';
+  var agentOn = !evmMode && (!toggle || toggle.getAttribute('data-on') === 'true');
   var ready = schAgentStatus().ready;
   warn.style.display = (agentOn && !ready) ? '' : 'none';
 }
@@ -30773,7 +30786,8 @@ function scheduleSubmit(){
     status: 'Active',
     created: new Date().toISOString(),
     createdBy,
-    agentExecution: !(document.getElementById('sch-agent-toggle') && document.getElementById('sch-agent-toggle').getAttribute('data-on') === 'false'),
+    executor: (document.getElementById('sch-executor') && document.getElementById('sch-executor').value === 'evm') ? 'evm' : 'agent',
+    agentExecution: (document.getElementById('sch-executor') && document.getElementById('sch-executor').value === 'evm') ? false : !(document.getElementById('sch-agent-toggle') && document.getElementById('sch-agent-toggle').getAttribute('data-on') === 'false'),
     walletAddress: walletAddress || ''
   });
   schedules = ScheduleEngine.getAll();
@@ -30838,6 +30852,8 @@ function scheduleNextDate(freq, from){
 async function scheduleRun(id){
   var sch = ScheduleEngine.getById(id);
   if(!sch) return;
+  // EVM-mode schedules run via the connected wallet, never the Agent path.
+  if(sch.executor === 'evm'){ return scheduleRunEvm(id); }
   if(sch.status === 'Completed' || (sch.maxEx > 0 && (sch.execCount || 0) >= sch.maxEx)) {
     toast('Schedule already completed (max executions reached)', 'warning');
     return;
@@ -30950,6 +30966,124 @@ async function scheduleRun(id){
   schLogEntry(sch.id, 'started', '"' + sch.name + '" routed for manual execution (' + schTypeLabel(sch.type) + ')');
   schedules = ScheduleEngine.getAll();
   renderSchedules();
+}
+
+// ── Run a schedule with the connected EVM wallet (manual, user signs) ──
+// Only for schedules with executor === 'evm'. Reuses the app's ERC-20 transfer
+// building (USDC_ABI + getChainById) and the shared ScheduleEngine execution
+// claim. NEVER uses the Agent/Circle signer and NEVER runs on the auto tick.
+async function scheduleRunEvm(id){
+  var sched = ScheduleEngine.getById(id);
+  if(!sched) return;
+  if(sched.status === 'Completed' || (sched.maxEx > 0 && (sched.execCount || 0) >= sched.maxEx)) {
+    toast('Schedule already completed (max executions reached)', 'warning'); return;
+  }
+  if(sched.status === 'Failed'){ toast('Schedule failed — duplicate it to run as a new occurrence', 'warning'); return; }
+  if(sched.type !== 'payment' && sched.type !== 'multisend'){
+    toast('EVM wallet execution currently supports payment and multisend only', 'warning'); return;
+  }
+  if(!walletAddress){ toast('Connect wallet to run with EVM wallet', 'warning'); openWalletModal(); return; }
+
+  // Resolve token on Arc Mainnet (payment/multisend always execute on Arc).
+  var sym = sched.token || 'USDC';
+  var arcChain = (typeof getChainById === 'function') ? getChainById(5042) : null;
+  var tokCfg = arcChain && arcChain.tokens ? arcChain.tokens[sym] : null;
+  var tokenAddr = tokCfg ? tokCfg.address : (typeof getTokenAddressForChain === 'function' ? getTokenAddressForChain(5042, sym) : null);
+  var decimals = tokCfg && tokCfg.decimals != null ? Number(tokCfg.decimals) : 6;
+  if(!tokenAddr || !isAddr(tokenAddr)){ toast('Token "' + sym + '" is not supported for EVM wallet execution', 'warning'); return; }
+
+  // Build recipients (payment single / multisend many).
+  var recipients = [];
+  if(sched.recipients && sched.recipients.length){
+    for(var i=0;i<sched.recipients.length;i++){
+      var r = sched.recipients[i];
+      var to = r.addr || r.address;
+      var amt = parseFloat(r.amount != null ? r.amount : sched.amount);
+      if(isAddr(to) && amt > 0) recipients.push({ to: to, amount: amt });
+    }
+  } else if(sched.address && isAddr(sched.address) && parseFloat(sched.amount) > 0){
+    recipients.push({ to: sched.address, amount: parseFloat(sched.amount) });
+  }
+  if(!recipients.length){ toast('Schedule has no valid recipients', 'warning'); return; }
+
+  // Shared claim so a manual EVM run never collides with another instance.
+  var runKey = sched.id + '|' + sched.nextRun;
+  var claim = null;
+  if(typeof ScheduleEngine.claimExecution === 'function'){
+    claim = await ScheduleEngine.claimExecution(runKey, 'evm_wallet', {
+      scheduleId: sched.id, occurrenceId: runKey,
+      wallet: walletAddress || null, chain: 'Arc Mainnet'
+    });
+    if(!claim || !claim.acquired){
+      toast('Schedule already executing in another instance', 'warning'); return;
+    }
+  }
+
+  var signer;
+  try {
+    var wp = (typeof getWriteProvider === 'function') ? getWriteProvider() : null;
+    if(!wp) throw new Error('Wallet provider not available');
+    signer = await wp.getSigner();
+  } catch(e){
+    toast('Wallet provider unavailable — connect your EVM wallet', 'error');
+    try { if(claim && typeof ScheduleEngine.releaseExecutionClaim === 'function') ScheduleEngine.releaseExecutionClaim(runKey, 'evm_wallet'); } catch(_e){}
+    return;
+  }
+
+  var spent = 0, lastHash = '';
+  try {
+    var tokenContract = new ethers.Contract(tokenAddr, USDC_ABI, signer);
+    for(var k=0;k<recipients.length;k++){
+      var rcp = recipients[k];
+      var rawAmt = ethers.parseUnits(String(rcp.amount), decimals);
+      toast('Awaiting signature for "' + sched.name + '" (' + (k+1) + '/' + recipients.length + ')...', 'info');
+      var tx = await tokenContract.transfer(rcp.to, rawAmt);   // wallet popup — user signs
+      lastHash = tx.hash;
+      toast('Transaction submitted — confirming...', 'info');
+      var receipt = await tx.wait(1, 60000);
+      if(!receipt || receipt.status !== 1) throw new Error('Transaction reverted on-chain');
+      spent += rcp.amount;
+    }
+  } catch(e){
+    var em = (e && (e.shortMessage || e.message)) ? String(e.shortMessage || e.message).substring(0, 140) : 'Unknown error';
+    var rejected = /user rejected|denied|4001|reject/i.test(em);
+    // Record failure (no execCount increment) and release the claim.
+    var failHistory = (sched.executionHistory || []).slice();
+    failHistory.unshift({ ts: new Date().toISOString(), status: 'failed', note: (rejected ? 'User rejected signature' : em), executor: 'evm_wallet', sender: walletAddress || null, token: sym, amount: (sched.amount || sched.total || 0) });
+    if(failHistory.length > 50) failHistory.length = 50;
+    ScheduleEngine.update(sched.id, { executionHistory: failHistory });
+    try { if(claim && typeof ScheduleEngine.updateExecutionClaim === 'function') ScheduleEngine.updateExecutionClaim(runKey, 'evm_wallet', { status: 'failed', txHash: lastHash || null }); } catch(_e){}
+    try { if(claim && typeof ScheduleEngine.releaseExecutionClaim === 'function') ScheduleEngine.releaseExecutionClaim(runKey, 'evm_wallet'); } catch(_e){}
+    toast(rejected ? 'Signature rejected — nothing was sent' : ('EVM execution failed: ' + em), 'error');
+    schedules = ScheduleEngine.getAll(); renderSchedules();
+    return;
+  }
+
+  // Success: finalize the occurrence exactly like the Agent path.
+  var execCount = (sched.execCount || 0) + 1;
+  var nextRun = sched.freq === 'once' ? null : scheduleNextDate(sched.freq, sched.nextRun || new Date().toISOString());
+  var newStatus = (sched.freq === 'once' || (sched.maxEx > 0 && execCount >= sched.maxEx)) ? 'Completed' : (sched.status || 'Active');
+  var history = (sched.executionHistory || []).slice();
+  history.unshift({
+    ts: new Date().toISOString(), status: 'executed',
+    note: sched.type + ' executed via EVM wallet',
+    txHash: lastHash || null, executor: 'evm_wallet',
+    sender: walletAddress || null,
+    recipient: recipients.length === 1 ? recipients[0].to : (recipients.length + ' recipients'),
+    token: sym, amount: spent
+  });
+  if(history.length > 50) history.length = 50;
+  ScheduleEngine.update(sched.id, { execCount: execCount, executionHistory: history, nextRun: nextRun, status: newStatus });
+  try {
+    if(claim && typeof ScheduleEngine.updateExecutionClaim === 'function') ScheduleEngine.updateExecutionClaim(runKey, 'evm_wallet', { status: 'confirmed', txHash: lastHash || null });
+    if(claim && typeof ScheduleEngine.releaseExecutionClaim === 'function') ScheduleEngine.releaseExecutionClaim(runKey, 'evm_wallet');
+  } catch(_e){}
+
+  // Audit trail (visible executor).
+  try { if(typeof AgentAudit !== 'undefined') AgentAudit.recordExecution({ operation: 'scheduled:' + sched.type, amount: spent, asset: sym, chain: 'Arc Mainnet', transactionHash: lastHash || '', result: 'success', duration: 0, gasUsed: 0, metadata: { scheduleId: sched.id, scheduleName: sched.name, executor: 'evm_wallet', sender: walletAddress || null, token: sym, amount: spent } }); } catch(_e){}
+  schedules = ScheduleEngine.getAll(); renderSchedules();
+  schLogEntry(sched.id, 'executed', '"' + sched.name + '" executed via EVM wallet (' + spent.toFixed(2) + ' ' + sym + ')');
+  toast('Schedule "' + sched.name + '" executed via EVM wallet — tx ' + String(lastHash || '').slice(0, 10) + '...', 'success');
 }
 
 // Finalize a pending manual run after a real on-chain transaction is confirmed.
@@ -31137,8 +31271,12 @@ function renderSchedules(){
     var sc = {Active:'green', Paused:'yellow', Completed:'blue', Failed:'red'}[s.status] || 'muted2';
     var nextRun = formatUSDateTime(s.nextRun);
     var isDue = s.nextRun && new Date(s.nextRun) <= now && s.status === 'Active';
-    var agentOn = s.agentExecution !== false;
-    var agentWarn = (agentOn && s.status === 'Active' && !agentReady) ? '<span style="font-size:8px;margin-left:5px;color:var(--red);font-weight:700" title="Circle Agent not configured or authorization missing — auto-execution will not run">⚠ NO AGENT</span>' : '';
+    var isEvm = s.executor === 'evm';
+    var agentOn = !isEvm && s.agentExecution !== false;
+    var agentWarn = (!isEvm && agentOn && s.status === 'Active' && !agentReady) ? '<span style="font-size:8px;margin-left:5px;color:var(--red);font-weight:700" title="Circle Agent not configured or authorization missing — auto-execution will not run">⚠ NO AGENT</span>' : '';
+    var executorBadge = isEvm
+      ? '<span style="font-size:8px;margin-left:5px;color:#06F7E9" title="Manual execution via the connected EVM wallet">EVM · manual</span>'
+      : (agentOn && s.status === 'Active' ? '<span style="font-size:8px;margin-left:5px;color:#a78bfa" title="Auto-executed by Circle AI Smart Wallet">AUTO</span>' : '');
     var assetInfo = (s.amount || 0) > 0 ? (s.amount || 0).toFixed(2) + ' ' + s.token : (s.recipients && s.recipients.length ? s.recipients.length + ' rcpts' : '—');
 
     var historyHtml = '';
@@ -31177,7 +31315,7 @@ function renderSchedules(){
     var qrBtn = (s.type === 'payment' || s.type === 'multisend' || s.type === 'link_payment') ? '<button class="btn" style="padding:2px 5px;font-size:8px;color:var(--blue)" title="Generate QR for scheduled payment" onclick="schGenerateQR(\'' + s.id + '\')"><i class="ti ti-qrcode"></i></button>' : '';
 
     var mainRow = '<tr' + (isDue ? ' style="background:rgba(245,158,11,.05)"' : '') + '>' +
-      '<td style="font-weight:600">' + s.name + (isDue ? '<span style="font-size:8px;margin-left:5px;color:var(--yellow)">DUE</span>' : '') + (agentOn && s.status === 'Active' ? '<span style="font-size:8px;margin-left:5px;color:#a78bfa" title="Auto-executed by Circle AI Smart Wallet">AUTO</span>' : '') + agentWarn + '</td>' +
+      '<td style="font-weight:600">' + s.name + (isDue ? '<span style="font-size:8px;margin-left:5px;color:var(--yellow)">DUE</span>' : '') + executorBadge + agentWarn + '</td>' +
       '<td><span class="sch-type-badge ' + s.type + '"><i class="ti ti-' + schTypeIcon(s.type) + '" style="font-size:9px"></i>' + schTypeLabel(s.type) + '</span></td>' +
       '<td style="color:var(--text)">' + assetInfo + '</td>' +
       '<td style="font-size:9px;color:var(--muted2)">' + (s.network || '—') + '</td>' +
@@ -31187,8 +31325,10 @@ function renderSchedules(){
       '<td style="text-align:center">' + (s.execCount > 0 ? ((hist.filter(function(h){ return h.status === 'executed' || h.status === 'delegated'; }).length / Math.max(1, s.execCount) * 100).toFixed(0) + '%') : '—') + '</td>' +
       '<td><span style="color:var(--' + sc + ')">' + s.status + '</span></td>' +
       '<td style="display:flex;gap:3px;align-items:center">' +
-        '<button class="btn primary" style="padding:2px 7px;font-size:8.5px" onclick="scheduleRun(\'' + s.id + '\')" title="Execute Now"><i class="ti ti-player-play"></i></button>' +
-        '<button class="btn" style="padding:2px 7px;font-size:8.5px;color:' + (agentOn ? '#a78bfa' : 'var(--muted2)') + '" onclick="scheduleToggleAgent(\'' + s.id + '\')" title="' + (agentOn ? 'Agent auto-execution ON — click to disable' : 'Agent auto-execution OFF — click to enable') + '"><i class="ti ti-robot"></i></button>' +
+        (isEvm
+          ? '<button class="btn primary" style="padding:2px 7px;font-size:8.5px;color:var(--teal)" onclick="scheduleRunEvm(\'' + s.id + '\')" title="Run with Wallet (connected EVM wallet signs)"><i class="ti ti-wallet"></i></button>'
+          : '<button class="btn primary" style="padding:2px 7px;font-size:8.5px" onclick="scheduleRun(\'' + s.id + '\')" title="Execute Now"><i class="ti ti-player-play"></i></button>') +
+        (!isEvm ? '<button class="btn" style="padding:2px 7px;font-size:8.5px;color:' + (agentOn ? '#a78bfa' : 'var(--muted2)') + '" onclick="scheduleToggleAgent(\'' + s.id + '\')" title="' + (agentOn ? 'Agent auto-execution ON — click to disable' : 'Agent auto-execution OFF — click to enable') + '"><i class="ti ti-robot"></i></button>' : '') +
         '<button class="btn" style="padding:2px 7px;font-size:8.5px" onclick="schedulePause(\'' + s.id + '\')" title="' + (s.status === 'Active' ? 'Pause' : 'Resume') + '"><i class="ti ti-' + (s.status === 'Active' ? 'pause' : 'play') + '"></i></button>' +
         '<button class="btn" style="padding:2px 7px;font-size:8.5px;color:var(--blue)" onclick="scheduleDuplicate(\'' + s.id + '\')" title="Duplicate"><i class="ti ti-copy"></i></button>' +
         '<button class="btn" style="padding:2px 7px;font-size:8.5px;color:var(--teal)" onclick="scheduleSaveAsTemplate(\'' + s.id + '\')" title="Save as Template"><i class="ti ti-template"></i></button>' +

@@ -255,6 +255,10 @@
 
   function isEligible(sched){
     if (!sched || sched.status !== 'Active' || !sched.nextRun) return false;
+    // EVM-mode schedules are executed manually via the connected wallet and MUST
+    // never enter the automatic Agent tick. (Legacy schedules without the field
+    // default to 'agent' via the ScheduleEngine migration.)
+    if (sched.executor === 'evm') return false;
     if (sched.agentExecution === false) return false;
     // AI Smart Wallet MultiSend (createdBy === 'aiwallet') is executed by the
     // existing BatchExecutionEngine (batch contract) — never by this executor.
