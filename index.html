@@ -14409,6 +14409,7 @@ function showPage(id) {
     }
     if (id === 'send') {
       setTimeout(() => {
+        saPrefetchBalances && saPrefetchBalances();
         saRefreshBalance && saRefreshBalance();
         saUpdateRoute && saUpdateRoute();
         saUpdateNetwork && saUpdateNetwork();
@@ -14840,6 +14841,7 @@ async function finalizeConnection(raw, walletType) {
   await refreshBalance();
   updateSwapBalancesDisplay(); // ensure swap widget shows correct token balances right after connect
   if (typeof swapPrefetchBalances === 'function') swapPrefetchBalances(); // warm multi-chain cache
+  if (typeof saPrefetchBalances === 'function') saPrefetchBalances(); // warm Send Assets multi-chain cache
   _refreshAllSurfaceBalances();
   loadAllPools().then(() => { updateSwapRate(); swpUpdatePoolInfo(); });
   closeWalletModal();
@@ -31651,6 +31653,28 @@ function _saClearBalCache() {
   for (var k in _saBalCache) { if (Object.prototype.hasOwnProperty.call(_saBalCache, k)) delete _saBalCache[k]; }
   _saLastBalance = null;
   _saLastBalanceKey = null;
+}
+
+// ── Send balance prefetch: warm the BalanceService cache for every Send asset
+// (USDC / EURC / cirBTC) across all supported chains, so switching the wallet
+// network (Arc → Base → …) shows the balance instantly instead of an RPC
+// round-trip. Runs on wallet connect and on Send page open. Never blocks and
+// never touches the wallet provider.
+function saPrefetchBalances() {
+  if (!walletAddress || typeof BalanceService === 'undefined' || !BalanceService.getTokenBalance) return;
+  try {
+    var tokens = ['USDC', 'EURC'];
+    var chains = [5042, 8453, 1, 42161, 10, 137];
+    for (var c = 0; c < chains.length; c++) {
+      for (var t = 0; t < tokens.length; t++) {
+        (function (chainId, sym) {
+          try { BalanceService.getTokenBalance(walletAddress, sym, chainId).catch(function () {}); } catch (_) {}
+        })(chains[c], tokens[t]);
+      }
+    }
+    // cirBTC is Arc-only.
+    try { BalanceService.getTokenBalance(walletAddress, 'cirBTC', 5042).catch(function () {}); } catch (_) {}
+  } catch (_) {}
 }
 
 async function saRefreshBalance() {
