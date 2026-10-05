@@ -40502,8 +40502,31 @@ function ubFetchAllBalances(walletKey) {
 
     return _ubMulticallChain(chain, erc20, walletKey, nativeSym).then(function(mcResults) {
       if (mcResults && mcResults.length) {
-        for (var k = 0; k < mcResults.length; k++) { if (mcResults[k]) results.push(mcResults[k]); }
-        return;
+        // UB-2.3 FIX: an ERC-20 token that Multicall3 reports as 'unavailable'
+        // (individual aggregate call failed) is re-read with a DIRECT balanceOf —
+        // the same read the sidebar (refreshBalance) and BalanceService perform.
+        // Without this, a Multicall3 edge case on a chain silently dropped the
+        // real balance (e.g. Arc USDC 5.25 shown as $0) while the direct read
+        // succeeds. The native ETH result (index >= erc20.length) is kept as-is.
+        var retries = [];
+        var kept = [];
+        for (var k = 0; k < mcResults.length; k++) {
+          var rr = mcResults[k];
+          if (!rr) continue;
+          if (k < erc20.length && rr.status === 'unavailable') {
+            retries.push(ubFetchOne(chain, erc20[k].sym, erc20[k].tokenAddr, walletKey));
+          } else {
+            kept.push(rr);
+          }
+        }
+        if (!retries.length) {
+          for (var p = 0; p < kept.length; p++) results.push(kept[p]);
+          return;
+        }
+        return Promise.all(retries).then(function(retried) {
+          for (var m = 0; m < kept.length; m++) results.push(kept[m]);
+          for (var n = 0; n < retried.length; n++) { if (retried[n]) results.push(retried[n]); }
+        });
       }
       // Multicall3 unavailable or total failure → per-chain fallback to
       // individual calls (same timeout + retry as before, never a fabricated 0).

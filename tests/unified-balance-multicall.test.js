@@ -233,6 +233,26 @@ describe('Multicall — failure semantics', () => {
     expect(eurc.raw).toBeNull();
   });
 
+  it('individual Multicall failure → DIRECT balanceOf fallback recovers balance (Arc USDC)', async () => {
+    // Multicall3 aggregate3 reports USDC as failed (success:false) while the
+    // DIRECT balanceOf read (what the sidebar refreshBalance performs) succeeds.
+    // The UB must fall back to the direct read and never silently drop 5.25 USDC.
+    const eng = load({
+      balanceOf: async (addr) => (addr.endsWith('A') ? 1000000n : 500000n),
+      aggregate3: async (calls_) => calls_.map((c) =>
+        String(c.target).endsWith('A')
+          ? { success: false, returnData: '0x' }
+          : { success: true, returnData: 500000n }
+      ),
+      chains: [arcChain()],
+    });
+    const results = await eng.ubFetchAllBalances('0xwallet');
+    const usdc = results.find((r) => r.token === 'USDC');
+    expect(usdc.status).toBe('available');      // recovered via direct balanceOf
+    expect(usdc.raw).toBe(1000000n);            // real balance preserved, never dropped
+    expect(eng.calls.balanceOf.length).toBe(1); // exactly one direct re-read (USDC)
+  });
+
   it('total multicall failure → per-chain fallback to individual calls succeeds', async () => {
     const eng = load({
       balanceOf: async (addr) => (addr.endsWith('A') ? 1000000n : 500000n),
