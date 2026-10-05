@@ -1,7 +1,7 @@
 /**
  * Autonoma Agent Schedule Executor ÔÇö Delegated Scheduled-Intent Execution
- * Executes due ScheduleEngine intents on-chain through the existing Agent Wallet.
- * The Agent Wallet is the ONLY execution layer. The user's keys are never used.
+ * Executes due ScheduleEngine intents on-chain through the existing Circle AI Smart Wallet.
+ * The Circle AI Smart Wallet is the ONLY execution layer. The user's keys are never used.
  *
  * Hard gates (all enforced BEFORE signing, every run):
  *   1. Active AgentAuthorization with allowScheduled=true (user opt-in, revocable)
@@ -285,7 +285,7 @@
     if (!E) return { ok: false, reason: 'ethers unavailable' };
     if (!az) return { ok: false, reason: 'Authorization system unavailable' };
     // Identity check: Circle Wallet must be configured
-    if (!_agentIdentityAddr()) return { ok: false, reason: 'Circle Agent Wallet not configured — set up the Circle Agent to enable scheduled execution' };
+    if (!_agentIdentityAddr()) return { ok: false, reason: 'Circle AI Smart Wallet not configured — set up the Circle Agent to enable scheduled execution' };
     // Execution layer pause check (not identity)
     if (wm && wm.isShutdown && wm.isShutdown()) return { ok: false, reason: 'Execution layer is shut down' };
     if (wm && typeof wm.isPaused === 'function' && wm.isPaused()) return { ok: false, reason: 'Execution layer is paused' };
@@ -362,7 +362,7 @@
         var bal = await erc20.balanceOf(agentAddr);
         var balFloat = parseFloat(E.formatUnits(bal, tokenInfo.decimals));
         if (balFloat < total) {
-          return { ok: false, reason: 'Agent wallet balance ' + balFloat.toFixed(4) + ' ' + token + ' < required ' + total + ' ÔÇö fund the agent wallet' };
+          return { ok: false, reason: 'Circle AI Smart Wallet balance ' + balFloat.toFixed(4) + ' ' + token + ' < required ' + total + ' ÔÇö fund the Circle AI Smart Wallet' };
         }
       } catch(e){ return { ok: false, reason: 'Balance check failed: ' + (e.message || 'read error').substring(0, 80) }; }
     }
@@ -373,7 +373,7 @@
       var native = await provider.getBalance(agentAddr);
       var gasBudget = maxFeeWei * BigInt(TX_GAS_LIMIT) * BigInt(txCount);
       if (native < gasBudget) {
-        return { ok: false, reason: 'Agent wallet has insufficient native gas balance' };
+        return { ok: false, reason: 'Circle AI Smart Wallet has insufficient native gas balance' };
       }
     } catch(e){}
 
@@ -422,7 +422,7 @@
     } catch(e){ return { ok: false, reason: 'Policy engine error: ' + ((e && (e.message || e)) || 'unknown'), report: null }; }
   }
 
-  /* ÔöÇÔöÇ Broadcast one ERC-20 transfer signed by the Agent Wallet ÔöÇÔöÇ */
+  /* ÔöÇÔöÇ Broadcast one ERC-20 transfer signed by the Circle AI Smart Wallet ÔöÇÔöÇ */
   /* ── Prepare ONE ERC-20 transfer (fee/gas/nonce + rawTx + fingerprint).
      NO signing, NO broadcasting. The returned nonce + fingerprint are persisted as an
      execution intent BEFORE broadcast, so a crash after eth_sendRawTransaction but before
@@ -719,7 +719,7 @@
       // Identity: Circle Wallet. Signer: SecureSignerProvider (Circle mode) or AWM (dev/browser fallback).
       var _identityAddr = _agentIdentityAddr();
       if (!_identityAddr) {
-        ledger[key] = { status: 'retry_pending', reason: 'Circle Agent Wallet not configured', ts: Date.now(), attempts: attempts, lastAttempt: Date.now() };
+        ledger[key] = { status: 'retry_pending', reason: 'Circle AI Smart Wallet not configured', ts: Date.now(), attempts: attempts, lastAttempt: Date.now() };
         _saveLedger();
         return { status: 'retry_pending' };
       }
@@ -884,10 +884,10 @@
       ledger[key] = { status: 'executed', ts: Date.now(), attempts: attempts, txHash: lastHash, amount: spent, asset: v.token };
       _saveLedger();
       if (eng0 && typeof eng0.updateExecutionClaim === 'function') eng0.updateExecutionClaim(key, 'agent_schedule_executor', { status: 'confirmed', txHash: lastHash || null });
-      _advanceSchedule(sched, 'Executed by Agent Wallet ÔÇö ' + spent.toFixed(2) + ' ' + v.token + ' to ' + confirmed + ' recipient(s)', 'executed', lastHash, { sender: agentAddr, recipient: v.transfers.length === 1 ? v.transfers[0].to : (v.transfers.length + ' recipients'), token: v.token, amount: spent, gasUsed: gasUsed });
+      _advanceSchedule(sched, 'Executed by Circle AI Smart Wallet ÔÇö ' + spent.toFixed(2) + ' ' + v.token + ' to ' + confirmed + ' recipient(s)', 'executed', lastHash, { sender: agentAddr, recipient: v.transfers.length === 1 ? v.transfers[0].to : (v.transfers.length + ' recipients'), token: v.token, amount: spent, gasUsed: gasUsed });
       _recordOutcome(sched, v.auth, spent, v.token, 'success', lastHash, duration, gasUsed, null, { sender: agentAddr, recipient: v.transfers.length === 1 ? v.transfers[0].to : (v.transfers.length + ' recipients'), token: v.token, amount: spent, gasUsed: gasUsed });
       try { if (task) ExecutionQueue.updateStatus(task.id, 'completed', { txHash: lastHash, result: 'success', progress: 100 }); } catch(e){}
-      _notify(sched, 'executed', 'Schedule "' + sched.name + '" executed by Agent Wallet ÔÇö ' + spent.toFixed(2) + ' ' + v.token + ' (tx ' + lastHash.slice(0, 10) + '...)', 'success');
+      _notify(sched, 'executed', 'Schedule "' + sched.name + '" executed by Circle AI Smart Wallet ÔÇö ' + spent.toFixed(2) + ' ' + v.token + ' (tx ' + lastHash.slice(0, 10) + '...)', 'success');
       return { status: 'executed', txHash: lastHash };
     } catch(fatal) {
       var fReason = (fatal && (fatal.shortMessage || fatal.message)) ? String(fatal.shortMessage || fatal.message).substring(0, 140) : 'Unknown executor error';
@@ -1076,7 +1076,7 @@
     _saveLedger();
     var engM2 = _engine();
     if (engM2 && typeof engM2.updateExecutionClaim === 'function') engM2.updateExecutionClaim(key, 'agent_schedule_executor', { status: 'confirmed', txHash: lastHash || null });
-    _advanceSchedule(sched, 'Executed by Agent Wallet — MultiSend ' + transfers.length + '/' + transfers.length + ' recipients (' + spent.toFixed(2) + ' ' + v.token + ')', 'executed', lastHash, { sender: agentAddr, recipient: transfers.length + ' recipients', token: v.token, amount: spent, gasUsed: gasUsed, rows: rows });
+    _advanceSchedule(sched, 'Executed by Circle AI Smart Wallet — MultiSend ' + transfers.length + '/' + transfers.length + ' recipients (' + spent.toFixed(2) + ' ' + v.token + ')', 'executed', lastHash, { sender: agentAddr, recipient: transfers.length + ' recipients', token: v.token, amount: spent, gasUsed: gasUsed, rows: rows });
     _recordOutcome(sched, v.auth, spent, v.token, 'success', lastHash, duration, gasUsed, null, { sender: agentAddr, recipient: transfers.length + ' recipients', token: v.token, amount: spent, gasUsed: gasUsed, rows: rows });
     try { if (task) ExecutionQueue.updateStatus(task.id, 'completed', { txHash: lastHash, result: 'success', progress: 100 }); } catch(e){}
     _notify(sched, 'executed', 'Schedule "' + sched.name + '" MultiSend completed — ' + transfers.length + '/' + transfers.length + ' recipients processed', 'success');
@@ -1165,9 +1165,9 @@
 
     ledger[key] = { status: 'executed', ts: Date.now(), attempts: attempts, amount: v.total, asset: v.token, txHash: actualTxHash, mintTxHash: mintTxHash };
     _saveLedger();
-    _advanceSchedule(sched, 'Executed by Agent Wallet ' + sched.type + ' executor \u2014 ' + v.total + ' ' + v.token + txNote, 'executed', actualTxHash, { token: v.token, amount: v.total, mintTxHash: mintTxHash });
+    _advanceSchedule(sched, 'Executed by Circle AI Smart Wallet ' + sched.type + ' executor \u2014 ' + v.total + ' ' + v.token + txNote, 'executed', actualTxHash, { token: v.token, amount: v.total, mintTxHash: mintTxHash });
     _recordOutcome(sched, v.auth, v.total, v.token, 'success', actualTxHash, Date.now() - startTime, 0, null, { token: v.token, amount: v.total, mintTxHash: mintTxHash });
-    _notify(sched, 'executed', 'Schedule "' + sched.name + '" \u2014 Agent Wallet executed the ' + sched.type + ' (' + v.total + ' ' + v.token + ')' + txNote, 'success');
+    _notify(sched, 'executed', 'Schedule "' + sched.name + '" \u2014 Circle AI Smart Wallet executed the ' + sched.type + ' (' + v.total + ' ' + v.token + ')' + txNote, 'success');
     return { status: 'executed', txHash: actualTxHash, mintTxHash: mintTxHash };
   }
 

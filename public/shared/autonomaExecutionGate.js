@@ -49,15 +49,15 @@
     gate_unavailable: 'Autonomous financial execution is currently blocked because the execution safety gate is unavailable.',
     authorization_unavailable: 'Autonomous financial execution is currently blocked because the authorization system is unavailable.',
     policy_unavailable: 'Autonomous financial execution is currently blocked because the policy engine is unavailable.',
-    wallet_unavailable: 'Autonomous financial execution is currently blocked because the Agent Wallet is unavailable.',
-    agent_wallet_unavailable: 'Autonomous financial execution is currently blocked because no Agent Wallet address is available.',
-    wallet_paused: 'Autonomous financial execution is currently blocked because the Agent Wallet is paused.',
-    wallet_shutdown: 'Autonomous financial execution is currently blocked because the Agent Wallet is shut down.',
+    wallet_unavailable: 'Autonomous financial execution is currently blocked because the Circle AI Smart Wallet is unavailable.',
+    agent_wallet_unavailable: 'Autonomous financial execution is currently blocked because no Circle AI Smart Wallet address is available.',
+    wallet_paused: 'Autonomous financial execution is currently blocked because the Circle AI Smart Wallet is paused.',
+    wallet_shutdown: 'Autonomous financial execution is currently blocked because the Circle AI Smart Wallet is shut down.',
     authorization_missing: 'Autonomous financial execution is currently blocked because explicit authorization/approval is required.',
     authorization_denied: 'Autonomous financial execution is currently blocked because the authorization scope denies this operation.',
     authorization_error: 'Autonomous financial execution is currently blocked because authorization validation failed.',
     operation_not_permitted: 'Autonomous financial execution is currently blocked because this operation is not permitted by the authorization.',
-    agent_wallet_mismatch: 'Autonomous financial execution is currently blocked because the authorization does not belong to the current Agent Wallet.',
+    agent_wallet_mismatch: 'Autonomous financial execution is currently blocked because the authorization does not belong to the current Circle AI Smart Wallet.',
     user_wallet_unbound: 'Autonomous financial execution is currently blocked because the granting wallet is not connected.',
     user_wallet_mismatch: 'Autonomous financial execution is currently blocked because the authorization was granted by a different wallet.',
     wrong_chain: 'Autonomous financial execution is currently blocked because the target chain is not authorized.',
@@ -179,9 +179,16 @@
     if (typeof wm.isPaused === 'function' && wm.isPaused()) return _block('wallet_paused');
     var agentAddr = null;
     // Resolve identity from CircleAgent (canonical). Never from AgentWalletManager.
+    // Prefer the async resolver so an empty cache resolves the real Circle wallet
+    // instead of falsely reporting "wallet unavailable". Falls back to the cached
+    // address for callers/mocks that do not expose resolveAddress.
     try {
-      if (typeof CircleAgent !== 'undefined' && typeof CircleAgent.getCachedAddress === 'function') {
-        agentAddr = CircleAgent.getCachedAddress() || null;
+      if (typeof CircleAgent !== 'undefined') {
+        if (typeof CircleAgent.resolveAddress === 'function') {
+          agentAddr = await CircleAgent.resolveAddress() || null;
+        } else if (typeof CircleAgent.getCachedAddress === 'function') {
+          agentAddr = CircleAgent.getCachedAddress() || null;
+        }
       }
     } catch (_e) { agentAddr = null; }
     if (!_isAddr(agentAddr)) return _block('agent_wallet_unavailable');

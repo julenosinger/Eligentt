@@ -69,7 +69,7 @@ function loadBrain(ctx) {
    ══════════════════════════════════════════════════════════════ */
 describe('buildBalanceSurface: CircleAgent canonical', function() {
 
-  it('shows Circle Agent Wallet section when CircleAgent is available', async function() {
+  it('shows Circle AI Smart Wallet section when CircleAgent is available', async function() {
     var ctx = buildCtx({
       CircleAgent: {
         getStatus: async function() {
@@ -96,7 +96,7 @@ describe('buildBalanceSurface: CircleAgent canonical', function() {
     loadRouter(ctx);
 
     var html = await ctx.AgentCapabilityRouter.buildBalanceSurface();
-    assert.ok(html.includes('Circle Agent Wallet'), 'must show "Circle Agent Wallet"');
+    assert.ok(html.includes('Circle AI Smart Wallet'), 'must show "Circle AI Smart Wallet"');
     assert.ok(html.includes('CANONICAL'), 'must badge the canonical wallet');
     assert.ok(html.includes('0xCircle000000000000000000000000000000CAFE'), 'must show Circle wallet address');
     assert.ok(html.includes('USDC'), 'must show USDC balance');
@@ -131,7 +131,7 @@ describe('buildBalanceSurface: CircleAgent canonical', function() {
     assert.ok(!html.includes('Agent EOA'), 'Agent EOA must NOT appear in balance surface');
     assert.ok(!html.includes('AgentWalletManager'), 'AgentWalletManager must NOT appear in UI');
     // Circle Wallet should be shown
-    assert.ok(html.includes('Circle Agent Wallet'), 'Circle Agent Wallet must be shown');
+    assert.ok(html.includes('Circle AI Smart Wallet'), 'Circle AI Smart Wallet must be shown');
   });
 
   it('does NOT show "Connect your wallet to see balances" when CircleAgent has data', async function() {
@@ -265,9 +265,9 @@ describe('Canonical capability set', function() {
 });
 
 /* ══════════════════════════════════════════════════════════════
-   SUITE 4: Circle Agent wallet context persists across capabilities
+   SUITE 4: Circle AI Smart Wallet context persists across capabilities
    ══════════════════════════════════════════════════════════════ */
-describe('Circle Agent wallet context across capabilities', function() {
+describe('Circle AI Smart Wallet context across capabilities', function() {
 
   it('CircleAgent.getCachedAddress is the same value used in buildBalanceSurface', async function() {
     var CIRCLE_ADDR = '0xCircleCanonical0000000000000000000000001';

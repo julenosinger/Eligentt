@@ -516,7 +516,7 @@ describe('8. Agent EOA never in balance surface HTML', () => {
     const ctx = baseCtx();
     vm.runInContext(load('agentCapabilityRouter.js'), ctx);
     const html = await ctx.AgentCapabilityRouter.buildBalanceSurface();
-    assert.ok(html.includes(CIRCLE_ADDR) || html.includes('Circle Agent Wallet'),
+    assert.ok(html.includes(CIRCLE_ADDR) || html.includes('Circle AI Smart Wallet'),
       'Circle Wallet address or label must appear in balance surface HTML');
   });
 });

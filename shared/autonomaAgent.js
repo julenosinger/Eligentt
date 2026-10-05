@@ -305,7 +305,7 @@
         R.head('shield-off','Agent Permissions',{text:'None',cls:'danger'})+
         '<div class="aut-rc-body">'+
         '<div style="font-size:9px;color:var(--muted)">No agent authorization active.</div>'+
-        '<div style="font-size:9px;color:var(--muted2);margin-top:4px">Enable autonomous execution to grant the Agent Wallet permission to operate on your behalf.</div>'+
+        '<div style="font-size:9px;color:var(--muted2);margin-top:4px">Enable autonomous execution to grant the Circle AI Smart Wallet permission to operate on your behalf.</div>'+
         '</div></div>';
     }
     var rows='';

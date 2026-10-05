@@ -442,7 +442,7 @@
   async function buildBalanceSurface() {
     var sections = [];
 
-    /* ── 1. Circle Agent Wallet (canonical) ────────────────────── */
+    /* ── 1. Circle AI Smart Wallet (canonical) ────────────────────── */
     try {
       var CA = mod('CircleAgent');
       if (CA && typeof CA.getBalance === 'function') {
@@ -479,7 +479,7 @@
           sections.push(
             '<div class="das-balance" style="border-color:rgba(39,117,202,.35);background:rgba(39,117,202,.05)">' +
               '<div class="das-balance-header" style="color:#2775ca">' +
-                '<i class="ti ti-building-bank"></i> Circle Agent Wallet' +
+                '<i class="ti ti-building-bank"></i> Circle AI Smart Wallet' +
                 '<span style="margin-left:auto;font-size:8px;background:rgba(34,197,94,.12);color:var(--green);border-radius:3px;padding:1px 5px;font-weight:600">CANONICAL</span>' +
               '</div>' +
               (circleAddr ? '<div class="das-balance-addr"><code style="font-size:9px">' + esc(circleAddr) + '</code>' +

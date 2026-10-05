@@ -228,7 +228,7 @@
       type: 'function',
       function: {
         name: 'manage_permissions',
-        description: 'Manage agent wallet permissions',
+        description: 'Manage Circle AI Smart Wallet permissions',
         parameters: {
           type: 'object',
           properties: {
@@ -544,7 +544,7 @@
       '<li> Swap tokens & bridge cross-chain (CCTP v2)</li>' +
       '<li> Batch send to multiple recipients</li>' +
       '<li> Check balances & transaction history</li>' +
-      '<li> Manage agent wallet permissions</li>' +
+      '<li> Manage Circle AI Smart Wallet permissions</li>' +
       '</ul>' +
       '<p style="font-size:9px;color:var(--muted2)">Try: "send 100 USDC to 0x...", "create invoice for 500 USDC", "bridge 300 USDC from Base to Arc", "show my balance"</p>' +
       '</div>';

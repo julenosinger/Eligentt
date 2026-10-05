@@ -119,7 +119,7 @@
       R.head('shield-check','Trust Layer',reputationBadge)+
       '<div class="aut-rc-body">'+
       R.row('Prepared By',trustLayer.agentName,'purple')+
-      R.row('Agent Wallet',trustLayer.agentWallet?trustLayer.agentWallet.slice(0,6)+'...'+trustLayer.agentWallet.slice(-4):'—','muted')+
+      R.row('Circle AI Smart Wallet',trustLayer.agentWallet?trustLayer.agentWallet.slice(0,6)+'...'+trustLayer.agentWallet.slice(-4):'—','muted')+
       (trustLayer.erc8004Identity?R.row('ERC-8004 ID','Token #'+trustLayer.erc8004Identity,'green'):'')+
       R.row('Reputation',trustLayer.reputationScore+'/100','purple')+
       (trustLayer.authorizationId?R.row('Authorization',trustLayer.authorizationId.slice(0,16)+'...','green'):'')+

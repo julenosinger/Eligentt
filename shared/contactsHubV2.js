@@ -277,7 +277,7 @@
             permRow('Vault', perms.vault) +
             permRow('OTC', perms.otc) +
           '</div>' +
-          '<div style="font-size:7px;color:var(--muted2);margin-top:10px">These permissions are enforced by Agent Wallet authorization. Edit in Settings → Permissions.</div>' +
+          '<div style="font-size:7px;color:var(--muted2);margin-top:10px">These permissions are enforced by Circle AI Smart Wallet authorization. Edit in Settings → Permissions.</div>' +
         '</div>' +
       '</div>' +
 

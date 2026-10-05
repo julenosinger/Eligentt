@@ -233,15 +233,17 @@ async function handleOpenAIProxy(request, env) {
 }
 
 // ══════════════════════════════════════════════════════════
-//  CIRCLE AGENT WALLET — Developer-Controlled Wallets API
+//  CIRCLE AI SMART WALLET — Developer-Controlled Wallets API
 //  Uses: CIRCLE_API_KEY, CIRCLE_ENTITY_SECRET, CIRCLE_WALLET_ID
 //  All secrets live server-side only (Cloudflare Secrets).
-//  Endpoints:
+//  Endpoints (READ-ONLY):
 //    GET  /api/agent/status          — wallet info + USDC balance
 //    GET  /api/agent/balance         — USDC balance on Arc + supported chains
-//    POST /api/agent/transfer        — initiate USDC transfer (requires body)
 //    GET  /api/agent/transactions    — recent tx history
-//    POST /api/agent/validate        — validate a transfer intent before execution
+//
+//  NOTE: Direct transfer/validate endpoints are disabled here. All financial
+//  execution must go through the authorized agent-signer path
+//  (/api/agent-signer/authorize → /api/agent-signer/broadcast).
 // ══════════════════════════════════════════════════════════
 async function handleAgentWallet(request, env, url) {
   const corsOrigin = getAllowedOrigin(request, env);
@@ -324,56 +326,13 @@ async function handleAgentWallet(request, env, url) {
     }
   }
 
-  // ── POST /api/agent/transfer ──
-  if (action === 'transfer' && request.method === 'POST') {
-    if (paused) return new Response(JSON.stringify({ error: 'Agent signer is paused (kill switch active)' }), { status: 403, headers });
-    if (!walletId || !entitySecret) {
-      return new Response(JSON.stringify({ error: 'Agent wallet not fully configured (walletId or entitySecret missing)' }), { status: 503, headers });
-    }
-    try {
-      let body;
-      try { body = await request.json(); } catch(_) { return new Response(JSON.stringify({ error: 'Invalid JSON body' }), { status: 400, headers }); }
-      const { to, amount, tokenAddress, blockchain, idempotencyKey } = body;
-      if (!to || !amount || !tokenAddress || !blockchain) {
-        return new Response(JSON.stringify({ error: 'Missing required fields: to, amount, tokenAddress, blockchain' }), { status: 400, headers });
-      }
-      // Circle developer-controlled wallets transfer endpoint
-      const payload = {
-        idempotencyKey: idempotencyKey || crypto.randomUUID(),
-        walletId,
-        tokenId: tokenAddress,  // Circle uses tokenId (contract address) for ERC-20 transfers
-        destinationAddress: to,
-        amounts: [String(amount)],
-        blockchain: blockchain || 'ARC',
-        entitySecretCiphertext: entitySecret,  // server-side only — never reaches browser
-        fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
-      };
-      const res = await circleAPI('/v1/w3s/developer/transactions/transfer', 'POST', payload);
-      return new Response(JSON.stringify(res.ok ? res.data : { error: res.data }), { status: res.ok ? 201 : res.status, headers });
-    } catch(e) {
-      return new Response(JSON.stringify({ error: e.message }), { status: 500, headers });
-    }
-  }
-
-  // ── POST /api/agent/validate ──
-  if (action === 'validate' && request.method === 'POST') {
-    try {
-      let body;
-      try { body = await request.json(); } catch(_) { return new Response(JSON.stringify({ error: 'Invalid JSON body' }), { status: 400, headers }); }
-      const { to, amount } = body;
-      const valid = to && /^0x[a-fA-F0-9]{40}$/.test(to) && amount && parseFloat(amount) > 0;
-      return new Response(JSON.stringify({
-        valid,
-        checks: {
-          addressFormat: /^0x[a-fA-F0-9]{40}$/.test(to || ''),
-          amountPositive: parseFloat(amount || 0) > 0,
-          agentConfigured: !!walletId && !!apiKey,
-          agentNotPaused: !paused,
-        }
-      }), { status: 200, headers });
-    } catch(e) {
-      return new Response(JSON.stringify({ error: e.message }), { status: 500, headers });
-    }
+  // ── POST /api/agent/transfer & /validate — DISABLED ──
+  // Direct fund movement is disabled on this legacy surface. All financial
+  // operations must go through the authorized agent-signer execution path
+  // (/api/agent-signer/authorize → /api/agent-signer/broadcast), which is the
+  // ONLY surface allowed to move funds.
+  if (action === 'transfer' || action === 'validate') {
+    return new Response(JSON.stringify({ error: 'Direct transfers are disabled — use the authorized agent-signer execution path' }), { status: 403, headers });
   }
 
   return new Response(JSON.stringify({ error: 'Unknown agent action: ' + action }), { status: 404, headers });

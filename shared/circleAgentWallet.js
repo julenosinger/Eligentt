@@ -1,5 +1,5 @@
 /**
- * Circle Agent Wallet — Frontend Client
+ * Circle AI Smart Wallet — Frontend Client
  *
  * Thin browser-side client for the /api/agent/* Cloudflare Pages Function.
  * All Circle secrets (API key, entity secret) live SERVER-SIDE ONLY.
@@ -66,37 +66,6 @@
   }
 
   /**
-   * validate(to, amount) → { valid, checks }
-   */
-  async function validate(to, amount) {
-    var res = await _call('validate', {
-      method: 'POST',
-      body: JSON.stringify({ to: to, amount: amount })
-    });
-    return res.data;
-  }
-
-  /**
-   * transfer(to, amount, tokenAddress, blockchain, idempotencyKey) → Circle transaction response
-   * All fields required except idempotencyKey (auto-generated server-side if omitted).
-   * USDC on Arc Mainnet: blockchain = 'ARC', tokenAddress = USDC contract on Arc.
-   */
-  async function transfer(to, amount, tokenAddress, blockchain, idempotencyKey) {
-    var res = await _call('transfer', {
-      method: 'POST',
-      body: JSON.stringify({
-        to: to,
-        amount: amount,
-        tokenAddress: tokenAddress || '0x3600000000000000000000000000000000000000',
-        blockchain: blockchain || 'ARC',
-        idempotencyKey: idempotencyKey || null
-      })
-    });
-    _cache.status = null; // invalidate cache after transfer
-    return { ok: res.ok, data: res.data };
-  }
-
-  /**
    * formatBalance(balances) → { USDC: '0.00', EURC: '0.00', ... }
    * Normalizes Circle's tokenBalances array into a simple symbol→amount map.
    */
@@ -121,7 +90,7 @@
       return '<div class="caw-card caw-unconfigured">' +
         '<div class="caw-card-icon"><i class="ti ti-robot-off"></i></div>' +
         '<div class="caw-card-body">' +
-          '<div class="caw-card-title">Circle Agent Wallet</div>' +
+          '<div class="caw-card-title">Circle AI Smart Wallet</div>' +
           '<div class="caw-card-sub">' + errMsg + '</div>' +
         '</div></div>';
     }
@@ -129,7 +98,7 @@
       return '<div class="caw-card caw-paused">' +
         '<div class="caw-card-icon" style="color:var(--yellow)"><i class="ti ti-pause-circle"></i></div>' +
         '<div class="caw-card-body">' +
-          '<div class="caw-card-title">Circle Agent Wallet <span class="caw-badge paused">Paused</span></div>' +
+          '<div class="caw-card-title">Circle AI Smart Wallet <span class="caw-badge paused">Paused</span></div>' +
           '<div class="caw-card-sub">Kill switch active — transfers are blocked</div>' +
         '</div></div>';
     }
@@ -145,7 +114,7 @@
     return '<div class="caw-card caw-live">' +
       '<div class="caw-card-icon" style="color:#2775ca"><img src="/assets/tokens/usdc/Symbol/USDC-symbol.png" style="width:28px;height:28px;border-radius:50%" alt="USDC"></div>' +
       '<div class="caw-card-body">' +
-        '<div class="caw-card-title">Circle Agent Wallet <span class="caw-badge ' + stateCls + '">' + walletState + '</span></div>' +
+        '<div class="caw-card-title">Circle AI Smart Wallet <span class="caw-badge ' + stateCls + '">' + walletState + '</span></div>' +
         '<div class="caw-card-addr" title="' + addr + '">' + addrShort + ' <button onclick="navigator.clipboard.writeText(\'' + addr + '\').then(()=>toast(\'Copied\',\'success\'))" style="background:none;border:none;cursor:pointer;color:var(--muted2);font-size:9px" title="Copy"><i class="ti ti-copy"></i></button></div>' +
         '<div class="caw-card-bals">' + balStr + '</div>' +
       '</div>' +
@@ -154,13 +123,51 @@
   }
 
   /**
-   * getCachedAddress() → the Circle wallet address from the last status call,
+   * _readCachedAddress() → the Circle wallet address from the last status call,
    * or null if status has not been fetched yet.
    */
-  function getCachedAddress() {
+  function _readCachedAddress() {
     var s = _cache.status;
     if (!s) return null;
     return s.walletAddress || (s.wallet && s.wallet.address) || null;
+  }
+
+  var _addressPromise = null;
+  var _lastResolveAttempt = 0;
+
+  /**
+   * resolveAddress() → the Circle AI Smart Wallet address, resolving it from the
+   * real Circle status when the cache is empty. Never invents an address and
+   * never falls back to another wallet; returns null only when Circle genuinely
+   * has no wallet to resolve.
+   */
+  async function resolveAddress() {
+    var cached = _readCachedAddress();
+    if (cached) return cached;
+    if (_addressPromise) return _addressPromise;
+    var now = Date.now();
+    if (now - _lastResolveAttempt < 5000) return null;
+    _lastResolveAttempt = now;
+    _addressPromise = getStatus(true)
+      .then(function (s) {
+        return (s && (s.walletAddress || (s.wallet && s.wallet.address))) || null;
+      })
+      .catch(function () { return null; })
+      .finally(function () { _addressPromise = null; });
+    return _addressPromise;
+  }
+
+  /**
+   * getCachedAddress() → the cached Circle wallet address. When the cache is
+   * empty, this kicks off a non-blocking resolution against the real Circle
+   * status so the address becomes available as soon as possible, instead of
+   * treating an empty cache as "wallet does not exist".
+   */
+  function getCachedAddress() {
+    var addr = _readCachedAddress();
+    if (addr) return addr;
+    try { resolveAddress(); } catch (_e) {}
+    return null;
   }
 
   /**
@@ -181,7 +188,7 @@
     var el = typeof selector === 'string' ? document.querySelector(selector) : selector;
     if (!el) return;
     el.classList.add('caw-mount');
-    el.innerHTML = '<div style="font-size:9px;color:var(--muted2);padding:8px">Loading Circle Agent Wallet…</div>';
+    el.innerHTML = '<div style="font-size:9px;color:var(--muted2);padding:8px">Loading Circle AI Smart Wallet…</div>';
     var html = await statusHTML();
     el.innerHTML = html;
   }
@@ -223,11 +230,10 @@
     getStatus: getStatus,
     getBalance: getBalance,
     getTransactions: getTransactions,
-    validate: validate,
-    transfer: transfer,
     formatBalance: formatBalance,
     statusHTML: statusHTML,
     getCachedAddress: getCachedAddress,
+    resolveAddress: resolveAddress,
     refreshCard: refreshCard,
     mount: mount,
   };

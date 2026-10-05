@@ -432,7 +432,7 @@ describe('AgentCapabilityRouter — buildBalanceSurface', () => {
     expect(html).toContain('EURC');
     // fmtUSDC formats 1234.56 as "1,234.56" — check for either format
     expect(html.includes('1234') || html.includes('1,234')).toBe(true);
-    expect(html).toContain('Circle Agent Wallet');
+    expect(html).toContain('Circle AI Smart Wallet');
     expect(html).toContain('CANONICAL');
   });
 });

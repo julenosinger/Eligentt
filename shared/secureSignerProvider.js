@@ -211,7 +211,7 @@
   }
 
   function _postJson(path, body) {
-    // Attach the Circle Agent wallet address as X-Agent-Wallet so the server
+    // Attach the Circle AI Smart Wallet address as X-Agent-Wallet so the server
     // can verify identity when no email/password session cookie is present
     // (wallet-connect users). The server validates it against CIRCLE_WALLET_ADDRESS env secret.
     var agentWallet = '';

@@ -214,7 +214,7 @@
         recipient: s.address || (s.recipients&&s.recipients[0]?s.recipients[0].addr:''),
         recipients: s.recipients,
         date: s.nextRun, freq: s.freq,
-        executor: s.createdBy === 'aiwallet' ? 'Agent Wallet' : (s.createdBy === 'autonoma' ? 'Autonoma' : 'Schedule'),
+        executor: s.createdBy === 'aiwallet' ? 'Circle AI Smart Wallet' : (s.createdBy === 'autonoma' ? 'Autonoma' : 'Schedule'),
         status: s.status
       });
     });

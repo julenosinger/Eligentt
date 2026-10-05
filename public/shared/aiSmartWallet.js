@@ -196,7 +196,7 @@
     // AgentWalletManager.getAgentAddress() is intentionally not used here.
     return circleWalletAddr();
   }
-  /* Canonical Circle agent wallet — the AI Smart Wallet is backed by this
+  /* Canonical Circle AI Smart Wallet — the AI Smart Wallet is backed by this
      server-side Circle wallet (mainnet). Never substituted by a local key. */
   const CANONICAL_CIRCLE_WALLET = '0x794eb2f43a333e9eab9731d8f5e5423d5ec628eb';
   function circleWalletAddr() {
@@ -369,7 +369,7 @@
 
     /* 10. Schedule / executor readiness */
     nextStage('Schedule Engine', 'Checking agent executor readiness');
-    var agentReady = false, agentReason = 'Circle Agent Wallet not configured';
+    var agentReady = false, agentReason = 'Circle AI Smart Wallet not configured';
     try {
       var _cAddr = agentAddr(); // circleWalletAddr()
       if (_cAddr) { agentReady = true; agentReason = 'Circle Agent ' + short(_cAddr) + ' ready'; }
@@ -775,7 +775,7 @@
       it.status = 'executing';
       saveIntents(); renderExecutions();
       pushHistory({ kind: 'execution', status: 'dispatched', intentId: it.id, schedId: sched.id, op: it.op, amount: it.amount, token: it.token, amountUsd: (Number(it.amount) || 0) * usdRate(it.token) });
-      notify('Intent ' + it.id + ' dispatched to Agent Wallet executor', 'success');
+      notify('Intent ' + it.id + ' dispatched to Circle AI Smart Wallet executor', 'success');
       /* Trigger the existing scheduler tick for immediate pickup */
       try { if (!it.startAt && typeof window._agentCheckSchedules === 'function') setTimeout(window._agentCheckSchedules, 400); } catch (_e) { /* next 60s tick */ }
       /* Also notify BatchExecutionEngine for instant multisend/batch intents */
@@ -827,7 +827,7 @@
         ts: latestHist ? latestHist.ts : null
       };
       pushHistory(execEntry);
-      notify('Intent ' + it.id + ' executed by Agent Wallet', 'success');
+      notify('Intent ' + it.id + ' executed by Circle AI Smart Wallet', 'success');
       renderExecutions(); renderHistory();
       // Emit status update to Autonoma via shared bridge
       try {
@@ -994,7 +994,7 @@
     // Identity: Circle Wallet is the canonical agent.
     // Signing: SecureSignerProvider (Circle mode) or AgentWalletManager (browser/dev fallback).
     // The identity check uses circleWalletAddr(), never AgentWalletManager.getAgentAddress().
-    if (!agentAddr()) { notify('Circle Agent Wallet not configured', 'error'); return; }
+    if (!agentAddr()) { notify('Circle AI Smart Wallet not configured', 'error'); return; }
     if (!to || (typeof ethers !== 'undefined' && !ethers.isAddress(to))) { notify(kind === 'vault' ? 'Treasury Vault address unavailable' : 'Enter a valid destination address', 'error'); return; }
     const isSelfWithdraw = kind === 'withdraw' && personalAddr() && to.toLowerCase() === String(personalAddr()).toLowerCase();
     if (emergencyStop && !isSelfWithdraw) { notify('Emergency Stop active — only withdrawals to your own Personal Wallet are allowed', 'error'); return; }
@@ -1071,7 +1071,7 @@
     if (hint) {
       const map = {
         deposit: 'Personal Wallet → AI Smart Wallet. Signed by your connected wallet on Arc Mainnet.',
-        withdraw: 'AI Smart Wallet → your Personal Wallet. Signed by the Agent Wallet.',
+        withdraw: 'AI Smart Wallet → your Personal Wallet. Signed by the Circle AI Smart Wallet.',
         transfer: 'AI Smart Wallet → any address on Arc. Blocked while Emergency Stop is active.',
         vault: 'AI Smart Wallet → Treasury Vault (' + (vaultAddress() ? short(vaultAddress()) : 'unavailable') + '). Vault → AI flows are managed on the Treasury page.'
       };
@@ -1088,7 +1088,7 @@
     if (!box) return;
     const addr = circleWalletAddr();
     const addrEl = $id('aiw-receive-addr');
-    if (addrEl) addrEl.textContent = addr || 'Agent Wallet not created yet';
+    if (addrEl) addrEl.textContent = addr || 'Circle AI Smart Wallet not created yet';
     const qrEl = $id('aiw-receive-qr');
     if (qrEl && addr && qrRenderedFor !== addr) {
       qrEl.innerHTML = '';
@@ -1145,7 +1145,7 @@
     }
     box.innerHTML =
       wRow('Personal Wallet', !!p, p ? short(p) + wtype : 'Use the Connect button in the top bar') +
-      wRow('AI Smart Wallet', !!a && !paused, a ? short(a) + (paused ? ' · paused' : ' · Agent Wallet on Arc') : 'Not created yet') +
+      wRow('AI Smart Wallet', !!a && !paused, a ? short(a) + (paused ? ' · paused' : ' · Circle AI Smart Wallet on Arc') : 'Not created yet') +
       '<div class="swap-label" style="margin-top:6px">Default Executor (AI operations)</div>' +
       '<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:4px">' +
       ['personal', 'ai', 'hybrid'].map(function (m) {
@@ -1384,7 +1384,7 @@
     var rows = [];
     var wallets = [
       { label: 'Personal Wallet', addr: personalAddr(), tag: 'personal' },
-      { label: 'AI Agent Wallet', addr: agentAddr(), tag: 'agent' }
+      { label: 'Circle AI Smart Wallet', addr: agentAddr(), tag: 'agent' }
     ];
 
     // Use multicall for batch reads when available (avoids sequential RPC trips)
@@ -1687,7 +1687,7 @@
           '<span style="color:var(--text);font-weight:600">' + esc(String(s.amount)) + ' ' + esc(s.token) + '</span>' +
           '<span style="color:var(--muted2)">' + esc(s.type) + '</span>' +
           '<span style="color:var(--muted2)">' + esc(new Date(s.nextRun).toLocaleString()) + '</span>' +
-          '<span class="chip" style="border:1px solid var(--border);color:var(--purple)">' + (s.createdBy === 'aiwallet' ? 'AI Smart Wallet' : 'Agent Wallet') + '</span>' +
+          '<span class="chip" style="border:1px solid var(--border);color:var(--purple)">' + (s.createdBy === 'aiwallet' ? 'AI Smart Wallet' : 'Circle AI Smart Wallet') + '</span>' +
           '<span style="margin-left:auto;color:var(--muted2)">gas ' + (avg ? '~' + avg.toFixed(6) : '—') + '</span></div>';
       });
     });
@@ -2894,7 +2894,7 @@
         '<div style="flex:1;min-width:0"><div style="font-size:9.5px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(s.name || s.type) + '</div>' +
         '<div style="font-size:8px;color:var(--muted2)">' + esc(s.type) + ' · ' + esc(String(s.amount)) + ' ' + esc(s.token) + ' · ' + esc(s.freq) + ' · next ' + (s.nextRun ? esc(new Date(s.nextRun).toLocaleString()) : '—') + ' · by ' + src + ' · runs ' + (s.execCount || 0) + histSuffix + '</div></div>' +
         '<span style="display:flex;gap:4px">' + actions + '</span></div>';
-    }).join('') + '<div style="font-size:8px;color:var(--muted2)">Tasks created elsewhere are shown read-only. Executor: existing Agent Wallet scheduler.</div>';
+    }).join('') + '<div style="font-size:8px;color:var(--muted2)">Tasks created elsewhere are shown read-only. Executor: existing Circle AI Smart Wallet scheduler.</div>';
   }
 
   function renderPermissions() {
@@ -2966,7 +2966,7 @@
     try {
       const addr = agentAddr(); // circleWalletAddr() — Circle Wallet is the canonical identity
       if (!addr) {
-        box.innerHTML = '<div style="font-size:9.5px;color:var(--muted2)">Circle Agent Wallet not yet configured. Set up the Circle Agent in settings to enable AI Smart Wallet execution.</div>';
+        box.innerHTML = '<div style="font-size:9.5px;color:var(--muted2)">Circle AI Smart Wallet not yet configured. Set up the Circle Agent in settings to enable AI Smart Wallet execution.</div>';
         return;
       }
       // Auth summary
@@ -2978,7 +2978,7 @@
         '<div style="display:flex;justify-content:space-between"><span style="color:var(--muted2)">Type</span><span style="color:var(--text)">Circle Developer Wallet</span></div>' +
         '<div style="display:flex;justify-content:space-between"><span style="color:var(--muted2)">Execution chain</span><span style="color:var(--text)">Arc Mainnet · 5042</span></div>' +
         '<div style="display:flex;justify-content:space-between"><span style="color:var(--muted2)">Active authorizations</span><span style="color:' + (authCount > 0 ? 'var(--green)' : 'var(--muted2)') + '">' + authCount + '</span></div>' +
-        '</div><div style="font-size:8px;color:var(--muted2);margin-top:7px">Circle Agent Wallet. The AI Smart Wallet never stores or exports keys — all execution is gated by AgentAuthorization.</div>';
+        '</div><div style="font-size:8px;color:var(--muted2);margin-top:7px">Circle AI Smart Wallet. The AI Smart Wallet never stores or exports keys — all execution is gated by AgentAuthorization.</div>';
     } catch (e) {
       box.innerHTML = '<div style="font-size:9.5px;color:var(--red)">Agent info error: ' + esc(e.message || e) + '</div>';
     }

@@ -18,7 +18,7 @@
     start: function () {
       try { if (typeof CapabilityRegistry !== 'undefined') {
         CapabilityRegistry.registerCapability('aiwallet.validate', 'aiwallet', '13-stage intent validation');
-        CapabilityRegistry.registerCapability('aiwallet.execute', 'aiwallet', 'Execute validated intent via Agent Wallet');
+        CapabilityRegistry.registerCapability('aiwallet.execute', 'aiwallet', 'Execute validated intent via Circle AI Smart Wallet');
         CapabilityRegistry.registerCapability('aiwallet.simulate', 'aiwallet', 'Dry-run simulation');
         CapabilityRegistry.registerCapability('aiwallet.approve', 'aiwallet', 'Approve/reject intents');
       }} catch (_e) {}
