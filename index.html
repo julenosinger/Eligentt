@@ -31635,39 +31635,61 @@ function saSelectAsset(asset, btn) {
   _log('[SendAssets] Asset selected:', asset, '| address:', saGetTokenAddr());
 }
 
-// ── Balance refresh ───────────────────────────────────────
+// ── Balance refresh (stale-while-revalidate + anti-race, BalanceService only) ──
+// Reads exclusively via BalanceService.getTokenBalance on the From Network
+// (the chain where the token lives). Never window.ethereum / wallet provider.
+let saBalReqId = 0;
+const _saBalCache = {};   // key -> "5.25 USDC" (last-known-good, UI-only)
+let _saLastBalance = null;   // number|null — raw human balance (last-known-good)
+let _saLastBalanceKey = null; // key _saLastBalance belongs to (guards asset/chain switches)
+
+function _saBalKey(address, sym, chainId) {
+  return String(address || '').toLowerCase() + '::' + String(sym || '').toUpperCase() + '::' + Number(chainId);
+}
+
+function _saClearBalCache() {
+  for (var k in _saBalCache) { if (Object.prototype.hasOwnProperty.call(_saBalCache, k)) delete _saBalCache[k]; }
+  _saLastBalance = null;
+  _saLastBalanceKey = null;
+}
+
 async function saRefreshBalance() {
   var balEl = document.getElementById('sa-balance-val');
   if (!balEl) return;
   if (!walletAddress) { balEl.textContent = '—'; return; }
+
+  var chain = getActiveChain();
+  var chainId = chain ? chain.chainId : activeChainId;
+  var sym = saCurrentAsset;
+  var dec = saGetTokenDecimals();
+  var key = _saBalKey(walletAddress, sym, chainId);
+  var reqId = ++saBalReqId;
+
+  // 1) stale-while-revalidate: show the last-known-good value immediately.
+  var cached = _saBalCache[key];
+  if (balEl) balEl.textContent = cached != null ? cached : '…';
+
+  // 2) fresh read via BalanceService (never window.ethereum / wallet provider).
+  var v = null;
   try {
-    var tokenAddr = saGetTokenAddr();
-    if (!tokenAddr) { balEl.textContent = '—'; return; }
-    var chain = getActiveChain();
-    // Use proxy-first RPC list (Arc: /api/rpc/arc first; other chains: direct rpc only).
-    var rpcList = (typeof _arcRpcList === 'function') ? _arcRpcList(chain) : (chain && chain.rpc ? [chain.rpc] : []);
-    var bal;
-    try {
-      bal = await _balanceOfWithFallback(tokenAddr, walletAddress, rpcList, 10000);
-    } catch(_rpcErr) {
-      // Fall back to the injected browser provider.
-      if (provider) {
-        var _fb = new ethers.Contract(tokenAddr, USDC_ABI, provider);
-        bal = await Promise.race([
-          _fb.balanceOf(walletAddress),
-          new Promise(function(_, rej){ setTimeout(function(){ rej(new Error('timeout')); }, 10000); })
-        ]);
-      } else {
-        balEl.textContent = '—';
-        return;
-      }
+    if (typeof BalanceService !== 'undefined' && BalanceService.getTokenBalance) {
+      v = await BalanceService.getTokenBalance(walletAddress, sym, chainId);
     }
-    var dec = saGetTokenDecimals();
-    var human = (Number(bal) / Math.pow(10, dec)).toFixed(dec === 6 ? 2 : 6);
-    balEl.textContent = human + ' ' + saCurrentAsset;
-  } catch(e) {
-    balEl.textContent = '—';
+  } catch (_) {}
+
+  // 3) anti-race: discard this response if a newer request superseded it.
+  if (reqId !== saBalReqId) return;
+
+  if (v == null) {
+    if (balEl) balEl.textContent = cached != null ? cached : '—';
+    return;
   }
+  var human = parseFloat(v);
+  _saLastBalance = human;
+  _saLastBalanceKey = key;
+  var text = human.toFixed(dec === 6 ? 2 : 6) + ' ' + sym;
+  _saBalCache[key] = text;
+  if (balEl) balEl.textContent = text;
 }
 
 // ── Set MAX ───────────────────────────────────────────────
@@ -31752,6 +31774,11 @@ function saUpdateRoute() {
     status = 'Zero address not allowed';
   } else if (amount <= 0) {
     status = 'Enter amount';
+  } else if (_saLastBalance != null && _saLastBalanceKey === _saBalKey(walletAddress, saCurrentAsset, (getActiveChain() ? getActiveChain().chainId : activeChainId)) && totalAmt > _saLastBalance) {
+    status = 'Insufficient balance';
+  } else if (recipient.toLowerCase() === walletAddress.toLowerCase()) {
+    status = 'Ready to send (own address)';
+    isReady = true;
   } else {
     status = 'Ready to send';
     isReady = true;
@@ -31759,7 +31786,7 @@ function saUpdateRoute() {
 
   if (statusEl) {
     statusEl.textContent = status;
-    statusEl.style.color = isReady ? 'var(--green)' : (status.startsWith('Invalid') || status.startsWith('Zero') ? 'var(--red)' : 'var(--muted2)');
+    statusEl.style.color = isReady ? (status.indexOf('own address') !== -1 ? 'var(--yellow)' : 'var(--green)') : (status.startsWith('Invalid') || status.startsWith('Zero') || status.startsWith('Insufficient') ? 'var(--red)' : 'var(--muted2)');
   }
   if (btn) btn.disabled = !isReady;
 }
@@ -32290,13 +32317,16 @@ async function saExecuteSend() {
   var feeRaw = (rawAmt * BigInt(saFeeBps)) / 10000n;
   var totalNeed = rawAmt + feeRaw;
 
+  // TOCTOU balance check via BalanceService (canonical, never the wallet provider).
   try {
-    var tc = new ethers.Contract(tokenAddr, USDC_ABI, provider);
-    var bal = await tc.balanceOf(walletAddress);
-    if (bal < totalNeed) {
-      var have = (Number(bal) / Math.pow(10, saGetTokenDecimals())).toFixed(4);
-      var need = (Number(totalNeed) / Math.pow(10, saGetTokenDecimals())).toFixed(4);
-      toast('Insufficient ' + saCurrentAsset + '. Have: ' + have + ', Need: ' + need, 'error'); return;
+    var _svcBal = (typeof BalanceService !== 'undefined' && BalanceService.getTokenBalance)
+      ? await BalanceService.getTokenBalance(walletAddress, saCurrentAsset, activeChainId) : null;
+    if (_svcBal != null) {
+      var _balHuman = parseFloat(_svcBal);
+      var _needHuman = (Number(totalNeed) / Math.pow(10, saGetTokenDecimals()));
+      if (_balHuman < _needHuman) {
+        toast('Insufficient ' + saCurrentAsset + '. Have: ' + _balHuman.toFixed(4) + ', Need: ' + _needHuman.toFixed(4), 'error'); return;
+      }
     }
   } catch(e) { _warn('[SendAssets] Balance check error:', e.message); }
 
@@ -32369,7 +32399,12 @@ async function saExecuteSend() {
     toast(amount + ' ' + saCurrentAsset + ' sent to ' + shortAddr(recipient) + ' + ' + feeUsd.toFixed(4) + ' fee | Tx: ' + shortAddr(tx.hash), 'success');
 
     if (typeof logFeeEvent === 'function') logFeeEvent({ module:'Send Assets', amount: amount, feeAmount: feeUsd, asset: saCurrentAsset, txHash: tx.hash, feeTxHash: tx.hash });
-    saLogTx({ hash: tx.hash, amount: amount, asset: saCurrentAsset, recipient: recipient, memo: memo, block: receipt.blockNumber });
+    saLogTx({ hash: tx.hash, txHash: tx.hash, amount: amount, asset: saCurrentAsset, recipient: recipient, memo: memo, block: receipt.blockNumber, network: (getActiveChain() && getActiveChain().name) || 'Arc Mainnet' });
+
+    // Invalidate the balance cache (single refresh, no loop) so the post-send
+    // balance reflects the real on-chain state.
+    try { if (typeof BalanceService !== 'undefined' && BalanceService.invalidate) BalanceService.invalidate(walletAddress); } catch(_e){}
+    try { if (typeof _saClearBalCache === 'function') _saClearBalCache(); } catch(_e){}
 
     setTimeout(function() {
       if (btnContent) btnContent.innerHTML = '<i class="ti ti-send"></i> Send Asset';
@@ -32457,7 +32492,7 @@ function saRenderActivity() {
       '<div class="sa-activity-detail">' +
         '<div class="sa-activity-label">' + label + '</div>' +
         '<div class="sa-activity-sub">' +
-          (isXChain ? (tx.fromChain || '') + ' → ' + (tx.toChain || '') + ' · Cross-Chain' : escHtml(tx.memo || 'Direct transfer') + ' · Block ' + (tx.block || '—')) +
+          (isXChain ? (tx.fromChain || '') + ' → ' + (tx.toChain || '') + ' · Cross-Chain' : ((tx.network || '') + ' · ' + escHtml(tx.memo || 'Direct transfer') + ' · Block ' + (tx.block || '—'))) +
         '</div>' +
       '</div>' +
       '<div>' +
