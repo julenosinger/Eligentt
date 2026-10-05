@@ -1467,7 +1467,28 @@
   }
 
   function getCapabilities(){ return agentState ? agentState.capabilities : []; }
-  function getSupportedChains(){ return agentState ? agentState.supportedChains : []; }
+
+  // Canonical supported chains — Arc Mainnet (5042) is ALWAYS included.
+  // Legacy "Arc Testnet" (persisted pre-mainnet) is normalized to Arc Mainnet so a
+  // stale localStorage state can never hide the real Arc chain.
+  function getSupportedChains(){
+    var list = (agentState && Array.isArray(agentState.supportedChains)) ? agentState.supportedChains.slice() : [];
+    var out = [];
+    for (var i = 0; i < list.length; i++) {
+      var name = _canonicalChainName(list[i]);
+      if (name && out.indexOf(name) === -1) out.push(name);
+    }
+    if (out.indexOf('Arc Mainnet') === -1) out.push('Arc Mainnet');
+    return out;
+  }
+
+  function _canonicalChainName(name){
+    var s = String(name == null ? '' : name).trim();
+    if (!s) return null;
+    var low = s.toLowerCase();
+    if (low === 'arc testnet' || low === 'arc_testnet' || low === 'arc test' || low === 'arc' || low === 'arc mainnet' || low === 'arc_mainnet') return 'Arc Mainnet';
+    return s;
+  }
   function getReputationScore(){ return agentState ? agentState.reputationScore : 0; }
   function getVerificationStatus(){ return agentState ? agentState.verificationStatus : 'unverified'; }
   function isIdentityRegistered(){ return agentState ? !!agentState.identityRegistered : false; }

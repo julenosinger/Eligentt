@@ -47,6 +47,51 @@
     save();
   }
 
+  /* ── Canonical chain resolution (Arc Mainnet = 5042 is canonical) ── */
+  var CHAIN_ALIASES = {
+    'arc': 5042, 'arc mainnet': 5042, 'arc_mainnet': 5042, 'arcmainnet': 5042, 'mainnet': 5042,
+    // Legacy Arc Testnet references must NEVER surface as an unsupported chain.
+    'arc testnet': 5042, 'arc_testnet': 5042, 'arctestnet': 5042, 'arc test': 5042,
+    'ethereum': 1, 'eth': 1, 'ethereum mainnet': 1,
+    'base': 8453,
+    'arbitrum': 42161, 'arb': 42161, 'arbitrum one': 42161,
+    'optimism': 10, 'op': 10, 'op mainnet': 10,
+    'polygon': 137, 'poly': 137, 'matic': 137
+  };
+
+  function _chainRegistry(){
+    try { if (typeof CHAIN_REGISTRY !== 'undefined' && CHAIN_REGISTRY) return CHAIN_REGISTRY; } catch(_e){}
+    try { if (typeof window !== 'undefined' && window.ElligenteChains && window.ElligenteChains.CHAIN_REGISTRY) return window.ElligenteChains.CHAIN_REGISTRY; } catch(_e){}
+    return null;
+  }
+
+  function _resolveChainId(network){
+    if (network == null) return null;
+    var s = String(network).trim();
+    if (!s) return null;
+    if (/^\d+$/.test(s)) return parseInt(s, 10);
+    if (/^0x[0-9a-f]+$/i.test(s)) return parseInt(s, 16);
+    var low = s.toLowerCase();
+    if (CHAIN_ALIASES[low] != null) return CHAIN_ALIASES[low];
+    var reg = _chainRegistry();
+    if (reg) {
+      for (var k in reg) {
+        var c = reg[k];
+        if (c && (String(c.name).toLowerCase() === low || String(c.shortName).toLowerCase() === low || String(c.id).toLowerCase() === low)) return c.chainId;
+      }
+    }
+    return null;
+  }
+
+  function _isSupportedChainId(id){
+    if (id == null) return false;
+    var reg = _chainRegistry();
+    if (reg) return !!reg[id];
+    // Canonical mainnet chain IDs — never stale (Arc 5042 + CCTP/LI.FI destinations).
+    var known = { 5042: 1, 1: 1, 8453: 1, 42161: 1, 10: 1, 137: 1 };
+    return !!known[id];
+  }
+
   /* ── Full execution policy validation ── */
   function validateExecution(opts){
     var results=[];
@@ -194,16 +239,22 @@
       }
     }
 
-    // 11. Chain availability
+    // 11. Chain availability — canonical, registry-based (never a stale localStorage list)
     if(opts.network){
-      var supportedChains=typeof AgentWalletManager!=='undefined'?AgentWalletManager.getSupportedChains():[];
-      var netLower=(opts.network||'').toLowerCase();
-      var chainMatch=supportedChains.length===0||supportedChains.some(function(c){return c.toLowerCase()===netLower;});
-      if(!chainMatch){
-        results.push({rule:'Chain Availability',passed:false,reason:'Chain '+opts.network+' not in supported chains'});
-        allValid=false;
-      } else {
+      var resolvedId = _resolveChainId(opts.network);
+      if (_isSupportedChainId(resolvedId)) {
         results.push({rule:'Chain Availability',passed:true,reason:'Chain '+opts.network+' available'});
+      } else {
+        // Fallback: legacy name-list check (for names outside the canonical map).
+        var supportedChains=typeof AgentWalletManager!=='undefined'?AgentWalletManager.getSupportedChains():[];
+        var netLower=(opts.network||'').toLowerCase();
+        var chainMatch=supportedChains.length===0||supportedChains.some(function(c){return String(c).toLowerCase()===netLower;});
+        if(chainMatch){
+          results.push({rule:'Chain Availability',passed:true,reason:'Chain '+opts.network+' available'});
+        } else {
+          results.push({rule:'Chain Availability',passed:false,reason:'Chain '+opts.network+' not in supported chains'});
+          allValid=false;
+        }
       }
     }
 

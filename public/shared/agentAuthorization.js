@@ -27,6 +27,25 @@
     try { localStorage.setItem(AUTH_HISTORY_KEY, JSON.stringify(authHistory).substring(0,50000)); } catch(e){}
   }
 
+  /* ── Canonical network normalization (Arc Mainnet = 5042 is canonical) ── */
+  function _normalizeNetwork(n){
+    var s = String(n == null ? '' : n).trim().toLowerCase();
+    if (!s) return '';
+    if (s === '5042' || s === 'arc' || s === 'arc mainnet' || s === 'arc_mainnet' ||
+        s === 'arc testnet' || s === 'arc_testnet' || s === 'arc test') return 'arc mainnet';
+    return s;
+  }
+
+  function _networkAllowed(allowed, network){
+    if (!allowed || !Array.isArray(allowed)) return false;
+    var target = _normalizeNetwork(network);
+    if (!target) return false;
+    for (var i = 0; i < allowed.length; i++) {
+      if (allowed[i] === '*' || _normalizeNetwork(allowed[i]) === target) return true;
+    }
+    return false;
+  }
+
   function invalidateExpired(){
     var now=Date.now();
     for(var i=0;i<authorizations.length;i++){
@@ -158,8 +177,8 @@
         continue;
       }
 
-      // Network check
-      if(a.allowedNetworks.indexOf('*')===-1&&a.allowedNetworks.indexOf(network)===-1){
+      // Network check (canonical — Arc/arc/ARC/5042 all resolve to Arc Mainnet)
+      if(a.allowedNetworks.indexOf('*')===-1&&!_networkAllowed(a.allowedNetworks, network)){
         results.push({auth:a,valid:false,reason:'Network '+network+' not allowed'});
         continue;
       }
