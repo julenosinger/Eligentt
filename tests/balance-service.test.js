@@ -90,12 +90,14 @@ describe('BalanceService — swap UI integration', () => {
     expect(html).toContain('<script src="/shared/BalanceService.js"></script>');
   });
 
-  it('swap reader resolves each side on its OWN chain via _swpTokenChainId', () => {
-    const fn = between(html, 'async function updateSwapBalancesDisplay()', 'function swapTokens()');
+  it('swap reader resolves each side on its OWN chain via _swpTokenChainId (stale-while-revalidate + anti-race)', () => {
+    const fn = between(html, 'let _swpBalReqIn = 0', 'function swapTokens()');
     expect(fn).toContain('_swpTokenChainId(tIn, \'in\')');
     expect(fn).toContain('_swpTokenChainId(tOut, \'out\')');
-    expect(fn).toContain('BalanceService.getTokenBalance(walletAddress, t, chainId)');
-    expect(fn).toContain('Promise.all([');
+    expect(fn).toContain('BalanceService.getTokenBalance(walletAddress, token, chainId)');
+    expect(fn).toContain('reqId');                    // per-field anti-race guard
+    expect(fn).toContain('_swpBalCache');             // last-known-good (no flicker)
+    expect(fn).toContain('swapPrefetchBalances');     // multi-chain prefetch
   });
 
   it('swap balance poll runs every 20-30s and only while the Swap page is active', () => {

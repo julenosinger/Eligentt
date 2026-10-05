@@ -14394,6 +14394,7 @@ function showPage(id) {
         if (id === 'pool') { renderPoolList(); updatePoolStats(); }
         if (id === 'swap') {
           updateSwapRate();
+          if (typeof swapPrefetchBalances === 'function') swapPrefetchBalances();
           if (typeof updateSwapBalancesDisplay === 'function') updateSwapBalancesDisplay();
           if (typeof swapBalStartPolling === 'function') swapBalStartPolling();
           setTimeout(function() {
@@ -14838,6 +14839,7 @@ async function finalizeConnection(raw, walletType) {
   swpSyncStdHeader();
   await refreshBalance();
   updateSwapBalancesDisplay(); // ensure swap widget shows correct token balances right after connect
+  if (typeof swapPrefetchBalances === 'function') swapPrefetchBalances(); // warm multi-chain cache
   _refreshAllSurfaceBalances();
   loadAllPools().then(() => { updateSwapRate(); swpUpdatePoolInfo(); });
   closeWalletModal();
@@ -20349,6 +20351,53 @@ function _swpTokenChainId(t, side) {
   return Number(SWP.toChainId || activeChainId);
 }
 
+// ── Swap balance UI: stale-while-revalidate + anti-race + last-known-good ──
+// BalanceService is the single source of truth (TTL cache + per-chain providers).
+// This UI layer keeps a last-known-good copy so re-renders/polls NEVER flash
+// "…"/"—" while a read is in flight, and a monotonic request id per field
+// guarantees a stale response can never overwrite a newer one.
+let _swpBalReqIn = 0;
+let _swpBalReqOut = 0;
+const _swpBalCache = {};   // key -> formatted text (last-known-good, UI-only)
+
+function _swpBalKey(address, sym, chainId) {
+  return String(address || '').toLowerCase() + '::' + String(sym || '').toUpperCase() + '::' + Number(chainId);
+}
+
+function _swpCachedText(key) {
+  return (_swpBalCache[key] != null) ? _swpBalCache[key] : null;
+}
+
+async function _swpReadBal(side, token, chainId) {
+  var el = document.getElementById(side === 'in' ? 'swp-bal-in-val' : 'swp-bal-out-val');
+  var sym = (token && (token.symbol || token.sym)) || 'USDC';
+  var key = _swpBalKey(walletAddress, sym, chainId);
+  var reqId = (side === 'in') ? ++_swpBalReqIn : ++_swpBalReqOut;
+
+  // 1) Stale-while-revalidate: show the last-known-good value immediately.
+  var cached = _swpCachedText(key);
+  if (el) { el.textContent = cached != null ? cached : '…'; el.title = ''; }
+
+  // 2) Fresh read (BalanceService cache handles TTL; never window.ethereum).
+  var v = null;
+  try {
+    if (typeof BalanceService !== 'undefined' && BalanceService.getTokenBalance) {
+      v = await BalanceService.getTokenBalance(walletAddress, token, chainId);
+    }
+  } catch (_) {}
+
+  // 3) Anti-race: discard this response if a newer request superseded it.
+  if (reqId !== (side === 'in' ? _swpBalReqIn : _swpBalReqOut)) return;
+
+  if (v == null) {
+    if (el) { el.textContent = cached != null ? cached : '—'; el.title = 'RPC offline'; }
+    return;
+  }
+  var text = parseFloat(v).toFixed(4);
+  _swpBalCache[key] = text;
+  if (el) { el.textContent = text; el.title = ''; }
+}
+
 async function updateSwapBalancesDisplay() {
   const balInEl = document.getElementById('swp-bal-in-val');
   const balOutEl = document.getElementById('swp-bal-out-val');
@@ -20358,10 +20407,6 @@ async function updateSwapBalancesDisplay() {
     return;
   }
 
-  // Loading state ("…") before any async read.
-  if (balInEl) { balInEl.textContent = '…'; balInEl.title = ''; }
-  if (balOutEl) { balOutEl.textContent = '…'; balOutEl.title = ''; }
-
   const tIn  = _swpTokIn();
   const tOut = _swpTokOut();
 
@@ -20370,27 +20415,34 @@ async function updateSwapBalancesDisplay() {
   const chainIn  = _swpTokenChainId(tIn, 'in');
   const chainOut = _swpTokenChainId(tOut, 'out');
 
-  // BalanceService.getTokenBalance reads via a dedicated per-chain
-  // JsonRpcProvider (never window.ethereum / MetaMask / the wallet's signing
-  // provider). Returns null on error → "—" + "RPC offline" tooltip, which never
-  // blocks the route. Execution is guarded separately (fail-closed).
-  const readBal = async (t, chainId) => {
-    try {
-      if (typeof BalanceService !== 'undefined' && BalanceService.getTokenBalance) {
-        const v = await BalanceService.getTokenBalance(walletAddress, t, chainId);
-        if (v == null) return { text: '—', offline: true };
-        return { text: parseFloat(v).toFixed(4), offline: false };
-      }
-    } catch (_) { /* fall through */ }
-    return { text: '—', offline: true };
-  };
+  // Fire-and-forget per-field reads (each updates independently + anti-race).
+  _swpReadBal('in', tIn, chainIn);
+  _swpReadBal('out', tOut, chainOut);
+}
 
-  const [rIn, rOut] = await Promise.all([
-    readBal(tIn, chainIn),
-    readBal(tOut, chainOut),
-  ]);
-  if (balInEl) { balInEl.textContent = rIn.text; balInEl.title = rIn.offline ? 'RPC offline' : ''; }
-  if (balOutEl) { balOutEl.textContent = rOut.text; balOutEl.title = rOut.offline ? 'RPC offline' : ''; }
+// ── Swap balance prefetch: warm the BalanceService cache for the main tokens
+// across every supported chain, so switching network in the selector shows the
+// balance instantly (<300ms) instead of an RPC round-trip. Runs on Swap open and
+// on wallet connect. Never blocks and never touches the wallet provider.
+function swapPrefetchBalances() {
+  if (!walletAddress || typeof BalanceService === 'undefined' || !BalanceService.getTokenBalance) return;
+  try {
+    var tokens = ['USDC', 'EURC', 'ETH'];
+    var chains = [5042, 8453, 1, 42161, 10, 137];
+    for (var c = 0; c < chains.length; c++) {
+      for (var t = 0; t < tokens.length; t++) {
+        (function (chainId, sym) {
+          try { BalanceService.getTokenBalance(walletAddress, sym, chainId).catch(function () {}); } catch (_) {}
+        })(chains[c], tokens[t]);
+      }
+    }
+  } catch (_) {}
+}
+
+// Clear the UI-layer last-known-good cache (called after a successful swap so
+// the next refresh reads the real post-swap balance instead of the stale value).
+function _swpClearBalCache() {
+  for (var k in _swpBalCache) { if (Object.prototype.hasOwnProperty.call(_swpBalCache, k)) delete _swpBalCache[k]; }
 }
 
 // ── Balance polling (20-30s) while the Swap page is active ────────────────
@@ -21107,6 +21159,7 @@ async function swpExecuteTowerOnly(tIn, tOut, amtIn, slippageBps) {
 
   if (signer) refreshBalance().catch(() => {});
   if (typeof BalanceService !== 'undefined' && BalanceService.invalidate) BalanceService.invalidate(walletAddress);
+  if (typeof _swpClearBalCache === 'function') _swpClearBalCache();
   updateSwapBalancesDisplay();
   swpAddHistory(tIn.sym, tOut.sym, amtIn, (Number((typeof SwapMath !== 'undefined' && SwapMath.formatUnits) ? SwapMath.formatUnits(expectedOutRaw, tOut.decimals) : ethers.formatUnits(expectedOutRaw, tOut.decimals))), swapTx.hash);
   toast(`Swapped ${amtIn} ${tIn.sym} → ${tOut.sym} via Tower`, 'success');
@@ -21224,6 +21277,7 @@ async function swpExecuteLiFi(tIn, tOut, amtIn, slippageBps) {
 
   if (signer) refreshBalance().catch(() => {});
   if (typeof BalanceService !== 'undefined' && BalanceService.invalidate) BalanceService.invalidate(walletAddress);
+  if (typeof _swpClearBalCache === 'function') _swpClearBalCache();
   updateSwapBalancesDisplay();
   swpAddHistory(symIn, symOut, amtIn,
     (Number((typeof SwapMath !== 'undefined' && SwapMath.formatUnits) ? SwapMath.formatUnits(expectedOutRaw, toDecimals) : ethers.formatUnits(expectedOutRaw, toDecimals))),
@@ -21598,6 +21652,7 @@ async function executeSwap() {
   updateSwapRate();
   if (signer) refreshBalance().catch(() => {});
   if (typeof BalanceService !== 'undefined' && BalanceService.invalidate) BalanceService.invalidate(walletAddress);
+  if (typeof _swpClearBalCache === 'function') _swpClearBalCache();
   updateSwapBalancesDisplay();
 
   swpAddHistory(tIn.sym, tOut.sym, amtIn, amtOut, lastTxHash);
