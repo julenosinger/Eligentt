@@ -45361,26 +45361,7 @@ function _ubDirectExec(intent, params, mode) {
     getAddress: function(){ return safeGet(function(){ return (typeof walletAddress !== 'undefined' && walletAddress) ? walletAddress : null; }); }
   });
 
-  // Source gas requirement for a cross-chain Send: the SENDER must hold the
-  // SOURCE network's gas token (activeChainId) to broadcast the burn/transfer.
-  // Arc (5042) uses USDC as gas (exempt); Base/Ethereum/Arbitrum/Optimism use
-  // ETH, Polygon uses MATIC/POL — all resolved from CHAIN_REGISTRY.nativeCurrency.
-  var saSrcCtl = createController({
-    pageId: 'page-send',
-    buttonId: 'sa-send-btn',
-    panelId: 'dgv-panel-send-src',
-    pillId: 'dgv-pill-send-src',
-    mountPill: null,
-    title: 'Source Gas Check',
-    walletLabel: 'Your Wallet (source gas)',
-    // Source gas check is ALWAYS shown on the Send page — including same-chain Arc
-    // sends, where Arc (5042) uses USDC as gas (exempt: true → SAFE immediately).
-    // The destination check (saCtl) is the one gated on cross-chain only.
-    getChainId: function(){ return safeGet(function(){ return activeChainId; }); },
-    getAddress: function(){ return safeGet(function(){ return (typeof walletAddress !== 'undefined' && walletAddress) ? walletAddress : null; }); }
-  });
-
-  var controllers = [bridgeCtl, xcCtl, saCtl, saSrcCtl];
+  var controllers = [bridgeCtl, xcCtl, saCtl];
 
   // ── Global capture-phase click gate (runs BEFORE the button's onclick) ──
   function installGate(){
@@ -45389,7 +45370,7 @@ function _ubDirectExec(intent, params, mode) {
       if (!t || !t.closest) return;
       if (t.closest('#bridge-btn')) { bridgeCtl.gate(e); return; }
       if (t.closest('#xc-send-btn')) { xcCtl.gate(e); return; }
-      if (t.closest('#sa-send-btn')) { saCtl.gate(e); saSrcCtl.gate(e); return; }
+      if (t.closest('#sa-send-btn')) { saCtl.gate(e); return; }
     }, true);
   }
 
