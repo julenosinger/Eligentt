@@ -190,7 +190,7 @@
     opts = opts || {};
     var quotes = (decision && decision.quotes) || [];
 
-    // Collect valid (ok + positive output) quotes.
+    // Collect valid (ok + positive output) quotes — selectable includes _needsStepTx.
     var valid = [];
     for (var i = 0; i < quotes.length; i++) {
       var q = quotes[i];
@@ -204,7 +204,7 @@
       return '<div class="route-empty">No routes available</div>';
     }
 
-    // Sort: best output first.
+    // Sort: best output first (mirrors Bridge ordering).
     valid.sort(function (a, b) {
       var ea = tryBig(a.expectedOutRaw), eb = tryBig(b.expectedOutRaw);
       if (ea !== eb) return ea > eb ? -1 : 1;
@@ -213,119 +213,92 @@
       return ((a.feeBps || 0) - (b.feeBps || 0));
     });
 
-    // Compute badge assignments from REAL data.
-    var bestRateIdx = 0; // index 0 after sort = best output = BEST RATE
+    // Badge assignments (same logic as _brsRenderRoutes in Bridge).
+    var bestRateIdx = 0;
 
-    // FASTEST: lowest execTime/estimatedTime among executable quotes.
     var fastestIdx = -1;
     var fastestTime = Infinity;
     for (var fi = 0; fi < valid.length; fi++) {
-      if (valid[fi].executable !== true) continue;
       var et = valid[fi].estimatedTime != null ? Number(valid[fi].estimatedTime)
              : valid[fi].execSec != null ? Number(valid[fi].execSec) : null;
       if (et !== null && et < fastestTime) { fastestTime = et; fastestIdx = fi; }
     }
-    // Only show FASTEST badge if it differs from BEST RATE (index 0).
     if (fastestIdx === 0) fastestIdx = -1;
 
-    // LOW FEE: lowest feeBps among executable quotes with valid feeBps.
-    var lowFeeIdx = -1;
-    var lowestFee = Infinity;
-    for (var lfi = 0; lfi < valid.length; lfi++) {
-      if (valid[lfi].executable !== true) continue;
-      var fb = valid[lfi].feeBps != null ? Number(valid[lfi].feeBps) : null;
-      if (fb !== null && fb < lowestFee) { lowestFee = fb; lowFeeIdx = lfi; }
-    }
-    // Only show LOW FEE when it differs from BEST RATE and FASTEST.
-    if (lowFeeIdx === bestRateIdx || lowFeeIdx === fastestIdx) lowFeeIdx = -1;
-
-    var execs = [], refs = [];
-    for (var j = 0; j < valid.length; j++) {
-      (valid[j].executable === true ? execs : refs).push({ q: valid[j], vidx: j });
-    }
+    var tokenOutSym = typeof opts.tokenOut === 'object' ? (opts.tokenOut.symbol || 'USDC') : (opts.tokenOut || 'USDC');
+    var tokenOutDec = opts.tokenOutDecimals != null ? opts.tokenOutDecimals
+      : (typeof opts.tokenOut === 'object' && opts.tokenOut ? opts.tokenOut.decimals : null);
 
     var out = '';
     var seen = {};
 
-    var tokenOutSym = typeof opts.tokenOut === 'object' ? (opts.tokenOut.symbol || '') : (opts.tokenOut || '');
-    var fromId = opts.fromChainId != null ? opts.fromChainId : (opts.chainId != null ? opts.chainId : null);
-    var toId   = opts.toChainId   != null ? opts.toChainId   : (opts.chainId != null ? opts.chainId : null);
-    var isCross = fromId != null && toId != null && Number(fromId) !== Number(toId);
+    for (var j = 0; j < valid.length; j++) {
+      var q = valid[j];
+      seen[q.source] = true;
+      var isBest    = j === bestRateIdx;
+      var isFastest = j === fastestIdx;
+      var isSel     = selectedSource === q.source;
+      var isSelectable = q.executable === true || q._needsStepTx === true;
 
-    function row(entry, executable) {
-      var q = entry.q; var vidx = entry.vidx;
-      var selected = selectedSource === q.source;
-      // Pass the quote so providerMeta can read q.label for lifi-<id> routes.
       var meta = providerMeta(q.source, q);
-      var o = formatOut(q.expectedOutRaw, opts.tokenOutDecimals != null ? opts.tokenOutDecimals
-        : (typeof opts.tokenOut === 'object' && opts.tokenOut ? opts.tokenOut.decimals : null));
-
-      // Badges (only for executable quotes at correct positions).
-      var badgeHtml = '';
-      if (executable) {
-        if (vidx === bestRateIdx) badgeHtml += '<span class="swp-rbadge swp-rbadge-best">Best Rate</span>';
-        if (vidx === fastestIdx)  badgeHtml += '<span class="swp-rbadge swp-rbadge-fast">Fastest</span>';
-        if (vidx === lowFeeIdx)   badgeHtml += '<span class="swp-rbadge swp-rbadge-lowfee">Low Fee</span>';
-      }
-
-      // Metrics: fee, time, steps.
-      var feeStr  = fmtFee(q.feeBps);
-      var timeStr = fmtTime(q.estimatedTime != null ? q.estimatedTime : q.execSec);
-      var stepsNum = (q.stepsData && q.stepsData.length) || (q.steps && q.steps.length) || null;
-
-      var metricsHtml = '';
-      if (feeStr)  metricsHtml += '<span class="swp-rm-item"><span class="swp-rm-val">' + escH(feeStr) + '</span><span class="swp-rm-lbl">Fee</span></span>';
-      if (timeStr) metricsHtml += '<span class="swp-rm-item"><span class="swp-rm-val">' + escH(timeStr) + '</span><span class="swp-rm-lbl">Time</span></span>';
-      if (stepsNum != null) metricsHtml += '<span class="swp-rm-item"><span class="swp-rm-val">' + stepsNum + '</span><span class="swp-rm-lbl">Steps</span></span>';
-      if (isCross) {
-        var pathStr = chainShort(fromId) + ' → ' + chainShort(toId);
-        metricsHtml += '<span class="swp-rm-item swp-rm-cross"><span class="swp-rm-val">' + escH(pathStr) + '</span><span class="swp-rm-lbl">Path</span></span>';
-      }
-
-      // Select button / state badge.
-      var selectHtml;
-      if (!executable) {
-        selectHtml = '<span class="route-state ref">Reference</span>';
-      } else if (selected) {
-        selectHtml = '<button class="brs-select-btn brs-select-btn--selected" onclick="event.stopPropagation();swpSelectRoute(\'' + q.source + '\')"><i class="ti ti-check"></i> Selected</button>';
-      } else {
-        selectHtml = '<button class="brs-select-btn" onclick="event.stopPropagation();swpSelectRoute(\'' + q.source + '\')">Select</button>';
-      }
-
       var provLetter = (meta.name || '?').charAt(0).toUpperCase();
-      var cls = 'brs-route' + (selected ? ' brs-selected' : '') + (vidx === bestRateIdx && executable ? ' brs-best' : '') + (!executable ? ' brs-unavail reference' : '');
-      // meta.name already carries the real tool name for lifi-<id> routes (set by providerMeta).
-      var displayName = meta.name;
-      var displaySub  = meta.sourceLabel;
 
-      return '<div class="' + cls + '" data-source="' + q.source + '">' +
-        (badgeHtml ? '<div class="swp-rbadge-row">' + badgeHtml + '</div>' : '') +
+      var outStr = formatOut(q.expectedOutRaw, tokenOutDec);
+
+      // Metrics — same 5 columns as Bridge: Bridge fee, Protocol fees, Est. gas, Est. time, Steps.
+      var feePctStr = q.feeBps != null ? (Number(q.feeBps) / 100).toFixed(2) + '%' : '—';
+      var feesUsd   = q.feeCostUSD != null ? '$' + Number(q.feeCostUSD).toFixed(3) : '—';
+      var gasUsd    = q.gasCostUSD  != null ? '$' + Number(q.gasCostUSD).toFixed(3)  : '—';
+      var execSec   = q.estimatedTime != null ? q.estimatedTime : (q.execSec != null ? q.execSec : null);
+      var timeStr   = execSec != null ? (Number(execSec) < 60 ? Math.round(Number(execSec)) + 's'
+                        : Math.round(Number(execSec) / 60) + ' min') : '—';
+      var stepsNum  = (q.stepsData && q.stepsData.length) || (typeof q.steps === 'number' ? q.steps : null) || 1;
+
+      // Badges — absolute-positioned like Bridge (brs-best-badge).
+      var badges = '';
+      if (isBest)    badges += '<div class="brs-best-badge">Best Rate</div>';
+      if (isFastest) badges += '<div class="brs-best-badge" style="right:auto;left:12px;background:var(--purple)">Fastest</div>';
+
+      // Select button — same style as Bridge.
+      var selectHtml;
+      if (!isSelectable) {
+        selectHtml = '<span class="brs-unavail-tag">Reference</span>';
+      } else if (isSel) {
+        selectHtml = '<button class="brs-select-btn brs-select-btn--selected" onclick="event.stopPropagation();swpSelectRoute(\'' + escH(q.source) + '\')"><i class="ti ti-check"></i> Selected</button>';
+      } else {
+        selectHtml = '<button class="brs-select-btn" onclick="event.stopPropagation();swpSelectRoute(\'' + escH(q.source) + '\')">Select</button>';
+      }
+
+      var cls = 'brs-route' +
+        (isBest ? ' brs-best' : '') +
+        (isSel  ? ' brs-selected' : '') +
+        (!isSelectable ? ' brs-unavail' : '');
+
+      out += '<div class="' + cls + '" data-source="' + escH(q.source) + '">' +
+        badges +
         '<div class="brs-route-top">' +
           '<div class="brs-provider-icon">' + provLetter + '</div>' +
           '<div style="flex:1;min-width:0;overflow:hidden">' +
-            '<div class="brs-provider-name">' + escH(displayName) + '</div>' +
-            '<div class="brs-protocol-tag">' + escH(displaySub) + '</div>' +
+            '<div class="brs-provider-name">' + escH(meta.name) + '</div>' +
+            '<div class="brs-protocol-tag">' + escH(meta.sourceLabel) + '</div>' +
           '</div>' +
           '<div class="brs-out-amount" style="margin-left:8px">' +
-            '<div class="brs-out-val">' + escH(o) + '</div>' +
+            '<div class="brs-out-val">' + escH(outStr) + '</div>' +
             '<div class="brs-out-label">' + escH(tokenOutSym) + ' received</div>' +
           '</div>' +
           '<div class="brs-route-steps" style="margin-left:8px;flex-shrink:0;padding-top:0;border-top:none">' + selectHtml + '</div>' +
         '</div>' +
-        (metricsHtml ? '<div class="brs-meta">' + metricsHtml + '</div>' : '') +
+        '<div class="brs-meta">' +
+          '<div class="brs-meta-item"><div class="brs-meta-val">' + feePctStr + '</div><div class="brs-meta-lbl">Bridge fee</div></div>' +
+          '<div class="brs-meta-item"><div class="brs-meta-val">' + feesUsd   + '</div><div class="brs-meta-lbl">Protocol fees</div></div>' +
+          '<div class="brs-meta-item"><div class="brs-meta-val">' + gasUsd    + '</div><div class="brs-meta-lbl">Est. gas</div></div>' +
+          '<div class="brs-meta-item"><div class="brs-meta-val">' + timeStr   + '</div><div class="brs-meta-lbl">Est. time</div></div>' +
+          '<div class="brs-meta-item"><div class="brs-meta-val">' + stepsNum  + '</div><div class="brs-meta-lbl">Steps</div></div>' +
+        '</div>' +
       '</div>';
     }
 
-    for (var k = 0; k < execs.length; k++) {
-      seen[execs[k].q.source] = true;
-      out += row(execs[k], true);
-    }
-    for (var r = 0; r < refs.length; r++) {
-      seen[refs[r].q.source] = true;
-      out += row(refs[r], false);
-    }
-
-    // Unavailable sources — discreet, never a global error.
+    // Unavailable providers (ok=false) — discreet, same as Bridge.
     for (var m = 0; m < quotes.length; m++) {
       var q2 = quotes[m];
       if (!q2 || q2.ok === true) continue;
@@ -333,7 +306,7 @@
       seen[q2.source] = true;
       var meta2 = providerMeta(q2.source, q2);
       out +=
-        '<div class="brs-route brs-unavail" data-source="' + q2.source + '">' +
+        '<div class="brs-route brs-unavail" data-source="' + escH(q2.source) + '">' +
           '<div class="brs-route-top">' +
             '<div class="brs-provider-icon">' + escH((meta2.name || '?').charAt(0).toUpperCase()) + '</div>' +
             '<div style="flex:1;min-width:0"><div class="brs-provider-name">' + escH(meta2.name) + '</div></div>' +
