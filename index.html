@@ -14843,6 +14843,11 @@ async function finalizeConnection(raw, walletType) {
   if (typeof swapPrefetchBalances === 'function') swapPrefetchBalances(); // warm multi-chain cache
   if (typeof saPrefetchBalances === 'function') saPrefetchBalances(); // warm Send Assets multi-chain cache
   _refreshAllSurfaceBalances();
+  // Cold-start: ensure Send Assets network + balance + gas check reflect the
+  // connected wallet state even when the page was loaded directly on /send
+  // (before the wallet was available). Idempotent — saUpdateNetwork guards
+  // against re-runs and the CHAIN_CHANGED listener handles subsequent switches.
+  try { if (typeof saUpdateNetwork === 'function') saUpdateNetwork(); } catch(_) {}
   loadAllPools().then(() => { updateSwapRate(); swpUpdatePoolInfo(); });
   closeWalletModal();
   setupProviderEvents(raw);
@@ -31579,7 +31584,9 @@ function saUpdateNetwork() {
 // ── React to a network change without a page reload ───────
 // Covers every chain-change path (EIP-1193 chainChanged, global network
 // selector, internal/Circle wallet switch) and the shared WalletService's
-// EventBus 'CHAIN_CHANGED'. Idempotent — registered exactly once.
+// EventBus 'CHAIN_CHANGED' and DOM 'WALLET_CONNECTED'. Idempotent — each registered exactly once.
+// WALLET_CONNECTED covers cold-start: wallet reconnects async after page load → refresh balance
+// + network display + gas check so they appear without requiring a manual network switch.
 (function _saInitChainChanged() {
   if (window.__saChainChangedSubscribed) return;
   window.__saChainChangedSubscribed = true;
@@ -31588,6 +31595,13 @@ function saUpdateNetwork() {
   }
   if (typeof EventBus !== 'undefined' && EventBus.on) {
     try { EventBus.on('CHAIN_CHANGED', _handle); } catch(_) {}
+  }
+  // Single DOM listener: wallet became available → run the same refresh that CHAIN_CHANGED uses.
+  if (!window.__saWalletConnectedSubscribed) {
+    window.__saWalletConnectedSubscribed = true;
+    document.addEventListener('WALLET_CONNECTED', function() {
+      try { if (typeof saUpdateNetwork === 'function') saUpdateNetwork(); } catch(_) {}
+    });
   }
 })();
 
@@ -45034,7 +45048,9 @@ function _ubDirectExec(intent, params, mode) {
       if (!els) return;
       state = res.state;
       setDot(res.state); setPill(res.state);
-      var badgeText = { SAFE: 'Ready', WARNING: 'Low Gas', BLOCKED: 'No Gas', UNKNOWN: 'Unavailable', CHECKING: 'Checking…' }[res.state] || '—';
+      var badgeText = (res.state === 'SAFE' && res.exempt)
+        ? 'Exempt (Arc)'
+        : ({ SAFE: 'Ready', WARNING: 'Low Gas', BLOCKED: 'No Gas', UNKNOWN: 'Unavailable', CHECKING: 'Checking…' }[res.state] || '—');
       var c = DOT[res.state] || DOT.UNKNOWN;
       if (els.badge){
         els.badge.textContent = badgeText;
@@ -45049,9 +45065,14 @@ function _ubDirectExec(intent, params, mode) {
         els.balance.textContent = (res.balance === undefined || res.balance === null) ? '—' : (fmt(res.balance, 4) + ' ' + (res.native||''));
         els.balance.style.color = res.state==='BLOCKED' ? DOT.BLOCKED : (res.state==='WARNING' ? DOT.WARNING : 'var(--text)');
       }
-      if (els.required) els.required.textContent = res.exempt ? 'N/A (gas token = asset)' : ((res.required!=null? fmt(res.required,4):'—') + ' ' + (res.native||''));
+      if (els.required) els.required.textContent = res.exempt ? 'N/A — gas token = asset (USDC)' : ((res.required!=null? fmt(res.required,4):'—') + ' ' + (res.native||''));
       if (els.status){
-        var st = { SAFE: '✅ Destination wallet ready', WARNING: '⚠ Low gas balance', BLOCKED: '❌ Cannot proceed', UNKNOWN: '— Not validated', CHECKING: '⏳ Checking…' }[res.state] || '—';
+        var st;
+        if (res.state === 'SAFE' && res.exempt) {
+          st = '✅ Exempt — Arc uses USDC as gas (not required)';
+        } else {
+          st = { SAFE: '✅ Ready', WARNING: '⚠ Low gas balance', BLOCKED: '❌ Cannot proceed', UNKNOWN: '— Not validated', CHECKING: '⏳ Checking…' }[res.state] || '—';
+        }
         els.status.textContent = st;
         els.status.style.color = (res.state==='UNKNOWN'||res.state==='CHECKING') ? 'var(--muted2)' : c;
       }
@@ -45244,7 +45265,9 @@ function _ubDirectExec(intent, params, mode) {
     mountPill: null,
     title: 'Source Gas Check',
     walletLabel: 'Your Wallet (source gas)',
-    condActive: function(){ try { return (typeof saIsCrossChain === 'function') ? saIsCrossChain() : false; } catch(_) { return false; } },
+    // Source gas check is ALWAYS shown on the Send page — including same-chain Arc
+    // sends, where Arc (5042) uses USDC as gas (exempt: true → SAFE immediately).
+    // The destination check (saCtl) is the one gated on cross-chain only.
     getChainId: function(){ return safeGet(function(){ return activeChainId; }); },
     getAddress: function(){ return safeGet(function(){ return (typeof walletAddress !== 'undefined' && walletAddress) ? walletAddress : null; }); }
   });

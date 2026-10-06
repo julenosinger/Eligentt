@@ -103,7 +103,7 @@ contract CCTPAdapterTest is Test {
     bytes32 public constant INTENT_ID = bytes32(uint256(1));
     uint256 public constant AMOUNT = 1000e6; // 1000 USDC
     uint32 public constant DEST_DOMAIN = 0; // Ethereum
-    bytes32 public constant MINT_RECIPIENT = bytes32(uint256(uint160(recipient)));
+    bytes32 public MINT_RECIPIENT;
 
     event BridgeInitiated(
         bytes32 indexed intentId,
@@ -112,6 +112,7 @@ contract CCTPAdapterTest is Test {
     );
 
     function setUp() public {
+        MINT_RECIPIENT = bytes32(uint256(uint160(recipient)));
         messenger = new MockTokenMessenger();
         adapter = new CCTPAdapter(address(messenger));
         usdc = new MockERC20();

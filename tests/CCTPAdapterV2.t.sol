@@ -7,6 +7,7 @@ import "../contracts/CCTPAdapterV2.sol";
 contract MockTM {
     event DepositForBurnCalled(uint256 amount, uint32 domain, address token);
     function depositForBurn(uint256,uint32,bytes32,address,bytes32,uint256,uint32) external {}
+    receive() external payable {}
     fallback() external payable {
         emit DepositForBurnCalled(0, 0, address(0));
     }
