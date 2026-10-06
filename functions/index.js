@@ -398,6 +398,10 @@ async function handleLifiProxy(request, env, url) {
       // For POST endpoints: read the JSON body sent by the client and forward it.
       let clientBody = {};
       try { clientBody = await request.json(); } catch(_) {}
+      // LI.FI /advanced/routes rejects EIP-55 checksummed addresses (mixed-case).
+      // Normalise fromAddress and toAddress to lowercase for all POST endpoints.
+      if (clientBody.fromAddress) clientBody.fromAddress = clientBody.fromAddress.toLowerCase();
+      if (clientBody.toAddress)   clientBody.toAddress   = clientBody.toAddress.toLowerCase();
       upstreamBody = JSON.stringify(clientBody);
     } else {
       // For GET endpoints: forward query params from the client, plus any body
@@ -409,7 +413,11 @@ async function handleLifiProxy(request, env, url) {
       url.searchParams.forEach((v, k) => params.set(k, v));
       // Merge body fields as query params (quote / status / tokens accept them)
       for (const [k, v] of Object.entries(clientBody)) {
-        if (v != null) params.set(k, String(v));
+        if (v != null) {
+          // Lowercase address fields so LI.FI accepts EIP-55 checksummed addresses.
+          const isAddr = (k === 'fromAddress' || k === 'toAddress');
+          params.set(k, isAddr ? String(v).toLowerCase() : String(v));
+        }
       }
       const qs = params.toString();
       if (qs) upstreamUrl = upstream + '?' + qs;
