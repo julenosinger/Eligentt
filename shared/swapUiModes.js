@@ -90,16 +90,31 @@
   function resolveSelection(decision, prevSource, prevKey, currentKey) {
     var quotes = (decision && decision.quotes) || [];
     var exec = {};
+    // Build ordered list of selectable sources (best output first — already sorted
+    // by SwapAggregator's pickBest, but we re-sort here to be safe).
+    var selectableOrdered = [];
     for (var i = 0; i < quotes.length; i++) {
       // lifi-N quotes are selectable but may not have calldata yet (_needsStepTx).
-      // Treat them as executable for selection persistence purposes.
+      // Treat them as selectable for route-comparison display purposes.
       if (isExecutableQuote(quotes[i]) || (quotes[i] && quotes[i].ok === true && quotes[i]._needsStepTx)) {
         exec[quotes[i].source] = true;
+        selectableOrdered.push(quotes[i]);
       }
     }
+    // Sort selectable by expectedOutRaw desc so first item = best output.
+    selectableOrdered.sort(function(a, b) {
+      var ea = (typeof a.expectedOutRaw === 'bigint') ? a.expectedOutRaw : BigInt(String(a.expectedOutRaw || 0));
+      var eb = (typeof b.expectedOutRaw === 'bigint') ? b.expectedOutRaw : BigInt(String(b.expectedOutRaw || 0));
+      return ea > eb ? -1 : ea < eb ? 1 : 0;
+    });
+
+    // Persist a valid manual selection across refreshes with the same params.
     if (prevSource && prevKey === currentKey && exec[prevSource]) return prevSource;
+    // Use bestExecutable when available (has ready calldata).
     var bestExec = (decision && decision.bestExecutable) || null;
     if (bestExec && exec[bestExec.source]) return bestExec.source;
+    // Fall back to the best selectable lifi-N route (calldata fetched on user confirm).
+    if (selectableOrdered.length > 0) return selectableOrdered[0].source;
     return null;
   }
 
