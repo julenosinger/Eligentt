@@ -15343,6 +15343,7 @@ function switchNetwork(chainId) {
       updateNetworkBadge();
       refreshBalance().catch(() => {});
       _refreshAllSurfaceBalances();
+      if (typeof saUpdateNetwork === 'function') saUpdateNetwork();
     }).catch(e => {
       toast('Network switch failed: ' + (e.message || 'unknown error'), 'error');
     });
@@ -23129,6 +23130,7 @@ async function ensureNetwork(targetChainId) {
     if (typeof _adoptInternalWalletGlobals === 'function') _adoptInternalWalletGlobals(); else activeChainId = targetChainId;
     if (typeof updateNetworkBadge === 'function') updateNetworkBadge();
     if (typeof refreshBalance === 'function') refreshBalance().catch(() => {});
+    if (typeof saUpdateNetwork === 'function') saUpdateNetwork();
     return;
   }
   // wallet_switchEthereumChain resolves when the wallet accepts the REQUEST,
@@ -31569,7 +31571,25 @@ function saUpdateNetwork() {
   saPopulateDestNetworks();
   saRefreshBalance();
   saUpdateRoute();
+  // Recalculate the destination/source gas check immediately after the active
+  // network changed (never reuse the previous network's gas result).
+  try { if (typeof window.__DGVRefreshActive === 'function') window.__DGVRefreshActive(true); } catch(_) {}
 }
+
+// ── React to a network change without a page reload ───────
+// Covers every chain-change path (EIP-1193 chainChanged, global network
+// selector, internal/Circle wallet switch) and the shared WalletService's
+// EventBus 'CHAIN_CHANGED'. Idempotent — registered exactly once.
+(function _saInitChainChanged() {
+  if (window.__saChainChangedSubscribed) return;
+  window.__saChainChangedSubscribed = true;
+  function _handle() {
+    try { if (typeof saUpdateNetwork === 'function') saUpdateNetwork(); } catch(_) {}
+  }
+  if (typeof EventBus !== 'undefined' && EventBus.on) {
+    try { EventBus.on('CHAIN_CHANGED', _handle); } catch(_) {}
+  }
+})();
 
 // ── Populate destination networks dynamically ─────────────
 // Mainnet only — testnets are never shown in the destination selector.
@@ -32721,6 +32741,7 @@ async function _nsSwitchTo(chainId) {
     updateNetworkBadge();
     _refreshBalancePending = false;
     await refreshBalance();
+    if (typeof saUpdateNetwork === 'function') saUpdateNetwork();
     if (modal) modal.remove();
     toast('✓ Switched to ' + chain.name, 'success');
   } catch(e) {
@@ -44897,7 +44918,7 @@ function _ubDirectExec(intent, params, mode) {
       var panelHTML =
         '<div style="display:flex;align-items:center;gap:7px;margin-bottom:6px">' +
           '<span class="dgv-dot" style="width:9px;height:9px;border-radius:50%;background:' + DOT.UNKNOWN + ';flex-shrink:0;box-shadow:0 0 6px ' + DOT.UNKNOWN + '88"></span>' +
-          '<span style="font-weight:700;color:var(--text)">Destination Gas Check</span>' +
+          '<span style="font-weight:700;color:var(--text)">' + (cfg.title || 'Destination Gas Check') + '</span>' +
           '<span class="dgv-badge" style="margin-left:auto;font-size:8px;font-weight:700;padding:2px 8px;border-radius:999px;background:rgba(255,255,255,.06);border:1px solid var(--border);color:var(--muted2)">Checking…</span>' +
         '</div>' +
         '<div class="dgv-rows" style="display:flex;flex-direction:column;gap:2px">' +
@@ -45211,7 +45232,24 @@ function _ubDirectExec(intent, params, mode) {
     getAddress: function(){ return safeGet(function(){ return (typeof walletAddress !== 'undefined' && walletAddress) ? walletAddress : null; }); }
   });
 
-  var controllers = [bridgeCtl, xcCtl, saCtl];
+  // Source gas requirement for a cross-chain Send: the SENDER must hold the
+  // SOURCE network's gas token (activeChainId) to broadcast the burn/transfer.
+  // Arc (5042) uses USDC as gas (exempt); Base/Ethereum/Arbitrum/Optimism use
+  // ETH, Polygon uses MATIC/POL — all resolved from CHAIN_REGISTRY.nativeCurrency.
+  var saSrcCtl = createController({
+    pageId: 'page-send',
+    buttonId: 'sa-send-btn',
+    panelId: 'dgv-panel-send-src',
+    pillId: 'dgv-pill-send-src',
+    mountPill: null,
+    title: 'Source Gas Check',
+    walletLabel: 'Your Wallet (source gas)',
+    condActive: function(){ try { return (typeof saIsCrossChain === 'function') ? saIsCrossChain() : false; } catch(_) { return false; } },
+    getChainId: function(){ return safeGet(function(){ return activeChainId; }); },
+    getAddress: function(){ return safeGet(function(){ return (typeof walletAddress !== 'undefined' && walletAddress) ? walletAddress : null; }); }
+  });
+
+  var controllers = [bridgeCtl, xcCtl, saCtl, saSrcCtl];
 
   // ── Global capture-phase click gate (runs BEFORE the button's onclick) ──
   function installGate(){
@@ -45220,7 +45258,7 @@ function _ubDirectExec(intent, params, mode) {
       if (!t || !t.closest) return;
       if (t.closest('#bridge-btn')) { bridgeCtl.gate(e); return; }
       if (t.closest('#xc-send-btn')) { xcCtl.gate(e); return; }
-      if (t.closest('#sa-send-btn')) { saCtl.gate(e); return; }
+      if (t.closest('#sa-send-btn')) { saCtl.gate(e); saSrcCtl.gate(e); return; }
     }, true);
   }
 
@@ -45249,6 +45287,10 @@ function _ubDirectExec(intent, params, mode) {
     }
     controllers.forEach(function(c){ c.ensure(); });
     installGate();
+
+    // Expose a single hook so the Send Assets flow can re-run the gas check the
+    // instant the active network changes (no 2.5s poll delay, no stale result).
+    try { window.__DGVRefreshActive = refreshActive; } catch(_) {}
 
     // (1) Chain change → re-validate (observe destination name text)
     ['to-chain-name','xc-to-name'].forEach(function(id){
