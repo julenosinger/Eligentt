@@ -72,7 +72,7 @@ export async function onRequestPost(context) {
       desc: desc || '',
       recipient,
       token: token || 'USDC',
-      chain: chain || 'Arc Testnet',
+      chain: chain || 'Arc Mainnet',
       chainId: RELAYER_CONFIG.ARC_CHAIN_ID,
       expiry: expiry || 'never',
       expiresAt,

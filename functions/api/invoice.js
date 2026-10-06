@@ -93,7 +93,7 @@ export async function onRequestPost(context) {
       feeReceiver: RELAYER_CONFIG.TREASURY_VAULT,
       recipient,
       token: token || 'USDC',
-      chain: chain || 'Arc Testnet',
+      chain: chain || 'Arc Mainnet',
       chainId: RELAYER_CONFIG.ARC_CHAIN_ID,
       expiry,
       expiresAt: expiresAtIso,
