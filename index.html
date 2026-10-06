@@ -19955,9 +19955,14 @@ async function renderTokenList(filterText) {
       let bal = '0.0000';
       try {
         if (useBS) {
-          const raw = await BalanceService.getTokenBalance(chainId, t.symbol, walletAddress);
+          // getTokenBalance(walletAddress, token, chainId) — address is first arg.
+          // Pass the full token object so BalanceService can resolve the contract
+          // address directly instead of looking up by symbol.
+          const tokenArg = { address: t.address, symbol: t.symbol, decimals: t.decimals };
+          const raw = await BalanceService.getTokenBalance(walletAddress, tokenArg, chainId);
           if (raw != null) {
-            bal = parseFloat(ethers.formatUnits(raw, t.decimals || 18)).toFixed(4);
+            // getTokenBalance already returns a formatted string (not a BigInt raw).
+            bal = parseFloat(raw).toFixed(4);
           }
         } else if (prov) {
           const isNative = addr === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';

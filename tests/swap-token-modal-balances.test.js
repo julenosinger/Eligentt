@@ -150,13 +150,18 @@ describe('renderTokenList — source-level regression', () => {
 
 describe('renderTokenList — integration with BalanceService contract', () => {
 
-  it('BalanceService.getTokenBalance is called with (chainId, symbol, walletAddress)', () => {
-    // Verify the call signature matches BalanceService's public API.
-    expect(renderSrc).toContain('BalanceService.getTokenBalance(chainId, t.symbol, walletAddress)');
+  it('BalanceService.getTokenBalance is called with (walletAddress, tokenObj, chainId)', () => {
+    // Correct call signature: address first, then token, then chainId.
+    expect(renderSrc).toContain('BalanceService.getTokenBalance(walletAddress, tokenArg, chainId)');
   });
 
-  it('raw result from BalanceService is formatted with ethers.formatUnits and token decimals', () => {
-    expect(renderSrc).toContain('ethers.formatUnits(raw, t.decimals');
+  it('passes a full token object (address+symbol+decimals) not just symbol string', () => {
+    expect(renderSrc).toContain('const tokenArg = { address: t.address, symbol: t.symbol, decimals: t.decimals }');
+  });
+
+  it('parses the formatted string from BalanceService with parseFloat', () => {
+    // getTokenBalance returns a formatted string — use parseFloat, not formatUnits.
+    expect(renderSrc).toContain('bal = parseFloat(raw).toFixed(4)');
   });
 
   it('null result from BalanceService keeps bal as "0.0000" (not NaN or crash)', () => {
