@@ -20498,6 +20498,82 @@ function swpSelectRoute(source) {
   if (typeof SwapUiModes === 'undefined' || !SwapUiModes.findExecutableQuote) return;
   var q = SwapUiModes.findExecutableQuote(SWP.aggQuotes, source);
   if (!q) return; // reference-only / invalid → not selectable for execution
+
+  // lifi-N: route variant that needs getStepTransaction to resolve calldata.
+  // Fetch calldata async, show loading in the route selector while fetching.
+  if (q._needsStepTx && typeof LiFiAdapter !== 'undefined' && typeof LiFiAdapter.getStepTransaction === 'function') {
+    var step = q.stepsData && q.stepsData[0];
+    if (!step) { toast('LI.FI step data unavailable — refresh quote', 'error'); return; }
+    SWP.selectedSource = source;
+    // Optimistically apply display (amount/rate) before calldata arrives.
+    swpApplySelectedQuote(q);
+    swpSetBtn('approving', 'Fetching route…');
+    if (typeof SwapUiModes !== 'undefined' && SwapUiModes.showRouteLoading) {
+      // Mark as loading in the selector
+      try {
+        var _listEl = document.getElementById('swap-route-list');
+        if (_listEl) {
+          var _selCard = _listEl.querySelector('[data-source="' + source + '"] .brs-route-steps');
+          if (_selCard) _selCard.innerHTML = '<span style="font-size:8px;color:var(--muted2)"><i class="ti ti-loader spin"></i> Fetching…</span>';
+        }
+      } catch(_) {}
+    }
+    LiFiAdapter.getStepTransaction(step).then(function(stepRes) {
+      if (!stepRes || stepRes.ok !== true || !stepRes.step) {
+        toast('LI.FI route calldata unavailable — try another route', 'error');
+        swpSetBtn('ready', 'Refresh Quote');
+        return;
+      }
+      var tr = stepRes.step.transactionRequest;
+      if (!tr || !tr.data || !tr.to) {
+        toast('LI.FI route returned invalid transaction data', 'error');
+        swpSetBtn('ready', 'Refresh Quote');
+        return;
+      }
+      var est = stepRes.step.estimate || {};
+      // Patch the quote in aggQuotes with resolved calldata so executeSwap can use it.
+      var minOutRaw = null;
+      if (est.toAmountMin != null) { try { minOutRaw = BigInt(String(est.toAmountMin)); } catch(_) {} }
+      if (!minOutRaw || minOutRaw <= 0n) minOutRaw = q.minOutRaw;
+      var patchedQ = Object.assign({}, q, {
+        calldata:   tr.data,
+        to:         tr.to,
+        spender:    est.approvalAddress || tr.to,
+        value:      tr.value != null ? String(tr.value) : '0',
+        minOutRaw:  minOutRaw,
+        fromDecimals: q.fromDecimals || 6,
+        toDecimals:   q.toDecimals   || 6,
+        expiresAt:  Date.now() + 160000,
+        _needsStepTx: false,
+      });
+      // Update aggQuotes in-place so future calls see the resolved calldata.
+      if (SWP.aggQuotes) {
+        for (var _qi = 0; _qi < SWP.aggQuotes.length; _qi++) {
+          if (SWP.aggQuotes[_qi] && SWP.aggQuotes[_qi].source === source) {
+            SWP.aggQuotes[_qi] = patchedQ; break;
+          }
+        }
+      }
+      SWP._towerQuoteData = patchedQ;
+      swpApplySelectedQuote(patchedQ);
+      swpSetBtn('ready', 'Swap via LI.FI');
+      try {
+        if (typeof SwapUiModes !== 'undefined' && SwapUiModes.renderRouteSelector) {
+          SwapUiModes.renderRouteSelector(
+            { ok: !!(SWP.aggBest), executable: true, best: SWP.aggBest || null, bestExecutable: SWP.aggBestExecutable || null, quotes: SWP.aggQuotes || [] },
+            SWP.selectedSource,
+            { tokenIn: SWP.tokenInObj || _swpTokIn().sym, tokenInDecimals: _swpTokIn().decimals, tokenOut: SWP.tokenOutObj || _swpTokOut().sym, tokenOutDecimals: _swpTokOut().decimals, amountInRaw: SWP.lastQuote ? SWP.lastQuote.amountInRaw : null, fromChainId: SWP.fromChainId || activeChainId, toChainId: SWP.toChainId || activeChainId }
+          );
+        }
+      } catch(_) {}
+    }).catch(function(e) {
+      _warn('[swap] getStepTransaction failed:', e);
+      toast('LI.FI route unavailable — try another route', 'error');
+      swpSetBtn('ready', 'Refresh Quote');
+    });
+    return;
+  }
+
   SWP.selectedSource = source;
   swpApplySelectedQuote(q);
   try {
@@ -20536,7 +20612,11 @@ function swpApplySelectedQuote(q) {
   var fromId = SWP.fromChainId || activeChainId;
   var toId   = SWP.toChainId   || activeChainId;
   var isCross = Number(fromId) !== Number(toId);
-  var srcLabel = q.source === 'tower' ? 'Tower Aggregator' : (q.source === 'lifi' ? 'LI.FI' : 'Elligentt AMM');
+  var _isLifiSrc = q.source === 'lifi' || (q.source && q.source.indexOf('lifi-') === 0);
+  var _lifiToolLabel = (_isLifiSrc && q.label && q.label !== 'LI.FI') ? q.label : null;
+  var srcLabel = q.source === 'tower' ? 'Tower Aggregator'
+    : (_isLifiSrc ? ('LI.FI' + (_lifiToolLabel ? ' · ' + _lifiToolLabel : ''))
+    : 'Elligentt AMM');
   if (isCross) srcLabel += ' · Cross-chain';
   swpSet('swp-source-val', srcLabel);
 
@@ -20548,12 +20628,23 @@ function swpApplySelectedQuote(q) {
     } else {
       routePool.textContent = q.source === 'tower'
         ? 'Tower'
-        : (q.source === 'lifi' ? 'LI.FI' : (SWP.lastRoute ? SWP.lastRoute.pools.map(function(p){ return p.tokenA + '/' + p.tokenB; }).join(' → ') : '—'));
+        : (_isLifiSrc ? ('LI.FI' + (_lifiToolLabel ? ' · ' + _lifiToolLabel : ''))
+        : (SWP.lastRoute ? SWP.lastRoute.pools.map(function(p){ return p.tokenA + '/' + p.tokenB; }).join(' → ') : '—'));
     }
   }
 
-  // Execution state follows the selected route (Tower only when selected + executable).
-  SWP._towerQuoteData = (q.source === 'tower' && q.calldata) ? q : null;
+  // Execution state: store quote in _towerQuoteData for Tower AND LI.FI sources
+  // (including lifi-N variants once calldata has been resolved by swpSelectRoute).
+  var isLifiSource = q.source === 'lifi' || (q.source && q.source.indexOf('lifi-') === 0);
+  if ((q.source === 'tower' || isLifiSource) && q.calldata) {
+    SWP._towerQuoteData = q;
+  } else {
+    SWP._towerQuoteData = null;
+  }
+
+  var srcDisplayLabel = q.source === 'tower' ? 'Tower Exchange'
+    : (isLifiSource ? ('LI.FI' + (q.label && q.label !== 'LI.FI' ? ' · ' + q.label : ''))
+    : 'Elligentt Pool');
 
   // Keep SWP.lastQuote in sync so executeSwap uses the correct expectedOutRaw/minOut.
   SWP.lastQuote = Object.assign({}, SWP.lastQuote, {
@@ -20564,7 +20655,7 @@ function swpApplySelectedQuote(q) {
     totalFee: feeBps,
     expectedOutRaw: q.expectedOutRaw,
     amountInRaw: amountInRaw,
-    source: q.source === 'tower' ? 'Tower Exchange' : 'Elligentt Pool',
+    source: srcDisplayLabel,
     tIn: tIn, tOut: tOut,
   });
 }
@@ -20715,9 +20806,12 @@ async function updateSwapRate() {
               source = 'Tower Exchange';
               SWP._towerQuoteData = selected.calldata ? selected : null;
               _log('[swap] SwapAggregator: Tower selecionada/executável (', selected.expectedOutRaw.toString(), ')');
-            } else if (selected.source === 'lifi') {
-              source = 'LI.FI';
-              SWP._towerQuoteData = selected.calldata ? selected : null;
+            } else if (selected.source === 'lifi' || (selected.source && selected.source.indexOf('lifi-') === 0)) {
+              var _selLifiLabel = selected.label && selected.label !== 'LI.FI' ? 'LI.FI · ' + selected.label : 'LI.FI';
+              source = _selLifiLabel;
+              // lifi-N: calldata not yet resolved — do not store in _towerQuoteData yet.
+              // It will be fetched by swpSelectRoute when the user confirms or auto-selected.
+              SWP._towerQuoteData = (selected.calldata && !selected._needsStepTx) ? selected : null;
               _log('[swap] SwapAggregator: LI.FI selecionada/executável (', selected.expectedOutRaw.toString(), ')');
             } else {
               source = 'Elligentt Pool';
@@ -20740,8 +20834,9 @@ async function updateSwapRate() {
       // ── External-calldata execution (Tower or LI.FI, no local pool for this pair) ──
       // QUOTE ≠ EXECUTION: external providers are quoted always, but executed only
       // when their calldata/target/spender are valid.
-      if (selected && (selected.source === 'tower' || selected.source === 'lifi')) {
-        const isLifi = selected.source === 'lifi';
+      if (selected && (selected.source === 'tower' || selected.source === 'lifi' || (selected.source && selected.source.indexOf('lifi-') === 0))) {
+        const isLifi = selected.source === 'lifi' || (selected.source && selected.source.indexOf('lifi-') === 0);
+        var _lifiTool = isLifi && selected.label && selected.label !== 'LI.FI' ? selected.label : null;
         const tOutAmt = Number((typeof SwapMath !== 'undefined' && SwapMath.formatUnits) ? SwapMath.formatUnits(selected.expectedOutRaw, tOut.decimals) : ethers.formatUnits(selected.expectedOutRaw, tOut.decimals));
         const tMinReceived = Number((typeof SwapMath !== 'undefined' && SwapMath.formatUnits) ? SwapMath.formatUnits(selected.minOutRaw, tOut.decimals) : ethers.formatUnits(selected.minOutRaw, tOut.decimals));
         const tRate = tOutAmt / amtIn;
@@ -20755,17 +20850,20 @@ async function updateSwapRate() {
         swpSet('swp-fee-val', (amtIn * (tFeeBps / 10000)).toFixed(6) + ' ' + tIn.sym + (tFeeBps ? ' (' + (tFeeBps / 100).toFixed(1) + '%)' : ''));
         var _fId = SWP.fromChainId || activeChainId; var _tId = SWP.toChainId || activeChainId;
         var _isCross = Number(_fId) !== Number(_tId);
-        swpSet('swp-source-val', (isLifi ? 'LI.FI' : 'Tower Aggregator') + (_isCross ? ' · Cross-chain' : ''));
+        var _srcValStr = isLifi ? ('LI.FI' + (_lifiTool ? ' · ' + _lifiTool : '')) : 'Tower Aggregator';
+        swpSet('swp-source-val', _srcValStr + (_isCross ? ' · Cross-chain' : ''));
         if (tImpact != null) swpSet('swp-impact-val', tImpact.toFixed(3) + '%', tImpact < 1 ? 'green' : tImpact < 3 ? 'yellow' : 'red');
         else swpSet('swp-impact-val', '—');
         const tRoutePool = document.getElementById('swp-route-pool');
         if (tRoutePool) {
           if (_isCross) { var _mIn = _swpChainMeta(_fId); var _mOut = _swpChainMeta(_tId); tRoutePool.textContent = tIn.sym + ' · ' + _mIn.name + ' → ' + tOut.sym + ' · ' + _mOut.name; }
-          else tRoutePool.textContent = isLifi ? 'LI.FI' : 'Tower';
+          else tRoutePool.textContent = isLifi ? ('LI.FI' + (_lifiTool ? ' · ' + _lifiTool : '')) : 'Tower';
         }
 
-        SWP._towerQuoteData = selected.calldata ? selected : null;
-        SWP.lastQuote = { amtIn, amtOut: tOutAmt, minReceived: tMinReceived, rate: tRate, priceImpact: tImpact, feeAmt: amtIn * (tFeeBps / 10000), source: isLifi ? 'LI.FI' : 'Tower Exchange', tIn, tOut, route: null, totalFee: tFeeBps, expectedOutRaw: selected.expectedOutRaw, amountInRaw, quotedAt: Date.now(), stateUpdatedAt: null };
+        // lifi-N: calldata not yet available — will be fetched on user confirm.
+        SWP._towerQuoteData = (selected.calldata && !selected._needsStepTx) ? selected : null;
+        var _srcLabel = isLifi ? ('LI.FI' + (_lifiTool ? ' · ' + _lifiTool : '')) : 'Tower Exchange';
+        SWP.lastQuote = { amtIn, amtOut: tOutAmt, minReceived: tMinReceived, rate: tRate, priceImpact: tImpact, feeAmt: amtIn * (tFeeBps / 10000), source: _srcLabel, tIn, tOut, route: null, totalFee: tFeeBps, expectedOutRaw: selected.expectedOutRaw, amountInRaw, quotedAt: Date.now(), stateUpdatedAt: null };
         SwapEngine.notifyQuoteLoaded(SWP.lastQuote);
         try {
           if (typeof SwapUiModes !== 'undefined' && SwapUiModes.renderRouteSelector) {
@@ -21326,12 +21424,22 @@ async function executeSwap() {
   // the user selected them AND their calldata/target/spender pass validation.
   // No silent provider substitution: LI.FI executes LI.FI, Tower executes Tower.
   if (SWP._towerQuoteData && SWP._towerQuoteData.calldata) {
-    if (SWP._towerQuoteData.source === 'lifi') {
+    var _execSrc = SWP._towerQuoteData.source;
+    var _execIsLifi = _execSrc === 'lifi' || (_execSrc && _execSrc.indexOf('lifi-') === 0);
+    if (_execIsLifi) {
       await swpExecuteLiFi(tIn, tOut, amtIn, slippageBps);
     } else {
       await swpExecuteTowerOnly(tIn, tOut, amtIn, slippageBps);
     }
     _swpExecuting = false;
+    return;
+  }
+
+  // lifi-N: route was auto-selected but calldata not yet fetched — trigger fetch now.
+  if (SWP.selectedSource && SWP.selectedSource.indexOf('lifi-') === 0 && !SWP._towerQuoteData) {
+    _swpExecuting = false;
+    swpSelectRoute(SWP.selectedSource); // will fetch calldata async; user should retry after
+    toast('Fetching LI.FI route — please wait a moment and try again', 'info');
     return;
   }
 

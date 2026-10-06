@@ -40,8 +40,15 @@
     return _mode;
   }
 
-  function providerMeta(source) {
+  function providerMeta(source, quote) {
     if (PROVIDER_META[source]) return PROVIDER_META[source];
+    // lifi-<routeId>: a real route from getRoutes — use the actual tool label
+    // (e.g. 'Stargate', 'Across', 'CCTP') carried in quote.label when available.
+    if (source && source.indexOf('lifi-') === 0) {
+      var toolLabel = (quote && quote.label) ? quote.label : null;
+      var displayName = toolLabel || 'LI.FI';
+      return { id: source, name: displayName, type: 'BRIDGE', sourceLabel: 'via LI.FI' };
+    }
     return { id: source, name: source || 'Provider', type: '', sourceLabel: source || '' };
   }
 
@@ -84,7 +91,11 @@
     var quotes = (decision && decision.quotes) || [];
     var exec = {};
     for (var i = 0; i < quotes.length; i++) {
-      if (isExecutableQuote(quotes[i])) exec[quotes[i].source] = true;
+      // lifi-N quotes are selectable but may not have calldata yet (_needsStepTx).
+      // Treat them as executable for selection persistence purposes.
+      if (isExecutableQuote(quotes[i]) || (quotes[i] && quotes[i].ok === true && quotes[i]._needsStepTx)) {
+        exec[quotes[i].source] = true;
+      }
     }
     if (prevSource && prevKey === currentKey && exec[prevSource]) return prevSource;
     var bestExec = (decision && decision.bestExecutable) || null;
@@ -96,7 +107,9 @@
   function findExecutableQuote(quotes, source) {
     for (var i = 0; i < (quotes || []).length; i++) {
       var q = quotes[i];
-      if (q && q.source === source && isExecutableQuote(q)) return q;
+      if (!q || q.source !== source) continue;
+      // lifi-N quotes are selectable even before calldata is fetched (flagged _needsStepTx).
+      if (isExecutableQuote(q) || (q.ok === true && q._needsStepTx)) return q;
     }
     return null;
   }
@@ -227,7 +240,8 @@
     function row(entry, executable) {
       var q = entry.q; var vidx = entry.vidx;
       var selected = selectedSource === q.source;
-      var meta = providerMeta(q.source);
+      // Pass the quote so providerMeta can read q.label for lifi-<id> routes.
+      var meta = providerMeta(q.source, q);
       var o = formatOut(q.expectedOutRaw, opts.tokenOutDecimals != null ? opts.tokenOutDecimals
         : (typeof opts.tokenOut === 'object' && opts.tokenOut ? opts.tokenOut.decimals : null));
 
@@ -265,14 +279,17 @@
 
       var provLetter = (meta.name || '?').charAt(0).toUpperCase();
       var cls = 'brs-route' + (selected ? ' brs-selected' : '') + (vidx === bestRateIdx && executable ? ' brs-best' : '') + (!executable ? ' brs-unavail reference' : '');
+      // meta.name already carries the real tool name for lifi-<id> routes (set by providerMeta).
+      var displayName = meta.name;
+      var displaySub  = meta.sourceLabel;
 
       return '<div class="' + cls + '" data-source="' + q.source + '">' +
         (badgeHtml ? '<div class="swp-rbadge-row">' + badgeHtml + '</div>' : '') +
         '<div class="brs-route-top">' +
           '<div class="brs-provider-icon">' + provLetter + '</div>' +
           '<div style="flex:1;min-width:0;overflow:hidden">' +
-            '<div class="brs-provider-name">' + escH(meta.name) + '</div>' +
-            '<div class="brs-protocol-tag">' + escH(meta.sourceLabel) + '</div>' +
+            '<div class="brs-provider-name">' + escH(displayName) + '</div>' +
+            '<div class="brs-protocol-tag">' + escH(displaySub) + '</div>' +
           '</div>' +
           '<div class="brs-out-amount" style="margin-left:8px">' +
             '<div class="brs-out-val">' + escH(o) + '</div>' +
@@ -299,7 +316,7 @@
       if (!q2 || q2.ok === true) continue;
       if (seen[q2.source]) continue;
       seen[q2.source] = true;
-      var meta2 = providerMeta(q2.source);
+      var meta2 = providerMeta(q2.source, q2);
       out +=
         '<div class="brs-route brs-unavail" data-source="' + q2.source + '">' +
           '<div class="brs-route-top">' +

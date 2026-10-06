@@ -225,7 +225,15 @@
     // the symbol→chain registry lookup — enables any token from LI.FI's catalog.
     var lifiFromChain = opts.fromChainId != null ? Number(opts.fromChainId) : (opts.chainId != null ? Number(opts.chainId) : null);
     var lifiToChain   = opts.toChainId   != null ? Number(opts.toChainId)   : (opts.chainId != null ? Number(opts.chainId) : null);
-    var lifiPromise = (typeof LiFiAdapter !== 'undefined' && LiFiAdapter.getQuote)
+    var isCrossChain  = lifiFromChain != null && lifiToChain != null && lifiFromChain !== lifiToChain;
+
+    // For cross-chain: use ONLY getRoutes — returns ALL available routes (Stargate,
+    // Across, CCTP, etc.) each as a separate card. getQuote is NOT called for cross-
+    // chain because it returns a single best-guess quote and hides the alternatives.
+    //
+    // For same-chain: getQuote is still called (LI.FI DEX aggregation, calldata ready).
+    // getRoutes is also called in parallel for same-chain to surface any extra options.
+    var lifiPromise = (!isCrossChain && typeof LiFiAdapter !== 'undefined' && LiFiAdapter.getQuote)
       ? LiFiAdapter.getQuote({
           tokenIn:     opts.tokenIn,
           tokenOut:    opts.tokenOut,
@@ -235,22 +243,92 @@
           toChainId:   lifiToChain,
           fromAddress: opts.userAddress,
         })
-      : Promise.resolve({ source: 'lifi', ok: false, error: 'LIFI_UNAVAILABLE' });
+      : Promise.resolve({ source: 'lifi', ok: false, error: isCrossChain ? 'USE_GETROUTES' : 'LIFI_UNAVAILABLE' });
+
+    // All-routes LI.FI query (getRoutes): returns ALL available routes.
+    // For cross-chain this is the PRIMARY and ONLY LI.FI source.
+    // Each route is expanded to its own 'lifi-<routeId>' source key so every
+    // provider/bridge appears as a distinct card in the selector.
+    var lifiRoutesPromise = (typeof LiFiAdapter !== 'undefined' && LiFiAdapter.getRoutes)
+      ? LiFiAdapter.getRoutes({
+          tokenIn:     opts.tokenIn,
+          tokenOut:    opts.tokenOut,
+          amountInRaw: opts.amountInRaw,
+          slippageBps: opts.slippageBps,
+          fromChainId: lifiFromChain,
+          toChainId:   lifiToChain,
+          fromAddress: opts.userAddress,
+          toAddress:   opts.userAddress,
+        })
+      : Promise.resolve({ ok: false, routes: [], error: 'LIFI_ROUTES_UNAVAILABLE' });
 
     // Isolated failures: a slow/rejecting source settles to an error quote after
     // its own timeout, never blocking the other source beyond `timeoutMs`.
     var wrapped = [
-      withTimeout(towerPromise, timeoutMs, { source: 'tower', ok: false, error: 'TIMEOUT' }),
-      withTimeout(localPromise, timeoutMs, { source: 'local', ok: false, error: 'TIMEOUT' }),
-      withTimeout(lifiPromise, timeoutMs, { source: 'lifi', ok: false, error: 'TIMEOUT' }),
+      withTimeout(towerPromise,      timeoutMs, { source: 'tower', ok: false, error: 'TIMEOUT' }),
+      withTimeout(localPromise,      timeoutMs, { source: 'local', ok: false, error: 'TIMEOUT' }),
+      withTimeout(lifiPromise,       timeoutMs, { source: 'lifi',  ok: false, error: 'TIMEOUT' }),
+      withTimeout(lifiRoutesPromise, timeoutMs, { ok: false, routes: [], error: 'TIMEOUT' }),
     ];
 
     var results = await Promise.allSettled(wrapped);
 
-    var quotes = results.map(function (r) {
+    var baseQuotes = results.slice(0, 3).map(function (r) {
       if (r.status === 'fulfilled') return r.value;
       return { source: 'unknown', ok: false, error: 'QUOTE_REJECTED' };
     });
+
+    // Expand getRoutes result — one quote per route, each tagged 'lifi-<routeId>'.
+    // For cross-chain: ALL routes are expanded (getQuote intentionally returned an
+    // error placeholder, so there is no 'lifi' base quote to deduplicate against).
+    // For same-chain: skip the first route only when getQuote succeeded (already
+    // represented as 'lifi') to avoid showing the same route twice.
+    var lifiRoutesResult = (results[3].status === 'fulfilled') ? results[3].value : { ok: false, routes: [] };
+    var extraLifiQuotes = [];
+    if (lifiRoutesResult && lifiRoutesResult.ok && Array.isArray(lifiRoutesResult.routes)) {
+      var primaryLifiOk = !isCrossChain && baseQuotes[2] && baseQuotes[2].ok === true;
+      // For cross-chain, always start at 0 (all routes are new).
+      // For same-chain, start at 1 if getQuote already captured route[0].
+      var startIdx = primaryLifiOk ? 1 : 0;
+      for (var ri = startIdx; ri < lifiRoutesResult.routes.length; ri++) {
+        var lr = lifiRoutesResult.routes[ri];
+        if (!lr || lr.toAmountRaw == null || lr.toAmountRaw <= 0n) continue;
+        // Use routeId as the unique source key so each real bridge/DEX gets its own card.
+        var routeSourceKey = 'lifi-' + (lr.routeId || ri);
+        extraLifiQuotes.push({
+          source:         routeSourceKey,
+          ok:             true,
+          // label = real tool name from toolDetails.name ('Stargate', 'Across', 'CCTP', …)
+          label:          lr.label  || 'LI.FI',
+          protocol:       lr.protocol || 'LI.FI aggregator',
+          tokenIn:        opts.tokenIn  || null,
+          tokenOut:       opts.tokenOut || null,
+          fromChainId:    lifiFromChain,
+          toChainId:      lifiToChain,
+          amountInRaw:    opts.amountInRaw,
+          expectedOutRaw: lr.toAmountRaw,
+          minOutRaw:      lr.toAmountMinRaw || lr.toAmountRaw,
+          feeBps:         lr.feeBps  || null,
+          feeCostUSD:     lr.feeCostUSD || null,
+          gasCostUSD:     lr.gasCostUSD || null,
+          estimatedTime:  lr.executionDuration || null,
+          execSec:        lr.executionDuration || null,
+          steps:          lr.steps   || 1,
+          stepsData:      lr.stepsData || [],
+          routeId:        lr.routeId || null,
+          _rawLifiRoute:  lr._rawRoute || null,
+          // calldata is NOT available yet — fetched on user selection via getStepTransaction.
+          calldata:       null,
+          to:             null,
+          spender:        null,
+          value:          '0',
+          expiresAt:      Date.now() + 160000, // 160s (same as Bridge freshness window)
+          executable:     false, // finalized below after executability check
+        });
+      }
+    }
+
+    var quotes = baseQuotes.concat(extraLifiQuotes);
 
     // Reject quotes that do not match the request (amount/token/chain/expiry).
     for (var i = 0; i < quotes.length; i++) {
@@ -261,18 +339,26 @@
     }
 
     // Finalize executability (single source of truth for bestExecutableQuote).
-    //   local  → executable only when a local route actually exists (hasLocalPool)
-    //   tower  → executable whenever its route is fully valid (calldata/target/
-    //            spender), INDEPENDENT of local-pool existence (Tower and
-    //            Elligentt are separate providers — never each other's gate).
-    //   lifi   → executable whenever its route is fully valid (LI.FI calldata/
-    //            target + chain match). LI.FI is an independent provider too.
+    //   local    → executable only when a local route actually exists (hasLocalPool)
+    //   tower    → executable whenever its route is fully valid (calldata/target/
+    //              spender), INDEPENDENT of local-pool existence (Tower and
+    //              Elligentt are separate providers — never each other's gate).
+    //   lifi     → executable whenever its route is fully valid (LI.FI calldata/
+    //              target + chain match). LI.FI is an independent provider too.
+    //   lifi-N   → route variants from getRoutes; stepsData present but calldata
+    //              fetched on selection. Treated as selectable (user can pick) but
+    //              NOT counted as bestExecutableQuote (no calldata yet).
     for (var j = 0; j < quotes.length; j++) {
       var qq = quotes[j];
       if (qq && qq.ok === true) {
         if (qq.source === 'local') qq.executable = hasLocalPool;
         else if (qq.source === 'tower') qq.executable = towerExecutionValid(qq);
         else if (qq.source === 'lifi') qq.executable = externalExecutionValid(qq);
+        else if (qq.source && qq.source.indexOf('lifi-') === 0) {
+          // lifi-N: selectable when stepsData is present (calldata fetched on select).
+          qq.executable = !!(qq.stepsData && qq.stepsData.length > 0);
+          qq._needsStepTx = true; // flag for swpSelectRoute to call getStepTransaction
+        }
         else qq.executable = false;
       } else if (qq) {
         qq.executable = false;

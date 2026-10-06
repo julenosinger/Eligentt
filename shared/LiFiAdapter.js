@@ -389,11 +389,12 @@
         feeBps = null; // let UI show feeCostUSD directly
       }
 
+      var routeId = r.id || ('route-' + Math.random().toString(36).substr(2,8));
       return {
         ok: true,
-        source: 'lifi',
-        routeId: r.id || ('route-' + Math.random().toString(36).substr(2,8)),
-        label: toolName,
+        source: 'lifi',        // overwritten by SwapAggregator to 'lifi-<routeId>'
+        routeId: routeId,
+        label: toolName,       // real tool name: 'Stargate', 'Across', 'CCTP', …
         protocol: 'LI.FI aggregator',
         available: true,
         steps: Array.isArray(r.steps) ? r.steps.length : 1,
