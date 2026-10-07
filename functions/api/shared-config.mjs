@@ -58,6 +58,69 @@ export const RELAYER_CONFIG = {
     cirbtc: '0x171A4217b86A807A64eB94757Db6849fb4bDbAA0',
   },
 
+  // Multi-chain registry for billing verification.
+  // Single source of truth: RPC, token addresses, and decimals per chain.
+  // If a chain is absent, payment verification returns "unsupported chain"
+  // and NEVER marks the payment as Paid.
+  CHAIN_REGISTRY: {
+    5042: {
+      name: 'Arc Mainnet',
+      rpc: 'https://rpc.mainnet.arc.io',
+      tokens: {
+        USDC:   { address: '0x3600000000000000000000000000000000000000', decimals: 6 },
+        EURC:   { address: '0xbEf5f6d51CB62b58e6A8f77868681825C6fe21c1', decimals: 6 },
+        CIRBTC: { address: '0x171A4217b86A807A64eB94757Db6849fb4bDbAA0', decimals: 8 },
+      },
+    },
+    1: {
+      name: 'Ethereum',
+      rpc: 'https://cloudflare-eth.com',
+      tokens: {
+        USDC: { address: '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', decimals: 6 },
+        EURC: { address: '0x1abaea1f7c830bd89acc67ec4af516284b1bc33c', decimals: 6 },
+      },
+    },
+    8453: {
+      name: 'Base',
+      rpc: 'https://mainnet.base.org',
+      tokens: {
+        USDC: { address: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', decimals: 6 },
+        EURC: { address: '0x60a3e35cc302bfa44cb288bc5a4f316fdb1adb42', decimals: 6 },
+      },
+    },
+    42161: {
+      name: 'Arbitrum',
+      rpc: 'https://arb1.arbitrum.io/rpc',
+      tokens: {
+        USDC: { address: '0xaf88d065e77c8cc2239327c5edb3a432268e5831', decimals: 6 },
+      },
+    },
+    10: {
+      name: 'Optimism',
+      rpc: 'https://mainnet.optimism.io',
+      tokens: {
+        USDC: { address: '0x0b2c639c533813f4aa9d7837caf62653d097ff85', decimals: 6 },
+      },
+    },
+    137: {
+      name: 'Polygon',
+      rpc: 'https://polygon-rpc.com',
+      tokens: {
+        USDC: { address: '0x3c499c542cef5e3811e1192ce70d8cc03d5c3359', decimals: 6 },
+      },
+    },
+  },
+
+  // Supported chain names -> chainId (for server-side validation).
+  CHAIN_NAME_TO_ID: {
+    'Arc Mainnet': 5042,
+    'Ethereum':    1,
+    'Base':        8453,
+    'Arbitrum':    42161,
+    'Optimism':    10,
+    'Polygon':     137,
+  },
+
   // SECURITY: custodial signer (/api/auth/sign) may only target official
   // Elligentt contracts. Recipients live inside ERC-20 calldata, so normal
   // payments still work; raw value transfers to arbitrary addresses are blocked.

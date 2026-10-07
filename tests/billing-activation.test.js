@@ -134,12 +134,14 @@ describe('Billing: invoice drawer', () => {
 // ── 6. Arc Mainnet default in backend ─────────────────────────────────────
 describe('Billing: Arc Mainnet defaults', () => {
   it('29. invoice.js defaults to Arc Mainnet (not Arc Testnet)', () => {
-    expect(invoiceJs).toContain("chain || 'Arc Mainnet'");
-    expect(invoiceJs).not.toContain("chain || 'Arc Testnet'");
+    // After Fix 1 the literal `chain || 'Arc Mainnet'` was replaced with
+    // resolvedChain which defaults to 'Arc Mainnet' via CHAIN_REGISTRY validation.
+    expect(invoiceJs).toContain("Arc Mainnet");
+    expect(invoiceJs).not.toContain("Arc Testnet");
   });
   it('30. payment-links.js defaults to Arc Mainnet (not Arc Testnet)', () => {
-    expect(payLinksJs).toContain("chain || 'Arc Mainnet'");
-    expect(payLinksJs).not.toContain("chain || 'Arc Testnet'");
+    expect(payLinksJs).toContain("Arc Mainnet");
+    expect(payLinksJs).not.toContain("Arc Testnet");
   });
 });
 

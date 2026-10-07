@@ -22,15 +22,43 @@
 
   const CHAIN_NAMES = Object.fromEntries(Object.entries(CHAIN_IDS).map(([k,v]) => [v, k]));
 
-  // USDC addresses per chain (same as existing config)
-  const USDC = {
-    5042:  '0x3600000000000000000000000000000000000000',
-    1:     '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48',
-    8453:  '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
-    42161: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831',
-    10:    '0x0b2c639c533813f4aa9d7837caf62653d097ff85',
-    137:   '0x3c499c542cef5e3811e1192ce70d8cc03d5c3359',
+  // Token registry per chain: address + decimals.
+  // Mirrors the server-side CHAIN_REGISTRY in shared-config.mjs.
+  // NEVER hardcode decimals at call sites -- always use tokenInfoFor().
+  const TOKEN_REGISTRY = {
+    5042: {
+      USDC:   { address: '0x3600000000000000000000000000000000000000', decimals: 6 },
+      EURC:   { address: '0xbEf5f6d51CB62b58e6A8f77868681825C6fe21c1', decimals: 6 },
+      CIRBTC: { address: '0x171A4217b86A807A64eB94757Db6849fb4bDbAA0', decimals: 8 },
+    },
+    1: {
+      USDC: { address: '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', decimals: 6 },
+      EURC: { address: '0x1abaea1f7c830bd89acc67ec4af516284b1bc33c', decimals: 6 },
+    },
+    8453: {
+      USDC: { address: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', decimals: 6 },
+      EURC: { address: '0x60a3e35cc302bfa44cb288bc5a4f316fdb1adb42', decimals: 6 },
+    },
+    42161: {
+      USDC: { address: '0xaf88d065e77c8cc2239327c5edb3a432268e5831', decimals: 6 },
+    },
+    10: {
+      USDC: { address: '0x0b2c639c533813f4aa9d7837caf62653d097ff85', decimals: 6 },
+    },
+    137: {
+      USDC: { address: '0x3c499c542cef5e3811e1192ce70d8cc03d5c3359', decimals: 6 },
+    },
   };
+
+  // Keep USDC as a convenience alias (used by usdcFor).
+  const USDC = Object.fromEntries(
+    Object.entries(TOKEN_REGISTRY).map(([id, tokens]) => [id, tokens.USDC?.address || null])
+  );
+
+  function tokenInfoFor(chainId, tokenSymbol) {
+    const sym = (tokenSymbol || 'USDC').toUpperCase();
+    return (TOKEN_REGISTRY[chainId] || {})[sym] || null;
+  }
 
   // ── Helpers ────────────────────────────────────────────────────────────────
   function chainIdFor(nameOrId) {
@@ -191,14 +219,21 @@
       return '<div style="padding:16px;text-align:center;color:var(--muted2);font-size:10px">No cross-chain routes available</div>';
     }
 
-    const amounts = routes.map(r => parseFloat(fmtAmount(r.toAmountMin, 6)));
+    // Resolve destination token decimals from LI.FI route data.
+    // route.toToken.decimals is the authoritative source per-route.
+    function routeToDecimals(r) { return r.toToken?.decimals || 6; }
+    function routeToSymbol(r)   { return r.toToken?.symbol   || 'USDC'; }
+
+    const amounts = routes.map(r => parseFloat(fmtAmount(r.toAmountMin, routeToDecimals(r))));
     const times   = routes.map(r => r.steps?.reduce((acc, s) => acc + (s.estimate?.executionDuration || 0), 0) || 0);
     const bestAmt = Math.max(...amounts);
     const bestTime = Math.min(...times.filter(t => t > 0));
 
     return routes.map((route, idx) => {
+      const toDecimals = routeToDecimals(route);
+      const toSymbol   = routeToSymbol(route);
       const tool     = toolName(route);
-      const received = fmtAmount(route.toAmountMin, 6);
+      const received = fmtAmount(route.toAmountMin, toDecimals);
       const fee      = fmtFee(route);
       const estTime  = fmtTime(route.steps?.reduce((acc, s) => acc + (s.estimate?.executionDuration || 0), 0));
       const steps    = route.steps?.length || 1;
@@ -224,7 +259,7 @@
             </div>
           </div>
           <div style="text-align:right">
-            <div style="font-size:12px;font-weight:700;color:var(--text)">${received} <span style="font-size:9px;color:var(--muted2)">USDC received</span></div>
+            <div style="font-size:12px;font-weight:700;color:var(--text)">${received} <span style="font-size:9px;color:var(--muted2)">${toSymbol} received</span></div>
             ${isSelected ? '<span style="font-size:8px;color:var(--teal);border:1px solid rgba(45,212,191,.4);border-radius:4px;padding:2px 6px;margin-top:2px;display:inline-block">✓ Selected</span>' : ''}
           </div>
         </div>
@@ -268,8 +303,13 @@
     _selectedIdx = 0;
 
     const destChainId = paymentData.chainId || chainIdFor(paymentData.chain) || 5042;
-    const destToken   = usdcFor(destChainId);
-    const srcToken    = usdcFor(sourceChainId);
+    // Destination token: use paymentData.token symbol; fallback USDC.
+    const tokenSymbol  = (paymentData.token || 'USDC').toUpperCase();
+    const destTokenAddr = (destTokenInfo || {}).address || usdcFor(destChainId);
+    // Source token: same symbol on source chain; fallback to USDC if not found.
+    const srcTokenInfo = tokenInfoFor(sourceChainId, tokenSymbol) || tokenInfoFor(sourceChainId, 'USDC');
+    const destToken    = destTokenAddr;
+    const srcToken     = srcTokenInfo ? srcTokenInfo.address : usdcFor(sourceChainId);
 
     if (!srcToken) {
       if (window.toast) toast('Source chain USDC address unknown', 'error');
@@ -280,7 +320,10 @@
       return;
     }
 
-    const amountRaw = String(Math.round(parseFloat(paymentData.amount) * 1e6));
+    // Use real token decimals for the destination token.
+    const destTokenInfo = tokenInfoFor(destChainId, paymentData.token || 'USDC');
+    const destDecimals  = destTokenInfo ? destTokenInfo.decimals : 6;
+    const amountRaw = String(Math.round(parseFloat(paymentData.amount) * Math.pow(10, destDecimals)));
     const fromChainName = window.CHAIN_REGISTRY?.[sourceChainId]?.name || CHAIN_NAMES[sourceChainId] || ('Chain ' + sourceChainId);
     const destChainName = paymentData.chain || CHAIN_NAMES[destChainId] || ('Chain ' + destChainId);
 
@@ -289,6 +332,7 @@
       fromChain: fromChainName,
       toChain: destChainName,
       amount: paymentData.amount,
+      token: tokenSymbol,
       recipient: paymentData.recipient,
       loading: true,
     });
@@ -367,7 +411,7 @@
           </div>
           <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
             <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--muted2);margin-bottom:4px">
-              <span>You pay</span><span style="color:var(--text)">${info.amount || '—'} USDC on ${fromChain}</span>
+              <span>You pay</span><span style="color:var(--text)">${info.amount || '—'} ${info.token || 'USDC'} on ${fromChain}</span>
             </div>
             <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--muted2);margin-bottom:12px">
               <span>Recipient</span><span style="color:var(--blue);font-family:monospace;font-size:8px">${(info.recipient||'').slice(0,10)}...${(info.recipient||'').slice(-6)}</span>
@@ -401,49 +445,65 @@
     const statusEl  = document.getElementById('bcc-status');
     const setStatus = (msg) => { if (statusEl) { statusEl.style.display = ''; statusEl.textContent = msg; } };
 
-    if (btn) { btn.disabled = true; btn.textContent = 'Preparing transaction…'; }
+    if (btn) { btn.disabled = true; btn.textContent = 'Preparing transaction...'; }
 
-    // Use the first step of the selected route
-    const step = route.steps[0];
-    if (!step) { if (window.toast) toast('Route has no steps', 'error'); if (btn) btn.disabled = false; return; }
-
-    setStatus('Fetching signed transaction…');
-    const txRes = await fetchStepTx(step);
-    if (!txRes.ok) {
-      if (window.toast) toast('Failed to get transaction: ' + txRes.error, 'error');
-      if (btn) { btn.disabled = false; btn.textContent = 'Retry'; }
-      setStatus('Error: ' + txRes.error);
+    // Execute ALL steps of the selected route in order.
+    // Failing any step stops execution and leaves the payment in Processing/Failed.
+    const steps = route.steps;
+    if (!steps || !steps.length) {
+      if (window.toast) toast('Route has no steps', 'error');
+      if (btn) btn.disabled = false;
       return;
     }
 
-    const txReq = txRes.tx;
-    setStatus('Waiting for wallet signature…');
-    let sourceTxHash;
-    try {
-      // Send via ethers signer
-      const txResponse = await window.signer.sendTransaction({
-        to:       txReq.to,
-        data:     txReq.data,
-        value:    txReq.value ? BigInt(txReq.value) : 0n,
-        gasLimit: txReq.gasLimit ? BigInt(txReq.gasLimit) : undefined,
-        chainId:  txReq.chainId ? Number(txReq.chainId) : undefined,
-      });
-      sourceTxHash = txResponse.hash;
-      if (window.toast) toast('Tx submitted: ' + sourceTxHash.slice(0, 10) + '… — bridging in progress', 'info');
-      setStatus('Tx sent — waiting for source confirmation…');
-      await txResponse.wait();
-      setStatus('Source confirmed — polling bridge status…');
-    } catch (e) {
-      if (e.code === 4001) {
-        if (window.toast) toast('Rejected by wallet', 'error');
-        setStatus('Rejected by wallet');
-      } else {
-        if (window.toast) toast('Transaction error: ' + (e.shortMessage || e.message || ''), 'error');
-        setStatus('Error: ' + (e.message || ''));
+    let sourceTxHash;    // hash of the first step tx (used for status polling)
+    let lastStepTxHash;  // hash of the last executed step
+
+    for (let stepIdx = 0; stepIdx < steps.length; stepIdx++) {
+      const step = steps[stepIdx];
+      const stepLabel = steps.length > 1 ? ' (step ' + (stepIdx + 1) + '/' + steps.length + ')' : '';
+
+      setStatus('Fetching transaction for step ' + (stepIdx + 1) + ' of ' + steps.length + '...');
+      const txRes = await fetchStepTx(step);
+      if (!txRes.ok) {
+        if (window.toast) toast('Step ' + (stepIdx + 1) + ' failed: ' + txRes.error, 'error');
+        if (btn) { btn.disabled = false; btn.textContent = 'Retry'; }
+        setStatus('Step ' + (stepIdx + 1) + ' error: ' + txRes.error);
+        return;
       }
-      if (btn) { btn.disabled = false; btn.textContent = 'Retry'; }
-      return;
-    }
+
+      const txReq = txRes.tx;
+      setStatus('Waiting for wallet signature' + stepLabel + '...');
+      try {
+        const txResponse = await window.signer.sendTransaction({
+          to:       txReq.to,
+          data:     txReq.data,
+          value:    txReq.value ? BigInt(txReq.value) : 0n,
+          gasLimit: txReq.gasLimit ? BigInt(txReq.gasLimit) : undefined,
+          chainId:  txReq.chainId ? Number(txReq.chainId) : undefined,
+        });
+        lastStepTxHash = txResponse.hash;
+        if (stepIdx === 0) sourceTxHash = lastStepTxHash;
+        if (window.toast) toast('Step ' + (stepIdx + 1) + ' submitted: ' + lastStepTxHash.slice(0, 10) + '...', 'info');
+        setStatus('Step ' + (stepIdx + 1) + ' sent - waiting for confirmation...');
+        await txResponse.wait();
+        if (stepIdx < steps.length - 1) {
+          setStatus('Step ' + (stepIdx + 1) + ' confirmed - proceeding to step ' + (stepIdx + 2) + '...');
+        } else {
+          setStatus('All steps confirmed - polling bridge status...');
+        }
+      } catch (e) {
+        if (e.code === 4001) {
+          if (window.toast) toast('Rejected by wallet' + stepLabel, 'error');
+          setStatus('Rejected by wallet at step ' + (stepIdx + 1));
+        } else {
+          if (window.toast) toast('Step ' + (stepIdx + 1) + ' error: ' + (e.shortMessage || e.message || ''), 'error');
+          setStatus('Error at step ' + (stepIdx + 1) + ': ' + (e.message || ''));
+        }
+        if (btn) { btn.disabled = false; btn.textContent = 'Retry'; }
+        return;
+      }
+    } // end steps loop
 
     // Update local state to Processing immediately
     const d = _paymentData;
@@ -457,10 +517,11 @@
       }
     }
 
-    // Poll bridge status
-    const fromChainId = step.action?.fromChainId || _paymentData?.sourceChainId;
-    const toChainId   = step.action?.toChainId   || _paymentData?.chainId;
-    const bridge      = step.tool || '';
+    // Poll bridge status using the FIRST step (source chain) identifiers.
+    const firstStep   = steps[0];
+    const fromChainId = firstStep.action?.fromChainId || _paymentData?.sourceChainId;
+    const toChainId   = firstStep.action?.toChainId   || _paymentData?.chainId;
+    const bridge      = firstStep.tool || '';
 
     const pollResult = await pollStatus(sourceTxHash, fromChainId, toChainId, bridge, function(status) {
       setStatus('Bridge status: ' + status);
@@ -556,8 +617,10 @@
     _fmtAmount:    fmtAmount,
     _renderRouteCards: renderRouteCards,
     _chainIdFor:   chainIdFor,
+    _tokenInfoFor: tokenInfoFor,
     CHAIN_IDS,
     USDC,
+    TOKEN_REGISTRY,
   };
 
 })(window);

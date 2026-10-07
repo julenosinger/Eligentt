@@ -59,7 +59,8 @@ export async function onRequestPost(context) {
 
   try {
     const body = await context.request.json();
-    const { id, number, label, amount, feeAmount, recipient, recipientName, desc, token, chain, expiresAt } = body;
+    const { id, number, label, amount, feeAmount, recipient, recipientName, desc, token, chain, chainId: bodyChainId, expiresAt } = body;
+    const chainId = bodyChainId;
 
     if (!id || !TOKEN_RE.test(id)) {
       return new Response(JSON.stringify({ error: 'Invalid invoice token' }), { status: 400, headers });
@@ -103,7 +104,25 @@ export async function onRequestPost(context) {
       if (!isNaN(d.getTime())) { expiresAtIso = d.toISOString(); expiry = 'date'; }
     }
 
-    const link = {
+    // Resolve and validate destination chain against server-side registry.
+    // Reject any chainId that is not in CHAIN_REGISTRY to prevent spoofing.
+    const nameToId = RELAYER_CONFIG.CHAIN_NAME_TO_ID || {};
+    const registry = RELAYER_CONFIG.CHAIN_REGISTRY || {};
+    let resolvedChainId = RELAYER_CONFIG.ARC_CHAIN_ID; // default Arc Mainnet
+    let resolvedChain = 'Arc Mainnet';
+    if (chain && typeof chain === 'string' && nameToId[chain]) {
+      resolvedChainId = nameToId[chain];
+      resolvedChain = chain;
+    } else if (chainId && registry[Number(chainId)]) {
+      resolvedChainId = Number(chainId);
+      resolvedChain = registry[resolvedChainId].name;
+    }
+    // Extra guard: if frontend sent a chainId that is not in our registry, reject it.
+    if (chain && typeof chain === 'string' && chain !== 'Arc Mainnet' && !nameToId[chain]) {
+      return new Response(JSON.stringify({ error: 'Unsupported destination chain: ' + chain }), { status: 400, headers });
+    }
+
+        const link = {
       id,
       kind: 'invoice',
       type: 'fixed',
@@ -117,9 +136,9 @@ export async function onRequestPost(context) {
       feeBps,
       feeReceiver: RELAYER_CONFIG.TREASURY_VAULT,
       recipient,
-      token: token || 'USDC',
-      chain: chain || 'Arc Mainnet',
-      chainId: RELAYER_CONFIG.ARC_CHAIN_ID,
+      token: (typeof token === 'string' && token.trim()) ? token.trim().toUpperCase() : 'USDC',
+      chain: resolvedChain,
+      chainId: resolvedChainId,
       expiry,
       expiresAt: expiresAtIso,
       status: 'Active',

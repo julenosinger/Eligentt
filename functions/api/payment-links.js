@@ -55,7 +55,8 @@ export async function onRequestPost(context) {
 
   try {
     const body = await context.request.json();
-    const { label, amount, type, desc, recipient, token, chain, expiry } = body;
+    const { label, amount, type, desc, recipient, token, chain, chainId: bodyChainId, expiry } = body;
+    const chainId = bodyChainId;
 
     if (!recipient || !/^0x[0-9a-fA-F]{40}$/.test(recipient)) {
       return new Response(JSON.stringify({ error: 'Invalid recipient address' }), { status: 400, headers });
@@ -76,7 +77,23 @@ export async function onRequestPost(context) {
       totalAmount = parseFloat(ethers.formatUnits(totalRaw, 6));
     }
 
-    const id = 'pl_' + crypto.randomUUID();
+    // Resolve destination chain against server-side registry.
+    const nameToId = RELAYER_CONFIG.CHAIN_NAME_TO_ID || {};
+    const registry = RELAYER_CONFIG.CHAIN_REGISTRY || {};
+    let resolvedChainId = RELAYER_CONFIG.ARC_CHAIN_ID;
+    let resolvedChain = 'Arc Mainnet';
+    if (chain && typeof chain === 'string' && nameToId[chain]) {
+      resolvedChainId = nameToId[chain];
+      resolvedChain = chain;
+    } else if (chainId && registry[Number(chainId)]) {
+      resolvedChainId = Number(chainId);
+      resolvedChain = registry[resolvedChainId].name;
+    }
+    if (chain && typeof chain === 'string' && chain !== 'Arc Mainnet' && !nameToId[chain]) {
+      return new Response(JSON.stringify({ error: 'Unsupported destination chain: ' + chain }), { status: 400, headers });
+    }
+
+        const id = 'pl_' + crypto.randomUUID();
 
     let expiresAt = null;
     if (expiry && expiry !== 'never') {
@@ -95,9 +112,9 @@ export async function onRequestPost(context) {
       type: type || 'fixed',
       desc: desc || '',
       recipient,
-      token: token || 'USDC',
-      chain: chain || 'Arc Mainnet',
-      chainId: RELAYER_CONFIG.ARC_CHAIN_ID,
+      token: (typeof token === 'string' && token.trim()) ? token.trim().toUpperCase() : 'USDC',
+      chain: resolvedChain,
+      chainId: resolvedChainId,
       expiry: expiry || 'never',
       expiresAt,
       status: 'Active',

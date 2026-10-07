@@ -15,11 +15,22 @@ function getCorsHeaders(request, env) {
 }
 
 const TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
-const USDC_ADDRESS = (RELAYER_CONFIG.ASSETS?.usdc || '0x3600000000000000000000000000000000000000').toLowerCase();
-const USDC_DECIMALS = 6;
 
-function toRaw(amount) {
-  return ethers.parseUnits(String(amount), USDC_DECIMALS);
+// Resolve RPC and token address/decimals from the server-side registry.
+// Returns null when chain or token is unsupported (payment must be rejected).
+function resolveChainToken(chainId, tokenSymbol) {
+  const registry = RELAYER_CONFIG.CHAIN_REGISTRY;
+  if (!registry) return null;
+  const chain = registry[Number(chainId)];
+  if (!chain) return null;
+  const sym = (tokenSymbol || 'USDC').toUpperCase();
+  const tokenEntry = chain.tokens[sym];
+  if (!tokenEntry) return null;
+  return { rpc: chain.rpc, tokenAddress: tokenEntry.address.toLowerCase(), decimals: tokenEntry.decimals };
+}
+
+function toRaw(amount, decimals) {
+  return ethers.parseUnits(String(amount), decimals || 6);
 }
 
 function addrMatch(a, b) {
@@ -126,7 +137,21 @@ export async function onRequestPost(context) {
       return new Response(JSON.stringify({ error: 'Invalid transaction hash' }), { status: 400, headers });
     }
 
-    const rpcUrl = context.env.ARC_RPC_URL || RELAYER_CONFIG.ARC_RPC_URL;
+    // Resolve destination chain + token from the stored link (never trust frontend).
+    // If chain or token is unsupported, reject without marking Paid.
+    const destChainId = link.chainId || RELAYER_CONFIG.ARC_CHAIN_ID;
+    const destToken   = link.token || 'USDC';
+    const chainToken  = resolveChainToken(destChainId, destToken);
+    if (!chainToken) {
+      return new Response(JSON.stringify({
+        error: 'Unsupported destination chain or token: chainId=' + destChainId + ' token=' + destToken
+      }), { status: 422, headers });
+    }
+
+    // Arc allows env override; all other chains use the registry RPC.
+    const rpcUrl = (destChainId === RELAYER_CONFIG.ARC_CHAIN_ID && context.env.ARC_RPC_URL)
+      ? context.env.ARC_RPC_URL
+      : chainToken.rpc;
     const provider = new ethers.JsonRpcProvider(rpcUrl);
 
     const receipt = await provider.getTransactionReceipt(txHash);
@@ -137,12 +162,12 @@ export async function onRequestPost(context) {
       return new Response(JSON.stringify({ error: 'Transaction failed on-chain (reverted)' }), { status: 422, headers });
     }
 
-    const expectedAmount = toRaw(link.amount);
-    const transfer = findTransfer(receipt, USDC_ADDRESS, link.recipient, expectedAmount, 2n);
+    const expectedAmount = toRaw(link.amount, chainToken.decimals);
+    const transfer = findTransfer(receipt, chainToken.tokenAddress, link.recipient, expectedAmount, 2n);
     if (!transfer) {
       return new Response(JSON.stringify({
-        error: 'On-chain validation failed: no matching USDC transfer to recipient for the expected amount',
-        expected: { recipient: link.recipient, amount: link.amount, rawAmount: expectedAmount.toString() }
+        error: 'On-chain validation failed: no matching ' + destToken + ' transfer to recipient for the expected amount',
+        expected: { recipient: link.recipient, amount: link.amount, rawAmount: expectedAmount.toString(), chain: destChainId }
       }), { status: 422, headers });
     }
 
@@ -162,12 +187,13 @@ export async function onRequestPost(context) {
         return new Response(JSON.stringify({ error: 'Fee transaction failed on-chain (reverted)' }), { status: 422, headers });
       }
 
-      const expectedFee = toRaw(feeAmount);
-      const feeTransfer = findTransfer(feeReceipt, USDC_ADDRESS, RELAYER_CONFIG.TREASURY_VAULT, expectedFee, 2n);
+      // Fee is paid on the destination chain in the destination token.
+      const expectedFee = toRaw(feeAmount, chainToken.decimals);
+      const feeTransfer = findTransfer(feeReceipt, chainToken.tokenAddress, RELAYER_CONFIG.TREASURY_VAULT, expectedFee, 2n);
       if (!feeTransfer) {
         return new Response(JSON.stringify({
-          error: 'On-chain validation failed: no matching USDC fee transfer to TreasuryVault',
-          expected: { treasury: RELAYER_CONFIG.TREASURY_VAULT, feeAmount, rawFee: expectedFee.toString() }
+          error: 'On-chain validation failed: no matching ' + destToken + ' fee transfer to TreasuryVault',
+          expected: { treasury: RELAYER_CONFIG.TREASURY_VAULT, feeAmount, rawFee: expectedFee.toString(), chain: destChainId }
         }), { status: 422, headers });
       }
       feeVerified = true;
