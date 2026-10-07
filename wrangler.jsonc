@@ -34,15 +34,17 @@
   // core state (nonces/rate/audit/registry-overrides/cache) uses RATE_LIMIT_KV.
   // Durable Objects — PaymentLock provides true atomic serialization for
   // chainId+txHash idempotency in payment/[token].js.
-  // Each DO instance is keyed by "txused:<chainId>:<txHash>".
-  "durable_objects": {
-    "bindings": [
-      { "name": "PAYMENT_LOCK", "class_name": "PaymentLock" }
-    ]
-  },
-  "migrations": [
-    { "tag": "v1", "new_classes": ["PaymentLock"] }
-  ],
+  //
+  // Cloudflare Pages does NOT support inline DO class definitions or migrations
+  // in wrangler.jsonc.  To activate the DO in production:
+  //   1. Deploy a separate Worker that exports PaymentLock from payment-lock.do.js
+  //   2. In Cloudflare Dashboard → Pages → elligentttest → Settings → Functions
+  //      → Durable Object bindings, add:
+  //        Variable name: PAYMENT_LOCK
+  //        Durable Object namespace: (the DO namespace from step 1)
+  //   3. Re-deploy.
+  // Until activated, payment/[token].js falls back to the KV-sentinel strategy
+  // (strong protection for sequential/retried; best-effort for concurrent).
 
   "vars": {
     "AUTH_MODE": "strict",
