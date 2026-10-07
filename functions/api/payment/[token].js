@@ -143,19 +143,67 @@ export async function onRequestPost(context) {
       return new Response(JSON.stringify({ error: 'Invalid transaction hash' }), { status: 400, headers });
     }
 
-    // IDEMPOTENCY PRE-CHECK: reject before any RPC call if this txHash is already claimed.
-    // This also serves as a fast-path for retries on the same token.
+    // IDEMPOTENCY — true atomic serialization via Durable Object (preferred)
+    // with graceful KV-sentinel fallback for local dev (PAYMENT_LOCK not bound).
+    //
+    // Durable Objects (production): Cloudflare guarantees a single active DO
+    // instance per key, serializing all concurrent requests.  Two simultaneous
+    // POST requests for the same chainId+txHash both enter the DO and the second
+    // one sees the first's "processing" claim — returning 409 immediately without
+    // reaching the RPC call.  On success the claim is "committed" (permanent);
+    // on failure or timeout it auto-releases via a 60-second DO alarm so the
+    // payment can be retried.
+    //
+    // KV fallback (dev/local): same sentinel strategy as before — strong
+    // protection for sequential/retried requests, best-effort for truly
+    // concurrent requests within KV propagation window (~1–5 s).
     const destChainIdEarly = link.chainId || RELAYER_CONFIG.ARC_CHAIN_ID;
     const idempotencyKey   = `txused:${destChainIdEarly}:${txHash.toLowerCase()}`;
-    const existingClaim    = await KV.get(idempotencyKey);
-    if (existingClaim && existingClaim !== token) {
-      return new Response(JSON.stringify({ error: 'Transaction already used for a different payment' }), { status: 409, headers });
-    }
-    if (existingClaim === token) {
-      // Same token re-submitting — idempotent: re-read link and return current state.
-      const freshRaw = await KV.get(token);
-      const fresh = freshRaw ? JSON.parse(freshRaw) : link;
-      return new Response(JSON.stringify({ ok: true, link: publicView(fresh) }), { status: 200, headers });
+
+    // ── Durable Object path (production) ────────────────────────────────────
+    const useDO = !!context.env.PAYMENT_LOCK;
+    let doId, doStub;
+
+    if (useDO) {
+      doId   = context.env.PAYMENT_LOCK.idFromName(idempotencyKey);
+      doStub = context.env.PAYMENT_LOCK.get(doId);
+
+      const claimRes  = await doStub.fetch('https://do/lock', {
+        method: 'POST',
+        body: JSON.stringify({ action: 'claim', token }),
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const claimBody = await claimRes.json();
+
+      if (claimBody.claimed === false) {
+        // Different token already holds this txHash — hard reject.
+        return new Response(JSON.stringify({ error: 'Transaction already used for a different payment' }), { status: 409, headers });
+      }
+      if (claimBody.claimed === 'same') {
+        // Same token retry — idempotent: return current state.
+        const freshRaw = await KV.get(token);
+        const fresh = freshRaw ? JSON.parse(freshRaw) : link;
+        return new Response(JSON.stringify({ ok: true, link: publicView(fresh) }), { status: 200, headers });
+      }
+      // claimed === true → this request won the lock; proceed to RPC verification.
+
+    } else {
+      // ── KV-sentinel fallback (dev / PAYMENT_LOCK not bound) ───────────────
+      const existingClaim = await KV.get(idempotencyKey);
+      if (existingClaim && !existingClaim.startsWith('processing:') && existingClaim !== token) {
+        return new Response(JSON.stringify({ error: 'Transaction already used for a different payment' }), { status: 409, headers });
+      }
+      if (existingClaim === token) {
+        const freshRaw = await KV.get(token);
+        const fresh = freshRaw ? JSON.parse(freshRaw) : link;
+        return new Response(JSON.stringify({ ok: true, link: publicView(fresh) }), { status: 200, headers });
+      }
+      const processingValue = `processing:${token}`;
+      await KV.put(idempotencyKey, processingValue, { expirationTtl: 60 });
+      const raceCheck = await KV.get(idempotencyKey);
+      if (raceCheck && raceCheck !== processingValue && raceCheck !== token) {
+        return new Response(JSON.stringify({ error: 'Transaction already used for a different payment' }), { status: 409, headers });
+      }
     }
 
     // Resolve destination chain + token from the stored link (never trust frontend).
@@ -186,20 +234,17 @@ export async function onRequestPost(context) {
     const expectedAmount = toRaw(link.amount, chainToken.decimals);
     const transfer = findTransfer(receipt, chainToken.tokenAddress, link.recipient, expectedAmount, 2n);
     if (!transfer) {
+      // Release DO lock on validation failure so payment can be retried with correct data.
+      if (useDO && doStub) {
+        await doStub.fetch('https://do/lock', {
+          method: 'POST', body: JSON.stringify({ action: 'release', token }),
+          headers: { 'Content-Type': 'application/json' },
+        }).catch(() => {});
+      }
       return new Response(JSON.stringify({
         error: 'On-chain validation failed: no matching ' + destToken + ' transfer to recipient for the expected amount',
         expected: { recipient: link.recipient, amount: link.amount, rawAmount: expectedAmount.toString(), chain: destChainId }
       }), { status: 422, headers });
-    }
-
-    // Write the idempotency claim before persisting Paid.
-    // pre-check already ran above; this write serializes any concurrent winner.
-    await KV.put(idempotencyKey, token, { expirationTtl: 604800 });
-
-    // Race guard: re-read to detect a concurrent writer (KV is eventually consistent).
-    const reCheck = await KV.get(idempotencyKey);
-    if (reCheck && reCheck !== token) {
-      return new Response(JSON.stringify({ error: 'Transaction already used for a different payment' }), { status: 409, headers });
     }
 
     const feeAmount = parseFloat(link.feeAmount) || 0;
@@ -207,27 +252,62 @@ export async function onRequestPost(context) {
 
     if (feeAmount > 0) {
       if (!feeTxHash || !/^0x[0-9a-fA-F]{64}$/.test(feeTxHash)) {
+        if (useDO && doStub) {
+          await doStub.fetch('https://do/lock', {
+            method: 'POST', body: JSON.stringify({ action: 'release', token }),
+            headers: { 'Content-Type': 'application/json' },
+          }).catch(() => {});
+        }
         return new Response(JSON.stringify({ error: 'Fee transaction hash required for paid links with protocol fee' }), { status: 400, headers });
       }
 
       const feeReceipt = await provider.getTransactionReceipt(feeTxHash);
       if (!feeReceipt) {
+        if (useDO && doStub) {
+          await doStub.fetch('https://do/lock', {
+            method: 'POST', body: JSON.stringify({ action: 'release', token }),
+            headers: { 'Content-Type': 'application/json' },
+          }).catch(() => {});
+        }
         return new Response(JSON.stringify({ error: 'Fee transaction not found on-chain' }), { status: 422, headers });
       }
       if (feeReceipt.status !== 1) {
+        if (useDO && doStub) {
+          await doStub.fetch('https://do/lock', {
+            method: 'POST', body: JSON.stringify({ action: 'release', token }),
+            headers: { 'Content-Type': 'application/json' },
+          }).catch(() => {});
+        }
         return new Response(JSON.stringify({ error: 'Fee transaction failed on-chain (reverted)' }), { status: 422, headers });
       }
 
-      // Fee is paid on the destination chain in the destination token.
       const expectedFee = toRaw(feeAmount, chainToken.decimals);
       const feeTransfer = findTransfer(feeReceipt, chainToken.tokenAddress, RELAYER_CONFIG.TREASURY_VAULT, expectedFee, 2n);
       if (!feeTransfer) {
+        if (useDO && doStub) {
+          await doStub.fetch('https://do/lock', {
+            method: 'POST', body: JSON.stringify({ action: 'release', token }),
+            headers: { 'Content-Type': 'application/json' },
+          }).catch(() => {});
+        }
         return new Response(JSON.stringify({
           error: 'On-chain validation failed: no matching ' + destToken + ' fee transfer to TreasuryVault',
           expected: { treasury: RELAYER_CONFIG.TREASURY_VAULT, feeAmount, rawFee: expectedFee.toString(), chain: destChainId }
         }), { status: 422, headers });
       }
       feeVerified = true;
+    }
+
+    // All verifications passed. Commit the idempotency claim permanently.
+    if (useDO && doStub) {
+      // DO: upgrade "processing" to "committed" — cancels the 60-second alarm.
+      await doStub.fetch('https://do/lock', {
+        method: 'POST', body: JSON.stringify({ action: 'commit', token }),
+        headers: { 'Content-Type': 'application/json' },
+      });
+    } else {
+      // KV fallback: overwrite sentinel with permanent 7-day claim.
+      await KV.put(idempotencyKey, token, { expirationTtl: 604800 });
     }
 
     link.status = 'Paid';
@@ -243,7 +323,6 @@ export async function onRequestPost(context) {
       chainId: destChainId,
     };
 
-    // Persist the Paid record. The idempotency key was already written above (Step 2).
     await KV.put(token, JSON.stringify(link));
 
     return new Response(JSON.stringify({ ok: true, link: publicView(link) }), { status: 200, headers });
