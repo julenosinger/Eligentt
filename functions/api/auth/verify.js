@@ -1,6 +1,7 @@
 import { ethers } from 'ethers';
 
 import { getAuthCors } from './_cors.mjs';
+import { createUserWallet } from '../agent-signer/_circle.js';
 
 // SECURITY: responses use a per-request CORS allowlist (see _cors.mjs).
 function mkJson(headers) {
@@ -189,6 +190,21 @@ export async function onRequestPost(context) {
     };
   }
 
+  // Provision a per-user Circle developer-controlled wallet on new registration.
+  // Graceful: if Circle is not configured or fails, registration still succeeds.
+  // The wallet can be provisioned later via POST /api/agent/provision.
+  if (!existingRaw && !user.circleWalletId) {
+    try {
+      const circleWallet = await createUserWallet(env, user.id);
+      user.circleWalletId = circleWallet.walletId;
+      user.circleWalletAddress = circleWallet.address;
+      console.log('[AUTH] Circle wallet provisioned for new user:', user.id);
+    } catch (circleErr) {
+      // Non-fatal: log and continue. User can provision later.
+      console.warn('[AUTH] Circle wallet provisioning skipped:', circleErr && circleErr.message);
+    }
+  }
+
   await KV.put(`user:${normalizedEmail}`, JSON.stringify(user));
 
   const sessionToken = generateSessionToken();
@@ -196,6 +212,8 @@ export async function onRequestPost(context) {
     email: normalizedEmail,
     userId: user.id,
     walletAddress: user.wallet.address,
+    circleWalletId: user.circleWalletId || null,
+    circleWalletAddress: user.circleWalletAddress || null,
     createdAt: Date.now(),
   }), { expirationTtl: 86400 });
 
@@ -219,6 +237,10 @@ export async function onRequestPost(context) {
         network: user.wallet.network,
         chainId: user.wallet.chainId,
       },
+      circleWallet: user.circleWalletId ? {
+        id: user.circleWalletId,
+        address: user.circleWalletAddress,
+      } : null,
       auth: user.auth,
       stats: user.stats,
     },

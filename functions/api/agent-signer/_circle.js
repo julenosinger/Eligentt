@@ -147,7 +147,7 @@ async function createContractExecution(env, req) {
   const entitySecretCiphertext = await encryptEntitySecret(env);
   const body = {
     idempotencyKey: req.idempotencyKey,
-    walletId: creds.walletId,
+    walletId: req.walletIdOverride || creds.walletId,
     contractAddress: req.contractAddress,
     abiFunctionSignature: req.abiFunctionSignature,
     abiParameters: req.abiParameters || [],
@@ -360,8 +360,81 @@ function mapStructuredRequest(req) {
   throw new Error('unknown request type: ' + type);
 }
 
+/**
+ * Create a new Circle developer-controlled wallet for a user.
+ * Uses CIRCLE_WALLET_SET_ID env secret (or falls back to creating a new wallet
+ * set on the fly if not configured — suitable for dev/low-volume).
+ * Returns { walletId, address } on success; throws on failure.
+ */
+async function createUserWallet(env, userId) {
+  const creds = getCredentials(env);
+  if (!creds.apiKey || !creds.entitySecret) {
+    throw new Error('Circle API key or entity secret not configured');
+  }
+  const walletSetId = (env && env.CIRCLE_WALLET_SET_ID) || null;
+
+  // If no wallet set is configured, create one first.
+  let resolvedWalletSetId = walletSetId;
+  if (!resolvedWalletSetId) {
+    const wsIdempotency = 'walletset_' + userId + '_' + Date.now();
+    const wsResp = await fetch(W3S_BASE + '/developer/walletSets', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + creds.apiKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ idempotencyKey: wsIdempotency, name: 'user_' + userId }),
+    });
+    const wsData = await wsResp.json().catch(() => ({}));
+    if (!wsResp.ok) {
+      throw new Error('Circle walletSet creation failed: ' + ((wsData && wsData.message) || wsResp.status));
+    }
+    resolvedWalletSetId = wsData && wsData.data && wsData.data.walletSet && wsData.data.walletSet.id;
+    if (!resolvedWalletSetId) throw new Error('Circle walletSet id missing in response');
+  }
+
+  const entitySecretCiphertext = await encryptEntitySecret(env);
+  const idempotencyKey = 'userwallet_' + userId + '_v1';
+  const resp = await fetch(W3S_BASE + '/developer/wallets', {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + creds.apiKey, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      idempotencyKey,
+      entitySecretCiphertext,
+      walletSetId: resolvedWalletSetId,
+      blockchains: ['ARB-SEPOLIA', 'ETH-SEPOLIA', 'MATIC-AMOY', 'SOL-DEVNET'],
+      count: 1,
+    }),
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    throw new Error('Circle wallet creation failed: ' + ((data && data.message) || resp.status));
+  }
+  const wallets = data && data.data && data.data.wallets;
+  if (!wallets || wallets.length === 0) throw new Error('Circle wallet creation returned no wallets');
+  const w = wallets[0];
+  return { walletId: w.id, address: w.address };
+}
+
+/**
+ * Resolve effective credentials for a user.
+ * If the user has a per-user Circle wallet (user.circleWalletId), use it.
+ * Otherwise fall back to the global CIRCLE_WALLET_ID/ADDRESS env secrets.
+ * Returns { apiKey, entitySecret, walletId, walletAddress }.
+ */
+function getUserCredentials(env, user) {
+  const base = getCredentials(env);
+  if (user && user.circleWalletId && user.circleWalletAddress) {
+    return {
+      apiKey: base.apiKey,
+      entitySecret: base.entitySecret,
+      walletId: user.circleWalletId,
+      walletAddress: user.circleWalletAddress,
+    };
+  }
+  return base;
+}
+
 export {
   W3S_BASE, CHAIN_RPC, getCredentials, isConfigured, corsHeaders, json, err,
   createContractExecution, fetchNonce, CANONICAL_CIRCLE_WALLET,
   mapStructuredRequest, isKnownContract, isAddress, SIGN_ALLOWLIST, KNOWN_CONTRACTS,
+  createUserWallet, getUserCredentials,
 };

@@ -33,7 +33,7 @@
  * No secret ever leaves the server.
  */
 import {
-  isConfigured, getCredentials, json, err,
+  isConfigured, getCredentials, getUserCredentials, json, err,
   mapStructuredRequest, createContractExecution, fetchNonce,
 } from './_circle.js';
 import { verifyProof, consumeProof, proofAvailable } from './_proof.mjs';
@@ -100,7 +100,20 @@ export async function onRequestPost(context) {
     return err('Authorization proof does not match this operation', 403, env, request);
   }
 
-  const creds = getCredentials(env);
+  // Resolve per-user or global credentials.
+  // The proof already binds walletAddress — verify it matches the resolved wallet.
+  let creds = getCredentials(env);
+  const KV = env && env.AUTH_KV;
+  if (KV && typeof KV.get === 'function' && p.userId) {
+    try {
+      // p.userId may be email or userId — try session lookup by userId key
+      const raw = await KV.get('user:' + p.userId) || null;
+      if (raw) {
+        const user = JSON.parse(raw);
+        creds = getUserCredentials(env, user);
+      }
+    } catch (_) { /* fall through to global creds */ }
+  }
   const serverWallet = String(creds.walletAddress || '').toLowerCase();
   if (!serverWallet || p.walletAddress !== serverWallet) {
     return err('Authorization proof wallet does not match the Circle wallet', 403, env, request);
@@ -168,6 +181,7 @@ export async function onRequestPost(context) {
   let circleRes;
   try {
     circleRes = await breakerGuard(env, 'circle', () => createContractExecution(env, {
+      walletIdOverride: creds.walletId,
       idempotencyKey,
       contractAddress: descriptor.contractAddress,
       abiFunctionSignature: descriptor.abiFunctionSignature,

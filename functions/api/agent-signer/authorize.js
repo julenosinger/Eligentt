@@ -4,27 +4,33 @@
  * Issues a short-lived, single-use, request-bound authorization proof that
  * /api/agent-signer/broadcast requires before it will touch the Circle wallet.
  *
- * This endpoint does NOT re-authorize the business operation (the Autonoma
- * AutonomaExecutionGate / AgentAuthorization / PolicyEngine chain remains the
- * authority, client-side, unchanged). It only proves, server-side, that the
- * caller is an authenticated session (reusing AUTH_KV) and binds the exact
- * structured request so the signer can only execute what was authorized.
- *
- * Body:
- *   {
- *     executionId,          // required — the Autonoma execution identity
- *     chainId,              // default 5042
- *     operation,            // e.g. 'payment' | 'bridge' | 'swap' | 'multisend'
- *     request,              // structured request (see _circle.mapStructuredRequest)
- *     amount,               // optional (audit binding)
- *     destination           // optional (audit binding)
- *   }
+ * Per-user wallet: reads the session from AUTH_KV and uses the user's own
+ * circleWalletId/circleWalletAddress if present; falls back to global env
+ * secrets (CIRCLE_WALLET_ID / CIRCLE_WALLET_ADDRESS) for users without a
+ * per-user wallet yet.
  *
  * FAIL-CLOSED: no valid session → 401; misconfigured → 503.
  */
-import { isConfigured, getCredentials, json, err, mapStructuredRequest, CHAIN_RPC } from './_circle.js';
+import { isConfigured, getCredentials, getUserCredentials, json, err, mapStructuredRequest, CHAIN_RPC } from './_circle.js';
 import { issueProof, proofAvailable } from './_proof.mjs';
 import { verifySession } from './_session.mjs';
+
+// Resolve the effective Circle credentials for an authenticated session.
+// Looks up the user's per-user wallet from AUTH_KV; falls back to global env.
+async function resolveCredentials(env, session) {
+  const base = getCredentials(env);
+  const KV = env && env.AUTH_KV;
+  if (!KV || !session || !session.email) return base;
+
+  try {
+    const raw = await KV.get('user:' + session.email);
+    if (!raw) return base;
+    const user = JSON.parse(raw);
+    return getUserCredentials(env, user);
+  } catch (_) {
+    return base;
+  }
+}
 
 export async function onRequestPost(context) {
   const { request, env } = context;
@@ -60,7 +66,8 @@ export async function onRequestPost(context) {
     return err('Invalid structured request: ' + (e.message || e), 400, env, request);
   }
 
-  const creds = getCredentials(env);
+  // Resolve per-user or global credentials
+  const creds = await resolveCredentials(env, session);
 
   const proof = await issueProof(env, {
     executionId,
