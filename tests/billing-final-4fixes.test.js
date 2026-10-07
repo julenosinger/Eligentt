@@ -182,11 +182,11 @@ describe('Fix 2 — ownership per user', () => {
     expect(res.status).toBe(409);
   });
 
-  it('legacy record (no userId) is accessible — no silent reassignment', async () => {
+  it('legacy record (no userId) is blocked — orphan cannot be silently claimed', async () => {
     const KV = makeKV();
     KV._store['inv_legacy001'] = JSON.stringify({
       id: 'inv_legacy001',
-      userId: null, // legacy
+      userId: null, // legacy orphan
       status: 'Active',
       amount: 3,
       recipient: '0xDDDD000000000000000000000000000000000DDD',
@@ -195,15 +195,18 @@ describe('Fix 2 — ownership per user', () => {
     const AUTH_KV = makeAuthKV('tok-user-A-000000000000000000000000000');
     const env = { KV, PAYMENT_LINKS: KV, AUTH_KV, ALLOWED_ORIGINS: '*', RATE_LIMIT_KV: makeKV() };
 
-    // user-A re-posting with same ID — allowed because userId is null (orphan/legacy)
+    // user-A re-posting with same ID — must be BLOCKED because the orphan record
+    // has userId=null which != user-A's userId, preventing silent ownership takeover.
     const res = await invoicePost({
       id: 'inv_legacy001',
       recipient: '0xEEEE000000000000000000000000000000000EEE',
       amount: 3,
     }, env);
 
-    // Should succeed (not a conflict) — legacy records can be re-created by any user
-    expect([200, 201]).toContain(res.status);
+    // Must be 409 — legacy orphan protected from reassignment.
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.error).toMatch(/conflict/i);
   });
 
   it('fail-closed: 503 when AUTH_KV absent and no DEV_AUTH_BYPASS', async () => {
