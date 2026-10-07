@@ -2,6 +2,25 @@ import { ethers } from 'ethers';
 import { RELAYER_CONFIG } from './shared-config.mjs';
 import { checkPaymentLimit } from './rate-limit.mjs';
 
+
+function extractSessionToken(request) {
+  const auth = request.headers.get('Authorization') || '';
+  const bearer = auth.replace('Bearer ', '').trim();
+  if (bearer && bearer.length >= 32) return bearer;
+  const cookie = request.headers.get('Cookie') || '';
+  const m = cookie.match(/elligente_sid=([^;]+)/);
+  return m ? m[1].trim() : '';
+}
+
+async function requireSession(request, env) {
+  if (!env.AUTH_KV) return null;
+  const token = extractSessionToken(request);
+  if (!token || token.length < 32) return 'Unauthorized — please log in';
+  const raw = await env.AUTH_KV.get('session:' + token);
+  if (!raw) return 'Session expired or invalid';
+  return null;
+}
+
 function getCorsHeaders(request, env) {
   const allowed = (env.ALLOWED_ORIGINS || 'https://elligente.pages.dev').split(',').map(s => s.trim());
   const origin = request.headers.get('Origin') || '';
@@ -9,7 +28,7 @@ function getCorsHeaders(request, env) {
   return {
     'Access-Control-Allow-Origin': corsOrigin,
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     'Content-Type': 'application/json',
   };
 }
@@ -20,6 +39,11 @@ export async function onRequestOptions(context) {
 
 export async function onRequestPost(context) {
   const headers = getCorsHeaders(context.request, context.env);
+
+  const authErr = await requireSession(context.request, context.env);
+  if (authErr) {
+    return new Response(JSON.stringify({ error: authErr }), { status: 401, headers });
+  }
 
   const clientIP = context.request.headers.get('CF-Connecting-IP') || context.request.headers.get('X-Forwarded-For') || 'unknown';
   const rateCheck = await checkPaymentLimit(context.env.RATE_LIMIT_KV, clientIP);

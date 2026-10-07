@@ -96,6 +96,7 @@
 <script src="/shared/TowerAdapter.js"></script>
 <script src="/shared/LocalAdapter.js"></script>
 <script src="/shared/LiFiAdapter.js"></script>
+<script src="/shared/billingCrosschain.js"></script>
 <script src="/shared/SwapAggregator.js"></script>
 <script src="/shared/swapUiModes.js"></script>
 <script src="/shared/liquidityHealth.js"></script>
@@ -25655,13 +25656,42 @@ async function payInvoice(id) {
         }
       }
 
-      inv.status  = 'Paid';
-      inv.paidOn  = new Date().toISOString();
+      // Backend on-chain verification before marking Paid
+      inv.status = 'Processing';
+      inv.txHash = tx.hash;
       inv.paidFrom = walletAddress;
-      inv.timeline.push({ event: 'Settlement Complete', ts: new Date().toISOString(), detail: 'Invoice marked as paid' });
       Store.save('invoices', invoiceList);
       renderInvoices(); updateInvStats();
-      toast('Invoice ' + id + ' paid — Tx: ' + shortAddr(tx.hash), 'success');
+      toast('Tx confirmed — verifying on-chain...', 'info');
+      try {
+        if (inv.publicToken) {
+          const verRes = await fetch('/api/payment/' + inv.publicToken, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ txHash: tx.hash, feeTxHash: inv.feeTxHash || null, paidBy: walletAddress })
+          });
+          const verJson = await verRes.json().catch(() => ({}));
+          if (verRes.ok && verJson.ok) {
+            inv.status = 'Paid';
+            inv.paidOn = new Date().toISOString();
+          } else {
+            _warn('[Invoice] Backend verify failed:', verJson.error);
+            inv.status = 'Processing';
+            toast('Payment sent — awaiting on-chain confirmation: ' + (verJson.error || ''), 'warning');
+          }
+        } else {
+          // No publicToken — trust tx.wait() confirmation (same-chain)
+          inv.status = 'Paid';
+          inv.paidOn = new Date().toISOString();
+        }
+      } catch (verErr) {
+        _warn('[Invoice] Verify call failed:', verErr.message);
+        inv.status = 'Processing';
+        toast('Payment sent — confirmation pending', 'warning');
+      }
+      inv.timeline.push({ event: inv.status === 'Paid' ? 'Settlement Complete' : 'Awaiting Confirmation', ts: new Date().toISOString(), detail: inv.status === 'Paid' ? 'Invoice verified on-chain' : 'Tx: ' + tx.hash });
+      Store.save('invoices', invoiceList);
+      renderInvoices(); updateInvStats();
+      if (inv.status === 'Paid') toast('Invoice ' + id + ' paid — Tx: ' + shortAddr(tx.hash), 'success');
       refreshBalance();
     } catch (e) {
       const inv2 = invoiceList.find(i => i.id === id);
@@ -25672,14 +25702,7 @@ async function payInvoice(id) {
       else toast('Payment error: ' + (e.shortMessage || e.message || ''), 'error');
     }
   } else {
-    inv.status  = 'Paid';
-    inv.txHash  = '0xdemo' + Date.now().toString(16);
-    inv.paidOn  = new Date().toISOString();
-    inv.timeline = inv.timeline || [];
-    inv.timeline.push({ event: 'Settlement Complete', ts: new Date().toISOString(), detail: 'Invoice marked as paid (demo)' });
-    Store.save('invoices', invoiceList);
-    renderInvoices(); updateInvStats();
-    toast('Invoice ' + id + ' marked paid (demo)', 'warning');
+    toast('Connect wallet to pay invoice ' + id, 'warning');
   }
 }
 
@@ -33510,20 +33533,34 @@ async function payLandingExecute() {
     _warn('[PayLanding] Balance check skipped:', balErr.message);
   }
 
-  // ── Ensure Arc Mainnet ────────────────────────────────
-  const arcChainId = 5042;
-  if (activeChainId !== arcChainId) {
-    toast('Switching to Arc Mainnet...','info');
-    _log('[PayLanding] Switching chain from', activeChainId, 'to 5042');
+  // ── Chain routing: cross-chain or same-chain switch ──────
+  const destChainId = d.chainId || 5042;
+  if (activeChainId !== destChainId) {
+    const crosschainAllowed = d.crosschainEnabled
+      || (d.acceptedPayments && d.acceptedPayments.indexOf('Crosschain') >= 0);
+    if (crosschainAllowed && typeof BillingCrosschain !== 'undefined') {
+      _log('[PayLanding] Cross-chain payment: src', activeChainId, '→ dest', destChainId);
+      closePayLanding();
+      BillingCrosschain.openModal({
+        type: d.type, id: d.id, publicToken: d.publicToken,
+        label: d.label, amount: amount, token: d.token || 'USDC',
+        recipient: recipient, chain: d.chain, chainId: destChainId,
+        crosschainEnabled: true,
+      }, walletAddress, activeChainId);
+      return;
+    }
+    // Same-chain-only: require wallet to switch
+    toast('Switching to ' + (d.chain || 'Arc Mainnet') + '...','info');
+    _log('[PayLanding] Switching chain from', activeChainId, 'to', destChainId);
     try {
       if (!window.ethereum) throw new Error('no provider');
       await window.ethereum.request({
         method: 'wallet_switchEthereumChain',
-        params: [{ chainId: '0x13b2' }]
+        params: [{ chainId: '0x' + destChainId.toString(16) }]
       });
     } catch(e) {
       _err('[PayLanding] Chain switch failed:', e.message);
-      toast('Please switch to Arc Mainnet manually','error');
+      toast('Please switch to ' + (d.chain || 'Arc Mainnet') + ' manually','error');
       return;
     }
   }
@@ -33602,28 +33639,58 @@ async function payLandingExecute() {
       }
     }
 
+    // ── Backend on-chain verification before marking Paid ─
+    if (btnContent) btnContent.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i> Verifying on-chain...';
+    let backendVerified = false;
+    const verPaymentId = d.publicToken || d.id;
+    try {
+      const verRes = await fetch('/api/payment/' + verPaymentId, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ txHash: tx.hash, feeTxHash: feeTxHash || null, paidBy: walletAddress })
+      });
+      const verJson = await verRes.json().catch(() => ({}));
+      if (verRes.ok && verJson.ok) {
+        backendVerified = true;
+      } else {
+        _warn('[PayLanding] Backend verify failed:', verJson.error);
+        toast('Payment sent — awaiting verification: ' + (verJson.error || ''), 'warning');
+      }
+    } catch (verErr) {
+      _warn('[PayLanding] Verify fetch failed:', verErr.message);
+      toast('Payment sent — confirmation pending', 'warning');
+    }
+
     if (d.type === 'paylink') {
       const l = payLinks.find(x => x.id === d.id);
       if (l) {
-        l.status = 'Paid'; l.payments = (l.payments||0) + 1; l.paidTx = tx.hash; l.feeTxHash = feeTxHash;
+        l.paidTx = tx.hash; l.feeTxHash = feeTxHash || null;
+        l.paidFrom = walletAddress;
+        if (backendVerified) {
+          l.status = 'Paid'; l.payments = (l.payments||0) + 1; l.paidOn = new Date().toISOString();
+        } else {
+          l.status = 'Processing';
+        }
         Store.save('links', payLinks); renderPayLinks(); updatePlStats();
-      }
-      if (!feeAmount || feeAmount <= 0) {
-        fetch('/api/payment/' + d.id, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ txHash: tx.hash, feeTxHash: null, paidBy: walletAddress })
-        }).catch(() => {});
       }
     } else if (d.type === 'invoice') {
       const inv = invoiceList.find(x => x.id === d.id);
       if (inv) {
-        inv.status = 'Paid'; inv.paidTx = tx.hash; inv.feeTxHash = feeTxHash;
+        inv.txHash = tx.hash; inv.feeTxHash = feeTxHash || null;
+        inv.paidFrom = walletAddress;
+        if (backendVerified) {
+          inv.status = 'Paid'; inv.paidOn = new Date().toISOString();
+        } else {
+          inv.status = 'Processing';
+        }
         Store.save('invoices', invoiceList); renderInvoices && renderInvoices();
       }
     }
 
-    if (btnContent) btnContent.innerHTML = '<i class="ti ti-check-circle"></i> Payment Sent!';
-    toast(`Payment sent! Tx: ${shortAddr(tx.hash)}`, 'success');
+    if (btnContent) btnContent.innerHTML = backendVerified
+      ? '<i class="ti ti-check-circle"></i> Payment Verified!'
+      : '<i class="ti ti-clock"></i> Payment Processing...';
+    if (backendVerified) toast('Payment confirmed on-chain! Tx: ' + shortAddr(tx.hash), 'success');
+    else toast('Payment sent — verification pending. Tx: ' + shortAddr(tx.hash), 'info');
     setTimeout(() => closePayLanding(), 3000);
   } catch(e) {
     _err('[PayLanding] Payment error:', e);

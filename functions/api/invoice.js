@@ -21,8 +21,33 @@ export async function onRequestOptions(context) {
   return new Response(null, { status: 204, headers: getCorsHeaders(context.request, context.env) });
 }
 
+function extractSessionToken(request) {
+  const auth = request.headers.get('Authorization') || '';
+  const bearer = auth.replace('Bearer ', '').trim();
+  if (bearer && bearer.length >= 32) return bearer;
+  const cookie = request.headers.get('Cookie') || '';
+  const m = cookie.match(/elligente_sid=([^;]+)/);
+  return m ? m[1].trim() : '';
+}
+
+async function requireSession(request, env) {
+  // If AUTH_KV is not configured, allow creation (unauthenticated install)
+  if (!env.AUTH_KV) return null;
+  const token = extractSessionToken(request);
+  if (!token || token.length < 32) return 'Unauthorized — please log in';
+  const raw = await env.AUTH_KV.get('session:' + token);
+  if (!raw) return 'Session expired or invalid';
+  return null; // ok
+}
+
 export async function onRequestPost(context) {
   const headers = getCorsHeaders(context.request, context.env);
+
+  // Session-based authorization (graceful: skipped when AUTH_KV not configured)
+  const authErr = await requireSession(context.request, context.env);
+  if (authErr) {
+    return new Response(JSON.stringify({ error: authErr }), { status: 401, headers });
+  }
 
   const clientIP = context.request.headers.get('CF-Connecting-IP') || context.request.headers.get('X-Forwarded-For') || 'unknown';
   const rateCheck = await checkPaymentLimit(context.env.RATE_LIMIT_KV, clientIP);
