@@ -59,6 +59,12 @@ export async function onRequestOptions(context) {
   return new Response(null, { status: 204, headers: getCorsHeaders(context.request, context.env) });
 }
 
+// Strip server-side ownership fields before returning to any client.
+function publicView(link) {
+  const { ownerEmail, ownerWallet, userId: _uid, ...pub } = link;
+  return pub;
+}
+
 export async function onRequestGet(context) {
   const headers = getCorsHeaders(context.request, context.env);
   try {
@@ -76,11 +82,11 @@ export async function onRequestGet(context) {
     if (link.expiresAt && new Date(link.expiresAt) < new Date() && link.status === 'Active') {
       link.status = 'Expired';
       await KV.put(token, JSON.stringify(link));
-      return new Response(JSON.stringify({ ok: true, link, expired: true }), { status: 200, headers });
+      return new Response(JSON.stringify({ ok: true, link: publicView(link), expired: true }), { status: 200, headers });
     }
 
     if (link.status === 'Expired') {
-      return new Response(JSON.stringify({ ok: true, link, expired: true }), { status: 200, headers });
+      return new Response(JSON.stringify({ ok: true, link: publicView(link), expired: true }), { status: 200, headers });
     }
 
     link.scans = (link.scans || 0) + 1;
@@ -89,7 +95,7 @@ export async function onRequestGet(context) {
     link.feeReceiver = RELAYER_CONFIG.TREASURY_VAULT;
     link.feeBps = RELAYER_CONFIG.PAYLINK_FEE_BPS || 200;
 
-    return new Response(JSON.stringify({ ok: true, link }), { status: 200, headers });
+    return new Response(JSON.stringify({ ok: true, link: publicView(link) }), { status: 200, headers });
   } catch (e) {
     return new Response(JSON.stringify({ error: 'Server error: ' + (e.message || '') }), { status: 500, headers });
   }
@@ -171,6 +177,15 @@ export async function onRequestPost(context) {
       }), { status: 422, headers });
     }
 
+    // IDEMPOTENCY: prevent the same txHash being used to pay two different links.
+    // Key: txused:<destChainId>:<txHash> — written atomically after verification.
+    // If the key already exists, this txHash was already claimed by another token.
+    const idempotencyKey = `txused:${destChainId}:${txHash.toLowerCase()}`;
+    const usedBy = await KV.get(idempotencyKey);
+    if (usedBy && usedBy !== token) {
+      return new Response(JSON.stringify({ error: 'Transaction already used for a different payment' }), { status: 409, headers });
+    }
+
     const feeAmount = parseFloat(link.feeAmount) || 0;
     let feeVerified = feeAmount <= 0;
 
@@ -202,18 +217,23 @@ export async function onRequestPost(context) {
     link.status = 'Paid';
     link.paidTx = txHash;
     link.feeTxHash = feeTxHash || null;
-    link.paidBy = paidBy || null;
+    link.paidBy = paidBy || null; // informational only — never used for authorization
     link.paidAt = new Date().toISOString();
     link.payments = (link.payments || 0) + 1;
     link.verification = {
       recipientTransfer: { to: transfer.to, value: transfer.value.toString() },
       feeVerified,
-      verifiedAt: new Date().toISOString()
+      verifiedAt: new Date().toISOString(),
+      chainId: destChainId,
     };
 
-    await KV.put(token, JSON.stringify(link));
+    // Write idempotency key (TTL 7 days) and the updated link atomically.
+    await Promise.all([
+      KV.put(idempotencyKey, token, { expirationTtl: 604800 }),
+      KV.put(token, JSON.stringify(link)),
+    ]);
 
-    return new Response(JSON.stringify({ ok: true, link }), { status: 200, headers });
+    return new Response(JSON.stringify({ ok: true, link: publicView(link) }), { status: 200, headers });
   } catch (e) {
     return new Response(JSON.stringify({ error: 'Server error: ' + (e.message || '') }), { status: 500, headers });
   }

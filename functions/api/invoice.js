@@ -9,13 +9,13 @@ function getCorsHeaders(request, env) {
   return {
     'Access-Control-Allow-Origin': corsOrigin,
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     'Content-Type': 'application/json',
   };
 }
 
 const TOKEN_RE = /^inv_[A-Za-z0-9_-]{6,64}$/;
-const ADDR_RE = /^0x[0-9a-fA-F]{40}$/;
+const ADDR_RE  = /^0x[0-9a-fA-F]{40}$/;
 
 export async function onRequestOptions(context) {
   return new Response(null, { status: 204, headers: getCorsHeaders(context.request, context.env) });
@@ -30,23 +30,40 @@ function extractSessionToken(request) {
   return m ? m[1].trim() : '';
 }
 
+// SECURITY — FAIL CLOSED:
+// If AUTH_KV is absent in production, reject ALL mutations.
+// We detect "dev-only" mode via an explicit opt-in env flag (DEV_AUTH_BYPASS=true).
+// Never expose internals in the error response.
 async function requireSession(request, env) {
-  // If AUTH_KV is not configured, allow creation (unauthenticated install)
-  if (!env.AUTH_KV) return null;
+  if (!env.AUTH_KV) {
+    // Allow unauthenticated only when DEV_AUTH_BYPASS is explicitly set.
+    if (env.DEV_AUTH_BYPASS === 'true') return { ok: true, user: null };
+    return { ok: false, status: 503, error: 'Authentication service unavailable' };
+  }
   const token = extractSessionToken(request);
-  if (!token || token.length < 32) return 'Unauthorized — please log in';
+  if (!token || token.length < 32) {
+    return { ok: false, status: 401, error: 'Unauthorized — please log in' };
+  }
   const raw = await env.AUTH_KV.get('session:' + token);
-  if (!raw) return 'Session expired or invalid';
-  return null; // ok
+  if (!raw) {
+    return { ok: false, status: 401, error: 'Session expired or invalid' };
+  }
+  let session;
+  try { session = JSON.parse(raw); } catch (_) {
+    return { ok: false, status: 401, error: 'Session corrupt' };
+  }
+  if (!session.userId || !session.email) {
+    return { ok: false, status: 401, error: 'Session invalid' };
+  }
+  return { ok: true, user: session };
 }
 
 export async function onRequestPost(context) {
   const headers = getCorsHeaders(context.request, context.env);
 
-  // Session-based authorization (graceful: skipped when AUTH_KV not configured)
-  const authErr = await requireSession(context.request, context.env);
-  if (authErr) {
-    return new Response(JSON.stringify({ error: authErr }), { status: 401, headers });
+  const auth = await requireSession(context.request, context.env);
+  if (!auth.ok) {
+    return new Response(JSON.stringify({ error: auth.error }), { status: auth.status, headers });
   }
 
   const clientIP = context.request.headers.get('CF-Connecting-IP') || context.request.headers.get('X-Forwarded-For') || 'unknown';
@@ -60,7 +77,6 @@ export async function onRequestPost(context) {
   try {
     const body = await context.request.json();
     const { id, number, label, amount, feeAmount, recipient, recipientName, desc, token, chain, chainId: bodyChainId, expiresAt } = body;
-    const chainId = bodyChainId;
 
     if (!id || !TOKEN_RE.test(id)) {
       return new Response(JSON.stringify({ error: 'Invalid invoice token' }), { status: 400, headers });
@@ -84,17 +100,22 @@ export async function onRequestPost(context) {
     if (!KV) return new Response(JSON.stringify({ error: 'Storage unavailable' }), { status: 503, headers });
 
     // Idempotency: never overwrite an already-paid invoice.
+    // OWNERSHIP: if this ID already exists and belongs to a different user, reject.
     const existingRaw = await KV.get(id);
     if (existingRaw) {
       const existing = JSON.parse(existingRaw);
+      // Ownership check on conflict: if the record has a userId, it must match.
+      if (existing.userId && auth.user && existing.userId !== auth.user.userId) {
+        return new Response(JSON.stringify({ error: 'Invoice ID conflict' }), { status: 409, headers });
+      }
       if (existing.status === 'Paid') {
-        return new Response(JSON.stringify({ ok: true, link: existing, existed: true }), { status: 200, headers });
+        return new Response(JSON.stringify({ ok: true, link: _publicView(existing), existed: true }), { status: 200, headers });
       }
     }
 
     const feeBps = RELAYER_CONFIG.INVOICE_FEE_BPS || 200;
     const amountRaw = ethers.parseUnits(recipientAmount.toFixed(6), 6);
-    const feeRaw = ethers.parseUnits(fee.toFixed(6), 6);
+    const feeRaw    = ethers.parseUnits(fee.toFixed(6), 6);
     const totalAmount = parseFloat(ethers.formatUnits(amountRaw + feeRaw, 6));
 
     let expiry = 'never';
@@ -105,49 +126,52 @@ export async function onRequestPost(context) {
     }
 
     // Resolve and validate destination chain against server-side registry.
-    // Reject any chainId that is not in CHAIN_REGISTRY to prevent spoofing.
     const nameToId = RELAYER_CONFIG.CHAIN_NAME_TO_ID || {};
-    const registry = RELAYER_CONFIG.CHAIN_REGISTRY || {};
-    let resolvedChainId = RELAYER_CONFIG.ARC_CHAIN_ID; // default Arc Mainnet
-    let resolvedChain = 'Arc Mainnet';
+    const registry  = RELAYER_CONFIG.CHAIN_REGISTRY || {};
+    let resolvedChainId = RELAYER_CONFIG.ARC_CHAIN_ID;
+    let resolvedChain   = 'Arc Mainnet';
     if (chain && typeof chain === 'string' && nameToId[chain]) {
       resolvedChainId = nameToId[chain];
-      resolvedChain = chain;
-    } else if (chainId && registry[Number(chainId)]) {
-      resolvedChainId = Number(chainId);
-      resolvedChain = registry[resolvedChainId].name;
+      resolvedChain   = chain;
+    } else if (bodyChainId && registry[Number(bodyChainId)]) {
+      resolvedChainId = Number(bodyChainId);
+      resolvedChain   = registry[resolvedChainId].name;
     }
-    // Extra guard: if frontend sent a chainId that is not in our registry, reject it.
     if (chain && typeof chain === 'string' && chain !== 'Arc Mainnet' && !nameToId[chain]) {
-      return new Response(JSON.stringify({ error: 'Unsupported destination chain: ' + chain }), { status: 400, headers });
+      return new Response(JSON.stringify({ error: 'Unsupported destination chain' }), { status: 400, headers });
     }
 
-        const link = {
+    const link = {
       id,
       kind: 'invoice',
       type: 'fixed',
-      number: typeof number === 'string' ? number.slice(0, 64) : '',
-      label: typeof label === 'string' && label.trim() ? label.trim().slice(0, 120) : 'Invoice',
+      // OWNERSHIP fields — server-side, never from client body.
+      userId:      auth.user ? auth.user.userId    : null,
+      ownerEmail:  auth.user ? auth.user.email     : null,
+      ownerWallet: auth.user ? (auth.user.walletAddress || null) : null,
+      createdBy:   auth.user ? auth.user.userId    : 'anonymous',
+      number:      typeof number === 'string' ? number.slice(0, 64) : '',
+      label:       typeof label === 'string' && label.trim() ? label.trim().slice(0, 120) : 'Invoice',
       recipientName: typeof recipientName === 'string' ? recipientName.slice(0, 120) : '',
-      desc: typeof desc === 'string' ? desc.slice(0, 500) : '',
-      amount: recipientAmount,
-      feeAmount: fee,
+      desc:        typeof desc === 'string' ? desc.slice(0, 500) : '',
+      amount:      recipientAmount,
+      feeAmount:   fee,
       totalAmount,
       feeBps,
       feeReceiver: RELAYER_CONFIG.TREASURY_VAULT,
       recipient,
-      token: (typeof token === 'string' && token.trim()) ? token.trim().toUpperCase() : 'USDC',
-      chain: resolvedChain,
-      chainId: resolvedChainId,
+      token:       (typeof token === 'string' && token.trim()) ? token.trim().toUpperCase() : 'USDC',
+      chain:       resolvedChain,
+      chainId:     resolvedChainId,
       expiry,
-      expiresAt: expiresAtIso,
-      status: 'Active',
-      payments: 0,
-      scans: 0,
-      created: new Date().toISOString(),
-      paidTx: null,
-      paidBy: null,
-      paidAt: null,
+      expiresAt:   expiresAtIso,
+      status:      'Active',
+      payments:    0,
+      scans:       0,
+      created:     new Date().toISOString(),
+      paidTx:      null,
+      paidBy:      null,
+      paidAt:      null,
     };
 
     const ttl = expiresAtIso
@@ -155,8 +179,14 @@ export async function onRequestPost(context) {
       : undefined;
     await KV.put(id, JSON.stringify(link), ttl ? { expirationTtl: ttl } : undefined);
 
-    return new Response(JSON.stringify({ ok: true, link }), { status: 201, headers });
+    return new Response(JSON.stringify({ ok: true, link: _publicView(link) }), { status: 201, headers });
   } catch (e) {
-    return new Response(JSON.stringify({ error: 'Server error: ' + (e.message || '') }), { status: 500, headers });
+    return new Response(JSON.stringify({ error: 'Server error' }), { status: 500, headers });
   }
+}
+
+// Strip internal ownership/server fields before sending to client.
+function _publicView(link) {
+  const { ownerEmail, ownerWallet, ...pub } = link;
+  return pub;
 }
