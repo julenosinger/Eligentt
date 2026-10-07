@@ -143,6 +143,21 @@ export async function onRequestPost(context) {
       return new Response(JSON.stringify({ error: 'Invalid transaction hash' }), { status: 400, headers });
     }
 
+    // IDEMPOTENCY PRE-CHECK: reject before any RPC call if this txHash is already claimed.
+    // This also serves as a fast-path for retries on the same token.
+    const destChainIdEarly = link.chainId || RELAYER_CONFIG.ARC_CHAIN_ID;
+    const idempotencyKey   = `txused:${destChainIdEarly}:${txHash.toLowerCase()}`;
+    const existingClaim    = await KV.get(idempotencyKey);
+    if (existingClaim && existingClaim !== token) {
+      return new Response(JSON.stringify({ error: 'Transaction already used for a different payment' }), { status: 409, headers });
+    }
+    if (existingClaim === token) {
+      // Same token re-submitting — idempotent: re-read link and return current state.
+      const freshRaw = await KV.get(token);
+      const fresh = freshRaw ? JSON.parse(freshRaw) : link;
+      return new Response(JSON.stringify({ ok: true, link: publicView(fresh) }), { status: 200, headers });
+    }
+
     // Resolve destination chain + token from the stored link (never trust frontend).
     // If chain or token is unsupported, reject without marking Paid.
     const destChainId = link.chainId || RELAYER_CONFIG.ARC_CHAIN_ID;
@@ -177,12 +192,13 @@ export async function onRequestPost(context) {
       }), { status: 422, headers });
     }
 
-    // IDEMPOTENCY: prevent the same txHash being used to pay two different links.
-    // Key: txused:<destChainId>:<txHash> — written atomically after verification.
-    // If the key already exists, this txHash was already claimed by another token.
-    const idempotencyKey = `txused:${destChainId}:${txHash.toLowerCase()}`;
-    const usedBy = await KV.get(idempotencyKey);
-    if (usedBy && usedBy !== token) {
+    // Write the idempotency claim before persisting Paid.
+    // pre-check already ran above; this write serializes any concurrent winner.
+    await KV.put(idempotencyKey, token, { expirationTtl: 604800 });
+
+    // Race guard: re-read to detect a concurrent writer (KV is eventually consistent).
+    const reCheck = await KV.get(idempotencyKey);
+    if (reCheck && reCheck !== token) {
       return new Response(JSON.stringify({ error: 'Transaction already used for a different payment' }), { status: 409, headers });
     }
 
@@ -227,11 +243,8 @@ export async function onRequestPost(context) {
       chainId: destChainId,
     };
 
-    // Write idempotency key (TTL 7 days) and the updated link atomically.
-    await Promise.all([
-      KV.put(idempotencyKey, token, { expirationTtl: 604800 }),
-      KV.put(token, JSON.stringify(link)),
-    ]);
+    // Persist the Paid record. The idempotency key was already written above (Step 2).
+    await KV.put(token, JSON.stringify(link));
 
     return new Response(JSON.stringify({ ok: true, link: publicView(link) }), { status: 200, headers });
   } catch (e) {

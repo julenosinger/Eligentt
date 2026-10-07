@@ -114,9 +114,6 @@ export async function onRequestPost(context) {
     }
 
     const feeBps = RELAYER_CONFIG.INVOICE_FEE_BPS || 200;
-    const amountRaw = ethers.parseUnits(recipientAmount.toFixed(6), 6);
-    const feeRaw    = ethers.parseUnits(fee.toFixed(6), 6);
-    const totalAmount = parseFloat(ethers.formatUnits(amountRaw + feeRaw, 6));
 
     let expiry = 'never';
     let expiresAtIso = null;
@@ -141,6 +138,17 @@ export async function onRequestPost(context) {
       return new Response(JSON.stringify({ error: 'Unsupported destination chain' }), { status: 400, headers });
     }
 
+    // Resolve decimals AFTER chain resolution so resolvedChainId is correct.
+    // Default to 6 (USDC/EURC) when token or chain is not in the registry.
+    const _tokenSym   = (typeof token === 'string' && token.trim()) ? token.trim().toUpperCase() : 'USDC';
+    const _chainEntry = registry[resolvedChainId];
+    const _tokenEntry = _chainEntry ? (_chainEntry.tokens[_tokenSym] || _chainEntry.tokens['USDC']) : null;
+    const _decimals   = _tokenEntry ? _tokenEntry.decimals : 6;
+
+    const amountRaw   = ethers.parseUnits(recipientAmount.toFixed(_decimals), _decimals);
+    const feeRaw      = ethers.parseUnits(fee.toFixed(_decimals), _decimals);
+    const totalAmount = parseFloat(ethers.formatUnits(amountRaw + feeRaw, _decimals));
+
     const link = {
       id,
       kind: 'invoice',
@@ -160,7 +168,8 @@ export async function onRequestPost(context) {
       feeBps,
       feeReceiver: RELAYER_CONFIG.TREASURY_VAULT,
       recipient,
-      token:       (typeof token === 'string' && token.trim()) ? token.trim().toUpperCase() : 'USDC',
+      token:       _tokenSym,
+      tokenDecimals: _decimals,
       chain:       resolvedChain,
       chainId:     resolvedChainId,
       expiry,
@@ -185,8 +194,10 @@ export async function onRequestPost(context) {
   }
 }
 
-// Strip internal ownership/server fields before sending to client.
+// Strip ALL internal ownership/server fields before sending to client.
+// userId, ownerEmail, ownerWallet, createdBy are server-side only.
 function _publicView(link) {
-  const { ownerEmail, ownerWallet, ...pub } = link;
+  // eslint-disable-next-line no-unused-vars
+  const { ownerEmail, ownerWallet, userId, createdBy, ...pub } = link;
   return pub;
 }

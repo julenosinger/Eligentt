@@ -84,12 +84,25 @@ export async function onRequestPost(context) {
     let feeAmount = 0;
     let totalAmount = 0;
 
+    // Resolve decimals from CHAIN_REGISTRY using the destination token.
+    // Must come before fee math so both use the same precision.
+    const _plTokenSym = (typeof token === 'string' && token.trim()) ? token.trim().toUpperCase() : 'USDC';
+    // resolvedChainId is computed below — derive decimals after resolution.
+    // We do a forward-read here using the raw bodyChainId/chain; resolution re-runs below.
+    const _plRegistry  = RELAYER_CONFIG.CHAIN_REGISTRY || {};
+    const _plNameToId  = RELAYER_CONFIG.CHAIN_NAME_TO_ID || {};
+    const _plTmpChainId = (chain && _plNameToId[chain]) ? _plNameToId[chain]
+      : (bodyChainId && _plRegistry[Number(bodyChainId)] ? Number(bodyChainId) : RELAYER_CONFIG.ARC_CHAIN_ID);
+    const _plChainEntry = _plRegistry[_plTmpChainId];
+    const _plTokenEntry = _plChainEntry ? (_plChainEntry.tokens[_plTokenSym] || _plChainEntry.tokens['USDC']) : null;
+    const _plDecimals   = _plTokenEntry ? _plTokenEntry.decimals : 6;
+
     if (type !== 'open' && amount > 0) {
-      const amountRaw = ethers.parseUnits(String(amount), 6);
+      const amountRaw = ethers.parseUnits(String(parseFloat(amount).toFixed(_plDecimals)), _plDecimals);
       const feeRaw    = (amountRaw * BigInt(feeBps)) / 10000n;
       const totalRaw  = amountRaw + feeRaw;
-      feeAmount   = parseFloat(ethers.formatUnits(feeRaw, 6));
-      totalAmount = parseFloat(ethers.formatUnits(totalRaw, 6));
+      feeAmount   = parseFloat(ethers.formatUnits(feeRaw, _plDecimals));
+      totalAmount = parseFloat(ethers.formatUnits(totalRaw, _plDecimals));
     }
 
     // Resolve destination chain against server-side registry.
@@ -132,7 +145,8 @@ export async function onRequestPost(context) {
       type:        type || 'fixed',
       desc:        desc || '',
       recipient,
-      token:       (typeof token === 'string' && token.trim()) ? token.trim().toUpperCase() : 'USDC',
+      token:       _plTokenSym,
+      tokenDecimals: _plDecimals,
       chain:       resolvedChain,
       chainId:     resolvedChainId,
       expiry:      expiry || 'never',
@@ -160,8 +174,10 @@ export async function onRequestPost(context) {
   }
 }
 
-// Strip internal ownership/server fields from client response.
+// Strip ALL internal ownership/server fields from client response.
+// userId, ownerEmail, ownerWallet, createdBy are server-side only.
 function _publicView(link) {
-  const { ownerEmail, ownerWallet, ...pub } = link;
+  // eslint-disable-next-line no-unused-vars
+  const { ownerEmail, ownerWallet, userId, createdBy, ...pub } = link;
   return pub;
 }
