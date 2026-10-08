@@ -8,10 +8,24 @@ const AuthManager = (() => {
 
   let _session = null;
   let _profile = null;
-  let _sessionToken = null;   // kept in memory only — never written to localStorage
+  let _sessionToken = null;   // kept in memory; also persisted to sessionStorage for same-tab reloads
+  const TOKEN_KEY = 'elligente_st';
   let _remoteSigner = null;
   let _remoteProvider = null;
   let _custodialUnlocked = false;
+
+  function _saveToken(tok) {
+    if (!tok) return;
+    try { sessionStorage.setItem(TOKEN_KEY, tok); } catch (_) {}
+  }
+
+  function _loadToken() {
+    try { return sessionStorage.getItem(TOKEN_KEY) || null; } catch (_) { return null; }
+  }
+
+  function _clearToken() {
+    try { sessionStorage.removeItem(TOKEN_KEY); } catch (_) {}
+  }
 
   function _loadSession() {
     try {
@@ -23,6 +37,8 @@ const AuthManager = (() => {
       const pRaw = localStorage.getItem(PROFILE_KEY);
       if (pRaw) _profile = JSON.parse(pRaw);
     } catch (_) {}
+    // Restore token from sessionStorage (survives page reload within same tab)
+    if (!_sessionToken) _sessionToken = _loadToken();
   }
 
   function _saveProfile(profile) {
@@ -54,6 +70,7 @@ const AuthManager = (() => {
     _remoteSigner = null;
     _remoteProvider = null;
     _custodialUnlocked = false;
+    _clearToken();
     try {
       localStorage.removeItem(SESSION_KEY);
       localStorage.removeItem(PROFILE_KEY);
@@ -78,7 +95,8 @@ const AuthManager = (() => {
     const data = await _api('/verify', { email, code, password: password || undefined, name: name || undefined });
     if (data.ok && data.sessionToken && data.profile) {
       _session = { ts: Date.now() };
-      _sessionToken = data.sessionToken;   // keep in memory for Authorization header
+      _sessionToken = data.sessionToken;   // keep in memory + sessionStorage
+      _saveToken(_sessionToken);
       _saveProfile(data.profile);
       _clearLegacyTokens();
       _buildRemoteSigner();
@@ -90,7 +108,8 @@ const AuthManager = (() => {
     const data = await _api('/login', { email, password });
     if (data.ok && data.sessionToken && data.profile) {
       _session = { ts: Date.now() };
-      _sessionToken = data.sessionToken;   // keep in memory for Authorization header
+      _sessionToken = data.sessionToken;   // keep in memory + sessionStorage
+      _saveToken(_sessionToken);
       _saveProfile(data.profile);
       _clearLegacyTokens();
       _buildRemoteSigner();
@@ -104,7 +123,7 @@ const AuthManager = (() => {
       const data = await _api('/session', null, 'GET');
       if (data.ok && data.profile) {
         _saveProfile(data.profile);
-        if (data.sessionToken) _sessionToken = data.sessionToken;
+        if (data.sessionToken) { _sessionToken = data.sessionToken; _saveToken(_sessionToken); }
         if (data.custodialUnlocked) _custodialUnlocked = true;
         _buildRemoteSigner();
         return true;

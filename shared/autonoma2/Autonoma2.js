@@ -329,6 +329,7 @@
     var chain = ctx.chainName || 'Arc Mainnet';
     var circleWallet = ctx.circleWalletAddress ? ctx.circleWalletAddress.slice(0, 6) + '...' + ctx.circleWalletAddress.slice(-4) : 'not provisioned';
     var tools = typeof A2ToolRegistry !== 'undefined' ? A2ToolRegistry.listNames().join(', ') : '';
+    var balLines = Object.keys(ctx.balances || {}).map(function(t) { return t + ': ' + Number(ctx.balances[t]).toFixed(4); });
     return [
       'You are Autonoma 2, a conversational AI financial agent for the Elligentt dApp on Arc Mainnet (Chain ID 5042).',
       'The native gas token on Arc is USDC. Supported tokens: USDC, EURC, cirBTC.',
@@ -337,6 +338,7 @@
       '- EVM wallet: ' + wallet,
       '- Chain: ' + chain + ' (ID ' + (ctx.chainId || 5042) + ')',
       '- Circle wallet: ' + circleWallet,
+      '- Balances: ' + (balLines.length ? balLines.join(', ') : 'not loaded'),
       '- Contacts: ' + (ctx.contacts ? ctx.contacts.length : 0) + ' saved',
       '',
       'Available tools: ' + tools,

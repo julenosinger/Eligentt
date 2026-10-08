@@ -37,6 +37,22 @@
       }
     } catch (e) { /* non-fatal */ }
 
+    // Balances (non-fatal — LLM still runs if unavailable)
+    if (ctx.walletAddress) {
+      try {
+        if (typeof BalanceService !== 'undefined') {
+          var chainId = ctx.chainId || 5042;
+          var tokens = ['USDC', 'EURC', 'cirBTC'];
+          for (var i = 0; i < tokens.length; i++) {
+            try {
+              var b = await BalanceService.getTokenBalance(ctx.walletAddress, tokens[i], chainId);
+              if (b !== null && b !== undefined) ctx.balances[tokens[i]] = b;
+            } catch (e) { /* skip individual token failure */ }
+          }
+        }
+      } catch (e) { /* non-fatal */ }
+    }
+
     // Contacts
     try {
       if (typeof Store !== 'undefined') {

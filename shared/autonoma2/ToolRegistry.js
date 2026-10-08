@@ -374,44 +374,7 @@
     return chain[s] || chain['USDC'];
   }
 
-  // ─── WRITE TOOLS — registered after page load so A2SendTool is available ───
-
-  function _registerWriteTools() {
-    // Send — delegates entirely to saExecuteSend via A2SendTool
-    if (typeof window.A2SendTool !== 'undefined') {
-      register(window.A2SendTool);
-    } else {
-      // Stub: will be replaced when A2SendTool loads
-      register({
-        name: 'send',
-        description: 'Send tokens to a recipient.',
-        llmDescription: 'Send USDC, EURC, or cirBTC to an address, ENS name, or contact. Specify amount, token, recipient, and optionally network.',
-        type: 'write',
-        requiresApproval: true,
-        parameters: {
-          recipient: { type: 'string', description: 'Recipient address (0x...), ENS, or contact name', required: true },
-          amount: { type: 'number', description: 'Amount to send', required: true },
-          token: { type: 'string', description: 'Token: USDC, EURC, cirBTC. Default USDC', required: false },
-          network: { type: 'string', description: 'Network: arc, base, ethereum, arbitrum, optimism, polygon', required: false }
-        },
-        validate: async function (args, ctx) {
-          if (typeof window.A2SendTool !== 'undefined') return window.A2SendTool.validate(args, ctx);
-          return { ok: false, errors: ['Send tool not loaded'] };
-        },
-        execute: async function (args, ctx, onProgress) {
-          if (typeof window.A2SendTool !== 'undefined') return window.A2SendTool.execute(args, ctx, onProgress);
-          return { ok: false, error: 'Send tool not loaded', stage: 'ENGINE_UNAVAILABLE' };
-        }
-      });
-    }
-  }
-
-  // Run after DOM ready so A2SendTool is available
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', _registerWriteTools);
-  } else {
-    setTimeout(_registerWriteTools, 0);
-  }
+  // No duplicate send registration — send tool already registered above at line 177.
 
   window.A2ToolRegistry = {
     register: register,
