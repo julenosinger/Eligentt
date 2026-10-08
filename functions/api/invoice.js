@@ -104,8 +104,15 @@ export async function onRequestPost(context) {
     const existingRaw = await KV.get(id);
     if (existingRaw) {
       const existing = JSON.parse(existingRaw);
-      // Ownership check on conflict: if the record has a userId, it must match.
-      if (existing.userId && auth.user && existing.userId !== auth.user.userId) {
+      // Ownership check: any existing record (with OR without a userId) blocks creation.
+      // A null/missing userId means legacy/orphan — never reassign silently.
+      // Rules: existing.userId matches current user → idempotent (allow if not Paid).
+      //        existing.userId differs → conflict.
+      //        existing.userId absent  → conflict (legacy orphan, cannot assume ownership).
+      const ownerId = auth.user ? auth.user.userId : null;
+      const recordOwner = existing.userId || null;
+      if (recordOwner !== ownerId) {
+        // Different user or legacy record without owner — deny.
         return new Response(JSON.stringify({ error: 'Invoice ID conflict' }), { status: 409, headers });
       }
       if (existing.status === 'Paid') {

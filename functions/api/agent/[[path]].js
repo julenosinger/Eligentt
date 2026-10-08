@@ -125,12 +125,18 @@ async function handleStatus(env, request) {
     circleGet(`/wallets/${creds.walletId}/balances`, creds.apiKey),
   ]);
 
+  const walletAddr = creds.walletAddress || walletRes.data?.wallet?.address || '';
   return json({
     ok: true,
     wallet: walletRes.data?.wallet ?? walletRes.data,
     balances: balRes.data?.tokenBalances ?? [],
-    address: creds.walletAddress || walletRes.data?.wallet?.address,
+    // walletAddress = the wallet currently in use (personal or platform fallback)
+    walletAddress: walletAddr,
+    address: walletAddr,
+    // isPerUser = true only when this user has their own Circle wallet provisioned
     isPerUser: creds.isPerUser || false,
+    // needsProvision = true tells the frontend to show the "Create My Wallet" CTA
+    needsProvision: !(creds.isPerUser),
   });
 }
 

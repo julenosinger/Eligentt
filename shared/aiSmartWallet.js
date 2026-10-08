@@ -487,7 +487,12 @@
       const provider = getProvider();
       if (!provider) return null;
       const raw = await provider.getBalance(addr);
-      nativeCache = { at: Date.now(), bal: Number(ethers.formatUnits(raw, 18)) };
+      // On Arc Mainnet (chainId 5042) the native gas token IS USDC — 6 decimals.
+      // On all other EVM chains, native gas is ETH — 18 decimals.
+      var chainId = 0;
+      try { if (typeof activeChainId !== 'undefined') chainId = Number(activeChainId); } catch (_e) {}
+      var nativeDecimals = chainId === 5042 ? 6 : 18;
+      nativeCache = { at: Date.now(), bal: Number(ethers.formatUnits(raw, nativeDecimals)) };
       return nativeCache.bal;
     } catch (_e) { return null; }
   }
@@ -1145,7 +1150,9 @@
     }
     box.innerHTML =
       wRow('Personal Wallet', !!p, p ? short(p) + wtype : 'Use the Connect button in the top bar') +
-      wRow('AI Smart Wallet', !!a && !paused, a ? short(a) + (paused ? ' · paused' : ' · Circle AI Smart Wallet on Arc') : 'Not created yet') +
+      wRow('AI Smart Wallet', !!a && !paused,
+        a ? short(a) + (paused ? ' · paused' : ' · Circle AI Smart Wallet on Arc') : 'Not created yet',
+        !paused ? '<button onclick="CircleAgent&&CircleAgent._handleCreate(this)" style="font-size:8px;padding:2px 8px;border-radius:4px;background:linear-gradient(135deg,#2775ca,#1a5fa8);color:#fff;border:none;cursor:pointer;white-space:nowrap" title="Create your personal Circle wallet on Arc Mainnet"><i class="ti ti-wallet-plus"></i> ' + (a ? 'Re-provision' : 'Create My Wallet') + '</button>' : '') +
       '<div class="swap-label" style="margin-top:6px">Default Executor (AI operations)</div>' +
       '<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:4px">' +
       ['personal', 'ai', 'hybrid'].map(function (m) {

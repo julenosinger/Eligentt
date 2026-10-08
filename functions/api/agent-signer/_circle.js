@@ -376,7 +376,8 @@ async function createUserWallet(env, userId) {
   // If no wallet set is configured, create one first.
   let resolvedWalletSetId = walletSetId;
   if (!resolvedWalletSetId) {
-    const wsIdempotency = 'walletset_' + userId + '_' + Date.now();
+    // Idempotency key must be stable across retries — no Date.now()
+    const wsIdempotency = 'walletset_user_' + userId + '_v1';
     const wsResp = await fetch(W3S_BASE + '/developer/walletSets', {
       method: 'POST',
       headers: { Authorization: 'Bearer ' + creds.apiKey, 'Content-Type': 'application/json' },
@@ -399,7 +400,7 @@ async function createUserWallet(env, userId) {
       idempotencyKey,
       entitySecretCiphertext,
       walletSetId: resolvedWalletSetId,
-      blockchains: ['ARB-SEPOLIA', 'ETH-SEPOLIA', 'MATIC-AMOY', 'SOL-DEVNET'],
+      blockchains: ['ARC-MAINNET'],
       count: 1,
     }),
   });

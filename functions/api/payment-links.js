@@ -84,28 +84,7 @@ export async function onRequestPost(context) {
     let feeAmount = 0;
     let totalAmount = 0;
 
-    // Resolve decimals from CHAIN_REGISTRY using the destination token.
-    // Must come before fee math so both use the same precision.
-    const _plTokenSym = (typeof token === 'string' && token.trim()) ? token.trim().toUpperCase() : 'USDC';
-    // resolvedChainId is computed below — derive decimals after resolution.
-    // We do a forward-read here using the raw bodyChainId/chain; resolution re-runs below.
-    const _plRegistry  = RELAYER_CONFIG.CHAIN_REGISTRY || {};
-    const _plNameToId  = RELAYER_CONFIG.CHAIN_NAME_TO_ID || {};
-    const _plTmpChainId = (chain && _plNameToId[chain]) ? _plNameToId[chain]
-      : (bodyChainId && _plRegistry[Number(bodyChainId)] ? Number(bodyChainId) : RELAYER_CONFIG.ARC_CHAIN_ID);
-    const _plChainEntry = _plRegistry[_plTmpChainId];
-    const _plTokenEntry = _plChainEntry ? (_plChainEntry.tokens[_plTokenSym] || _plChainEntry.tokens['USDC']) : null;
-    const _plDecimals   = _plTokenEntry ? _plTokenEntry.decimals : 6;
-
-    if (type !== 'open' && amount > 0) {
-      const amountRaw = ethers.parseUnits(String(parseFloat(amount).toFixed(_plDecimals)), _plDecimals);
-      const feeRaw    = (amountRaw * BigInt(feeBps)) / 10000n;
-      const totalRaw  = amountRaw + feeRaw;
-      feeAmount   = parseFloat(ethers.formatUnits(feeRaw, _plDecimals));
-      totalAmount = parseFloat(ethers.formatUnits(totalRaw, _plDecimals));
-    }
-
-    // Resolve destination chain against server-side registry.
+    // Step 1 — resolve destination chain (single source of truth).
     const nameToId = RELAYER_CONFIG.CHAIN_NAME_TO_ID || {};
     const registry  = RELAYER_CONFIG.CHAIN_REGISTRY || {};
     let resolvedChainId = RELAYER_CONFIG.ARC_CHAIN_ID;
@@ -119,6 +98,22 @@ export async function onRequestPost(context) {
     }
     if (chain && typeof chain === 'string' && chain !== 'Arc Mainnet' && !nameToId[chain]) {
       return new Response(JSON.stringify({ error: 'Unsupported destination chain' }), { status: 400, headers });
+    }
+
+    // Step 2 — resolve decimals AFTER chain resolution (no duplicate/temp chainId).
+    // Single lookup from CHAIN_REGISTRY; default 6 when token/chain absent.
+    const _plTokenSym   = (typeof token === 'string' && token.trim()) ? token.trim().toUpperCase() : 'USDC';
+    const _plChainEntry = registry[resolvedChainId];
+    const _plTokenEntry = _plChainEntry ? (_plChainEntry.tokens[_plTokenSym] || _plChainEntry.tokens['USDC']) : null;
+    const _plDecimals   = _plTokenEntry ? _plTokenEntry.decimals : 6;
+
+    // Step 3 — fee math using resolved decimals.
+    if (type !== 'open' && amount > 0) {
+      const amountRaw = ethers.parseUnits(String(parseFloat(amount).toFixed(_plDecimals)), _plDecimals);
+      const feeRaw    = (amountRaw * BigInt(feeBps)) / 10000n;
+      const totalRaw  = amountRaw + feeRaw;
+      feeAmount   = parseFloat(ethers.formatUnits(feeRaw, _plDecimals));
+      totalAmount = parseFloat(ethers.formatUnits(totalRaw, _plDecimals));
     }
 
     const id = 'pl_' + crypto.randomUUID();

@@ -165,6 +165,12 @@
 <script src="/shared/autonomaOperationsCenter.js"></script>
 <script src="/shared/autonomaBusinessIntelligence.js"></script>
 <script src="/shared/autonomaV2Integration.js"></script>
+<!-- Autonoma 2 — isolated modules, no conflict with autonoma v1 -->
+<script src="/shared/autonoma2/ContextEngine.js"></script>
+<script src="/shared/autonoma2/Planner.js"></script>
+<script src="/shared/autonoma2/ToolRegistry.js"></script>
+<script src="/shared/autonoma2/ExecutionMonitor.js"></script>
+<script src="/shared/autonoma2/Autonoma2.js"></script>
 <script src="/shared/oracleInterop.js"></script>
 <script src="/shared/oracle-interoperability/OracleRegistry.js"></script>
 <script src="/shared/oracle-interoperability/HistoricalMarketDataEngine.js"></script>
@@ -5575,6 +5581,67 @@ select.cinput option { background: #161a24; color: #dde2f0; }
 
 /* ── Autonoma AI Agent ───────────────────── */
 #page-autonoma{padding:0!important;overflow:hidden!important}
+/* ── Autonoma 2 ── */
+#page-autonoma2{padding:0!important;overflow:hidden!important;flex-direction:column}
+.a2-wrap{display:flex;height:100%;overflow:hidden}
+.a2-side{width:220px;flex-shrink:0;border-right:1px solid var(--border);display:flex;flex-direction:column;background:var(--bg);overflow:hidden}
+.a2-side-head{padding:14px 16px 10px;display:flex;align-items:center;justify-content:space-between}
+.a2-side-title{font-size:11px;font-weight:700;color:var(--text);opacity:.7;letter-spacing:.05em;text-transform:uppercase}
+.a2-new-btn{width:28px;height:28px;border-radius:6px;background:rgba(168,85,247,.12);border:1px solid rgba(168,85,247,.25);color:#a855f7;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:14px;transition:all .2s;flex-shrink:0}
+.a2-new-btn:hover{background:rgba(168,85,247,.22)}
+.a2-conv-list{flex:1;overflow-y:auto;padding:4px 8px 8px}
+.a2-conv-group{font-size:9px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;padding:8px 8px 4px;opacity:.6}
+.a2-conv-item{padding:8px 10px;border-radius:7px;cursor:pointer;font-size:11px;color:var(--muted2);transition:all .15s;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;gap:6px;position:relative}
+.a2-conv-item:hover{background:rgba(255,255,255,.04);color:var(--text)}
+.a2-conv-item.active{background:rgba(168,85,247,.1);color:#a855f7}
+.a2-conv-del{position:absolute;right:6px;font-size:12px;color:var(--muted);opacity:0;transition:opacity .15s;padding:2px}
+.a2-conv-item:hover .a2-conv-del{opacity:1}
+.a2-main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
+.a2-header{padding:14px 20px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;flex-shrink:0}
+.a2-header-icon{width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,rgba(168,85,247,.3),rgba(6,247,233,.15));display:flex;align-items:center;justify-content:center;font-size:15px;color:#a855f7;flex-shrink:0}
+.a2-header-title{font-size:13px;font-weight:700;color:var(--text)}
+.a2-header-sub{font-size:9.5px;color:var(--muted)}
+.a2-messages{flex:1;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:12px;scroll-behavior:smooth}
+.a2-welcome{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px 20px;text-align:center;flex:1;gap:16px}
+.a2-welcome-icon{width:56px;height:56px;border-radius:14px;background:linear-gradient(135deg,rgba(168,85,247,.25),rgba(6,247,233,.1));display:flex;align-items:center;justify-content:center;font-size:26px;color:#a855f7;margin:0 auto}
+.a2-welcome-title{font-size:17px;font-weight:700;color:var(--text)}
+.a2-welcome-sub{font-size:11px;color:var(--muted);max-width:360px;line-height:1.6}
+.a2-suggestions{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;max-width:480px}
+.a2-sug{padding:6px 14px;border-radius:20px;border:1px solid var(--border);background:rgba(255,255,255,.03);font-size:10px;color:var(--muted2);cursor:pointer;transition:all .2s;white-space:nowrap}
+.a2-sug:hover{border-color:rgba(168,85,247,.4);color:#a855f7;background:rgba(168,85,247,.08)}
+.a2-msg{display:flex;flex-direction:column;gap:4px;max-width:78%;animation:a2msgIn .2s ease}
+.a2-msg.user{align-self:flex-end;align-items:flex-end}
+.a2-msg.assistant{align-self:flex-start;align-items:flex-start}
+.a2-bubble{padding:10px 14px;border-radius:12px;font-size:11.5px;line-height:1.6;white-space:pre-wrap;word-break:break-word}
+.a2-msg.user .a2-bubble{background:rgba(168,85,247,.15);border:1px solid rgba(168,85,247,.2);color:var(--text);border-bottom-right-radius:4px}
+.a2-msg.assistant .a2-bubble{background:var(--surface);border:1px solid var(--border);color:var(--text);border-bottom-left-radius:4px}
+.a2-msg .a2-ts{font-size:8.5px;color:var(--muted);opacity:.6;padding:0 4px}
+.a2-typing{display:flex;align-items:center;gap:4px;padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:12px;border-bottom-left-radius:4px;width:fit-content}
+.a2-typing span{width:6px;height:6px;border-radius:50%;background:#a855f7;opacity:.4;animation:a2dot 1.2s infinite}
+.a2-typing span:nth-child(2){animation-delay:.2s}
+.a2-typing span:nth-child(3){animation-delay:.4s}
+.a2-approval-card{background:rgba(168,85,247,.06);border:1px solid rgba(168,85,247,.25);border-radius:10px;padding:12px 14px;font-size:11px;color:var(--text);line-height:1.6}
+.a2-approval-card strong{color:#a855f7}
+.a2-approval-btns{display:flex;gap:8px;margin-top:10px}
+.a2-btn-confirm{padding:7px 16px;border-radius:7px;background:rgba(168,85,247,.2);border:1px solid rgba(168,85,247,.4);color:#a855f7;font-size:10.5px;font-weight:600;cursor:pointer;transition:all .2s}
+.a2-btn-confirm:hover{background:rgba(168,85,247,.35)}
+.a2-btn-cancel{padding:7px 16px;border-radius:7px;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.25);color:#ef4444;font-size:10.5px;font-weight:600;cursor:pointer;transition:all .2s}
+.a2-btn-cancel:hover{background:rgba(239,68,68,.2)}
+.a2-exec-status{display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:8px;background:rgba(255,255,255,.03);border:1px solid var(--border);font-size:10.5px;color:var(--muted2)}
+.a2-exec-status .a2-exec-dot{width:7px;height:7px;border-radius:50%;background:#22c55e;flex-shrink:0}
+.a2-exec-status.processing .a2-exec-dot{background:#f59e0b;animation:a2pulse 1s infinite}
+.a2-exec-status.failed .a2-exec-dot{background:#ef4444}
+.a2-input-area{padding:14px 20px;border-top:1px solid var(--border);background:var(--surface);display:flex;align-items:flex-end;gap:8px;flex-shrink:0}
+.a2-input{flex:1;background:rgba(0,0,0,.25);border:1px solid var(--border);border-radius:10px;padding:10px 14px;color:var(--text);font-size:11.5px;line-height:1.5;font-family:inherit;outline:none;resize:none;min-height:20px;max-height:180px;overflow-y:auto;transition:border .2s}
+.a2-input:focus{border-color:rgba(168,85,247,.4)}
+.a2-input::placeholder{color:var(--muted)}
+.a2-send{width:36px;height:36px;border-radius:9px;background:rgba(168,85,247,.15);border:1px solid rgba(168,85,247,.3);color:#a855f7;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:15px;transition:all .2s;flex-shrink:0}
+.a2-send:hover{background:rgba(168,85,247,.28)}
+.a2-send:disabled{opacity:.4;cursor:default}
+@keyframes a2msgIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+@keyframes a2dot{0%,80%,100%{opacity:.4;transform:scale(1)}40%{opacity:1;transform:scale(1.2)}}
+@keyframes a2pulse{0%,100%{opacity:1}50%{opacity:.4}}
+@media(max-width:768px){.a2-side{display:none}.a2-messages{padding:12px 10px}.a2-msg{max-width:95%}.a2-input-area{padding:10px}.a2-welcome{padding:20px 10px}}
 .aut-wrap{display:flex;height:100%;min-height:0}
 .aut-side{width:250px;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0}
 .aut-side-logo{padding:16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px}
@@ -6477,6 +6544,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
       <div class="nav-item" id="nav-bridge" onclick="showPage('bridge')" title="Bridge"><i class="ti ti-topology-star-3"></i>Bridge<span class="nav-kit">Kit</span></div>
       <div class="nav-item" id="nav-pool" onclick="showPage('pool')" title="Liquidity Pool"><i class="ti ti-droplet"></i>Liquidity<span class="nav-kit">Pool</span></div>
       <div class="nav-item" id="nav-autonoma" onclick="showPage('autonoma')" title="Autonoma AI"><i class="ti ti-brain"></i>Autonoma<span class="nav-kit" style="background:rgba(6,247,233,.12);color:#06F7E9;border:1px solid rgba(6,247,233,.25)">AI</span></div>
+      <div class="nav-item" id="nav-autonoma2" onclick="showPage('autonoma2')" title="Autonoma 2 — AI Financial Agent"><i class="ti ti-sparkles"></i>Autonoma 2<span class="nav-new" style="background:rgba(168,85,247,.15);color:#a855f7;border:1px solid rgba(168,85,247,.3)">AI</span></div>
       <div class="nav-item" id="nav-aiwallet" onclick="showPage('aiwallet')" title="Circle AI Smart Wallet"><i class="ti ti-building-bank"></i>Circle Agent<span class="nav-new">New</span></div>
       <div class="nav-group" style="margin-top:4px">Protocol</div>
       <div class="nav-group" style="margin-top:4px">Manage</div>
@@ -10534,6 +10602,57 @@ select.cinput option { background: #161a24; color: #dde2f0; }
     <!-- ══════════════════════════════════════
          PAGE: AUTONOMA AI AGENT
     ══════════════════════════════════════ -->
+
+    <!-- ══════════════════════════════════════
+         AUTONOMA 2 — AI Financial Agent
+    ══════════════════════════════════════ -->
+    <div class="page" id="page-autonoma2">
+      <div class="a2-wrap">
+        <!-- Sidebar: conversation list -->
+        <div class="a2-side">
+          <div class="a2-side-head">
+            <span class="a2-side-title">Chats</span>
+            <div class="a2-new-btn" onclick="a2NewChat()" title="New chat"><i class="ti ti-plus"></i></div>
+          </div>
+          <div class="a2-conv-list" id="a2-conv-list">
+            <!-- rendered by a2RenderConvList() -->
+          </div>
+        </div>
+        <!-- Main chat area -->
+        <div class="a2-main">
+          <div class="a2-header">
+            <div class="a2-header-icon"><i class="ti ti-sparkles"></i></div>
+            <div>
+              <div class="a2-header-title">Autonoma 2</div>
+              <div class="a2-header-sub" id="a2-header-sub">AI Financial Agent · Arc Mainnet</div>
+            </div>
+          </div>
+          <div class="a2-messages" id="a2-messages">
+            <!-- Welcome screen shown when no messages -->
+            <div class="a2-welcome" id="a2-welcome">
+              <div class="a2-welcome-icon"><i class="ti ti-sparkles"></i></div>
+              <div class="a2-welcome-title">Autonoma 2</div>
+              <div class="a2-welcome-sub">Your AI financial agent. Ask anything — balances, swaps, bridges, payments, invoices, schedules. I plan, you approve, engines execute.</div>
+              <div class="a2-suggestions">
+                <div class="a2-sug" onclick="a2Suggest(this)">What is my balance?</div>
+                <div class="a2-sug" onclick="a2Suggest(this)">Swap 10 USDC for EURC</div>
+                <div class="a2-sug" onclick="a2Suggest(this)">Best route Arc → Base</div>
+                <div class="a2-sug" onclick="a2Suggest(this)">Create a 250 USDC invoice</div>
+                <div class="a2-sug" onclick="a2Suggest(this)">Schedule weekly payment</div>
+                <div class="a2-sug" onclick="a2Suggest(this)">Show my wallet info</div>
+              </div>
+            </div>
+          </div>
+          <div class="a2-input-area">
+            <textarea class="a2-input" id="a2-input" placeholder="Ask Autonoma 2…" rows="1"
+              onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();a2Send()}"
+              oninput="a2AutoResize(this)"></textarea>
+            <button class="a2-send" id="a2-send-btn" onclick="a2Send()" title="Send"><i class="ti ti-send"></i></button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div class="page" id="page-autonoma">
       <div class="aut-wrap">
         <div class="aut-side">
@@ -14845,6 +14964,9 @@ function showPage(id) {
     if (id === 'autonoma') {
       setTimeout(() => { if (typeof autonomaInit === 'function') autonomaInit(); }, 50);
       setTimeout(() => { if (typeof CircleAgent !== 'undefined') CircleAgent.mount('#aut-circle-agent-card'); }, 300);
+    }
+    if (id === 'autonoma2') {
+      setTimeout(() => { if (typeof a2Init === 'function') a2Init(); }, 50);
     }
     if (id === 'aiwallet') {
       setTimeout(() => { if (typeof CircleAgent !== 'undefined') CircleAgent.mount('#aiw-circle-agent-card'); }, 300);
@@ -41030,7 +41152,379 @@ function ubIsMainnet() {
   try { return Number(activeChainId) === 5042; } catch (_) { return false; }
 }
 
+// ══════════════════════════════════════════════════════════════
+//  AUTONOMA 2 — Chat UI Controller
+//  Isolated from v1 Autonoma. Delegates to window.Autonoma2.
+// ══════════════════════════════════════════════════════════════
+var _a2Initialized = false;
+var _a2Streaming = false;
+
+
+function a2Init() {
+  if (_a2Initialized) { a2RenderConvList(); return; }
+  if (typeof Autonoma2 === 'undefined') return;
+  _a2Initialized = true;
+
+  // Register A2Monitor update listener → update exec status bubbles
+  if (typeof A2Monitor !== 'undefined') {
+    A2Monitor.onUpdate(function(id, op) {
+      var el = document.getElementById('a2-exec-' + id);
+      if (el) {
+        el.className = 'a2-exec-status' + (op.state === 'failed' ? ' failed' : op.state !== 'completed' ? ' processing' : '');
+        el.querySelector('.a2-exec-label').textContent = A2Monitor.stateLabel(op.state);
+      }
+    });
+  }
+
+  // Load or create first conversation
+  var convs = Autonoma2.listConversations();
+  if (convs.length === 0) {
+    var c = Autonoma2.newConversation();
+    Autonoma2.setActive(c.id);
+  } else {
+    Autonoma2.setActive(convs[0].id);
+  }
+  a2RenderConvList();
+  a2RenderMessages();
+}
+
+function a2RenderConvList() {
+  if (typeof Autonoma2 === 'undefined') return;
+  var list = document.getElementById('a2-conv-list');
+  if (!list) return;
+  var convs = Autonoma2.listConversations();
+  var activeId = Autonoma2.activeId();
+  if (convs.length === 0) { list.innerHTML = '<div style="padding:8px 10px;font-size:10px;color:var(--muted);opacity:.6">No conversations yet</div>'; return; }
+  // Group by date
+  var today = new Date().toDateString();
+  var groups = {};
+  convs.forEach(function(c) {
+    var d = new Date(c.createdAt).toDateString();
+    var g = d === today ? 'Today' : d;
+    if (!groups[g]) groups[g] = [];
+    groups[g].push(c);
+  });
+  var html = '';
+  Object.keys(groups).forEach(function(g) {
+    html += '<div class="a2-conv-group">' + g + '</div>';
+    groups[g].forEach(function(c) {
+      html += '<div class="a2-conv-item' + (c.id === activeId ? ' active' : '') + '" onclick="a2SwitchConv(\'' + c.id + '\')" title="' + (c.title || 'Chat').replace(/"/g,'&quot;') + '">'
+            + '<i class="ti ti-message" style="font-size:12px;flex-shrink:0;opacity:.5"></i>'
+            + '<span style="flex:1;overflow:hidden;text-overflow:ellipsis">' + (c.title || 'New Chat') + '</span>'
+            + '<span class="a2-conv-del" onclick="event.stopPropagation();a2DeleteConv(\'' + c.id + '\')" title="Delete"><i class="ti ti-x"></i></span>'
+            + '</div>';
+    });
+  });
+  list.innerHTML = html;
+}
+
+function a2RenderMessages() {
+  if (typeof Autonoma2 === 'undefined') return;
+  var convId = Autonoma2.activeId();
+  var msgs = convId ? Autonoma2.getMessages(convId) : [];
+  var container = document.getElementById('a2-messages');
+  if (!container) return;
+  var welcome = document.getElementById('a2-welcome');
+  if (msgs.length === 0) {
+    if (welcome) welcome.style.display = '';
+    // Remove all non-welcome children
+    Array.from(container.children).forEach(function(c) { if (c !== welcome) c.remove(); });
+    return;
+  }
+  if (welcome) welcome.style.display = 'none';
+  // Re-render all messages
+  Array.from(container.children).forEach(function(c) { if (c !== welcome) c.remove(); });
+  msgs.forEach(function(msg) { container.appendChild(a2BuildMsgEl(msg)); });
+  container.scrollTop = container.scrollHeight;
+}
+
+function a2BuildMsgEl(msg) {
+  var div = document.createElement('div');
+  div.className = 'a2-msg ' + (msg.role === 'user' ? 'user' : 'assistant');
+  div.id = 'a2-msg-' + msg.id;
+
+  var time = new Date(msg.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+  if (msg.meta && msg.meta.type === 'approval_required') {
+    // Approval card
+    var exId = msg.meta.executionId;
+    div.innerHTML = '<div class="a2-approval-card">'
+      + '<strong>⚡ Approval required</strong><br>'
+      + '<span style="white-space:pre-wrap">' + _a2Escape(msg.content) + '</span>'
+      + '<div class="a2-approval-btns">'
+      + '<button class="a2-btn-confirm" onclick="a2Approve(\'' + exId + '\')">Confirm</button>'
+      + '<button class="a2-btn-cancel" onclick="a2Cancel(\'' + exId + '\')">Cancel</button>'
+      + '</div></div>'
+      + '<span class="a2-ts">' + time + '</span>';
+  } else {
+    div.innerHTML = '<div class="a2-bubble">' + _a2Format(msg.content) + '</div>'
+                  + '<span class="a2-ts">' + time + '</span>';
+  }
+  return div;
+}
+
+function _a2Format(text) {
+  // Simple markdown: **bold**, `code`, newlines
+  return _a2Escape(text)
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/`([^`]+)`/g, '<code style="background:rgba(255,255,255,.07);padding:1px 5px;border-radius:4px;font-size:10px">$1</code>')
+    .replace(/\n/g, '<br>');
+}
+
+function _a2Escape(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function a2NewChat() {
+  if (typeof Autonoma2 === 'undefined') return;
+  var c = Autonoma2.newConversation();
+  Autonoma2.setActive(c.id);
+  a2RenderConvList();
+  a2RenderMessages();
+  var inp = document.getElementById('a2-input');
+  if (inp) inp.focus();
+}
+
+function a2SwitchConv(id) {
+  if (typeof Autonoma2 === 'undefined') return;
+  Autonoma2.setActive(id);
+  a2RenderConvList();
+  a2RenderMessages();
+}
+
+function a2DeleteConv(id) {
+  if (typeof Autonoma2 === 'undefined') return;
+  Autonoma2.deleteConversation(id);
+  var convs = Autonoma2.listConversations();
+  if (convs.length === 0) { var c = Autonoma2.newConversation(); Autonoma2.setActive(c.id); }
+  else if (Autonoma2.activeId() === null) Autonoma2.setActive(convs[0].id);
+  a2RenderConvList();
+  a2RenderMessages();
+}
+
+function a2Suggest(el) {
+  var inp = document.getElementById('a2-input');
+  if (inp) { inp.value = el.textContent; a2AutoResize(inp); inp.focus(); }
+}
+
+function a2AutoResize(ta) {
+  ta.style.height = 'auto';
+  ta.style.height = Math.min(ta.scrollHeight, 180) + 'px';
+}
+
+async function a2Send() {
+  if (_a2Streaming) return;
+  if (typeof Autonoma2 === 'undefined') return;
+  var inp = document.getElementById('a2-input');
+  var text = inp ? inp.value.trim() : '';
+  if (!text) return;
+  inp.value = '';
+  if (inp) { inp.style.height = 'auto'; }
+
+  var btn = document.getElementById('a2-send-btn');
+  if (btn) btn.disabled = true;
+  _a2Streaming = true;
+
+  var convId = Autonoma2.activeId();
+  if (!convId) { var c = Autonoma2.newConversation(); convId = c.id; Autonoma2.setActive(convId); }
+
+  // Hide welcome, add user bubble
+  var welcome = document.getElementById('a2-welcome');
+  if (welcome) welcome.style.display = 'none';
+  var container = document.getElementById('a2-messages');
+
+  // Check if this is a confirm/cancel response to pending approval
+  // Pass onChunk so execution progress renders live in the chat
+  var handled = await Autonoma2.handleConfirmCancel(convId, text, function(chunk) {
+    if (chunk.type === 'execution_progress') {
+      var msgList = document.getElementById('a2-messages');
+      if (msgList) {
+        var progId = 'a2-prog-confirm';
+        var existing = document.getElementById(progId);
+        var stageIcon = { PREPARING:'⚙️',APPROVED:'✅',SUBMITTED:'📤',PENDING:'⏳',CONFIRMING:'🔍',COMPLETED:'✅',FAILED:'❌',CANCELLED:'🚫' }[chunk.stage]||'⏳';
+        var html = '<div id="'+progId+'" class="a2-msg a2-assistant" style="opacity:.85"><div class="a2-msg-bubble" style="border-left:2px solid var(--blue);padding-left:8px">'
+          +stageIcon+' <strong>'+(chunk.stage||'')+'</strong> '+(chunk.message||'')
+          +(chunk.txHash?'<br><small style="font-family:monospace;color:var(--blue)">'+chunk.txHash.slice(0,12)+'…'+chunk.txHash.slice(-6)+'</small>':'')
+          +'</div></div>';
+        if (existing) existing.outerHTML = html;
+        else msgList.insertAdjacentHTML('beforeend', html);
+        msgList.scrollTop = msgList.scrollHeight;
+      }
+    }
+    if (chunk.type === 'done') { a2RenderConvList(); a2RenderMessages(); }
+  });
+  if (handled) {
+    _a2Streaming = false;
+    if (btn) btn.disabled = false;
+    a2RenderConvList();
+    a2RenderMessages();
+    return;
+  }
+
+  // Add user message visually
+  var userMsg = Autonoma2.addMessage(convId, 'user', text);
+  if (container && userMsg) container.appendChild(a2BuildMsgEl(userMsg));
+  if (container) container.scrollTop = container.scrollHeight;
+  a2RenderConvList();
+
+  // Typing indicator
+  var typingEl = document.createElement('div');
+  typingEl.className = 'a2-msg assistant';
+  typingEl.id = 'a2-typing';
+  typingEl.innerHTML = '<div class="a2-typing"><span></span><span></span><span></span></div>';
+  if (container) { container.appendChild(typingEl); container.scrollTop = container.scrollHeight; }
+
+  // Streaming bubble
+  var streamDiv = null;
+  var streamText = '';
+
+  try {
+    await Autonoma2.sendMessage(convId, text, function(chunk) {
+      if (chunk.type === 'chunk') {
+        if (!streamDiv) {
+          // Replace typing indicator with streaming bubble
+          if (typingEl.parentNode) typingEl.parentNode.removeChild(typingEl);
+          streamDiv = document.createElement('div');
+          streamDiv.className = 'a2-msg assistant';
+          streamDiv.innerHTML = '<div class="a2-bubble" id="a2-stream-bubble"></div>';
+          if (container) container.appendChild(streamDiv);
+        }
+        streamText += chunk.text;
+        var bubble = document.getElementById('a2-stream-bubble');
+        if (bubble) bubble.innerHTML = _a2Format(streamText);
+        if (container) container.scrollTop = container.scrollHeight;
+      } else if (chunk.type === 'approval') {
+        if (typingEl.parentNode) typingEl.parentNode.removeChild(typingEl);
+        if (streamDiv && streamDiv.parentNode) streamDiv.parentNode.removeChild(streamDiv);
+        // Rendered via a2RenderMessages after sendMessage resolves
+      } else if (chunk.type === 'tool_start') {
+        if (typingEl.parentNode) {
+          var tipEl = document.createElement('div');
+          tipEl.className = 'a2-msg assistant';
+          tipEl.innerHTML = '<div class="a2-bubble" style="opacity:.6;font-size:10px"><i class="ti ti-loader" style="animation:spin .8s linear infinite"></i> Using ' + chunk.toolName + '…</div>';
+          typingEl.parentNode.insertBefore(tipEl, typingEl);
+          setTimeout(function() { if (tipEl.parentNode) tipEl.parentNode.removeChild(tipEl); }, 3000);
+        }
+      } else if (chunk.type === 'done') {
+        if (typingEl.parentNode) typingEl.parentNode.removeChild(typingEl);
+        if (streamDiv && streamDiv.parentNode) streamDiv.parentNode.removeChild(streamDiv);
+      }
+    });
+  } catch(e) {
+    if (typingEl.parentNode) typingEl.parentNode.removeChild(typingEl);
+    var errMsg = (e && e.message === 'LLM_UNAUTHORIZED')
+      ? 'Session expired — please log out and log in again to use Autonoma 2.'
+      : (e && e.message === 'LLM_UNAVAILABLE')
+        ? 'AI service temporarily unavailable. Please try again in a moment.'
+        : 'Sorry, something went wrong. Please try again.';
+    Autonoma2.addMessage(convId, 'assistant', errMsg);
+  }
+
+  _a2Streaming = false;
+  if (btn) btn.disabled = false;
+  a2RenderConvList();
+  a2RenderMessages();
+  if (container) container.scrollTop = container.scrollHeight;
+}
+
+async function a2Approve(executionId) {
+  if (typeof Autonoma2 === 'undefined') return;
+  var convId = Autonoma2.activeId();
+  if (!convId) return;
+  // Disable approval buttons immediately
+  var btns = document.querySelectorAll('.a2-btn-confirm, .a2-btn-cancel');
+  btns.forEach(function(b) { b.disabled = true; b.style.opacity = '.5'; });
+
+  // Progress callback: render each execution stage live in the chat
+  function _approveOnChunk(event) {
+    if (event.type === 'execution_progress') {
+      // Add a transient progress bubble
+      var msgList = document.getElementById('a2-messages');
+      if (msgList) {
+        var progId = 'a2-prog-' + executionId;
+        var existing = document.getElementById(progId);
+        var stageIcon = { PREPARING: '⚙️', APPROVED: '✅', SUBMITTED: '📤', PENDING: '⏳', CONFIRMING: '🔍', COMPLETED: '✅', FAILED: '❌', CANCELLED: '🚫' }[event.stage] || '⏳';
+        var stageHtml = '<div id="' + progId + '" class="a2-msg a2-assistant" style="opacity:.85">'
+          + '<div class="a2-msg-bubble" style="border-left:2px solid var(--blue);padding-left:8px">'
+          + stageIcon + ' <strong>' + (event.stage || '') + '</strong> ' + (event.message || '')
+          + (event.txHash ? '<br><small style="font-family:monospace;color:var(--blue)">' + event.txHash.slice(0, 12) + '…' + event.txHash.slice(-6) + '</small>' : '')
+          + '</div></div>';
+        if (existing) existing.outerHTML = stageHtml;
+        else msgList.insertAdjacentHTML('beforeend', stageHtml);
+        msgList.scrollTop = msgList.scrollHeight;
+      }
+    }
+    if (event.type === 'done') {
+      a2RenderConvList();
+      a2RenderMessages();
+    }
+  }
+
+  await Autonoma2.approveAction(executionId, _approveOnChunk);
+  a2RenderConvList();
+  a2RenderMessages();
+}
+
+function a2Cancel(executionId) {
+  if (typeof Autonoma2 === 'undefined') return;
+  Autonoma2.cancelApproval(executionId);
+  a2RenderConvList();
+  a2RenderMessages();
+}
+
+function _a2DispatchAction(result) {
+  // Route approved write actions to existing engines
+  if (!result || !result.action) return;
+  switch (result.action) {
+    case 'send':
+      // Pre-fill Send Assets and navigate
+      if (typeof saSetRecipient === 'function') saSetRecipient(result.to);
+      if (typeof saSetAmount === 'function') saSetAmount(result.amount);
+      showPage('send');
+      if (typeof toast === 'function') toast('Send pre-filled — review and confirm', 'info');
+      break;
+    case 'swap':
+      showPage('swap');
+      if (typeof toast === 'function') toast('Swap pre-filled — review and confirm', 'info');
+      break;
+    case 'bridge':
+      showPage('bridge');
+      if (typeof toast === 'function') toast('Bridge pre-filled — review and confirm', 'info');
+      break;
+    case 'create_invoice':
+      showPage('billing');
+      if (typeof toast === 'function') toast('Invoice creation opened in Billing', 'info');
+      break;
+    case 'create_schedule':
+      showPage('schedule');
+      if (typeof toast === 'function') toast('Schedule creation opened', 'info');
+      break;
+    case 'create_payment_link':
+      showPage('billing');
+      if (typeof toast === 'function') toast('Payment link creation opened in Billing', 'info');
+      break;
+  }
+}
+
+
+// Expose a2 functions to window so inline onclick handlers work after bundling
+window.a2Init = a2Init;
+window.a2RenderConvList = a2RenderConvList;
+window.a2RenderMessages = a2RenderMessages;
+window.a2NewChat = a2NewChat;
+window.a2SwitchConv = a2SwitchConv;
+window.a2DeleteConv = a2DeleteConv;
+window.a2Suggest = a2Suggest;
+window.a2AutoResize = a2AutoResize;
+window.a2Send = a2Send;
+window.a2Approve = a2Approve;
+window.a2Cancel = a2Cancel;
+window._a2DispatchAction = _a2DispatchAction;
+
+// ── end Autonoma 2 ────────────────────────────────────────────────────────────
+
 function ubInit() {
+
   // Eagerly expose __autExecuteIntent so _ubPanelApprove can use it
   // even if the user hasn't visited the Autonoma page yet.
   if (typeof window.__autExecuteIntent === 'undefined' && typeof autonomaInit === 'function') {
@@ -44783,14 +45277,14 @@ const UBScreen = (function() {
     // Same-chain Arc Mainnet (the UB EVM drawer has no chain selector).
     var chain = (SWP.fromChainId || (typeof activeChainId !== 'undefined' ? activeChainId : 5042));
 
+    // Hard 9s deadline so Loading never gets stuck regardless of aggregator state.
+    var _ubHardTimer = null, _ubHardResolve = null;
+    var _ubHardPromise = new Promise(function(res){ _ubHardResolve = res; _ubHardTimer = setTimeout(function(){ res('HARD_TIMEOUT'); }, 9000); });
+
     try {
       var agg = null;
       if (typeof SwapAggregator !== 'undefined' && typeof SwapAggregator.getBestQuote === 'function') {
-        // Reuse the SAME aggregator as the canonical swap flow (LI.FI / Tower
-        // only in the EVM drawer). Promise.race is a hard bound so a stuck
-        // provider can NEVER leave the drawer in an infinite Loading state —
-        // it always resolves to a quote or to the "No route" state below.
-        agg = await Promise.race([
+        var _aggRes = await Promise.race([
           SwapAggregator.getBestQuote({
             tokenIn: ti2.sym,
             tokenOut: to2.sym,
@@ -44802,10 +45296,15 @@ const UBScreen = (function() {
             userAddress: (typeof walletAddress !== 'undefined' && walletAddress) ? walletAddress : null,
             hasLocalPool: false,
             excludeLocal: true,
+            timeoutMs: 7000,
           }),
-          new Promise(function(res){ setTimeout(function(){ res(null); }, 12000); })
+          _ubHardPromise
         ]);
+        if (_aggRes !== 'HARD_TIMEOUT') agg = _aggRes;
+      } else {
+        await _ubHardPromise;
       }
+      clearTimeout(_ubHardTimer);
 
       if (seq !== _ubSwapSeq) return; // stale response must never overwrite a newer one
 
@@ -44851,6 +45350,7 @@ const UBScreen = (function() {
       }
     } catch(e) {
       // Any unexpected error must still terminate the loading state.
+      clearTimeout(_ubHardTimer);
       SWP._towerQuoteData = null;
       SWP.lastQuote = null;
       _ubSwapNoRoute(outEl, rateEl, rteEl);

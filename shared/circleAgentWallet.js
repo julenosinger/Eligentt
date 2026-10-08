@@ -83,16 +83,109 @@
    * statusHTML() → renders a compact HTML status card for embedding in
    * Autonoma's welcome panel and AI Smart Wallet Mission Control.
    */
+  /**
+   * provision() — calls POST /api/agent/provision to create a per-user
+   * Circle wallet on Arc Mainnet. Idempotent: safe to call multiple times.
+   * Returns { ok, address, walletId, alreadyProvisioned, error }.
+   */
+  async function provision() {
+    try {
+      // Build headers — always include credentials (cookie) and also pass
+      // the session token as Authorization: Bearer so the backend can
+      // authenticate even if the HttpOnly cookie was not forwarded
+      // (e.g. SameSite restrictions, expired cookie, browser quirks).
+      var headers = { 'Content-Type': 'application/json' };
+      try {
+        // Auth module exposes getSessionToken(); if it returns null we fall
+        // back to reading the raw value from localStorage directly.
+        var tok = null;
+        if (typeof Auth !== 'undefined' && typeof Auth.getSessionToken === 'function') {
+          tok = Auth.getSessionToken();
+        }
+        if (!tok) {
+          // Attempt direct localStorage read — the session key used by auth.js
+          var raw = localStorage.getItem('elligente_session');
+          if (raw) {
+            var parsed = JSON.parse(raw);
+            if (parsed && parsed.token) tok = parsed.token;
+          }
+        }
+        if (!tok) {
+          // Last resort: read from the elligente_sid cookie (visible only if
+          // the cookie was NOT set HttpOnly — keep as fallback, harmless if absent)
+          var cm = document.cookie.match(/elligente_sid=([^;]+)/);
+          if (cm) tok = cm[1];
+        }
+        if (tok) headers['Authorization'] = 'Bearer ' + tok;
+      } catch (_e) {}
+      var resp = await fetch('/api/agent/provision', {
+        method: 'POST',
+        credentials: 'include',
+        headers: headers,
+      });
+      var data = await resp.json();
+      if (resp.ok && data.ok) {
+        // Bust cache so next mount/refresh picks up the new wallet
+        _cache.status = null;
+      }
+      return data;
+    } catch (e) {
+      return { ok: false, error: e.message || 'Network error' };
+    }
+  }
+
   async function statusHTML() {
     var s = await getStatus();
     if (!s || s.ok === false || s.error) {
       var errMsg = (s && s.error) ? s.error : 'Could not reach /api/agent — check Cloudflare secrets';
+      // Distinguish "not configured" (server secrets missing) from "no wallet yet"
+      var noWallet = s && (s.status === 503 || (s.error && s.error.indexOf('not configured') !== -1));
+      if (!noWallet && s && s.error && s.error.indexOf('wallet') !== -1) noWallet = true;
       return '<div class="caw-card caw-unconfigured">' +
         '<div class="caw-card-icon"><i class="ti ti-robot-off"></i></div>' +
         '<div class="caw-card-body">' +
           '<div class="caw-card-title">Circle AI Smart Wallet</div>' +
           '<div class="caw-card-sub">' + errMsg + '</div>' +
         '</div></div>';
+    }
+
+    // User doesn't have a personal wallet yet — show Create My Wallet CTA
+    // (needsProvision comes from the backend; isPerUser === false means using platform fallback)
+    if (s.needsProvision || (!s.isPerUser && s.isPerUser !== undefined)) {
+      var platAddr = s.walletAddress || (s.wallet && s.wallet.address) || '';
+      var platShort = platAddr ? (platAddr.slice(0,6) + '…' + platAddr.slice(-4)) : '';
+      return '<div style="display:flex;flex-direction:column;gap:8px">' +
+        // CTA card
+        '<div class="caw-card" style="flex-direction:column;align-items:flex-start;gap:10px;border-color:rgba(39,117,202,.35);background:rgba(39,117,202,.07)">' +
+          '<div style="display:flex;align-items:center;gap:10px;width:100%">' +
+            '<div class="caw-card-icon" style="color:#2775ca"><i class="ti ti-wallet-plus" style="font-size:22px"></i></div>' +
+            '<div class="caw-card-body">' +
+              '<div class="caw-card-title">Create Your Personal AI Wallet</div>' +
+              '<div class="caw-card-sub">Get your own Circle wallet on Arc Mainnet for Autonoma operations — no seed phrase, no private key to manage.</div>' +
+            '</div>' +
+          '</div>' +
+          '<div style="width:100%;padding:10px 12px;border-radius:8px;background:rgba(39,117,202,.06);border:1px solid rgba(39,117,202,.15)">' +
+            '<div style="font-size:8.5px;color:var(--muted2);margin-bottom:8px;display:flex;flex-wrap:wrap;gap:12px">' +
+              '<span><i class="ti ti-check" style="color:var(--green)"></i> Arc Mainnet</span>' +
+              '<span><i class="ti ti-check" style="color:var(--green)"></i> Circle Developer-Controlled</span>' +
+              '<span><i class="ti ti-check" style="color:var(--green)"></i> No seed phrase</span>' +
+              '<span><i class="ti ti-check" style="color:var(--green)"></i> Autonoma-ready</span>' +
+            '</div>' +
+            '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">' +
+              '<button id="caw-create-btn" onclick="CircleAgent._handleCreate(this)" ' +
+                'style="background:linear-gradient(135deg,#2775ca,#1a5fa8);color:#fff;border:none;border-radius:6px;padding:8px 18px;font-size:10.5px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px;box-shadow:0 2px 8px rgba(39,117,202,.3)">' +
+                '<i class="ti ti-wallet-plus"></i>Create My Wallet' +
+              '</button>' +
+              '<span style="font-size:8px;color:var(--muted2)">Free · Instant · Arc Mainnet</span>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+        // Platform wallet shown below as reference
+        (platShort ? '<div style="font-size:8px;color:var(--muted2);padding:5px 8px;border-radius:5px;border:1px solid var(--border);background:rgba(0,0,0,.1)">' +
+          '<i class="ti ti-building-bank" style="margin-right:4px"></i>Platform wallet in use until yours is created: ' +
+          '<span style="font-family:monospace;color:var(--muted2)">' + platShort + '</span>' +
+        '</div>' : '') +
+      '</div>';
     }
     if (s.paused) {
       return '<div class="caw-card caw-paused">' +
@@ -225,6 +318,31 @@
     _injectCSS();
   }
 
+  /**
+   * _handleCreate(btn) — called by the "Create My Wallet" button.
+   * Shows a loading state, calls provision(), then refreshes all cards.
+   */
+  async function _handleCreate(btn) {
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i> Creating…'; }
+    try {
+      var res = await provision();
+      if (res && res.ok) {
+        var msg = res.alreadyProvisioned
+          ? 'Wallet already exists: ' + (res.address ? res.address.slice(0,6) + '…' + res.address.slice(-4) : '')
+          : 'Wallet created on Arc Mainnet: ' + (res.address ? res.address.slice(0,6) + '…' + res.address.slice(-4) : '');
+        try { if (typeof toast === 'function') toast(msg, 'success'); } catch(_e){}
+        await refreshCard();
+      } else {
+        var errMsg = (res && res.error) ? res.error : 'Wallet creation failed';
+        try { if (typeof toast === 'function') toast(errMsg, 'error'); } catch(_e){}
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-wallet-plus"></i>Create My Wallet'; }
+      }
+    } catch(e) {
+      try { if (typeof toast === 'function') toast('Error: ' + (e.message || e), 'error'); } catch(_e){}
+      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-wallet-plus"></i>Create My Wallet'; }
+    }
+  }
+
   /* ── Exports ─────────────────────────────────────────── */
   var API = {
     getStatus: getStatus,
@@ -236,6 +354,8 @@
     resolveAddress: resolveAddress,
     refreshCard: refreshCard,
     mount: mount,
+    provision: provision,
+    _handleCreate: _handleCreate,
   };
 
   if (typeof window !== 'undefined') window.CircleAgent = API;

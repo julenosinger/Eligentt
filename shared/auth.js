@@ -8,6 +8,7 @@ const AuthManager = (() => {
 
   let _session = null;
   let _profile = null;
+  let _sessionToken = null;   // kept in memory only — never written to localStorage
   let _remoteSigner = null;
   let _remoteProvider = null;
   let _custodialUnlocked = false;
@@ -49,6 +50,7 @@ const AuthManager = (() => {
   function _clearSession() {
     _session = null;
     _profile = null;
+    _sessionToken = null;
     _remoteSigner = null;
     _remoteProvider = null;
     _custodialUnlocked = false;
@@ -76,6 +78,7 @@ const AuthManager = (() => {
     const data = await _api('/verify', { email, code, password: password || undefined, name: name || undefined });
     if (data.ok && data.sessionToken && data.profile) {
       _session = { ts: Date.now() };
+      _sessionToken = data.sessionToken;   // keep in memory for Authorization header
       _saveProfile(data.profile);
       _clearLegacyTokens();
       _buildRemoteSigner();
@@ -87,6 +90,7 @@ const AuthManager = (() => {
     const data = await _api('/login', { email, password });
     if (data.ok && data.sessionToken && data.profile) {
       _session = { ts: Date.now() };
+      _sessionToken = data.sessionToken;   // keep in memory for Authorization header
       _saveProfile(data.profile);
       _clearLegacyTokens();
       _buildRemoteSigner();
@@ -100,6 +104,7 @@ const AuthManager = (() => {
       const data = await _api('/session', null, 'GET');
       if (data.ok && data.profile) {
         _saveProfile(data.profile);
+        if (data.sessionToken) _sessionToken = data.sessionToken;
         if (data.custodialUnlocked) _custodialUnlocked = true;
         _buildRemoteSigner();
         return true;
@@ -224,7 +229,7 @@ const AuthManager = (() => {
   }
 
   function getSessionToken() {
-    return null;
+    return _sessionToken || null;
   }
 
   function getRemoteSigner() {
