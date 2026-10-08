@@ -159,8 +159,8 @@
 
     // Build auth headers — cookie alone may be blocked (SameSite/domain); add Bearer as backup
     var fetchHeaders = { 'Content-Type': 'application/json' };
-    var _tok = (typeof Auth !== 'undefined' && typeof Auth.getSessionToken === 'function') ? Auth.getSessionToken() : null;
-    if (!_tok) { try { _tok = JSON.parse(localStorage.getItem('elligentt_session') || '{}').token || null; } catch(_) {} }
+    var _tok = (typeof AuthManager !== 'undefined' && typeof AuthManager.getSessionToken === 'function') ? AuthManager.getSessionToken() : null;
+    if (!_tok) { try { _tok = sessionStorage.getItem('elligente_st') || null; } catch(_) {} }
     if (_tok) fetchHeaders['Authorization'] = 'Bearer ' + _tok;
 
     var resp = await fetch('/api/autonoma2/chat', {
