@@ -41161,7 +41161,12 @@ var _a2Streaming = false;
 
 
 function a2Init() {
-  if (_a2Initialized) { a2RenderConvList(); return; }
+  // Always reset streaming guard on page open — prevents permanent button lock
+  _a2Streaming = false;
+  var btn = document.getElementById('a2-send-btn');
+  if (btn) btn.disabled = false;
+
+  if (_a2Initialized) { a2RenderConvList(); a2RenderMessages(); return; }
   if (typeof Autonoma2 === 'undefined') return;
   _a2Initialized = true;
 
@@ -41314,16 +41319,23 @@ function a2AutoResize(ta) {
 
 async function a2Send() {
   if (_a2Streaming) return;
-  if (typeof Autonoma2 === 'undefined') return;
+  if (typeof Autonoma2 === 'undefined') {
+    // Modules not loaded yet — show error in chat area
+    var errArea = document.getElementById('a2-messages');
+    if (errArea) errArea.insertAdjacentHTML('beforeend', '<div class="a2-msg assistant"><div class="a2-bubble" style="color:#f87171">AI agent not loaded. Please refresh the page.</div></div>');
+    return;
+  }
   var inp = document.getElementById('a2-input');
   var text = inp ? inp.value.trim() : '';
   if (!text) return;
-  inp.value = '';
-  if (inp) { inp.style.height = 'auto'; }
 
   var btn = document.getElementById('a2-send-btn');
   if (btn) btn.disabled = true;
   _a2Streaming = true;
+
+  // Capture and clear input immediately
+  inp.value = '';
+  if (inp) { inp.style.height = 'auto'; }
 
   var convId = Autonoma2.activeId();
   if (!convId) { var c = Autonoma2.newConversation(); convId = c.id; Autonoma2.setActive(convId); }
@@ -41332,6 +41344,9 @@ async function a2Send() {
   var welcome = document.getElementById('a2-welcome');
   if (welcome) welcome.style.display = 'none';
   var container = document.getElementById('a2-messages');
+
+  // Outer try/finally guarantees _a2Streaming + btn are ALWAYS reset
+  try {
 
   // Check if this is a confirm/cancel response to pending approval
   // Pass onChunk so execution progress renders live in the chat
@@ -41411,20 +41426,32 @@ async function a2Send() {
       }
     });
   } catch(e) {
-    if (typingEl.parentNode) typingEl.parentNode.removeChild(typingEl);
+    if (typingEl && typingEl.parentNode) typingEl.parentNode.removeChild(typingEl);
+    if (streamDiv && streamDiv.parentNode) streamDiv.parentNode.removeChild(streamDiv);
     var errMsg = (e && e.message === 'LLM_UNAUTHORIZED')
       ? 'Session expired — please log out and log in again to use Autonoma 2.'
       : (e && e.message === 'LLM_UNAVAILABLE')
         ? 'AI service temporarily unavailable. Please try again in a moment.'
         : 'Sorry, something went wrong. Please try again.';
-    Autonoma2.addMessage(convId, 'assistant', errMsg);
+    try { Autonoma2.addMessage(convId, 'assistant', errMsg); } catch(_) {}
+  } finally {
+    a2RenderConvList();
+    a2RenderMessages();
+    if (container) container.scrollTop = container.scrollHeight;
   }
 
-  _a2Streaming = false;
-  if (btn) btn.disabled = false;
-  a2RenderConvList();
-  a2RenderMessages();
-  if (container) container.scrollTop = container.scrollHeight;
+  } catch(outerErr) {
+    // Catches errors before/outside the inner try (handleConfirmCancel, addMessage, etc.)
+    var container2 = document.getElementById('a2-messages');
+    var outerErrMsg = 'Something went wrong: ' + (outerErr && outerErr.message ? outerErr.message : String(outerErr));
+    try { Autonoma2.addMessage(convId, 'assistant', outerErrMsg); } catch(_) {}
+    a2RenderConvList();
+    a2RenderMessages();
+    if (container2) container2.scrollTop = container2.scrollHeight;
+  } finally {
+    _a2Streaming = false;
+    if (btn) btn.disabled = false;
+  }
 }
 
 async function a2Approve(executionId) {

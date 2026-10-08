@@ -84,8 +84,8 @@
     _loadConvs();
     if (!_convs[convId]) return;
 
-    // Add user message
-    addMessage(convId, 'user', userText.trim());
+    // NOTE: user message is already added by the UI layer (a2Send) before calling here.
+    // We do NOT add it again to avoid duplicates in the conversation store.
 
     // Build context
     var ctx = await A2Context.get();
