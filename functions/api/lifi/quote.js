@@ -15,7 +15,7 @@
  */
 const LIFI_BASE = 'https://li.quest/v1';
 
-const DEFAULT_ALLOWED_ORIGINS = 'https://elligente.pages.dev,https://elligentt.xyz,https://execdaat.xyz,https://elligente-tower.pages.dev';
+const DEFAULT_ALLOWED_ORIGINS = 'https://elligente.pages.dev,https://elligentttest.pages.dev,https://elligentt.xyz,https://execdaat.xyz,https://elligente-tower.pages.dev';
 
 function allowedOrigins(env) {
   return ((env && env.ALLOWED_ORIGINS) || DEFAULT_ALLOWED_ORIGINS).split(',').map((s) => s.trim()).filter(Boolean);

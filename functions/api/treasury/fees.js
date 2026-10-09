@@ -1,7 +1,7 @@
 import { RELAYER_CONFIG } from '../shared-config.mjs';
 
 function getCorsHeaders(request, env) {
-  const allowed = (env.ALLOWED_ORIGINS || 'https://elligente.pages.dev').split(',').map(s => s.trim());
+  const allowed = (env.ALLOWED_ORIGINS || 'https://elligente.pages.dev,https://elligentttest.pages.dev').split(',').map(s => s.trim());
   const origin = request.headers.get('Origin') || '';
   const corsOrigin = allowed.includes(origin) ? origin : allowed[0];
   return {

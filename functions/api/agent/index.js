@@ -63,43 +63,46 @@ function extractToken(request) {
 
 /**
  * Resolve the Circle walletId + walletAddress for the authenticated user.
- * Falls back to global env secrets if:
- *   - AUTH_KV is not configured
- *   - No valid session token
- *   - User has no per-user Circle wallet yet
+ *
+ * SECURITY RULE: the global CIRCLE_WALLET_ID / CIRCLE_WALLET_ADDRESS env
+ * secrets are the PLATFORM wallet — they must NEVER be returned as a user's
+ * personal wallet identity. When the user has no personal wallet yet, returns
+ * a no-wallet sentinel so the frontend can show the provisioning CTA instead
+ * of silently serving platform wallet data as the user's own.
  */
 async function resolveUserWallet(env, request) {
   const KV = env.AUTH_KV;
   const apiKey = env.CIRCLE_API_KEY;
 
-  // Fallback credentials (global)
-  const fallback = {
+  // "No wallet" sentinel
+  const noWallet = {
     apiKey,
-    walletId: env.CIRCLE_WALLET_ID || '',
-    walletAddress: env.CIRCLE_WALLET_ADDRESS || '',
+    walletId: '',
+    walletAddress: '',
     isPerUser: false,
+    needsProvision: true,
   };
 
-  if (!KV || typeof KV.get !== 'function') return fallback;
+  if (!KV || typeof KV.get !== 'function') return noWallet;
 
   const token = extractToken(request);
-  if (!token || token.length < 32) return fallback;
+  if (!token || token.length < 32) return noWallet;
 
   let session;
   try {
     const raw = await KV.get('session:' + token);
-    if (!raw) return fallback;
+    if (!raw) return noWallet;
     session = JSON.parse(raw);
-  } catch (_) { return fallback; }
+  } catch (_) { return noWallet; }
 
-  if (!session || !session.email) return fallback;
+  if (!session || !session.email) return noWallet;
 
   let user;
   try {
     const raw = await KV.get('user:' + session.email);
-    if (!raw) return fallback;
+    if (!raw) return noWallet;
     user = JSON.parse(raw);
-  } catch (_) { return fallback; }
+  } catch (_) { return noWallet; }
 
   if (user && user.circleWalletId && user.circleWalletAddress) {
     return {
@@ -107,55 +110,111 @@ async function resolveUserWallet(env, request) {
       walletId: user.circleWalletId,
       walletAddress: user.circleWalletAddress,
       isPerUser: true,
+      needsProvision: false,
       userId: user.id,
+      email: session.email,
     };
   }
 
-  return fallback;
+  // Authenticated user, no personal wallet yet — return sentinel, never platform wallet.
+  return { ...noWallet, userId: user && user.id, email: session.email };
 }
 
 // ─── Route handlers ──────────────────────────────────────────────────────────
 
 async function handleStatus(env, request) {
   const creds = await resolveUserWallet(env, request);
-  if (!creds.apiKey || !creds.walletId) return err('Circle agent not configured', 503);
 
-  const [walletRes, balRes] = await Promise.all([
-    circleGet(`/wallets/${creds.walletId}`, creds.apiKey),
-    circleGet(`/wallets/${creds.walletId}/balances`, creds.apiKey),
-  ]);
+  // No personal wallet — tell the frontend to prompt provisioning.
+  // Never serve platform wallet data as the user's identity.
+  if (!creds.walletId) {
+    return json({
+      ok: true,
+      configured: !!(creds.apiKey),
+      isPerUser: false,
+      needsProvision: true,
+      wallet: null,
+      balances: [],
+      walletAddress: null,
+      address: null,
+    });
+  }
 
-  return json({
-    ok: true,
-    wallet: walletRes.data?.wallet ?? walletRes.data,
-    balances: balRes.data?.tokenBalances ?? [],
-    address: creds.walletAddress || walletRes.data?.wallet?.address,
-    isPerUser: creds.isPerUser || false,
-  });
+  if (!creds.apiKey) return err('Circle API not configured', 503);
+
+  try {
+    const [walletRes, balRes] = await Promise.all([
+      circleGet(`/wallets/${creds.walletId}`, creds.apiKey),
+      circleGet(`/wallets/${creds.walletId}/balances`, creds.apiKey),
+    ]);
+
+    const walletAddr = creds.walletAddress || walletRes.data?.wallet?.address || '';
+    return json({
+      ok: true,
+      configured: true,
+      wallet: walletRes.data?.wallet ?? walletRes.data,
+      balances: balRes.data?.tokenBalances ?? [],
+      walletAddress: walletAddr,
+      address: walletAddr,
+      isPerUser: creds.isPerUser || false,
+      needsProvision: false,
+    });
+  } catch (e) {
+    return err('Circle API error: ' + (e.message || e), 502);
+  }
 }
 
 async function handleBalance(env, request) {
   const creds = await resolveUserWallet(env, request);
-  if (!creds.apiKey || !creds.walletId) return err('Circle agent not configured', 503);
 
-  const balRes = await circleGet(`/wallets/${creds.walletId}/balances`, creds.apiKey);
-  return json({
-    ok: true,
-    balances: balRes.data?.tokenBalances ?? [],
-    address: creds.walletAddress,
-    isPerUser: creds.isPerUser || false,
-  });
+  if (!creds.walletId) {
+    return json({
+      ok: true,
+      balances: [],
+      address: null,
+      isPerUser: false,
+      needsProvision: true,
+    });
+  }
+  if (!creds.apiKey) return err('Circle API not configured', 503);
+
+  try {
+    const balRes = await circleGet(`/wallets/${creds.walletId}/balances`, creds.apiKey);
+    return json({
+      ok: true,
+      balances: balRes.data?.tokenBalances ?? [],
+      address: creds.walletAddress,
+      isPerUser: creds.isPerUser || false,
+      needsProvision: false,
+    });
+  } catch (e) {
+    return err('Circle API error: ' + (e.message || e), 502);
+  }
 }
 
 async function handleTransactions(env, request) {
   const creds = await resolveUserWallet(env, request);
-  if (!creds.apiKey || !creds.walletId) return err('Circle agent not configured', 503);
 
-  const res = await circleGet(`/transactions?walletIds=${creds.walletId}&pageSize=20`, creds.apiKey);
-  return json({
-    ok: true,
-    transactions: res.data?.transactions ?? [],
-  });
+  if (!creds.walletId) {
+    return json({
+      ok: true,
+      transactions: [],
+      isPerUser: false,
+      needsProvision: true,
+    });
+  }
+  if (!creds.apiKey) return err('Circle API not configured', 503);
+
+  try {
+    const res = await circleGet(`/transactions?walletIds=${creds.walletId}&pageSize=20`, creds.apiKey);
+    return json({
+      ok: true,
+      transactions: res.data?.transactions ?? [],
+      isPerUser: true,
+    });
+  } catch (e) {
+    return err('Circle API error: ' + (e.message || e), 502);
+  }
 }
 
 // ─── Main handler ─────────────────────────────────────────────────────────────

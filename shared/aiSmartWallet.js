@@ -194,19 +194,33 @@
   function agentAddr() {
     // Circle Wallet is the canonical Agent identity.
     // AgentWalletManager.getAgentAddress() is intentionally not used here.
+    // Returns null (never a platform/hardcoded fallback) when no personal
+    // Circle wallet has been provisioned for this user.
     return circleWalletAddr();
   }
-  /* Canonical Circle AI Smart Wallet — the AI Smart Wallet is backed by this
-     server-side Circle wallet (mainnet). Never substituted by a local key. */
-  const CANONICAL_CIRCLE_WALLET = '0x794eb2f43a333e9eab9731d8f5e5423d5ec628eb';
+  /**
+   * Returns the authenticated user's personal Circle wallet address from the
+   * last /api/agent/status response, or null when:
+   *   - No CircleAgent cache exists yet (status not fetched)
+   *   - The status response indicated needsProvision=true (no personal wallet)
+   *   - CircleAgent is unavailable
+   *
+   * SECURITY: this function MUST NOT fall back to any hardcoded platform
+   * address. A null return must propagate up and block financial operations.
+   */
   function circleWalletAddr() {
     try {
       if (typeof CircleAgent !== 'undefined' && CircleAgent.getCachedAddress) {
         const a = CircleAgent.getCachedAddress();
+        // Only return the address when it is confirmed to be the user's personal
+        // wallet (isPerUser=true) — CircleAgent.getCachedAddress() returns null
+        // when status.needsProvision=true, so the null propagates correctly.
         if (a) return a;
       }
     } catch (_e) { /* ignore */ }
-    return CANONICAL_CIRCLE_WALLET;
+    // Return null — never a hardcoded platform address.
+    // callers must check agentAddr() !== null before any financial operation.
+    return null;
   }
   function personalAddr() {
     try {

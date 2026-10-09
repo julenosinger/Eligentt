@@ -15,7 +15,7 @@
  */
 const TOWER_BASE = 'https://www.tower.exchange/api/public';
 
-const DEFAULT_ALLOWED_ORIGINS = 'https://elligente.pages.dev,https://elligentt.xyz,https://execdaat.xyz';
+const DEFAULT_ALLOWED_ORIGINS = 'https://elligente.pages.dev,https://elligentttest.pages.dev,https://elligentt.xyz,https://execdaat.xyz';
 
 // Tower normalizes amounts to 18 decimals. Elligentt's token registry uses native
 // decimals (USDC/EURC = 6, cirBTC = 8). We scale output amounts back to native

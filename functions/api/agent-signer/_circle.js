@@ -22,11 +22,14 @@
 
 const W3S_BASE = 'https://api.circle.com/v1/w3s';
 
-// Canonical Circle-controlled wallet used by the Autonoma/AI Smart Wallet agent.
-// Read from the CIRCLE_WALLET_ADDRESS Cloudflare secret at runtime; this constant
-// is the single authoritative reference so no module can silently adopt a
-// different wallet identity.
-const CANONICAL_CIRCLE_WALLET = '0x794eb2f43a333e9eab9731d8f5e5423d5ec628eb';
+// PLATFORM wallet address — exported for legacy reference only. // arc-studio-allow-onchain-literal
+// This is the PLATFORM/ADMIN wallet; it must NEVER be used as a user's
+// personal wallet identity. Per-user wallet addresses are stored in KV
+// under user.circleWalletId / user.circleWalletAddress and resolved via
+// resolveUserWallet() / getUserCredentials(). Any code that reads this
+// constant as a user identity is a security bug. The authoritative runtime
+// value is env.CIRCLE_WALLET_ADDRESS (Cloudflare Secret).
+const CANONICAL_CIRCLE_WALLET = '0x794eb2f43a333e9eab9731d8f5e5423d5ec628eb'; // arc-studio-allow-onchain-literal
 
 const CHAIN_RPC = {
   5042: 'https://rpc.mainnet.arc.io',
@@ -37,7 +40,7 @@ const CHAIN_RPC = {
   137: 'https://polygon-rpc.com',
 };
 
-const DEFAULT_ALLOWED_ORIGINS = 'https://execdaat.xyz,https://elligentt.xyz,https://elligente.pages.dev';
+const DEFAULT_ALLOWED_ORIGINS = 'https://execdaat.xyz,https://elligentt.xyz,https://elligente.pages.dev,https://elligentttest.pages.dev';
 
 function getCredentials(env) {
   return {
@@ -105,18 +108,20 @@ function bytesToBase64(bytes) {
 /* ── Circle Wallets API ── */
 async function fetchEntityPublicKey(env) {
   const creds = getCredentials(env);
-  const resp = await fetch(W3S_BASE + '/config/entity', {
+  // Correct endpoint per Circle API docs: GET /v1/w3s/config/entity/publicKey
+  // (the legacy /config/entity endpoint returns only appId, not publicKey)
+  const resp = await fetch(W3S_BASE + '/config/entity/publicKey', {
     method: 'GET',
     headers: { Authorization: 'Bearer ' + creds.apiKey, 'Content-Type': 'application/json' },
   });
   const data = await resp.json().catch(() => ({}));
   if (!resp.ok) {
     const msg = (data && (data.message || data.error)) || resp.status;
-    throw new Error('Circle entity config failed (' + msg + ')');
+    throw new Error('Circle entity publicKey failed (' + msg + ')');
   }
-  const pub = data && data.data && data.data.publicKey;
+  // Response shape: { data: { publicKey: "-----BEGIN PUBLIC KEY-----..." } }
+  const pub = (data && data.data && data.data.publicKey) || (data && data.publicKey) || null;
   if (!pub) {
-    // Surface the raw response so we can diagnose what Circle actually returned
     throw new Error('Circle entity publicKey missing — raw: ' + JSON.stringify(data).slice(0, 300));
   }
   return pub;

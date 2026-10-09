@@ -41,9 +41,9 @@ function relayerTelemetry(endpoint, reason) {
 }
 
 function getCORS(request, env) {
-  const allowed = (env.ALLOWED_ORIGINS || 'https://elligente.pages.dev').split(',').map(s => s.trim());
+  const allowed = (env.ALLOWED_ORIGINS || 'https://elligente.pages.dev,https://elligentttest.pages.dev').split(',').map(s => s.trim());
   const origin = request.headers.get('Origin') || '';
-  const corsOrigin = allowed.includes(origin) ? origin : (allowed[0] || 'https://elligente.pages.dev');
+  const corsOrigin = allowed.includes(origin) ? origin : (allowed[0] || 'https://elligentttest.pages.dev');
   return {
     'Access-Control-Allow-Origin': corsOrigin,
     'Access-Control-Allow-Methods': 'POST, OPTIONS',

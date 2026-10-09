@@ -9,7 +9,7 @@ export const RELAYER_CONFIG = {
   MEMO_CONTRACT:   '0x5294E9927c3306DcBaDb03fe70b92e01cCede505',
   ARC_CHAIN_ID:    5042,
   ARC_RPC_URL:     'https://rpc.mainnet.arc.io',
-  ALLOWED_ORIGINS: 'https://elligente.pages.dev',
+  ALLOWED_ORIGINS: 'https://elligente.pages.dev,https://elligentttest.pages.dev',
   PAYLINK_FEE_BPS: 200,
   INVOICE_FEE_BPS: 200,
   SEND_ASSETS_FEE_BPS: 20,

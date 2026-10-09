@@ -96,25 +96,32 @@
       // (e.g. SameSite restrictions, expired cookie, browser quirks).
       var headers = { 'Content-Type': 'application/json' };
       try {
-        // Auth module exposes getSessionToken(); if it returns null we fall
-        // back to reading the raw value from localStorage directly.
         var tok = null;
-        if (typeof Auth !== 'undefined' && typeof Auth.getSessionToken === 'function') {
+        // AuthManager is the canonical name (auth.js registers as window.AuthManager).
+        // Auth is a legacy alias some pages may also set — try both.
+        if (!tok && typeof AuthManager !== 'undefined' && typeof AuthManager.getSessionToken === 'function') {
+          tok = AuthManager.getSessionToken();
+        }
+        if (!tok && typeof Auth !== 'undefined' && typeof Auth.getSessionToken === 'function') {
           tok = Auth.getSessionToken();
         }
+        // Fallback: sessionStorage key used by auth.js (_saveToken stores under 'elligente_st')
         if (!tok) {
-          // Attempt direct localStorage read — the session key used by auth.js
-          var raw = localStorage.getItem('elligente_session');
-          if (raw) {
-            var parsed = JSON.parse(raw);
-            if (parsed && parsed.token) tok = parsed.token;
-          }
+          try { tok = sessionStorage.getItem('elligente_st') || null; } catch (_) {}
         }
+        // Fallback: legacy localStorage shape { token: '...' }
         if (!tok) {
-          // Last resort: read from the elligente_sid cookie (visible only if
-          // the cookie was NOT set HttpOnly — keep as fallback, harmless if absent)
-          var cm = document.cookie.match(/elligente_sid=([^;]+)/);
-          if (cm) tok = cm[1];
+          try {
+            var raw = localStorage.getItem('elligente_session');
+            if (raw) { var parsed = JSON.parse(raw); if (parsed && parsed.token) tok = parsed.token; }
+          } catch (_) {}
+        }
+        // Last resort: elligente_sid cookie (only visible when not HttpOnly)
+        if (!tok) {
+          try {
+            var cm = document.cookie.match(/elligente_sid=([^;]+)/);
+            if (cm) tok = cm[1];
+          } catch (_) {}
         }
         if (tok) headers['Authorization'] = 'Bearer ' + tok;
       } catch (_e) {}
@@ -152,10 +159,39 @@
     // User doesn't have a personal wallet yet — show Create My Wallet CTA
     // (needsProvision comes from the backend; isPerUser === false means using platform fallback)
     if (s.needsProvision || (!s.isPerUser && s.isPerUser !== undefined)) {
-      var platAddr = s.walletAddress || (s.wallet && s.wallet.address) || '';
-      var platShort = platAddr ? (platAddr.slice(0,6) + '…' + platAddr.slice(-4)) : '';
+      // Check if the user has an active session — if not, show login prompt instead
+      var hasSession = false;
+      try {
+        if (typeof AuthManager !== 'undefined' && typeof AuthManager.getSessionToken === 'function') {
+          hasSession = !!AuthManager.getSessionToken();
+        }
+        if (!hasSession && typeof Auth !== 'undefined' && typeof Auth.getSessionToken === 'function') {
+          hasSession = !!Auth.getSessionToken();
+        }
+        if (!hasSession) {
+          try { hasSession = !!(sessionStorage.getItem('elligente_st')); } catch(_) {}
+        }
+      } catch(_) {}
+
+      // Not logged in — prompt to sign in first
+      if (!hasSession) {
+        return '<div class="caw-card" style="flex-direction:column;align-items:flex-start;gap:10px;border-color:rgba(245,158,11,.3);background:rgba(245,158,11,.05)">' +
+          '<div style="display:flex;align-items:center;gap:10px;width:100%">' +
+            '<div class="caw-card-icon" style="color:var(--yellow)"><i class="ti ti-lock" style="font-size:22px"></i></div>' +
+            '<div class="caw-card-body">' +
+              '<div class="caw-card-title">Sign in to activate your AI Wallet</div>' +
+              '<div class="caw-card-sub">Create an account or sign in with your email to get your personal Circle wallet on Arc Mainnet.</div>' +
+            '</div>' +
+          '</div>' +
+          '<button onclick="if(typeof authOpen===\'function\'){authOpen()}else if(typeof showAuthModal===\'function\'){showAuthModal()}else{document.querySelector(\'[data-action=login],#auth-trigger,[onclick*=login],[onclick*=auth]\')?.click()}" ' +
+            'style="background:linear-gradient(135deg,#f59e0b,#d97706);color:#fff;border:none;border-radius:6px;padding:8px 18px;font-size:10.5px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px">' +
+            '<i class="ti ti-login"></i>Sign in / Create Account' +
+          '</button>' +
+        '</div>';
+      }
+
+      // Logged in but no wallet yet — show Create My Wallet button
       return '<div style="display:flex;flex-direction:column;gap:8px">' +
-        // CTA card
         '<div class="caw-card" style="flex-direction:column;align-items:flex-start;gap:10px;border-color:rgba(39,117,202,.35);background:rgba(39,117,202,.07)">' +
           '<div style="display:flex;align-items:center;gap:10px;width:100%">' +
             '<div class="caw-card-icon" style="color:#2775ca"><i class="ti ti-wallet-plus" style="font-size:22px"></i></div>' +
@@ -180,11 +216,6 @@
             '</div>' +
           '</div>' +
         '</div>' +
-        // Platform wallet shown below as reference
-        (platShort ? '<div style="font-size:8px;color:var(--muted2);padding:5px 8px;border-radius:5px;border:1px solid var(--border);background:rgba(0,0,0,.1)">' +
-          '<i class="ti ti-building-bank" style="margin-right:4px"></i>Platform wallet in use until yours is created: ' +
-          '<span style="font-family:monospace;color:var(--muted2)">' + platShort + '</span>' +
-        '</div>' : '') +
       '</div>';
     }
     if (s.paused) {
@@ -216,12 +247,21 @@
   }
 
   /**
-   * _readCachedAddress() → the Circle wallet address from the last status call,
-   * or null if status has not been fetched yet.
+   * _readCachedAddress() → the authenticated user's personal Circle wallet
+   * address from the last status call, or null when:
+   *   - Status has not been fetched yet
+   *   - needsProvision=true (user has no personal wallet)
+   *   - isPerUser=false (would be a platform/fallback wallet — never returned)
+   *
+   * SECURITY: must return null rather than a platform wallet address when the
+   * user has not provisioned their personal wallet.
    */
   function _readCachedAddress() {
     var s = _cache.status;
     if (!s) return null;
+    // Only return an address when it belongs to this specific user.
+    // needsProvision=true or isPerUser=false means no personal wallet yet.
+    if (s.needsProvision || s.isPerUser === false) return null;
     return s.walletAddress || (s.wallet && s.wallet.address) || null;
   }
 
@@ -229,10 +269,14 @@
   var _lastResolveAttempt = 0;
 
   /**
-   * resolveAddress() → the Circle AI Smart Wallet address, resolving it from the
-   * real Circle status when the cache is empty. Never invents an address and
-   * never falls back to another wallet; returns null only when Circle genuinely
-   * has no wallet to resolve.
+   * resolveAddress() → the authenticated user's personal Circle wallet address,
+   * resolving it from the real /api/agent/status when the cache is empty.
+   *
+   * Returns null when:
+   *   - The user has not provisioned a personal wallet (needsProvision=true)
+   *   - Circle API is unreachable
+   *
+   * SECURITY: never returns a platform/fallback address — only the user's own.
    */
   async function resolveAddress() {
     var cached = _readCachedAddress();
@@ -243,7 +287,9 @@
     _lastResolveAttempt = now;
     _addressPromise = getStatus(true)
       .then(function (s) {
-        return (s && (s.walletAddress || (s.wallet && s.wallet.address))) || null;
+        // Only resolve when this is the user's personal wallet.
+        if (!s || s.needsProvision || s.isPerUser === false) return null;
+        return (s.walletAddress || (s.wallet && s.wallet.address)) || null;
       })
       .catch(function () { return null; })
       .finally(function () { _addressPromise = null; });
@@ -333,8 +379,16 @@
         try { if (typeof toast === 'function') toast(msg, 'success'); } catch(_e){}
         await refreshCard();
       } else {
+        // Surface the exact backend error so the user (and developer) can see what failed
         var errMsg = (res && res.error) ? res.error : 'Wallet creation failed';
-        try { if (typeof toast === 'function') toast(errMsg, 'error'); } catch(_e){}
+        // Add session context to help diagnose auth failures
+        var hasTok = false;
+        try {
+          if (typeof AuthManager !== 'undefined') hasTok = !!AuthManager.getSessionToken();
+          if (!hasTok) { try { hasTok = !!(sessionStorage.getItem('elligente_st')); } catch(_){} }
+        } catch(_) {}
+        var fullErr = errMsg + (errMsg.indexOf('Unauthorized') !== -1 ? (hasTok ? ' (token present but rejected)' : ' (not logged in — sign in first)') : '');
+        try { if (typeof toast === 'function') toast(fullErr, 'error'); } catch(_e){}
         if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-wallet-plus"></i>Create My Wallet'; }
       }
     } catch(e) {

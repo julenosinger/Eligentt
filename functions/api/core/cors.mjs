@@ -13,6 +13,7 @@ const STATIC_ALLOWED = [
   'https://execdaat.xyz',
   'https://elligentt.xyz',
   'https://elligente.pages.dev',
+  'https://elligentttest.pages.dev',
 ];
 
 const ALLOWED_METHODS = 'GET, POST, OPTIONS';

@@ -115,7 +115,7 @@ export async function onRequest(context) {
 }
 
 function getAllowedOrigin(request, env) {
-  const allowed = (env.ALLOWED_ORIGINS || 'https://elligente.pages.dev').split(',').map(s => s.trim());
+  const allowed = (env.ALLOWED_ORIGINS || 'https://elligente.pages.dev,https://elligentttest.pages.dev').split(',').map(s => s.trim());
   const origin = request.headers.get('Origin') || '';
   return allowed.includes(origin) ? origin : allowed[0];
 }

@@ -6,7 +6,7 @@
 // Note: same-origin requests (the app itself, served from the app origin) are
 // unaffected — CORS only restricts cross-origin browsers.
 
-const DEFAULT_ORIGINS = ['https://elligente.pages.dev'];
+const DEFAULT_ORIGINS = ['https://elligente.pages.dev', 'https://elligentttest.pages.dev'];
 
 function isLocalhost(origin) {
   return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
