@@ -22,11 +22,11 @@
 
 'use strict';
 
-const { describe, it } = require('node:test');
-const assert = require('node:assert/strict');
-const vm = require('node:vm');
-const fs = require('node:fs');
-const path = require('node:path');
+import { describe, it, expect } from 'vitest';
+
+import vm from 'node:vm';
+import fs from 'node:fs';
+import path from 'node:path';
 
 const SHARED = path.join(__dirname, '..', 'public', 'shared');
 const SHARED_SRC = path.join(__dirname, '..', 'shared');
@@ -130,21 +130,17 @@ describe('1. AI Smart Wallet: identity = Circle Wallet', () => {
     const agentAddrFn = ctx.AIWallet && ctx.AIWallet.getAgentAddress;
     if (typeof agentAddrFn === 'function') {
       const addr = agentAddrFn();
-      assert.strictEqual(addr && addr.toLowerCase(), CIRCLE_ADDR.toLowerCase(),
-        'getAgentAddress() must return Circle Wallet, not legacy EOA');
-      assert.notStrictEqual(addr && addr.toLowerCase(), LEGACY_EOA.toLowerCase(),
-        'Must not return legacy AWM EOA as agent identity');
+      expect(addr && addr.toLowerCase(), 'getAgentAddress() must return Circle Wallet, not legacy EOA').toBe(CIRCLE_ADDR.toLowerCase());
+      expect(addr && addr.toLowerCase(), 'Must not return legacy AWM EOA as agent identity').not.toBe(LEGACY_EOA.toLowerCase());
     } else {
       // If no direct export, verify via source: the module must reference
       // CircleAgent.getCachedAddress for identity and not call AWM.getAgentAddress
       // for the agentAddr() function. The source-level contract was already
       // validated via code inspection; this test confirms the module loads cleanly
       // and CircleAgent is available:
-      assert.ok(ctx.AIWallet, 'AIWallet must be exposed on window');
-      assert.strictEqual(ctx.CircleAgent.getCachedAddress(), CIRCLE_ADDR,
-        'CircleAgent.getCachedAddress() must return Circle Wallet');
-      assert.notStrictEqual(ctx.AgentWalletManager.getAgentAddress(), CIRCLE_ADDR,
-        'AWM.getAgentAddress() must NOT equal Circle Wallet (addresses are distinct)');
+      expect(ctx.AIWallet, 'AIWallet must be exposed on window').toBeTruthy();
+      expect(ctx.CircleAgent.getCachedAddress(), 'CircleAgent.getCachedAddress() must return Circle Wallet').toBe(CIRCLE_ADDR);
+      expect(ctx.AgentWalletManager.getAgentAddress(), 'AWM.getAgentAddress() must NOT equal Circle Wallet (addresses are distinct)').not.toBe(CIRCLE_ADDR);
     }
   });
 });
@@ -165,18 +161,15 @@ describe('2. AgentAuthorization: Circle Wallet = agentWallet, personal = granted
       durationMs: 3600000,
       allowPayments: true
     });
-    assert.strictEqual(auth.agentWallet && auth.agentWallet.toLowerCase(), CIRCLE_ADDR.toLowerCase(),
-      'agentWallet must equal Circle Wallet address');
-    assert.notStrictEqual(auth.agentWallet && auth.agentWallet.toLowerCase(), LEGACY_EOA.toLowerCase(),
-      'agentWallet must NOT be the legacy EOA');
+    expect(auth.agentWallet && auth.agentWallet.toLowerCase(), 'agentWallet must equal Circle Wallet address').toBe(CIRCLE_ADDR.toLowerCase());
+    expect(auth.agentWallet && auth.agentWallet.toLowerCase(), 'agentWallet must NOT be the legacy EOA').not.toBe(LEGACY_EOA.toLowerCase());
   });
 
   it('createAuthorization stores walletAddress as grantedBy (personal wallet)', () => {
     const ctx = baseCtx();
     loadAuth(ctx);
     const auth = ctx.AgentAuthorization.createAuthorization({ maxSpending: 50, allowSwap: true });
-    assert.strictEqual(auth.grantedBy && auth.grantedBy.toLowerCase(), PERSONAL_ADDR.toLowerCase(),
-      'grantedBy must be the personal (user) wallet address');
+    expect(auth.grantedBy && auth.grantedBy.toLowerCase(), 'grantedBy must be the personal (user) wallet address').toBe(PERSONAL_ADDR.toLowerCase());
   });
 
   it('agentWallet is NEVER set to LEGACY_EOA', () => {
@@ -185,8 +178,7 @@ describe('2. AgentAuthorization: Circle Wallet = agentWallet, personal = granted
     const auths = ctx.AgentAuthorization.getAll();
     auths.forEach(a => {
       if (a.agentWallet) {
-        assert.notStrictEqual(a.agentWallet.toLowerCase(), LEGACY_EOA.toLowerCase(),
-          'No authorization should have legacy EOA as agentWallet');
+        expect(a.agentWallet.toLowerCase(), 'No authorization should have legacy EOA as agentWallet').not.toBe(LEGACY_EOA.toLowerCase());
       }
     });
   });
@@ -196,8 +188,7 @@ describe('2. AgentAuthorization: Circle Wallet = agentWallet, personal = granted
     loadAuth(ctx);
     const auth = ctx.AgentAuthorization.createAuthorization({ allowBridge: true });
     if (auth.agentWallet) {
-      assert.notStrictEqual(auth.agentWallet.toLowerCase(), PERSONAL_ADDR.toLowerCase(),
-        'agentWallet must not be the personal wallet');
+      expect(auth.agentWallet.toLowerCase(), 'agentWallet must not be the personal wallet').not.toBe(PERSONAL_ADDR.toLowerCase());
     }
   });
 });
@@ -210,24 +201,21 @@ describe('3. FinancialContext.getWalletContext: agentAddress = CircleAgent, not 
     const ctx = baseCtx();
     vm.runInContext(load('financialContext.js'), ctx);
     const wctx = ctx.FinancialContext.getWalletContext();
-    assert.strictEqual(wctx.agentAddress && wctx.agentAddress.toLowerCase(), CIRCLE_ADDR.toLowerCase(),
-      'agentAddress must equal Circle Wallet');
+    expect(wctx.agentAddress && wctx.agentAddress.toLowerCase(), 'agentAddress must equal Circle Wallet').toBe(CIRCLE_ADDR.toLowerCase());
   });
 
   it('getWalletContext().agentAddress is NOT the legacy AWM EOA', () => {
     const ctx = baseCtx();
     vm.runInContext(load('financialContext.js'), ctx);
     const wctx = ctx.FinancialContext.getWalletContext();
-    assert.notStrictEqual(wctx.agentAddress && wctx.agentAddress.toLowerCase(), LEGACY_EOA.toLowerCase(),
-      'agentAddress must NOT be the legacy AWM EOA');
+    expect(wctx.agentAddress && wctx.agentAddress.toLowerCase(), 'agentAddress must NOT be the legacy AWM EOA').not.toBe(LEGACY_EOA.toLowerCase());
   });
 
   it('getWalletContext().agentAddress is null when CircleAgent unavailable (no fallback to AWM)', () => {
     const ctx = baseCtx({ CircleAgent: undefined });
     vm.runInContext(load('financialContext.js'), ctx);
     const wctx = ctx.FinancialContext.getWalletContext();
-    assert.ok(wctx.agentAddress == null,
-      'agentAddress must be null when CircleAgent unavailable — no silent AWM fallback');
+    expect(wctx.agentAddress == null, 'agentAddress must be null when CircleAgent unavailable — no silent AWM fallback').toBeTruthy();
   });
 });
 
@@ -265,8 +253,8 @@ describe('4. AutonomaExecutionGate: agent identity = CircleAgent, not AWM', () =
     const result = await ctx.AutonomaExecutionGate.authorizeAutonomaExecution({
       operation: 'payment', amount: 1, asset: 'USDC', network: 'Arc Mainnet', chainId: 5042
     });
-    assert.strictEqual(result.ok, false, 'Must block when CircleAgent returns no address');
-    assert.strictEqual(result.code, 'agent_wallet_unavailable', 'Code must be agent_wallet_unavailable');
+    expect(result.ok, 'Must block when CircleAgent returns no address').toBe(false);
+    expect(result.code, 'Code must be agent_wallet_unavailable').toBe('agent_wallet_unavailable');
   });
 
   it('uses CircleAgent address as agentWallet in the authorized result', async () => {
@@ -276,15 +264,12 @@ describe('4. AutonomaExecutionGate: agent identity = CircleAgent, not AWM', () =
       operation: 'payment', amount: 1, asset: 'USDC', network: 'Arc Mainnet', chainId: 5042
     });
     if (result.ok) {
-      assert.strictEqual(result.agentWallet && result.agentWallet.toLowerCase(), CIRCLE_ADDR.toLowerCase(),
-        'Authorized result must carry the Circle Wallet as agentWallet');
-      assert.notStrictEqual(result.agentWallet && result.agentWallet.toLowerCase(), LEGACY_EOA.toLowerCase(),
-        'Must NOT carry legacy EOA as agentWallet');
+      expect(result.agentWallet && result.agentWallet.toLowerCase(), 'Authorized result must carry the Circle Wallet as agentWallet').toBe(CIRCLE_ADDR.toLowerCase());
+      expect(result.agentWallet && result.agentWallet.toLowerCase(), 'Must NOT carry legacy EOA as agentWallet').not.toBe(LEGACY_EOA.toLowerCase());
     }
     // If gate blocked (e.g. policy/claim setup incomplete), at minimum it must not
     // have tried to use the legacy EOA:
-    assert.notStrictEqual(result.agentWallet && result.agentWallet, LEGACY_EOA,
-      'Legacy EOA must never appear as agentWallet');
+    expect(result.agentWallet && result.agentWallet, 'Legacy EOA must never appear as agentWallet').not.toBe(LEGACY_EOA);
   });
 });
 
@@ -330,15 +315,12 @@ describe('5. AgentScheduleExecutor: Circle Wallet identity, SecureSignerProvider
     // The module exposes this via getExecutionLog inspection or the public API.
     // We validate that the module loaded without error and that CircleAgent is not
     // replaced by the legacy EOA:
-    assert.ok(ctx.AgentScheduleExecutor, 'AgentScheduleExecutor must load');
+    expect(ctx.AgentScheduleExecutor, 'AgentScheduleExecutor must load').toBeTruthy();
     // CircleAgent address takes priority
-    assert.strictEqual(ctx.CircleAgent.getCachedAddress(), CIRCLE_ADDR,
-      'CircleAgent.getCachedAddress() must return Circle Wallet');
+    expect(ctx.CircleAgent.getCachedAddress(), 'CircleAgent.getCachedAddress() must return Circle Wallet').toBe(CIRCLE_ADDR);
     // AgentWalletManager.getAgentAddress() returns legacy EOA but must NOT influence identity
-    assert.strictEqual(ctx.AgentWalletManager.getAgentAddress(), LEGACY_EOA,
-      'Fixture: AWM returns legacy EOA');
-    assert.notStrictEqual(CIRCLE_ADDR, LEGACY_EOA,
-      'Addresses must differ so we can distinguish identity source');
+    expect(ctx.AgentWalletManager.getAgentAddress(), 'Fixture: AWM returns legacy EOA').toBe(LEGACY_EOA);
+    expect(CIRCLE_ADDR, 'Addresses must differ so we can distinguish identity source').not.toBe(LEGACY_EOA);
   });
 
   it('does not fall back to AWM signer when SecureSignerProvider blocks', async () => {
@@ -372,8 +354,7 @@ describe('5. AgentScheduleExecutor: Circle Wallet identity, SecureSignerProvider
     // signTransaction — we verify no execution happened by confirming no success:
     const log = ctx.AgentScheduleExecutor.getExecutionLog(10);
     const successful = log.filter(e => e.status === 'executed');
-    assert.strictEqual(successful.length, 0,
-      'No executions must succeed when SecureSignerProvider is unavailable — no AWM fallback');
+    expect(successful.length, 'No executions must succeed when SecureSignerProvider is unavailable — no AWM fallback').toBe(0);
   });
 });
 
@@ -392,10 +373,8 @@ describe('6. CCTPV2InboundEngine: no new Agent wallet creation', () => {
     });
     // mintRecipient should be the explicitly provided value (Circle Wallet),
     // NOT silently overwritten by the legacy EOA:
-    assert.strictEqual(t.mintRecipient, CIRCLE_ADDR,
-      'mintRecipient must equal the explicitly provided Circle Wallet address');
-    assert.notStrictEqual(t.mintRecipient, LEGACY_EOA,
-      'mintRecipient must NOT be the legacy AWM EOA');
+    expect(t.mintRecipient, 'mintRecipient must equal the explicitly provided Circle Wallet address').toBe(CIRCLE_ADDR);
+    expect(t.mintRecipient, 'mintRecipient must NOT be the legacy AWM EOA').not.toBe(LEGACY_EOA);
   });
 
   it('executeBurn returns no-signer error when both SecureSignerProvider and AWM fail', async () => {
@@ -415,10 +394,10 @@ describe('6. CCTPV2InboundEngine: no new Agent wallet creation', () => {
       sourceChainId: 1, amount: 5, token: 'USDC', mintRecipient: CIRCLE_ADDR
     });
     const res = await ctx.CCTPV2InboundEngine.executeBurn(t.id);
-    assert.strictEqual(res.ok, false, 'Must fail when signer unavailable');
+    expect(res.ok, 'Must fail when signer unavailable').toBe(false);
     // Error must reference a technical missing-signer condition, NOT produce a
     // "signed" transaction by secretly using the legacy key:
-    assert.ok(res.error, 'Error message must be present');
+    expect(res.error, 'Error message must be present').toBeTruthy();
   });
 });
 
@@ -456,8 +435,7 @@ describe('7. Authorization is mandatory for fund movement', () => {
     const summary = await ctx.AgentScheduleExecutor.tickNow();
     const log = ctx.AgentScheduleExecutor.getExecutionLog(10);
     const succeeded = log.filter(e => e.status === 'executed');
-    assert.strictEqual(succeeded.length, 0,
-      'No schedule must execute without active agent authorization');
+    expect(succeeded.length, 'No schedule must execute without active agent authorization').toBe(0);
   });
 
   it('AutonomaAgentBrain requires confirmation for write intents', () => {
@@ -486,15 +464,14 @@ describe('7. Authorization is mandatory for fund movement', () => {
     // run() returns a promise; the SYNC portion of the plan evaluates policy
     // The test verifies that the confirmation gate exists (requiresConfirmation) for
     // writes with HIGH risk:
-    assert.ok(ctx.AutonomaAgentBrain.plan, 'Plan stage must exist');
+    expect(ctx.AutonomaAgentBrain.plan, 'Plan stage must exist').toBeTruthy();
     // Verify write intents have requiresConfirmation: true
     const planResult = ctx.AutonomaAgentBrain.plan(
       { canonical: 'send_payment', entities: { amount: 100, token: 'USDC', address: '0x' + '33'.repeat(20) }, isWrite: true },
       {},
       {}
     );
-    assert.strictEqual(planResult.requiresConfirmation, true,
-      'Write intents must always require confirmation');
+    expect(planResult.requiresConfirmation, 'Write intents must always require confirmation').toBe(true);
   });
 });
 
@@ -506,18 +483,15 @@ describe('8. Agent EOA never in balance surface HTML', () => {
     const ctx = baseCtx();
     vm.runInContext(load('agentCapabilityRouter.js'), ctx);
     const html = await ctx.AgentCapabilityRouter.buildBalanceSurface();
-    assert.ok(!html.includes(LEGACY_EOA),
-      'Legacy EOA address must NOT appear in balance surface HTML');
-    assert.ok(!html.includes('Agent EOA'),
-      '"Agent EOA" label must NOT appear in balance surface HTML');
+    expect(!html.includes(LEGACY_EOA), 'Legacy EOA address must NOT appear in balance surface HTML').toBeTruthy();
+    expect(!html.includes('Agent EOA'), '"Agent EOA" label must NOT appear in balance surface HTML').toBeTruthy();
   });
 
   it('buildBalanceSurface shows Circle Wallet address', async () => {
     const ctx = baseCtx();
     vm.runInContext(load('agentCapabilityRouter.js'), ctx);
     const html = await ctx.AgentCapabilityRouter.buildBalanceSurface();
-    assert.ok(html.includes(CIRCLE_ADDR) || html.includes('Circle AI Smart Wallet'),
-      'Circle Wallet address or label must appear in balance surface HTML');
+    expect(html.includes(CIRCLE_ADDR) || html.includes('Circle AI Smart Wallet'), 'Circle Wallet address or label must appear in balance surface HTML').toBeTruthy();
   });
 });
 
@@ -544,11 +518,9 @@ describe('9. Operations remain authorization-protected', () => {
     vm.runInContext(load('agentCapabilityRouter.js'), ctx);
     const html = await ctx.AgentCapabilityRouter.buildBalanceSurface();
     // The surface must not contain the legacy EOA (core requirement)
-    assert.ok(!html.includes(LEGACY_EOA),
-      'Legacy EOA must NOT appear in balance surface when authorization is absent');
+    expect(!html.includes(LEGACY_EOA), 'Legacy EOA must NOT appear in balance surface when authorization is absent').toBeTruthy();
     // The surface must be a non-empty string
-    assert.ok(typeof html === 'string' && html.length > 0,
-      'Balance surface must return a non-empty HTML string');
+    expect(typeof html === 'string' && html.length > 0, 'Balance surface must return a non-empty HTML string').toBeTruthy();
   });
 
   it('AgentAuthorization: hasOperationAuth returns false for all ops when no auth exists', () => {
@@ -556,7 +528,7 @@ describe('9. Operations remain authorization-protected', () => {
     vm.runInContext(load('agentAuthorization.js'), ctx);
     // Fresh state — no authorization granted
     ['payment', 'swap', 'bridge', 'crosschain', 'scheduled', 'multisend'].forEach(op => {
-      assert.strictEqual(ctx.AgentAuthorization.hasOperationAuth(op), false,
+      expect(ctx.AgentAuthorization.hasOperationAuth(op)).toBe(false,
         op + ' must not be authorized without a grant');
     });
   });
@@ -570,11 +542,8 @@ describe('9. Operations remain authorization-protected', () => {
       allowBridge: false,
       durationMs: 3600000
     });
-    assert.strictEqual(ctx.AgentAuthorization.hasOperationAuth('payment'), true,
-      'payment must be authorized after explicit grant');
-    assert.strictEqual(ctx.AgentAuthorization.hasOperationAuth('swap'), false,
-      'swap must NOT be authorized when not granted');
-    assert.strictEqual(ctx.AgentAuthorization.hasOperationAuth('bridge'), false,
-      'bridge must NOT be authorized when not granted');
+    expect(ctx.AgentAuthorization.hasOperationAuth('payment'), 'payment must be authorized after explicit grant').toBe(true);
+    expect(ctx.AgentAuthorization.hasOperationAuth('swap'), 'swap must NOT be authorized when not granted').toBe(false);
+    expect(ctx.AgentAuthorization.hasOperationAuth('bridge'), 'bridge must NOT be authorized when not granted').toBe(false);
   });
 });

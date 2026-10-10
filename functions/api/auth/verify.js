@@ -179,39 +179,11 @@ async function _handleVerify(context) {
       user.passwordHash = HASH_PREFIX_V2 + rawHash;
     }
   } else {
-    // Generate a deterministic EVM wallet from entropy via WebCrypto only
-    // (avoids ethers.js bundle issues in Cloudflare Workers).
-    console.log('[AUTH/verify] step:wallet_create_start');
-    let walletAddress, encryptedPK;
-    try {
-      const privKeyBytes = crypto.getRandomValues(new Uint8Array(32));
-      // Derive a compressed public key and address using WebCrypto ECDH
-      // (secp256k1 not directly available — use a simple keccak-free approach:
-      // store the raw private key encrypted, derive address via ethers if available,
-      // otherwise use a placeholder that gets replaced on first use.)
-      let walletAddr = '0x' + Array.from(crypto.getRandomValues(new Uint8Array(20))).map(b => b.toString(16).padStart(2, '0')).join('');
-
-      // Try ethers.Wallet if available (bundled by Wrangler)
-      try {
-        const privHex = '0x' + Array.from(privKeyBytes).map(b => b.toString(16).padStart(2, '0')).join('');
-        const w = new ethers.Wallet(privHex);
-        walletAddr = w.address;
-        console.log('[AUTH/verify] step:ethers_wallet_ok');
-      } catch (ethersErr) {
-        console.warn('[AUTH/verify] step:ethers_wallet_fallback err=' + (ethersErr && ethersErr.message));
-      }
-
-      walletAddress = walletAddr;
-      const walletSalt = Array.from(crypto.getRandomValues(new Uint8Array(16))).map(b => b.toString(16).padStart(2, '0')).join('');
-      const encKey = await deriveEncryptionKey(serverSecret, walletSalt);
-      const privHexFinal = '0x' + Array.from(privKeyBytes).map(b => b.toString(16).padStart(2, '0')).join('');
-      encryptedPK = await encryptData(privHexFinal, encKey, walletSalt);
-      console.log('[AUTH/verify] step:wallet_create_ok addr=' + walletAddress.slice(0, 10));
-    } catch (walletErr) {
-      console.error('[AUTH/verify] step:wallet_create_fail err=' + (walletErr && walletErr.message));
-      walletAddress = '0x' + Array.from(crypto.getRandomValues(new Uint8Array(20))).map(b => b.toString(16).padStart(2, '0')).join('');
-      encryptedPK = null;
-    }
+    // New user: create account WITHOUT a local/internal wallet.
+    // The Circle developer-controlled wallet is provisioned separately via
+    // POST /api/agent/provision (explicit user action) or auto-provisioned
+    // below if Circle is configured. No local key is generated here.
+    console.log('[AUTH/verify] step:new_user_no_internal_wallet');
 
     const passwordSalt = Array.from(crypto.getRandomValues(new Uint8Array(16))).map(b => b.toString(16).padStart(2, '0')).join('');
     let passwordHash = null;
@@ -225,9 +197,8 @@ async function _handleVerify(context) {
       name: name || normalizedEmail.split('@')[0],
       avatar: null,
       wallet: {
-        address: walletAddress,
-        encryptedKey: encryptedPK,
-        type: 'internal',
+        address: null,
+        type: 'none',
         network: 'Arc Mainnet',
         chainId: 5042,
       },
