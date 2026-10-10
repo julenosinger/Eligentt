@@ -4,7 +4,11 @@ import { getAuthCors } from './_cors.mjs';
 
 // SECURITY: responses use a per-request CORS allowlist (see _cors.mjs).
 function mkJson(headers) {
-  return (data, status = 200) => new Response(JSON.stringify(data), { status, headers });
+  return (data, status = 200) => {
+    const h = new Headers(headers);
+    h.set('Content-Type', 'application/json');
+    return new Response(JSON.stringify(data), { status, headers: h });
+  };
 }
 
 // SECURITY: OTP is never stored in plaintext nor returned in the response.
@@ -64,6 +68,18 @@ export async function onRequestOptions(context) {
 }
 
 export async function onRequestPost(context) {
+  try {
+    return await _handleRegister(context);
+  } catch (err) {
+    console.error('[AUTH/register] unhandled error:', err && err.message);
+    const headers = getAuthCors(context.request, context.env);
+    return new Response(JSON.stringify({ error: 'Server error — please try again.' }), {
+      status: 500, headers
+    });
+  }
+}
+
+async function _handleRegister(context) {
   const { request, env } = context;
   const json = mkJson(getAuthCors(request, env));
   const KV = env.AUTH_KV;

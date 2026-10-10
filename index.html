@@ -39590,12 +39590,17 @@ function prfEditProfile() {
     const p = ProfileManager.get();
     if (!p.id || !p.email) return;
     try {
+        // Only restore an existing vault — never create a new wallet on auto-restore.
       const iw = await WalletManager.createOrRestoreWallet(p.email, p.id);
       if (iw && !window.walletAddress) {
-        WalletManager.activateInternalWallet(iw);
-        console.log('[Profile] Auto-restored Intelligent Wallet:', iw.address);
+        // Only activate if Circle wallet is not already the active identity
+        const circleAddr = (typeof CircleAgent !== 'undefined' && CircleAgent.getCachedAddress) ? CircleAgent.getCachedAddress() : null;
+        if (!circleAddr) {
+          WalletManager.activateInternalWallet(iw);
+          console.log('[Profile] Auto-restored local vault wallet:', iw.address);
+        }
       }
-    } catch (e) { console.warn('[Profile] Auto-restore failed:', e.message ?? e); }
+    } catch (e) { console.warn('[Profile] Auto-restore skipped:', e.message ?? e); }
   };
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => setTimeout(run, 800));
@@ -39857,18 +39862,22 @@ async function prfSignIn(authProvider) {
   const profile = await ProfileManager.signIn(authProvider, userData);
   if (typeof WalletManager !== 'undefined' && profile && profile.id) {
     try {
+      // Circle is the primary wallet — do NOT auto-create a local wallet.
+      // Only restore if the user already has a vault (iw != null).
       const iw = await WalletManager.createOrRestoreWallet(profile.email || profile.id, profile.id);
       if (iw) {
-        profile.wallet.address = iw.address;
-        try { localStorage.setItem('elligente_profile', JSON.stringify({ ...profile, stats: { ...profile.stats, chainsUsed: [...(profile.stats.chainsUsed || [])] } })); } catch (_) {}
-        if (!window.walletAddress || window.activeWalletType === 'intelligent') {
-          WalletManager.activateInternalWallet(iw);
+        // Existing local vault restored — use it only if no Circle wallet is active
+        const circleAddr = (typeof CircleAgent !== 'undefined' && CircleAgent.getCachedAddress) ? CircleAgent.getCachedAddress() : null;
+        if (!circleAddr) {
+          profile.wallet.address = iw.address;
+          try { localStorage.setItem('elligente_profile', JSON.stringify({ ...profile, stats: { ...profile.stats, chainsUsed: [...(profile.stats.chainsUsed || [])] } })); } catch (_) {}
+          if (!window.walletAddress || window.activeWalletType === 'intelligent') {
+            WalletManager.activateInternalWallet(iw);
+          }
         }
-        try { toast('Intelligent Wallet activated: ' + iw.address.slice(0, 8) + '...', 'success'); } catch (_) {}
       }
     } catch (e) {
-      console.warn('[Profile] Internal wallet creation error:', e.message ?? e);
-      try { toast('Wallet created (offline mode)', 'info'); } catch (_) {}
+      console.warn('[Profile] Wallet restore error:', e.message ?? e);
     }
   }
   prfRefreshProfile();
@@ -40192,10 +40201,16 @@ function _authCompleteLogin(profile) {
   const emailEl = document.getElementById('auth-success-email');
   const titleEl = document.getElementById('auth-success-title');
   const subEl = document.getElementById('auth-success-sub');
-  if (addrEl) addrEl.textContent = profile.wallet.address ? profile.wallet.address.slice(0, 8) + '...' + profile.wallet.address.slice(-6) : '—';
+  // Prefer Circle wallet address; fall back to server profile address
+  const _circleAddrForModal = (typeof CircleAgent !== 'undefined' && CircleAgent.getCachedAddress) ? CircleAgent.getCachedAddress() : null;
+  const _displayAddr = _circleAddrForModal || profile.wallet.address || null;
+  if (addrEl) addrEl.textContent = _displayAddr ? _displayAddr.slice(0, 8) + '...' + _displayAddr.slice(-6) : '—';
   if (emailEl) emailEl.textContent = profile.email || '—';
   if (titleEl) titleEl.textContent = _authIsNewUser ? 'Account Created' : 'Welcome Back';
   if (subEl) subEl.textContent = _authIsNewUser ? 'Your Intelligent Wallet is ready' : 'Session restored successfully';
+  // Update wallet type label in modal
+  const _walletTypeEl = document.querySelector('#auth-step-success .auth-wallet-row .value.purple');
+  if (_walletTypeEl) _walletTypeEl.textContent = _circleAddrForModal ? 'Circle Developer-Controlled' : (profile.wallet.type || 'Internal Smart Wallet');
 
   _authShowStep('auth-step-success');
   try { toast('Intelligent Wallet activated: ' + (profile.wallet.address || '').slice(0, 8) + '...', 'success'); } catch (_) {}

@@ -164,15 +164,11 @@ const WalletManager = (() => {
       } catch (_) {}
     }
 
-    const wallet = ethers.Wallet.createRandom();
-    const salt = _generateSalt();
-    const derivedKey = await _deriveKey(email + '|' + userId, salt);
-    const encrypted = await _encrypt(wallet.privateKey, derivedKey);
-    localStorage.setItem(VAULT_KEY, JSON.stringify({ ...encrypted, salt, v: 2 }));
-    _internalProvider = new ethers.JsonRpcProvider(ARC_RPC);
-    _internalWallet = wallet.connect(_internalProvider);
-    _accountType = 'internal';
-    return _internalWallet;
+    // No vault or decrypt failed — do NOT create a new random wallet.
+    // Circle developer-controlled wallet is the primary identity.
+    // Explicit user action required to create a local backup wallet.
+    console.warn('[WalletManager] createOrRestoreWallet: no vault found or decrypt failed — returning null (Circle is primary)');
+    return null;
   }
 
   // ── Self-custody (local key) — user holds the key, encrypted on this device ──

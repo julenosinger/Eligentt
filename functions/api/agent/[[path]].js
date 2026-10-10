@@ -303,10 +303,11 @@ async function handleProvision(env, request) {
 
   let circleWallet;
   try {
-    circleWallet = await createUserWallet(env, user.id);
+    circleWallet = await createUserWallet(env, user.id, user.email);
   } catch (e) {
-    console.error('[provision] Circle wallet creation failed:', e && e.message);
-    return json({ ok: false, error: 'Circle wallet provisioning failed: ' + (e && e.message) }, 502);
+    const msg = (e && e.message) || 'unknown';
+    console.error('[provision] Circle wallet creation failed:', msg);
+    return json({ ok: false, error: 'Circle wallet provisioning failed: ' + msg }, 502);
   }
 
   // Persist to KV

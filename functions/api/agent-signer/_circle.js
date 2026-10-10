@@ -366,57 +366,120 @@ function mapStructuredRequest(req) {
 }
 
 /**
- * Create a new Circle developer-controlled wallet for a user.
- * Uses CIRCLE_WALLET_SET_ID env secret (or falls back to creating a new wallet
- * set on the fly if not configured — suitable for dev/low-volume).
- * Returns { walletId, address } on success; throws on failure.
+ * Derive a deterministic UUID v4 from an arbitrary string seed.
+ * Uses SHA-256 so the same seed always produces the same UUID — safe for
+ * idempotency keys that must be stable across retries without clock skew.
+ * Output is a valid RFC-4122 UUID v4 (variant bits set correctly).
  */
-async function createUserWallet(env, userId) {
+async function deterministicUUID(seed) {
+  const enc = new TextEncoder();
+  const hashBuf = await crypto.subtle.digest('SHA-256', enc.encode(seed));
+  const b = new Uint8Array(hashBuf).slice(0, 16);
+  // Set version 4 (bits 12-15 of byte 6)
+  b[6] = (b[6] & 0x0f) | 0x40;
+  // Set variant bits 10 (bits 6-7 of byte 8)
+  b[8] = (b[8] & 0x3f) | 0x80;
+  const hex = Array.from(b).map(x => x.toString(16).padStart(2, '0')).join('');
+  return [
+    hex.slice(0, 8),
+    hex.slice(8, 12),
+    hex.slice(12, 16),
+    hex.slice(16, 20),
+    hex.slice(20, 32),
+  ].join('-');
+}
+
+/**
+ * Generate a random UUID v4 (crypto.randomUUID when available, fallback via
+ * getRandomValues). Each call returns a unique value — required by Circle for
+ * every mutating request (idempotencyKey + entitySecretCiphertext must both be
+ * fresh per request to prevent replay-attack rejection).
+ */
+function randomUUID() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  // Manual fallback for environments without randomUUID
+  const b = crypto.getRandomValues(new Uint8Array(16));
+  b[6] = (b[6] & 0x0f) | 0x40; // version 4
+  b[8] = (b[8] & 0x3f) | 0x80; // variant 10
+  const h = Array.from(b).map(x => x.toString(16).padStart(2, '0')).join('');
+  return `${h.slice(0,8)}-${h.slice(8,12)}-${h.slice(12,16)}-${h.slice(16,20)}-${h.slice(20,32)}`;
+}
+
+async function createUserWallet(env, userId, userEmail) {
   const creds = getCredentials(env);
   if (!creds.apiKey || !creds.entitySecret) {
     throw new Error('Circle API key or entity secret not configured');
   }
-  const walletSetId = (env && env.CIRCLE_WALLET_SET_ID) || null;
 
-  // If no wallet set is configured, create one first.
-  let resolvedWalletSetId = walletSetId;
+  // ── Step 1: Resolve walletSetId ───────────────────────────────────────────
+  // Prefer a pre-configured shared wallet set (CIRCLE_WALLET_SET_ID env secret).
+  // If absent, create one per-user. Each call to POST /walletSets MUST send a
+  // fresh entitySecretCiphertext — Circle rejects reused ciphertexts.
+  let resolvedWalletSetId = (env && env.CIRCLE_WALLET_SET_ID) || null;
+
   if (!resolvedWalletSetId) {
-    // Idempotency key must be stable across retries — no Date.now()
-    const wsIdempotency = 'walletset_user_' + userId + '_v1';
+    const wsCiphertext = await encryptEntitySecret(env); // fresh per request
+    const wsBody = {
+      idempotencyKey: randomUUID(),          // fresh UUID v4 per Circle spec
+      entitySecretCiphertext: wsCiphertext,
+      name: 'Elligentt',
+    };
     const wsResp = await fetch(W3S_BASE + '/developer/walletSets', {
       method: 'POST',
       headers: { Authorization: 'Bearer ' + creds.apiKey, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ idempotencyKey: wsIdempotency, name: 'user_' + userId }),
+      body: JSON.stringify(wsBody),
     });
     const wsData = await wsResp.json().catch(() => ({}));
     if (!wsResp.ok) {
-      throw new Error('Circle walletSet creation failed: ' + ((wsData && wsData.message) || wsResp.status));
+      const detail = JSON.stringify(wsData).slice(0, 400);
+      throw new Error('Circle walletSet creation failed: ' +
+        ((wsData && (wsData.message || wsData.error)) || wsResp.status) +
+        ' | circle response: ' + detail);
     }
     resolvedWalletSetId = wsData && wsData.data && wsData.data.walletSet && wsData.data.walletSet.id;
-    if (!resolvedWalletSetId) throw new Error('Circle walletSet id missing in response');
+    if (!resolvedWalletSetId) {
+      throw new Error('Circle walletSet id missing in response: ' + JSON.stringify(wsData).slice(0, 200));
+    }
   }
 
-  const entitySecretCiphertext = await encryptEntitySecret(env);
-  const idempotencyKey = 'userwallet_' + userId + '_v1';
+  // ── Step 2: Create wallet ─────────────────────────────────────────────────
+  // entitySecretCiphertext MUST be unique per request — generate fresh one.
+  // blockchain: "ARC" = Arc Mainnet (chain id 5042). "ARC-TESTNET" for testnet.
+  const walletCiphertext = await encryptEntitySecret(env);
+  const walletBody = {
+    idempotencyKey: randomUUID(),            // fresh UUID v4 per Circle spec
+    entitySecretCiphertext: walletCiphertext,
+    accountType: 'EOA',
+    walletSetId: resolvedWalletSetId,
+    blockchains: ['ARC'],                    // Arc Mainnet — NOT "ARC-MAINNET"
+    count: 1,
+    metadata: [{ name: userEmail || userId, refId: userId }],
+  };
   const resp = await fetch(W3S_BASE + '/developer/wallets', {
     method: 'POST',
     headers: { Authorization: 'Bearer ' + creds.apiKey, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      idempotencyKey,
-      entitySecretCiphertext,
-      walletSetId: resolvedWalletSetId,
-      blockchains: ['ARC-MAINNET'],
-      count: 1,
-    }),
+    body: JSON.stringify(walletBody),
   });
   const data = await resp.json().catch(() => ({}));
   if (!resp.ok) {
-    throw new Error('Circle wallet creation failed: ' + ((data && data.message) || resp.status));
+    const detail = JSON.stringify(data).slice(0, 400);
+    throw new Error('Circle wallet creation failed: ' +
+      ((data && (data.message || data.error)) || resp.status) +
+      ' | circle response: ' + detail);
   }
   const wallets = data && data.data && data.data.wallets;
-  if (!wallets || wallets.length === 0) throw new Error('Circle wallet creation returned no wallets');
+  if (!wallets || wallets.length === 0) {
+    throw new Error('Circle wallet creation returned no wallets: ' + JSON.stringify(data).slice(0, 200));
+  }
   const w = wallets[0];
-  return { walletId: w.id, address: w.address };
+  return {
+    walletId: w.id,
+    address: w.address,
+    blockchain: w.blockchain,
+    accountType: w.accountType,
+  };
 }
 
 /**

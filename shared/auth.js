@@ -81,9 +81,38 @@ const AuthManager = (() => {
     const headers = { 'Content-Type': 'application/json' };
     const opts = { method, headers, credentials: 'same-origin' };
     if (body && method !== 'GET') opts.body = JSON.stringify(body);
-    const resp = await fetch(API_BASE + endpoint, opts);
-    const data = await resp.json();
-    if (!resp.ok) throw new Error(data.error || 'Request failed');
+
+    let resp;
+    try {
+      resp = await fetch(API_BASE + endpoint, opts);
+    } catch (networkErr) {
+      throw new Error('Network error — check your connection and try again.');
+    }
+
+    const contentType = resp.headers.get('content-type') || '';
+    const text = await resp.text();
+
+    // Guard against SPA HTML fallback, Cloudflare error pages, or 5xx HTML bodies.
+    if (!contentType.includes('application/json')) {
+      console.error('[AuthManager] Non-JSON response from', API_BASE + endpoint, {
+        status: resp.status, contentType, bodyPreview: text.slice(0, 200)
+      });
+      throw new Error(
+        resp.status >= 500
+          ? 'Server error — please try again in a moment.'
+          : 'Authentication service unavailable — please try again.'
+      );
+    }
+
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (_) {
+      console.error('[AuthManager] Invalid JSON from', API_BASE + endpoint, text.slice(0, 200));
+      throw new Error('Invalid response from authentication server.');
+    }
+
+    if (!resp.ok) throw new Error(data.error || data.message || 'Request failed');
     return data;
   }
 

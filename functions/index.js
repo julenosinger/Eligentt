@@ -2,6 +2,19 @@ export async function onRequest(context) {
   const { request, env, next } = context;
   const url = new URL(request.url);
 
+  // Delegate auth, tower, relayer, treasury, payment, and core routes
+  // to their dedicated functions/api/<route>/*.js files.
+  if (
+    url.pathname.startsWith('/api/auth/') ||
+    url.pathname.startsWith('/api/tower/') ||
+    url.pathname.startsWith('/api/relayer/') ||
+    url.pathname.startsWith('/api/treasury/') ||
+    url.pathname.startsWith('/api/payment/') ||
+    url.pathname.startsWith('/api/core/')
+  ) {
+    return next();
+  }
+
   if (url.pathname === '/api/deepseek/chat') {
     if (request.method === 'OPTIONS') {
       return new Response(null, {

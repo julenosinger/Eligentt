@@ -913,34 +913,10 @@
      A1 — BIP-39 mnemonic backup
      ════════════════════════════════════════ */
   function createWalletWithBackup() {
-    if (typeof ethers === 'undefined') return null;
-    if (_creationInProgress) return null;
-    if (_getPersistedWalletIdentity().exists) return null;
-    _creationInProgress = true;
-    try {
-      var w = ethers.Wallet.createRandom();
-      _sessionPrivateKey = w.privateKey;
-      _sessionMnemonic = w.mnemonic ? w.mnemonic.phrase : null;
-      _showBackup = !!_sessionMnemonic;
-      agentProvider = getAgentProvider();
-      agentWallet = w.connect(agentProvider);
-      _setSessionWallet(agentWallet);
-
-      // [C1 FIX] Never persist plaintext key. Encrypt with ENC4.
-      _saveSessionKeyEncrypted().then(function(){
-        try { localStorage.removeItem('elligentt_agent_session_v1'); } catch(e) {}
-      }).catch(function(){
-        try { console.warn('[AgentWalletManager] Key encryption failed'); } catch(e) {}
-      });
-
-      if (agentState) {
-        agentState.walletAddress = agentWallet.address;
-        agentState.registrationDate = agentState.registrationDate || Date.now();
-        saveState();
-      }
-      _creationInProgress = false;
-      return agentWallet;
-    } catch(e) { _creationInProgress = false; return null; }
+    // Disabled: agent identity uses Circle developer-controlled wallets only.
+    // Local mnemonic wallets are not auto-generated. Use POST /api/agent/provision.
+    try { console.warn('[AgentWalletManager] createWalletWithBackup() disabled — use Circle wallet via provision'); } catch(e) {}
+    return null;
   }
 
   function getMnemonic() {
@@ -1242,12 +1218,8 @@
       } catch(e) {}
     }
     loadState();
-    if (_getPersistedWalletIdentity().exists) return null;
-    var w = createAgentWallet();
-    if(w && agentState){
-      _setSessionWallet(w);
-    }
-    return w;
+    // Do NOT auto-create — Circle wallet is the agent identity.
+    return null;
   }
 
   function getAgentWallet(){
@@ -1256,8 +1228,17 @@
   }
 
   function getAgentAddress(){
-    var w = getOrCreateWallet();
-    if (w) return w.address;
+    // Prefer Circle developer-controlled wallet as the canonical agent address.
+    try {
+      if (typeof CircleAgent !== 'undefined' && CircleAgent.getCachedAddress) {
+        var circleAddr = CircleAgent.getCachedAddress();
+        if (circleAddr) return circleAddr;
+      }
+    } catch(_) {}
+    // Fallback: existing in-memory or session wallet (read-only, no create)
+    if (agentWallet) return agentWallet.address;
+    var sess = _sessionWallet();
+    if (sess) return sess.address;
     if (!agentState) loadState();
     return (agentState && agentState.walletAddress) ? agentState.walletAddress : null;
   }
@@ -1448,17 +1429,11 @@
     } catch(e) {}
   }
 
-  // Deferred auto-create — runs when ethers is guaranteed loaded
+  // Auto-create disabled: Circle developer-controlled wallets are the agent
+  // identity. Local mnemonic wallets must not be generated automatically.
+  // Provisioning happens only via POST /api/agent/provision (explicit user action).
   function _scheduleAutoCreate() {
-    if (document.readyState === 'complete' || document.readyState === 'interactive') {
-      _autoCreateIfMissing();
-    } else {
-      document.addEventListener('DOMContentLoaded', function() {
-        _autoCreateIfMissing();
-      });
-    }
-    // Also retry after 2s for late-loading ethers (CDN)
-    setTimeout(function() { _autoCreateIfMissing(); }, 2000);
+    // no-op — intentionally disabled
   }
 
   function _scrubPersistedKeys() {
