@@ -729,13 +729,22 @@
       }
       var wm = _wm();
       var provider = wm ? wm.getAgentProvider() : null;
-      // Resolve signer: SecureSignerProvider (Circle production mode) first, AWM fallback
+      // Resolve signer: Circle mode is the only production path.
+      // FAIL-CLOSED: if Circle mode is active and getSigner fails, do NOT fall
+      // back to AgentWalletManager (local key). Fail the execution safely.
       var signer = null;
-      if (typeof SecureSignerProvider !== 'undefined' && SecureSignerProvider.isCircleMode && SecureSignerProvider.isCircleMode()) {
-        try { signer = await SecureSignerProvider.getSigner(provider); } catch(_se){}
-      }
-      if (!signer && wm && typeof wm.getSessionSigner === 'function') {
-        try { signer = await wm.getSessionSigner(provider); } catch(_se){}
+      var _inCircleMode = typeof SecureSignerProvider !== 'undefined' && SecureSignerProvider.isCircleMode && SecureSignerProvider.isCircleMode();
+      if (_inCircleMode) {
+        try { signer = await SecureSignerProvider.getSigner(provider); } catch(_se){
+          ledger[key] = { status: 'retry_pending', reason: 'Circle signer unavailable: ' + (_se && _se.message || 'unknown'), ts: Date.now(), attempts: attempts, lastAttempt: Date.now() };
+          _saveLedger();
+          return { status: 'retry_pending' };
+        }
+      } else {
+        // Non-Circle mode (dev/browser only) — AWM fallback permitted
+        if (wm && typeof wm.getSessionSigner === 'function') {
+          try { signer = await wm.getSessionSigner(provider); } catch(_se){}
+        }
       }
       if (!provider || !signer) {
         ledger[key] = { status: 'retry_pending', reason: 'Execution signer unavailable — Circle Agent or signing layer not ready', ts: Date.now(), attempts: attempts, lastAttempt: Date.now() };

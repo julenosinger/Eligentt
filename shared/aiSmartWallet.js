@@ -1030,12 +1030,20 @@
       const bal = await tokenBalance(agentAddr(), token);
       if (bal === null) { notify('Balance check failed (RPC) — aborting', 'error'); return; }
       if (bal < amount) { notify('Insufficient Circle Agent balance: ' + bal.toFixed(4) + ' ' + token, 'error'); return; }
-      // Resolve signer: Circle mode (SecureSignerProvider) → dev/browser fallback (AgentWalletManager)
+      // Resolve signer: Circle mode is the only production path.
+      // FAIL-CLOSED: never fall back to AgentWalletManager (local key) when Circle mode is active.
       var aSigner = null;
-      if (typeof SecureSignerProvider !== 'undefined' && SecureSignerProvider.isCircleMode && SecureSignerProvider.isCircleMode()) {
-        aSigner = await SecureSignerProvider.getSigner();
-      } else if (typeof AgentWalletManager !== 'undefined' && AgentWalletManager.getAgentSigner) {
-        aSigner = AgentWalletManager.getAgentSigner();
+      var _inCircleMode = typeof SecureSignerProvider !== 'undefined' && SecureSignerProvider.isCircleMode && SecureSignerProvider.isCircleMode();
+      if (_inCircleMode) {
+        try { aSigner = await SecureSignerProvider.getSigner(); } catch(_se) {
+          notify('Circle signer unavailable — ' + (_se && _se.message || 'check Circle Agent configuration'), 'error');
+          return;
+        }
+      } else {
+        // Non-Circle mode (dev/browser only) — AWM fallback permitted
+        if (typeof AgentWalletManager !== 'undefined' && AgentWalletManager.getAgentSigner) {
+          aSigner = AgentWalletManager.getAgentSigner();
+        }
       }
       if (!aSigner) { notify('Agent signer unavailable — configure Circle Agent or enable browser wallet signing', 'error'); return; }
 
