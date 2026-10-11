@@ -576,6 +576,12 @@
 
   /* ── Wait for a receipt for an already-broadcast transaction ── */
   async function _waitReceipt(provider, txHash){
+    // [ARC-STUDIO] A "pending:" marker means the Circle operation was accepted but
+    // its EVM txHash is not yet available. Poll the server-side status until the
+    // hash appears, then poll the receipt. NEVER poll a receipt with a Circle UUID.
+    if (typeof txHash === 'string' && txHash.indexOf('pending:') === 0) {
+      return await _waitPendingOperation(provider, txHash.slice('pending:'.length));
+    }
     try {
       var receipt = await provider.waitForTransaction(txHash, 1, 60000);
       if (!receipt || receipt.status !== 1) {
@@ -585,6 +591,42 @@
     } catch(waitErr) {
       return { ok: false, txHash: txHash, reason: 'Receipt timeout (tx submitted): ' + (waitErr.shortMessage || waitErr.message || 'timeout').substring(0, 80) };
     }
+  }
+
+  /* ── Poll a pending Circle operation until its EVM hash + receipt resolve.
+        Limited polling + transient-error tolerance. NEVER reports "dropped" for a
+        timeout — an operation still processing is reported as submitted/pending. ── */
+  async function _waitPendingOperation(provider, opKey){
+    var MAX_POLLS = 30;
+    var DELAY_MS = 2000;
+    var lastReason = 'Transaction submitted — awaiting Circle confirmation';
+    for (var i = 0; i < MAX_POLLS; i++) {
+      var st = null;
+      try {
+        if (typeof SecureSignerProvider !== 'undefined' && typeof SecureSignerProvider.getOperationStatus === 'function') {
+          st = await SecureSignerProvider.getOperationStatus(opKey);
+        }
+      } catch(e) {
+        lastReason = 'Status lookup transient: ' + ((e && e.message) || 'error');
+      }
+      if (st && st.ok) {
+        if (st.status === 'confirmed' && st.txHash && /^0x[0-9a-fA-F]{64}$/.test(st.txHash)) {
+          return { ok: true, txHash: st.txHash, receipt: { status: 1, blockNumber: st.blockNumber || null } };
+        }
+        if (st.status === 'failed') {
+          return { ok: false, txHash: st.txHash || null, reason: 'Transaction failed on-chain', receipt: { status: 0 } };
+        }
+        if (st.status === 'submitted' && st.txHash && /^0x[0-9a-fA-F]{64}$/.test(st.txHash)) {
+          // EVM hash now available — fall through to direct receipt polling.
+          return await _waitReceipt(provider, st.txHash);
+        }
+        // status 'pending' (no hash yet) or 'unknown' — keep polling.
+        if (st.status === 'unknown') { lastReason = 'No execution record found — reconcile manually'; }
+      }
+      await new Promise(function(r){ setTimeout(r, DELAY_MS); });
+    }
+    // Polling exhausted — the operation is still processing. NOT "dropped".
+    return { ok: false, txHash: null, reason: lastReason, pending: true };
   }
 
   /* ── Reconcile an occurrence that already has a txHash — NEVER re-broadcast ── */

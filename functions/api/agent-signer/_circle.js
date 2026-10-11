@@ -234,6 +234,41 @@ async function fetchNonce(env, chainId, address, walletIdOverride) {
   throw new Error('Nonce lookup failed: ' + lastErr);
 }
 
+/* ── Operation status reconciliation ────────────────────────────────────────
+   The Circle contractExecution response may carry an operation UUID (`id`)
+   BEFORE the EVM transaction hash is available. These helpers reconcile the
+   Circle operation id → EVM txHash → on-chain receipt, so the client never
+   treats the Circle UUID as a transaction hash.
+   ─────────────────────────────────────────────────────────────────────── */
+
+// Query a Circle transaction by its operation id (returns data.state + data.txHash).
+async function getTransaction(env, txId) {
+  const creds = getCredentials(env);
+  const resp = await fetch(W3S_BASE + '/transactions/' + txId, {
+    method: 'GET',
+    headers: { Authorization: 'Bearer ' + creds.apiKey, 'Content-Type': 'application/json' },
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    throw new Error('Circle transaction lookup failed (' + resp.status + ')');
+  }
+  return data;
+}
+
+// Query an EVM transaction receipt on a given chain (returns null while pending).
+async function getReceipt(chainId, txHash) {
+  const rpc = CHAIN_RPC[chainId];
+  if (!rpc) throw new Error('Unsupported chain ' + chainId);
+  const resp = await fetch(rpc, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_getTransactionReceipt', params: [txHash] }),
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error('RPC receipt lookup failed (' + resp.status + ')');
+  return (data && data.result) || null;
+}
+
 /* ───────────────────────────────────────────────────────────────────────
    AUTONOMA-6C — Structured request → Circle contract-execution descriptor.
    The endpoint never accepts a raw transaction as the authority of truth.
@@ -510,7 +545,7 @@ function getUserCredentials(env, user) {
 
 export {
   W3S_BASE, CHAIN_RPC, getCredentials, isConfigured, corsHeaders, json, err,
-  createContractExecution, fetchNonce, CANONICAL_CIRCLE_WALLET,
+  createContractExecution, fetchNonce, getTransaction, getReceipt, CANONICAL_CIRCLE_WALLET,
   mapStructuredRequest, isKnownContract, isAddress, SIGN_ALLOWLIST, KNOWN_CONTRACTS,
   createUserWallet, getUserCredentials,
 };

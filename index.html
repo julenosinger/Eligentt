@@ -53213,56 +53213,69 @@ setTimeout(function() {
         return;
       }
 
-      // txHash may be "pending:..." when Circle accepted the tx but has not yet
-      // exposed the on-chain hash. Do NOT poll a receipt for a non-hash value.
-      if (txHash && typeof txHash === 'string' && txHash.indexOf('pending:') === 0) {
-        _agentGateClaimDone(paymentGate.claimKey, 'submitted', null);
-        _agentStateMsg(execId, 'SUBMITTED', 'Transaction submitted — awaiting Circle confirmation (tx hash not yet visible)');
-        return;
+      // [ARC-STUDIO] txHash may be a real EVM hash OR a "pending:" marker (Circle
+      // accepted the operation but the hash is not available yet). Only render the
+      // ArcScan link for a REAL EVM hash — never for a Circle operation UUID.
+      var _hasEVM = (typeof txHash === 'string' && /^0x[0-9a-fA-F]{64}$/.test(txHash));
+      if (_hasEVM) {
+        _addAgentResultMsg(
+          '<div style="font-size:10px"><span style="color:#06F7E9">Payment submitted</span><br>'+
+          '<code style="font-size:8px;word-break:break-all;color:#a78bfa">'+txHash+'</code><br>'+
+          '<a href="https://explorer.arc.io/tx/'+txHash+'" target="_blank" style="color:#a78bfa;font-size:8px">View on ArcScan ↗</a></div>',
+          'pending');
+        _agentStateMsg(execId, 'CONFIRMING', 'Awaiting block');
+      } else {
+        _agentStateMsg(execId, 'SUBMITTED', 'Transaction accepted by Circle — awaiting on-chain confirmation');
       }
 
-      _addAgentResultMsg(
-        '<div style="font-size:10px"><span style="color:#06F7E9">Payment submitted</span><br>'+
-        '<code style="font-size:8px;word-break:break-all;color:#a78bfa">'+txHash+'</code><br>'+
-        '<a href="https://explorer.arc.io/tx/'+txHash+'" target="_blank" style="color:#a78bfa;font-size:8px">View on ArcScan ↗</a></div>',
-        'pending');
-
-      _agentStateMsg(execId, 'CONFIRMING', 'Awaiting block');
-
+      // _agentWaitReceipt now reconciles a "pending:" marker (polls Circle status
+      // → EVM hash → receipt). It never reports "dropped" for a timeout — an
+      // operation still processing is reported as submitted/pending.
       var rec;
       try { rec = await _agentWaitReceipt(provider, txHash); }
-      catch(e){ _agentStateMsg(execId, 'DROPPED', 'Not confirmed'); return; }
+      catch(e){ rec = { ok: false, reason: (e.message || 'receipt error').substring(0, 120) }; }
 
-      if(!rec || !rec.ok || !rec.receipt || rec.receipt.status !== 1){
-        if(rec && rec.receipt && rec.receipt.status === 0){
-          _agentGateClaimDone(paymentGate.claimKey, 'failed', txHash);
-          _agentStateMsg(execId, 'REVERTED', '<a href="https://explorer.arc.io/tx/'+txHash+'" target="_blank" style="color:#ef4444">View on ArcScan ↗</a>');
-          return;
-        }
-        _agentStateMsg(execId, 'DROPPED', 'Not confirmed');
+      var _resolvedHash = (rec && typeof rec.txHash === 'string' && /^0x[0-9a-fA-F]{64}$/.test(rec.txHash)) ? rec.txHash : (_hasEVM ? txHash : null);
+
+      if(rec && rec.ok && rec.receipt && rec.receipt.status === 1){
+        var receipt = rec.receipt;
+        _agentStateMsg(execId, 'COMPLETED');
+        _agentGateClaimDone(paymentGate.claimKey, 'confirmed', _resolvedHash);
+
+        _addAgentResultMsg(
+          '<div style="font-size:10px">'+
+          '<span style="color:#22c55e;font-size:12px">✓ Payment Verified On-chain</span><br><br>'+
+          '<strong>'+amount+' USDC sent</strong><br>'+
+          'To: <code style="font-size:8px">'+dest.substring(0,10)+'...</code><br>'+
+          (_resolvedHash
+            ? 'Tx: <code style="font-size:8px;word-break:break-all;color:#a78bfa">'+_resolvedHash+'</code><br>'+
+              '<a href="https://explorer.arc.io/tx/'+_resolvedHash+'" target="_blank" style="color:#a78bfa">Open in ArcScan →</a><br>'
+            : '')+
+          'Block: #'+(receipt?receipt.blockNumber:'?')+' · From: '+agentAddr.substring(0,8)+'... (Agent)'+
+          '</div>', 'success');
+
+        if(typeof AgentAudit!=='undefined') AgentAudit.recordExecution({
+          operation:'payment', amount:amount, asset:'USDC', chain:'Arc Mainnet',
+          transactionHash:_resolvedHash, result:'success', duration:0, gasUsed:receipt?Number(receipt.gasUsed):0
+        });
+        if(typeof AgentReputation!=='undefined') AgentReputation.recordSuccess('payment', 0, 0);
+        if(typeof AgentWalletManager!=='undefined') AgentWalletManager.recordOperationSuccess('payment');
         return;
       }
-      var receipt = rec.receipt;
 
-      _agentStateMsg(execId, 'COMPLETED');
-      _agentGateClaimDone(paymentGate.claimKey, 'confirmed', txHash);
+      // Deterministic on-chain revert → Failed (with the EVM hash when present).
+      if(rec && rec.receipt && rec.receipt.status === 0){
+        _agentGateClaimDone(paymentGate.claimKey, 'failed', _resolvedHash);
+        _agentStateMsg(execId, 'REVERTED', _resolvedHash
+          ? '<a href="https://explorer.arc.io/tx/'+_resolvedHash+'" target="_blank" style="color:#ef4444">View on ArcScan ↗</a>'
+          : 'Transaction reverted on-chain');
+        return;
+      }
 
-      _addAgentResultMsg(
-        '<div style="font-size:10px">'+
-        '<span style="color:#22c55e;font-size:12px">✓ Payment Verified On-chain</span><br><br>'+
-        '<strong>'+amount+' USDC sent</strong><br>'+
-        'To: <code style="font-size:8px">'+dest.substring(0,10)+'...</code><br>'+
-        'Tx: <code style="font-size:8px;word-break:break-all;color:#a78bfa">'+txHash+'</code><br>'+
-        '<a href="https://explorer.arc.io/tx/'+txHash+'" target="_blank" style="color:#a78bfa">Open in ArcScan →</a><br>'+
-        'Block: #'+(receipt?receipt.blockNumber:'?')+' · From: '+agentAddr.substring(0,8)+'... (Agent)'+
-        '</div>', 'success');
-
-      if(typeof AgentAudit!=='undefined') AgentAudit.recordExecution({
-        operation:'payment', amount:amount, asset:'USDC', chain:'Arc Mainnet',
-        transactionHash:txHash, result:'success', duration:0, gasUsed:receipt?Number(receipt.gasUsed):0
-      });
-      if(typeof AgentReputation!=='undefined') AgentReputation.recordSuccess('payment', 0, 0);
-      if(typeof AgentWalletManager!=='undefined') AgentWalletManager.recordOperationSuccess('payment');
+      // Not confirmed and not a proven revert — keep "submitted", NEVER "dropped".
+      _agentGateClaimDone(paymentGate.claimKey, 'submitted', _resolvedHash);
+      _agentStateMsg(execId, 'SUBMITTED', (rec && rec.reason) || 'Awaiting on-chain confirmation');
+      return;
     }
     else if(operation==='swap'){
       var swapParams = null;

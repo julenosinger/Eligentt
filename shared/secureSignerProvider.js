@@ -200,8 +200,23 @@
     if (!res || res.ok !== true) {
       throw new Error('Circle signer broadcast failed: ' + ((res && (res.error || res.reason)) || 'unknown'));
     }
-    // txHash may be null when tx is pending (nonce conflict / in-flight) — still ok
-    return res.txHash || res.id || 'pending:' + (res.state || 'submitted');
+    // [ARC-STUDIO] The Circle response may carry an operation UUID (`res.id`)
+    // BEFORE the EVM txHash is available. NEVER return that UUID as a transaction
+    // hash — callers would poll a receipt / build an ArcScan link with the UUID.
+    // Instead return the EVM hash when present, otherwise a "pending:" marker that
+    // carries the operation identifiers for later reconciliation.
+    if (res.txHash && typeof res.txHash === 'string' && /^0x[0-9a-fA-F]{64}$/.test(res.txHash)) {
+      return res.txHash;
+    }
+    var opKey = executionId || res.id || res.state || 'submitted';
+    return 'pending:' + opKey;
+  }
+
+  /* ── Operation status reconciliation ── */
+  // Polls /api/agent-signer/status for the eventual EVM txHash + on-chain state.
+  // Returns { ok, status, txHash, circleOperationId, state, blockNumber }.
+  async function getOperationStatus(executionId) {
+    return await _postJson('/api/agent-signer/status', { executionId: executionId });
   }
 
   /* ── Receipt (read-only — safe in both modes) ── */
@@ -270,6 +285,7 @@
     getSignerAddress: getSignerAddress,
     nextNonce: nextNonce,
     broadcast: broadcast,
+    getOperationStatus: getOperationStatus,
     waitReceipt: waitReceipt,
     getStatus: getStatus,
     version: 'AUTONOMA-6C'

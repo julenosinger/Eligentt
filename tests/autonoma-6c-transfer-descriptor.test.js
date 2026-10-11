@@ -98,9 +98,10 @@ describe('AUTONOMA-6C — structured descriptor is passed to the Circle signer',
     expect(agentSend).toContain("type: 'transfer'");
   });
 
-  it('Smart Wallet send treats "pending:" as submitted (not failure)', () => {
+  it('Smart Wallet send reconciles pending via waitReceipt (no false confirmed/failed)', () => {
     const agentSend = smartWalletSrc.slice(smartWalletSrc.indexOf('if (aSigner.isRemote)'), smartWalletSrc.indexOf('Browser/dev mode'));
-    expect(agentSend).toContain("indexOf('pending:') === 0");
+    expect(agentSend).toContain('SecureSignerProvider.waitReceipt');
+    expect(agentSend).toContain("status: 'pending'");
   });
 
   it('secureSignerProvider surfaces WHICH endpoint returned a non-JSON error', () => {
@@ -109,10 +110,12 @@ describe('AUTONOMA-6C — structured descriptor is passed to the Circle signer',
 });
 
 describe('AUTONOMA-6C — UI error differentiation (index.html)', () => {
-  it('payment branch handles pending: submission without polling a receipt', () => {
+  it('payment branch only renders ArcScan link for a real EVM hash (no pending receipt poll)', () => {
     const payBranch = srcHtml.slice(srcHtml.indexOf("if(!dest || typeof dest !== 'string'"), srcHtml.indexOf("else if(operation==='swap')"));
-    expect(payBranch).toContain("indexOf('pending:') === 0");
+    expect(payBranch).toContain('_hasEVM');
     expect(payBranch).toContain('SUBMITTED');
+    expect(payBranch).not.toContain("'DROPPED'");
+    expect(payBranch).not.toContain("'Not confirmed'");
   });
 
   it('payment branch distinguishes definitive vs unknown-outcome (HTTP 502) failures', () => {

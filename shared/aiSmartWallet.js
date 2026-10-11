@@ -1068,15 +1068,27 @@
         renderHistory();
         var result = await SecureSignerProvider.broadcast(aSigner, provider, rawTx, opts);
         var txHash = result && (result.txHash || result.hash || result);
-        if (typeof txHash === 'string' && txHash.indexOf('pending:') === 0) {
-          // Submitted to Circle but txHash not yet available — do NOT report failure.
-          pushHistory({ kind: 'funding', status: 'pending', op: kind, amount: amount, token: token, to: to });
-          notify(kind + ' submitted — awaiting Circle confirmation (tx not yet visible)', 'info');
-        } else if (typeof txHash === 'string') {
-          pushHistory({ kind: 'funding', status: 'confirmed', op: kind, amount: amount, token: token, to: to, txHash: txHash });
-          notify(kind + ' confirmed on-chain', 'success');
-        } else {
+        if (typeof txHash !== 'string') {
           throw new Error((result && result.error) || 'Broadcast returned no txHash');
+        }
+        // [ARC-STUDIO] txHash may be a real EVM hash OR a "pending:" marker (Circle
+        // accepted the operation but the hash is not yet available). Reconcile via
+        // SecureSignerProvider.waitReceipt, which polls the Circle status → EVM hash
+        // → receipt, and NEVER reports a false "dropped" for a still-processing op.
+        pushHistory({ kind: 'funding', status: 'pending', op: kind, amount: amount, token: token, to: to });
+        renderHistory();
+        notify(kind + ' submitted — waiting for confirmation…', 'info');
+        var _rec = await SecureSignerProvider.waitReceipt(provider, txHash);
+        if (_rec && _rec.ok && _rec.receipt && _rec.receipt.status === 1) {
+          pushHistory({ kind: 'funding', status: 'confirmed', op: kind, amount: amount, token: token, to: to, txHash: _rec.txHash || txHash });
+          notify(kind + ' confirmed on-chain', 'success');
+        } else if (_rec && _rec.receipt && _rec.receipt.status === 0) {
+          pushHistory({ kind: 'funding', status: 'failed', op: kind, amount: amount, token: token, to: to });
+          notify(kind + ' failed on-chain', 'error');
+        } else {
+          // Still processing — keep "pending", never mark failed/dropped.
+          pushHistory({ kind: 'funding', status: 'pending', op: kind, amount: amount, token: token, to: to });
+          notify(kind + ' submitted — awaiting on-chain confirmation', 'info');
         }
         refreshPortfolio(true); renderHistory(); renderHistoryStats();
         return;
