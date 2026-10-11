@@ -53235,6 +53235,46 @@ setTimeout(function() {
       try { rec = await _agentWaitReceipt(provider, txHash); }
       catch(e){ rec = { ok: false, reason: (e.message || 'receipt error').substring(0, 120) }; }
 
+      // [ARC-STUDIO] Active follow-up: while the Circle operation is still awaiting an
+      // on-chain receipt, keep polling the server-side status (light ~5s cadence)
+      // until it resolves to confirmed/reverted, so the chat reaches the final card
+      // with the REAL EVM hash + ArcScan link (instead of ending permanently on the
+      // intermediate execution card). Bounded and never re-broadcasts the same
+      // executionId (status is read-only).
+      var _isSettled = function(r){
+        return !!(r && r.ok && r.receipt && r.receipt.status === 1) ||
+               !!(r && r.receipt && r.receipt.status === 0);
+      };
+      var _opKey = (typeof txHash === 'string' && txHash.indexOf('pending:') === 0) ? txHash.slice('pending:'.length) : null;
+      if (!_isSettled(rec) && _opKey) {
+        for (var _fu = 0; _fu < 60; _fu++) {
+          if (_agentStopCheck(execId)) return;
+          await new Promise(function(r){ setTimeout(r, 5000); });
+          var _st = null;
+          try {
+            if (typeof SecureSignerProvider !== 'undefined' && typeof SecureSignerProvider.getOperationStatus === 'function') {
+              _st = await SecureSignerProvider.getOperationStatus(_opKey);
+            }
+          } catch(e){}
+          if (_st && _st.ok) {
+            if (_st.status === 'confirmed' && _st.txHash && /^0x[0-9a-fA-F]{64}$/.test(_st.txHash)) {
+              rec = { ok: true, txHash: _st.txHash, receipt: { status: 1, blockNumber: _st.blockNumber || null } };
+              break;
+            }
+            if (_st.status === 'failed') {
+              rec = { ok: false, txHash: _st.txHash || null, receipt: { status: 0 } };
+              break;
+            }
+            if (_st.txHash && /^0x[0-9a-fA-F]{64}$/.test(_st.txHash)) {
+              // EVM hash now available — wait for the receipt (single bounded call).
+              try { rec = await _agentWaitReceipt(provider, _st.txHash); }
+              catch(e){ rec = { ok: false, txHash: _st.txHash, reason: (e.message || 'receipt error').substring(0, 120) }; }
+              if (_isSettled(rec)) break;
+            }
+          }
+        }
+      }
+
       var _resolvedHash = (rec && typeof rec.txHash === 'string' && /^0x[0-9a-fA-F]{64}$/.test(rec.txHash)) ? rec.txHash : (_hasEVM ? txHash : null);
 
       if(rec && rec.ok && rec.receipt && rec.receipt.status === 1){

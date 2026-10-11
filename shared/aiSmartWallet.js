@@ -1079,6 +1079,40 @@
         renderHistory();
         notify(kind + ' submitted — waiting for confirmation…', 'info');
         var _rec = await SecureSignerProvider.waitReceipt(provider, txHash);
+        // [ARC-STUDIO] Active follow-up: keep polling the Circle status while the
+        // operation is still awaiting a receipt, so the Smart Wallet history reaches
+        // 'confirmed' with the REAL EVM hash instead of staying 'pending' forever.
+        var _swSettled = function(r){
+          return !!(r && r.ok && r.receipt && r.receipt.status === 1) ||
+                 !!(r && r.receipt && r.receipt.status === 0);
+        };
+        var _swOpKey = (typeof txHash === 'string' && txHash.indexOf('pending:') === 0) ? txHash.slice('pending:'.length) : null;
+        if (!_swSettled(_rec) && _swOpKey) {
+          for (var _swFu = 0; _swFu < 60; _swFu++) {
+            await new Promise(function(r){ setTimeout(r, 5000); });
+            var _swSt = null;
+            try {
+              if (typeof SecureSignerProvider !== 'undefined' && typeof SecureSignerProvider.getOperationStatus === 'function') {
+                _swSt = await SecureSignerProvider.getOperationStatus(_swOpKey);
+              }
+            } catch(e){}
+            if (_swSt && _swSt.ok) {
+              if (_swSt.status === 'confirmed' && _swSt.txHash && /^0x[0-9a-fA-F]{64}$/.test(_swSt.txHash)) {
+                _rec = { ok: true, txHash: _swSt.txHash, receipt: { status: 1, blockNumber: _swSt.blockNumber || null } };
+                break;
+              }
+              if (_swSt.status === 'failed') {
+                _rec = { ok: false, txHash: _swSt.txHash || null, receipt: { status: 0 } };
+                break;
+              }
+              if (_swSt.txHash && /^0x[0-9a-fA-F]{64}$/.test(_swSt.txHash)) {
+                try { _rec = await SecureSignerProvider.waitReceipt(provider, _swSt.txHash); }
+                catch(e){ _rec = { ok: false, txHash: _swSt.txHash }; }
+                if (_swSettled(_rec)) break;
+              }
+            }
+          }
+        }
         if (_rec && _rec.ok && _rec.receipt && _rec.receipt.status === 1) {
           pushHistory({ kind: 'funding', status: 'confirmed', op: kind, amount: amount, token: token, to: to, txHash: _rec.txHash || txHash });
           notify(kind + ' confirmed on-chain', 'success');

@@ -632,15 +632,43 @@
   /* ── Reconcile an occurrence that already has a txHash — NEVER re-broadcast ── */
   async function _reconcileSubmitted(sched, key, prior){
     var txHash = prior.txHash;
-    // "pending:*" means the Circle tx was accepted but txHash not yet available
+    // "pending:*" means the Circle tx was accepted but txHash not yet available.
+    // Poll the server-side status to reconcile op → EVM hash → receipt. A confirmed
+    // receipt flips the occurrence to 'executed' with the REAL hash; a proven revert
+    // flips it to 'failed'; otherwise it stays 'submitted' for the next tick (a
+    // still-processing op is NEVER reported as dropped or failed).
     if (txHash && typeof txHash === 'string' && txHash.indexOf('pending:') === 0) {
-      ledger[key] = { status: 'submitted', txHash: null, ts: Date.now(), attempts: prior.attempts || 0 };
+      var wmP = _wm();
+      var providerP = wmP ? wmP.getAgentProvider() : null;
+      if (!providerP) return { status: 'submitted', txHash: null, pending: true };
+      var pend = await _waitPendingOperation(providerP, txHash.slice('pending:'.length));
+      var engP = _engine();
+      if (pend && pend.ok && pend.txHash) {
+        ledger[key] = { status: 'executed', txHash: pend.txHash, ts: Date.now(), attempts: prior.attempts || 0 };
+        _saveLedger();
+        if (engP && typeof engP.updateExecutionClaim === 'function') engP.updateExecutionClaim(key, 'agent_schedule_executor', { status: 'confirmed', txHash: pend.txHash });
+        _advanceSchedule(sched, 'Reconciled: transaction confirmed on-chain', 'executed', pend.txHash, { sender: null, token: sched.token, amount: sched.amount });
+        _notify(sched, 'executed', 'Schedule "' + sched.name + '" reconciled: tx ' + pend.txHash.slice(0, 10) + '... confirmed', 'success');
+        return { status: 'executed', txHash: pend.txHash };
+      }
+      if (pend && pend.ok === false && pend.receipt && pend.receipt.status === 0) {
+        ledger[key] = { status: 'failed', reason: 'Reconciled: transaction reverted on-chain', txHash: pend.txHash || null, ts: Date.now(), attempts: prior.attempts || 0 };
+        _saveLedger();
+        if (engP && typeof engP.updateExecutionClaim === 'function') engP.updateExecutionClaim(key, 'agent_schedule_executor', { status: 'failed', txHash: pend.txHash || null });
+        _advanceSchedule(sched, 'Reconciled: transaction reverted on-chain', 'failed', pend.txHash || null, { sender: null, token: sched.token, amount: sched.amount });
+        return { status: 'failed', txHash: pend.txHash || null };
+      }
+      // Still pending (hash not yet available / transient RPC) — keep 'submitted'.
+      // Never mark failed on a timeout. A later tick re-polls.
+      ledger[key] = { status: 'submitted', txHash: txHash, ts: Date.now(), attempts: prior.attempts || 0 };
       _saveLedger();
-      _advanceSchedule(sched, 'Transaction submitted (awaiting confirmation)', 'submitted', null, { token: sched.token, amount: sched.amount });
-      return { status: 'submitted', txHash: null };
+      return { status: 'submitted', txHash: null, pending: true };
     }
     if (!txHash) {
-      ledger[key] = { status: 'failed', reason: 'Submitted without txHash — manual reconciliation required', ts: Date.now(), attempts: prior.attempts || 0 };
+      // No hash and no pending marker — keep 'submitted', NEVER mark failed. A
+      // missing hash is not proof of on-chain failure (it may simply not have been
+      // recorded yet); the next tick keeps reconciling.
+      ledger[key] = { status: 'submitted', txHash: null, ts: Date.now(), attempts: prior.attempts || 0 };
       _saveLedger();
       return { status: 'reconciling' };
     }
@@ -928,16 +956,23 @@
         // "pending:*" means Circle accepted the tx but txHash is not yet available
         var isPendingHash = txHash && typeof txHash === 'string' && txHash.indexOf('pending:') === 0;
         lastHash = isPendingHash ? null : txHash;
-        ledger[key] = { status: 'submitted', txHash: lastHash, nonce: prep.nonce, from: prep.from, ts: Date.now(), attempts: attempts, amount: spent + v.transfers[i].amount, asset: v.token };
+        // [ARC-STUDIO] Persist the FULL "pending:opKey" marker (NOT null) so a later
+        // tick can reconcile the Circle operation id → EVM hash via the status
+        // endpoint. Dropping the marker to null makes _reconcileSubmitted treat it as
+        // "submitted without txHash" and mark the occurrence FAILED (a false failure).
+        var storedHash = isPendingHash ? txHash : lastHash;
+        ledger[key] = { status: 'submitted', txHash: storedHash, nonce: prep.nonce, from: prep.from, ts: Date.now(), attempts: attempts, amount: spent + v.transfers[i].amount, asset: v.token };
         _saveLedger();
-        if (eng0 && typeof eng0.updateExecutionClaim === 'function') eng0.updateExecutionClaim(key, 'agent_schedule_executor', { status: 'submitted', txHash: lastHash });
+        if (eng0 && typeof eng0.updateExecutionClaim === 'function') eng0.updateExecutionClaim(key, 'agent_schedule_executor', { status: 'submitted', txHash: storedHash });
 
-        // If no real txHash yet, treat as submitted and skip receipt wait
+        // No real txHash yet: keep 'submitted' (with the pending marker) and return.
+        // A later tick reconciles via _reconcileSubmitted → _waitPendingOperation.
+        // MUST NOT fall through to the "executed" recording below (that would mark the
+        // schedule executed with a null hash and then throw on lastHash.slice).
         if (isPendingHash) {
           _notify(sched, 'pending', 'Schedule "' + sched.name + '" submitted (awaiting Circle confirmation)', 'info');
           _outcome = 'submitted';
-          spent += v.transfers[i].amount;
-          continue;
+          return { status: 'submitted', pending: true, opKey: txHash.slice('pending:'.length), amount: spent + v.transfers[i].amount };
         }
 
         var rec;
@@ -1138,7 +1173,12 @@
         rec = { ok: false, txHash: rowTxHash, reason: (wErr.shortMessage || wErr.message || 'receipt error').substring(0, 120) };
       }
       if (!rec.ok) {
-        rows[i].txHash = rec.txHash;
+        // [ARC-STUDIO] Preserve the "pending:opKey" marker when the Circle hash is
+        // not yet available, so a later reconciliation can recover the EVM hash
+        // (never drop it to null → false "submitted without txHash" failure).
+        var isPendingRow = rowTxHash && typeof rowTxHash === 'string' && rowTxHash.indexOf('pending:') === 0;
+        var rowStoreHash = (isPendingRow && !rec.txHash) ? rowTxHash : rec.txHash;
+        rows[i].txHash = rowStoreHash;
         rows[i].error = rec.reason || null;
         if (rec.receipt && rec.receipt.status === 0) {
           rows[i].status = 'failed';
@@ -1153,10 +1193,15 @@
           return { status: 'failed', reason: revertNote, rows: rows };
         }
         // Receipt timeout → keep row 'submitted', stop here and reconcile later. Never re-send.
-        ledger[key] = { status: 'submitted', txHash: rec.txHash, rows: rows, ts: Date.now(), attempts: attempts, amount: total, asset: v.token };
+        ledger[key] = { status: 'submitted', txHash: rowStoreHash, rows: rows, ts: Date.now(), attempts: attempts, amount: total, asset: v.token };
         _saveLedger();
-        _notify(sched, 'pending', 'Schedule "' + sched.name + '" MultiSend row submitted (tx ' + rec.txHash.slice(0, 10) + '...) — awaiting confirmation', 'info');
-        return { status: 'submitted', txHash: rec.txHash, rows: rows };
+        if (engM && typeof engM.updateExecutionClaim === 'function') engM.updateExecutionClaim(key, 'agent_schedule_executor', { status: 'submitted', txHash: rowStoreHash });
+        if (isPendingRow && !rec.txHash) {
+          _notify(sched, 'pending', 'Schedule "' + sched.name + '" MultiSend row submitted (awaiting Circle confirmation)', 'info');
+        } else {
+          _notify(sched, 'pending', 'Schedule "' + sched.name + '" MultiSend row submitted (tx ' + rec.txHash.slice(0, 10) + '...) — awaiting confirmation', 'info');
+        }
+        return { status: 'submitted', txHash: rowStoreHash, rows: rows };
       }
 
       confirmed++;
