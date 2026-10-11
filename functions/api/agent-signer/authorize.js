@@ -16,19 +16,29 @@ import { issueProof, proofAvailable } from './_proof.mjs';
 import { verifySession } from './_session.mjs';
 
 // Resolve the effective Circle credentials for an authenticated session.
-// Looks up the user's per-user wallet from AUTH_KV; falls back to global env.
+// When user has a personal Circle wallet, ALWAYS use it — never fall back
+// to platform wallet for a user who has their own wallet provisioned.
 async function resolveCredentials(env, session) {
-  const base = getCredentials(env);
   const KV = env && env.AUTH_KV;
-  if (!KV || !session || !session.email) return base;
+  if (!KV || !session || !session.email) return getCredentials(env);
 
   try {
     const raw = await KV.get('user:' + session.email);
-    if (!raw) return base;
+    if (!raw) return getCredentials(env);
     const user = JSON.parse(raw);
-    return getUserCredentials(env, user);
+    const userCreds = getUserCredentials(env, user);
+    // Use per-user wallet when provisioned; fail-closed (return null) when
+    // the user exists in KV but has no personal wallet yet (needsProvision).
+    if (userCreds && userCreds.walletAddress && userCreds.isPerUser !== false) {
+      return userCreds;
+    }
+    // User in KV but no personal wallet — return null so caller returns 403/needsProvision
+    if (user && (user.circleNeedsProvision || !user.circleWalletAddress)) {
+      return null;
+    }
+    return getCredentials(env);
   } catch (_) {
-    return base;
+    return getCredentials(env);
   }
 }
 
@@ -68,10 +78,15 @@ export async function onRequestPost(context) {
 
   // Resolve per-user or global credentials
   const creds = await resolveCredentials(env, session);
+  if (!creds) {
+    return err('Circle wallet not provisioned for this user — create your AI wallet first', 403, env, request);
+  }
 
   const proof = await issueProof(env, {
     executionId,
-    userId: session.userId || session.email || null,
+    // Store email as userId so broadcast.js can look up user:email in KV.
+    // session.userId is a UUID — not a valid KV key for user records.
+    userId: session.email || session.userId || null,
     chainId,
     operation,
     walletId: creds.walletId,

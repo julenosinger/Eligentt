@@ -376,6 +376,14 @@
         var msg = res.alreadyProvisioned
           ? 'Wallet already exists: ' + (res.address ? res.address.slice(0,6) + '…' + res.address.slice(-4) : '')
           : 'Wallet created on Arc Mainnet: ' + (res.address ? res.address.slice(0,6) + '…' + res.address.slice(-4) : '');
+        // Revoke any stale authorizations that were bound to an old/internal wallet address.
+        // The user now has a Circle wallet; old auths with a different agentWallet would
+        // trigger agent_wallet_mismatch on the first execution attempt.
+        try {
+          if (typeof AgentAuthorization !== 'undefined' && typeof AgentAuthorization.revokeAll === 'function') {
+            AgentAuthorization.revokeAll('circle_wallet_provisioned');
+          }
+        } catch(_e) {}
         try { if (typeof toast === 'function') toast(msg, 'success'); } catch(_e){}
         await refreshCard();
       } else {

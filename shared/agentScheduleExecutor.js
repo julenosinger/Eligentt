@@ -579,6 +579,13 @@
   /* ── Reconcile an occurrence that already has a txHash — NEVER re-broadcast ── */
   async function _reconcileSubmitted(sched, key, prior){
     var txHash = prior.txHash;
+    // "pending:*" means the Circle tx was accepted but txHash not yet available
+    if (txHash && typeof txHash === 'string' && txHash.indexOf('pending:') === 0) {
+      ledger[key] = { status: 'submitted', txHash: null, ts: Date.now(), attempts: prior.attempts || 0 };
+      _saveLedger();
+      _advanceSchedule(sched, 'Transaction submitted (awaiting confirmation)', 'submitted', null, { token: sched.token, amount: sched.amount });
+      return { status: 'submitted', txHash: null };
+    }
     if (!txHash) {
       ledger[key] = { status: 'failed', reason: 'Submitted without txHash — manual reconciliation required', ts: Date.now(), attempts: prior.attempts || 0 };
       _saveLedger();
@@ -855,10 +862,20 @@
         }
 
         // 4. txHash is known — persist it IMMEDIATELY (before waiting for the receipt).
-        lastHash = txHash;
-        ledger[key] = { status: 'submitted', txHash: txHash, nonce: prep.nonce, from: prep.from, ts: Date.now(), attempts: attempts, amount: spent + v.transfers[i].amount, asset: v.token };
+        // "pending:*" means Circle accepted the tx but txHash is not yet available
+        var isPendingHash = txHash && typeof txHash === 'string' && txHash.indexOf('pending:') === 0;
+        lastHash = isPendingHash ? null : txHash;
+        ledger[key] = { status: 'submitted', txHash: lastHash, nonce: prep.nonce, from: prep.from, ts: Date.now(), attempts: attempts, amount: spent + v.transfers[i].amount, asset: v.token };
         _saveLedger();
-        if (eng0 && typeof eng0.updateExecutionClaim === 'function') eng0.updateExecutionClaim(key, 'agent_schedule_executor', { status: 'submitted', txHash: txHash });
+        if (eng0 && typeof eng0.updateExecutionClaim === 'function') eng0.updateExecutionClaim(key, 'agent_schedule_executor', { status: 'submitted', txHash: lastHash });
+
+        // If no real txHash yet, treat as submitted and skip receipt wait
+        if (isPendingHash) {
+          _notify(sched, 'pending', 'Schedule "' + sched.name + '" submitted (awaiting Circle confirmation)', 'info');
+          _outcome = 'submitted';
+          spent += v.transfers[i].amount;
+          continue;
+        }
 
         var rec;
         try {

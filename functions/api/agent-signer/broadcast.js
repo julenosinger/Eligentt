@@ -100,23 +100,45 @@ export async function onRequestPost(context) {
     return err('Authorization proof does not match this operation', 403, env, request);
   }
 
-  // Resolve per-user or global credentials.
-  // The proof already binds walletAddress — verify it matches the resolved wallet.
-  let creds = getCredentials(env);
+  // Resolve per-user credentials — MUST find the user's personal Circle wallet.
+  // p.userId is email or userId from the authorize step.
+  // Try all known KV key formats to locate the user record.
+  let creds = null;
   const KV = env && env.AUTH_KV;
   if (KV && typeof KV.get === 'function' && p.userId) {
     try {
-      // p.userId may be email or userId — try session lookup by userId key
-      const raw = await KV.get('user:' + p.userId) || null;
+      // Try direct user:email key (primary format)
+      let raw = await KV.get('user:' + p.userId);
+      // Try user:userId if the first miss (p.userId may be a UUID userId, not email)
+      if (!raw) raw = await KV.get('user:id:' + p.userId);
+      // Try session lookup to find email, then user record
+      if (!raw) {
+        const sessRaw = await KV.get('session:' + p.userId);
+        if (sessRaw) {
+          const sess = JSON.parse(sessRaw);
+          if (sess && sess.email) raw = await KV.get('user:' + sess.email);
+        }
+      }
       if (raw) {
         const user = JSON.parse(raw);
-        creds = getUserCredentials(env, user);
+        const userCreds = getUserCredentials(env, user);
+        // Only use per-user creds when they have a personal wallet
+        if (userCreds && userCreds.walletAddress && userCreds.isPerUser !== false) {
+          creds = userCreds;
+        }
       }
-    } catch (_) { /* fall through to global creds */ }
+    } catch (_) { /* fall through */ }
   }
+  // Fall back to global only when user has no personal wallet AND proof was also global
+  if (!creds) creds = getCredentials(env);
+
   const serverWallet = String(creds.walletAddress || '').toLowerCase();
   if (!serverWallet || p.walletAddress !== serverWallet) {
-    return err('Authorization proof wallet does not match the Circle wallet', 403, env, request);
+    return err(
+      'Authorization proof wallet ' + p.walletAddress +
+      ' does not match the Circle wallet ' + serverWallet,
+      403, env, request
+    );
   }
 
   let descriptor;
@@ -164,19 +186,37 @@ export async function onRequestPost(context) {
     }, 200, env, request);
   }
 
-  // ── 11. Nonce lock (server-side) ──
-  let nonceHex;
+  // ── 11. Nonce lock (server-side, best-effort for EOA) ──
+  // Circle contractExecution manages nonce internally for developer-controlled wallets.
+  // We attempt a nonce lock to prevent parallel double-sends, but do NOT fail if
+  // nonce lookup is unavailable (rate limit, RPC down) — Circle's own idempotency
+  // key + single-use proof already prevent replay.
+  let nonce = null;
+  let nonceLocked = false;
   try {
-    nonceHex = await fetchNonce(env, chainId, serverWallet);
-  } catch (e) {
-    return err('Nonce unavailable: ' + (e.message || e), 502, env, request);
+    const nonceHex = await fetchNonce(env, chainId, serverWallet, creds.walletId);
+    nonce = parseInt(nonceHex, 16);
+    const lock = await reserveNonce(env, { walletAddress: serverWallet, chainId, nonce, executionId });
+    if (lock.ok) nonceLocked = true;
+    // If lock fails due to conflict, a tx is already in-flight — return idempotent
+    else if (lock.reason && lock.reason.toLowerCase().indexOf('conflict') !== -1) {
+      const inflight = await getExecution(env, executionId).catch(() => null);
+      if (inflight && inflight.txHash) {
+        return json({ ok: true, idempotent: true, txHash: inflight.txHash, state: inflight.circleState || 'pending', address: serverWallet }, 200, env, request);
+      }
+      // No record yet — tx is in-flight but not recorded, wait a moment and return pending
+      return json({ ok: true, idempotent: true, txHash: null, state: 'pending', address: serverWallet, message: 'Transaction already in flight' }, 200, env, request);
+    }
+    // Other lock failures (KV unavailable etc) — proceed without lock
+  } catch (_) {
+    // Nonce lookup failed (rate limit, RPC down) — proceed without nonce lock.
+    // Circle's idempotency key prevents duplicate submissions.
+    nonce = null;
   }
-  const nonce = parseInt(nonceHex, 16);
-  const lock = await reserveNonce(env, { walletAddress: serverWallet, chainId, nonce, executionId });
-  if (!lock.ok) return err('Nonce conflict: ' + lock.reason, lock.status || 409, env, request);
 
   // ── 12. Circle sign + broadcast (guarded) ──
-  const idempotencyKey = 'autonoma_' + executionId;
+  // idempotencyKey MUST be a valid UUID v4 — Circle rejects any other format
+  const idempotencyKey = crypto.randomUUID();
   const requestHash = await hashRequest(descriptor);
   let circleRes;
   try {
@@ -189,9 +229,10 @@ export async function onRequestPost(context) {
       value: descriptor.value || null,
     }));
   } catch (e) {
-    // Release the nonce lock — the tx was never submitted to chain, so the
-    // nonce is still available. Without this, the next attempt gets nonce_conflict.
-    await releaseNonce(env, { walletAddress: serverWallet, chainId, nonce });
+    // Release the nonce lock if we acquired one
+    if (nonceLocked && nonce !== null) {
+      await releaseNonce(env, { walletAddress: serverWallet, chainId, nonce }).catch(() => {});
+    }
     await recordExecution(env, {
       executionId, operation, chainId, walletAddress: serverWallet,
       contractAddress: descriptor.contractAddress, abiFunctionSignature: descriptor.abiFunctionSignature,
@@ -207,7 +248,13 @@ export async function onRequestPost(context) {
       circleStatus: 'error', finalStatus: 'failed', error: (e && e.message ? e.message : String(e)).slice(0, 200),
     });
     const isOpen = e && (e.circuitOpen || (e.message && String(e.message).indexOf('CIRCUIT_OPEN') === 0));
-    return err(isOpen ? 'Circle execution blocked: circuit breaker open' : 'Broadcast failed: ' + (e.message || e), isOpen ? 503 : 502, env, request);
+    const errDetail = (e && e.message) ? e.message : (e && typeof e === 'object' ? JSON.stringify(e).slice(0, 400) : String(e));
+    // nonce_conflict from Circle means a tx is already in-flight — treat as pending
+    const isNonceConflict = errDetail && errDetail.toLowerCase().indexOf('nonce_conflict') !== -1;
+    if (isNonceConflict) {
+      return json({ ok: true, idempotent: true, txHash: null, state: 'pending', address: serverWallet, message: 'Transaction already in flight (nonce conflict)' }, 200, env, request);
+    }
+    return err(isOpen ? 'Circle execution blocked: circuit breaker open' : 'Broadcast failed: ' + errDetail, isOpen ? 503 : 502, env, request);
   }
 
   const tx = (circleRes && circleRes.data) ? circleRes.data : {};

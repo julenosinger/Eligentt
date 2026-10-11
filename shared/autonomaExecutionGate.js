@@ -153,6 +153,31 @@
     intent = intent || {};
     context = context || {};
 
+    // OTP fast-path: when the frontend has already verified an email OTP and passed
+    // an execToken, skip the legacy AgentAuthorization address-binding check.
+    // The execToken was issued by /api/agent/exec-otp after validating the OTP against
+    // the authenticated user's session — it is the canonical authorization for this op.
+    if (context.execToken || (intent.params && intent.params._execToken)) {
+      var _agentAddrOtp = null;
+      try {
+        if (typeof CircleAgent !== 'undefined') {
+          if (typeof CircleAgent.resolveAddress === 'function') {
+            _agentAddrOtp = await CircleAgent.resolveAddress() || null;
+          } else if (typeof CircleAgent.getCachedAddress === 'function') {
+            _agentAddrOtp = CircleAgent.getCachedAddress() || null;
+          }
+        }
+      } catch (_e) {}
+      if (!_isAddr(_agentAddrOtp)) return _block('agent_wallet_unavailable');
+      return {
+        ok: true, code: 'otp_authorized', reason: '',
+        delegated: false, claimKey: null,
+        agentWallet: _agentAddrOtp, operation: intent.operation || '',
+        auth: { agentWallet: _agentAddrOtp, execToken: context.execToken || (intent.params && intent.params._execToken) },
+        policyReport: null,
+      };
+    }
+
     var operation = intent.operation || '';
     var amount = Number(intent.amount) || 0;
     var asset = intent.asset || 'USDC';

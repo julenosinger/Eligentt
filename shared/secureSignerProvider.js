@@ -197,10 +197,11 @@
       executionId: executionId,
       request: circleReq
     });
-    if (!res || res.ok !== true || !res.txHash) {
+    if (!res || res.ok !== true) {
       throw new Error('Circle signer broadcast failed: ' + ((res && (res.error || res.reason)) || 'unknown'));
     }
-    return res.txHash;
+    // txHash may be null when tx is pending (nonce conflict / in-flight) — still ok
+    return res.txHash || res.id || 'pending:' + (res.state || 'submitted');
   }
 
   /* ── Receipt (read-only — safe in both modes) ── */
@@ -222,6 +223,14 @@
     } catch (_) {}
     var hdrs = { 'Content-Type': 'application/json' };
     if (agentWallet) hdrs['X-Agent-Wallet'] = agentWallet;
+    // Always send the session token so the backend can resolve per-user wallet
+    try {
+      var tok = null;
+      if (typeof AuthManager !== 'undefined' && AuthManager.getSessionToken) tok = AuthManager.getSessionToken();
+      if (!tok) { try { tok = sessionStorage.getItem('elligente_st'); } catch(_){} }
+      if (!tok) { try { tok = localStorage.getItem('elligente_session'); } catch(_){} }
+      if (tok) hdrs['Authorization'] = 'Bearer ' + tok;
+    } catch(_) {}
     return fetch(path, {
       method: 'POST',
       headers: hdrs,

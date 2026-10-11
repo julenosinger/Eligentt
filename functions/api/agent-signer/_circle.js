@@ -168,20 +168,26 @@ async function createContractExecution(env, req) {
   });
   const data = await resp.json().catch(() => ({}));
   if (!resp.ok) {
-    throw new Error((data && data.message) || ('Circle contractExecution failed (' + resp.status + ')'));
+    // Surface full Circle error for debugging
+    const circleMsg = (data && data.message) || (data && data.error) || JSON.stringify(data).slice(0, 300);
+    const circleCode = (data && data.code) || resp.status;
+    const circleErrors = (data && data.errors) ? JSON.stringify(data.errors).slice(0, 300) : '';
+    throw new Error('Circle contractExecution failed (' + resp.status + '): ' + circleMsg + (circleErrors ? ' errors=' + circleErrors : '') + ' code=' + circleCode);
   }
   return data;
 }
 
 // Query the nonce for the circle wallet on a given chain (eth_getTransactionCount).
-async function fetchNonce(env, chainId, address) {
+async function fetchNonce(env, chainId, address, walletIdOverride) {
   const creds = getCredentials(env);
+  // Use explicit walletId when provided (per-user wallet), otherwise fall back to platform
+  const resolvedWalletId = walletIdOverride || creds.walletId;
 
   // ── Primary: Circle Wallets API nonce (no RPC call, no rate-limit risk) ──
   // GET /v1/w3s/wallets/{walletId} returns the wallet's current nonce field.
-  if (creds.apiKey && creds.walletId) {
+  if (creds.apiKey && resolvedWalletId) {
     try {
-      const wResp = await fetch(W3S_BASE + '/wallets/' + creds.walletId, {
+      const wResp = await fetch(W3S_BASE + '/wallets/' + resolvedWalletId, {
         method: 'GET',
         headers: {
           'Authorization': 'Bearer ' + creds.apiKey,
@@ -196,6 +202,7 @@ async function fetchNonce(env, chainId, address) {
       // fall through to RPC
     }
   }
+  // Note: resolvedWalletId used above for Circle API; address used below for RPC fallback
 
   // ── Fallback: eth_getTransactionCount via RPC with retry ──
   const rpc = CHAIN_RPC[chainId];

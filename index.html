@@ -125,6 +125,7 @@
 <script src="/shared/agentIdentity.js"></script>
 <script src="/shared/agentAuthorization.js"></script>
 <script src="/shared/agentWalletManager.js"></script>
+<script src="/shared/agentExecOTP.js"></script>
 <script src="/shared/agentReputation.js"></script>
 <script src="/shared/agentSession.js"></script>
 <script src="/shared/policyEngine.js"></script>
@@ -49106,16 +49107,22 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
   async function _executeIntent(intent, params, msg){
     _ctxClear(); // Clear context on execution
 
-    // Show permission card for financial operations if Circle Agent is configured but op not authorized
-    // Skip when already approved via AgentCapabilityRouter (_capRouterApproved flag)
-    if(_isFinancialIntent(intent) && typeof AgentAuthorization !== 'undefined' && !(params && params._capRouterApproved)){
+    // OTP-verified path: skip all permission checks when execution comes with a valid OTP token
+    if(params && params._otpVerified && params._execToken) {
+      // execToken already validated by the user via email OTP — proceed directly to execution
+    } else if(_isFinancialIntent(intent) && !(params && params._capRouterApproved)){
+      // Circle OTP authorization: when Circle Agent is provisioned, require email OTP
+      // instead of the legacy AgentAuthorization approve flow (which caused address mismatch).
       var _circleAgentReady = typeof CircleAgent !== 'undefined' && (CircleAgent.getCachedAddress() || false);
-      if(_circleAgentReady){
-        var operation = intent.replace('_EXECUTE','').replace('_GUIDE','').toLowerCase();
-        // Normalize operation names
-        var opNorm = {send_payment:'payment',swap:'swap',bridge:'bridge',multisend:'payment',add_liquidity:'swap',remove_liquidity:'swap'};
-        var checkOp = opNorm[operation] || operation;
-        if(!AgentAuthorization.hasOperationAuth(checkOp)){
+      if(_circleAgentReady && typeof AgentExecOTP !== 'undefined'){
+        return _showOTPCard(intent, params, msg);
+      }
+      // Legacy fallback: Circle not provisioned — use permission card
+      if(typeof AgentAuthorization !== 'undefined'){
+        var _opLegacy = intent.replace('_EXECUTE','').replace('_GUIDE','').toLowerCase();
+        var _opNormL = {send_payment:'payment',swap:'swap',bridge:'bridge',multisend:'payment',add_liquidity:'swap',remove_liquidity:'swap'};
+        var _checkOpL = _opNormL[_opLegacy] || _opLegacy;
+        if(!AgentAuthorization.hasOperationAuth(_checkOpL)){
           return _showPermissionCard(intent, params, msg);
         }
       }
@@ -50267,6 +50274,113 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
       '</div></div>';
   }
 
+  // ── OTP Authorization Card ──────────────────────────────────────────────────
+  // Shows an email OTP input card. On successful verification, re-runs _executeIntent
+  // with params._otpVerified=true + params._execToken so the gate passes without
+  // the legacy AgentAuthorization address-mismatch check.
+
+  var _otpPendingState = {}; // intentId → { intent, params, msg }
+
+  function _showOTPCard(intent, params, msg){
+    var operation = intent.replace('_EXECUTE','').replace('_GUIDE','').toLowerCase();
+    var opNorm = {send_payment:'payment',swap:'swap',bridge:'bridge',multisend:'payment',add_liquidity:'swap',remove_liquidity:'swap'};
+    var displayOp = opNorm[operation] || operation;
+    var opLabel = displayOp.charAt(0).toUpperCase()+displayOp.slice(1);
+    var amount = (params && (params.amount || params.value)) || '';
+    var asset  = (params && (params.token || params.asset || params.fromToken)) || 'USDC';
+    var dest   = (params && (params.address || params.destination || params.toChain)) || '';
+
+    var intentId = (typeof AgentExecOTP !== 'undefined')
+      ? AgentExecOTP.generateIntentId(displayOp, amount, asset, dest)
+      : 'intent_' + Date.now();
+
+    _otpPendingState[intentId] = { intent: intent, params: params, msg: msg };
+
+    // Request OTP immediately
+    if(typeof AgentExecOTP !== 'undefined'){
+      AgentExecOTP.requestOTP(intentId, displayOp, amount, asset, dest).catch(function(){});
+    }
+
+    var summaryLine = opLabel + (amount ? ' <strong>' + amount + ' ' + asset + '</strong>' : '') + (dest ? ' → <code style="font-size:9px">' + dest.slice(0,8)+'…'+dest.slice(-4) + '</code>' : '');
+
+    return R.card(
+      R.head('mail-forward', 'Email Confirmation Required', { text: 'OTP Sent', cls: 'live' }),
+      '<div style="font-size:11px;color:var(--text);margin-bottom:10px">A 6-digit code was sent to your email. Enter it below to authorize:</div>'+
+      '<div style="font-size:11px;color:var(--muted2);margin-bottom:12px">'+summaryLine+'</div>'+
+      '<div style="display:flex;gap:6px;align-items:center;margin-bottom:10px">'+
+      '<input id="otp-input-'+intentId+'" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="000000" '+
+      'style="flex:1;padding:10px 14px;border-radius:8px;border:1px solid var(--border2);background:var(--bg2);color:var(--text);font-size:18px;letter-spacing:8px;text-align:center;font-weight:700" '+
+      'onkeydown="if(event.key===\'Enter\')_autVerifyOTP(\''+intentId+'\')" />'+
+      '<button class="aut-act primary" onclick="_autVerifyOTP(\''+intentId+'\')" style="padding:10px 16px;white-space:nowrap"><i class="ti ti-check"></i> Confirm</button>'+
+      '</div>'+
+      '<div id="otp-err-'+intentId+'" style="font-size:10px;color:#ef4444;min-height:14px;margin-bottom:4px"></div>'+
+      '<div style="display:flex;justify-content:space-between;align-items:center">'+
+      '<button class="aut-act" onclick="_autResendOTP(\''+intentId+'\')" style="font-size:9px;padding:4px 8px"><i class="ti ti-refresh"></i> Resend</button>'+
+      '<span style="font-size:9px;color:var(--muted2)">Code expires in 5 minutes</span>'+
+      '</div>'
+    );
+  }
+
+  window._autVerifyOTP = async function(intentId){
+    var inputEl = document.getElementById('otp-input-'+intentId);
+    var errEl   = document.getElementById('otp-err-'+intentId);
+    if(!inputEl) return;
+    var code = inputEl.value.replace(/\s/g,'');
+    if(!/^\d{6}$/.test(code)){
+      if(errEl) errEl.textContent = 'Please enter the 6-digit code.';
+      return;
+    }
+    var btn = inputEl.parentElement && inputEl.parentElement.querySelector('button.primary');
+    if(btn){ btn.disabled=true; btn.innerHTML='<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i>'; }
+    if(errEl) errEl.textContent = '';
+    try {
+      var res = await AgentExecOTP.verifyOTP(intentId, code);
+      if(res && res.ok){
+        var state = _otpPendingState[intentId];
+        delete _otpPendingState[intentId];
+        if(!state){ if(errEl) errEl.textContent = 'Session expired. Please retry.'; return; }
+        // Re-run executeIntent with OTP token — gate will pass
+        var newParams = Object.assign({}, state.params || {}, {
+          _otpVerified: true,
+          _execToken: res.execToken,
+          _circleWalletId: res.circleWalletId,
+          _circleWalletAddress: res.circleWalletAddress,
+          _capRouterApproved: true,
+        });
+        // Show loading state in messages
+        autAppend(R.card(R.head('check','Authorized',''),'<div style="font-size:11px;color:#22c55e">Code verified. Executing…</div>'));
+        var result = await _executeIntent(state.intent, newParams, state.msg);
+        if(result) autAppend(result);
+      } else {
+        var errMsg = (res && res.error) || 'Invalid code.';
+        if(errEl) errEl.textContent = errMsg;
+        if(btn){ btn.disabled=false; btn.innerHTML='<i class="ti ti-check"></i> Confirm'; }
+      }
+    } catch(e){
+      if(errEl) errEl.textContent = e.message || 'Verification failed. Please try again.';
+      if(btn){ btn.disabled=false; btn.innerHTML='<i class="ti ti-check"></i> Confirm'; }
+    }
+  };
+
+  window._autResendOTP = async function(intentId){
+    var state = _otpPendingState[intentId];
+    if(!state || typeof AgentExecOTP === 'undefined') return;
+    var operation = state.intent.replace('_EXECUTE','').replace('_GUIDE','').toLowerCase();
+    var opNorm = {send_payment:'payment',swap:'swap',bridge:'bridge',multisend:'payment',add_liquidity:'swap',remove_liquidity:'swap'};
+    var displayOp = opNorm[operation] || operation;
+    var amount = (state.params && (state.params.amount || state.params.value)) || '';
+    var asset  = (state.params && (state.params.token || state.params.asset)) || 'USDC';
+    var dest   = (state.params && (state.params.address || state.params.destination)) || '';
+    var errEl = document.getElementById('otp-err-'+intentId);
+    try {
+      await AgentExecOTP.requestOTP(intentId, displayOp, amount, asset, dest);
+      if(errEl) errEl.textContent = 'New code sent to your email.';
+      setTimeout(function(){ if(errEl) errEl.textContent = ''; }, 3000);
+    } catch(e){
+      if(errEl) errEl.textContent = (e && e.message) || 'Could not resend code.';
+    }
+  };
+
   window._confirmPermission = function(amount, intent){
     if(typeof AgentAuthorization === 'undefined') return;
 
@@ -50284,7 +50398,17 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
     };
     authOpts[allowKey] = true;
 
-    AgentAuthorization.createAuthorization(authOpts);
+    // Resolve Circle wallet address before creating authorization so
+    // agentWallet is always the real Circle address, never a stale cache value.
+    var _doCreateAuth = function(circleAddr){
+      if(circleAddr) authOpts.agentWallet = circleAddr;
+      AgentAuthorization.createAuthorization(authOpts);
+    };
+    if(typeof CircleAgent!=='undefined' && typeof CircleAgent.resolveAddress==='function'){
+      CircleAgent.resolveAddress().then(function(addr){ _doCreateAuth(addr); }).catch(function(){ _doCreateAuth(null); });
+    } else {
+      _doCreateAuth(typeof CircleAgent!=='undefined'&&CircleAgent.getCachedAddress ? CircleAgent.getCachedAddress() : null);
+    }
     var c = document.getElementById('aut-messages');
     if(c){
       var html = '<div class="aut-msg ai"><div class="aut-msg-header"><i class="ti ti-robot" style="color:#a78bfa"></i><span class="aut-msg-role">Autonoma Agent</span></div>'+
@@ -51314,12 +51438,15 @@ setTimeout(function() {
     };
     for(var i=0;i<ops.length;i++){ if(opMap[ops[i]]) authOpts[opMap[ops[i]]]=true; }
 
-    // Use Circle Wallet as the canonical agent identity
-    if(typeof CircleAgent!=='undefined' && CircleAgent.getCachedAddress()){
-      authOpts.agentWallet=CircleAgent.getCachedAddress();
-    }
+    // Use Circle Wallet as the canonical agent identity — resolve async to avoid stale cache
+    var _resolvedCircleAddr = (typeof CircleAgent!=='undefined' && CircleAgent.getCachedAddress) ? CircleAgent.getCachedAddress() : null;
+    if(_resolvedCircleAddr) authOpts.agentWallet = _resolvedCircleAddr;
 
     var auth=AgentAuthorization.createAuthorization(authOpts);
+    // Patch agentWallet async if cache was empty at call time
+    if(!auth.agentWallet && typeof CircleAgent!=='undefined' && typeof CircleAgent.resolveAddress==='function'){
+      CircleAgent.resolveAddress().then(function(addr){ if(addr) auth.agentWallet = addr; }).catch(function(){});
+    }
     var allowedOps=AgentAuthorization.fmtAllowedOps(auth);
     return R.intro('<i class="ti ti-shield-check" style="color:#22c55e"></i> Agent authorized for <strong style="color:#06F7E9">'+allowedOps+'</strong>!')+
       '<div class="aut-rc" style="border-color:rgba(34,197,94,.2);margin-top:8px">'+
