@@ -53195,10 +53195,29 @@ setTimeout(function() {
         txHash = await _agentBroadcast(signer, provider, rawTx, broadcastOpts);
         _agentGateClaimSubmit(paymentGate.claimKey, txHash);
       } catch(sendErr){
-        var eMsg = (sendErr.message || String(sendErr)).substring(0, 150);
-        if(/user.rejected|denied/i.test(eMsg)) _agentStateMsg(execId, 'REJECTED', 'User rejected');
-        else if(/insufficient/i.test(eMsg)) _agentStateMsg(execId, 'FAILED', 'Insufficient funds');
-        else _agentStateMsg(execId, 'FAILED', eMsg);
+        // [AUTONOMA-6C] Surface the REAL error and distinguish a DEFINITIVE failure
+        // from an AMBIGUOUS (unknown-outcome) failure. Never claim "failed" when the
+        // Circle tx may have been accepted but the response was lost.
+        var eMsg = (sendErr.message || String(sendErr)).substring(0, 220);
+        if(/user.rejected|denied|rejected by user/i.test(eMsg)) {
+          _agentStateMsg(execId, 'REJECTED', eMsg);
+        } else if(/insufficient/i.test(eMsg)) {
+          _agentStateMsg(execId, 'FAILED', 'Insufficient funds: ' + eMsg);
+        } else if(/502|503|timeout|timed out|network|failed to fetch|ENOTFOUND|ECONN/i.test(eMsg)) {
+          // Ambiguous: the Circle tx may already be in-flight. Do NOT mark as failed
+          // and do NOT auto-retry — the same executionId is bound to the action.
+          _agentStateMsg(execId, 'UNKNOWN', 'Submission status unknown — do not retry. Reconcile before retrying: ' + eMsg);
+        } else {
+          _agentStateMsg(execId, 'FAILED', eMsg);
+        }
+        return;
+      }
+
+      // txHash may be "pending:..." when Circle accepted the tx but has not yet
+      // exposed the on-chain hash. Do NOT poll a receipt for a non-hash value.
+      if (txHash && typeof txHash === 'string' && txHash.indexOf('pending:') === 0) {
+        _agentGateClaimDone(paymentGate.claimKey, 'submitted', null);
+        _agentStateMsg(execId, 'SUBMITTED', 'Transaction submitted — awaiting Circle confirmation (tx hash not yet visible)');
         return;
       }
 
@@ -53342,6 +53361,8 @@ setTimeout(function() {
       BROADCASTING:   ['#06F7E9','Broadcasting transaction...'],
       CONFIRMING:     ['#f59e0b','Waiting blockchain confirmation...'],
       CONFIRMED:      ['#22c55e','Block confirmed'],
+      SUBMITTED:      ['#06F7E9','Transaction submitted — awaiting confirmation'],
+      UNKNOWN:        ['#f59e0b','Submission status unknown — reconcile before retrying'],
       ATTESTING:      ['#a78bfa','Polling CCTP attestation...'],
       MINTING:        ['#06F7E9','Minting on destination chain...'],
       VERIFYING:      ['#a78bfa','Verifying on-chain state...'],

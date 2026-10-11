@@ -1051,14 +1051,28 @@
       if (aSigner.isRemote) {
         var rawAmt = ethers.parseUnits(String(amount), meta.decimals || 6).toString();
         var rawTx  = { to: meta.address, data: '0x', value: '0' }; // placeholder; Circle server builds the real tx
-        var opts   = { circle: { type: 'transfer', tokenAddress: meta.address, to: to, amount: rawAmt } };
+        // [AUTONOMA-6C] The authorize step REQUIRES a valid executionId (>= 8 chars)
+        // and an operation. Reuse the same executionId across retries so server-side
+        // idempotency prevents duplicate payments for the same action.
+        var _execId = 'aiw_' + kind + '_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+        var opts   = {
+          operation: 'payment',
+          executionId: _execId,
+          amount: String(amount),
+          destination: to,
+          circle: { type: 'transfer', tokenAddress: meta.address, to: to, amount: rawAmt }
+        };
         var provider = getCachedProvider(_resolveRpcUrl('/api/rpc/arc'));
         notify(kind.charAt(0).toUpperCase() + kind.slice(1) + ' submitted — waiting for confirmation…', 'info');
         pushHistory({ kind: 'funding', status: 'submitted', op: kind, amount: amount, token: token, to: to });
         renderHistory();
         var result = await SecureSignerProvider.broadcast(aSigner, provider, rawTx, opts);
         var txHash = result && (result.txHash || result.hash || result);
-        if (typeof txHash === 'string') {
+        if (typeof txHash === 'string' && txHash.indexOf('pending:') === 0) {
+          // Submitted to Circle but txHash not yet available — do NOT report failure.
+          pushHistory({ kind: 'funding', status: 'pending', op: kind, amount: amount, token: token, to: to });
+          notify(kind + ' submitted — awaiting Circle confirmation (tx not yet visible)', 'info');
+        } else if (typeof txHash === 'string') {
           pushHistory({ kind: 'funding', status: 'confirmed', op: kind, amount: amount, token: token, to: to, txHash: txHash });
           notify(kind + ' confirmed on-chain', 'success');
         } else {

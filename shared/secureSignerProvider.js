@@ -242,7 +242,7 @@
       });
     }).then(function (wrapped) {
       if (!wrapped.ok) {
-        var err = (wrapped.data && (wrapped.data.error || wrapped.data.reason)) || ('HTTP ' + wrapped.status);
+        var err = (wrapped.data && (wrapped.data.error || wrapped.data.reason)) || ('HTTP ' + wrapped.status + ' from ' + path);
         throw new Error(err);
       }
       return wrapped.data;

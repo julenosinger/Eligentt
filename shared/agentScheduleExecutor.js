@@ -462,10 +462,21 @@
       maxFeePerGas: E.toBeHex(maxFee),
       maxPriorityFeePerGas: E.toBeHex(maxPriorityFee)
     };
+    var rawAmt = (transfer._rawAmount != null) ? transfer._rawAmount : _toRawAmount(transfer.amount, tokenInfo.symbol || 'USDC');
     return {
       nonce: nonce, from: agentAddr, to: tokenInfo.address, data: transfer._calldata,
       value: '0x0', chainId: ARC_CHAIN_ID, rawTx: rawTx,
-      fingerprint: _txFingerprint(agentAddr, nonce, tokenInfo.address, transfer._calldata)
+      fingerprint: _txFingerprint(agentAddr, nonce, tokenInfo.address, transfer._calldata),
+      // [AUTONOMA-6C] The Circle signer requires a STRUCTURED operation descriptor
+      // (token address + recipient + raw amount + ERC-20 transfer), NOT a raw tx.
+      // This descriptor is carried through _signAndSend → SecureSignerProvider.broadcast
+      // so the server-side Circle signer maps it to a contractExecution call.
+      circle: {
+        type: 'transfer',
+        tokenAddress: tokenInfo.address,
+        to: transfer.to,
+        amount: String(rawAmt)
+      }
     };
   }
 
@@ -854,7 +865,17 @@
         // 3. Sign + broadcast. On throw the outcome is AMBIGUOUS — reconcile, never blind-retry.
         var txHash;
         try {
-          txHash = await _signAndSend(signer, provider, prep.rawTx);
+          // [AUTONOMA-6C] Pass the structured Circle descriptor so the server-side
+          // signer can map the transfer to a Circle contractExecution. executionId is
+          // the schedule occurrence key — server-side idempotency prevents duplicate
+          // payments if the same occurrence is retried.
+          txHash = await _signAndSend(signer, provider, prep.rawTx, {
+            operation: 'payment',
+            executionId: key,
+            amount: String(v.transfers[i].amount),
+            destination: v.transfers[i].to,
+            circle: prep.circle
+          });
         } catch(sendErr) {
           var unkRes = await _reconcileUnknown(sched, key, ledger[key]);
           _outcome = (unkRes.status === 'reconciling' || unkRes.status === 'submitted') ? 'submitted' : 'running';
@@ -1033,7 +1054,15 @@
         if (engM && typeof engM.updateExecutionClaim === 'function') engM.updateExecutionClaim(key, 'agent_schedule_executor', { status: 'execution_unknown', nonce: prep.nonce });
 
         try {
-          rowTxHash = await _signAndSend(signer, provider, prep.rawTx);
+          // [AUTONOMA-6C] Pass the structured Circle descriptor (per-row executionId
+          // for server-side idempotency so a row is never paid twice).
+          rowTxHash = await _signAndSend(signer, provider, prep.rawTx, {
+            operation: 'payment',
+            executionId: key + '_row' + i,
+            amount: String(transfers[i].amount),
+            destination: transfers[i].to,
+            circle: prep.circle
+          });
         } catch(sendErr) {
           // Ambiguous broadcast — reconcile by nonce, never blind-retry.
           var unk2 = await _resolveUnknownIntent(rows[i], provider);
