@@ -89,9 +89,9 @@ describe('ARC-STUDIO — /api/agent-signer/status reconciliation', () => {
       executionId: EXEC, chainId: 5042, walletAddress: WALLET_ADDRESS.toLowerCase(),
       status: 'pending', circleId: 'op-uuid-1', circleState: 'PENDING', txHash: null,
     }));
-    // Circle getTransaction returns no txHash yet
+    // Circle getTransaction returns no txHash yet (NESTED data.transaction shape — the real API)
     globalThis.fetch = async (url) => {
-      if (String(url).includes('/transactions/op-uuid-1')) return { ok: true, json: async () => ({ data: { id: 'op-uuid-1', state: 'PENDING', txHash: null } }) };
+      if (String(url).includes('/transactions/op-uuid-1')) return { ok: true, json: async () => ({ data: { transaction: { id: 'op-uuid-1', state: 'PENDING', txHash: null } } }) };
       throw new Error('unexpected ' + url);
     };
     const r = await statusPost({ request: req({ executionId: EXEC }), env });
@@ -111,7 +111,7 @@ describe('ARC-STUDIO — /api/agent-signer/status reconciliation', () => {
     }));
     globalThis.fetch = async (url) => {
       const u = String(url);
-      if (u.includes('/transactions/op-uuid-1')) return { ok: true, json: async () => ({ data: { id: 'op-uuid-1', state: 'COMPLETE', txHash: REAL_TX } }) };
+      if (u.includes('/transactions/op-uuid-1')) return { ok: true, json: async () => ({ data: { transaction: { id: 'op-uuid-1', state: 'COMPLETE', txHash: REAL_TX } } }) };
       if (u.includes('rpc.mainnet.arc.io') || u.includes('drpc')) return { ok: true, json: async () => ({ jsonrpc: '2.0', id: 1, result: null }) };
       throw new Error('unexpected ' + url);
     };
@@ -170,6 +170,35 @@ describe('ARC-STUDIO — /api/agent-signer/status reconciliation', () => {
     const d = await r.json();
     expect(d.status).toBe('submitted');
     expect(d.txHash).toBe(REAL_TX);
+  });
+
+  it('9. REAL repro: nested Circle data.transaction → EVM hash → confirmed', async () => {
+    // Production transaction confirmed on Arc Mainnet but stuck "submitted" because
+    // Circle nests the tx under data.transaction (not flat data.txHash).
+    const REAL_HASH = '0xae96c693a1d479c0f8043665ac47d6fc1a2b8faffad8b80372ec788a0d629514';
+    const env = makeEnv();
+    await seedSession(env);
+    await env.AUTH_KV.put('agent:exec:' + EXEC, JSON.stringify({
+      executionId: EXEC, chainId: 5042, walletAddress: WALLET_ADDRESS.toLowerCase(),
+      status: 'pending', circleId: 'op-uuid-1', circleState: 'COMPLETE', txHash: null,
+    }));
+    globalThis.fetch = async (url) => {
+      const u = String(url);
+      if (u.includes('/transactions/op-uuid-1')) {
+        return { ok: true, json: async () => ({ data: { transaction: { id: 'op-uuid-1', state: 'COMPLETE', txHash: REAL_HASH } } }) };
+      }
+      if (u.includes('rpc.mainnet.arc.io') || u.includes('drpc')) {
+        return { ok: true, json: async () => ({ jsonrpc: '2.0', id: 1, result: { status: '0x1', blockNumber: '0x1873fc4', transactionHash: REAL_HASH } }) };
+      }
+      throw new Error('unexpected ' + url);
+    };
+    const r = await statusPost({ request: req({ executionId: EXEC }), env });
+    const d = await r.json();
+    expect(d.status).toBe('confirmed');
+    expect(d.txHash).toBe(REAL_HASH);
+    // The execution record is now persisted with the real hash (idempotent for later polls).
+    const rec = JSON.parse(await env.AUTH_KV.get('agent:exec:' + EXEC));
+    expect(rec.txHash).toBe(REAL_HASH);
   });
 });
 

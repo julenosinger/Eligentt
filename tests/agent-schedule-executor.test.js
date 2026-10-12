@@ -691,6 +691,78 @@ describe('AgentScheduleExecutor — replay, simulation and safety', () => {
   });
 });
 
+describe('AgentScheduleExecutor — RPC connectivity & recovery', () => {
+  const LEDGER_KEY = 'elligentt_agent_sched_exec_v1';
+
+  function flakyProvider(startFailing) {
+    return {
+      failRpc: startFailing,
+      sent: [], simCalls: [],
+      async getNetwork() {
+        if (this.failRpc) throw new Error('Failed to fetch');
+        return { chainId: BigInt(5042) };
+      },
+      async call(tx) { if (tx && tx.data && tx.data.startsWith('0xa9059cbb')) this.simCalls.push(tx); return BAL_HEX; },
+      async getBalance() { return 10n ** 18n; },
+      async send(method) {
+        if (method === 'eth_getTransactionCount') return '0x0';
+        if (method === 'eth_sendRawTransaction') { this.sent.push('0x'); return '0x' + 'ab'.repeat(32); }
+        throw new Error('unexpected rpc ' + method);
+      },
+      async waitForTransaction() { return { status: 1, blockNumber: 123, gasUsed: 21000n }; },
+    };
+  }
+
+  function fastForwardTransient(ls) {
+    const ledger = JSON.parse(ls.getItem(LEDGER_KEY) || '{}');
+    let changed = false;
+    for (const k in ledger) {
+      if (ledger[k] && ledger[k].transient) { ledger[k].lastAttempt = Date.now() - 31000; changed = true; }
+    }
+    if (changed) ls.setItem(LEDGER_KEY, JSON.stringify(ledger));
+  }
+
+  it('transient RPC failure → rpc_unavailable (recoverable, never marked Failed)', async () => {
+    const provider = flakyProvider(true);
+    const env = boot({ provider, schedules: [makeSchedule({ freq: 'daily' })] });
+    grantScheduledAuth(env.auth);
+    const summary = await env.executor.tickNow();
+    expect(summary.executed).toBe(0);
+    expect(summary.results[0].status).toBe('rpc_unavailable');
+    expect(env.provider.sent.length).toBe(0);
+    const sched = env.engine.getById('SCH_TEST_1');
+    expect(sched.status).toBe('Active');       // never paused/failed by a network blip
+    expect(sched.execCount).toBe(0);
+    const log = env.executor.getExecutionLog(1)[0];
+    expect(log.status).toBe('retry_pending');
+    expect(log.transient).toBe(true);
+  });
+
+  it('recovers and executes once the RPC is back', async () => {
+    const provider = flakyProvider(true);
+    const env = boot({ provider, schedules: [makeSchedule({ freq: 'daily' })] });
+    grantScheduledAuth(env.auth);
+    await env.executor.tickNow();
+    expect(env.provider.sent.length).toBe(0);
+    // RPC recovers and the retry delay elapses.
+    provider.failRpc = false;
+    fastForwardTransient(env.ls);
+    const summary2 = await env.executor.tickNow();
+    expect(summary2.executed).toBe(1);
+    expect(env.provider.sent.length).toBe(1);
+  });
+
+  it('a wrong chain is NOT treated as a transient RPC failure', async () => {
+    const env = boot({ providerOpts: { chainId: 1 } });
+    grantScheduledAuth(env.auth);
+    const summary = await env.executor.tickNow();
+    expect(env.provider.sent.length).toBe(0);
+    expect(summary.results[0].reason).toMatch(/Wrong chain/i);
+    const log = env.executor.getExecutionLog(1)[0];
+    expect(log.transient).not.toBe(true);
+  });
+});
+
 describe('AgentScheduleExecutor — module source safety checks', () => {
   it('simulates before broadcasting and validates before signing', () => {
     const execBody = executorSrc.slice(executorSrc.indexOf('async function _executeSchedule'));

@@ -241,7 +241,11 @@ async function fetchNonce(env, chainId, address, walletIdOverride) {
    treats the Circle UUID as a transaction hash.
    ─────────────────────────────────────────────────────────────────────── */
 
-// Query a Circle transaction by its operation id (returns data.state + data.txHash).
+// Query a Circle transaction by its operation id.
+// The Circle GET /transactions/{id} response nests the transaction under
+// `data.transaction` (unlike the flat `data` object returned by the
+// contractExecution POST). Normalize both shapes to the transaction object
+// itself so callers read a single consistent shape (state / txHash).
 async function getTransaction(env, txId) {
   const creds = getCredentials(env);
   const resp = await fetch(W3S_BASE + '/transactions/' + txId, {
@@ -252,7 +256,7 @@ async function getTransaction(env, txId) {
   if (!resp.ok) {
     throw new Error('Circle transaction lookup failed (' + resp.status + ')');
   }
-  return data;
+  return (data && data.data && data.data.transaction) || (data && data.data) || data || {};
 }
 
 // Query an EVM transaction receipt on a given chain (returns null while pending).

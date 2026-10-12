@@ -1255,6 +1255,17 @@
 
   function getAgentProvider(){
     if(agentProvider) return agentProvider;
+    // [ARC-STUDIO] Browsers cannot reach the Arc RPC endpoint directly (it does
+    // not send CORS headers, so ethers throws "Failed to fetch"). Route all read
+    // RPC through the same-origin Cloudflare Pages proxy, which fans out to the
+    // official Arc RPCs and returns proper CORS headers. Fall back to RPCManager /
+    // direct only when the proxy helper is unavailable (non-browser/test contexts).
+    if (typeof getCachedProvider === 'function') {
+      try {
+        var proxyProvider = getCachedProvider('/api/rpc/arc');
+        if (proxyProvider) { agentProvider = proxyProvider; return agentProvider; }
+      } catch(_e) {}
+    }
     // Use RPCManager fallback if available
     if (typeof RPCManager !== 'undefined' && RPCManager.getCurrentProvider) {
       var p = RPCManager.getCurrentProvider();

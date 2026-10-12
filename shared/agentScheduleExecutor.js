@@ -290,6 +290,23 @@
     } catch(e){ return false; }
   }
 
+  /* RPC network read with retry + backoff. A transient fetch/CORS/timeout failure
+     is retried a few times before being reported, so a brief network blip does not
+     fail a schedule. The caller still distinguishes transient (RPC unavailable)
+     from permanent (wrong chain / wrong config) afterwards. */
+  async function _getNetworkWithRetry(provider){
+    var lastErr = null;
+    for (var attempt = 0; attempt < 3; attempt++) {
+      try {
+        return await provider.getNetwork();
+      } catch(e) {
+        lastErr = e;
+        if (attempt < 2) await new Promise(function(r){ setTimeout(r, 400 * Math.pow(2, attempt)); });
+      }
+    }
+    throw lastErr || new Error('network error');
+  }
+
   /* ÔöÇÔöÇ Validation pipeline (returns {ok, reason, auth, transfers, token} ) ÔöÇÔöÇ */
   async function _validateIntent(sched, provider, agentAddr){
     var az = _authz();
@@ -364,7 +381,7 @@
     } catch(e){}
 
     var net;
-    try { net = await provider.getNetwork(); } catch(e){ return { ok: false, reason: 'RPC unavailable: ' + (e.message || 'network error') }; }
+    try { net = await _getNetworkWithRetry(provider); } catch(e){ return { ok: false, reason: 'RPC unavailable: ' + (e.message || 'network error'), transient: true }; }
     if (net && Number(net.chainId) !== ARC_CHAIN_ID) {
       return { ok: false, reason: 'Wrong chain: expected Arc Mainnet (' + ARC_CHAIN_ID + '), got ' + Number(net.chainId) };
     }
@@ -640,7 +657,14 @@
 
   /* ── Reconcile an occurrence that already has a txHash — NEVER re-broadcast ── */
   async function _reconcileSubmitted(sched, key, prior){
-    var txHash = prior.txHash;
+    // Re-read the ledger before reconciling: another tab/instance may have already
+    // reconciled this occurrence. Never double-advance execCount/history.
+    _ledgerRefresh();
+    var fresh = ledger[key];
+    if (fresh && fresh.status !== 'submitted') {
+      return { status: fresh.status === 'executed' ? 'already_executed' : 'reconciling', txHash: fresh.txHash || null };
+    }
+    var txHash = (fresh || prior).txHash;
     // "pending:*" means the Circle tx was accepted but txHash not yet available.
     // Poll the server-side status to reconcile op → EVM hash → receipt. A confirmed
     // receipt flips the occurrence to 'executed' with the REAL hash; a proven revert
@@ -760,6 +784,14 @@
     var defaults = _policyDefaults();
     if (prior && prior.status === 'retry_pending') {
       if ((prior.attempts || 0) >= (defaults.retryMax || 3)) {
+        if (prior.transient) {
+          // Transient RPC/network failure — keep the schedule recoverable, reset the
+          // attempt counter and retry again. Never mark it failed / paused for a
+          // temporary network blip.
+          ledger[key] = { status: 'retry_pending', reason: prior.reason || 'RPC unavailable', ts: Date.now(), attempts: 0, lastAttempt: Date.now(), transient: true };
+          _saveLedger();
+          return { status: 'retry_waiting', reason: prior.reason, transient: true };
+        }
         ledger[key] = { status: 'failed', reason: prior.reason || 'Retries exhausted', ts: Date.now(), attempts: prior.attempts };
         _saveLedger();
         _advanceSchedule(sched, 'Failed after ' + prior.attempts + ' attempts: ' + (prior.reason || ''), 'failed', null, { token: sched.token, amount: sched.amount });
@@ -860,6 +892,16 @@
           _recordOutcome(sched, v.auth, v.total || sched.amount || 0, sched.token || 'USDC', 'unauthorized', null, Date.now() - startTime, 0, v.reason, { sender: agentAddr, token: sched.token || 'USDC', amount: v.total || sched.amount || 0 });
           if (firstNotice) _notify(sched, 'blocked', 'Agent cannot execute "' + sched.name + '": ' + v.reason, 'warning');
           return { status: 'awaiting_auth', reason: v.reason };
+        }
+        // Transient RPC/network failure (RPC unavailable, Failed to fetch, timeout)
+        // is recoverable — never recorded as a terminal failure and never paused.
+        var isTransient = !!v.transient || /RPC unavailable|Failed to fetch|fetch failed|network|timeout|ECONN|ENOTFOUND|rate limit/i.test(v.reason || '');
+        if (isTransient) {
+          var transientNotice = !prior || prior.status !== 'retry_pending';
+          ledger[key] = { status: 'retry_pending', reason: v.reason, ts: Date.now(), attempts: attempts, lastAttempt: Date.now(), transient: true };
+          _saveLedger();
+          if (transientNotice) _notify(sched, 'pending', 'Schedule "' + sched.name + '" could not reach the network (RPC unavailable) — will retry automatically', 'warning');
+          return { status: 'rpc_unavailable', reason: v.reason, transient: true };
         }
         ledger[key] = { status: 'retry_pending', reason: v.reason, ts: Date.now(), attempts: attempts, lastAttempt: Date.now() };
         _saveLedger();

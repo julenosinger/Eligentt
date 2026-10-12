@@ -257,7 +257,9 @@ export async function onRequestPost(context) {
     return err(isOpen ? 'Circle execution blocked: circuit breaker open' : 'Broadcast failed: ' + errDetail, isOpen ? 503 : 502, env, request);
   }
 
-  const tx = (circleRes && circleRes.data) ? circleRes.data : {};
+  // Circle may return the transaction either flat (data.id / data.txHash) or
+  // nested (data.transaction.id / data.transaction.txHash). Normalize both.
+  const tx = (circleRes && circleRes.data && circleRes.data.transaction) || (circleRes && circleRes.data) || {};
   const txHash = tx.txHash || null;
 
   await recordExecution(env, {

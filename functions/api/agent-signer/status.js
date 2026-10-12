@@ -76,11 +76,12 @@ export async function onRequestPost(context) {
   // Reconcile with Circle when we only have an operation id (no EVM hash yet).
   if (!txHash && circleId) {
     try {
+      // getTransaction returns the normalized transaction object (state + txHash),
+      // already unwrapped from the Circle `data.transaction` envelope.
       const t = await getTransaction(env, circleId);
-      const d = (t && t.data) || t || {};
-      circleState = d.state || circleState;
-      if (isEVMHash(d.txHash)) {
-        txHash = d.txHash;
+      circleState = t.state || circleState;
+      if (isEVMHash(t.txHash)) {
+        txHash = t.txHash;
         await recordExecution(env, Object.assign({}, prior, { txHash, circleState, circleId, status: 'submitted' }));
       }
     } catch (_) { /* transient Circle error — keep current state */ }
