@@ -132,22 +132,44 @@ export async function onRequestOptions(context) {
 export async function onRequestPost(context) {
   const { request, env } = context;
   const json = mkJson({});
+
+  // Correlation id ties every log line + error response to this exact request,
+  // without ever logging OTP codes, tokens, secrets or sensitive payload data.
+  const correlationId = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+    ? crypto.randomUUID()
+    : ('cid_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10));
+
   const KV = env.AUTH_KV;
-  if (!KV) return json({ error: 'AUTH_KV not configured' }, 503);
-  if (!env.AUTH_SECRET) return json({ error: 'Server misconfiguration' }, 503);
+  if (!KV) return json({ error: 'AUTH_KV not configured', correlationId }, 503);
+  if (!env.AUTH_SECRET) return json({ error: 'Server misconfiguration', correlationId }, 503);
+
+  try {
+    return await handleExecOTP(context, json, correlationId);
+  } catch (e) {
+    // Preserve the real server-side error in the logs (redacted, correlation-tagged)
+    // while returning consistent JSON to the client — never a raw HTML error page.
+    const msg = (e && e.message) ? String(e.message) : String(e);
+    console.error(JSON.stringify({ event: 'exec_otp_error', correlationId, error: msg.slice(0, 300), ts: Date.now() }));
+    return json({ error: msg.slice(0, 300) || 'Internal server error', correlationId }, 500);
+  }
+}
+
+async function handleExecOTP(context, json, correlationId) {
+  const { request, env } = context;
+  const KV = env.AUTH_KV;
 
   const sess = await resolveSession(KV, request);
-  if (!sess) return json({ error: 'Unauthorized' }, 401);
+  if (!sess) return json({ error: 'Unauthorized', correlationId }, 401);
 
   let body;
   try { body = await request.json(); } catch (_) {
-    return json({ error: 'Invalid JSON' }, 400);
+    return json({ error: 'Invalid JSON', correlationId }, 400);
   }
 
   const { action, intentId, operation, amount, asset, destination, code } = body;
 
   if (!intentId || typeof intentId !== 'string' || intentId.length > 128) {
-    return json({ error: 'Invalid intentId' }, 400);
+    return json({ error: 'Invalid intentId', correlationId }, 400);
   }
 
   // ── Phase 1: request OTP ──────────────────────────────────────────────────
@@ -157,7 +179,7 @@ export async function onRequestPost(context) {
     const rlRaw = await KV.get(rlKey);
     const rl = rlRaw ? JSON.parse(rlRaw) : { count: 0, firstAt: Date.now() };
     if (rl.count >= 3 && (Date.now() - rl.firstAt) < 5 * 60 * 1000) {
-      return json({ error: 'Too many OTP requests. Please wait a few minutes.' }, 429);
+      return json({ error: 'Too many OTP requests. Please wait a few minutes.', correlationId }, 429);
     }
 
     const rawCode = randomDigits(6);
@@ -179,30 +201,30 @@ export async function onRequestPost(context) {
 
     await deliverExecOTP(env, sess.email, rawCode, operation, amount, asset);
 
-    console.log(JSON.stringify({ event: 'exec_otp_sent', userId: sess.userId,
+    console.log(JSON.stringify({ event: 'exec_otp_sent', correlationId, userId: sess.userId,
       intentId, operation, ts: Date.now() }));
 
-    return json({ ok: true, sent: true, email: sess.email, expiresIn: 300 });
+    return json({ ok: true, sent: true, email: sess.email, expiresIn: 300, correlationId });
   }
 
   // ── Phase 2: verify OTP ───────────────────────────────────────────────────
   if (action === 'verify') {
     if (!code || typeof code !== 'string' || !/^\d{6}$/.test(code)) {
-      return json({ error: 'Invalid code format' }, 400);
+      return json({ error: 'Invalid code format', correlationId }, 400);
     }
 
     const otpKey = `execotp:${sess.userId}:${intentId}`;
     const otpRaw = await KV.get(otpKey);
-    if (!otpRaw) return json({ error: 'Code expired or not found' }, 400);
+    if (!otpRaw) return json({ error: 'Code expired or not found', correlationId }, 400);
 
     let otp;
     try { otp = JSON.parse(otpRaw); } catch (_) {
-      return json({ error: 'Invalid OTP state' }, 500);
+      return json({ error: 'Invalid OTP state', correlationId }, 500);
     }
 
     if (otp.attempts >= 3) {
       await KV.delete(otpKey);
-      return json({ error: 'Too many failed attempts. Request a new code.' }, 429);
+      return json({ error: 'Too many failed attempts. Request a new code.', correlationId }, 429);
     }
 
     const hashed = await hashOTP(code, otp.salt);
@@ -214,22 +236,23 @@ export async function onRequestPost(context) {
         await KV.put(otpKey, JSON.stringify(otp), { expirationTtl: 300 });
       }
       const remaining = 3 - otp.attempts;
-      return json({ error: `Invalid code. ${remaining} attempt${remaining === 1 ? '' : 's'} remaining.` }, 401);
+      return json({ error: `Invalid code. ${remaining} attempt${remaining === 1 ? '' : 's'} remaining.`, correlationId }, 401);
     }
 
     // OTP valid — consume it (single-use)
     await KV.delete(otpKey);
 
-    // Build execToken: HMAC-signed claim
+    // Build execToken: HMAC-signed claim.
+    // NOTE: btoa (not Buffer) — the Workers runtime does not provide a Buffer global.
     const expiresAt = Date.now() + 5 * 60 * 1000;
     const payload = [
       sess.userId, intentId, sess.circleWalletId || '', otp.operation,
       String(otp.amount), otp.asset, otp.destination, String(expiresAt)
     ].join(':');
     const sig = await hmacSign(env.AUTH_SECRET, payload);
-    const execToken = Buffer.from(JSON.stringify({ payload, sig })).toString('base64');
+    const execToken = btoa(JSON.stringify({ payload, sig }));
 
-    console.log(JSON.stringify({ event: 'exec_otp_verified', userId: sess.userId,
+    console.log(JSON.stringify({ event: 'exec_otp_verified', correlationId, userId: sess.userId,
       intentId, operation: otp.operation, ts: Date.now() }));
 
     return json({
@@ -242,8 +265,9 @@ export async function onRequestPost(context) {
       asset: otp.asset,
       destination: otp.destination,
       expiresAt,
+      correlationId,
     });
   }
 
-  return json({ error: 'Invalid action. Use "request" or "verify".' }, 400);
+  return json({ error: 'Invalid action. Use "request" or "verify".', correlationId }, 400);
 }

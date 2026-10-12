@@ -7501,6 +7501,9 @@ select.cinput option { background: #161a24; color: #dde2f0; }
           <div class="card" style="padding:12px"><div class="st-lbl">Total Processed Value</div><div class="st-val purple" id="sch-stat-vol">$0.00</div></div>
         </div>
 
+        <!-- Executor status banner — always shows whether auto-execution is active, paused or blocked and why -->
+        <div class="card" id="sch-exec-status" style="padding:10px 14px;display:none"></div>
+
         <!-- Create schedule form -->
         <div class="card" id="sch-create-panel" style="display:none">
           <div class="ch"><i class="ti ti-calendar-plus" style="font-size:13px;color:var(--yellow)"></i><span class="ct">New Scheduled Automation</span>
@@ -32121,6 +32124,7 @@ function renderSchedules(){
   var tbody = document.getElementById('sch-tbody');
   var empty = document.getElementById('sch-empty');
   if(!tbody) return;
+  renderScheduleExecutorStatus();
 
   var all = ScheduleEngine.getAll();  var now = new Date();
   var agentReady = schAgentStatus().ready;
@@ -32223,6 +32227,28 @@ function schAgentStatus(){
   try { wmReady = !!(typeof CircleAgent !== 'undefined' && CircleAgent.getCachedAddress()); } catch(_){}
   try { authReady = !!(typeof AgentScheduleExecutor !== 'undefined' && typeof AgentScheduleExecutor.hasScheduledAuth === 'function' && AgentScheduleExecutor.hasScheduledAuth()); } catch(_){}
   return { wmReady: wmReady, authReady: authReady, ready: !!(wmReady && authReady) };
+}
+
+// Renders the executor status banner. Never lets a missing configuration
+// silently disable automation — it shows Active / Paused / Blocked + reason.
+function renderScheduleExecutorStatus(){
+  var el = document.getElementById('sch-exec-status');
+  if(!el) return;
+  var status = null;
+  try { if(typeof AgentScheduleExecutor !== 'undefined' && typeof AgentScheduleExecutor.getStatus === 'function') status = AgentScheduleExecutor.getStatus(); } catch(_){}
+  if(!status){ el.style.display = 'none'; return; }
+
+  var color, icon, text;
+  if(status.emergencyStopped){ color='#ef4444'; icon='alert-triangle'; text='Automation emergency-stopped.'; }
+  else if(!status.enabled){ color='#f59e0b'; icon='player-pause'; text='Auto-execution is disabled (paused).'; }
+  else if(!status.running){ color='#f59e0b'; icon='player-pause'; text='Executor is not running yet — waiting to start.'; }
+  else if(status.depsMissing && status.depsMissing.length){ color='#ef4444'; icon='alert-triangle'; text='Blocked — missing: ' + status.depsMissing.join(', ') + '.'; }
+  else if(!status.walletReady){ color='#ef4444'; icon='wallet'; text='Blocked — Circle AI Smart Wallet not configured.'; }
+  else if(!status.authReady){ color='#f59e0b'; icon='shield-lock'; text='Blocked — allowScheduled authorization missing. Say "allow agent to execute schedules" in Autonoma.'; }
+  else { color='#22c55e'; icon='circle-check'; text='Active — auto-executes due schedules every 30s via the Circle AI Smart Wallet.'; }
+
+  el.style.display = '';
+  el.innerHTML = '<div style="display:flex;align-items:center;gap:8px"><i class="ti ti-' + icon + '" style="color:' + color + ';font-size:14px"></i><span style="font-size:9.5px;color:var(--text)">' + text + '</span></div>';
 }
 
 function checkDueSchedules(){
@@ -50347,10 +50373,18 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
           _circleWalletAddress: res.circleWalletAddress,
           _capRouterApproved: true,
         });
+        // Publish the verified execToken so the execution gate + Circle signer can
+        // forward it to the server for re-validation (bound to user / wallet /
+        // operation / amount / asset / destination). Cleared after this run.
+        window.__autOtpExecToken = res.execToken || null;
         // Show loading state in messages
         autAppend(R.card(R.head('check','Authorized',''),'<div style="font-size:11px;color:#22c55e">Code verified. Executing…</div>'));
-        var result = await _executeIntent(state.intent, newParams, state.msg);
-        if(result) autAppend(result);
+        try {
+          var result = await _executeIntent(state.intent, newParams, state.msg);
+          if(result) autAppend(result);
+        } finally {
+          window.__autOtpExecToken = null;
+        }
       } else {
         var errMsg = (res && res.error) || 'Invalid code.';
         if(errEl) errEl.textContent = errMsg;
@@ -53018,9 +53052,13 @@ setTimeout(function() {
     if (typeof AutonomaExecutionGate === 'undefined' || typeof AutonomaExecutionGate.authorizeAutonomaExecution !== 'function') {
       return { ok:false, code:'gate_unavailable', reason:'execution gate unavailable', userMessage:'Autonomous financial execution is currently blocked because the execution safety gate is unavailable.' };
     }
+    // OTP fast-path: when an email OTP was just verified, pass its execToken so
+    // the gate skips the legacy AgentAuthorization address-binding check.
+    var _otpToken = null;
+    try { _otpToken = (typeof window !== 'undefined' && window.__autOtpExecToken) || null; } catch(_) {}
     var res;
     try {
-      res = await AutonomaExecutionGate.authorizeAutonomaExecution(intent, {});
+      res = await AutonomaExecutionGate.authorizeAutonomaExecution(intent, { execToken: _otpToken || undefined });
     } catch(e) {
       res = { ok:false, code:'gate_unavailable', reason:(e && e.message) || String(e), userMessage:'Autonomous financial execution is currently blocked because the execution safety gate could not run.' };
     }

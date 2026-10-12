@@ -57,6 +57,9 @@
   var _inFlight = {};
   var ledger = {};
   var notifications = [];
+  // Last tick status — surfaced via getStatus() so the UI can show whether the
+  // automation is active, paused (explicitly disabled) or blocked, and why.
+  var _lastStatus = { lastTickAt: null, lastSummary: null, blockedReason: null };
 
   /* ÔöÇÔöÇ Persistence ÔöÇÔöÇ */
   function _loadLedger(){
@@ -90,7 +93,13 @@
   }
 
   function isAutoEnabled(){
-    try { return localStorage.getItem(ENABLED_KEY) === 'on'; } catch(e){ return false; }
+    // Auto-execution is enabled BY DEFAULT. Only an explicit 'off' disables it,
+    // so a missing/legacy configuration can never silently stop authorized
+    // schedules from running. A read failure also defaults to enabled.
+    try {
+      var v = localStorage.getItem(ENABLED_KEY);
+      return v !== 'off';
+    } catch(e){ return true; }
   }
 
   function setAutoEnabled(on){
@@ -1331,13 +1340,25 @@
   }
 
   async function _tick(opts){
+    _lastStatus.lastTickAt = Date.now();
     if (_ticking) return { status: 'busy' };
-    if (_isEmergencyStopped()) return { status: 'emergency_stopped' };
-    if (!(opts && opts.force) && !isAutoEnabled()) return { status: 'disabled' };
+    if (_isEmergencyStopped()) { _lastStatus.blockedReason = 'emergency_stopped'; return { status: 'emergency_stopped' }; }
+    if (!(opts && opts.force) && !isAutoEnabled()) { _lastStatus.blockedReason = 'auto_execution_disabled'; return { status: 'disabled' }; }
     var eng = _engine();
     var E = _ethers();
-    if (!eng || !E || !_wm() || !_authz()) return { status: 'deps_missing' };
+    var wm = _wm();
+    var az = _authz();
+    if (!eng || !E || !wm || !az) {
+      var missing = [];
+      if (!eng) missing.push('ScheduleEngine');
+      if (!E) missing.push('ethers');
+      if (!wm) missing.push('AgentWalletManager');
+      if (!az) missing.push('AgentAuthorization');
+      _lastStatus.blockedReason = 'deps_missing:' + missing.join(',');
+      return { status: 'deps_missing', missing: missing };
+    }
     _ticking = true;
+    _lastStatus.blockedReason = null;
     var summary = { processed: 0, executed: 0, blocked: 0, failed: 0, results: [] };
     try {
       var due = getDueSchedules();
@@ -1355,6 +1376,7 @@
       summary.error = e.message || String(e);
     } finally {
       _ticking = false;
+      _lastStatus.lastSummary = summary;
     }
     return summary;
   }
@@ -1375,6 +1397,35 @@
   function isRunning(){ return !!_timer; }
 
   function tickNow(){ return _tick({ force: true }); }
+
+  // Comprehensive status for the Schedules UI — always shows whether the
+  // automation is enabled, running, or blocked and the concrete reason, so a
+  // missing dependency can never silently disable execution.
+  function getStatus(){
+    var eng = _engine();
+    var E = _ethers();
+    var wm = _wm();
+    var az = _authz();
+    var missing = [];
+    if (!eng) missing.push('ScheduleEngine');
+    if (!E) missing.push('ethers');
+    if (!wm) missing.push('AgentWalletManager');
+    if (!az) missing.push('AgentAuthorization');
+    return {
+      enabled: isAutoEnabled(),
+      running: isRunning(),
+      ticking: _ticking,
+      emergencyStopped: _isEmergencyStopped(),
+      depsMissing: missing,
+      depsReady: missing.length === 0,
+      walletReady: !!_agentIdentityAddr(),
+      authReady: hasScheduledAuth(),
+      lastTickAt: _lastStatus.lastTickAt,
+      lastSummary: _lastStatus.lastSummary,
+      blockedReason: _lastStatus.blockedReason,
+      version: '1.1.0'
+    };
+  }
 
   function getExecutionLog(limit){
     var keys = Object.keys(ledger);
@@ -1409,6 +1460,7 @@
     getNotifications: getNotifications,
     setAutoEnabled: setAutoEnabled,
     isAutoEnabled: isAutoEnabled,
+    getStatus: getStatus,
     /* ── AUTONOMA-1 — single execution authority primitives ──
        Every Autonoma financial broadcast, nonce read and receipt wait must
        go through these (the ONLY eth_sendRawTransaction lives in `broadcast`). */

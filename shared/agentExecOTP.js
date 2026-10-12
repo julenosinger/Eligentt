@@ -41,21 +41,40 @@
     var token = _getToken();
     var headers = { 'Content-Type': 'application/json' };
     if (token) headers['Authorization'] = 'Bearer ' + token;
-    var resp = await fetch(API_BASE, {
-      method: 'POST',
-      headers: headers,
-      credentials: 'same-origin',
-      body: JSON.stringify(body),
-    });
-    var ct = resp.headers.get('content-type') || '';
-    var text = await resp.text();
-    if (!ct.includes('application/json')) {
-      throw new Error(resp.status >= 500 ? 'Server error. Please try again.' : 'Service unavailable.');
+    var resp;
+    try {
+      resp = await fetch(API_BASE, {
+        method: 'POST',
+        headers: headers,
+        credentials: 'same-origin',
+        body: JSON.stringify(body),
+      });
+    } catch (e) {
+      throw new Error('Network error: ' + (e && e.message ? e.message : 'could not reach server'));
     }
-    var data;
-    try { data = JSON.parse(text); } catch (_) { throw new Error('Invalid server response.'); }
-    if (!resp.ok) throw new Error(data.error || 'Request failed');
-    return data;
+    var ct = resp.headers.get('content-type') || '';
+    var text;
+    try { text = await resp.text(); } catch (_) { text = ''; }
+
+    var correlationId = null;
+    if (ct.indexOf('application/json') !== -1) {
+      var data;
+      try { data = JSON.parse(text); } catch (_) { data = null; }
+      if (data) correlationId = data.correlationId || null;
+      if (!resp.ok) {
+        var msg = (data && (data.error || data.message)) || ('Request failed (HTTP ' + resp.status + ')');
+        throw new Error(correlationId ? msg + ' [ref ' + correlationId + ']' : msg);
+      }
+      if (!data) throw new Error('Invalid server response.');
+      return data;
+    }
+
+    // Non-JSON response — surface the real status + a safe body snippet instead of
+    // hiding the root cause behind a generic "Server error" message.
+    var snippet = String(text || '').replace(/\s+/g, ' ').slice(0, 180).trim();
+    throw new Error('Unexpected server response (HTTP ' + resp.status + ')' +
+      (snippet ? ': ' + snippet : '') +
+      (correlationId ? ' [ref ' + correlationId + ']' : ''));
   }
 
   /**

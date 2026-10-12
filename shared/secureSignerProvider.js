@@ -178,14 +178,23 @@
     var executionId = opts.executionId || null;
 
     // [AUTONOMA-6C] Obtain a server-issued, single-use authorization proof first.
-    var proofRes = await _postJson('/api/agent-signer/authorize', {
+    // When the operation was authorized by an email OTP, forward the verified
+    // execToken so the server can re-validate its binding before issuing a proof.
+    var otpExecToken = null;
+    try {
+      otpExecToken = (opts && opts.execToken) ||
+        (typeof window !== 'undefined' && window.__autOtpExecToken) || null;
+    } catch (_) {}
+    var authorizeBody = {
       chainId: chainId,
       operation: operation,
       executionId: executionId,
       amount: opts.amount != null ? opts.amount : null,
       destination: opts.destination || null,
       request: circleReq
-    });
+    };
+    if (otpExecToken) authorizeBody.execToken = otpExecToken;
+    var proofRes = await _postJson('/api/agent-signer/authorize', authorizeBody);
     if (!proofRes || proofRes.ok !== true || !proofRes.authorizationProof) {
       throw new Error('Circle signer authorization denied: ' + ((proofRes && (proofRes.error || proofRes.reason)) || 'unknown'));
     }

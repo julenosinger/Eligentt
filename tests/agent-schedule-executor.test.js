@@ -20,7 +20,6 @@ const root = path.resolve(__dirname, '..');
 const executorSrc = fs.readFileSync(path.join(root, 'public', 'shared', 'agentScheduleExecutor.js'), 'utf8');
 const authSrc = fs.readFileSync(path.join(root, 'public', 'shared', 'agentAuthorization.js'), 'utf8');
 const policySrc = fs.readFileSync(path.join(root, 'public', 'shared', 'policyEngine.js'), 'utf8');
-const html = fs.readFileSync(path.join(root, 'public', 'index.html'), 'utf8');
 const srcHtml = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 
 const RCPT = '0x' + '11'.repeat(20);
@@ -170,11 +169,74 @@ describe('AgentScheduleExecutor — authorization gating', () => {
     expect(env.executor.hasScheduledAuth()).toBe(false);
   });
 
-  it('auto-execution is opt-in (unset key is disabled)', () => {
+  it('auto-execution is enabled by default; explicit "off" disables it', () => {
     const env = boot();
+    // Unset key → enabled (a missing configuration must NOT silently disable
+    // authorized schedules from auto-executing).
+    expect(env.executor.isAutoEnabled()).toBe(true);
+    env.executor.setAutoEnabled(false);
     expect(env.executor.isAutoEnabled()).toBe(false);
     env.executor.setAutoEnabled(true);
     expect(env.executor.isAutoEnabled()).toBe(true);
+  });
+
+  it('reports execution status (enabled / deps / wallet / auth) via getStatus', () => {
+    const env = boot();
+    const status = env.executor.getStatus();
+    expect(status).toBeTruthy();
+    expect(status.enabled).toBe(true);
+    expect(Array.isArray(status.depsMissing)).toBe(true);
+    expect(typeof status.walletReady).toBe('boolean');
+    expect(typeof status.authReady).toBe('boolean');
+    expect(typeof status.running).toBe('boolean');
+    // With CircleAgent + AgentWalletManager + ethers + ScheduleEngine mocked,
+    // dependencies are present and wallet is ready.
+    expect(status.depsReady).toBe(true);
+    expect(status.walletReady).toBe(true);
+    // No scheduled authorization granted yet.
+    expect(status.authReady).toBe(false);
+  });
+
+  it('reports the blocked reason when dependencies are missing', () => {
+    const env = boot();
+    // Remove a hard dependency → getStatus reports it, and a non-forced tick
+    // records a deps_missing block reason instead of silently doing nothing.
+    const savedAuth = globalThis.AgentAuthorization;
+    delete globalThis.AgentAuthorization;
+    try {
+      const status = env.executor.getStatus();
+      expect(status.depsReady).toBe(false);
+      expect(status.depsMissing).toContain('AgentAuthorization');
+    } finally {
+      globalThis.AgentAuthorization = savedAuth;
+    }
+  });
+
+  it('future intent is not executed (only due schedules are picked)', async () => {
+    const env = boot({ schedules: [makeSchedule({ nextRun: new Date(Date.now() + 3600000).toISOString() })] });
+    grantScheduledAuth(env.auth);
+    const summary = await env.executor.tickNow();
+    expect(summary.processed).toBe(0);
+    expect(env.provider.sent.length).toBe(0);
+    expect(env.engine.getById('SCH_TEST_1').execCount).toBe(0);
+  });
+
+  it('overdue intent (within the 24h window) is executed automatically', async () => {
+    const env = boot({ schedules: [makeSchedule({ nextRun: new Date(Date.now() - 30 * 60000).toISOString() })] });
+    grantScheduledAuth(env.auth);
+    const summary = await env.executor.tickNow();
+    expect(summary.executed).toBe(1);
+    expect(env.provider.sent.length).toBe(1);
+    expect(env.engine.getById('SCH_TEST_1').execCount).toBe(1);
+  });
+
+  it('blocks with a reason when the Circle AI Smart Wallet is unavailable', async () => {
+    const env = boot({ circleAgentOverrides: { getCachedAddress: () => null, getAddress: async () => null } });
+    grantScheduledAuth(env.auth);
+    expect(env.executor.getStatus().walletReady).toBe(false);
+    const summary = await env.executor.tickNow();
+    expect(env.provider.sent.length).toBe(0);
+    expect(env.engine.getById('SCH_TEST_1').execCount).toBe(0);
   });
 
   it('never executes without an active scheduled authorization', async () => {
@@ -669,13 +731,15 @@ describe('AgentScheduleExecutor — module source safety checks', () => {
 
 describe('Schedules tab + Autonoma wiring (index.html)', () => {
   it('loads the executor module', () => {
-    expect(html).toContain('<script src="/shared/agentScheduleExecutor.js"></script>');
+    expect(srcHtml).toContain('<script src="/shared/agentScheduleExecutor.js"></script>');
   });
 
   it('new schedules are assigned to the Agent Wallet (agentExecution flag)', () => {
-    const fn = html.slice(html.indexOf('function scheduleSubmit()'), html.indexOf('function schTypeLabel'));
-    // agentExecution defaults to true (either literal or expression that evaluates to true by default)
-    expect(fn).toMatch(/agentExecution:\s*(true|![\s\S]{0,200}data-on.*false)/);
+    const fn = srcHtml.slice(srcHtml.indexOf('function scheduleSubmit()'), srcHtml.indexOf('function schTypeLabel'));
+    // agentExecution defaults to true: it is only false when the executor is 'evm'
+    // (or the per-schedule agent toggle is explicitly off).
+    expect(fn).toContain('agentExecution');
+    expect(fn).toContain("value === 'evm'");
   });
 
   it('chat-created schedules are assigned to the Agent Wallet too', () => {
@@ -685,14 +749,14 @@ describe('Schedules tab + Autonoma wiring (index.html)', () => {
   });
 
   it('Schedules tab exposes a per-intent agent toggle and AUTO badge', () => {
-    expect(html).toContain('function scheduleToggleAgent(id)');
-    const render = html.slice(html.indexOf('function renderSchedules()'), html.indexOf('function checkDueSchedules'));
+    expect(srcHtml).toContain('function scheduleToggleAgent(id)');
+    const render = srcHtml.slice(srcHtml.indexOf('function renderSchedules()'), srcHtml.indexOf('function checkDueSchedules'));
     expect(render).toContain('scheduleToggleAgent');
     expect(render).toContain('AUTO');
   });
 
   it('executor is started on init via checkDueSchedules', () => {
-    const fn = html.slice(html.indexOf('function checkDueSchedules()'), html.indexOf('function checkDueSchedules()') + 800);
+    const fn = srcHtml.slice(srcHtml.indexOf('function checkDueSchedules()'), srcHtml.indexOf('function checkDueSchedules()') + 800);
     expect(fn).toContain('AgentScheduleExecutor.start()');
   });
 
@@ -709,7 +773,7 @@ describe('Schedules tab + Autonoma wiring (index.html)', () => {
   });
 
   it('does not alter the manual scheduleRun flow', () => {
-    const fn = html.slice(html.indexOf('async function scheduleRun(id)'), html.indexOf('function schedulePause'));
+    const fn = srcHtml.slice(srcHtml.indexOf('async function scheduleRun(id)'), srcHtml.indexOf('function schedulePause'));
     expect(fn).toContain("showPage('batch')");
     expect(fn).toContain("showPage('swap')");
     expect(fn).toContain("showPage('bridge')");
