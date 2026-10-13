@@ -126,15 +126,20 @@ describe('x402 _x402.mjs helpers', () => {
     expect(norm.requirements[0].network).toBe('eip155:8453');
   });
 
-  it('normalises legacy v1 field names (maxAmountRequired + slug)', () => {
+  it('normalises legacy v1 field names (maxAmountRequired + slug) within v2', () => {
     const legacy = {
       scheme: 'exact', network: 'base', maxAmountRequired: '5000', payTo: PAYTO,
       asset: USDC_BASE, maxTimeoutSeconds: 30, extra: { name: 'USDC', version: '2' },
     };
-    const norm = normalizePaymentRequired({ accepts: [legacy] });
+    const norm = normalizePaymentRequired({ x402Version: 2, accepts: [legacy] });
     expect(norm.ok).toBe(true);
     expect(norm.requirements[0].amount).toBe('5000');
     expect(norm.requirements[0].network).toBe('eip155:8453');
+  });
+
+  it('rejects a missing x402 version', () => {
+    const legacy = { scheme: 'exact', network: 'base', amount: '5000', payTo: PAYTO, asset: USDC_BASE, extra: { name: 'USDC', version: '2' } };
+    expect(normalizePaymentRequired({ accepts: [legacy] }).ok).toBe(false);
   });
 
   it('rejects unsupported x402 version', () => {
@@ -145,10 +150,33 @@ describe('x402 _x402.mjs helpers', () => {
     const req0 = normalizePaymentRequired(paymentRequired()).requirements[0];
     const v = validateRequirement(req0);
     const names = v.checks.map((c) => c.name);
-    // Everything structural passes; only the "payments_enabled" flag is external.
-    expect(names).toEqual(expect.arrayContaining(['scheme', 'network_supported', 'network_eip3009', 'asset_usdc', 'payto_valid', 'amount_valid', 'amount_within_max', 'timeout_valid']));
+    // Everything structural passes; only the "payments_enabled"/"settlement" flags are external.
+    expect(names).toEqual(expect.arrayContaining(['scheme', 'network_supported', 'network_eip3009', 'asset_known', 'asset_domain_name', 'asset_domain_version', 'asset_transfer_method', 'payto_valid', 'amount_valid', 'amount_within_max', 'timeout_valid']));
     expect(v.ok).toBe(true);
     expect(v.amountUsd).toBeCloseTo(0.01, 5);
+    expect(v.asset).toBe('USDC');
+    expect(v.decimals).toBe(6);
+  });
+
+  it('rejects a token falsely named "USDC" with an untrusted contract address', () => {
+    const fake = {
+      scheme: 'exact', network: 'eip155:8453', amount: '10000',
+      asset: '0x' + '99'.repeat(20), payTo: PAYTO, maxTimeoutSeconds: 60,
+      extra: { name: 'USDC', version: '2' },
+    };
+    const v = validateRequirement(fake);
+    expect(v.ok).toBe(false);
+    expect(v.checks.find((c) => c.name === 'asset_known').passed).toBe(false);
+  });
+
+  it('rejects a USDC named token on the wrong network (address/network mismatch)', () => {
+    // Base USDC address but claimed on Polygon PoS → asset_known must fail.
+    const wrongNet = {
+      scheme: 'exact', network: 'eip155:137', amount: '10000',
+      asset: USDC_BASE, payTo: PAYTO, maxTimeoutSeconds: 60, extra: { name: 'USDC', version: '2' },
+    };
+    const v = validateRequirement(wrongNet);
+    expect(v.checks.find((c) => c.name === 'asset_known').passed).toBe(false);
   });
 
   it('blocks Arc Mainnet (EIP-3009 unconfirmed)', () => {
@@ -207,6 +235,15 @@ describe('x402 /api/x402 endpoints', () => {
     ]));
   });
 
+  it('GET /status never claims settlement available even when X402_ENABLED=true', async () => {
+    const res = await onRequest({ request: req('/api/x402/status', { token: null }), env: makeEnv({ X402_ENABLED: 'true', CIRCLE_API_KEY: 'k', CIRCLE_ENTITY_SECRET: 's' }) });
+    const data = await res.json();
+    expect(data.enabled).toBe(true);
+    expect(data.state).toBe('settlement_unavailable');
+    expect(data.settlement.available).toBe(false);
+    expect(data.discovery.available).toBe(true);
+  });
+
   it('POST /discover detects 402 and returns normalised requirements', async () => {
     const pr = paymentRequired();
     globalThis.fetch.mockResolvedValueOnce(new Response('{}', {
@@ -236,6 +273,26 @@ describe('x402 /api/x402 endpoints', () => {
     const data = await jsonOf(res);
     expect(res.status).toBe(400);
     expect(data.error).toMatch(/blocked/i);
+  });
+
+  it('POST /discover blocks redirects to private destinations (SSRF re-validation)', async () => {
+    globalThis.fetch.mockResolvedValueOnce(new Response('', { status: 302, headers: { Location: 'http://169.254.169.254/latest' } }));
+    const res = await onRequest({ request: req('/api/x402/discover', { method: 'POST', body: { url: 'https://api.example.com/redirect' } }), env: makeEnv() });
+    const data = await jsonOf(res);
+    expect(res.status).toBe(502);
+    expect(data.error).toMatch(/blocked/i);
+  });
+
+  it('POST /discover follows a safe redirect and still detects 402', async () => {
+    const pr = paymentRequired();
+    globalThis.fetch
+      .mockResolvedValueOnce(new Response('', { status: 302, headers: { Location: 'https://api.example.com/final' } }))
+      .mockResolvedValueOnce(new Response('{}', { status: 402, headers: { 'Content-Type': 'application/json', [HEADER_PAYMENT_REQUIRED]: b64(pr) } }));
+    const res = await onRequest({ request: req('/api/x402/discover', { method: 'POST', body: { url: 'https://api.example.com/start' } }), env: makeEnv() });
+    const data = await jsonOf(res);
+    expect(data.ok).toBe(true);
+    expect(data.status).toBe(402);
+    expect(data.x402).toBe(true);
   });
 
   it('POST /discover requires a session', async () => {
@@ -268,6 +325,29 @@ describe('x402 /api/x402 endpoints', () => {
     const data = await jsonOf(res);
     expect(data.intent.status).toBe('blocked');
     expect(data.intent.checks.find((c) => c.name === 'network_eip3009').passed).toBe(false);
+  });
+
+  it('POST /prepare blocks settlement even when the flag is on (settlement not implemented)', async () => {
+    const req0 = normalizePaymentRequired(paymentRequired()).requirements[0];
+    const res = await onRequest({
+      request: req('/api/x402/prepare', { method: 'POST', body: { resourceUrl: 'https://api.example.com/premium', requirement: req0 } }),
+      env: makeEnv({ X402_ENABLED: 'true', CIRCLE_API_KEY: 'k', CIRCLE_ENTITY_SECRET: 's' }),
+    });
+    const data = await jsonOf(res);
+    expect(data.intent.status).toBe('blocked');
+    expect(data.intent.checks.find((c) => c.name === 'settlement_implemented').passed).toBe(false);
+  });
+
+  it('POST /prepare rejects an invalid requirement (bad recipient)', async () => {
+    const req0 = normalizePaymentRequired(paymentRequired()).requirements[0];
+    const bad = { ...req0, payTo: '0x1234' };
+    const res = await onRequest({
+      request: req('/api/x402/prepare', { method: 'POST', body: { resourceUrl: 'https://api.example.com/premium', requirement: bad } }),
+      env: makeEnv(),
+    });
+    const data = await jsonOf(res);
+    expect(data.intent.status).toBe('blocked');
+    expect(data.intent.checks.find((c) => c.name === 'payto_valid').passed).toBe(false);
   });
 
   it('POST /pay is fail-closed (503) with no simulated settlement', async () => {

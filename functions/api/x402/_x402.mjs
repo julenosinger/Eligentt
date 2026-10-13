@@ -60,11 +60,32 @@ const NETWORK_SLUG_MAP = {
   'arc-mainnet':  'eip155:5042',
 };
 
-// The only asset token we accept for payments (EIP-712 domain name/version
-// used by `exact` / EIP-3009 against the USDC contract).
-export const USDC_DOMAIN = Object.freeze({ name: 'USDC', version: '2' });
+/**
+ * Trusted assets (explicit allowlist). An x402 requirement MUST reference one
+ * of these exact contract addresses on its network; `extra.name` / `extra.version`
+ * must match the EIP-712 domain; `decimals` fixes the amount interpretation.
+ *
+ * We NEVER trust `extra.name === "USDC"` alone — a malicious server could label
+ * any token "USDC". The contract address + network + domain must all match a
+ * known, EIP-3009-capable USDC deployment.
+ *
+ * Arc Mainnet (`eip155:5042`) is listed for completeness but is blocked at the
+ * network level (`eip3009Compatible: false`) — its native USDC is a precompile,
+ * NOT a standard EIP-3009 ERC-20.
+ */
+export const TRUSTED_ASSETS = Object.freeze({
+  'eip155:84532': Object.freeze({ address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e', symbol: 'USDC', decimals: 6, domainName: 'USDC', domainVersion: '2' }),
+  'eip155:8453':  Object.freeze({ address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', symbol: 'USDC', decimals: 6, domainName: 'USDC', domainVersion: '2' }),
+  'eip155:137':   Object.freeze({ address: '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359', symbol: 'USDC', decimals: 6, domainName: 'USDC', domainVersion: '2' }),
+  'eip155:5042':  Object.freeze({ address: '0x3600000000000000000000000000000000000000', symbol: 'USDC', decimals: 6, domainName: 'USDC', domainVersion: '2' }),
+});
 
 export const DEFAULT_MAX_USD = 25; // hard cap on a single x402 payment (Phase 1)
+
+// Settlement is NOT implemented in Phase 1. This code-level flag guarantees the
+// status endpoint can never claim payments are "available" while there is no
+// real authorization → signing → verification → confirmation flow.
+export const SETTLEMENT_IMPLEMENTED = false;
 
 /* ── Base64 helpers (Workers runtime provides atob/btoa) ─────────────── */
 
@@ -156,10 +177,7 @@ export function normalizePaymentRequired(paymentRequired) {
 
   const x402Version = Number(paymentRequired.x402Version);
   if (!Number.isFinite(x402Version) || x402Version !== X402_VERSION) {
-    // v1 payloads predate x402Version — accept them but keep a flag.
-    if (paymentRequired.x402Version !== undefined) {
-      return { ok: false, reason: 'unsupported x402 version: ' + paymentRequired.x402Version };
-    }
+    return { ok: false, reason: 'unsupported or missing x402 version (expected ' + X402_VERSION + ')' };
   }
 
   const rawAccepts = Array.isArray(paymentRequired.accepts)
@@ -218,19 +236,41 @@ export function validateRequirement(req, opts = {}) {
   const net = X402_NETWORKS[req.network];
   add('network_supported', !!net, net ? net.label : 'unsupported network "' + req.networkRaw + '"');
 
+  const trusted = net ? TRUSTED_ASSETS[req.network] : null;
+
   if (net) {
     add('network_eip3009', net.eip3009Compatible, net.eip3009Compatible
       ? net.label + ' USDC supports EIP-3009'
       : net.label + ' EIP-3009 compatibility NOT confirmed — payments blocked');
   }
 
-  const isUsdc = req.extra && String(req.extra.name || '').toUpperCase() === USDC_DOMAIN.name;
-  add('asset_usdc', isUsdc, isUsdc ? 'USDC' : 'unsupported asset "' + (req.extra && req.extra.name) + '"');
+  // Asset contract address MUST be the trusted USDC address for this network.
+  const assetAddr = String(req.asset || '').toLowerCase();
+  add('asset_known', !!trusted && trusted.address.toLowerCase() === assetAddr,
+    trusted
+      ? (trusted.address.toLowerCase() === assetAddr
+          ? trusted.symbol + ' (' + trusted.address + ')'
+          : 'asset address not in trusted list for ' + net.label)
+      : 'no trusted asset for this network');
+
+  // EIP-712 domain name + version MUST match the trusted token deployment.
+  const extraName = String((req.extra && req.extra.name) || '').toUpperCase();
+  const extraVersion = String((req.extra && req.extra.version) || '');
+  add('asset_domain_name', !!trusted && extraName === trusted.domainName,
+    extraName === 'USDC' ? 'EIP-712 domain name "USDC"' : 'unsupported token name "' + (req.extra && req.extra.name) + '"');
+  add('asset_domain_version', !!trusted && extraVersion === trusted.domainVersion,
+    extraVersion === '2' ? 'EIP-712 domain version "2"' : 'unsupported domain version "' + extraVersion + '"');
+
+  // Only the default `eip3009` transfer method is supported in Phase 1.
+  const transferMethod = String((req.extra && req.extra.assetTransferMethod) || 'eip3009');
+  add('asset_transfer_method', transferMethod === 'eip3009',
+    transferMethod === 'eip3009' ? 'eip3009' : 'unsupported assetTransferMethod "' + transferMethod + '"');
 
   add('payto_valid', isAddress(req.payTo), isAddress(req.payTo) ? req.payTo : 'invalid recipient address');
 
-  const amountBig = (() => { try { return BigInt(req.amount || ''); } catch (_) { return null; } })();
-  const amountUsd = amountBig !== null ? Number(amountBig) / 1e6 : NaN;
+  const decimals = (trusted && trusted.decimals) || 6;
+  const amountBig = (() => { try { return BigInt(String(req.amount || '').trim()); } catch (_) { return null; } })();
+  const amountUsd = amountBig !== null ? Number(amountBig) / Math.pow(10, decimals) : NaN;
   add('amount_valid', amountBig !== null && amountBig > 0n, amountBig !== null && amountBig > 0n
     ? (amountUsd.toFixed(2) + ' USDC')
     : 'invalid or non-positive amount');
@@ -248,7 +288,8 @@ export function validateRequirement(req, opts = {}) {
     checks,
     amountUsd: Number.isFinite(amountUsd) ? amountUsd : null,
     network: net || null,
-    asset: isUsdc ? 'USDC' : null,
+    asset: (trusted && trusted.symbol) || null,
+    decimals,
   };
 }
 
@@ -307,21 +348,24 @@ export function assertSafeTarget(urlStr, allowedHosts = []) {
     return { ok: true, url };
   }
 
-  if (host === 'localhost' || host.endsWith('.local') || host.endsWith('.internal')) {
+  if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || host.endsWith('.internal')) {
     return { ok: false, reason: 'internal hostname blocked' };
   }
-  // IPv4 literal
+
+  // IPv6 literal (any form) — blocked outright for the discovery proxy, since a
+  // legitimate x402 service is never an IPv6 literal and IPv4-mapped forms can
+  // smuggle private/loopback addresses.
+  if (host.includes(':')) {
+    return { ok: false, reason: 'IPv6 literal targets are not allowed' };
+  }
+
+  // IPv4 literal — block loopback / private / link-local / reserved ranges.
   if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) {
     if (PRIVATE_IPV4_RE.test(host + '.') || host === '0.0.0.0' || host === '255.255.255.255') {
       return { ok: false, reason: 'private/loopback IP blocked' };
     }
   }
-  // IPv6 literal — block loopback / link-local / unspecified / ULA
-  if (host.includes(':')) {
-    if (host === '::1' || host === '::' || host.toLowerCase().startsWith('fe80') || host.toLowerCase().startsWith('fc') || host.toLowerCase().startsWith('fd')) {
-      return { ok: false, reason: 'private/loopback IPv6 blocked' };
-    }
-  }
+
   return { ok: true, url };
 }
 

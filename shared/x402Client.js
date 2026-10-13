@@ -35,9 +35,13 @@
   var _overlay = null;
   var _status = null;
   var _lastDiscovery = null;
+  var _lastPrepare = null;
   var _busy = false;
+  var _userId = null; // authenticated user id — namespaces history (per-user isolation)
 
-  /* ── Storage helpers ──────────────────────────────────────────────── */
+  /* ── Storage helpers (namespaced per authenticated user) ───────────── */
+  function histKey() { return CFG.STORAGE_HISTORY + (_userId ? ':' + _userId : ''); }
+  function subKey() { return CFG.STORAGE_SUBMITTED + (_userId ? ':' + _userId : ''); }
   function lsLoad(key, def) {
     try { var raw = localStorage.getItem(key); return raw === null ? def : JSON.parse(raw); }
     catch (_) { return def; }
@@ -45,8 +49,27 @@
   function lsSave(key, val) {
     try { localStorage.setItem(key, JSON.stringify(val)); } catch (_) { /* quota */ }
   }
-  function getHistory() { return lsLoad(CFG.STORAGE_HISTORY, []); }
-  function getSubmitted() { return lsLoad(CFG.STORAGE_SUBMITTED, {}); }
+  function getHistory() { return lsLoad(histKey(), []); }
+  function getSubmitted() { return lsLoad(subKey(), {}); }
+  function pushHistory(entry) {
+    var h = getHistory();
+    h.unshift(Object.assign({ at: nowIso() }, entry));
+    h = h.slice(0, 100);
+    lsSave(histKey(), h);
+    return h;
+  }
+  // Only actual settlements (with real on-chain evidence) are ever recorded
+  // here. Blocked/failed operations are recorded in HISTORY only, so a later
+  // legitimate retry is never blocked.
+  function markSubmitted(id, status) {
+    var s = getSubmitted();
+    s[id] = { at: nowIso(), status: status };
+    lsSave(subKey(), s);
+  }
+  function isAlreadySubmitted(id) {
+    var s = getSubmitted();
+    return !!(s && s[id]);
+  }
 
   function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
@@ -102,6 +125,8 @@
     if (!force && _status) return _status;
     var res = await api('/status');
     _status = res.data || {};
+    // Namespace history/submitted state per authenticated user (never shared).
+    if (_status && _status.user && _status.user.id) _userId = _status.user.id;
     return _status;
   }
 
@@ -117,30 +142,13 @@
     return await api('/pay', { method: 'POST', body: JSON.stringify({ intentId: intent && intent.id }) });
   }
 
-  /* ── History / dedup ───────────────────────────────────────────────── */
-  function pushHistory(entry) {
-    var h = getHistory();
-    h.unshift(Object.assign({ at: nowIso() }, entry));
-    h = h.slice(0, 100);
-    lsSave(CFG.STORAGE_HISTORY, h);
-    return h;
-  }
-  function isAlreadySubmitted(id) {
-    var s = getSubmitted();
-    return !!(s && s[id]);
-  }
-  function markSubmitted(id, status) {
-    var s = getSubmitted();
-    s[id] = { at: nowIso(), status: status };
-    lsSave(CFG.STORAGE_SUBMITTED, s);
-  }
-
   /* ── Rendering ─────────────────────────────────────────────────────── */
 
   function stateBadge(state) {
     var map = {
       available: { cls: 'x402-live', label: 'Available' },
       disabled: { cls: 'x402-muted', label: 'Disabled' },
+      settlement_unavailable: { cls: 'x402-warn', label: 'Settlement unavailable' },
       unavailable: { cls: 'x402-err', label: 'Unavailable' },
       pending_config: { cls: 'x402-warn', label: 'Configuration pending' },
     };
@@ -162,14 +170,24 @@
     var s = _status || {};
     var state = s.state || 'disabled';
     var wallet = s.wallet || {};
+    var discovery = s.discovery || {};
+    var settlement = s.settlement || {};
     var netRows = (s.networks || []).map(function (n) {
       var compat = n.eip3009Compatible ? '<span style="color:var(--green)">EIP-3009 ✓</span>' : '<span style="color:var(--yellow)">EIP-3009 unconfirmed</span>';
       return '<div class="x402-net"><span>' + esc(n.label) + '</span><span class="x402-net-caip">' + esc(n.caip) + '</span><span>' + compat + '</span></div>';
     }).join('');
 
+    var capDiscovery = discovery.available
+      ? '<span class="x402-badge x402-live">discovery available</span>'
+      : '<span class="x402-badge x402-err">discovery unavailable</span>';
+    var capSettlement = settlement.available
+      ? '<span class="x402-badge x402-live">settlement available</span>'
+      : '<span class="x402-badge x402-warn">settlement unavailable</span>';
+
     return '<div class="x402-card">' +
       '<div class="x402-card-head"><span class="x402-card-title"><i class="ti ti-credit-card-pay"></i> x402 Payments</span>' + stateBadge(state) + '</div>' +
       '<div class="x402-card-sub">' + esc(s.reason || '…') + '</div>' +
+      '<div class="x402-cap-row">' + capDiscovery + capSettlement + '</div>' +
       '<div class="x402-kv">' +
         '<div><span>Protocol</span><b>v' + esc(s.version) + '</b></div>' +
         '<div><span>Facilitator</span><b>' + esc(s.facilitator || '—') + '</b></div>' +
@@ -238,9 +256,10 @@
     var res = p.data || {};
     var it = res.intent || {};
     var checkRows = (it.checks || []).map(checkRow).join('');
+    var ready = it.status === 'ready';
 
     var head;
-    if (res.enabled && !it.blockedReason) {
+    if (ready) {
       head = '<div class="x402-card-head"><span class="x402-card-title"><i class="ti ti-shield-check"></i> Authorize payment</span>' +
         '<span class="x402-badge x402-live">ready</span></div>' +
         '<div class="x402-card-sub">Review the payment and confirm. Funds move ONLY after you authorize — never automatically.</div>';
@@ -262,7 +281,7 @@
       '<div class="x402-checks">' + checkRows + '</div>' +
       '<div class="x402-row">' +
         '<button class="x402-btn" onclick="X402._back()"><i class="ti ti-arrow-left"></i> Back</button>' +
-        '<button class="x402-btn x402-btn-primary" id="x402-pay-btn" onclick="X402._pay()" ' + (res.enabled && !it.blockedReason ? '' : 'disabled') + '><i class="ti ti-credit-card-pay"></i> Confirm &amp; Pay</button>' +
+        '<button class="x402-btn x402-btn-primary" id="x402-pay-btn" onclick="X402._pay()" ' + (ready ? '' : 'disabled') + '><i class="ti ti-credit-card-pay"></i> Confirm &amp; Pay</button>' +
       '</div>' +
     '</div>';
   }
@@ -362,8 +381,10 @@
     var p = _lastPrepare && _lastPrepare.data;
     var it = p && p.intent;
     if (!it) return;
+    // Only a REAL settlement is recorded as "submitted". Blocked/failed
+    // attempts are history-only, so a later legitimate retry is never blocked.
     if (isAlreadySubmitted(it.id)) {
-      notify('This payment was already handled — not resubmitting', 'error');
+      notify('This payment was already settled — not resubmitting', 'error');
       return;
     }
     // Explicit authorization is the user clicking "Confirm & Pay". No auto-pay.
@@ -371,8 +392,9 @@
     var res = await pay(it);
     setBusy(false);
     if (!res.ok) {
+      // Blocked / disabled / 503 — record in HISTORY only. Never mark as
+      // "submitted", so the user can retry after fixing config / a failure.
       var reason = (res.data && res.data.error) || 'Payment disabled';
-      markSubmitted(it.id, 'blocked');
       pushHistory({
         status: 'blocked', id: it.id, service: p.resourceUrl, amountAtomic: Math.round((it.amountUsd || 0) * 1e6),
         network: it.networkCaip, reason: reason,
@@ -383,9 +405,20 @@
       render();
       return;
     }
-    // Phase 2: record real txHash/opId when settlement is enabled.
-    markSubmitted(it.id, 'paid');
-    pushHistory({ status: 'paid', id: it.id, service: p.resourceUrl, amountAtomic: Math.round((it.amountUsd || 0) * 1e6), network: it.networkCaip, txHash: null });
+    // Success requires verifiable settlement evidence (real tx hash). Without
+    // it, we do NOT record a payment as completed.
+    var txHash = res.data && (res.data.txHash || res.data.transaction);
+    if (!txHash) {
+      pushHistory({
+        status: 'blocked', id: it.id, service: p.resourceUrl, amountAtomic: Math.round((it.amountUsd || 0) * 1e6),
+        network: it.networkCaip, reason: 'settlement evidence missing — not recorded as paid',
+      });
+      notify('Settlement not confirmed', 'error');
+      render();
+      return;
+    }
+    markSubmitted(it.id, 'settled');
+    pushHistory({ status: 'paid', id: it.id, service: p.resourceUrl, amountAtomic: Math.round((it.amountUsd || 0) * 1e6), network: it.networkCaip, txHash: txHash });
     render();
   }
 
@@ -411,6 +444,7 @@
       '.x402-badge.x402-err{background:rgba(239,68,68,.14);color:var(--red,#ef4444)}',
       '.x402-badge.x402-muted{background:rgba(148,163,184,.14);color:var(--muted2,#94a3b8)}',
       '.x402-kv{display:grid;grid-template-columns:1fr 1fr;gap:6px}',
+      '.x402-cap-row{display:flex;gap:6px;flex-wrap:wrap}',
       '.x402-kv div{display:flex;flex-direction:column;gap:1px;min-width:0}',
       '.x402-kv span{font-size:8px;color:var(--muted2,#94a3b8);text-transform:uppercase;letter-spacing:.4px}',
       '.x402-kv b{font-size:10px;color:var(--text,#e5e7eb);word-break:break-all}',
@@ -484,6 +518,11 @@
     _pay: _pay,
     _back: _back,
     getHistory: getHistory,
+    getSubmitted: getSubmitted,
+    // Test/debug hooks (no secrets — state only).
+    _setUserId: function (id) { _userId = id || null; },
+    _setLastPrepare: function (p) { _lastPrepare = p; },
+    _getDiscovery: function () { return _lastDiscovery; },
   };
 
   if (typeof window !== 'undefined') window.X402 = API;

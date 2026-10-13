@@ -28,6 +28,7 @@ import {
   X402_VERSION,
   readFlags,
   assertSafeTarget,
+  SETTLEMENT_IMPLEMENTED,
   HEADER_PAYMENT_REQUIRED,
 } from './_x402.mjs';
 import { verifySession } from '../agent-signer/_session.mjs';
@@ -105,15 +106,26 @@ async function handleStatus(env, request) {
   const flags = readFlags(env);
   const circleConfigured = !!(env && env.CIRCLE_API_KEY && env.CIRCLE_ENTITY_SECRET);
 
-  const walletRes = await resolveUserWallet(env, request).catch(() => ({ needsProvision: true }));
+  const walletRes = await resolveUserWallet(env, request).catch(() => ({ needsProvision: true, email: null, userId: null }));
   const walletProvisioned = !!(walletRes && !walletRes.needsProvision && walletRes.walletAddress);
 
-  let state = 'disabled';
-  let reason = 'x402 payments are disabled (Phase 1 — infrastructure only)';
-  if (flags.enabled) {
-    if (!circleConfigured) { state = 'pending_config'; reason = 'Circle credentials not configured'; }
-    else if (!walletProvisioned) { state = 'pending_config'; reason = 'Circle AI Smart Wallet not provisioned for this user'; }
-    else { state = 'available'; reason = 'x402 payments available'; }
+  // Settlement availability is a CODE-LEVEL fact (SETTLEMENT_IMPLEMENTED), never
+  // derived from the X402_ENABLED flag. A misconfigured flag must not make the
+  // UI claim payments are possible while there is no settlement path.
+  const discoveryAvailable = true; // discovery + validation are implemented
+  const settlementAvailable = SETTLEMENT_IMPLEMENTED; // false in Phase 1
+
+  let state;
+  let reason;
+  if (!flags.enabled) {
+    state = 'disabled';
+    reason = 'x402 payments are disabled (X402_ENABLED=false)';
+  } else if (!settlementAvailable) {
+    state = 'settlement_unavailable';
+    reason = 'x402 discovery is available but settlement is not implemented — real payments remain disabled';
+  } else {
+    state = 'available';
+    reason = 'x402 payments available';
   }
 
   return json({
@@ -122,11 +134,21 @@ async function handleStatus(env, request) {
     enabled: flags.enabled,
     state,
     reason,
+    discovery: {
+      available: discoveryAvailable,
+      reason: discoveryAvailable ? 'discovery available' : 'discovery unavailable',
+    },
+    settlement: {
+      available: settlementAvailable,
+      reason: settlementAvailable ? 'available' : 'settlement not implemented (Phase 1)',
+    },
     facilitator: FACILITATOR_URL,
     circleConfigured,
     wallet: walletProvisioned
       ? { provisioned: true, address: walletRes.walletAddress }
       : { provisioned: false, address: null },
+    // Stable per-user key (never email/PII) for client-side history isolation.
+    user: { id: walletRes.userId || null },
     maxUsd: flags.maxUsd,
     networks: Object.keys(X402_NETWORKS).map((caip) => ({
       caip,
@@ -136,6 +158,52 @@ async function handleStatus(env, request) {
       eip3009Compatible: X402_NETWORKS[caip].eip3009Compatible,
     })),
   });
+}
+
+const REDIRECT_STATUS = new Set([301, 302, 303, 307, 308]);
+const MAX_REDIRECTS = 5;
+
+/**
+ * SSRF-safe fetch that follows redirects MANUALLY, re-validating every hop
+ * against the SSRF guard / allowlist. Never relies on the initial URL alone.
+ * `redirect: 'manual'` prevents the runtime from auto-following to a private
+ * destination we never inspected.
+ */
+async function safeFetch(target, allowedHosts, timeoutMs = 10000) {
+  let current = target;
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    const safe = assertSafeTarget(current, allowedHosts);
+    if (!safe.ok) return { ok: false, reason: 'target blocked: ' + safe.reason };
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    let resp;
+    try {
+      resp = await fetch(current, {
+        method: 'GET',
+        redirect: 'manual',
+        signal: controller.signal,
+        headers: { 'Accept': 'application/json, */*', 'User-Agent': 'Elligentt-x402/1.0' },
+      });
+    } catch (e) {
+      clearTimeout(timer);
+      return { ok: false, reason: (e && e.name === 'AbortError') ? 'request timed out' : ('request failed: ' + (e && e.message ? e.message : e)) };
+    }
+    clearTimeout(timer);
+
+    if (REDIRECT_STATUS.has(resp.status)) {
+      const location = resp.headers.get('Location');
+      if (!location) return { ok: true, resp };
+      try {
+        current = new URL(location, current).toString();
+      } catch (_) {
+        return { ok: true, resp };
+      }
+      continue;
+    }
+    return { ok: true, resp };
+  }
+  return { ok: false, reason: 'too many redirects' };
 }
 
 async function handleDiscover(env, request) {
@@ -155,21 +223,10 @@ async function handleDiscover(env, request) {
   const safe = assertSafeTarget(target, flags.allowedHosts);
   if (!safe.ok) return err('Target blocked: ' + safe.reason, 400);
 
-  let resp;
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 10000);
-    resp = await fetch(safe.url, {
-      method: 'GET',
-      redirect: 'manual',
-      signal: controller.signal,
-      headers: { 'Accept': 'application/json, */*', 'User-Agent': 'Elligentt-x402/1.0' },
-    });
-    clearTimeout(timer);
-  } catch (e) {
-    return err('Discovery request failed: ' + (e && e.message ? e.message : e), 502);
-  }
+  const fetched = await safeFetch(target, flags.allowedHosts);
+  if (!fetched.ok) return err('Discovery failed: ' + fetched.reason, 502);
 
+  const resp = fetched.resp;
   const status = resp.status;
   const headerValue = resp.headers.get(HEADER_PAYMENT_REQUIRED) || '';
   let bodyText = '';
@@ -251,7 +308,8 @@ async function handlePrepare(env, request) {
   const checks = [
     { name: 'session', passed: session.ok, detail: session.ok ? 'authenticated' : 'no session' },
     { name: 'wallet', passed: !!wallet.walletAddress, detail: wallet.walletAddress ? wallet.walletAddress : 'Circle AI Smart Wallet not provisioned' },
-    { name: 'payments_enabled', passed: flags.enabled, detail: flags.enabled ? 'enabled' : 'x402 payments disabled (Phase 1)' },
+    { name: 'payments_enabled', passed: flags.enabled, detail: flags.enabled ? 'enabled' : 'x402 payments disabled (X402_ENABLED=false)' },
+    { name: 'settlement_implemented', passed: SETTLEMENT_IMPLEMENTED, detail: SETTLEMENT_IMPLEMENTED ? 'available' : 'settlement not implemented (Phase 1) — payments blocked' },
   ].concat(validation.checks);
 
   const blocked = checks.find((c) => !c.passed) || null;

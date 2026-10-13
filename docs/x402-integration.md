@@ -71,7 +71,7 @@ da Autonoma.
 
 | Rota | Método | Auth | Comportamento |
 |------|--------|------|---------------|
-| `/api/x402/status` | GET | não | Estado da integração (disabled/pending_config/available), redes, facilitador, wallet |
+| `/api/x402/status` | GET | não | Estado da integração (`disabled` / `settlement_unavailable` / `available`) + capacidades `discovery`/`settlement` + `user.id` |
 | `/api/x402/discover` | POST | sessão | Probe de URL → detecta 402 → parseia `PAYMENT-REQUIRED` → requisitos normalizados |
 | `/api/x402/prepare` | POST | sessão | Revalida requisitos no servidor + carteira + autorização → `intent` (ready/blocked) |
 | `/api/x402/pay` | POST | sessão | **fail-closed 503** — liquidação não implementada nesta fase |
@@ -92,14 +92,25 @@ da Autonoma.
   `shared/x402Client.js` contêm apenas constantes de exibição.
 - **Preço, destinatário, rede e status nunca são confiados do cliente ou do
   modelo** — revalidados no servidor.
-- **Anti-SSRF** no proxy de descoberta: bloqueio de IPs privados/loopback/
-  link-local/reservados, `localhost`, `.local`/`.internal`, protocolos != http(s),
-  e allowlist opcional `X402_ALLOWED_HOSTS` (recomendado em produção).
+- **Ativos confiáveis (allowlist explícita).** O endereço do contrato, a rede e
+  os decimais são validados contra `TRUSTED_ASSETS` (USDC por rede). `extra.name
+  = "USDC"` sozinho **não** é aceito: um token falso rotulado "USDC" é bloqueado
+  por `asset_known` (endereço) + `asset_domain_name`/`asset_domain_version`
+  (domínio EIP-712). A versão do protocolo (`x402Version`) é validada (=2).
+- **Anti-SSRF + redirecionamentos.** Bloqueio de IPs privados/loopback/
+  link-local/reservados, literais IPv6, `localhost`/`.local`/`.internal`,
+  protocolos != http(s), e allowlist opcional `X402_ALLOWED_HOSTS`. Redirecionamentos
+  (301/302/303/307/308) são seguidos **manualmente** e o destino é **revalidado a
+  cada hop** — nunca se confia apenas na URL inicial.
 - **Anti-replay / duplicidade:** `requirementId` determinístico + mapa de
-  operações já submetidas no cliente + `pay` single-use (futuro). O cliente
-  **nunca reenvia** uma operação já tratada.
+  operações **realmente liquidadas** no cliente. Operações bloqueadas/falhas são
+  registradas apenas no histórico — **nunca** como "submetidas" — e não impedem
+  novas tentativas legítimas.
+- **Histórico isolado por usuário.** As chaves de `localStorage` são namespacedas
+  por `user.id` (do `/api/x402/status`), impedindo mistura entre usuários do mesmo
+  navegador. Nenhum segredo é persistido.
 - **Fail-closed:** falha de RPC/Circle/provedor não produz falso sucesso nem
-  falso fracasso; incompatibilidade de rede bloqueia o pagamento com motivo claro.
+  falso fracasso; incompatibilidade de rede/ativo bloqueia o pagamento com motivo claro.
 
 ## 6. Configuração (Cloudflare Secrets / env vars)
 
@@ -112,21 +123,40 @@ da Autonoma.
 ## 7. Testes
 
 ```bash
-npx vitest run tests/x402.test.js   # 21 testes, todos verdes
+npx vitest run tests/x402.test.js tests/x402-client.test.js   # 34 testes, todos verdes
 ```
 
-Cobertura: parsing de `PAYMENT-REQUIRED` (base64/raw/body), normalização v1/v2,
-validação (scheme/rede/EIP-3009/ativo/payTo/valor/teto/timeout), bloqueio de Arc,
-SSRF, `status` desligado por padrão, `discover` (402/200/parse-error/SSRF),
-`prepare` (bloqueado por flag e por rede), `pay` fail-closed, `requirementId`
-determinístico.
+Cobertura backend (`tests/x402.test.js`, 29 testes): parsing de
+`PAYMENT-REQUIRED` (base64/raw/body), normalização v1/v2, versão obrigatória (=2),
+validação (scheme/rede/EIP-3009/**ativo allowlist**/domínio EIP-712/payTo/valor/
+teto/timeout), token falso "USDC", mismatch endereço/rede, bloqueio de Arc, SSRF
+(incluindo **redirecionamento para IP privado**), `status` (disabled +
+settlement_unavailable), `discover` (402/200/redirect/parse-error/SSRF),
+`prepare` (bloqueado por flag/settlement/rede/recipiente), `pay` fail-closed.
+
+Cobertura do cliente (`tests/x402-client.test.js`, 5 testes): descoberta sem
+lançar (regressão do `_lastPrepare` não declarado), 503 não marca como submetida,
+nova tentativa legítima após falha, histórico isolado por usuário, nenhum segredo
+persistido.
 
 > A suíte completa do repositório já contém **33 arquivos de teste falhando de
 > forma pré-existente** (Arc Mainnet registry / Unified Balance / Autonoma
-> execution) — **independentes** desta integração e confirmados como
-> pré-existentes revertendo `index.html`. Nenhum teste novo regrediu.
+> execution / CSS extraído do HTML) — **independentes** desta integração. Nenhum
+> teste novo regrediu (contagem de falhas idêntica antes/depois).
 
-## 8. Limitações desta fase e próximos passos
+## 8. Correções aplicadas nesta revisão (causa → correção)
+
+| Bug | Causa | Correção |
+|-----|-------|----------|
+| `ReferenceError` no fluxo de descoberta | `_lastPrepare` não declarado (strict mode) | declarado e inicializado em `shared/x402Client.js` |
+| Operações bloqueadas marcadas como submetidas | `markSubmitted(id,'blocked')` no caminho de erro | só `markSubmitted(...,'settled')` com `txHash` real |
+| Pagamento "concluído" sem evidência | `txHash: null` no caminho de sucesso | exige `txHash`/`transaction` verificável |
+| Token falso rotulado "USDC" aceito | validação só por `extra.name` | allowlist `TRUSTED_ASSETS` (endereço+rede+decimais+domínio) |
+| SSRF via redirecionamento | `redirect:'manual'` sem re-validação | loop manual de redirect revalidando cada hop |
+| Status prometia "available" com flag ligada | estado derivado do flag | `SETTLEMENT_IMPLEMENTED=false` (nível de código) |
+| Histórico misturado entre usuários | chave única de `localStorage` | namespacing por `user.id` |
+
+## 9. Limitações desta fase e próximos passos
 
 - **Liquidação real não implementada.** `pay` retorna 503. Sem pagamento simulado.
 - **Arc Mainnet bloqueado** até confirmação on-chain de EIP-3009 no USDC nativo.
