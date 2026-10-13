@@ -40,8 +40,10 @@
   var _userId = null; // authenticated user id — namespaces history (per-user isolation)
 
   /* ── Storage helpers (namespaced per authenticated user) ───────────── */
-  function histKey() { return CFG.STORAGE_HISTORY + (_userId ? ':' + _userId : ''); }
-  function subKey() { return CFG.STORAGE_SUBMITTED + (_userId ? ':' + _userId : ''); }
+  // These return null when there is NO authenticated identity, so the client
+  // NEVER reads or writes a shared/global history or operation key.
+  function histKey() { return _userId ? CFG.STORAGE_HISTORY + ':' + _userId : null; }
+  function subKey() { return _userId ? CFG.STORAGE_SUBMITTED + ':' + _userId : null; }
   function lsLoad(key, def) {
     try { var raw = localStorage.getItem(key); return raw === null ? def : JSON.parse(raw); }
     catch (_) { return def; }
@@ -49,22 +51,26 @@
   function lsSave(key, val) {
     try { localStorage.setItem(key, JSON.stringify(val)); } catch (_) { /* quota */ }
   }
-  function getHistory() { return lsLoad(histKey(), []); }
-  function getSubmitted() { return lsLoad(subKey(), {}); }
+  function getHistory() { var k = histKey(); return k ? lsLoad(k, []) : []; }
+  function getSubmitted() { var k = subKey(); return k ? lsLoad(k, {}) : {}; }
   function pushHistory(entry) {
-    var h = getHistory();
+    var k = histKey();
+    if (!k) return null; // no identity — never write shared history
+    var h = lsLoad(k, []);
     h.unshift(Object.assign({ at: nowIso() }, entry));
     h = h.slice(0, 100);
-    lsSave(histKey(), h);
+    lsSave(k, h);
     return h;
   }
   // Only actual settlements (with real on-chain evidence) are ever recorded
   // here. Blocked/failed operations are recorded in HISTORY only, so a later
   // legitimate retry is never blocked.
   function markSubmitted(id, status) {
-    var s = getSubmitted();
+    var k = subKey();
+    if (!k) return; // no identity — never write shared operations
+    var s = lsLoad(k, {});
     s[id] = { at: nowIso(), status: status };
-    lsSave(subKey(), s);
+    lsSave(k, s);
   }
   function isAlreadySubmitted(id) {
     var s = getSubmitted();
@@ -125,8 +131,10 @@
     if (!force && _status) return _status;
     var res = await api('/status');
     _status = res.data || {};
-    // Namespace history/submitted state per authenticated user (never shared).
-    if (_status && _status.user && _status.user.id) _userId = _status.user.id;
+    // Bind the identity used for history/submitted namespacing. Always reset:
+    // a null id (no authenticated session) must clear any prior identity so a
+    // shared/global key is NEVER used to read or write.
+    _userId = (_status && _status.user && _status.user.id) || null;
     return _status;
   }
 

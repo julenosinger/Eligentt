@@ -125,4 +125,29 @@ describe('x402 client (frontend state machine)', () => {
     // No private key / API key / secret markers anywhere in persisted state.
     expect(serialized).not.toMatch(/privateKey|apiKey|secret|mnemonic|seed/i);
   });
+
+  it('does not read or write shared history when identity is absent', async () => {
+    // Simulate a backend response with no authenticated identity (user.id null).
+    globalThis.fetch.mockImplementation(async (url) => {
+      if (String(url).includes('/status')) return jsonResponse({ ok: true, state: 'disabled', user: { id: null } }, 200);
+      if (String(url).includes('/pay')) return jsonResponse({ ok: false, error: 'x402 payments disabled' }, 503);
+      return jsonResponse({ ok: false }, 404);
+    });
+    X402._setUserId(null);
+    X402._setLastPrepare({ data: { resourceUrl: 'https://api.example.com/x', intent: { id: 'x402_x', amountUsd: 0.01 } } });
+    await X402._pay();
+    expect(X402.getHistory()).toEqual([]);
+    expect(X402.getSubmitted()).toEqual({});
+    expect(localStorageMock._map.size).toBe(0); // nothing ever written to shared storage
+  });
+
+  it('never loads legacy unnamespaced history', async () => {
+    // A legacy global key (pre-namespacing) must never be surfaced to any user.
+    localStorageMock._map.set('elligentt_x402_history_v1', JSON.stringify([
+      { status: 'paid', service: 'https://legacy', amountAtomic: 10000, at: '2025-01-01T00:00:00.000Z' },
+    ]));
+    X402._setUserId('userA');
+    expect(X402.getHistory()).toEqual([]); // userA only reads their namespaced key
+    expect(localStorageMock._map.get('elligentt_x402_history_v1')).toBeTruthy(); // legacy key untouched/ignored
+  });
 });

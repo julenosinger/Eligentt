@@ -106,9 +106,14 @@ da Autonoma.
   operações **realmente liquidadas** no cliente. Operações bloqueadas/falhas são
   registradas apenas no histórico — **nunca** como "submetidas" — e não impedem
   novas tentativas legítimas.
-- **Histórico isolado por usuário.** As chaves de `localStorage` são namespacedas
-  por `user.id` (do `/api/x402/status`), impedindo mistura entre usuários do mesmo
-  navegador. Nenhum segredo é persistido.
+- **Histórico isolado por usuário.** A identidade é um UUID **vinculado à sessão**
+  (`session.userId`), resolvido no backend — nunca o email. As chaves de
+  `localStorage` são namespacedas por esse id e, **quando não há identidade
+  válida, o cliente não lê nem grava histórico/operações** (nunca usa uma chave
+  global). Histórico legado sem namespace é ignorado. Nenhum segredo é persistido.
+- **Sessão sem fallback global.** `discover`/`prepare` validam apenas a sessão de
+  email (`session:` em `AUTH_KV`) e vinculam a operação à Circle AI Smart Wallet
+  per-user — o fallback `X-Agent-Wallet`/carteira global **não** é aceito.
 - **Fail-closed:** falha de RPC/Circle/provedor não produz falso sucesso nem
   falso fracasso; incompatibilidade de rede/ativo bloqueia o pagamento com motivo claro.
 
@@ -123,21 +128,23 @@ da Autonoma.
 ## 7. Testes
 
 ```bash
-npx vitest run tests/x402.test.js tests/x402-client.test.js   # 34 testes, todos verdes
+npx vitest run tests/x402.test.js tests/x402-client.test.js   # 40 testes, todos verdes
 ```
 
-Cobertura backend (`tests/x402.test.js`, 29 testes): parsing de
+Cobertura backend (`tests/x402.test.js`, 33 testes): parsing de
 `PAYMENT-REQUIRED` (base64/raw/body), normalização v1/v2, versão obrigatória (=2),
 validação (scheme/rede/EIP-3009/**ativo allowlist**/domínio EIP-712/payTo/valor/
 teto/timeout), token falso "USDC", mismatch endereço/rede, bloqueio de Arc, SSRF
-(incluindo **redirecionamento para IP privado**), `status` (disabled +
-settlement_unavailable), `discover` (402/200/redirect/parse-error/SSRF),
-`prepare` (bloqueado por flag/settlement/rede/recipiente), `pay` fail-closed.
+(incluindo **redirecionamento para IP privado / localhost / metadata**), `status`
+(disabled + settlement_unavailable), `discover` (402/200/redirect/parse-error/
+SSRF/**sessão expirada**/**fallback global rejeitado**), `prepare` (bloqueado por
+flag/settlement/rede/recipiente/**carteira ausente**), `pay` fail-closed.
 
-Cobertura do cliente (`tests/x402-client.test.js`, 5 testes): descoberta sem
+Cobertura do cliente (`tests/x402-client.test.js`, 7 testes): descoberta sem
 lançar (regressão do `_lastPrepare` não declarado), 503 não marca como submetida,
-nova tentativa legítima após falha, histórico isolado por usuário, nenhum segredo
-persistido.
+nova tentativa legítima após falha, histórico isolado por usuário, **identidade
+ausente não grava/lê nada**, **histórico legado sem namespace ignorado**, nenhum
+segredo persistido.
 
 > A suíte completa do repositório já contém **33 arquivos de teste falhando de
 > forma pré-existente** (Arc Mainnet registry / Unified Balance / Autonoma

@@ -365,4 +365,59 @@ describe('x402 /api/x402 endpoints', () => {
     });
     expect(res.status).toBe(401);
   });
+
+  it('rejects an expired session (discover + prepare → 401)', async () => {
+    const expiredEnv = makeEnv({
+      AUTH_KV: makeKV({
+        ['session:' + TOKEN]: JSON.stringify({ userId: USER_ID, email: EMAIL, expiresAt: Date.now() - 1000 }),
+        ['user:' + EMAIL]: JSON.stringify({ id: USER_ID, circleWalletId: 'w1', circleWalletAddress: PAYER }),
+      }),
+    });
+    const d = await onRequest({ request: req('/api/x402/discover', { method: 'POST', body: { url: 'https://api.example.com/x' } }), env: expiredEnv });
+    expect(d.status).toBe(401);
+
+    const req0 = normalizePaymentRequired(paymentRequired()).requirements[0];
+    const p = await onRequest({ request: req('/api/x402/prepare', { method: 'POST', body: { resourceUrl: 'https://api.example.com/x', requirement: req0 } }), env: expiredEnv });
+    expect(p.status).toBe(401);
+  });
+
+  it('blocks prepare when the wallet is missing (no per-user Circle wallet)', async () => {
+    const noWalletEnv = makeEnv({
+      AUTH_KV: makeKV({
+        ['session:' + TOKEN]: JSON.stringify({ userId: USER_ID, email: EMAIL }),
+        ['user:' + EMAIL]: JSON.stringify({ id: USER_ID }), // no circleWalletId
+      }),
+    });
+    const req0 = normalizePaymentRequired(paymentRequired()).requirements[0];
+    const res = await onRequest({
+      request: req('/api/x402/prepare', { method: 'POST', body: { resourceUrl: 'https://api.example.com/x', requirement: req0 } }),
+      env: noWalletEnv,
+    });
+    const data = await jsonOf(res);
+    expect(data.intent.status).toBe('blocked');
+    expect(data.intent.checks.find((c) => c.name === 'wallet').passed).toBe(false);
+  });
+
+  it('POST /discover blocks redirects to internal hostnames (localhost / metadata)', async () => {
+    globalThis.fetch.mockResolvedValueOnce(new Response('', { status: 302, headers: { Location: 'http://localhost:3000/x' } }));
+    const res1 = await onRequest({ request: req('/api/x402/discover', { method: 'POST', body: { url: 'https://api.example.com/r' } }), env: makeEnv() });
+    expect(res1.status).toBe(502);
+    expect((await jsonOf(res1)).error).toMatch(/blocked/i);
+
+    globalThis.fetch.mockResolvedValueOnce(new Response('', { status: 302, headers: { Location: 'http://metadata.google.internal/latest' } }));
+    const res2 = await onRequest({ request: req('/api/x402/discover', { method: 'POST', body: { url: 'https://api.example.com/r' } }), env: makeEnv() });
+    expect(res2.status).toBe(502);
+  });
+
+  it('POST /discover does not accept the wallet-connect/global fallback header', async () => {
+    // A request authenticated ONLY via X-Agent-Wallet (matching CIRCLE_WALLET_ADDRESS)
+    // must NOT be treated as a valid x402 session — only email sessions count.
+    const env = makeEnv({ CIRCLE_WALLET_ADDRESS: PAYER });
+    const headers = { 'Content-Type': 'application/json', 'X-Agent-Wallet': PAYER };
+    const request = new Request('https://app.local/api/x402/discover', {
+      method: 'POST', headers, body: JSON.stringify({ url: 'https://api.example.com/x' }),
+    });
+    const res = await onRequest({ request, env });
+    expect(res.status).toBe(401);
+  });
 });

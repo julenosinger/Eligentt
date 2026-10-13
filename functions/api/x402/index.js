@@ -31,9 +31,6 @@ import {
   SETTLEMENT_IMPLEMENTED,
   HEADER_PAYMENT_REQUIRED,
 } from './_x402.mjs';
-import { verifySession } from '../agent-signer/_session.mjs';
-
-const CIRCLE_BASE = 'https://api.circle.com/v1/w3s';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -65,25 +62,40 @@ function extractToken(request) {
 }
 
 /**
- * Resolve the authenticated user's personal Circle wallet from AUTH_KV.
- * NEVER returns the platform CIRCLE_WALLET_* env values as a user identity.
+ * Resolve the authenticated user's identity + personal Circle wallet from
+ * AUTH_KV (email session ONLY — never the wallet-connect/global fallback).
+ *
+ * Returns a stable, non-sensitive `userId` bound to the session (the UUID stored
+ * in `session.userId`), NOT the email. When there is no valid session, `authed`
+ * is false and `status` carries the HTTP code to fail with.
+ *
+ * SECURITY:
+ *   - Never falls back to CIRCLE_WALLET_ID / CIRCLE_WALLET_ADDRESS (platform
+ *     wallet) as a user identity.
+ *   - Rejects expired sessions (defense-in-depth; primary expiry is KV TTL).
  */
 async function resolveUserWallet(env, request) {
-  const KV = env && env.AUTH_KV;
-  const apiKey = (env && env.CIRCLE_API_KEY) || '';
-  const noWallet = { ok: true, apiKey, walletId: '', walletAddress: '', needsProvision: true, email: null, userId: null };
+  const unauth = (reason, status) => ({
+    authed: false, reason, status, userId: null, email: null,
+    walletId: '', walletAddress: '', needsProvision: true,
+  });
 
-  if (!KV || typeof KV.get !== 'function') return noWallet;
+  const KV = env && env.AUTH_KV;
+  if (!KV || typeof KV.get !== 'function') return unauth('auth_not_configured', 503);
+
   const token = extractToken(request);
-  if (!token || token.length < 32) return noWallet;
+  if (!token || token.length < 32) return unauth('invalid_session', 401);
 
   let session;
   try {
     const raw = await KV.get('session:' + token);
-    if (!raw) return noWallet;
+    if (!raw) return unauth('session_expired_or_invalid', 401);
     session = JSON.parse(raw);
-  } catch (_) { return noWallet; }
-  if (!session || !session.email) return noWallet;
+  } catch (_) {
+    return unauth('invalid_session', 401);
+  }
+  if (!session || !session.email) return unauth('invalid_session', 401);
+  if (session.expiresAt && Date.now() > session.expiresAt) return unauth('session_expired', 401);
 
   let user;
   try {
@@ -91,13 +103,19 @@ async function resolveUserWallet(env, request) {
     if (raw) user = JSON.parse(raw);
   } catch (_) { user = null; }
 
+  // Stable, non-sensitive identity bound to the session (UUID) — never the email.
+  const userId = session.userId || (user && user.id) || null;
   const walletId = (user && user.circleWalletId) || session.circleWalletId || '';
   const walletAddress = (user && user.circleWalletAddress) || session.circleWalletAddress || '';
 
-  if (walletId && walletAddress) {
-    return { ok: true, apiKey, walletId, walletAddress, needsProvision: false, email: session.email, userId: user && user.id };
-  }
-  return { ok: true, apiKey, walletId: '', walletAddress: '', needsProvision: true, email: session.email, userId: user && user.id };
+  return {
+    authed: true,
+    userId,
+    email: session.email,
+    walletId,
+    walletAddress,
+    needsProvision: !(walletId && walletAddress),
+  };
 }
 
 /* ── Route handlers ──────────────────────────────────────────────────── */
@@ -106,8 +124,8 @@ async function handleStatus(env, request) {
   const flags = readFlags(env);
   const circleConfigured = !!(env && env.CIRCLE_API_KEY && env.CIRCLE_ENTITY_SECRET);
 
-  const walletRes = await resolveUserWallet(env, request).catch(() => ({ needsProvision: true, email: null, userId: null }));
-  const walletProvisioned = !!(walletRes && !walletRes.needsProvision && walletRes.walletAddress);
+  const walletRes = await resolveUserWallet(env, request).catch(() => ({ authed: false, needsProvision: true, userId: null, walletAddress: '' }));
+  const walletProvisioned = !!(walletRes.authed && !walletRes.needsProvision && walletRes.walletAddress);
 
   // Settlement availability is a CODE-LEVEL fact (SETTLEMENT_IMPLEMENTED), never
   // derived from the X402_ENABLED flag. A misconfigured flag must not make the
@@ -147,8 +165,9 @@ async function handleStatus(env, request) {
     wallet: walletProvisioned
       ? { provisioned: true, address: walletRes.walletAddress }
       : { provisioned: false, address: null },
-    // Stable per-user key (never email/PII) for client-side history isolation.
-    user: { id: walletRes.userId || null },
+    // Stable per-user key (session-bound UUID, never email/PII). Null when no
+    // authenticated session — the client then refuses to read/write history.
+    user: { id: walletRes.authed ? (walletRes.userId || null) : null },
     maxUsd: flags.maxUsd,
     networks: Object.keys(X402_NETWORKS).map((caip) => ({
       caip,
@@ -209,10 +228,11 @@ async function safeFetch(target, allowedHosts, timeoutMs = 10000) {
 async function handleDiscover(env, request) {
   const flags = readFlags(env);
 
-  // Discovery is a server-side outbound fetch — gate it behind a session and
-  // SSRF protections so the endpoint cannot be abused as an open proxy.
-  const session = await verifySession(env, request);
-  if (!session.ok) return err('Unauthorized: ' + session.reason, session.status || 401);
+  // Discovery is a server-side outbound fetch — gate it behind an authenticated
+  // email session (NOT the wallet-connect/global fallback) and SSRF protections
+  // so the endpoint cannot be abused as an open proxy.
+  const auth = await resolveUserWallet(env, request);
+  if (!auth.authed) return err('Unauthorized: ' + auth.reason, auth.status || 401);
 
   let body;
   try { body = await request.json(); } catch (_) { return err('Invalid JSON body', 400); }
@@ -279,8 +299,10 @@ async function handleDiscover(env, request) {
 async function handlePrepare(env, request) {
   const flags = readFlags(env);
 
-  const session = await verifySession(env, request);
-  if (!session.ok) return err('Unauthorized: ' + session.reason, session.status || 401);
+  // Authenticate via the email session and resolve the user's personal Circle
+  // wallet ONCE. Never falls back to a global/internal wallet.
+  const auth = await resolveUserWallet(env, request);
+  if (!auth.authed) return err('Unauthorized: ' + auth.reason, auth.status || 401);
 
   let body;
   try { body = await request.json(); } catch (_) { return err('Invalid JSON body', 400); }
@@ -304,10 +326,9 @@ async function handlePrepare(env, request) {
 
   const validation = validateRequirement(normalizedReq, { maxUsd: flags.maxUsd });
 
-  const wallet = await resolveUserWallet(env, request);
   const checks = [
-    { name: 'session', passed: session.ok, detail: session.ok ? 'authenticated' : 'no session' },
-    { name: 'wallet', passed: !!wallet.walletAddress, detail: wallet.walletAddress ? wallet.walletAddress : 'Circle AI Smart Wallet not provisioned' },
+    { name: 'session', passed: true, detail: 'authenticated' },
+    { name: 'wallet', passed: !auth.needsProvision, detail: auth.walletAddress ? auth.walletAddress : 'Circle AI Smart Wallet not provisioned' },
     { name: 'payments_enabled', passed: flags.enabled, detail: flags.enabled ? 'enabled' : 'x402 payments disabled (X402_ENABLED=false)' },
     { name: 'settlement_implemented', passed: SETTLEMENT_IMPLEMENTED, detail: SETTLEMENT_IMPLEMENTED ? 'available' : 'settlement not implemented (Phase 1) — payments blocked' },
   ].concat(validation.checks);
@@ -332,7 +353,7 @@ async function handlePrepare(env, request) {
       asset: validation.asset,
       payTo: normalizedReq.payTo,
       maxTimeoutSeconds: normalizedReq.maxTimeoutSeconds,
-      walletAddress: wallet.walletAddress || null,
+      walletAddress: auth.walletAddress || null,
     },
   });
 }
