@@ -7017,6 +7017,8 @@ select.cinput option { background: #161a24; color: #dde2f0; }
                 <i class="ti ti-route" style="font-size:11px;color:var(--teal)"></i>
                 <span>AVAILABLE ROUTES</span>
                 <span class="swap-route-status" id="swap-route-status">Compare execution routes</span>
+                <button class="swp-refresh-btn" id="swp-refresh-btn" onclick="swpManualRefresh()" title="Refresh quotes now" style="margin-left:6px;background:rgba(148,163,184,.1);border:1px solid var(--border);border-radius:5px;color:var(--muted2);cursor:pointer;font-size:10px;padding:2px 7px;display:flex;align-items:center;gap:4px"><i class="ti ti-refresh"></i></button>
+                <span class="swp-updated" id="swp-updated" style="font-size:7.5px;color:var(--muted2);margin-left:auto;display:none"></span>
               </div>
               <div class="swap-route-list" id="swap-route-list"></div>
             </div>
@@ -14931,6 +14933,7 @@ function showPage(id) {
           if (typeof swapPrefetchBalances === 'function') swapPrefetchBalances();
           if (typeof updateSwapBalancesDisplay === 'function') updateSwapBalancesDisplay();
           if (typeof swapBalStartPolling === 'function') swapBalStartPolling();
+          if (typeof swapStartQuoteAutoRefresh === 'function') swapStartQuoteAutoRefresh();
           setTimeout(function() {
             stInitTerminal();
             stStartAutoRefresh();
@@ -14938,6 +14941,7 @@ function showPage(id) {
         } else {
           stStopAutoRefresh();
           if (typeof swapBalStopPolling === 'function') swapBalStopPolling();
+          if (typeof swapStopQuoteAutoRefresh === 'function') swapStopQuoteAutoRefresh();
         }
       });
     }
@@ -20072,6 +20076,7 @@ const SWP = {
   tokenInObj: null,           // full TokenObject { chainId, address, symbol, name, decimals, logoURI }
   tokenOutObj: null,          // same for output token
   _tokModalChainId: 5042,     // chain shown in token selector modal
+  lastQuoteAt: 0,             // ms timestamp of last successful quote (auto-refresh + "updated" display)
 };
 
 // Quote race guard: monotonic request id. A stale async quote (older request
@@ -21125,6 +21130,11 @@ function swpSelectRoute(source) {
         toDecimals:   q.toDecimals   || 6,
         expiresAt:  Date.now() + 160000,
         _needsStepTx: false,
+        // The resolved LI.FI step (action + transactionRequest) is the route
+        // validateRoute() needs. Without it, swpExecuteLiFi validates against an
+        // undefined route and rejects with 'no_route'.
+        route:      stepRes.step,
+        action:     (stepRes.step && stepRes.step.action) || null,
       });
       // Update aggQuotes in-place so future calls see the resolved calldata.
       if (SWP.aggQuotes) {
@@ -21244,6 +21254,47 @@ function swpApplySelectedQuote(q) {
 let swapRateTimer = null;
 let _swapPoolWarmupStarted = false; // single background pool-discovery trigger (never blocks quotes)
 let _swpExecuting = false; // guard: prevent updateSwapRate from resetting button during execution
+
+// ── Automatic quote refresh (throttled) ─────────────────────────────
+// Minimum 30s between AUTOMATIC refreshes. Prevents refresh loops, concurrent
+// re-quotes and stale responses overwriting newer quotes (monotonic
+// _swapQuoteSeq guard inside updateSwapRate). Suspended during signing/execution
+// and while the amount is empty. The selected route is preserved across
+// refreshes by the selection-persistence logic (selectedParamsKey).
+const SWAP_QUOTE_AUTO_REFRESH_MS = 30000;
+let _swapQuoteRefreshTimer = null;
+function swapStartQuoteAutoRefresh() {
+  if (_swapQuoteRefreshTimer) return;
+  _swapQuoteRefreshTimer = setInterval(function () {
+    try {
+      if (_swpExecuting) return; // suspend during signing/execution
+      const page = document.getElementById('page-swap');
+      if (!page || !page.classList.contains('active')) return;
+      const amtEl = document.getElementById('swap-amount-in');
+      const amt = amtEl ? (parseFloat(amtEl.value) || 0) : 0;
+      if (amt <= 0) return;
+      if (typeof updateSwapRate === 'function') updateSwapRate();
+    } catch (_) {}
+  }, SWAP_QUOTE_AUTO_REFRESH_MS);
+}
+function swapStopQuoteAutoRefresh() {
+  if (_swapQuoteRefreshTimer) { clearInterval(_swapQuoteRefreshTimer); _swapQuoteRefreshTimer = null; }
+}
+// Manual refresh (user-initiated) — always allowed unless mid-execution.
+function swpManualRefresh() {
+  if (_swpExecuting) return;
+  if (typeof updateSwapRate === 'function') updateSwapRate();
+}
+// Update the "last updated" timestamp label from SWP.lastQuoteAt.
+function swpUpdateTimestamp() {
+  var el = document.getElementById('swp-updated');
+  if (!el) return;
+  var t = SWP.lastQuoteAt || (SWP.lastQuote && SWP.lastQuote.quotedAt) || 0;
+  if (!t) { el.style.display = 'none'; return; }
+  var s = Math.max(0, Math.round((Date.now() - t) / 1000));
+  el.style.display = '';
+  el.textContent = s < 60 ? ('Updated ' + s + 's ago') : ('Updated ' + Math.round(s / 60) + 'm ago');
+}
 
 async function updateSwapRate() {
   if (_swpExecuting) return; // don't touch button/quote during execution
@@ -21445,6 +21496,8 @@ async function updateSwapRate() {
         var _srcLabel = isLifi ? ('LI.FI' + (_lifiTool ? ' · ' + _lifiTool : '')) : 'Tower Exchange';
         SWP.lastQuote = { amtIn, amtOut: tOutAmt, minReceived: tMinReceived, rate: tRate, priceImpact: tImpact, feeAmt: amtIn * (tFeeBps / 10000), source: _srcLabel, tIn, tOut, route: null, totalFee: tFeeBps, expectedOutRaw: selected.expectedOutRaw, amountInRaw, quotedAt: Date.now(), stateUpdatedAt: null };
         SwapEngine.notifyQuoteLoaded(SWP.lastQuote);
+        SWP.lastQuoteAt = Date.now();
+        swpUpdateTimestamp();
         try {
           if (typeof SwapUiModes !== 'undefined' && SwapUiModes.renderRouteSelector) {
             SwapUiModes.renderRouteSelector(
@@ -21630,6 +21683,7 @@ async function updateSwapRate() {
       // Race guard: discard this result if a newer quote request already started.
       if (quoteSeq !== _swapQuoteSeq) return;
       SWP.lastQuote = { amtIn, amtOut, minReceived, rate, priceImpact, feeAmt, source, tIn, tOut, route, totalFee, expectedOutRaw, amountInRaw, quotedAt: Date.now(), stateUpdatedAt: _qState ? _qState.updatedAt : null };
+      SWP.lastQuoteAt = Date.now();
       // Render the ROUTES selector (Standard mode) from the SAME aggregator quotes.
       try {
         if (typeof SwapUiModes !== 'undefined' && SwapUiModes.renderRouteSelector) {
@@ -21641,6 +21695,7 @@ async function updateSwapRate() {
         }
       } catch(_) {}
       SwapEngine.notifyQuoteLoaded(SWP.lastQuote);
+      swpUpdateTimestamp();
       // Stamp block number synchronously so it's ready before user clicks
       await stampQuoteBlock();
 
