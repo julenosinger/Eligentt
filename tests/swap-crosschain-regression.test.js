@@ -98,6 +98,19 @@ describe('LiFiAdapter.validateRoute — cross-chain step validation', () => {
     expect(r.reason).toBe('amount_mismatch');
   });
 
+  it('rejects from_token_mismatch (genuinely different source token)', () => {
+    // Step built for Base USDC, validated against a DIFFERENT source token address.
+    const r = L.validateRoute(liFiStep(), ctx({ fromToken: '0x' + 'ee'.repeat(20) }));
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe('from_token_mismatch');
+  });
+
+  it('rejects to_token_mismatch (different destination token)', () => {
+    const r = L.validateRoute(liFiStep(), ctx({ toToken: '0x' + 'dd'.repeat(20) }));
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe('to_token_mismatch');
+  });
+
   it('rejects invalid target (missing transactionRequest.to)', () => {
     const s = liFiStep({ transactionRequest: { to: null, data: '0xabcdef', value: '0', chainId: 8453 } });
     const r = L.validateRoute(s, ctx());

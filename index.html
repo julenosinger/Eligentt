@@ -21099,6 +21099,24 @@ function swapTokens() {
 // The selected route is the source of truth for execution. It persists across
 // quote refreshes with the same params, and resets when params change or the
 // selected provider becomes invalid (expired / disappeared / not executable).
+
+// Selection signature — captures the token/network/amount a quote is bound to.
+// Used to discard a stale async resolution (e.g. getStepTransaction) when the
+// user changes the selection before the request completes. Without this, a route
+// fetched for the previous token/chain would be bound to SWP._towerQuoteData and
+// later fail validation with 'from_token_mismatch' / 'to_chain_mismatch'.
+function _swpSelSig() {
+  var ti = SWP.tokenInObj
+    ? (SWP.tokenInObj.address || SWP.tokenInObj.symbol || '')
+    : (TOKEN_LIST[SWP.tokenInIdx] ? TOKEN_LIST[SWP.tokenInIdx].sym : SWP.tokenInIdx);
+  var to = SWP.tokenOutObj
+    ? (SWP.tokenOutObj.address || SWP.tokenOutObj.symbol || '')
+    : (TOKEN_LIST[SWP.tokenOutIdx] ? TOKEN_LIST[SWP.tokenOutIdx].sym : SWP.tokenOutIdx);
+  var amtEl = document.getElementById('swap-amount-in');
+  var amt = amtEl ? (amtEl.value || '') : '';
+  return (SWP.fromChainId || activeChainId) + '|' + (SWP.toChainId || activeChainId) + '|' + ti + '|' + to + '|' + amt;
+}
+
 function swpSelectRoute(source) {
   if (typeof SwapUiModes === 'undefined' || !SwapUiModes.findExecutableQuote) return;
   var q = SwapUiModes.findExecutableQuote(SWP.aggQuotes, source);
@@ -21110,6 +21128,8 @@ function swpSelectRoute(source) {
     var step = q.stepsData && q.stepsData[0];
     if (!step) { toast('LI.FI step data unavailable — refresh quote', 'error'); return; }
     SWP.selectedSource = source;
+    // Capture the selection signature so a stale async resolution is discarded.
+    var selSig = _swpSelSig();
     // Optimistically apply display (amount/rate) before calldata arrives.
     swpApplySelectedQuote(q);
     swpSetBtn('approving', 'Fetching route…');
@@ -21124,6 +21144,10 @@ function swpSelectRoute(source) {
       } catch(_) {}
     }
     LiFiAdapter.getStepTransaction(step).then(function(stepRes) {
+      // Discard if the selection changed while the step was being fetched —
+      // otherwise this route would bind to the wrong token/chain and later fail
+      // validation with 'from_token_mismatch' / 'to_chain_mismatch'.
+      if (_swpSelSig() !== selSig) return;
       if (!stepRes || stepRes.ok !== true || !stepRes.step) {
         toast('LI.FI route calldata unavailable — try another route', 'error');
         swpSetBtn('ready', 'Refresh Quote');
@@ -22019,8 +22043,12 @@ async function swpExecuteLiFi(tIn, tOut, amtIn, slippageBps) {
     value: q.value != null ? String(q.value) : null,
   });
   if (!vres.ok) {
-    toast('LI.FI route rejected: ' + vres.reason, 'error');
-    swpShowPrecheck('error', 'LI.FI route rejected — ' + vres.reason);
+    var _rejectMsg = (vres.reason === 'from_token_mismatch' || vres.reason === 'to_token_mismatch' ||
+                      vres.reason === 'from_chain_mismatch' || vres.reason === 'to_chain_mismatch')
+      ? 'Quote is stale (token/network changed) — refresh and try again'
+      : ('LI.FI route rejected: ' + vres.reason);
+    toast(_rejectMsg, 'error');
+    swpShowPrecheck('error', _rejectMsg);
     return;
   }
 
