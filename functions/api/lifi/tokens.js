@@ -46,10 +46,13 @@ export async function onRequestGet({ request, env }) {
     if (body && body.ok) return json(body);
   }
 
-  // Fetch from LI.FI.
+  // Fetch from LI.FI — filter to ONLY the requested chains. Pulling the entire
+  // EVM token catalog (~4 MB) on a cold cache was the cause of the slow
+  // token-selector load. `chains` shrinks the upstream payload to just the
+  // chains we support (e.g. Base ≈400 KB, Arc ≈12 KB).
   const lifiUrl = new URL(LIFI_BASE + '/tokens');
   lifiUrl.searchParams.set('chainTypes', 'EVM');
-  // We'll fetch all tokens and filter client-side by our allowed chains.
+  lifiUrl.searchParams.set('chains', requestedChains.join(','));
   const headers = { 'Accept': 'application/json', 'User-Agent': 'elligentt/1.0' };
   const key = (env && env.LIFI_API_KEY) || '';
   if (key) headers['x-lifi-api-key'] = key;

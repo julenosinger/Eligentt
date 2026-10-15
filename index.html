@@ -14931,6 +14931,7 @@ function showPage(id) {
         if (id === 'swap') {
           updateSwapRate();
           if (typeof swapPrefetchBalances === 'function') swapPrefetchBalances();
+          if (typeof swapPrefetchTokens === 'function') swapPrefetchTokens();
           if (typeof updateSwapBalancesDisplay === 'function') updateSwapBalancesDisplay();
           if (typeof swapBalStartPolling === 'function') swapBalStartPolling();
           if (typeof swapStartQuoteAutoRefresh === 'function') swapStartQuoteAutoRefresh();
@@ -20404,7 +20405,7 @@ async function renderTokenList(filterText) {
     // Fetch from LI.FI via LiFiAdapter.getTokens (cached server-side 10min).
     if (typeof LiFiAdapter !== 'undefined' && LiFiAdapter.getTokens) {
       const res = await LiFiAdapter.getTokens(chainId);
-      if (res && res.ok && res.tokens && res.tokens[chainId]) {
+      if (res && res.ok && res.tokens && res.tokens[chainId] && res.tokens[chainId].length) {
         _tokListCache[chainId] = res.tokens[chainId];
       }
     }
@@ -21030,6 +21031,24 @@ function swapPrefetchBalances() {
         })(chains[c], tokens[t]);
       }
     }
+  } catch (_) {}
+}
+
+// Prefetch the LI.FI token catalog for every supported chain in the background,
+// so the token selector opens instantly instead of waiting on the cold-cache
+// upstream fetch. Non-blocking; failures are ignored (the selector falls back to
+// the local registry).
+function swapPrefetchTokens() {
+  if (typeof LiFiAdapter === 'undefined' || !LiFiAdapter.getTokens) return;
+  var chains = [5042, 1, 8453, 42161, 10, 137];
+  try {
+    LiFiAdapter.getTokens(chains).then(function (res) {
+      if (!res || !res.ok || !res.tokens) return;
+      for (var i = 0; i < chains.length; i++) {
+        var arr = res.tokens[chains[i]];
+        if (Array.isArray(arr) && arr.length) _tokListCache[chains[i]] = arr;
+      }
+    }).catch(function () {});
   } catch (_) {}
 }
 
