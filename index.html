@@ -21445,6 +21445,7 @@ async function updateSwapRate() {
           const aggToChain   = SWP.toChainId   || activeChainId;
           const aggTokenIn   = SWP.tokenInObj  || tIn.sym;
           const aggTokenOut  = SWP.tokenOutObj || tOut.sym;
+          const paramsKey = tIn.sym + '|' + tOut.sym + '|' + amountInRaw.toString();
           const agg = await SwapAggregator.getBestQuote({
             tokenIn: aggTokenIn,
             tokenOut: aggTokenOut,
@@ -21456,6 +21457,29 @@ async function updateSwapRate() {
             userAddress: walletAddress || null,
             hasLocalPool: hasLocalPool,
             excludeLocal: _ubEVMOpActive === true,
+            // Progressive rendering: show the first valid route as soon as it
+            // arrives, then add more as providers settle. Stale callbacks (params
+            // changed mid-flight) are discarded via the monotonic quoteSeq.
+            onProgress: function (partial) {
+              if (quoteSeq !== _swapQuoteSeq) return; // stale request — ignore
+              if (!partial || !partial.quotes || !partial.quotes.some(function (q) { return q && q.ok === true; })) return;
+              SWP.aggQuotes = partial.quotes || [];
+              SWP.aggBest = partial.best || null;
+              SWP.aggBestExecutable = partial.bestExecutable || null;
+              SWP.selectedSource = (typeof SwapUiModes !== 'undefined' && SwapUiModes.resolveSelection)
+                ? SwapUiModes.resolveSelection(partial, SWP.selectedSource, SWP.selectedParamsKey, paramsKey)
+                : (partial.bestExecutable ? partial.bestExecutable.source : null);
+              SWP.selectedParamsKey = paramsKey;
+              try {
+                if (typeof SwapUiModes !== 'undefined' && SwapUiModes.renderRouteSelector) {
+                  SwapUiModes.renderRouteSelector(
+                    { ok: !!(partial.best), executable: !!(partial.bestExecutable), best: partial.best || null, bestExecutable: partial.bestExecutable || null, quotes: partial.quotes || [] },
+                    SWP.selectedSource,
+                    { tokenIn: SWP.tokenInObj || tIn.sym, tokenInDecimals: tIn.decimals, tokenOut: SWP.tokenOutObj || tOut.sym, tokenOutDecimals: tOut.decimals, amountInRaw: amountInRaw, fromChainId: SWP.fromChainId || activeChainId, toChainId: SWP.toChainId || activeChainId }
+                  );
+                }
+              } catch (_) {}
+            }
           });
           SWP.aggQuotes = agg.quotes || [];
           SWP.aggBest = agg.best || null;                    // bestQuote (referência — maior expectedOutRaw)
@@ -21465,7 +21489,6 @@ async function updateSwapRate() {
           // Manual selection persists across refreshes with the SAME params key;
           // it resets to best-executable when params change or the provider is
           // no longer valid (invalid / expired / disappeared).
-          const paramsKey = tIn.sym + '|' + tOut.sym + '|' + amountInRaw.toString();
           SWP.selectedSource = (typeof SwapUiModes !== 'undefined' && SwapUiModes.resolveSelection)
             ? SwapUiModes.resolveSelection(agg, SWP.selectedSource, SWP.selectedParamsKey, paramsKey)
             : (agg.bestExecutable ? agg.bestExecutable.source : null);

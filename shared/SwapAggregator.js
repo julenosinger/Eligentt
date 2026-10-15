@@ -199,8 +199,14 @@
    * Quote Tower + local pools in parallel and select the best route.
    * Distinguishes bestQuote (highest expectedOutRaw) from bestExecutableQuote
    * (highest expectedOutRaw among quotes that can actually be executed).
-   * @param {object} opts { tokenIn, tokenOut, amountInRaw: bigint, slippageBps, userAddress?, chainId?, hasLocalPool? }
-   * @returns {Promise<{ok:boolean, executable:boolean, best?:object, bestExecutable?:object, alternatives?:object[], reason?:string, quotes:object[]}>}
+   *
+   * Progressive rendering: pass `opts.onProgress(partialDecision)` to receive a
+   * decision as soon as EACH source settles, so the UI can render the first
+   * valid route immediately instead of waiting for every provider. The final
+   * return value is identical to a non-progressive call.
+   *
+   * @param {object} opts { tokenIn, tokenOut, amountInRaw: bigint, slippageBps, userAddress?, chainId?, hasLocalPool?, excludeLocal?, onProgress? }
+   * @returns {Promise<{ok:boolean, executable:boolean, best?:object, bestExecutable?:object, alternatives?:object[], reason?:string, quotes:object[], _cached?:boolean}>}
    */
   async function getBestQuote(opts) {
     opts = opts || {};
@@ -209,6 +215,7 @@
     // excludeLocal: when true the local pool is NOT quoted at all (used by the
     // Unified Balance EVM-Wallet flow, which must route through LI.FI/Tower only).
     var excludeLocal = opts.excludeLocal === true;
+    var onProgress = typeof opts.onProgress === 'function' ? opts.onProgress : null;
 
     var towerPromise = (typeof TowerAdapter !== 'undefined' && TowerAdapter.getQuote)
       ? TowerAdapter.getQuote(opts)
@@ -271,20 +278,30 @@
       withTimeout(lifiRoutesPromise, timeoutMs, { ok: false, routes: [], error: 'TIMEOUT' }),
     ];
 
+    // Progressive: fire onProgress as each source settles (first route fast).
+    // The caller discards stale callbacks via its own monotonic request id.
+    if (onProgress) {
+      var settled = [null, null, null, null];
+      wrapped.forEach(function (p, i) {
+        Promise.resolve(p).then(function (v) {
+          settled[i] = { status: 'fulfilled', value: v };
+          try { onProgress(_decisionFromResults(settled, opts, isCrossChain, lifiFromChain, lifiToChain, hasLocalPool)); } catch (_) {}
+        }, function () {
+          settled[i] = { status: 'rejected', value: undefined };
+          try { onProgress(_decisionFromResults(settled, opts, isCrossChain, lifiFromChain, lifiToChain, hasLocalPool)); } catch (_) {}
+        });
+      });
+    }
+
     var results = await Promise.allSettled(wrapped);
+    return _decisionFromResults(results, opts, isCrossChain, lifiFromChain, lifiToChain, hasLocalPool);
+  }
 
-    var baseQuotes = results.slice(0, 3).map(function (r) {
-      if (r.status === 'fulfilled') return r.value;
-      return { source: 'unknown', ok: false, error: 'QUOTE_REJECTED' };
-    });
+  /* ── Decision assembly (shared by the progressive + final paths) ─────── */
 
-    // Expand getRoutes result — one quote per route, each tagged 'lifi-<routeId>'.
-    // For cross-chain: ALL routes are expanded (getQuote intentionally returned an
-    // error placeholder, so there is no 'lifi' base quote to deduplicate against).
-    // For same-chain: skip the first route only when getQuote succeeded (already
-    // represented as 'lifi') to avoid showing the same route twice.
-    var lifiRoutesResult = (results[3].status === 'fulfilled') ? results[3].value : { ok: false, routes: [] };
-    var extraLifiQuotes = [];
+  /** Expand a getRoutes result into lifi-N quote objects (one per route). */
+  function _expandLifiRoutes(lifiRoutesResult, baseQuotes, opts, isCrossChain, lifiFromChain, lifiToChain) {
+    var extra = [];
     if (lifiRoutesResult && lifiRoutesResult.ok && Array.isArray(lifiRoutesResult.routes)) {
       var primaryLifiOk = !isCrossChain && baseQuotes[2] && baseQuotes[2].ok === true;
       // For cross-chain, always start at 0 (all routes are new).
@@ -295,7 +312,7 @@
         if (!lr || lr.toAmountRaw == null || lr.toAmountRaw <= 0n) continue;
         // Use routeId as the unique source key so each real bridge/DEX gets its own card.
         var routeSourceKey = 'lifi-' + (lr.routeId || ri);
-        extraLifiQuotes.push({
+        extra.push({
           source:         routeSourceKey,
           ok:             true,
           // label = real tool name from toolDetails.name ('Stargate', 'Across', 'CCTP', …)
@@ -327,9 +344,11 @@
         });
       }
     }
+    return extra;
+  }
 
-    var quotes = baseQuotes.concat(extraLifiQuotes);
-
+  /** Validate + finalize executability + pick best from a list of quotes. */
+  function _buildDecision(quotes, opts, hasLocalPool) {
     // Reject quotes that do not match the request (amount/token/chain/expiry).
     for (var i = 0; i < quotes.length; i++) {
       var q = quotes[i];
@@ -339,15 +358,6 @@
     }
 
     // Finalize executability (single source of truth for bestExecutableQuote).
-    //   local    → executable only when a local route actually exists (hasLocalPool)
-    //   tower    → executable whenever its route is fully valid (calldata/target/
-    //              spender), INDEPENDENT of local-pool existence (Tower and
-    //              Elligentt are separate providers — never each other's gate).
-    //   lifi     → executable whenever its route is fully valid (LI.FI calldata/
-    //              target + chain match). LI.FI is an independent provider too.
-    //   lifi-N   → route variants from getRoutes; stepsData present but calldata
-    //              fetched on selection. Treated as selectable (user can pick) but
-    //              NOT counted as bestExecutableQuote (no calldata yet).
     for (var j = 0; j < quotes.length; j++) {
       var qq = quotes[j];
       if (qq && qq.ok === true) {
@@ -373,6 +383,17 @@
     if (!decision.ok) decision.reason = 'NO_ROUTE_AVAILABLE';
     else if (!decision.executable) decision.reason = 'NO_EXECUTABLE_ROUTE';
     return decision;
+  }
+
+  /** Rebuild a decision from a settled-results array (shared by progressive + final). */
+  function _decisionFromResults(results, opts, isCrossChain, lifiFromChain, lifiToChain, hasLocalPool) {
+    var baseQuotes = results.slice(0, 3).map(function (r) {
+      if (r.status === 'fulfilled') return r.value;
+      return { source: 'unknown', ok: false, error: 'QUOTE_REJECTED' };
+    });
+    var lifiRoutesResult = (results[3].status === 'fulfilled') ? results[3].value : { ok: false, routes: [] };
+    var extra = _expandLifiRoutes(lifiRoutesResult, baseQuotes, opts, isCrossChain, lifiFromChain, lifiToChain);
+    return _buildDecision(baseQuotes.concat(extra), opts, hasLocalPool);
   }
 
   window.SwapAggregator = {
