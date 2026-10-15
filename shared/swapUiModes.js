@@ -319,11 +319,18 @@
   }
 
   /** Render the ROUTES selector into the DOM (Standard mode only). */
+  var _lastRouteListHtml = '';
   function renderRouteSelector(decision, selectedSource, opts) {
     try {
       opts = opts || {};
       var list = document.getElementById('swap-route-list');
-      if (list) list.innerHTML = buildRouteListHtml(decision, selectedSource, opts);
+      var html = buildRouteListHtml(decision, selectedSource, opts);
+      // Skip the rebuild when the rendered list is identical — avoids unnecessary
+      // DOM churn (and any residual flicker) on background refreshes.
+      if (list && html !== _lastRouteListHtml) {
+        list.innerHTML = html;
+        _lastRouteListHtml = html;
+      }
       var page = document.getElementById('page-swap');
       var status = document.getElementById('swap-route-status');
       // Count valid quotes for the status label.
@@ -365,6 +372,21 @@
     } catch (_) {}
   }
 
+  /**
+   * Show a SUBTLE "updating" state WITHOUT touching the route cards. Used on
+   * background refreshes so the already-displayed routers never disappear or get
+   * replaced by a "Finding routes..." placeholder (the source of the blinking).
+   */
+  function showRouteUpdating() {
+    try {
+      var page = document.getElementById('page-swap');
+      var status = document.getElementById('swap-route-status');
+      if (_mode === 'standard' && page) page.classList.add('swp-routes');
+      if (status) status.textContent = 'Updating routes...';
+      // Intentionally do NOT touch the route list — keep the cards visible.
+    } catch (_) {}
+  }
+
   /** Hide + empty the route card (no amount / no route / error / leaving Standard). */
   function clearRouteSelector() {
     try {
@@ -372,6 +394,7 @@
       var list = document.getElementById('swap-route-list');
       if (page) page.classList.remove('swp-routes');
       if (list) list.innerHTML = '';
+      _lastRouteListHtml = '';
     } catch (_) {}
   }
 
@@ -395,6 +418,7 @@
     buildRouteListHtml: buildRouteListHtml,
     renderRouteSelector: renderRouteSelector,
     showRouteLoading: showRouteLoading,
+    showRouteUpdating: showRouteUpdating,
     clearRouteSelector: clearRouteSelector,
     version: '2.0.0',
   };

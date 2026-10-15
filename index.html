@@ -20077,6 +20077,7 @@ const SWP = {
   tokenOutObj: null,          // same for output token
   _tokModalChainId: 5042,     // chain shown in token selector modal
   lastQuoteAt: 0,             // ms timestamp of last successful quote (auto-refresh + "updated" display)
+  _displayedParamsKey: null,  // params key of the currently displayed quote (blink-prevention)
 };
 
 // Quote race guard: monotonic request id. A stale async quote (older request
@@ -21339,13 +21340,38 @@ async function updateSwapRate() {
   }
 
   const rateEl = document.getElementById('swap-rate');
-  if (rateEl) rateEl.textContent = 'Finding route…';
-  if (outEl)  outEl.value = '';
-  if (detailEl) detailEl.style.display = '';
   var rateBar = document.getElementById('swp-rate-bar');
-  if (rateBar) rateBar.style.display = '';
-  swpHidePrecheck();
-  try { if (typeof SwapUiModes !== 'undefined' && SwapUiModes.showRouteLoading) SwapUiModes.showRouteLoading(); } catch(_) {}
+
+  // ── Blink prevention ─────────────────────────────────────────────────────
+  // Only wipe into the "Finding routes…" placeholder when there are NO cards yet
+  // (first search). On a background refresh (same params) the already-visible
+  // route cards and output are KEPT and only a subtle "Updating…" indicator is
+  // shown — never clear the list just because a new quote started.
+  const displayKey = (SWP.fromChainId || activeChainId) + '|' + (SWP.toChainId || activeChainId) + '|' + tIn.sym + '|' + tOut.sym + '|' + amtIn;
+  const paramsChanged = SWP._displayedParamsKey !== displayKey;
+  const hasCards = !!(SWP.aggQuotes && SWP.aggQuotes.some(function (q) { return q && q.ok === true; }));
+  SWP._displayedParamsKey = displayKey;
+
+  if (paramsChanged) {
+    // Real param change: invalidate the stale quote immediately so it can never
+    // be executed with the wrong params (validateRoute also re-checks at sign time).
+    SWP.lastQuote = null;
+    SWP._towerQuoteData = null;
+  }
+
+  if (!hasCards) {
+    // First search (no cards yet): show the loading state.
+    if (rateEl) rateEl.textContent = 'Finding route…';
+    if (outEl)  outEl.value = '';
+    if (detailEl) detailEl.style.display = '';
+    if (rateBar) rateBar.style.display = '';
+    swpHidePrecheck();
+    try { if (typeof SwapUiModes !== 'undefined' && SwapUiModes.showRouteLoading) SwapUiModes.showRouteLoading(); } catch(_) {}
+  } else {
+    // Cards already visible: keep them + output, subtle update indicator only.
+    swpHidePrecheck();
+    try { if (typeof SwapUiModes !== 'undefined' && SwapUiModes.showRouteUpdating) SwapUiModes.showRouteUpdating(); } catch(_) {}
+  }
 
   swapRateTimer = setTimeout(async () => {
     const quoteSeq = ++_swapQuoteSeq;
