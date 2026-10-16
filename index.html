@@ -51246,47 +51246,343 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
     );
   }
 
-  window.autDocExecute = function(mode) {
-    if(!autDocData){ autUI('ai',R.intro('No document data loaded.')); return; }
-    var rows = autDocData.rows;
-    var total = autDocData.summary.totalAmount;
+  // ════════════════════════════════════════
+  //  GUIDED DOC FLOWS — Execute Now / Schedule / Recurring / Payroll
+  // ════════════════════════════════════════
+  var autDocFlow = null;   // transient guided-flow state
+  var autDocBusy = false;  // double-click guard
 
-    if(mode === 'schedule' || mode === 'recurring'){
-      if(typeof ScheduleEngine === 'undefined'){ autUI('ai',R.intro('ScheduleEngine unavailable.')); return; }
-      var created = 0;
-      rows.forEach(function(r){
-        try {
-          var isXc = r._chain && r._chain !== 'Arc_Mainnet';
-          ScheduleEngine.create({
-            type: (mode === 'recurring' && isXc) ? 'crosschain' : isXc ? 'crosschain' : 'payment',
-            name: (r.note||'Doc Payment')+' to '+r.address.slice(0,6)+'...', token: r._token,
-            amount: r._amount, total: r._amount,
-            network: r._chain, fromNetwork: 'Arc_Mainnet', toNetwork: r._chain,
-            recipients: [{ addr: r.address, amount: r._amount, note: r.note||'', chainId: r._chain, token: r._token }],
-            address: r.address,
-            freq: mode === 'recurring' ? 'monthly' : 'once', maxEx: mode === 'recurring' ? 0 : 1, gas: 0.10,
-            nextRun: new Date(Date.now() + 60000).toISOString(),
-            execCount: 0, executionHistory: [],
-            status: 'Active', created: new Date().toISOString(), createdBy: 'autonoma_doc',
-            agentExecution: true, walletAddress: (typeof walletAddress !== 'undefined' ? walletAddress : '')
-          });
-          created++;
-        } catch(e){}
-      });
-      try { schedules = ScheduleEngine.getAll(); if(typeof renderSchedules === 'function') renderSchedules(); } catch(e){}
-      try { if(typeof AgentScheduleExecutor !== 'undefined') AgentScheduleExecutor.start(); } catch(e){}
+  function autDocRows() { return (autDocData && autDocData.rows) || []; }
+  function autDocSummary() { return (autDocData && autDocData.summary) || {}; }
+  function autDocTotal() { return Number(autDocSummary().totalAmount) || 0; }
+  function autDocCount() { return autDocRows().length; }
+  function autDocTokens() {
+    var m = {}; autDocRows().forEach(function(r){ m[r._token || 'USDC'] = true; });
+    return Object.keys(m);
+  }
+  function autDocNetworks() {
+    var m = {}; autDocRows().forEach(function(r){ m[r._chain || 'Arc_Mainnet'] = true; });
+    var l = Object.keys(m); return l.length ? l : ['Arc_Mainnet'];
+  }
+  // Duplicate address detection — returns the indices of duplicated rows.
+  function autDocDuplicateIdx() {
+    var seen = {}, dups = [];
+    autDocRows().forEach(function(r, i){
+      var a = String(r.address || '').toLowerCase();
+      if (Object.prototype.hasOwnProperty.call(seen, a)) dups.push(i);
+      else seen[a] = true;
+    });
+    return dups;
+  }
+  function autDocInvalidCount() { return ((autDocSummary().errors) || []).length; }
+
+  function autDocRecipientsHtml() {
+    var dupSet = {}; autDocDuplicateIdx().forEach(function(i){ dupSet[i] = true; });
+    var rows = autDocRows().slice(0, 50);
+    var html = rows.map(function(r, i){
+      var dup = dupSet[i];
+      return '<div style="display:flex;align-items:center;gap:6px;padding:3px 2px;font-size:8.5px;border-bottom:1px solid rgba(255,255,255,.03)'+(dup?';background:rgba(239,68,68,.09)':'')+'">' +
+        '<span style="color:var(--muted2);min-width:16px">'+(i+1)+'</span>' +
+        '<span style="color:'+(dup?'var(--red)':'#a78bfa')+'" title="'+esc(r.address)+'">'+esc(String(r.address).slice(0,6)+'…'+String(r.address).slice(-4))+(dup?' <i class="ti ti-alert-triangle" style="font-size:9px"></i>':'')+'</span>' +
+        '<span style="color:var(--muted2);flex:1;text-align:right">'+Number(r._amount).toLocaleString('en-US',{maximumFractionDigits:2})+' '+esc(r._token)+'</span>' +
+      '</div>';
+    }).join('');
+    var more = autDocCount() - rows.length;
+    if (more > 0) html += '<div style="font-size:8.5px;color:var(--muted2);padding:4px 2px">+ '+more+' more…</div>';
+    return html;
+  }
+  function autDocWarningsHtml() {
+    var errs = (autDocSummary().errors) || [];
+    var dups = autDocDuplicateIdx().length;
+    if (!errs.length && !dups) return '';
+    var lines = [];
+    if (dups) lines.push('<div style="color:var(--red)"><i class="ti ti-alert-triangle"></i> '+dups+' duplicate address(es) detected.</div>');
+    errs.slice(0, 6).forEach(function(e){ lines.push('<div style="color:var(--yellow)"><i class="ti ti-alert-circle"></i> '+esc(e)+'</div>'); });
+    return R.sep() + R.section('Warnings') + '<div style="font-size:8.5px;line-height:1.7">'+lines.join('')+'</div>';
+  }
+  function autDocBack() { autDocFlow = null; autDocBusy = false; if (autDocData) autRenderDocSummary(autDocData); }
+
+  // Schedule every row (one-time or recurring) via the existing ScheduleEngine.
+  function autDocScheduleAll(freq, nextRunIso, maxEx) {
+    if (typeof ScheduleEngine === 'undefined') return { ok:false, created:0, errors:['ScheduleEngine unavailable'] };
+    var created = 0, errors = [];
+    autDocRows().forEach(function(r){
+      try {
+        var isXc = r._chain && r._chain !== 'Arc_Mainnet';
+        ScheduleEngine.create({
+          type: isXc ? 'crosschain' : 'payment',
+          name: (r.note || 'Doc Payment') + ' to ' + String(r.address).slice(0,6) + '…',
+          token: r._token, amount: r._amount, total: r._amount,
+          network: r._chain || 'Arc_Mainnet', fromNetwork: 'Arc_Mainnet', toNetwork: r._chain || 'Arc_Mainnet',
+          recipients: [{ addr: r.address, amount: r._amount, note: r.note || '', chainId: r._chain || 'Arc_Mainnet', token: r._token }],
+          address: r.address, freq: freq, maxEx: maxEx, gas: 0.10,
+          nextRun: nextRunIso, execCount: 0, executionHistory: [],
+          status: 'Active', created: new Date().toISOString(), createdBy: 'autonoma_doc',
+          agentExecution: true, walletAddress: (typeof walletAddress !== 'undefined' ? walletAddress : '')
+        });
+        created++;
+      } catch(e){ errors.push(String(r.address).slice(0,8) + ': ' + (e.message || 'error')); }
+    });
+    try { if (typeof renderSchedules === 'function') renderSchedules(); } catch(e){}
+    try { if (typeof AgentScheduleExecutor !== 'undefined') AgentScheduleExecutor.start(); } catch(e){}
+    return { ok: created > 0, created: created, errors: errors };
+  }
+
+  // Dispatch every row through the Circle AI Smart Wallet (immediate).
+  function autDocDispatchAll() {
+    if (typeof AIWallet === 'undefined' || !AIWallet.submitIntent) return { ok:false, dispatched:0, error:'Circle AI Smart Wallet unavailable' };
+    var dispatched = 0;
+    autDocRows().forEach(function(r){
+      try {
+        AIWallet.submitIntent({ op:'payment', name:(r.note||'Doc Payment'), amount:r._amount, token:r._token, to:r.address, network:r._chain||'Arc_Mainnet', freq:'once', source:'autonoma_doc' });
+        dispatched++;
+      } catch(e){}
+    });
+    try { if (AIWallet.renderExecutions) AIWallet.renderExecutions(); } catch(e){}
+    return { ok: dispatched > 0, dispatched: dispatched };
+  }
+
+  // ── Execute Now ──
+  function autDocFlowExecute() {
+    autDocFlow = { mode:'execute', step:'review' };
+    autUI('ai',
+      R.intro('Review the batch before executing <strong>now</strong>:') +
+      R.card(R.head('bolt','Execute Now — Review',{text:autDocCount()+' payments',cls:'live'}),
+        R.row('Payments', autDocCount(), 'green') +
+        R.row('Total', autDocTotal().toLocaleString('en-US',{maximumFractionDigits:2}) + ' ' + autDocTokens().join('/'), 'green') +
+        R.row('Network', R.chainPill(autDocNetworks()[0].replace(/_/g,' '),'#ff0202'),'') +
+        R.sep() + R.section('Recipients') + '<div style="max-height:220px;overflow-y:auto">' + autDocRecipientsHtml() + '</div>' +
+        autDocWarningsHtml(),
+        R.actions(
+          {icon:'check',label:'Confirm and Execute',cls:'confirm',action:'autDocFlowExecuteDo()'},
+          {icon:'x',label:'Cancel',cls:'danger',action:'autDocBack()'}
+        )
+      )
+    );
+  }
+  window.autDocFlowExecuteDo = function() {
+    if (autDocBusy) return; autDocBusy = true;
+    var res = autDocDispatchAll();
+    autUI('ai',
+      R.intro(res.ok ? 'Payments dispatched to the Circle AI Smart Wallet.' : 'Dispatch failed.') +
+      R.card(R.head(res.ok?'bolt':'alert-triangle', res.ok?'Dispatched':'Dispatch Failed', {text: res.ok?'In Progress':'Error', cls: res.ok?'live':'pending'}),
+        R.row('Dispatched', res.dispatched + ' / ' + autDocCount(), res.ok?'green':'red') +
+        R.row('Total', autDocTotal().toLocaleString('en-US',{maximumFractionDigits:2}), 'green') +
+        (res.error ? R.row('Error', esc(res.error), 'red') : ''),
+        R.actions({icon:'building-bank',label:'Open AI Smart Wallet',cls:'primary',action:"showPage('aiwallet')"})
+      )
+    );
+    autDocBusy = false;
+  };
+
+  // ── Schedule ──
+  function autDocFlowSchedule() {
+    autDocFlow = { mode:'schedule', step:'options' };
+    var opts = [
+      { key:'now', label:'Execute Now', icon:'bolt' },
+      { key:'m30', label:'In 30 minutes', icon:'clock' },
+      { key:'h1', label:'In 1 hour', icon:'clock' },
+      { key:'d1', label:'In 1 day', icon:'calendar' },
+      { key:'custom', label:'Custom date and time', icon:'calendar-time' },
+    ];
+    var btns = opts.map(function(o){
+      return { icon:o.icon, label:o.label, cls:o.key==='now'?'primary':'', action:"autDocFlowSchedulePick('"+o.key+"')" };
+    });
+    autUI('ai',
+      R.intro('When should I schedule these <strong>'+autDocCount()+'</strong> payments?') +
+      R.card(R.head('calendar-event','Schedule Batch',{text:autDocCount()+' payments',cls:'live'}),
+        R.row('Total', autDocTotal().toLocaleString('en-US',{maximumFractionDigits:2}) + ' ' + autDocTokens().join('/'), 'green') +
+        R.row('Network', R.chainPill(autDocNetworks()[0].replace(/_/g,' '),'#ff0202'),''),
+        R.actions.apply(null, btns.concat([{icon:'arrow-left',label:'Back',cls:'',action:'autDocBack()'}]))
+      )
+    );
+  }
+  window.autDocFlowSchedulePick = function(key) {
+    if (!autDocData || autDocBusy) return;
+    var offsets = { now:60000, m30:1800000, h1:3600000, d1:86400000 };
+    if (key === 'custom') {
+      autDocFlow = { mode:'schedule', step:'custom' };
       autUI('ai',
-        R.intro(mode === 'recurring' ? 'Created ' + created + ' recurring schedules.' : 'Scheduled ' + created + ' payments for execution.') +
-        R.card(R.head('check','Operation Complete'),
-          R.row('Payments',created + '/' + rows.length,'green') +
-          R.row('Mode',mode === 'recurring'?'Recurring Monthly':'One-Time Scheduled','purple') +
-          R.row('Total',total.toLocaleString('en-US',{maximumFractionDigits:2}),'green'),
-          R.actions({icon:'external-link',label:'View Schedules',cls:'primary',action:"showPage('schedule')"})
+        R.intro('Choose a future date and time:') +
+        R.card(R.head('calendar-time','Custom Date and Time'),
+          '<input type="datetime-local" id="autdoc-custom-dt" style="background:rgba(0,0,0,.25);border:1px solid var(--border);border-radius:6px;padding:7px 9px;font-size:10px;color:var(--text);width:100%">',
+          R.actions(
+            {icon:'check',label:'Confirm Time',cls:'primary',action:'autDocFlowScheduleCustomConfirm()'},
+            {icon:'arrow-left',label:'Back',cls:'',action:'autDocFlowSchedule()'}
+          )
         )
       );
       return;
     }
+    var at = Date.now() + offsets[key];
+    autDocFlow = { mode:'schedule', step:'confirm', at:at };
+    autDocFlowScheduleConfirm(at);
+  };
+  window.autDocFlowScheduleCustomConfirm = function() {
+    var el = document.getElementById('autdoc-custom-dt');
+    var v = el ? el.value : '';
+    if (!v) { autUI('ai', R.intro('Please pick a future date and time.')); return; }
+    var at = new Date(v).getTime();
+    if (isNaN(at) || at <= Date.now()) { autUI('ai', R.intro('That time is in the past — pick a future time.')); return; }
+    autDocFlow = { mode:'schedule', step:'confirm', at:at };
+    autDocFlowScheduleConfirm(at);
+  };
+  function autDocFlowScheduleConfirm(at) {
+    autUI('ai',
+      R.intro('Confirm the one-time schedule:') +
+      R.card(R.head('calendar-event','Schedule Summary',{text:'One-time',cls:'live'}),
+        R.row('Payments', autDocCount(), 'green') +
+        R.row('Total', autDocTotal().toLocaleString('en-US',{maximumFractionDigits:2}) + ' ' + autDocTokens().join('/'), 'green') +
+        R.row('Network', R.chainPill(autDocNetworks()[0].replace(/_/g,' '),'#ff0202'),'') +
+        R.row('Scheduled for', new Date(at).toLocaleString('en-US',{dateStyle:'medium',timeStyle:'short'}), 'blue') +
+        autDocWarningsHtml(),
+        R.actions(
+          {icon:'check',label:'Confirm and Schedule',cls:'confirm',action:'autDocFlowScheduleDo()'},
+          {icon:'arrow-left',label:'Back',cls:'',action:'autDocFlowSchedule()'}
+        )
+      )
+    );
+  }
+  window.autDocFlowScheduleDo = function() {
+    if (autDocBusy) return; autDocBusy = true;
+    var at = (autDocFlow && autDocFlow.at) || (Date.now() + 60000);
+    var res = autDocScheduleAll('once', new Date(at).toISOString(), 1);
+    autUI('ai',
+      R.intro(res.ok ? 'Payments scheduled.' : 'Scheduling failed.') +
+      R.card(R.head(res.ok?'check':'alert-triangle', res.ok?'Scheduled':'Scheduling Failed', {text: res.ok?'Complete':'Error', cls: res.ok?'live':'pending'}),
+        R.row('Scheduled', res.created + ' / ' + autDocCount(), res.ok?'green':'red') +
+        R.row('For', new Date(at).toLocaleString('en-US',{dateStyle:'medium',timeStyle:'short'}), 'blue') +
+        (res.errors.length ? R.row('Errors', esc(res.errors.slice(0,3).join('; ')), 'red') : ''),
+        R.actions({icon:'external-link',label:'View Schedules',cls:'primary',action:"showPage('schedule')"})
+      )
+    );
+    autDocBusy = false;
+  };
 
+  // ── Recurring ──
+  var AUTDOC_FREQS = [
+    { key:'daily', label:'Daily', supported:true },
+    { key:'weekly', label:'Weekly', supported:true },
+    { key:'biweekly', label:'Bi-weekly', supported:true },
+    { key:'monthly', label:'Monthly', supported:true },
+    { key:'hourly', label:'Hourly', supported:false },
+    { key:'m30', label:'Every 30 min', supported:false },
+  ];
+  function autDocFlowRecurring() {
+    autDocFlow = { mode:'recurring', step:'freq' };
+    var unsupported = AUTDOC_FREQS.filter(function(f){ return !f.supported; }).map(function(f){ return f.label; }).join(', ');
+    var freqBtns = AUTDOC_FREQS.map(function(f){
+      if (!f.supported) return '<span class="aut-act" style="opacity:.4;cursor:not-allowed"><i class="ti ti-repeat"></i>'+esc(f.label)+'</span>';
+      return '<button class="aut-act" onclick="autDocFlowRecurringPick(\''+f.key+'\')"><i class="ti ti-repeat"></i>'+esc(f.label)+'</button>';
+    }).join('');
+    autUI('ai',
+      R.intro('Choose a recurrence for <strong>'+autDocCount()+'</strong> payments:') +
+      R.card(R.head('repeat','Recurring Schedule',{text:'Recurring',cls:'live'}),
+        R.row('Payments', autDocCount(), 'green') +
+        R.row('Total', autDocTotal().toLocaleString('en-US',{maximumFractionDigits:2}) + ' ' + autDocTokens().join('/'), 'green') +
+        R.sep() + R.section('Frequency') + '<div style="display:flex;gap:6px;flex-wrap:wrap;margin:4px 0">' + freqBtns + '</div>' +
+        '<div style="font-size:8px;color:var(--muted2);margin-top:2px">Not supported yet: '+esc(unsupported)+' — the executor supports daily, weekly, bi-weekly and monthly only.</div>',
+        R.actions({icon:'x',label:'Cancel',cls:'danger',action:'autDocBack()'})
+      )
+    );
+  }
+  window.autDocFlowRecurringPick = function(key) {
+    if (!autDocFlow || autDocFlow.mode !== 'recurring') return;
+    autDocFlow.freq = key;
+    autDocFlow.step = 'config';
+    autUI('ai',
+      R.intro('Configure <strong>'+esc(key)+'</strong> recurrence:') +
+      R.card(R.head('repeat','Recurring Options',{text:key,cls:'live'}),
+        R.row('Payments', autDocCount(), 'green') +
+        R.row('Total', autDocTotal().toLocaleString('en-US',{maximumFractionDigits:2}) + ' ' + autDocTokens().join('/'), 'green') +
+        R.sep() +
+        '<div style="display:flex;flex-direction:column;gap:7px;margin-top:4px">' +
+          '<div><span style="font-size:8.5px;color:var(--muted2)">First run (default: in 1 hour)</span><input type="datetime-local" id="autdoc-rec-first" style="background:rgba(0,0,0,.25);border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:9px;color:var(--text);width:100%;margin-top:2px"></div>' +
+          '<div><span style="font-size:8.5px;color:var(--muted2)">Number of repetitions (0 = unlimited)</span><input type="number" id="autdoc-rec-max" min="0" value="0" style="background:rgba(0,0,0,.25);border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:9px;color:var(--text);width:100%;margin-top:2px"></div>' +
+        '</div>',
+        R.actions(
+          {icon:'check',label:'Continue',cls:'primary',action:'autDocFlowRecurringConfirm()'},
+          {icon:'arrow-left',label:'Back',cls:'',action:'autDocFlowRecurring()'}
+        )
+      )
+    );
+  };
+  window.autDocFlowRecurringConfirm = function() {
+    if (autDocBusy) return;
+    var freq = (autDocFlow && autDocFlow.freq) || 'monthly';
+    var firstEl = document.getElementById('autdoc-rec-first');
+    var maxEl = document.getElementById('autdoc-rec-max');
+    var firstIso = (firstEl && firstEl.value) ? new Date(firstEl.value).toISOString() : new Date(Date.now() + 3600000).toISOString();
+    if (isNaN(new Date(firstIso).getTime()) || new Date(firstIso).getTime() <= Date.now()) firstIso = new Date(Date.now() + 3600000).toISOString();
+    var maxEx = (maxEl && maxEl.value) ? Math.max(0, parseInt(maxEl.value, 10) || 0) : 0;
+    autDocFlow = { mode:'recurring', step:'confirm', freq:freq, firstIso:firstIso, maxEx:maxEx };
+    autUI('ai',
+      R.intro('Confirm the recurring schedule:') +
+      R.card(R.head('repeat','Recurring Summary',{text:freq,cls:'live'}),
+        R.row('Payments', autDocCount(), 'green') +
+        R.row('Total', autDocTotal().toLocaleString('en-US',{maximumFractionDigits:2}) + ' ' + autDocTokens().join('/'), 'green') +
+        R.row('Network', R.chainPill(autDocNetworks()[0].replace(/_/g,' '),'#ff0202'),'') +
+        R.row('Frequency', freq, 'purple') +
+        R.row('First run', new Date(firstIso).toLocaleString('en-US',{dateStyle:'medium',timeStyle:'short'}), 'blue') +
+        R.row('Repetitions', maxEx === 0 ? 'Unlimited' : String(maxEx), '') +
+        autDocWarningsHtml(),
+        R.actions(
+          {icon:'check',label:'Confirm and Schedule',cls:'confirm',action:'autDocFlowRecurringDo()'},
+          {icon:'arrow-left',label:'Back',cls:'',action:'autDocFlowRecurring()'}
+        )
+      )
+    );
+  };
+  window.autDocFlowRecurringDo = function() {
+    if (autDocBusy) return; autDocBusy = true;
+    var freq = (autDocFlow && autDocFlow.freq) || 'monthly';
+    var firstIso = (autDocFlow && autDocFlow.firstIso) || new Date(Date.now() + 3600000).toISOString();
+    var maxEx = (autDocFlow && autDocFlow.maxEx) || 0;
+    var res = autDocScheduleAll(freq, firstIso, maxEx);
+    autUI('ai',
+      R.intro(res.ok ? 'Recurring schedule created.' : 'Scheduling failed.') +
+      R.card(R.head(res.ok?'check':'alert-triangle', res.ok?'Scheduled':'Scheduling Failed', {text: res.ok?'Recurring':'Error', cls: res.ok?'live':'pending'}),
+        R.row('Scheduled', res.created + ' / ' + autDocCount(), res.ok?'green':'red') +
+        R.row('Frequency', freq, 'purple') +
+        (res.errors.length ? R.row('Errors', esc(res.errors.slice(0,3).join('; ')), 'red') : ''),
+        R.actions({icon:'external-link',label:'View Schedules',cls:'primary',action:"showPage('schedule')"})
+      )
+    );
+    autDocBusy = false;
+  };
+
+  // ── Payroll ──
+  function autDocFlowPayroll() {
+    autDocFlow = { mode:'payroll', step:'method' };
+    autUI('ai',
+      R.intro('Payroll review — <strong>'+autDocCount()+'</strong> recipients:') +
+      R.card(R.head('workflow','Payroll Summary',{text:autDocCount()+' recipients',cls:'live'}),
+        R.row('Recipients', autDocCount(), 'green') +
+        R.row('Total', autDocTotal().toLocaleString('en-US',{maximumFractionDigits:2}) + ' ' + autDocTokens().join('/'), 'green') +
+        R.row('Network', R.chainPill(autDocNetworks()[0].replace(/_/g,' '),'#ff0202'),'') +
+        R.sep() + R.section('Recipients') + '<div style="max-height:220px;overflow-y:auto">' + autDocRecipientsHtml() + '</div>' +
+        autDocWarningsHtml() +
+        R.sep() + R.section('How do you want to pay?'),
+        R.actions(
+          {icon:'bolt',label:'Pay Now',cls:'primary',action:'autDocFlowExecute()'},
+          {icon:'calendar-event',label:'Schedule',cls:'',action:'autDocFlowSchedule()'},
+          {icon:'repeat',label:'Recurring',cls:'',action:'autDocFlowRecurring()'},
+          {icon:'x',label:'Cancel',cls:'danger',action:'autDocBack()'}
+        )
+      )
+    );
+  }
+
+  window.autDocExecute = function(mode) {
+    if(!autDocData){ autUI('ai',R.intro('No document data loaded.')); return; }
+    if (mode === 'execute' || mode === 'swap_pay') { autDocFlowExecute(); return; }
+    if (mode === 'schedule')  { autDocFlowSchedule(); return; }
+    if (mode === 'recurring') { autDocFlowRecurring(); return; }
+    if (mode === 'workflow')  { autDocFlowPayroll(); return; }
+
+    // crosschain — preserved existing path (not one of the four guided flows).
+    var rows = autDocData.rows;
+    var total = autDocData.summary.totalAmount;
     if(mode === 'crosschain'){
       if(typeof window !== 'undefined' && typeof window._agentExecuteBridge === 'function'){
         (async function(){
@@ -51317,51 +51613,9 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
             )
           );
 })();
-
-// Circle AI Smart Wallet recovery phrase backup prompt (runs after auto-create)
-setTimeout(function() {
-  try {
-    if (typeof AgentWalletManager !== 'undefined' && AgentWalletManager.needsBackupDisplay && AgentWalletManager.needsBackupDisplay()) {
-      _showRecoveryBackup();
-    }
-  } catch(_e) {}
-}, 3500);
       } else {
         autUI('ai',R.intro('Crosschain engine unavailable. Please open the Bridge page manually.'));
       }
-      return;
-    }
-
-    if(mode === 'execute' || mode === 'swap_pay' || mode === 'workflow'){
-      if(typeof AIWallet === 'undefined' || !AIWallet.submitIntent){
-        autUI('ai',R.intro('Circle AI Smart Wallet unavailable. Please connect your wallet and try again.'));
-        return;
-      }
-      var dispatched = 0;
-      rows.forEach(function(r){
-        try {
-          AIWallet.submitIntent({
-            op: 'payment', name: (r.note||'Doc Payment'), amount: r._amount,
-            token: r._token, to: r.address, network: r._chain, freq: 'once',
-            source: 'autonoma_doc'
-          });
-          dispatched++;
-        } catch(e){}
-      });
-      try { if(AIWallet.renderExecutions) AIWallet.renderExecutions(); } catch(e){}
-      autUI('ai',
-        R.intro('Dispatched ' + dispatched + ' payments to AI Smart Wallet for ' + (mode === 'workflow' ? 'workflow' : mode === 'swap_pay' ? 'swap+pay' : 'instant') + ' execution.') +
-        R.card(R.head('bolt','Payments Dispatched'),
-          R.row('Payments',dispatched + '/' + rows.length,'green') +
-          R.row('Mode',mode === 'workflow' ? 'Payroll Workflow' : mode === 'swap_pay' ? 'Swap & Pay' : 'Instant','purple') +
-          R.row('Total Value',total.toLocaleString('en-US',{maximumFractionDigits:2}),'green'),
-          R.actions(
-            {icon:'building-bank',label:'Open Circle AI Smart Wallet',cls:'primary',action:"showPage('aiwallet')"},
-            {icon:'external-link',label:'View Schedule',cls:'',action:"showPage('schedule')"}
-          )
-        )
-      );
-      return;
     }
   };
 
