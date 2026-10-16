@@ -51318,6 +51318,28 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
   }
   function _autDocHash(s) { var h = 0; for (var i = 0; i < s.length; i++) { h = (h * 31 + s.charCodeAt(i)) >>> 0; } return h.toString(36); }
 
+  // ── Date/time: visual MM/DD/YYYY HH:MM (24h, local) ↔ internal ISO ─────
+  // Visual format is strictly for display/input; the ScheduleEngine only ever
+  // receives a real ISO string via Date#toISOString().
+  function autDocPad(n) { return (n < 10 ? '0' : '') + n; }
+  function autDocFormatDT(d) {
+    if (!d || isNaN(d.getTime())) return '';
+    return autDocPad(d.getMonth()+1) + '/' + autDocPad(d.getDate()) + '/' + d.getFullYear() + ' ' + autDocPad(d.getHours()) + ':' + autDocPad(d.getMinutes());
+  }
+  // Parse "MM/DD/YYYY HH:MM" (24h) in LOCAL time. Returns a Date or null.
+  function autDocParseDT(str) {
+    if (!str || typeof str !== 'string') return null;
+    var m = String(str).trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2})$/);
+    if (!m) return null;
+    var mo = parseInt(m[1],10), dd = parseInt(m[2],10), yy = parseInt(m[3],10);
+    var hh = parseInt(m[4],10), mi = parseInt(m[5],10);
+    if (mo < 1 || mo > 12 || dd < 1 || dd > 31 || hh < 0 || hh > 23 || mi < 0 || mi > 59) return null;
+    var d = new Date(yy, mo-1, dd, hh, mi, 0, 0);
+    // Reject non-existent dates (e.g. Feb 30 rolls to Mar 2).
+    if (d.getFullYear() !== yy || d.getMonth() !== mo-1 || d.getDate() !== dd) return null;
+    return d;
+  }
+
   function autDocRecipientsHtml() {
     var dupSet = {}; autDocDuplicateIdx().forEach(function(i){ dupSet[i] = true; });
     var rows = autDocRows().slice(0, 50);
@@ -51464,7 +51486,7 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
 
   // ── Schedule ──
   function autDocFlowSchedule() {
-    autDocFlow = { mode:'schedule', step:'options' };
+    autDocFlow = { mode:'schedule', step:'options', customVal:(autDocFlow && autDocFlow.customVal) || '' };
     var opts = [
       { key:'now', label:'Execute Now', icon:'bolt' },
       { key:'m30', label:'In 30 minutes', icon:'clock' },
@@ -51488,11 +51510,13 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
     if (!autDocData || autDocBusy) return;
     var offsets = { now:60000, m30:1800000, h1:3600000, d1:86400000 };
     if (key === 'custom') {
-      autDocFlow = { mode:'schedule', step:'custom' };
+      var prevCustom = (autDocFlow && autDocFlow.customVal) || '';
+      autDocFlow = { mode:'schedule', step:'custom', customVal: prevCustom };
       autUI('ai',
         R.intro('Choose a future date and time:') +
         R.card(R.head('calendar-time','Custom Date and Time'),
-          '<input type="datetime-local" id="autdoc-custom-dt" style="background:rgba(0,0,0,.25);border:1px solid var(--border);border-radius:6px;padding:7px 9px;font-size:10px;color:var(--text);width:100%">',
+          '<div style="font-size:8px;color:var(--muted2);margin-bottom:3px">Format: MM/DD/YYYY HH:MM (24-hour)</div>' +
+          '<input type="text" id="autdoc-custom-dt" placeholder="MM/DD/YYYY HH:MM" value="'+esc(prevCustom)+'" inputmode="numeric" autocomplete="off" style="background:rgba(0,0,0,.25);border:1px solid var(--border);border-radius:6px;padding:7px 9px;font-size:10px;color:var(--text);width:100%">',
           R.actions(
             {icon:'check',label:'Confirm Time',cls:'primary',action:'autDocFlowScheduleCustomConfirm()'},
             {icon:'arrow-left',label:'Back',cls:'',action:'autDocFlowSchedule()'}
@@ -51502,17 +51526,17 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
       return;
     }
     var at = Date.now() + offsets[key];
-    autDocFlow = { mode:'schedule', step:'confirm', at:at };
+    autDocFlow = { mode:'schedule', step:'confirm', at:at, customVal:(autDocFlow && autDocFlow.customVal) || '' };
     autDocFlowScheduleConfirm(at);
   };
   window.autDocFlowScheduleCustomConfirm = function() {
     var el = document.getElementById('autdoc-custom-dt');
     var v = el ? el.value : '';
-    if (!v) { autUI('ai', R.intro('Please pick a future date and time.')); return; }
-    var at = new Date(v).getTime();
-    if (isNaN(at) || at <= Date.now()) { autUI('ai', R.intro('That time is in the past — pick a future time.')); return; }
-    autDocFlow = { mode:'schedule', step:'confirm', at:at };
-    autDocFlowScheduleConfirm(at);
+    var d = autDocParseDT(v);
+    if (!d) { autUI('ai', R.intro('Invalid date — use the format MM/DD/YYYY HH:MM (24-hour).')); return; }
+    if (d.getTime() <= Date.now()) { autUI('ai', R.intro('That time is in the past — pick a future time.')); return; }
+    autDocFlow = { mode:'schedule', step:'confirm', at: d.getTime(), customVal: v };
+    autDocFlowScheduleConfirm(d.getTime());
   };
   function autDocFlowScheduleConfirm(at) {
     autUI('ai',
@@ -51521,7 +51545,7 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
         R.row('Payments', autDocCount(), 'green') +
         R.row('Total', autDocTotal().toLocaleString('en-US',{maximumFractionDigits:2}) + ' ' + autDocTokens().join('/'), 'green') +
         autDocTotalsSection() +
-        R.row('Scheduled for', new Date(at).toLocaleString('en-US',{dateStyle:'medium',timeStyle:'short'}), 'blue') +
+        R.row('Scheduled for', autDocFormatDT(new Date(at)), 'blue') +
         autDocWarningsHtml(),
         R.actions(
           {icon:'check',label:'Confirm and Schedule',cls:'confirm',action:'autDocFlowScheduleDo()'},
@@ -51540,7 +51564,7 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
         R.row('Created', res.created, 'green') +
         R.row('Failed', res.failed, res.failed?'red':'') +
         R.row('Skipped', res.skipped, res.skipped?'yellow':'') +
-        R.row('For', new Date(at).toLocaleString('en-US',{dateStyle:'medium',timeStyle:'short'}), 'blue') +
+        R.row('For', autDocFormatDT(new Date(at)), 'blue') +
         (res.errors.length ? R.row('Errors', esc(res.errors.slice(0,3).join('; ')), 'red') : ''),
         R.actions({icon:'external-link',label:'View Schedules',cls:'primary',action:"showPage('schedule')"})
       )
@@ -51558,7 +51582,7 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
     { key:'m30', label:'Every 30 min', supported:false },
   ];
   function autDocFlowRecurring() {
-    autDocFlow = { mode:'recurring', step:'freq' };
+    autDocFlow = { mode:'recurring', step:'freq', firstVal:(autDocFlow && autDocFlow.firstVal) || '', maxVal:(autDocFlow && autDocFlow.maxVal) || '0' };
     var unsupported = AUTDOC_FREQS.filter(function(f){ return !f.supported; }).map(function(f){ return f.label; }).join(', ');
     var freqBtns = AUTDOC_FREQS.map(function(f){
       if (!f.supported) return '<span class="aut-act" style="opacity:.4;cursor:not-allowed"><i class="ti ti-repeat"></i>'+esc(f.label)+'</span>';
@@ -51577,8 +51601,9 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
   }
   window.autDocFlowRecurringPick = function(key) {
     if (!autDocFlow || autDocFlow.mode !== 'recurring') return;
-    autDocFlow.freq = key;
-    autDocFlow.step = 'config';
+    var firstVal = (autDocFlow && autDocFlow.firstVal) || autDocFormatDT(new Date(Date.now() + 3600000));
+    var maxVal = (autDocFlow && autDocFlow.maxVal) || '0';
+    autDocFlow = { mode:'recurring', step:'config', freq:key, firstVal:firstVal, maxVal:maxVal };
     autUI('ai',
       R.intro('Configure <strong>'+esc(key)+'</strong> recurrence:') +
       R.card(R.head('repeat','Recurring Options',{text:key,cls:'live'}),
@@ -51586,8 +51611,8 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
         R.row('Total', autDocTotal().toLocaleString('en-US',{maximumFractionDigits:2}) + ' ' + autDocTokens().join('/'), 'green') +
         R.sep() +
         '<div style="display:flex;flex-direction:column;gap:7px;margin-top:4px">' +
-          '<div><span style="font-size:8.5px;color:var(--muted2)">First run (default: in 1 hour)</span><input type="datetime-local" id="autdoc-rec-first" style="background:rgba(0,0,0,.25);border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:9px;color:var(--text);width:100%;margin-top:2px"></div>' +
-          '<div><span style="font-size:8.5px;color:var(--muted2)">Number of repetitions (0 = unlimited)</span><input type="number" id="autdoc-rec-max" min="0" value="0" style="background:rgba(0,0,0,.25);border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:9px;color:var(--text);width:100%;margin-top:2px"></div>' +
+          '<div><span style="font-size:8.5px;color:var(--muted2)">First run (MM/DD/YYYY HH:MM, 24-hour)</span><input type="text" id="autdoc-rec-first" placeholder="MM/DD/YYYY HH:MM" value="'+esc(firstVal)+'" inputmode="numeric" autocomplete="off" style="background:rgba(0,0,0,.25);border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:9px;color:var(--text);width:100%;margin-top:2px"></div>' +
+          '<div><span style="font-size:8.5px;color:var(--muted2)">Number of repetitions (0 = unlimited)</span><input type="number" id="autdoc-rec-max" min="0" value="'+esc(maxVal)+'" style="background:rgba(0,0,0,.25);border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:9px;color:var(--text);width:100%;margin-top:2px"></div>' +
         '</div>',
         R.actions(
           {icon:'check',label:'Continue',cls:'primary',action:'autDocFlowRecurringConfirm()'},
@@ -51601,10 +51626,13 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
     var freq = (autDocFlow && autDocFlow.freq) || 'monthly';
     var firstEl = document.getElementById('autdoc-rec-first');
     var maxEl = document.getElementById('autdoc-rec-max');
-    var firstIso = (firstEl && firstEl.value) ? new Date(firstEl.value).toISOString() : new Date(Date.now() + 3600000).toISOString();
-    if (isNaN(new Date(firstIso).getTime()) || new Date(firstIso).getTime() <= Date.now()) firstIso = new Date(Date.now() + 3600000).toISOString();
+    var firstVal = (firstEl && firstEl.value) ? String(firstEl.value).trim() : '';
+    var d = autDocParseDT(firstVal);
+    if (!d) { autUI('ai', R.intro('Invalid first-run date — use MM/DD/YYYY HH:MM (24-hour).')); return; }
+    if (d.getTime() <= Date.now()) { autUI('ai', R.intro('First run must be in the future.')); return; }
+    var firstIso = d.toISOString();
     var maxEx = (maxEl && maxEl.value) ? Math.max(0, parseInt(maxEl.value, 10) || 0) : 0;
-    autDocFlow = { mode:'recurring', step:'confirm', freq:freq, firstIso:firstIso, maxEx:maxEx };
+    autDocFlow = { mode:'recurring', step:'confirm', freq:freq, firstIso:firstIso, firstVal:firstVal, maxVal:String(maxEx), maxEx:maxEx };
     autUI('ai',
       R.intro('Confirm the recurring schedule:') +
       R.card(R.head('repeat','Recurring Summary',{text:freq,cls:'live'}),
@@ -51612,12 +51640,12 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
         R.row('Total', autDocTotal().toLocaleString('en-US',{maximumFractionDigits:2}) + ' ' + autDocTokens().join('/'), 'green') +
         autDocTotalsSection() +
         R.row('Frequency', freq, 'purple') +
-        R.row('First run', new Date(firstIso).toLocaleString('en-US',{dateStyle:'medium',timeStyle:'short'}), 'blue') +
+        R.row('First run', autDocFormatDT(new Date(firstIso)), 'blue') +
         R.row('Repetitions', maxEx === 0 ? 'Unlimited' : String(maxEx), '') +
         autDocWarningsHtml(),
         R.actions(
           {icon:'check',label:'Confirm and Schedule',cls:'confirm',action:'autDocFlowRecurringDo()'},
-          {icon:'arrow-left',label:'Back',cls:'',action:'autDocFlowRecurring()'}
+          {icon:'arrow-left',label:'Back',cls:'',action:'autDocFlowRecurringPick(\''+freq+'\')'}
         )
       )
     );

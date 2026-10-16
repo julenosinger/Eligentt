@@ -223,3 +223,75 @@ describe('Totals separated by token and network', () => {
     expect(fn).toContain("R.section('Totals by network')");
   });
 });
+
+// Evaluate the inline date helpers to test their real logic.
+function loadDateHelpers() {
+  const start = html.indexOf('function autDocPad(');
+  const end = html.indexOf('function autDocRecipientsHtml(', start);
+  const block = html.slice(start, end);
+  const fn = new Function(block + '\nreturn { pad: autDocPad, fmt: autDocFormatDT, parse: autDocParseDT };');
+  return fn();
+}
+
+describe('Schedule date/time — MM/DD/YYYY HH:MM format', () => {
+  it('uses text inputs (not native datetime-local) for custom + first-run', () => {
+    const fn = html.slice(html.indexOf('function autDocFlowSchedule()'), html.indexOf('window.autDocExecute = function'));
+    expect(fn).toContain('placeholder="MM/DD/YYYY HH:MM"');
+    expect(fn).toContain('id="autdoc-custom-dt"');
+    expect(fn).toContain('id="autdoc-rec-first"');
+    expect(fn).not.toContain('type="datetime-local"');
+  });
+
+  it('defines visual format + parser helpers', () => {
+    expect(html).toContain('function autDocFormatDT(');
+    expect(html).toContain('function autDocParseDT(');
+  });
+
+  it('preserves the custom value across Back/Continue', () => {
+    const fn = html.slice(html.indexOf('function autDocFlowSchedule()'), html.indexOf('function autDocFlowScheduleConfirm'));
+    expect(fn).toContain('customVal:(autDocFlow && autDocFlow.customVal)');
+  });
+
+  it('preserves the recurring first-run value across Back/Continue', () => {
+    const fn = html.slice(html.indexOf('function autDocFlowRecurring()'), html.indexOf('window.autDocFlowRecurringConfirm'));
+    expect(fn).toContain('firstVal:(autDocFlow && autDocFlow.firstVal)');
+  });
+});
+
+describe('autDocFormatDT / autDocParseDT — date logic', () => {
+  const H = loadDateHelpers();
+
+  it('formats a date as MM/DD/YYYY HH:MM (24h)', () => {
+    expect(H.fmt(new Date(2026, 9, 20, 14, 30))).toBe('10/20/2026 14:30');
+    expect(H.fmt(new Date(2026, 0, 5, 9, 5))).toBe('01/05/2026 09:05');
+  });
+
+  it('parses MM/DD/YYYY HH:MM and round-trips', () => {
+    const d = H.parse('10/20/2026 14:30');
+    expect(d).toBeTruthy();
+    expect(d.getFullYear()).toBe(2026);
+    expect(d.getMonth()).toBe(9);   // Oct
+    expect(d.getDate()).toBe(20);
+    expect(d.getHours()).toBe(14);
+    expect(d.getMinutes()).toBe(30);
+    expect(H.fmt(d)).toBe('10/20/2026 14:30');
+  });
+
+  it('rejects a non-existent date (Feb 30)', () => {
+    expect(H.parse('02/30/2026 10:00')).toBeNull();
+  });
+
+  it('rejects empty / malformed input', () => {
+    expect(H.parse('')).toBeNull();
+    expect(H.parse('not-a-date')).toBeNull();
+    expect(H.parse('10/20/2026')).toBeNull(); // missing time
+    expect(H.parse('13/20/2026 10:00')).toBeNull(); // month 13
+    expect(H.parse('10/20/2026 25:00')).toBeNull(); // hour 25
+  });
+
+  it('parses in local time (timezone-respecting, no UTC shift)', () => {
+    const d = H.parse('10/20/2026 14:30');
+    expect(d.getHours()).toBe(14);
+    expect(d.getMinutes()).toBe(30);
+  });
+});
