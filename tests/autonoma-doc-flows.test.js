@@ -151,4 +151,75 @@ describe('AutonomaDocIntel — CSV validation', () => {
     expect(r.rows.length).toBe(1);
     expect(r.summary.totalPayments).toBe(1);
   });
+
+  it('parses multiple tokens and networks (no single-network assumption)', () => {
+    const A = '0x' + '11'.repeat(20);
+    const B = '0x' + '22'.repeat(20);
+    const csv = 'address,amount,token,chain\n' + A + ',100,USDC,Arc_Mainnet\n' + B + ',50,EURC,Base\n';
+    const r = Intel.parseFile('t.csv', csv, false, '');
+    expect(r.success).toBe(true);
+    expect(r.rows.length).toBe(2);
+    expect(r.summary.tokenSummary.length).toBe(2); // USDC + EURC
+    expect(r.rows[0]._chain).toBe('Arc_Mainnet');
+    expect(r.rows[1]._chain).toBe('Base');
+  });
+});
+
+describe('Execute Now — duplicate blocking + real states', () => {
+  it('blocks execution and offers duplicate removal', () => {
+    expect(html).toContain('function autDocRemoveDuplicates()');
+    expect(html).toContain('window.autDocFlowExecuteRemoveDups = function');
+    expect(html).toContain("label:'Remove Duplicates'");
+    expect(html).toContain("label:'Confirm and Execute'");
+  });
+
+  it('re-checks duplicates before dispatch (final guard)', () => {
+    const fn = html.slice(html.indexOf('window.autDocFlowExecuteDo = function'), html.indexOf('// ── Schedule ──'));
+    expect(fn).toContain('if (autDocDuplicateIdx().length > 0)');
+  });
+
+  it('counts requested vs rejected from submitIntent return value', () => {
+    const fn = html.slice(html.indexOf('function autDocDispatchAll()'), html.indexOf('// ── Execute Now ──'));
+    expect(fn).toContain('if (id) { requested++;');
+    expect(fn).toContain('else rejected++;');
+  });
+
+  it('reports requested/rejected (never a false "completed")', () => {
+    const fn = html.slice(html.indexOf('window.autDocFlowExecuteDo = function'), html.indexOf('// ── Schedule ──'));
+    expect(fn).toContain("R.row('Requested', res.requested");
+    expect(fn).toContain("R.row('Rejected', res.rejected");
+    expect(fn).not.toContain("'Dispatched'");
+  });
+});
+
+describe('Schedule / Recurring — idempotency + partial results', () => {
+  it('schedules with a deterministic id (no duplicate on retry)', () => {
+    const fn = html.slice(html.indexOf('function autDocScheduleAll('), html.indexOf('// Dispatch every row'));
+    expect(fn).toContain("var id = 'SCH_DOC_' + _autDocHash(");
+    expect(fn).toContain('ScheduleEngine.getById(id)');
+  });
+
+  it('reports created / failed / skipped distinctly', () => {
+    expect(html).toContain("R.row('Created', res.created");
+    expect(html).toContain("R.row('Failed', res.failed");
+    expect(html).toContain("R.row('Skipped', res.skipped");
+  });
+
+  it('validates a future first-run time', () => {
+    const fn = html.slice(html.indexOf('window.autDocFlowRecurringConfirm = function'), html.indexOf('window.autDocFlowRecurringDo'));
+    expect(fn).toContain('<= Date.now()');
+  });
+});
+
+describe('Totals separated by token and network', () => {
+  it('computes token + network totals', () => {
+    expect(html).toContain('function autDocTokenTotals()');
+    expect(html).toContain('function autDocNetworkTotals()');
+    expect(html).toContain('function autDocTotalsSection()');
+  });
+
+  it('renders totals-by-network (no single-network assumption)', () => {
+    const fn = html.slice(html.indexOf('function autDocTotalsSection()'), html.indexOf('// Duplicate address detection'));
+    expect(fn).toContain("R.section('Totals by network')");
+  });
 });

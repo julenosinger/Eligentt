@@ -51185,9 +51185,11 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
   //  FINANCIAL DOCUMENT INTELLIGENCE RENDERER
   // ════════════════════════════════════════
   var autDocData = null; // current parsed document in session
+  var _autDocDispatched = {}; // addresses already dispatched this session (dedup on retry)
 
   function autRenderDocSummary(result) {
     autDocData = result;
+    _autDocDispatched = {}; // fresh document → reset dispatch dedup
     var s = result.summary;
     var c = result.classification;
     var items = result.rows.slice(0, 5);
@@ -51254,7 +51256,8 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
 
   function autDocRows() { return (autDocData && autDocData.rows) || []; }
   function autDocSummary() { return (autDocData && autDocData.summary) || {}; }
-  function autDocTotal() { return Number(autDocSummary().totalAmount) || 0; }
+  // Total recomputed from the CURRENT rows (updates after duplicate removal).
+  function autDocTotal() { return autDocRows().reduce(function(s,r){ return s + (Number(r._amount) || 0); }, 0); }
   function autDocCount() { return autDocRows().length; }
   function autDocTokens() {
     var m = {}; autDocRows().forEach(function(r){ m[r._token || 'USDC'] = true; });
@@ -51263,6 +51266,28 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
   function autDocNetworks() {
     var m = {}; autDocRows().forEach(function(r){ m[r._chain || 'Arc_Mainnet'] = true; });
     var l = Object.keys(m); return l.length ? l : ['Arc_Mainnet'];
+  }
+  // Totals grouped by token → { USDC: 150, EURC: 50 }.
+  function autDocTokenTotals() {
+    var m = {}; autDocRows().forEach(function(r){ var k = r._token || 'USDC'; m[k] = (m[k]||0) + (Number(r._amount)||0); });
+    return m;
+  }
+  // Totals grouped by network → { Arc_Mainnet: 150, Base: 50 }.
+  function autDocNetworkTotals() {
+    var m = {}; autDocRows().forEach(function(r){ var k = r._chain || 'Arc_Mainnet'; m[k] = (m[k]||0) + (Number(r._amount)||0); });
+    return m;
+  }
+  function autDocTokenTotalsHtml() {
+    var t = autDocTokenTotals();
+    return Object.keys(t).map(function(k){ return R.row('· '+k, t[k].toLocaleString('en-US',{maximumFractionDigits:2}), 'green'); }).join('');
+  }
+  function autDocNetworkTotalsHtml() {
+    var t = autDocNetworkTotals();
+    return Object.keys(t).map(function(k){ return R.row('· '+k.replace(/_/g,' '), t[k].toLocaleString('en-US',{maximumFractionDigits:2}), 'purple'); }).join('');
+  }
+  // Combined "totals by token + network" section (no single-network assumption).
+  function autDocTotalsSection() {
+    return R.sep() + R.section('Totals by token') + autDocTokenTotalsHtml() + R.sep() + R.section('Totals by network') + autDocNetworkTotalsHtml();
   }
   // Duplicate address detection — returns the indices of duplicated rows.
   function autDocDuplicateIdx() {
@@ -51274,7 +51299,24 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
     });
     return dups;
   }
-  function autDocInvalidCount() { return ((autDocSummary().errors) || []).length; }
+  function autDocInvalidCount() { return ((autDocSummary().errors) || []).filter(function(e){ return !/duplicate/i.test(e); }).length; }
+  // Remove duplicate rows (keep the first occurrence) and refresh the summary.
+  function autDocRemoveDuplicates() {
+    if (!autDocData) return 0;
+    var seen = {}, kept = [], removed = 0;
+    autDocData.rows.forEach(function(r){
+      var a = String(r.address || '').toLowerCase();
+      if (seen[a]) { removed++; return; }
+      seen[a] = true; kept.push(r);
+    });
+    autDocData.rows = kept;
+    var s = autDocData.summary || (autDocData.summary = {});
+    s.totalAmount = kept.reduce(function(x,r){ return x + (Number(r._amount)||0); }, 0);
+    s.totalPayments = kept.length;
+    s.errors = (s.errors || []).filter(function(e){ return !/duplicate/i.test(e); });
+    return removed;
+  }
+  function _autDocHash(s) { var h = 0; for (var i = 0; i < s.length; i++) { h = (h * 31 + s.charCodeAt(i)) >>> 0; } return h.toString(36); }
 
   function autDocRecipientsHtml() {
     var dupSet = {}; autDocDuplicateIdx().forEach(function(i){ dupSet[i] = true; });
@@ -51303,13 +51345,18 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
   function autDocBack() { autDocFlow = null; autDocBusy = false; if (autDocData) autRenderDocSummary(autDocData); }
 
   // Schedule every row (one-time or recurring) via the existing ScheduleEngine.
+  // Idempotent: a deterministic id per (address|freq|token|amount) prevents
+  // creating duplicate schedules when the user retries after a partial failure.
   function autDocScheduleAll(freq, nextRunIso, maxEx) {
-    if (typeof ScheduleEngine === 'undefined') return { ok:false, created:0, errors:['ScheduleEngine unavailable'] };
-    var created = 0, errors = [];
+    if (typeof ScheduleEngine === 'undefined') return { ok:false, created:0, failed:0, skipped:0, errors:['ScheduleEngine unavailable'] };
+    var created = 0, failed = 0, skipped = 0, errors = [];
     autDocRows().forEach(function(r){
       try {
         var isXc = r._chain && r._chain !== 'Arc_Mainnet';
+        var id = 'SCH_DOC_' + _autDocHash(String(r.address).toLowerCase() + '|' + freq + '|' + (r._token||'USDC') + '|' + Number(r._amount));
+        if (typeof ScheduleEngine.getById === 'function' && ScheduleEngine.getById(id)) { skipped++; return; }
         ScheduleEngine.create({
+          id: id,
           type: isXc ? 'crosschain' : 'payment',
           name: (r.note || 'Doc Payment') + ' to ' + String(r.address).slice(0,6) + '…',
           token: r._token, amount: r._amount, total: r._amount,
@@ -51321,52 +51368,92 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
           agentExecution: true, walletAddress: (typeof walletAddress !== 'undefined' ? walletAddress : '')
         });
         created++;
-      } catch(e){ errors.push(String(r.address).slice(0,8) + ': ' + (e.message || 'error')); }
+      } catch(e){ failed++; errors.push(String(r.address).slice(0,8) + ': ' + (e.message || 'error')); }
     });
     try { if (typeof renderSchedules === 'function') renderSchedules(); } catch(e){}
     try { if (typeof AgentScheduleExecutor !== 'undefined') AgentScheduleExecutor.start(); } catch(e){}
-    return { ok: created > 0, created: created, errors: errors };
+    return { ok: created > 0, created: created, failed: failed, skipped: skipped, errors: errors };
   }
 
   // Dispatch every row through the Circle AI Smart Wallet (immediate).
+  // submitIntent is SYNCHRONOUS and returns an intent id (or null when rejected,
+  // e.g. emergency stop). We count "requested" (submitted for async validation)
+  // and "rejected" separately — never report a request as a completed payment.
   function autDocDispatchAll() {
-    if (typeof AIWallet === 'undefined' || !AIWallet.submitIntent) return { ok:false, dispatched:0, error:'Circle AI Smart Wallet unavailable' };
-    var dispatched = 0;
+    if (typeof AIWallet === 'undefined' || !AIWallet.submitIntent) return { ok:false, requested:0, rejected:0, error:'Circle AI Smart Wallet unavailable' };
+    var requested = 0, rejected = 0, ids = [];
     autDocRows().forEach(function(r){
+      var a = String(r.address || '').toLowerCase();
+      if (_autDocDispatched[a]) { rejected++; return; }
       try {
-        AIWallet.submitIntent({ op:'payment', name:(r.note||'Doc Payment'), amount:r._amount, token:r._token, to:r.address, network:r._chain||'Arc_Mainnet', freq:'once', source:'autonoma_doc' });
-        dispatched++;
-      } catch(e){}
+        var id = AIWallet.submitIntent({ op:'payment', name:(r.note||'Doc Payment'), amount:r._amount, token:r._token, to:r.address, network:r._chain||'Arc_Mainnet', freq:'once', source:'autonoma_doc' });
+        if (id) { requested++; ids.push(id); _autDocDispatched[a] = true; }
+        else rejected++;
+      } catch(e){ rejected++; }
     });
     try { if (AIWallet.renderExecutions) AIWallet.renderExecutions(); } catch(e){}
-    return { ok: dispatched > 0, dispatched: dispatched };
+    return { ok: requested > 0, requested: requested, rejected: rejected, ids: ids };
   }
 
   // ── Execute Now ──
   function autDocFlowExecute() {
     autDocFlow = { mode:'execute', step:'review' };
+    var dupCount = autDocDuplicateIdx().length;
+    var invCount = autDocInvalidCount();
+    var blocked = dupCount > 0;
+    var warnHtml = autDocWarningsHtml();
+    var blockHtml = '';
+    if (blocked) {
+      blockHtml = R.sep() + R.section('Action required') +
+        '<div style="font-size:8.5px;color:var(--yellow);line-height:1.7">' +
+        '<div><i class="ti ti-alert-triangle"></i> '+dupCount+' duplicate address(es) — remove them before executing (prevents double-paying).</div>' +
+        (invCount ? '<div><i class="ti ti-alert-circle"></i> '+invCount+' invalid row(s) already excluded from this batch.</div>' : '') +
+        '</div>';
+    }
+    var netRows = Object.keys(autDocNetworkTotals()).map(function(k){
+      return R.row('· '+k.replace(/_/g,' '), autDocNetworkTotals()[k].toLocaleString('en-US',{maximumFractionDigits:2}), 'purple');
+    }).join('');
+    var actionsHtml;
+    if (blocked) {
+      actionsHtml = R.actions(
+        {icon:'filter',label:'Remove Duplicates',cls:'primary',action:'autDocFlowExecuteRemoveDups()'},
+        {icon:'x',label:'Cancel',cls:'danger',action:'autDocBack()'}
+      );
+    } else {
+      actionsHtml = R.actions(
+        {icon:'check',label:'Confirm and Execute',cls:'confirm',action:'autDocFlowExecuteDo()'},
+        {icon:'x',label:'Cancel',cls:'danger',action:'autDocBack()'}
+      );
+    }
     autUI('ai',
       R.intro('Review the batch before executing <strong>now</strong>:') +
       R.card(R.head('bolt','Execute Now — Review',{text:autDocCount()+' payments',cls:'live'}),
         R.row('Payments', autDocCount(), 'green') +
         R.row('Total', autDocTotal().toLocaleString('en-US',{maximumFractionDigits:2}) + ' ' + autDocTokens().join('/'), 'green') +
-        R.row('Network', R.chainPill(autDocNetworks()[0].replace(/_/g,' '),'#ff0202'),'') +
-        R.sep() + R.section('Recipients') + '<div style="max-height:220px;overflow-y:auto">' + autDocRecipientsHtml() + '</div>' +
-        autDocWarningsHtml(),
-        R.actions(
-          {icon:'check',label:'Confirm and Execute',cls:'confirm',action:'autDocFlowExecuteDo()'},
-          {icon:'x',label:'Cancel',cls:'danger',action:'autDocBack()'}
-        )
+        R.sep() + R.section('Totals by token') + autDocTokenTotalsHtml() +
+        R.sep() + R.section('Totals by network') + netRows +
+        R.sep() + R.section('Recipients') + '<div style="max-height:180px;overflow-y:auto">' + autDocRecipientsHtml() + '</div>' +
+        warnHtml + blockHtml,
+        actionsHtml
       )
     );
   }
+  window.autDocFlowExecuteRemoveDups = function() {
+    var removed = autDocRemoveDuplicates();
+    autDocFlowExecute();
+    autUI('ai', R.intro('Removed '+removed+' duplicate row(s). Totals recalculated below — review and confirm.'));
+  };
   window.autDocFlowExecuteDo = function() {
-    if (autDocBusy) return; autDocBusy = true;
+    if (autDocBusy) return;
+    // Final guard: never execute while duplicates remain.
+    if (autDocDuplicateIdx().length > 0) { autDocFlowExecute(); autUI('ai', R.intro('Duplicate addresses remain — remove them before executing.')); return; }
+    autDocBusy = true;
     var res = autDocDispatchAll();
     autUI('ai',
-      R.intro(res.ok ? 'Payments dispatched to the Circle AI Smart Wallet.' : 'Dispatch failed.') +
-      R.card(R.head(res.ok?'bolt':'alert-triangle', res.ok?'Dispatched':'Dispatch Failed', {text: res.ok?'In Progress':'Error', cls: res.ok?'live':'pending'}),
-        R.row('Dispatched', res.dispatched + ' / ' + autDocCount(), res.ok?'green':'red') +
+      R.intro(res.ok ? 'Payments submitted to the Circle AI Smart Wallet for validation.' : 'Nothing was submitted.') +
+      R.card(R.head(res.ok?'bolt':'alert-triangle', res.ok?'Requested':'Not Submitted', {text: res.ok?'Requested':'Error', cls: res.ok?'live':'pending'}),
+        R.row('Requested', res.requested, res.ok?'green':'') +
+        R.row('Rejected', res.rejected, res.rejected?'yellow':'') +
         R.row('Total', autDocTotal().toLocaleString('en-US',{maximumFractionDigits:2}), 'green') +
         (res.error ? R.row('Error', esc(res.error), 'red') : ''),
         R.actions({icon:'building-bank',label:'Open AI Smart Wallet',cls:'primary',action:"showPage('aiwallet')"})
@@ -51392,7 +51479,7 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
       R.intro('When should I schedule these <strong>'+autDocCount()+'</strong> payments?') +
       R.card(R.head('calendar-event','Schedule Batch',{text:autDocCount()+' payments',cls:'live'}),
         R.row('Total', autDocTotal().toLocaleString('en-US',{maximumFractionDigits:2}) + ' ' + autDocTokens().join('/'), 'green') +
-        R.row('Network', R.chainPill(autDocNetworks()[0].replace(/_/g,' '),'#ff0202'),''),
+        autDocTotalsSection(),
         R.actions.apply(null, btns.concat([{icon:'arrow-left',label:'Back',cls:'',action:'autDocBack()'}]))
       )
     );
@@ -51433,7 +51520,7 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
       R.card(R.head('calendar-event','Schedule Summary',{text:'One-time',cls:'live'}),
         R.row('Payments', autDocCount(), 'green') +
         R.row('Total', autDocTotal().toLocaleString('en-US',{maximumFractionDigits:2}) + ' ' + autDocTokens().join('/'), 'green') +
-        R.row('Network', R.chainPill(autDocNetworks()[0].replace(/_/g,' '),'#ff0202'),'') +
+        autDocTotalsSection() +
         R.row('Scheduled for', new Date(at).toLocaleString('en-US',{dateStyle:'medium',timeStyle:'short'}), 'blue') +
         autDocWarningsHtml(),
         R.actions(
@@ -51450,7 +51537,9 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
     autUI('ai',
       R.intro(res.ok ? 'Payments scheduled.' : 'Scheduling failed.') +
       R.card(R.head(res.ok?'check':'alert-triangle', res.ok?'Scheduled':'Scheduling Failed', {text: res.ok?'Complete':'Error', cls: res.ok?'live':'pending'}),
-        R.row('Scheduled', res.created + ' / ' + autDocCount(), res.ok?'green':'red') +
+        R.row('Created', res.created, 'green') +
+        R.row('Failed', res.failed, res.failed?'red':'') +
+        R.row('Skipped', res.skipped, res.skipped?'yellow':'') +
         R.row('For', new Date(at).toLocaleString('en-US',{dateStyle:'medium',timeStyle:'short'}), 'blue') +
         (res.errors.length ? R.row('Errors', esc(res.errors.slice(0,3).join('; ')), 'red') : ''),
         R.actions({icon:'external-link',label:'View Schedules',cls:'primary',action:"showPage('schedule')"})
@@ -51521,7 +51610,7 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
       R.card(R.head('repeat','Recurring Summary',{text:freq,cls:'live'}),
         R.row('Payments', autDocCount(), 'green') +
         R.row('Total', autDocTotal().toLocaleString('en-US',{maximumFractionDigits:2}) + ' ' + autDocTokens().join('/'), 'green') +
-        R.row('Network', R.chainPill(autDocNetworks()[0].replace(/_/g,' '),'#ff0202'),'') +
+        autDocTotalsSection() +
         R.row('Frequency', freq, 'purple') +
         R.row('First run', new Date(firstIso).toLocaleString('en-US',{dateStyle:'medium',timeStyle:'short'}), 'blue') +
         R.row('Repetitions', maxEx === 0 ? 'Unlimited' : String(maxEx), '') +
@@ -51542,7 +51631,9 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
     autUI('ai',
       R.intro(res.ok ? 'Recurring schedule created.' : 'Scheduling failed.') +
       R.card(R.head(res.ok?'check':'alert-triangle', res.ok?'Scheduled':'Scheduling Failed', {text: res.ok?'Recurring':'Error', cls: res.ok?'live':'pending'}),
-        R.row('Scheduled', res.created + ' / ' + autDocCount(), res.ok?'green':'red') +
+        R.row('Created', res.created, 'green') +
+        R.row('Failed', res.failed, res.failed?'red':'') +
+        R.row('Skipped', res.skipped, res.skipped?'yellow':'') +
         R.row('Frequency', freq, 'purple') +
         (res.errors.length ? R.row('Errors', esc(res.errors.slice(0,3).join('; ')), 'red') : ''),
         R.actions({icon:'external-link',label:'View Schedules',cls:'primary',action:"showPage('schedule')"})
@@ -51559,7 +51650,7 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
       R.card(R.head('workflow','Payroll Summary',{text:autDocCount()+' recipients',cls:'live'}),
         R.row('Recipients', autDocCount(), 'green') +
         R.row('Total', autDocTotal().toLocaleString('en-US',{maximumFractionDigits:2}) + ' ' + autDocTokens().join('/'), 'green') +
-        R.row('Network', R.chainPill(autDocNetworks()[0].replace(/_/g,' '),'#ff0202'),'') +
+        autDocTotalsSection() +
         R.sep() + R.section('Recipients') + '<div style="max-height:220px;overflow-y:auto">' + autDocRecipientsHtml() + '</div>' +
         autDocWarningsHtml() +
         R.sep() + R.section('How do you want to pay?'),
