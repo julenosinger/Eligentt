@@ -229,27 +229,39 @@ function loadDateHelpers() {
   const start = html.indexOf('function autDocPad(');
   const end = html.indexOf('function autDocRecipientsHtml(', start);
   const block = html.slice(start, end);
-  const fn = new Function(block + '\nreturn { pad: autDocPad, fmt: autDocFormatDT, parse: autDocParseDT };');
+  const fn = new Function(block + '\nreturn { pad: autDocPad, fmt: autDocFormatDT, parse: autDocParseDT, isoToDisplay: autDocIsoToDisplay };');
   return fn();
 }
 
-describe('Schedule date/time — MM/DD/YYYY HH:MM format', () => {
-  it('uses text inputs (not native datetime-local) for custom + first-run', () => {
+describe('Schedule date/time — reuses the EnglishDatePicker (MM/DD/YYYY HH:mm)', () => {
+  it('custom date uses the shared eldp picker (calendar + time dropdown), not a text field', () => {
     const fn = html.slice(html.indexOf('function autDocFlowSchedule()'), html.indexOf('window.autDocExecute = function'));
-    expect(fn).toContain('placeholder="MM/DD/YYYY HH:MM"');
     expect(fn).toContain('id="autdoc-custom-dt"');
-    expect(fn).toContain('id="autdoc-rec-first"');
+    expect(fn).toContain('data-eldp="datetime"');
+    expect(fn).toContain('readonly');
+    expect(fn).toContain('placeholder="MM/DD/YYYY HH:mm"');
     expect(fn).not.toContain('type="datetime-local"');
   });
 
-  it('defines visual format + parser helpers', () => {
-    expect(html).toContain('function autDocFormatDT(');
-    expect(html).toContain('function autDocParseDT(');
+  it('refreshes the shared picker after rendering the injected input', () => {
+    const fn = html.slice(html.indexOf('window.autDocFlowSchedulePick = function'), html.indexOf('window.autDocFlowScheduleCustomConfirm'));
+    expect(fn).toContain('EnglishDatePicker.refresh');
   });
 
-  it('preserves the custom value across Back/Continue', () => {
+  it('converts the picked wall-time to UTC ISO via parseDateTimeAsUTC (no manual typing)', () => {
+    const fn = html.slice(html.indexOf('window.autDocFlowScheduleCustomConfirm'), html.indexOf('function autDocFlowScheduleConfirm'));
+    expect(fn).toContain('parseDateTimeAsUTC(iso)');
+    expect(fn).toContain('is in the past');
+    expect(fn).not.toContain('autDocParseDT(');
+  });
+
+  it('defines the ISO→display helper (wall-time, no timezone shift)', () => {
+    expect(html).toContain('function autDocIsoToDisplay(');
+  });
+
+  it('preserves the custom ISO value across Back/Continue', () => {
     const fn = html.slice(html.indexOf('function autDocFlowSchedule()'), html.indexOf('function autDocFlowScheduleConfirm'));
-    expect(fn).toContain('customVal:(autDocFlow && autDocFlow.customVal)');
+    expect(fn).toContain('customIso:(autDocFlow && autDocFlow.customIso)');
   });
 
   it('preserves the recurring first-run value across Back/Continue', () => {
@@ -258,12 +270,18 @@ describe('Schedule date/time — MM/DD/YYYY HH:MM format', () => {
   });
 });
 
-describe('autDocFormatDT / autDocParseDT — date logic', () => {
+describe('autDocFormatDT / autDocParseDT / autDocIsoToDisplay — date logic', () => {
   const H = loadDateHelpers();
 
   it('formats a date as MM/DD/YYYY HH:MM (24h)', () => {
     expect(H.fmt(new Date(2026, 9, 20, 14, 30))).toBe('10/20/2026 14:30');
     expect(H.fmt(new Date(2026, 0, 5, 9, 5))).toBe('01/05/2026 09:05');
+  });
+
+  it('reformats an eldp ISO to MM/DD/YYYY HH:mm (no timezone shift)', () => {
+    expect(H.isoToDisplay('2026-10-20T14:30')).toBe('10/20/2026 14:30');
+    expect(H.isoToDisplay('2026-01-05T09:05')).toBe('01/05/2026 09:05');
+    expect(H.isoToDisplay('')).toBe('');
   });
 
   it('parses MM/DD/YYYY HH:MM and round-trips', () => {

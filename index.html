@@ -51339,6 +51339,14 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
     if (d.getFullYear() !== yy || d.getMonth() !== mo-1 || d.getDate() !== dd) return null;
     return d;
   }
+  // Reformat an EnglishDatePicker ISO "YYYY-MM-DDTHH:mm" → "MM/DD/YYYY HH:mm"
+  // (pure string reformat of the wall-time the user picked — no timezone shift).
+  function autDocIsoToDisplay(iso) {
+    if (!iso) return '';
+    var m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(String(iso));
+    if (!m) return String(iso);
+    return m[2] + '/' + m[3] + '/' + m[1] + ' ' + m[4] + ':' + m[5];
+  }
 
   function autDocRecipientsHtml() {
     var dupSet = {}; autDocDuplicateIdx().forEach(function(i){ dupSet[i] = true; });
@@ -51486,7 +51494,7 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
 
   // ── Schedule ──
   function autDocFlowSchedule() {
-    autDocFlow = { mode:'schedule', step:'options', customVal:(autDocFlow && autDocFlow.customVal) || '' };
+    autDocFlow = { mode:'schedule', step:'options', customIso:(autDocFlow && autDocFlow.customIso) || '' };
     var opts = [
       { key:'now', label:'Execute Now', icon:'bolt' },
       { key:'m30', label:'In 30 minutes', icon:'clock' },
@@ -51510,42 +51518,47 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
     if (!autDocData || autDocBusy) return;
     var offsets = { now:60000, m30:1800000, h1:3600000, d1:86400000 };
     if (key === 'custom') {
-      var prevCustom = (autDocFlow && autDocFlow.customVal) || '';
-      autDocFlow = { mode:'schedule', step:'custom', customVal: prevCustom };
+      var prevIso = (autDocFlow && autDocFlow.customIso) || '';
+      autDocFlow = { mode:'schedule', step:'custom', customIso: prevIso };
       autUI('ai',
         R.intro('Choose a future date and time:') +
         R.card(R.head('calendar-time','Custom Date and Time'),
-          '<div style="font-size:8px;color:var(--muted2);margin-bottom:3px">Format: MM/DD/YYYY HH:MM (24-hour)</div>' +
-          '<input type="text" id="autdoc-custom-dt" placeholder="MM/DD/YYYY HH:MM" value="'+esc(prevCustom)+'" inputmode="numeric" autocomplete="off" style="background:rgba(0,0,0,.25);border:1px solid var(--border);border-radius:6px;padding:7px 9px;font-size:10px;color:var(--text);width:100%">',
+          '<div style="font-size:8px;color:var(--muted2);margin-bottom:3px">Select date and time (24-hour, UTC — stored in UTC)</div>' +
+          '<input type="text" readonly id="autdoc-custom-dt" data-eldp="datetime" placeholder="MM/DD/YYYY HH:mm" value="'+esc(prevIso)+'" style="background:rgba(0,0,0,.25);border:1px solid var(--border);border-radius:6px;padding:7px 9px;font-size:10px;color:var(--text);width:100%;cursor:pointer;color-scheme:dark">',
           R.actions(
             {icon:'check',label:'Confirm Time',cls:'primary',action:'autDocFlowScheduleCustomConfirm()'},
             {icon:'arrow-left',label:'Back',cls:'',action:'autDocFlowSchedule()'}
           )
         )
       );
+      if (window.EnglishDatePicker && window.EnglishDatePicker.refresh) window.EnglishDatePicker.refresh();
       return;
     }
     var at = Date.now() + offsets[key];
-    autDocFlow = { mode:'schedule', step:'confirm', at:at, customVal:(autDocFlow && autDocFlow.customVal) || '' };
-    autDocFlowScheduleConfirm(at);
+    var display = autDocFormatDT(new Date(at));
+    autDocFlow = { mode:'schedule', step:'confirm', at:at, display:display, customIso:(autDocFlow && autDocFlow.customIso) || '' };
+    autDocFlowScheduleConfirm(at, display);
   };
   window.autDocFlowScheduleCustomConfirm = function() {
     var el = document.getElementById('autdoc-custom-dt');
-    var v = el ? el.value : '';
-    var d = autDocParseDT(v);
-    if (!d) { autUI('ai', R.intro('Invalid date — use the format MM/DD/YYYY HH:MM (24-hour).')); return; }
+    var iso = el ? (el.value || '') : '';
+    if (!iso) { autUI('ai', R.intro('Please select a future date and time.')); return; }
+    var d = (typeof parseDateTimeAsUTC === 'function') ? parseDateTimeAsUTC(iso) : new Date(iso);
+    if (!d || isNaN(d.getTime())) { autUI('ai', R.intro('Invalid date — select a date and time from the picker.')); return; }
     if (d.getTime() <= Date.now()) { autUI('ai', R.intro('That time is in the past — pick a future time.')); return; }
-    autDocFlow = { mode:'schedule', step:'confirm', at: d.getTime(), customVal: v };
-    autDocFlowScheduleConfirm(d.getTime());
+    var display = autDocIsoToDisplay(iso);
+    autDocFlow = { mode:'schedule', step:'confirm', at: d.getTime(), display: display, customIso: iso };
+    autDocFlowScheduleConfirm(d.getTime(), display);
   };
-  function autDocFlowScheduleConfirm(at) {
+  function autDocFlowScheduleConfirm(at, display) {
+    display = display || autDocFormatDT(new Date(at));
     autUI('ai',
       R.intro('Confirm the one-time schedule:') +
       R.card(R.head('calendar-event','Schedule Summary',{text:'One-time',cls:'live'}),
         R.row('Payments', autDocCount(), 'green') +
         R.row('Total', autDocTotal().toLocaleString('en-US',{maximumFractionDigits:2}) + ' ' + autDocTokens().join('/'), 'green') +
         autDocTotalsSection() +
-        R.row('Scheduled for', autDocFormatDT(new Date(at)), 'blue') +
+        R.row('Scheduled for', display, 'blue') +
         autDocWarningsHtml(),
         R.actions(
           {icon:'check',label:'Confirm and Schedule',cls:'confirm',action:'autDocFlowScheduleDo()'},
@@ -51557,6 +51570,7 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
   window.autDocFlowScheduleDo = function() {
     if (autDocBusy) return; autDocBusy = true;
     var at = (autDocFlow && autDocFlow.at) || (Date.now() + 60000);
+    var display = (autDocFlow && autDocFlow.display) || autDocFormatDT(new Date(at));
     var res = autDocScheduleAll('once', new Date(at).toISOString(), 1);
     autUI('ai',
       R.intro(res.ok ? 'Payments scheduled.' : 'Scheduling failed.') +
@@ -51564,7 +51578,7 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
         R.row('Created', res.created, 'green') +
         R.row('Failed', res.failed, res.failed?'red':'') +
         R.row('Skipped', res.skipped, res.skipped?'yellow':'') +
-        R.row('For', autDocFormatDT(new Date(at)), 'blue') +
+        R.row('For', display, 'blue') +
         (res.errors.length ? R.row('Errors', esc(res.errors.slice(0,3).join('; ')), 'red') : ''),
         R.actions({icon:'external-link',label:'View Schedules',cls:'primary',action:"showPage('schedule')"})
       )
