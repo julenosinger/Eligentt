@@ -7526,7 +7526,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
               </div>
             </div>
             <div><div class="swap-label">Schedule Name</div><input id="sch-name" class="cinput" placeholder="e.g. Monthly Payroll"/></div>
-            <div><div class="swap-label">Asset / Token</div>
+            <div><div class="swap-label" id="sch-token-label">Asset / Token</div>
               <select id="sch-token" class="cinput" style="cursor:pointer"><option>USDC</option><option>EURC</option><option>cirBTC</option><option>ETH</option></select>
             </div>
             <div><div class="swap-label">Amount</div><input id="sch-amount" class="cinput" type="number" placeholder="0.00" step="0.01" min="0"/></div>
@@ -7550,6 +7550,15 @@ select.cinput option { background: #161a24; color: #dde2f0; }
             <div id="sch-to-network-wrap" style="display:none"><div class="swap-label">To Network</div><select id="sch-to-network" class="cinput" style="color-scheme:dark"><option value="Base">Base</option><option value="Arbitrum">Arbitrum</option><option value="Optimism">Optimism</option><option value="Arc_Mainnet">Arc Mainnet</option><option value="Ethereum">Ethereum</option><option value="Polygon">Polygon</option></select></div>
             <!-- Swap fields -->
             <div id="sch-swap-to-token-wrap" style="display:none"><div class="swap-label">To Token</div><select id="sch-swap-to-token" class="cinput" style="color-scheme:dark"><option>USDC</option><option>EURC</option><option>cirBTC</option><option>ETH</option></select></div>
+            <!-- Swap quote (LI.FI) preview -->
+            <div id="sch-swap-quote-wrap" style="display:none;grid-column:1/-1;background:rgba(0,0,0,.15);border:1px solid var(--border);border-radius:6px;padding:10px">
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+                <span class="swap-label" style="margin:0">LI.FI Quote</span>
+                <button class="btn" style="font-size:8.5px;padding:3px 10px;color:var(--teal);border-color:rgba(45,212,191,.3)" onclick="schGetSwapQuote()"><i class="ti ti-refresh"></i>Get Quote</button>
+              </div>
+              <div id="sch-swap-quote" style="font-size:9px;color:var(--muted2)">Configure amount, tokens and networks, then fetch a live LI.FI quote. The quote is an estimate and will change before execution — a fresh quote is always obtained at execution time.</div>
+              <div style="font-size:8px;color:#7C89B8;margin-top:6px">Scheduled swaps execute <b>from Arc Mainnet</b> (Circle AI Smart Wallet) to the selected destination. Execution requires the app to be open — there is no background worker.</div>
+            </div>
             <!-- Payment / MultiSend / Link fields -->
             <div style="grid-column:1/-1" id="sch-recipients-wrap">
               <div class="swap-label" id="sch-address-label">Recipient Address</div>
@@ -31340,7 +31349,7 @@ const ScheduleEngine = (() => {
 
   function create(scheduleData) {
     const sched = Object.assign({
-      id: 'SCH' + Date.now(),
+      id: 'SCH' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8),
       type: 'payment', name: '', token: 'USDC', amount: 0, total: 0,
       network: 'Arc_Mainnet', fromNetwork: 'Arc_Mainnet', toNetwork: 'Base',
       swapToToken: undefined, recipients: [], address: '',
@@ -31531,9 +31540,18 @@ function schSelectType(type, btn){
   const isPayment = type === 'payment';
   const isLink = type === 'link_payment';
   const isCrosschain = type === 'crosschain';
-  document.getElementById('sch-from-network-wrap').style.display = isBridge ? '' : 'none';
-  document.getElementById('sch-to-network-wrap').style.display = isBridge ? '' : 'none';
+  document.getElementById('sch-from-network-wrap').style.display = (isBridge || isSwap) ? '' : 'none';
+  document.getElementById('sch-to-network-wrap').style.display = (isBridge || isSwap) ? '' : 'none';
   document.getElementById('sch-swap-to-token-wrap').style.display = isSwap ? '' : 'none';
+  var swapQuoteWrap = document.getElementById('sch-swap-quote-wrap');
+  if (swapQuoteWrap) swapQuoteWrap.style.display = isSwap ? '' : 'none';
+  // For scheduled swaps the source is always Arc Mainnet (the Circle AI Smart
+  // Wallet's blockchain) — lock the from-network and relabel the asset as "From Token".
+  var fromNetSel = document.getElementById('sch-from-network');
+  if (fromNetSel && isSwap) { fromNetSel.value = 'Arc_Mainnet'; fromNetSel.disabled = true; }
+  else if (fromNetSel) { fromNetSel.disabled = false; }
+  var tokenLabel = document.getElementById('sch-token-label');
+  if (tokenLabel) tokenLabel.textContent = isSwap ? 'From Token (on Arc Mainnet)' : 'Asset / Token';
   document.getElementById('sch-recipients-wrap').style.display = (isPayment || isLink || isMultiSend || isCrosschain) ? '' : 'none';
   document.getElementById('sch-csv-wrap').style.display = isMultiSend ? '' : 'none';
   var csvImport = document.getElementById('sch-csv-import-wrap');
@@ -31749,6 +31767,64 @@ function schRefreshAgentWarning(){
   warn.style.display = (agentOn && !ready) ? '' : 'none';
 }
 
+// ── Scheduled swap (LI.FI) quote preview ────────────────────
+var _schSwapQuote = null;
+
+async function schGetSwapQuote(){
+  var el = document.getElementById('sch-swap-quote');
+  if (!el) return;
+  var amount = parseFloat(document.getElementById('sch-amount')?.value) || 0;
+  var fromToken = document.getElementById('sch-token')?.value || 'USDC';
+  var toToken = document.getElementById('sch-swap-to-token')?.value || 'USDC';
+  var fromNet = document.getElementById('sch-from-network')?.value || 'Arc_Mainnet';
+  var toNet = document.getElementById('sch-to-network')?.value || 'Arc_Mainnet';
+
+  if (!(amount > 0)) { el.innerHTML = '<span style="color:var(--red)">Enter an amount first.</span>'; _schSwapQuote = null; return; }
+
+  var chainMap = { 'Arc_Mainnet':5042, 'Arc Mainnet':5042, 'Arc':5042, 'Ethereum':1, 'Base':8453, 'Arbitrum':42161, 'Optimism':10, 'Polygon':137 };
+  var fromChainId = chainMap[fromNet]; var toChainId = chainMap[toNet];
+  if (!fromChainId || !toChainId) { el.innerHTML = '<span style="color:var(--red)">Unknown network.</span>'; _schSwapQuote = null; return; }
+  if (fromChainId !== 5042) { el.innerHTML = '<span style="color:var(--yellow)">Scheduled swaps execute from Arc Mainnet (Circle AI Smart Wallet).</span>'; _schSwapQuote = null; return; }
+
+  el.innerHTML = '<span style="color:var(--muted)">Fetching live LI.FI quote…</span>';
+
+  var fromDec = (fromToken === 'cirBTC' || fromToken === 'ETH') ? 8 : 6;
+  var toDec = (toToken === 'cirBTC' || toToken === 'ETH') ? 8 : 6;
+  var amtRaw = (typeof ethers !== 'undefined') ? ethers.parseUnits(String(amount), fromDec) : BigInt(Math.round(amount * Math.pow(10, fromDec)));
+  var slippageBps = 100;
+  var addr = (typeof walletAddress !== 'undefined' && walletAddress) ? walletAddress : null;
+
+  if (typeof LiFiAdapter === 'undefined') { el.innerHTML = '<span style="color:var(--red)">LI.FI adapter unavailable.</span>'; _schSwapQuote = null; return; }
+
+  var crossChain = fromChainId !== toChainId;
+  var tool = null, estOut = null, feeUSD = null, gasUSD = null, routeCount = 0, feeBps = null;
+
+  if (!crossChain) {
+    var q = await LiFiAdapter.getQuote({ tokenIn: fromToken, tokenOut: toToken, amountInRaw: amtRaw, fromChainId: fromChainId, toChainId: toChainId, slippageBps: slippageBps, fromAddress: addr, toAddress: addr });
+    if (!q || !q.ok) { el.innerHTML = '<span style="color:var(--red)">' + esc((q && q.error) || 'No LI.FI route') + '</span>'; _schSwapQuote = null; return; }
+    tool = q.tool || 'LI.FI';
+    estOut = q.expectedOutRaw ? Number(q.expectedOutRaw) / Math.pow(10, toDec) : null;
+    feeBps = q.feeBps != null ? q.feeBps : null;
+    _schSwapQuote = { ok:true, fromToken:fromToken, toToken:toToken, fromChainId:fromChainId, toChainId:toChainId, amount:amount, amountInRaw:amtRaw.toString(), slippageBps:slippageBps, expectedOutRaw: q.expectedOutRaw ? q.expectedOutRaw.toString() : null, expectedOut: estOut, tool:tool, feeBps:feeBps, crossChain:false, quotedAt:Date.now() };
+  } else {
+    var r = await LiFiAdapter.getRoutes({ tokenIn: fromToken, tokenOut: toToken, amountInRaw: amtRaw, fromChainId: fromChainId, toChainId: toChainId, slippageBps: slippageBps, fromAddress: addr, toAddress: addr });
+    if (!r || !r.ok || !r.routes || !r.routes.length) { el.innerHTML = '<span style="color:var(--red)">' + esc((r && r.error) || 'No cross-chain LI.FI route') + '</span>'; _schSwapQuote = null; return; }
+    var best = r.routes[0];
+    tool = best.label || 'LI.FI';
+    estOut = best.toAmountRaw ? Number(best.toAmountRaw) / Math.pow(10, toDec) : null;
+    feeUSD = best.feeCostUSD; gasUSD = best.gasCostUSD;
+    routeCount = r.count || r.routes.length;
+    _schSwapQuote = { ok:true, fromToken:fromToken, toToken:toToken, fromChainId:fromChainId, toChainId:toChainId, amount:amount, amountInRaw:amtRaw.toString(), slippageBps:slippageBps, expectedOutRaw: best.toAmountRaw ? best.toAmountRaw.toString() : null, expectedOut: estOut, tool:tool, feeBps:null, feeUSD:feeUSD, gasUSD:gasUSD, crossChain:true, routeCount:routeCount, quotedAt:Date.now() };
+  }
+
+  var html = '<span style="color:var(--green)">✓ ' + esc(tool) + (crossChain ? ' (cross-chain)' : '') + '</span> · ' + amount + ' ' + esc(fromToken) + ' → ~' + (estOut != null ? estOut.toFixed(6) : '?') + ' ' + esc(toToken);
+  if (feeUSD != null) html += '<br>Fees: ~$' + Number(feeUSD).toFixed(2) + (gasUSD != null ? ' + gas $' + Number(gasUSD).toFixed(2) : '');
+  if (feeBps != null) html += '<br>Fee: ' + (feeBps/100).toFixed(2) + '%';
+  if (routeCount > 1) html += '<br>' + routeCount + ' routes available — best shown.';
+  html += '<br><span style="color:var(--yellow)">Estimate only — the final rate is re-quoted at execution time and may change.</span>';
+  el.innerHTML = html;
+}
+
 function scheduleSubmit(){
   const name = document.getElementById('sch-name')?.value.trim() || 'Schedule ' + (ScheduleEngine.getAll().length+1);
   const token = document.getElementById('sch-token')?.value || 'USDC';
@@ -31798,6 +31874,13 @@ function scheduleSubmit(){
     toast('Provide an amount','error'); return;
   }
 
+  // Swap: require a real LI.FI quote before confirmation — never schedule blind.
+  var swapQuote = null;
+  if (type === 'swap') {
+    if (!_schSwapQuote || !_schSwapQuote.ok) { toast('Fetch a LI.FI quote before scheduling a swap','error'); return; }
+    swapQuote = _schSwapQuote;
+  }
+
   const total = recipients.length ? recipients.reduce((s,r) => s + r.amount, 0) : amount;
   const fromNetwork = document.getElementById('sch-from-network')?.value || 'Arc_Mainnet';
   const toNetwork = document.getElementById('sch-to-network')?.value || 'Base';
@@ -31807,9 +31890,12 @@ function scheduleSubmit(){
 
   const sched = ScheduleEngine.create({
     type, name, token, amount, total,
-    network: type === 'bridge' || type === 'crosschain' ? (fromNetwork + ' → ' + toNetwork) : 'Arc_Mainnet',
+    network: (type === 'bridge' || type === 'crosschain' || type === 'swap') ? (fromNetwork + ' → ' + toNetwork) : 'Arc_Mainnet',
     fromNetwork, toNetwork,
+    fromToken: type === 'swap' ? token : undefined,
     swapToToken: type === 'swap' ? swapToToken : undefined,
+    slippageBps: type === 'swap' ? (swapQuote ? swapQuote.slippageBps : 100) : undefined,
+    swapQuote: type === 'swap' && swapQuote ? { tool: swapQuote.tool, expectedOut: swapQuote.expectedOut, expectedOutRaw: swapQuote.expectedOutRaw, toToken: swapQuote.toToken, crossChain: swapQuote.crossChain, feeUSD: swapQuote.feeUSD || null, quotedAt: swapQuote.quotedAt } : undefined,
     recipients, address,
     freq, maxEx, gas,
     nextRun: nextRunIso,
@@ -32309,7 +32395,10 @@ function renderSchedules(){
     var executorBadge = isEvm
       ? '<span style="font-size:8px;margin-left:5px;color:#06F7E9" title="Manual execution via the connected EVM wallet">EVM · manual</span>'
       : (agentOn && s.status === 'Active' ? '<span style="font-size:8px;margin-left:5px;color:#a78bfa" title="Auto-executed by Circle AI Smart Wallet">AUTO</span>' : '');
-    var assetInfo = (s.amount || 0) > 0 ? (s.amount || 0).toFixed(2) + ' ' + s.token : (s.recipients && s.recipients.length ? s.recipients.length + ' rcpts' : '—');
+    var assetInfo = (s.type === 'swap')
+      ? ((s.amount || 0) > 0 ? (s.amount || 0).toFixed(2) + ' ' + (s.fromToken || s.token) + ' → ' + (s.swapToToken || '') : '—')
+      : ((s.amount || 0) > 0 ? (s.amount || 0).toFixed(2) + ' ' + s.token : (s.recipients && s.recipients.length ? s.recipients.length + ' rcpts' : '—'));
+    var xcPending = !!(s.crossChain && s.crossChain.status === 'pending');
 
     var historyHtml = '';
     var hist = (s.executionHistory || []).slice(0, 10);
@@ -32355,7 +32444,7 @@ function renderSchedules(){
       '<td style="font-size:9px;color:' + (isDue ? 'var(--yellow)' : 'var(--muted2)') + '">' + nextRun + '</td>' +
       '<td style="text-align:center">' + s.execCount + (s.maxEx > 0 ? ' / ' + s.maxEx : '') + '</td>' +
       '<td style="text-align:center">' + (s.execCount > 0 ? ((hist.filter(function(h){ return h.status === 'executed' || h.status === 'delegated'; }).length / Math.max(1, s.execCount) * 100).toFixed(0) + '%') : '—') + '</td>' +
-      '<td><span style="color:var(--' + sc + ')">' + s.status + '</span></td>' +
+      '<td><span style="color:var(--' + sc + ')">' + (xcPending ? 'Awaiting confirmation' : s.status) + '</span>' + (xcPending ? '<span style="font-size:8px;margin-left:4px;color:#a78bfa" title="Source swap confirmed; awaiting cross-chain destination confirmation">cross-chain</span>' : '') + '</td>' +
       '<td style="display:flex;gap:3px;align-items:center">' +
         (isEvm
           ? '<button class="btn primary" style="padding:2px 7px;font-size:8.5px;color:var(--teal)" onclick="scheduleRunEvm(\'' + s.id + '\')" title="Run with Wallet (connected EVM wallet signs)"><i class="ti ti-wallet"></i></button>'
@@ -51383,7 +51472,7 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
     autDocRows().forEach(function(r){
       try {
         var isXc = r._chain && r._chain !== 'Arc_Mainnet';
-        var id = 'SCH_DOC_' + _autDocHash(String(r.address).toLowerCase() + '|' + freq + '|' + (r._token||'USDC') + '|' + Number(r._amount));
+        var id = 'SCH_DOC_' + _autDocHash(String(r.address).toLowerCase() + '|' + (r._chain||'Arc_Mainnet') + '|' + freq + '|' + (r._token||'USDC') + '|' + Number(r._amount) + '|' + String(nextRunIso||''));
         if (typeof ScheduleEngine.getById === 'function' && ScheduleEngine.getById(id)) { skipped++; return; }
         ScheduleEngine.create({
           id: id,
@@ -54209,7 +54298,7 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
         _agentStateMsg(execId, 'FAILED', 'LI.FI execution error: ' + _lifiErrMsg);
         return { ok: false, error: _lifiErrMsg };
       }
-      return { ok: true, provider: 'lifi' };
+      return { ok: true, txHash: _lifiTxHash, provider: 'lifi' };
     }
 
     _log('[agent swap] plan built: ' + calldataPlan.steps.length + ' steps, est. output: ' + (calldataPlan.estimatedOutput || 'N/A'));
@@ -55413,8 +55502,150 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
     }
   }, 5000);
 
+  // ── Scheduled LI.FI swap (same-chain + cross-chain) ─────────────────────
+  // Executes a scheduled swap through the Circle AI Smart Wallet using a FRESH
+  // LI.FI quote (never a stored/expired one). The source is always Arc Mainnet
+  // (the Circle wallet's blockchain); the destination may be Arc (same-chain) or
+  // a LI.FI bridge destination (cross-chain). Returns
+  //   { ok, txHash, mintTxHash?, crossChainPending?, toChainId?, tool?, ... }.
+  function _schChainIdForNetwork(name){
+    if (NETWORK_CHAIN_MAP && NETWORK_CHAIN_MAP[name]) return NETWORK_CHAIN_MAP[name].chainId;
+    var m = { 'Arc Mainnet':5042, 'Arc':5042 };
+    return m[name] || null;
+  }
+  function _schTokenDecimals(sym){ return (sym === 'cirBTC' || sym === 'ETH') ? 8 : 6; }
+
+  async function _agentPollLifiStatus(txHash, toChainId, maxMs){
+    var start = Date.now();
+    while (Date.now() - start < maxMs) {
+      try {
+        if (typeof LiFiAdapter === 'undefined') return { status:'PENDING', mintTxHash:null };
+        var st = await LiFiAdapter.getStatus(txHash, { bridge: true, fromChainId: 5042, toChainId: toChainId });
+        if (st && st.ok && st.data) {
+          var d = st.data;
+          if (d.status === 'DONE') return { status:'DONE', mintTxHash: (d.receiving && d.receiving.txHash) || null };
+          if (d.status === 'FAILED' || d.status === 'NOT_FOUND' || d.status === 'INVALID') return { status: d.status, mintTxHash: null };
+        }
+      } catch(_e){}
+      await new Promise(function(r){ setTimeout(r, 15000); });
+    }
+    return { status:'PENDING', mintTxHash:null };
+  }
+
+  async function _agentExecuteScheduledSwap(sched, executionId){
+    var execId = 'exec_' + Date.now();
+    if (!executionId) executionId = 'sched_' + (sched.id || 'swap') + '_' + Date.now();
+
+    var fromNet = sched.fromNetwork || 'Arc_Mainnet';
+    var toNet = sched.toNetwork || 'Arc_Mainnet';
+    var fromToken = sched.fromToken || sched.token || 'USDC';
+    var toToken = sched.swapToToken || sched.toToken || 'EURC';
+    var amount = Number(sched.amount || sched.total || 0);
+    var slippageBps = Number(sched.slippageBps) || 100;
+
+    if (!(amount > 0)) return { ok:false, error:'Invalid swap amount' };
+
+    var fromChainId = _schChainIdForNetwork(fromNet);
+    var toChainId = _schChainIdForNetwork(toNet);
+    if (!fromChainId || !toChainId) return { ok:false, error:'Unknown network: ' + fromNet + ' → ' + toNet };
+
+    // Circle AI Smart Wallet executes on Arc Mainnet only (single Arc blockchain).
+    if (fromChainId !== 5042) {
+      return { ok:false, error:'Scheduled swaps execute from Arc Mainnet (Circle AI Smart Wallet). "' + fromNet + '" source is not supported for autonomous execution.' };
+    }
+
+    var gate = await _agentGateCheck('swap', amount, fromToken, { chainId: fromChainId }, executionId);
+    if (!gate.ok) { _agentGateBlock(execId, gate); return { ok:false, error: gate.userMessage || gate.reason }; }
+
+    var signer = await _agentGetSigner();
+    if (!signer) return { ok:false, error:'Agent signer unavailable' };
+    var provider = signer.provider;
+    var agentAddr = signer.address;
+
+    var fromDec = _schTokenDecimals(fromToken);
+    var toDec = _schTokenDecimals(toToken);
+    var amtRaw = (typeof ethers !== 'undefined') ? ethers.parseUnits(String(amount), fromDec) : BigInt(Math.round(amount * Math.pow(10, fromDec)));
+
+    var crossChain = fromChainId !== toChainId;
+
+    // Re-quote FRESH (never reuse a stored quote — quotes expire and drift).
+    var stepTo = null, stepData = null, stepValue = '0', expectedOutRaw = null, routeTool = null;
+    if (!crossChain) {
+      var q = null;
+      try { q = await LiFiAdapter.getQuote({ tokenIn: fromToken, tokenOut: toToken, amountInRaw: amtRaw, fromChainId: fromChainId, toChainId: toChainId, slippageBps: slippageBps, fromAddress: agentAddr, toAddress: agentAddr }); } catch(e){ q = null; }
+      if (!q || !q.ok || !q.calldata || !q.to) return { ok:false, error: (q && q.error) || ('No LI.FI route for ' + fromToken + ' → ' + toToken) };
+      var v1 = LiFiAdapter.validateRoute(q.route, { fromChainId: fromChainId, toChainId: toChainId, fromToken: (typeof getTokenAddressForChain === 'function') ? getTokenAddressForChain(fromChainId, fromToken) : null, toToken: (typeof getTokenAddressForChain === 'function') ? getTokenAddressForChain(toChainId, toToken) : null, amountRaw: (q.amountInRaw || '').toString(), sender: agentAddr });
+      if (!v1.ok) return { ok:false, error:'LI.FI route validation failed: ' + v1.reason };
+      stepTo = q.to; stepData = q.calldata; stepValue = q.value || '0'; expectedOutRaw = q.expectedOutRaw || null; routeTool = q.tool || 'LI.FI';
+    } else {
+      var routes = null;
+      try { routes = await LiFiAdapter.getRoutes({ tokenIn: fromToken, tokenOut: toToken, amountInRaw: amtRaw, fromChainId: fromChainId, toChainId: toChainId, slippageBps: slippageBps, fromAddress: agentAddr, toAddress: agentAddr }); } catch(e){ routes = null; }
+      if (!routes || !routes.ok || !routes.routes || !routes.routes.length) return { ok:false, error: (routes && routes.error) || ('No cross-chain LI.FI route for ' + fromToken + ' → ' + toToken) };
+      var best = routes.routes[0];
+      var firstStep = (best.stepsData && best.stepsData[0]) || null;
+      if (!firstStep) return { ok:false, error:'Cross-chain route has no steps' };
+      var stepRes = null;
+      try { stepRes = await LiFiAdapter.getStepTransaction(firstStep); } catch(e){ stepRes = null; }
+      if (!stepRes || !stepRes.ok || !stepRes.step || !stepRes.step.transactionRequest) return { ok:false, error: (stepRes && stepRes.error) || 'Could not resolve cross-chain step transaction' };
+      var routeStep = stepRes.step;
+      var v2 = LiFiAdapter.validateRoute(routeStep, { fromChainId: fromChainId, toChainId: toChainId, fromToken: (typeof getTokenAddressForChain === 'function') ? getTokenAddressForChain(fromChainId, fromToken) : null, toToken: (typeof getTokenAddressForChain === 'function') ? getTokenAddressForChain(toChainId, toToken) : null, amountRaw: amtRaw.toString(), sender: agentAddr, recipient: agentAddr });
+      if (!v2.ok) return { ok:false, error:'Cross-chain route validation failed: ' + v2.reason };
+      var tr = routeStep.transactionRequest;
+      stepTo = tr.to; stepData = tr.data; stepValue = tr.value != null ? String(tr.value) : '0';
+      try { expectedOutRaw = BigInt(String(best.toAmountRaw || 0)); } catch(e){ expectedOutRaw = null; }
+      routeTool = best.label || 'LI.FI';
+    }
+
+    _agentStateMsg(execId, 'PLANNING', 'LI.FI ' + (crossChain ? 'cross-chain' : '') + ' swap ' + amount + ' ' + fromToken + ' → ' + toToken);
+
+    var gasParams = await _agentGetGasParams();
+    var nonce = await _agentNextNonce(provider, agentAddr);
+    var valueHex = (stepValue && stepValue !== '0' && stepValue !== '0x0') ? ethers.toBeHex(BigInt(stepValue)) : '0x0';
+    var rawTx = {
+      type: 2, chainId: fromChainId,
+      to: stepTo, data: stepData, value: valueHex,
+      gasLimit: ethers.toBeHex(gasParams.gasLimit), nonce: nonce,
+      maxFeePerGas: ethers.toBeHex(gasParams.maxFeePerGas),
+      maxPriorityFeePerGas: ethers.toBeHex(gasParams.maxPriorityFeePerGas)
+    };
+    if (!_agentPreValidate(execId, 'swap', rawTx.maxFeePerGas, rawTx.gasLimit)) return { ok:false, error:'Pre-execution validation failed' };
+
+    var broadcastOpts = null;
+    if (typeof SecureSignerProvider !== 'undefined' && SecureSignerProvider.isCircleMode()) {
+      broadcastOpts = { operation:'swap', executionId: executionId, amount: amount, destination: stepTo, circle: { type:'lifi', contractAddress: stepTo, calldata: stepData, value: stepValue || null } };
+    }
+
+    _agentStateMsg(execId, 'BROADCASTING', 'LI.FI swap ' + amount + ' ' + fromToken + ' → ' + toToken);
+    var txHash = await _agentBroadcast(signer, provider, rawTx, broadcastOpts);
+    if (gate.claimKey) _agentGateClaimSubmit(gate.claimKey, txHash);
+
+    var rec = await _agentWaitReceipt(provider, txHash);
+    if (!rec || !rec.ok || !rec.receipt || rec.receipt.status !== 1) {
+      return { ok:false, error: (rec && rec.receipt && rec.receipt.status === 0) ? 'Swap reverted on-chain' : 'Swap transaction not confirmed' };
+    }
+
+    var mintTxHash = null;
+    if (crossChain) {
+      _agentStateMsg(execId, 'CONFIRMING', 'Awaiting cross-chain confirmation on ' + toNet + '…');
+      var fin = await _agentPollLifiStatus(txHash, toChainId, 180000);
+      if (fin && fin.status === 'DONE') {
+        mintTxHash = fin.mintTxHash || null;
+      } else if (fin && (fin.status === 'FAILED' || fin.status === 'NOT_FOUND' || fin.status === 'INVALID')) {
+        return { ok:false, error:'Cross-chain swap failed on destination (' + fin.status + ')' };
+      } else {
+        // Source confirmed; destination still pending. Report pending so the executor
+        // reconciles finality later without re-executing.
+        return { ok:true, txHash: txHash, mintTxHash: null, crossChainPending: true, toChainId: toChainId, tool: routeTool, fromToken: fromToken, toToken: toToken, amount: amount };
+      }
+    }
+
+    if (gate.claimKey) _agentGateClaimDone(gate.claimKey, 'confirmed', txHash);
+    return { ok:true, txHash: txHash, mintTxHash: mintTxHash, crossChainPending: false, tool: routeTool, fromToken: fromToken, toToken: toToken, amount: amount };
+  }
+
   // Expose agent execution functions globally for onclick handlers
   window._agentExecuteSwap = _agentExecuteSwap;
+  window._agentExecuteScheduledSwap = _agentExecuteScheduledSwap;
   window._agentExecuteBridge = _agentExecuteBridge;
   window._agentExecuteTurboBridge = _agentExecuteTurboBridge;
   window._agentExecuteLiquidity = _agentExecuteLiquidity;

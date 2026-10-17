@@ -272,6 +272,9 @@
     // AI Smart Wallet MultiSend (createdBy === 'aiwallet') is executed by the
     // existing BatchExecutionEngine (batch contract) — never by this executor.
     if (sched.type === 'multisend' && sched.createdBy === 'aiwallet') return false;
+    // A cross-chain swap whose source is confirmed but destination is still
+    // pending is reconciled by _reconcileCrossChain — NEVER re-executed here.
+    if (sched.crossChain && sched.crossChain.status === 'pending') return false;
     if (SUPPORTED_TYPES.indexOf(sched.type) === -1 && MANUAL_TYPES.indexOf(sched.type) === -1) return false;
     return new Date(sched.nextRun).getTime() <= Date.now();
   }
@@ -280,6 +283,36 @@
     var eng = _engine();
     if (!eng) return [];
     return eng.getAll().filter(isEligible);
+  }
+
+  // Finalize a cross-chain swap whose source tx is confirmed but whose destination
+  // is still pending. Polls LI.FI status; marks executed (advance) on DONE, failed
+  // on FAILED/NOT_FOUND/INVALID, and leaves the schedule pending otherwise.
+  async function _reconcileCrossChain(sched){
+    var xc = sched.crossChain;
+    if (!xc || xc.status !== 'pending' || !xc.srcTxHash) return;
+    if (typeof LiFiAdapter === 'undefined') return;
+    var eng = _engine();
+    if (!eng) return;
+    var st = null;
+    try {
+      st = await LiFiAdapter.getStatus(xc.srcTxHash, { bridge: true, fromChainId: xc.fromChainId || 5042, toChainId: xc.toChainId });
+    } catch(e){ st = null; }
+    if (!st || !st.ok || !st.data) return; // unknown — retry next tick
+    var d = st.data;
+    var fresh = eng.getById(sched.id);
+    if (!fresh) return;
+    if (d.status === 'DONE') {
+      var mint = (d.receiving && d.receiving.txHash) || null;
+      eng.update(sched.id, { crossChain: { status:'confirmed', srcTxHash: xc.srcTxHash, fromChainId: xc.fromChainId || 5042, toChainId: xc.toChainId, mintTxHash: mint, ts: Date.now() } });
+      _advanceSchedule(fresh, 'Cross-chain swap confirmed on destination' + (mint ? ' — mint tx ' + mint.slice(0,10) + '…' : ''), 'executed', xc.srcTxHash, { token: fresh.token || 'USDC', amount: fresh.amount || fresh.total, mintTxHash: mint });
+      _notify(fresh, 'executed', 'Schedule "' + fresh.name + '" — cross-chain swap confirmed on the destination chain', 'success');
+    } else if (d.status === 'FAILED' || d.status === 'NOT_FOUND' || d.status === 'INVALID') {
+      eng.update(sched.id, { crossChain: { status:'failed', srcTxHash: xc.srcTxHash, fromChainId: xc.fromChainId || 5042, toChainId: xc.toChainId, ts: Date.now() } });
+      _advanceSchedule(fresh, 'Cross-chain swap failed on destination (' + d.status + ')', 'failed', xc.srcTxHash, { token: fresh.token || 'USDC', amount: fresh.amount || fresh.total });
+      _notify(fresh, 'failed', 'Schedule "' + fresh.name + '" — cross-chain swap failed on the destination chain (' + d.status + ')', 'error');
+    }
+    // PENDING: leave as-is, retry next tick.
   }
 
   function hasScheduledAuth(){
@@ -1285,7 +1318,13 @@
     var attempts = ((ledger[key] && ledger[key].attempts) || 0) + 1;
     var fn = null;
     var args = [];
-    if (sched.type === 'swap' && typeof window !== 'undefined' && typeof window._agentExecuteSwap === 'function') {
+    if (sched.type === 'swap' && typeof window !== 'undefined' && typeof window._agentExecuteScheduledSwap === 'function') {
+      // Scheduled swap (same-chain + cross-chain) via LI.FI, re-quoted fresh at
+      // execution time and executed through the Circle AI Smart Wallet.
+      fn = window._agentExecuteScheduledSwap;
+      args = [sched, 'sched_' + sched.id + '_' + Date.now()];
+    } else if (sched.type === 'swap' && typeof window !== 'undefined' && typeof window._agentExecuteSwap === 'function') {
+      // Legacy same-chain swap (pre-LI.FI-schedule) — keep as fallback.
       fn = window._agentExecuteSwap;
       args = [v.total, v.token, sched.swapToToken || (v.token === 'USDC' ? 'EURC' : 'USDC'), 'sched_' + sched.id + '_' + Date.now()];
     } else if ((sched.type === 'bridge' || sched.type === 'crosschain') && typeof window !== 'undefined' && typeof window._agentExecuteBridge === 'function') {
@@ -1356,6 +1395,22 @@
       return { status: 'failed', reason: failReason };
     }
 
+    // Cross-chain: source tx is confirmed but the destination is still pending.
+    // Persist the cross-chain context (so reconciliation can finalize via LI.FI
+    // status) and DO NOT mark completed / advance nextRun — a cross-chain swap is
+    // only complete once the destination confirms.
+    if (delResult.crossChainPending === true) {
+      var xcToChainId = delResult.toChainId || null;
+      ledger[key] = { status: 'awaiting_crosschain', ts: Date.now(), attempts: attempts, amount: v.total, asset: v.token, txHash: delResult.txHash, toChainId: xcToChainId, fromChainId: 5042 };
+      _saveLedger();
+      var _engXc = _engine();
+      if (_engXc) {
+        try { _engXc.update(sched.id, { crossChain: { status: 'pending', srcTxHash: delResult.txHash, fromChainId: 5042, toChainId: xcToChainId, tool: delResult.tool || null, ts: Date.now() } }); } catch(_e){}
+      }
+      _notify(sched, 'pending_crosschain', 'Schedule "' + sched.name + '" — source swap confirmed; awaiting cross-chain confirmation on the destination chain', 'info');
+      return { status: 'awaiting_crosschain', txHash: delResult.txHash };
+    }
+
     var actualTxHash = (delResult && delResult.txHash) || null;
     var mintTxHash = (delResult && delResult.mintTxHash) || null;
     var txNote = actualTxHash ? ' \u00B7 tx ' + actualTxHash.slice(0, 10) + '...' : '';
@@ -1403,6 +1458,13 @@
     _lastStatus.blockedReason = null;
     var summary = { processed: 0, executed: 0, blocked: 0, failed: 0, results: [] };
     try {
+      // Reconcile pending cross-chain swaps (source confirmed, destination pending)
+      // BEFORE the due loop, so finality is resolved without ever re-executing.
+      var pendingXc = [];
+      try { pendingXc = eng.getAll().filter(function(s){ return s.crossChain && s.crossChain.status === 'pending'; }); } catch(e){}
+      for (var _x = 0; _x < pendingXc.length; _x++) {
+        try { await _reconcileCrossChain(pendingXc[_x]); } catch(e){}
+      }
       var due = getDueSchedules();
       for (var i = 0; i < due.length; i++) {
         var fresh = eng.getById(due[i].id);
