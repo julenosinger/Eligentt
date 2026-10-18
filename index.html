@@ -33935,6 +33935,14 @@ let _saCPNMode = false;                // true when "Send to Bank (CPN)" is acti
 let _saCPNQuotes = [];                 // last fetched quote array
 let _saCPNSelectedQuote = null;        // user-selected quote object
 let _saCPNPaymentId = null;            // CPN payment id for current in-flight payout
+// Idempotency: one stable key per logical payout attempt. Generated when the
+// user opens CPN mode or confirms a new payout. Cleared only on success or
+// explicit cancel. Never regenerated mid-flight or on retry.
+let _saCPNIdempotencyKey = null;
+
+// Allowed CPN chain IDs — mirror of cpnFiatPayout.js CPN_ALLOWED_CHAIN_IDS.
+// Any chainId returned by CPN outside this list is rejected before signing.
+var _CPN_ALLOWED_CHAIN_IDS = [1, 5042, 8453, 42161, 10, 137, 43114];
 
 // ── Toggle CPN mode ───────────────────────────────────────────────────────────
 function saToggleCPN() {
@@ -33982,6 +33990,9 @@ function saToggleCPN() {
     if (destNetworkRow) destNetworkRow.style.display = '';
     _saCPNQuotes = [];
     _saCPNSelectedQuote = null;
+    // Reset idempotency key — user is cancelling this payout, not retrying it.
+    _saCPNIdempotencyKey = null;
+    _saCPNPaymentId = null;
     var btnContent2 = document.getElementById('sa-send-btn-content');
     if (btnContent2) btnContent2.innerHTML = '<i class="ti ti-send"></i> Send Asset';
     set_('sa-rt-type', 'Direct ERC-20 Transfer');
@@ -34065,6 +34076,7 @@ async function saFetchCPNQuotes() {
       var res = await fetch('/api/cpn/quotes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
         body: JSON.stringify({ amount: amount.toFixed(2), sourceCurrency: 'USD', destinationCurrency: currency, destinationCountry: country || '' }),
       });
       var data = await res.json();
@@ -34186,6 +34198,14 @@ async function saExecuteCPNPayout() {
   var senderName  = document.getElementById('sa-cpn-sender-name')?.value.trim();
   var senderCtry  = document.getElementById('sa-cpn-sender-country')?.value.trim().toUpperCase();
 
+  // ── Idempotency: generate once per logical payout, reuse on retry ──────
+  // Never generate a new key mid-flight or after a timeout — that would create
+  // a duplicate payment. The key is cleared only on confirmed success or cancel.
+  if (!_saCPNIdempotencyKey) {
+    _saCPNIdempotencyKey = _cpnUuidFE();
+  }
+  var idemKey = _saCPNIdempotencyKey;
+
   var btn        = document.getElementById('sa-send-btn');
   var btnContent = document.getElementById('sa-send-btn-content');
   if (btn) btn.disabled = true;
@@ -34198,29 +34218,20 @@ async function saExecuteCPNPayout() {
   }
 
   try {
-    // ── Step 1: already have a quote from _saCPNSelectedQuote ──
+    // ── Step 1: already have a quote from _saCPNSelectedQuote ──────────
     _setStatus('Creating payment…', 'teal');
 
-    // Build beneficiary and sender objects
-    var beneficiary = {
-      currency:      currency,
-      name:          beneName,
-      bankName:      bankName,
-      accountNumber: account,
-      countryCode:   country,
-      routingNumber: routing || undefined,
-    };
-    var sender = { name: senderName, countryCode: senderCtry };
-
-    // ── Step 2: create payment via proxy ──
+    // ── Step 2: create payment via proxy ────────────────────────────────
+    // credentials:'same-origin' ensures the session cookie is sent.
     var paymentRes = await fetch('/api/cpn/payments', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
       body: JSON.stringify({
-        idempotencyKey:       _cpnUuidFE(),
-        quoteId:              _saCPNSelectedQuote.id,
-        amount:               { amount: amount.toFixed(2), currency: 'USD' },
-        destinationCurrency:  currency,
+        idempotencyKey:      idemKey,   // stable — same key if this is a retry
+        quoteId:             _saCPNSelectedQuote.id,
+        amount:              { amount: amount.toFixed(2), currency: 'USD' },
+        destinationCurrency: currency,
         beneficiaryDetails: {
           name:          beneName,
           bankName:      bankName,
@@ -34233,40 +34244,63 @@ async function saExecuteCPNPayout() {
     });
     var paymentData = await paymentRes.json();
     if (!paymentRes.ok) throw new Error(paymentData.message || paymentData.error || 'Payment creation failed');
-    _saCPNPaymentId = paymentData.id;
-    set_('sa-rt-cpn-status', 'Payment created: ' + _saCPNPaymentId);
 
-    // ── Step 3: get onchain tx object ──
+    // Server returns IDEMPOTENT_REPLAY when this key was already used —
+    // that is not an error; we resume with the existing paymentId.
+    _saCPNPaymentId = paymentData.id;
+    var wasReplay = paymentData.idempotent === true;
+    set_('sa-rt-cpn-status', wasReplay ? 'Resuming existing payment…' : 'Payment created');
+
+    // ── Step 3: get onchain tx object ──────────────────────────────────
     _setStatus('Getting TX object…', 'teal');
     var txObjRes = await fetch('/api/cpn/payments/' + _saCPNPaymentId + '/transactions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
       body: JSON.stringify({ walletAddress: walletAddress }),
     });
     var txObjData = await txObjRes.json();
     if (!txObjRes.ok) throw new Error(txObjData.message || 'TX object request failed');
 
-    // ── Step 4: sign the transaction ──
+    // ── Step 4: validate TX object BEFORE signing ───────────────────────
+    // Reject if: missing fields, wrong chainId, bad address, excessive value.
+    // walletAddress and activeChainId are read from the app's authenticated state —
+    // never from the txObjData itself.
+    var txValidationError = _saCPNValidateTxObject(txObjData, {
+      amount: amount,
+      walletAddress: walletAddress,
+      expectedChainId: activeChainId,
+    });
+    if (txValidationError) {
+      throw new Error('TX validation failed: ' + txValidationError);
+    }
+
+    // ── Step 5: sign the validated transaction ─────────────────────────
     _setStatus('Sign in wallet…', 'yellow', 'ti-writing');
     var rawTx = {
       to:       txObjData.to,
       data:     txObjData.data || '0x',
       value:    txObjData.value ? BigInt(txObjData.value) : 0n,
-      chainId:  txObjData.chainId ? Number(txObjData.chainId) : activeChainId,
+      chainId:  Number(txObjData.chainId),
       gasLimit: txObjData.gasLimit ? BigInt(txObjData.gasLimit) : undefined,
     };
     var signedTx = await signer.signTransaction(rawTx);
     _setStatus('Submitting TX…', 'teal');
 
-    // ── Step 5: submit signed tx ──
+    // ── Step 6: submit signed tx ───────────────────────────────────────
     var submitRes = await fetch(
       '/api/cpn/payments/' + _saCPNPaymentId + '/transactions/' + txObjData.transactionId + '/submit',
-      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ signedTransaction: signedTx }) }
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ signedTransaction: signedTx }),
+      }
     );
     var submitData = await submitRes.json();
     if (!submitRes.ok) throw new Error(submitData.message || 'TX submit failed');
 
-    // ── Step 6: poll status ──
+    // ── Step 7: poll status ─────────────────────────────────────────────
     _setStatus('Confirming…', 'teal');
     var finalPayment = await _saCPNPoll(_saCPNPaymentId, function(p) {
       _setStatus(_saCPNStatusLabel(p.status), 'teal');
@@ -34274,16 +34308,25 @@ async function saExecuteCPNPayout() {
     });
 
     var isComplete = finalPayment.status === 'COMPLETED';
-    _setStatus(isComplete ? 'Completed!' : finalPayment.status, isComplete ? 'green' : 'red', isComplete ? 'ti-check-circle' : 'ti-x');
+    _setStatus(
+      isComplete ? 'Completed!' : finalPayment.status,
+      isComplete ? 'green' : 'red',
+      isComplete ? 'ti-check-circle' : 'ti-x'
+    );
     if (isComplete) {
       toast('Fiat payout ' + amount.toFixed(2) + ' USDC → ' + currency + ' completed via CPN', 'success');
+      // ── Clear idempotency key only after confirmed success ──────────
+      // This prevents re-use for a different payment, while allowing safe
+      // retry of the same payment if it hadn't completed yet.
+      _saCPNIdempotencyKey = null;
+      _saCPNPaymentId = null;
     } else {
       toast('CPN payout ended with status: ' + finalPayment.status, 'warning');
     }
 
-    // Log to activity
+    // Log to activity (no bank account number in the log)
     saLogTx({
-      hash: _saCPNPaymentId,
+      hash: _saCPNPaymentId || 'cpn-' + idemKey.slice(0, 8),
       type: 'cpn-fiat',
       amount: amount,
       asset: 'USDC',
@@ -34295,10 +34338,44 @@ async function saExecuteCPNPayout() {
   } catch (e) {
     var errMsg = e.message || 'CPN payout failed';
     toast(errMsg, 'error');
-    set_('sa-rt-cpn-status', '<span style="color:var(--red)">' + errMsg.slice(0, 60) + '</span>');
+    set_('sa-rt-cpn-status', '<span style="color:var(--red)">' + errMsg.slice(0, 80) + '</span>');
     if (btnContent) btnContent.innerHTML = '<i class="ti ti-building-bank"></i> Send via CPN';
     if (btn) btn.disabled = false;
+    // Do NOT clear _saCPNIdempotencyKey on error — safe retry must reuse it.
   }
+}
+
+// ── TX validation (client-side mirror of cpnFiatPayout.validateTxObject) ─────
+// Runs BEFORE the user is asked to sign. If any check fails the TX is rejected
+// and the signer is never called.
+function _saCPNValidateTxObject(txObj, opts) {
+  opts = opts || {};
+  if (!txObj || typeof txObj !== 'object') return 'TX object missing';
+  if (!txObj.transactionId || typeof txObj.transactionId !== 'string')
+    return 'TX object missing transactionId';
+  if (!txObj.to || typeof txObj.to !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(txObj.to))
+    return 'TX object has invalid `to` address';
+  if (txObj.chainId == null) return 'TX object missing chainId';
+  var cid = Number(txObj.chainId);
+  if (!Number.isFinite(cid) || cid <= 0) return 'TX object has invalid chainId';
+  if (_CPN_ALLOWED_CHAIN_IDS.indexOf(cid) === -1)
+    return 'TX object chainId ' + cid + ' is not an allowed CPN chain';
+  if (txObj.data && typeof txObj.data !== 'string') return 'TX data field must be a string';
+  if (txObj.data && txObj.data !== '0x' && !/^0x[0-9a-fA-F]*$/.test(txObj.data))
+    return 'TX data field is not valid hex';
+  // Reject excessive native value (USDC transfers use calldata, not msg.value)
+  if (txObj.value) {
+    try {
+      var valBig = BigInt(txObj.value);
+      if (valBig > BigInt('10000000000000000'))
+        return 'TX native value exceeds safety limit (possible value-draining TX)';
+    } catch (_) { return 'TX value field is not a valid integer'; }
+  }
+  // from field mismatch
+  if (txObj.from && opts.walletAddress &&
+      txObj.from.toLowerCase() !== opts.walletAddress.toLowerCase())
+    return 'TX `from` does not match authenticated wallet';
+  return null; // valid
 }
 
 // ── CPN polling (client-side, max 5 min) ─────────────────────────────────────
@@ -34306,7 +34383,7 @@ async function _saCPNPoll(paymentId, onUpdate) {
   var TERMINAL = ['COMPLETED', 'FAILED', 'REVERSED', 'CANCELLED'];
   var started = Date.now();
   while (true) {
-    var res = await fetch('/api/cpn/payments/' + paymentId);
+    var res = await fetch('/api/cpn/payments/' + paymentId, { credentials: 'same-origin' });
     var data = await res.json();
     if (!res.ok) throw new Error(data.message || 'Poll failed');
     if (typeof onUpdate === 'function') onUpdate(data);

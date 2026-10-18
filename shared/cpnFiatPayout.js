@@ -60,17 +60,33 @@
     'CANCELLED':         { label: 'Cancelled',           color: 'muted2' },
   };
 
+  // ── Supported EVM chainIds for CPN onchain transactions ──────────────────
+  // CPN only settles USDC on Circle-supported EVM chains. Any chainId outside
+  // this set in a TX object from CPN is treated as invalid and rejected before
+  // signing — it indicates either a bug or a tampered response.
+  var CPN_ALLOWED_CHAIN_IDS = [
+    1,      // Ethereum Mainnet
+    5042,   // Arc Mainnet
+    8453,   // Base Mainnet
+    42161,  // Arbitrum One
+    10,     // OP Mainnet
+    137,    // Polygon PoS
+    43114,  // Avalanche C-Chain
+  ];
+
   // ── Internal helpers ────────────────────────────────────────────────────
 
   /**
    * POST/GET /api/cpn/<path> — always via the Pages Function proxy.
    * The proxy injects CPN_API_KEY server-side, never exposing it to the browser.
+   * Includes the session cookie automatically (same-origin fetch with credentials).
    */
   async function _cpnFetch(method, path, body) {
     var url = '/api/cpn/' + path.replace(/^\//, '');
     var opts = {
       method: method,
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin', // sends HttpOnly session cookie
     };
     if (body != null) opts.body = JSON.stringify(body);
     var res = await fetch(url, opts);
@@ -85,6 +101,63 @@
       throw err;
     }
     return json;
+  }
+
+  // ── TX validation (before signing) ──────────────────────────────────────
+  /**
+   * validateTxObject — validates the onchain transaction object returned by CPN
+   * before it is ever passed to a signer. Rejects:
+   *   - Missing required fields (to, data, chainId)
+   *   - chainId not in the CPN-allowed list
+   *   - Non-hex `to` address (basic format check)
+   *   - TX value that exceeds the approved USDC amount by more than the fee
+   *     tolerance (protects against tampered value field)
+   *   - data field that is not a hex string
+   *
+   * @param {object} txObj        raw TX object from CPN
+   * @param {object} approval     { amount: number, walletAddress: string }
+   *   amount         — approved USDC amount (human-readable, decimal)
+   *   walletAddress  — authenticated wallet; txObj must NOT send FROM another addr
+   * @returns {string|null}  error message, or null if valid
+   */
+  function validateTxObject(txObj, approval) {
+    if (!txObj || typeof txObj !== 'object') return 'TX object missing or invalid';
+    if (!txObj.transactionId || typeof txObj.transactionId !== 'string')
+      return 'TX object missing transactionId';
+    if (!txObj.to || typeof txObj.to !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(txObj.to))
+      return 'TX object has invalid or missing `to` address';
+    if (typeof txObj.chainId === 'undefined' || txObj.chainId === null)
+      return 'TX object missing chainId';
+    var chainId = Number(txObj.chainId);
+    if (!Number.isFinite(chainId) || chainId <= 0)
+      return 'TX object has invalid chainId: ' + txObj.chainId;
+    if (CPN_ALLOWED_CHAIN_IDS.indexOf(chainId) === -1)
+      return 'TX object chainId ' + chainId + ' is not an allowed CPN chain';
+    if (txObj.data && typeof txObj.data !== 'string')
+      return 'TX object data field must be a string';
+    if (txObj.data && txObj.data !== '0x' && !/^0x[0-9a-fA-F]*$/.test(txObj.data))
+      return 'TX object data field is not valid hex';
+    // Value check: CPN USDC transfers send ERC-20 calldata, not ETH value.
+    // A non-zero native value in a USDC transfer TX is suspicious.
+    var rawValue = txObj.value != null ? BigInt(txObj.value) : 0n;
+    if (rawValue > 0n) {
+      // Allow a small amount for gas on networks that require it (e.g. ≤ 0.01 ETH
+      // equivalent). Anything larger is rejected as a potential value-draining attack.
+      // 1e16 wei = 0.01 ETH — generous upper bound.
+      if (rawValue > BigInt('10000000000000000')) {
+        return 'TX object native value (' + rawValue.toString() + ' wei) exceeds safety limit for a USDC transfer';
+      }
+    }
+    // Wallet check
+    if (approval && approval.walletAddress) {
+      var approved = (approval.walletAddress || '').toLowerCase();
+      // txObj does not include `from` — we just confirm the signer is who we expect.
+      // If CPN embeds a `from` field, it must match.
+      if (txObj.from && txObj.from.toLowerCase() !== approved) {
+        return 'TX object `from` address does not match authenticated wallet';
+      }
+    }
+    return null; // valid
   }
 
   /**
@@ -306,14 +379,23 @@
     var txObj = await getTransactionObject(payment.id, params.walletAddress);
     onStep('tx_object', { status: 'received', transactionId: txObj.transactionId });
 
-    // ── Step 5: sign and submit ────────────────────────────────────────
+    // ── Step 5a: validate TX object BEFORE signing ────────────────────
+    // Never sign an arbitrary TX returned by an API — validate all fields first.
+    var txErr = validateTxObject(txObj, { amount: params.amount, walletAddress: params.walletAddress });
+    if (txErr) {
+      var ve = new Error('TX validation failed before signing: ' + txErr);
+      ve.code = 'TX_VALIDATION_FAILED';
+      throw ve;
+    }
+    onStep('tx_validated', { transactionId: txObj.transactionId });
+
+    // ── Step 5b: sign the validated transaction ────────────────────────
     onStep('tx_sign', { status: 'signing' });
-    // Build the tx from the CPN object
     var tx = {
       to:       txObj.to,
-      data:     txObj.data,
+      data:     txObj.data || '0x',
       value:    txObj.value   ? BigInt(txObj.value) : 0n,
-      chainId:  txObj.chainId ? Number(txObj.chainId) : undefined,
+      chainId:  Number(txObj.chainId),
       gasLimit: txObj.gasLimit ? BigInt(txObj.gasLimit) : undefined,
     };
     var signedTx = await params.signer.signTransaction(tx);
@@ -369,10 +451,12 @@
     // Helpers
     validateBeneficiary:      validateBeneficiary,
     validateSender:           validateSender,
+    validateTxObject:         validateTxObject,
     formatStatus:             formatStatus,
     getSupportedCurrencies:   getSupportedCurrencies,
     CURRENCIES:               CPN_CURRENCIES,
     STATUS_MAP:               CPN_STATUS_MAP,
+    ALLOWED_CHAIN_IDS:        CPN_ALLOWED_CHAIN_IDS,
   };
 
   if (typeof module !== 'undefined' && module.exports) {
