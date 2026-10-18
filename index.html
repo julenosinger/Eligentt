@@ -33944,6 +33944,25 @@ let _saCPNIdempotencyKey = null;
 // Any chainId returned by CPN outside this list is rejected before signing.
 var _CPN_ALLOWED_CHAIN_IDS = [1, 5042, 8453, 42161, 10, 137, 43114];
 
+// Canonical USDC contract per chainId — mirror of cpnFiatPayout.js CPN_ALLOWED_USDC_CONTRACTS.
+// The `to` field in the CPN TX object MUST match this exactly for the target chain.
+// Source: https://developers.circle.com/stablecoins/docs/usdc-on-main-networks
+var _CPN_USDC_CONTRACTS = {
+  1:     '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', // Ethereum
+  5042:  '0x3600000000000000000000000000000000000000', // Arc Mainnet
+  8453:  '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', // Base
+  42161: '0xaf88d065e77c8cc2239327c5edb3a432268e5831', // Arbitrum One
+  10:    '0x0b2c639c533813f4aa9d7837caf62653d097ff85', // OP Mainnet
+  137:   '0x3c499c542cef5e3811e1192ce70d8cc03d5c3359', // Polygon PoS
+  43114: '0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e', // Avalanche C-Chain
+};
+
+// ERC-20 transfer() selector: keccak256("transfer(address,uint256)") = 0xa9059cbb
+var _CPN_ERC20_TRANSFER_SELECTOR = '0xa9059cbb';
+
+// USDC has 6 decimals
+var _CPN_USDC_DECIMALS = 6;
+
 // ── Toggle CPN mode ───────────────────────────────────────────────────────────
 function saToggleCPN() {
   _saCPNMode = !_saCPNMode;
@@ -34337,33 +34356,96 @@ async function saExecuteCPNPayout() {
 
   } catch (e) {
     var errMsg = e.message || 'CPN payout failed';
-    toast(errMsg, 'error');
-    set_('sa-rt-cpn-status', '<span style="color:var(--red)">' + errMsg.slice(0, 80) + '</span>');
-    if (btnContent) btnContent.innerHTML = '<i class="ti ti-building-bank"></i> Send via CPN';
-    if (btn) btn.disabled = false;
-    // Do NOT clear _saCPNIdempotencyKey on error — safe retry must reuse it.
+
+    if (e.code === 'POLL_TIMEOUT') {
+      // Polling timed out. The payment may have been submitted onchain. Show the
+      // last known status and block automatic retry until the user reconciles.
+      // The idempotency key is preserved so a manual retry reuses the same payment.
+      var lastStatus = (e.payment && e.payment.status) || 'UNKNOWN';
+      var timeoutMsg = 'Payout status unknown after timeout. Last known status: ' + lastStatus +
+        '. Do NOT retry — check your payment history and reconcile before proceeding.';
+      toast(timeoutMsg, 'warning');
+      set_('sa-rt-cpn-status', '<span style="color:var(--yellow)">Timeout — reconcile required</span>');
+      if (btnContent) btnContent.innerHTML = '<i class="ti ti-clock-exclamation"></i> Reconcile';
+      // Leave button disabled — the user must manually check status before retrying
+      // (they can press the Cancel/toggle CPN off button to reset)
+    } else {
+      toast(errMsg, 'error');
+      set_('sa-rt-cpn-status', '<span style="color:var(--red)">' + errMsg.slice(0, 80) + '</span>');
+      if (btnContent) btnContent.innerHTML = '<i class="ti ti-building-bank"></i> Send via CPN';
+      if (btn) btn.disabled = false;
+    }
+    // Do NOT clear _saCPNIdempotencyKey on error — safe retry must reuse the same key.
   }
 }
 
 // ── TX validation (client-side mirror of cpnFiatPayout.validateTxObject) ─────
-// Runs BEFORE the user is asked to sign. If any check fails the TX is rejected
-// and the signer is never called.
+// Runs BEFORE the user is asked to sign. All 7 checks must pass or the TX is
+// rejected and the signer is never called.
+//
+// opts:
+//   walletAddress  {string}  authenticated wallet (from app state, not txObj)
+//   amount         {number}  approved USDC amount (human-readable)
+//   expectedChainId {number} active chain from wallet — TX must target this chain
 function _saCPNValidateTxObject(txObj, opts) {
   opts = opts || {};
   if (!txObj || typeof txObj !== 'object') return 'TX object missing';
+
+  // 1. Required fields
   if (!txObj.transactionId || typeof txObj.transactionId !== 'string')
     return 'TX object missing transactionId';
   if (!txObj.to || typeof txObj.to !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(txObj.to))
     return 'TX object has invalid `to` address';
   if (txObj.chainId == null) return 'TX object missing chainId';
+
+  // 2. ChainId in allowlist
   var cid = Number(txObj.chainId);
   if (!Number.isFinite(cid) || cid <= 0) return 'TX object has invalid chainId';
   if (_CPN_ALLOWED_CHAIN_IDS.indexOf(cid) === -1)
     return 'TX object chainId ' + cid + ' is not an allowed CPN chain';
-  if (txObj.data && typeof txObj.data !== 'string') return 'TX data field must be a string';
-  if (txObj.data && txObj.data !== '0x' && !/^0x[0-9a-fA-F]*$/.test(txObj.data))
+
+  // 2b. ChainId must match the user's currently connected chain
+  if (opts.expectedChainId != null && Number.isFinite(opts.expectedChainId)) {
+    if (cid !== opts.expectedChainId)
+      return 'TX chainId (' + cid + ') does not match active wallet chain (' + opts.expectedChainId + ')';
+  }
+
+  // 3. Contract allowlist — `to` must be the USDC contract for this chain
+  var allowedContract = _CPN_USDC_CONTRACTS[cid];
+  if (!allowedContract)
+    return 'No known USDC contract for chainId ' + cid;
+  if (txObj.to.toLowerCase() !== allowedContract.toLowerCase())
+    return 'TX `to` (' + txObj.to + ') is not the USDC contract for chain ' + cid;
+
+  // 4. Calldata: present, valid hex, and starts with ERC-20 transfer() selector
+  if (!txObj.data || typeof txObj.data !== 'string')
+    return 'TX object missing data field (expected ERC-20 transfer calldata)';
+  if (!/^0x[0-9a-fA-F]*$/.test(txObj.data))
     return 'TX data field is not valid hex';
-  // Reject excessive native value (USDC transfers use calldata, not msg.value)
+  if (!txObj.data.toLowerCase().startsWith(_CPN_ERC20_TRANSFER_SELECTOR))
+    return 'TX calldata selector ' + txObj.data.slice(0, 10) + ' does not match ERC-20 transfer()';
+  if (txObj.data.length < 138)
+    return 'TX calldata too short to contain transfer(address,uint256) parameters';
+
+  // 5. Amount cross-check (decode from calldata, compare to approval within 0.5%)
+  if (opts.amount != null) {
+    try {
+      var amountHex64 = txObj.data.slice(2 + 8 + 64, 2 + 8 + 64 + 64); // skip 0x, selector, address
+      var rawAmountBig = BigInt('0x' + amountHex64);
+      var approvedFloat = parseFloat(String(opts.amount));
+      if (!isFinite(approvedFloat) || approvedFloat <= 0)
+        return 'Approved amount is not a valid positive number';
+      var approvedRaw = BigInt(Math.round(approvedFloat * Math.pow(10, _CPN_USDC_DECIMALS)));
+      var toleranceBig = approvedRaw / 200n; // 0.5%
+      var diff = rawAmountBig > approvedRaw ? rawAmountBig - approvedRaw : approvedRaw - rawAmountBig;
+      if (diff > toleranceBig)
+        return 'TX calldata amount diverges from approved amount by more than 0.5%';
+    } catch (e) {
+      return 'Could not decode transfer amount from calldata: ' + (e && e.message ? e.message : String(e));
+    }
+  }
+
+  // 6. Native value — USDC transfers must not send ETH value
   if (txObj.value) {
     try {
       var valBig = BigInt(txObj.value);
@@ -34371,14 +34453,19 @@ function _saCPNValidateTxObject(txObj, opts) {
         return 'TX native value exceeds safety limit (possible value-draining TX)';
     } catch (_) { return 'TX value field is not a valid integer'; }
   }
-  // from field mismatch
+
+  // 7. From field mismatch
   if (txObj.from && opts.walletAddress &&
       txObj.from.toLowerCase() !== opts.walletAddress.toLowerCase())
     return 'TX `from` does not match authenticated wallet';
+
   return null; // valid
 }
 
 // ── CPN polling (client-side, max 5 min) ─────────────────────────────────────
+// On timeout, fetches the payment one final time to reconcile before throwing.
+// The error.payment field is populated with the last known state so the caller
+// can present accurate status to the user instead of an opaque "timed out".
 async function _saCPNPoll(paymentId, onUpdate) {
   var TERMINAL = ['COMPLETED', 'FAILED', 'REVERSED', 'CANCELLED'];
   var started = Date.now();
@@ -34388,7 +34475,19 @@ async function _saCPNPoll(paymentId, onUpdate) {
     if (!res.ok) throw new Error(data.message || 'Poll failed');
     if (typeof onUpdate === 'function') onUpdate(data);
     if (TERMINAL.indexOf(data.status) !== -1) return data;
-    if (Date.now() - started > 300000) throw new Error('CPN payment polling timed out');
+    if (Date.now() - started > 300000) {
+      // Timeout: do one final reconciliation fetch before giving up.
+      // This prevents the caller from treating a "timed out" as a reason to
+      // retry (which would create a duplicate payment). If the final fetch
+      // shows a terminal state, return it normally.
+      var finalRes = await fetch('/api/cpn/payments/' + paymentId, { credentials: 'same-origin' }).catch(function() { return null; });
+      var finalData = finalRes ? await finalRes.json().catch(function() { return null; }) : null;
+      if (finalData && TERMINAL.indexOf(finalData.status) !== -1) return finalData;
+      var timeoutErr = new Error('CPN payment polling timed out — last known status: ' + ((finalData && finalData.status) || data.status));
+      timeoutErr.payment = finalData || data;
+      timeoutErr.code = 'POLL_TIMEOUT';
+      throw timeoutErr;
+    }
     await new Promise(function(r) { setTimeout(r, 5000); });
   }
 }

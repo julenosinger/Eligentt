@@ -74,6 +74,31 @@
     43114,  // Avalanche C-Chain
   ];
 
+  // ── USDC contract addresses per chainId ──────────────────────────────────
+  // CPN fiat payouts settle in USDC. The `to` address in the TX object returned
+  // by CPN MUST be the canonical USDC contract for the target chain.
+  // Any other `to` address (including a USDC look-alike or bridged token) is
+  // rejected before signing — it indicates a tampered or misconfigured response.
+  // Source: https://developers.circle.com/stablecoins/docs/usdc-on-main-networks
+  var CPN_ALLOWED_USDC_CONTRACTS = {
+    1:     '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', // Ethereum
+    5042:  '0x3600000000000000000000000000000000000000', // Arc Mainnet
+    8453:  '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', // Base
+    42161: '0xaf88d065e77c8cc2239327c5edb3a432268e5831', // Arbitrum One
+    10:    '0x0b2c639c533813f4aa9d7837caf62653d097ff85', // OP Mainnet
+    137:   '0x3c499c542cef5e3811e1192ce70d8cc03d5c3359', // Polygon PoS
+    43114: '0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e', // Avalanche C-Chain
+  };
+
+  // ── ERC-20 transfer() function selector ──────────────────────────────────
+  // keccak256("transfer(address,uint256)") → 0xa9059cbb
+  // CPN USDC transfers MUST use this selector. Any other selector indicates
+  // the TX is not a standard ERC-20 transfer and is rejected before signing.
+  var ERC20_TRANSFER_SELECTOR = '0xa9059cbb';
+
+  // USDC has 6 decimals. 1 USDC = 1_000_000 (1e6) raw units.
+  var USDC_DECIMALS = 6;
+
   // ── Internal helpers ────────────────────────────────────────────────────
 
   /**
@@ -106,57 +131,105 @@
   // ── TX validation (before signing) ──────────────────────────────────────
   /**
    * validateTxObject — validates the onchain transaction object returned by CPN
-   * before it is ever passed to a signer. Rejects:
-   *   - Missing required fields (to, data, chainId)
-   *   - chainId not in the CPN-allowed list
-   *   - Non-hex `to` address (basic format check)
-   *   - TX value that exceeds the approved USDC amount by more than the fee
-   *     tolerance (protects against tampered value field)
-   *   - data field that is not a hex string
+   * before it is ever passed to a signer. Rejects anything that does not match
+   * the approved payment exactly:
+   *
+   *   1. Structural:  missing required fields (transactionId, to, chainId, data)
+   *   2. Network:     chainId not in CPN_ALLOWED_CHAIN_IDS
+   *   3. Contract:    `to` address not the canonical USDC contract for that chainId
+   *   4. Selector:    calldata does not start with ERC-20 transfer() selector
+   *   5. Amount:      decoded transfer amount in calldata diverges from approved
+   *                   amount by more than 0.5% (fee tolerance)
+   *   6. Native value: any msg.value > 0.01 ETH is rejected (USDC transfers send
+   *                   ERC-20 calldata, not ETH; a large value field means the TX
+   *                   would drain native gas — likely a tampered response)
+   *   7. From field:  if CPN embeds a `from`, it must match the authenticated wallet
+   *   8. Unknown extra fields are ignored — only the above are checked
    *
    * @param {object} txObj        raw TX object from CPN
-   * @param {object} approval     { amount: number, walletAddress: string }
-   *   amount         — approved USDC amount (human-readable, decimal)
-   *   walletAddress  — authenticated wallet; txObj must NOT send FROM another addr
+   * @param {object} approval
+   *   amount         {number|string} approved USDC amount (human-readable, e.g. 100)
+   *   walletAddress  {string}        authenticated wallet address
    * @returns {string|null}  error message, or null if valid
    */
   function validateTxObject(txObj, approval) {
     if (!txObj || typeof txObj !== 'object') return 'TX object missing or invalid';
+
+    // 1. Required fields
     if (!txObj.transactionId || typeof txObj.transactionId !== 'string')
       return 'TX object missing transactionId';
     if (!txObj.to || typeof txObj.to !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(txObj.to))
       return 'TX object has invalid or missing `to` address';
-    if (typeof txObj.chainId === 'undefined' || txObj.chainId === null)
+    if (txObj.chainId == null)
       return 'TX object missing chainId';
+
+    // 2. ChainId in allowlist
     var chainId = Number(txObj.chainId);
     if (!Number.isFinite(chainId) || chainId <= 0)
       return 'TX object has invalid chainId: ' + txObj.chainId;
     if (CPN_ALLOWED_CHAIN_IDS.indexOf(chainId) === -1)
       return 'TX object chainId ' + chainId + ' is not an allowed CPN chain';
-    if (txObj.data && typeof txObj.data !== 'string')
-      return 'TX object data field must be a string';
-    if (txObj.data && txObj.data !== '0x' && !/^0x[0-9a-fA-F]*$/.test(txObj.data))
+
+    // 3. Contract allowlist — `to` must be the canonical USDC contract for this chain
+    var allowedContract = CPN_ALLOWED_USDC_CONTRACTS[chainId];
+    if (!allowedContract)
+      return 'No known USDC contract for chainId ' + chainId + ' — cannot validate';
+    if (txObj.to.toLowerCase() !== allowedContract.toLowerCase())
+      return 'TX object `to` (' + txObj.to + ') is not the USDC contract for chain ' + chainId;
+
+    // 4. Calldata: must be present, valid hex, and start with ERC-20 transfer() selector
+    if (!txObj.data || typeof txObj.data !== 'string')
+      return 'TX object missing data field (expected ERC-20 transfer calldata)';
+    if (!/^0x[0-9a-fA-F]*$/.test(txObj.data))
       return 'TX object data field is not valid hex';
-    // Value check: CPN USDC transfers send ERC-20 calldata, not ETH value.
-    // A non-zero native value in a USDC transfer TX is suspicious.
+    var dataLow = txObj.data.toLowerCase();
+    if (!dataLow.startsWith(ERC20_TRANSFER_SELECTOR))
+      return 'TX calldata selector ' + dataLow.slice(0, 10) + ' does not match ERC-20 transfer() (' + ERC20_TRANSFER_SELECTOR + ')';
+    // transfer(address,uint256) ABI-encoded = 4 + 32 + 32 = 68 bytes = 136 hex chars + '0x'
+    if (txObj.data.length < 138) // 2 (0x) + 8 (selector) + 64 (address padded) + 64 (amount) = 138
+      return 'TX calldata too short to contain transfer(address,uint256) parameters';
+
+    // 5. Amount cross-check: decode the uint256 from calldata and compare to approval
+    if (approval && approval.amount != null) {
+      try {
+        // calldata layout: 0x + 8 (selector) + 64 (address) + 64 (uint256 amount)
+        var amountHex = txObj.data.slice(2 + 8 + 64); // skip 0x, selector, address
+        // Take first 64 hex chars (32 bytes) even if there is trailing data
+        var amountHex64 = amountHex.slice(0, 64);
+        var rawAmountBig = BigInt('0x' + amountHex64);
+        // Convert approved amount to USDC raw units (6 decimals)
+        var approvedFloat = parseFloat(String(approval.amount));
+        if (!isFinite(approvedFloat) || approvedFloat <= 0)
+          return 'Approved amount is not a valid positive number';
+        var approvedRaw = BigInt(Math.round(approvedFloat * Math.pow(10, USDC_DECIMALS)));
+        // Allow 0.5% tolerance for fees
+        var toleranceBig = approvedRaw / 200n; // 0.5% = 1/200
+        var diff = rawAmountBig > approvedRaw
+          ? rawAmountBig - approvedRaw
+          : approvedRaw - rawAmountBig;
+        if (diff > toleranceBig) {
+          return 'TX calldata amount (' + rawAmountBig.toString() + ' raw USDC) diverges from ' +
+            'approved amount (' + approvedRaw.toString() + ' raw USDC) by more than 0.5%';
+        }
+      } catch (e) {
+        return 'Could not decode transfer amount from calldata: ' + (e && e.message ? e.message : String(e));
+      }
+    }
+
+    // 6. Native value check
     var rawValue = txObj.value != null ? BigInt(txObj.value) : 0n;
     if (rawValue > 0n) {
-      // Allow a small amount for gas on networks that require it (e.g. ≤ 0.01 ETH
-      // equivalent). Anything larger is rejected as a potential value-draining attack.
-      // 1e16 wei = 0.01 ETH — generous upper bound.
-      if (rawValue > BigInt('10000000000000000')) {
+      if (rawValue > BigInt('10000000000000000'))
         return 'TX object native value (' + rawValue.toString() + ' wei) exceeds safety limit for a USDC transfer';
-      }
     }
-    // Wallet check
+
+    // 7. From field mismatch
     if (approval && approval.walletAddress) {
       var approved = (approval.walletAddress || '').toLowerCase();
-      // txObj does not include `from` — we just confirm the signer is who we expect.
-      // If CPN embeds a `from` field, it must match.
-      if (txObj.from && txObj.from.toLowerCase() !== approved) {
+      if (txObj.from && txObj.from.toLowerCase() !== approved)
         return 'TX object `from` address does not match authenticated wallet';
-      }
     }
+
     return null; // valid
   }
 
@@ -457,6 +530,8 @@
     CURRENCIES:               CPN_CURRENCIES,
     STATUS_MAP:               CPN_STATUS_MAP,
     ALLOWED_CHAIN_IDS:        CPN_ALLOWED_CHAIN_IDS,
+    ALLOWED_USDC_CONTRACTS:   CPN_ALLOWED_USDC_CONTRACTS,
+    ERC20_TRANSFER_SELECTOR:  ERC20_TRANSFER_SELECTOR,
   };
 
   if (typeof module !== 'undefined' && module.exports) {

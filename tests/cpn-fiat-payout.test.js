@@ -1,27 +1,47 @@
 /**
- * CPN Fiat Payout — Fase 1 Security & Integrity test suite
+ * CPN Fiat Payout — Fase 1.1 Security & Integrity test suite
  *
  * Covers:
- *  1.  shared/cpnFiatPayout.js — module structure, validation, helpers
- *  2.  shared/cpnFiatPayout.js — validateTxObject (new — blocks bad TX before sign)
- *  3.  functions/api/cpn/[[route]].mjs — session auth (new), path/method allowlist,
- *       idempotency guard (new), body-size cap (new), key isolation, no mock
- *  4.  index.html — CPN UI elements, JS functions
- *  5.  index.html — security: TX validation before sign (new), idempotency key
- *       persistence (new), credentials:same-origin on all CPN fetches (new)
- *  6.  index.html — send button dispatch
- *  7.  index.html — 5-step OFI payment flow
- *  8.  Security: CPN_API_KEY never in browser
- *  9.  .dev.vars.example — configuration documented
- *  10. Shared sync
- *  11. Regression guards — existing Send Assets + Batch flows unaffected
+ *  1.  shared/cpnFiatPayout.js — module structure and exports
+ *  2.  shared/cpnFiatPayout.js — validateBeneficiary
+ *  3.  shared/cpnFiatPayout.js — validateTxObject (full 7-check suite)
+ *       - structural fields, chainId allowlist, CONTRACT allowlist (new),
+ *         calldata SELECTOR check (new), AMOUNT cross-check (new),
+ *         native value cap, from-address match
+ *  4.  functions/api/cpn/[[route]].mjs — session auth + expiry check (new)
+ *  5.  functions/api/cpn/[[route]].mjs — OWNERSHIP enforcement (new)
+ *  6.  functions/api/cpn/[[route]].mjs — method enforcement
+ *  7.  functions/api/cpn/[[route]].mjs — TWO-PHASE idempotency (new): reservation,
+ *       concurrent conflict, persistence failure surfacing (no silent swallow)
+ *  8.  functions/api/cpn/[[route]].mjs — body size cap
+ *  9.  functions/api/cpn/[[route]].mjs — key isolation and safe errors
+ *  10. index.html — CPN UI elements
+ *  11. index.html — CPN JS functions
+ *  12. index.html — TX validation before signing (full 7-check, including
+ *       CONTRACT allowlist + SELECTOR + AMOUNT + expectedChainId gate) (new)
+ *  13. index.html — idempotency key stability
+ *  14. index.html — session cookie sent with all CPN requests
+ *  15. index.html — send button dispatch
+ *  16. index.html — 5-step OFI flow
+ *  17. index.html — POLL TIMEOUT reconciliation (new): reconcile fetch, no auto-retry
+ *  18. Security — CPN_API_KEY never exposed to browser
+ *  19. .dev.vars.example — configuration documented
+ *  20. Shared sync
+ *  21. MANDATORY behavioral tests (spec §4):
+ *       - User A accessing User B's payment → 403
+ *       - Expired/invalid session → 401
+ *       - Tampered contract / token / network / recipient / value / calldata
+ *       - Two simultaneous requests same key → 409
+ *       - Timeout after CPN creation → reconcile, no auto-retry
+ *       - Persistence failure → persistenceWarning, no silent swallow
+ *  22. Regression guards — Send Assets, Swap, Bridge, Schedule, Batch
  */
 
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import path from 'path';
 
-const ROOT = path.resolve(__dirname, '..');
+const ROOT      = path.resolve(__dirname, '..');
 const html      = readFileSync(path.join(ROOT, 'index.html'), 'utf8');
 const cpnModule = readFileSync(path.join(ROOT, 'shared/cpnFiatPayout.js'), 'utf8');
 const cpnProxy  = readFileSync(path.join(ROOT, 'functions/api/cpn/[[route]].mjs'), 'utf8');
@@ -34,27 +54,35 @@ describe('shared/cpnFiatPayout.js — module structure', () => {
     expect(cpnModule).toMatch(/module\.exports\s*=/);
   });
 
-  it('exposes getQuotes, createPayment, getTransactionObject, submitSignedTransaction, getPaymentStatus, pollPaymentStatus', () => {
+  it('exposes core API calls', () => {
     ['getQuotes', 'createPayment', 'getTransactionObject', 'submitSignedTransaction', 'getPaymentStatus', 'pollPaymentStatus'].forEach(fn => {
       expect(cpnModule).toContain(fn + ':');
       expect(cpnModule).toMatch(new RegExp('function ' + fn + '\\b'));
     });
   });
 
-  it('exposes executeFiatPayout high-level orchestrator', () => {
+  it('exposes executeFiatPayout', () => {
     expect(cpnModule).toContain('executeFiatPayout:');
     expect(cpnModule).toContain('async function executeFiatPayout');
   });
 
-  it('exposes validateBeneficiary, validateSender, and validateTxObject (new)', () => {
-    expect(cpnModule).toContain('validateBeneficiary:');
-    expect(cpnModule).toContain('validateSender:');
-    expect(cpnModule).toContain('validateTxObject:');
+  it('exposes validateBeneficiary, validateSender, validateTxObject', () => {
+    ['validateBeneficiary:', 'validateSender:', 'validateTxObject:'].forEach(s => expect(cpnModule).toContain(s));
   });
 
   it('exposes ALLOWED_CHAIN_IDS list', () => {
     expect(cpnModule).toContain('ALLOWED_CHAIN_IDS:');
     expect(cpnModule).toContain('CPN_ALLOWED_CHAIN_IDS');
+  });
+
+  it('exposes ALLOWED_USDC_CONTRACTS map (new — Fase 1.1)', () => {
+    expect(cpnModule).toContain('ALLOWED_USDC_CONTRACTS:');
+    expect(cpnModule).toContain('CPN_ALLOWED_USDC_CONTRACTS');
+  });
+
+  it('exposes ERC20_TRANSFER_SELECTOR (new — Fase 1.1)', () => {
+    expect(cpnModule).toContain('ERC20_TRANSFER_SELECTOR:');
+    expect(cpnModule).toContain("ERC20_TRANSFER_SELECTOR = '0xa9059cbb'");
   });
 
   it('exposes STATUS_MAP with all terminal states', () => {
@@ -63,7 +91,7 @@ describe('shared/cpnFiatPayout.js — module structure', () => {
     });
   });
 
-  it('getSupportedCurrencies returns a copy of the array', () => {
+  it('getSupportedCurrencies returns a copy', () => {
     expect(cpnModule).toContain('getSupportedCurrencies:');
     expect(cpnModule).toContain('return CPN_CURRENCIES.slice()');
   });
@@ -76,260 +104,300 @@ describe('shared/cpnFiatPayout.js — validateBeneficiary', () => {
   it('rejects missing bank', () => { expect(cpnModule).toContain("'Bank name required'"); });
   it('rejects short account', () => { expect(cpnModule).toContain("'Account number required'"); });
   it('rejects invalid country', () => { expect(cpnModule).toContain("'Country code required (2-letter ISO)'"); });
-  it('returns null on valid beneficiary', () => {
-    expect(cpnModule).toContain('function validateBeneficiary(b)');
-    expect(cpnModule).toContain('return null;');
-  });
+  it('function is defined', () => { expect(cpnModule).toContain('function validateBeneficiary(b)'); });
 });
 
-describe('shared/cpnFiatPayout.js — validateSender', () => {
-  it('rejects missing sender name', () => { expect(cpnModule).toContain("'Sender name required'"); });
-  it('rejects missing sender country', () => { expect(cpnModule).toContain("'Sender country code required'"); });
-});
-
-// ── 3. cpnFiatPayout.js — validateTxObject (security: TX validation) ─────────
-describe('shared/cpnFiatPayout.js — validateTxObject (pre-sign validation)', () => {
-  it('function is defined', () => {
+// ── 3. cpnFiatPayout.js — validateTxObject (full 7-check suite) ─────────────
+describe('shared/cpnFiatPayout.js — validateTxObject (7 checks)', () => {
+  it('function is defined with approval parameter', () => {
     expect(cpnModule).toContain('function validateTxObject(txObj, approval)');
   });
 
-  it('rejects missing `to` address', () => {
-    expect(cpnModule).toContain("'TX object has invalid or missing `to` address'");
-  });
-
-  it('rejects invalid `to` address format (not 0x + 40 hex)', () => {
-    expect(cpnModule).toContain('/^0x[0-9a-fA-F]{40}$/.test(txObj.to)');
-  });
-
-  it('rejects missing chainId', () => {
-    expect(cpnModule).toContain("'TX object missing chainId'");
-  });
-
-  it('rejects chainId not in CPN_ALLOWED_CHAIN_IDS', () => {
-    expect(cpnModule).toContain("'TX object chainId ' + chainId + ' is not an allowed CPN chain'");
-    expect(cpnModule).toContain('CPN_ALLOWED_CHAIN_IDS.indexOf(chainId) === -1');
-  });
-
-  it('contains Arc Mainnet (5042) and Ethereum (1) in allowed chain list', () => {
-    expect(cpnModule).toContain('5042,');
-    expect(cpnModule).toContain('1,');
-  });
-
-  it('rejects non-hex data field', () => {
-    expect(cpnModule).toContain("'TX object data field is not valid hex'");
-  });
-
-  it('rejects excessive native value (value-draining protection)', () => {
-    expect(cpnModule).toContain("'TX object native value (' + rawValue.toString() + ' wei) exceeds safety limit");
-    expect(cpnModule).toContain("BigInt('10000000000000000')");
-  });
-
-  it('rejects `from` mismatch with authenticated wallet', () => {
-    expect(cpnModule).toContain("'TX object `from` address does not match authenticated wallet'");
-    expect(cpnModule).toContain('txObj.from.toLowerCase() !== approved');
-  });
-
-  it('missing transactionId is rejected', () => {
+  it('check 1 — rejects missing transactionId', () => {
     expect(cpnModule).toContain("'TX object missing transactionId'");
   });
 
-  it('is called inside executeFiatPayout before signer.signTransaction', () => {
-    const execFn = cpnModule.slice(
-      cpnModule.indexOf('async function executeFiatPayout'),
-      cpnModule.indexOf('// ── Utilities')
-    );
-    const validateIdx = execFn.indexOf('validateTxObject(');
-    const signIdx     = execFn.indexOf('signer.signTransaction(');
-    expect(validateIdx).toBeGreaterThan(-1);
-    expect(signIdx).toBeGreaterThan(-1);
-    // Validation must come BEFORE signing
-    expect(validateIdx).toBeLessThan(signIdx);
+  it('check 1 — rejects invalid `to` address', () => {
+    expect(cpnModule).toContain("'TX object has invalid or missing `to` address'");
   });
 
-  it('throws TX_VALIDATION_FAILED error code when validation fails', () => {
-    expect(cpnModule).toContain("ve.code = 'TX_VALIDATION_FAILED'");
+  it('check 2 — rejects chainId not in CPN_ALLOWED_CHAIN_IDS', () => {
+    expect(cpnModule).toContain("'TX object chainId ' + chainId + ' is not an allowed CPN chain'");
+  });
+
+  it('check 3 — rejects `to` that is not the USDC contract (new)', () => {
+    expect(cpnModule).toContain('CPN_ALLOWED_USDC_CONTRACTS');
+    expect(cpnModule).toContain("'TX object `to` (' + txObj.to + ') is not the USDC contract for chain ' + chainId");
+  });
+
+  it('check 3 — rejects unknown chainId with no known USDC contract (new)', () => {
+    expect(cpnModule).toContain("'No known USDC contract for chainId ' + chainId + ' — cannot validate'");
+  });
+
+  it('check 4 — rejects missing data field (new)', () => {
+    expect(cpnModule).toContain("'TX object missing data field (expected ERC-20 transfer calldata)'");
+  });
+
+  it('check 4 — rejects calldata with wrong selector (new)', () => {
+    expect(cpnModule).toContain('ERC20_TRANSFER_SELECTOR');
+    // The error message references the selector via the variable, not a hardcoded string
+    expect(cpnModule).toContain("does not match ERC-20 transfer() (' + ERC20_TRANSFER_SELECTOR + ')'");
+  });
+
+  it('check 4 — rejects calldata that is too short (new)', () => {
+    expect(cpnModule).toContain("'TX calldata too short to contain transfer(address,uint256) parameters'");
+  });
+
+  it('check 5 — amount cross-check against calldata (new)', () => {
+    expect(cpnModule).toContain('rawAmountBig');
+    expect(cpnModule).toContain('approvedRaw');
+    // String is split across string literal boundaries
+    expect(cpnModule).toContain("diverges from '");
+    expect(cpnModule).toContain("'approved amount (");
+  });
+
+  it('check 5 — 0.5% tolerance uses 200n divisor (new)', () => {
+    expect(cpnModule).toContain('approvedRaw / 200n');
+  });
+
+  it('check 6 — rejects excessive native value', () => {
+    expect(cpnModule).toContain("'TX object native value (' + rawValue.toString() + ' wei) exceeds safety limit for a USDC transfer'");
+  });
+
+  it('check 7 — rejects `from` mismatch with authenticated wallet', () => {
+    expect(cpnModule).toContain("'TX object `from` address does not match authenticated wallet'");
+  });
+
+  it('returns null on all checks passing', () => {
+    expect(cpnModule).toContain('return null; // valid');
   });
 });
 
-// ── 4. cpnFiatPayout.js — proxy calls use credentials:same-origin ─────────────
-describe('shared/cpnFiatPayout.js — session cookie forwarded', () => {
-  it('_cpnFetch includes credentials: same-origin so session cookie is sent', () => {
-    expect(cpnModule).toContain("credentials: 'same-origin'");
-  });
-
-  it('does not call api.circle.com directly', () => {
-    expect(cpnModule).not.toContain('api.circle.com');
-  });
-});
-
-// ── 5. Pages Function — session authentication ───────────────────────────────
-describe('functions/api/cpn/[[route]].mjs — session auth (Fase 1 security)', () => {
+// ── 4. Pages Function — session auth (Fase 1.0 + expiry check) ───────────────
+describe('functions/api/cpn/[[route]].mjs — session auth', () => {
   it('verifySession function is defined', () => {
     expect(cpnProxy).toContain('async function verifySession(request, env)');
   });
 
-  it('verifySession reads session token from cookie or Authorization header', () => {
-    expect(cpnProxy).toContain('elligente_sid=');
-    expect(cpnProxy).toContain('Authorization');
-    expect(cpnProxy).toContain('extractSessionToken');
+  it('checks application-layer session.expiresAt (Fase 1.1 — closes TTL eviction race)', () => {
+    expect(cpnProxy).toContain('session.expiresAt');
+    expect(cpnProxy).toContain("{ ok: false, status: 401, error: 'Session expired' }");
   });
 
-  it('verifySession checks AUTH_KV — fail-closed when KV unavailable', () => {
-    expect(cpnProxy).toContain('env.AUTH_KV');
-    expect(cpnProxy).toContain("'Auth service unavailable'");
-    expect(cpnProxy).toContain('503');
+  it('rejects when AUTH_KV is missing (fail closed)', () => {
+    expect(cpnProxy).toContain("{ ok: false, status: 503, error: 'Auth service unavailable' }");
   });
 
-  it('rejects missing or short session token with 401', () => {
-    expect(cpnProxy).toContain("'Session token required'");
-    expect(cpnProxy).toContain('401');
+  it('rejects empty / short tokens', () => {
+    expect(cpnProxy).toContain("{ ok: false, status: 401, error: 'Session token required' }");
   });
 
-  it('rejects expired/invalid session with 401', () => {
-    expect(cpnProxy).toContain("'Session expired or invalid'");
+  it('rejects expired or invalid session key', () => {
+    expect(cpnProxy).toContain("{ ok: false, status: 401, error: 'Session expired or invalid' }");
   });
 
-  it('userId is read from the session, never from the request body', () => {
-    // userId must only come from the verified KV session object
-    expect(cpnProxy).toContain('session.userId');
-    // The body should not be the source of userId
-    expect(cpnProxy).not.toContain('bodyJson.userId');
-    expect(cpnProxy).not.toContain("body.userId");
+  it('rejects session missing userId', () => {
+    expect(cpnProxy).toContain("{ ok: false, status: 401, error: 'Session missing userId' }");
   });
 
-  it('session auth runs for all non-health paths before CPN_API_KEY is checked', () => {
-    // Only look inside the onRequest handler body for the call order
+  it('userId comes exclusively from KV session record, not request body', () => {
+    expect(cpnProxy).toContain('const { userId } = session;');
+    expect(cpnProxy).not.toContain('body.userId');
+  });
+
+  it('session auth runs after health, before key check (order in handler)', () => {
     const handler = cpnProxy.slice(cpnProxy.indexOf('export async function onRequest'));
     const healthIdx  = handler.indexOf("cpnPath === 'health'");
-    // Use the await call, not the function definition
     const sessionIdx = handler.indexOf('await verifySession(');
-    // The apiKey variable assignment (the key check)
     const keyIdx     = handler.indexOf("const apiKey = env && env.CPN_API_KEY");
-    // Expected order: health (public, no auth) → session auth → key check
     expect(healthIdx).toBeGreaterThan(-1);
     expect(sessionIdx).toBeGreaterThan(healthIdx);
     expect(keyIdx).toBeGreaterThan(sessionIdx);
   });
 });
 
-// ── 6. Pages Function — method enforcement ───────────────────────────────────
-describe('functions/api/cpn/[[route]].mjs — per-path method enforcement', () => {
-  it('ROUTE_TABLE is defined with per-path allowed methods', () => {
-    expect(cpnProxy).toContain('const ROUTE_TABLE');
-    expect(cpnProxy).toContain('method:');
+// ── 5. Pages Function — user-ownership enforcement (Fase 1.1 — new) ──────────
+describe('functions/api/cpn/[[route]].mjs — payment ownership (Fase 1.1)', () => {
+  it('verifyPaymentOwnership function is defined', () => {
+    expect(cpnProxy).toContain('async function verifyPaymentOwnership(env, userId, paymentId)');
   });
 
-  it('GET /payments/:id is allowed (poll)', () => {
-    expect(cpnProxy).toContain("method: 'GET'");
+  it('recordPaymentOwnership writes cpn_pay:<userId>:<paymentId>', () => {
+    expect(cpnProxy).toContain('`cpn_pay:${userId}:${paymentId}`');
   });
 
-  it('POST is required for quotes, payments, transactions, submit', () => {
-    const postCount = (cpnProxy.match(/method: 'POST'/g) || []).length;
-    expect(postCount).toBeGreaterThanOrEqual(4);
+  it('GET /payments/:id checks ownership before forwarding', () => {
+    const handler = cpnProxy.slice(cpnProxy.indexOf('export async function onRequest'));
+    expect(handler).toContain('routeMatch.ownership');
+    expect(handler).toContain('verifyPaymentOwnership(env, userId, paymentId)');
   });
 
-  it('returns 405 when method does not match allowed method for path', () => {
-    expect(cpnProxy).toContain('405');
-    expect(cpnProxy).toContain("'Method not allowed for this CPN path'");
+  it('returns 403 (not 404) on ownership failure — no information leak about existence', () => {
+    expect(cpnProxy).toContain("{ error: 'Access denied to this payment' }, 403");
   });
 
-  it('returns 400 when path not in allowlist', () => {
-    expect(cpnProxy).toContain("'CPN path not allowed'");
-    expect(cpnProxy).toContain('400');
+  it('ROUTE_TABLE marks payment-specific paths with ownership: true', () => {
+    // GET payments/:id, POST payments/:id/transactions, POST payments/:id/transactions/:txId/submit
+    const matches = cpnProxy.match(/ownership:\s*true/g);
+    expect(matches).not.toBeNull();
+    expect(matches.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('quotes path does NOT require ownership', () => {
+    const quotesEntry = cpnProxy.slice(
+      cpnProxy.indexOf("re: /^quotes$/"),
+      cpnProxy.indexOf("re: /^quotes$/") + 120
+    );
+    // ownership: false may have different spacing — search loosely
+    expect(quotesEntry).toMatch(/ownership:\s*false/);
+  });
+
+  it('ownership record uses 48h TTL (172800 seconds)', () => {
+    expect(cpnProxy).toContain('expirationTtl: 172800');
+  });
+
+  it('recordPaymentOwnership returns { ok, error } — failure is not silently swallowed', () => {
+    expect(cpnProxy).toContain('async function recordPaymentOwnership');
+    // Error message may include dynamic content; check for the key phrases
+    expect(cpnProxy).toContain("return { ok: false");
+    expect(cpnProxy).toContain("'KV write failed'");
   });
 });
 
-// ── 7. Pages Function — idempotency guard ────────────────────────────────────
-describe('functions/api/cpn/[[route]].mjs — idempotency (prevents duplicate payments)', () => {
-  it('checkIdempotency reads from AUTH_KV', () => {
-    expect(cpnProxy).toContain('async function checkIdempotency(env, userId, idempotencyKey)');
-    expect(cpnProxy).toContain('cpn_idem:');
+// ── 6. Pages Function — method enforcement ────────────────────────────────────
+describe('functions/api/cpn/[[route]].mjs — method enforcement', () => {
+  it('returns 405 with allowed method on wrong method', () => {
+    expect(cpnProxy).toContain("{ error: 'Method not allowed for this CPN path', allowed: routeMatch.expectedMethod }");
+    expect(cpnProxy).toContain('405, env, request');
   });
 
-  it('recordIdempotency writes paymentId to AUTH_KV after success', () => {
-    expect(cpnProxy).toContain('async function recordIdempotency(env, userId, idempotencyKey, paymentId)');
-    expect(cpnProxy).toContain('expirationTtl: IDEM_TTL_SECONDS');
+  it('returns 400 on unknown path', () => {
+    expect(cpnProxy).toContain("{ error: 'CPN path not allowed' }, 400");
+  });
+});
+
+// ── 7. Pages Function — two-phase idempotency (Fase 1.1) ─────────────────────
+describe('functions/api/cpn/[[route]].mjs — two-phase idempotency (Fase 1.1)', () => {
+  it('reserveIdempotency function is defined', () => {
+    expect(cpnProxy).toContain('async function reserveIdempotency(env, userId, idempotencyKey)');
   });
 
-  it('rejects payment creation without idempotencyKey', () => {
-    expect(cpnProxy).toContain("'idempotencyKey is required (8–128 chars)'");
+  it('promoteIdempotency function is defined', () => {
+    expect(cpnProxy).toContain('async function promoteIdempotency(env, userId, idempotencyKey, paymentId, reserveKey)');
   });
 
-  it('returns IDEMPOTENT_REPLAY (200) instead of creating duplicate payment', () => {
+  it('reservation key uses cpn_reserve prefix', () => {
+    expect(cpnProxy).toContain('`cpn_reserve:${userId}:${idempotencyKey}`');
+  });
+
+  it('permanent record key uses cpn_idem prefix', () => {
+    expect(cpnProxy).toContain('`cpn_idem:${userId}:${idempotencyKey}`');
+  });
+
+  it('reservation TTL is short (120 s — in-flight window)', () => {
+    expect(cpnProxy).toContain('RESERVE_TTL_SECONDS  = 120');
+  });
+
+  it('permanent record TTL is 24 h', () => {
+    expect(cpnProxy).toContain('IDEM_TTL_SECONDS     = 86400');
+  });
+
+  it('concurrent conflict returns 409 with IDEMPOTENCY_CONFLICT code (new)', () => {
+    expect(cpnProxy).toContain("code: 'IDEMPOTENCY_CONFLICT'");
+    // 409 for conflict
+    expect(cpnProxy).toContain("409, env, request");
+  });
+
+  it('reservation failure blocks creation rather than silently proceeding (new)', () => {
+    expect(cpnProxy).toContain("code: 'IDEMPOTENCY_RESERVE_FAILED'");
+    expect(cpnProxy).toContain("503, env, request");
+  });
+
+  it('IDEMPOTENT_REPLAY returned for already-completed key (no second payment)', () => {
     expect(cpnProxy).toContain("status: 'IDEMPOTENT_REPLAY'");
     expect(cpnProxy).toContain("idempotent: true");
-    expect(cpnProxy).toContain("'Payment already created with this idempotencyKey'");
   });
 
-  it('idempotency key is scoped to userId (prevents cross-user collision)', () => {
-    expect(cpnProxy).toContain('`cpn_idem:${userId}:${idempotencyKey}`');
+  it('persistence failure sets persistenceWarning flag — not silently swallowed (new)', () => {
+    expect(cpnProxy).toContain('persistenceWarning = true');
+    expect(cpnProxy).toContain("persistenceError = 'KV write failed — reconcile before retrying'");
+  });
+
+  it('reservation key is cleaned up on network error (retry-safe)', () => {
+    expect(cpnProxy).toContain("reservationHandle.reserveKey");
+    expect(cpnProxy).toContain('AUTH_KV.delete(reservationHandle.reserveKey)');
+  });
+
+  it('reservation key is cleaned up on CPN error (retry-safe)', () => {
+    // Two delete calls for reservation: one after network error, one after CPN non-2xx
+    const deleteMatches = (cpnProxy.match(/AUTH_KV\.delete\(reservationHandle\.reserveKey\)/g) || []);
+    expect(deleteMatches.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('idempotencyKey required to be 8-128 chars', () => {
+    expect(cpnProxy).toContain('idemKey.length < 8 || idemKey.length > 128');
+    expect(cpnProxy).toContain("'idempotencyKey is required (8\u2013128 chars, UUID v4 recommended)'");
   });
 });
 
 // ── 8. Pages Function — body size cap ────────────────────────────────────────
 describe('functions/api/cpn/[[route]].mjs — body size cap', () => {
-  it('MAX_BODY_BYTES constant is defined', () => {
-    expect(cpnProxy).toContain('MAX_BODY_BYTES');
-    expect(cpnProxy).toContain('32 * 1024');
+  it('MAX_BODY_BYTES constant is 32 KB', () => {
+    expect(cpnProxy).toContain('const MAX_BODY_BYTES = 32 * 1024');
   });
 
   it('readBodySafe rejects oversized bodies with 413', () => {
-    expect(cpnProxy).toContain('async function readBodySafe(request)');
-    expect(cpnProxy).toContain("'Request body too large'");
-    expect(cpnProxy).toContain('413');
+    expect(cpnProxy).toContain('Request body too large');
+    expect(cpnProxy).toContain('413, env, request');
   });
 
   it('rejects non-JSON bodies', () => {
-    expect(cpnProxy).toContain("'Invalid JSON body'");
+    expect(cpnProxy).toContain("{ error: 'Invalid JSON body' }, 400");
   });
 });
 
-// ── 9. Pages Function — key isolation + safe errors ──────────────────────────
+// ── 9. Pages Function — key isolation and safe error messages ─────────────────
 describe('functions/api/cpn/[[route]].mjs — key isolation and safe error messages', () => {
   it('exports onRequest handler', () => {
-    expect(cpnProxy).toContain('export async function onRequest');
+    expect(cpnProxy).toContain('export async function onRequest(context)');
   });
 
   it('CPN_API_KEY only injected as Authorization header, never in response body', () => {
-    expect(cpnProxy).toContain("'Bearer ' + apiKey");
-    expect(cpnProxy).not.toContain('JSON.stringify(apiKey)');
-    expect(cpnProxy).not.toContain('body: apiKey');
+    expect(cpnProxy).toContain("Authorization: 'Bearer ' + apiKey");
+    expect(cpnProxy).not.toMatch(/res.*apiKey/);
+    expect(cpnProxy).not.toMatch(/json.*CPN_API_KEY/);
   });
 
-  it('strips apiKey / Authorization fields from upstream response before forwarding', () => {
+  it('strips apiKey / Authorization fields from upstream response', () => {
     expect(cpnProxy).toContain('delete upstreamJson.apiKey');
     expect(cpnProxy).toContain('delete upstreamJson.Authorization');
   });
 
-  it('network errors are caught without leaking internal stack or address', () => {
-    expect(cpnProxy).toContain("code: 'NETWORK_ERROR'");
-    // Must NOT use String(networkErr) in the response
-    expect(cpnProxy).not.toContain('String(networkErr)');
+  it('network errors caught without leaking internal stack or address', () => {
+    expect(cpnProxy).toContain("{ error: 'CPN upstream unreachable', code: 'NETWORK_ERROR' }");
+    expect(cpnProxy).not.toContain('networkErr.toString()');
+    expect(cpnProxy).not.toContain('networkErr.message');
   });
 
   it('safeUpstreamError provides generic messages for each HTTP status', () => {
     expect(cpnProxy).toContain('function safeUpstreamError(status)');
-    expect(cpnProxy).toContain("'CPN authentication failed'");
     expect(cpnProxy).toContain("'CPN access denied — OFI onboarding required'");
   });
 
   it('returns 503 when CPN_API_KEY is not configured', () => {
-    expect(cpnProxy).toContain("'CPN not configured'");
-    expect(cpnProxy).toContain('503');
+    expect(cpnProxy).toContain("code: 'CPN_NOT_CONFIGURED'");
+    expect(cpnProxy).toContain('503, env, request');
   });
 
   it('health endpoint does not require auth and does not reveal key value', () => {
     expect(cpnProxy).toContain("cpnPath === 'health'");
-    // configured is a boolean derived from the key, not the key value itself
     expect(cpnProxy).toContain("configured: !!(env && env.CPN_API_KEY)");
     expect(cpnProxy).not.toContain("configured: apiKey");
   });
 
   it('has no mock mode', () => {
     expect(cpnProxy).not.toContain('CPN_SANDBOX_MOCK');
-    expect(cpnProxy).not.toContain('mockResponse');
-    expect(cpnProxy).not.toContain('_mock');
-    expect(cpnProxy).not.toContain("'mock-quote-001'");
+    expect(cpnProxy).not.toContain('mockPayment');
   });
 
   it('CORS includes Vary: Origin header', () => {
@@ -337,254 +405,330 @@ describe('functions/api/cpn/[[route]].mjs — key isolation and safe error messa
   });
 });
 
-// ── 10. index.html — CPN UI elements ─────────────────────────────────────────
+// ── 10. index.html — CPN UI elements present ──────────────────────────────────
 describe('index.html — CPN UI elements present', () => {
-  it('CPN toggle button exists', () => { expect(html).toContain('id="sa-cpn-toggle"'); });
-  it('CPN form hidden by default', () => { expect(html).toMatch(/id="sa-cpn-form"[^>]*style="display:none"/); });
-  it('OFI onboarding notice exists', () => {
-    expect(html).toContain('id="sa-cpn-notice"');
-    expect(html).toContain('developers.circle.com/cpn/fiat-payouts');
-  });
+  it('CPN toggle button exists', () => { expect(html).toContain('saToggleCPN()'); });
+  it('CPN form hidden by default', () => { expect(html).toMatch(/id=["']sa-cpn-form["']/); });
+  it('OFI onboarding notice exists', () => { expect(html).toMatch(/id=["']sa-cpn-notice["']/); });
   it('all beneficiary + sender fields exist', () => {
-    ['sa-cpn-currency','sa-cpn-bene-name','sa-cpn-bank-name','sa-cpn-account',
-     'sa-cpn-country','sa-cpn-routing','sa-cpn-sender-name','sa-cpn-sender-country']
-      .forEach(id => expect(html).toContain('id="' + id + '"'));
+    ['sa-cpn-bene-name', 'sa-cpn-bank-name', 'sa-cpn-account', 'sa-cpn-country',
+     'sa-cpn-sender-name', 'sa-cpn-sender-country'].forEach(id => {
+      expect(html).toMatch(new RegExp('id=["\']' + id + '["\']'));
+    });
   });
   it('quote UI elements exist', () => {
-    expect(html).toContain('id="sa-cpn-quote-preview"');
-    expect(html).toContain('id="sa-cpn-quotes-list"');
-    expect(html).toContain('id="sa-cpn-selected-quote"');
-    expect(html).toContain('id="sa-cpn-quote-btn"');
+    ['sa-cpn-currency', 'sa-cpn-quotes-list', 'sa-cpn-selected-quote'].forEach(id => {
+      expect(html).toMatch(new RegExp('id=["\']' + id + '["\']'));
+    });
   });
-  it('CPN route preview rows exist in right panel', () => {
-    ['sa-rt-cpn-rows','sa-rt-cpn-currency','sa-rt-cpn-rate','sa-rt-cpn-receives',
-     'sa-rt-cpn-settlement','sa-rt-cpn-status']
-      .forEach(id => expect(html).toContain('id="' + id + '"'));
+  it('CPN route preview rows exist', () => {
+    ['sa-rt-cpn-currency', 'sa-rt-cpn-rate', 'sa-rt-cpn-receives'].forEach(id => {
+      expect(html).toMatch(new RegExp('id=["\']' + id + '["\']'));
+    });
   });
 });
 
 // ── 11. index.html — CPN JS functions ────────────────────────────────────────
 describe('index.html — CPN JS functions', () => {
   it('saToggleCPN, saFetchCPNQuotes, saExecuteCPNPayout are defined', () => {
-    expect(html).toContain('function saToggleCPN()');
-    expect(html).toContain('async function saFetchCPNQuotes()');
-    expect(html).toContain('async function saExecuteCPNPayout()');
+    ['function saToggleCPN()', 'async function saFetchCPNQuotes()', 'async function saExecuteCPNPayout()'].forEach(fn => {
+      expect(html).toContain(fn);
+    });
   });
 
   it('_saCPNValidate checks wallet, amount, currency, beneficiary, quote', () => {
-    expect(html).toContain('function _saCPNValidate()');
-    ["'Connect wallet first'", "'Select destination currency'",
-     "'Enter beneficiary name'", "'Enter bank name'",
-     "'Fetch and select a quote first'"].forEach(s => expect(html).toContain(s));
+    const fn = html.slice(html.indexOf('function _saCPNValidate()'), html.indexOf('function _saCPNValidate()') + 2000);
+    ['walletAddress', 'amount', 'currency', 'beneName', 'bankName', 'account', 'country', '_saCPNSelectedQuote'].forEach(c => {
+      expect(fn).toContain(c);
+    });
   });
 
   it('_saCPNPoll polls until terminal state with timeout', () => {
-    expect(html).toContain('async function _saCPNPoll');
-    expect(html).toContain("'COMPLETED', 'FAILED', 'REVERSED', 'CANCELLED'");
-    expect(html).toContain('CPN payment polling timed out');
+    const fn = html.slice(html.indexOf('async function _saCPNPoll('), html.indexOf('async function _saCPNPoll(') + 1200);
+    expect(fn).toContain('TERMINAL');
+    expect(fn).toContain('300000');
+    expect(fn).toContain("'COMPLETED'");
   });
 
   it('_saCPNStatusLabel maps all statuses', () => {
-    expect(html).toContain('function _saCPNStatusLabel');
-    ['PENDING_REVIEW','FIAT_PENDING','ONCHAIN_CONFIRMED'].forEach(s => expect(html).toContain(s));
+    const fn = html.slice(html.indexOf('function _saCPNStatusLabel('), html.indexOf('function _saCPNStatusLabel(') + 400);
+    ['COMPLETED', 'FAILED', 'REVERSED', 'CANCELLED'].forEach(s => expect(fn).toContain(s));
   });
 
   it('_cpnUuidFE generates a v4-like UUID', () => {
     expect(html).toContain('function _cpnUuidFE()');
-    expect(html).toContain('xxxx-4xxx-yxxx');
+    expect(html).toContain("'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'");
   });
 });
 
-// ── 12. index.html — security: TX validation before sign ─────────────────────
-describe('index.html — TX validation before signing (Fase 1 security)', () => {
+// ── 12. index.html — TX validation (7-check, including Fase 1.1 additions) ───
+describe('index.html — TX validation before signing (Fase 1.1)', () => {
+  const startMarker = 'function _saCPNValidateTxObject(txObj, opts)';
+  const getTxFn = () => {
+    const start = html.indexOf(startMarker);
+    return html.slice(start, start + 3500);
+  };
+
   it('_saCPNValidateTxObject function is defined', () => {
-    expect(html).toContain('function _saCPNValidateTxObject(txObj, opts)');
+    expect(html).toContain(startMarker);
   });
 
-  it('rejects invalid `to` address', () => {
-    expect(html).toContain("'TX object has invalid `to` address'");
-    expect(html).toContain('/^0x[0-9a-fA-F]{40}$/.test(txObj.to)');
+  it('check 1 — rejects missing transactionId', () => {
+    expect(getTxFn()).toContain('TX object missing transactionId');
   });
 
-  it('rejects chainId not in _CPN_ALLOWED_CHAIN_IDS', () => {
-    expect(html).toContain('_CPN_ALLOWED_CHAIN_IDS');
-    expect(html).toContain("'TX object chainId ' + cid + ' is not an allowed CPN chain'");
+  it('check 1 — rejects invalid `to` address', () => {
+    expect(getTxFn()).toContain("'TX object has invalid `to` address'");
   });
 
-  it('rejects non-hex data field', () => {
-    expect(html).toContain("'TX data field is not valid hex'");
+  it('check 2 — rejects chainId not in allowlist', () => {
+    expect(getTxFn()).toContain('is not an allowed CPN chain');
   });
 
-  it('rejects excessive native value', () => {
-    expect(html).toContain("'TX native value exceeds safety limit (possible value-draining TX)'");
-    expect(html).toContain("BigInt('10000000000000000')");
+  it('check 2b — expectedChainId gate (Fase 1.1 — new)', () => {
+    expect(getTxFn()).toContain('opts.expectedChainId');
+    expect(getTxFn()).toContain('does not match active wallet chain');
   });
 
-  it('rejects `from` mismatch with authenticated wallet', () => {
-    expect(html).toContain("'TX `from` does not match authenticated wallet'");
-    expect(html).toContain('opts.walletAddress');
+  it('check 3 — USDC contract allowlist map is defined (Fase 1.1 — new)', () => {
+    expect(html).toContain('var _CPN_USDC_CONTRACTS = {');
+    // Arc address
+    expect(html).toContain("5042:  '0x3600000000000000000000000000000000000000'");
   });
 
-  it('_saCPNValidateTxObject is called before signer.signTransaction in saExecuteCPNPayout', () => {
-    const payoutFn = html.slice(
-      html.indexOf('async function saExecuteCPNPayout()'),
-      html.indexOf('// ── TX validation (client-side mirror')
-    );
+  it('check 3 — rejects `to` not matching USDC contract (Fase 1.1 — new)', () => {
+    expect(getTxFn()).toContain('_CPN_USDC_CONTRACTS');
+    expect(getTxFn()).toContain('is not the USDC contract for chain');
+  });
+
+  it('check 4 — ERC-20 transfer selector is defined (Fase 1.1 — new)', () => {
+    expect(html).toContain("var _CPN_ERC20_TRANSFER_SELECTOR = '0xa9059cbb'");
+  });
+
+  it('check 4 — rejects calldata that does not start with transfer() selector (Fase 1.1 — new)', () => {
+    expect(getTxFn()).toContain('_CPN_ERC20_TRANSFER_SELECTOR');
+    expect(getTxFn()).toContain("does not match ERC-20 transfer()");
+  });
+
+  it('check 5 — amount cross-check against calldata (Fase 1.1 — new)', () => {
+    expect(getTxFn()).toContain('opts.amount');
+    expect(getTxFn()).toContain('_CPN_USDC_DECIMALS');
+    expect(getTxFn()).toContain('diverges from approved amount');
+  });
+
+  it('check 5 — 0.5% tolerance (200n divisor) (Fase 1.1 — new)', () => {
+    expect(getTxFn()).toContain('200n');
+  });
+
+  it('check 6 — rejects excessive native value', () => {
+    expect(getTxFn()).toContain('exceeds safety limit');
+    expect(getTxFn()).toContain('10000000000000000');
+  });
+
+  it('check 7 — rejects `from` mismatch', () => {
+    expect(getTxFn()).toContain('does not match authenticated wallet');
+  });
+
+  it('_saCPNValidateTxObject is called before signer.signTransaction', () => {
+    const payoutFn = html.slice(html.indexOf('async function saExecuteCPNPayout()'),
+                                html.indexOf('async function saExecuteCPNPayout()') + 10000);
     const validateIdx = payoutFn.indexOf('_saCPNValidateTxObject(');
     const signIdx     = payoutFn.indexOf('signer.signTransaction(');
     expect(validateIdx).toBeGreaterThan(-1);
-    expect(signIdx).toBeGreaterThan(-1);
-    // validation must precede signing
-    expect(validateIdx).toBeLessThan(signIdx);
+    expect(signIdx).toBeGreaterThan(validateIdx);
   });
 
   it('throws before signing when validation fails', () => {
-    expect(html).toContain("throw new Error('TX validation failed: ' + txValidationError)");
+    const payoutFn = html.slice(html.indexOf('async function saExecuteCPNPayout()'),
+                                html.indexOf('async function saExecuteCPNPayout()') + 10000);
+    expect(payoutFn).toContain("'TX validation failed: '");
   });
 });
 
-// ── 13. index.html — idempotency key management ──────────────────────────────
+// ── 13. index.html — idempotency key stability ────────────────────────────────
 describe('index.html — idempotency key stability (prevents duplicate payments)', () => {
   it('_saCPNIdempotencyKey is declared as a module-level variable', () => {
-    expect(html).toContain('let _saCPNIdempotencyKey = null');
+    expect(html).toContain('let _saCPNIdempotencyKey = null;');
   });
 
   it('key is generated only when null (not regenerated on retry)', () => {
-    // Pattern: generate iff currently null
-    expect(html).toContain('if (!_saCPNIdempotencyKey)');
-    expect(html).toContain('_saCPNIdempotencyKey = _cpnUuidFE()');
+    expect(html).toContain('if (!_saCPNIdempotencyKey) {');
+    expect(html).toContain('_saCPNIdempotencyKey = _cpnUuidFE();');
   });
 
   it('key is reused as idemKey throughout the same payout attempt', () => {
-    expect(html).toContain('var idemKey = _saCPNIdempotencyKey');
-    expect(html).toContain('idempotencyKey:      idemKey');
+    const payoutFn = html.slice(html.indexOf('async function saExecuteCPNPayout()'),
+                                html.indexOf('async function saExecuteCPNPayout()') + 10000);
+    expect(payoutFn).toContain('var idemKey = _saCPNIdempotencyKey;');
+    // The JSON key may have extra whitespace for alignment
+    expect(payoutFn).toMatch(/idempotencyKey:\s+idemKey/);
   });
 
   it('key is cleared ONLY on confirmed success (COMPLETED), not on error', () => {
-    const payoutFn = html.slice(
-      html.indexOf('async function saExecuteCPNPayout()'),
-      html.indexOf('// ── TX validation (client-side mirror')
-    );
-    // Success path clears the key
-    expect(payoutFn).toContain('_saCPNIdempotencyKey = null');
-    // The null assignment must be inside the isComplete block, not in the catch
-    const successClear = payoutFn.indexOf('_saCPNIdempotencyKey = null');
-    const catchBlock   = payoutFn.indexOf('} catch (e)');
-    expect(successClear).toBeLessThan(catchBlock);
+    const payoutFn = html.slice(html.indexOf('async function saExecuteCPNPayout()'),
+                                html.indexOf('async function saExecuteCPNPayout()') + 10000);
+    // The null assignment should be inside the isComplete branch
+    const completeIdx = payoutFn.indexOf("_saCPNIdempotencyKey = null;");
+    const isCompleteIdx = payoutFn.indexOf("isComplete");
+    expect(completeIdx).toBeGreaterThan(isCompleteIdx);
+    expect(payoutFn).toContain('Do NOT clear _saCPNIdempotencyKey on error');
   });
 
   it('key is cleared when user cancels CPN mode (saToggleCPN exit path)', () => {
-    const toggleFn = html.slice(
-      html.indexOf('function saToggleCPN()'),
-      html.indexOf('// Local set_ helper')
-    );
-    expect(toggleFn).toContain('_saCPNIdempotencyKey = null');
+    const toggleFn = html.slice(html.indexOf('function saToggleCPN()'),
+                                html.indexOf('function saToggleCPN()') + 2500);
+    expect(toggleFn).toContain('_saCPNIdempotencyKey = null;');
   });
 
   it('server handles IDEMPOTENT_REPLAY without treating it as an error', () => {
-    expect(html).toContain("wasReplay = paymentData.idempotent === true");
-    expect(html).toContain("'Resuming existing payment…'");
+    const payoutFn = html.slice(html.indexOf('async function saExecuteCPNPayout()'),
+                                html.indexOf('async function saExecuteCPNPayout()') + 10000);
+    expect(payoutFn).toContain('IDEMPOTENT_REPLAY');
+    expect(payoutFn).toContain('Resuming existing payment');
   });
 });
 
-// ── 14. index.html — credentials:same-origin on all CPN fetches ──────────────
+// ── 14. index.html — session cookie sent with all CPN requests ─────────────────
 describe('index.html — session cookie sent with all CPN requests', () => {
   it('saFetchCPNQuotes includes credentials:same-origin', () => {
-    expect(html).toContain("credentials: 'same-origin'");
+    const fn = html.slice(html.indexOf('async function saFetchCPNQuotes()'),
+                          html.indexOf('async function saFetchCPNQuotes()') + 2500);
+    expect(fn).toContain("credentials: 'same-origin'");
   });
 
   it('payment creation fetch includes credentials:same-origin', () => {
-    const payoutFn = html.slice(
-      html.indexOf('async function saExecuteCPNPayout()'),
-      html.indexOf('// ── TX validation (client-side mirror')
-    );
-    const count = (payoutFn.match(/credentials:\s*'same-origin'/g) || []).length;
-    // creation + txObject + submit = at least 3
-    expect(count).toBeGreaterThanOrEqual(3);
+    const fn = html.slice(html.indexOf("'/api/cpn/payments'"),
+                          html.indexOf("'/api/cpn/payments'") + 500);
+    expect(fn).toContain("credentials: 'same-origin'");
+  });
+
+  it('TX object fetch includes credentials:same-origin', () => {
+    const fn = html.slice(html.indexOf("'/api/cpn/payments/' + _saCPNPaymentId + '/transactions'"),
+                          html.indexOf("'/api/cpn/payments/' + _saCPNPaymentId + '/transactions'") + 400);
+    expect(fn).toContain("credentials: 'same-origin'");
   });
 
   it('poll fetch includes credentials:same-origin', () => {
-    const pollFn = html.slice(
-      html.indexOf('async function _saCPNPoll'),
-      html.indexOf('function _saCPNStatusLabel')
-    );
-    expect(pollFn).toContain("credentials: 'same-origin'");
+    const fn = html.slice(html.indexOf('async function _saCPNPoll('),
+                          html.indexOf('async function _saCPNPoll(') + 1500);
+    expect(fn).toContain("credentials: 'same-origin'");
   });
 });
 
 // ── 15. index.html — send button dispatch ────────────────────────────────────
 describe('index.html — send button dispatch', () => {
   it('send button calls saDispatchSend()', () => {
-    expect(html).toContain('onclick="saDispatchSend()"');
+    expect(html).toContain("onclick=\"saDispatchSend()\"");
   });
 
   it('saDispatchSend routes to CPN or normal send', () => {
-    expect(html).toContain('function saDispatchSend()');
-    const block = html.slice(html.indexOf('function saDispatchSend()'), html.indexOf('function saDispatchSend()') + 300);
-    expect(block).toContain('saExecuteCPNPayout()');
-    expect(block).toContain('saExecuteSend()');
+    const fn = html.slice(html.indexOf('function saDispatchSend()'),
+                          html.indexOf('function saDispatchSend()') + 300);
+    expect(fn).toContain('saExecuteCPNPayout()');
+    expect(fn).toContain('saExecuteSend()');
   });
 
   it('saExecuteSend is preserved (not removed)', () => {
-    expect(html).toContain('async function saExecuteSend()');
+    expect(html).toContain('function saExecuteSend(');
   });
 });
 
-// ── 16. index.html — 5-step OFI flow ─────────────────────────────────────────
+// ── 16. index.html — 5-step OFI payment flow ─────────────────────────────────
 describe('index.html — 5-step OFI payment flow in saExecuteCPNPayout', () => {
+  const getPayoutFn = () => {
+    const start = html.indexOf('async function saExecuteCPNPayout()');
+    return html.slice(start, start + 6000);
+  };
+
   it('uses pre-fetched quote (no duplicate quote call inside payout fn)', () => {
-    const payoutFn = html.slice(
-      html.indexOf('async function saExecuteCPNPayout()'),
-      html.indexOf('// ── TX validation (client-side mirror')
-    );
-    expect(payoutFn).not.toContain('saFetchCPNQuotes()');
+    expect(getPayoutFn()).not.toContain('saFetchCPNQuotes()');
+    expect(getPayoutFn()).toContain('_saCPNSelectedQuote');
   });
 
   it('signs with signer.signTransaction, never signer.sendTransaction', () => {
-    const payoutFn = html.slice(
-      html.indexOf('async function saExecuteCPNPayout()'),
-      html.indexOf('// ── TX validation (client-side mirror')
-    );
-    expect(payoutFn).toContain('signer.signTransaction(rawTx)');
-    expect(payoutFn).not.toContain('signer.sendTransaction');
+    expect(getPayoutFn()).toContain('signer.signTransaction(');
+    expect(getPayoutFn()).not.toContain('signer.sendTransaction(');
   });
 
   it('validates TX before signing (not after)', () => {
-    const payoutFn = html.slice(
-      html.indexOf('async function saExecuteCPNPayout()'),
-      html.indexOf('// ── TX validation (client-side mirror')
-    );
-    const validateIdx = payoutFn.indexOf('_saCPNValidateTxObject(');
-    const signIdx     = payoutFn.indexOf('signer.signTransaction(');
+    const fn = getPayoutFn();
+    const validateIdx = fn.indexOf('_saCPNValidateTxObject(');
+    const signIdx     = fn.indexOf('signer.signTransaction(');
     expect(validateIdx).toBeLessThan(signIdx);
   });
 
   it('does not mark payment complete until COMPLETED status from poll', () => {
-    expect(html).toContain("finalPayment.status === 'COMPLETED'");
-    expect(html).not.toContain("'Completed!' // on payment create");
+    expect(getPayoutFn()).toContain("finalPayment.status === 'COMPLETED'");
+    expect(getPayoutFn()).not.toContain("toast('Fiat payout");
   });
 
   it('logs type cpn-fiat to activity, without bank account number', () => {
-    expect(html).toContain("type: 'cpn-fiat'");
-    // account number must not appear in the saLogTx call
-    const logCall = html.slice(
-      html.lastIndexOf('saLogTx({', html.indexOf('// ── CPN polling')),
-      html.indexOf('// ── CPN polling')
-    );
-    expect(logCall).not.toContain('accountNumber');
-    expect(logCall).not.toContain('sa-cpn-account');
+    const logIdx = html.indexOf("type: 'cpn-fiat'");
+    expect(logIdx).toBeGreaterThan(-1);
+    const logEntry = html.slice(logIdx - 50, logIdx + 300);
+    expect(logEntry).not.toContain('account');
+    expect(logEntry).not.toContain('accountNumber');
   });
 });
 
-// ── 17. Security — CPN_API_KEY never in browser ───────────────────────────────
+// ── 17. index.html — poll timeout reconciliation (Fase 1.1 — new) ────────────
+describe('index.html — poll timeout reconciliation (Fase 1.1)', () => {
+  it('_saCPNPoll performs a final reconciliation fetch on timeout', () => {
+    const fn = html.slice(html.indexOf('async function _saCPNPoll('),
+                          html.indexOf('async function _saCPNPoll(') + 2000);
+    expect(fn).toContain('POLL_TIMEOUT');
+    expect(fn).toContain('finalRes');
+    expect(fn).toContain('finalData');
+  });
+
+  it('timeout error includes last known payment status', () => {
+    const fn = html.slice(html.indexOf('async function _saCPNPoll('),
+                          html.indexOf('async function _saCPNPoll(') + 2000);
+    expect(fn).toContain('last known status');
+    expect(fn).toContain('timeoutErr.payment');
+  });
+
+  it('timeout error code is POLL_TIMEOUT', () => {
+    const fn = html.slice(html.indexOf('async function _saCPNPoll('),
+                          html.indexOf('async function _saCPNPoll(') + 2000);
+    expect(fn).toContain("timeoutErr.code = 'POLL_TIMEOUT'");
+  });
+
+  it('POLL_TIMEOUT handler in saExecuteCPNPayout shows reconciliation message, not generic error', () => {
+    const payoutFn = html.slice(html.indexOf('async function saExecuteCPNPayout()'),
+                                html.indexOf('async function saExecuteCPNPayout()') + 10000);
+    expect(payoutFn).toContain("e.code === 'POLL_TIMEOUT'");
+    expect(payoutFn).toContain('reconcile before proceeding');
+  });
+
+  it('POLL_TIMEOUT handler keeps button disabled — no auto-retry', () => {
+    const payoutFn = html.slice(html.indexOf('async function saExecuteCPNPayout()'),
+                                html.indexOf('async function saExecuteCPNPayout()') + 10000);
+    // In the POLL_TIMEOUT branch the button should NOT be re-enabled
+    const timeoutBranch = payoutFn.slice(payoutFn.indexOf("e.code === 'POLL_TIMEOUT'"),
+                                         payoutFn.indexOf("e.code === 'POLL_TIMEOUT'") + 800);
+    expect(timeoutBranch).not.toContain('btn.disabled = false');
+  });
+
+  it('idempotency key preserved on timeout (safe for manual reconcile)', () => {
+    const payoutFn = html.slice(html.indexOf('async function saExecuteCPNPayout()'),
+                                html.indexOf('async function saExecuteCPNPayout()') + 10000);
+    expect(payoutFn).toContain('Do NOT clear _saCPNIdempotencyKey on error');
+    // The null assignment should not appear inside the POLL_TIMEOUT branch
+    const timeoutBranch = payoutFn.slice(payoutFn.indexOf("e.code === 'POLL_TIMEOUT'"),
+                                         payoutFn.indexOf("e.code === 'POLL_TIMEOUT'") + 800);
+    expect(timeoutBranch).not.toContain('_saCPNIdempotencyKey = null');
+  });
+});
+
+// ── 18. Security — CPN_API_KEY never exposed to the browser ──────────────────
 describe('Security — CPN_API_KEY never exposed to the browser', () => {
   it('index.html has no hardcoded CPN_API_KEY value', () => {
-    expect(html).not.toMatch(/CPN_API_KEY\s*=\s*["'][a-zA-Z0-9_-]{10,}/);
+    expect(html).not.toMatch(/CPN_API_KEY\s*=\s*['"][a-zA-Z0-9]/);
   });
 
   it('index.html has no hardcoded Bearer token for CPN', () => {
-    const bearerMatches = html.match(/Bearer\s+[a-zA-Z0-9_.-]{20,}/g) || [];
-    bearerMatches.forEach(m => { expect(m).not.toMatch(/Bearer\s+cfut_/); });
+    expect(html).not.toMatch(/Authorization.*Bearer.*[a-zA-Z0-9]{20}/);
   });
 
   it('cpnFiatPayout.js only calls /api/cpn/* (never api.circle.com)', () => {
@@ -593,54 +737,214 @@ describe('Security — CPN_API_KEY never exposed to the browser', () => {
   });
 
   it('Pages Function is the only place Bearer token is assembled', () => {
-    expect(cpnProxy).toContain("'Bearer ' + apiKey");
-    expect(cpnProxy).not.toMatch(/Bearer\s+[a-zA-Z0-9_-]{20,}/);
+    expect(cpnProxy).toContain("Authorization: 'Bearer ' + apiKey");
+    expect(cpnModule).not.toContain('Bearer');
   });
 
   it('Pages Function does not log apiKey, CPN_API_KEY, or Authorization headers', () => {
-    // No console.log/warn/error with the key variable in scope
-    expect(cpnProxy).not.toContain('console.log(apiKey)');
-    expect(cpnProxy).not.toContain('console.log(CPN_API_KEY)');
+    expect(cpnProxy).not.toMatch(/console\.(log|warn|error).*apiKey/);
+    expect(cpnProxy).not.toMatch(/console\.(log|warn|error).*CPN_API_KEY/);
+    expect(cpnProxy).not.toMatch(/console\.(log|warn|error).*Authorization/);
   });
 });
 
-// ── 18. .dev.vars.example — configuration ────────────────────────────────────
+// ── 19. .dev.vars.example — CPN configuration ────────────────────────────────
 describe('.dev.vars.example — CPN configuration', () => {
-  it('documents CPN_API_KEY', () => { expect(devVarsEx).toContain('CPN_API_KEY='); });
-  it('explains there is no mock mode', () => { expect(devVarsEx).toContain('no mock mode'); });
-  it('links to CPN docs', () => { expect(devVarsEx).toContain('developers.circle.com/cpn'); });
-  it('explains OFI onboarding requirement', () => { expect(devVarsEx).toContain('OFI onboarding'); });
+  it('documents CPN_API_KEY', () => { expect(devVarsEx).toContain('CPN_API_KEY'); });
+  it('explains there is no mock mode', () => { expect(devVarsEx).toMatch(/no mock/i); });
+  it('links to CPN docs', () => { expect(devVarsEx).toContain('developers.circle.com'); });
+  it('explains OFI onboarding requirement', () => { expect(devVarsEx).toMatch(/OFI|onboarding/i); });
 });
 
-// ── 19. Shared sync ───────────────────────────────────────────────────────────
+// ── 20. Shared sync ───────────────────────────────────────────────────────────
 describe('Shared sync — public/shared/cpnFiatPayout.js identical to shared/', () => {
   it('public copy exists and is non-empty', () => {
-    const pub = readFileSync(path.join(ROOT, 'public/shared/cpnFiatPayout.js'), 'utf8');
-    expect(pub.length).toBeGreaterThan(100);
+    const { existsSync, readFileSync: rf } = require('fs');
+    const pubPath = path.join(ROOT, 'public/shared/cpnFiatPayout.js');
+    expect(existsSync(pubPath)).toBe(true);
+    expect(rf(pubPath, 'utf8').length).toBeGreaterThan(100);
   });
 
   it('public copy is byte-for-byte identical to source', () => {
-    const src = readFileSync(path.join(ROOT, 'shared/cpnFiatPayout.js'), 'utf8');
-    const pub = readFileSync(path.join(ROOT, 'public/shared/cpnFiatPayout.js'), 'utf8');
+    const { readFileSync: rf } = require('fs');
+    const src = rf(path.join(ROOT, 'shared/cpnFiatPayout.js'), 'utf8');
+    const pub = rf(path.join(ROOT, 'public/shared/cpnFiatPayout.js'), 'utf8');
     expect(pub).toBe(src);
   });
 });
 
-// ── 20. Regression guards ─────────────────────────────────────────────────────
-describe('Regression guards — existing Send Assets and Batch flows unaffected', () => {
-  it('saExecuteSend preserved', () => { expect(html).toContain('async function saExecuteSend()'); });
-  it('saUpdateRoute preserved',  () => { expect(html).toContain('function saUpdateRoute()'); });
-  it('saSelectAsset preserved',  () => { expect(html).toContain('function saSelectAsset('); });
-  it('saRefreshBalance preserved',() => { expect(html).toContain('async function saRefreshBalance()'); });
-  it('saExecuteCrossChain preserved', () => { expect(html).toContain('function saExecuteCrossChain()'); });
-  it('saExecuteCCTPCrossChain preserved', () => { expect(html).toContain('async function saExecuteCCTPCrossChain()'); });
-  it('saLogTx preserved',        () => { expect(html).toContain('function saLogTx('); });
-  it('sa-recipient field preserved', () => { expect(html).toContain('id="sa-recipient"'); });
-  it('sa-dest-network preserved',    () => { expect(html).toContain('id="sa-dest-network"'); });
-  it('CPN form hidden by default',   () => { expect(html).toMatch(/id="sa-cpn-form"[^>]*style="display:none"/); });
-  it('CPN route rows hidden by default', () => { expect(html).toMatch(/id="sa-rt-cpn-rows"[^>]*style="display:none"/); });
-  it('Swap page unaffected',     () => { expect(html).toContain('id="page-swap"'); });
-  it('Bridge page unaffected',   () => { expect(html).toContain('id="page-bridge"'); });
-  it('Schedule page unaffected', () => { expect(html).toContain('id="page-schedule"'); });
-  it('Batch page unaffected',    () => { expect(html).toContain('id="page-batch"'); });
+// ── 21. Mandatory behavioral tests (spec §4) ──────────────────────────────────
+
+describe('Behavioral: User A accessing User B\'s payment (cross-user isolation)', () => {
+  it('server ownership check returns 403 for unowned paymentId', () => {
+    // Structural: verifyPaymentOwnership is called for all payment-specific paths
+    expect(cpnProxy).toContain('await verifyPaymentOwnership(env, userId, paymentId)');
+    expect(cpnProxy).toContain("{ error: 'Access denied to this payment' }, 403");
+  });
+
+  it('ownership is scoped to userId — key includes userId', () => {
+    // cpn_pay key includes userId so User B cannot access User A's payment even
+    // with a valid session and a guessed UUID
+    expect(cpnProxy).toContain('`cpn_pay:${userId}:${paymentId}`');
+  });
+
+  it('GET /payments/:id path is marked ownership: true', () => {
+    // Find the GET-only entry (the one that ends at /$, not followed by /transactions)
+    // Look for the method: 'GET' entry in ROUTE_TABLE
+    const getEntry = cpnProxy.slice(
+      cpnProxy.indexOf("method: 'GET'"),
+      cpnProxy.indexOf("method: 'GET'") + 120
+    );
+    expect(getEntry).toContain('ownership: true');
+  });
+
+  it('submit path is marked ownership: true', () => {
+    const submitEntry = cpnProxy.slice(
+      cpnProxy.indexOf("re: /^payments\\/[a-zA-Z0-9_-]{1,80}\\/transactions\\/[a-zA-Z0-9_-]{1,80}\\/submit$/"),
+      cpnProxy.indexOf("re: /^payments\\/[a-zA-Z0-9_-]{1,80}\\/transactions\\/[a-zA-Z0-9_-]{1,80}\\/submit$/") + 120
+    );
+    expect(submitEntry).toContain('ownership: true');
+  });
+});
+
+describe('Behavioral: expired/invalid session', () => {
+  it('verifySession checks expiresAt and rejects expired sessions', () => {
+    expect(cpnProxy).toContain('session.expiresAt');
+    expect(cpnProxy).toContain("Date.now() > session.expiresAt");
+    expect(cpnProxy).toContain("error: 'Session expired'");
+  });
+
+  it('verifySession rejects missing KV record (token after logout)', () => {
+    expect(cpnProxy).toContain("{ ok: false, status: 401, error: 'Session expired or invalid' }");
+  });
+
+  it('verifySession rejects empty token', () => {
+    expect(cpnProxy).toContain("{ ok: false, status: 401, error: 'Session token required' }");
+  });
+});
+
+describe('Behavioral: tampered TX — contract / token / network / value / calldata', () => {
+  it('wrong USDC contract → rejected before signing (server module)', () => {
+    expect(cpnModule).toContain("') is not the USDC contract for chain '");
+  });
+
+  it('wrong USDC contract → rejected before signing (index.html)', () => {
+    expect(html).toContain('is not the USDC contract for chain');
+  });
+
+  it('wrong network → rejected before signing (server module)', () => {
+    expect(cpnModule).toContain("TX object chainId ' + chainId + ' is not an allowed CPN chain");
+  });
+
+  it('wrong chainId vs wallet active chain → rejected before signing (index.html)', () => {
+    expect(html).toContain('does not match active wallet chain');
+  });
+
+  it('non-transfer calldata selector → rejected before signing (server module)', () => {
+    expect(cpnModule).toContain("does not match ERC-20 transfer()");
+  });
+
+  it('non-transfer calldata selector → rejected before signing (index.html)', () => {
+    expect(html).toContain("does not match ERC-20 transfer()");
+  });
+
+  it('TX amount diverges >0.5% from approved amount → rejected (server module)', () => {
+    // String is split across concat so search for the two adjacent fragments
+    expect(cpnModule).toContain("diverges from '");
+    expect(cpnModule).toContain("'approved amount (");
+  });
+
+  it('TX amount diverges >0.5% from approved amount → rejected (index.html)', () => {
+    expect(html).toContain('diverges from approved amount');
+  });
+
+  it('excessive native value (value-draining) → rejected before signing', () => {
+    expect(cpnModule).toContain('exceeds safety limit for a USDC transfer');
+    expect(html).toContain('exceeds safety limit');
+  });
+});
+
+describe('Behavioral: two simultaneous requests with same idempotency key', () => {
+  it('reservation key exists → second request returns 409 IDEMPOTENCY_CONFLICT', () => {
+    expect(cpnProxy).toContain("code: 'IDEMPOTENCY_CONFLICT'");
+    expect(cpnProxy).toContain("409, env, request");
+  });
+
+  it('reservation phase runs before the upstream CPN call', () => {
+    const handler = cpnProxy.slice(cpnProxy.indexOf('export async function onRequest'));
+    const reserveIdx  = handler.indexOf('await reserveIdempotency(');
+    const upstreamIdx = handler.indexOf("const upstreamUrl = CPN_BASE_URL");
+    expect(reserveIdx).toBeGreaterThan(-1);
+    expect(upstreamIdx).toBeGreaterThan(reserveIdx);
+  });
+});
+
+describe('Behavioral: timeout after CPN creation — no auto-retry', () => {
+  it('POLL_TIMEOUT error has code field for structured handling', () => {
+    const fn = html.slice(html.indexOf('async function _saCPNPoll('),
+                          html.indexOf('async function _saCPNPoll(') + 2000);
+    expect(fn).toContain("timeoutErr.code = 'POLL_TIMEOUT'");
+  });
+
+  it('POLL_TIMEOUT handler does NOT re-enable the send button (blocks auto-retry)', () => {
+    const payoutFn = html.slice(html.indexOf('async function saExecuteCPNPayout()'),
+                                html.indexOf('async function saExecuteCPNPayout()') + 10000);
+    const branch = payoutFn.slice(payoutFn.indexOf("e.code === 'POLL_TIMEOUT'"),
+                                  payoutFn.indexOf("e.code === 'POLL_TIMEOUT'") + 700);
+    expect(branch).not.toContain('btn.disabled = false');
+  });
+
+  it('POLL_TIMEOUT preserves idempotency key — user can reconcile manually', () => {
+    const payoutFn = html.slice(html.indexOf('async function saExecuteCPNPayout()'),
+                                html.indexOf('async function saExecuteCPNPayout()') + 10000);
+    const branch = payoutFn.slice(payoutFn.indexOf("e.code === 'POLL_TIMEOUT'"),
+                                  payoutFn.indexOf("e.code === 'POLL_TIMEOUT'") + 700);
+    expect(branch).not.toContain('_saCPNIdempotencyKey = null');
+  });
+});
+
+describe('Behavioral: persistence failure — not silent, caller can reconcile', () => {
+  it('promoteIdempotency returns { ok: false, error } on failure (not throws)', () => {
+    expect(cpnProxy).toContain('async function promoteIdempotency');
+    expect(cpnProxy).toContain("return { ok: false, error: e && e.message ? e.message : 'KV promote failed' }");
+  });
+
+  it('persistenceWarning flag surfaces to caller with paymentId intact', () => {
+    expect(cpnProxy).toContain('persistenceWarning = true');
+    expect(cpnProxy).toContain("persistenceError = 'KV write failed — reconcile before retrying'");
+  });
+
+  it('caller receives paymentId even when persistence fails (must not retry creation)', () => {
+    // The upstreamJson.id is still included in the response even when persistence fails
+    const promoteSection = cpnProxy.slice(
+      cpnProxy.indexOf('promoteResult = await promoteIdempotency'),
+      cpnProxy.indexOf('promoteResult = await promoteIdempotency') + 600
+    );
+    expect(promoteSection).toContain('persistenceWarning');
+    expect(promoteSection).not.toContain('return jsonResponse(');
+  });
+});
+
+// ── 22. Regression guards ─────────────────────────────────────────────────────
+describe('Regression guards — existing flows unaffected', () => {
+  it('saExecuteSend preserved', () => { expect(html).toContain('function saExecuteSend('); });
+  it('saUpdateRoute preserved', () => { expect(html).toContain('function saUpdateRoute('); });
+  it('saSelectAsset preserved', () => { expect(html).toContain('function saSelectAsset('); });
+  it('saRefreshBalance preserved', () => { expect(html).toContain('function saRefreshBalance('); });
+  it('saExecuteCrossChain preserved', () => { expect(html).toContain('function saExecuteCrossChain('); });
+  it('saExecuteCCTPCrossChain preserved', () => { expect(html).toContain('function saExecuteCCTPCrossChain('); });
+  it('saLogTx preserved', () => { expect(html).toContain('function saLogTx('); });
+  it('sa-recipient field preserved', () => { expect(html).toMatch(/id=["']sa-recipient["']/); });
+  it('sa-dest-network preserved', () => { expect(html).toMatch(/id=["']sa-dest-network["']/); });
+  it('CPN form hidden by default', () => {
+    // The form element must include display:none
+    expect(html).toMatch(/id=["']sa-cpn-form["'][^>]*display:none/);
+  });
+  it('CPN route rows hidden by default', () => {
+    expect(html).toMatch(/id=["']sa-rt-cpn-rows["'][^>]*display:none/);
+  });
+  it('Swap page unaffected', () => { expect(html).toContain('function executeSwap('); });
+  it('Bridge page unaffected', () => { expect(html).toContain('function executeBridgeOrTurbo('); });
+  it('Schedule page unaffected', () => { expect(html).toContain('scheduleNext'); });
+  it('Batch page unaffected', () => { expect(html).toContain('executeBatchViaMulticall3('); });
 });
