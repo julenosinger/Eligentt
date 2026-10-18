@@ -37,6 +37,7 @@
  *   session:<token>                → { userId, email, walletAddress, createdAt } (TTL 86400 s)
  *   cpn_reserve:<userId>:<idemKey> → "<requestId>:<payloadHash>" (reservation — short TTL)
  *   cpn_idem:<userId>:<idemKey>    → { paymentId, createdAt, payloadHash } (permanent record)
+ *   cpn_pending:<userId>:<idemKey> → { status:'PENDING_RECONCILIATION', payloadHash, requestId } (24 h)
  *   cpn_pay:<userId>:<paymentId>   → "1" (ownership record — 48 h TTL)
  *
  * Session expiry: login.js writes { createdAt, expirationTtl: 86400 } — there is NO expiresAt
@@ -268,12 +269,27 @@ function generateRequestId() {
  *   account-level provisioning). This limitation is documented and not silently claimed
  *   as solved. The code fails closed in all ambiguous states.
  */
+/**
+ * Canonicalize the amount field for payload binding. CPN accepts the amount as
+ * either a plain string ("100.00") or an object ({ amount, currency }). The
+ * object form MUST be flattened — String({amount:'100'}) collapses to
+ * "[object Object]" and would make two different amounts hash identically,
+ * defeating the key-reuse binding.
+ */
+function _canonicalAmount(amount) {
+  if (amount == null) return null;
+  if (typeof amount === 'object') {
+    return String(amount.amount != null ? amount.amount : '') + '|' + String(amount.currency || '');
+  }
+  return String(amount);
+}
+
 async function payloadHash(body) {
   if (!body) return 'empty';
   // Canonical fields that define a unique payment operation
   const canonical = JSON.stringify({
     quoteId:             body.quoteId             || null,
-    amount:              body.amount              ? String(body.amount) : null,
+    amount:              _canonicalAmount(body.amount),
     destinationCurrency: body.destinationCurrency || null,
     beneficiaryName:     body.beneficiaryDetails && body.beneficiaryDetails.name   ? body.beneficiaryDetails.name.trim()   : null,
     beneficiaryAccount:  body.beneficiaryDetails && body.beneficiaryDetails.accountNumber ? body.beneficiaryDetails.accountNumber.trim() : null,
@@ -311,8 +327,8 @@ async function promoteIdempotency(env, userId, idempotencyKey, paymentId, reserv
       JSON.stringify({ paymentId, createdAt: Date.now(), payloadHash: pHash || null }),
       { expirationTtl: IDEM_TTL_SECONDS },
     );
-    // Clean up reservation (best-effort)
-    try { await env.AUTH_KV.delete(reserveKey); } catch (_) {}
+    // Clean up reservation (best-effort); null reserveKey = reconciliation path.
+    if (reserveKey) { try { await env.AUTH_KV.delete(reserveKey); } catch (_) {} }
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e && e.message ? e.message : 'KV promote failed' };
@@ -325,6 +341,58 @@ async function checkIdempotencyRecord(env, userId, idempotencyKey) {
     const raw = await env.AUTH_KV.get(`cpn_idem:${userId}:${idempotencyKey}`);
     return raw ? JSON.parse(raw) : null;
   } catch (_) { return null; }
+}
+
+// ── PENDING_RECONCILIATION (Fase 1.4) ────────────────────────────────────────
+// When a Circle call ends in a NETWORK_UNKNOWN (timeout / communication error) or
+// a persistence failure occurs after Circle may have created the payment, the
+// operation's outcome is INDETERMINATE. The reservation (120 s TTL) is too short
+// to safely gate a retry — a caller could retry after the reservation expires and
+// (absent Circle-side idempotency) create a duplicate.
+//
+// To close that gap we persist a longer-lived (24 h) reconciliation record bound to
+// the authenticated user AND the full canonical payload hash. A subsequent request
+// reusing the same idempotency key is:
+//   · rejected (409) if the payload differs (key-reuse misuse), or
+//   · allowed through as a reconciliation retry — Circle's Idempotency-Key header
+//     is the authoritative dedup and returns the original paymentId.
+//
+// This does NOT claim exactly-once execution locally: Cloudflare KV has no atomic
+// compare-and-swap, and the authoritative dedup is Circle's own Idempotency-Key.
+// See also the note in reserveIdempotency.
+
+const PENDING_TTL_SECONDS = 86400; // 24 h reconciliation window
+
+async function writePendingReconciliation(env, userId, idempotencyKey, payloadHash, requestId) {
+  if (!env.AUTH_KV) return { ok: false, error: 'AUTH_KV unavailable' };
+  try {
+    await env.AUTH_KV.put(
+      `cpn_pending:${userId}:${idempotencyKey}`,
+      JSON.stringify({
+        status: 'PENDING_RECONCILIATION',
+        payloadHash: payloadHash || null,
+        requestId: requestId || null,
+        createdAt: Date.now(),
+      }),
+      { expirationTtl: PENDING_TTL_SECONDS },
+    );
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e && e.message ? e.message : 'KV pending write failed' };
+  }
+}
+
+async function checkPendingReconciliation(env, userId, idempotencyKey) {
+  if (!env.AUTH_KV || !idempotencyKey) return null;
+  try {
+    const raw = await env.AUTH_KV.get(`cpn_pending:${userId}:${idempotencyKey}`);
+    return raw ? JSON.parse(raw) : null;
+  } catch (_) { return null; }
+}
+
+async function clearPendingReconciliation(env, userId, idempotencyKey) {
+  if (!env.AUTH_KV || !idempotencyKey) return;
+  try { await env.AUTH_KV.delete(`cpn_pending:${userId}:${idempotencyKey}`); } catch (_) {}
 }
 
 // ── Body size guard ──────────────────────────────────────────────────────────
@@ -456,22 +524,47 @@ export async function onRequest(context) {
       }, 200, env, request);
     }
 
-    // Phase 1: reserve (prevents concurrent duplicate creation)
-    const reservation = await reserveIdempotency(env, userId, idemKey, bodyJson);
-    if (!reservation.ok) {
-      if (reservation.conflict) {
+    // PENDING_RECONCILIATION (Fase 1.4): a prior attempt with this key had an
+    // indeterminate outcome (network error / persistence failure). Bind the retry to
+    // the original payload — a different payload is key-reuse misuse; the same
+    // payload is a safe reconciliation retry (Circle's Idempotency-Key dedups).
+    const pending = await checkPendingReconciliation(env, userId, idemKey);
+    let reconciling = false;
+    if (pending) {
+      const pendingHash = await payloadHash(bodyJson);
+      if (pending.payloadHash && pending.payloadHash !== pendingHash) {
         return jsonResponse({
-          error: 'A payment with this idempotencyKey is already in progress',
-          code: 'IDEMPOTENCY_CONFLICT',
+          error: 'idempotencyKey already used for a different payment operation (pending reconciliation)',
+          code: 'IDEMPOTENCY_KEY_REUSE',
         }, 409, env, request);
       }
-      // Non-conflict reservation failure: block creation rather than risk a duplicate
-      return jsonResponse({
-        error: 'Could not reserve idempotency slot — please retry',
-        code: 'IDEMPOTENCY_RESERVE_FAILED',
-      }, 503, env, request);
+      // Same payload — reconciliation retry. It is a SEQUENTIAL retry (not a
+      // concurrent request), so we skip the in-flight reservation and forward to
+      // Circle, whose Idempotency-Key is the authoritative dedup.
+      reconciling = true;
     }
-    reservationHandle = { idemKey, reserveKey: reservation.reserveKey, payloadHash: reservation.payloadHash };
+
+    // Phase 1: reserve (prevents concurrent duplicate creation). Skipped for a
+    // same-payload reconciliation retry (Circle dedups the Idempotency-Key).
+    if (!reconciling) {
+      const reservation = await reserveIdempotency(env, userId, idemKey, bodyJson);
+      if (!reservation.ok) {
+        if (reservation.conflict) {
+          return jsonResponse({
+            error: 'A payment with this idempotencyKey is already in progress',
+            code: 'IDEMPOTENCY_CONFLICT',
+          }, 409, env, request);
+        }
+        // Non-conflict reservation failure: block creation rather than risk a duplicate
+        return jsonResponse({
+          error: 'Could not reserve idempotency slot — please retry',
+          code: 'IDEMPOTENCY_RESERVE_FAILED',
+        }, 503, env, request);
+      }
+      reservationHandle = { idemKey, reserveKey: reservation.reserveKey, payloadHash: reservation.payloadHash, reqId: reservation.reqId };
+    } else {
+      reservationHandle = { idemKey, reserveKey: null, payloadHash: pending.payloadHash || (await payloadHash(bodyJson)), reqId: null, reconciling: true };
+    }
   }
 
   // ── Forward to Circle CPN API ──
@@ -508,6 +601,9 @@ export async function onRequest(context) {
       unknownPayload.idempotencyKey = reservationHandle.idemKey;
       // Do NOT delete the reservation — it signals to concurrent requests that an
       // operation with this key is in-flight or has unknown outcome.
+      // Persist a PENDING_RECONCILIATION record (24 h) so a retry with this key is
+      // still payload-bound even after the 120 s reservation expires.
+      await writePendingReconciliation(env, userId, reservationHandle.idemKey, reservationHandle.payloadHash, reservationHandle.reqId);
     }
     return jsonResponse(unknownPayload, 502, env, request);
   }
@@ -543,11 +639,13 @@ export async function onRequest(context) {
 
     const persistenceFailed = !promoteResult.ok || !ownershipResult.ok;
     if (persistenceFailed) {
-      // Payment was created at Circle but we could not record it locally.
-      // Surface the warning so the caller knows to reconcile.
-      // Still return the paymentId — the caller must NOT create another payment.
+      // Local persistence failed — persist PENDING_RECONCILIATION + surface paymentId.
       upstreamJson.persistenceWarning = true;
       upstreamJson.persistenceError = 'KV write failed — reconcile before retrying';
+      upstreamJson.reconcileRequired = true;
+      await writePendingReconciliation(env, userId, idemKey, pHash, reservationHandle.reqId);
+    } else {
+      await clearPendingReconciliation(env, userId, idemKey);
     }
   }
 

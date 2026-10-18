@@ -506,6 +506,16 @@
   async function executeFiatPayout(params) {
     var onStep = params.onStep || function () {};
 
+    // ── Fase 1.4: fail fast — the recipient binding is required before any work.
+    // The approved recipient is the operation-bound destination disclosed by CPN,
+    // NOT the TX object's own data. Without it, a tampered/redirected calldata
+    // could never be caught, so we refuse to proceed (and never reach signing).
+    if (!params.expectedRecipient) {
+      var recErr = new Error('Expected recipient is required before signing — cannot validate TX calldata recipient');
+      recErr.code = 'TX_RECIPIENT_REQUIRED';
+      throw recErr;
+    }
+
     // ── Step 1: get quotes ─────────────────────────────────────────────
     onStep('quote_fetch', { status: 'fetching' });
     var quotes = await getQuotes({
@@ -540,16 +550,13 @@
 
     // ── Step 5a: validate TX object BEFORE signing ────────────────────
     // Never sign an arbitrary TX returned by an API — validate all fields first.
-    // params.expectedRecipient — if the caller knows the expected EVM recipient
-    // address (e.g. from a prior trusted disclosure by Circle), pass it here so the
-    // decoded calldata recipient is compared against it exactly. When omitted, the
-    // decoded recipient is still validated for structural correctness (non-zero,
-    // well-formed) but is not compared to an expected value.
+    // expectedRecipient is required (fail-fast check already ran at entry) and is
+    // bound to the operation so a tampered/redirected calldata is caught here.
     var txApproval = {
       amount:        params.amount,
       walletAddress: params.walletAddress,
+      recipient:     params.expectedRecipient,
     };
-    if (params.expectedRecipient) txApproval.recipient = params.expectedRecipient;
     var txErr = validateTxObject(txObj, txApproval);
     if (txErr) {
       var ve = new Error('TX validation failed before signing: ' + txErr);
@@ -559,11 +566,13 @@
     onStep('tx_validated', { transactionId: txObj.transactionId });
 
     // ── Step 5b: sign the validated transaction ────────────────────────
+    // Fase 1.4: no fallback — value was already validated (must be "0" as a valid
+    // BigInt). Parse it strictly; an invalid value would have thrown at Step 5a.
     onStep('tx_sign', { status: 'signing' });
     var tx = {
       to:       txObj.to,
       data:     txObj.data || '0x',
-      value:    txObj.value   ? BigInt(txObj.value) : 0n,
+      value:    BigInt(txObj.value),
       chainId:  Number(txObj.chainId),
       gasLimit: txObj.gasLimit ? BigInt(txObj.gasLimit) : undefined,
     };

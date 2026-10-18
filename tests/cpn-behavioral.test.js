@@ -18,13 +18,14 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 
 // ── Load the real shared module ──────────────────────────────────────────────
 // The module uses an IIFE that exports to window or module.exports.
 // We load it into this test environment via require() after writing to a temp path.
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
-const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CPNFiatPayout = require(path.join(ROOT, 'shared/cpnFiatPayout.js'));
 const { validateTxObject } = CPNFiatPayout;
 
