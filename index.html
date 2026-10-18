@@ -34387,6 +34387,7 @@ async function saExecuteCPNPayout() {
 //   walletAddress  {string}  authenticated wallet (from app state, not txObj)
 //   amount         {number}  approved USDC amount (human-readable)
 //   expectedChainId {number} active chain from wallet — TX must target this chain
+// Fase 1.2: exact-match TX validation — no tolerances, full calldata decode
 function _saCPNValidateTxObject(txObj, opts) {
   opts = opts || {};
   if (!txObj || typeof txObj !== 'object') return 'TX object missing';
@@ -34427,34 +34428,50 @@ function _saCPNValidateTxObject(txObj, opts) {
   if (txObj.data.length < 138)
     return 'TX calldata too short to contain transfer(address,uint256) parameters';
 
-  // 5. Amount cross-check (decode from calldata, compare to approval within 0.5%)
+  // 5. Recipient: decode address param from calldata and validate
+  // calldata layout (hex, after 0x): [8 selector][64 address_padded][64 amount]
+  // address is right-justified in 32 bytes → last 20 bytes = chars 24–63 of the address slot
+  var addrSlot = txObj.data.toLowerCase().slice(2 + 8, 2 + 8 + 64);
+  var decodedRecipient = '0x' + addrSlot.slice(24); // last 20 bytes
+  if (decodedRecipient.length !== 42)
+    return 'TX calldata recipient address could not be decoded (malformed)';
+  if (decodedRecipient === '0x0000000000000000000000000000000000000000')
+    return 'TX calldata recipient is the zero address — rejected';
+
+  // 6. Amount: decode uint256 from calldata and compare EXACTLY to approved amount.
+  // No tolerance is permitted — even 1 raw unit divergence is rejected.
   if (opts.amount != null) {
     try {
-      var amountHex64 = txObj.data.slice(2 + 8 + 64, 2 + 8 + 64 + 64); // skip 0x, selector, address
+      var amountHex64 = txObj.data.slice(2 + 8 + 64, 2 + 8 + 64 + 64);
+      if (amountHex64.length !== 64)
+        return 'TX calldata too short to decode transfer amount';
       var rawAmountBig = BigInt('0x' + amountHex64);
       var approvedFloat = parseFloat(String(opts.amount));
       if (!isFinite(approvedFloat) || approvedFloat <= 0)
         return 'Approved amount is not a valid positive number';
       var approvedRaw = BigInt(Math.round(approvedFloat * Math.pow(10, _CPN_USDC_DECIMALS)));
-      var toleranceBig = approvedRaw / 200n; // 0.5%
-      var diff = rawAmountBig > approvedRaw ? rawAmountBig - approvedRaw : approvedRaw - rawAmountBig;
-      if (diff > toleranceBig)
-        return 'TX calldata amount diverges from approved amount by more than 0.5%';
+      // EXACT match — no 0.5% tolerance. Removed per Fase 1.2 spec.
+      if (rawAmountBig !== approvedRaw)
+        return 'TX calldata amount (' + rawAmountBig.toString() + ' raw) does not exactly match ' +
+               'approved amount (' + approvedRaw.toString() + ' raw). diverges from approved amount.';
     } catch (e) {
       return 'Could not decode transfer amount from calldata: ' + (e && e.message ? e.message : String(e));
     }
+  } else if (opts !== null && opts !== undefined) {
+    // opts provided but amount missing — caller must supply amount for sign path
+    return 'Approved amount not supplied — cannot validate TX calldata amount';
   }
 
-  // 6. Native value — USDC transfers must not send ETH value
+  // 7. Native value — USDC ERC-20 transfers must send ZERO native value
   if (txObj.value) {
     try {
       var valBig = BigInt(txObj.value);
-      if (valBig > BigInt('10000000000000000'))
-        return 'TX native value exceeds safety limit (possible value-draining TX)';
+      if (valBig > 0n)
+        return 'TX native value (' + valBig.toString() + ' wei) must be zero for a USDC transfer — exceeds safety limit';
     } catch (_) { return 'TX value field is not a valid integer'; }
   }
 
-  // 7. From field mismatch
+  // 8. From field mismatch
   if (txObj.from && opts.walletAddress &&
       txObj.from.toLowerCase() !== opts.walletAddress.toLowerCase())
     return 'TX `from` does not match authenticated wallet';

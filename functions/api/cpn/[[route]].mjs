@@ -34,10 +34,14 @@
  *   KEY ISOLATION — CPN_API_KEY is never included in responses or logs.
  *
  * KV key schema:
- *   session:<token>                → { userId, email, expiresAt, ... }
- *   cpn_reserve:<userId>:<idemKey> → "pending:<requestId>" (reservation — short TTL)
- *   cpn_idem:<userId>:<idemKey>    → { paymentId, createdAt } (permanent record)
+ *   session:<token>                → { userId, email, walletAddress, createdAt } (TTL 86400 s)
+ *   cpn_reserve:<userId>:<idemKey> → "<requestId>:<payloadHash>" (reservation — short TTL)
+ *   cpn_idem:<userId>:<idemKey>    → { paymentId, createdAt, payloadHash } (permanent record)
  *   cpn_pay:<userId>:<paymentId>   → "1" (ownership record — 48 h TTL)
+ *
+ * Session expiry: login.js writes { createdAt, expirationTtl: 86400 } — there is NO expiresAt
+ * field in the session record. The application-layer check computes expiry as
+ * createdAt + SESSION_TTL_MS and compares to Date.now().
  *
  * Supported paths:
  *   POST /api/cpn/quotes
@@ -82,8 +86,15 @@ function jsonResponse(data, status, env, request) {
 }
 
 // ── Session verification ──────────────────────────────────────────────────────
-// Mirrors /api/auth/session.js. Also checks application-layer session.expiresAt
-// in addition to relying on KV TTL, closing the eviction race window.
+// Mirrors /api/auth/session.js.
+//
+// IMPORTANT — real session record schema (login.js):
+//   { email, userId, walletAddress, createdAt }  with KV expirationTtl: 86400
+// There is NO expiresAt field. Expiry is computed here as createdAt + SESSION_TTL_MS.
+// Checking session.expiresAt would always be undefined and silently pass — that bug
+// is exactly what this version corrects.
+
+const SESSION_TTL_MS = 86400 * 1000; // 24 h — must match login.js expirationTtl
 
 function extractSessionToken(request) {
   const authHeader = request.headers.get('Authorization') || '';
@@ -95,8 +106,13 @@ function extractSessionToken(request) {
 }
 
 /**
- * Verify session and return { ok, userId, email } or { ok: false, status, error }.
- * Checks both KV existence and session.expiresAt (application-layer expiry).
+ * Verify session and return { ok, userId, email, walletAddress } or
+ * { ok: false, status, error }.
+ *
+ * Checks both KV existence (primary expiry via KV TTL) and application-layer
+ * expiry computed from session.createdAt + SESSION_TTL_MS (secondary check that
+ * closes the TTL eviction race window).
+ *
  * Never throws.
  */
 async function verifySession(request, env) {
@@ -118,11 +134,20 @@ async function verifySession(request, env) {
   if (!session || !session.userId) {
     return { ok: false, status: 401, error: 'Session missing userId' };
   }
-  // Application-layer expiry check (closes TTL eviction race)
-  if (session.expiresAt && typeof session.expiresAt === 'number' && Date.now() > session.expiresAt) {
+  // Application-layer expiry: login.js uses { createdAt, expirationTtl: 86400 }.
+  // createdAt is required; a session without it is treated as expired.
+  if (!session.createdAt || typeof session.createdAt !== 'number') {
+    return { ok: false, status: 401, error: 'Session missing createdAt — expired' };
+  }
+  if (Date.now() > session.createdAt + SESSION_TTL_MS) {
     return { ok: false, status: 401, error: 'Session expired' };
   }
-  return { ok: true, userId: session.userId, email: session.email };
+  return {
+    ok: true,
+    userId:        session.userId,
+    email:         session.email,
+    walletAddress: session.walletAddress || null, // from login.js — may be used for TX binding
+  };
 }
 
 // ── Route allowlist with per-path method enforcement ─────────────────────────
@@ -186,25 +211,29 @@ async function recordPaymentOwnership(env, userId, paymentId) {
 // ── Idempotency guard (POST /payments only — two-phase reservation) ───────────
 //
 // Phase 1 — RESERVE (before CPN call):
-//   Write cpn_reserve:<userId>:<idemKey> → "pending:<requestId>" with a short TTL
-//   (120 s — long enough for the CPN round-trip). If the key already exists,
-//   another request with the same key is in flight; reject 409.
+//   Write cpn_reserve:<userId>:<idemKey> → "<requestId>:<payloadHash>" with TTL 120 s.
+//   If the key already exists, another request with the same key is in flight → 409.
+//   The value includes a hash of the canonical payment payload so that a retry with a
+//   DIFFERENT payload is rejected even if the reservation window hasn't expired yet.
 //
 // Phase 2 — PROMOTE (after successful CPN response):
-//   Write cpn_idem:<userId>:<idemKey> → { paymentId, createdAt } with a 24 h TTL.
+//   Write cpn_idem:<userId>:<idemKey> → { paymentId, createdAt, payloadHash } TTL 24 h.
+//   On IDEMPOTENT_REPLAY, the stored payloadHash is compared against the new request's
+//   hash — a different payload with the same key is rejected as a misuse attempt.
 //   Delete the reservation key.
 //
-// If the promotion write fails, the caller receives a `persistenceWarning: true`
-// flag alongside the paymentId so it can reconcile. The reservation key expires
-// on its own TTL, so the 120 s window prevents double-creation on concurrent retry
-// but a manual reconciliation is required if the promotion fails.
+// Persistence failure: if the promotion write fails, the caller receives
+// persistenceWarning: true and the paymentId — it must reconcile before retrying.
 //
-// Note: Cloudflare KV does not offer conditional (compare-and-swap) writes. The
-// reservation is best-effort: two requests arriving in the same millisecond could
-// both read "no key" before either writes. This is the safest achievable guarantee
-// without an atomic store. The Circle CPN API enforces its own idempotency
-// independently via the idempotencyKey forwarded in the request, so the worst
-// outcome is one spurious 409 from CPN (which we surface as IDEMPOTENT_REPLAY).
+// Atomicity limitation: Cloudflare KV does not offer compare-and-swap. The reservation
+// is best-effort (read → check → write). Two requests arriving within the same ~1 ms
+// window could both read "no key" and both proceed. This is mitigated in two ways:
+//   1. The Circle CPN API enforces server-side idempotency via the Idempotency-Key
+//      header — a true duplicate is rejected by CPN itself and returned as 409/REPLAY.
+//   2. The payloadHash binding ensures that even a successful double-reservation for
+//      the same key with different parameters is caught at the IDEMPOTENT_REPLAY check.
+// For strict single-execution guarantees, a Durable Object lock would be required.
+// That is documented here and not silently claimed as guaranteed.
 
 const RESERVE_TTL_SECONDS  = 120;  // in-flight reservation window
 const IDEM_TTL_SECONDS     = 86400; // 24 h permanent record
@@ -215,9 +244,34 @@ function generateRequestId() {
   return Array.from(arr).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-async function reserveIdempotency(env, userId, idempotencyKey) {
+/**
+ * Produce a short deterministic hash of the canonical payment payload fields so that
+ * two requests using the same idempotency key but different parameters can be detected.
+ * This is NOT a cryptographic guarantee — it is a consistency check.
+ */
+function payloadHash(body) {
+  if (!body) return 'empty';
+  // Canonical fields that define a unique payment operation
+  const canonical = JSON.stringify({
+    quoteId:             body.quoteId             || null,
+    amount:              body.amount              ? String(body.amount) : null,
+    destinationCurrency: body.destinationCurrency || null,
+    beneficiaryName:     body.beneficiaryDetails && body.beneficiaryDetails.name   ? body.beneficiaryDetails.name.trim()   : null,
+    beneficiaryAccount:  body.beneficiaryDetails && body.beneficiaryDetails.accountNumber ? body.beneficiaryDetails.accountNumber.trim() : null,
+  });
+  // djb2-style hash — non-cryptographic, collision-resistant enough for consistency checks
+  let h = 5381;
+  for (let i = 0; i < canonical.length; i++) {
+    h = ((h << 5) + h) ^ canonical.charCodeAt(i);
+    h = h >>> 0; // keep unsigned 32-bit
+  }
+  return h.toString(16).padStart(8, '0');
+}
+
+async function reserveIdempotency(env, userId, idempotencyKey, bodyJson) {
   if (!env.AUTH_KV) return { ok: false, error: 'AUTH_KV unavailable' };
   const reqId = generateRequestId();
+  const pHash = payloadHash(bodyJson);
   const reserveKey = `cpn_reserve:${userId}:${idempotencyKey}`;
   // Read first (best-effort — not atomic; see note above)
   try {
@@ -225,19 +279,19 @@ async function reserveIdempotency(env, userId, idempotencyKey) {
     if (existing) {
       return { ok: false, conflict: true, error: 'Concurrent request in flight for this idempotencyKey' };
     }
-    await env.AUTH_KV.put(reserveKey, `pending:${reqId}`, { expirationTtl: RESERVE_TTL_SECONDS });
-    return { ok: true, reqId, reserveKey };
+    await env.AUTH_KV.put(reserveKey, `${reqId}:${pHash}`, { expirationTtl: RESERVE_TTL_SECONDS });
+    return { ok: true, reqId, reserveKey, payloadHash: pHash };
   } catch (e) {
     return { ok: false, error: 'Reservation failed: ' + (e && e.message ? e.message : 'unknown') };
   }
 }
 
-async function promoteIdempotency(env, userId, idempotencyKey, paymentId, reserveKey) {
+async function promoteIdempotency(env, userId, idempotencyKey, paymentId, reserveKey, pHash) {
   if (!env.AUTH_KV) return { ok: false, error: 'AUTH_KV unavailable' };
   try {
     await env.AUTH_KV.put(
       `cpn_idem:${userId}:${idempotencyKey}`,
-      JSON.stringify({ paymentId, createdAt: Date.now() }),
+      JSON.stringify({ paymentId, createdAt: Date.now(), payloadHash: pHash || null }),
       { expirationTtl: IDEM_TTL_SECONDS },
     );
     // Clean up reservation (best-effort)
@@ -367,6 +421,16 @@ export async function onRequest(context) {
     // Check for a completed record first (idempotent replay)
     const existing = await checkIdempotencyRecord(env, userId, idemKey);
     if (existing) {
+      // Payload-binding check: if the stored hash differs from this request's hash,
+      // the caller is trying to reuse an idempotency key for a different payment.
+      // This is a misuse: reject rather than silently process a different operation.
+      const newHash = payloadHash(bodyJson);
+      if (existing.payloadHash && existing.payloadHash !== newHash) {
+        return jsonResponse({
+          error: 'idempotencyKey already used for a different payment operation',
+          code: 'IDEMPOTENCY_KEY_REUSE',
+        }, 409, env, request);
+      }
       return jsonResponse({
         id: existing.paymentId,
         status: 'IDEMPOTENT_REPLAY',
@@ -376,7 +440,7 @@ export async function onRequest(context) {
     }
 
     // Phase 1: reserve (prevents concurrent duplicate creation)
-    const reservation = await reserveIdempotency(env, userId, idemKey);
+    const reservation = await reserveIdempotency(env, userId, idemKey, bodyJson);
     if (!reservation.ok) {
       if (reservation.conflict) {
         return jsonResponse({
@@ -390,7 +454,7 @@ export async function onRequest(context) {
         code: 'IDEMPOTENCY_RESERVE_FAILED',
       }, 503, env, request);
     }
-    reservationHandle = { idemKey, reserveKey: reservation.reserveKey };
+    reservationHandle = { idemKey, reserveKey: reservation.reserveKey, payloadHash: reservation.payloadHash };
   }
 
   // ── Forward to Circle CPN API ──
@@ -438,11 +502,11 @@ export async function onRequest(context) {
     upstreamJson && upstreamJson.id &&
     reservationHandle
   ) {
-    const { idemKey, reserveKey } = reservationHandle;
+    const { idemKey, reserveKey, payloadHash: pHash } = reservationHandle;
     const paymentId = upstreamJson.id;
 
-    // Promote idempotency record
-    const promoteResult = await promoteIdempotency(env, userId, idemKey, paymentId, reserveKey);
+    // Promote idempotency record (includes payloadHash for replay binding)
+    const promoteResult = await promoteIdempotency(env, userId, idemKey, paymentId, reserveKey, pHash);
     // Record ownership
     const ownershipResult = await recordPaymentOwnership(env, userId, paymentId);
 

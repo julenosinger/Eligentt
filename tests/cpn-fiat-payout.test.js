@@ -148,20 +148,23 @@ describe('shared/cpnFiatPayout.js — validateTxObject (7 checks)', () => {
     expect(cpnModule).toContain("'TX calldata too short to contain transfer(address,uint256) parameters'");
   });
 
-  it('check 5 — amount cross-check against calldata (new)', () => {
+  it('check 5 — amount EXACT match against calldata (Fase 1.2 — no tolerance)', () => {
     expect(cpnModule).toContain('rawAmountBig');
     expect(cpnModule).toContain('approvedRaw');
-    // String is split across string literal boundaries
-    expect(cpnModule).toContain("diverges from '");
-    expect(cpnModule).toContain("'approved amount (");
+    // Fase 1.2: exact match — search for the exact-match error string
+    expect(cpnModule).toContain('does not exactly match');
+    expect(cpnModule).toContain('No tolerance is permitted');
   });
 
-  it('check 5 — 0.5% tolerance uses 200n divisor (new)', () => {
-    expect(cpnModule).toContain('approvedRaw / 200n');
+  it('check 5 — 0.5% tolerance REMOVED (Fase 1.2)', () => {
+    // The 200n divisor (0.5% tolerance) must no longer exist — it was removed
+    expect(cpnModule).not.toContain('approvedRaw / 200n');
   });
 
-  it('check 6 — rejects excessive native value', () => {
-    expect(cpnModule).toContain("'TX object native value (' + rawValue.toString() + ' wei) exceeds safety limit for a USDC transfer'");
+  it('check 6 — rejects any non-zero native value (Fase 1.2 — must be zero)', () => {
+    // Fase 1.2: any non-zero value is rejected, not just > 0.01 ETH
+    expect(cpnModule).toContain('must be zero for a USDC transfer');
+    expect(cpnModule).toContain('exceeds safety limit');
   });
 
   it('check 7 — rejects `from` mismatch with authenticated wallet', () => {
@@ -169,7 +172,7 @@ describe('shared/cpnFiatPayout.js — validateTxObject (7 checks)', () => {
   });
 
   it('returns null on all checks passing', () => {
-    expect(cpnModule).toContain('return null; // valid');
+    expect(cpnModule).toContain('return null; // all checks passed');
   });
 });
 
@@ -179,8 +182,11 @@ describe('functions/api/cpn/[[route]].mjs — session auth', () => {
     expect(cpnProxy).toContain('async function verifySession(request, env)');
   });
 
-  it('checks application-layer session.expiresAt (Fase 1.1 — closes TTL eviction race)', () => {
-    expect(cpnProxy).toContain('session.expiresAt');
+  it('checks application-layer expiry via createdAt + SESSION_TTL_MS (Fase 1.2 — fixes missing expiresAt bug)', () => {
+    // Real login.js session has { createdAt } — NOT expiresAt. Check uses createdAt.
+    expect(cpnProxy).toContain('session.createdAt');
+    expect(cpnProxy).toContain('SESSION_TTL_MS');
+    expect(cpnProxy).toContain("Date.now() > session.createdAt + SESSION_TTL_MS");
     expect(cpnProxy).toContain("{ ok: false, status: 401, error: 'Session expired' }");
   });
 
@@ -278,12 +284,14 @@ describe('functions/api/cpn/[[route]].mjs — method enforcement', () => {
 
 // ── 7. Pages Function — two-phase idempotency (Fase 1.1) ─────────────────────
 describe('functions/api/cpn/[[route]].mjs — two-phase idempotency (Fase 1.1)', () => {
-  it('reserveIdempotency function is defined', () => {
-    expect(cpnProxy).toContain('async function reserveIdempotency(env, userId, idempotencyKey)');
+  it('reserveIdempotency function is defined (Fase 1.2: includes bodyJson for payload binding)', () => {
+    // Fase 1.2 added bodyJson parameter for payload hash binding
+    expect(cpnProxy).toContain('async function reserveIdempotency(env, userId, idempotencyKey, bodyJson)');
   });
 
-  it('promoteIdempotency function is defined', () => {
-    expect(cpnProxy).toContain('async function promoteIdempotency(env, userId, idempotencyKey, paymentId, reserveKey)');
+  it('promoteIdempotency function is defined (Fase 1.2: includes pHash for replay binding)', () => {
+    // Fase 1.2 added pHash parameter for idempotent replay binding
+    expect(cpnProxy).toContain('async function promoteIdempotency(env, userId, idempotencyKey, paymentId, reserveKey, pHash)');
   });
 
   it('reservation key uses cpn_reserve prefix', () => {
@@ -337,6 +345,23 @@ describe('functions/api/cpn/[[route]].mjs — two-phase idempotency (Fase 1.1)',
   it('idempotencyKey required to be 8-128 chars', () => {
     expect(cpnProxy).toContain('idemKey.length < 8 || idemKey.length > 128');
     expect(cpnProxy).toContain("'idempotencyKey is required (8\u2013128 chars, UUID v4 recommended)'");
+  });
+
+  it('payloadHash function binds reservation to canonical payload fields (Fase 1.2)', () => {
+    expect(cpnProxy).toContain('function payloadHash(body)');
+    expect(cpnProxy).toContain('quoteId');
+    expect(cpnProxy).toContain('destinationCurrency');
+    expect(cpnProxy).toContain('beneficiaryName');
+    expect(cpnProxy).toContain('beneficiaryAccount');
+  });
+
+  it('IDEMPOTENCY_KEY_REUSE returned when same key used with different payload (Fase 1.2)', () => {
+    expect(cpnProxy).toContain("code: 'IDEMPOTENCY_KEY_REUSE'");
+    expect(cpnProxy).toContain('existing.payloadHash !== newHash');
+  });
+
+  it('permanent record stores payloadHash for replay binding (Fase 1.2)', () => {
+    expect(cpnProxy).toContain('payloadHash: pHash');
   });
 });
 
@@ -466,7 +491,7 @@ describe('index.html — TX validation before signing (Fase 1.1)', () => {
   const startMarker = 'function _saCPNValidateTxObject(txObj, opts)';
   const getTxFn = () => {
     const start = html.indexOf(startMarker);
-    return html.slice(start, start + 3500);
+    return html.slice(start, start + 5000); // increased: Fase 1.2 added recipient + exact-amount checks
   };
 
   it('_saCPNValidateTxObject function is defined', () => {
@@ -510,19 +535,21 @@ describe('index.html — TX validation before signing (Fase 1.1)', () => {
     expect(getTxFn()).toContain("does not match ERC-20 transfer()");
   });
 
-  it('check 5 — amount cross-check against calldata (Fase 1.1 — new)', () => {
+  it('check 5 — amount EXACT match against calldata (Fase 1.2 — no tolerance)', () => {
     expect(getTxFn()).toContain('opts.amount');
     expect(getTxFn()).toContain('_CPN_USDC_DECIMALS');
     expect(getTxFn()).toContain('diverges from approved amount');
+    expect(getTxFn()).toContain('does not exactly match');
   });
 
-  it('check 5 — 0.5% tolerance (200n divisor) (Fase 1.1 — new)', () => {
-    expect(getTxFn()).toContain('200n');
+  it('check 5 — 0.5% tolerance REMOVED (Fase 1.2)', () => {
+    // The 200n divisor was part of the 0.5% tolerance that was removed
+    expect(getTxFn()).not.toContain('200n');
   });
 
-  it('check 6 — rejects excessive native value', () => {
+  it('check 6 — rejects any non-zero native value (Fase 1.2 — must be zero)', () => {
+    expect(getTxFn()).toContain('must be zero');
     expect(getTxFn()).toContain('exceeds safety limit');
-    expect(getTxFn()).toContain('10000000000000000');
   });
 
   it('check 7 — rejects `from` mismatch', () => {
@@ -808,9 +835,10 @@ describe('Behavioral: User A accessing User B\'s payment (cross-user isolation)'
 });
 
 describe('Behavioral: expired/invalid session', () => {
-  it('verifySession checks expiresAt and rejects expired sessions', () => {
-    expect(cpnProxy).toContain('session.expiresAt');
-    expect(cpnProxy).toContain("Date.now() > session.expiresAt");
+  it('verifySession checks createdAt + SESSION_TTL_MS and rejects expired sessions (Fase 1.2)', () => {
+    // Fase 1.2 fix: login.js stores createdAt (not expiresAt); expiry is derived here
+    expect(cpnProxy).toContain('session.createdAt');
+    expect(cpnProxy).toContain('SESSION_TTL_MS');
     expect(cpnProxy).toContain("error: 'Session expired'");
   });
 
@@ -848,19 +876,19 @@ describe('Behavioral: tampered TX — contract / token / network / value / calld
     expect(html).toContain("does not match ERC-20 transfer()");
   });
 
-  it('TX amount diverges >0.5% from approved amount → rejected (server module)', () => {
-    // String is split across concat so search for the two adjacent fragments
-    expect(cpnModule).toContain("diverges from '");
-    expect(cpnModule).toContain("'approved amount (");
+  it('TX amount not exactly equal to approved amount → rejected (server module) (Fase 1.2)', () => {
+    expect(cpnModule).toContain('does not exactly match');
+    expect(cpnModule).toContain('No tolerance is permitted');
   });
 
-  it('TX amount diverges >0.5% from approved amount → rejected (index.html)', () => {
+  it('TX amount not exactly equal to approved amount → rejected (index.html) (Fase 1.2)', () => {
+    expect(html).toContain('does not exactly match');
     expect(html).toContain('diverges from approved amount');
   });
 
-  it('excessive native value (value-draining) → rejected before signing', () => {
-    expect(cpnModule).toContain('exceeds safety limit for a USDC transfer');
-    expect(html).toContain('exceeds safety limit');
+  it('any non-zero native value → rejected before signing (Fase 1.2 — zero required)', () => {
+    expect(cpnModule).toContain('must be zero for a USDC transfer');
+    expect(html).toContain('must be zero');
   });
 });
 
