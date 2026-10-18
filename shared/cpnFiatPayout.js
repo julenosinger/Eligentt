@@ -128,6 +128,54 @@
     return json;
   }
 
+  // ── Decimal-exact USDC amount conversion ────────────────────────────────
+  /**
+   * _usdcStringToRaw — converts a human-readable USDC amount string to raw BigInt units
+   * (6 decimal places) WITHOUT using parseFloat or binary float arithmetic.
+   *
+   * Examples:
+   *   "100"        → 100000000n
+   *   "100.50"     → 100500000n
+   *   "0.000001"   → 1n            (1 raw unit — minimum)
+   *   "100.1234567" → error        (more than 6 decimal places)
+   *   "-5"          → error        (negative)
+   *   "0"           → error        (zero not allowed as a payment amount)
+   *   "1e3"         → error        (scientific notation rejected)
+   *   ""            → error
+   *
+   * Returns a BigInt on success, or a string error message on failure.
+   */
+  function _usdcStringToRaw(s) {
+    if (typeof s !== 'string') s = String(s);
+    s = s.trim();
+    // Reject empty, scientific notation, and anything not matching decimal number
+    if (!s || /[eE]/.test(s) || !/^-?\d+(\.\d+)?$/.test(s))
+      return 'Approved amount is not a valid decimal number (scientific notation not accepted)';
+    // Reject negative
+    if (s.startsWith('-'))
+      return 'Approved amount must be a positive number';
+    // Split on decimal point
+    var parts = s.split('.');
+    var intPart = parts[0] || '0';
+    var fracPart = parts.length > 1 ? parts[1] : '';
+    // Reject more than USDC_DECIMALS decimal places
+    if (fracPart.length > USDC_DECIMALS)
+      return 'Approved amount has more than ' + USDC_DECIMALS + ' decimal places — not supported by USDC';
+    // Pad fractional part to exactly USDC_DECIMALS digits
+    var fracPadded = fracPart.padEnd(USDC_DECIMALS, '0');
+    // Combine to integer raw units
+    var rawStr = intPart + fracPadded;
+    // Remove leading zeros except for a single zero
+    rawStr = rawStr.replace(/^0+/, '') || '0';
+    var raw;
+    try { raw = BigInt(rawStr); } catch (_) {
+      return 'Approved amount could not be parsed as an integer after decimal conversion';
+    }
+    if (raw <= 0n)
+      return 'Approved amount must be greater than zero';
+    return raw;
+  }
+
   // ── TX validation (before signing) ──────────────────────────────────────
   /**
    * validateTxObject — validates the onchain transaction object returned by CPN
@@ -213,19 +261,19 @@
                'approved recipient (' + approval.recipient + ')';
     }
 
-    // 6. Amount: decode and compare EXACTLY to the approved amount — no tolerance
+    // 6. Amount: decode and compare EXACTLY to the approved amount — no tolerance.
+    // Uses decimal-exact integer arithmetic (no parseFloat / binary float rounding).
     if (approval && approval.amount != null) {
       try {
         var amountHex64 = dataLow.slice(2 + 8 + 64, 2 + 8 + 64 + 64); // 64 hex chars = 32 bytes
         if (amountHex64.length !== 64)
           return 'TX calldata too short to decode transfer amount';
         var rawAmountBig = BigInt('0x' + amountHex64);
-        // Convert approved amount to USDC raw units (6 decimals) — exact integer conversion
-        var approvedFloat = parseFloat(String(approval.amount));
-        if (!isFinite(approvedFloat) || approvedFloat <= 0)
-          return 'Approved amount is not a valid positive number';
-        // Round to nearest integer raw unit — sub-cent precision is not meaningful for USDC
-        var approvedRaw = BigInt(Math.round(approvedFloat * Math.pow(10, USDC_DECIMALS)));
+        // ── Decimal-exact conversion: no parseFloat, no binary float rounding ──
+        // Converts a human-readable USDC string like "100.50" to raw integer units (6 decimals).
+        // Rejects: non-numeric, negative, zero, more than 6 decimal places, ambiguous notation.
+        var approvedRaw = _usdcStringToRaw(String(approval.amount));
+        if (typeof approvedRaw === 'string') return approvedRaw; // error message
         // EXACT match required — no tolerance. Even 1 raw unit divergence is rejected.
         if (rawAmountBig !== approvedRaw) {
           return 'TX calldata amount (' + rawAmountBig.toString() + ' raw USDC) does not exactly match ' +
@@ -560,6 +608,7 @@
     ALLOWED_CHAIN_IDS:        CPN_ALLOWED_CHAIN_IDS,
     ALLOWED_USDC_CONTRACTS:   CPN_ALLOWED_USDC_CONTRACTS,
     ERC20_TRANSFER_SELECTOR:  ERC20_TRANSFER_SELECTOR,
+    _usdcStringToRaw:         _usdcStringToRaw,  // exported for testing
   };
 
   if (typeof module !== 'undefined' && module.exports) {

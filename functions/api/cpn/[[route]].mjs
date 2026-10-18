@@ -474,11 +474,25 @@ export async function onRequest(context) {
       body: bodyText || undefined,
     });
   } catch (_networkErr) {
-    // Clean up reservation on network failure so the caller can retry
+    // NETWORK_UNKNOWN — the fetch threw before we received any response.
+    // We cannot determine whether Circle received the request. Deleting the
+    // reservation here would allow an immediate retry that could create a duplicate
+    // payment if Circle's server processed the first request but the client's
+    // connection dropped. The reservation TTL (120 s) will expire on its own.
+    // The caller receives NETWORK_UNKNOWN and must reconcile (query Circle for
+    // the payment status using the idempotency key) before retrying.
+    const unknownPayload = {
+      error: 'CPN upstream unreachable — outcome unknown',
+      code: 'NETWORK_UNKNOWN',
+      reconcileRequired: true,
+      message: 'The request may or may not have reached Circle. Do not retry without reconciling first.',
+    };
     if (reservationHandle) {
-      try { await env.AUTH_KV.delete(reservationHandle.reserveKey); } catch (_) {}
+      unknownPayload.idempotencyKey = reservationHandle.idemKey;
+      // Do NOT delete the reservation — it signals to concurrent requests that an
+      // operation with this key is in-flight or has unknown outcome.
     }
-    return jsonResponse({ error: 'CPN upstream unreachable', code: 'NETWORK_ERROR' }, 502, env, request);
+    return jsonResponse(unknownPayload, 502, env, request);
   }
 
   const upstreamText = await upstreamRes.text();

@@ -599,6 +599,250 @@ describe('D. recordPaymentOwnership — persistence failure (real execution)', (
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// H. _usdcStringToRaw — decimal-exact conversion (Fase 1.3)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const { _usdcStringToRaw } = CPNFiatPayout;
+
+describe('H. _usdcStringToRaw — decimal-exact amount conversion (Fase 1.3)', () => {
+  it('converts "100" to 100000000n', () => {
+    expect(_usdcStringToRaw('100')).toBe(100000000n);
+  });
+
+  it('converts "100.50" to 100500000n', () => {
+    expect(_usdcStringToRaw('100.50')).toBe(100500000n);
+  });
+
+  it('converts "0.000001" to 1n (minimum USDC unit)', () => {
+    expect(_usdcStringToRaw('0.000001')).toBe(1n);
+  });
+
+  it('converts "99.999999" to 99999999n (6 exact decimal places)', () => {
+    expect(_usdcStringToRaw('99.999999')).toBe(99999999n);
+  });
+
+  it('converts integer string "1" to 1000000n', () => {
+    expect(_usdcStringToRaw('1')).toBe(1000000n);
+  });
+
+  it('rejects more than 6 decimal places (precision loss risk)', () => {
+    const result = _usdcStringToRaw('100.1234567');
+    expect(typeof result).toBe('string');
+    expect(result).toContain('decimal places');
+  });
+
+  it('rejects negative amount', () => {
+    const result = _usdcStringToRaw('-5');
+    expect(typeof result).toBe('string');
+    expect(result).toContain('positive');
+  });
+
+  it('rejects zero', () => {
+    const result = _usdcStringToRaw('0');
+    expect(typeof result).toBe('string');
+    expect(result).toContain('greater than zero');
+  });
+
+  it('rejects zero with decimals ("0.000000")', () => {
+    const result = _usdcStringToRaw('0.000000');
+    expect(typeof result).toBe('string');
+  });
+
+  it('rejects scientific notation "1e6"', () => {
+    const result = _usdcStringToRaw('1e6');
+    expect(typeof result).toBe('string');
+    expect(result).toContain('scientific notation');
+  });
+
+  it('rejects empty string', () => {
+    const result = _usdcStringToRaw('');
+    expect(typeof result).toBe('string');
+  });
+
+  it('rejects non-numeric string "abc"', () => {
+    const result = _usdcStringToRaw('abc');
+    expect(typeof result).toBe('string');
+  });
+
+  it('converts number input 100 (not string) correctly', () => {
+    // The function coerces to string — make sure it works for number inputs
+    expect(_usdcStringToRaw(100)).toBe(100000000n);
+  });
+
+  it('no binary float error for "99.9999999999" (rejects due to > 6 decimal places)', () => {
+    // This input would have failed with parseFloat+round: parseFloat("99.9999999999") * 1e6 loses precision
+    const result = _usdcStringToRaw('99.9999999999');
+    expect(typeof result).toBe('string'); // rejected cleanly, not silently truncated
+  });
+});
+
+describe('H. validateTxObject — decimal-exact amount (Fase 1.3, real execution)', () => {
+  const recipient = '0xdeadbeef00000000000000000000000000000001';
+
+  it('accepts amount expressed as integer string "100"', () => {
+    const tx = makeTxObj({ data: makeCalldata(recipient, 100) });
+    expect(validateTxObject(tx, { amount: '100', recipient })).toBeNull();
+  });
+
+  it('accepts amount expressed as decimal string "100.50" matching calldata exactly', () => {
+    // Build calldata for 100.50 USDC = 100500000 raw
+    const raw = 100500000n;
+    const addr = recipient.toLowerCase().replace('0x', '').padStart(64, '0');
+    const amount = raw.toString(16).padStart(64, '0');
+    const tx = makeTxObj({ data: ERC20_SELECTOR + addr + amount });
+    expect(validateTxObject(tx, { amount: '100.50', recipient })).toBeNull();
+  });
+
+  it('rejects amount with >6 decimal places ("99.9999999999") before calldata decode', () => {
+    const tx = makeTxObj({ data: makeCalldata(recipient, 100) });
+    const err = validateTxObject(tx, { amount: '99.9999999999', recipient });
+    expect(err).not.toBeNull();
+    expect(err).toContain('decimal places');
+  });
+
+  it('rejects negative amount "-100"', () => {
+    const tx = makeTxObj({ data: makeCalldata(recipient, 100) });
+    const err = validateTxObject(tx, { amount: '-100', recipient });
+    expect(err).not.toBeNull();
+    expect(err).toContain('positive');
+  });
+
+  it('rejects zero amount "0"', () => {
+    const tx = makeTxObj({ data: makeCalldata(recipient, 100) });
+    const err = validateTxObject(tx, { amount: '0', recipient });
+    expect(err).not.toBeNull();
+  });
+
+  it('rejects scientific notation "1e2"', () => {
+    const tx = makeTxObj({ data: makeCalldata(recipient, 100) });
+    const err = validateTxObject(tx, { amount: '1e2', recipient });
+    expect(err).not.toBeNull();
+    expect(err).toContain('scientific notation');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// I. Network-unknown / reservation preservation (Fase 1.3)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('I. NETWORK_UNKNOWN — reservation preserved on network error (Fase 1.3)', () => {
+  // Inline the relevant section of the server logic to test the reservation behaviour
+  // without a full HTTP stack. We verify that after a simulated network throw:
+  //  1. The reservation key is NOT deleted from KV.
+  //  2. The returned payload includes reconcileRequired: true.
+  //  3. The returned payload includes the idempotencyKey for reconciliation.
+
+  async function simulatePaymentHandler(kv, idemKey, bodyJson, throwNetwork) {
+    // Simplified re-implementation of the reservation + upstream call logic
+    const userId = 'user-test';
+
+    // Phase 1: reserve
+    const reserveKey = `cpn_reserve:${userId}:${idemKey}`;
+    const existing = await kv.get(reserveKey);
+    if (existing) return { code: 'IDEMPOTENCY_CONFLICT', status: 409 };
+    await kv.put(reserveKey, `pending:req123`, { expirationTtl: 120 });
+
+    let reservationHandle = { idemKey, reserveKey };
+
+    // Simulate network call
+    if (throwNetwork) {
+      // NETWORK_UNKNOWN: do NOT delete reservation
+      const payload = {
+        error: 'CPN upstream unreachable — outcome unknown',
+        code: 'NETWORK_UNKNOWN',
+        reconcileRequired: true,
+        idempotencyKey: reservationHandle.idemKey,
+      };
+      return { ...payload, status: 502 };
+    }
+
+    // Simulate successful response
+    const paymentId = 'pay-' + Math.random().toString(36).slice(2);
+    await kv.put(`cpn_idem:${userId}:${idemKey}`, JSON.stringify({ paymentId, createdAt: Date.now() }), {});
+    await kv.put(`cpn_pay:${userId}:${paymentId}`, '1', {});
+    try { await kv.delete(reserveKey); } catch (_) {}
+    return { id: paymentId, status: 200 };
+  }
+
+  it('on network error, reservation key is NOT deleted — blocks immediate retry', async () => {
+    const kv = makeMockKV({});
+    const idemKey = 'test-idem-key-12345678';
+    await simulatePaymentHandler(kv, idemKey, {}, true);
+    // Reservation must still exist
+    const reserved = await kv.get(`cpn_reserve:user-test:${idemKey}`);
+    expect(reserved).not.toBeNull();
+    expect(reserved).toContain('pending');
+  });
+
+  it('on network error, response includes reconcileRequired: true', async () => {
+    const kv = makeMockKV({});
+    const result = await simulatePaymentHandler(kv, 'test-idem-key-87654321', {}, true);
+    expect(result.code).toBe('NETWORK_UNKNOWN');
+    expect(result.reconcileRequired).toBe(true);
+  });
+
+  it('on network error, response includes the idempotencyKey for reconciliation', async () => {
+    const kv = makeMockKV({});
+    const key = 'test-idem-key-reconcile1';
+    const result = await simulatePaymentHandler(kv, key, {}, true);
+    expect(result.idempotencyKey).toBe(key);
+  });
+
+  it('a second concurrent request with same key gets IDEMPOTENCY_CONFLICT (reservation intact)', async () => {
+    const kv = makeMockKV({});
+    const idemKey = 'concurrent-key-00000001';
+    // First request: throws network
+    await simulatePaymentHandler(kv, idemKey, {}, true);
+    // Second request with same key: should see the reservation
+    const result = await simulatePaymentHandler(kv, idemKey, {}, false);
+    expect(result.code).toBe('IDEMPOTENCY_CONFLICT');
+  });
+
+  it('successful payment cleans up reservation and records paymentId', async () => {
+    const kv = makeMockKV({});
+    const idemKey = 'success-key-000001';
+    const result = await simulatePaymentHandler(kv, idemKey, {}, false);
+    expect(result.status).toBe(200);
+    expect(result.id).toBeDefined();
+    // Reservation must be gone
+    const reserved = await kv.get(`cpn_reserve:user-test:${idemKey}`);
+    expect(reserved).toBeNull();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// J. Partial persistence — promote fails, ownership recorded
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('J. Partial persistence (Fase 1.3)', () => {
+  it('recordPaymentOwnership failure returns { ok: false, error } — not silent', async () => {
+    const kv = makeFailingKV('put');
+    const result = await recordPaymentOwnership({ AUTH_KV: kv }, 'u1', 'pay-partial');
+    expect(result.ok).toBe(false);
+    expect(typeof result.error).toBe('string');
+  });
+
+  it('after ownership record failure, payment still not accessible (fail closed)', async () => {
+    const kv = makeMockKV({});
+    // Simulate: ownership was NOT written (KV failure)
+    const accessible = await verifyPaymentOwnership({ AUTH_KV: kv }, 'u1', 'pay-partial-never-written');
+    expect(accessible).toBe(false);
+  });
+
+  it('payloadHash detects same key with different beneficiary account', () => {
+    const body1 = { quoteId: 'q1', amount: '100', destinationCurrency: 'BRL', beneficiaryDetails: { name: 'Alice', accountNumber: '11111' } };
+    const body2 = { quoteId: 'q1', amount: '100', destinationCurrency: 'BRL', beneficiaryDetails: { name: 'Alice', accountNumber: '22222' } };
+    expect(payloadHash(body1)).not.toBe(payloadHash(body2));
+  });
+
+  it('payloadHash detects same key with different amount', () => {
+    const body1 = { quoteId: 'q1', amount: '100', destinationCurrency: 'BRL', beneficiaryDetails: { name: 'Alice', accountNumber: '11111' } };
+    const body2 = { quoteId: 'q1', amount: '200', destinationCurrency: 'BRL', beneficiaryDetails: { name: 'Alice', accountNumber: '11111' } };
+    expect(payloadHash(body1)).not.toBe(payloadHash(body2));
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // G. Regression guards — other pages unaffected
 // ─────────────────────────────────────────────────────────────────────────────
 

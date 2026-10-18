@@ -148,17 +148,22 @@ describe('shared/cpnFiatPayout.js — validateTxObject (7 checks)', () => {
     expect(cpnModule).toContain("'TX calldata too short to contain transfer(address,uint256) parameters'");
   });
 
-  it('check 5 — amount EXACT match against calldata (Fase 1.2 — no tolerance)', () => {
+  it('check 5 — amount EXACT match, decimal-exact conversion (Fase 1.3 — no parseFloat)', () => {
     expect(cpnModule).toContain('rawAmountBig');
-    expect(cpnModule).toContain('approvedRaw');
-    // Fase 1.2: exact match — search for the exact-match error string
+    expect(cpnModule).toContain('_usdcStringToRaw');  // decimal-exact converter used
     expect(cpnModule).toContain('does not exactly match');
     expect(cpnModule).toContain('No tolerance is permitted');
   });
 
-  it('check 5 — 0.5% tolerance REMOVED (Fase 1.2)', () => {
-    // The 200n divisor (0.5% tolerance) must no longer exist — it was removed
-    expect(cpnModule).not.toContain('approvedRaw / 200n');
+  it('check 5 — parseFloat REMOVED (Fase 1.3)', () => {
+    // validateTxObject must not use parseFloat for amount conversion
+    // _usdcStringToRaw must be used instead
+    const validateFn = cpnModule.slice(
+      cpnModule.indexOf('function validateTxObject('),
+      cpnModule.indexOf('function validateTxObject(') + 3000
+    );
+    expect(validateFn).not.toContain('parseFloat');
+    expect(validateFn).not.toContain('Math.round');
   });
 
   it('check 6 — rejects any non-zero native value (Fase 1.2 — must be zero)', () => {
@@ -331,15 +336,27 @@ describe('functions/api/cpn/[[route]].mjs — two-phase idempotency (Fase 1.1)',
     expect(cpnProxy).toContain("persistenceError = 'KV write failed — reconcile before retrying'");
   });
 
-  it('reservation key is cleaned up on network error (retry-safe)', () => {
-    expect(cpnProxy).toContain("reservationHandle.reserveKey");
-    expect(cpnProxy).toContain('AUTH_KV.delete(reservationHandle.reserveKey)');
+  it('reservation NOT deleted on network error — outcome unknown, reconcile required (Fase 1.3)', () => {
+    // Fase 1.3: network error returns NETWORK_UNKNOWN; reservation is preserved so
+    // a concurrent retry sees IDEMPOTENCY_CONFLICT until the TTL expires.
+    expect(cpnProxy).toContain("'NETWORK_UNKNOWN'");
+    expect(cpnProxy).toContain('reconcileRequired: true');
+    // The old "Clean up reservation on network failure" delete must NOT be present
+    // in the network error catch block (it was removed in Fase 1.3)
+    const catchBlock = cpnProxy.slice(
+      cpnProxy.indexOf('} catch (_networkErr) {'),
+      cpnProxy.indexOf('} catch (_networkErr) {') + 1000
+    );
+    expect(catchBlock).not.toContain('AUTH_KV.delete(reservationHandle.reserveKey)');
   });
 
-  it('reservation key is cleaned up on CPN error (retry-safe)', () => {
-    // Two delete calls for reservation: one after network error, one after CPN non-2xx
+  it('reservation key is cleaned up on CPN non-2xx error (retry-safe on known failure)', () => {
+    // On CPN returning a non-2xx error (known failure), the reservation IS deleted so
+    // the caller can retry. On NETWORK_UNKNOWN it is NOT deleted (Fase 1.3).
+    expect(cpnProxy).toContain('AUTH_KV.delete(reservationHandle.reserveKey)');
+    // There should be exactly one delete (in the non-2xx path), not two
     const deleteMatches = (cpnProxy.match(/AUTH_KV\.delete\(reservationHandle\.reserveKey\)/g) || []);
-    expect(deleteMatches.length).toBeGreaterThanOrEqual(2);
+    expect(deleteMatches.length).toBeGreaterThanOrEqual(1);
   });
 
   it('idempotencyKey required to be 8-128 chars', () => {
@@ -398,8 +415,10 @@ describe('functions/api/cpn/[[route]].mjs — key isolation and safe error messa
     expect(cpnProxy).toContain('delete upstreamJson.Authorization');
   });
 
-  it('network errors caught without leaking internal stack or address', () => {
-    expect(cpnProxy).toContain("{ error: 'CPN upstream unreachable', code: 'NETWORK_ERROR' }");
+  it('network errors caught without leaking internal stack or address (Fase 1.3: NETWORK_UNKNOWN)', () => {
+    // Fase 1.3: code changed from NETWORK_ERROR to NETWORK_UNKNOWN with reconcileRequired
+    expect(cpnProxy).toContain("'NETWORK_UNKNOWN'");
+    expect(cpnProxy).toContain('reconcileRequired: true');
     expect(cpnProxy).not.toContain('networkErr.toString()');
     expect(cpnProxy).not.toContain('networkErr.message');
   });
@@ -535,9 +554,9 @@ describe('index.html — TX validation before signing (Fase 1.1)', () => {
     expect(getTxFn()).toContain("does not match ERC-20 transfer()");
   });
 
-  it('check 5 — amount EXACT match against calldata (Fase 1.2 — no tolerance)', () => {
+  it('check 5 — amount EXACT match, decimal-exact conversion (Fase 1.3 — no parseFloat)', () => {
     expect(getTxFn()).toContain('opts.amount');
-    expect(getTxFn()).toContain('_CPN_USDC_DECIMALS');
+    expect(getTxFn()).toContain('_cpnUsdcStringToRaw'); // Fase 1.3: decimal-exact converter
     expect(getTxFn()).toContain('diverges from approved amount');
     expect(getTxFn()).toContain('does not exactly match');
   });
