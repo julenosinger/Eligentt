@@ -40,7 +40,7 @@ function makeKV() {
 }
 
 function makeEnv(kv, { apiKey = 'cpn-secret-key', kvFail = null } = {}) {
-  const env = { CPN_API_KEY: apiKey, AUTH_KV: kv };
+  const env = { CPN_API_KEY: apiKey, AUTH_KV: kv, CPN_ALLOW_KV_FALLBACK: 'true' };
   return env;
 }
 

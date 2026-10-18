@@ -25,6 +25,11 @@ const PAYLOAD_HASH = 'a'.repeat(64);
 // ── DO state mock ──────────────────────────────────────────────────────────────
 function makeDOState() {
   const store = new Map();
+  const txn = {
+    async get(k) { return store.has(k) ? store.get(k) : undefined; },
+    async put(k, v) { store.set(k, v); },
+    async delete(k) { store.delete(k); },
+  };
   return {
     storage: {
       async get(k) { return store.has(k) ? store.get(k) : undefined; },
@@ -32,7 +37,9 @@ function makeDOState() {
       async delete(k) { store.delete(k); },
       async setAlarm() {},
       async deleteAlarm() {},
+      async transaction(cb) { return cb(txn); },
     },
+    async blockConcurrencyWhile(cb) { return cb(); },
     _store: store,
   };
 }
@@ -232,7 +239,7 @@ describe('onRequest — persistence failure for every idempotency record', () =>
   it('cpn_pending write failure sets reconciliationPersistFailed (still indeterminate)', async () => {
     const kv = makeKV();
     await seedSession(kv);
-    const env = { CPN_API_KEY: 'key', AUTH_KV: kv };
+    const env = { CPN_API_KEY: 'key', AUTH_KV: kv, CPN_ALLOW_KV_FALLBACK: 'true' };
 
     // Circle succeeds, but cpn_idem + cpn_pay + cpn_pending writes all fail.
     kv.put = async (k, v) => {
@@ -253,7 +260,7 @@ describe('onRequest — persistence failure for every idempotency record', () =>
   it('cpn_pay failure alone → INDETERMINATE_OUTCOME (never definitive success)', async () => {
     const kv = makeKV();
     await seedSession(kv);
-    const env = { CPN_API_KEY: 'key', AUTH_KV: kv };
+    const env = { CPN_API_KEY: 'key', AUTH_KV: kv, CPN_ALLOW_KV_FALLBACK: 'true' };
 
     kv.put = async (k, v) => {
       if (k.startsWith('cpn_pay:')) throw new Error('KV write failed');

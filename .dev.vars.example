@@ -70,6 +70,18 @@ ANTHROPIC_API_KEY=
 # There is no mock mode — all calls hit the real Circle CPN API.
 CPN_API_KEY=
 
+# CPN_LOCK — Durable Object binding for ATOMIC payment idempotency (REQUIRED).
+# The CpnLock class (functions/api/cpn-lock.do.js) must be deployed as a separate
+# Worker and bound to this Pages project via the dashboard (like PAYMENT_LOCK).
+# Without this binding, POST /api/cpn/payments FAILS SAFE (503 CPN_LOCK_NOT_CONFIGURED)
+# rather than silently falling back to a non-atomic KV reservation.
+#   Variable name: CPN_LOCK
+#   Durable Object namespace: the namespace exported by the CpnLock Worker
+# Optional dev-only escape hatch: set "true" to use the NON-ATOMIC KV reservation
+# (responses carry `degraded: true`). NOT recommended for production — Circle's
+# Idempotency-Key remains the authoritative dedup, but local serialization is lost.
+# CPN_ALLOW_KV_FALLBACK=false
+
 # ── x402 Payments (Autonoma, Phase 1 — infrastructure only) ──
 # Master switch. Keep "false" until network + EIP-3009 settlement compatibility
 # is confirmed (see docs/x402-integration.md). Real payments are NOT wired yet.

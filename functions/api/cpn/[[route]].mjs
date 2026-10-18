@@ -403,6 +403,28 @@ async function clearPendingReconciliation(env, userId, idempotencyKey) {
   try { await env.AUTH_KV.delete(`cpn_pending:${userId}:${idempotencyKey}`); } catch (_) {}
 }
 
+// Perform a CpnLock Durable Object action and validate its result. Returns
+// { ok:true } on a confirmed `{ ok:true }` response, or { ok:false, error } on
+// any HTTP/rejection/parse/network failure — the caller must never assume an
+// indeterminate outcome was recorded.
+async function lockAction(handle, action, extra) {
+  if (!handle || !handle.useDO || !handle.doStub) return { ok: true, skipped: true };
+  try {
+    const res = await handle.doStub.fetch('https://do/lock', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, payloadHash: handle.payloadHash, ...(extra || {}) }),
+    });
+    if (!res || !res.ok) return { ok: false, error: 'DO action failed (HTTP ' + (res && res.status) + ')' };
+    let body = null;
+    try { body = await res.json(); } catch (_) { body = null; }
+    if (!body || body.ok !== true) return { ok: false, error: (body && body.error) || 'DO action rejected' };
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e && e.message ? e.message : 'DO action error' };
+  }
+}
+
 // ── Body size guard ──────────────────────────────────────────────────────────
 
 async function readBodySafe(request) {
@@ -547,6 +569,18 @@ export async function onRequest(context) {
     // the lock, so two simultaneous retries with the same key are serialized.
     const pHash = await payloadHash(bodyJson);
     const useDO = !!(env && env.CPN_LOCK);
+    const allowKvFallback = !!(env && env.CPN_ALLOW_KV_FALLBACK === 'true');
+    // FAIL-SAFE (Fase 1.6): fiat payouts require the atomic CpnLock Durable Object.
+    // If the binding is absent, do NOT silently fall back to KV as if it offered the
+    // same guarantee. Block the operation with an explicit configuration error unless
+    // the deployer explicitly opted into the non-atomic KV fallback (dev only).
+    if (!useDO && !allowKvFallback) {
+      return jsonResponse({
+        error: 'Atomic idempotency lock (CpnLock Durable Object) is not configured',
+        code: 'CPN_LOCK_NOT_CONFIGURED',
+        message: 'Fiat payouts require the CPN_LOCK Durable Object binding. Configure it in the Cloudflare dashboard, or explicitly enable the non-atomic KV fallback with CPN_ALLOW_KV_FALLBACK=true (not recommended for production).',
+      }, 503, env, request);
+    }
     if (useDO) {
       const doId = env.CPN_LOCK.idFromName(`${userId}:${idemKey}`);
       const doStub = env.CPN_LOCK.get(doId);
@@ -587,7 +621,7 @@ export async function onRequest(context) {
         }
         return jsonResponse({ error: 'Could not reserve idempotency slot — please retry', code: 'IDEMPOTENCY_RESERVE_FAILED' }, 503, env, request);
       }
-      reservationHandle = { idemKey, reserveKey: reservation.reserveKey, payloadHash: reservation.payloadHash, reqId: reservation.reqId, useDO: false };
+      reservationHandle = { idemKey, reserveKey: reservation.reserveKey, payloadHash: reservation.payloadHash, reqId: reservation.reqId, useDO: false, degraded: true };
     }
   }
 
@@ -622,13 +656,10 @@ export async function onRequest(context) {
     if (reservationHandle) {
       unknownPayload.idempotencyKey = reservationHandle.idemKey;
       if (reservationHandle.useDO && reservationHandle.doStub) {
-        try {
-          await reservationHandle.doStub.fetch('https://do/lock', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'markPending', payloadHash: reservationHandle.payloadHash }),
-          });
-        } catch (_e) {}
+        const mpRes = await lockAction(reservationHandle, 'markPending');
+        if (!mpRes.ok) {
+          unknownPayload.lockMarkPendingFailed = true;
+        }
       }
       const pendingWrite = await writePendingReconciliation(env, userId, reservationHandle.idemKey, reservationHandle.payloadHash, reservationHandle.reqId);
       if (!pendingWrite.ok) {
@@ -676,13 +707,8 @@ export async function onRequest(context) {
       upstreamJson.reconcileRequired = true;
       upstreamJson.code = 'INDETERMINATE_OUTCOME';
       if (reservationHandle.useDO && reservationHandle.doStub) {
-        try {
-          await reservationHandle.doStub.fetch('https://do/lock', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'markPending', payloadHash: pHash, paymentId }),
-          });
-        } catch (_e) {}
+        const mpRes = await lockAction(reservationHandle, 'markPending', { paymentId });
+        if (!mpRes.ok) upstreamJson.lockMarkPendingFailed = true;
       }
       const pendingWrite = await writePendingReconciliation(env, userId, idemKey, pHash, reservationHandle.reqId);
       if (!pendingWrite.ok) {
@@ -691,13 +717,12 @@ export async function onRequest(context) {
     } else {
       // Successfully persisted — commit the DO lock (permanent) + clear pending.
       if (reservationHandle.useDO && reservationHandle.doStub) {
-        try {
-          await reservationHandle.doStub.fetch('https://do/lock', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'commit', payloadHash: pHash, paymentId }),
-          });
-        } catch (_e) {}
+        const cRes = await lockAction(reservationHandle, 'commit', { paymentId });
+        if (!cRes.ok) {
+          // The KV records are already written (idempotent replay will dedup), but the
+          // DO lock could not be committed — surface it so the caller is aware.
+          upstreamJson.lockCommitFailed = true;
+        }
       }
       await clearPendingReconciliation(env, userId, idemKey);
     }
@@ -708,13 +733,7 @@ export async function onRequest(context) {
     // Release the lock on a KNOWN CPN error (non-2xx) so the caller can retry safely.
     if (reservationHandle) {
       if (reservationHandle.useDO && reservationHandle.doStub) {
-        try {
-          await reservationHandle.doStub.fetch('https://do/lock', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'release', payloadHash: reservationHandle.payloadHash }),
-          });
-        } catch (_e) {}
+        await lockAction(reservationHandle, 'release');
       } else if (reservationHandle.reserveKey) {
         try { await env.AUTH_KV.delete(reservationHandle.reserveKey); } catch (_) {}
       }
@@ -729,5 +748,9 @@ export async function onRequest(context) {
     );
   }
 
+  // Mark non-atomic KV-fallback responses explicitly (never silent).
+  if (reservationHandle && reservationHandle.degraded && upstreamJson && typeof upstreamJson === 'object') {
+    upstreamJson.degraded = true;
+  }
   return jsonResponse(upstreamJson, upstreamRes.status, env, request);
 }
