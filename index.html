@@ -33939,6 +33939,10 @@ let _saCPNPaymentId = null;            // CPN payment id for current in-flight p
 // user opens CPN mode or confirms a new payout. Cleared only on success or
 // explicit cancel. Never regenerated mid-flight or on retry.
 let _saCPNIdempotencyKey = null;
+// Captured EVM recipient address from the first valid TX object returned by CPN.
+// Once captured, all subsequent validation for the same payment uses this as the
+// expected recipient — prevents a tampered retry response from redirecting funds.
+let _saCPNExpectedRecipient = null;
 
 // Allowed CPN chain IDs — mirror of cpnFiatPayout.js CPN_ALLOWED_CHAIN_IDS.
 // Any chainId returned by CPN outside this list is rejected before signing.
@@ -34012,6 +34016,7 @@ function saToggleCPN() {
     // Reset idempotency key — user is cancelling this payout, not retrying it.
     _saCPNIdempotencyKey = null;
     _saCPNPaymentId = null;
+    _saCPNExpectedRecipient = null;
     var btnContent2 = document.getElementById('sa-send-btn-content');
     if (btnContent2) btnContent2.innerHTML = '<i class="ti ti-send"></i> Send Asset';
     set_('sa-rt-type', 'Direct ERC-20 Transfer');
@@ -34285,21 +34290,44 @@ async function saExecuteCPNPayout() {
     // Reject if: missing fields, wrong chainId, bad address, excessive value.
     // walletAddress and activeChainId are read from the app's authenticated state —
     // never from the txObjData itself.
+    //
+    // Recipient binding: on the FIRST call for this paymentId, the decoded EVM
+    // recipient address is captured in _saCPNExpectedRecipient. On any subsequent
+    // call (retry), the captured address is passed as expectedRecipient so that a
+    // tampered response cannot redirect funds to a different address.
     var txValidationError = _saCPNValidateTxObject(txObjData, {
       amount: amount,
       walletAddress: walletAddress,
       expectedChainId: activeChainId,
+      expectedRecipient: _saCPNExpectedRecipient || undefined,
     });
     if (txValidationError) {
       throw new Error('TX validation failed: ' + txValidationError);
     }
+    // Capture the decoded recipient from the first validated TX object.
+    // Once set, this is used for all subsequent validations for this payment.
+    if (!_saCPNExpectedRecipient && txObjData.data) {
+      var _addrSlot = txObjData.data.toLowerCase().slice(2 + 8, 2 + 8 + 64);
+      var _decoded  = '0x' + _addrSlot.slice(24);
+      if (_decoded.length === 42 && _decoded !== '0x0000000000000000000000000000000000000000') {
+        _saCPNExpectedRecipient = _decoded;
+      }
+    }
 
     // ── Step 5: sign the validated transaction ─────────────────────────
     _setStatus('Sign in wallet…', 'yellow', 'ti-writing');
+    // Signing: value must be exactly 0n — validation already confirmed it.
+    // No fallback: if txObjData.value is missing, malformed, or non-zero,
+    // the validation at step 4 would have thrown. Here we parse it strictly.
+    var _txValue;
+    try { _txValue = BigInt(txObjData.value); } catch (_) {
+      throw new Error('TX value field is not a valid integer — cannot sign');
+    }
+    if (_txValue !== 0n) throw new Error('TX value must be 0 for USDC transfer — rejecting sign');
     var rawTx = {
       to:       txObjData.to,
       data:     txObjData.data || '0x',
-      value:    txObjData.value ? BigInt(txObjData.value) : 0n,
+      value:    _txValue,
       chainId:  Number(txObjData.chainId),
       gasLimit: txObjData.gasLimit ? BigInt(txObjData.gasLimit) : undefined,
     };
@@ -34339,6 +34367,7 @@ async function saExecuteCPNPayout() {
       // retry of the same payment if it hadn't completed yet.
       _saCPNIdempotencyKey = null;
       _saCPNPaymentId = null;
+      _saCPNExpectedRecipient = null;
     } else {
       toast('CPN payout ended with status: ' + finalPayment.status, 'warning');
     }
@@ -34458,6 +34487,13 @@ function _saCPNValidateTxObject(txObj, opts) {
     return 'TX calldata recipient address could not be decoded (malformed)';
   if (decodedRecipient === '0x0000000000000000000000000000000000000000')
     return 'TX calldata recipient is the zero address — rejected';
+  // If the caller supplies an expectedRecipient (captured from the first trusted TX
+  // object for this paymentId), the decoded recipient must match it exactly.
+  if (opts && opts.expectedRecipient) {
+    if (decodedRecipient.toLowerCase() !== opts.expectedRecipient.toLowerCase())
+      return 'TX calldata recipient (' + decodedRecipient + ') does not match ' +
+             'expected recipient (' + opts.expectedRecipient + ') — possible redirection';
+  }
 
   // 6. Amount: decode uint256 from calldata and compare EXACTLY to approved amount.
   // Fase 1.3: uses decimal-exact integer arithmetic — no parseFloat, no binary rounding.
@@ -34483,14 +34519,22 @@ function _saCPNValidateTxObject(txObj, opts) {
     return 'Approved amount not supplied — cannot validate TX calldata amount';
   }
 
-  // 7. Native value — USDC ERC-20 transfers must send ZERO native value
-  if (txObj.value) {
-    try {
-      var valBig = BigInt(txObj.value);
-      if (valBig > 0n)
-        return 'TX native value (' + valBig.toString() + ' wei) must be zero for a USDC transfer — exceeds safety limit';
-    } catch (_) { return 'TX value field is not a valid integer'; }
+  // 7. Native value — USDC ERC-20 transfers must send ZERO native value.
+  // CRITICAL (Fase 1.4): no fallback or truthy bypass — a missing/malformed value is rejected,
+  // not silently treated as 0. This mirrors the fix in shared/cpnFiatPayout.js.
+  var _valStr = txObj.value != null ? String(txObj.value).trim() : null;
+  if (_valStr === null)
+    return 'TX object is missing the `value` field — required for USDC transfer validation';
+  if (!/^-?\d+$/.test(_valStr))
+    return 'TX object `value` field is not a valid integer string: ' + _valStr;
+  var _valBig;
+  try { _valBig = BigInt(_valStr); } catch (_) {
+    return 'TX object `value` field could not be parsed as BigInt: ' + _valStr;
   }
+  if (_valBig < 0n)
+    return 'TX object `value` is negative (' + _valBig.toString() + ') — rejected';
+  if (_valBig > 0n)
+    return 'TX native value (' + _valBig.toString() + ' wei) must be zero for a USDC transfer — exceeds safety limit';
 
   // 8. From field mismatch
   if (txObj.from && opts.walletAddress &&

@@ -293,9 +293,19 @@
 
     // 7. Native value: USDC transfers must send zero native value.
     // Any non-zero value means the TX would also drain native gas — rejected.
-    var rawValueStr = txObj.value != null ? String(txObj.value) : '0';
+    // CRITICAL: no fallback to 0n — a malformed/negative/non-numeric value is rejected
+    // rather than silently treated as safe. The caller must supply a parseable value.
+    var rawValueStr = txObj.value != null ? String(txObj.value).trim() : null;
+    if (rawValueStr === null)
+      return 'TX object is missing the `value` field — required for USDC transfer validation';
+    if (!/^-?\d+$/.test(rawValueStr))
+      return 'TX object `value` field is not a valid integer string: ' + rawValueStr;
     var rawValue;
-    try { rawValue = BigInt(rawValueStr); } catch (_) { rawValue = 0n; }
+    try { rawValue = BigInt(rawValueStr); } catch (_) {
+      return 'TX object `value` field could not be parsed as BigInt: ' + rawValueStr;
+    }
+    if (rawValue < 0n)
+      return 'TX object `value` is negative (' + rawValue.toString() + ') — rejected';
     if (rawValue > 0n)
       return 'TX object native value (' + rawValue.toString() + ' wei) must be zero for a USDC transfer — exceeds safety limit';
 
@@ -530,7 +540,17 @@
 
     // ── Step 5a: validate TX object BEFORE signing ────────────────────
     // Never sign an arbitrary TX returned by an API — validate all fields first.
-    var txErr = validateTxObject(txObj, { amount: params.amount, walletAddress: params.walletAddress });
+    // params.expectedRecipient — if the caller knows the expected EVM recipient
+    // address (e.g. from a prior trusted disclosure by Circle), pass it here so the
+    // decoded calldata recipient is compared against it exactly. When omitted, the
+    // decoded recipient is still validated for structural correctness (non-zero,
+    // well-formed) but is not compared to an expected value.
+    var txApproval = {
+      amount:        params.amount,
+      walletAddress: params.walletAddress,
+    };
+    if (params.expectedRecipient) txApproval.recipient = params.expectedRecipient;
+    var txErr = validateTxObject(txObj, txApproval);
     if (txErr) {
       var ve = new Error('TX validation failed before signing: ' + txErr);
       ve.code = 'TX_VALIDATION_FAILED';

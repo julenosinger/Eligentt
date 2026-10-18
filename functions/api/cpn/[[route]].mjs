@@ -245,11 +245,30 @@ function generateRequestId() {
 }
 
 /**
- * Produce a short deterministic hash of the canonical payment payload fields so that
+ * Produce a SHA-256 hash of the canonical payment payload fields so that
  * two requests using the same idempotency key but different parameters can be detected.
- * This is NOT a cryptographic guarantee — it is a consistency check.
+ *
+ * Uses crypto.subtle.digest (SubtleCrypto, available in all Cloudflare Workers runtimes).
+ * Returns a 64-char hex string (256-bit output). This is a binding integrity check, not
+ * a signature — it is collision-resistant and appropriate for same-key/different-payload
+ * detection, but it does not authenticate the payload against a secret.
+ *
+ * IDEMPOTENCY ATOMICITY LIMITATION (Cloudflare KV):
+ *   KV does not offer compare-and-swap or any transactional primitive. The reservation
+ *   pattern (get → check → put) is NOT atomic: two concurrent requests arriving within
+ *   the same ~1 ms window can both read "no key" and both proceed past the check.
+ *   This is mitigated by two independent barriers:
+ *     1. Circle's own server-side idempotency (Idempotency-Key header) — CPN will return
+ *        409 for a true duplicate regardless of what we do locally.
+ *     2. payloadHash binding — even if both requests pass the KV reservation, a replay
+ *        check against the permanent record will detect a different payload.
+ *   For strict exactly-once execution, a Durable Object with a transactional lock would
+ *   be required. That is not implemented here because it requires user-provisioned
+ *   Cloudflare Durable Objects (a paid feature requiring wrangler.jsonc changes and
+ *   account-level provisioning). This limitation is documented and not silently claimed
+ *   as solved. The code fails closed in all ambiguous states.
  */
-function payloadHash(body) {
+async function payloadHash(body) {
   if (!body) return 'empty';
   // Canonical fields that define a unique payment operation
   const canonical = JSON.stringify({
@@ -259,19 +278,17 @@ function payloadHash(body) {
     beneficiaryName:     body.beneficiaryDetails && body.beneficiaryDetails.name   ? body.beneficiaryDetails.name.trim()   : null,
     beneficiaryAccount:  body.beneficiaryDetails && body.beneficiaryDetails.accountNumber ? body.beneficiaryDetails.accountNumber.trim() : null,
   });
-  // djb2-style hash — non-cryptographic, collision-resistant enough for consistency checks
-  let h = 5381;
-  for (let i = 0; i < canonical.length; i++) {
-    h = ((h << 5) + h) ^ canonical.charCodeAt(i);
-    h = h >>> 0; // keep unsigned 32-bit
-  }
-  return h.toString(16).padStart(8, '0');
+  // SHA-256 via SubtleCrypto (available in Cloudflare Workers runtime)
+  const encoded = new TextEncoder().encode(canonical);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', encoded);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
 async function reserveIdempotency(env, userId, idempotencyKey, bodyJson) {
   if (!env.AUTH_KV) return { ok: false, error: 'AUTH_KV unavailable' };
   const reqId = generateRequestId();
-  const pHash = payloadHash(bodyJson);
+  const pHash = await payloadHash(bodyJson);
   const reserveKey = `cpn_reserve:${userId}:${idempotencyKey}`;
   // Read first (best-effort — not atomic; see note above)
   try {
@@ -424,7 +441,7 @@ export async function onRequest(context) {
       // Payload-binding check: if the stored hash differs from this request's hash,
       // the caller is trying to reuse an idempotency key for a different payment.
       // This is a misuse: reject rather than silently process a different operation.
-      const newHash = payloadHash(bodyJson);
+      const newHash = await payloadHash(bodyJson);
       if (existing.payloadHash && existing.payloadHash !== newHash) {
         return jsonResponse({
           error: 'idempotencyKey already used for a different payment operation',

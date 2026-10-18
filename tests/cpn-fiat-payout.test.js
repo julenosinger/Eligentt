@@ -364,12 +364,15 @@ describe('functions/api/cpn/[[route]].mjs — two-phase idempotency (Fase 1.1)',
     expect(cpnProxy).toContain("'idempotencyKey is required (8\u2013128 chars, UUID v4 recommended)'");
   });
 
-  it('payloadHash function binds reservation to canonical payload fields (Fase 1.2)', () => {
-    expect(cpnProxy).toContain('function payloadHash(body)');
+  it('payloadHash function binds reservation to canonical payload fields (Fase 1.4: SHA-256)', () => {
+    expect(cpnProxy).toContain('async function payloadHash(body)'); // now async (Fase 1.4)
     expect(cpnProxy).toContain('quoteId');
     expect(cpnProxy).toContain('destinationCurrency');
     expect(cpnProxy).toContain('beneficiaryName');
     expect(cpnProxy).toContain('beneficiaryAccount');
+    // SHA-256 upgrade: must use SubtleCrypto, not djb2
+    expect(cpnProxy).toContain("crypto.subtle.digest('SHA-256'");
+    expect(cpnProxy).not.toContain('h = 5381'); // djb2 removed
   });
 
   it('IDEMPOTENCY_KEY_REUSE returned when same key used with different payload (Fase 1.2)', () => {
@@ -510,7 +513,7 @@ describe('index.html — TX validation before signing (Fase 1.1)', () => {
   const startMarker = 'function _saCPNValidateTxObject(txObj, opts)';
   const getTxFn = () => {
     const start = html.indexOf(startMarker);
-    return html.slice(start, start + 5000); // increased: Fase 1.2 added recipient + exact-amount checks
+    return html.slice(start, start + 8000); // increased: Fase 1.4 added expectedRecipient block + strict value checks
   };
 
   it('_saCPNValidateTxObject function is defined', () => {
@@ -683,7 +686,7 @@ describe('index.html — send button dispatch', () => {
 describe('index.html — 5-step OFI payment flow in saExecuteCPNPayout', () => {
   const getPayoutFn = () => {
     const start = html.indexOf('async function saExecuteCPNPayout()');
-    return html.slice(start, start + 6000);
+    return html.slice(start, start + 10000); // Fase 1.4: fn grew with signing-path hardening
   };
 
   it('uses pre-fetched quote (no duplicate quote call inside payout fn)', () => {
@@ -704,8 +707,13 @@ describe('index.html — 5-step OFI payment flow in saExecuteCPNPayout', () => {
   });
 
   it('does not mark payment complete until COMPLETED status from poll', () => {
-    expect(getPayoutFn()).toContain("finalPayment.status === 'COMPLETED'");
-    expect(getPayoutFn()).not.toContain("toast('Fiat payout");
+    const fn = getPayoutFn();
+    expect(fn).toContain("finalPayment.status === 'COMPLETED'");
+    // toast is gated behind the COMPLETED check — not called unconditionally
+    const completedIdx = fn.indexOf("finalPayment.status === 'COMPLETED'");
+    const toastIdx     = fn.indexOf("toast('Fiat payout");
+    // toast must come AFTER the COMPLETED guard
+    expect(toastIdx).toBeGreaterThan(completedIdx);
   });
 
   it('logs type cpn-fiat to activity, without bank account number', () => {

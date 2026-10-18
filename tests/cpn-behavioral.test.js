@@ -843,6 +843,188 @@ describe('J. Partial persistence (Fase 1.3)', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// K. value field — Fase 1.4: no fallback-to-0n (real execution)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('K. validateTxObject — value field strict validation (Fase 1.4)', () => {
+  const recipient = '0xdeadbeef00000000000000000000000000000001';
+
+  it('accepts value "0" (string)', () => {
+    const tx = makeTxObj({ data: makeCalldata(recipient, 100), value: '0' });
+    expect(validateTxObject(tx, { amount: '100', recipient })).toBeNull();
+  });
+
+  it('accepts value 0 (number coerced to string)', () => {
+    const tx = makeTxObj({ data: makeCalldata(recipient, 100), value: 0 });
+    expect(validateTxObject(tx, { amount: '100', recipient })).toBeNull();
+  });
+
+  it('rejects missing value field (null)', () => {
+    const tx = { ...makeTxObj({ data: makeCalldata(recipient, 100) }), value: null };
+    const err = validateTxObject(tx, { amount: '100', recipient });
+    expect(err).not.toBeNull();
+    expect(err).toContain('missing the `value` field');
+  });
+
+  it('rejects undefined value field', () => {
+    const tx = makeTxObj({ data: makeCalldata(recipient, 100) });
+    delete tx.value;
+    const err = validateTxObject(tx, { amount: '100', recipient });
+    expect(err).not.toBeNull();
+    expect(err).toContain('missing the `value` field');
+  });
+
+  it('rejects negative value ("-1")', () => {
+    const tx = makeTxObj({ data: makeCalldata(recipient, 100), value: '-1' });
+    const err = validateTxObject(tx, { amount: '100', recipient });
+    expect(err).not.toBeNull();
+    expect(err).toContain('negative');
+  });
+
+  it('rejects non-numeric value string ("abc")', () => {
+    const tx = makeTxObj({ data: makeCalldata(recipient, 100), value: 'abc' });
+    const err = validateTxObject(tx, { amount: '100', recipient });
+    expect(err).not.toBeNull();
+    expect(err).toContain('not a valid integer string');
+  });
+
+  it('rejects decimal value string ("0.5")', () => {
+    const tx = makeTxObj({ data: makeCalldata(recipient, 100), value: '0.5' });
+    const err = validateTxObject(tx, { amount: '100', recipient });
+    expect(err).not.toBeNull();
+    expect(err).toContain('not a valid integer string');
+  });
+
+  it('rejects empty string value ("")', () => {
+    const tx = makeTxObj({ data: makeCalldata(recipient, 100), value: '' });
+    const err = validateTxObject(tx, { amount: '100', recipient });
+    expect(err).not.toBeNull();
+    // Empty string fails the regex test
+    expect(err).toContain('not a valid integer string');
+  });
+
+  it('rejects positive value (1 wei — value-draining)', () => {
+    const tx = makeTxObj({ data: makeCalldata(recipient, 100), value: '1' });
+    const err = validateTxObject(tx, { amount: '100', recipient });
+    expect(err).not.toBeNull();
+    expect(err).toContain('must be zero');
+  });
+
+  it('the old falsy bypass: value "0" must NOT be silently passed for malformed — strict only', () => {
+    // Confirms we do NOT use `if (txObj.value)` truthy check that would skip validation
+    // for any falsy-but-present value. "0" is falsy in JS but is a valid value here.
+    const tx = makeTxObj({ data: makeCalldata(recipient, 100), value: '0' });
+    // This must pass — "0" is valid
+    expect(validateTxObject(tx, { amount: '100', recipient })).toBeNull();
+    // And null must fail
+    const tx2 = { ...makeTxObj({ data: makeCalldata(recipient, 100) }), value: null };
+    const err2 = validateTxObject(tx2, { amount: '100', recipient });
+    expect(err2).not.toBeNull();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// L. SHA-256 payloadHash — Fase 1.4 (real execution, browser SubtleCrypto)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Re-implement the server payloadHash using the same algorithm so we can test
+// the hash properties. In Vitest (Node), SubtleCrypto is available via globalThis.
+async function sha256PayloadHash(body) {
+  if (!body) return 'empty';
+  const canonical = JSON.stringify({
+    quoteId:             body.quoteId             || null,
+    amount:              body.amount              ? String(body.amount) : null,
+    destinationCurrency: body.destinationCurrency || null,
+    beneficiaryName:     body.beneficiaryDetails && body.beneficiaryDetails.name   ? body.beneficiaryDetails.name.trim()   : null,
+    beneficiaryAccount:  body.beneficiaryDetails && body.beneficiaryDetails.accountNumber ? body.beneficiaryDetails.accountNumber.trim() : null,
+  });
+  const encoded = new TextEncoder().encode(canonical);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', encoded);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+describe('L. SHA-256 payloadHash — Fase 1.4', () => {
+  const bodyA = { quoteId: 'q1', amount: '100', destinationCurrency: 'BRL', beneficiaryDetails: { name: 'Alice', accountNumber: '12345' } };
+  const bodyB = { quoteId: 'q1', amount: '100', destinationCurrency: 'BRL', beneficiaryDetails: { name: 'Alice', accountNumber: '99999' } };
+  const bodyC = { quoteId: 'q1', amount: '200', destinationCurrency: 'BRL', beneficiaryDetails: { name: 'Alice', accountNumber: '12345' } };
+
+  it('SHA-256 hash is exactly 64 hex characters (256-bit output)', async () => {
+    const h = await sha256PayloadHash(bodyA);
+    expect(h).toHaveLength(64);
+    expect(/^[0-9a-f]{64}$/.test(h)).toBe(true);
+  });
+
+  it('same payload always produces the same SHA-256 hash (deterministic)', async () => {
+    const h1 = await sha256PayloadHash(bodyA);
+    const h2 = await sha256PayloadHash(bodyA);
+    expect(h1).toBe(h2);
+  });
+
+  it('different account number produces a different hash', async () => {
+    const h1 = await sha256PayloadHash(bodyA);
+    const h2 = await sha256PayloadHash(bodyB);
+    expect(h1).not.toBe(h2);
+  });
+
+  it('different amount produces a different hash', async () => {
+    const h1 = await sha256PayloadHash(bodyA);
+    const h2 = await sha256PayloadHash(bodyC);
+    expect(h1).not.toBe(h2);
+  });
+
+  it('null body still returns "empty" (not a hash)', async () => {
+    expect(await sha256PayloadHash(null)).toBe('empty');
+  });
+
+  it('SHA-256 is strictly longer than djb2 (32-bit): > 8 chars, collision-resistant', async () => {
+    const h = await sha256PayloadHash(bodyA);
+    // djb2 would be 8 hex chars; SHA-256 is 64
+    expect(h.length).toBeGreaterThan(8);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// M. expectedRecipient binding — Fase 1.4 (structural, index.html)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('M. expectedRecipient binding — Fase 1.4 (index.html structural)', () => {
+  const html = readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+
+  it('_saCPNExpectedRecipient variable is declared', () => {
+    expect(html).toContain('_saCPNExpectedRecipient');
+  });
+
+  it('_saCPNExpectedRecipient is passed as expectedRecipient to _saCPNValidateTxObject', () => {
+    expect(html).toContain('expectedRecipient: _saCPNExpectedRecipient');
+  });
+
+  it('_saCPNValidateTxObject checks opts.expectedRecipient against decoded calldata recipient', () => {
+    expect(html).toContain('opts.expectedRecipient');
+    expect(html).toContain('possible redirection');
+  });
+
+  it('_saCPNExpectedRecipient is cleared on success (idempotency key cleared together)', () => {
+    // Count occurrences: should be cleared in both success and cancel paths
+    const clearCount = (html.match(/_saCPNExpectedRecipient = null/g) || []).length;
+    expect(clearCount).toBeGreaterThanOrEqual(2);
+  });
+
+  it('signing path uses _txValue = BigInt(txObjData.value) without 0n fallback', () => {
+    expect(html).toContain('_txValue = BigInt(txObjData.value)');
+    expect(html).toContain('_txValue !== 0n');
+    // The old fallback must be gone
+    expect(html).not.toContain('txObjData.value ? BigInt(txObjData.value) : 0n');
+  });
+
+  it('value field in _saCPNValidateTxObject is strict (no falsy bypass)', () => {
+    // The new check uses a regex test — must contain the new pattern
+    expect(html).toContain('missing the `value` field');
+    expect(html).toContain('not a valid integer string');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // G. Regression guards — other pages unaffected
 // ─────────────────────────────────────────────────────────────────────────────
 
