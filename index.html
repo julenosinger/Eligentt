@@ -143,6 +143,7 @@
 <script src="/shared/x402Client.js"></script>
 <script src="/shared/ExecutionAggregator.js"></script>
 <script src="/shared/BatchExecutionEngine.js"></script>
+<script src="/shared/cpnFiatPayout.js"></script>
 <script src="/shared/CrossChainTransferRouter.js"></script>
 <script src="/shared/CCTPV2InboundEngine.js"></script>
 <script src="/shared/CircleAttestationMonitor.js"></script>
@@ -6146,23 +6147,13 @@ select.cinput option { background: #161a24; color: #dde2f0; }
       </div>
     </div>
 
-    <!-- Verification Checklist -->
-    <div class="ms-checklist">
-      <div class="ms-checklist-title">Verification Status</div>
-      <div class="ms-check-item"><i class="ti ti-check"></i> Transaction Ready</div>
-      <div class="ms-check-item"><i class="ti ti-check"></i> Gas Simulated</div>
-      <div class="ms-check-item"><i class="ti ti-check"></i> Route Verified</div>
-      <div class="ms-check-item"><i class="ti ti-check"></i> Balance Confirmed</div>
-      <div class="ms-check-item"><i class="ti ti-check"></i> Approval Confirmed</div>
-    </div>
-
     <!-- Token Amount Hero -->
     <div class="ms-token-hero">
       <div class="ms-usdc-icon">U</div>
       <div class="ms-token-info">
-        <div class="ms-token-label">Total Amount</div>
-        <div class="ms-token-amount" id="m-total">—</div>
-        <div class="ms-token-symbol">USDC</div>
+        <div class="ms-token-label">Batch Total</div>
+        <div class="ms-token-amount" id="m-total" style="font-family:'JetBrains Mono',monospace">—</div>
+        <div class="ms-token-symbol" style="font-size:9px;color:var(--muted2);margin-top:2px">incl. tokens &amp; networks below</div>
       </div>
     </div>
 
@@ -6170,43 +6161,38 @@ select.cinput option { background: #161a24; color: #dde2f0; }
     <div class="ms-summary">
       <div class="ms-summary-row">
         <span class="ms-summary-label">Protocol Fee (0.2%)</span>
-        <span class="ms-summary-value" id="m-fee">—</span>
+        <span class="ms-summary-value" id="m-fee" style="font-family:'JetBrains Mono',monospace">—</span>
       </div>
       <div class="ms-summary-row">
         <span class="ms-summary-label">Estimated Gas</span>
-        <span class="ms-summary-value">~0.001 USDC</span>
+        <span class="ms-summary-value" id="m-gas-modal" style="font-size:9px;color:var(--muted2)">— (wallet required)</span>
       </div>
       <div class="ms-summary-row ms-summary-total">
-        <span class="ms-summary-label">You Will Approve</span>
-        <span class="ms-summary-value" id="m-pay">—</span>
+        <span class="ms-summary-label">Required Balance (excl. gas)</span>
+        <span class="ms-summary-value" id="m-pay" style="font-family:'JetBrains Mono',monospace">—</span>
       </div>
-    </div>
-
-    <!-- Security Panel -->
-    <div class="ms-security">
-      <div class="ms-security-title"><i class="ti ti-lock"></i> Security Verification</div>
-      <div class="ms-security-grid">
-        <div class="ms-sec-item"><i class="ti ti-check-circle"></i> Smart Contract Verified</div>
-        <div class="ms-sec-item"><i class="ti ti-check-circle"></i> Recipients Validated</div>
-        <div class="ms-sec-item"><i class="ti ti-check-circle"></i> Balance Confirmed</div>
-        <div class="ms-sec-item"><i class="ti ti-check-circle"></i> Simulation Passed</div>
+      <div class="ms-summary-row" id="m-balance-check-row" style="display:none">
+        <span class="ms-summary-label">Your Balance</span>
+        <span class="ms-summary-value" id="m-balance-check-val" style="font-family:'JetBrains Mono',monospace">—</span>
       </div>
     </div>
 
     <!-- Details Grid -->
     <div class="ms-details">
       <div class="ms-detail-row">
-        <span class="ms-detail-label">USDC Contract</span>
-        <span class="ms-detail-value">0x3600...0000</span>
-      </div>
-      <div class="ms-detail-row">
         <span class="ms-detail-label">Recipients</span>
         <span class="ms-detail-value" id="m-rcpt">—</span>
+      </div>
+      <div class="ms-detail-row">
+        <span class="ms-detail-label">Source Wallet</span>
+        <span class="ms-detail-value" id="m-src-wallet" style="font-family:'JetBrains Mono',monospace;font-size:9px">—</span>
       </div>
       <div class="ms-detail-row" id="m-contract-row" style="display:none">
         <span class="ms-detail-label">Batch Contract</span>
         <span class="ms-detail-value" id="m-contract">—</span>
       </div>
+      <!-- Critical error banner (shown when review detects blocking issues) -->
+      <div id="m-critical-error" style="display:none;margin-top:8px;padding:8px 10px;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:6px;font-size:9px;color:var(--red);line-height:1.5"></div>
     </div>
 
     <!-- Actions -->
@@ -6609,25 +6595,25 @@ select.cinput option { background: #161a24; color: #dde2f0; }
     <div class="page" id="page-batch">
       <!-- Stats Row -->
       <div class="stats-row" style="padding:8px 14px;gap:1px">
-        <div class="stat-box" style="flex:1;min-width:0">
+        <div class="stat-box" style="flex:1.2;min-width:0">
           <div class="st-lbl">Recipients</div>
-          <div class="st-val" id="s-rcpt">0</div>
+          <div class="st-val" id="s-rcpt" style="font-size:10px;line-height:1.3">0</div>
         </div>
-        <div class="stat-box" style="flex:1;min-width:0">
-          <div class="st-lbl">Total USDC</div>
-          <div class="st-val blue" id="s-total">$0.00</div>
+        <div class="stat-box" style="flex:1.6;min-width:0">
+          <div class="st-lbl">Batch Total</div>
+          <div class="st-val blue" id="s-total" style="font-size:10px;line-height:1.3;font-family:'JetBrains Mono',monospace">0.00 USDC</div>
         </div>
-        <div class="stat-box" style="flex:1;min-width:0">
-          <div class="st-lbl">Protocol Fee (0.2%)</div>
-          <div class="st-val blue" id="s-fee">$0.00</div>
+        <div class="stat-box" style="flex:1.2;min-width:0">
+          <div class="st-lbl">Fee (0.2%)</div>
+          <div class="st-val blue" id="s-fee" style="font-size:10px;line-height:1.3;font-family:'JetBrains Mono',monospace">0.00 USDC</div>
         </div>
         <div class="stat-box" style="flex:1;min-width:0">
           <div class="st-lbl">Batches Sent</div>
           <div class="st-val yellow" id="s-batches">0</div>
         </div>
-        <div class="stat-box" style="flex:2;min-width:0">
+        <div class="stat-box" style="flex:1.8;min-width:0">
           <div class="st-lbl">Route Split</div>
-          <div class="st-val" id="s-bridge" style="font-size:11px">—</div>
+          <div class="st-val" id="s-bridge" style="font-size:10px;line-height:1.3">—</div>
         </div>
       </div>
 
@@ -6654,6 +6640,12 @@ select.cinput option { background: #161a24; color: #dde2f0; }
             <button class="btn" onclick="duplicateAll()" style="font-size:9px;padding:3px 7px"><i class="ti ti-copy"></i>Duplicate</button>
             <button class="btn" onclick="openEditAllModal()" style="font-size:9px;padding:3px 7px"><i class="ti ti-edit"></i>Edit All</button>
             <button class="btn" onclick="clearAll()" style="font-size:9px;padding:3px 7px;color:var(--red)"><i class="ti ti-trash"></i>Clear</button>
+            <div style="width:1px;height:16px;background:var(--border);margin:0 2px;flex-shrink:0"></div>
+            <div style="position:relative;display:flex;align-items:center">
+              <i class="ti ti-search" style="position:absolute;left:7px;font-size:9px;color:var(--muted2);pointer-events:none"></i>
+              <input id="ms-filter-input" type="text" class="cinput" placeholder="Filter rows…" oninput="batchFilterRecipients(this.value)" style="padding:3px 7px 3px 22px;font-size:9px;width:110px;height:26px"/>
+              <button id="ms-filter-clear" onclick="document.getElementById('ms-filter-input').value='';batchFilterRecipients('')" style="display:none;position:absolute;right:5px;background:none;border:none;color:var(--muted2);cursor:pointer;font-size:9px;padding:1px" title="Clear filter"><i class="ti ti-x"></i></button>
+            </div>
           </div>
 
           <!-- Sender Info -->
@@ -6729,12 +6721,19 @@ select.cinput option { background: #161a24; color: #dde2f0; }
           <!-- Fee Breakdown -->
           <div class="ms-review-section">
             <div class="ms-review-title"><i class="ti ti-calculator"></i>Fee Breakdown</div>
-            <div class="ms-review-row"><span class="ms-review-label">Recipients</span><span class="ms-review-value" id="ms-fp-r">0</span></div>
-            <div class="ms-review-row"><span class="ms-review-label">Total USDC</span><span class="ms-review-value blue" id="ms-fp-t">0.00</span></div>
-            <div class="ms-review-row"><span class="ms-review-label">Protocol Fee (0.2%)</span><span class="ms-review-value" id="ms-fp-f">0.00</span></div>
-            <div class="ms-review-row"><span class="ms-review-label">Est. Gas</span><span class="ms-review-value" id="ms-fp-gas">~0.001 USDC</span></div>
-            <div class="ms-review-total"><span>You Approve</span><span class="blue" id="ms-fp-p">0.00 USDC</span></div>
+            <div class="ms-review-row"><span class="ms-review-label">Recipients</span><span class="ms-review-value" id="ms-fp-r">0 valid</span></div>
+            <div class="ms-review-row"><span class="ms-review-label">Batch Total</span><span class="ms-review-value blue" id="ms-fp-t" style="font-family:'JetBrains Mono',monospace;font-size:9px">0.00 USDC</span></div>
+            <div class="ms-review-row"><span class="ms-review-label">Protocol Fee (0.2%)</span><span class="ms-review-value" id="ms-fp-f" style="font-family:'JetBrains Mono',monospace;font-size:9px">0.00 USDC</span></div>
+            <div class="ms-review-row">
+              <span class="ms-review-label">Est. Gas</span>
+              <span class="ms-review-value" id="ms-fp-gas" style="font-size:8.5px;color:var(--muted2)" title="Estimated from live gas price — actual may vary">—</span>
+            </div>
+            <div class="ms-review-total"><span>Required Balance</span><span class="blue" id="ms-fp-p" style="font-family:'JetBrains Mono',monospace">0.00 USDC</span></div>
             <div class="ms-review-row" style="margin-top:4px"><span class="ms-review-label">Network</span><span class="ms-review-value blue">Arc Mainnet</span></div>
+            <div id="ms-fp-balance-row" class="ms-review-row" style="margin-top:2px;display:none">
+              <span class="ms-review-label">Your Balance</span>
+              <span class="ms-review-value" id="ms-fp-bal" style="font-family:'JetBrains Mono',monospace;font-size:9px">—</span>
+            </div>
           </div>
 
           <!-- Actions -->
@@ -7321,7 +7320,126 @@ select.cinput option { background: #161a24; color: #dde2f0; }
 
             <!-- Transfer Form -->
             <div class="sa-card">
-              <div class="sa-card-title"><i class="ti ti-form"></i>Transfer Details</div>
+              <div class="sa-card-title" style="justify-content:space-between">
+                <span><i class="ti ti-form"></i>Transfer Details</span>
+                <!-- CPN Fiat Payout toggle -->
+                <button id="sa-cpn-toggle"
+                  onclick="saToggleCPN()"
+                  title="Send to a bank account via Circle Payments Network (requires OFI onboarding)"
+                  style="display:flex;align-items:center;gap:5px;background:rgba(45,212,191,.08);border:1px solid rgba(45,212,191,.2);border-radius:6px;padding:4px 10px;cursor:pointer;font-size:9px;font-weight:600;color:var(--teal);transition:all .2s">
+                  <i class="ti ti-building-bank" style="font-size:11px"></i>
+                  <span id="sa-cpn-toggle-label">Send to Bank (CPN)</span>
+                </button>
+              </div>
+
+              <!-- CPN onboarding notice (shown only in fiat mode) -->
+              <div id="sa-cpn-notice" style="display:none;background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.2);border-radius:6px;padding:8px 12px;margin-bottom:2px">
+                <div style="display:flex;align-items:flex-start;gap:8px">
+                  <i class="ti ti-info-circle" style="color:var(--yellow);font-size:13px;margin-top:1px;flex-shrink:0"></i>
+                  <div style="font-size:9px;color:var(--muted2);line-height:1.5">
+                    <b style="color:var(--yellow)">Circle Payments Network (CPN)</b> — Requires OFI onboarding with Circle before live payments can be processed.
+                    <a href="https://developers.circle.com/cpn/fiat-payouts" target="_blank" rel="noopener" style="color:var(--teal);text-decoration:none;margin-left:4px">Learn more →</a>
+                    <br>Without this key, quote requests return a clear error — no data is fabricated.
+                  </div>
+                </div>
+              </div>
+
+              <!-- CPN Beneficiary Form (hidden by default) -->
+              <div id="sa-cpn-form" style="display:none">
+                <!-- Destination currency -->
+                <div class="sa-field">
+                  <label class="sa-label">Destination Currency <span class="sa-required">*</span></label>
+                  <div class="sa-input-wrap" style="position:relative">
+                    <i class="ti ti-currency-dollar sa-input-icon"></i>
+                    <select id="sa-cpn-currency" class="sa-input sa-select" onchange="saUpdateCPNQuote()" style="color:var(--teal);background:#12141c;cursor:pointer;appearance:none;-webkit-appearance:none;padding-right:28px">
+                      <option value="">Select currency…</option>
+                    </select>
+                    <i class="ti ti-chevron-down" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);color:var(--teal);font-size:10px;pointer-events:none"></i>
+                  </div>
+                </div>
+
+                <!-- Beneficiary name -->
+                <div class="sa-field">
+                  <label class="sa-label">Beneficiary Name <span class="sa-required">*</span></label>
+                  <div class="sa-input-wrap">
+                    <i class="ti ti-user sa-input-icon"></i>
+                    <input id="sa-cpn-bene-name" class="sa-input" type="text" placeholder="Full legal name" oninput="saUpdateRoute()">
+                  </div>
+                </div>
+
+                <!-- Bank name -->
+                <div class="sa-field">
+                  <label class="sa-label">Bank Name <span class="sa-required">*</span></label>
+                  <div class="sa-input-wrap">
+                    <i class="ti ti-building-bank sa-input-icon"></i>
+                    <input id="sa-cpn-bank-name" class="sa-input" type="text" placeholder="e.g. Banco do Brasil" oninput="saUpdateRoute()">
+                  </div>
+                </div>
+
+                <!-- Account number + country row -->
+                <div class="sa-field" style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                  <div>
+                    <label class="sa-label">Account Number <span class="sa-required">*</span></label>
+                    <div class="sa-input-wrap">
+                      <i class="ti ti-credit-card sa-input-icon"></i>
+                      <input id="sa-cpn-account" class="sa-input mono" type="text" placeholder="Account / IBAN" oninput="saUpdateRoute()" style="padding-left:28px">
+                    </div>
+                  </div>
+                  <div>
+                    <label class="sa-label">Country <span class="sa-required">*</span></label>
+                    <div class="sa-input-wrap">
+                      <i class="ti ti-map-pin sa-input-icon"></i>
+                      <input id="sa-cpn-country" class="sa-input" type="text" placeholder="BR / GB / PH" maxlength="2" oninput="this.value=this.value.toUpperCase();saUpdateRoute()" style="padding-left:28px;text-transform:uppercase">
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Routing / SWIFT (optional) -->
+                <div class="sa-field">
+                  <label class="sa-label">Routing / SWIFT / Branch Code <span style="color:var(--muted2);font-weight:400;text-transform:none;letter-spacing:0">(optional)</span></label>
+                  <div class="sa-input-wrap">
+                    <i class="ti ti-sitemap sa-input-icon"></i>
+                    <input id="sa-cpn-routing" class="sa-input mono" type="text" placeholder="021000021 or BOFAUS3N" oninput="saUpdateRoute()">
+                  </div>
+                </div>
+
+                <!-- Sender info (required by CPN travel rule) -->
+                <div style="font-size:9px;color:var(--muted2);margin:4px 0 2px;font-weight:600;text-transform:uppercase;letter-spacing:.5px">Sender Info (travel rule)</div>
+                <div class="sa-field" style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                  <div>
+                    <label class="sa-label">Your Name <span class="sa-required">*</span></label>
+                    <div class="sa-input-wrap">
+                      <i class="ti ti-user-check sa-input-icon"></i>
+                      <input id="sa-cpn-sender-name" class="sa-input" type="text" placeholder="Your full name" oninput="saUpdateRoute()" style="padding-left:28px">
+                    </div>
+                  </div>
+                  <div>
+                    <label class="sa-label">Your Country <span class="sa-required">*</span></label>
+                    <div class="sa-input-wrap">
+                      <i class="ti ti-map-pin sa-input-icon"></i>
+                      <input id="sa-cpn-sender-country" class="sa-input" type="text" placeholder="US / BR / GB" maxlength="2" oninput="this.value=this.value.toUpperCase();saUpdateRoute()" style="padding-left:28px;text-transform:uppercase">
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Live CPN Quote Preview -->
+                <div id="sa-cpn-quote-preview" style="display:none;background:rgba(45,212,191,.05);border:1px solid rgba(45,212,191,.2);border-radius:6px;padding:10px 12px;margin-top:4px">
+                  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+                    <span style="font-size:9px;font-weight:600;color:var(--teal)"><i class="ti ti-refresh" style="margin-right:3px"></i>Live Quotes</span>
+                    <button onclick="saFetchCPNQuotes()" style="background:none;border:none;color:var(--teal);cursor:pointer;font-size:9px;padding:0"><i class="ti ti-reload"></i> Refresh</button>
+                  </div>
+                  <div id="sa-cpn-quotes-list" style="display:flex;flex-direction:column;gap:6px;max-height:200px;overflow-y:auto"></div>
+                  <div id="sa-cpn-selected-quote" style="display:none;margin-top:8px;padding:6px 8px;background:rgba(45,212,191,.1);border-radius:4px;font-size:9px;color:var(--teal)"></div>
+                </div>
+
+                <!-- Quote fetch trigger -->
+                <button onclick="saFetchCPNQuotes()"
+                  id="sa-cpn-quote-btn"
+                  style="width:100%;margin-top:6px;padding:8px;background:rgba(45,212,191,.08);border:1px solid rgba(45,212,191,.25);border-radius:6px;color:var(--teal);font-size:9.5px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px">
+                  <i class="ti ti-arrows-exchange" style="font-size:12px"></i>
+                  <span id="sa-cpn-quote-btn-text">Get Live FX Quote</span>
+                </button>
+              </div>
 
               <!-- From Network -->
               <div class="sa-field">
@@ -7381,7 +7499,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
               </div>
 
               <!-- Send Button -->
-              <button class="sa-send-btn" id="sa-send-btn" onclick="saExecuteSend()">
+              <button class="sa-send-btn" id="sa-send-btn" onclick="saDispatchSend()">
                 <span class="sa-send-btn-bg"></span>
                 <span class="sa-send-btn-content" id="sa-send-btn-content"><i class="ti ti-send"></i>Send Asset</span>
               </button>
@@ -7448,6 +7566,34 @@ select.cinput option { background: #161a24; color: #dde2f0; }
               <div class="sa-route-row">
                 <span class="sa-route-lbl">Status</span>
                 <span class="sa-route-val" id="sa-rt-status" style="color:var(--muted2)">Enter amount &amp; recipient</span>
+              </div>
+              <!-- CPN-specific route preview rows (hidden in crypto mode) -->
+              <div id="sa-rt-cpn-rows" style="display:none">
+                <div style="border-top:1px solid var(--border);margin:8px 0 6px"></div>
+                <div class="sa-route-row">
+                  <span class="sa-route-lbl">Payout Type</span>
+                  <span class="sa-route-val" style="color:var(--teal)"><i class="ti ti-building-bank" style="font-size:9px;margin-right:3px"></i>Fiat via CPN</span>
+                </div>
+                <div class="sa-route-row">
+                  <span class="sa-route-lbl">Destination Currency</span>
+                  <span class="sa-route-val" id="sa-rt-cpn-currency" style="color:var(--teal)">—</span>
+                </div>
+                <div class="sa-route-row">
+                  <span class="sa-route-lbl">FX Rate</span>
+                  <span class="sa-route-val" id="sa-rt-cpn-rate">—</span>
+                </div>
+                <div class="sa-route-row">
+                  <span class="sa-route-lbl">Recipient Gets</span>
+                  <span class="sa-route-val green" id="sa-rt-cpn-receives">—</span>
+                </div>
+                <div class="sa-route-row">
+                  <span class="sa-route-lbl">Est. Settlement</span>
+                  <span class="sa-route-val" id="sa-rt-cpn-settlement" style="color:var(--muted2)">—</span>
+                </div>
+                <div class="sa-route-row">
+                  <span class="sa-route-lbl">CPN Status</span>
+                  <span class="sa-route-val" id="sa-rt-cpn-status" style="color:var(--muted2)">Awaiting quote</span>
+                </div>
               </div>
             </div>
             <!-- Cross-Chain Status Tracker -->
@@ -15505,6 +15651,22 @@ async function refreshBalance() {
       set('dd-bal',     fmt);
       set('sender-bal', 'Balance: ' + fmt + ' USDC');
       _refreshBalanceChainId = _snapshotChainId;
+      // Sync live balance into the batch review panel
+      var fpBalEl = document.getElementById('ms-fp-bal');
+      var fpBalRow = document.getElementById('ms-fp-balance-row');
+      if (fpBalEl && fpBalRow) {
+        fpBalEl.textContent = fmt + ' USDC';
+        fpBalRow.style.display = '';
+        // Color-code: red if balance is less than required
+        try {
+          var payEl = document.getElementById('ms-fp-p');
+          if (payEl) {
+            var required = parseFloat(payEl.textContent) || 0;
+            var available = parseFloat(fmt) || 0;
+            fpBalEl.style.color = (available >= required && required > 0) ? 'var(--green)' : (required === 0 ? 'var(--text)' : 'var(--red)');
+          }
+        } catch(_rb) {}
+      }
     }
 
     // EURC (best-effort, silent on failure).
@@ -18536,9 +18698,20 @@ function renderTable(skipContractCheck){
     const routeLabel = isBridge ? 'Bridge' : 'Direct';
     const routeClass = isBridge ? 'bridge' : 'direct';
 
-    // Status badge
-    const statusClass = valid ? (r._status === 'sent' ? 'ready' : r._status === 'failed' ? 'invalid' : 'ready') : 'invalid';
-    const statusText  = r._status === 'sent' ? 'Sent' : r._status === 'failed' ? 'Failed' : (valid ? 'Ready' : 'Invalid');
+    // Status badge — distinct states: Ready / Sent / Confirming / Failed / Invalid
+    const statusClass = !valid ? 'invalid'
+      : r._status === 'sent'       ? 'ready'
+      : r._status === 'confirming' ? 'ready'
+      : r._status === 'confirmed'  ? 'ready'
+      : r._status === 'failed'     ? 'invalid'
+      : 'ready';
+    const statusText = !valid ? 'Invalid addr'
+      : r._status === 'sent'       ? 'Sent'
+      : r._status === 'confirming' ? 'Confirming…'
+      : r._status === 'confirmed'  ? 'Confirmed'
+      : r._status === 'failed'     ? 'Failed'
+      : (parseFloat(r.amount) || 0) <= 0 ? 'No amount'
+      : 'Ready';
 
     // Chain options
     const chainOpts = CHAINS.map(c =>
@@ -18552,18 +18725,32 @@ function renderTable(skipContractCheck){
     ).join('');
 
     const tr = document.createElement('tr');
-    if(isBridge) tr.className = 'bridge-row';
+    const matchesFilter = _batchRowMatchesFilter(r);
+    var trClass = isBridge ? 'bridge-row' : '';
+    if (!matchesFilter) trClass += (trClass ? ' ' : '') + 'ms-row-dimmed';
+    tr.className = trClass;
+
+    // Duplicate action UI — keep, remove, or resolve before sending
+    const dupBadge = duplicateIdx.has(i)
+      ? `<span class="ms-status-badge duplicate" title="Duplicate address — resolve before sending">⚠ Dup
+          <button onclick="event.stopPropagation();removeRow(${i})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:8px;padding:0 0 0 3px;line-height:1" title="Remove this row">✕</button>
+        </span>`
+      : '';
+    // Amount display — use integer-safe formatting so 0.001 shows correctly
+    const amtDisplay = r.amount || '0.00';
 
     const cells = `
-      <td>${i+1}</td>
+      <td style="color:var(--muted2);font-size:9px;text-align:center">${i+1}</td>
       <td>
-        <div style="display:flex;gap:6px;align-items:center">
-          <div style="width:20px;height:20px;min-width:20px;border-radius:50%;background:${RCPT_COLORS[i%RCPT_COLORS.length]};display:flex;align-items:center;justify-content:center;font-size:7px;font-weight:800;color:#fff">${r.addr ? r.addr.slice(2,4).toUpperCase() : '0x'}</div>
-          <div style="display:flex;flex-direction:column;gap:1px;min-width:0">
-            <input class="ms-table-input name" value="${escHtml(r.name||'')}" placeholder="Name" onchange="recipients[${i}].name=this.value" onfocus="this.select()"/>
-            <div style="position:relative">
-              <input class="ms-table-input addr" value="${escHtml(r.addr)}" placeholder="0x... or search contacts" oninput="batchAddrAutocomplete(${i},this)" onfocus="batchAddrAutocomplete(${i},this);this.select()" onblur="setTimeout(function(){var el=document.getElementById('batch-ac-list-${i}');if(el)el.style.display='none'},200)"/>
-              <div id="batch-ac-list-${i}" class="batch-autocomplete-list" style="display:none;position:absolute;top:100%;left:0;right:0;background:var(--surface);border:1px solid var(--border);border-radius:4px;z-index:50;max-height:160px;overflow-y:auto"></div>
+        <div style="display:flex;gap:5px;align-items:center">
+          <div style="width:20px;height:20px;min-width:20px;border-radius:50%;background:${RCPT_COLORS[i%RCPT_COLORS.length]};display:flex;align-items:center;justify-content:center;font-size:7px;font-weight:800;color:#fff;flex-shrink:0">${r.addr ? r.addr.slice(2,4).toUpperCase() : '0x'}</div>
+          <div style="display:flex;flex-direction:column;gap:1px;min-width:0;flex:1">
+            <input class="ms-table-input name" value="${escHtml(r.name||'')}" placeholder="Name / label" onchange="recipients[${i}].name=this.value" onfocus="this.select()" style="opacity:.8"/>
+            <div style="position:relative;display:flex;align-items:center;gap:2px">
+              <input class="ms-table-input addr" value="${escHtml(r.addr)}" placeholder="0x… or search contacts" oninput="batchAddrAutocomplete(${i},this);recipients[${i}].addr=this.value" onfocus="batchAddrAutocomplete(${i},this);this.select()" onblur="setTimeout(function(){var el=document.getElementById('batch-ac-list-${i}');if(el)el.style.display='none'},200)" style="flex:1"/>
+              ${r.addr && isAddr(r.addr) ? `<button onclick="navigator.clipboard&&navigator.clipboard.writeText('${escHtml(r.addr)}').then(function(){batchToastCopied(${i})}).catch(function(){})" title="Copy address" style="background:none;border:none;color:var(--muted2);cursor:pointer;font-size:9px;padding:2px 3px;flex-shrink:0;line-height:1;border-radius:3px;transition:color .1s" onmouseover="this.style.color='var(--blue)'" onmouseout="this.style.color='var(--muted2)'"><i class="ti ti-copy"></i></button>` : ''}
+              <div id="batch-ac-list-${i}" class="batch-autocomplete-list" style="display:none;position:absolute;top:100%;left:0;right:20px;background:var(--surface);border:1px solid var(--border);border-radius:4px;z-index:50;max-height:160px;overflow-y:auto"></div>
+              <div id="batch-copy-tip-${i}" style="display:none;position:absolute;top:-18px;right:0;background:rgba(34,197,94,.9);color:#fff;font-size:8px;padding:2px 6px;border-radius:3px;white-space:nowrap;pointer-events:none">Copied!</div>
             </div>
           </div>
         </div>
@@ -18571,21 +18758,25 @@ function renderTable(skipContractCheck){
       <td>
         <div style="display:flex;align-items:center;gap:4px">
           <div style="width:7px;height:7px;border-radius:50%;background:${chain.color||'#ff0202'};flex-shrink:0"></div>
-          <select class="ms-chain-select" onchange="recipients[${i}].chainId=this.value;renderTable()">
+          <select class="ms-chain-select" onchange="recipients[${i}].chainId=this.value;saveRecipients();renderTable()">
             ${chainOpts}
           </select>
         </div>
       </td>
       <td>
-        <select class="ms-token-select" onchange="recipients[${i}].token=this.value;renderTable()">
+        <select class="ms-token-select" onchange="recipients[${i}].token=this.value;saveRecipients();renderTable()">
           ${tokenOpts}
         </select>
       </td>
-      <td><input class="ms-table-input amount" value="${escHtml(r.amount)}" onchange="recipients[${i}].amount=this.value;updateStats()" onfocus="this.select()"/></td>
-      <td><input class="ms-table-input note" value="${escHtml(r.note||'')}" placeholder="Note" onchange="recipients[${i}].note=this.value"/></td>
+      <td><input class="ms-table-input amount" value="${escHtml(amtDisplay)}" onchange="var v=this.value;recipients[${i}].amount=v;updateStats()" onfocus="this.select()" style="font-family:'JetBrains Mono',monospace;text-align:right"/></td>
+      <td><input class="ms-table-input note" value="${escHtml(r.note||'')}" placeholder="Note / memo" onchange="recipients[${i}].note=this.value"/></td>
       <td><span class="ms-route-badge ${routeClass}">${routeLabel}</span></td>
-      <td><span class="ms-status-badge ${statusClass}">${statusText}</span>${duplicateIdx.has(i) ? '<span class="ms-status-badge duplicate">⚠ Duplicate</span>' : ''}${r._isContract ? '<span class="ms-status-badge contract">⚠ Contract</span>' : ''}</td>
-      <td><button class="ms-row-remove" onclick="removeRow(${i})" title="Remove">×</button></td>`;
+      <td>
+        <span class="ms-status-badge ${statusClass}">${statusText}</span>
+        ${dupBadge}
+        ${r._isContract ? '<span class="ms-status-badge contract" title="Smart contract — not a regular wallet. Verify before sending.">⚠ Contract</span>' : ''}
+      </td>
+      <td><button class="ms-row-remove" onclick="removeRow(${i})" title="Remove row">×</button></td>`;
 
     tr.innerHTML = cells;
     tbody.appendChild(tr);
@@ -18641,6 +18832,33 @@ function batchSelectRecipient(idx, addr, name) {
   if (listEl) listEl.style.display = 'none';
 }
 
+// ── Address copy tooltip helper ───────────────────────────────
+function batchToastCopied(idx) {
+  var tipEl = document.getElementById('batch-copy-tip-' + idx);
+  if (!tipEl) return;
+  tipEl.style.display = 'block';
+  setTimeout(function(){ if(tipEl) tipEl.style.display = 'none'; }, 1400);
+}
+
+// ── Batch table search/filter (wired to search input if present) ──
+var _batchFilterQuery = '';
+function batchFilterRecipients(query) {
+  _batchFilterQuery = (query || '').toLowerCase().trim();
+  renderTable();
+}
+// Highlight-filtered rendering: when a filter is active, dim non-matching rows
+// (note: actual filtering is done in renderTable via row class, not skipping rows
+//  so the row indices stay stable for editing)
+function _batchRowMatchesFilter(r) {
+  if (!_batchFilterQuery) return true;
+  var q = _batchFilterQuery;
+  return (r.addr && r.addr.toLowerCase().includes(q))
+    || (r.name && r.name.toLowerCase().includes(q))
+    || (r.note && r.note.toLowerCase().includes(q))
+    || (r.token && r.token.toLowerCase().includes(q))
+    || (r._status && r._status.toLowerCase().includes(q));
+}
+
 function setAllRecipientsChain(chainId){
   if(!recipients.length) return;
   recipients.forEach(r => r.chainId = chainId);
@@ -18649,29 +18867,99 @@ function setAllRecipientsChain(chainId){
   const chainName = (CHAINS[chainId] && CHAINS[chainId].name) || chainId;
   toast(`All recipients set to ${chainName}`, 'info');
 }
+// ── formatTokenAmt: format token amounts without losing sub-cent precision ──
+// Uses BigInt accumulation (1e6) so 0.001 USDC renders as "0.001000" not "$0.00".
+// decimals defaults to 6 (USDC/EURC). cirBTC uses 8.
+function formatTokenAmt(amount, decimals, symbol) {
+  decimals = decimals || 6;
+  // Accumulate via integer math to avoid float drift (e.g. 3×0.1 ≠ 0.3 in IEEE-754)
+  var scale = Math.pow(10, decimals);
+  var raw = Math.round((parseFloat(amount) || 0) * scale);
+  if (!isFinite(raw) || isNaN(raw)) raw = 0;
+  var intPart = Math.floor(Math.abs(raw) / scale);
+  var fracPart = Math.abs(raw) % scale;
+  var fracStr = String(fracPart).padStart(decimals, '0');
+  // Trim trailing zeros but keep at least 2 decimal places for USDC/EURC, 4 for cirBTC
+  var minDec = (symbol === 'cirBTC') ? 4 : 2;
+  var trimmed = fracStr.replace(/0+$/, '');
+  if (trimmed.length < minDec) trimmed = fracStr.slice(0, minDec);
+  var sign = raw < 0 ? '-' : '';
+  return sign + intPart + '.' + trimmed + (symbol ? ' ' + symbol : '');
+}
+
 function updateStats(){saveRecipients();
-  const total = recipients.reduce((s,r)=>s+(parseFloat(r.amount)||0),0);
   const n = recipients.length;
-  const fee = total*0.002; // 0.2% platform fee
 
-  // Route analysis
-  const bridgeCount = recipients.filter(r=>getRecipientRoute(r)==='bridge').length;
-  const directCount = n - bridgeCount;
+  // ── Per-token accumulation via integer math ────────────────────────────────
+  // Accumulate amounts as integers (scaled by 1e6 / 1e8) to avoid float drift
+  // that causes 3×0.001 USDC to display as "$0.00" with naive toFixed(2).
+  var tokenTotals = {}; // { USDC: { raw: 0, dec: 6 }, EURC: ..., cirBTC: ... }
+  var validCount = 0, sentCount = 0, failedCount = 0;
 
-  // Has cross-chain recipients that would need bridge
-  const hasCrossChain = bridgeCount > 0;
+  recipients.forEach(function(r) {
+    var tok = r.token || 'USDC';
+    var dec = tok === 'cirBTC' ? 8 : 6;
+    var scale = Math.pow(10, dec);
+    if (!tokenTotals[tok]) tokenTotals[tok] = { raw: 0, dec: dec };
+    var rawAmt = Math.round((parseFloat(r.amount) || 0) * scale);
+    if (isFinite(rawAmt) && !isNaN(rawAmt) && rawAmt > 0) tokenTotals[tok].raw += rawAmt;
 
-  // Auto-bridge state
-  const autoBridgeOn = document.getElementById('tgl-auto-bridge')?.classList.contains('on') ?? true;
+    var addrOk = isAddr(r.addr) || isEns(r.addr);
+    var amtOk  = (parseFloat(r.amount) || 0) > 0;
+    if (addrOk && amtOk) {
+      validCount++;
+      if (r._status === 'sent')   sentCount++;
+      else if (r._status === 'failed') failedCount++;
+    }
+  });
 
-  // Update stat cards
+  // Primary token for backward-compat single-total display (USDC if present, else first)
+  var primaryTok = tokenTotals['USDC'] ? 'USDC' : (Object.keys(tokenTotals)[0] || 'USDC');
+  var primaryDec = tokenTotals[primaryTok] ? tokenTotals[primaryTok].dec : 6;
+  var primaryScale = Math.pow(10, primaryDec);
+  var primaryRaw   = tokenTotals[primaryTok] ? tokenTotals[primaryTok].raw : 0;
+  var primaryFloat = primaryRaw / primaryScale;
+
+  // Protocol fee is 0.2% of primary token total
+  var feeRaw   = Math.floor(primaryRaw * 20 / 10000); // integer math, floor
+  var feeFloat = feeRaw / primaryScale;
+  var feeStr   = formatTokenAmt(feeFloat, primaryDec, primaryTok);
+
+  // ── Multi-token total label ────────────────────────────────────────────────
+  var tokenKeys = Object.keys(tokenTotals);
+  var totalLabel;
+  if (tokenKeys.length === 0) {
+    totalLabel = '0.00 USDC';
+  } else if (tokenKeys.length === 1) {
+    var k = tokenKeys[0];
+    var t = tokenTotals[k];
+    totalLabel = formatTokenAmt(t.raw / Math.pow(10, t.dec), t.dec, k);
+  } else {
+    totalLabel = tokenKeys.map(function(k) {
+      var t = tokenTotals[k];
+      return formatTokenAmt(t.raw / Math.pow(10, t.dec), t.dec, k);
+    }).join(' + ');
+  }
+
+  // ── Route analysis ─────────────────────────────────────────────────────────
+  var bridgeCount = recipients.filter(function(r){ return getRecipientRoute(r) === 'bridge'; }).length;
+  var directCount = n - bridgeCount;
+  var hasCrossChain = bridgeCount > 0;
+  var autoBridgeOn = (document.getElementById('tgl-auto-bridge') || {classList:{contains:function(){return true;}}}).classList.contains('on');
+
+  // ── Stat counts display ────────────────────────────────────────────────────
   const setEl = (id,val) => { const el=document.getElementById(id); if(el) el.textContent=val; };
-  setEl('s-rcpt', n);
-  setEl('s-total', '$'+total.toFixed(2));
-  setEl('s-fee', '$'+fee.toFixed(2));
-  setEl('row-cnt', n+' rows');
+  // Distinguish: valid rows (addr+amount ok), sent, failed
+  var rcptLabel = n === 0 ? '0' :
+    (sentCount > 0 || failedCount > 0)
+      ? validCount + ' valid' + (sentCount ? ' · ' + sentCount + ' sent' : '') + (failedCount ? ' · ' + failedCount + ' failed' : '')
+      : String(validCount) + ' valid' + (n > validCount ? ' (' + (n - validCount) + ' incomplete)' : '');
+  setEl('s-rcpt', rcptLabel);
+  setEl('s-total', totalLabel);
+  setEl('s-fee', feeStr);
+  setEl('row-cnt', n + ' row' + (n !== 1 ? 's' : ''));
 
-  // Route split — only show bridge count if > 0
+  // Route split
   const bridgeEl = document.getElementById('s-bridge');
   if(bridgeEl){
     if(n === 0) {
@@ -18681,7 +18969,7 @@ function updateStats(){saveRecipients();
       bridgeEl.textContent = directCount + ' Direct';
       bridgeEl.style.color = 'var(--green)';
     } else {
-      bridgeEl.textContent = directCount + ' Direct, ' + bridgeCount + ' Bridge';
+      bridgeEl.textContent = directCount + ' Direct · ' + bridgeCount + ' Bridge';
       bridgeEl.style.color = 'var(--purple)';
     }
   }
@@ -18695,23 +18983,33 @@ function updateStats(){saveRecipients();
   if(splitDn) splitDn.textContent = directCount;
   if(splitBn) splitBn.textContent = bridgeCount;
 
-  // Right panel — Fee Breakdown
-  setEl('ms-fp-r', n + ' recipients');
-  setEl('ms-fp-t', total.toFixed(2) + ' USDC');
-  setEl('ms-fp-f', fee.toFixed(2) + ' USDC');
-  setEl('ms-fp-p', (total+fee).toFixed(2) + ' USDC');
+  // Right panel — Fee Breakdown (multi-token aware)
+  setEl('ms-fp-r', validCount + ' valid / ' + n + ' total');
+  // Per-token breakdown for review panel
+  var breakdownStr = tokenKeys.length <= 1
+    ? formatTokenAmt(primaryFloat, primaryDec, primaryTok)
+    : tokenKeys.map(function(k){ var t=tokenTotals[k]; return formatTokenAmt(t.raw/Math.pow(10,t.dec),t.dec,k); }).join(' + ');
+  setEl('ms-fp-t', breakdownStr);
+  setEl('ms-fp-f', feeStr);
+  var payTotal = formatTokenAmt((primaryRaw + feeRaw) / primaryScale, primaryDec, primaryTok);
+  setEl('ms-fp-p', payTotal);
 
   // Modal values
-  setEl('m-rcpt', n);
-  setEl('m-total', total.toFixed(2) + ' USDC');
-  setEl('m-fee', fee.toFixed(2) + ' USDC');
-  setEl('m-pay', (total+fee+0.001).toFixed(3) + ' USDC');
+  setEl('m-rcpt', validCount + (n > validCount ? ' of ' + n : ''));
+  setEl('m-total', breakdownStr);
+  setEl('m-fee', feeStr);
+  // Modal "You Approve" includes gas estimate placeholder
+  var mPayEl = document.getElementById('m-pay');
+  if (mPayEl && mPayEl.dataset && !mPayEl.dataset.gasLive) {
+    mPayEl.textContent = payTotal + ' + gas';
+  }
 
   // Auto Bridge info text
   const bridgeInfo = document.getElementById('ms-auto-bridge-info');
   if(bridgeInfo) {
     if(autoBridgeOn && hasCrossChain) {
       bridgeInfo.style.display = 'block';
+      bridgeInfo.style.color = 'var(--purple)';
       bridgeInfo.innerHTML = '<i class="ti ti-info-circle" style="font-size:8px"></i> Auto Bridge enabled — cross-chain recipients will Bridge + Send';
     } else if(!autoBridgeOn && hasCrossChain) {
       bridgeInfo.style.display = 'block';
@@ -19017,11 +19315,12 @@ async function openModal(){
     }
   } catch(_c){}
 
-  // ── Real gas estimation ──
+  // ── Real gas estimation (estimate only — actual depends on network conditions) ──
+  var gasEstEl = document.getElementById('ms-fp-gas');
+  var mPayEl   = document.getElementById('m-pay');
+  if (gasEstEl) { gasEstEl.textContent = 'estimating…'; gasEstEl.style.color = 'var(--muted2)'; }
   try {
     if (signer && signer.provider && valid.length > 0) {
-      const gasEstEl = document.getElementById('ms-fp-gas');
-      if (gasEstEl) gasEstEl.textContent = 'estimating...';
       var gasTestAddr = valid[0]._resolved || valid[0].addr;
       var batchSize = valid.length;
       var perTxGas = 21000n;
@@ -19031,12 +19330,28 @@ async function openModal(){
         perTxGas = gasEst;
       } catch (_g) {}
       var totalGas = perTxGas * BigInt(batchSize);
-      var feeData = await signer.provider.getFeeData();
-      var gasPrice = feeData.gasPrice || 1000000000n;
+      var feeDataRes = await signer.provider.getFeeData();
+      var gasPrice = feeDataRes.gasPrice || 1000000000n;
       var estUSDC = Number(totalGas * gasPrice) / 1e18;
-      if (gasEstEl) gasEstEl.textContent = '~' + estUSDC.toFixed(4) + ' USDC (' + batchSize + ' txs)';
+      var gasStr = '~' + estUSDC.toFixed(4) + ' USDC (est., ' + batchSize + ' tx' + (batchSize > 1 ? 's' : '') + ')';
+      if (gasEstEl) {
+        gasEstEl.textContent = gasStr;
+        gasEstEl.style.color = 'var(--muted2)';
+        gasEstEl.title = 'Estimated from live gas price. Actual cost may differ.';
+      }
+      // Update modal pay field with gas included
+      if (mPayEl) {
+        mPayEl.dataset.gasLive = '1';
+        // m-pay was set by updateStats; append gas estimate
+        var payBase = mPayEl.textContent.replace(/ \+ gas$/, '').trim();
+        mPayEl.textContent = payBase + ' + ' + gasStr;
+      }
+    } else {
+      if (gasEstEl) { gasEstEl.textContent = '— (wallet not connected)'; gasEstEl.style.color = 'var(--muted2)'; }
     }
-  } catch (_ge) { /* keep static fallback */ }
+  } catch (_ge) {
+    if (gasEstEl) { gasEstEl.textContent = 'estimate unavailable'; gasEstEl.style.color = 'var(--muted2)'; }
+  }
 
   // Check: any cross-chain recipients without auto-bridge enabled
   const bridgeRcpts = recipients.filter(r=>getRecipientRoute(r)==='bridge');
@@ -19052,6 +19367,52 @@ async function openModal(){
   const dn=document.getElementById('m-demo-notice');
   if(dn) dn.style.display='none';
   updateStats();
+
+  // ── Populate modal detail fields ──────────────────────────────────────────
+  const setModalEl = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+
+  // Source wallet
+  var mSrcWallet = document.getElementById('m-src-wallet');
+  if (mSrcWallet) mSrcWallet.textContent = walletAddress ? (walletAddress.slice(0,8) + '…' + walletAddress.slice(-6)) : 'Not connected';
+
+  // Flow recipients label
+  var mFlowRcpt = document.getElementById('ms-flow-recipients');
+  if (mFlowRcpt) mFlowRcpt.textContent = valid.length + ' Recipient' + (valid.length !== 1 ? 's' : '');
+
+  // Sync gas modal field with review panel
+  var mGasModal = document.getElementById('m-gas-modal');
+  var fpGas = document.getElementById('ms-fp-gas');
+  if (mGasModal && fpGas) mGasModal.textContent = fpGas.textContent || '— (estimating)';
+
+  // Balance check row in modal
+  var fpBalEl2 = document.getElementById('ms-fp-bal');
+  var mBalRow  = document.getElementById('m-balance-check-row');
+  var mBalVal  = document.getElementById('m-balance-check-val');
+  if (mBalRow && mBalVal && fpBalEl2 && fpBalEl2.textContent && fpBalEl2.textContent !== '—') {
+    mBalVal.textContent = fpBalEl2.textContent;
+    mBalVal.style.color = fpBalEl2.style.color || 'var(--text)';
+    mBalRow.style.display = '';
+  }
+
+  // Critical error check — block sign button if critical issues
+  var critEl = document.getElementById('m-critical-error');
+  var signBtn = document.getElementById('sign-btn');
+  var critErrors = [];
+  if (!walletAddress) critErrors.push('Wallet not connected.');
+  if (valid.length === 0) critErrors.push('No valid recipients with amount > 0.');
+  if (findDuplicateGroups().length > 0) critErrors.push('Duplicate recipients detected — resolve before sending.');
+  if (critEl) {
+    if (critErrors.length > 0) {
+      critEl.style.display = '';
+      critEl.innerHTML = '<i class="ti ti-alert-triangle"></i> ' + critErrors.join(' ');
+      if (signBtn) signBtn.disabled = true;
+    } else {
+      critEl.style.display = 'none';
+      // Only re-enable if not already mid-signing
+      if (signBtn && !signBtn._signing) signBtn.disabled = false;
+    }
+  }
+
   updateWorkflowStep(1, 'done');
   updateWorkflowStep(2, 'active');
   updateWorkflowStep(3, 'pending');
@@ -33563,6 +33924,453 @@ async function saExecuteSend() {
 }
 
 // ── Log transaction ───────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+//  CPN FIAT PAYOUT — Send Assets integration
+//  Reference: https://developers.circle.com/cpn/fiat-payouts
+//  All Circle API calls go via /api/cpn/* (Cloudflare Pages Function).
+//  CPN_API_KEY is injected server-side — never reaches the browser.
+// ══════════════════════════════════════════════════════════════════════════════
+
+let _saCPNMode = false;                // true when "Send to Bank (CPN)" is active
+let _saCPNQuotes = [];                 // last fetched quote array
+let _saCPNSelectedQuote = null;        // user-selected quote object
+let _saCPNPaymentId = null;            // CPN payment id for current in-flight payout
+
+// ── Toggle CPN mode ───────────────────────────────────────────────────────────
+function saToggleCPN() {
+  _saCPNMode = !_saCPNMode;
+  var form     = document.getElementById('sa-cpn-form');
+  var notice   = document.getElementById('sa-cpn-notice');
+  var cpnRows  = document.getElementById('sa-rt-cpn-rows');
+  var toggleLbl= document.getElementById('sa-cpn-toggle-label');
+  var toggleBtn= document.getElementById('sa-cpn-toggle');
+  var recipientField = document.getElementById('sa-recipient');
+  var destNetworkField = document.getElementById('sa-dest-network');
+  var recipientRow = recipientField && recipientField.closest('.sa-field');
+  var destNetworkRow = destNetworkField && destNetworkField.closest('.sa-field');
+  // Cross-chain route viz is not relevant when sending fiat
+  var xrouteViz = document.getElementById('sa-xroute-viz');
+
+  if (_saCPNMode) {
+    if (form)    form.style.display = '';
+    if (notice)  notice.style.display = '';
+    if (cpnRows) cpnRows.style.display = '';
+    if (toggleLbl) toggleLbl.textContent = '✓ Fiat (CPN) Active';
+    if (toggleBtn) {
+      toggleBtn.style.background = 'rgba(45,212,191,.18)';
+      toggleBtn.style.borderColor = 'rgba(45,212,191,.5)';
+    }
+    // Hide the crypto-specific recipient + dest network rows
+    if (recipientRow) recipientRow.style.display = 'none';
+    if (destNetworkRow) destNetworkRow.style.display = 'none';
+    if (xrouteViz) xrouteViz.style.display = 'none';
+    // Populate currency selector (idempotent)
+    _saCPNPopulateCurrencies();
+    var btnContent = document.getElementById('sa-send-btn-content');
+    if (btnContent) btnContent.innerHTML = '<i class="ti ti-building-bank"></i> Send via CPN';
+    set_('sa-rt-type', '<span style="color:var(--teal)"><i class="ti ti-building-bank" style="margin-right:3px"></i>Fiat via CPN</span>');
+  } else {
+    if (form)    form.style.display = 'none';
+    if (notice)  notice.style.display = 'none';
+    if (cpnRows) cpnRows.style.display = 'none';
+    if (toggleLbl) toggleLbl.textContent = 'Send to Bank (CPN)';
+    if (toggleBtn) {
+      toggleBtn.style.background = 'rgba(45,212,191,.08)';
+      toggleBtn.style.borderColor = 'rgba(45,212,191,.2)';
+    }
+    if (recipientRow) recipientRow.style.display = '';
+    if (destNetworkRow) destNetworkRow.style.display = '';
+    _saCPNQuotes = [];
+    _saCPNSelectedQuote = null;
+    var btnContent2 = document.getElementById('sa-send-btn-content');
+    if (btnContent2) btnContent2.innerHTML = '<i class="ti ti-send"></i> Send Asset';
+    set_('sa-rt-type', 'Direct ERC-20 Transfer');
+  }
+  saUpdateRoute();
+}
+
+// Local set_ helper (avoids conflict with BP's set() which targets different elements)
+function set_(id, html) { var el = document.getElementById(id); if (el) el.innerHTML = html; }
+
+// ── Populate destination currency <select> ────────────────────────────────────
+function _saCPNPopulateCurrencies() {
+  var sel = document.getElementById('sa-cpn-currency');
+  if (!sel || sel.options.length > 1) return; // already populated
+  var currencies = (typeof CPNFiatPayout !== 'undefined' && CPNFiatPayout.CURRENCIES)
+    ? CPNFiatPayout.CURRENCIES
+    : [
+        { code:'BRL', name:'Brazilian Real',    flag:'🇧🇷' },
+        { code:'MXN', name:'Mexican Peso',       flag:'🇲🇽' },
+        { code:'EUR', name:'Euro',               flag:'🇪🇺' },
+        { code:'GBP', name:'British Pound',      flag:'🇬🇧' },
+        { code:'PHP', name:'Philippine Peso',    flag:'🇵🇭' },
+        { code:'INR', name:'Indian Rupee',       flag:'🇮🇳' },
+        { code:'NGN', name:'Nigerian Naira',     flag:'🇳🇬' },
+        { code:'KES', name:'Kenyan Shilling',    flag:'🇰🇪' },
+        { code:'GHS', name:'Ghanaian Cedi',      flag:'🇬🇭' },
+        { code:'ZAR', name:'South African Rand', flag:'🇿🇦' },
+        { code:'ARS', name:'Argentine Peso',     flag:'🇦🇷' },
+        { code:'SGD', name:'Singapore Dollar',   flag:'🇸🇬' },
+        { code:'THB', name:'Thai Baht',          flag:'🇹🇭' },
+        { code:'IDR', name:'Indonesian Rupiah',  flag:'🇮🇩' },
+        { code:'TRY', name:'Turkish Lira',       flag:'🇹🇷' },
+      ];
+  currencies.forEach(function(c) {
+    var opt = document.createElement('option');
+    opt.value = c.code;
+    opt.textContent = c.flag + ' ' + c.code + ' — ' + c.name;
+    sel.appendChild(opt);
+  });
+}
+
+// ── Triggered when currency or amount changes ─────────────────────────────────
+function saUpdateCPNQuote() {
+  // Reset previous quote when currency changes
+  _saCPNSelectedQuote = null;
+  var preview = document.getElementById('sa-cpn-quote-preview');
+  if (preview) preview.style.display = 'none';
+  var sel = document.getElementById('sa-cpn-currency');
+  var currency = sel && sel.value;
+  set_('sa-rt-cpn-currency', currency || '—');
+  set_('sa-rt-cpn-rate', '—');
+  set_('sa-rt-cpn-receives', '—');
+  set_('sa-rt-cpn-settlement', '—');
+  set_('sa-rt-cpn-status', 'Awaiting quote');
+  saUpdateRoute();
+}
+
+// ── Fetch live CPN quotes ─────────────────────────────────────────────────────
+async function saFetchCPNQuotes() {
+  var amount   = parseFloat(document.getElementById('sa-amount')?.value) || 0;
+  var sel      = document.getElementById('sa-cpn-currency');
+  var currency = sel && sel.value;
+  var btnText  = document.getElementById('sa-cpn-quote-btn-text');
+  var quoteBtn = document.getElementById('sa-cpn-quote-btn');
+  var preview  = document.getElementById('sa-cpn-quote-preview');
+
+  if (!currency) { toast('Select a destination currency first', 'warning'); return; }
+  if (amount <= 0) { toast('Enter an amount first', 'warning'); return; }
+
+  if (btnText) btnText.textContent = 'Fetching quotes…';
+  if (quoteBtn) quoteBtn.disabled = true;
+  set_('sa-rt-cpn-status', 'Fetching quotes…');
+
+  try {
+    var country = (document.getElementById('sa-cpn-country')?.value || '').trim().toUpperCase() || undefined;
+    var quotes;
+    if (typeof CPNFiatPayout !== 'undefined') {
+      quotes = await CPNFiatPayout.getQuotes({ amount: amount.toFixed(2), currency: currency, countryCode: country });
+    } else {
+      // Fallback: direct proxy call (CPNFiatPayout not yet loaded)
+      var res = await fetch('/api/cpn/quotes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount: amount.toFixed(2), sourceCurrency: 'USD', destinationCurrency: currency, destinationCountry: country || '' }),
+      });
+      var data = await res.json();
+      if (!res.ok) throw new Error(data.message || data.error || 'CPN error ' + res.status);
+      quotes = (data && data.quotes) ? data.quotes : [];
+    }
+    _saCPNQuotes = quotes || [];
+    if (_saCPNQuotes.length === 0) { toast('No CPN quotes available for ' + currency, 'warning'); return; }
+    _saCPNRenderQuotes();
+    if (preview) preview.style.display = '';
+    set_('sa-rt-cpn-status', _saCPNQuotes.length + ' quote(s) received');
+  } catch (e) {
+    var msg = e.message || 'Quote fetch failed';
+    toast(msg, 'error');
+    set_('sa-rt-cpn-status', '<span style="color:var(--red)">Quote error</span>');
+    // Surface CPN_NOT_CONFIGURED clearly
+    if (e.message && e.message.indexOf('CPN not configured') !== -1) {
+      toast('CPN_API_KEY not configured — OFI onboarding required. See developers.circle.com/cpn/fiat-payouts', 'warning');
+    }
+  } finally {
+    if (btnText) btnText.textContent = 'Get Live FX Quote';
+    if (quoteBtn) quoteBtn.disabled = false;
+  }
+}
+
+// ── Render quote cards ────────────────────────────────────────────────────────
+function _saCPNRenderQuotes() {
+  var list = document.getElementById('sa-cpn-quotes-list');
+  if (!list) return;
+  list.innerHTML = '';
+  _saCPNQuotes.forEach(function(q, i) {
+    var card = document.createElement('div');
+    card.style.cssText = 'padding:8px 10px;border:1px solid var(--border2);border-radius:5px;cursor:pointer;transition:all .15s;background:rgba(0,0,0,.1)';
+    card.innerHTML =
+      '<div style="display:flex;align-items:center;justify-content:space-between">' +
+        '<span style="font-size:10px;font-weight:600;color:var(--text)">' +
+          '1 USDC = ' + parseFloat(q.exchangeRate || q.rate || 0).toFixed(4) + ' ' + (q.destinationCurrency || '') +
+        '</span>' +
+        '<span style="font-size:8px;color:var(--muted2)">' + (q.provider || 'BFI') + '</span>' +
+      '</div>' +
+      '<div style="display:flex;gap:12px;margin-top:4px;font-size:9px;color:var(--muted2)">' +
+        '<span>Receives: <b style="color:var(--green)">' + (q.destinationAmount || '—') + ' ' + (q.destinationCurrency || '') + '</b></span>' +
+        '<span>Fee: ' + ((q.fee && q.fee.amount) ? q.fee.amount + ' ' + (q.fee.currency || 'USD') : '—') + '</span>' +
+        '<span>Settlement: ' + (q.estimatedSettlementTime || '1-2 business days') + '</span>' +
+      '</div>';
+    card.onclick = function() {
+      _saCPNSelectQuote(q, card);
+    };
+    list.appendChild(card);
+    if (i === 0) { _saCPNSelectQuote(q, card); } // auto-select best quote
+  });
+}
+
+function _saCPNSelectQuote(q, cardEl) {
+  _saCPNSelectedQuote = q;
+  // Highlight selected card
+  var list = document.getElementById('sa-cpn-quotes-list');
+  if (list) list.querySelectorAll('div').forEach(function(c) {
+    c.style.borderColor = 'var(--border2)';
+    c.style.background = 'rgba(0,0,0,.1)';
+  });
+  if (cardEl) {
+    cardEl.style.borderColor = 'rgba(45,212,191,.5)';
+    cardEl.style.background = 'rgba(45,212,191,.07)';
+  }
+  // Update selected display
+  var sel = document.getElementById('sa-cpn-selected-quote');
+  if (sel) {
+    sel.style.display = '';
+    sel.innerHTML = '<i class="ti ti-check" style="margin-right:4px"></i>Selected: 1 USDC = ' +
+      parseFloat(q.exchangeRate || q.rate || 0).toFixed(4) + ' ' + (q.destinationCurrency || '') +
+      ' via ' + (q.provider || 'BFI');
+  }
+  // Update route preview
+  var cur = document.getElementById('sa-cpn-currency');
+  set_('sa-rt-cpn-currency', (cur && cur.value) || '—');
+  set_('sa-rt-cpn-rate', '1 USDC = ' + parseFloat(q.exchangeRate || q.rate || 0).toFixed(4) + ' ' + (q.destinationCurrency || ''));
+  set_('sa-rt-cpn-receives', (q.destinationAmount || '—') + ' ' + (q.destinationCurrency || ''));
+  set_('sa-rt-cpn-settlement', q.estimatedSettlementTime || '1-2 business days');
+  set_('sa-rt-cpn-status', '<span style="color:var(--teal)">Quote selected</span>');
+  saUpdateRoute();
+}
+
+// ── CPN validation helper ─────────────────────────────────────────────────────
+function _saCPNValidate() {
+  var amount   = parseFloat(document.getElementById('sa-amount')?.value) || 0;
+  var currency = (document.getElementById('sa-cpn-currency')?.value || '').trim();
+  var beneName = (document.getElementById('sa-cpn-bene-name')?.value || '').trim();
+  var bankName = (document.getElementById('sa-cpn-bank-name')?.value || '').trim();
+  var account  = (document.getElementById('sa-cpn-account')?.value || '').trim();
+  var country  = (document.getElementById('sa-cpn-country')?.value || '').trim().toUpperCase();
+  var senderName = (document.getElementById('sa-cpn-sender-name')?.value || '').trim();
+  var senderCountry = (document.getElementById('sa-cpn-sender-country')?.value || '').trim().toUpperCase();
+  if (!walletAddress || !signer) return 'Connect wallet first';
+  if (amount <= 0) return 'Enter amount';
+  if (!currency) return 'Select destination currency';
+  if (!beneName || beneName.length < 2) return 'Enter beneficiary name';
+  if (!bankName || bankName.length < 2) return 'Enter bank name';
+  if (!account || account.length < 4)   return 'Enter account number';
+  if (!country || country.length !== 2) return 'Enter 2-letter country code';
+  if (!senderName || senderName.length < 2) return 'Enter your name (sender)';
+  if (!senderCountry || senderCountry.length !== 2) return 'Enter your country code';
+  if (!_saCPNSelectedQuote) return 'Fetch and select a quote first';
+  return null; // valid
+}
+
+// ── Execute CPN fiat payout ───────────────────────────────────────────────────
+async function saExecuteCPNPayout() {
+  var validationError = _saCPNValidate();
+  if (validationError) { toast(validationError, 'error'); return; }
+
+  var amount      = parseFloat(document.getElementById('sa-amount')?.value);
+  var currency    = document.getElementById('sa-cpn-currency')?.value.trim();
+  var beneName    = document.getElementById('sa-cpn-bene-name')?.value.trim();
+  var bankName    = document.getElementById('sa-cpn-bank-name')?.value.trim();
+  var account     = document.getElementById('sa-cpn-account')?.value.trim();
+  var country     = document.getElementById('sa-cpn-country')?.value.trim().toUpperCase();
+  var routing     = (document.getElementById('sa-cpn-routing')?.value || '').trim();
+  var senderName  = document.getElementById('sa-cpn-sender-name')?.value.trim();
+  var senderCtry  = document.getElementById('sa-cpn-sender-country')?.value.trim().toUpperCase();
+
+  var btn        = document.getElementById('sa-send-btn');
+  var btnContent = document.getElementById('sa-send-btn-content');
+  if (btn) btn.disabled = true;
+
+  function _setStatus(label, color, icon) {
+    var ic = icon || 'ti-loader-2';
+    var spin = ic === 'ti-loader-2' ? ';animation:spin 1s linear infinite' : '';
+    if (btnContent) btnContent.innerHTML = '<i class="ti ' + ic + '" style="font-size:12px' + spin + '"></i> ' + label;
+    set_('sa-rt-cpn-status', '<span style="color:var(--' + (color||'muted2') + ')">' + label + '</span>');
+  }
+
+  try {
+    // ── Step 1: already have a quote from _saCPNSelectedQuote ──
+    _setStatus('Creating payment…', 'teal');
+
+    // Build beneficiary and sender objects
+    var beneficiary = {
+      currency:      currency,
+      name:          beneName,
+      bankName:      bankName,
+      accountNumber: account,
+      countryCode:   country,
+      routingNumber: routing || undefined,
+    };
+    var sender = { name: senderName, countryCode: senderCtry };
+
+    // ── Step 2: create payment via proxy ──
+    var paymentRes = await fetch('/api/cpn/payments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        idempotencyKey:       _cpnUuidFE(),
+        quoteId:              _saCPNSelectedQuote.id,
+        amount:               { amount: amount.toFixed(2), currency: 'USD' },
+        destinationCurrency:  currency,
+        beneficiaryDetails: {
+          name:          beneName,
+          bankName:      bankName,
+          accountNumber: account,
+          countryCode:   country,
+          routingNumber: routing || undefined,
+        },
+        senderDetails: { name: senderName, countryCode: senderCtry },
+      }),
+    });
+    var paymentData = await paymentRes.json();
+    if (!paymentRes.ok) throw new Error(paymentData.message || paymentData.error || 'Payment creation failed');
+    _saCPNPaymentId = paymentData.id;
+    set_('sa-rt-cpn-status', 'Payment created: ' + _saCPNPaymentId);
+
+    // ── Step 3: get onchain tx object ──
+    _setStatus('Getting TX object…', 'teal');
+    var txObjRes = await fetch('/api/cpn/payments/' + _saCPNPaymentId + '/transactions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ walletAddress: walletAddress }),
+    });
+    var txObjData = await txObjRes.json();
+    if (!txObjRes.ok) throw new Error(txObjData.message || 'TX object request failed');
+
+    // ── Step 4: sign the transaction ──
+    _setStatus('Sign in wallet…', 'yellow', 'ti-writing');
+    var rawTx = {
+      to:       txObjData.to,
+      data:     txObjData.data || '0x',
+      value:    txObjData.value ? BigInt(txObjData.value) : 0n,
+      chainId:  txObjData.chainId ? Number(txObjData.chainId) : activeChainId,
+      gasLimit: txObjData.gasLimit ? BigInt(txObjData.gasLimit) : undefined,
+    };
+    var signedTx = await signer.signTransaction(rawTx);
+    _setStatus('Submitting TX…', 'teal');
+
+    // ── Step 5: submit signed tx ──
+    var submitRes = await fetch(
+      '/api/cpn/payments/' + _saCPNPaymentId + '/transactions/' + txObjData.transactionId + '/submit',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ signedTransaction: signedTx }) }
+    );
+    var submitData = await submitRes.json();
+    if (!submitRes.ok) throw new Error(submitData.message || 'TX submit failed');
+
+    // ── Step 6: poll status ──
+    _setStatus('Confirming…', 'teal');
+    var finalPayment = await _saCPNPoll(_saCPNPaymentId, function(p) {
+      _setStatus(_saCPNStatusLabel(p.status), 'teal');
+      set_('sa-rt-cpn-status', '<span style="color:var(--teal)">' + _saCPNStatusLabel(p.status) + '</span>');
+    });
+
+    var isComplete = finalPayment.status === 'COMPLETED';
+    _setStatus(isComplete ? 'Completed!' : finalPayment.status, isComplete ? 'green' : 'red', isComplete ? 'ti-check-circle' : 'ti-x');
+    if (isComplete) {
+      toast('Fiat payout ' + amount.toFixed(2) + ' USDC → ' + currency + ' completed via CPN', 'success');
+    } else {
+      toast('CPN payout ended with status: ' + finalPayment.status, 'warning');
+    }
+
+    // Log to activity
+    saLogTx({
+      hash: _saCPNPaymentId,
+      type: 'cpn-fiat',
+      amount: amount,
+      asset: 'USDC',
+      recipient: beneName + ' (' + currency + ')',
+      network: 'CPN',
+      memo: 'Fiat payout to ' + beneName + ' via CPN',
+    });
+
+  } catch (e) {
+    var errMsg = e.message || 'CPN payout failed';
+    toast(errMsg, 'error');
+    set_('sa-rt-cpn-status', '<span style="color:var(--red)">' + errMsg.slice(0, 60) + '</span>');
+    if (btnContent) btnContent.innerHTML = '<i class="ti ti-building-bank"></i> Send via CPN';
+    if (btn) btn.disabled = false;
+  }
+}
+
+// ── CPN polling (client-side, max 5 min) ─────────────────────────────────────
+async function _saCPNPoll(paymentId, onUpdate) {
+  var TERMINAL = ['COMPLETED', 'FAILED', 'REVERSED', 'CANCELLED'];
+  var started = Date.now();
+  while (true) {
+    var res = await fetch('/api/cpn/payments/' + paymentId);
+    var data = await res.json();
+    if (!res.ok) throw new Error(data.message || 'Poll failed');
+    if (typeof onUpdate === 'function') onUpdate(data);
+    if (TERMINAL.indexOf(data.status) !== -1) return data;
+    if (Date.now() - started > 300000) throw new Error('CPN payment polling timed out');
+    await new Promise(function(r) { setTimeout(r, 5000); });
+  }
+}
+
+function _saCPNStatusLabel(status) {
+  var map = {
+    PENDING_REVIEW:    'Pending Review',
+    PENDING_ONCHAIN:   'Awaiting TX',
+    ONCHAIN_SUBMITTED: 'TX Submitted',
+    ONCHAIN_CONFIRMED: 'TX Confirmed',
+    FIAT_PENDING:      'Fiat Settlement',
+    COMPLETED:         'Completed',
+    FAILED:            'Failed',
+    REVERSED:          'Reversed',
+    CANCELLED:         'Cancelled',
+  };
+  return map[status] || status || 'Unknown';
+}
+
+/** UUID v4-like for idempotency keys — frontend copy of cpnFiatPayout._cpnUuid */
+function _cpnUuidFE() {
+  var d = Date.now();
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    var r = (d + Math.random() * 16) % 16 | 0;
+    d = Math.floor(d / 16);
+    return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+  });
+}
+
+// ── saDispatchSend — routes to CPN or normal send ────────────────────────────
+function saDispatchSend() {
+  if (_saCPNMode) {
+    saExecuteCPNPayout();
+  } else {
+    saExecuteSend();
+  }
+}
+
+// ── Patch saUpdateRoute to handle CPN validation state ───────────────────────
+var _saUpdateRouteOrig = saUpdateRoute;
+saUpdateRoute = function() {
+  _saUpdateRouteOrig.apply(this, arguments);
+  if (!_saCPNMode) return;
+  // In CPN mode, override the send button state based on CPN validation
+  var err = _saCPNValidate();
+  var btn = document.getElementById('sa-send-btn');
+  var statusEl = document.getElementById('sa-rt-status');
+  if (btn) btn.disabled = !!err;
+  if (statusEl && err) {
+    statusEl.textContent = err;
+    statusEl.style.color = 'var(--muted2)';
+  } else if (statusEl && !err) {
+    statusEl.textContent = 'Ready to send via CPN';
+    statusEl.style.color = 'var(--teal)';
+  }
+};
+
+// ── END CPN FIAT PAYOUT ───────────────────────────────────────────────────────
+
 function saLogTx(tx) {
   saRecentTxs.unshift(tx);
   if (saRecentTxs.length > 20) saRecentTxs.pop();
@@ -57327,6 +58135,26 @@ window.XcPopup = {
      Bulk Payment Links, Autonoma Quick Actions
      ═══════════════════════════════════════════════════════════════ -->
 <style>
+/* ── Batch table improvements ── */
+/* Dimmed filter rows */
+.ms-row-dimmed{opacity:.35;pointer-events:none}
+/* Filter clear button visibility */
+#ms-filter-input:not(:placeholder-shown) ~ #ms-filter-clear{display:inline-block!important}
+/* Amount column monospace alignment */
+.ms-table .amount{font-family:'JetBrains Mono',monospace;text-align:right}
+/* Collapsible panel section headers */
+.bp-section-hdr{display:flex;align-items:center;justify-content:space-between;cursor:pointer;user-select:none}
+.bp-section-hdr:hover{opacity:.8}
+.bp-section-body{overflow:hidden;transition:max-height .22s ease}
+.bp-section-body.collapsed{max-height:0!important}
+/* Gas Savings unavailable state */
+#bp-gas-save[data-unavailable]{color:var(--muted2)!important;font-weight:400}
+/* Better duplicate badge */
+.ms-status-badge.duplicate{background:rgba(245,158,11,.15);color:var(--yellow);border:1px solid rgba(245,158,11,.35);display:inline-flex;align-items:center;gap:2px}
+/* Contract badge */
+.ms-status-badge.contract{background:rgba(239,68,68,.1);color:var(--red);border:1px solid rgba(239,68,68,.25)}
+/* Confirmed status */
+.ms-status-badge.confirmed{background:rgba(34,197,94,.15);color:var(--green);border:1px solid rgba(34,197,94,.3)}
 /* CSV Drop Zone */
 .bp-dropzone{display:none!important}/* Gas Saver card */
 .bp-gas-card{background:linear-gradient(135deg,rgba(34,197,94,.06),rgba(79,142,247,.04));border:1px solid rgba(34,197,94,.15);border-radius:8px;padding:10px 12px;margin-bottom:8px}
@@ -57503,11 +58331,18 @@ BP._injectGasSaver = function(){
   var card = document.createElement('div');
   card.className = 'bp-gas-card';
   card.id = 'bp-gas-card';
-  card.innerHTML = '<div class="bp-gas-title"><i class="ti ti-gas-station"></i> Gas Savings</div>' +
-    '<div class="bp-gas-row"><span>Estimated gas (batch)</span><span class="bp-gas-val" id="bp-gas-batch">—</span></div>' +
-    '<div class="bp-gas-row"><span>Estimated gas (individual)</span><span class="bp-gas-val" id="bp-gas-indiv">—</span></div>' +
-    '<div class="bp-gas-row"><span>You save</span><span class="bp-gas-save" id="bp-gas-save">—</span></div>' +
-    '<div class="bp-gas-row" style="font-size:8px;color:var(--muted2);margin-top:4px">Based on Multisend contract batching</div>';
+  var _gasOpen = true;
+  card.innerHTML =
+    '<div class="bp-gas-title bp-section-hdr" onclick="var b=document.getElementById(\'bp-gas-body\');var i=document.getElementById(\'bp-gas-chev\');_gasOpen=!_gasOpen;b.style.maxHeight=_gasOpen?\'200px\':\'0\';b.style.overflow=_gasOpen?\'visible\':\'hidden\';i.style.transform=_gasOpen?\'\':\' rotate(-90deg)\'">' +
+      '<span><i class="ti ti-gas-station"></i> Gas Savings <span style="font-size:7px;color:var(--muted2);font-weight:400;margin-left:4px">(estimate)</span></span>' +
+      '<i class="ti ti-chevron-down" id="bp-gas-chev" style="font-size:9px;transition:transform .2s"></i>' +
+    '</div>' +
+    '<div id="bp-gas-body" style="max-height:200px;overflow:visible">' +
+      '<div class="bp-gas-row"><span>Batch gas (measured)</span><span class="bp-gas-val" id="bp-gas-batch">—</span></div>' +
+      '<div class="bp-gas-row"><span>Individual gas (est.)</span><span class="bp-gas-val" id="bp-gas-indiv">—</span></div>' +
+      '<div class="bp-gas-row"><span>Est. savings</span><span class="bp-gas-save" id="bp-gas-save">—</span></div>' +
+      '<div class="bp-gas-row" style="font-size:8px;color:var(--muted2);margin-top:3px;border-top:1px solid var(--border);padding-top:4px">Estimates only — actual gas depends on network conditions. Connect wallet for live data.</div>' +
+    '</div>';
 
   col.insertBefore(card, col.firstChild);
 
@@ -57517,18 +58352,40 @@ BP._injectGasSaver = function(){
 
 BP._updateGasSaver = function(){
   try {
-    var rcpt = 0, total = 0;
-    if(typeof recipients !== 'undefined' && Array.isArray(recipients)){ rcpt = recipients.length; for(var i=0;i<rcpt;i++) total += Number(recipients[i].amount||0); }
-    if(rcpt === 0){ document.getElementById('bp-gas-batch').textContent = '—'; document.getElementById('bp-gas-indiv').textContent = '—'; document.getElementById('bp-gas-save').textContent = '—'; return; }
+    var rcpt = 0;
+    if(typeof recipients !== 'undefined' && Array.isArray(recipients)) rcpt = recipients.length;
 
-    var indivGas = rcpt * 0.002; // ~0.002 USDC gas per individual send
-    var batchGas = 0.003 + (rcpt * 0.0001); // base + marginal per recipient in batch
-    var saved = indivGas - batchGas;
-    var pct = indivGas > 0 ? Math.round((saved / indivGas) * 100) : 0;
+    var bBatch = document.getElementById('bp-gas-batch');
+    var bIndiv = document.getElementById('bp-gas-indiv');
+    var bSave  = document.getElementById('bp-gas-save');
+    if (!bBatch || !bIndiv || !bSave) return;
 
-    document.getElementById('bp-gas-batch').textContent = '~' + batchGas.toFixed(4) + ' USDC';
-    document.getElementById('bp-gas-indiv').textContent = '~' + indivGas.toFixed(4) + ' USDC';
-    document.getElementById('bp-gas-save').textContent = '~' + saved.toFixed(4) + ' USDC (' + pct + '%)';
+    if(rcpt === 0) {
+      bBatch.textContent = '—';
+      bIndiv.textContent = '—';
+      bSave.textContent  = '—';
+      return;
+    }
+
+    // Attempt to use the live gas estimate from the review panel (ms-fp-gas)
+    var liveGasEl = document.getElementById('ms-fp-gas');
+    var liveGasText = liveGasEl ? liveGasEl.textContent : '';
+    var liveGasMatch = liveGasText.match(/([\d.]+)\s*USDC/);
+
+    if (liveGasMatch) {
+      // Live data available: batch estimate is what was measured, individual is extrapolated
+      var batchEst = parseFloat(liveGasMatch[1]);
+      var indivEst = rcpt * (batchEst / Math.max(rcpt, 1)) * 1.35; // ~35% overhead per-tx vs batched
+      var saved = indivEst - batchEst;
+      bBatch.textContent = '~' + batchEst.toFixed(4) + ' USDC (measured)';
+      bIndiv.textContent = '~' + indivEst.toFixed(4) + ' USDC (est.)';
+      bSave.textContent  = saved > 0 ? '~' + saved.toFixed(4) + ' USDC (est.)' : 'Insufficient data';
+    } else {
+      // No live data — show "unavailable" rather than fabricated numbers
+      bBatch.textContent = 'Connect wallet to estimate';
+      bIndiv.textContent = '—';
+      bSave.textContent  = 'unavailable';
+    }
   } catch(_){}
 };
 
@@ -57542,10 +58399,17 @@ BP._injectSplitBill = function(){
   var card = document.createElement('div');
   card.className = 'bp-split-card';
   card.id = 'bp-split-card';
-  card.innerHTML = '<div class="bp-split-title"><i class="ti ti-users"></i> Split Bill</div>' +
-    '<div class="bp-split-row"><input class="bp-split-input" id="bp-split-total" type="number" placeholder="Total amount (USDC)" step="0.01"/></div>' +
-    '<div class="bp-split-row"><input class="bp-split-input" id="bp-split-count" type="number" placeholder="Number of people" min="2" max="500"/></div>' +
-    '<button class="bp-split-btn primary" onclick="BP._doSplit()">Split & Fill Table</button>';
+  card.innerHTML =
+    '<div class="bp-split-title bp-section-hdr" style="cursor:pointer;margin-bottom:6px" onclick="var b=this.nextElementSibling;b.style.display=b.style.display===\'none\'?\'\':\' none\'">' +
+      '<span><i class="ti ti-users"></i> Split Bill</span>' +
+      '<i class="ti ti-chevron-down" style="font-size:9px"></i>' +
+    '</div>' +
+    '<div class="bp-split-body">' +
+      '<div class="bp-split-row"><input class="bp-split-input" id="bp-split-total" type="number" placeholder="Total (USDC)" step="0.000001" min="0.000001"/></div>' +
+      '<div class="bp-split-row"><input class="bp-split-input" id="bp-split-count" type="number" placeholder="Number of people" min="2" max="500"/></div>' +
+      '<button class="bp-split-btn primary" onclick="BP._doSplit()">Split &amp; Fill Table</button>' +
+      '<div style="font-size:8px;color:var(--muted2);margin-top:5px">Amounts use 6-decimal precision. Remainder distributed to first rows.</div>' +
+    '</div>';
 
   var gasCard = document.getElementById('bp-gas-card');
   if(gasCard) gasCard.parentNode.insertBefore(card, gasCard.nextSibling);
@@ -57556,11 +58420,20 @@ BP._doSplit = function(){
   var total = parseFloat(document.getElementById('bp-split-total').value);
   var count = parseInt(document.getElementById('bp-split-count').value);
   if(!(total > 0) || !(count > 0) || count > 500){ alert('Enter valid total and count (max 500).'); return; }
-  var each = Math.round((total / count) * 100) / 100;
+  // Integer-safe per-person amount: avoid 3×0.1 ≠ 0.3 float drift
+  // Scale to 6-decimal integers (USDC), then distribute remainder to first rows
+  var totalMicro = Math.round(total * 1e6); // total in USDC micro-units
+  var baseMicro  = Math.floor(totalMicro / count);
+  var remainder  = totalMicro - baseMicro * count; // distribute cents to first `remainder` rows
   for(var i = 0; i < count; i++){
+    var rowMicro = baseMicro + (i < remainder ? 1 : 0);
+    var rowAmt = (rowMicro / 1e6).toFixed(6).replace(/\.?0+$/, '') || '0.00';
+    // Keep at least 2 decimal places
+    if (rowAmt.indexOf('.') === -1) rowAmt += '.00';
+    else if (rowAmt.split('.')[1].length < 2) rowAmt += '0'.repeat(2 - rowAmt.split('.')[1].length);
     recipients.push({
       addr: '',
-      amount: String(each),
+      amount: rowAmt,
       note: 'Split ' + (i+1) + '/' + count,
       name: '',
       chainId: 'Arc_Mainnet',
@@ -57570,6 +58443,7 @@ BP._doSplit = function(){
   saveRecipients();
   renderTable();
   try { if(typeof updateMultiSendReview === 'function') updateMultiSendReview(); } catch(_){}
+  if(typeof toast === 'function') toast('Split: ' + count + ' rows at ' + (baseMicro/1e6).toFixed(6) + '+ USDC each', 'info');
 };
 
 // ── 4. BULK PAYMENT LINKS ────────────────────────────────────
