@@ -306,13 +306,21 @@ async function reserveIdempotency(env, userId, idempotencyKey, bodyJson) {
   const reqId = generateRequestId();
   const pHash = await payloadHash(bodyJson);
   const reserveKey = `cpn_reserve:${userId}:${idempotencyKey}`;
-  // Read first (best-effort — not atomic; see note above)
+  const value = `${reqId}:${pHash}`;
+  // Best-effort KV reservation with write-then-verify. This is NOT a true atomic
+  // compare-and-swap (KV has none): two concurrent writers can still both pass the
+  // initial get, but the re-read makes the loser detect the winner's value and back
+  // off. For TRUE atomic mutual exclusion use the CpnLock Durable Object (env.CPN_LOCK).
   try {
     const existing = await env.AUTH_KV.get(reserveKey);
     if (existing) {
       return { ok: false, conflict: true, error: 'Concurrent request in flight for this idempotencyKey' };
     }
-    await env.AUTH_KV.put(reserveKey, `${reqId}:${pHash}`, { expirationTtl: RESERVE_TTL_SECONDS });
+    await env.AUTH_KV.put(reserveKey, value, { expirationTtl: RESERVE_TTL_SECONDS });
+    const raceCheck = await env.AUTH_KV.get(reserveKey);
+    if (raceCheck && raceCheck !== value) {
+      return { ok: false, conflict: true, error: 'Concurrent reservation won by another request' };
+    }
     return { ok: true, reqId, reserveKey, payloadHash: pHash };
   } catch (e) {
     return { ok: false, error: 'Reservation failed: ' + (e && e.message ? e.message : 'unknown') };
@@ -495,7 +503,7 @@ export async function onRequest(context) {
     }
   }
 
-  // ── Idempotency — two-phase reservation for payment creation ──
+  // ── Idempotency — atomic reservation (Durable Object, KV fallback) ──
   let reservationHandle = null;
   if (cpnPath === 'payments' && request.method === 'POST') {
     const idemKey = bodyJson && bodyJson.idempotencyKey;
@@ -503,12 +511,9 @@ export async function onRequest(context) {
       return jsonResponse({ error: 'idempotencyKey is required (8–128 chars, UUID v4 recommended)' }, 400, env, request);
     }
 
-    // Check for a completed record first (idempotent replay)
+    // 1. Completed record → idempotent replay or key reuse.
     const existing = await checkIdempotencyRecord(env, userId, idemKey);
     if (existing) {
-      // Payload-binding check: if the stored hash differs from this request's hash,
-      // the caller is trying to reuse an idempotency key for a different payment.
-      // This is a misuse: reject rather than silently process a different operation.
       const newHash = await payloadHash(bodyJson);
       if (existing.payloadHash && existing.payloadHash !== newHash) {
         return jsonResponse({
@@ -524,12 +529,8 @@ export async function onRequest(context) {
       }, 200, env, request);
     }
 
-    // PENDING_RECONCILIATION (Fase 1.4): a prior attempt with this key had an
-    // indeterminate outcome (network error / persistence failure). Bind the retry to
-    // the original payload — a different payload is key-reuse misuse; the same
-    // payload is a safe reconciliation retry (Circle's Idempotency-Key dedups).
+    // 2. PENDING_RECONCILIATION → key reuse (different payload) or proceed (same).
     const pending = await checkPendingReconciliation(env, userId, idemKey);
-    let reconciling = false;
     if (pending) {
       const pendingHash = await payloadHash(bodyJson);
       if (pending.payloadHash && pending.payloadHash !== pendingHash) {
@@ -538,32 +539,55 @@ export async function onRequest(context) {
           code: 'IDEMPOTENCY_KEY_REUSE',
         }, 409, env, request);
       }
-      // Same payload — reconciliation retry. It is a SEQUENTIAL retry (not a
-      // concurrent request), so we skip the in-flight reservation and forward to
-      // Circle, whose Idempotency-Key is the authoritative dedup.
-      reconciling = true;
+      // Same payload — reconciliation retry. Fall through to the atomic lock so a
+      // concurrent reconciliation is serialized (never two uncoordinated Circle calls).
     }
 
-    // Phase 1: reserve (prevents concurrent duplicate creation). Skipped for a
-    // same-payload reconciliation retry (Circle dedups the Idempotency-Key).
-    if (!reconciling) {
+    // 3. Atomic reservation. The reconciliation path is NOT skipped: it also acquires
+    // the lock, so two simultaneous retries with the same key are serialized.
+    const pHash = await payloadHash(bodyJson);
+    const useDO = !!(env && env.CPN_LOCK);
+    if (useDO) {
+      const doId = env.CPN_LOCK.idFromName(`${userId}:${idemKey}`);
+      const doStub = env.CPN_LOCK.get(doId);
+      let claimRes = null;
+      try {
+        claimRes = await doStub.fetch('https://do/lock', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'claim', payloadHash: pHash }),
+        });
+      } catch (_e) { claimRes = null; }
+      if (!claimRes) {
+        return jsonResponse({ error: 'Could not reserve idempotency slot — please retry', code: 'IDEMPOTENCY_RESERVE_FAILED' }, 503, env, request);
+      }
+      let claimBody = null;
+      try { claimBody = await claimRes.json(); } catch (_e) { claimBody = null; }
+      if (!claimBody || !claimBody.ok) {
+        return jsonResponse({ error: 'Could not reserve idempotency slot — please retry', code: 'IDEMPOTENCY_RESERVE_FAILED' }, 503, env, request);
+      }
+      if (claimBody.claimed === false) {
+        return jsonResponse({ error: 'idempotencyKey already used for a different payment operation', code: 'IDEMPOTENCY_KEY_REUSE' }, 409, env, request);
+      }
+      if (claimBody.claimed === 'committed') {
+        return jsonResponse({ id: claimBody.paymentId, status: 'IDEMPOTENT_REPLAY', idempotent: true, message: 'Payment already created with this idempotencyKey' }, 200, env, request);
+      }
+      if (claimBody.claimed === 'same') {
+        // Same payload is already in-flight — block (coordinate) rather than let a
+        // concurrent request proceed to Circle.
+        return jsonResponse({ error: 'A payment with this idempotencyKey is already in progress', code: 'IDEMPOTENCY_CONFLICT' }, 409, env, request);
+      }
+      // claimed === true → this request won the lock; proceed.
+      reservationHandle = { idemKey, payloadHash: pHash, useDO: true, doStub };
+    } else {
       const reservation = await reserveIdempotency(env, userId, idemKey, bodyJson);
       if (!reservation.ok) {
         if (reservation.conflict) {
-          return jsonResponse({
-            error: 'A payment with this idempotencyKey is already in progress',
-            code: 'IDEMPOTENCY_CONFLICT',
-          }, 409, env, request);
+          return jsonResponse({ error: 'A payment with this idempotencyKey is already in progress', code: 'IDEMPOTENCY_CONFLICT' }, 409, env, request);
         }
-        // Non-conflict reservation failure: block creation rather than risk a duplicate
-        return jsonResponse({
-          error: 'Could not reserve idempotency slot — please retry',
-          code: 'IDEMPOTENCY_RESERVE_FAILED',
-        }, 503, env, request);
+        return jsonResponse({ error: 'Could not reserve idempotency slot — please retry', code: 'IDEMPOTENCY_RESERVE_FAILED' }, 503, env, request);
       }
-      reservationHandle = { idemKey, reserveKey: reservation.reserveKey, payloadHash: reservation.payloadHash, reqId: reservation.reqId };
-    } else {
-      reservationHandle = { idemKey, reserveKey: null, payloadHash: pending.payloadHash || (await payloadHash(bodyJson)), reqId: null, reconciling: true };
+      reservationHandle = { idemKey, reserveKey: reservation.reserveKey, payloadHash: reservation.payloadHash, reqId: reservation.reqId, useDO: false };
     }
   }
 
@@ -585,12 +609,10 @@ export async function onRequest(context) {
     });
   } catch (_networkErr) {
     // NETWORK_UNKNOWN — the fetch threw before we received any response.
-    // We cannot determine whether Circle received the request. Deleting the
-    // reservation here would allow an immediate retry that could create a duplicate
-    // payment if Circle's server processed the first request but the client's
-    // connection dropped. The reservation TTL (120 s) will expire on its own.
-    // The caller receives NETWORK_UNKNOWN and must reconcile (query Circle for
-    // the payment status using the idempotency key) before retrying.
+    // Outcome is INDETERMINATE: Circle may or may not have created the payment.
+    // Do NOT release the lock; mark it pending_reconciliation (DO) and persist a
+    // PENDING_RECONCILIATION KV record (24 h) so a retry stays payload-bound and
+    // is blocked until the lock expires or reconciliation completes.
     const unknownPayload = {
       error: 'CPN upstream unreachable — outcome unknown',
       code: 'NETWORK_UNKNOWN',
@@ -599,11 +621,20 @@ export async function onRequest(context) {
     };
     if (reservationHandle) {
       unknownPayload.idempotencyKey = reservationHandle.idemKey;
-      // Do NOT delete the reservation — it signals to concurrent requests that an
-      // operation with this key is in-flight or has unknown outcome.
-      // Persist a PENDING_RECONCILIATION record (24 h) so a retry with this key is
-      // still payload-bound even after the 120 s reservation expires.
-      await writePendingReconciliation(env, userId, reservationHandle.idemKey, reservationHandle.payloadHash, reservationHandle.reqId);
+      if (reservationHandle.useDO && reservationHandle.doStub) {
+        try {
+          await reservationHandle.doStub.fetch('https://do/lock', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'markPending', payloadHash: reservationHandle.payloadHash }),
+          });
+        } catch (_e) {}
+      }
+      const pendingWrite = await writePendingReconciliation(env, userId, reservationHandle.idemKey, reservationHandle.payloadHash, reservationHandle.reqId);
+      if (!pendingWrite.ok) {
+        unknownPayload.persistenceWarning = true;
+        unknownPayload.persistenceError = 'Could not persist reconciliation record — retry is blocked until the reservation expires';
+      }
     }
     return jsonResponse(unknownPayload, 502, env, request);
   }
@@ -639,21 +670,54 @@ export async function onRequest(context) {
 
     const persistenceFailed = !promoteResult.ok || !ownershipResult.ok;
     if (persistenceFailed) {
-      // Local persistence failed — persist PENDING_RECONCILIATION + surface paymentId.
+      // INDETERMINATE: Circle created it but persistence failed — reconcile, never dup.
       upstreamJson.persistenceWarning = true;
       upstreamJson.persistenceError = 'KV write failed — reconcile before retrying';
       upstreamJson.reconcileRequired = true;
-      await writePendingReconciliation(env, userId, idemKey, pHash, reservationHandle.reqId);
+      upstreamJson.code = 'INDETERMINATE_OUTCOME';
+      if (reservationHandle.useDO && reservationHandle.doStub) {
+        try {
+          await reservationHandle.doStub.fetch('https://do/lock', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'markPending', payloadHash: pHash, paymentId }),
+          });
+        } catch (_e) {}
+      }
+      const pendingWrite = await writePendingReconciliation(env, userId, idemKey, pHash, reservationHandle.reqId);
+      if (!pendingWrite.ok) {
+        upstreamJson.reconciliationPersistFailed = true;
+      }
     } else {
+      // Successfully persisted — commit the DO lock (permanent) + clear pending.
+      if (reservationHandle.useDO && reservationHandle.doStub) {
+        try {
+          await reservationHandle.doStub.fetch('https://do/lock', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'commit', payloadHash: pHash, paymentId }),
+          });
+        } catch (_e) {}
+      }
       await clearPendingReconciliation(env, userId, idemKey);
     }
   }
 
   // ── Return upstream response ──
   if (!upstreamRes.ok) {
-    // Clean up reservation on CPN error so caller can retry safely
+    // Release the lock on a KNOWN CPN error (non-2xx) so the caller can retry safely.
     if (reservationHandle) {
-      try { await env.AUTH_KV.delete(reservationHandle.reserveKey); } catch (_) {}
+      if (reservationHandle.useDO && reservationHandle.doStub) {
+        try {
+          await reservationHandle.doStub.fetch('https://do/lock', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'release', payloadHash: reservationHandle.payloadHash }),
+          });
+        } catch (_e) {}
+      } else if (reservationHandle.reserveKey) {
+        try { await env.AUTH_KV.delete(reservationHandle.reserveKey); } catch (_) {}
+      }
     }
     const errMsg = (upstreamJson && (upstreamJson.message || upstreamJson.error))
       || safeUpstreamError(upstreamRes.status);

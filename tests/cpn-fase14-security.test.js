@@ -148,6 +148,10 @@ describe('onRequest — PENDING_RECONCILIATION (real handler)', () => {
     await onRequest({ env, request: makeRequest('POST', 'payments', body) });
     expect(await kv.get(`cpn_pending:${USER_ID}:${body.idempotencyKey}`)).toBeTruthy();
 
+    // Simulate the in-flight reservation TTL (120 s) expiring before the retry,
+    // so the reconciliation retry can acquire a fresh lock.
+    await kv.delete(`cpn_reserve:${USER_ID}:${body.idempotencyKey}`);
+
     // Retry with SAME payload: Circle returns the already-created paymentId.
     globalThis.fetch = async (url, init) => {
       expect(init.headers['Idempotency-Key']).toBe(body.idempotencyKey);
@@ -164,6 +168,27 @@ describe('onRequest — PENDING_RECONCILIATION (real handler)', () => {
     const idemRaw = await kv.get(`cpn_idem:${USER_ID}:${body.idempotencyKey}`);
     expect(idemRaw).toBeTruthy();
     expect(JSON.parse(idemRaw).paymentId).toBe('pmt-123');
+  });
+
+  it('a same-payload retry while the reservation is still held is blocked (coordinated)', async () => {
+    const kv = makeKV();
+    await seedSession(kv);
+    const env = makeEnv(kv);
+    const body = paymentBody();
+
+    // First attempt: network error → reservation + PENDING_RECONCILIATION persist.
+    globalThis.fetch = async () => { throw new Error('network down'); };
+    await onRequest({ env, request: makeRequest('POST', 'payments', body) });
+
+    // Retry with SAME payload while the reservation is STILL held → 409 (no
+    // uncoordinated reconciliation; the in-flight lock serializes the retry).
+    let circleCalls = 0;
+    globalThis.fetch = async () => { circleCalls++; return makeResponse({ id: 'pmt-x' }, 201); };
+    const res = await onRequest({ env, request: makeRequest('POST', 'payments', body) });
+    expect(res.status).toBe(409);
+    const data = await res.json();
+    expect(data.code).toBe('IDEMPOTENCY_CONFLICT');
+    expect(circleCalls).toBe(0); // never reached Circle — lock held
   });
 
   it('persistence failure after Circle created the payment persists PENDING_RECONCILIATION', async () => {
