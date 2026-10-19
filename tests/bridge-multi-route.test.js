@@ -162,7 +162,7 @@ describe('executeBridgeViaLiFi', () => {
 
   it('validates route via LiFiAdapter.validateRoute before execution', () => {
     const startIdx = html.indexOf('async function executeBridgeViaLiFi()');
-    const fn = html.slice(startIdx, startIdx + 8000);
+    const fn = html.slice(startIdx, startIdx + 16000); // wider window (function grew in 1.2)
     expect(fn).toContain('LiFiAdapter.validateRoute');
   });
 

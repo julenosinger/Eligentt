@@ -1880,6 +1880,20 @@ body.swap-standard-mode .site-footer{display:block !important}
 .token-sel:hover{border-color:var(--blue)}
 .token-icon{width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:800;color:#fff;flex-shrink:0}
 .token-name{font-size:12px;font-weight:700}
+/* ── Bridge token picker overlay ──────────────────────── */
+#bridge-token-picker{position:fixed;inset:0;z-index:9999;display:none}
+#bridge-token-picker.btp-open{display:flex;align-items:center;justify-content:center}
+.btp-backdrop{position:absolute;inset:0;background:rgba(0,0,0,.55)}
+.btp-modal{position:relative;z-index:1;background:var(--card);border:1px solid var(--border2);border-radius:12px;padding:16px;min-width:240px;max-width:320px;width:90%;box-shadow:0 16px 48px rgba(0,0,0,.45)}
+.btp-title{font-size:11px;font-weight:700;color:var(--muted2);text-transform:uppercase;letter-spacing:.7px;margin-bottom:10px}
+.btp-item{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:7px;cursor:pointer;transition:background .12s}
+.btp-item:hover{background:var(--card2)}
+.btp-item-icon{width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;color:#fff;flex-shrink:0}
+.btp-item-info{flex:1;min-width:0}
+.btp-item-sym{font-size:12px;font-weight:700;color:var(--text)}
+.btp-item-name{font-size:9px;color:var(--muted2)}
+.btp-item-tag{font-size:8px;background:rgba(45,212,191,.15);color:var(--teal);border:1px solid rgba(45,212,191,.3);border-radius:4px;padding:1px 5px;white-space:nowrap}
+.btp-no-tokens{font-size:10px;color:var(--muted2);text-align:center;padding:12px}
 .token-usd{font-size:9.5px;color:var(--muted2);margin-top:3px}
 .swap-arrow{width:32px;height:32px;border-radius:8px;background:var(--card2);border:1px solid var(--border2);display:flex;align-items:center;justify-content:center;cursor:pointer;margin:8px auto;transition:all .2s;font-size:16px;color:var(--muted2)}
 .swap-arrow:hover{border-color:var(--blue);color:var(--blue);transform:rotate(180deg)}
@@ -7148,12 +7162,13 @@ select.cinput option { background: #161a24; color: #dde2f0; }
                 <input class="token-amt" id="bridge-amount" type="number" placeholder="0.00" oninput="updateBridgeEst()" style="font-size:18px"/>
                 <div style="font-size:9px;color:var(--muted2);margin-top:2px" id="bridge-usd">≈ $1.00 USD</div>
               </div>
-              <div class="token-sel">
-                <div class="token-icon" style="background:#2775ca">U</div>
-                <span class="token-name">USDC</span>
+              <div class="token-sel" id="bridge-from-token-sel" onclick="_bridgeOpenTokenPicker('from')" title="Select source token" style="cursor:pointer">
+                <div class="token-icon" id="bridge-from-token-icon" style="background:#2775ca">U</div>
+                <span class="token-name" id="bridge-from-token-name">USDC</span>
+                <i class="ti ti-chevron-down" style="font-size:9px;color:var(--muted2);margin-left:2px"></i>
               </div>
             </div>
-            <div style="display:flex;align-items:center;gap:3px;margin-top:4px;font-size:8.5px;color:var(--muted2)"><i class="ti ti-wallet" style="font-size:9px"></i>Balance: <span id="bridge-from-bal" style="color:var(--text);font-weight:600">—</span> USDC</div>
+            <div style="display:flex;align-items:center;gap:3px;margin-top:4px;font-size:8.5px;color:var(--muted2)"><i class="ti ti-wallet" style="font-size:9px"></i>Balance: <span id="bridge-from-bal" style="color:var(--text);font-weight:600">—</span> <span id="bridge-from-bal-sym">USDC</span></div>
 
             <div class="swap-arrow" style="color:var(--teal)" onclick="swapBridgeChains()"><i class="ti ti-arrows-up-down"></i></div>
 
@@ -7167,16 +7182,17 @@ select.cinput option { background: #161a24; color: #dde2f0; }
               <div style="flex:1;padding-left:10px">
                 <div class="token-amt" style="font-size:18px;display:flex;align-items:center;gap:5px;padding-top:2px">
                   <span id="bridge-amount-out" style="color:var(--text)">0.00</span>
-                  <span style="font-size:10px;color:var(--muted2)">USDC</span>
+                  <span style="font-size:10px;color:var(--muted2)" id="bridge-amount-out-sym">USDC</span>
                 </div>
                 <div style="font-size:9px;color:var(--muted2);margin-top:2px">After bridge fees</div>
               </div>
-              <div class="token-sel">
-                <div class="token-icon" style="background:#2775ca">U</div>
-                <span class="token-name">USDC</span>
+              <div class="token-sel" id="bridge-to-token-sel" onclick="_bridgeOpenTokenPicker('to')" title="Select destination token" style="cursor:pointer">
+                <div class="token-icon" id="bridge-to-token-icon" style="background:#2775ca">U</div>
+                <span class="token-name" id="bridge-to-token-name">USDC</span>
+                <i class="ti ti-chevron-down" style="font-size:9px;color:var(--muted2);margin-left:2px"></i>
               </div>
             </div>
-            <div style="display:flex;align-items:center;gap:3px;margin-top:4px;font-size:8.5px;color:var(--muted2)"><i class="ti ti-wallet" style="font-size:9px"></i>Balance: <span id="bridge-to-bal" style="color:var(--text);font-weight:600">—</span> USDC</div>
+            <div style="display:flex;align-items:center;gap:3px;margin-top:4px;font-size:8.5px;color:var(--muted2)"><i class="ti ti-wallet" style="font-size:9px"></i>Balance: <span id="bridge-to-bal" style="color:var(--text);font-weight:600">—</span> <span id="bridge-to-bal-sym">USDC</span></div>
 
             <div class="rate-box" style="margin-top:10px;display:none" id="bridge-rate-box">
               <div class="rate-row"><span>Route</span><span class="rate-val teal" id="bridge-protocol">LI.FI</span></div>
@@ -14696,6 +14712,7 @@ const BridgeEngine = {
 
 let swapTokenInIdx  = 0, swapTokenOutIdx = 1;
 let bridgeFromIdx   = 1, bridgeToIdx     = 0;  // Ethereum → Arc Mainnet
+let bridgeFromToken = 'USDC', bridgeToToken = 'USDC'; // Multi-token Bridge 1.0
 
 // ── Utilities ──────────────────────────────────────────────
 const toUsdc   = n  => BigInt(Math.round((parseFloat(n)||0)*1e6));
@@ -23813,7 +23830,175 @@ function stStopAutoRefresh() {
 function initBridgeChains(){
   bridgeFromIdx = 1; // Ethereum
   bridgeToIdx   = 0; // Arc Mainnet
+  bridgeFromToken = 'USDC';
+  bridgeToToken   = 'USDC';
   applyBridgeChains(); updateBridgeEst();
+}
+
+// ── Multi-Token Bridge 1.0 helpers ──────────────────────────────────────────
+// Returns tokens available on a given chain (have a non-zero address registered).
+// CCTP tokens (USDC, EURC) are always shown first when available on the chain.
+function _bridgeAvailableTokens(chain) {
+  if (!chain) return [];
+  var chainId = chain.chainId;
+  var tokens = [];
+  // Walk TOKEN_REGISTRY (app-level) first — only includes tokens with addresses on Arc.
+  // For other chains read from CHAIN_REGISTRY directly.
+  var chainEntry = (typeof CHAIN_REGISTRY !== 'undefined' && CHAIN_REGISTRY[chainId]) || chain;
+  var chainTokens = chainEntry.tokens || {};
+  // Build list from tokens that have a valid address on this chain.
+  var seen = {};
+  Object.keys(chainTokens).forEach(function(sym) {
+    var t = chainTokens[sym];
+    if (!t || !t.address || t.address === '0x0000000000000000000000000000000000000000') return;
+    seen[sym] = true;
+    var ui = (typeof _TOKEN_UI !== 'undefined' && _TOKEN_UI[sym]) || { icon: sym.charAt(0), color: '#607d8b' };
+    var decimals = t.decimals != null ? t.decimals : 6;
+    tokens.push({ sym: sym, address: t.address, decimals: decimals, icon: ui.icon, color: ui.color });
+  });
+  // Sort: USDC first, then EURC, then rest alphabetically.
+  tokens.sort(function(a, b) {
+    var order = { USDC: 0, EURC: 1 };
+    var oa = order[a.sym] != null ? order[a.sym] : 99;
+    var ob = order[b.sym] != null ? order[b.sym] : 99;
+    if (oa !== ob) return oa - ob;
+    return a.sym.localeCompare(b.sym);
+  });
+  return tokens;
+}
+
+// Get metadata for a specific (chainId, sym) pair. Returns null if unavailable.
+function _bridgeGetTokenMeta(chainId, sym) {
+  var chainEntry = (typeof CHAIN_REGISTRY !== 'undefined' && CHAIN_REGISTRY[chainId]) || null;
+  var t = chainEntry && chainEntry.tokens && chainEntry.tokens[sym];
+  if (!t || !t.address || t.address === '0x0000000000000000000000000000000000000000') return null;
+  var ui = (typeof _TOKEN_UI !== 'undefined' && _TOKEN_UI[sym]) || { icon: sym.charAt(0), color: '#607d8b' };
+  return { sym: sym, address: t.address, decimals: t.decimals != null ? t.decimals : 6, icon: ui.icon, color: ui.color };
+}
+
+// Convert a human amount to raw BigInt using the correct decimals for a token on a chain.
+function _bridgeToRaw(amount, chainId, sym) {
+  var meta = _bridgeGetTokenMeta(chainId, sym);
+  var dec = meta ? meta.decimals : 6;
+  return BigInt(Math.round((parseFloat(amount) || 0) * Math.pow(10, dec)));
+}
+
+// Format raw BigInt to display string using the correct decimals.
+function _bridgeFromRaw(raw, chainId, sym) {
+  var meta = _bridgeGetTokenMeta(chainId, sym);
+  var dec = meta ? meta.decimals : 6;
+  return (Number(raw) / Math.pow(10, dec)).toFixed(4);
+}
+
+// Update the visual token selector buttons after state change.
+function _bridgeUpdateTokenSelectors() {
+  var fromChain = CHAINS[bridgeFromIdx];
+  var toChain   = CHAINS[bridgeToIdx];
+
+  var fromMeta = _bridgeGetTokenMeta(fromChain && fromChain.chainId, bridgeFromToken);
+  var toMeta   = _bridgeGetTokenMeta(toChain   && toChain.chainId,   bridgeToToken);
+
+  // If currently selected token is unavailable on the new chain, fall back to USDC.
+  if (!fromMeta) {
+    bridgeFromToken = 'USDC';
+    fromMeta = _bridgeGetTokenMeta(fromChain && fromChain.chainId, 'USDC') || { sym:'USDC', icon:'U', color:'#2775ca' };
+  }
+  if (!toMeta) {
+    bridgeToToken = 'USDC';
+    toMeta = _bridgeGetTokenMeta(toChain && toChain.chainId, 'USDC') || { sym:'USDC', icon:'U', color:'#2775ca' };
+  }
+
+  function _setEl(id, v) { var el = document.getElementById(id); if (el) el.textContent = v; }
+  function _setStyle(id, prop, v) { var el = document.getElementById(id); if (el) el.style[prop] = v; }
+
+  _setEl('bridge-from-token-name', fromMeta.sym);
+  _setEl('bridge-from-token-icon', fromMeta.icon);
+  _setStyle('bridge-from-token-icon', 'background', fromMeta.color);
+  _setEl('bridge-from-bal-sym', fromMeta.sym);
+
+  _setEl('bridge-to-token-name', toMeta.sym);
+  _setEl('bridge-to-token-icon', toMeta.icon);
+  _setStyle('bridge-to-token-icon', 'background', toMeta.color);
+  _setEl('bridge-amount-out-sym', toMeta.sym);
+  _setEl('bridge-to-bal-sym', toMeta.sym);
+
+  // Update Bridge button label.
+  var btn = document.getElementById('bridge-btn');
+  if (btn && !btn.disabled) {
+    btn.innerHTML = '<i class="ti ti-topology-star-3"></i>Bridge ' + escHtml(fromMeta.sym);
+  }
+}
+
+// Open the token picker for 'from' or 'to' side.
+var _btpActiveSide = null;
+function _bridgeOpenTokenPicker(side) {
+  _btpActiveSide = side;
+  var chain = side === 'from' ? CHAINS[bridgeFromIdx] : CHAINS[bridgeToIdx];
+  var current = side === 'from' ? bridgeFromToken : bridgeToToken;
+  var tokens = _bridgeAvailableTokens(chain);
+
+  var overlay = document.getElementById('bridge-token-picker');
+  var title   = document.getElementById('btp-title');
+  var list    = document.getElementById('btp-list');
+  if (!overlay || !list) return;
+
+  if (title) title.textContent = 'Select ' + (side === 'from' ? 'Source' : 'Destination') + ' Token · ' + (chain ? chain.name : '');
+
+  if (!tokens.length) {
+    list.innerHTML = '<div class="btp-no-tokens">No supported tokens found on this chain.</div>';
+  } else {
+    var html = '';
+    tokens.forEach(function(t, i) {
+      var isSel = t.sym === current;
+      // CCTP badge: shown only when this token is actually CCTP-eligible for the
+      // CURRENT chain pair (uses isEligible which checks per-token chain support).
+      // For EURC this means both sides must be in EURC_CCTP_CHAINS.
+      var cctpBadge = '';
+      if (typeof BridgeKitRouter !== 'undefined' && typeof BridgeKitRouter.isEligible === 'function') {
+        var _otherChain = side === 'from' ? CHAINS[bridgeToIdx] : CHAINS[bridgeFromIdx];
+        var _otherChainId = _otherChain ? _otherChain.chainId : null;
+        if (_otherChainId && chain && BridgeKitRouter.isEligible(
+          side === 'from' ? chain.chainId : _otherChainId,
+          side === 'from' ? _otherChainId : chain.chainId,
+          t.sym
+        )) {
+          cctpBadge = '<span class="btp-item-tag">CCTP</span>';
+        }
+      }
+      html += '<div class="btp-item' + (isSel ? '" style="background:var(--card2);border:1px solid var(--border2)' : '') + '" onclick="_bridgePickToken(' + i + ')">' +
+        '<div class="btp-item-icon" style="background:' + escHtml(t.color) + '">' + escHtml(String(t.icon)) + '</div>' +
+        '<div class="btp-item-info"><div class="btp-item-sym">' + escHtml(t.sym) + (isSel ? ' <i class="ti ti-check" style="font-size:9px;color:var(--teal)"></i>' : '') + '</div>' +
+        '<div class="btp-item-name">decimals: ' + t.decimals + cctpBadge + '</div></div></div>';
+    });
+    list.innerHTML = html;
+  }
+
+  // Stash token list for picker selection.
+  overlay._btpTokens = tokens;
+  overlay.classList.add('btp-open');
+}
+
+function _bridgePickToken(idx) {
+  var overlay = document.getElementById('bridge-token-picker');
+  if (!overlay || !overlay._btpTokens) return;
+  var t = overlay._btpTokens[idx];
+  if (!t) return;
+
+  if (_btpActiveSide === 'from') {
+    bridgeFromToken = t.sym;
+  } else {
+    bridgeToToken = t.sym;
+  }
+  _bridgeClosePicker();
+  _bridgeUpdateTokenSelectors();
+  _brsClearRoutes();
+  updateBridgeEst();
+}
+
+function _bridgeClosePicker() {
+  var overlay = document.getElementById('bridge-token-picker');
+  if (overlay) overlay.classList.remove('btp-open');
+  _btpActiveSide = null;
 }
 function cycleFromChain(){
   bridgeFromIdx=(bridgeFromIdx+1)%CHAINS.length;
@@ -23827,6 +24012,8 @@ function cycleToChain(){
 }
 function swapBridgeChains(){
   [bridgeFromIdx,bridgeToIdx]=[bridgeToIdx,bridgeFromIdx];
+  // Also swap the tokens so the direction is fully reversed.
+  [bridgeFromToken,bridgeToToken]=[bridgeToToken,bridgeFromToken];
   applyBridgeChains();updateBridgeEst();
 }
 function applyBridgeChains(){
@@ -23835,6 +24022,10 @@ function applyBridgeChains(){
   document.getElementById('from-chain-name').textContent=from.name;
   document.getElementById('to-chain-dot').style.background=to.color;
   document.getElementById('to-chain-name').textContent=to.name;
+  // Reset tokens to USDC when switching chains (safe fallback).
+  // _bridgeUpdateTokenSelectors will fall back to USDC if the current token
+  // is not available on the new chain.
+  _bridgeUpdateTokenSelectors();
   refreshBridgeBalances();
 }
 // ── LI.FI quote state (debounce + stale-response protection) ────────────
@@ -23861,19 +24052,25 @@ function _bridgeFmtDuration(sec) {
 var _bridgeRoutes = [];          // current loaded routes
 var _selectedBridgeRoute = null; // { provider, quote, idx }
 var _bridgeRoutesSeq = 0;        // stale-result guard
+var _bridgeRoutesLifiError = false; // true when last fetch threw (API unavailable, not "no route")
 
 // Normalize a LI.FI advanced-route result into RouteResult shape.
-function _brsFromLiFiRoute(lifiRoute) {
+// toDecimals: decimals of the destination token (default 6 for USDC backward compat).
+function _brsFromLiFiRoute(lifiRoute, toDecimals) {
   if (!lifiRoute || lifiRoute.ok === false) return null;
+  var dec = (toDecimals != null) ? toDecimals : (lifiRoute.toDecimals != null ? lifiRoute.toDecimals : 6);
+  var divisor = Math.pow(10, dec);
+  var inDec = (lifiRoute.fromDecimals != null) ? lifiRoute.fromDecimals : 6;
+  var inDivisor = Math.pow(10, inDec);
   return {
     provider:    'lifi',
     id:          lifiRoute.routeId || ('lifi-' + Math.random().toString(36).substr(2,8)),
     label:       lifiRoute.label || 'LI.FI',
     protocol:    lifiRoute.protocol || 'LI.FI aggregator',
     available:   lifiRoute.available !== false,
-    inAmt:       Number(lifiRoute._rawRoute && lifiRoute._rawRoute.fromAmount || 0) / 1e6,
-    outAmt:      Number(lifiRoute.toAmountRaw || 0) / 1e6,
-    minAmt:      Number(lifiRoute.toAmountMinRaw || 0) / 1e6,
+    inAmt:       Number(lifiRoute._rawRoute && lifiRoute._rawRoute.fromAmount || 0) / inDivisor,
+    outAmt:      Number(lifiRoute.toAmountRaw || 0) / divisor,
+    minAmt:      Number(lifiRoute.toAmountMinRaw || 0) / divisor,
     feePct:      null,
     gasUsd:      lifiRoute.gasCostUSD || null,
     feesUsd:     lifiRoute.feeCostUSD || null,
@@ -23881,17 +24078,24 @@ function _brsFromLiFiRoute(lifiRoute) {
     steps:       lifiRoute.steps || 1,
     stepsData:   lifiRoute.stepsData || [],
     quote:       lifiRoute,    // kept for execution (contains _rawRoute + stepsData)
+    toDecimals:  dec,
+    fromDecimals: inDec,
   };
 }
 
 // Legacy: normalize a LI.FI single-quote (getQuote) into RouteResult — kept for fallback.
-function _brsFromLiFi(quote) {
+// toDecimals: decimals of the destination token (default 6 for USDC backward compat).
+function _brsFromLiFi(quote, toDecimals) {
   if (!quote || quote.ok !== true) return null;
+  var dec = (toDecimals != null) ? toDecimals : (quote.toDecimals != null ? quote.toDecimals : 6);
+  var divisor = Math.pow(10, dec);
+  var inDec = (quote.fromDecimals != null) ? quote.fromDecimals : 6;
+  var inDivisor = Math.pow(10, inDec);
   var est = quote.route && quote.route.estimate;
   var steps = (quote.route && quote.route.steps && quote.route.steps.length) || 1;
   var execSec = est && est.executionDuration != null ? Number(est.executionDuration) : null;
-  var outAmt  = Number(quote.expectedOutRaw || 0) / 1e6;
-  var minAmt  = quote.minOutRaw != null ? Number(quote.minOutRaw) / 1e6 : null;
+  var outAmt  = Number(quote.expectedOutRaw || 0) / divisor;
+  var minAmt  = quote.minOutRaw != null ? Number(quote.minOutRaw) / divisor : null;
   var feePct  = quote.feeBps != null ? (quote.feeBps / 100) : null;
   var gasUsd  = est && est.gasCosts && est.gasCosts[0] ? (Number(est.gasCosts[0].amountUSD) || 0) : null;
   var feesUsd = est && est.feeCosts && est.feeCosts.length
@@ -23903,7 +24107,7 @@ function _brsFromLiFi(quote) {
     label:       quote.tool || 'LI.FI',
     protocol:    'LI.FI aggregator',
     available:   true,
-    inAmt:       Number(quote.inAmtRaw || 0) / 1e6,
+    inAmt:       Number(quote.amountInRaw || 0) / inDivisor,
     outAmt:      outAmt,
     minAmt:      minAmt,
     feePct:      feePct,
@@ -23913,79 +24117,119 @@ function _brsFromLiFi(quote) {
     steps:       steps,
     stepsData:   (quote.route && quote.route.steps) || [],
     quote:       quote,
+    toDecimals:  dec,
+    fromDecimals: inDec,
   };
 }
 
 // Normalize a BridgeKitRouter estimate into RouteResult shape.
-function _brsFromCCTP(est, fromChainId, toChainId) {
+// token: optional token symbol to set the _unverifiedEurc flag for EURC routes.
+function _brsFromCCTP(est, fromChainId, toChainId, token) {
   if (!est || est.ok === false) return null;
   var outAmt = est.outAmt != null ? Number(est.outAmt) : null;
   var fee    = est.fee    != null ? Number(est.fee)    : null;
   var execSec = est.execSec != null ? Number(est.execSec) : 120; // CCTP ~2min typical
   var inAmt  = est.inAmt != null ? Number(est.inAmt)  : null;
+  // EURC CCTP route: eligible (Arc↔Base) but not sandbox-verified with real funds.
+  // Flag it so the UI can show an informational note.
+  var isEurc = token && String(token).toUpperCase() === 'EURC';
   return {
-    provider:    'cctp',
-    id:          'cctp-' + fromChainId + '-' + toChainId,
-    label:       'Circle CCTP',
-    protocol:    'CCTP V2',
-    available:   true,
-    inAmt:       inAmt,
-    outAmt:      outAmt,
-    minAmt:      outAmt,
-    feePct:      (fee != null && inAmt != null && inAmt > 0) ? (fee / inAmt * 100) : null,
-    gasUsd:      null,
-    feesUsd:     fee,
-    execSec:     execSec,
-    steps:       4,   // approve + burn + attest + mint
-    quote:       est,
+    provider:       'cctp',
+    id:             'cctp-' + fromChainId + '-' + toChainId,
+    label:          'Circle CCTP',
+    protocol:       'CCTP V2',
+    available:      true,
+    inAmt:          inAmt,
+    outAmt:         outAmt,
+    minAmt:         outAmt,
+    feePct:         (fee != null && inAmt != null && inAmt > 0) ? (fee / inAmt * 100) : null,
+    gasUsd:         null,
+    feesUsd:        fee,
+    execSec:        execSec,
+    steps:          4,   // approve + burn + attest + mint
+    quote:          est,
+    _unverifiedEurc: !!isEurc, // EURC CCTP not verified with real funds on this pair
   };
 }
 
 // Fetch all available routes in parallel, normalize, sort by outAmt desc.
+// Uses the globally selected bridgeFromToken / bridgeToToken tokens.
 async function _fetchBridgeRoutes(fromChain, toChain, amt, walletAddr) {
   var seq = ++_bridgeRoutesSeq;
   var lifiRoutes = [];
   var cctpRoute  = null;
+  _bridgeRoutesLifiError = false; // reset per fetch
 
-  // Provider 1: LI.FI /advanced/routes — returns ALL routes
+  // Resolve token symbols from global state (default USDC for backward compat).
+  var fromSym = (typeof bridgeFromToken !== 'undefined' && bridgeFromToken) || 'USDC';
+  var toSym   = (typeof bridgeToToken   !== 'undefined' && bridgeToToken)   || 'USDC';
+
+  // Resolve metadata: address + decimals for the selected tokens on each chain.
+  var fromMeta = (typeof _bridgeGetTokenMeta === 'function') ? _bridgeGetTokenMeta(fromChain.chainId, fromSym) : null;
+  var toMeta   = (typeof _bridgeGetTokenMeta === 'function') ? _bridgeGetTokenMeta(toChain.chainId,   toSym)   : null;
+  // If the selected token has no address on the source or destination chain,
+  // return an empty route list and let _fetchBridgeQuote show a clear "no route" state.
+  // Do NOT silently fall back to a different token — that would bridge a different asset.
+  if (!fromMeta) return [];  // selected source token not supported on source chain
+  if (!toMeta)   return [];  // selected destination token not supported on destination chain
+
+  var fromDecimals = fromMeta ? fromMeta.decimals : 6;
+  var toDecimals   = toMeta   ? toMeta.decimals   : 6;
+  var amountInRaw  = BigInt(Math.round((parseFloat(amt) || 0) * Math.pow(10, fromDecimals)));
+
+  // Provider 1: LI.FI /advanced/routes — returns ALL routes.
+  // Pass resolved token addresses (not symbols) to LiFiAdapter to avoid any
+  // TOKEN_REGISTRY fallback that could return an Arc-specific address for
+  // a token on a different chain.  fromMeta / toMeta are guaranteed non-null here.
   if (typeof LiFiAdapter !== 'undefined' && typeof LiFiAdapter.getRoutes === 'function') {
+    var _lifiTokenIn  = { address: fromMeta.address, symbol: fromSym, decimals: fromDecimals };
+    var _lifiTokenOut = { address: toMeta.address,   symbol: toSym,   decimals: toDecimals   };
     try {
       var res = await LiFiAdapter.getRoutes({
-        tokenIn: 'USDC', tokenOut: 'USDC',
-        amountInRaw: toUsdc(amt),
-        slippageBps: (typeof SlippageConfig !== 'undefined' && SlippageConfig.DEFAULT_BPS) || 50,
-        fromChainId: fromChain.chainId, toChainId: toChain.chainId,
-        fromAddress: walletAddr, toAddress: walletAddr,
+        tokenIn:      _lifiTokenIn,
+        tokenOut:     _lifiTokenOut,
+        amountInRaw:  amountInRaw,
+        slippageBps:  (typeof SlippageConfig !== 'undefined' && SlippageConfig.DEFAULT_BPS) || 50,
+        fromChainId:  fromChain.chainId,
+        toChainId:    toChain.chainId,
+        fromAddress:  walletAddr,
+        toAddress:    walletAddr,
       });
       if (res && res.ok && Array.isArray(res.routes)) {
-        lifiRoutes = res.routes.map(_brsFromLiFiRoute).filter(Boolean);
+        lifiRoutes = res.routes.map(function(r) { return _brsFromLiFiRoute(r, toDecimals); }).filter(Boolean);
       } else if (res && !res.ok && typeof LiFiAdapter.getQuote === 'function') {
         // Fallback to single-quote if /advanced/routes is unavailable
         var q = await LiFiAdapter.getQuote({
-          tokenIn: 'USDC', tokenOut: 'USDC',
-          amountInRaw: toUsdc(amt),
+          tokenIn:     _lifiTokenIn,
+          tokenOut:    _lifiTokenOut,
+          amountInRaw: amountInRaw,
           slippageBps: (typeof SlippageConfig !== 'undefined' && SlippageConfig.DEFAULT_BPS) || 100,
-          fromChainId: fromChain.chainId, toChainId: toChain.chainId,
-          fromAddress: walletAddr, toAddress: walletAddr,
+          fromChainId: fromChain.chainId,
+          toChainId:   toChain.chainId,
+          fromAddress: walletAddr,
+          toAddress:   walletAddr,
         });
-        var fbRoute = _brsFromLiFi(q);
+        var fbRoute = _brsFromLiFi(q, toDecimals);
         if (fbRoute) lifiRoutes = [fbRoute];
       }
     } catch(_e) {
-      // LI.FI unavailable — proceed with CCTP only
+      // LI.FI network/API unavailable — flag it so the caller can show the right message.
+      _bridgeRoutesLifiError = true;
     }
   }
 
-  // Provider 2: CCTP (BridgeKitRouter.estimate)
+  // Provider 2: CCTP (BridgeKitRouter.estimate) — ONLY for tokens/chains eligible for CCTP.
+  // BridgeKitRouter.isEligible checks: token is USDC/EURC AND both chains have CCTP domains.
   if (
     typeof BridgeKitRouter !== 'undefined' &&
     BridgeKitRouter.isAvailable() &&
     typeof BridgeKitRouter.estimate === 'function' &&
-    BridgeKitRouter.route(fromChain.chainId, toChain.chainId, 'USDC').provider === 'cctp'
+    typeof BridgeKitRouter.isEligible === 'function' &&
+    BridgeKitRouter.isEligible(fromChain.chainId, toChain.chainId, fromSym)
   ) {
     try {
-      var cctpEst = await BridgeKitRouter.estimate(fromChain.chainId, toChain.chainId, amt, 'USDC');
-      cctpRoute = _brsFromCCTP(cctpEst, fromChain.chainId, toChain.chainId);
+      var cctpEst = await BridgeKitRouter.estimate(fromChain.chainId, toChain.chainId, amt, fromSym);
+      cctpRoute = _brsFromCCTP(cctpEst, fromChain.chainId, toChain.chainId, fromSym);
     } catch(_e2) {}
   }
 
@@ -24000,6 +24244,18 @@ async function _fetchBridgeRoutes(fromChain, toChain, amt, walletAddr) {
     if (a.available !== b.available) return a.available ? -1 : 1;
     return (b.outAmt || 0) - (a.outAmt || 0);
   });
+
+  // Stamp every route with the token pair it was fetched for.
+  // executeBridgeOrTurbo uses this to detect stale routes if the user
+  // changes the token AFTER selecting a route (belt-and-suspenders guard,
+  // since _bridgePickToken already calls _brsClearRoutes to null _selectedBridgeRoute).
+  routes.forEach(function(r) {
+    r._fetchFromSym = fromSym;
+    r._fetchToSym   = toSym;
+    r._fetchFromChainId = fromChain.chainId;
+    r._fetchToChainId   = toChain.chainId;
+  });
+
   return routes;
 }
 
@@ -24051,9 +24307,8 @@ function _brsRenderRoutes(routes, fromChain, toChain) {
   if (!panel || !inner) return;
 
   if (!routes || routes.length === 0) {
-    panel.classList.remove('brs-visible');
-    inner.innerHTML = '';
-    _brsSetActive(false);
+    // Keep the panel visible so the caller's message (set in bridge-routes-inner) stays shown.
+    // The caller (_fetchBridgeQuote) populates inner before calling _brsRenderRoutes with [].
     return;
   }
 
@@ -24099,6 +24354,8 @@ function _brsRenderRoutes(routes, fromChain, toChain) {
     var badges = '';
     if (isBest)    badges += '<div class="brs-best-badge">Best Rate</div>';
     if (isFastest) badges += '<div class="brs-best-badge" style="right:auto;left:12px;background:var(--purple)">Fastest</div>';
+    // EURC CCTP informational note (eligible but not yet sandbox-verified with real funds).
+    if (route._unverifiedEurc) badges += '<div class="brs-best-badge" style="right:auto;left:12px;top:auto;bottom:6px;background:rgba(245,158,11,.18);color:#f59e0b;border:1px solid rgba(245,158,11,.3);font-size:6.5px">EURC · not sandbox-verified</div>';
 
     var selectBtn = route.available
       ? (isSel
@@ -24117,7 +24374,7 @@ function _brsRenderRoutes(routes, fromChain, toChain) {
         '</div>' +
         '<div class="brs-out-amount" style="margin-left:8px">' +
           '<div class="brs-out-val">' + outStr + '</div>' +
-          '<div class="brs-out-label">USDC received</div>' +
+          '<div class="brs-out-label">' + escHtml((typeof bridgeToToken !== 'undefined' && bridgeToToken) || 'USDC') + ' received</div>' +
         '</div>' +
         '<div class="brs-route-steps" style="margin-left:8px;flex-shrink:0;padding-top:0;border-top:none">' + selectBtn + '</div>' +
       '</div>' +
@@ -24168,16 +24425,18 @@ function brSelectRoute(idx) {
   var feePct   = route.feePct  != null ? route.feePct  : null;
   var execSec  = route.execSec != null ? route.execSec : null;
   var toolName = route.label   || 'LI.FI';
+  var toSym    = (typeof bridgeToToken !== 'undefined' && bridgeToToken) || 'USDC';
   _bridgeSetText('bridge-protocol',    toolName);
   _bridgeSetText('bridge-amount-out',  '~' + outAmt.toFixed(4));
-  _bridgeSetText('bridge-receive',     '~' + outAmt.toFixed(4) + ' USDC');
+  _bridgeSetText('bridge-receive',     '~' + outAmt.toFixed(4) + ' ' + toSym);
   _bridgeSetText('bridge-fee-display', feePct  != null ? '~' + feePct.toFixed(3)  + '%'    : '—');
-  _bridgeSetText('bridge-min',         minAmt  != null ? '~' + minAmt.toFixed(4)  + ' USDC': '—');
+  _bridgeSetText('bridge-min',         minAmt  != null ? '~' + minAmt.toFixed(4)  + ' ' + toSym : '—');
   _bridgeSetText('bridge-time',        execSec != null ? '~' + _bridgeFmtDuration(execSec) : '—');
 
   // Update Bridge button label
+  var fromSym  = (typeof bridgeFromToken !== 'undefined' && bridgeFromToken) || 'USDC';
   var btn = document.getElementById('bridge-btn');
-  if (btn) btn.innerHTML = '<i class="ti ti-topology-star-3"></i>Bridge via ' + escHtml(route.label);
+  if (btn) btn.innerHTML = '<i class="ti ti-topology-star-3"></i>Bridge ' + escHtml(fromSym) + ' via ' + escHtml(route.label);
 }
 
 // Clear routes (on chain/amount change) — hides the right panel entirely.
@@ -24192,7 +24451,8 @@ function _brsClearRoutes() {
   if (panel) panel.classList.remove('brs-visible');
   _brsSetActive(false);
   var btn = document.getElementById('bridge-btn');
-  if (btn) btn.innerHTML = '<i class="ti ti-topology-star-3"></i>Bridge USDC';
+  var fromSym = (typeof bridgeFromToken !== 'undefined' && bridgeFromToken) || 'USDC';
+  if (btn && !btn.disabled) btn.innerHTML = '<i class="ti ti-topology-star-3"></i>Bridge ' + escHtml(fromSym);
 }
 
 // Show loading skeleton in the routes-inner area.
@@ -24205,6 +24465,33 @@ function _brsShowLoading() {
   _brsShowRoutes();
   inner.innerHTML = '<div class="brs-header"><i class="ti ti-route"></i>Finding Routes…</div>' +
     '<div class="brs-loading"><div class="aut-typing"><span></span><span></span><span></span></div>Fetching available routes…</div>';
+}
+
+// Show a clear no-route or token-unavailable message in the route panel.
+// type: 'token_unavailable' | 'no_route' | 'api_error'
+function _brsShowNoRoute(msg, type) {
+  var panel = document.getElementById('bridge-routes-panel');
+  var inner = document.getElementById('bridge-routes-inner');
+  if (!panel || !inner) return;
+  panel.classList.add('brs-visible');
+  _brsSetActive(true);
+  _brsShowRoutes();
+  var iconClass = type === 'token_unavailable' ? 'ti-coin-off' : type === 'api_error' ? 'ti-wifi-off' : 'ti-route-off';
+  var iconColor  = type === 'api_error' ? 'var(--red)' : 'var(--muted2)';
+  inner.innerHTML =
+    '<div class="brs-header" style="color:' + iconColor + '">' +
+      '<i class="ti ' + iconClass + '" style="color:' + iconColor + '"></i>' +
+      (type === 'token_unavailable' ? 'Token unavailable on this chain' :
+       type === 'api_error'         ? 'Route API unavailable' :
+                                      'No route found') +
+    '</div>' +
+    '<div class="brs-empty" style="' +
+      (type === 'no_route' ? 'border-color:rgba(239,68,68,.2);background:rgba(239,68,68,.04)' :
+       type === 'api_error' ? 'border-color:rgba(239,68,68,.3);background:rgba(239,68,68,.06)' :
+                              'border-color:rgba(107,114,128,.2);background:rgba(107,114,128,.04)') +
+    '">' + escHtml(msg) + '</div>';
+  _bridgeRoutes = [];
+  _selectedBridgeRoute = null;
 }
 
 function updateBridgeEst(){
@@ -24263,13 +24550,36 @@ async function _fetchBridgeQuote(fromChain, toChain, amt) {
 
   if (!routes || routes.length === 0) {
     _bridgeLastQuote = null;
-    _bridgeSetText('bridge-protocol', 'LI.FI');
-    _bridgeSetText('bridge-receive', 'No route');
-    _bridgeSetText('bridge-amount-out', '0.00');
+    _bridgeSetText('bridge-protocol', '—');
+    _bridgeSetText('bridge-receive', '—');
+    _bridgeSetText('bridge-amount-out', '—');
     _bridgeSetText('bridge-fee-display', '—');
     _bridgeSetText('bridge-min', '—');
-    _bridgeSetText('bridge-time', 'No routes available for this pair');
-    _brsClearRoutes();
+    _bridgeSetText('bridge-time', '—');
+    // Provide a specific reason: check whether the selected tokens exist on both chains.
+    var _noRouteFromSym = (typeof bridgeFromToken !== 'undefined' && bridgeFromToken) || 'USDC';
+    var _noRouteToSym   = (typeof bridgeToToken   !== 'undefined' && bridgeToToken)   || 'USDC';
+    var _noRouteFm  = (typeof _bridgeGetTokenMeta === 'function') ? _bridgeGetTokenMeta(fromChain && fromChain.chainId, _noRouteFromSym) : null;
+    var _noRouteTm  = (typeof _bridgeGetTokenMeta === 'function') ? _bridgeGetTokenMeta(toChain   && toChain.chainId,   _noRouteToSym)   : null;
+    var _noRouteMsg;
+    var _noRouteType; // 'token_unavailable' | 'no_route'
+    if (!_noRouteFm) {
+      _noRouteMsg = _noRouteFromSym + ' is not available on ' + (fromChain ? fromChain.name : 'source chain') + '. Choose a different token or source chain.';
+      _noRouteType = 'token_unavailable';
+    } else if (!_noRouteTm) {
+      _noRouteMsg = _noRouteToSym + ' is not available on ' + (toChain ? toChain.name : 'destination chain') + '. Choose a different token or destination chain.';
+      _noRouteType = 'token_unavailable';
+    } else {
+      _noRouteMsg = 'No route found for ' + _noRouteFromSym + ' → ' + _noRouteToSym + ' · ' + (fromChain ? fromChain.shortName || fromChain.name : '?') + ' → ' + (toChain ? toChain.shortName || toChain.name : '?') + '.';
+      _noRouteType = 'no_route';
+    }
+    // If LI.FI threw (network error) and CCTP also has no route, show "API unavailable".
+    if (_bridgeRoutesLifiError && _noRouteType === 'no_route') {
+      _noRouteType = 'api_error';
+      _noRouteMsg  = 'Route API unavailable. Check your connection and try again.';
+    }
+    // Show a clear no-route card in the route panel.
+    _brsShowNoRoute(_noRouteMsg, _noRouteType);
     return;
   }
 
@@ -24285,15 +24595,16 @@ async function _fetchBridgeQuote(fromChain, toChain, amt) {
   const toolName = best.label || 'LI.FI';
   const feePct   = best.feePct;
   const execSec  = best.execSec;
+  const _toSym   = (typeof bridgeToToken !== 'undefined' && bridgeToToken) || 'USDC';
 
   // _bridgeLastQuote is set only when the user explicitly selects a route (brSelectRoute).
   // Do NOT set it here — no auto-selection.
 
   _bridgeSetText('bridge-protocol', toolName);
   _bridgeSetText('bridge-amount-out', `~${outAmt.toFixed(4)}`);
-  _bridgeSetText('bridge-receive', `~${outAmt.toFixed(4)} USDC`);
+  _bridgeSetText('bridge-receive', `~${outAmt.toFixed(4)} ${_toSym}`);
   _bridgeSetText('bridge-fee-display', feePct != null ? `~${feePct.toFixed(3)}%` : '—');
-  _bridgeSetText('bridge-min', minAmt != null ? `~${minAmt.toFixed(4)} USDC` : '—');
+  _bridgeSetText('bridge-min', minAmt != null ? `~${minAmt.toFixed(4)} ${_toSym}` : '—');
   _bridgeSetText('bridge-time', execSec != null ? `~${_bridgeFmtDuration(execSec)}` : '—');
 
   BridgeEngine.notifyEstimateUpdated(fromChain.id, toChain.id, amt, feePct, outAmt);
@@ -24302,21 +24613,28 @@ async function refreshBridgeBalances(){
   const set=(id,v)=>{const el=document.getElementById(id);if(el)el.textContent=v;};
   if(!walletAddress){set('bridge-from-bal','—');set('bridge-to-bal','—');return;}
   const from=CHAINS[bridgeFromIdx],to=CHAINS[bridgeToIdx];
+  const fromSym = (typeof bridgeFromToken !== 'undefined' && bridgeFromToken) || 'USDC';
+  const toSym   = (typeof bridgeToToken   !== 'undefined' && bridgeToToken)   || 'USDC';
   // Use same proxy-first reader as Send Assets / refreshBalance.
   // _arcRpcList returns ['/api/rpc/arc', ...fallbacks] for Arc (chain.rpc = '/api/rpc/arc'),
   // and [chain.rpc] for other chains. _balanceOfWithFallback tries each in order.
-  async function _bridgeReadBal(chain, elId) {
-    const a = chain && chain.tokens?.USDC?.address;
-    if (!a) { set(elId, '—'); return; }
+  async function _bridgeReadBal(chain, sym, elId) {
+    var chainTokens = chain && chain.tokens;
+    var a = chainTokens && chainTokens[sym] && chainTokens[sym].address;
+    // No silent fallback to USDC — if this token has no address on this chain,
+    // show "—" so the UI never displays a balance for the wrong asset.
+    if (!a || a === '0x0000000000000000000000000000000000000000') { set(elId, '—'); return; }
+    var decimals = 6;
+    if (chainTokens && chainTokens[sym] && chainTokens[sym].decimals != null) decimals = chainTokens[sym].decimals;
     try {
       const rpcList = (typeof _arcRpcList === 'function') ? _arcRpcList(chain) : (chain.rpc ? [chain.rpc] : []);
       const b = await _balanceOfWithFallback(a, walletAddress, rpcList, 10000);
-      set(elId, fromUsdc(b));
+      set(elId, (Number(b) / Math.pow(10, decimals)).toFixed(4));
     } catch (_e) { set(elId, '—'); }
   }
   await Promise.all([
-    _bridgeReadBal(from, 'bridge-from-bal'),
-    _bridgeReadBal(to,   'bridge-to-bal'),
+    _bridgeReadBal(from, fromSym, 'bridge-from-bal'),
+    _bridgeReadBal(to,   toSym,   'bridge-to-bal'),
   ]);
 }
 
@@ -24782,7 +25100,7 @@ async function executeBridge(){
     const msg = e.code===4001 ? 'Rejected by user' : (e.shortMessage||e.message||'Unknown error');
     toast('Bridge error: '+msg,'error');
   } finally {
-    btn.disabled=false; btn.innerHTML='<i class="ti ti-topology-star-3"></i> Bridge USDC';
+    btn.disabled=false; btn.innerHTML='<i class="ti ti-topology-star-3"></i> Bridge ' + ((typeof bridgeFromToken !== 'undefined' && bridgeFromToken) || 'USDC');
     _walletOpInProgress = false;
   }
 }
@@ -37859,7 +38177,8 @@ function setBridgeMode(mode) {
     if (timeEl) timeEl.textContent = '10 – 30 seconds (Turbo)';
     if (typeof vaultRefreshUI === 'function') vaultRefreshUI();
   } else {
-    if (btn) btn.innerHTML = '<i class="ti ti-topology-star-3"></i>Bridge USDC';
+    var _bsSym = (typeof bridgeFromToken !== 'undefined' && bridgeFromToken) || 'USDC';
+    if (btn) btn.innerHTML = '<i class="ti ti-topology-star-3"></i>Bridge ' + escHtml(_bsSym);
     updateBridgeEst();
   }
 }
@@ -37898,7 +38217,7 @@ function executeBridgeOrTurbo() {
   const fromChain = CHAINS[bridgeFromIdx];
   const toChain   = CHAINS[bridgeToIdx];
   const amt = parseFloat(document.getElementById('bridge-amount')?.value) || 0;
-  const token = 'USDC';
+  const token = (typeof bridgeFromToken !== 'undefined' && bridgeFromToken) || 'USDC';
 
   // If routes were loaded but none selected yet, require explicit selection.
   if (_bridgeRoutes.length > 0 && !_selectedBridgeRoute) {
@@ -37921,7 +38240,24 @@ function executeBridgeOrTurbo() {
     if (!fromChain || !toChain || fromChain.chainId === toChain.chainId) {
       toast('Cannot bridge to the same network', 'error'); return;
     }
-    // 4. Quote expiry: LI.FI quotes expire ~3 min; CCTP uses real-time Kit.
+    // 4. Token/chain mismatch guard: the selected route must have been fetched
+    //    for the SAME token and chain pair that is currently active.
+    //    (_bridgePickToken and applyBridgeChains both call _brsClearRoutes which
+    //    nulls _selectedBridgeRoute, so this is a belt-and-suspenders check.)
+    var _currentFromSym = token;
+    var _currentToSym   = (typeof bridgeToToken !== 'undefined' && bridgeToToken) || 'USDC';
+    if (
+      route._fetchFromSym && route._fetchFromSym !== _currentFromSym
+      || route._fetchToSym && route._fetchToSym !== _currentToSym
+      || route._fetchFromChainId != null && route._fetchFromChainId !== fromChain.chainId
+      || route._fetchToChainId   != null && route._fetchToChainId   !== toChain.chainId
+    ) {
+      toast('Token or network changed since route was loaded. Refreshing routes…', 'warning');
+      _brsClearRoutes();
+      updateBridgeEst();
+      return;
+    }
+    // 5. Quote expiry: LI.FI quotes expire ~3 min; CCTP uses real-time Kit.
     if (route.provider === 'lifi' && route.quote) {
       var quoteAge = route.quote._fetchedAt ? (Date.now() - route.quote._fetchedAt) : 0;
       if (quoteAge > 160000) { // 160s grace (LI.FI TTL ~3min)
@@ -37931,7 +38267,7 @@ function executeBridgeOrTurbo() {
         return;
       }
     }
-    // 5. Route provider must match expected chain pair.
+    // 6. Route provider must match expected chain pair.
     if (route.provider === 'cctp') {
       executeBridgeViaCCTP();
       return;
@@ -37978,7 +38314,17 @@ async function executeBridgeViaCCTP() {
   const fromChain = CHAINS[bridgeFromIdx];
   const toChain = CHAINS[bridgeToIdx];
   if (!fromChain || !toChain || fromChain.chainId === toChain.chainId) { toast('Cannot bridge to the same network', 'error'); return; }
-  const token = 'USDC';
+  const token = (typeof bridgeFromToken !== 'undefined' && bridgeFromToken) || 'USDC';
+  // Guard: CCTP only supports USDC/EURC on eligible chains. If the selected token
+  // is not eligible for CCTP, fall through to LI.FI.
+  if (
+    typeof BridgeKitRouter !== 'undefined' &&
+    typeof BridgeKitRouter.isEligible === 'function' &&
+    !BridgeKitRouter.isEligible(fromChain.chainId, toChain.chainId, token)
+  ) {
+    executeBridgeViaLiFi();
+    return;
+  }
 
   _walletOpInProgress = true;
   const btn = document.getElementById('bridge-btn');
@@ -37996,10 +38342,10 @@ async function executeBridgeViaCCTP() {
   if (statusEl) { statusEl.textContent = 'Pending'; statusEl.style.color = 'var(--muted2)'; }
 
   const steps = [
-    { name: 'approve',        label: `Approve USDC on ${fromChain.name}`, detail: 'CCTP v2 (Bridge Kit)' },
-    { name: 'burn',           label: `Burn USDC on ${fromChain.name}`,    detail: 'Circle CCTP v2 depositForBurn' },
-    { name: 'attestation',    label: 'Circle attestation',                detail: 'Iris (production)' },
-    { name: 'mint',           label: `Mint USDC on ${toChain.name}`,      detail: 'Circle CCTP v2 mint' },
+    { name: 'approve',        label: `Approve ${token} on ${fromChain.name}`, detail: 'CCTP v2 (Bridge Kit)' },
+    { name: 'burn',           label: `Burn ${token} on ${fromChain.name}`,    detail: 'Circle CCTP v2 depositForBurn' },
+    { name: 'attestation',    label: 'Circle attestation',                    detail: 'Iris (production)' },
+    { name: 'mint',           label: `Mint ${token} on ${toChain.name}`,      detail: 'Circle CCTP v2 mint' },
   ];
   function renderBridgeStep(idx, state, txHash) {
     const s = steps[idx]; if (!s) return;
@@ -38012,7 +38358,8 @@ async function executeBridgeViaCCTP() {
     setSafeHTML(el, `<div class="step-ico ${stateClass}">${stateIcon}</div><div style="flex:1"><div style="font-weight:600">${_safePurify(s.label)}</div><div style="font-size:8.5px;color:var(--muted2)">${txLink}</div></div>`);
   }
   const stepIndex = { approve: 0, burn: 1, fetchAttestation: 2, mint: 3 };
-  function resetBtn() { _walletOpInProgress = false; if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-topology-star-3"></i>Bridge USDC'; } if (typeof _brsShowRoutes === 'function') _brsShowRoutes(); }
+  const _cctpBtnLabel = '<i class="ti ti-topology-star-3"></i>Bridge ' + escHtml(token);
+  function resetBtn() { _walletOpInProgress = false; if (btn) { btn.disabled = false; btn.innerHTML = _cctpBtnLabel; } if (typeof _brsShowRoutes === 'function') _brsShowRoutes(); }
   steps.forEach((_, i) => renderBridgeStep(i, 'pending', null));
 
   if (typeof BridgeEngine !== 'undefined') BridgeEngine.notifyStandardStart({ from: fromChain.id, to: toChain.id, amt: amt, type: 'cctp' });
@@ -38173,10 +38520,16 @@ async function executeBridgeViaLiFi() {
   const toChain   = CHAINS[bridgeToIdx];
   if (!fromChain || !toChain || fromChain.chainId === toChain.chainId) { toast('Cannot bridge to the same network', 'error'); return; }
 
-  const srcToken = getTokenAddressForChain(fromChain.chainId, 'USDC');
-  const dstToken = getTokenAddressForChain(toChain.chainId, 'USDC');
-  if (!srcToken || !dstToken) { toast('USDC not available on this route', 'error'); return; }
-  const amountInRaw = toUsdc(amt);
+  const _lifiFromSym = (typeof bridgeFromToken !== 'undefined' && bridgeFromToken) || 'USDC';
+  const _lifiToSym   = (typeof bridgeToToken   !== 'undefined' && bridgeToToken)   || 'USDC';
+  const srcToken = getTokenAddressForChain(fromChain.chainId, _lifiFromSym) || getTokenAddressForChain(fromChain.chainId, 'USDC');
+  const dstToken = getTokenAddressForChain(toChain.chainId,   _lifiToSym)   || getTokenAddressForChain(toChain.chainId,   'USDC');
+  if (!srcToken || !dstToken) { toast(_lifiFromSym + ' not available on this route', 'error'); return; }
+  // Resolve decimals for the selected source and destination tokens (default 6 for USDC).
+  var _lifiFromMeta = (typeof _bridgeGetTokenMeta === 'function') ? _bridgeGetTokenMeta(fromChain.chainId, _lifiFromSym) : null;
+  var _lifiToMeta   = (typeof _bridgeGetTokenMeta === 'function') ? _bridgeGetTokenMeta(toChain.chainId,   _lifiToSym)   : null;
+  var _lifiFromDec  = _lifiFromMeta ? _lifiFromMeta.decimals : 6;
+  const amountInRaw = BigInt(Math.round((parseFloat(amt) || 0) * Math.pow(10, _lifiFromDec)));
 
   _walletOpInProgress = true;
 
@@ -38196,11 +38549,11 @@ async function executeBridgeViaLiFi() {
   if (statusEl) { statusEl.textContent = 'Pending'; statusEl.style.color = 'var(--muted2)'; }
 
   const steps = [
-    { name: 'route',    label: 'Fetch LI.FI route',                 detail: 'Quote via LI.FI aggregator' },
-    { name: 'approve',  label: `Approve USDC on ${fromChain.name}`, detail: 'ERC-20 approval when required' },
-    { name: 'bridge',   label: 'Sign & broadcast',                  detail: `LI.FI transaction on ${fromChain.name}` },
-    { name: 'source',   label: 'Source confirmed',                  detail: 'Awaiting LI.FI cross-chain settlement' },
-    { name: 'complete', label: 'Bridge completed',                  detail: 'Funds delivered on destination' },
+    { name: 'route',    label: 'Fetch LI.FI route',                           detail: 'Quote via LI.FI aggregator' },
+    { name: 'approve',  label: `Approve ${_lifiFromSym} on ${fromChain.name}`, detail: 'ERC-20 approval when required' },
+    { name: 'bridge',   label: 'Sign & broadcast',                             detail: `LI.FI transaction on ${fromChain.name}` },
+    { name: 'source',   label: 'Source confirmed',                             detail: 'Awaiting LI.FI cross-chain settlement' },
+    { name: 'complete', label: 'Bridge completed',                             detail: 'Funds delivered on destination' },
   ];
 
   function renderBridgeStep(idx, state, txHash) {
@@ -38215,9 +38568,10 @@ async function executeBridgeViaLiFi() {
     setSafeHTML(el, `<div class="step-ico ${stateClass}">${stateIcon}</div><div style="flex:1"><div style="font-weight:600">${_safePurify(s.label)}</div><div style="font-size:8.5px;color:var(--muted2)">${txLink}</div></div>`);
   }
 
+  const _lifiBtnLabel = '<i class="ti ti-topology-star-3"></i>Bridge ' + escHtml(_lifiFromSym);
   function resetBtn() {
     _walletOpInProgress = false;
-    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-topology-star-3"></i>Bridge USDC'; }
+    if (btn) { btn.disabled = false; btn.innerHTML = _lifiBtnLabel; }
     if (typeof _brsShowRoutes === 'function') _brsShowRoutes();
   }
 
@@ -38269,10 +38623,14 @@ async function executeBridgeViaLiFi() {
       _fromSelectedRoute: true,
     };
   } else {
-    // Fallback: no route selected — use getQuote (single best quote)
+    // Fallback: no route selected — use getQuote (single best quote).
+    // Pass token address objects (not just symbols) so _resolveTokenAddr uses
+    // the chain-correct address and never falls back to TOKEN_REGISTRY.
     try {
       quote = await LiFiAdapter.getQuote({
-        tokenIn: 'USDC', tokenOut: 'USDC', amountInRaw,
+        tokenIn:  { address: srcToken, symbol: _lifiFromSym, decimals: _lifiFromMeta ? _lifiFromMeta.decimals : 6 },
+        tokenOut: { address: dstToken, symbol: _lifiToSym,   decimals: _lifiToMeta ? _lifiToMeta.decimals : 6 },
+        amountInRaw,
         slippageBps: (typeof SlippageConfig !== 'undefined' && SlippageConfig.DEFAULT_BPS) || 100,
         fromChainId: fromChain.chainId, toChainId: toChain.chainId,
         fromAddress: walletAddress, toAddress: walletAddress,
@@ -38289,7 +38647,7 @@ async function executeBridgeViaLiFi() {
   }
 
   // Validate route (uses the step's transactionRequest)
-  const _routeForValidation = quote._fromSelectedRoute ? quote.route : quote.route;
+  const _routeForValidation = quote.route;
   const vres = LiFiAdapter.validateRoute(_routeForValidation, {
     fromChainId: fromChain.chainId, toChainId: toChain.chainId,
     fromToken: srcToken, toToken: dstToken,
@@ -59225,6 +59583,15 @@ if(document.readyState === 'loading'){
 window.RCP = RCP;
 })();
 </script>
+
+<!-- ── Bridge Multi-Token Picker Modal ─────────────────────────────────── -->
+<div id="bridge-token-picker">
+  <div class="btp-backdrop" onclick="_bridgeClosePicker()"></div>
+  <div class="btp-modal">
+    <div class="btp-title" id="btp-title">Select Token</div>
+    <div id="btp-list"></div>
+  </div>
+</div>
 
 </body>
 </html>

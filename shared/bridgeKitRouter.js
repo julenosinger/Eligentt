@@ -36,8 +36,19 @@
     '5042':  { kitId: 'Arc',     domain: 26, usdc: '0x3600000000000000000000000000000000000000', name: 'Arc Mainnet' },
   };
 
-  // Tokens eligible for CCTP v2 (USDC always; EURC as a Circle-issued expanded asset).
+  // Tokens eligible for CCTP v2.
+  // USDC is available on every CCTP chain in the CHAINS map.
+  // EURC is Circle-issued but deployed only on a SUBSET of CCTP chains.
+  // Only add a chain ID here when Circle's CCTP v2 actually supports EURC on it
+  // AND the token has a verified on-chain address (cross-referenced with CHAIN_REGISTRY).
   var CCTP_TOKENS = { USDC: true, EURC: true };
+
+  // Chains where EURC has a confirmed on-chain address AND CCTP v2 support.
+  // Source: Circle EURC deployment docs + CHAIN_REGISTRY entries.
+  // Arc (5042) and Base (8453) are the only two chains with verified EURC addresses.
+  // Do NOT add Ethereum (1), Arbitrum (42161), Optimism (10), or Polygon (137) here
+  // until Circle officially deploys EURC on those chains with CCTP v2 support.
+  var EURC_CCTP_CHAINS = { '5042': true, '8453': true };
 
   function chainEntry(chainId) { return CHAINS[String(chainId)] || null; }
 
@@ -45,6 +56,11 @@
 
   function isCCTPToken(token) {
     return !!token && !!CCTP_TOKENS[String(token).toUpperCase()];
+  }
+
+  /** True when EURC has a verified on-chain address and CCTP v2 support on this chain. */
+  function isEurcCctpChain(chainId) {
+    return !!EURC_CCTP_CHAINS[String(chainId)];
   }
 
   /** Canonical Kit `chain` string for a numeric chain id, or null. */
@@ -59,11 +75,21 @@
     return e ? e.domain : null;
   }
 
-  /** True when this (token, chain pair) is eligible for CCTP v2. */
+  /**
+   * True when this (token, chain pair) is eligible for CCTP v2.
+   *
+   * USDC: eligible on any two distinct CCTP chains.
+   * EURC: eligible ONLY when BOTH chains are in EURC_CCTP_CHAINS (i.e., have a
+   *       verified EURC address AND CCTP v2 support for that asset).
+   */
   function isEligible(fromChainId, toChainId, token) {
     if (!isCCTPToken(token)) return false;
     if (!isCCTPChain(fromChainId) || !isCCTPChain(toChainId)) return false;
     if (String(fromChainId) === String(toChainId)) return false; // same-chain = local, not CCTP
+    // EURC requires verified per-chain address — only a subset of CCTP chains support it.
+    if (String(token).toUpperCase() === 'EURC') {
+      if (!isEurcCctpChain(fromChainId) || !isEurcCctpChain(toChainId)) return false;
+    }
     return true;
   }
 
@@ -242,8 +268,10 @@
   window.BridgeKitRouter = {
     CHAINS: CHAINS,
     CCTP_TOKENS: CCTP_TOKENS,
+    EURC_CCTP_CHAINS: EURC_CCTP_CHAINS,
     isCCTPChain: isCCTPChain,
     isCCTPToken: isCCTPToken,
+    isEurcCctpChain: isEurcCctpChain,
     getKitChainId: getKitChainId,
     getDomain: getDomain,
     isEligible: isEligible,

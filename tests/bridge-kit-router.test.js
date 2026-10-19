@@ -32,8 +32,22 @@ describe('BridgeKitRouter — routing decision matrix', () => {
     expect(R.route(OPT, POLY, 'USDC').provider).toBe('cctp');
   });
 
-  it('EURC between two CCTP chains → CCTP (primary)', () => {
-    expect(R.route(ARC, ETH, 'EURC').provider).toBe('cctp');
+  it('EURC between Arc and Base → CCTP (both are in EURC_CCTP_CHAINS)', () => {
+    // Only Arc (5042) and Base (8453) have verified EURC addresses + CCTP v2 support.
+    expect(R.route(ARC, BASE, 'EURC').provider).toBe('cctp');
+    expect(R.route(BASE, ARC, 'EURC').provider).toBe('cctp');
+  });
+
+  it('EURC between Arc and Ethereum → LI.FI (Ethereum has no EURC address)', () => {
+    // Ethereum does not have a verified EURC deployment — must not use CCTP.
+    expect(R.route(ARC, ETH, 'EURC').provider).toBe('lifi');
+    expect(R.route(ETH, ARC, 'EURC').provider).toBe('lifi');
+  });
+
+  it('EURC between Arc and Arbitrum/Optimism/Polygon → LI.FI', () => {
+    expect(R.route(ARC, ARB,  'EURC').provider).toBe('lifi');
+    expect(R.route(ARC, OPT,  'EURC').provider).toBe('lifi');
+    expect(R.route(ARC, POLY, 'EURC').provider).toBe('lifi');
   });
 
   it('non-USDC/EURC token → LI.FI (fallback)', () => {
