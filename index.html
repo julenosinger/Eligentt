@@ -2590,6 +2590,49 @@ body.swap-standard-mode .site-footer{display:block !important}
 .chain-row{background:rgba(0,0,0,.2);border:1px solid var(--border);border-radius:7px;padding:10px 14px;display:flex;align-items:center;gap:10px}
 .chain-sel{display:flex;align-items:center;gap:6px;background:var(--card2);border:1px solid var(--border2);border-radius:6px;padding:6px 10px;cursor:pointer;font-size:11px;font-weight:600;transition:all .15s;user-select:none}
 .chain-sel:hover{border-color:var(--blue)}
+/* ── Bridge premium chain selector ────────────────────────────────────── */
+.brg-chain-sel { gap: 7px; min-width: 0; }
+.brg-chain-logo-wrap { display: flex; align-items: center; flex-shrink: 0; }
+.brg-chain-logo-wrap img,
+.brg-chain-logo-wrap svg { border-radius: 5px; }
+/* ── Bridge Network Picker modal ───────────────────────────────────────── */
+/* Reuses .ns-overlay/.ns-box/.ns-chain-row CSS; overrides for Bridge context */
+.brg-np-overlay { z-index: 10010 }   /* above token picker (9999) */
+.brg-np-box {
+  width: 420px; max-width: 95vw;
+  max-height: 80vh;
+  display: flex; flex-direction: column;
+}
+.brg-np-head {
+  display: flex; align-items: center; gap: 10px;
+  padding: 20px 20px 12px; padding-right: 44px;
+  border-bottom: 1px solid #1e2436;
+  flex-shrink: 0;
+}
+.brg-np-icon {
+  width: 34px; height: 34px; border-radius: 9px;
+  background: rgba(6,247,233,.1); border: 1px solid rgba(6,247,233,.2);
+  display: flex; align-items: center; justify-content: center; font-size: 15px;
+  flex-shrink: 0;
+}
+.brg-np-title { font-size: 14px; font-weight: 700; color: #dde2f0; }
+.brg-np-sub   { font-size: 9px; color: #606880; margin-top: 2px; }
+.brg-np-list  { flex: 1; overflow-y: auto; padding: 0 10px 12px; }
+.brg-np-row   { cursor: pointer; }
+.brg-np-disabled { opacity: .45; cursor: not-allowed; pointer-events: none; }
+.brg-np-logo  { width: 32px !important; height: 32px !important; border-radius: 8px !important; }
+.brg-np-logo img, .brg-np-logo svg { width: 26px !important; height: 26px !important; border-radius: 5px; }
+.brg-np-in-use {
+  font-size: 8px; font-weight: 700; padding: 2px 7px; border-radius: 999px;
+  background: rgba(148,163,184,.1); border: 1px solid rgba(148,163,184,.2);
+  color: #606880; white-space: nowrap;
+}
+.brg-np-empty {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 8px; padding: 28px 0; color: #606880; font-size: 11px;
+}
+.brg-np-empty i { font-size: 26px; opacity: .4; }
+@media (max-width: 480px) { .brg-np-box { width: 100vw; max-width: 100vw; border-radius: 18px 18px 0 0; } }
 .chain-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
 .rate-box{background:rgba(0,0,0,.15);border:1px solid var(--border);border-radius:6px;padding:9px 12px;font-size:10px;margin-top:8px}
 .rate-row{display:flex;justify-content:space-between;padding:2px 0;color:var(--muted2)}
@@ -7338,8 +7381,8 @@ select.cinput option { background: #161a24; color: #dde2f0; }
           <div class="swap-card">
             <div class="swap-label">From Chain</div>
             <div class="chain-row" style="margin-bottom:8px">
-              <div class="chain-sel" onclick="cycleFromChain()" id="from-chain-sel">
-                <div class="chain-dot" id="from-chain-dot" style="background:#627eea"></div>
+              <div class="chain-sel brg-chain-sel" onclick="brgOpenNetPicker('from')" id="from-chain-sel" title="Select source network">
+                <div class="brg-chain-logo-wrap" id="from-chain-logo"><div class="chain-dot" id="from-chain-dot" style="background:#627eea"></div></div>
                 <span id="from-chain-name">Ethereum</span>
                 <i class="ti ti-chevron-down" style="font-size:10px;color:var(--muted2)"></i>
               </div>
@@ -7359,8 +7402,8 @@ select.cinput option { background: #161a24; color: #dde2f0; }
 
             <div class="swap-label">To Chain</div>
             <div class="chain-row">
-              <div class="chain-sel" onclick="cycleToChain()" id="to-chain-sel">
-                <div class="chain-dot" id="to-chain-dot" style="background:#ff0202"></div>
+              <div class="chain-sel brg-chain-sel" onclick="brgOpenNetPicker('to')" id="to-chain-sel" title="Select destination network">
+                <div class="brg-chain-logo-wrap" id="to-chain-logo"><div class="chain-dot" id="to-chain-dot" style="background:#ff0202"></div></div>
                 <span id="to-chain-name">Arc</span>
                 <i class="ti ti-chevron-down" style="font-size:10px;color:var(--muted2)"></i>
               </div>
@@ -24344,12 +24387,156 @@ function applyBridgeChains(){
   document.getElementById('from-chain-name').textContent=from.name;
   document.getElementById('to-chain-dot').style.background=to.color;
   document.getElementById('to-chain-name').textContent=to.name;
+  // Update premium logos in selectors (uses shared _nsChainLogo when available).
+  _brgApplyChainLogo('from-chain-logo', from);
+  _brgApplyChainLogo('to-chain-logo', to);
   // Reset tokens to USDC when switching chains (safe fallback).
   // _bridgeUpdateTokenSelectors will fall back to USDC if the current token
   // is not available on the new chain.
   _bridgeUpdateTokenSelectors();
   refreshBridgeBalances();
 }
+// ── Bridge Premium Network Picker ────────────────────────────────────────
+// Scoped entirely to the Bridge tab. Reuses .ns-* CSS and _nsChainLogo()
+// from the global network selector. No side-effects on other tabs.
+var _brgPickerSide = null; // 'from' | 'to'
+
+/** Apply a premium logo (SVG/img) to a chain-selector logo wrapper. */
+function _brgApplyChainLogo(wrapperId, chain) {
+  var el = document.getElementById(wrapperId);
+  if (!el) return;
+  if (typeof _nsChainLogo === 'function') {
+    el.innerHTML = _nsChainLogo(chain);
+    // Resize the img/svg to 22×22 to fit the compact selector.
+    var img = el.querySelector('img,svg');
+    if (img) { img.style.width = '22px'; img.style.height = '22px'; img.style.borderRadius = '5px'; }
+  } else {
+    // Fallback: colored dot (original behavior).
+    el.innerHTML = '<div class="chain-dot" id="' + wrapperId.replace('-logo', '-dot') + '" style="background:' + chain.color + '"></div>';
+  }
+}
+
+/** Open the Bridge network picker for 'from' or 'to'. */
+function brgOpenNetPicker(side) {
+  _brgPickerSide = side;
+  var old = document.getElementById('brg-net-picker');
+  if (old) old.remove();
+
+  var oppositeIdx = side === 'from' ? bridgeToIdx : bridgeFromIdx;
+  var currentIdx  = side === 'from' ? bridgeFromIdx : bridgeToIdx;
+
+  // Build list HTML — reuse _nsChainLogo for real logos.
+  function rowHtml(chain, idx) {
+    var isSelected  = idx === currentIdx;
+    var isOpposite  = idx === oppositeIdx;
+    var disabledAttr = isOpposite ? 'data-disabled="1"' : '';
+    var rowClass = 'ns-chain-row brg-np-row'
+      + (isSelected  ? ' ns-row-active'    : '')
+      + (isOpposite  ? ' brg-np-disabled'  : '');
+    var logo = (typeof _nsChainLogo === 'function') ? _nsChainLogo(chain) : '<div class="chain-dot" style="background:' + chain.color + '"></div>';
+    var rightBadge = isSelected
+      ? '<span class="ns-badge-connected" style="border-color:' + chain.color + '55;color:' + chain.color + '"><span class="ns-dot" style="background:' + chain.color + '"></span>Selected</span>'
+      : (isOpposite
+          ? '<span class="brg-np-in-use">In use</span>'
+          : '<i class="ti ti-chevron-right" style="color:#606880;font-size:12px"></i>');
+    return '<div class="' + rowClass + '" ' + disabledAttr + ' data-idx="' + idx + '" onclick="brgPickNet(' + idx + ')">'
+      + '<div class="ns-row-logo brg-np-logo">' + logo + '</div>'
+      + '<div class="ns-row-info">'
+      +   '<div class="ns-row-name">' + chain.name + '</div>'
+      +   '<div class="ns-row-sub">' + (chain.shortName || chain.id) + ' · Chain ID ' + chain.chainId + '</div>'
+      + '</div>'
+      + '<div class="ns-row-right">' + rightBadge + '</div>'
+      + '</div>';
+  }
+
+  var listHtml = CHAINS.map(function(chain, idx) { return rowHtml(chain, idx); }).join('');
+
+  var title = side === 'from' ? 'Select Source Network' : 'Select Destination Network';
+
+  var modal = document.createElement('div');
+  modal.id = 'brg-net-picker';
+  modal.className = 'ns-overlay brg-np-overlay';
+  modal.setAttribute('role', 'dialog');
+  modal.setAttribute('aria-label', title);
+  modal.innerHTML = ''
+    + '<div class="ns-box brg-np-box" onclick="event.stopPropagation()">'
+    +   '<button class="ns-close" onclick="brgCloseNetPicker()" aria-label="Close"><i class="ti ti-x"></i></button>'
+    +   '<div class="brg-np-head">'
+    +     '<div class="brg-np-icon"><i class="ti ti-topology-star-3" style="color:var(--teal)"></i></div>'
+    +     '<div>'
+    +       '<div class="brg-np-title">' + title + '</div>'
+    +       '<div class="brg-np-sub">Bridge · ' + CHAINS.length + ' networks available</div>'
+    +     '</div>'
+    +   '</div>'
+    +   '<div class="ns-search-wrap" style="margin:0 16px 8px">'
+    +     '<i class="ti ti-search ns-search-ico"></i>'
+    +     '<input id="brg-np-search" class="ns-search" type="text" placeholder="Search network…" autocomplete="off" oninput="_brgNpFilter(this.value)"/>'
+    +   '</div>'
+    +   '<div class="ns-section-lbl">SUPPORTED NETWORKS</div>'
+    +   '<div class="ns-list brg-np-list" id="brg-np-list">' + listHtml + '</div>'
+    +   '<div class="brg-np-empty" id="brg-np-empty" style="display:none"><i class="ti ti-topology-star-3"></i><span>No networks found</span></div>'
+    + '</div>';
+
+  // Close on backdrop click.
+  modal.addEventListener('click', function(e) { if (e.target === modal) brgCloseNetPicker(); });
+
+  // Escape key.
+  modal._brgEscHandler = function(e) { if (e.key === 'Escape') brgCloseNetPicker(); };
+  document.addEventListener('keydown', modal._brgEscHandler);
+
+  document.body.appendChild(modal);
+  // Focus search
+  setTimeout(function() { var s = document.getElementById('brg-np-search'); if (s) s.focus(); }, 80);
+}
+
+/** Select a network from the picker. */
+function brgPickNet(idx) {
+  var chain = CHAINS[idx];
+  if (!chain) return;
+  // Prevent selecting the chain already on the opposite side.
+  var oppositeIdx = _brgPickerSide === 'from' ? bridgeToIdx : bridgeFromIdx;
+  if (idx === oppositeIdx) {
+    // Offer to swap instead.
+    brgCloseNetPicker();
+    swapBridgeChains();
+    toast('Chains swapped: ' + chain.name + ' ↔ ' + CHAINS[_brgPickerSide === 'from' ? bridgeFromIdx : bridgeToIdx].name, 'info');
+    return;
+  }
+  if (_brgPickerSide === 'from') bridgeFromIdx = idx;
+  else                           bridgeToIdx   = idx;
+  brgCloseNetPicker();
+  applyBridgeChains();
+  updateBridgeEst();
+}
+
+/** Close the Bridge network picker and clean up. */
+function brgCloseNetPicker() {
+  var modal = document.getElementById('brg-net-picker');
+  if (modal) {
+    if (modal._brgEscHandler) document.removeEventListener('keydown', modal._brgEscHandler);
+    modal.remove();
+  }
+  _brgPickerSide = null;
+}
+
+/** Search/filter inside the Bridge network picker. */
+function _brgNpFilter(q) {
+  var query = (q || '').toLowerCase().trim();
+  var list  = document.getElementById('brg-np-list');
+  var empty = document.getElementById('brg-np-empty');
+  if (!list) return;
+  var rows = list.querySelectorAll('.brg-np-row');
+  var visible = 0;
+  rows.forEach(function(row) {
+    var name = (row.querySelector('.ns-row-name')  ? row.querySelector('.ns-row-name').textContent  : '').toLowerCase();
+    var sub  = (row.querySelector('.ns-row-sub')   ? row.querySelector('.ns-row-sub').textContent   : '').toLowerCase();
+    var show = !query || name.indexOf(query) >= 0 || sub.indexOf(query) >= 0;
+    row.style.display = show ? '' : 'none';
+    if (show) visible++;
+  });
+  if (empty) empty.style.display = visible === 0 ? 'flex' : 'none';
+}
+
 // ── LI.FI quote state (debounce + stale-response protection) ────────────
 // LI.FI is the ONLY bridge quote source for /bridge. Quotes are fetched from
 // the real LI.FI API via the server-side proxy; no hardcoded fee/rate/output.
@@ -38604,11 +38791,15 @@ function executeBridgeOrTurbo() {
   // ── Fallback: no routes loaded — use original routing logic. ─────────────
   let forceLiFi = false;
   try { forceLiFi = !!window.__bridgeForceLiFi; } catch (_e) {}
+  // Use isEligible (not the legacy .route()) for the fallback routing decision.
+  // .route() only checks isCCTPToken + isCCTPChain; .isEligible() also validates
+  // EURC per-chain address (EURC_CCTP_CHAINS), preventing Arc→Ethereum EURC via CCTP.
   if (
     !forceLiFi &&
     fromChain && toChain &&
     typeof BridgeKitRouter !== 'undefined' &&
-    BridgeKitRouter.route(fromChain.chainId, toChain.chainId, token).provider === 'cctp'
+    typeof BridgeKitRouter.isEligible === 'function' &&
+    BridgeKitRouter.isEligible(fromChain.chainId, toChain.chainId, token)
   ) {
     executeBridgeViaCCTP();
     return;
@@ -38798,7 +38989,7 @@ async function executeBridgeViaCCTP() {
     if (statusEl) { statusEl.textContent = 'Completed'; statusEl.style.color = 'var(--green)'; }
     addToHistory('bridge-history', {
       icon: 'ti-topology-star-3', color: 'var(--teal)',
-      label: `${amt} USDC: ${fromChain.name} → ${toChain.name}`,
+      label: `${amt} ${token}: ${fromChain.name} → ${toChain.name}`,
       sub: `CCTP v2 · ${new Date().toLocaleTimeString('en-US', {hour:'numeric', minute:'2-digit', hour12:true})}`,
       txHash: mintTxHash || txHash, dotColor: '#2dd4bf', explorer: toChain.explorer,
     });
@@ -38811,7 +39002,7 @@ async function executeBridgeViaCCTP() {
     if (statusEl) { statusEl.textContent = 'Failed'; statusEl.style.color = 'var(--red)'; }
     addToHistory('bridge-history', {
       icon: 'ti-topology-star-3', color: 'var(--red)',
-      label: `${amt} USDC: ${fromChain.name} → ${toChain.name}`,
+      label: `${amt} ${token}: ${fromChain.name} → ${toChain.name}`,
       sub: `CCTP v2 · failed` + (errReason ? ` · ${errReason}` : ''),
       txHash: txHash, dotColor: '#ef4444', explorer: fromChain.explorer,
     });
@@ -38844,9 +39035,14 @@ async function executeBridgeViaLiFi() {
 
   const _lifiFromSym = (typeof bridgeFromToken !== 'undefined' && bridgeFromToken) || 'USDC';
   const _lifiToSym   = (typeof bridgeToToken   !== 'undefined' && bridgeToToken)   || 'USDC';
-  const srcToken = getTokenAddressForChain(fromChain.chainId, _lifiFromSym) || getTokenAddressForChain(fromChain.chainId, 'USDC');
-  const dstToken = getTokenAddressForChain(toChain.chainId,   _lifiToSym)   || getTokenAddressForChain(toChain.chainId,   'USDC');
-  if (!srcToken || !dstToken) { toast(_lifiFromSym + ' not available on this route', 'error'); return; }
+  // No fallback to USDC — if the selected token has no address on this chain,
+  // block execution with a clear message.  The USDC fallback silently substituted
+  // a different asset, making the approval and calldata inconsistent with the
+  // displayed token.
+  const srcToken = getTokenAddressForChain(fromChain.chainId, _lifiFromSym);
+  const dstToken = getTokenAddressForChain(toChain.chainId,   _lifiToSym);
+  if (!srcToken) { toast(_lifiFromSym + ' is not available on ' + fromChain.name + '. Select a supported token.', 'error'); return; }
+  if (!dstToken) { toast(_lifiToSym   + ' is not available on ' + toChain.name   + '. Select a supported token.', 'error'); return; }
   // Resolve decimals for the selected source and destination tokens (default 6 for USDC).
   var _lifiFromMeta = (typeof _bridgeGetTokenMeta === 'function') ? _bridgeGetTokenMeta(fromChain.chainId, _lifiFromSym) : null;
   var _lifiToMeta   = (typeof _bridgeGetTokenMeta === 'function') ? _bridgeGetTokenMeta(toChain.chainId,   _lifiToSym)   : null;
@@ -39047,7 +39243,7 @@ async function executeBridgeViaLiFi() {
 
       addToHistory('bridge-history', {
         icon: 'ti-topology-star-3', color: 'var(--teal)',
-        label: `${amt} USDC: ${fromChain.name} → ${toChain.name}`,
+        label: `${amt} ${_lifiFromSym}: ${fromChain.name} → ${toChain.name}`,
         sub: `${toolName} · ${new Date().toLocaleTimeString('en-US', {hour:'numeric', minute:'2-digit', hour12:true})}`,
         txHash: destTxHash || tx.hash, dotColor: '#2dd4bf', explorer: toChain.explorer,
       });
@@ -39062,7 +39258,7 @@ async function executeBridgeViaLiFi() {
       if (statusEl) { statusEl.textContent = 'Failed'; statusEl.style.color = 'var(--red)'; }
       addToHistory('bridge-history', {
         icon: 'ti-topology-star-3', color: 'var(--red)',
-        label: `${amt} USDC: ${fromChain.name} → ${toChain.name}`,
+        label: `${amt} ${_lifiFromSym}: ${fromChain.name} → ${toChain.name}`,
         sub: `${toolName} · LI.FI status: FAILED`,
         txHash: tx.hash, dotColor: '#ef4444', explorer: fromChain.explorer,
       });
@@ -39076,7 +39272,7 @@ async function executeBridgeViaLiFi() {
       _savePendingBridge({ fromChainId: fromChain.chainId, toChainId: toChain.chainId, tool: quote.tool || null, sourceTxHash: tx.hash, amount: amt, ts: Date.now() });
       addToHistory('bridge-history', {
         icon: 'ti-topology-star-3', color: 'var(--yellow)',
-        label: `${amt} USDC: ${fromChain.name} → ${toChain.name}`,
+        label: `${amt} ${_lifiFromSym}: ${fromChain.name} → ${toChain.name}`,
         sub: `${toolName} · Source confirmed · settling…`,
         txHash: tx.hash, dotColor: '#f59e0b', explorer: fromChain.explorer,
       });

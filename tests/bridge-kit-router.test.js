@@ -146,9 +146,10 @@ describe('Bridge Kit vendor bundle — CCTP contracts (Mainnet)', () => {
 describe('Routing wiring in index.html (CCTP primary / LI.FI fallback)', () => {
   const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 
-  it('bridge dispatches through BridgeKitRouter (CCTP first)', () => {
+  it('bridge dispatches through BridgeKitRouter (CCTP first via isEligible)', () => {
     const fn = html.slice(html.indexOf('function executeBridgeOrTurbo'), html.indexOf('async function executeBridgeViaCCTP'));
-    expect(fn).toContain('BridgeKitRouter.route');
+    // Fallback path now uses isEligible (not .route()) for correct EURC per-chain check.
+    expect(fn).toContain('BridgeKitRouter.isEligible(');
     expect(fn).toContain('executeBridgeViaCCTP()');
     expect(fn).toContain('executeBridgeViaLiFi()');
   });

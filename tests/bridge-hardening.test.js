@@ -409,7 +409,10 @@ describe('executeBridgeViaLiFi: correct token address resolved per chain', () =>
   });
 
   it('blocks execution when srcToken or dstToken is not found', () => {
-    expect(fn).toContain('not available on this route');
+    // Fix D1: message now distinguishes source vs destination chain.
+    // Old single guard "not available on this route" replaced by two per-chain guards.
+    expect(fn).toContain('is not available on ');
+    expect(fn).toContain('Select a supported token');
   });
 });
 
