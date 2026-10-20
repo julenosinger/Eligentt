@@ -1775,6 +1775,95 @@ body.swap-standard-mode .site-footer{display:block !important}
   .swp-hist-panel { width: 100vw; }
 }
 
+/* ── Bridge History Button & Slide-in Panel ────────────────────────── */
+.brg-hist-btn {
+  display: flex; align-items: center; gap: 5px;
+  background: rgba(45,212,191,.08);
+  border: 1px solid rgba(45,212,191,.18);
+  border-radius: 7px;
+  color: var(--teal);
+  font-size: 9.5px; font-weight: 600;
+  padding: 5px 10px;
+  cursor: pointer;
+  transition: background .15s, border-color .15s;
+  white-space: nowrap;
+}
+.brg-hist-btn:hover { background: rgba(45,212,191,.15); border-color: rgba(45,212,191,.35); }
+.brg-hist-btn i { font-size: 12px; }
+@media (max-width: 480px) { .brg-hist-btn-label { display: none; } }
+.brg-hist-overlay {
+  position: fixed; inset: 0; z-index: 2400;
+  background: rgba(0,0,0,.55);
+  display: flex; justify-content: flex-end;
+  opacity: 0; pointer-events: none;
+  transition: opacity .22s ease;
+}
+.brg-hist-overlay.open { opacity: 1; pointer-events: all; }
+.brg-hist-panel {
+  width: 440px; max-width: 96vw;
+  background: #0d1017;
+  border-left: 1px solid var(--border);
+  display: flex; flex-direction: column;
+  transform: translateX(100%);
+  transition: transform .22s ease;
+  height: 100%; overflow: hidden;
+}
+.brg-hist-overlay.open .brg-hist-panel { transform: translateX(0); }
+.brg-hist-panel-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 16px 18px 14px;
+  border-bottom: 1px solid var(--border2);
+  flex-shrink: 0;
+}
+.brg-hist-panel-title { font-size: 13px; font-weight: 700; color: var(--text); }
+.brg-hist-filters { display: flex; gap: 4px; }
+.brg-hist-filter {
+  background: transparent; border: 1px solid var(--border2);
+  border-radius: 5px; color: var(--muted2);
+  font-size: 8.5px; font-weight: 600;
+  padding: 3px 8px; cursor: pointer;
+  transition: background .12s, color .12s, border-color .12s;
+}
+.brg-hist-filter.active,
+.brg-hist-filter:hover { background: rgba(45,212,191,.1); color: var(--teal); border-color: rgba(45,212,191,.25); }
+.brg-hist-refresh-btn,
+.brg-hist-close-btn {
+  background: transparent; border: 1px solid var(--border2);
+  border-radius: 6px; color: var(--muted2);
+  width: 26px; height: 26px;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; font-size: 12px;
+  transition: background .12s, color .12s;
+}
+.brg-hist-refresh-btn:hover,
+.brg-hist-close-btn:hover { background: rgba(255,255,255,.06); color: var(--text); }
+.brg-hist-source-note {
+  font-size: 8px; color: var(--muted2);
+  padding: 8px 18px; border-bottom: 1px solid var(--border2);
+  background: rgba(255,255,255,.02); flex-shrink: 0; line-height: 1.5;
+}
+.brg-hist-body { flex: 1; overflow-y: auto; padding: 12px 14px; }
+.brg-hist-loading {
+  display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 10px;
+  color: var(--muted2); font-size: 11px; padding: 40px 0;
+}
+.brg-hist-list { display: flex; flex-direction: column; gap: 6px; }
+.brg-hist-entry {
+  display: flex; align-items: center; gap: 10px;
+  background: rgba(255,255,255,.025); border: 1px solid var(--border2);
+  border-radius: 9px; padding: 10px 12px; font-size: 10px;
+  transition: border-color .14s; cursor: default;
+}
+.brg-hist-entry:hover { border-color: rgba(45,212,191,.2); }
+.brg-hist-empty {
+  display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 10px;
+  color: var(--muted2); font-size: 11px; padding: 48px 0;
+}
+.brg-hist-empty i { font-size: 28px; opacity: .4; }
+@media (max-width: 540px) { .brg-hist-panel { width: 100vw; } }
+
 /* AI Optimizer */
 .swa-ai-route {
   display: flex;
@@ -7367,8 +7456,8 @@ select.cinput option { background: #161a24; color: #dde2f0; }
           <div class="page-sub" id="bridge-page-sub">Cross-chain bridge · LI.FI · Arc Mainnet</div>
         </div>
         <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+          <button class="brg-hist-btn" id="brg-hist-btn" onclick="brgOpenHistory()" title="View bridge history"><i class="ti ti-history"></i><span class="brg-hist-btn-label">History</span></button>
           <div class="kit-badge" style="background:rgba(45,212,191,.1);border-color:rgba(45,212,191,.25);color:var(--teal)"><i class="ti ti-world" style="font-size:9px"></i>LI.FI</div>
-          <a href="https://docs.li.fi" target="_blank" class="btn teal" style="font-size:9px"><i class="ti ti-book"></i>Docs</a>
         </div>
       </div>
       <div class="page-content">
@@ -7464,15 +7553,44 @@ select.cinput option { background: #161a24; color: #dde2f0; }
 
         </div>
 
-        <!-- Info column -->
-        <div class="info-col">
-          <div class="info-card">
-            <div class="info-title"><i class="ti ti-history" style="color:var(--muted2)"></i>Bridge History</div>
-            <div class="tx-log" id="bridge-history"><div style="font-size:9px;color:var(--muted2);text-align:center;padding:8px">No bridges yet</div></div>
+        <!-- bridge-history container kept hidden for addToHistory() compatibility -->
+        <div id="bridge-history" style="display:none"></div>
+      </div>
+    </div>
+
+    <!-- ══ BRIDGE HISTORY PANEL ════════════════════════════════════════════ -->
+    <div class="brg-hist-overlay" id="brg-hist-overlay" onclick="brgHistOverlayClick(event)">
+      <div class="brg-hist-panel" id="brg-hist-panel">
+        <div class="brg-hist-panel-head">
+          <div style="display:flex;align-items:center;gap:8px">
+            <i class="ti ti-history" style="font-size:14px;color:var(--teal)"></i>
+            <span class="brg-hist-panel-title">Bridge History</span>
           </div>
+          <div style="display:flex;align-items:center;gap:8px;margin-left:auto">
+            <div class="brg-hist-filters" id="brg-hist-filters">
+              <button class="brg-hist-filter active" data-filter="all"     onclick="brgHistFilter('all',this)">All</button>
+              <button class="brg-hist-filter"         data-filter="done"    onclick="brgHistFilter('done',this)">Done</button>
+              <button class="brg-hist-filter"         data-filter="pending" onclick="brgHistFilter('pending',this)">Pending</button>
+            </div>
+            <button class="brg-hist-refresh-btn" id="brg-hist-refresh-btn" onclick="brgHistRefresh()" title="Refresh history">
+              <i class="ti ti-refresh" id="brg-hist-refresh-icon"></i>
+            </button>
+            <button class="brg-hist-close-btn" onclick="brgCloseHistory()" title="Close"><i class="ti ti-x"></i></button>
+          </div>
+        </div>
+        <div class="brg-hist-source-note">
+          Bridge transactions (CCTP &amp; LI.FI) executed from this session. On-chain confirmation required for finality.
+        </div>
+        <div class="brg-hist-body" id="brg-hist-body">
+          <div class="brg-hist-loading" id="brg-hist-loading" style="display:none">
+            <i class="ti ti-loader-2" style="animation:spin .8s linear infinite;font-size:18px;color:var(--teal)"></i>
+            <span>Loading history…</span>
+          </div>
+          <div class="brg-hist-list" id="brg-hist-list"></div>
         </div>
       </div>
     </div>
+    <!-- ══ END BRIDGE HISTORY PANEL ════════════════════════════════════════ -->
 
 
     <!-- ══════════════════════════════════════════════════════════
@@ -18092,6 +18210,169 @@ async function executeMint(intentId){
     if(mintBtn && !mintBtn.disabledByUser){ mintBtn.disabled = false; mintBtn.textContent = 'Execute Mint'; }
   }
 }
+
+// ── Bridge History Panel (slide-in, mirrors Swap History) ────────────
+var _brgHistFilter = 'all';
+var _brgHistBusy   = false;
+
+function brgOpenHistory() {
+  var overlay = document.getElementById('brg-hist-overlay');
+  if (!overlay) return;
+  overlay.classList.add('open');
+  document.addEventListener('keydown', _brgHistKeyDown);
+  brgHistRender();
+}
+
+function brgCloseHistory() {
+  var overlay = document.getElementById('brg-hist-overlay');
+  if (overlay) overlay.classList.remove('open');
+  document.removeEventListener('keydown', _brgHistKeyDown);
+}
+
+function brgHistOverlayClick(e) {
+  var panel = document.getElementById('brg-hist-panel');
+  if (panel && !panel.contains(e.target)) brgCloseHistory();
+}
+
+function _brgHistKeyDown(e) {
+  if (e.key === 'Escape') brgCloseHistory();
+}
+
+function brgHistFilter(filter, btn) {
+  _brgHistFilter = filter;
+  document.querySelectorAll('.brg-hist-filter').forEach(function(b) {
+    b.classList.toggle('active', b.dataset.filter === filter);
+  });
+  brgHistRender();
+}
+
+function brgHistRefresh() {
+  if (_brgHistBusy) return;
+  _brgHistBusy = true;
+  var btn  = document.getElementById('brg-hist-refresh-btn');
+  var icon = document.getElementById('brg-hist-refresh-icon');
+  if (btn)  btn.disabled = true;
+  if (icon) icon.style.animation = 'spin .6s linear infinite';
+  setTimeout(function() {
+    _brgHistBusy = false;
+    if (btn)  btn.disabled = false;
+    if (icon) icon.style.animation = '';
+    brgHistRender();
+  }, 600);
+}
+
+function brgHistRender() {
+  var list = document.getElementById('brg-hist-list');
+  if (!list) return;
+
+  // Read entries from the hidden #bridge-history container (populated by addToHistory)
+  // and from localStorage (populated by saveBridgeHistory) — merge both sources.
+  var entries = [];
+
+  // Source 1: DOM entries from addToHistory (current session)
+  var domContainer = document.getElementById('bridge-history');
+  if (domContainer) {
+    var rows = domContainer.querySelectorAll('.tx-row');
+    rows.forEach(function(row) {
+      var labelEl  = row.querySelector('.tx-label');
+      var subEl    = row.querySelector('.tx-sub');
+      var dotEl    = row.querySelector('.tx-dot');
+      var linkEl   = row.querySelector('a');
+      var dotColor = dotEl ? (dotEl.style.background || '#2dd4bf') : '#2dd4bf';
+      var isPending = dotColor.indexOf('f59e0b') >= 0 || dotColor.indexOf('yellow') >= 0;
+      var isFailed  = dotColor.indexOf('ef4444') >= 0 || dotColor.indexOf('red') >= 0;
+      entries.push({
+        label:   labelEl ? labelEl.textContent : '—',
+        sub:     subEl   ? subEl.textContent   : '',
+        txHash:  linkEl  ? (linkEl.href || '') : '',
+        explorer: linkEl ? linkEl.href.replace(/\/tx\/.*$/, '') : '',
+        dotColor: dotColor,
+        pending: isPending,
+        failed:  isFailed,
+        ts: row.dataset.ts ? parseInt(row.dataset.ts) : 0,
+      });
+    });
+  }
+
+  // Source 2: localStorage history (persisted across sessions)
+  var stored = (typeof loadBridgeHistory === 'function') ? loadBridgeHistory() : [];
+  stored.forEach(function(h) {
+    // Avoid duplicates: skip if txHash already present from DOM source.
+    var alreadyIn = entries.some(function(e) { return e.txHash && h.txHash && e.txHash === h.txHash; });
+    if (!alreadyIn && (h.label || h.txHash)) {
+      entries.push({
+        label:    h.label   || (h.amount ? h.amount + ' ' + (h.token || 'USDC') + ': ' + (h.from || '?') + ' → ' + (h.to || '?') : '—'),
+        sub:      h.sub     || (h.provider || 'Bridge') + (h.ts ? ' · ' + new Date(h.ts).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true}) : ''),
+        txHash:   h.txHash  || h.sourceTxHash || '',
+        explorer: h.explorer || '',
+        dotColor: h.dotColor || (h.finalStatus === 'EXECUTED' ? '#2dd4bf' : h.finalStatus === 'FAILED' ? '#ef4444' : '#f59e0b'),
+        pending:  !h.finalStatus || h.finalStatus === 'BURN_CONFIRMED' || h.finalStatus === 'WAITING_ATTESTATION' || h.finalStatus === 'BRIDGE_PENDING',
+        failed:   h.finalStatus === 'FAILED',
+        ts: h.ts || h.timestamp || 0,
+      });
+    }
+  });
+
+  // Sort: newest first.
+  entries.sort(function(a, b) { return (b.ts || 0) - (a.ts || 0); });
+
+  // Apply filter.
+  var filtered = entries.filter(function(e) {
+    if (_brgHistFilter === 'done')    return !e.pending && !e.failed;
+    if (_brgHistFilter === 'pending') return !!e.pending;
+    return true;
+  });
+
+  if (!filtered.length) {
+    list.innerHTML = '<div class="brg-hist-empty"><i class="ti ti-topology-star-3"></i><span>'
+      + (_brgHistFilter !== 'all' ? 'No ' + _brgHistFilter + ' bridges' : 'No bridges yet') + '</span></div>';
+    return;
+  }
+
+  list.innerHTML = filtered.map(function(e) {
+    var dotClass = e.failed ? 'err' : e.pending ? 'pend' : 'ok';
+    var dotStyle = e.dotColor ? ' style="background:' + e.dotColor + '"' : '';
+    var explorerBase = e.explorer || '';
+    var txLink = (e.txHash && explorerBase)
+      ? '<a class="swp-hist-entry-link" href="' + explorerBase + '/tx/' + e.txHash + '" target="_blank" rel="noopener"><i class="ti ti-external-link"></i></a>'
+      : (e.txHash ? '<span style="font-size:8px;color:var(--muted2);font-family:monospace">' + e.txHash.slice(0,10) + '…</span>' : '');
+    var badge = e.failed
+      ? '<span class="brg-hist-entry-provider" style="color:var(--red);background:rgba(239,68,68,.1);border-color:rgba(239,68,68,.15)">Failed</span>'
+      : (e.pending
+          ? '<span class="brg-hist-entry-provider" style="color:var(--yellow);background:rgba(245,158,11,.1);border-color:rgba(245,158,11,.15)">Pending</span>'
+          : '<span class="brg-hist-entry-provider" style="color:var(--teal);background:rgba(45,212,191,.1);border-color:rgba(45,212,191,.15)">Done</span>');
+    return '<div class="brg-hist-entry">'
+      + '<div class="swp-hist-entry-dot ' + dotClass + '"' + dotStyle + '></div>'
+      + '<div class="swp-hist-entry-main">'
+      +   '<div class="swp-hist-entry-pair">' + (e.label || '—') + '</div>'
+      +   '<div class="swp-hist-entry-amounts">' + (e.sub || '') + '</div>'
+      + '</div>'
+      + '<div class="swp-hist-entry-meta">' + badge + txLink + '</div>'
+      + '</div>';
+  }).join('');
+}
+
+// Also re-render the Bridge History panel when a new entry is added (if open).
+var _brgHistOrigAddToHistory = null;
+(function _patchAddToHistoryForBridge() {
+  // Defer until addToHistory is defined (script order safety).
+  var _orig = null;
+  function _tryPatch() {
+    if (typeof addToHistory !== 'function') { setTimeout(_tryPatch, 300); return; }
+    if (addToHistory._brgPatched) return;
+    _orig = addToHistory;
+    addToHistory = function(containerId, opts) {
+      _orig(containerId, opts);
+      // Re-render Bridge panel if it is open and this is a bridge entry.
+      if (containerId === 'bridge-history') {
+        var overlay = document.getElementById('brg-hist-overlay');
+        if (overlay && overlay.classList.contains('open')) brgHistRender();
+      }
+    };
+    addToHistory._brgPatched = true;
+  }
+  setTimeout(_tryPatch, 500);
+})();
 
 // ── Bridge History & Monitoring ─────────────────────────────────
 const BRIDGE_HISTORY_KEY = 'arcpay_bridge_history';
