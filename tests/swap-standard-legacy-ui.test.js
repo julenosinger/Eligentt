@@ -39,10 +39,13 @@ describe('Swap — Standard legacy-DEX layout (presentation isolation)', () => {
     expect(html).toContain('max-width:480px');
   });
 
-  it('Standard shows the side column (ROUTES + Swap Summary + Recent Swaps)', () => {
+  it('Standard shows the side column (ROUTES + Swap Summary); Recent Swaps replaced by History panel', () => {
     expect(html).toContain('class="swp-side-col"');
     expect(html).toContain('#page-swap.swp-standard .swp-side-col{display:flex}');
-    expect(html).toContain('id="swa-hist-list"');
+    // Recent Swaps card removed in v1.1 — replaced by History button + slide-in panel.
+    expect(html).not.toContain('id="swa-hist-list"');
+    expect(html).toContain('id="swp-hist-panel"');   // new History panel
+    expect(html).toContain('id="swp-hist-btn"');     // History button in header
     expect(html).toContain('id="swa-summary"');
   });
 
@@ -56,8 +59,12 @@ describe('Swap — Standard legacy-DEX layout (presentation isolation)', () => {
   it('Swap History remains a single shared source (no standard/advanced split)', () => {
     expect(html).not.toContain('standardHistory');
     expect(html).not.toContain('advancedHistory');
-    expect(html).toContain("getElementById('swa-hist-list')");
+    // swa-hist-list element removed in v1.1; function still guards with null check.
+    expect(html).toContain("getElementById('swa-hist-list')");  // null-guarded in swpSyncRecentSwaps
     expect(html).toContain('id="swap-history"'); // authoritative hidden container
+    // New history panel uses the same authoritative source.
+    expect(html).toContain('getAuthoritativeAllSwaps');
+    expect(html).toContain('swpHistRender');
   });
 
   it('provider comparison + selection still present', () => {
