@@ -108,21 +108,32 @@ export async function onRequestGet({ request, env }) {
     const arr = rawTokens[String(chainId)];
     if (!Array.isArray(arr)) continue;
     // Normalize + filter to essential fields only.
-    // `tags` is preserved because downstream consumers (e.g. rwaLoadMarkets) rely
-    // on it to identify RWA tokens without a hardcoded list — dropping it would
-    // make every token catalogue empty regardless of LI.FI coverage.
-    filtered[chainId] = arr.map(t => ({
-      chainId: Number(t.chainId || chainId),
-      address: (t.address || '').toLowerCase(),
-      symbol: t.symbol || '',
-      name: t.name || t.symbol || '',
-      decimals: Number(t.decimals) || 18,
-      logoURI: t.logoURI || null,
-      priceUSD: t.priceUSD ? String(t.priceUSD) : null,
-      // Preserve classification tags (e.g. ['rwa', 'defi']) for downstream filtering.
-      // Never fabricate: if the upstream field is absent we store an empty array.
-      tags: Array.isArray(t.tags) ? t.tags.slice() : [],
-    })).filter(t => t.symbol && t.address);
+    // IMPORTANT: LI.FI uses ?tags= as a SERVER-SIDE FILTER param only — it does
+    // NOT populate a `tags` field on each token object in the response. When this
+    // proxy was called with ?tags=rwa, every token in `arr` was already selected
+    // by LI.FI as an RWA asset. We must inject the tag ourselves so downstream
+    // consumers (e.g. rwaLoadMarkets) can trust the tag field without knowing the
+    // request context.
+    const requestedTags = tagsParam ? tagsParam.split(',').map(s => s.trim().toLowerCase()).filter(Boolean) : [];
+    filtered[chainId] = arr.map(t => {
+      // Start from whatever LI.FI returned (may be absent), then merge injected tags.
+      const baseTags = Array.isArray(t.tags) ? t.tags.map(s => String(s).toLowerCase()) : [];
+      // Add any tag that was used to filter this request but is missing from the token.
+      const mergedTags = Array.from(new Set([...baseTags, ...requestedTags]));
+      return {
+        chainId: Number(t.chainId || chainId),
+        address: (t.address || '').toLowerCase(),
+        symbol: t.symbol || '',
+        name: t.name || t.symbol || '',
+        decimals: Number(t.decimals) || 18,
+        logoURI: t.logoURI || null,
+        priceUSD: t.priceUSD ? String(t.priceUSD) : null,
+        // Tags: LI.FI upstream value merged with the filter param that produced
+        // this result. If the upstream object omits tags (current LI.FI behaviour),
+        // the filter param is the authoritative source of truth.
+        tags: mergedTags,
+      };
+    }).filter(t => t.symbol && t.address);
   }
 
   const result = { ok: true, tokens: filtered };

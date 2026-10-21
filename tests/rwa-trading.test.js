@@ -431,6 +431,27 @@ describe('FIX-MARKETS — tags=rwa forwarding and accurate empty state', () => {
     // The proxy now accepts both ?chainId= and ?chains= for backward compat.
     expect(tokensProxy).toContain("url.searchParams.get('chains')");
   });
+
+  it('proxy injects requested tags into token objects (LI.FI omits tags from response)', () => {
+    // ROOT CAUSE FIX: LI.FI uses ?tags= as a server-side filter only — it does NOT
+    // populate a `tags` field on each token in the response. Without this injection
+    // every token arrives with tags:[] and the client filter for indexOf('rwa')===!=-1
+    // always fails, producing an empty Markets tab even when the API returned RWA tokens.
+    // The proxy must merge the request's tagsParam into each token's tags array.
+    expect(tokensProxy).toContain('requestedTags');
+    expect(tokensProxy).toContain('mergedTags');
+    expect(tokensProxy).toContain('tagsParam.split');
+    // Must use Set to deduplicate (so upstream tags + injected tags don't double)
+    expect(tokensProxy).toContain('new Set([');
+    // Final token must carry the merged tags
+    expect(tokensProxy).toContain('tags: mergedTags');
+  });
+
+  it('proxy tag injection is conditional — only when tagsParam is truthy', () => {
+    // When called without ?tags (Swap/Bridge callers), requestedTags is empty array.
+    // This ensures no fabricated tags appear on tokens in the general catalog.
+    expect(tokensProxy).toContain('requestedTags = tagsParam ?');
+  });
 });
 
 // ── AUDIT TESTS — D1-D7 fixes ─────────────────────────────────────────────────
@@ -585,11 +606,14 @@ describe('P1 — tokens.js proxy preserves tags field for RWA discovery', () => 
     expect(tokensProxy).toContain('tags:');
   });
   it('preserves tags as array without fabricating values', () => {
-    // Must copy the upstream array, not invent tags.
-    // The tags assignment is past the first 400 chars of the map block — use 600.
-    const mapBlock = blockAt(tokensProxy, 'filtered[chainId] = arr.map', 600);
+    // Base tags come from t.tags (upstream LI.FI value), normalised via Array.isArray
+    // guard. Final value is mergedTags (baseTags + requestedTags via Set dedup).
+    // Never an unconditional hardcoded ['rwa'].
+    const mapBlock = blockAt(tokensProxy, 'filtered[chainId] = arr.map', 1050);
     expect(mapBlock).toContain('Array.isArray(t.tags)');
-    expect(mapBlock).toContain('t.tags.slice()');
+    expect(mapBlock).toContain('tags: mergedTags');
+    // Must NOT fabricate a hardcoded ['rwa'] literal
+    expect(mapBlock).not.toMatch(/tags:\s*\['rwa'\]/);
   });
   it('falls back to empty array when upstream has no tags (no fabrication)', () => {
     const mapBlock = blockAt(tokensProxy, 'filtered[chainId] = arr.map', 600);
