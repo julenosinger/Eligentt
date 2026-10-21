@@ -18411,25 +18411,56 @@ function brgHistRender() {
   var entries = [];
   var seenHashes = {};
 
-  // Session entries first (newest)
-  sessionEntries.forEach(function(e) {
-    var key = e.txHash || (e.label + '|' + e.ts);
-    if (!seenHashes[key]) { seenHashes[key] = true; entries.push(e); }
+  // Normalise a localStorage entry into the same shape as a session entry.
+  function _normalizeStored(h) {
+    var txHash   = h.txHash || h.sourceTxHash || '';
+    var label    = h.label || (h.amount ? h.amount + ' ' + (h.token || 'USDC') + ': ' + (h.from || '?') + ' \u2192 ' + (h.to || '?') : '');
+    var sub      = h.sub || (h.provider || 'Bridge') + (h.ts ? ' \xb7 ' + new Date(h.ts).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true}) : '');
+    // Status derived from explicit finalStatus field — never from color.
+    var PENDING_STATUSES = { BURN_CONFIRMED:1, WAITING_ATTESTATION:1, BRIDGE_PENDING:1, CREATED:1 };
+    var pending  = !h.finalStatus || !!PENDING_STATUSES[h.finalStatus];
+    var failed   = h.finalStatus === 'FAILED';
+    var status   = failed ? 'failed' : pending ? 'pending' : 'done';
+    var dotColor = h.dotColor || (status === 'done' ? '#2dd4bf' : status === 'failed' ? '#ef4444' : '#f59e0b');
+    return { label: label, sub: sub, txHash: txHash, explorer: h.explorer || '', dotColor: dotColor, status: status, pending: pending, failed: failed, ts: h.ts || h.timestamp || 0 };
+  }
+
+  // Build a lookup of stored entries keyed by txHash so we can check
+  // whether a session entry should be superseded by a confirmed stored status.
+  var storedByHash = {};
+  stored.forEach(function(h) {
+    var key = h.txHash || h.sourceTxHash || '';
+    if (key) storedByHash[key] = h;
   });
 
-  // localStorage entries (may overlap with session)
+  // Merge: session entries are candidates, but stored wins when it has a
+  // confirmed (non-pending) finalStatus for the same hash.
+  sessionEntries.forEach(function(e) {
+    var key = e.txHash || (e.label + '|' + e.ts);
+    if (seenHashes[key]) return;
+    seenHashes[key] = true;
+    // If localStorage already has a confirmed status for this hash, use it.
+    if (e.txHash && storedByHash[e.txHash]) {
+      var sv = storedByHash[e.txHash];
+      var PENDING_STS = { BURN_CONFIRMED:1, WAITING_ATTESTATION:1, BRIDGE_PENDING:1, CREATED:1 };
+      var storedPending = !sv.finalStatus || !!PENDING_STS[sv.finalStatus];
+      // Only override if stored is more settled (confirmed or failed)
+      if (!storedPending) {
+        entries.push(_normalizeStored(sv));
+        return;
+      }
+    }
+    entries.push(e);
+  });
+
+  // localStorage entries not already in session
   stored.forEach(function(h) {
-    var txHash  = h.txHash || h.sourceTxHash || '';
-    var label   = h.label || (h.amount ? h.amount + ' ' + (h.token || 'USDC') + ': ' + (h.from || '?') + ' → ' + (h.to || '?') : '');
-    var sub     = h.sub   || (h.provider || 'Bridge') + (h.ts ? ' · ' + new Date(h.ts).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true}) : '');
-    var dotColor = h.dotColor || (h.finalStatus === 'EXECUTED' ? '#2dd4bf' : h.finalStatus === 'FAILED' ? '#ef4444' : '#f59e0b');
-    var pending  = !h.finalStatus || h.finalStatus === 'BURN_CONFIRMED' || h.finalStatus === 'WAITING_ATTESTATION' || h.finalStatus === 'BRIDGE_PENDING' || h.finalStatus === 'CREATED';
-    var failed   = h.finalStatus === 'FAILED';
-    var key = txHash || (label + '|' + (h.ts || 0));
-    if (!(h.label || txHash)) return; // skip empty records
+    var n   = _normalizeStored(h);
+    var key = n.txHash || (n.label + '|' + (h.ts || 0));
+    if (!(h.label || n.txHash)) return; // skip empty records
     if (!seenHashes[key]) {
       seenHashes[key] = true;
-      entries.push({ label: label, sub: sub, txHash: txHash, explorer: h.explorer || '', dotColor: dotColor, pending: pending, failed: failed, ts: h.ts || h.timestamp || 0 });
+      entries.push(n);
     }
   });
 
@@ -18475,42 +18506,43 @@ var _brgSessionEntries = [];
     var container = document.getElementById('bridge-history');
     if (!container) { setTimeout(_attach, 400); return; }
     var observer = new MutationObserver(function() {
-      // A new .tx-item was prepended — read its data attributes (set safely by
-      // addToHistory) rather than its innerHTML.  The item has no data-* attrs
-      // in the current addToHistory impl, so we read textContent only.
+      // A new .tx-item was prepended — read its data-brg-* attributes (set by
+      // addToHistory) for structured, reliable access without CSS-style selectors.
       var items = container.querySelectorAll('.tx-item');
       if (!items.length) return;
       var newest = items[0];
-      var labelEl = newest.querySelector('[style*="font-weight:600"]');
-      var subEl   = newest.querySelector('[style*="color:var(--muted2)"]');
-      var linkEl  = newest.querySelector('a[href]');
-      var dotEl   = newest.querySelector('.tx-dot');
 
-      var rawHref    = linkEl ? linkEl.getAttribute('href') : '';
-      // Extract txHash and explorer from the href safely
-      var safeOrigin = null;
-      var safeHash   = null;
-      if (rawHref) {
-        try {
-          var u = new URL(rawHref);
-          if (u.protocol === 'https:') {
-            safeOrigin = _brgSafeExplorerBase(u.origin);
-            var parts  = u.pathname.split('/');
-            var idx    = parts.indexOf('tx');
-            if (idx >= 0 && parts[idx+1]) safeHash = _brgSafeTxHash(parts[idx+1]);
-          }
-        } catch(_e) {}
-      }
+      // Read from data-brg-* attributes (reliable, set by addToHistory).
+      var rawLabel    = newest.getAttribute('data-brg-label')    || '';
+      var rawSub      = newest.getAttribute('data-brg-sub')      || '';
+      var rawHash     = newest.getAttribute('data-brg-hash')     || '';
+      var rawExplorer = newest.getAttribute('data-brg-explorer') || '';
+      var rawDotColor = newest.getAttribute('data-brg-dotcolor') || '#2dd4bf';
 
-      var dotColor = dotEl ? dotEl.style.background : '#2dd4bf';
+      // Validate hash and explorer origin against allowlist.
+      var safeHash   = _brgSafeTxHash(rawHash);
+      var safeOrigin = _brgSafeExplorerBase(rawExplorer || 'https://explorer.arc.io');
+
+      // Derive semantic status from dotColor using known palette constants —
+      // AMBER (#f59e0b) = pending, RED (#ef4444) = failed, else done.
+      // These constants match the app's CSS variables (--yellow, --red).
+      var STATUS_PENDING = ['#f59e0b', 'f59e0b', 'rgb(245, 158, 11)', 'rgb(245,158,11)'];
+      var STATUS_FAILED  = ['#ef4444', 'ef4444', 'rgb(239, 68, 68)',  'rgb(239,68,68)'];
+      var dc = rawDotColor.replace(/\s/g, '').toLowerCase();
+      var isPending = STATUS_PENDING.some(function(v){ return dc === v || dc.indexOf(v) >= 0; });
+      var isFailed  = STATUS_FAILED.some(function(v){  return dc === v || dc.indexOf(v) >= 0; });
+      // Semantic status field — never derived from color in brgHistRender.
+      var semanticStatus = isFailed ? 'failed' : isPending ? 'pending' : 'done';
+
       var entry = {
-        label:    labelEl ? labelEl.textContent : '—',
-        sub:      subEl   ? subEl.textContent   : '',
+        label:    rawLabel || '—',
+        sub:      rawSub,
         txHash:   safeHash   || '',
         explorer: safeOrigin || '',
-        dotColor: /^#[0-9a-fA-F]{3,8}$/.test(dotColor) ? dotColor : '#2dd4bf',
-        pending:  dotColor.indexOf('f59e0b') >= 0,
-        failed:   dotColor.indexOf('ef4444') >= 0,
+        dotColor: /^#[0-9a-fA-F]{3,8}$/.test(rawDotColor) ? rawDotColor : '#2dd4bf',
+        status:   semanticStatus,   // semantic — used by brgHistRender
+        pending:  semanticStatus === 'pending',
+        failed:   semanticStatus === 'failed',
         ts:       Date.now(),
       };
       // Deduplicate by hash or label+ts-bucket
@@ -26065,8 +26097,15 @@ function addToHistory(containerId,{icon,color,label,sub,txHash,dotColor,explorer
   if(empty)empty.remove();
   const div=document.createElement('div');
   div.className='tx-item';
+  // data-brg-* attributes let the Bridge History MutationObserver read
+  // structured data without relying on CSS-style selectors.
+  if(label    !== undefined) div.setAttribute('data-brg-label',    String(label));
+  if(sub      !== undefined) div.setAttribute('data-brg-sub',      String(sub));
+  if(txHash   !== undefined) div.setAttribute('data-brg-hash',     String(txHash));
+  if(explorer !== undefined) div.setAttribute('data-brg-explorer', String(explorer));
+  if(dotColor !== undefined) div.setAttribute('data-brg-dotcolor', String(dotColor));
   const explorerBase = explorer || 'https://explorer.arc.io';
-  setSafeHTML(div, `<div class="tx-dot" style="background:${dotColor}"></div><div style="flex:1"><div style="font-weight:600;font-size:9px">${_safePurify(label)}</div><div style="font-size:8px;color:var(--muted2)">${_safePurify(sub)}</div></div><a href="${escHtml(explorerBase.replace(/\/$/,''))}/tx/${escHtml(txHash)}" target="_blank" style="color:var(--blue);font-size:8px;text-decoration:none;flex-shrink:0"><i class="ti ti-external-link" style="font-size:9px"></i></a>`);
+  setSafeHTML(div, `<div class="tx-dot" style="background:${dotColor}"></div><div style="flex:1"><div style="font-weight:600;font-size:9px">${_safePurify(label)}</div><div style="font-size:8px;color:var(--muted2)">${_safePurify(sub)}</div></div>${txHash ? `<a href="${escHtml(explorerBase.replace(/\/$/,''))}/tx/${escHtml(txHash)}" target="_blank" style="color:var(--blue);font-size:8px;text-decoration:none;flex-shrink:0"><i class="ti ti-external-link" style="font-size:9px"></i></a>` : ''}`);
   c.prepend(div);
 }
 

@@ -220,8 +220,13 @@ describe('S12 – Status mapping: pending states from finalStatus', () => {
   });
 
   it('S12: EXECUTED/finalStatus=EXECUTED maps to teal dotColor', () => {
-    expect(renderFn).toContain("'EXECUTED'");
+    // _normalizeStored derives status from PENDING_STATUSES exclusion list —
+    // EXECUTED is not in that list, so it falls through to status='done' → teal.
+    // The string 'EXECUTED' does not need to appear literally; the teal color must.
     expect(renderFn).toContain('#2dd4bf');
+    // PENDING_STATUSES covers known pending states; EXECUTED is intentionally absent.
+    expect(renderFn).toContain('BURN_CONFIRMED');
+    expect(renderFn).toContain('WAITING_ATTESTATION');
   });
 
   it('S12: FAILED maps to red dotColor', () => {
