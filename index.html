@@ -7401,9 +7401,12 @@ select.cinput option { background: #161a24; color: #dde2f0; }
           <div style="display:flex;align-items:center;gap:8px;margin-left:auto">
             <!-- Filter pills -->
             <div class="swp-hist-filters" id="swp-hist-filters">
-              <button class="swp-hist-filter active" data-filter="all"   onclick="swpHistFilter('all',this)">All</button>
-              <button class="swp-hist-filter"         data-filter="done" onclick="swpHistFilter('done',this)">Done</button>
-              <button class="swp-hist-filter"         data-filter="pending" onclick="swpHistFilter('pending',this)">Pending</button>
+              <button class="swp-hist-filter active" data-filter="all"         onclick="swpHistFilter('all',this)">All</button>
+              <button class="swp-hist-filter"         data-filter="done"        onclick="swpHistFilter('done',this)">Done</button>
+              <button class="swp-hist-filter"         data-filter="pending"     onclick="swpHistFilter('pending',this)">Pending</button>
+              <button class="swp-hist-filter"         data-filter="failed"      onclick="swpHistFilter('failed',this)">Failed</button>
+              <button class="swp-hist-filter"         data-filter="same-chain"  onclick="swpHistFilter('same-chain',this)">Same-chain</button>
+              <button class="swp-hist-filter"         data-filter="cross-chain" onclick="swpHistFilter('cross-chain',this)">Cross-chain</button>
             </div>
             <button class="swp-hist-refresh-btn" id="swp-hist-refresh-btn" onclick="swpHistRefresh()" title="Refresh history">
               <i class="ti ti-refresh" id="swp-hist-refresh-icon"></i>
@@ -21413,6 +21416,113 @@ function swpSyncRecentSwaps() {
 var _swpHistFilter = 'all'; // 'all' | 'done' | 'pending'
 var _swpHistBusy = false;
 
+// ── Local swap history (wallet-scoped, persisted to localStorage) ──────────
+// Captures Tower, LI.FI, native-pool and cross-chain swaps immediately at
+// submission time, before any pool indexer picks them up. The authoritative
+// /api/pool-index feed is merged in at render time; pool-indexed events take
+// precedence for dedup (same txHash wins from authoritative source).
+var _SWP_LOCAL_KEY_PREFIX = 'swpLocalHistory_';
+
+function _swpLocalKey() {
+  var addr = (typeof walletAddress !== 'undefined' && walletAddress) ? walletAddress.toLowerCase() : 'anon';
+  return _SWP_LOCAL_KEY_PREFIX + addr;
+}
+
+function _swpLocalLoad() {
+  try {
+    var raw = localStorage.getItem(_swpLocalKey());
+    if (!raw) return [];
+    var arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr : [];
+  } catch (_) { return []; }
+}
+
+function _swpLocalSave(entries) {
+  try {
+    // Keep at most 200 entries; newest first.
+    var trimmed = entries.slice(0, 200);
+    localStorage.setItem(_swpLocalKey(), JSON.stringify(trimmed));
+  } catch (_) {}
+}
+
+// Push a new entry immediately after swap submission.
+// type: 'same-chain' | 'cross-chain'
+// status: 'pending' | 'done' | 'failed'
+function swpLocalRecord(opts) {
+  if (!opts || !opts.txHash) return; // never record without a real tx hash
+  var entry = {
+    id: opts.txHash,           // dedup key
+    txHash: opts.txHash,
+    txHashDst: opts.txHashDst || null,   // destination chain tx (cross-chain)
+    tokenIn:  opts.tokenIn  || '?',
+    tokenOut: opts.tokenOut || '?',
+    amountIn:  opts.amountIn  != null ? String(opts.amountIn)  : '?',
+    amountOut: opts.amountOut != null ? String(opts.amountOut) : '?',
+    chainId:    opts.chainId    || 5042,
+    chainIdDst: opts.chainIdDst || null,
+    provider: opts.provider || 'Unknown',
+    type: opts.type || 'same-chain',    // 'same-chain' | 'cross-chain'
+    status: opts.status || 'pending',   // 'pending' | 'done' | 'failed'
+    timestamp: opts.timestamp || Date.now(),
+    explorerBase:    opts.explorerBase    || 'https://explorer.arc.io',
+    explorerBaseDst: opts.explorerBaseDst || null,
+  };
+  var existing = _swpLocalLoad();
+  // Dedup: update if txHash already exists.
+  var idx = existing.findIndex(function(e) { return e.txHash === entry.txHash; });
+  if (idx >= 0) {
+    existing[idx] = Object.assign({}, existing[idx], entry);
+  } else {
+    existing.unshift(entry);
+  }
+  _swpLocalSave(existing);
+}
+
+// Update status of a persisted entry by txHash.
+function swpLocalUpdateStatus(txHash, status, txHashDst) {
+  if (!txHash) return;
+  var existing = _swpLocalLoad();
+  var idx = existing.findIndex(function(e) { return e.txHash === txHash; });
+  if (idx < 0) return;
+  existing[idx].status = status;
+  if (txHashDst) existing[idx].txHashDst = txHashDst;
+  _swpLocalSave(existing);
+}
+
+// Merge local entries with authoritative pool events.
+// Authoritative wins for dedup (same txHash).
+function _swpMergeHistory(authEvents, localEntries) {
+  var authHashes = {};
+  authEvents.forEach(function(ev) { if (ev.txHash) authHashes[ev.txHash.toLowerCase()] = true; });
+  var localNorm = localEntries
+    .filter(function(e) { return !authHashes[e.txHash.toLowerCase()]; })
+    .map(function(e) {
+      return {
+        txHash:     e.txHash,
+        txHashDst:  e.txHashDst,
+        tokenIn:    e.tokenIn,
+        tokenOut:   e.tokenOut,
+        amountInRaw:  null, // local entries store human-readable amounts
+        amountOutRaw: null,
+        amountIn:   e.amountIn,
+        amountOut:  e.amountOut,
+        chainId:    e.chainId,
+        chainIdDst: e.chainIdDst,
+        provider:   e.provider,
+        type:       e.type,
+        pending:    e.status === 'pending',
+        failed:     e.status === 'failed',
+        timestamp:  e.timestamp,
+        explorerBase:    e.explorerBase,
+        explorerBaseDst: e.explorerBaseDst,
+        _local: true,
+      };
+    });
+  var merged = authEvents.concat(localNorm);
+  merged.sort(function(a, b) { return (b.timestamp || 0) - (a.timestamp || 0); });
+  return merged;
+}
+
 function swpOpenHistory() {
   var overlay = document.getElementById('swp-hist-overlay');
   if (!overlay) return;
@@ -21465,22 +21575,37 @@ async function swpHistRefresh() {
 }
 
 function swpHistRender() {
-  var list   = document.getElementById('swp-hist-list');
-  var loading = document.getElementById('swp-hist-loading');
+  var list    = document.getElementById('swp-hist-list');
   if (!list) return;
 
-  var all = (typeof getAuthoritativeAllSwaps === 'function')
-    ? getAuthoritativeAllSwaps(100) : [];
+  // Merge authoritative pool events (on-chain indexed) with local wallet entries.
+  var authEvents = (typeof getAuthoritativeAllSwaps === 'function')
+    ? getAuthoritativeAllSwaps(200) : [];
+  var localEntries = _swpLocalLoad();
+  var all = _swpMergeHistory(authEvents, localEntries);
 
   // Apply filter.
   var filtered = all.filter(function(ev) {
-    if (_swpHistFilter === 'done')    return !ev.pending && !ev.failed;
-    if (_swpHistFilter === 'pending') return !!ev.pending;
+    if (_swpHistFilter === 'done')        return !ev.pending && !ev.failed;
+    if (_swpHistFilter === 'pending')     return !!ev.pending;
+    if (_swpHistFilter === 'failed')      return !!ev.failed;
+    if (_swpHistFilter === 'same-chain')  return ev.type !== 'cross-chain';
+    if (_swpHistFilter === 'cross-chain') return ev.type === 'cross-chain';
     return true; // 'all'
   });
 
+  // Build the note line (source of data).
+  var noteEl = document.getElementById('swp-hist-source-note');
+  if (noteEl) {
+    var hasLocal = localEntries.length > 0;
+    var hasAuth  = authEvents.length > 0;
+    if (hasLocal && hasAuth)        noteEl.textContent = 'Showing wallet + indexed swaps';
+    else if (hasLocal)              noteEl.textContent = 'Showing wallet swaps (index loading)';
+    else if (hasAuth)               noteEl.textContent = 'Showing indexed swaps';
+    else                            noteEl.textContent = '';
+  }
+
   if (!filtered.length) {
-    // Distinguish "empty wallet/no history" from "index not ready".
     var statuses = [];
     if (typeof _authoritativeHistory !== 'undefined') {
       Object.keys(_authoritativeHistory).forEach(function(id) {
@@ -21488,54 +21613,161 @@ function swpHistRender() {
         if (h && h.status) statuses.push(h.status);
       });
     }
-    var emptyMsg = 'No swaps found';
-    if (_swpHistFilter !== 'all') emptyMsg = 'No ' + _swpHistFilter + ' swaps';
-    else if (statuses.indexOf('INDEX_WARMING') >= 0) emptyMsg = 'Analytics warming up — check back soon';
+    var emptyMsg = 'No swaps yet';
+    if (_swpHistFilter === 'done')        emptyMsg = 'No completed swaps';
+    else if (_swpHistFilter === 'pending') emptyMsg = 'No pending swaps';
+    else if (_swpHistFilter === 'failed')  emptyMsg = 'No failed swaps';
+    else if (_swpHistFilter === 'same-chain')  emptyMsg = 'No same-chain swaps';
+    else if (_swpHistFilter === 'cross-chain') emptyMsg = 'No cross-chain swaps';
+    else if (statuses.indexOf('INDEX_WARMING') >= 0) emptyMsg = 'Index warming up…';
     else if (statuses.indexOf('INDEX_UNAVAILABLE') >= 0 || statuses.indexOf('ERROR') >= 0) emptyMsg = 'History temporarily unavailable';
-    list.innerHTML = '<div class="swp-hist-empty"><i class="ti ti-history"></i><span>' + emptyMsg + '</span></div>';
+    // Clear safely.
+    while (list.firstChild) list.removeChild(list.firstChild);
+    var emptyDiv = document.createElement('div');
+    emptyDiv.className = 'swp-hist-empty';
+    var icon = document.createElement('i');
+    icon.className = 'ti ti-history';
+    var txt = document.createElement('span');
+    txt.textContent = emptyMsg;
+    emptyDiv.appendChild(icon);
+    emptyDiv.appendChild(txt);
+    list.appendChild(emptyDiv);
     return;
   }
 
-  list.innerHTML = filtered.map(function(ev) {
-    var tIn  = escHtml(ev.tokenIn  || '?');
-    var tOut = escHtml(ev.tokenOut || '?');
-    var amtIn  = (typeof formatRawTokenAmount === 'function') ? formatRawTokenAmount(ev.amountInRaw,  ev.tokenIn)  : '?';
-    var amtOut = (typeof formatRawTokenAmount === 'function') ? formatRawTokenAmount(ev.amountOutRaw, ev.tokenOut) : '?';
-    var time   = (typeof formatActivityTime   === 'function') ? formatActivityTime(ev.timestamp)   : '—';
+  // Build rows safely (no innerHTML of untrusted data).
+  while (list.firstChild) list.removeChild(list.firstChild);
 
-    var dotCls = ev.failed ? 'err' : (ev.pending ? 'pend' : 'ok');
+  filtered.forEach(function(ev) {
+    var tIn  = ev.tokenIn  || '?';
+    var tOut = ev.tokenOut || '?';
+
+    // Amount: local entries store human-readable; authoritative have raw.
+    var amtIn, amtOut;
+    if (ev._local) {
+      amtIn  = ev.amountIn  != null ? String(ev.amountIn)  : '?';
+      amtOut = ev.amountOut != null ? String(ev.amountOut) : '?';
+    } else {
+      amtIn  = (typeof formatRawTokenAmount === 'function') ? formatRawTokenAmount(ev.amountInRaw,  ev.tokenIn)  : '?';
+      amtOut = (typeof formatRawTokenAmount === 'function') ? formatRawTokenAmount(ev.amountOutRaw, ev.tokenOut) : '?';
+    }
+    var time = (typeof formatActivityTime === 'function') ? formatActivityTime(ev.timestamp) : '—';
+
+    var dotCls     = ev.failed ? 'err' : (ev.pending ? 'pend' : 'ok');
     var statusLabel = ev.failed ? 'Failed' : (ev.pending ? 'Pending' : 'Done');
+    var isCross    = ev.type === 'cross-chain';
 
-    var txLink = '';
-    if (ev.txHash) {
-      var shortHash = ev.txHash.slice(0, 6) + '…' + ev.txHash.slice(-4);
-      txLink = '<a class="swp-hist-entry-link" href="https://explorer.arc.io/tx/' + ev.txHash + '" target="_blank" rel="noopener">'
-             + '<i class="ti ti-external-link" style="font-size:9px"></i>' + shortHash + '</a>';
+    // Explorer link — validate before use.
+    var explorerBase = ev.explorerBase || 'https://explorer.arc.io';
+    var safeBase = /^https:\/\//.test(explorerBase) ? explorerBase : 'https://explorer.arc.io';
+
+    // Build row element.
+    var row = document.createElement('div');
+    row.className = 'swp-hist-entry';
+    if (isCross) row.style.borderColor = 'rgba(251,191,36,.15)';
+
+    // Dot.
+    var dot = document.createElement('div');
+    dot.className = 'swp-hist-entry-dot ' + dotCls;
+    dot.title = statusLabel;
+    row.appendChild(dot);
+
+    // Main block.
+    var main = document.createElement('div');
+    main.className = 'swp-hist-entry-main';
+
+    var pair = document.createElement('div');
+    pair.className = 'swp-hist-entry-pair';
+    var tInSpan = document.createElement('span');
+    tInSpan.textContent = tIn;
+    var arrow = document.createElement('span');
+    arrow.className = 'arrow';
+    arrow.textContent = '→';
+    var tOutSpan = document.createElement('span');
+    tOutSpan.textContent = tOut;
+    pair.appendChild(tInSpan);
+    pair.appendChild(arrow);
+    pair.appendChild(tOutSpan);
+
+    // Provider badge.
+    if (ev.provider) {
+      var prov = document.createElement('span');
+      prov.className = 'swp-hist-entry-provider';
+      prov.textContent = ev.provider;
+      pair.appendChild(prov);
     }
 
-    var provider = ev.provider
-      ? '<span class="swp-hist-entry-provider">' + escHtml(ev.provider) + '</span>'
-      : '';
-    var network = ev.chainId && ev.chainId !== 5042
-      ? '<span style="font-size:7.5px;color:var(--muted2);margin-left:4px">' + escHtml(String(ev.chainId)) + '</span>'
-      : '';
+    // Cross-chain badge.
+    if (isCross) {
+      var xbadge = document.createElement('span');
+      xbadge.style.cssText = 'font-size:7px;background:rgba(251,191,36,.15);color:#fbbf24;border-radius:4px;padding:1px 4px;margin-left:4px;';
+      xbadge.textContent = 'Cross-chain';
+      pair.appendChild(xbadge);
+    }
 
-    return '<div class="swp-hist-entry">'
-      + '<div class="swp-hist-entry-dot ' + dotCls + '" title="' + statusLabel + '"></div>'
-      + '<div class="swp-hist-entry-main">'
-      +   '<div class="swp-hist-entry-pair">'
-      +     tIn + '<span class="arrow">→</span>' + tOut + network + provider
-      +   '</div>'
-      +   '<div class="swp-hist-entry-amounts">'
-      +     amtIn + ' ' + tIn + ' → ' + amtOut + ' ' + tOut
-      +   '</div>'
-      + '</div>'
-      + '<div class="swp-hist-entry-meta">'
-      +   '<span class="swp-hist-entry-time">' + time + '</span>'
-      +   txLink
-      + '</div>'
-      + '</div>';
-  }).join('');
+    // Destination chain badge.
+    if (ev.chainIdDst && ev.chainIdDst !== ev.chainId) {
+      var _CHAIN_NAMES = {5042:'Arc',1:'ETH',8453:'Base',42161:'ARB',10:'OP',137:'POL'};
+      var dstName = _CHAIN_NAMES[ev.chainIdDst] || String(ev.chainIdDst);
+      var chainBadge = document.createElement('span');
+      chainBadge.style.cssText = 'font-size:7px;color:var(--muted2);margin-left:4px;';
+      chainBadge.textContent = '→ ' + dstName;
+      pair.appendChild(chainBadge);
+    }
+
+    main.appendChild(pair);
+
+    var amounts = document.createElement('div');
+    amounts.className = 'swp-hist-entry-amounts';
+    amounts.textContent = amtIn + ' ' + tIn + ' → ' + amtOut + ' ' + tOut;
+    main.appendChild(amounts);
+
+    row.appendChild(main);
+
+    // Meta block (time + links).
+    var meta = document.createElement('div');
+    meta.className = 'swp-hist-entry-meta';
+
+    var timeSpan = document.createElement('span');
+    timeSpan.className = 'swp-hist-entry-time';
+    timeSpan.textContent = time;
+    meta.appendChild(timeSpan);
+
+    // Source tx link.
+    if (ev.txHash && /^0x[0-9a-fA-F]{64}$/.test(ev.txHash)) {
+      var link = document.createElement('a');
+      link.className = 'swp-hist-entry-link';
+      link.href = safeBase + '/tx/' + ev.txHash;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      var icon2 = document.createElement('i');
+      icon2.className = 'ti ti-external-link';
+      icon2.style.fontSize = '9px';
+      link.appendChild(icon2);
+      link.appendChild(document.createTextNode(ev.txHash.slice(0,6) + '…' + ev.txHash.slice(-4)));
+      meta.appendChild(link);
+    }
+
+    // Destination tx link (cross-chain).
+    if (ev.txHashDst && /^0x[0-9a-fA-F]{64}$/.test(ev.txHashDst)) {
+      var safeBaseDst = ev.explorerBaseDst && /^https:\/\//.test(ev.explorerBaseDst) ? ev.explorerBaseDst : 'https://explorer.arc.io';
+      var linkDst = document.createElement('a');
+      linkDst.className = 'swp-hist-entry-link';
+      linkDst.href = safeBaseDst + '/tx/' + ev.txHashDst;
+      linkDst.target = '_blank';
+      linkDst.rel = 'noopener noreferrer';
+      linkDst.style.marginLeft = '4px';
+      var icon3 = document.createElement('i');
+      icon3.className = 'ti ti-external-link';
+      icon3.style.fontSize = '9px';
+      linkDst.appendChild(icon3);
+      linkDst.appendChild(document.createTextNode('dst'));
+      meta.appendChild(linkDst);
+    }
+
+    row.appendChild(meta);
+    list.appendChild(row);
+  });
 }
 // ── End Swap History Panel ───────────────────────────────────────────
 
@@ -23216,7 +23448,7 @@ async function swpExecuteTowerOnly(tIn, tOut, amtIn, slippageBps) {
   if (typeof BalanceService !== 'undefined' && BalanceService.invalidate) BalanceService.invalidate(walletAddress);
   if (typeof _swpClearBalCache === 'function') _swpClearBalCache();
   updateSwapBalancesDisplay();
-  swpAddHistory(tIn.sym, tOut.sym, amtIn, (Number((typeof SwapMath !== 'undefined' && SwapMath.formatUnits) ? SwapMath.formatUnits(expectedOutRaw, tOut.decimals) : ethers.formatUnits(expectedOutRaw, tOut.decimals))), swapTx.hash);
+  swpAddHistory(tIn.sym, tOut.sym, amtIn, (Number((typeof SwapMath !== 'undefined' && SwapMath.formatUnits) ? SwapMath.formatUnits(expectedOutRaw, tOut.decimals) : ethers.formatUnits(expectedOutRaw, tOut.decimals))), swapTx.hash, { provider: 'Tower', type: 'same-chain' });
   toast(`Swapped ${amtIn} ${tIn.sym} → ${tOut.sym} via Tower`, 'success');
   swpSetBtn('done', 'Swapped!');
   setTimeout(function(){ swpSetBtn('ready', `Swap ${tIn.sym} → ${tOut.sym}`); }, 2800);
@@ -23340,7 +23572,7 @@ async function swpExecuteLiFi(tIn, tOut, amtIn, slippageBps) {
   updateSwapBalancesDisplay();
   swpAddHistory(symIn, symOut, amtIn,
     (Number((typeof SwapMath !== 'undefined' && SwapMath.formatUnits) ? SwapMath.formatUnits(expectedOutRaw, toDecimals) : ethers.formatUnits(expectedOutRaw, toDecimals))),
-    swapTx.hash);
+    swapTx.hash, { provider: 'LI.FI', type: 'same-chain' });
   toast(`Swapped ${amtIn} ${symIn} → ${symOut} via LI.FI`, 'success');
   swpSetBtn('done', 'Swapped!');
   setTimeout(function(){ swpSetBtn('ready', `Swap ${symIn} → ${symOut}`); }, 2800);
@@ -23724,7 +23956,8 @@ async function executeSwap() {
   if (typeof _swpClearBalCache === 'function') _swpClearBalCache();
   updateSwapBalancesDisplay();
 
-  swpAddHistory(tIn.sym, tOut.sym, amtIn, amtOut, lastTxHash);
+  var _swpProvLabel = route.type === 'multi-hop' ? (route.hops || []).join('+') : (route.source || 'Elligentt');
+  swpAddHistory(tIn.sym, tOut.sym, amtIn, amtOut, lastTxHash, { provider: _swpProvLabel, type: 'same-chain' });
 
   const routeLabel = route.type === 'multi-hop' ? ` via ${route.hops.join(' → ')}` : '';
   toast(`Swapped ${amtIn} ${tIn.sym} → ${amtOut.toFixed(4)} ${tOut.sym}${routeLabel}`, 'success');
@@ -23741,18 +23974,44 @@ async function executeSwap() {
 // surfaces once it is indexed past confirmationDepth. (symIn/symOut/amtIn/amtOut
 // are retained for signature compatibility with the execution flow; the on-chain
 // values are authoritative.)
-function swpAddHistory(symIn, symOut, amtIn, amtOut, txHash) {
-  // Transient post-execution hook only. Request the authoritative history
-  // (server re-ingest, respecting confirmationDepth) then re-render the
-  // authoritative views once the response lands. The event may not appear until
-  // it is confirmed past confirmationDepth — never invent it locally.
-  refreshAuthoritativeSwapHistory(true).then(function() {
-    if (typeof stUpdateHistory === 'function') stUpdateHistory();
-    if (typeof swpSyncRecentSwaps === 'function') swpSyncRecentSwaps();
-    // If the history panel is open, re-render it with the new data.
+function swpAddHistory(symIn, symOut, amtIn, amtOut, txHash, opts) {
+  // 1) Persist immediately to localStorage so the history panel shows the swap
+  //    right away, before any pool indexer picks it up. Requires a real txHash.
+  if (txHash && /^0x[0-9a-fA-F]{64}$/.test(txHash)) {
+    swpLocalRecord({
+      txHash:     txHash,
+      txHashDst:  opts && opts.txHashDst  ? opts.txHashDst  : null,
+      tokenIn:    symIn,
+      tokenOut:   symOut,
+      amountIn:   amtIn  != null ? String(amtIn)  : '?',
+      amountOut:  amtOut != null ? String(amtOut) : '?',
+      chainId:    (opts && opts.chainId)    ? opts.chainId    : 5042,
+      chainIdDst: (opts && opts.chainIdDst) ? opts.chainIdDst : null,
+      provider:   (opts && opts.provider)   ? opts.provider   : 'Elligentt',
+      type:       (opts && opts.type)       ? opts.type       : 'same-chain',
+      status:     'pending',  // always start as pending; confirmed by receipt below
+      explorerBase:    (opts && opts.explorerBase)    ? opts.explorerBase    : 'https://explorer.arc.io',
+      explorerBaseDst: (opts && opts.explorerBaseDst) ? opts.explorerBaseDst : null,
+    });
+    // If the panel is already open, re-render immediately with the new entry.
     var overlay = document.getElementById('swp-hist-overlay');
     if (overlay && overlay.classList.contains('open') && typeof swpHistRender === 'function') swpHistRender();
-  }).catch(function() {});
+  }
+
+  // 2) Request the authoritative history (server re-ingest) then update status
+  //    to 'done' once confirmed, and re-render.
+  refreshAuthoritativeSwapHistory(true).then(function() {
+    // Mark local entry as done once the server confirms it.
+    if (txHash) swpLocalUpdateStatus(txHash, 'done');
+    if (typeof stUpdateHistory === 'function') stUpdateHistory();
+    if (typeof swpSyncRecentSwaps === 'function') swpSyncRecentSwaps();
+    var overlay2 = document.getElementById('swp-hist-overlay');
+    if (overlay2 && overlay2.classList.contains('open') && typeof swpHistRender === 'function') swpHistRender();
+  }).catch(function() {
+    // Server unavailable — keep entry as pending, not failed (don't know yet).
+    var overlay3 = document.getElementById('swp-hist-overlay');
+    if (overlay3 && overlay3.classList.contains('open') && typeof swpHistRender === 'function') swpHistRender();
+  });
 }
 
 
