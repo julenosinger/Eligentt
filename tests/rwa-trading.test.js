@@ -308,7 +308,7 @@ describe('N8 — XSS safety', () => {
 // ── N9: Scope isolation ───────────────────────────────────────────────────────
 
 describe('N9 — Scope isolation (no changes to other modules)', () => {
-  const rwaJS = html.slice(html.indexOf('RWA ADVANCED TRADING — JavaScript'), html.indexOf('RWA ADVANCED TRADING — JavaScript') + 50000);
+  const rwaJS = html.slice(html.indexOf('RWA ADVANCED TRADING \u2014 JavaScript'), html.indexOf('RWA ADVANCED TRADING \u2014 JavaScript') + 55000);
 
   it('rwa JS does not modify swapHistRender or swpAddHistory', () => {
     expect(rwaJS).not.toContain('swpAddHistory');
@@ -755,5 +755,147 @@ describe('P3 — BigInt conversion consistent in approval check (no Math.round)'
     // fracPart.length > d → fracPart = fracPart.slice(0, d) — truncate, not round
     const approvalSection = blockAt(execBlock, 'P3-fix', 600);
     expect(approvalSection).toContain('fracPart.slice(0, d)');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BAL — Trade Terminal balance fetch
+// Root cause: _rwaUpdateBalances used `typeof getTokenBalance === 'function'`
+// which is always false in-browser (getTokenBalance is Node-only in shared/).
+// Fix: direct ethers.Contract + balanceOf using getCachedProvider + CHAIN_REGISTRY.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('BAL — _rwaUpdateBalances real balanceOf implementation', () => {
+  const _rwaStart = html.indexOf('RWA ADVANCED TRADING \u2014 JavaScript');
+  const rwaFull  = html.slice(_rwaStart, _rwaStart + 55000);
+  const updateFn = fnBlock(rwaFull, '_rwaUpdateBalances', 3500);
+  const fetchFn  = fnBlock(rwaFull, '_rwaFetchTokenBalance', 800);
+
+  it('_rwaFetchTokenBalance function exists', () => {
+    expect(fetchFn.length).toBeGreaterThan(50);
+  });
+
+  it('uses CHAIN_REGISTRY to get rpcUrl — not hardcoded', () => {
+    expect(fetchFn).toContain('CHAIN_REGISTRY[chainId]');
+    expect(fetchFn).toContain('.rpc');
+    // Must NOT have a hardcoded RPC string inside the function
+    expect(fetchFn).not.toMatch(/https?:\/\/[a-z]/);
+  });
+
+  it('uses getCachedProvider with the resolved rpcUrl', () => {
+    expect(fetchFn).toContain('getCachedProvider(rpcUrl)');
+  });
+
+  it('calls balanceOf with the wallet address', () => {
+    expect(fetchFn).toContain('balanceOf(wallet)');
+  });
+
+  it('uses ethers.Contract with minimal ABI (not a full ERC-20 ABI)', () => {
+    expect(fetchFn).toContain('ethers.Contract');
+    expect(fetchFn).toContain('_RWA_BAL_ABI');
+    // The ABI constant should exist and only declare balanceOf
+    const abiConst = blockAt(rwaFull, '_RWA_BAL_ABI', 80);
+    expect(abiConst).toContain('balanceOf');
+    expect(abiConst).not.toContain('transfer(');
+  });
+
+  it('throws when CHAIN_REGISTRY has no rpcUrl for the chain', () => {
+    // The function must check rpcUrl before proceeding
+    expect(fetchFn).toContain('No RPC for chainId');
+  });
+
+  it('race-condition guard: bumps sequence counter before async call', () => {
+    // _rwaBalSeq.from and _rwaBalSeq.to are incremented synchronously
+    expect(updateFn).toContain('++_rwaBalSeq.from');
+    expect(updateFn).toContain('++_rwaBalSeq.to');
+  });
+
+  it('discards stale response if token changed before RPC returned', () => {
+    // After resolution, check that current seq matches captured seq
+    expect(updateFn).toContain('_rwaBalSeq.from !== fromSeq');
+    expect(updateFn).toContain('_rwaBalSeq.to !== toSeq');
+  });
+
+  it('shows loading indicator (…) while fetch is in-flight', () => {
+    expect(updateFn).toContain('Balance: …');
+  });
+
+  it('shows error state on RPC failure — not zero or dash', () => {
+    expect(updateFn).toContain('Balance: error');
+  });
+
+  it('resets to dash (—) synchronously on every call before async result', () => {
+    // The first thing the function does is set text to — before any async
+    const topOfFn = updateFn.slice(0, 500);
+    expect(topOfFn).toContain('Balance: —');
+  });
+
+  it('reads wallet from walletAddress global — no hardcoded address', () => {
+    expect(updateFn).toContain('walletAddress');
+    expect(updateFn).not.toMatch(/0x[0-9a-fA-F]{40}/);
+  });
+
+  it('returns early without error when wallet is disconnected', () => {
+    expect(updateFn).toContain('if (!wallet) return');
+  });
+
+  it('uses token.decimals from the token object — not hardcoded 18 everywhere', () => {
+    // fromDec reads _rwaFromToken.decimals; toDec reads _rwaToToken.decimals
+    expect(updateFn).toContain('_rwaFromToken.decimals');
+    expect(updateFn).toContain('_rwaToToken.decimals');
+  });
+
+  it('formats the raw BigInt with _rwaFmt, not Number() or parseFloat()', () => {
+    // _rwaFmt handles BigInt safely; Number(bigint > MAX_SAFE_INTEGER) would lose precision
+    const resultBlock = blockAt(updateFn, 'Balance: \' + _rwaFmt', 200);
+    expect(resultBlock.length).toBeGreaterThan(10);
+    expect(resultBlock).not.toContain('Number(raw)');
+    expect(resultBlock).not.toContain('parseFloat(raw)');
+  });
+
+  it('uses the from-token chain (_rwaFromChainId) for the from balance call', () => {
+    const fromBlock = blockAt(updateFn, 'fromChain', 400);
+    expect(fromBlock).toContain('_rwaFromChainId');
+  });
+
+  it('uses the to-token chain (_rwaToChainId) for the to balance call', () => {
+    const toBlock = blockAt(updateFn, 'toChain', 400);
+    expect(toBlock).toContain('_rwaToChainId');
+  });
+
+  it('does NOT call the legacy getTokenBalance function', () => {
+    // getTokenBalance is a Node-only shared/ function, never a browser global
+    expect(updateFn).not.toContain('getTokenBalance(');
+  });
+});
+
+describe('BAL — wallet event listeners and post-trade refresh', () => {
+  const _rwaStart2 = html.indexOf('RWA ADVANCED TRADING \u2014 JavaScript');
+  const rwaFull  = html.slice(_rwaStart2, _rwaStart2 + 55000);
+
+  it('registers WALLET_CONNECTED listener in init block', () => {
+    const initBlock = blockAt(rwaFull, '_rwaInitialized = true', 900);
+    expect(initBlock).toContain("'WALLET_CONNECTED'");
+    expect(initBlock).toContain('_rwaUpdateBalances');
+  });
+
+  it('registers WALLET_SWITCHED listener in init block', () => {
+    const initBlock = blockAt(rwaFull, '_rwaInitialized = true', 900);
+    expect(initBlock).toContain("'WALLET_SWITCHED'");
+  });
+
+  it('rwaOnChainChange calls _rwaUpdateBalances before rwaFetchQuote', () => {
+    const chainChangeFn = fnBlock(rwaFull, 'rwaOnChainChange', 300);
+    const updateIdx = chainChangeFn.indexOf('_rwaUpdateBalances');
+    const quoteIdx  = chainChangeFn.indexOf('rwaFetchQuote');
+    expect(updateIdx).toBeGreaterThan(-1);
+    expect(quoteIdx).toBeGreaterThan(-1);
+    expect(updateIdx).toBeLessThan(quoteIdx);
+  });
+
+  it('rwaExecuteTrade calls _rwaUpdateBalances after confirmed receipt', () => {
+    const execBlock8k = fnBlock(rwaFull, 'rwaExecuteTrade', 8000);
+    // After tx.wait() resolves and status !== failed, balance is refreshed
+    const afterReceiptBlock = blockAt(execBlock8k, 'status !== \'failed\'', 200);
+    expect(afterReceiptBlock).toContain('_rwaUpdateBalances');
   });
 });

@@ -61611,26 +61611,74 @@ function _rwaUpdateTokenUI() {
   _rwaUpdateBalances();
 }
 
+// ── ERC-20 minimal ABI for balanceOf only ───────────────────────
+var _RWA_BAL_ABI = ['function balanceOf(address) view returns (uint256)'];
+
+// Race-condition guard: each element tracks the last-requested token address.
+// If the token changes before the RPC responds, the stale result is discarded.
+var _rwaBalSeq = { from: 0, to: 0 };
+
+/**
+ * Fetch an ERC-20 balanceOf for `tokenAddr` on `chainId` for `wallet`.
+ * Returns a BigInt raw balance, or throws on RPC failure.
+ * Uses getCachedProvider so the JsonRpcProvider is shared with the rest of the app.
+ */
+async function _rwaFetchTokenBalance(tokenAddr, chainId, wallet) {
+  var chainCfg = (typeof CHAIN_REGISTRY !== 'undefined') ? CHAIN_REGISTRY[chainId] : null;
+  var rpcUrl = chainCfg ? chainCfg.rpc : null;
+  if (!rpcUrl) throw new Error('No RPC for chainId ' + chainId);
+  var prov = getCachedProvider(rpcUrl);
+  var contract = new ethers.Contract(tokenAddr, _RWA_BAL_ABI, prov);
+  return await contract.balanceOf(wallet);
+}
+
 function _rwaUpdateBalances() {
-  // Read balances using LiFiAdapter token address or CHAIN_REGISTRY lookup
   var fromBalEl = document.getElementById('rwa-from-bal');
   var toBalEl   = document.getElementById('rwa-to-bal');
+  // Reset to dash immediately on every token/chain change
   if (fromBalEl) fromBalEl.textContent = 'Balance: —';
   if (toBalEl)   toBalEl.textContent   = 'Balance: —';
-  // Attempt to read via existing getBalance/tokenBalance infra if available
-  if (typeof walletAddress === 'undefined' || !walletAddress) return;
-  try {
-    if (typeof getTokenBalance === 'function' && _rwaFromToken && _rwaFromToken.address) {
-      getTokenBalance(_rwaFromToken.address, walletAddress).then(function(b) {
-        if (fromBalEl && b != null) fromBalEl.textContent = 'Balance: ' + _rwaFmt(b, _rwaFromToken.decimals) + ' ' + _rwaFromToken.symbol;
-      }).catch(function() {});
-    }
-    if (typeof getTokenBalance === 'function' && _rwaToToken && _rwaToToken.address) {
-      getTokenBalance(_rwaToToken.address, walletAddress).then(function(b) {
-        if (toBalEl && b != null) toBalEl.textContent = 'Balance: ' + _rwaFmt(b, _rwaToToken.decimals) + ' ' + _rwaToToken.symbol;
-      }).catch(function() {});
-    }
-  } catch (_) {}
+
+  // Wallet must be connected
+  var wallet = (typeof walletAddress !== 'undefined') ? walletAddress : null;
+  if (!wallet) return;
+
+  // ── FROM balance ─────────────────────────────────────────────
+  if (_rwaFromToken && _rwaFromToken.address) {
+    var fromAddr    = _rwaFromToken.address;
+    var fromChain   = _rwaFromChainId || _rwaFromToken.chainId || 1;
+    var fromDec     = _rwaFromToken.decimals != null ? _rwaFromToken.decimals : 18;
+    var fromSym     = _rwaFromToken.symbol || '';
+    var fromSeq     = ++_rwaBalSeq.from;             // bump sequence before async
+    if (fromBalEl) fromBalEl.textContent = 'Balance: …';
+    _rwaFetchTokenBalance(fromAddr, fromChain, wallet).then(function(raw) {
+      // Discard if token changed while we were waiting
+      if (_rwaBalSeq.from !== fromSeq) return;
+      if (!fromBalEl) return;
+      fromBalEl.textContent = 'Balance: ' + _rwaFmt(raw, fromDec) + ' ' + fromSym;
+    }).catch(function() {
+      if (_rwaBalSeq.from !== fromSeq) return;
+      if (fromBalEl) fromBalEl.textContent = 'Balance: error';
+    });
+  }
+
+  // ── TO balance ───────────────────────────────────────────────
+  if (_rwaToToken && _rwaToToken.address) {
+    var toAddr    = _rwaToToken.address;
+    var toChain   = _rwaToChainId || _rwaToToken.chainId || 1;
+    var toDec     = _rwaToToken.decimals != null ? _rwaToToken.decimals : 18;
+    var toSym     = _rwaToToken.symbol || '';
+    var toSeq     = ++_rwaBalSeq.to;
+    if (toBalEl) toBalEl.textContent = 'Balance: …';
+    _rwaFetchTokenBalance(toAddr, toChain, wallet).then(function(raw) {
+      if (_rwaBalSeq.to !== toSeq) return;
+      if (!toBalEl) return;
+      toBalEl.textContent = 'Balance: ' + _rwaFmt(raw, toDec) + ' ' + toSym;
+    }).catch(function() {
+      if (_rwaBalSeq.to !== toSeq) return;
+      if (toBalEl) toBalEl.textContent = 'Balance: error';
+    });
+  }
 }
 
 function rwaOnAmountChange() {
@@ -61647,6 +61695,7 @@ function rwaOnChainChange() {
   var toSel   = document.getElementById('rwa-to-chain');
   if (fromSel) _rwaFromChainId = Number(fromSel.value);
   if (toSel)   _rwaToChainId   = Number(toSel.value);
+  _rwaUpdateBalances();
   rwaFetchQuote();
 }
 
@@ -62075,6 +62124,8 @@ async function rwaExecuteTrade() {
         var level = (status === 'failed') ? 'error' : (isCrossChain ? 'info' : 'success');
         if (typeof toast === 'function') toast(msg, level);
         if (_rwaActiveTab === 'history') rwaRenderHistory();
+        // Refresh balances after a confirmed trade (from token was spent).
+        if (status !== 'failed') _rwaUpdateBalances();
       }).catch(function() {
         _rwaUpdateStatus(txHash, 'failed');
         if (_rwaActiveTab === 'history') rwaRenderHistory();
@@ -62242,6 +62293,10 @@ if (_origShowPage) {
       if (pbar) pbar.style.display = 'none';
       rwaLoadMarkets();
       rwaRenderHistory();
+      // Refresh balances whenever the wallet connects or switches address/chain.
+      // These events are fired by finalizeConnection() and the chain-switch handler.
+      document.addEventListener('WALLET_CONNECTED', function() { _rwaUpdateBalances(); });
+      document.addEventListener('WALLET_SWITCHED',  function() { _rwaUpdateBalances(); });
     }
   };
 }
