@@ -72,8 +72,12 @@ export async function onRequestPost(context) {
     return json({ ok: false, error: 'Invalid toAddress', code: 'INVALID_ADDRESS' }, 400, env, request);
   }
 
-  const slippage = (body.slippage != null && Number.isFinite(Number(body.slippage)) && Number(body.slippage) >= 0 && Number(body.slippage) <= 1)
-    ? Number(body.slippage) : 0.005;
+  // Smart Slippage: pass 'auto' through to LI.FI when requested; fall back to
+  // numeric value when explicit bps given; use 0.005 (0.5 %) as last resort.
+  const slippage = body.slippage === 'auto'
+    ? 'auto'
+    : (body.slippage != null && Number.isFinite(Number(body.slippage)) && Number(body.slippage) >= 0 && Number(body.slippage) <= 1)
+      ? Number(body.slippage) : 0.005;
 
   const upstream_body = {
     fromChainId: Number(body.fromChainId),
@@ -87,6 +91,8 @@ export async function onRequestPost(context) {
       slippage: slippage,
       integrator: (typeof body.integrator === 'string' && body.integrator) ? body.integrator : 'elligentt',
       order: 'RECOMMENDED',
+      // Quote Simulation: filter routes that would revert before returning them.
+      ...(body.simulate === true ? { simulate: true } : {}),
     },
   };
 

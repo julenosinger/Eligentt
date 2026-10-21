@@ -152,6 +152,11 @@
       return { source: 'lifi', ok: false, error: 'NO_FROM_ADDRESS' };
     }
 
+    // Smart Slippage: pass 'auto' when no explicit slippage was requested so
+    // LI.FI calibrates tolerance per-token from live market data. When the user
+    // has set an explicit value (opts.slippageBps != null), honour it exactly.
+    var slippageParam = opts.slippageBps != null ? slippageBps / 10000 : 'auto';
+
     var res;
     try {
       res = await _postJson(API, {
@@ -162,8 +167,11 @@
         fromAmount: amountStr,
         fromAddress: fromAddress,
         toAddress: opts.toAddress || null,
-        slippage: slippageBps / 10000,
+        slippage: slippageParam,
         integrator: 'elligentt',
+        // Quote Simulation: ask LI.FI to pre-simulate and filter routes that
+        // would revert, so only executable quotes reach the user.
+        simulate: true,
       });
     } catch (e) {
       return { source: 'lifi', ok: false, error: (e && e.message) || String(e) };
@@ -341,6 +349,9 @@
       return { ok: false, error: 'NO_FROM_ADDRESS', routes: [] };
     }
 
+    // Smart Slippage: same logic as getQuote — 'auto' unless caller sets explicit bps.
+    var slippageParam = opts.slippageBps != null ? slippageBps / 10000 : 'auto';
+
     var res;
     try {
       res = await _postJson(ROUTES_API, {
@@ -351,8 +362,10 @@
         fromAmount: amountStr,
         fromAddress: fromAddress,
         toAddress: opts.toAddress || fromAddress,
-        slippage: slippageBps / 10000,
+        slippage: slippageParam,
         integrator: 'elligentt',
+        // Quote Simulation: filter routes that would revert before returning them.
+        simulate: true,
       });
     } catch (e) {
       return { ok: false, error: (e && e.message) || String(e), routes: [] };
@@ -489,6 +502,6 @@
     validateRoute: validateRoute,
     getStatus: getStatus,
     getTokens: getTokens,
-    version: '1.2.0',
+    version: '1.3.0', // Smart Slippage + Quote Simulation (LI.FI Enterprise)
   };
 })();

@@ -99,10 +99,17 @@ export async function onRequestPost(context) {
   });
   if (body.toAddress) params.set('toAddress', body.toAddress);
   if (body.slippage != null) {
-    const s = Number(body.slippage);
-    if (Number.isFinite(s) && s >= 0 && s <= 1) params.set('slippage', String(s));
+    if (body.slippage === 'auto') {
+      // Smart Slippage: LI.FI calibrates per-token from live market data.
+      params.set('slippage', 'auto');
+    } else {
+      const s = Number(body.slippage);
+      if (Number.isFinite(s) && s >= 0 && s <= 1) params.set('slippage', String(s));
+    }
   }
   if (typeof body.integrator === 'string' && body.integrator) params.set('integrator', body.integrator);
+  // Quote Simulation: pre-simulate to filter routes that would revert.
+  if (body.simulate === true) params.set('allowSwitchChain', 'false'), params.set('simulate', 'true');
 
   const headers = { 'Content-Type': 'application/json' };
   const key = (env && env.LIFI_API_KEY) || '';
