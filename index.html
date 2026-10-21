@@ -61394,18 +61394,26 @@ async function rwaLoadMarkets() {
 
   var chainIds = [1, 8453, 42161, 137, 10];
   var allTokens = [];
+  var _marketsApiError = null;
   try {
-    var url = '/api/lifi/tokens?chainId=' + chainIds.join(',');
+    // Pass tags=rwa so the proxy forwards the filter to LI.FI upstream.
+    // Without this param, LI.FI returns the full EVM token catalog and
+    // none of the tokens carry the rwa tag in the generic endpoint.
+    var url = '/api/lifi/tokens?chainId=' + chainIds.join(',') + '&tags=rwa';
     var res = await fetch(url, { credentials: 'same-origin' }).then(function(r) { return r.json(); });
     if (res && res.ok && res.tokens) {
       for (var cid in res.tokens) {
         var toks = res.tokens[cid] || [];
         toks.forEach(function(t) {
-          if (t.tags && Array.isArray(t.tags) && t.tags.indexOf('rwa') !== -1) {
-            allTokens.push(Object.assign({}, t, { chainId: Number(cid) }));
-          }
+          // Defensive client-side filter: keep only rwa-tagged tokens.
+          // With tags=rwa on the request LI.FI already filters upstream,
+          // so this check is a safety net, not the primary filter.
+          if (!t.tags || !Array.isArray(t.tags) || t.tags.indexOf('rwa') === -1) return;
+          allTokens.push(Object.assign({}, t, { chainId: Number(cid) }));
         });
       }
+    } else if (res && !res.ok) {
+      _marketsApiError = res.error || 'Proxy returned an error';
     }
   } catch (e) {
     if (grid) grid.innerHTML = '<div class="rwa-empty"><i class="ti ti-alert-triangle" style="color:#ef4444"></i><div class="rwa-empty-title">Failed to load markets</div><div class="rwa-empty-sub">' + _rwaEsc((e && e.message) || 'Network error') + '</div></div>';
@@ -61414,9 +61422,18 @@ async function rwaLoadMarkets() {
   }
 
   _rwaLoading = false;
+  if (_marketsApiError) {
+    // Proxy or upstream error — show error state, do not imply policy block.
+    if (grid) grid.innerHTML = '<div class="rwa-empty"><i class="ti ti-alert-triangle" style="color:#ef4444"></i><div class="rwa-empty-title">Could not load RWA tokens</div><div class="rwa-empty-sub">' + _rwaEsc(_marketsApiError) + '</div></div>';
+    return;
+  }
   if (allTokens.length === 0) {
-    if (grid) grid.innerHTML = '<div class="rwa-empty"><i class="ti ti-building-store"></i><div class="rwa-empty-title">No RWA tokens found</div><div class="rwa-empty-sub">LI.FI did not return any tokens tagged "rwa" for the selected chains. This may reflect your integrator policy or current coverage.</div></div>';
-    _rwaShowPolicy('unknown', 'No RWA tokens returned. Check your LI.FI Partner Portal policy.');
+    // LI.FI returned a valid response but no RWA-tagged tokens for these chains.
+    // This is a coverage/availability state, not a policy block — policy is
+    // only determinable from quote/route errors, not from an empty token list.
+    if (grid) grid.innerHTML = '<div class="rwa-empty"><i class="ti ti-building-store"></i><div class="rwa-empty-title">No RWA tokens available</div><div class="rwa-empty-sub">LI.FI has no RWA-tagged tokens for the selected chains right now. Coverage may vary by chain and integrator.</div></div>';
+    // Empty list = coverage gap; policy state is only known after a quote attempt.
+    // The policy bar stays hidden (set in init) — do not set it to 'unknown' here.
     return;
   }
 
@@ -62217,7 +62234,12 @@ if (_origShowPage) {
     _origShowPage(id);
     if (id === 'rwa' && !_rwaInitialized) {
       _rwaInitialized = true;
-      _rwaShowPolicy('unknown');
+      // Do NOT show policy bar on init — policy state is only determinable
+      // from a real quote response. Showing 'Policy Pending' before any
+      // quote has been attempted gives a false impression that token listing
+      // is blocked when the actual issue is just the missing tags= filter.
+      var pbar = document.getElementById('rwa-policy-bar');
+      if (pbar) pbar.style.display = 'none';
       rwaLoadMarkets();
       rwaRenderHistory();
     }

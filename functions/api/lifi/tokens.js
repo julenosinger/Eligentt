@@ -1,14 +1,21 @@
 /**
- * GET /api/lifi/tokens?chainId=8453[,1,42161,...]
+ * GET /api/lifi/tokens?chainId=8453[,1,42161,...]&tags=rwa
  * Server-side proxy for the LI.FI /tokens endpoint.
  * - Keeps LIFI_API_KEY server-side only.
- * - Caches the response in a Cloudflare Cache API bucket for 10 minutes.
+ * - Caches the response in a Cloudflare Cache API bucket.
  * - Filters to ONLY the chains Elligentt supports.
+ * - Optional ?tags= param (comma-separated) forwarded to LI.FI so callers
+ *   like rwaLoadMarkets can request ?tags=rwa and get only RWA tokens.
+ *   Without ?tags, all tokens are returned (backward-compatible default).
+ * - Cache is keyed by (chains + tags) so rwa and non-rwa responses are
+ *   stored separately — no cross-contamination for Swap/Bridge callers.
  * - Returns { ok: true, tokens: { [chainId]: TokenObject[] } }
  */
 
 const LIFI_BASE = 'https://li.quest/v1';
-const CACHE_TTL_SECONDS = 600; // 10 min
+// RWA-tagged responses are smaller and short-lived; generic token lists cached longer.
+const CACHE_TTL_RWA = 300;  // 5 min for tagged/filtered responses
+const CACHE_TTL_ALL = 600;  // 10 min for full token catalog
 const ALLOWED_CHAIN_IDS = new Set([5042, 1, 8453, 42161, 10, 137]);
 
 function json(data, status, headers) {
@@ -22,7 +29,7 @@ export async function onRequestGet({ request, env }) {
   const url = new URL(request.url);
 
   // Parse requested chain IDs from query param; default to all supported.
-  const rawChains = url.searchParams.get('chainId') || '';
+  const rawChains = url.searchParams.get('chainId') || url.searchParams.get('chains') || '';
   let requestedChains;
   if (rawChains) {
     requestedChains = rawChains.split(',')
@@ -35,8 +42,17 @@ export async function onRequestGet({ request, env }) {
     return json({ ok: false, error: 'No supported chains in request' }, 400);
   }
 
-  // Build a stable cache key from sorted chain IDs.
-  const cacheKey = 'https://lifi-tokens-cache/' + requestedChains.slice().sort().join(',');
+  // Parse optional tags filter (e.g. tags=rwa).
+  // When present, forwarded to LI.FI so only matching tokens are returned.
+  // Absent means return all tokens (backward-compatible for Swap/Bridge callers).
+  const rawTags = url.searchParams.get('tags') || '';
+  const tagsParam = rawTags.trim();
+
+  // Cache key includes tags so rwa and non-rwa responses never collide.
+  const cacheTtl = tagsParam ? CACHE_TTL_RWA : CACHE_TTL_ALL;
+  const cacheKey = 'https://lifi-tokens-cache/'
+    + requestedChains.slice().sort().join(',')
+    + (tagsParam ? '/tags=' + tagsParam : '');
   const cache = caches.default;
 
   // Try cache first.
@@ -50,9 +66,20 @@ export async function onRequestGet({ request, env }) {
   // EVM token catalog (~4 MB) on a cold cache was the cause of the slow
   // token-selector load. `chains` shrinks the upstream payload to just the
   // chains we support (e.g. Base ≈400 KB, Arc ≈12 KB).
+  // When tags= is set (e.g. tags=rwa), LI.FI returns only tokens with that
+  // tag — drastically smaller response and the correct RWA token set.
   const lifiUrl = new URL(LIFI_BASE + '/tokens');
   lifiUrl.searchParams.set('chainTypes', 'EVM');
   lifiUrl.searchParams.set('chains', requestedChains.join(','));
+  if (tagsParam) {
+    // Forward the tags filter directly to LI.FI.
+    // LI.FI accepts comma-separated tag values: ?tags=rwa or ?tags=rwa,defi
+    lifiUrl.searchParams.set('tags', tagsParam);
+  }
+  // Forward integrator so Partner Portal policy resolves for this request.
+  const integrator = (env && env.LIFI_INTEGRATOR) || 'elligentt';
+  lifiUrl.searchParams.set('integrator', integrator);
+
   const headers = { 'Accept': 'application/json', 'User-Agent': 'elligentt/1.0' };
   const key = (env && env.LIFI_API_KEY) || '';
   if (key) headers['x-lifi-api-key'] = key;
@@ -100,11 +127,11 @@ export async function onRequestGet({ request, env }) {
 
   const result = { ok: true, tokens: filtered };
 
-  // Cache the successful response.
+  // Cache the successful response (TTL differs: shorter for tagged/filtered sets).
   const cacheResp = new Response(JSON.stringify(result), {
     headers: {
       'Content-Type': 'application/json',
-      'Cache-Control': 'public, max-age=' + CACHE_TTL_SECONDS,
+      'Cache-Control': 'public, max-age=' + cacheTtl,
     },
   });
   await cache.put(cacheKey, cacheResp).catch(() => null);

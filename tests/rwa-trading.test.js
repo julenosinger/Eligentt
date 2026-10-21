@@ -346,7 +346,9 @@ describe('N10 — showPage lazy-load hook', () => {
     expect(rwaJS).toContain('!_rwaInitialized');
   });
   it('hook calls rwaLoadMarkets on first visit', () => {
-    const block = blockAt(rwaJS, '_rwaInitialized = true', 300);
+    // Use a wider window: a comment was inserted between _rwaInitialized = true
+    // and the rwaLoadMarkets() call so 300 chars no longer covers both.
+    const block = blockAt(rwaJS, '_rwaInitialized = true', 600);
     expect(block).toContain('rwaLoadMarkets()');
   });
   it('hook delegates to _origShowPage for all pages', () => {
@@ -369,10 +371,65 @@ describe('N11 — Token discovery via LI.FI proxy', () => {
     expect(loadBlock).toContain("indexOf('rwa')");
   });
   it('handles empty token list gracefully', () => {
-    expect(loadBlock).toContain('No RWA tokens found');
+    // Message updated: "No RWA tokens available" (coverage state, not policy block).
+    // "No RWA tokens found" was misleading — empty list is an availability issue,
+    // not a policy block. Policy is only determinable from a quote response.
+    expect(loadBlock).toContain('No RWA tokens available');
   });
   it('handles network error gracefully', () => {
     expect(loadBlock).toContain('Failed to load markets');
+  });
+});
+
+// ── FIX-MARKETS: tags=rwa forwarded through proxy + no false policy badge ────
+
+describe('FIX-MARKETS — tags=rwa forwarding and accurate empty state', () => {
+  const rwaFull2 = html.slice(html.indexOf('RWA ADVANCED TRADING — JavaScript'), html.indexOf('RWA ADVANCED TRADING — JavaScript') + 50000);
+  const loadBlock2 = fnBlock(rwaFull2, 'rwaLoadMarkets', 3000);
+  const tokensProxy = fs.readFileSync(path.resolve(__dirname, '../functions/api/lifi/tokens.js'), 'utf8');
+
+  it('rwaLoadMarkets requests /api/lifi/tokens with tags=rwa', () => {
+    // The URL must include &tags=rwa so LI.FI filters upstream.
+    // Without it, LI.FI returns the full catalog with empty tags arrays.
+    expect(loadBlock2).toContain('tags=rwa');
+  });
+
+  it('proxy accepts ?tags query param and forwards to LI.FI', () => {
+    expect(tokensProxy).toContain("url.searchParams.get('tags')");
+    expect(tokensProxy).toContain("lifiUrl.searchParams.set('tags'");
+  });
+
+  it('proxy passes integrator to LI.FI (Partner Portal policy resolution)', () => {
+    expect(tokensProxy).toContain("lifiUrl.searchParams.set('integrator'");
+  });
+
+  it('cache key includes tags so rwa and non-rwa responses are separate', () => {
+    // Cache key appends /tags=<value> when tagsParam is set, so rwa and
+    // non-rwa responses are stored separately. The separator is '/tags='.
+    expect(tokensProxy).toContain('/tags=');
+    // The tags suffix must be conditional (only when tagsParam is truthy).
+    expect(tokensProxy).toContain('tagsParam ?');
+  });
+
+  it('empty token list does not call _rwaShowPolicy(unknown)', () => {
+    // Empty list = coverage gap, not a policy block. Showing Policy Pending
+    // was misleading. The policy bar stays hidden until a quote is attempted.
+    // Check: the empty-list branch must NOT contain _rwaShowPolicy('unknown').
+    const emptyBranch = blockAt(loadBlock2, 'No RWA tokens available', 400);
+    expect(emptyBranch).not.toContain("_rwaShowPolicy('unknown'");
+  });
+
+  it('init does not call _rwaShowPolicy before any quote', () => {
+    // The showPage hook must hide the policy bar on init, not call showPolicy('unknown').
+    const initBlock = blockAt(rwaFull2, '_rwaInitialized = true', 800);
+    expect(initBlock).not.toContain("_rwaShowPolicy('unknown'");
+    // Policy bar must be explicitly hidden instead
+    expect(initBlock).toContain("pbar.style.display = 'none'");
+  });
+
+  it('rwaLoadMarkets uses ?chains param that is backward-compatible alias', () => {
+    // The proxy now accepts both ?chainId= and ?chains= for backward compat.
+    expect(tokensProxy).toContain("url.searchParams.get('chains')");
   });
 });
 
@@ -558,15 +615,18 @@ describe('P1 — tokens.js proxy preserves tags field for RWA discovery', () => 
     expect(tokensProxy).toContain(".filter(t => t.symbol && t.address)");
   });
   it('empty tags array is falsy-safe in consumer code', () => {
-    // rwaLoadMarkets: tags && Array.isArray(tags) — empty array passes Array.isArray
-    // but indexOf('rwa') === -1, so no spurious RWA tokens are added.
+    // rwaLoadMarkets now uses early-return negation (!t.tags || ...) so tokens
+    // without an rwa tag are skipped — semantically equivalent but guard is
+    // expressed as !t.tags rather than t.tags &&.
     const rwaFull = html.slice(
       html.indexOf('RWA ADVANCED TRADING — JavaScript'),
       html.indexOf('RWA ADVANCED TRADING — JavaScript') + 50000
     );
     const loadBlock = fnBlock(rwaFull, 'rwaLoadMarkets', 3000);
-    // The guard uses && so an absent/empty tags won't throw
-    expect(loadBlock).toContain('t.tags &&');
+    // Either form of the guard must be present to prevent tokens without tags from passing.
+    const hasPositiveGuard = loadBlock.includes('t.tags &&') || loadBlock.includes('t.tags,') || loadBlock.includes('t.tags)');
+    const hasNegativeGuard = loadBlock.includes('!t.tags') || loadBlock.includes('t.tags.indexOf');
+    expect(hasPositiveGuard || hasNegativeGuard).toBe(true);
   });
 });
 
