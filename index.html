@@ -18246,6 +18246,47 @@ function brgHistFilter(filter, btn) {
   brgHistRender();
 }
 
+// ── Trusted explorer origins (protocol must be https) ──────────────────────
+var _BRG_TRUSTED_EXPLORERS = [
+  'https://explorer.arc.io',
+  'https://etherscan.io',
+  'https://basescan.org',
+  'https://arbiscan.io',
+  'https://optimistic.etherscan.io',
+  'https://polygonscan.com',
+];
+/**
+ * Validate an explorer base URL.  Returns the sanitised origin when trusted,
+ * null otherwise.  Prevents javascript: / data: / relative-URL injection.
+ */
+function _brgSafeExplorerBase(raw) {
+  if (!raw || typeof raw !== 'string') return null;
+  try {
+    var u = new URL(raw);
+    if (u.protocol !== 'https:') return null;
+    var origin = u.origin; // strips any path/query/hash
+    for (var i = 0; i < _BRG_TRUSTED_EXPLORERS.length; i++) {
+      if (origin === _BRG_TRUSTED_EXPLORERS[i]) return origin;
+    }
+  } catch (_) {}
+  return null;
+}
+
+/**
+ * Validate a tx hash: must be 0x followed by 64 hex chars.
+ */
+function _brgSafeTxHash(raw) {
+  if (!raw || typeof raw !== 'string') return null;
+  return /^0x[0-9a-fA-F]{64}$/.test(raw.trim()) ? raw.trim() : null;
+}
+
+/**
+ * Refresh: re-reads localStorage and, when recoverPendingIntents is available
+ * AND a wallet is connected, attempts a real on-chain status check.
+ * NOTE: on-chain confirmation requires a connected wallet + RPC.  When neither
+ * is available the panel shows the persisted status unchanged — it never marks
+ * a transaction confirmed without a verifiable on-chain result.
+ */
 function brgHistRefresh() {
   if (_brgHistBusy) return;
   _brgHistBusy = true;
@@ -18253,125 +18294,244 @@ function brgHistRefresh() {
   var icon = document.getElementById('brg-hist-refresh-icon');
   if (btn)  btn.disabled = true;
   if (icon) icon.style.animation = 'spin .6s linear infinite';
-  setTimeout(function() {
+
+  function _done() {
     _brgHistBusy = false;
     if (btn)  btn.disabled = false;
     if (icon) icon.style.animation = '';
     brgHistRender();
-  }, 600);
+  }
+
+  // Attempt real on-chain recovery when wallet + recoverPendingIntents are available.
+  // recoverPendingIntents updates localStorage in-place; brgHistRender picks it up.
+  if (typeof recoverPendingIntents === 'function' &&
+      typeof walletAddress !== 'undefined' && walletAddress) {
+    recoverPendingIntents().then(_done).catch(_done);
+  } else {
+    // No wallet or no recovery function — re-render from persisted state only.
+    // Status remains as stored; pending entries stay pending until wallet connects.
+    _done();
+  }
 }
 
+/**
+ * Build a single history entry row safely (NO innerHTML of untrusted data).
+ * All user-controlled strings are set via textContent or safe attribute assignment.
+ */
+function _brgHistBuildRow(e) {
+  var wrapper = document.createElement('div');
+  wrapper.className = 'brg-hist-entry';
+
+  // Dot
+  var dot = document.createElement('div');
+  dot.className = 'swp-hist-entry-dot ' + (e.failed ? 'err' : e.pending ? 'pend' : 'ok');
+  if (e.dotColor && /^#[0-9a-fA-F]{3,8}$/.test(e.dotColor)) {
+    dot.style.background = e.dotColor;
+  }
+  wrapper.appendChild(dot);
+
+  // Main text block
+  var main = document.createElement('div');
+  main.className = 'swp-hist-entry-main';
+
+  var pair = document.createElement('div');
+  pair.className = 'swp-hist-entry-pair';
+  pair.textContent = e.label || '—';         // textContent — no HTML injection
+  main.appendChild(pair);
+
+  var amts = document.createElement('div');
+  amts.className = 'swp-hist-entry-amounts';
+  amts.textContent = e.sub || '';             // textContent
+  main.appendChild(amts);
+
+  wrapper.appendChild(main);
+
+  // Meta: badge + optional explorer link
+  var meta = document.createElement('div');
+  meta.className = 'swp-hist-entry-meta';
+
+  var badge = document.createElement('span');
+  badge.className = 'brg-hist-entry-provider';
+  if (e.failed) {
+    badge.textContent = 'Failed';
+    badge.style.cssText = 'color:var(--red);background:rgba(239,68,68,.1);border-color:rgba(239,68,68,.15)';
+  } else if (e.pending) {
+    badge.textContent = 'Pending';
+    badge.style.cssText = 'color:var(--yellow);background:rgba(245,158,11,.1);border-color:rgba(245,158,11,.15)';
+  } else {
+    badge.textContent = 'Done';
+    badge.style.cssText = 'color:var(--teal);background:rgba(45,212,191,.1);border-color:rgba(45,212,191,.15)';
+  }
+  meta.appendChild(badge);
+
+  // Explorer link — only when both hash and origin are validated
+  var safeHash    = _brgSafeTxHash(e.txHash);
+  var safeOrigin  = _brgSafeExplorerBase(e.explorer);
+  if (safeHash && safeOrigin) {
+    var link = document.createElement('a');
+    link.className = 'swp-hist-entry-link';
+    link.href       = safeOrigin + '/tx/' + safeHash;
+    link.target     = '_blank';
+    link.rel        = 'noopener noreferrer';
+    var linkIcon = document.createElement('i');
+    linkIcon.className = 'ti ti-external-link';
+    link.appendChild(linkIcon);
+    meta.appendChild(link);
+  } else if (safeHash) {
+    // Hash present but explorer not trusted — show truncated hash as plain text
+    var hashSpan = document.createElement('span');
+    hashSpan.style.cssText = 'font-size:8px;color:var(--muted2);font-family:monospace';
+    hashSpan.textContent = safeHash.slice(0, 10) + '…';
+    meta.appendChild(hashSpan);
+  }
+
+  wrapper.appendChild(meta);
+  return wrapper;
+}
+
+/**
+ * Render Bridge History panel.  Reads exclusively from localStorage via
+ * loadBridgeHistory() — no DOM scraping of untrusted content.
+ * The hidden #bridge-history container is used only as a write target for
+ * addToHistory(); we never read HTML back from it.
+ */
 function brgHistRender() {
   var list = document.getElementById('brg-hist-list');
   if (!list) return;
 
-  // Read entries from the hidden #bridge-history container (populated by addToHistory)
-  // and from localStorage (populated by saveBridgeHistory) — merge both sources.
-  var entries = [];
-
-  // Source 1: DOM entries from addToHistory (current session)
-  var domContainer = document.getElementById('bridge-history');
-  if (domContainer) {
-    var rows = domContainer.querySelectorAll('.tx-row');
-    rows.forEach(function(row) {
-      var labelEl  = row.querySelector('.tx-label');
-      var subEl    = row.querySelector('.tx-sub');
-      var dotEl    = row.querySelector('.tx-dot');
-      var linkEl   = row.querySelector('a');
-      var dotColor = dotEl ? (dotEl.style.background || '#2dd4bf') : '#2dd4bf';
-      var isPending = dotColor.indexOf('f59e0b') >= 0 || dotColor.indexOf('yellow') >= 0;
-      var isFailed  = dotColor.indexOf('ef4444') >= 0 || dotColor.indexOf('red') >= 0;
-      entries.push({
-        label:   labelEl ? labelEl.textContent : '—',
-        sub:     subEl   ? subEl.textContent   : '',
-        txHash:  linkEl  ? (linkEl.href || '') : '',
-        explorer: linkEl ? linkEl.href.replace(/\/tx\/.*$/, '') : '',
-        dotColor: dotColor,
-        pending: isPending,
-        failed:  isFailed,
-        ts: row.dataset.ts ? parseInt(row.dataset.ts) : 0,
-      });
-    });
-  }
-
-  // Source 2: localStorage history (persisted across sessions)
+  // Authoritative source: localStorage (populated by saveBridgeHistory +
+  // updated by recoverPendingIntents on refresh).
   var stored = (typeof loadBridgeHistory === 'function') ? loadBridgeHistory() : [];
+
+  // Also capture entries added this session via addToHistory that may not yet
+  // be in localStorage (addToHistory writes to DOM; saveBridgeHistory persists).
+  // We use the in-memory _brgSessionEntries queue instead of reading DOM HTML.
+  var sessionEntries = (typeof _brgSessionEntries !== 'undefined') ? _brgSessionEntries : [];
+
+  var entries = [];
+  var seenHashes = {};
+
+  // Session entries first (newest)
+  sessionEntries.forEach(function(e) {
+    var key = e.txHash || (e.label + '|' + e.ts);
+    if (!seenHashes[key]) { seenHashes[key] = true; entries.push(e); }
+  });
+
+  // localStorage entries (may overlap with session)
   stored.forEach(function(h) {
-    // Avoid duplicates: skip if txHash already present from DOM source.
-    var alreadyIn = entries.some(function(e) { return e.txHash && h.txHash && e.txHash === h.txHash; });
-    if (!alreadyIn && (h.label || h.txHash)) {
-      entries.push({
-        label:    h.label   || (h.amount ? h.amount + ' ' + (h.token || 'USDC') + ': ' + (h.from || '?') + ' → ' + (h.to || '?') : '—'),
-        sub:      h.sub     || (h.provider || 'Bridge') + (h.ts ? ' · ' + new Date(h.ts).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true}) : ''),
-        txHash:   h.txHash  || h.sourceTxHash || '',
-        explorer: h.explorer || '',
-        dotColor: h.dotColor || (h.finalStatus === 'EXECUTED' ? '#2dd4bf' : h.finalStatus === 'FAILED' ? '#ef4444' : '#f59e0b'),
-        pending:  !h.finalStatus || h.finalStatus === 'BURN_CONFIRMED' || h.finalStatus === 'WAITING_ATTESTATION' || h.finalStatus === 'BRIDGE_PENDING',
-        failed:   h.finalStatus === 'FAILED',
-        ts: h.ts || h.timestamp || 0,
-      });
+    var txHash  = h.txHash || h.sourceTxHash || '';
+    var label   = h.label || (h.amount ? h.amount + ' ' + (h.token || 'USDC') + ': ' + (h.from || '?') + ' → ' + (h.to || '?') : '');
+    var sub     = h.sub   || (h.provider || 'Bridge') + (h.ts ? ' · ' + new Date(h.ts).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true}) : '');
+    var dotColor = h.dotColor || (h.finalStatus === 'EXECUTED' ? '#2dd4bf' : h.finalStatus === 'FAILED' ? '#ef4444' : '#f59e0b');
+    var pending  = !h.finalStatus || h.finalStatus === 'BURN_CONFIRMED' || h.finalStatus === 'WAITING_ATTESTATION' || h.finalStatus === 'BRIDGE_PENDING' || h.finalStatus === 'CREATED';
+    var failed   = h.finalStatus === 'FAILED';
+    var key = txHash || (label + '|' + (h.ts || 0));
+    if (!(h.label || txHash)) return; // skip empty records
+    if (!seenHashes[key]) {
+      seenHashes[key] = true;
+      entries.push({ label: label, sub: sub, txHash: txHash, explorer: h.explorer || '', dotColor: dotColor, pending: pending, failed: failed, ts: h.ts || h.timestamp || 0 });
     }
   });
 
-  // Sort: newest first.
   entries.sort(function(a, b) { return (b.ts || 0) - (a.ts || 0); });
 
-  // Apply filter.
   var filtered = entries.filter(function(e) {
     if (_brgHistFilter === 'done')    return !e.pending && !e.failed;
     if (_brgHistFilter === 'pending') return !!e.pending;
     return true;
   });
 
+  // Clear list safely
+  while (list.firstChild) list.removeChild(list.firstChild);
+
   if (!filtered.length) {
-    list.innerHTML = '<div class="brg-hist-empty"><i class="ti ti-topology-star-3"></i><span>'
-      + (_brgHistFilter !== 'all' ? 'No ' + _brgHistFilter + ' bridges' : 'No bridges yet') + '</span></div>';
+    var empty = document.createElement('div');
+    empty.className = 'brg-hist-empty';
+    var emptyIcon = document.createElement('i');
+    emptyIcon.className = 'ti ti-topology-star-3';
+    var emptySpan = document.createElement('span');
+    emptySpan.textContent = _brgHistFilter !== 'all' ? 'No ' + _brgHistFilter + ' bridges' : 'No bridges yet';
+    empty.appendChild(emptyIcon);
+    empty.appendChild(emptySpan);
+    list.appendChild(empty);
     return;
   }
 
-  list.innerHTML = filtered.map(function(e) {
-    var dotClass = e.failed ? 'err' : e.pending ? 'pend' : 'ok';
-    var dotStyle = e.dotColor ? ' style="background:' + e.dotColor + '"' : '';
-    var explorerBase = e.explorer || '';
-    var txLink = (e.txHash && explorerBase)
-      ? '<a class="swp-hist-entry-link" href="' + explorerBase + '/tx/' + e.txHash + '" target="_blank" rel="noopener"><i class="ti ti-external-link"></i></a>'
-      : (e.txHash ? '<span style="font-size:8px;color:var(--muted2);font-family:monospace">' + e.txHash.slice(0,10) + '…</span>' : '');
-    var badge = e.failed
-      ? '<span class="brg-hist-entry-provider" style="color:var(--red);background:rgba(239,68,68,.1);border-color:rgba(239,68,68,.15)">Failed</span>'
-      : (e.pending
-          ? '<span class="brg-hist-entry-provider" style="color:var(--yellow);background:rgba(245,158,11,.1);border-color:rgba(245,158,11,.15)">Pending</span>'
-          : '<span class="brg-hist-entry-provider" style="color:var(--teal);background:rgba(45,212,191,.1);border-color:rgba(45,212,191,.15)">Done</span>');
-    return '<div class="brg-hist-entry">'
-      + '<div class="swp-hist-entry-dot ' + dotClass + '"' + dotStyle + '></div>'
-      + '<div class="swp-hist-entry-main">'
-      +   '<div class="swp-hist-entry-pair">' + (e.label || '—') + '</div>'
-      +   '<div class="swp-hist-entry-amounts">' + (e.sub || '') + '</div>'
-      + '</div>'
-      + '<div class="swp-hist-entry-meta">' + badge + txLink + '</div>'
-      + '</div>';
-  }).join('');
+  filtered.forEach(function(e) { list.appendChild(_brgHistBuildRow(e)); });
 }
 
-// Also re-render the Bridge History panel when a new entry is added (if open).
-var _brgHistOrigAddToHistory = null;
-(function _patchAddToHistoryForBridge() {
-  // Defer until addToHistory is defined (script order safety).
-  var _orig = null;
-  function _tryPatch() {
-    if (typeof addToHistory !== 'function') { setTimeout(_tryPatch, 300); return; }
-    if (addToHistory._brgPatched) return;
-    _orig = addToHistory;
-    addToHistory = function(containerId, opts) {
-      _orig(containerId, opts);
-      // Re-render Bridge panel if it is open and this is a bridge entry.
-      if (containerId === 'bridge-history') {
-        var overlay = document.getElementById('brg-hist-overlay');
-        if (overlay && overlay.classList.contains('open')) brgHistRender();
+// ── In-memory session queue (replaces DOM-scraping, avoids XSS read-back) ──
+// addToHistory writes to the hidden #bridge-history DOM node (for compat).
+// We also push a sanitised copy here so brgHistRender never reads raw HTML back.
+var _brgSessionEntries = [];
+
+// Listen for bridge entries via a custom event — NO monkey-patching of the
+// global addToHistory function.  executeBridgeViaCCTP / executeBridgeViaLiFi
+// both call addToHistory('bridge-history', ...) — we intercept by observing
+// the hidden container with a MutationObserver, which is local to this module
+// and has zero effect on any other tab.
+(function _initBrgHistObserver() {
+  function _attach() {
+    var container = document.getElementById('bridge-history');
+    if (!container) { setTimeout(_attach, 400); return; }
+    var observer = new MutationObserver(function() {
+      // A new .tx-item was prepended — read its data attributes (set safely by
+      // addToHistory) rather than its innerHTML.  The item has no data-* attrs
+      // in the current addToHistory impl, so we read textContent only.
+      var items = container.querySelectorAll('.tx-item');
+      if (!items.length) return;
+      var newest = items[0];
+      var labelEl = newest.querySelector('[style*="font-weight:600"]');
+      var subEl   = newest.querySelector('[style*="color:var(--muted2)"]');
+      var linkEl  = newest.querySelector('a[href]');
+      var dotEl   = newest.querySelector('.tx-dot');
+
+      var rawHref    = linkEl ? linkEl.getAttribute('href') : '';
+      // Extract txHash and explorer from the href safely
+      var safeOrigin = null;
+      var safeHash   = null;
+      if (rawHref) {
+        try {
+          var u = new URL(rawHref);
+          if (u.protocol === 'https:') {
+            safeOrigin = _brgSafeExplorerBase(u.origin);
+            var parts  = u.pathname.split('/');
+            var idx    = parts.indexOf('tx');
+            if (idx >= 0 && parts[idx+1]) safeHash = _brgSafeTxHash(parts[idx+1]);
+          }
+        } catch(_e) {}
       }
-    };
-    addToHistory._brgPatched = true;
+
+      var dotColor = dotEl ? dotEl.style.background : '#2dd4bf';
+      var entry = {
+        label:    labelEl ? labelEl.textContent : '—',
+        sub:      subEl   ? subEl.textContent   : '',
+        txHash:   safeHash   || '',
+        explorer: safeOrigin || '',
+        dotColor: /^#[0-9a-fA-F]{3,8}$/.test(dotColor) ? dotColor : '#2dd4bf',
+        pending:  dotColor.indexOf('f59e0b') >= 0,
+        failed:   dotColor.indexOf('ef4444') >= 0,
+        ts:       Date.now(),
+      };
+      // Deduplicate by hash or label+ts-bucket
+      var key = entry.txHash || (entry.label + '|' + Math.floor(entry.ts / 2000));
+      var already = _brgSessionEntries.some(function(x) {
+        return (x.txHash && x.txHash === entry.txHash) || (!x.txHash && x.label === entry.label && Math.abs((x.ts||0) - entry.ts) < 2000);
+      });
+      if (!already) _brgSessionEntries.unshift(entry);
+      if (_brgSessionEntries.length > 50) _brgSessionEntries.length = 50;
+
+      // Re-render panel if open
+      var overlay = document.getElementById('brg-hist-overlay');
+      if (overlay && overlay.classList.contains('open')) brgHistRender();
+    });
+    observer.observe(container, { childList: true });
   }
-  setTimeout(_tryPatch, 500);
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', _attach);
+  } else {
+    setTimeout(_attach, 200);
+  }
 })();
 
 // ── Bridge History & Monitoring ─────────────────────────────────
