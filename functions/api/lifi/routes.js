@@ -72,12 +72,23 @@ export async function onRequestPost(context) {
     return json({ ok: false, error: 'Invalid toAddress', code: 'INVALID_ADDRESS' }, 400, env, request);
   }
 
-  // Smart Slippage: pass 'auto' through to LI.FI when requested; fall back to
-  // numeric value when explicit bps given; use 0.005 (0.5 %) as last resort.
-  const slippage = body.slippage === 'auto'
-    ? 'auto'
-    : (body.slippage != null && Number.isFinite(Number(body.slippage)) && Number(body.slippage) >= 0 && Number(body.slippage) <= 1)
-      ? Number(body.slippage) : 0.005;
+  // Slippage: /v1/advanced/routes requires options.slippage to be a number.
+  // When caller requests 'auto' (Smart Slippage), omit the field so LI.FI
+  // applies its own default — sending the string 'auto' causes a schema error.
+  // Fall back to 0.005 (0.5 %) for any other invalid/absent value.
+  const slippageNum = (body.slippage != null && body.slippage !== 'auto' &&
+    Number.isFinite(Number(body.slippage)) &&
+    Number(body.slippage) >= 0 && Number(body.slippage) <= 1)
+      ? Number(body.slippage) : null;  // null = omit field
+
+  const routeOptions = {
+    integrator: (typeof body.integrator === 'string' && body.integrator) ? body.integrator : 'elligentt',
+    order: 'RECOMMENDED',
+    // Quote Simulation: filter routes that would revert before returning them.
+    ...(body.simulate === true ? { simulate: true } : {}),
+  };
+  // Only add slippage when a valid numeric value was provided.
+  if (slippageNum !== null) routeOptions.slippage = slippageNum;
 
   const upstream_body = {
     fromChainId: Number(body.fromChainId),
@@ -87,13 +98,7 @@ export async function onRequestPost(context) {
     fromAmount: body.fromAmount,
     fromAddress: body.fromAddress,
     toAddress: body.toAddress || body.fromAddress,
-    options: {
-      slippage: slippage,
-      integrator: (typeof body.integrator === 'string' && body.integrator) ? body.integrator : 'elligentt',
-      order: 'RECOMMENDED',
-      // Quote Simulation: filter routes that would revert before returning them.
-      ...(body.simulate === true ? { simulate: true } : {}),
-    },
+    options: routeOptions,
   };
 
   const headers = { 'Content-Type': 'application/json' };

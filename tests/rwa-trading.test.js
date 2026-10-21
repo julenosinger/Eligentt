@@ -768,7 +768,7 @@ describe('BAL — _rwaUpdateBalances real balanceOf implementation', () => {
   const _rwaStart = html.indexOf('RWA ADVANCED TRADING \u2014 JavaScript');
   const rwaFull  = html.slice(_rwaStart, _rwaStart + 55000);
   const updateFn = fnBlock(rwaFull, '_rwaUpdateBalances', 3500);
-  const fetchFn  = fnBlock(rwaFull, '_rwaFetchTokenBalance', 800);
+  const fetchFn  = fnBlock(rwaFull, '_rwaFetchTokenBalance', 1000);
 
   it('_rwaFetchTokenBalance function exists', () => {
     expect(fetchFn.length).toBeGreaterThan(50);
@@ -798,9 +798,13 @@ describe('BAL — _rwaUpdateBalances real balanceOf implementation', () => {
     expect(abiConst).not.toContain('transfer(');
   });
 
-  it('throws when CHAIN_REGISTRY has no rpcUrl for the chain', () => {
-    // The function must check rpcUrl before proceeding
-    expect(fetchFn).toContain('No RPC for chainId');
+  it('returns null (not throw) when CHAIN_REGISTRY has no rpcUrl for the chain', () => {
+    // The function must check rpcUrl and return null gracefully, not throw —
+    // throwing causes "Balance: error" in the UI for CORS/no-proxy scenarios.
+    const fetchFn900 = fnBlock(rwaFull, '_rwaFetchTokenBalance', 900);
+    expect(fetchFn900).toContain('return null');
+    expect(fetchFn900).not.toContain('No RPC for chainId');
+    expect(fetchFn900).not.toMatch(/throw new Error/);
   });
 
   it('race-condition guard: bumps sequence counter before async call', () => {
@@ -819,8 +823,13 @@ describe('BAL — _rwaUpdateBalances real balanceOf implementation', () => {
     expect(updateFn).toContain('Balance: …');
   });
 
-  it('shows error state on RPC failure — not zero or dash', () => {
-    expect(updateFn).toContain('Balance: error');
+  it('shows dash (—) on RPC failure — never "Balance: error" (avoids alarming users for CORS/network issues)', () => {
+    // Catch handlers now show '—' not 'error', since external RPCs cause CORS
+    // errors that are not user-actionable — a dash is less alarming and accurate.
+    expect(updateFn).not.toContain('Balance: error');
+    // Both catch handlers must show dash
+    const catches = [...updateFn.matchAll(/\.catch\(function[\s\S]{0,200}?\)\s*;/g)].map(m => m[0]);
+    catches.forEach(c => expect(c).toContain('Balance: —'));
   });
 
   it('resets to dash (—) synchronously on every call before async result', () => {
@@ -897,5 +906,85 @@ describe('BAL — wallet event listeners and post-trade refresh', () => {
     // After tx.wait() resolves and status !== failed, balance is refreshed
     const afterReceiptBlock = blockAt(execBlock8k, 'status !== \'failed\'', 200);
     expect(afterReceiptBlock).toContain('_rwaUpdateBalances');
+  });
+});
+
+// ── FIX-BALANCE: all chains use internal RPC proxy ────────────────────────────
+describe('FIX-BALANCE — all chains use same-origin RPC proxies', () => {
+  const _rwaStart3 = html.indexOf('RWA ADVANCED TRADING \u2014 JavaScript');
+  const rwaFull3   = html.slice(_rwaStart3, _rwaStart3 + 55000);
+  const fetchFn    = fnBlock(rwaFull3, '_rwaFetchTokenBalance', 900);
+
+  it('_rwaFetchTokenBalance exists in RWA block', () => {
+    expect(fetchFn.length).toBeGreaterThan(50);
+  });
+
+  it('returns null when rpcUrl is absent (not throw)', () => {
+    // No RPC configured → return null, not throw Error
+    const noRpcBlock = blockAt(fetchFn, 'rpcUrl', 80);
+    expect(noRpcBlock).toContain('return null');
+    expect(noRpcBlock).not.toContain('throw');
+  });
+
+  it('does not have the old CORS startsWith guard (all chains have proxy now)', () => {
+    // The guard was needed when some chains had external URLs.
+    // Now all CHAIN_REGISTRY entries point to /api/rpc/* — no guard needed.
+    expect(fetchFn).not.toContain("!rpcUrl.startsWith('/')");
+  });
+
+  it('CHAIN_REGISTRY chain 1 uses internal proxy', () => {
+    expect(html).toContain("rpc: '/api/rpc/ethereum'");
+  });
+
+  it('CHAIN_REGISTRY chain 8453 uses internal proxy', () => {
+    expect(html).toContain("rpc: '/api/rpc/base'");
+  });
+
+  it('CHAIN_REGISTRY chain 42161 uses internal proxy', () => {
+    expect(html).toContain("rpc: '/api/rpc/arbitrum'");
+  });
+
+  it('CHAIN_REGISTRY chain 10 uses internal proxy', () => {
+    expect(html).toContain("rpc: '/api/rpc/optimism'");
+  });
+
+  it('CHAIN_REGISTRY chain 137 uses internal proxy', () => {
+    expect(html).toContain("rpc: '/api/rpc/polygon'");
+  });
+
+  it('_rwaUpdateBalances handles null result from fetch as dash (not error)', () => {
+    const updateFn2 = fnBlock(rwaFull3, '_rwaUpdateBalances', 2500);
+    expect(updateFn2).toContain("raw === null");
+    expect(updateFn2).not.toContain("'Balance: error'");
+    expect(updateFn2).not.toContain('"Balance: error"');
+  });
+});
+
+describe('FIX-SLIPPAGE — routes.js must NOT forward "auto" string to /advanced/routes', () => {
+  const routesSrc = fs.readFileSync(
+    path.resolve(__dirname, '../functions/api/lifi/routes.js'), 'utf8'
+  );
+
+  it('omits slippage from options when body.slippage is "auto"', () => {
+    // /v1/advanced/routes schema: options.slippage must be a number.
+    // Sending "auto" causes: /options/slippage must be number error from LI.FI.
+    // Fixed by using null sentinel and conditional add: if (slippageNum !== null)
+    expect(routesSrc).toContain('null;  // null = omit field');
+    expect(routesSrc).not.toMatch(/body\.slippage\s*===\s*'auto'\s*\?\s*'auto'/);
+  });
+
+  it('options object is built without slippage field when auto', () => {
+    // routeOptions is built first without slippage, then slippage added conditionally
+    expect(routesSrc).toContain('if (slippageNum !== null) routeOptions.slippage = slippageNum');
+  });
+
+  it('options.slippage is never set to the string "auto"', () => {
+    // The options object must never contain slippage: 'auto'
+    expect(routesSrc).not.toMatch(/slippage:\s*'auto'/);
+    expect(routesSrc).not.toMatch(/slippage:\s*"auto"/);
+  });
+
+  it('still accepts numeric slippage from explicit bps', () => {
+    expect(routesSrc).toContain('Number.isFinite(Number(body.slippage))');
   });
 });

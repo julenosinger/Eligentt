@@ -13048,14 +13048,14 @@ const CHAIN_REGISTRY = {
   // ── LI.FI-supported Mainnet destinations (verified USDC addresses via LI.FI /v1/tokens) ──
   1: {
     id: 'Ethereum', name: 'Ethereum', shortName: 'ETH', color: '#627eea', symbol: 'Ξ', testnet: false,
-    chainId: 1, chainHex: '0x1', rpc: 'https://cloudflare-eth.com', explorer: 'https://etherscan.io',
+    chainId: 1, chainHex: '0x1', rpc: '/api/rpc/ethereum', explorer: 'https://etherscan.io',
     nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
     tokens: { USDC: { address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', decimals: 6 } },
     isEvm: true,
   },
   8453: {
     id: 'Base', name: 'Base', shortName: 'Base', color: '#0052ff', symbol: 'B', testnet: false,
-    chainId: 8453, chainHex: '0x2105', rpc: 'https://mainnet.base.org', explorer: 'https://basescan.org',
+    chainId: 8453, chainHex: '0x2105', rpc: '/api/rpc/base', explorer: 'https://basescan.org',
     nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
     tokens: {
       USDC: { address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', decimals: 6 },
@@ -13065,21 +13065,21 @@ const CHAIN_REGISTRY = {
   },
   42161: {
     id: 'Arbitrum', name: 'Arbitrum', shortName: 'Arb', color: '#12aaff', symbol: 'Ar', testnet: false,
-    chainId: 42161, chainHex: '0xa4b1', rpc: 'https://arb1.arbitrum.io/rpc', explorer: 'https://arbiscan.io',
+    chainId: 42161, chainHex: '0xa4b1', rpc: '/api/rpc/arbitrum', explorer: 'https://arbiscan.io',
     nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
     tokens: { USDC: { address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', decimals: 6 } },
     isEvm: true,
   },
   10: {
     id: 'Optimism', name: 'Optimism', shortName: 'OP', color: '#ff0420', symbol: 'OP', testnet: false,
-    chainId: 10, chainHex: '0xa', rpc: 'https://mainnet.optimism.io', explorer: 'https://optimistic.etherscan.io',
+    chainId: 10, chainHex: '0xa', rpc: '/api/rpc/optimism', explorer: 'https://optimistic.etherscan.io',
     nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
     tokens: { USDC: { address: '0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85', decimals: 6 } },
     isEvm: true,
   },
   137: {
     id: 'Polygon', name: 'Polygon', shortName: 'Polygon', color: '#8247e5', symbol: 'POL', testnet: false,
-    chainId: 137, chainHex: '0x89', rpc: 'https://polygon-rpc.com', explorer: 'https://polygonscan.com',
+    chainId: 137, chainHex: '0x89', rpc: '/api/rpc/polygon', explorer: 'https://polygonscan.com',
     nativeCurrency: { name: 'MATIC', symbol: 'MATIC', decimals: 18 },
     tokens: { USDC: { address: '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359', decimals: 6 } },
     isEvm: true,
@@ -61626,7 +61626,9 @@ var _rwaBalSeq = { from: 0, to: 0 };
 async function _rwaFetchTokenBalance(tokenAddr, chainId, wallet) {
   var chainCfg = (typeof CHAIN_REGISTRY !== 'undefined') ? CHAIN_REGISTRY[chainId] : null;
   var rpcUrl = chainCfg ? chainCfg.rpc : null;
-  if (!rpcUrl) throw new Error('No RPC for chainId ' + chainId);
+  if (!rpcUrl) return null;  // No RPC configured → show dash, not error
+  // All chains in CHAIN_REGISTRY use same-origin proxy paths (/api/rpc/*)
+  // so direct eth_call from the browser never hits CORS restrictions.
   var prov = getCachedProvider(rpcUrl);
   var contract = new ethers.Contract(tokenAddr, _RWA_BAL_ABI, prov);
   return await contract.balanceOf(wallet);
@@ -61655,10 +61657,12 @@ function _rwaUpdateBalances() {
       // Discard if token changed while we were waiting
       if (_rwaBalSeq.from !== fromSeq) return;
       if (!fromBalEl) return;
+      // null = no proxy available for this chain (CORS); show dash, not error
+      if (raw === null) { fromBalEl.textContent = 'Balance: —'; return; }
       fromBalEl.textContent = 'Balance: ' + _rwaFmt(raw, fromDec) + ' ' + fromSym;
     }).catch(function() {
       if (_rwaBalSeq.from !== fromSeq) return;
-      if (fromBalEl) fromBalEl.textContent = 'Balance: error';
+      if (fromBalEl) fromBalEl.textContent = 'Balance: —';
     });
   }
 
@@ -61673,10 +61677,12 @@ function _rwaUpdateBalances() {
     _rwaFetchTokenBalance(toAddr, toChain, wallet).then(function(raw) {
       if (_rwaBalSeq.to !== toSeq) return;
       if (!toBalEl) return;
+      // null = no proxy available for this chain (CORS); show dash, not error
+      if (raw === null) { toBalEl.textContent = 'Balance: —'; return; }
       toBalEl.textContent = 'Balance: ' + _rwaFmt(raw, toDec) + ' ' + toSym;
     }).catch(function() {
       if (_rwaBalSeq.to !== toSeq) return;
-      if (toBalEl) toBalEl.textContent = 'Balance: error';
+      if (toBalEl) toBalEl.textContent = 'Balance: —';
     });
   }
 }
@@ -61773,6 +61779,7 @@ async function rwaFetchQuote() {
       toChainId:   _rwaToChainId,
       fromAddress: walletAddress,
       toAddress:   walletAddress,
+      slippageBps: 50,  // 0.5% explicit — avoids 'auto' string which /advanced/routes rejects
     });
   } catch (e) { routeRes = { ok: false, error: (e && e.message) || String(e), routes: [] }; }
 

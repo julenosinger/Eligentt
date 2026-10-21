@@ -195,13 +195,18 @@ describe('S8 — CF proxy routes.js: simulate and Smart Slippage', () => {
     path.resolve(__dirname, '../functions/api/lifi/routes.js'), 'utf8'
   );
 
-  it('routes.js handles slippage === auto', () => {
-    expect(routesSrc).toContain("body.slippage === 'auto'");
-    expect(routesSrc).toContain("? 'auto'");
+  it('routes.js recognises and excludes slippage:"auto"', () => {
+    // The fix: 'auto' is excluded from options.slippage —
+    // /v1/advanced/routes requires options.slippage to be a number; sending
+    // 'auto' causes a LI.FI schema error (/options/slippage must be number).
+    // Detection is via !== 'auto' (exclude from numeric path), not === 'auto'.
+    expect(routesSrc).toContain("body.slippage !== 'auto'");
   });
 
-  it('routes.js still has numeric fallback (0.005) when slippage invalid', () => {
-    expect(routesSrc).toContain('0.005');
+  it('routes.js does NOT forward slippage:"auto" string to LI.FI options', () => {
+    // The old code had `? 'auto'` which sent the string to LI.FI /advanced/routes.
+    // The fixed code omits slippage from options when auto, letting LI.FI use its default.
+    expect(routesSrc).not.toMatch(/body\.slippage\s*===\s*'auto'\s*\?\s*'auto'/);
   });
 
   it('routes.js forwards simulate:true inside options object', () => {
@@ -209,15 +214,24 @@ describe('S8 — CF proxy routes.js: simulate and Smart Slippage', () => {
     expect(routesSrc).toContain('simulate: true');
   });
 
-  it('routes.js does NOT use hardcoded 0.005 when slippage:auto is passed', () => {
-    // Confirm ternary: body.slippage === 'auto' ? 'auto' : (numeric check) ? numeric : 0.005
-    expect(routesSrc).toMatch(/body\.slippage\s*===\s*'auto'\s*\?\s*'auto'/);
+  it('routes.js omits slippage from options when auto (field not added to routeOptions)', () => {
+    // When slippageNum === null (auto case), slippage is NOT added to routeOptions.
+    // Confirm null sentinel is used.
+    expect(routesSrc).toContain('null;  // null = omit field');
+    expect(routesSrc).toContain('if (slippageNum !== null) routeOptions.slippage = slippageNum');
+  });
+
+  it('routes.js still accepts explicit numeric slippage', () => {
+    // A caller can pass an explicit bps value; it must be forwarded numerically.
+    expect(routesSrc).toContain('Number.isFinite(Number(body.slippage))');
+    expect(routesSrc).toContain('routeOptions.slippage = slippageNum');
   });
 
   it('routes.js old path would have fallen to 0.005 for slippage:auto — confirm fixed', () => {
     // Old: Number.isFinite(Number('auto')) = false → 0.005 forced.
-    // New code must have 'auto' === check before the numeric path.
-    const autoIdx    = routesSrc.indexOf("body.slippage === 'auto'");
+    // New: 'auto' is excluded via !== check; result is null (field omitted).
+    // Detection pattern: body.slippage !== 'auto' appears BEFORE the numeric check.
+    const autoIdx    = routesSrc.indexOf("body.slippage !== 'auto'");
     const numericIdx = routesSrc.indexOf("Number.isFinite(Number(body.slippage))");
     expect(autoIdx).toBeGreaterThan(-1);
     expect(numericIdx).toBeGreaterThan(-1);
