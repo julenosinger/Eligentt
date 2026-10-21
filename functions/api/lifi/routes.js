@@ -122,6 +122,11 @@ export async function onRequestPost(context) {
     return json({ ok: false, error: (data && data.message) || 'LI.FI routes failed', code }, 502, env, request);
   }
 
-  // data.routes is the array from LI.FI — pass through unmodified
-  return json({ ok: true, routes: data.routes || [], count: (data.routes || []).length }, 200, env, request);
+  // data.routes is the array from LI.FI — pass through unmodified.
+  // Also propagate unavailableRoutes.filteredOut so the client can detect
+  // RWA policy blocks (policy block returns HTTP 200 with routes:[] and
+  // unavailableRoutes.filteredOut containing the block reason per LI.FI docs).
+  const routes = data.routes || [];
+  const unavailableRoutes = data.unavailableRoutes || null;
+  return json({ ok: true, routes, count: routes.length, unavailableRoutes }, 200, env, request);
 }

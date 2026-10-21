@@ -6827,6 +6827,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
       <div class="nav-item" id="nav-autonoma" onclick="showPage('autonoma')" title="Autonoma AI"><i class="ti ti-brain"></i>Autonoma<span class="nav-kit" style="background:rgba(6,247,233,.12);color:#06F7E9;border:1px solid rgba(6,247,233,.25)">AI</span></div>
       <div class="nav-item" id="nav-autonoma2" style="display:none" onclick="showPage('autonoma2')" title="Autonoma 2 — AI Financial Agent"><i class="ti ti-sparkles"></i>Autonoma 2<span class="nav-new" style="background:rgba(168,85,247,.15);color:#a855f7;border:1px solid rgba(168,85,247,.3)">AI</span></div>
       <div class="nav-item" id="nav-aiwallet" onclick="showPage('aiwallet')" title="Smart Wallet"><i class="ti ti-building-bank"></i>Smart Wallet<span class="nav-new">New</span></div>
+      <div class="nav-item" id="nav-rwa" onclick="showPage('rwa')" title="RWA Advanced Trading"><i class="ti ti-chart-candle"></i>RWA<span class="nav-new" style="background:rgba(168,85,247,.15);color:#a855f7;border:1px solid rgba(168,85,247,.3)">Pro</span></div>
       <div class="nav-group" style="margin-top:4px">Protocol</div>
       <div class="nav-group" style="margin-top:4px">Manage</div>
       <div class="nav-item" id="nav-recipients" onclick="showPage('recipients')" title="Recipients"><i class="ti ti-users"></i>Recipients</div>
@@ -11330,6 +11331,312 @@ select.cinput option { background: #161a24; color: #dde2f0; }
         #page-aiwallet .aiw-tab.active{border-left-color:transparent;border-bottom-color:var(--purple)}
       }
     </style>
+
+    <!-- ══════════════════════════════════════════════════════════════════
+         RWA ADVANCED TRADING — scoped CSS (rwa- namespace only)
+         ══════════════════════════════════════════════════════════════════ -->
+    <style>
+      #page-rwa{display:none;flex-direction:column;height:100%;overflow:hidden}
+      #page-rwa.active{display:flex}
+      .rwa-shell{display:flex;flex-direction:column;height:100%;overflow:hidden}
+      /* ── Header ── */
+      .rwa-header{display:flex;align-items:center;gap:12px;padding:14px 20px 12px;border-bottom:1px solid var(--border);flex-shrink:0}
+      .rwa-header-icon{width:36px;height:36px;border-radius:10px;background:rgba(168,85,247,.14);color:#a855f7;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
+      .rwa-header-title{font-size:15px;font-weight:700;color:var(--text)}
+      .rwa-header-sub{font-size:10.5px;color:var(--muted2);margin-top:1px}
+      .rwa-header-badge{margin-left:auto;font-size:9px;font-weight:700;padding:3px 8px;border-radius:5px;background:rgba(168,85,247,.13);color:#a855f7;border:1px solid rgba(168,85,247,.3);letter-spacing:.5px}
+      .rwa-policy-bar{display:flex;align-items:center;gap:8px;padding:7px 20px;font-size:10.5px;border-bottom:1px solid var(--border);flex-shrink:0}
+      .rwa-policy-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+      /* ── Sub-nav ── */
+      .rwa-nav{display:flex;border-bottom:1px solid var(--border);flex-shrink:0;overflow-x:auto}
+      .rwa-tab{padding:0 16px;height:38px;display:flex;align-items:center;font-size:10.5px;font-weight:600;color:var(--muted2);cursor:pointer;border-bottom:2px solid transparent;transition:all .15s;user-select:none;gap:5px;white-space:nowrap}
+      .rwa-tab:hover{color:var(--text)}
+      .rwa-tab.active{color:#a855f7;border-bottom-color:#a855f7}
+      .rwa-tab i{font-size:13px}
+      /* ── Panels ── */
+      .rwa-panel{display:none;flex:1;overflow-y:auto;padding:16px 20px}
+      .rwa-panel.active{display:block}
+      /* ── Market cards ── */
+      .rwa-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}
+      .rwa-card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px;cursor:pointer;transition:all .15s;position:relative}
+      .rwa-card:hover{border-color:rgba(168,85,247,.4);box-shadow:0 0 0 1px rgba(168,85,247,.12)}
+      .rwa-card.selected{border-color:#a855f7;box-shadow:0 0 0 2px rgba(168,85,247,.18)}
+      .rwa-card-symbol{font-size:13px;font-weight:700;color:var(--text)}
+      .rwa-card-name{font-size:10px;color:var(--muted2);margin-top:2px}
+      .rwa-card-issuer{font-size:9px;color:var(--muted);margin-top:4px;text-transform:uppercase;letter-spacing:.6px}
+      .rwa-card-chain{font-size:9px;color:var(--muted2);margin-top:6px}
+      .rwa-card-price{font-size:12px;font-weight:600;color:var(--text);margin-top:8px}
+      .rwa-card-tag{position:absolute;top:10px;right:10px;font-size:8px;font-weight:700;padding:2px 6px;border-radius:4px;background:rgba(168,85,247,.13);color:#a855f7;border:1px solid rgba(168,85,247,.25);text-transform:uppercase}
+      .rwa-card-addr{font-size:8px;color:var(--muted);margin-top:4px;font-family:monospace;word-break:break-all}
+      /* ── Trade terminal ── */
+      .rwa-trade-wrap{max-width:520px;margin:0 auto}
+      .rwa-field-group{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:10px}
+      .rwa-field-label{font-size:9px;font-weight:700;color:var(--muted2);text-transform:uppercase;letter-spacing:.7px;margin-bottom:6px}
+      .rwa-token-row{display:flex;align-items:center;gap:10px}
+      .rwa-token-sel{display:flex;align-items:center;gap:6px;padding:7px 10px;background:var(--surface);border:1px solid var(--border);border-radius:7px;cursor:pointer;transition:border-color .15s;min-width:120px}
+      .rwa-token-sel:hover{border-color:rgba(168,85,247,.4)}
+      .rwa-amount-input{flex:1;background:transparent;border:none;font-size:18px;font-weight:600;color:var(--text);outline:none;text-align:right;min-width:0}
+      .rwa-amount-input::placeholder{color:var(--muted)}
+      .rwa-bal{font-size:10px;color:var(--muted2);margin-top:5px;text-align:right}
+      .rwa-swap-arrow{display:flex;justify-content:center;margin:6px 0}
+      .rwa-swap-btn{width:32px;height:32px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--muted2);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:14px;transition:all .15s}
+      .rwa-swap-btn:hover{border-color:rgba(168,85,247,.4);color:#a855f7}
+      .rwa-quote-box{background:rgba(168,85,247,.06);border:1px solid rgba(168,85,247,.2);border-radius:9px;padding:12px 14px;margin-bottom:10px}
+      .rwa-quote-row{display:flex;justify-content:space-between;font-size:10.5px;margin-bottom:5px}
+      .rwa-quote-row:last-child{margin-bottom:0}
+      .rwa-quote-label{color:var(--muted2)}
+      .rwa-quote-val{color:var(--text);font-weight:600}
+      .rwa-exec-btn{width:100%;padding:13px;border-radius:9px;border:none;background:linear-gradient(135deg,#a855f7,#7c3aed);color:#fff;font-size:13px;font-weight:700;cursor:pointer;transition:all .2s;letter-spacing:.3px}
+      .rwa-exec-btn:hover:not(:disabled){filter:brightness(1.12);box-shadow:0 4px 16px rgba(168,85,247,.35)}
+      .rwa-exec-btn:disabled{opacity:.45;cursor:not-allowed}
+      /* ── Routes ── */
+      .rwa-route-card{background:var(--card);border:1px solid var(--border);border-radius:9px;padding:12px 14px;margin-bottom:8px;cursor:pointer;transition:all .15s}
+      .rwa-route-card:hover{border-color:rgba(168,85,247,.35)}
+      .rwa-route-card.selected{border-color:#a855f7;box-shadow:0 0 0 1px rgba(168,85,247,.18)}
+      .rwa-route-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+      .rwa-route-tool{font-size:11px;font-weight:700;color:var(--text)}
+      .rwa-route-out{font-size:13px;font-weight:700;color:#a855f7}
+      .rwa-route-meta{font-size:9.5px;color:var(--muted2);display:flex;gap:10px;flex-wrap:wrap}
+      .rwa-route-steps{display:flex;gap:4px;margin-top:6px;flex-wrap:wrap}
+      .rwa-step-chip{font-size:8.5px;padding:2px 7px;border-radius:4px;background:rgba(168,85,247,.1);color:#a855f7;border:1px solid rgba(168,85,247,.2)}
+      /* ── Portfolio ── */
+      .rwa-pos-card{background:var(--card);border:1px solid var(--border);border-radius:9px;padding:12px 14px;margin-bottom:8px}
+      .rwa-pos-head{display:flex;justify-content:space-between;align-items:center}
+      .rwa-pos-symbol{font-size:12px;font-weight:700;color:var(--text)}
+      .rwa-pos-balance{font-size:13px;font-weight:700;color:#a855f7}
+      /* ── History ── */
+      .rwa-hist-row{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border2)}
+      .rwa-hist-row:last-child{border-bottom:none}
+      .rwa-hist-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+      .rwa-hist-main{flex:1;min-width:0}
+      .rwa-hist-label{font-size:11px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .rwa-hist-sub{font-size:9.5px;color:var(--muted2);margin-top:2px}
+      .rwa-hist-badge{font-size:8.5px;font-weight:700;padding:2px 7px;border-radius:4px;text-transform:uppercase}
+      /* ── Empty/loading states ── */
+      .rwa-empty{text-align:center;padding:40px 20px;color:var(--muted2)}
+      .rwa-empty i{font-size:28px;margin-bottom:10px;color:rgba(168,85,247,.4)}
+      .rwa-empty-title{font-size:12px;font-weight:600;color:var(--muted);margin-bottom:4px}
+      .rwa-empty-sub{font-size:10.5px;color:var(--muted)}
+      .rwa-spinner{display:inline-block;width:18px;height:18px;border:2px solid rgba(168,85,247,.2);border-top-color:#a855f7;border-radius:50%;animation:spin .8s linear infinite}
+      /* ── Token picker modal ── */
+      .rwa-picker-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9100;align-items:center;justify-content:center;backdrop-filter:blur(4px)}
+      .rwa-picker-overlay.open{display:flex}
+      .rwa-picker-box{background:var(--surface);border:1px solid var(--border);border-radius:14px;width:420px;max-width:calc(100vw - 32px);max-height:70vh;display:flex;flex-direction:column;box-shadow:0 24px 64px rgba(0,0,0,.55)}
+      .rwa-picker-head{display:flex;align-items:center;gap:10px;padding:14px 16px 10px;border-bottom:1px solid var(--border);flex-shrink:0}
+      .rwa-picker-title{font-size:13px;font-weight:700;color:var(--text);flex:1}
+      .rwa-picker-close{width:26px;height:26px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--muted2);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:12px;flex-shrink:0}
+      .rwa-picker-close:hover{border-color:rgba(239,68,68,.4);color:#ef4444}
+      .rwa-picker-search{padding:8px 14px;border-bottom:1px solid var(--border);flex-shrink:0}
+      .rwa-picker-search input{width:100%;background:var(--card);border:1px solid var(--border);border-radius:7px;padding:7px 10px;font-size:11px;color:var(--text);outline:none}
+      .rwa-picker-search input:focus{border-color:rgba(168,85,247,.4)}
+      .rwa-picker-list{overflow-y:auto;flex:1;padding:6px 0}
+      .rwa-picker-item{display:flex;align-items:center;gap:10px;padding:9px 14px;cursor:pointer;transition:background .12s}
+      .rwa-picker-item:hover{background:rgba(168,85,247,.07)}
+      .rwa-picker-item.selected{background:rgba(168,85,247,.12)}
+      .rwa-picker-sym{font-size:12px;font-weight:700;color:var(--text)}
+      .rwa-picker-name{font-size:10px;color:var(--muted2)}
+      .rwa-picker-chain{font-size:9px;color:var(--muted);margin-top:1px}
+      /* ── Confirm modal ── */
+      .rwa-confirm-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:9200;align-items:center;justify-content:center;backdrop-filter:blur(6px)}
+      .rwa-confirm-overlay.open{display:flex}
+      .rwa-confirm-box{background:var(--surface);border:1px solid rgba(168,85,247,.3);border-radius:18px;width:440px;max-width:calc(100vw - 32px);box-shadow:0 24px 64px rgba(0,0,0,.6);overflow:hidden}
+      .rwa-confirm-header{padding:18px 20px 14px;display:flex;align-items:center;gap:12px;border-bottom:1px solid rgba(168,85,247,.15)}
+      .rwa-confirm-icon{width:40px;height:40px;border-radius:11px;background:rgba(168,85,247,.15);color:#a855f7;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0}
+      .rwa-confirm-title{font-size:14px;font-weight:700;color:var(--text)}
+      .rwa-confirm-sub{font-size:10.5px;color:var(--muted2);margin-top:2px}
+      .rwa-confirm-body{padding:14px 20px}
+      .rwa-confirm-row{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border2);font-size:10.5px}
+      .rwa-confirm-row:last-child{border-bottom:none}
+      .rwa-confirm-key{color:var(--muted2)}
+      .rwa-confirm-val{font-weight:600;color:var(--text);text-align:right;max-width:60%;word-break:break-all}
+      .rwa-confirm-warn{background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.22);border-radius:8px;padding:9px 12px;font-size:10px;color:var(--yellow);margin:10px 20px}
+      .rwa-confirm-footer{display:flex;gap:10px;padding:12px 20px 18px}
+      .rwa-confirm-cancel{flex:1;padding:10px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--muted2);cursor:pointer;font-size:11.5px}
+      .rwa-confirm-ok{flex:2;padding:10px;border-radius:8px;border:none;background:linear-gradient(135deg,#a855f7,#7c3aed);color:#fff;font-size:12px;font-weight:700;cursor:pointer;transition:all .2s}
+      .rwa-confirm-ok:hover{filter:brightness(1.1);box-shadow:0 4px 14px rgba(168,85,247,.35)}
+      @media(max-width:768px){
+        .rwa-grid{grid-template-columns:1fr 1fr}
+        .rwa-panel{padding:12px}
+        .rwa-trade-wrap{max-width:100%}
+      }
+    </style>
+
+    <!-- ══════════════════════════════════════════════════════════════════
+         RWA ADVANCED TRADING PAGE
+         ══════════════════════════════════════════════════════════════════ -->
+    <div class="page" id="page-rwa">
+      <div class="rwa-shell">
+        <!-- Header -->
+        <div class="rwa-header">
+          <div class="rwa-header-icon"><i class="ti ti-chart-candle"></i></div>
+          <div>
+            <div class="rwa-header-title">RWA Advanced Trading</div>
+            <div class="rwa-header-sub">Tokenized real-world assets · onchain stocks · permissioned assets · powered by LI.FI</div>
+          </div>
+          <div class="rwa-header-badge" id="rwa-policy-badge">Checking policy…</div>
+          <button onclick="rwaRefresh()" style="margin-left:8px;background:transparent;border:1px solid var(--border);border-radius:7px;color:var(--muted2);padding:5px 10px;cursor:pointer;font-size:11px;display:flex;align-items:center;gap:5px"><i class="ti ti-refresh" id="rwa-refresh-icon"></i>Refresh</button>
+        </div>
+        <!-- Policy info bar -->
+        <div class="rwa-policy-bar" id="rwa-policy-bar" style="display:none">
+          <div class="rwa-policy-dot" id="rwa-policy-dot"></div>
+          <span id="rwa-policy-msg" style="color:var(--muted2)"></span>
+        </div>
+        <!-- Sub-navigation -->
+        <div class="rwa-nav">
+          <div class="rwa-tab active" id="rwa-tab-markets" onclick="rwaTab('markets')"><i class="ti ti-building-store"></i>Markets</div>
+          <div class="rwa-tab" id="rwa-tab-trade" onclick="rwaTab('trade')"><i class="ti ti-arrows-exchange"></i>Trade Terminal</div>
+          <div class="rwa-tab" id="rwa-tab-routes" onclick="rwaTab('routes')"><i class="ti ti-route"></i>Route Comparison</div>
+          <div class="rwa-tab" id="rwa-tab-portfolio" onclick="rwaTab('portfolio')"><i class="ti ti-briefcase"></i>Portfolio</div>
+          <div class="rwa-tab" id="rwa-tab-history" onclick="rwaTab('history')"><i class="ti ti-history"></i>History</div>
+        </div>
+        <!-- Panels -->
+        <!-- Markets -->
+        <div class="rwa-panel active" id="rwa-panel-markets">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+            <input id="rwa-search" type="text" placeholder="Search by name, symbol or issuer…" oninput="rwaFilterMarkets()" style="flex:1;min-width:180px;background:var(--card);border:1px solid var(--border);border-radius:7px;padding:7px 12px;font-size:11px;color:var(--text);outline:none">
+            <select id="rwa-chain-filter" onchange="rwaFilterMarkets()" style="background:var(--card);border:1px solid var(--border);border-radius:7px;padding:7px 10px;font-size:11px;color:var(--text);outline:none">
+              <option value="">All chains</option>
+              <option value="1">Ethereum</option>
+              <option value="8453">Base</option>
+              <option value="42161">Arbitrum</option>
+              <option value="137">Polygon</option>
+              <option value="10">Optimism</option>
+            </select>
+            <select id="rwa-issuer-filter" onchange="rwaFilterMarkets()" style="background:var(--card);border:1px solid var(--border);border-radius:7px;padding:7px 10px;font-size:11px;color:var(--text);outline:none">
+              <option value="">All issuers</option>
+              <option value="ondo">Ondo</option>
+              <option value="xstocks">xStocks</option>
+              <option value="robinhood">Robinhood</option>
+            </select>
+          </div>
+          <div id="rwa-markets-grid" class="rwa-grid"><div class="rwa-empty"><div class="rwa-spinner"></div><div class="rwa-empty-title" style="margin-top:12px">Loading RWA markets…</div></div></div>
+        </div>
+        <!-- Trade Terminal -->
+        <div class="rwa-panel" id="rwa-panel-trade">
+          <div class="rwa-trade-wrap">
+            <!-- From -->
+            <div class="rwa-field-group">
+              <div class="rwa-field-label">You send</div>
+              <div class="rwa-token-row">
+                <div class="rwa-token-sel" id="rwa-from-sel" onclick="rwaOpenPicker('from')">
+                  <span id="rwa-from-sym" style="font-size:12px;font-weight:700;color:var(--text)">USDC</span>
+                  <i class="ti ti-chevron-down" style="font-size:10px;color:var(--muted2);margin-left:auto"></i>
+                </div>
+                <input id="rwa-amount-in" class="rwa-amount-input" type="number" min="0" step="any" placeholder="0.00" oninput="rwaOnAmountChange()">
+              </div>
+              <div class="rwa-bal" id="rwa-from-bal">Balance: —</div>
+            </div>
+            <!-- Arrow -->
+            <div class="rwa-swap-arrow">
+              <button class="rwa-swap-btn" onclick="rwaSwapDirection()" title="Swap direction"><i class="ti ti-arrows-down-up"></i></button>
+            </div>
+            <!-- To -->
+            <div class="rwa-field-group">
+              <div class="rwa-field-label">You receive</div>
+              <div class="rwa-token-row">
+                <div class="rwa-token-sel" id="rwa-to-sel" onclick="rwaOpenPicker('to')">
+                  <span id="rwa-to-sym" style="font-size:12px;font-weight:700;color:var(--text)">Select RWA</span>
+                  <i class="ti ti-chevron-down" style="font-size:10px;color:var(--muted2);margin-left:auto"></i>
+                </div>
+                <div style="flex:1;text-align:right">
+                  <div id="rwa-amount-out" style="font-size:18px;font-weight:600;color:var(--muted2)">—</div>
+                  <div id="rwa-amount-out-min" style="font-size:9.5px;color:var(--muted);margin-top:2px"></div>
+                </div>
+              </div>
+              <div class="rwa-bal" id="rwa-to-bal">Balance: —</div>
+            </div>
+            <!-- Network selector -->
+            <div class="rwa-field-group">
+              <div class="rwa-field-label">Networks</div>
+              <div style="display:flex;gap:10px;align-items:center">
+                <div style="flex:1">
+                  <div style="font-size:9px;color:var(--muted2);margin-bottom:4px">From</div>
+                  <select id="rwa-from-chain" onchange="rwaOnChainChange()" style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:7px;padding:6px 8px;font-size:11px;color:var(--text);outline:none">
+                    <option value="1">Ethereum</option>
+                    <option value="8453">Base</option>
+                    <option value="42161">Arbitrum</option>
+                    <option value="137">Polygon</option>
+                    <option value="10">Optimism</option>
+                  </select>
+                </div>
+                <i class="ti ti-arrow-right" style="color:var(--muted2);font-size:14px;margin-top:12px;flex-shrink:0"></i>
+                <div style="flex:1">
+                  <div style="font-size:9px;color:var(--muted2);margin-bottom:4px">To</div>
+                  <select id="rwa-to-chain" onchange="rwaOnChainChange()" style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:7px;padding:6px 8px;font-size:11px;color:var(--text);outline:none">
+                    <option value="1">Ethereum</option>
+                    <option value="8453">Base</option>
+                    <option value="42161">Arbitrum</option>
+                    <option value="137">Polygon</option>
+                    <option value="10">Optimism</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+            <!-- Quote box -->
+            <div id="rwa-quote-box" class="rwa-quote-box" style="display:none">
+              <div class="rwa-quote-row"><span class="rwa-quote-label">Route</span><span class="rwa-quote-val" id="rwa-quote-tool">—</span></div>
+              <div class="rwa-quote-row"><span class="rwa-quote-label">Expected out</span><span class="rwa-quote-val" id="rwa-quote-out">—</span></div>
+              <div class="rwa-quote-row"><span class="rwa-quote-label">Minimum out</span><span class="rwa-quote-val" id="rwa-quote-min">—</span></div>
+              <div class="rwa-quote-row"><span class="rwa-quote-label">Est. fee</span><span class="rwa-quote-val" id="rwa-quote-fee">—</span></div>
+              <div class="rwa-quote-row"><span class="rwa-quote-label">Est. time</span><span class="rwa-quote-val" id="rwa-quote-time">—</span></div>
+              <div class="rwa-quote-row" id="rwa-quote-eligibility-row" style="display:none"><span class="rwa-quote-label">Eligibility</span><span class="rwa-quote-val" id="rwa-quote-eligibility"></span></div>
+            </div>
+            <div id="rwa-quote-err" style="display:none;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.25);border-radius:8px;padding:10px 12px;font-size:10.5px;color:#ef4444;margin-bottom:10px"></div>
+            <button id="rwa-trade-btn" class="rwa-exec-btn" onclick="rwaConfirmTrade()" disabled>Connect wallet to trade</button>
+          </div>
+        </div>
+        <!-- Route Comparison -->
+        <div class="rwa-panel" id="rwa-panel-routes">
+          <div id="rwa-routes-list"><div class="rwa-empty"><i class="ti ti-route"></i><div class="rwa-empty-title">No routes fetched yet</div><div class="rwa-empty-sub">Configure a trade in the Trade Terminal to see available routes.</div></div></div>
+        </div>
+        <!-- Portfolio -->
+        <div class="rwa-panel" id="rwa-panel-portfolio">
+          <div id="rwa-portfolio-list"><div class="rwa-empty"><i class="ti ti-briefcase"></i><div class="rwa-empty-title">Connect wallet to view positions</div><div class="rwa-empty-sub">Detected RWA holdings in your connected wallet will appear here.</div></div></div>
+        </div>
+        <!-- History -->
+        <div class="rwa-panel" id="rwa-panel-history">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+            <div style="font-size:11px;font-weight:600;color:var(--muted2)">Filter:</div>
+            <button onclick="rwaHistFilter('all')" id="rwa-hf-all" style="padding:4px 10px;border-radius:5px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:10px;cursor:pointer">All</button>
+            <button onclick="rwaHistFilter('pending')" id="rwa-hf-pending" style="padding:4px 10px;border-radius:5px;border:1px solid var(--border);background:transparent;color:var(--muted2);font-size:10px;cursor:pointer">Pending</button>
+            <button onclick="rwaHistFilter('done')" id="rwa-hf-done" style="padding:4px 10px;border-radius:5px;border:1px solid var(--border);background:transparent;color:var(--muted2);font-size:10px;cursor:pointer">Completed</button>
+            <button onclick="rwaHistFilter('failed')" id="rwa-hf-failed" style="padding:4px 10px;border-radius:5px;border:1px solid var(--border);background:transparent;color:var(--muted2);font-size:10px;cursor:pointer">Failed</button>
+          </div>
+          <div id="rwa-hist-list"></div>
+        </div>
+      </div>
+    </div>
+    <!-- RWA Token Picker -->
+    <div class="rwa-picker-overlay" id="rwa-picker-overlay" onclick="rwaPickerBgClick(event)">
+      <div class="rwa-picker-box">
+        <div class="rwa-picker-head">
+          <span class="rwa-picker-title" id="rwa-picker-title">Select token</span>
+          <button class="rwa-picker-close" onclick="rwaClosePicker()"><i class="ti ti-x"></i></button>
+        </div>
+        <div class="rwa-picker-search"><input id="rwa-picker-search" type="text" placeholder="Search…" oninput="rwaPickerFilter()"></div>
+        <div class="rwa-picker-list" id="rwa-picker-list"></div>
+      </div>
+    </div>
+    <!-- RWA Confirm Trade -->
+    <div class="rwa-confirm-overlay" id="rwa-confirm-overlay">
+      <div class="rwa-confirm-box">
+        <div class="rwa-confirm-header">
+          <div class="rwa-confirm-icon"><i class="ti ti-chart-candle"></i></div>
+          <div>
+            <div class="rwa-confirm-title">Confirm RWA Trade</div>
+            <div class="rwa-confirm-sub" id="rwa-confirm-sub">Review carefully before signing</div>
+          </div>
+          <button onclick="rwaCloseConfirm()" style="margin-left:auto;background:transparent;border:1px solid var(--border);border-radius:7px;width:28px;height:28px;color:var(--muted2);cursor:pointer;display:flex;align-items:center;justify-content:center"><i class="ti ti-x" style="font-size:12px"></i></button>
+        </div>
+        <div class="rwa-confirm-body" id="rwa-confirm-body"></div>
+        <div class="rwa-confirm-warn"><i class="ti ti-alert-triangle"></i> RWA tokens may have issuer-level restrictions. Eligibility is checked by LI.FI before routing. Once submitted, this transaction cannot be reversed.</div>
+        <div class="rwa-confirm-footer">
+          <button class="rwa-confirm-cancel" onclick="rwaCloseConfirm()">Cancel</button>
+          <button class="rwa-confirm-ok" id="rwa-confirm-ok-btn" onclick="rwaExecuteTrade()">Confirm &amp; Sign</button>
+        </div>
+      </div>
+    </div>
+
     <div class="page" id="page-aiwallet" lang="en-US" translate="no">
       <div class="page-header">
         <div class="page-icon" style="background:rgba(167,139,250,.12);color:var(--purple)"><i class="ti ti-wallet"></i></div>
@@ -60913,6 +61220,1015 @@ if(document.readyState === 'loading'){
   setTimeout(RCP.start, 1800);
 }
 window.RCP = RCP;
+})();
+</script>
+
+<!-- ══════════════════════════════════════════════════════════════════════
+     RWA ADVANCED TRADING — JavaScript (rwa namespace)
+     ══════════════════════════════════════════════════════════════════════ -->
+<script>
+(function () {
+'use strict';
+
+// ── Known RWA-tagged tokens (seed list; updated via LI.FI /v1/token at runtime)
+// Source: LI.FI docs — "ondo-tokenized-assets", "xstocks-ecosystem",
+//         "backpack-securities-ecosystem", "robinhood-chain-stocks-ecosystem"
+// These are checked dynamically; we surface issuers known per docs.
+var _RWA_ISSUERS = {
+  ondo:      { name: 'Ondo Finance',    color: '#3b82f6' },
+  xstocks:   { name: 'xStocks',         color: '#10b981' },
+  robinhood: { name: 'Robinhood Chain', color: '#22c55e' },
+  backpack:  { name: 'Backpack',        color: '#f59e0b' },
+  other:     { name: 'Other',           color: '#8b5cf6' },
+};
+
+// ── State
+var _rwaActiveTab    = 'markets';
+var _rwaMarkets      = [];          // { symbol, name, address, chainId, decimals, logoURI, issuer, priceUSD, tags }
+var _rwaMarketsFiltered = [];
+var _rwaLoading      = false;
+var _rwaPolicyStatus = 'unknown';   // 'allowed'|'blocked'|'unknown'
+var _rwaPickerSide   = 'from';      // 'from'|'to'
+var _rwaFromToken    = { symbol: 'USDC', address: null, chainId: null, decimals: 6 };
+var _rwaToToken      = null;
+var _rwaFromChainId  = 1;
+var _rwaToChainId    = 1;
+var _rwaCurrentQuote = null;
+var _rwaRoutes       = [];
+var _rwaSelectedRoute = null;
+var _rwaHistFilter   = 'all';
+var _rwaExecPending  = false;
+
+// ── Chain info
+var _RWA_CHAINS = {
+  1:     { name: 'Ethereum',  explorer: 'https://etherscan.io' },
+  8453:  { name: 'Base',      explorer: 'https://basescan.org' },
+  42161: { name: 'Arbitrum',  explorer: 'https://arbiscan.io' },
+  137:   { name: 'Polygon',   explorer: 'https://polygonscan.com' },
+  10:    { name: 'Optimism',  explorer: 'https://optimistic.etherscan.io' },
+};
+
+// ── Safe helpers
+function _rwaEsc(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function _rwaFmt(n, dec) {
+  if (n == null) return '—';
+  dec = dec != null ? dec : 6;
+  try {
+    var v = typeof n === 'bigint' ? Number(n) / Math.pow(10, dec) : Number(n);
+    if (!isFinite(v)) return '—';
+    return v.toLocaleString('en-US', { maximumFractionDigits: 6 });
+  } catch (_) { return '—'; }
+}
+function _rwaShortAddr(addr) {
+  if (!addr || addr.length < 10) return addr || '—';
+  return addr.slice(0, 6) + '…' + addr.slice(-4);
+}
+function _rwaSafeExplorer(chainId) {
+  var c = _RWA_CHAINS[Number(chainId)];
+  return (c && c.explorer) || null;
+}
+function _rwaSafeTxHash(h) {
+  return (h && /^0x[0-9a-fA-F]{64}$/.test(h)) ? h : null;
+}
+
+// ── localStorage history (per wallet+chain)
+function _rwaLocalKey() {
+  var w = (typeof walletAddress !== 'undefined' && walletAddress) ? walletAddress.toLowerCase() : 'anon';
+  return 'rwa_hist_' + w;
+}
+function _rwaLocalLoad() {
+  try { return JSON.parse(localStorage.getItem(_rwaLocalKey()) || '[]'); } catch (_) { return []; }
+}
+function _rwaLocalSave(arr) {
+  try { localStorage.setItem(_rwaLocalKey(), JSON.stringify(arr.slice(0, 200))); } catch (_) {}
+}
+function _rwaRecord(opts) {
+  if (!opts || !opts.txHash) return;
+  var arr = _rwaLocalLoad();
+  if (arr.some(function(e) { return e.txHash === opts.txHash; })) return; // dedup
+  arr.unshift({
+    id: 'rwa_' + Date.now().toString(36),
+    ts: Date.now(),
+    txHash: opts.txHash,
+    fromSym: opts.fromSym || '—',
+    toSym: opts.toSym || '—',
+    amountIn: opts.amountIn || '—',
+    amountOut: opts.amountOut || '—',
+    fromChainId: opts.fromChainId || null,
+    toChainId: opts.toChainId || null,
+    tool: opts.tool || 'LI.FI',
+    status: 'pending',
+  });
+  _rwaLocalSave(arr);
+}
+function _rwaUpdateStatus(txHash, status) {
+  var arr = _rwaLocalLoad();
+  var idx = arr.findIndex(function(e) { return e.txHash === txHash; });
+  if (idx >= 0) { arr[idx].status = status; _rwaLocalSave(arr); }
+}
+
+// ── Policy check (best-effort — no separate endpoint; inferred from quote response)
+function _rwaShowPolicy(status, msg) {
+  _rwaPolicyStatus = status;
+  var bar = document.getElementById('rwa-policy-bar');
+  var badge = document.getElementById('rwa-policy-badge');
+  var dot = document.getElementById('rwa-policy-dot');
+  var msgEl = document.getElementById('rwa-policy-msg');
+  if (!bar || !badge) return;
+  bar.style.display = 'flex';
+  if (status === 'allowed') {
+    dot.style.background = '#22c55e';
+    badge.textContent = 'RWA Enabled';
+    badge.style.background = 'rgba(34,197,94,.13)';
+    badge.style.color = '#22c55e';
+    badge.style.borderColor = 'rgba(34,197,94,.3)';
+    msgEl.textContent = msg || 'Your integrator policy allows RWA-tagged tokens.';
+  } else if (status === 'blocked') {
+    dot.style.background = '#ef4444';
+    badge.textContent = 'RWA Blocked';
+    badge.style.background = 'rgba(239,68,68,.13)';
+    badge.style.color = '#ef4444';
+    badge.style.borderColor = 'rgba(239,68,68,.3)';
+    msgEl.textContent = msg || 'Your integrator policy blocks RWA tokens. Configure in the LI.FI Partner Portal.';
+  } else {
+    dot.style.background = '#f59e0b';
+    badge.textContent = 'Policy Pending';
+    badge.style.background = 'rgba(245,158,11,.13)';
+    badge.style.color = '#f59e0b';
+    badge.style.borderColor = 'rgba(245,158,11,.3)';
+    msgEl.textContent = msg || 'RWA policy status unknown. Submit a quote to check eligibility.';
+  }
+}
+
+// ── Tab navigation
+function rwaTab(name) {
+  _rwaActiveTab = name;
+  document.querySelectorAll('.rwa-tab').forEach(function(t) { t.classList.remove('active'); });
+  document.querySelectorAll('.rwa-panel').forEach(function(p) { p.classList.remove('active'); });
+  var tabEl = document.getElementById('rwa-tab-' + name);
+  var panelEl = document.getElementById('rwa-panel-' + name);
+  if (tabEl) tabEl.classList.add('active');
+  if (panelEl) panelEl.classList.add('active');
+  if (name === 'history') rwaRenderHistory();
+  if (name === 'portfolio') rwaLoadPortfolio();
+}
+
+// ── Refresh
+function rwaRefresh() {
+  var icon = document.getElementById('rwa-refresh-icon');
+  if (icon) icon.style.animation = 'spin .8s linear infinite';
+  rwaLoadMarkets().then(function() {
+    if (icon) icon.style.animation = '';
+  });
+  if (_rwaActiveTab === 'history') rwaRefreshHistoryStatus();
+  if (_rwaActiveTab === 'portfolio') rwaLoadPortfolio();
+}
+
+// ── Markets: load RWA tokens from LI.FI /v1/tokens endpoint via proxy
+async function rwaLoadMarkets() {
+  _rwaLoading = true;
+  var grid = document.getElementById('rwa-markets-grid');
+  if (grid) grid.innerHTML = '<div class="rwa-empty"><div class="rwa-spinner"></div><div class="rwa-empty-title" style="margin-top:12px">Loading RWA markets…</div></div>';
+
+  var chainIds = [1, 8453, 42161, 137, 10];
+  var allTokens = [];
+  try {
+    var url = '/api/lifi/tokens?chainId=' + chainIds.join(',');
+    var res = await fetch(url, { credentials: 'same-origin' }).then(function(r) { return r.json(); });
+    if (res && res.ok && res.tokens) {
+      for (var cid in res.tokens) {
+        var toks = res.tokens[cid] || [];
+        toks.forEach(function(t) {
+          if (t.tags && Array.isArray(t.tags) && t.tags.indexOf('rwa') !== -1) {
+            allTokens.push(Object.assign({}, t, { chainId: Number(cid) }));
+          }
+        });
+      }
+    }
+  } catch (e) {
+    if (grid) grid.innerHTML = '<div class="rwa-empty"><i class="ti ti-alert-triangle" style="color:#ef4444"></i><div class="rwa-empty-title">Failed to load markets</div><div class="rwa-empty-sub">' + _rwaEsc((e && e.message) || 'Network error') + '</div></div>';
+    _rwaLoading = false;
+    return;
+  }
+
+  _rwaLoading = false;
+  if (allTokens.length === 0) {
+    if (grid) grid.innerHTML = '<div class="rwa-empty"><i class="ti ti-building-store"></i><div class="rwa-empty-title">No RWA tokens found</div><div class="rwa-empty-sub">LI.FI did not return any tokens tagged "rwa" for the selected chains. This may reflect your integrator policy or current coverage.</div></div>';
+    _rwaShowPolicy('unknown', 'No RWA tokens returned. Check your LI.FI Partner Portal policy.');
+    return;
+  }
+
+  // Infer issuer from name/symbol
+  allTokens.forEach(function(t) {
+    var s = (t.symbol || '').toLowerCase();
+    var n = (t.name || '').toLowerCase();
+    if (s.indexOf('ondo') !== -1 || n.indexOf('ondo') !== -1 || s.startsWith('ousdc') || s.startsWith('ousg')) {
+      t._issuer = 'ondo';
+    } else if (s.indexOf('xstock') !== -1 || n.indexOf('xstock') !== -1 || s.startsWith('xs')) {
+      t._issuer = 'xstocks';
+    } else if (n.indexOf('robinhood') !== -1 || s.indexOf('rbnb') !== -1) {
+      t._issuer = 'robinhood';
+    } else if (n.indexOf('backpack') !== -1) {
+      t._issuer = 'backpack';
+    } else {
+      t._issuer = 'other';
+    }
+  });
+
+  _rwaMarkets = allTokens;
+  _rwaShowPolicy('allowed', 'LI.FI returned ' + allTokens.length + ' RWA-tagged tokens. Integrator policy allows RWA.');
+  rwaFilterMarkets();
+}
+
+function rwaFilterMarkets() {
+  var q = (document.getElementById('rwa-search') && document.getElementById('rwa-search').value || '').toLowerCase();
+  var chainF = document.getElementById('rwa-chain-filter') && document.getElementById('rwa-chain-filter').value;
+  var issuerF = document.getElementById('rwa-issuer-filter') && document.getElementById('rwa-issuer-filter').value;
+
+  _rwaMarketsFiltered = _rwaMarkets.filter(function(t) {
+    if (q && (t.symbol || '').toLowerCase().indexOf(q) === -1 &&
+        (t.name || '').toLowerCase().indexOf(q) === -1 &&
+        (t._issuer || '').indexOf(q) === -1) return false;
+    if (chainF && String(t.chainId) !== String(chainF)) return false;
+    if (issuerF && t._issuer !== issuerF) return false;
+    return true;
+  });
+
+  var grid = document.getElementById('rwa-markets-grid');
+  if (!grid) return;
+
+  if (_rwaMarketsFiltered.length === 0) {
+    grid.innerHTML = '<div class="rwa-empty"><i class="ti ti-building-store"></i><div class="rwa-empty-title">No matches</div><div class="rwa-empty-sub">Try adjusting the search or filters.</div></div>';
+    return;
+  }
+
+  var frag = document.createDocumentFragment();
+  _rwaMarketsFiltered.forEach(function(t) {
+    var card = document.createElement('div');
+    card.className = 'rwa-card';
+    var issuer = _RWA_ISSUERS[t._issuer] || _RWA_ISSUERS.other;
+    var chain = _RWA_CHAINS[t.chainId] || { name: 'Chain ' + t.chainId };
+
+    var sym = document.createElement('div'); sym.className = 'rwa-card-symbol'; sym.textContent = t.symbol || '—';
+    var nm = document.createElement('div'); nm.className = 'rwa-card-name'; nm.textContent = t.name || '';
+    var iss = document.createElement('div'); iss.className = 'rwa-card-issuer'; iss.textContent = issuer.name;
+    iss.style.color = issuer.color;
+    var chn = document.createElement('div'); chn.className = 'rwa-card-chain';
+    chn.textContent = '\u{1F517} ' + chain.name;
+    var tag = document.createElement('div'); tag.className = 'rwa-card-tag'; tag.textContent = 'RWA';
+    var addr = document.createElement('div'); addr.className = 'rwa-card-addr'; addr.textContent = _rwaShortAddr(t.address);
+
+    card.appendChild(sym); card.appendChild(nm); card.appendChild(iss); card.appendChild(chn);
+    if (t.priceUSD) { var pr = document.createElement('div'); pr.className = 'rwa-card-price'; pr.textContent = '$' + parseFloat(t.priceUSD).toFixed(4); card.appendChild(pr); }
+    card.appendChild(tag); card.appendChild(addr);
+
+    card.addEventListener('click', function() { rwaSelectMarketToken(t); });
+    frag.appendChild(card);
+  });
+  grid.innerHTML = '';
+  grid.appendChild(frag);
+}
+
+function rwaSelectMarketToken(token) {
+  _rwaToToken = { symbol: token.symbol, address: token.address, chainId: token.chainId, decimals: token.decimals || 18 };
+  _rwaToChainId = token.chainId;
+  var toChainSel = document.getElementById('rwa-to-chain');
+  if (toChainSel) toChainSel.value = String(token.chainId);
+  _rwaUpdateTokenUI();
+  rwaTab('trade');
+  rwaFetchQuote();
+}
+
+// ── Token picker
+function rwaOpenPicker(side) {
+  _rwaPickerSide = side;
+  var overlay = document.getElementById('rwa-picker-overlay');
+  var title = document.getElementById('rwa-picker-title');
+  if (title) title.textContent = side === 'from' ? 'Select source token' : 'Select RWA destination token';
+  var inp = document.getElementById('rwa-picker-search');
+  if (inp) inp.value = '';
+  if (overlay) overlay.classList.add('open');
+  rwaPickerFilter();
+}
+function rwaClosePicker() {
+  var overlay = document.getElementById('rwa-picker-overlay');
+  if (overlay) overlay.classList.remove('open');
+}
+function rwaPickerBgClick(e) {
+  if (e.target === document.getElementById('rwa-picker-overlay')) rwaClosePicker();
+}
+function rwaPickerFilter() {
+  var q = (document.getElementById('rwa-picker-search') && document.getElementById('rwa-picker-search').value || '').toLowerCase();
+  var list = document.getElementById('rwa-picker-list');
+  if (!list) return;
+
+  // Source side: USDC + common stables; Dest side: RWA tokens
+  var tokens;
+  if (_rwaPickerSide === 'from') {
+    tokens = [
+      { symbol: 'USDC', name: 'USD Coin', chainId: _rwaFromChainId, decimals: 6, address: null, _issuer: 'stable' },
+      { symbol: 'USDT', name: 'Tether USD', chainId: _rwaFromChainId, decimals: 6, address: null, _issuer: 'stable' },
+      { symbol: 'ETH',  name: 'Ethereum',  chainId: 1,              decimals: 18, address: null, _issuer: 'native' },
+    ];
+  } else {
+    tokens = _rwaMarkets.filter(function(t) { return String(t.chainId) === String(_rwaToChainId); });
+    if (tokens.length === 0) tokens = _rwaMarkets; // cross-chain: show all
+  }
+
+  if (q) tokens = tokens.filter(function(t) {
+    return (t.symbol || '').toLowerCase().indexOf(q) !== -1 || (t.name || '').toLowerCase().indexOf(q) !== -1;
+  });
+
+  list.innerHTML = '';
+  if (tokens.length === 0) {
+    var empty = document.createElement('div');
+    empty.style.cssText = 'padding:20px;text-align:center;color:var(--muted2);font-size:10.5px';
+    empty.textContent = 'No tokens found';
+    list.appendChild(empty);
+    return;
+  }
+
+  var frag = document.createDocumentFragment();
+  tokens.forEach(function(t) {
+    var item = document.createElement('div');
+    item.className = 'rwa-picker-item';
+    var selected = _rwaPickerSide === 'from'
+      ? (_rwaFromToken && _rwaFromToken.symbol === t.symbol)
+      : (_rwaToToken && _rwaToToken.symbol === t.symbol && _rwaToToken.chainId === t.chainId);
+    if (selected) item.classList.add('selected');
+
+    var left = document.createElement('div');
+    var sym = document.createElement('div'); sym.className = 'rwa-picker-sym'; sym.textContent = t.symbol || '—';
+    var nm = document.createElement('div'); nm.className = 'rwa-picker-name'; nm.textContent = t.name || '';
+    var chn = document.createElement('div'); chn.className = 'rwa-picker-chain';
+    chn.textContent = (_RWA_CHAINS[Number(t.chainId)] || { name: 'Chain ' + t.chainId }).name;
+    left.appendChild(sym); left.appendChild(nm); left.appendChild(chn);
+    item.appendChild(left);
+
+    item.addEventListener('click', function() {
+      if (_rwaPickerSide === 'from') {
+        _rwaFromToken = { symbol: t.symbol, address: t.address, chainId: t.chainId, decimals: t.decimals || 6 };
+        _rwaFromChainId = t.chainId || _rwaFromChainId;
+      } else {
+        _rwaToToken = { symbol: t.symbol, address: t.address, chainId: t.chainId, decimals: t.decimals || 18 };
+        _rwaToChainId = t.chainId;
+        var toChainSel = document.getElementById('rwa-to-chain');
+        if (toChainSel) toChainSel.value = String(t.chainId);
+      }
+      rwaClosePicker();
+      _rwaUpdateTokenUI();
+      rwaFetchQuote();
+    });
+    frag.appendChild(item);
+  });
+  list.appendChild(frag);
+}
+
+function _rwaUpdateTokenUI() {
+  var fromSym = document.getElementById('rwa-from-sym');
+  var toSym = document.getElementById('rwa-to-sym');
+  if (fromSym) fromSym.textContent = _rwaFromToken ? _rwaFromToken.symbol : 'USDC';
+  if (toSym) toSym.textContent = _rwaToToken ? _rwaToToken.symbol : 'Select RWA';
+  _rwaUpdateBalances();
+}
+
+function _rwaUpdateBalances() {
+  // Read balances using LiFiAdapter token address or CHAIN_REGISTRY lookup
+  var fromBalEl = document.getElementById('rwa-from-bal');
+  var toBalEl   = document.getElementById('rwa-to-bal');
+  if (fromBalEl) fromBalEl.textContent = 'Balance: —';
+  if (toBalEl)   toBalEl.textContent   = 'Balance: —';
+  // Attempt to read via existing getBalance/tokenBalance infra if available
+  if (typeof walletAddress === 'undefined' || !walletAddress) return;
+  try {
+    if (typeof getTokenBalance === 'function' && _rwaFromToken && _rwaFromToken.address) {
+      getTokenBalance(_rwaFromToken.address, walletAddress).then(function(b) {
+        if (fromBalEl && b != null) fromBalEl.textContent = 'Balance: ' + _rwaFmt(b, _rwaFromToken.decimals) + ' ' + _rwaFromToken.symbol;
+      }).catch(function() {});
+    }
+    if (typeof getTokenBalance === 'function' && _rwaToToken && _rwaToToken.address) {
+      getTokenBalance(_rwaToToken.address, walletAddress).then(function(b) {
+        if (toBalEl && b != null) toBalEl.textContent = 'Balance: ' + _rwaFmt(b, _rwaToToken.decimals) + ' ' + _rwaToToken.symbol;
+      }).catch(function() {});
+    }
+  } catch (_) {}
+}
+
+function rwaOnAmountChange() {
+  _rwaCurrentQuote = null;
+  var btn = document.getElementById('rwa-trade-btn');
+  if (btn) btn.disabled = true;
+  // Debounce quote fetch
+  clearTimeout(window._rwaQuoteTimer);
+  window._rwaQuoteTimer = setTimeout(rwaFetchQuote, 700);
+}
+
+function rwaOnChainChange() {
+  var fromSel = document.getElementById('rwa-from-chain');
+  var toSel   = document.getElementById('rwa-to-chain');
+  if (fromSel) _rwaFromChainId = Number(fromSel.value);
+  if (toSel)   _rwaToChainId   = Number(toSel.value);
+  rwaFetchQuote();
+}
+
+function rwaSwapDirection() {
+  var tmp = _rwaFromToken;
+  _rwaFromToken = _rwaToToken || { symbol: 'USDC', address: null, chainId: _rwaToChainId, decimals: 6 };
+  _rwaToToken = tmp;
+  var tmpC = _rwaFromChainId;
+  _rwaFromChainId = _rwaToChainId;
+  _rwaToChainId = tmpC;
+  var fromSel = document.getElementById('rwa-from-chain');
+  var toSel   = document.getElementById('rwa-to-chain');
+  if (fromSel) fromSel.value = String(_rwaFromChainId);
+  if (toSel)   toSel.value   = String(_rwaToChainId);
+  _rwaUpdateTokenUI();
+  _rwaCurrentQuote = null;
+  rwaFetchQuote();
+}
+
+// ── Quote fetch
+async function rwaFetchQuote() {
+  if (typeof LiFiAdapter === 'undefined') return;
+  if (!_rwaFromToken || !_rwaToToken) {
+    _rwaSetQuoteErr('Select source and destination tokens.');
+    return;
+  }
+  var amtEl = document.getElementById('rwa-amount-in');
+  var amt = amtEl ? parseFloat(amtEl.value) : 0;
+  if (!amt || amt <= 0) {
+    _rwaSetQuoteErr(null);
+    return;
+  }
+  if (typeof walletAddress === 'undefined' || !walletAddress) {
+    _rwaSetQuoteErr('Connect your wallet to get a quote.');
+    return;
+  }
+  _rwaSetQuoteErr(null);
+  _rwaSetQuoteLoading(true);
+
+  var decimals = _rwaFromToken.decimals || 6;
+  // D1-fix: avoid Number precision loss for tokens with many decimals.
+  // Split amt into integer and fractional parts, shift each separately,
+  // then combine — keeps 18-decimal tokens exact up to 15 significant digits.
+  var amtRaw = (function(a, d) {
+    try {
+      var s = String(a);
+      var dot = s.indexOf('.');
+      if (dot === -1) return BigInt(s) * (10n ** BigInt(d));
+      var intPart = s.slice(0, dot) || '0';
+      var fracPart = s.slice(dot + 1);
+      if (fracPart.length > d) fracPart = fracPart.slice(0, d); // truncate, don't round
+      while (fracPart.length < d) fracPart += '0';
+      return BigInt(intPart) * (10n ** BigInt(d)) + BigInt(fracPart);
+    } catch (_) { return 0n; }
+  })(amt, decimals);
+
+  // Resolve token addresses
+  var fromAddr = _rwaFromToken.address;
+  if (!fromAddr && typeof getTokenAddressForChain === 'function') {
+    fromAddr = getTokenAddressForChain(_rwaFromChainId, _rwaFromToken.symbol);
+  }
+  var toAddr = _rwaToToken.address;
+  if (!toAddr && typeof getTokenAddressForChain === 'function') {
+    toAddr = getTokenAddressForChain(_rwaToChainId, _rwaToToken.symbol);
+  }
+
+  // Prefer getRoutes (returns multiple) then fall back to getQuote
+  var routeRes = null;
+  try {
+    routeRes = await LiFiAdapter.getRoutes({
+      tokenIn:     { symbol: _rwaFromToken.symbol, address: fromAddr, decimals: decimals },
+      tokenOut:    { symbol: _rwaToToken.symbol,   address: toAddr,   decimals: _rwaToToken.decimals || 18 },
+      amountInRaw: amtRaw,
+      fromChainId: _rwaFromChainId,
+      toChainId:   _rwaToChainId,
+      fromAddress: walletAddress,
+      toAddress:   walletAddress,
+    });
+  } catch (e) { routeRes = { ok: false, error: (e && e.message) || String(e), routes: [] }; }
+
+  _rwaSetQuoteLoading(false);
+
+  // Check for RWA policy block
+  if (routeRes && !routeRes.ok) {
+    var errMsg = routeRes.error || '';
+    if (errMsg.indexOf('RWA') !== -1 || errMsg.indexOf('policy') !== -1 || (routeRes.code && String(routeRes.code) === '1002')) {
+      _rwaShowPolicy('blocked', 'Integrator policy blocks RWA tokens. Configure in LI.FI Partner Portal.');
+      _rwaSetQuoteErr('RWA trading is not enabled for this integrator. Please configure your policy in the LI.FI Partner Portal (Settings → Compliance).');
+    } else {
+      _rwaSetQuoteErr(errMsg || 'No routes available for this pair.');
+    }
+    _rwaRoutes = [];
+    _rwaSelectedRoute = null;
+    _rwaRenderRoutes();
+    return;
+  }
+
+  var routes = (routeRes && routeRes.routes) || [];
+  if (routes.length === 0) {
+    // D2-fix: inspect unavailableRoutes.filteredOut for RWA policy block reason.
+    // Per LI.FI docs: HTTP 200 + routes:[] + unavailableRoutes.filteredOut when
+    // policy is 'declined'. The reason text is human-readable diagnostic only —
+    // detect via presence of 'RWA' or 'policy' in the reason (case-insensitive),
+    // not by matching the exact sentence.
+    var filteredOut = (routeRes && routeRes.unavailableRoutes && Array.isArray(routeRes.unavailableRoutes.filteredOut))
+      ? routeRes.unavailableRoutes.filteredOut : [];
+    var policyBlock = filteredOut.some(function(f) {
+      var r = (f && typeof f.reason === 'string') ? f.reason.toLowerCase() : '';
+      return r.indexOf('rwa') !== -1 || r.indexOf('policy') !== -1;
+    });
+    if (policyBlock) {
+      var blockReason = filteredOut.map(function(f) { return f.reason || ''; }).filter(Boolean).join('; ');
+      _rwaShowPolicy('blocked', 'LI.FI declined RWA paths: ' + blockReason + '. Configure in the LI.FI Partner Portal (Settings → Compliance).');
+      _rwaSetQuoteErr('RWA trading is not enabled for this integrator. Please configure your policy in the LI.FI Partner Portal (Settings → Compliance).');
+    } else {
+      _rwaSetQuoteErr('No routes available for this RWA pair. The asset may not be eligible on this network for your wallet address, or liquidity is unavailable.');
+    }
+    _rwaRoutes = [];
+    _rwaSelectedRoute = null;
+    _rwaRenderRoutes();
+    return;
+  }
+
+  _rwaShowPolicy('allowed', 'Routes returned — integrator policy allows RWA tokens.');
+  _rwaRoutes = routes;
+  _rwaSelectedRoute = routes[0];
+  _rwaRenderRoutes();
+
+  // Populate quote box from best route
+  var best = routes[0];
+  var outDec = _rwaToToken.decimals || 18;
+  var outAmt  = _rwaFmt(best.toAmountRaw, outDec);
+  var minAmt  = _rwaFmt(best.toAmountMinRaw, outDec);
+
+  var qBox = document.getElementById('rwa-quote-box');
+  if (qBox) qBox.style.display = 'block';
+  var _s = function(id, v) { var el = document.getElementById(id); if (el) el.textContent = v; };
+  _s('rwa-quote-tool', best.label || 'LI.FI');
+  _s('rwa-quote-out',  outAmt + ' ' + _rwaToToken.symbol);
+  _s('rwa-quote-min',  minAmt + ' ' + _rwaToToken.symbol);
+  _s('rwa-quote-fee',  best.feeCostUSD != null ? '$' + best.feeCostUSD.toFixed(4) : best.gasCostUSD != null ? '~$' + best.gasCostUSD.toFixed(4) + ' gas' : '—');
+  _s('rwa-quote-time', best.executionDuration != null ? Math.ceil(best.executionDuration / 60) + ' min' : '—');
+
+  var outEl = document.getElementById('rwa-amount-out');
+  var minEl = document.getElementById('rwa-amount-out-min');
+  if (outEl) outEl.textContent = outAmt;
+  if (minEl) minEl.textContent = 'min: ' + minAmt;
+
+  // D6-fix: stamp the fetch time so rwaConfirmTrade can reject stale quotes.
+  _rwaCurrentQuote = best;
+  _rwaCurrentQuote._quoteFetchedAt = Date.now();
+  var btn = document.getElementById('rwa-trade-btn');
+  if (btn) {
+    btn.disabled = false;
+    btn.textContent = 'Trade ' + _rwaFromToken.symbol + ' → ' + _rwaToToken.symbol;
+  }
+}
+
+function _rwaSetQuoteLoading(on) {
+  var btn = document.getElementById('rwa-trade-btn');
+  if (btn && on) { btn.disabled = true; btn.textContent = 'Fetching routes…'; }
+  var qBox = document.getElementById('rwa-quote-box');
+  if (!on) return;
+  if (qBox) qBox.style.display = 'none';
+  var outEl = document.getElementById('rwa-amount-out');
+  if (outEl) outEl.textContent = '—';
+}
+
+function _rwaSetQuoteErr(msg) {
+  var el = document.getElementById('rwa-quote-err');
+  if (!el) return;
+  if (msg) { el.style.display = 'block'; el.textContent = msg; }
+  else { el.style.display = 'none'; el.textContent = ''; }
+  var btn = document.getElementById('rwa-trade-btn');
+  if (btn && msg) { btn.disabled = true; btn.textContent = msg.length > 40 ? 'Route unavailable' : msg; }
+}
+
+// ── Routes panel
+function _rwaRenderRoutes() {
+  var el = document.getElementById('rwa-routes-list');
+  if (!el) return;
+  if (!_rwaRoutes.length) {
+    el.innerHTML = '<div class="rwa-empty"><i class="ti ti-route"></i><div class="rwa-empty-title">No routes available</div><div class="rwa-empty-sub">Try adjusting the pair, amount or network.</div></div>';
+    return;
+  }
+  el.innerHTML = '';
+  _rwaRoutes.forEach(function(r, i) {
+    var card = document.createElement('div');
+    card.className = 'rwa-route-card' + (i === 0 ? ' selected' : '');
+
+    var head = document.createElement('div'); head.className = 'rwa-route-head';
+    var tool = document.createElement('div'); tool.className = 'rwa-route-tool'; tool.textContent = r.label || 'LI.FI';
+    var outDec = _rwaToToken ? (_rwaToToken.decimals || 18) : 18;
+    var outV = document.createElement('div'); outV.className = 'rwa-route-out';
+    outV.textContent = _rwaFmt(r.toAmountRaw, outDec) + ' ' + (_rwaToToken ? _rwaToToken.symbol : '');
+    head.appendChild(tool); head.appendChild(outV);
+
+    var meta = document.createElement('div'); meta.className = 'rwa-route-meta';
+    var items = [];
+    if (r.feeCostUSD != null) items.push('Fee: $' + r.feeCostUSD.toFixed(4));
+    if (r.gasCostUSD != null) items.push('Gas: ~$' + r.gasCostUSD.toFixed(4));
+    if (r.executionDuration != null) items.push(Math.ceil(r.executionDuration / 60) + ' min');
+    if (r.steps != null) items.push(r.steps + (r.steps === 1 ? ' step' : ' steps'));
+    items.forEach(function(txt) { var s = document.createElement('span'); s.textContent = txt; meta.appendChild(s); });
+
+    var chips = document.createElement('div'); chips.className = 'rwa-route-steps';
+    (r.stepsData || []).forEach(function(step) {
+      var c = document.createElement('div'); c.className = 'rwa-step-chip';
+      c.textContent = (step.toolDetails && step.toolDetails.name) || step.tool || 'step';
+      chips.appendChild(c);
+    });
+
+    card.appendChild(head); card.appendChild(meta); card.appendChild(chips);
+    card.addEventListener('click', function() {
+      document.querySelectorAll('.rwa-route-card').forEach(function(c) { c.classList.remove('selected'); });
+      card.classList.add('selected');
+      _rwaSelectedRoute = r;
+    });
+    el.appendChild(card);
+  });
+}
+
+// ── Confirm modal
+var _RWA_QUOTE_TTL_MS = 60000; // 60 s — same window as LiFiAdapter
+
+function rwaConfirmTrade() {
+  if (!_rwaCurrentQuote || !_rwaSelectedRoute) return;
+  if (typeof walletAddress === 'undefined' || !walletAddress) { if (typeof toast === 'function') toast('Connect wallet first', 'error'); return; }
+  // D6-fix: reject stale quotes before opening the confirm modal.
+  if (_rwaCurrentQuote._quoteFetchedAt && (Date.now() - _rwaCurrentQuote._quoteFetchedAt) > _RWA_QUOTE_TTL_MS) {
+    if (typeof toast === 'function') toast('Quote expired — refreshing…', 'warn');
+    _rwaCurrentQuote = null;
+    var btn = document.getElementById('rwa-trade-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Quote expired — re-enter amount'; }
+    rwaFetchQuote();
+    return;
+  }
+  var amtEl = document.getElementById('rwa-amount-in');
+  var amt = amtEl ? amtEl.value : '0';
+  var outDec = _rwaToToken ? (_rwaToToken.decimals || 18) : 18;
+  var outAmt = _rwaFmt(_rwaSelectedRoute.toAmountRaw, outDec);
+  var minAmt = _rwaFmt(_rwaSelectedRoute.toAmountMinRaw, outDec);
+
+  var bodyEl = document.getElementById('rwa-confirm-body');
+  if (bodyEl) {
+    bodyEl.innerHTML = '';
+    var rows = [
+      ['From',       amt + ' ' + (_rwaFromToken ? _rwaFromToken.symbol : '—')],
+      ['To',         outAmt + ' ' + (_rwaToToken ? _rwaToToken.symbol : '—')],
+      ['Minimum out',minAmt + ' ' + (_rwaToToken ? _rwaToToken.symbol : '—')],
+      ['Route',      _rwaSelectedRoute.label || 'LI.FI'],
+      ['From chain', (_RWA_CHAINS[_rwaFromChainId] || { name: 'Chain ' + _rwaFromChainId }).name],
+      ['To chain',   (_RWA_CHAINS[_rwaToChainId]   || { name: 'Chain ' + _rwaToChainId }).name],
+      ['Recipient',  _rwaShortAddr(walletAddress)],
+    ];
+    rows.forEach(function(r) {
+      var row = document.createElement('div'); row.className = 'rwa-confirm-row';
+      var k = document.createElement('div'); k.className = 'rwa-confirm-key'; k.textContent = r[0];
+      var v = document.createElement('div'); v.className = 'rwa-confirm-val'; v.textContent = r[1];
+      row.appendChild(k); row.appendChild(v);
+      bodyEl.appendChild(row);
+    });
+  }
+
+  var sub = document.getElementById('rwa-confirm-sub');
+  if (sub) sub.textContent = 'Review carefully. RWA tokens may have issuer restrictions.';
+  var overlay = document.getElementById('rwa-confirm-overlay');
+  if (overlay) overlay.classList.add('open');
+}
+
+function rwaCloseConfirm() {
+  var overlay = document.getElementById('rwa-confirm-overlay');
+  if (overlay) overlay.classList.remove('open');
+}
+
+// ── Execute trade
+async function rwaExecuteTrade() {
+  if (_rwaExecPending) return;
+  if (!_rwaSelectedRoute || !_rwaCurrentQuote) { rwaCloseConfirm(); return; }
+  if (typeof walletAddress === 'undefined' || !walletAddress) { if (typeof toast === 'function') toast('Connect wallet first', 'error'); rwaCloseConfirm(); return; }
+
+  _rwaExecPending = true;
+  var okBtn = document.getElementById('rwa-confirm-ok-btn');
+  if (okBtn) { okBtn.disabled = true; okBtn.textContent = 'Signing…'; }
+
+  // Re-validate route before signing
+  if (!_rwaSelectedRoute._rawRoute || !Array.isArray(_rwaSelectedRoute.stepsData) || !_rwaSelectedRoute.stepsData.length) {
+    if (typeof toast === 'function') toast('Route data unavailable — please refresh and retry.', 'error');
+    _rwaExecPending = false;
+    if (okBtn) { okBtn.disabled = false; okBtn.textContent = 'Confirm & Sign'; }
+    rwaCloseConfirm();
+    return;
+  }
+
+  var firstStep = _rwaSelectedRoute.stepsData[0];
+  var stepWithTx;
+  try {
+    var stRes = await LiFiAdapter.getStepTransaction(firstStep);
+    if (!stRes || !stRes.ok || !stRes.step) throw new Error((stRes && stRes.error) || 'Step transaction unavailable');
+    stepWithTx = stRes.step;
+  } catch (e) {
+    if (typeof toast === 'function') toast('Failed to build transaction: ' + (e && e.message), 'error');
+    _rwaExecPending = false;
+    if (okBtn) { okBtn.disabled = false; okBtn.textContent = 'Confirm & Sign'; }
+    rwaCloseConfirm();
+    return;
+  }
+
+  // Validate step
+  if (typeof LiFiAdapter !== 'undefined' && typeof LiFiAdapter.validateRoute === 'function') {
+    // D3-fix: resolve token addresses the same way rwaFetchQuote does.
+    // _rwaFromToken.address may be null for USDC/ETH before picker selection;
+    // fall back to getTokenAddressForChain so validateRoute receives a real
+    // address (or null, which causes validateRoute to skip the token check).
+    var _vtFromAddr = (_rwaFromToken && _rwaFromToken.address) || null;
+    if (!_vtFromAddr && typeof getTokenAddressForChain === 'function' && _rwaFromToken) {
+      try { _vtFromAddr = getTokenAddressForChain(_rwaFromChainId, _rwaFromToken.symbol) || null; } catch (_) {}
+    }
+    var _vtToAddr = (_rwaToToken && _rwaToToken.address) || null;
+    if (!_vtToAddr && typeof getTokenAddressForChain === 'function' && _rwaToToken) {
+      try { _vtToAddr = getTokenAddressForChain(_rwaToChainId, _rwaToToken.symbol) || null; } catch (_) {}
+    }
+    var vResult = LiFiAdapter.validateRoute(stepWithTx, {
+      fromChainId: _rwaFromChainId,
+      toChainId:   _rwaToChainId,
+      fromToken:   _vtFromAddr,
+      toToken:     _vtToAddr,
+      sender:      walletAddress,
+    });
+    if (!vResult.ok) {
+      if (typeof toast === 'function') toast('Route validation failed: ' + (vResult.reason || 'mismatch'), 'error');
+      _rwaExecPending = false;
+      if (okBtn) { okBtn.disabled = false; okBtn.textContent = 'Confirm & Sign'; }
+      rwaCloseConfirm();
+      return;
+    }
+  }
+
+  var tr = stepWithTx.transactionRequest;
+  if (!tr || !tr.to || !tr.data) {
+    if (typeof toast === 'function') toast('Invalid transaction data from LI.FI.', 'error');
+    _rwaExecPending = false;
+    if (okBtn) { okBtn.disabled = false; okBtn.textContent = 'Confirm & Sign'; }
+    rwaCloseConfirm();
+    return;
+  }
+
+  rwaCloseConfirm();
+
+  // Sign and send via existing wallet infrastructure
+  var txHash = null;
+  try {
+    if (typeof walletProvider !== 'undefined' && walletProvider) {
+      var ethersProvider = new ethers.BrowserProvider(walletProvider);
+      var signer = await ethersProvider.getSigner();
+      // ERC-20 approval if needed
+      if (stepWithTx.estimate && stepWithTx.estimate.approvalAddress && _rwaFromToken && _rwaFromToken.address) {
+        var amtEl = document.getElementById('rwa-amount-in');
+        var amtNum = amtEl ? parseFloat(amtEl.value) : 0;
+        var amtRaw = BigInt(Math.round(amtNum * Math.pow(10, _rwaFromToken.decimals || 6)));
+        var erc20 = new ethers.Contract(_rwaFromToken.address,
+          ['function allowance(address,address) view returns (uint256)',
+           'function approve(address,uint256) returns (bool)'], signer);
+        var allowance = await erc20.allowance(walletAddress, stepWithTx.estimate.approvalAddress);
+        if (BigInt(allowance.toString()) < amtRaw) {
+          if (typeof toast === 'function') toast('Approving ' + _rwaFromToken.symbol + '…', 'info');
+          var approveTx = await erc20.approve(stepWithTx.estimate.approvalAddress, amtRaw);
+          await approveTx.wait();
+        }
+      }
+      if (typeof toast === 'function') toast('Sending RWA trade transaction…', 'info');
+      var tx = await signer.sendTransaction({
+        to:       tr.to,
+        data:     tr.data,
+        value:    tr.value ? BigInt(tr.value) : 0n,
+        chainId:  Number(_rwaFromChainId),
+        gasLimit: tr.gasLimit ? BigInt(tr.gasLimit) : undefined,
+      });
+      txHash = tx.hash;
+      if (typeof toast === 'function') toast('Transaction sent: ' + _rwaShortAddr(txHash), 'success');
+
+      var amtInEl = document.getElementById('rwa-amount-in');
+      _rwaRecord({
+        txHash:      txHash,
+        fromSym:     _rwaFromToken ? _rwaFromToken.symbol : '—',
+        toSym:       _rwaToToken   ? _rwaToToken.symbol   : '—',
+        amountIn:    amtInEl ? amtInEl.value : '—',
+        amountOut:   _rwaFmt(_rwaSelectedRoute.toAmountRaw, _rwaToToken ? _rwaToToken.decimals || 18 : 18),
+        fromChainId: _rwaFromChainId,
+        toChainId:   _rwaToChainId,
+        tool:        _rwaSelectedRoute.label || 'LI.FI',
+      });
+      if (_rwaActiveTab === 'history') rwaRenderHistory();
+
+      // Wait for receipt in background.
+      // D5-fix: for same-chain trades, receipt.status === 1 is definitive.
+      // For cross-chain trades (fromChainId !== toChainId), the source receipt
+      // only confirms the first leg; the bridge/intent may still fail on dest.
+      // Keep status 'pending' for cross-chain and let rwaRefreshHistoryStatus
+      // (which calls LiFiAdapter.getStatus) set the terminal state.
+      var _execFromChain = _rwaFromChainId;
+      var _execToChain   = _rwaToChainId;
+      tx.wait().then(function(receipt) {
+        var isCrossChain = Number(_execFromChain) !== Number(_execToChain);
+        var status = isCrossChain
+          ? (receipt && receipt.status === 1 ? 'pending' : 'failed')  // cross-chain: stay pending until dest confirmed
+          : (receipt && receipt.status === 1 ? 'done' : 'failed');      // same-chain: source receipt is final
+        _rwaUpdateStatus(txHash, status);
+        var msg = isCrossChain
+          ? 'Source tx confirmed. Waiting for cross-chain completion…'
+          : (status === 'done' ? 'RWA trade completed ✓' : 'RWA trade failed ✗');
+        var level = (status === 'failed') ? 'error' : (isCrossChain ? 'info' : 'success');
+        if (typeof toast === 'function') toast(msg, level);
+        if (_rwaActiveTab === 'history') rwaRenderHistory();
+      }).catch(function() {
+        _rwaUpdateStatus(txHash, 'failed');
+        if (_rwaActiveTab === 'history') rwaRenderHistory();
+      });
+    } else {
+      if (typeof toast === 'function') toast('No wallet provider. Connect a wallet to sign transactions.', 'error');
+    }
+  } catch (e) {
+    var code = e && e.code;
+    if (code === 4001 || (e && e.message && e.message.indexOf('rejected') !== -1)) {
+      if (typeof toast === 'function') toast('Transaction rejected by user.', 'warn');
+    } else {
+      if (typeof toast === 'function') toast('Transaction failed: ' + (e && e.message || 'unknown error'), 'error');
+      if (txHash) _rwaUpdateStatus(txHash, 'failed');
+    }
+  }
+
+  _rwaExecPending = false;
+}
+
+// ── History render
+function rwaRenderHistory() {
+  var el = document.getElementById('rwa-hist-list');
+  if (!el) return;
+  var entries = _rwaLocalLoad();
+  var filtered = entries.filter(function(e) {
+    if (_rwaHistFilter === 'all') return true;
+    return e.status === _rwaHistFilter;
+  });
+
+  if (filtered.length === 0) {
+    el.innerHTML = '<div class="rwa-empty"><i class="ti ti-history"></i><div class="rwa-empty-title">' + (_rwaHistFilter === 'all' ? 'No RWA trades yet' : 'No ' + _rwaHistFilter + ' trades') + '</div><div class="rwa-empty-sub">Trades will appear here after execution.</div></div>';
+    return;
+  }
+
+  el.innerHTML = '';
+  var frag = document.createDocumentFragment();
+  filtered.forEach(function(e) {
+    var row = document.createElement('div'); row.className = 'rwa-hist-row';
+    var dot = document.createElement('div'); dot.className = 'rwa-hist-dot';
+    dot.style.background = e.status === 'done' ? '#22c55e' : e.status === 'failed' ? '#ef4444' : '#f59e0b';
+
+    var main = document.createElement('div'); main.className = 'rwa-hist-main';
+    var lbl = document.createElement('div'); lbl.className = 'rwa-hist-label';
+    lbl.textContent = e.amountIn + ' ' + e.fromSym + ' → ' + e.amountOut + ' ' + e.toSym;
+    var sub = document.createElement('div'); sub.className = 'rwa-hist-sub';
+    var fromChn = (_RWA_CHAINS[Number(e.fromChainId)] || { name: 'Chain ' + e.fromChainId }).name;
+    var toChn   = (_RWA_CHAINS[Number(e.toChainId)]   || { name: 'Chain ' + e.toChainId }).name;
+    sub.textContent = fromChn + ' → ' + toChn + ' · ' + (e.tool || 'LI.FI') + ' · ' + new Date(e.ts).toLocaleString();
+
+    var badge = document.createElement('div'); badge.className = 'rwa-hist-badge';
+    badge.style.background = e.status === 'done' ? 'rgba(34,197,94,.13)' : e.status === 'failed' ? 'rgba(239,68,68,.13)' : 'rgba(245,158,11,.13)';
+    badge.style.color = e.status === 'done' ? '#22c55e' : e.status === 'failed' ? '#ef4444' : '#f59e0b';
+    badge.style.border = '1px solid ' + (e.status === 'done' ? 'rgba(34,197,94,.25)' : e.status === 'failed' ? 'rgba(239,68,68,.25)' : 'rgba(245,158,11,.25)');
+    badge.textContent = e.status === 'done' ? 'Done' : e.status === 'failed' ? 'Failed' : 'Pending';
+
+    var hash = _rwaSafeTxHash(e.txHash);
+    if (hash) {
+      var exp = _rwaSafeExplorer(e.fromChainId);
+      if (exp) {
+        var link = document.createElement('a');
+        link.href = exp + '/tx/' + hash;
+        link.target = '_blank'; link.rel = 'noopener noreferrer';
+        link.style.cssText = 'font-size:9px;color:var(--blue);text-decoration:none;display:block;margin-top:3px';
+        link.textContent = hash.slice(0, 10) + '…' + hash.slice(-6);
+        sub.appendChild(link);
+      }
+    }
+
+    main.appendChild(lbl); main.appendChild(sub);
+    row.appendChild(dot); row.appendChild(main); row.appendChild(badge);
+    frag.appendChild(row);
+  });
+  el.appendChild(frag);
+}
+
+function rwaHistFilter(f) {
+  _rwaHistFilter = f;
+  ['all','pending','done','failed'].forEach(function(k) {
+    var btn = document.getElementById('rwa-hf-' + k);
+    if (!btn) return;
+    btn.style.background = k === f ? 'var(--card)' : 'transparent';
+    btn.style.color      = k === f ? 'var(--text)' : 'var(--muted2)';
+  });
+  rwaRenderHistory();
+}
+
+async function rwaRefreshHistoryStatus() {
+  if (typeof LiFiAdapter === 'undefined') return;
+  var entries = _rwaLocalLoad();
+  var pending = entries.filter(function(e) { return e.status === 'pending' && _rwaSafeTxHash(e.txHash); });
+  for (var i = 0; i < pending.length; i++) {
+    var e = pending[i];
+    try {
+      var r = await LiFiAdapter.getStatus(e.txHash, { fromChainId: e.fromChainId, toChainId: e.toChainId });
+      if (r && r.ok && r.status) {
+        var s = String(r.status).toUpperCase();
+        if (s === 'DONE') _rwaUpdateStatus(e.txHash, 'done');
+        else if (s === 'FAILED') _rwaUpdateStatus(e.txHash, 'failed');
+      }
+    } catch (_) {}
+  }
+  if (_rwaActiveTab === 'history') rwaRenderHistory();
+}
+
+// ── Portfolio: detect RWA holdings
+async function rwaLoadPortfolio() {
+  var el = document.getElementById('rwa-portfolio-list');
+  if (!el) return;
+  if (typeof walletAddress === 'undefined' || !walletAddress) {
+    el.innerHTML = '<div class="rwa-empty"><i class="ti ti-briefcase"></i><div class="rwa-empty-title">Connect wallet to view positions</div><div class="rwa-empty-sub">Detected RWA holdings will appear here.</div></div>';
+    return;
+  }
+  el.innerHTML = '<div class="rwa-empty"><div class="rwa-spinner"></div><div class="rwa-empty-title" style="margin-top:12px">Checking balances…</div></div>';
+
+  var positions = [];
+  if (_rwaMarkets.length === 0) await rwaLoadMarkets();
+
+  for (var i = 0; i < _rwaMarkets.length; i++) {
+    var t = _rwaMarkets[i];
+    if (!t.address) continue;
+    try {
+      if (typeof getTokenBalance === 'function') {
+        var bal = await getTokenBalance(t.address, walletAddress);
+        if (bal != null && bal > 0n) {
+          positions.push({ token: t, balance: bal });
+        }
+      }
+    } catch (_) {}
+  }
+
+  if (positions.length === 0) {
+    el.innerHTML = '<div class="rwa-empty"><i class="ti ti-briefcase"></i><div class="rwa-empty-title">No RWA positions found</div><div class="rwa-empty-sub">Your wallet has no detected RWA token holdings on the loaded chains.</div></div>';
+    return;
+  }
+
+  el.innerHTML = '';
+  var frag = document.createDocumentFragment();
+  positions.forEach(function(p) {
+    var card = document.createElement('div'); card.className = 'rwa-pos-card';
+    var head = document.createElement('div'); head.className = 'rwa-pos-head';
+    var sym = document.createElement('div'); sym.className = 'rwa-pos-symbol'; sym.textContent = p.token.symbol + ' · ' + (_RWA_CHAINS[Number(p.token.chainId)] || { name: 'Chain ' + p.token.chainId }).name;
+    var bal = document.createElement('div'); bal.className = 'rwa-pos-balance'; bal.textContent = _rwaFmt(p.balance, p.token.decimals || 18) + ' ' + p.token.symbol;
+    var nm = document.createElement('div'); nm.style.cssText = 'font-size:10px;color:var(--muted2);margin-top:4px'; nm.textContent = p.token.name || '';
+    head.appendChild(sym); head.appendChild(bal);
+    card.appendChild(head); card.appendChild(nm);
+    frag.appendChild(card);
+  });
+  el.appendChild(frag);
+}
+
+// ── showPage hook: lazy-load markets on first visit
+var _rwaInitialized = false;
+var _origShowPage = (typeof showPage === 'function') ? showPage : null;
+if (_origShowPage) {
+  window.showPage = function(id) {
+    _origShowPage(id);
+    if (id === 'rwa' && !_rwaInitialized) {
+      _rwaInitialized = true;
+      _rwaShowPolicy('unknown');
+      rwaLoadMarkets();
+      rwaRenderHistory();
+    }
+  };
+}
+
+// Expose globals
+window.rwaTab = rwaTab;
+window.rwaRefresh = rwaRefresh;
+window.rwaFilterMarkets = rwaFilterMarkets;
+window.rwaOpenPicker = rwaOpenPicker;
+window.rwaClosePicker = rwaClosePicker;
+window.rwaPickerBgClick = rwaPickerBgClick;
+window.rwaPickerFilter = rwaPickerFilter;
+window.rwaOnAmountChange = rwaOnAmountChange;
+window.rwaOnChainChange = rwaOnChainChange;
+window.rwaSwapDirection = rwaSwapDirection;
+window.rwaConfirmTrade = rwaConfirmTrade;
+window.rwaCloseConfirm = rwaCloseConfirm;
+window.rwaExecuteTrade = rwaExecuteTrade;
+window.rwaRenderHistory = rwaRenderHistory;
+window.rwaHistFilter = rwaHistFilter;
+window.rwaLoadPortfolio = rwaLoadPortfolio;
+window.rwaSelectMarketToken = rwaSelectMarketToken;
+
 })();
 </script>
 
