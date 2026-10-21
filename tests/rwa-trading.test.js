@@ -516,3 +516,160 @@ describe('A7 — D7: proxy routes.js propagates unavailableRoutes', () => {
     expect(routesProxy).not.toContain('Path contains RWA token');
   });
 });
+
+// ── P1: tokens.js proxy preserves `tags` field ───────────────────────────────
+
+describe('P1 — tokens.js proxy preserves tags field for RWA discovery', () => {
+  const tokensProxy = fs.readFileSync(
+    path.resolve(__dirname, '../functions/api/lifi/tokens.js'), 'utf8');
+
+  it('includes tags in the map() output', () => {
+    // The normalized token object must carry tags so rwaLoadMarkets can filter.
+    expect(tokensProxy).toContain('tags:');
+  });
+  it('preserves tags as array without fabricating values', () => {
+    // Must copy the upstream array, not invent tags.
+    // The tags assignment is past the first 400 chars of the map block — use 600.
+    const mapBlock = blockAt(tokensProxy, 'filtered[chainId] = arr.map', 600);
+    expect(mapBlock).toContain('Array.isArray(t.tags)');
+    expect(mapBlock).toContain('t.tags.slice()');
+  });
+  it('falls back to empty array when upstream has no tags (no fabrication)', () => {
+    const mapBlock = blockAt(tokensProxy, 'filtered[chainId] = arr.map', 600);
+    expect(mapBlock).toContain('[]');
+    // Must NOT invent an 'rwa' string as a synthetic tag.
+    // The only 'rwa' that should appear is inside a comment, not as a string literal
+    // assigned to t.tags or returned directly.
+    const tagAssignBlock = blockAt(tokensProxy, 'tags:', 80);
+    expect(tagAssignBlock).not.toMatch(/tags:\s*\[\s*['"]rwa['"]\s*\]/);
+  });
+  it('rwaLoadMarkets checks t.tags array for rwa tag', () => {
+    const rwaFull = html.slice(
+      html.indexOf('RWA ADVANCED TRADING — JavaScript'),
+      html.indexOf('RWA ADVANCED TRADING — JavaScript') + 50000
+    );
+    const loadBlock = fnBlock(rwaFull, 'rwaLoadMarkets', 3000);
+    expect(loadBlock).toContain("t.tags.indexOf('rwa')");
+    expect(loadBlock).toContain('Array.isArray(t.tags)');
+  });
+  it('existing getTokens() consumers (LiFiAdapter) are not broken — shape check', () => {
+    // LiFiAdapter.getTokens() caches the tokens from the proxy; the added tags
+    // field is additive and must not break the shape contract (symbol + address required).
+    expect(tokensProxy).toContain(".filter(t => t.symbol && t.address)");
+  });
+  it('empty tags array is falsy-safe in consumer code', () => {
+    // rwaLoadMarkets: tags && Array.isArray(tags) — empty array passes Array.isArray
+    // but indexOf('rwa') === -1, so no spurious RWA tokens are added.
+    const rwaFull = html.slice(
+      html.indexOf('RWA ADVANCED TRADING — JavaScript'),
+      html.indexOf('RWA ADVANCED TRADING — JavaScript') + 50000
+    );
+    const loadBlock = fnBlock(rwaFull, 'rwaLoadMarkets', 3000);
+    // The guard uses && so an absent/empty tags won't throw
+    expect(loadBlock).toContain('t.tags &&');
+  });
+});
+
+// ── P2: LiFiAdapter.getRoutes() propagates unavailableRoutes ─────────────────
+
+describe('P2 — LiFiAdapter.getRoutes() propagates unavailableRoutes to callers', () => {
+  const adapter = fs.readFileSync(
+    path.resolve(__dirname, '../shared/LiFiAdapter.js'), 'utf8');
+
+  // getRoutes() function body — from declaration to end of function
+  const getRoutesBlock = fnBlock(adapter, 'getRoutes', 6000);
+
+  it('getRoutes return value includes unavailableRoutes field', () => {
+    // The return statement inside getRoutes must carry unavailableRoutes.
+    expect(getRoutesBlock).toContain('unavailableRoutes');
+    expect(getRoutesBlock).toContain('res.unavailableRoutes');
+  });
+  it('unavailableRoutes is read from the proxy response, not fabricated', () => {
+    // Must read from res (the proxy response), not hard-code.
+    // Anchor on 'var unavailableRoutes' to capture the assignment line.
+    const propBlock = blockAt(getRoutesBlock, 'var unavailableRoutes', 200);
+    expect(propBlock).toContain('res.unavailableRoutes');
+    expect(propBlock).not.toMatch(/unavailableRoutes\s*=\s*\{/); // no inline fabrication
+  });
+  it('existing callers that only read .routes are not broken', () => {
+    // The return is additive — .routes and .count still present.
+    const returnBlock = blockAt(getRoutesBlock, 'return { ok: true, routes:', 200);
+    expect(returnBlock).toContain('routes: normalized');
+    expect(returnBlock).toContain('count: normalized.length');
+  });
+  it('rwaFetchQuote reads unavailableRoutes from the LiFiAdapter.getRoutes result', () => {
+    const rwaFull = html.slice(
+      html.indexOf('RWA ADVANCED TRADING — JavaScript'),
+      html.indexOf('RWA ADVANCED TRADING — JavaScript') + 50000
+    );
+    // rwaFetchQuote calls LiFiAdapter.getRoutes and stores result as routeRes,
+    // then accesses routeRes.unavailableRoutes.filteredOut.
+    const quoteBlock = fnBlock(rwaFull, 'rwaFetchQuote', 7000);
+    expect(quoteBlock).toContain('routeRes.unavailableRoutes');
+    expect(quoteBlock).toContain('filteredOut');
+  });
+  it('policy block is differentiated from empty routes (no fabrication of message)', () => {
+    const rwaFull = html.slice(
+      html.indexOf('RWA ADVANCED TRADING — JavaScript'),
+      html.indexOf('RWA ADVANCED TRADING — JavaScript') + 50000
+    );
+    const quoteBlock = fnBlock(rwaFull, 'rwaFetchQuote', 7000);
+    // policyBlock is true only when filteredOut contains reason with 'rwa' or 'policy'
+    expect(quoteBlock).toContain('policyBlock');
+    // Empty routes without filteredOut shows a generic no-route message, not a policy block
+    expect(quoteBlock).toContain('No routes available');
+    expect(quoteBlock).toContain('RWA trading is not enabled');
+  });
+  it('getRoutes returns {ok:false} when proxy returns {ok:false} — callers unaffected', () => {
+    // The early return at "if (!res || res.ok !== true..." already handles this.
+    // Anchor before the error string so 'ok: false' is within the window.
+    const earlyReturn = blockAt(getRoutesBlock, 'return { ok: false, error: (res && res.error) || \'LIFI_ROUTES', 200);
+    expect(earlyReturn).toContain('ok: false');
+    expect(earlyReturn).toContain('routes: []');
+  });
+});
+
+// ── P3: BigInt precision consistent between quote and approval ────────────────
+
+describe('P3 — BigInt conversion consistent in approval check (no Math.round)', () => {
+  const rwaFull = html.slice(
+    html.indexOf('RWA ADVANCED TRADING — JavaScript'),
+    html.indexOf('RWA ADVANCED TRADING — JavaScript') + 50000
+  );
+  // rwaExecuteTrade is ~8000 chars; include enough to reach the approval section
+  const execBlock = fnBlock(rwaFull, 'rwaExecuteTrade', 9000);
+
+  it('approval block uses split-string BigInt, not Math.round', () => {
+    // Must use the safe string-split conversion (P3-fix), not the old naive path.
+    const approvalSection = blockAt(execBlock, 'approvalAddress', 600);
+    expect(approvalSection).not.toContain('Math.round');
+    expect(approvalSection).not.toContain('Math.pow(10,');
+    expect(approvalSection).not.toContain('Math.pow(10, ');
+  });
+  it('approval block uses same split-integer/fraction pattern as rwaFetchQuote', () => {
+    const approvalSection = blockAt(execBlock, 'P3-fix', 500);
+    expect(approvalSection).toContain('10n ** BigInt(d)');
+    expect(approvalSection).toContain('fracPart');
+    expect(approvalSection).toContain('intPart');
+  });
+  it('rwaFetchQuote quote conversion also uses split-string BigInt (D1-fix still intact)', () => {
+    const quoteBlock = fnBlock(rwaFull, 'rwaFetchQuote', 7000);
+    expect(quoteBlock).toContain('D1-fix');
+    expect(quoteBlock).toContain('10n ** BigInt(d)');
+    expect(quoteBlock).not.toContain('BigInt(Math.round(amt * Math.pow(10,');
+  });
+  it('approval amtRaw is computed from the UI input value, not a hardcoded fallback', () => {
+    const approvalSection = blockAt(execBlock, 'amtNum', 400);
+    expect(approvalSection).toContain('parseFloat(amtEl.value)');
+  });
+  it('approval uses token-specific decimals, not hardcoded 6 or 18', () => {
+    // _aprvDec reads _rwaFromToken.decimals
+    const approvalSection = blockAt(execBlock, '_aprvDec', 200);
+    expect(approvalSection).toContain('_rwaFromToken.decimals');
+  });
+  it('truncates excess decimal places for tokens with fewer decimals (no silent rounding)', () => {
+    // fracPart.length > d → fracPart = fracPart.slice(0, d) — truncate, not round
+    const approvalSection = blockAt(execBlock, 'P3-fix', 600);
+    expect(approvalSection).toContain('fracPart.slice(0, d)');
+  });
+});

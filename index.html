@@ -61989,7 +61989,21 @@ async function rwaExecuteTrade() {
       if (stepWithTx.estimate && stepWithTx.estimate.approvalAddress && _rwaFromToken && _rwaFromToken.address) {
         var amtEl = document.getElementById('rwa-amount-in');
         var amtNum = amtEl ? parseFloat(amtEl.value) : 0;
-        var amtRaw = BigInt(Math.round(amtNum * Math.pow(10, _rwaFromToken.decimals || 6)));
+        // P3-fix: use the same split-string BigInt conversion as rwaFetchQuote
+        // (D1-fix) to avoid Number precision loss for tokens with 18 decimals.
+        var _aprvDec = _rwaFromToken.decimals || 6;
+        var amtRaw = (function(a, d) {
+          try {
+            var s = String(a);
+            var dot = s.indexOf('.');
+            if (dot === -1) return BigInt(s) * (10n ** BigInt(d));
+            var intPart = s.slice(0, dot) || '0';
+            var fracPart = s.slice(dot + 1);
+            if (fracPart.length > d) fracPart = fracPart.slice(0, d);
+            while (fracPart.length < d) fracPart += '0';
+            return BigInt(intPart) * (10n ** BigInt(d)) + BigInt(fracPart);
+          } catch (_) { return 0n; }
+        })(amtNum, _aprvDec);
         var erc20 = new ethers.Contract(_rwaFromToken.address,
           ['function allowance(address,address) view returns (uint256)',
            'function approve(address,uint256) returns (bool)'], signer);

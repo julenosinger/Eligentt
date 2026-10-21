@@ -81,6 +81,9 @@ export async function onRequestGet({ request, env }) {
     const arr = rawTokens[String(chainId)];
     if (!Array.isArray(arr)) continue;
     // Normalize + filter to essential fields only.
+    // `tags` is preserved because downstream consumers (e.g. rwaLoadMarkets) rely
+    // on it to identify RWA tokens without a hardcoded list — dropping it would
+    // make every token catalogue empty regardless of LI.FI coverage.
     filtered[chainId] = arr.map(t => ({
       chainId: Number(t.chainId || chainId),
       address: (t.address || '').toLowerCase(),
@@ -89,6 +92,9 @@ export async function onRequestGet({ request, env }) {
       decimals: Number(t.decimals) || 18,
       logoURI: t.logoURI || null,
       priceUSD: t.priceUSD ? String(t.priceUSD) : null,
+      // Preserve classification tags (e.g. ['rwa', 'defi']) for downstream filtering.
+      // Never fabricate: if the upstream field is absent we store an empty array.
+      tags: Array.isArray(t.tags) ? t.tags.slice() : [],
     })).filter(t => t.symbol && t.address);
   }
 

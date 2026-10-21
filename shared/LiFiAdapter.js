@@ -426,7 +426,12 @@
       };
     }).filter(function(r) { return r.toAmountRaw > 0n; });
 
-    return { ok: true, routes: normalized, count: normalized.length };
+    // Propagate unavailableRoutes.filteredOut from the proxy so callers can
+    // detect RWA policy blocks (LI.FI returns HTTP 200 + routes:[] +
+    // unavailableRoutes.filteredOut when integrator policy is 'declined').
+    // This is additive: existing consumers that only read .routes are unaffected.
+    var unavailableRoutes = res.unavailableRoutes || null;
+    return { ok: true, routes: normalized, count: normalized.length, unavailableRoutes: unavailableRoutes };
   }
 
   /**
