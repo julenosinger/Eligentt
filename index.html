@@ -61645,45 +61645,57 @@ function _rwaUpdateBalances() {
   var wallet = (typeof walletAddress !== 'undefined') ? walletAddress : null;
   if (!wallet) return;
 
+  // ── Helper: resolve token address when the token object has address:null
+  // (e.g. default USDC before a market token is selected). Looks up symbol
+  // in CHAIN_REGISTRY[chainId].tokens — canonical address per chain.
+  function _resolveAddr(tok, chainId) {
+    if (tok && tok.address) return tok.address;
+    if (!tok || !tok.symbol) return null;
+    var reg = (typeof CHAIN_REGISTRY !== 'undefined') ? CHAIN_REGISTRY[chainId] : null;
+    var entry = reg && reg.tokens && reg.tokens[tok.symbol.toUpperCase()];
+    return entry ? entry.address : null;
+  }
+
   // ── FROM balance ─────────────────────────────────────────────
-  if (_rwaFromToken && _rwaFromToken.address) {
-    var fromAddr    = _rwaFromToken.address;
+  if (_rwaFromToken) {
     var fromChain   = _rwaFromChainId || _rwaFromToken.chainId || 1;
+    var fromAddr    = _resolveAddr(_rwaFromToken, fromChain);
     var fromDec     = _rwaFromToken.decimals != null ? _rwaFromToken.decimals : 18;
     var fromSym     = _rwaFromToken.symbol || '';
-    var fromSeq     = ++_rwaBalSeq.from;             // bump sequence before async
-    if (fromBalEl) fromBalEl.textContent = 'Balance: …';
-    _rwaFetchTokenBalance(fromAddr, fromChain, wallet).then(function(raw) {
-      // Discard if token changed while we were waiting
-      if (_rwaBalSeq.from !== fromSeq) return;
-      if (!fromBalEl) return;
-      // null = no proxy available for this chain (CORS); show dash, not error
-      if (raw === null) { fromBalEl.textContent = 'Balance: —'; return; }
-      fromBalEl.textContent = 'Balance: ' + _rwaFmt(raw, fromDec) + ' ' + fromSym;
-    }).catch(function() {
-      if (_rwaBalSeq.from !== fromSeq) return;
-      if (fromBalEl) fromBalEl.textContent = 'Balance: —';
-    });
+    if (fromAddr) {
+      var fromSeq = ++_rwaBalSeq.from;
+      if (fromBalEl) fromBalEl.textContent = 'Balance: …';
+      _rwaFetchTokenBalance(fromAddr, fromChain, wallet).then(function(raw) {
+        if (_rwaBalSeq.from !== fromSeq) return;
+        if (!fromBalEl) return;
+        if (raw === null) { fromBalEl.textContent = 'Balance: —'; return; }
+        fromBalEl.textContent = 'Balance: ' + _rwaFmt(raw, fromDec) + ' ' + fromSym;
+      }).catch(function() {
+        if (_rwaBalSeq.from !== fromSeq) return;
+        if (fromBalEl) fromBalEl.textContent = 'Balance: —';
+      });
+    }
   }
 
   // ── TO balance ───────────────────────────────────────────────
-  if (_rwaToToken && _rwaToToken.address) {
-    var toAddr    = _rwaToToken.address;
+  if (_rwaToToken) {
     var toChain   = _rwaToChainId || _rwaToToken.chainId || 1;
+    var toAddr    = _resolveAddr(_rwaToToken, toChain);
     var toDec     = _rwaToToken.decimals != null ? _rwaToToken.decimals : 18;
     var toSym     = _rwaToToken.symbol || '';
-    var toSeq     = ++_rwaBalSeq.to;
-    if (toBalEl) toBalEl.textContent = 'Balance: …';
-    _rwaFetchTokenBalance(toAddr, toChain, wallet).then(function(raw) {
-      if (_rwaBalSeq.to !== toSeq) return;
-      if (!toBalEl) return;
-      // null = no proxy available for this chain (CORS); show dash, not error
-      if (raw === null) { toBalEl.textContent = 'Balance: —'; return; }
-      toBalEl.textContent = 'Balance: ' + _rwaFmt(raw, toDec) + ' ' + toSym;
-    }).catch(function() {
-      if (_rwaBalSeq.to !== toSeq) return;
-      if (toBalEl) toBalEl.textContent = 'Balance: —';
-    });
+    if (toAddr) {
+      var toSeq = ++_rwaBalSeq.to;
+      if (toBalEl) toBalEl.textContent = 'Balance: …';
+      _rwaFetchTokenBalance(toAddr, toChain, wallet).then(function(raw) {
+        if (_rwaBalSeq.to !== toSeq) return;
+        if (!toBalEl) return;
+        if (raw === null) { toBalEl.textContent = 'Balance: —'; return; }
+        toBalEl.textContent = 'Balance: ' + _rwaFmt(raw, toDec) + ' ' + toSym;
+      }).catch(function() {
+        if (_rwaBalSeq.to !== toSeq) return;
+        if (toBalEl) toBalEl.textContent = 'Balance: —';
+      });
+    }
   }
 }
 
@@ -62300,8 +62312,9 @@ if (_origShowPage) {
       if (pbar) pbar.style.display = 'none';
       rwaLoadMarkets();
       rwaRenderHistory();
-      // Refresh balances whenever the wallet connects or switches address/chain.
-      // These events are fired by finalizeConnection() and the chain-switch handler.
+      // Fetch balances immediately if wallet already connected (event already fired).
+      _rwaUpdateBalances();
+      // Also refresh whenever wallet connects or switches address/chain after init.
       document.addEventListener('WALLET_CONNECTED', function() { _rwaUpdateBalances(); });
       document.addEventListener('WALLET_SWITCHED',  function() { _rwaUpdateBalances(); });
     }

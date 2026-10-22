@@ -988,3 +988,45 @@ describe('FIX-SLIPPAGE — routes.js must NOT forward "auto" string to /advanced
     expect(routesSrc).toContain('Number.isFinite(Number(body.slippage))');
   });
 });
+
+// ── FIX-BALANCE-ADDRESS: _resolveAddr resolves null address via CHAIN_REGISTRY ─
+describe('FIX-BALANCE-ADDRESS — _resolveAddr resolves null address via CHAIN_REGISTRY', () => {
+  const _rwaStart4 = html.indexOf('RWA ADVANCED TRADING \u2014 JavaScript');
+  const rwaFull4   = html.slice(_rwaStart4, _rwaStart4 + 55000);
+  const updateFn   = fnBlock(rwaFull4, '_rwaUpdateBalances', 3000);
+
+  it('_resolveAddr helper exists inside _rwaUpdateBalances', () => {
+    expect(updateFn).toContain('function _resolveAddr');
+  });
+
+  it('_resolveAddr returns tok.address when present', () => {
+    expect(updateFn).toContain('if (tok && tok.address) return tok.address');
+  });
+
+  it('_resolveAddr falls back to CHAIN_REGISTRY[chainId].tokens lookup', () => {
+    expect(updateFn).toContain('CHAIN_REGISTRY[chainId]');
+    expect(updateFn).toContain('reg.tokens[tok.symbol.toUpperCase()]');
+  });
+
+  it('_resolveAddr returns null (not throw) when registry entry absent', () => {
+    expect(updateFn).toContain('return entry ? entry.address : null');
+  });
+
+  it('FROM balance block no longer gates on _rwaFromToken.address being truthy', () => {
+    // Old code: if (_rwaFromToken && _rwaFromToken.address) { ... }
+    // New code: _resolveAddr resolves address even when tok.address is null
+    expect(updateFn).not.toContain('_rwaFromToken.address)');
+  });
+
+  it('init block calls _rwaUpdateBalances immediately on first visit', () => {
+    // Previously only called via WALLET_CONNECTED / WALLET_SWITCHED events.
+    // If wallet already connected when tab opens, those events never fire again.
+    const initBlock = blockAt(rwaFull4, '_rwaInitialized = true', 800);
+    expect(initBlock).toContain('_rwaUpdateBalances()');
+  });
+
+  it('CHAIN_REGISTRY chain 1 has canonical Ethereum USDC address', () => {
+    // Must NOT be Arc USDC (0x3600...) for chain 1 balance reads to work.
+    expect(html).toContain("'0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'");
+  });
+});
