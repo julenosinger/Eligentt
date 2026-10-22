@@ -48946,10 +48946,12 @@ const UBScreen = (function() {
 
   async function _ubQuoteSwap(from, to, amt) {
     var seq = ++_ubSwapSeq;
-    if (typeof SWP === 'undefined') return;
     var outEl = document.getElementById('ub-scr-swap-out');
     var rateEl = document.getElementById('ub-scr-swap-rate');
     var rteEl = document.getElementById('ub-scr-swap-route');
+
+    // Guard: SWP must exist (Swap page state object)
+    if (typeof SWP === 'undefined') { _ubSwapNoRoute(outEl, rateEl, rteEl); return; }
 
     // Map symbols → token objects (USDC/EURC → address + decimals).
     var ti2 = null, to2 = null;
@@ -49054,16 +49056,26 @@ const UBScreen = (function() {
     } catch(e) {
       // Any unexpected error must still terminate the loading state.
       clearTimeout(_ubHardTimer);
-      SWP._towerQuoteData = null;
-      SWP.lastQuote = null;
-      _ubSwapNoRoute(outEl, rateEl, rteEl);
+      if (typeof SWP !== 'undefined') { SWP._towerQuoteData = null; SWP.lastQuote = null; }
+      // Re-fetch elements in case DOM was rebuilt during the await
+      _ubSwapNoRoute(
+        document.getElementById('ub-scr-swap-out') || outEl,
+        document.getElementById('ub-scr-swap-rate') || rateEl,
+        document.getElementById('ub-scr-swap-route') || rteEl
+      );
+    } finally {
+      clearTimeout(_ubHardTimer);
     }
   }
 
   function _ubSwapNoRoute(outEl, rateEl, rteEl) {
-    if (outEl) outEl.value = '—';
-    if (rateEl) rateEl.textContent = 'No route available';
-    if (rteEl) rteEl.textContent = 'No route';
+    // Re-fetch live DOM refs — elements may have been replaced since capture
+    var o = document.getElementById('ub-scr-swap-out')  || outEl;
+    var r = document.getElementById('ub-scr-swap-rate') || rateEl;
+    var t = document.getElementById('ub-scr-swap-route')|| rteEl;
+    if (o) o.value = '—';
+    if (r) r.textContent = 'No route available';
+    if (t) t.textContent = 'No route available';
   }
 
   function _ubSwapProviderLabel(source) {
