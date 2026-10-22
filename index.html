@@ -1913,6 +1913,88 @@ body.swap-standard-mode .site-footer{display:block !important}
 .brg-hist-empty i { font-size: 28px; opacity: .4; }
 @media (max-width: 540px) { .brg-hist-panel { width: 100vw; } }
 
+/* Schedule History panel */
+.sch-hist-btn {
+  display: flex; align-items: center; gap: 5px;
+  background: rgba(245,158,11,.08);
+  border: 1px solid rgba(245,158,11,.18);
+  border-radius: 7px;
+  color: var(--yellow);
+  font-size: 9.5px; font-weight: 600;
+  padding: 5px 10px;
+  cursor: pointer;
+  transition: background .15s, border-color .15s;
+  white-space: nowrap;
+}
+.sch-hist-btn:hover { background: rgba(245,158,11,.15); border-color: rgba(245,158,11,.35); }
+.sch-hist-btn i { font-size: 12px; }
+@media (max-width: 480px) { .sch-hist-btn-label { display: none; } }
+.sch-hist-overlay {
+  position: fixed; inset: 0; z-index: 2400;
+  background: rgba(0,0,0,.55);
+  display: flex; justify-content: flex-end;
+  opacity: 0; pointer-events: none;
+  transition: opacity .22s ease;
+}
+.sch-hist-overlay.open { opacity: 1; pointer-events: all; }
+.sch-hist-panel {
+  width: 460px; max-width: 96vw;
+  background: var(--bg);
+  border-left: 1px solid var(--border);
+  display: flex; flex-direction: column;
+  transform: translateX(100%);
+  transition: transform .22s ease;
+  height: 100%; overflow: hidden;
+}
+.sch-hist-overlay.open .sch-hist-panel { transform: translateX(0); }
+.sch-hist-panel-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 16px 18px 14px;
+  border-bottom: 1px solid var(--border2);
+  flex-shrink: 0;
+}
+.sch-hist-panel-title { font-size: 13px; font-weight: 700; color: var(--text); }
+.sch-hist-filters { display: flex; gap: 4px; flex-wrap: wrap; }
+.sch-hist-filter {
+  background: transparent; border: 1px solid var(--border2);
+  border-radius: 5px; color: var(--muted2);
+  font-size: 8.5px; font-weight: 600;
+  padding: 3px 8px; cursor: pointer;
+  transition: background .12s, color .12s, border-color .12s;
+}
+.sch-hist-filter.active,
+.sch-hist-filter:hover { background: rgba(245,158,11,.1); color: var(--yellow); border-color: rgba(245,158,11,.25); }
+.sch-hist-refresh-btn,
+.sch-hist-close-btn {
+  background: transparent; border: 1px solid var(--border2);
+  border-radius: 6px; color: var(--muted2);
+  width: 26px; height: 26px;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; font-size: 12px;
+  transition: background .12s, color .12s;
+}
+.sch-hist-refresh-btn:hover,
+.sch-hist-close-btn:hover { background: rgba(255,255,255,.06); color: var(--text); }
+.sch-hist-body { flex: 1; overflow-y: auto; padding: 12px 14px; }
+.sch-hist-empty {
+  display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 10px;
+  color: var(--muted2); font-size: 11px; padding: 48px 0;
+}
+.sch-hist-empty i { font-size: 28px; opacity: .4; }
+.sch-hist-list { display: flex; flex-direction: column; gap: 5px; }
+.sch-hist-entry {
+  display: flex; align-items: flex-start; gap: 10px;
+  background: rgba(255,255,255,.025); border: 1px solid var(--border2);
+  border-radius: 9px; padding: 10px 12px; font-size: 10px;
+  transition: border-color .14s;
+}
+.sch-hist-entry:hover { border-color: rgba(245,158,11,.2); }
+.sch-hist-entry-icon { flex-shrink: 0; margin-top: 1px; }
+.sch-hist-entry-detail { flex: 1; color: var(--text); line-height: 1.5; }
+.sch-hist-entry-time { font-size: 8.5px; color: var(--muted2); white-space: nowrap; flex-shrink: 0; }
+@media (max-width: 540px) { .sch-hist-panel { width: 100vw; } }
+
 /* AI Optimizer */
 .swa-ai-route {
   display: flex;
@@ -8057,6 +8139,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
         </div>
         <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
           <div class="kit-badge" style="background:rgba(245,158,11,.1);color:var(--yellow);border-color:rgba(245,158,11,.2)"><i class="ti ti-calendar-event" style="font-size:9px"></i>Smart Scheduler</div>
+          <button class="sch-hist-btn" id="sch-hist-btn" onclick="schOpenHistory()" title="View execution history"><i class="ti ti-history"></i><span class="sch-hist-btn-label">History</span></button>
           <button class="btn" onclick="scheduleFilterView('scheduled')"><i class="ti ti-calendar-check"></i>Scheduled</button>
           <button class="btn" onclick="scheduleFilterView('stopped')"><i class="ti ti-player-pause"></i>Stopped</button>
           <button class="btn primary" onclick="scheduleCreateNew()"><i class="ti ti-plus"></i>New Schedule</button>
@@ -8208,12 +8291,37 @@ select.cinput option { background: #161a24; color: #dde2f0; }
           </div>
         </div>
 
-        <!-- Execution log -->
-        <div class="card">
-          <div class="ch"><i class="ti ti-history" style="font-size:13px;color:var(--muted2)"></i><span class="ct">Execution History</span></div>
+        <!-- Execution log (inline, source of truth for panel) -->
+        <div class="card" id="sch-log-card">
+          <div class="ch"><i class="ti ti-history" style="font-size:13px;color:var(--muted2)"></i><span class="ct">Execution History</span>
+            <button onclick="schOpenHistory()" style="margin-left:auto;background:transparent;border:none;color:var(--yellow);cursor:pointer;font-size:10px;font-weight:600;display:flex;align-items:center;gap:4px"><i class="ti ti-external-link" style="font-size:11px"></i>View all</button>
+          </div>
           <div id="sch-log" style="display:flex;flex-direction:column;gap:4px;max-height:250px;overflow-y:auto;padding:8px">
             <div style="font-size:9px;color:var(--muted2);text-align:center">No executions yet.</div>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Schedule History overlay/panel -->
+    <div class="sch-hist-overlay" id="sch-hist-overlay" onclick="schHistOverlayClick(event)">
+      <div class="sch-hist-panel" id="sch-hist-panel">
+        <div class="sch-hist-panel-head">
+          <i class="ti ti-history" style="color:var(--yellow);font-size:15px"></i>
+          <span class="sch-hist-panel-title">Schedule History</span>
+          <div class="sch-hist-filters" id="sch-hist-filters" style="margin-left:8px">
+            <button class="sch-hist-filter active" data-sch-filter="all" onclick="schHistFilter('all')">All</button>
+            <button class="sch-hist-filter" data-sch-filter="executed" onclick="schHistFilter('executed')">Executed</button>
+            <button class="sch-hist-filter" data-sch-filter="created" onclick="schHistFilter('created')">Created</button>
+            <button class="sch-hist-filter" data-sch-filter="paused" onclick="schHistFilter('paused')">Paused</button>
+          </div>
+          <div style="margin-left:auto;display:flex;gap:6px">
+            <button class="sch-hist-refresh-btn" onclick="schHistRefresh()" title="Refresh"><i class="ti ti-refresh"></i></button>
+            <button class="sch-hist-close-btn" onclick="schCloseHistory()" title="Close"><i class="ti ti-x"></i></button>
+          </div>
+        </div>
+        <div class="sch-hist-body" id="sch-hist-body">
+          <div class="sch-hist-empty"><i class="ti ti-calendar-off"></i><span>No executions yet.</span></div>
         </div>
       </div>
     </div>
@@ -18928,6 +19036,144 @@ var _brgSessionEntries = [];
     document.addEventListener('DOMContentLoaded', _attach);
   } else {
     setTimeout(_attach, 200);
+  }
+})();
+
+// ── Schedule History panel ───────────────────────────────────────
+var _schHistFilter = 'all';
+
+function schOpenHistory() {
+  var overlay = document.getElementById('sch-hist-overlay');
+  if (!overlay) return;
+  overlay.classList.add('open');
+  document.addEventListener('keydown', _schHistKeydown);
+  schHistRender();
+}
+
+function schCloseHistory() {
+  var overlay = document.getElementById('sch-hist-overlay');
+  if (overlay) overlay.classList.remove('open');
+  document.removeEventListener('keydown', _schHistKeydown);
+}
+
+function _schHistKeydown(e) { if (e.key === 'Escape') schCloseHistory(); }
+
+function schHistOverlayClick(e) {
+  var panel = document.getElementById('sch-hist-panel');
+  if (panel && !panel.contains(e.target)) schCloseHistory();
+}
+
+function schHistFilter(f) {
+  _schHistFilter = f;
+  var btns = document.querySelectorAll('#sch-hist-filters .sch-hist-filter');
+  btns.forEach(function(b) {
+    b.classList.toggle('active', b.getAttribute('data-sch-filter') === f);
+  });
+  schHistRender();
+}
+
+function schHistRefresh() {
+  var btn = document.querySelector('.sch-hist-refresh-btn');
+  if (btn) { btn.style.opacity = '.4'; setTimeout(function() { btn.style.opacity = ''; }, 600); }
+  schHistRender();
+}
+
+function schHistRender() {
+  var body = document.getElementById('sch-hist-body');
+  if (!body) return;
+
+  // Read entries from the inline #sch-log source-of-truth
+  var logEl = document.getElementById('sch-log');
+  var rawItems = logEl ? Array.from(logEl.children) : [];
+  // Filter out the empty-state placeholder
+  var items = rawItems.filter(function(el) {
+    return !el.style.textAlign && el.children.length > 0;
+  });
+
+  // Apply filter based on icon color (green = executed, yellow = created, else = other)
+  var filtered = items.filter(function(el) {
+    if (_schHistFilter === 'all') return true;
+    var icon = el.querySelector('i');
+    if (!icon) return true;
+    var cls = icon.className || '';
+    if (_schHistFilter === 'executed') return cls.indexOf('ti-check') !== -1;
+    if (_schHistFilter === 'created')  return cls.indexOf('ti-plus') !== -1;
+    if (_schHistFilter === 'paused')   return cls.indexOf('ti-pause') !== -1 || cls.indexOf('ti-play') !== -1;
+    return true;
+  });
+
+  // Clear body safely
+  while (body.firstChild) body.removeChild(body.firstChild);
+
+  if (!filtered.length) {
+    var empty = document.createElement('div');
+    empty.className = 'sch-hist-empty';
+    var emptyIcon = document.createElement('i');
+    emptyIcon.className = 'ti ti-calendar-off';
+    var emptySpan = document.createElement('span');
+    emptySpan.textContent = _schHistFilter !== 'all'
+      ? 'No ' + _schHistFilter + ' entries'
+      : 'No executions yet.';
+    empty.appendChild(emptyIcon);
+    empty.appendChild(emptySpan);
+    body.appendChild(empty);
+    return;
+  }
+
+  var list = document.createElement('div');
+  list.className = 'sch-hist-list';
+
+  filtered.forEach(function(src) {
+    // Extract icon, detail text and time from the source entry
+    var srcIcon = src.querySelector('i');
+    var spans   = src.querySelectorAll('span');
+    var detail  = spans[0] ? spans[0].textContent : '';
+    var time    = spans[1] ? spans[1].textContent : '';
+
+    var entry = document.createElement('div');
+    entry.className = 'sch-hist-entry';
+
+    var iconWrap = document.createElement('span');
+    iconWrap.className = 'sch-hist-entry-icon';
+    if (srcIcon) {
+      var ic = document.createElement('i');
+      ic.className = srcIcon.className;
+      ic.style.cssText = srcIcon.style.cssText || 'color:var(--muted2);font-size:12px';
+      iconWrap.appendChild(ic);
+    }
+
+    var detailEl = document.createElement('span');
+    detailEl.className = 'sch-hist-entry-detail';
+    detailEl.textContent = detail;
+
+    var timeEl = document.createElement('span');
+    timeEl.className = 'sch-hist-entry-time';
+    timeEl.textContent = time;
+
+    entry.appendChild(iconWrap);
+    entry.appendChild(detailEl);
+    entry.appendChild(timeEl);
+    list.appendChild(entry);
+  });
+
+  body.appendChild(list);
+}
+
+// Re-render panel when a new log entry is added to #sch-log
+(function _schHistObserver() {
+  function _attach() {
+    var container = document.getElementById('sch-log');
+    if (!container) return;
+    var observer = new MutationObserver(function() {
+      var overlay = document.getElementById('sch-hist-overlay');
+      if (overlay && overlay.classList.contains('open')) schHistRender();
+    });
+    observer.observe(container, { childList: true });
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', _attach);
+  } else {
+    setTimeout(_attach, 300);
   }
 })();
 
