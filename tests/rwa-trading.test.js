@@ -143,7 +143,7 @@ describe('N3 — CSS scoping', () => {
 
 describe('N4 — JS functions present', () => {
   const rwaJsStart = html.indexOf('RWA ADVANCED TRADING — JavaScript');
-  const rwaJS = rwaJsStart > -1 ? html.slice(rwaJsStart, rwaJsStart + 50000) : '';
+  const rwaJS = rwaJsStart > -1 ? html.slice(rwaJsStart, rwaJsStart + 55000) : '';
 
   it('RWA JS block exists', () => {
     expect(rwaJS.length).toBeGreaterThan(1000);
@@ -168,7 +168,7 @@ describe('N4 — JS functions present', () => {
 // ── N5: Policy handling ───────────────────────────────────────────────────────
 
 describe('N5 — Policy handling', () => {
-  const rwaJS = html.slice(html.indexOf('RWA ADVANCED TRADING — JavaScript'), html.indexOf('RWA ADVANCED TRADING — JavaScript') + 50000);
+  const rwaJS = html.slice(html.indexOf('RWA ADVANCED TRADING — JavaScript'), html.indexOf('RWA ADVANCED TRADING — JavaScript') + 55000);
 
   it('_rwaShowPolicy handles allowed/blocked/unknown', () => {
     expect(rwaJS).toContain("status === 'allowed'");
@@ -194,7 +194,7 @@ describe('N5 — Policy handling', () => {
 // ── N6: Quote and route fetch ─────────────────────────────────────────────────
 
 describe('N6 — Quote and route fetch', () => {
-  const rwaJS = html.slice(html.indexOf('RWA ADVANCED TRADING — JavaScript'), html.indexOf('RWA ADVANCED TRADING — JavaScript') + 50000);
+  const rwaJS = html.slice(html.indexOf('RWA ADVANCED TRADING — JavaScript'), html.indexOf('RWA ADVANCED TRADING — JavaScript') + 55000);
   const quoteBlock = fnBlock(rwaJS, 'rwaFetchQuote', 7000);
 
   it('uses LiFiAdapter.getRoutes (not a custom fetch)', () => {
@@ -233,7 +233,7 @@ describe('N6 — Quote and route fetch', () => {
 // ── N7: History safety ────────────────────────────────────────────────────────
 
 describe('N7 — History safety', () => {
-  const rwaJS = html.slice(html.indexOf('RWA ADVANCED TRADING — JavaScript'), html.indexOf('RWA ADVANCED TRADING — JavaScript') + 50000);
+  const rwaJS = html.slice(html.indexOf('RWA ADVANCED TRADING — JavaScript'), html.indexOf('RWA ADVANCED TRADING — JavaScript') + 55000);
 
   it('_rwaRecord deduplicates by txHash', () => {
     const block = fnBlock(rwaJS, '_rwaRecord', 500);
@@ -276,7 +276,7 @@ describe('N7 — History safety', () => {
 // ── N8: XSS safety ───────────────────────────────────────────────────────────
 
 describe('N8 — XSS safety', () => {
-  const rwaJS = html.slice(html.indexOf('RWA ADVANCED TRADING — JavaScript'), html.indexOf('RWA ADVANCED TRADING — JavaScript') + 50000);
+  const rwaJS = html.slice(html.indexOf('RWA ADVANCED TRADING — JavaScript'), html.indexOf('RWA ADVANCED TRADING — JavaScript') + 55000);
 
   it('_rwaEsc function exists and escapes HTML entities', () => {
     expect(rwaJS).toContain('function _rwaEsc(');
@@ -339,7 +339,7 @@ describe('N9 — Scope isolation (no changes to other modules)', () => {
 // ── N10: showPage hook ────────────────────────────────────────────────────────
 
 describe('N10 — showPage lazy-load hook', () => {
-  const rwaJS = html.slice(html.indexOf('RWA ADVANCED TRADING — JavaScript'), html.indexOf('RWA ADVANCED TRADING — JavaScript') + 50000);
+  const rwaJS = html.slice(html.indexOf('RWA ADVANCED TRADING — JavaScript'), html.indexOf('RWA ADVANCED TRADING — JavaScript') + 55000);
 
   it('hook initializes only once (_rwaInitialized guard)', () => {
     expect(rwaJS).toContain('_rwaInitialized');
@@ -359,7 +359,7 @@ describe('N10 — showPage lazy-load hook', () => {
 // ── N11: LI.FI token endpoint used for discovery ─────────────────────────────
 
 describe('N11 — Token discovery via LI.FI proxy', () => {
-  const rwaJS = html.slice(html.indexOf('RWA ADVANCED TRADING — JavaScript'), html.indexOf('RWA ADVANCED TRADING — JavaScript') + 50000);
+  const rwaJS = html.slice(html.indexOf('RWA ADVANCED TRADING — JavaScript'), html.indexOf('RWA ADVANCED TRADING — JavaScript') + 55000);
   const loadBlock = fnBlock(rwaJS, 'rwaLoadMarkets', 3000);
 
   it('uses /api/lifi/tokens proxy (not a public API call)', () => {
@@ -384,7 +384,7 @@ describe('N11 — Token discovery via LI.FI proxy', () => {
 // ── FIX-MARKETS: tags=rwa forwarded through proxy + no false policy badge ────
 
 describe('FIX-MARKETS — tags=rwa forwarding and accurate empty state', () => {
-  const rwaFull2 = html.slice(html.indexOf('RWA ADVANCED TRADING — JavaScript'), html.indexOf('RWA ADVANCED TRADING — JavaScript') + 50000);
+  const rwaFull2 = html.slice(html.indexOf('RWA ADVANCED TRADING — JavaScript'), html.indexOf('RWA ADVANCED TRADING — JavaScript') + 55000);
   const loadBlock2 = fnBlock(rwaFull2, 'rwaLoadMarkets', 3000);
   const tokensProxy = fs.readFileSync(path.resolve(__dirname, '../functions/api/lifi/tokens.js'), 'utf8');
 
@@ -456,7 +456,7 @@ describe('FIX-MARKETS — tags=rwa forwarding and accurate empty state', () => {
 
 // ── AUDIT TESTS — D1-D7 fixes ─────────────────────────────────────────────────
 
-const rwaFull = html.slice(html.indexOf('RWA ADVANCED TRADING — JavaScript'), html.indexOf('RWA ADVANCED TRADING — JavaScript') + 50000);
+const rwaFull = html.slice(html.indexOf('RWA ADVANCED TRADING — JavaScript'), html.indexOf('RWA ADVANCED TRADING — JavaScript') + 55000);
 
 describe('A1 — D1: amtRaw precision fix (no Math.round for BigInt conversion)', () => {
   const quoteBlock = fnBlock(rwaFull, 'rwaFetchQuote', 3000);
@@ -627,7 +627,7 @@ describe('P1 — tokens.js proxy preserves tags field for RWA discovery', () => 
   it('rwaLoadMarkets checks t.tags array for rwa tag', () => {
     const rwaFull = html.slice(
       html.indexOf('RWA ADVANCED TRADING — JavaScript'),
-      html.indexOf('RWA ADVANCED TRADING — JavaScript') + 50000
+      html.indexOf('RWA ADVANCED TRADING — JavaScript') + 55000
     );
     const loadBlock = fnBlock(rwaFull, 'rwaLoadMarkets', 3000);
     expect(loadBlock).toContain("t.tags.indexOf('rwa')");
@@ -644,7 +644,7 @@ describe('P1 — tokens.js proxy preserves tags field for RWA discovery', () => 
     // expressed as !t.tags rather than t.tags &&.
     const rwaFull = html.slice(
       html.indexOf('RWA ADVANCED TRADING — JavaScript'),
-      html.indexOf('RWA ADVANCED TRADING — JavaScript') + 50000
+      html.indexOf('RWA ADVANCED TRADING — JavaScript') + 55000
     );
     const loadBlock = fnBlock(rwaFull, 'rwaLoadMarkets', 3000);
     // Either form of the guard must be present to prevent tokens without tags from passing.
@@ -684,7 +684,7 @@ describe('P2 — LiFiAdapter.getRoutes() propagates unavailableRoutes to callers
   it('rwaFetchQuote reads unavailableRoutes from the LiFiAdapter.getRoutes result', () => {
     const rwaFull = html.slice(
       html.indexOf('RWA ADVANCED TRADING — JavaScript'),
-      html.indexOf('RWA ADVANCED TRADING — JavaScript') + 50000
+      html.indexOf('RWA ADVANCED TRADING — JavaScript') + 55000
     );
     // rwaFetchQuote calls LiFiAdapter.getRoutes and stores result as routeRes,
     // then accesses routeRes.unavailableRoutes.filteredOut.
@@ -695,7 +695,7 @@ describe('P2 — LiFiAdapter.getRoutes() propagates unavailableRoutes to callers
   it('policy block is differentiated from empty routes (no fabrication of message)', () => {
     const rwaFull = html.slice(
       html.indexOf('RWA ADVANCED TRADING — JavaScript'),
-      html.indexOf('RWA ADVANCED TRADING — JavaScript') + 50000
+      html.indexOf('RWA ADVANCED TRADING — JavaScript') + 55000
     );
     const quoteBlock = fnBlock(rwaFull, 'rwaFetchQuote', 7000);
     // policyBlock is true only when filteredOut contains reason with 'rwa' or 'policy'
@@ -718,7 +718,7 @@ describe('P2 — LiFiAdapter.getRoutes() propagates unavailableRoutes to callers
 describe('P3 — BigInt conversion consistent in approval check (no Math.round)', () => {
   const rwaFull = html.slice(
     html.indexOf('RWA ADVANCED TRADING — JavaScript'),
-    html.indexOf('RWA ADVANCED TRADING — JavaScript') + 50000
+    html.indexOf('RWA ADVANCED TRADING — JavaScript') + 55000
   );
   // rwaExecuteTrade is ~8000 chars; include enough to reach the approval section
   const execBlock = fnBlock(rwaFull, 'rwaExecuteTrade', 9000);
