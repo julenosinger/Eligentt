@@ -3332,6 +3332,31 @@ body.swap-standard-mode .site-footer{display:block !important}
 [data-theme="light"] .swp-mode-btn:not(.active):hover{background:rgba(0,0,0,.04)}
 [data-theme="light"] .swp-tab:not(.active):hover{background:rgba(0,0,0,.04)}
 [data-theme="light"] .swp-tab-soon{background:rgba(0,0,0,.07)}
+/* ── Gateway Balance card ───────────────────────────────────────────────── */
+.ub-gw-card{padding:0;overflow:hidden}
+.ub-gw-header{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--border);cursor:pointer}
+.ub-gw-chevron{margin-left:auto;font-size:11px;color:var(--muted2);transition:transform .2s}
+.ub-gw-chevron.open{transform:rotate(180deg)}
+.ub-gw-body{display:flex;flex-direction:column;gap:0}
+.ub-gw-asset{display:flex;flex-direction:column;gap:0;border-bottom:1px solid var(--border)}
+.ub-gw-asset:last-child{border-bottom:none}
+.ub-gw-asset-head{display:flex;align-items:center;gap:8px;padding:10px 14px}
+.ub-gw-asset-icon{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex-shrink:0}
+.ub-gw-asset-icon.usdc{background:rgba(39,117,202,.15);color:#2775ca}
+.ub-gw-asset-icon.eurc{background:rgba(5,93,181,.15);color:#055db5}
+.ub-gw-asset-icon.cirbtc{background:rgba(247,147,26,.15);color:#f7931a}
+.ub-gw-asset-total{font-size:14px;font-weight:700;font-family:'JetBrains Mono',monospace;color:var(--text)}
+.ub-gw-asset-sym{font-size:9px;color:var(--muted2);margin-left:2px}
+.ub-gw-asset-label{font-size:8px;color:var(--muted2);margin-left:auto}
+.ub-gw-rows{display:flex;flex-direction:column;gap:0;padding:0 14px 8px;border-top:1px solid var(--border2)}
+.ub-gw-row{display:flex;align-items:center;justify-content:space-between;padding:5px 0;font-size:9px}
+.ub-gw-row-net{color:var(--muted2)}
+.ub-gw-row-bal{font-family:'JetBrains Mono',monospace;color:var(--text);font-weight:600}
+.ub-gw-row-zero{color:var(--muted2);font-weight:400}
+.ub-gw-loading{padding:16px 14px;font-size:9px;color:var(--muted2);display:flex;align-items:center;gap:8px}
+.ub-gw-error{padding:14px;font-size:9px;color:var(--red)}
+.ub-gw-badge{font-size:7.5px;font-weight:700;letter-spacing:.4px;padding:1px 5px;border-radius:3px;text-transform:uppercase;background:rgba(6,247,233,.1);color:var(--teal);border:1px solid rgba(6,247,233,.2)}
+[data-theme="light"] .ub-gw-badge{background:rgba(0,153,160,.08);color:#0099a0;border-color:rgba(0,153,160,.2)}
 /* ── Bridge — light theme ────────────────────────────────────────────────── */
 [data-theme="light"] .chain-row{background:var(--card2)}
 [data-theme="light"] .rate-box{background:var(--card2)}
@@ -11323,6 +11348,23 @@ select.cinput option { background: #161a24; color: #dde2f0; }
                 Advanced <i class="ti ti-chevron-down" id="ub-networks-advanced-chevron" style="font-size:9px"></i>
               </div>
               <div id="ub-networks-advanced" style="display:none;flex-direction:column;gap:2px"></div>
+            </div>
+          </div>
+
+          <!-- ══ GATEWAY BALANCE ══ -->
+          <div class="card ub-gw-card" id="ub-gateway-card" style="display:none">
+            <div class="ub-gw-header" onclick="ubGatewayToggle()">
+              <i class="ti ti-topology-star-3" style="font-size:13px;color:var(--teal)"></i>
+              <span class="ct">Gateway Balance</span>
+              <span class="ub-gw-badge">Circle Gateway</span>
+              <button onclick="event.stopPropagation();ubGatewayFetch()" style="margin-left:8px;background:none;border:none;color:var(--muted2);cursor:pointer;font-size:11px;padding:0" title="Refresh gateway balances"><i class="ti ti-refresh" id="ub-gw-refresh-icon"></i></button>
+              <span id="ub-gw-updated" style="font-size:7.5px;color:var(--muted2);margin-left:4px"></span>
+              <i class="ti ti-chevron-down ub-gw-chevron open" id="ub-gw-chevron"></i>
+            </div>
+            <div class="ub-gw-body" id="ub-gw-body">
+              <div class="ub-gw-loading" id="ub-gw-loading"><i class="ti ti-loader-2" style="animation:spin .8s linear infinite"></i>Fetching Gateway balances…</div>
+              <div class="ub-gw-error" id="ub-gw-error" style="display:none"></div>
+              <div id="ub-gw-assets" style="display:none"></div>
             </div>
           </div>
 
@@ -45540,6 +45582,8 @@ function ubRefresh() {
   if (emptyEl) emptyEl.style.display = 'none';
 
   var evmFetch = walletKey ? ubFetchAllBalances(walletKey) : Promise.resolve([]);
+  // Gateway balance — non-blocking, independent of EVM fetch lifecycle.
+  ubGatewaySyncRefresh();
   evmFetch
     .then(function(results) {
       if (!agentAddr) return results;
@@ -46743,6 +46787,221 @@ function ubToggleNetworks() {
   body.style.display = open ? 'none' : 'flex';
   if (chev) chev.className = 'ti ti-chevron-' + (open ? 'down' : 'up');
 }
+
+// ── Gateway Balance ──────────────────────────────────────────────────────
+// Read-only. Fetches USDC, EURC, cirBTC balances from the Circle Gateway API
+// via the /api/gateway/balances CF Function proxy.  No auth required.
+// Decimals: USDC=6, EURC=6, cirBTC=8.
+var _ubGwSeq     = 0;   // anti-race generation counter
+var _ubGwOpen    = true; // panel collapsed state
+var _ubGwFetching = false;
+
+// Asset display metadata
+var _UB_GW_ASSETS = [
+  { token: 'USDC',   label: 'USD Coin',    cls: 'usdc',   sym: '$',  dec: 6 },
+  { token: 'EURC',   label: 'Euro Coin',   cls: 'eurc',   sym: '€',  dec: 6 },
+  { token: 'cirBTC', label: 'Circle BTC',  cls: 'cirbtc', sym: '₿',  dec: 8 },
+];
+
+function ubGatewayToggle() {
+  _ubGwOpen = !_ubGwOpen;
+  var body = document.getElementById('ub-gw-body');
+  var chev = document.getElementById('ub-gw-chevron');
+  if (body) body.style.display = _ubGwOpen ? 'flex' : 'none';
+  if (chev) { chev.classList.toggle('open', _ubGwOpen); }
+}
+
+function ubGatewayFetch() {
+  var address = (typeof walletAddress !== 'undefined' ? walletAddress : '') ||
+                (typeof _ubWalletKey === 'function' ? _ubWalletKey() : '');
+  // Normalise — strip chain prefix (e.g. "arc:0x..." → "0x...").
+  if (address && address.indexOf(':') !== -1) address = address.split(':').pop();
+
+  var card = document.getElementById('ub-gateway-card');
+  if (!card) return;
+
+  if (!address || !/^0x[0-9a-fA-F]{40}$/.test(address)) {
+    // No valid EVM wallet — hide card.
+    card.style.display = 'none';
+    return;
+  }
+
+  card.style.display = '';
+  if (_ubGwFetching) return; // already in-flight
+  _ubGwFetching = true;
+  var seq = ++_ubGwSeq;
+
+  var loadEl  = document.getElementById('ub-gw-loading');
+  var errEl   = document.getElementById('ub-gw-error');
+  var assEl   = document.getElementById('ub-gw-assets');
+  var icon    = document.getElementById('ub-gw-refresh-icon');
+
+  if (loadEl) { loadEl.style.display = 'flex'; }
+  if (errEl)  { errEl.style.display  = 'none'; }
+  if (assEl)  { assEl.style.display  = 'none'; }
+  if (icon)   { icon.className = 'ti ti-loader-2'; icon.style.animation = 'spin .8s linear infinite'; }
+
+  var url = '/api/gateway/balances?address=' + encodeURIComponent(address);
+  var ctrl = new AbortController();
+  var timer = setTimeout(function() { ctrl.abort(); }, 14000);
+
+  fetch(url, { signal: ctrl.signal })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      clearTimeout(timer);
+      _ubGwFetching = false;
+      if (seq !== _ubGwSeq) return; // stale response — discard
+      if (data.error) throw new Error(data.error);
+      ubGatewayRender(data);
+    })
+    .catch(function(err) {
+      clearTimeout(timer);
+      _ubGwFetching = false;
+      if (seq !== _ubGwSeq) return;
+      if (loadEl) loadEl.style.display = 'none';
+      if (errEl)  { errEl.style.display = ''; errEl.textContent = 'Gateway unavailable: ' + (err.message || 'fetch error'); }
+      if (icon)   { icon.className = 'ti ti-refresh'; icon.style.animation = ''; }
+    });
+}
+
+function ubGatewayRender(data) {
+  var loadEl = document.getElementById('ub-gw-loading');
+  var errEl  = document.getElementById('ub-gw-error');
+  var assEl  = document.getElementById('ub-gw-assets');
+  var icon   = document.getElementById('ub-gw-refresh-icon');
+  var updEl  = document.getElementById('ub-gw-updated');
+
+  if (loadEl) loadEl.style.display = 'none';
+  if (errEl)  errEl.style.display  = 'none';
+  if (icon)   { icon.className = 'ti ti-refresh'; icon.style.animation = ''; }
+  if (updEl)  updEl.textContent = 'Updated ' + new Date().toLocaleTimeString();
+
+  if (!assEl) return;
+
+  var html = '';
+  for (var i = 0; i < _UB_GW_ASSETS.length; i++) {
+    var a      = _UB_GW_ASSETS[i];
+    var rows   = data[a.token];
+    var errMsg = data.errors && data.errors[a.token];
+
+    html += '<div class="ub-gw-asset">';
+    html += '<div class="ub-gw-asset-head">';
+    html += '<div class="ub-gw-asset-icon ' + a.cls + '">' + a.sym + '</div>';
+    html += '<div style="display:flex;flex-direction:column;gap:1px">';
+    html += '<div style="font-size:9.5px;font-weight:700;color:var(--text)">' + a.token + '</div>';
+    html += '<div style="font-size:8px;color:var(--muted2)">' + a.label + '</div>';
+    html += '</div>';
+
+    if (errMsg) {
+      html += '<div class="ub-gw-asset-label" style="color:var(--red)">Unavailable</div>';
+    } else if (rows) {
+      // Sum all balances using string arithmetic (avoids float precision loss for cirBTC).
+      var total = '0';
+      for (var r = 0; r < rows.length; r++) {
+        var rawBal = String(rows[r].balance || '0');
+        total = _ubGwAddStr(total, rawBal, a.dec);
+      }
+      var totalFmt = _ubGwFmt(total, a.dec);
+      html += '<span class="ub-gw-asset-total">' + totalFmt + '</span>';
+      html += '<span class="ub-gw-asset-sym">' + a.token + '</span>';
+      html += '<div class="ub-gw-asset-label">Total (all chains)</div>';
+    } else {
+      html += '<div class="ub-gw-asset-label">—</div>';
+    }
+
+    html += '</div>'; // .ub-gw-asset-head
+
+    if (rows && !errMsg) {
+      html += '<div class="ub-gw-rows">';
+      for (var r2 = 0; r2 < rows.length; r2++) {
+        var row = rows[r2];
+        // Use raw string from API — avoids float conversion.
+        var rawStr = String(row.balance || '0');
+        var isZero = /^0+(\.0+)?$/.test(rawStr);
+        var balFmt = isZero ? '0' : _ubGwFmt(rawStr, a.dec);
+        html += '<div class="ub-gw-row">';
+        html += '<span class="ub-gw-row-net">' + _ubGwEscHtml(row.domainName) + '</span>';
+        html += '<span class="' + (isZero ? 'ub-gw-row-zero' : 'ub-gw-row-bal') + '">' + balFmt + '</span>';
+        html += '</div>';
+      }
+      html += '</div>'; // .ub-gw-rows
+    } else if (errMsg) {
+      html += '<div class="ub-gw-rows" style="color:var(--muted2);font-size:8.5px;padding:6px 14px">';
+      html += _ubGwEscHtml(errMsg);
+      html += '</div>';
+    }
+
+    html += '</div>'; // .ub-gw-asset
+  }
+
+  assEl.innerHTML = html;
+  assEl.style.display = '';
+}
+
+/**
+ * _ubGwFmt — format a Gateway balance string or number for display.
+ * Accepts the raw API string (e.g. "0.00012345") or a JS number.
+ * Uses integer arithmetic to avoid IEEE 754 float precision loss,
+ * which matters for cirBTC (8 decimals) with large or very small values.
+ */
+function _ubGwFmt(val, dec) {
+  if (val === null || val === undefined || val === '') return '—';
+  // Convert to string representation first.
+  var s = String(val).trim();
+  if (s === '' || s === 'NaN' || s === 'undefined' || s === 'null') return '—';
+  // Parse via BigInt-safe string split to avoid float rounding.
+  var neg = s.charAt(0) === '-';
+  if (neg) s = s.slice(1);
+  var parts = s.split('.');
+  var intPart  = parts[0] || '0';
+  var fracPart = (parts[1] || '').slice(0, dec); // truncate extra decimals
+  // Pad fraction to `dec` digits for uniform processing.
+  while (fracPart.length < dec) fracPart += '0';
+  // Check if effectively zero.
+  var allZero = /^0+$/.test(intPart) && /^0+$/.test(fracPart);
+  if (allZero) return '0';
+  // Trim trailing zeros from fraction.
+  var trimmed = fracPart.replace(/0+$/, '');
+  var result = (neg ? '-' : '') + intPart + (trimmed ? '.' + trimmed : '');
+  return result;
+}
+
+/**
+ * _ubGwAddStr — add two decimal strings without float precision loss.
+ * Both must be non-negative. Used for cross-chain totals.
+ */
+function _ubGwAddStr(a, b, dec) {
+  // Work in integer units (atomic units at `dec` decimals).
+  function toInt(str) {
+    var p = String(str || '0').split('.');
+    var i = p[0] || '0';
+    var f = (p[1] || '').slice(0, dec);
+    while (f.length < dec) f += '0';
+    return BigInt(i) * BigInt(Math.pow(10, dec)) + BigInt(f || '0');
+  }
+  function fromInt(n) {
+    var factor = BigInt(Math.pow(10, dec));
+    var ipart = String(n / factor);
+    var fpart = String(n % factor).padStart(dec, '0').replace(/0+$/, '');
+    return fpart ? ipart + '.' + fpart : ipart;
+  }
+  try {
+    return fromInt(toInt(a) + toInt(b));
+  } catch (_) {
+    // BigInt not available (very old browser) — fall back to float.
+    return String(parseFloat(a || '0') + parseFloat(b || '0'));
+  }
+}
+
+function _ubGwEscHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// Called from ubRefresh() — non-blocking, runs in parallel with the EVM fetch.
+function ubGatewaySyncRefresh() {
+  try { ubGatewayFetch(); } catch(_) {}
+}
+// ── end Gateway Balance ───────────────────────────────────────────────────
 
 function _ubChainId(cid) {
   try {
