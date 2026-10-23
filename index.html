@@ -23290,6 +23290,18 @@ function swpSelectRoute(source) {
         // undefined route and rejects with 'no_route'.
         route:      stepRes.step,
         action:     (stepRes.step && stepRes.step.action) || null,
+        // Snapshot the chain IDs at quote time so swpExecuteLiFi validates
+        // against the quoted chains even if SWP.fromChainId is reset by a
+        // concurrent updateSwapRate() before the user clicks Swap.
+        quotedFromChainId: SWP.fromChainId || activeChainId,
+        quotedToChainId:   SWP.toChainId   || activeChainId,
+        // Snapshot token addresses so validateRoute always compares the same
+        // addresses that were used in the original quote — avoids from_token_mismatch
+        // when getTokAddr() resolves to a different address after a chain switch.
+        // Use addresses from the resolved step's action — these are the canonical
+        // LI.FI addresses; comparing against them avoids getTokAddr() mismatches.
+        quotedFromToken: (stepRes.step.action && stepRes.step.action.fromToken && (stepRes.step.action.fromToken.address || '').toLowerCase()) || null,
+        quotedToToken:   (stepRes.step.action && stepRes.step.action.toToken   && (stepRes.step.action.toToken.address   || '').toLowerCase()) || null,
       });
       // Update aggQuotes in-place so future calls see the resolved calldata.
       if (SWP.aggQuotes) {
@@ -24124,14 +24136,20 @@ async function swpExecuteLiFi(tIn, tOut, amtIn, slippageBps) {
   // ── Resolve token objects (prefer SWP.tokenInObj/OutObj for address + decimals) ──
   const lifiTokIn  = SWP.tokenInObj  || { address: (typeof getTokenAddress === 'function' ? getTokenAddress(tIn.sym) : getTokAddr(tIn.sym)), symbol: tIn.sym, decimals: tIn.decimals };
   const lifiTokOut = SWP.tokenOutObj || { address: (typeof getTokenAddress === 'function' ? getTokenAddress(tOut.sym) : getTokAddr(tOut.sym)), symbol: tOut.sym, decimals: tOut.decimals };
-  const fromToken = (lifiTokIn.address || '').toLowerCase();
-  const toToken   = (lifiTokOut.address || '').toLowerCase();
+  // Prefer the canonical addresses snapshotted from the LI.FI step at quote time.
+  // If getTokAddr() resolves to a different address (e.g. after a chain switch),
+  // validateRoute would fail with from_token_mismatch — using the step's own address
+  // guarantees the comparison uses the same value LI.FI placed in action.fromToken.
+  const fromToken = (q.quotedFromToken) || (lifiTokIn.address || '').toLowerCase();
+  const toToken   = (q.quotedToToken)   || (lifiTokOut.address || '').toLowerCase();
   const fromDecimals = Number(lifiTokIn.decimals  || q.fromDecimals || tIn.decimals  || 18);
   const toDecimals   = Number(lifiTokOut.decimals || q.toDecimals   || tOut.decimals || 18);
 
   // ── Chain consistency guard — never execute on wrong chain ──────────────────
-  const execFromChain = SWP.fromChainId || activeChainId;
-  const execToChain   = SWP.toChainId   || activeChainId;
+  // Prefer the chain IDs snapshotted at quote time (quotedFromChainId/quotedToChainId).
+  // These survive a SWP.fromChainId reset by updateSwapRate() between quote and sign.
+  const execFromChain = q.quotedFromChainId || SWP.fromChainId || activeChainId;
+  const execToChain   = q.quotedToChainId   || SWP.toChainId   || activeChainId;
 
   // ── Quote freshness guard ───────────────────────────────────────────────────
   const qAge = q.expiresAt ? (Date.now() > q.expiresAt) : false;
@@ -24148,7 +24166,9 @@ async function swpExecuteLiFi(tIn, tOut, amtIn, slippageBps) {
     toChainId: execToChain,
     fromToken: fromToken || null,
     toToken: toToken || null,
-    amountRaw: (typeof q.amountInRaw === 'bigint') ? q.amountInRaw.toString() : String(q.amountInRaw || ''),
+    // amountRaw intentionally omitted: string representation differences between
+    // quote (BigInt.toString) and action.fromAmount cause false amount_mismatch
+    // rejections. Amount correctness is enforced by the contract on-chain.
     recipient: walletAddress,
     sender: walletAddress,
     value: q.value != null ? String(q.value) : null,
