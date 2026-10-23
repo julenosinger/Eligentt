@@ -16665,6 +16665,8 @@ function setupProviderEvents(raw) {
       await refreshBalance();
       _refreshAllSurfaceBalances();
       try { if (typeof saUpdateNetwork === 'function') saUpdateNetwork(); } catch(_) {}
+      // Sync Swap Standard to the new active chain
+      try { if (typeof swpSyncToActiveChain === 'function') swpSyncToActiveChain(); } catch(_) {}
       const knownChain = getChainById(newChainId);
       toast('Network: ' + (knownChain ? knownChain.name : 'chain ' + newChainId), 'info');
       // NO automatic write-triggering on chain change.
@@ -32545,6 +32547,73 @@ function swpSyncStdHeader() {
   }
 }
 
+// ── Swap Network Sync ──────────────────────────────────────────────────────
+// Called whenever activeChainId changes (chainChanged, WALLET_CONNECTED, WALLET_SWITCHED).
+// Resets SWP chain IDs and token pair to valid defaults for the new chain,
+// clears stale quote state, and re-renders badges + balances.
+// Guard flag prevents concurrent executions; idempotent when chainId unchanged.
+var _swpSyncChainLast = 0; // last synced chainId — skip if unchanged
+function swpSyncToActiveChain() {
+  var cid = typeof activeChainId !== 'undefined' ? Number(activeChainId) : 5042;
+  if (cid === _swpSyncChainLast) return; // nothing changed — skip
+  _swpSyncChainLast = cid;
+
+  // 1. Reset chain IDs to active chain (same-chain swap by default)
+  SWP.fromChainId = cid;
+  SWP.toChainId   = cid;
+
+  // 2. Clear external (LI.FI) token objects — they belong to a specific chain
+  SWP.tokenInObj  = null;
+  SWP.tokenOutObj = null;
+
+  // 3. Select default token pair for this chain from existing TOKEN_LIST
+  // Prefer USDC→EURC on Arc (5042), USDC→ETH elsewhere if available
+  var avail = swapAvailableTokens(cid);
+  var symIn  = 'USDC';
+  var symOut = (cid === 5042) ? 'EURC' : 'ETH';
+  // Verify preferred pair is available; fall back to first two available tokens
+  var hasIn  = avail.some(function(t){ return t.sym === symIn; });
+  var hasOut = avail.some(function(t){ return t.sym === symOut; });
+  if (!hasIn && avail.length > 0) symIn = avail[0].sym;
+  if (!hasOut && avail.length > 1) {
+    // pick first token that is not symIn
+    var alt = avail.find(function(t){ return t.sym !== symIn; });
+    symOut = alt ? alt.sym : symIn;
+  }
+  // Locate indices in TOKEN_LIST
+  var idxIn = -1, idxOut = -1;
+  for (var i = 0; i < TOKEN_LIST.length; i++) {
+    if (TOKEN_LIST[i].sym === symIn  && idxIn  === -1) idxIn  = i;
+    if (TOKEN_LIST[i].sym === symOut && idxOut === -1) idxOut = i;
+  }
+  SWP.tokenInIdx  = idxIn  >= 0 ? idxIn  : 0;
+  SWP.tokenOutIdx = idxOut >= 0 ? idxOut : Math.min(1, TOKEN_LIST.length - 1);
+
+  // 4. Invalidate all stale quote state
+  SWP.lastQuote       = null;
+  SWP._towerQuoteData = null;
+  SWP.aggQuotes       = null;
+  SWP.aggBest         = null;
+  SWP.aggBestExecutable = null;
+  SWP.selectedSource  = null;
+  SWP.selectedParamsKey = null;
+  SWP._displayedParamsKey = null;
+  SWP.checking        = false;
+  if (SWP.quoteTimer) { clearTimeout(SWP.quoteTimer); SWP.quoteTimer = null; }
+  _swapQuoteSeq++; // invalidate any in-flight quote callbacks
+
+  // 5. Clear output amount and reset UI to neutral state
+  var amtOut = document.getElementById('swap-amount-out');
+  if (amtOut) amtOut.value = '';
+  var swpBtn = document.getElementById('swp-exec-btn');
+  if (swpBtn) swpSetBtn('noamount', 'Enter an amount');
+
+  // 6. Re-render tokens, badges and balances
+  applySwapTokens();
+  swpSyncStdHeader();
+  try { if (typeof updateSwapBalancesDisplay === 'function') updateSwapBalancesDisplay(); } catch(_) {}
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   // Initialize swap button state
   swpSetBtn('nowallt', 'Connect Wallet');
@@ -45326,6 +45395,8 @@ document.addEventListener('WALLET_CONNECTED', function() {
   if (page && page.classList.contains('active')) {
     ubRefresh();
   }
+  // Sync Swap to the newly connected wallet's chain
+  try { if (typeof swpSyncToActiveChain === 'function') swpSyncToActiveChain(); } catch(_) {}
 });
 document.addEventListener('WALLET_DISCONNECTED', function() {
   _ubBumpGeneration();
@@ -45345,6 +45416,8 @@ document.addEventListener('WALLET_SWITCHED', function() {
     ubRefresh();
     try { UBScreen.refreshDashboard(); } catch(_) {}
   }
+  // Sync Swap to the switched wallet's chain
+  try { if (typeof swpSyncToActiveChain === 'function') swpSyncToActiveChain(); } catch(_) {}
 });
 
 function ubRefresh() {
