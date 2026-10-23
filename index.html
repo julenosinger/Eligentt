@@ -3357,6 +3357,33 @@ body.swap-standard-mode .site-footer{display:block !important}
 .ub-gw-error{padding:14px;font-size:9px;color:var(--red)}
 .ub-gw-badge{font-size:7.5px;font-weight:700;letter-spacing:.4px;padding:1px 5px;border-radius:3px;text-transform:uppercase;background:rgba(6,247,233,.1);color:var(--teal);border:1px solid rgba(6,247,233,.2)}
 [data-theme="light"] .ub-gw-badge{background:rgba(0,153,160,.08);color:#0099a0;border-color:rgba(0,153,160,.2)}
+/* ── Unified Portfolio subcards ─────────────────────────────────────────── */
+.ub-up-subcards{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
+.ub-up-subcard{flex:1;min-width:160px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:8px;padding:10px 14px;display:flex;flex-direction:column;gap:4px}
+.ub-up-subcard-title{font-size:7.5px;text-transform:uppercase;letter-spacing:.7px;color:var(--muted2);display:flex;align-items:center;gap:5px}
+.ub-up-subcard-title i{font-size:10px}
+.ub-up-subcard-body{display:flex;flex-direction:column;gap:2px}
+.ub-up-subcard-row{display:flex;justify-content:space-between;align-items:center;gap:6px;font-size:9px}
+.ub-up-subcard-row .sym{font-weight:700;color:var(--text);font-family:'JetBrains Mono',monospace;font-size:8.5px}
+.ub-up-subcard-row .val{color:var(--teal);font-family:'JetBrains Mono',monospace;font-size:9px}
+.ub-up-subcard-row .loading{color:var(--muted2)}
+.ub-up-subcard-row .err{color:var(--red);font-size:8px}
+.ub-up-subcard-footer{font-size:7.5px;color:var(--muted2);margin-top:2px}
+.ub-up-subcard.gw{border-color:rgba(6,247,233,.18);background:rgba(6,247,233,.03)}
+.ub-up-subcard.gw .ub-up-subcard-title{color:var(--teal)}
+/* Gateway row in asset breakdown */
+.ub2-gw-row{display:flex;align-items:center;gap:6px;padding:3px 8px;font-size:8.5px;border-top:1px dashed rgba(6,247,233,.12);margin-top:2px}
+.ub2-gw-dot{width:6px;height:6px;min-width:6px;border-radius:50%;background:var(--teal)}
+.ub2-gw-label{flex:1;color:var(--muted2)}
+.ub2-gw-bal{font-family:'JetBrains Mono',monospace;color:var(--teal)}
+/* Light overrides */
+[data-theme="light"] .ub-up-subcard{background:rgba(0,0,0,.03);border-color:var(--border2)}
+[data-theme="light"] .ub-up-subcard.gw{border-color:rgba(0,153,160,.2);background:rgba(0,153,160,.04)}
+[data-theme="light"] .ub-up-subcard.gw .ub-up-subcard-title{color:#0099a0}
+[data-theme="light"] .ub2-gw-row{border-color:rgba(0,153,160,.18)}
+[data-theme="light"] .ub2-gw-dot{background:#0099a0}
+[data-theme="light"] .ub2-gw-bal{color:#0099a0}
+@media(max-width:480px){.ub-up-subcard{min-width:100%;flex:0 0 100%}}
 /* ── Gateway Deposit Modal ─────────────────────────────────────────────────── */
 .ub-gw-dep-btn{display:inline-flex;align-items:center;gap:4px;font-size:8px;font-weight:700;letter-spacing:.3px;padding:2px 7px;border-radius:4px;background:rgba(6,247,233,.1);color:var(--teal);border:1px solid rgba(6,247,233,.25);cursor:pointer;text-transform:uppercase;transition:background .15s}
 .ub-gw-dep-btn:hover{background:rgba(6,247,233,.18)}
@@ -11311,6 +11338,31 @@ select.cinput option { background: #161a24; color: #dde2f0; }
                 <span id="ub-updating" style="display:none;font-size:7.5px;color:var(--teal)"><i class="ti ti-refresh"></i> Updating…</span>
               </div>
             </div>
+            <!-- ── Unified Portfolio subcards (EVM Wallet + Circle Gateway) ── -->
+            <div class="ub-up-subcards" style="padding:0 18px 14px">
+              <!-- EVM Wallet subcard -->
+              <div class="ub-up-subcard" id="ub-up-evm-card">
+                <div class="ub-up-subcard-title"><i class="ti ti-wallet"></i>EVM Wallet</div>
+                <div class="ub-up-subcard-body" id="ub-up-evm-body">
+                  <div class="ub-up-subcard-row"><span class="sym loading">—</span></div>
+                </div>
+                <div class="ub-up-subcard-footer" id="ub-up-evm-footer"></div>
+              </div>
+              <!-- Circle Gateway subcard -->
+              <div class="ub-up-subcard gw" id="ub-up-gw-card" style="display:none">
+                <div class="ub-up-subcard-title"><i class="ti ti-topology-star-3"></i>Circle Gateway<span class="ub-gw-badge" style="margin-left:auto">Circle Gateway</span></div>
+                <div class="ub-up-subcard-body" id="ub-up-gw-body">
+                  <div class="ub-up-subcard-row"><span class="sym loading">Loading…</span></div>
+                </div>
+                <div class="ub-up-subcard-footer" id="ub-up-gw-footer"></div>
+              </div>
+            </div>
+          </div>
+          <!-- ── Gateway card (hidden — data source only; visual is in subcards) ── -->
+          <div id="ub-gateway-card-src" style="display:none">
+            <div id="ub-gw-loading-src"></div>
+            <div id="ub-gw-error-src"></div>
+            <div id="ub-gw-assets-src"></div>
           </div>
 
           <!-- ══ MAIN CONTENT GRID ══ -->
@@ -11385,21 +11437,16 @@ select.cinput option { background: #161a24; color: #dde2f0; }
             </div>
           </div>
 
-          <!-- ══ GATEWAY BALANCE ══ -->
-          <div class="card ub-gw-card" id="ub-gateway-card" style="display:none">
-            <div class="ub-gw-header" onclick="ubGatewayToggle()">
-              <i class="ti ti-topology-star-3" style="font-size:13px;color:var(--teal)"></i>
-              <span class="ct">Gateway Balance</span>
-              <span class="ub-gw-badge">Circle Gateway</span>
-              <button onclick="event.stopPropagation();ubGatewayFetch()" style="margin-left:8px;background:none;border:none;color:var(--muted2);cursor:pointer;font-size:11px;padding:0" title="Refresh gateway balances"><i class="ti ti-refresh" id="ub-gw-refresh-icon"></i></button>
-              <span id="ub-gw-updated" style="font-size:7.5px;color:var(--muted2);margin-left:4px"></span>
-              <i class="ti ti-chevron-down ub-gw-chevron open" id="ub-gw-chevron"></i>
+          <!-- ══ GATEWAY BALANCE (hidden data container — IDs used by ubGatewayFetch/Render) ══ -->
+          <div id="ub-gateway-card" style="display:none">
+            <div id="ub-gw-body" style="display:none">
+              <div id="ub-gw-loading"></div>
+              <div id="ub-gw-error"></div>
+              <div id="ub-gw-assets"></div>
             </div>
-            <div class="ub-gw-body" id="ub-gw-body">
-              <div class="ub-gw-loading" id="ub-gw-loading"><i class="ti ti-loader-2" style="animation:spin .8s linear infinite"></i>Fetching Gateway balances…</div>
-              <div class="ub-gw-error" id="ub-gw-error" style="display:none"></div>
-              <div id="ub-gw-assets" style="display:none"></div>
-            </div>
+            <i id="ub-gw-refresh-icon" style="display:none"></i>
+            <span id="ub-gw-updated" style="display:none"></span>
+            <i id="ub-gw-chevron" style="display:none"></i>
           </div>
 
           <!-- Recent Activity — hidden; #ub-activity kept for JS compat -->
@@ -45601,6 +45648,9 @@ function ubRefresh() {
 
   UB.loading = true;
   UB._refreshQueued = false;
+  // Show loading state in EVM subcard
+  var _evmSubBody = document.getElementById('ub-up-evm-body');
+  if (_evmSubBody) _evmSubBody.innerHTML = '<div class="ub-up-subcard-row"><span class="sym loading">Loading…</span></div>';
   var generation = _ubGeneration;       // capture generation (bumped on wallet/network change)
   var t0 = performance.now();
   UnifiedBalanceEngine.notifyRefreshStart();
@@ -46267,6 +46317,7 @@ async function _ubMulticallChain(chain, tokens, walletKey, nativeSym) {
 
 function ubRenderAll() {
   ubRenderHero();
+  try { _ubUpRenderEvmSubcard(); } catch(_e) {} // EVM Wallet subcard in portfolio header
   ubRenderAssets();
   ubRenderHealth();
   ubRenderIntelligence();
@@ -46554,6 +46605,15 @@ function ubFilterAssets() {
     '</div>';
   }
   container.innerHTML = html;
+
+  // Inject Gateway sub-rows after EVM breakdown — purely additive, no UB.state change
+  if (_ubGwLastData) {
+    for (var gj = 0; gj < order.length; gj++) {
+      var gsym = order[gj];
+      var bd = document.getElementById('ub2-bd-' + gsym);
+      if (bd) try { _ubUpInjectGwRows(gsym, bd); } catch(_e) {}
+    }
+  }
 }
 
 function ubToggleAssetGroup(sym) {
@@ -46829,6 +46889,7 @@ function ubToggleNetworks() {
 var _ubGwSeq     = 0;   // anti-race generation counter
 var _ubGwOpen    = true; // panel collapsed state
 var _ubGwFetching = false;
+var _ubGwLastData = null; // last successful Gateway data — used by ubFilterAssets for asset rows
 
 // Asset display metadata
 var _UB_GW_ASSETS = [
@@ -46972,6 +47033,99 @@ function ubGatewayRender(data) {
 
   assEl.innerHTML = html;
   assEl.style.display = '';
+
+  // Store data and update Unified Portfolio subcards + asset rows
+  _ubGwLastData = data;
+  _ubUpRenderGwSubcard(data);
+  ubFilterAssets(); // re-render asset groups with Gateway sub-rows
+}
+
+/**
+ * _ubUpRenderGwSubcard — render the Circle Gateway subcard in the header.
+ * Called after ubGatewayRender. Never modifies UB.state or EVM totals.
+ */
+function _ubUpRenderGwSubcard(data) {
+  var card = document.getElementById('ub-up-gw-card');
+  var body = document.getElementById('ub-up-gw-body');
+  var footer = document.getElementById('ub-up-gw-footer');
+  if (!card || !body) return;
+  card.style.display = '';
+  var rows = '';
+  for (var i = 0; i < _UB_GW_ASSETS.length; i++) {
+    var a = _UB_GW_ASSETS[i];
+    var assetRows = data[a.token];
+    var errMsg = data.errors && data.errors[a.token];
+    if (errMsg) {
+      rows += '<div class="ub-up-subcard-row"><span class="sym">' + a.token + '</span><span class="err">Unavailable</span></div>';
+    } else if (assetRows) {
+      var total = '0';
+      for (var r = 0; r < assetRows.length; r++) {
+        total = _ubGwAddStr(total, String(assetRows[r].balance || '0'), a.dec);
+      }
+      rows += '<div class="ub-up-subcard-row"><span class="sym">' + a.token + '</span><span class="val">' + _ubGwFmt(total, a.dec) + '</span></div>';
+    } else {
+      rows += '<div class="ub-up-subcard-row"><span class="sym">' + a.token + '</span><span class="loading">—</span></div>';
+    }
+  }
+  body.innerHTML = rows || '<div class="ub-up-subcard-row"><span class="loading">No data</span></div>';
+  if (footer) footer.textContent = 'Updated ' + new Date().toLocaleTimeString();
+}
+
+/**
+ * _ubUpRenderEvmSubcard — render the EVM Wallet subcard in the header.
+ * Called from ubRenderHero after UB.state is populated.
+ * Never includes Gateway balances.
+ */
+function _ubUpRenderEvmSubcard() {
+  var body = document.getElementById('ub-up-evm-body');
+  var footer = document.getElementById('ub-up-evm-footer');
+  if (!body) return;
+  var assets = (typeof UB !== 'undefined' && UB.state && UB.state.assets) ? UB.state.assets : [];
+  if (!assets.length) {
+    body.innerHTML = '<div class="ub-up-subcard-row"><span class="sym loading">No assets</span></div>';
+    return;
+  }
+  // Group by token
+  var grouped = {};
+  for (var i = 0; i < assets.length; i++) {
+    var a = assets[i];
+    if (!grouped[a.token]) grouped[a.token] = 0;
+    grouped[a.token] += (a.balance || 0);
+  }
+  var rows = '';
+  var toks = Object.keys(grouped);
+  for (var ti = 0; ti < toks.length; ti++) {
+    var sym = toks[ti];
+    var bal = grouped[sym];
+    var dec = sym === 'cirBTC' ? 8 : 4;
+    rows += '<div class="ub-up-subcard-row"><span class="sym">' + sym + '</span><span class="val">' + bal.toFixed(dec) + '</span></div>';
+  }
+  body.innerHTML = rows || '<div class="ub-up-subcard-row"><span class="loading">—</span></div>';
+  var chain = (typeof activeChainId !== 'undefined') ? (activeChainId === 5042 ? 'Arc Mainnet' : 'Chain ' + activeChainId) : '';
+  if (footer) footer.textContent = chain;
+}
+
+/**
+ * _ubUpInjectGwRows — called from ubFilterAssets to add Gateway sub-rows
+ * to asset breakdown cards. Purely visual — does not modify UB.state.
+ */
+function _ubUpInjectGwRows(sym, existingRowsEl) {
+  if (!_ubGwLastData || !existingRowsEl) return;
+  var assetRows = _ubGwLastData[sym];
+  if (!assetRows || !assetRows.length) return;
+  var dec = sym === 'cirBTC' ? 8 : 6;
+  var total = '0';
+  for (var r = 0; r < assetRows.length; r++) {
+    total = _ubGwAddStr(total, String(assetRows[r].balance || '0'), dec);
+  }
+  var isZero = /^0+(\.0+)?$/.test(total);
+  var balFmt = isZero ? '0' : _ubGwFmt(total, dec);
+  var row = document.createElement('div');
+  row.className = 'ub2-gw-row';
+  row.innerHTML = '<span class="ub2-gw-dot"></span>' +
+    '<span class="ub2-gw-label">Circle Gateway</span>' +
+    '<span class="ub2-gw-bal">' + balFmt + ' ' + sym + '</span>';
+  existingRowsEl.appendChild(row);
 }
 
 /**

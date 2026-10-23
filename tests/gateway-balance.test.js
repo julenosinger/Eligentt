@@ -169,9 +169,13 @@ describe('UI — HTML Gateway Balance card', () => {
     expect(html).toContain('id="ub-gw-assets"');
   });
 
-  it('UI1.6 — "Circle Gateway" badge present in card', () => {
-    const card = blockAt(html, 'id="ub-gateway-card"', 600);
-    expect(card).toContain('Circle Gateway');
+  it('UI1.6 — "Circle Gateway" badge present in portfolio UI', () => {
+    // After Unified Portfolio refactor, the badge lives in ub-up-gw-card (subcard)
+    // The hidden data container ub-gateway-card no longer carries the badge.
+    expect(html).toContain('Circle Gateway');
+    // Badge is in the Gateway subcard
+    const subcard = blockAt(html, 'id="ub-up-gw-card"', 400);
+    expect(subcard).toContain('Circle Gateway');
   });
 
   it('UI1.7 — Gateway card is AFTER Networks card (ordering)', () => {
