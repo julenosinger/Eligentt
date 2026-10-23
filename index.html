@@ -23075,6 +23075,22 @@ let _swpBalReqIn = 0;
 let _swpBalReqOut = 0;
 const _swpBalCache = {};   // key -> formatted text (last-known-good, UI-only)
 
+// Single balance formatter for the Swap UI.
+// Rules (per spec):
+//   loading / disconnected  → '—'   (caller shows this before fetch)
+//   loaded, amount === 0    → '0'
+//   loaded, amount > 0      → trimmed decimal (e.g. '1.05', not '1.0500')
+//   fetch failed            → '0'   (not perpetual '—')
+function _swpFmtBal(v) {
+  if (v == null) return '0';                         // RPC failure → show 0
+  var n = parseFloat(v);
+  if (!isFinite(n) || n === 0) return '0';           // zero balance → '0'
+  // Trim trailing zeros but keep up to 4 significant decimals.
+  var s = n.toFixed(4);
+  s = s.replace(/\.?0+$/, '');
+  return s || '0';
+}
+
 function _swpBalKey(address, sym, chainId) {
   return String(address || '').toLowerCase() + '::' + String(sym || '').toUpperCase() + '::' + Number(chainId);
 }
@@ -23105,10 +23121,12 @@ async function _swpReadBal(side, token, chainId) {
   if (reqId !== (side === 'in' ? _swpBalReqIn : _swpBalReqOut)) return;
 
   if (v == null) {
-    if (el) { el.textContent = cached != null ? cached : '—'; el.title = 'RPC offline'; }
+    // RPC failure: show '0' (not perpetual '—') unless we have a cached value.
+    var failText = cached != null ? cached : '0';
+    if (el) { el.textContent = failText; el.title = 'RPC offline'; }
     return;
   }
-  var text = parseFloat(v).toFixed(4);
+  var text = _swpFmtBal(v);
   _swpBalCache[key] = text;
   if (el) { el.textContent = text; el.title = ''; }
 }
@@ -23132,7 +23150,12 @@ async function updateSwapBalancesDisplay() {
 
   // Fire-and-forget per-field reads (each updates independently + anti-race).
   _swpReadBal('in', tIn, chainIn);
-  _swpReadBal('out', tOut, chainOut);
+  // Don't fetch balance for sentinel "Select token" — show '—' immediately.
+  if (tOut && tOut._noToken) {
+    if (balOutEl) balOutEl.textContent = '—';
+  } else {
+    _swpReadBal('out', tOut, chainOut);
+  }
 }
 
 // ── Swap balance prefetch: warm the BalanceService cache for the main tokens
