@@ -29,6 +29,27 @@ function extractFn(text, name) {
   }
   return '';
 }
+// Extract a complete var assignment (array or object) via bracket counting
+function extractVar(text, varName) {
+  var start = text.indexOf('var ' + varName);
+  if (start === -1) return '';
+  // find the opening bracket
+  var eq = text.indexOf('=', start);
+  if (eq === -1) return '';
+  var open = text.indexOf('[', eq);
+  var openB = text.indexOf('{', eq);
+  if (open === -1 && openB === -1) return '';
+  var opener, closer;
+  if (open === -1 || (openB !== -1 && openB < open)) { opener = '{'; closer = '}'; open = openB; }
+  else { opener = '['; closer = ']'; }
+  var depth = 0, i = open;
+  while (i < text.length) {
+    if (text[i] === opener) depth++;
+    else if (text[i] === closer) { depth--; if (depth === 0) { return text.slice(start, i + 1) + ';'; } }
+    i++;
+  }
+  return '';
+}
 
 // ── UP1: HTML structure ───────────────────────────────────────────────────────
 describe('Unified Portfolio — HTML structure', () => {
@@ -295,48 +316,134 @@ describe('Unified Portfolio — Deposit button in Gateway subcard', () => {
   // Functional: extract and execute _ubUpRenderGwSubcard with mock data
   it('UP6.13 — functional: rendered HTML contains dep button for USDC', () => {
     const src = html;
-    // Extract needed helpers
-    const fmtSrc = extractFn(src, '_ubGwFmt');
-    const addSrc = extractFn(src, '_ubGwAddStr');
-    const assetsSrc = src.slice(src.indexOf('var _UB_GW_ASSETS'), src.indexOf('var _UB_GW_ASSETS') + 600);
+    // Extract helpers needed by _ubUpRenderGwSubcard
+    const fmtSrc   = extractFn(src, '_ubGwFmt');
+    const addSrc   = extractFn(src, '_ubGwAddStr');
+    const assetsSrc = extractVar(src, '_UB_GW_ASSETS');
     const renderSrc = extractFn(src, '_ubUpRenderGwSubcard');
 
-    if (!renderSrc || !fmtSrc || !addSrc || !assetsSrc) return; // static fallback
+    // All four pieces are required — no fallback
+    expect(renderSrc,  'renderSrc must be extracted').toBeTruthy();
+    expect(fmtSrc,     'fmtSrc must be extracted').toBeTruthy();
+    expect(addSrc,     'addSrc must be extracted').toBeTruthy();
+    expect(assetsSrc.includes('_UB_GW_ASSETS'), 'assetsSrc must include _UB_GW_ASSETS').toBe(true);
 
-    let renderedRows = '';
-    try {
-      const factory = new Function(
-        assetsSrc + '\n' +
-        fmtSrc + '\n' +
-        addSrc + '\n' +
-        // Mock DOM
-        'var _captured = ""; ' +
-        'var _mockBody = { innerHTML: "" }; ' +
-        'var _mockFooter = { textContent: "" }; ' +
-        'var _origGetById = typeof document !== "undefined" ? document.getElementById.bind(document) : null; ' +
-        // Patch render to capture rows
-        renderSrc.replace(
-          'body.innerHTML = rows ||',
-          '_captured = rows; body.innerHTML = rows ||'
-        ) +
-        '\n' +
-        'var mockData = { USDC: [{ domain: 26, depositor: "0x1234", balance: "9.079400" }], errors: {} };\n' +
-        '_ubUpRenderGwSubcard.call({ ' +
-        '  document: { getElementById: function(id) { ' +
-        '    if (id === "ub-up-gw-card") return { style: {}, innerHTML: "" }; ' +
-        '    if (id === "ub-up-gw-body") return _mockBody; ' +
-        '    if (id === "ub-up-gw-footer") return _mockFooter; ' +
-        '    return null; ' +
-        '  } } ' +
-        '}, mockData);\n' +
-        'return _captured;'
-      );
-      renderedRows = factory();
-    } catch (e) {
-      // If execution fails, fall back to structural check
-      renderedRows = renderFn;
-    }
+    // Patch the render source so that document.getElementById is
+    // replaced with a local mock — no global `document` needed.
+    const mockedRender = renderSrc
+      .replace(/document\.getElementById\(/g, '__mockGetById(');
+
+    // Build a self-contained factory inside new Function (node env, no DOM)
+    const factory = new Function(
+      // 1. helpers
+      assetsSrc + '\n' +
+      fmtSrc    + '\n' +
+      addSrc    + '\n' +
+
+      // 2. lightweight DOM mock (local vars, capture body.innerHTML)
+      'var _capturedRows = "";\n' +
+      'var _mockBody     = { innerHTML: "" };\n' +
+      'var _mockFooter   = { textContent: "" };\n' +
+      'var _mockCard     = { style: {}, innerHTML: "" };\n' +
+      'function __mockGetById(id) {\n' +
+      '  if (id === "ub-up-gw-card")   return _mockCard;\n' +
+      '  if (id === "ub-up-gw-body")   return _mockBody;\n' +
+      '  if (id === "ub-up-gw-footer") return _mockFooter;\n' +
+      '  return null;\n' +
+      '}\n' +
+      // Capture the rows string before it is written to the mock body
+      mockedRender.replace(
+        'body.innerHTML = rows ||',
+        '_capturedRows = rows; body.innerHTML = rows ||'
+      ) + '\n' +
+
+      // 3. test invocation with explicit mock data
+      'var _mockData = {\n' +
+      '  USDC: [{ domain: 26, depositor: "0xTEST", balance: "9.079400" }],\n' +
+      '  errors: {}\n' +
+      '};\n' +
+      '_ubUpRenderGwSubcard(_mockData);\n' +
+      'return _capturedRows;'
+    );
+
+    // Execute — any error here is a real failure, NOT a fallback
+    const renderedRows = factory();
+
+    // The rendered HTML must contain the deposit button
     expect(renderedRows).toContain('ubGwDepOpen');
     expect(renderedRows).toContain('ub-gw-dep-btn');
+    // The deposit button for USDC must pass the correct token
+    expect(renderedRows).toContain("ubGwDepOpen('USDC')");
+  });
+
+  it('UP6.14 — functional: rendered HTML contains dep button for cirBTC with 8 decimals', () => {
+    const src = html;
+    const fmtSrc    = extractFn(src, '_ubGwFmt');
+    const addSrc    = extractFn(src, '_ubGwAddStr');
+    const assetsSrc = extractVar(src, '_UB_GW_ASSETS');
+    const renderSrc = extractFn(src, '_ubUpRenderGwSubcard');
+
+    expect(renderSrc,  'renderSrc required').toBeTruthy();
+    expect(fmtSrc,     'fmtSrc required').toBeTruthy();
+    expect(addSrc,     'addSrc required').toBeTruthy();
+
+    const mockedRender = renderSrc.replace(
+      /document\.getElementById\(/g, '__mockGetById('
+    );
+
+    const factory = new Function(
+      assetsSrc + '\n' + fmtSrc + '\n' + addSrc + '\n' +
+      'var _cap = ""; var _mb = { innerHTML: "" }; var _mf = { textContent: "" }; var _mc = { style: {}, innerHTML: "" };\n' +
+      'function __mockGetById(id) {\n' +
+      '  if (id==="ub-up-gw-card") return _mc;\n' +
+      '  if (id==="ub-up-gw-body") return _mb;\n' +
+      '  if (id==="ub-up-gw-footer") return _mf;\n' +
+      '  return null;\n' +
+      '}\n' +
+      mockedRender.replace('body.innerHTML = rows ||', '_cap = rows; body.innerHTML = rows ||') + '\n' +
+      // cirBTC has 8 decimals: 0.00012345 BTC
+      'var _d = { cirBTC: [{ domain: 26, depositor: "0xTEST", balance: "0.00012345" }], errors: {} };\n' +
+      '_ubUpRenderGwSubcard(_d);\n' +
+      'return _cap;'
+    );
+
+    const rows = factory();
+    expect(rows).toContain("ubGwDepOpen('cirBTC')");
+    expect(rows).toContain('ub-gw-dep-btn');
+    // cirBTC balance should not lose the 8th decimal
+    expect(rows).toContain('0.00012345');
+  });
+
+  it('UP6.15 — functional: error state still renders deposit button', () => {
+    const src = html;
+    const fmtSrc    = extractFn(src, '_ubGwFmt');
+    const addSrc    = extractFn(src, '_ubGwAddStr');
+    const assetsSrc = extractVar(src, '_UB_GW_ASSETS');
+    const renderSrc = extractFn(src, '_ubUpRenderGwSubcard');
+
+    expect(renderSrc).toBeTruthy();
+
+    const mockedRender = renderSrc.replace(/document\.getElementById\(/g, '__mockGetById(');
+
+    const factory = new Function(
+      assetsSrc + '\n' + fmtSrc + '\n' + addSrc + '\n' +
+      'var _cap = ""; var _mb = { innerHTML: "" }; var _mf = { textContent: "" }; var _mc = { style: {}, innerHTML: "" };\n' +
+      'function __mockGetById(id) {\n' +
+      '  if (id==="ub-up-gw-card") return _mc;\n' +
+      '  if (id==="ub-up-gw-body") return _mb;\n' +
+      '  if (id==="ub-up-gw-footer") return _mf;\n' +
+      '  return null;\n' +
+      '}\n' +
+      mockedRender.replace('body.innerHTML = rows ||', '_cap = rows; body.innerHTML = rows ||') + '\n' +
+      // errors present, no balance data
+      'var _d = { USDC: [], errors: { USDC: "RPC timeout" } };\n' +
+      '_ubUpRenderGwSubcard(_d);\n' +
+      'return _cap;'
+    );
+
+    const rows = factory();
+    // Even in error state, deposit button must be present
+    expect(rows).toContain('ub-gw-dep-btn');
+    expect(rows).toContain('ubGwDepOpen');
   });
 });
