@@ -30,13 +30,14 @@ const TOKEN_ADDRESSES = { // arc-studio-allow-onchain-literal
     43114: '0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E', // Avalanche
     480:   '0x79A02482A880bCe3F13E09da970dC34dB4cD24D1', // World Chain
   },
-  EURC: {
-    // Supported: Arc, Ethereum, Avalanche, Base, World Chain (docs: non-usdc-assets)
-    5042:  '0xbEf5f6d51CB62b58e6A8f77868681825C6fe21c1', // Arc
-    1:     '0x1aBaEA1f7C830bD89Acc67eC4af516284b1bC33c', // Ethereum
-    43114: '0xC891EB4cbdEFf6e073e859e987815Ed1505c2ACD', // Avalanche
-    8453:  '0x60a3E35Cc302bFA44Cb288Bc5a4F316Fdb1adb42', // Base
-    480:   '0x79A02482A880bCe3F13E09da970dC34dB4cD24D1', // World Chain (USDC addr placeholder — EURC not yet confirmed on World Chain mainnet; endpoint returns 422 until confirmed)
+  EURC: { // arc-studio-allow-onchain-literal
+    // Supported mainnet: Arc, Ethereum, Avalanche, Base only.
+    // World Chain (480): EURC address not yet published by Circle for mainnet;
+    // entry deliberately absent — request returns 422 until officially confirmed.
+    5042:  '0xbEf5f6d51CB62b58e6A8f77868681825C6fe21c1', // Arc // arc-studio-allow-onchain-literal
+    1:     '0x1aBaEA1f7C830bD89Acc67eC4af516284b1bC33c', // Ethereum // arc-studio-allow-onchain-literal
+    43114: '0xC891EB4cbdEFf6e073e859e987815Ed1505c2ACD', // Avalanche // arc-studio-allow-onchain-literal
+    8453:  '0x60a3E35Cc302bFA44Cb288Bc5a4F316Fdb1adb42', // Base // arc-studio-allow-onchain-literal
   },
   cirBTC: {
     // Arc and Ethereum ONLY per official docs

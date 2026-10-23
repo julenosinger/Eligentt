@@ -47205,6 +47205,8 @@ function ubGwDepFetchBalance(params) {
   }
 
   // Use the chain-specific RPC proxy already present in the app.
+  // Avalanche (43114) has no /api/rpc/avalanche proxy configured — explicitly absent
+  // so the unavailability check below fires instead of sending a 404 fetch.
   var rpcMap = {
     5042:  '/api/rpc/arc',
     1:     '/api/rpc/ethereum',
@@ -47212,12 +47214,17 @@ function ubGwDepFetchBalance(params) {
     42161: '/api/rpc/arbitrum',
     10:    '/api/rpc/optimism',
     137:   '/api/rpc/polygon',
-    43114: '/api/rpc/avalanche',
+    // 43114 (Avalanche): no proxy configured — falls through to unavailable message.
   };
   var rpc = rpcMap[params.chainId];
   if (!rpc) {
-    document.getElementById('ub-gw-dep-bal') &&
-      (document.getElementById('ub-gw-dep-bal').textContent = 'Balance: RPC unavailable for this chain');
+    // Distinguish "no proxy configured" from a fetched-zero balance.
+    var balEl2 = document.getElementById('ub-gw-dep-bal');
+    if (balEl2) balEl2.textContent = 'Balance check unavailable for ' +
+      (params.chainName || 'this chain') + ' — deposit disabled';
+    // Also disable the confirm button so user cannot proceed without balance check.
+    var btn2 = document.getElementById('ub-gw-dep-confirm');
+    if (btn2) { btn2.disabled = true; btn2.title = 'Balance check required before deposit'; }
     return;
   }
 
@@ -47269,11 +47276,24 @@ function _ubGwDepValidate() {
   var sumEl  = document.getElementById('ub-gw-dep-summary');
   if (!amtEl || !btn) return;
 
-  var amt = parseFloat(amtEl.value || '0');
-  var bal = parseFloat(_ubGwDep.walletBal || '0');
+  var amtRaw = (amtEl.value || '').trim();
   var params = _ubGwDep.params;
+  var dec    = params ? params.decimals : 6;
+  var factor = BigInt(Math.pow(10, dec));
 
-  var valid = params && amt > 0 && bal > 0 && amt <= bal && !_ubGwDep.executing;
+  // Validate via BigInt — no parseFloat on money paths.
+  var amtOk = /^[0-9]+(\.[0-9]+)?$/.test(amtRaw) && amtRaw !== '0' &&
+              (amtRaw.split('.')[1] || '').length <= dec;
+  var rawAmt = 0n, rawBal = 0n;
+  if (amtOk) {
+    var ap = amtRaw.split('.'), af = (ap[1] || '').padEnd(dec, '0');
+    rawAmt = BigInt(ap[0] || '0') * factor + BigInt(af);
+  }
+  if (_ubGwDep.walletBal) {
+    var bp = _ubGwDep.walletBal.split('.'), bf = (bp[1] || '').padEnd(dec, '0');
+    rawBal = BigInt(bp[0] || '0') * factor + BigInt(bf);
+  }
+  var valid = params && amtOk && rawAmt > 0n && rawBal > 0n && rawAmt <= rawBal && !_ubGwDep.executing;
   btn.disabled = !valid;
   btn.textContent = _ubGwDep.executing ? 'Processing…' : 'Review & Deposit';
 
@@ -47284,7 +47304,7 @@ function _ubGwDepValidate() {
     document.getElementById('ub-gw-dep-s-chain') &&
       (document.getElementById('ub-gw-dep-s-chain').textContent = params.chainName);
     document.getElementById('ub-gw-dep-s-amt') &&
-      (document.getElementById('ub-gw-dep-s-amt').textContent = amt + ' ' + params.token);
+      (document.getElementById('ub-gw-dep-s-amt').textContent = amtRaw + ' ' + params.token);
     document.getElementById('ub-gw-dep-s-gw') &&
       (document.getElementById('ub-gw-dep-s-gw').textContent = params.gatewayWallet);
     document.getElementById('ub-gw-dep-s-tok') &&
@@ -47294,6 +47314,25 @@ function _ubGwDepValidate() {
   } else if (sumEl) {
     sumEl.style.display = 'none';
   }
+}
+
+/**
+ * _ubGwDepStrToAtomic(amtStr, dec) → BigInt
+ * Converts a decimal string (e.g. "0.00000001") to atomic units for `dec` decimals.
+ * No Number/float conversion at any step — safe for cirBTC (8 dec) and USDC (6 dec).
+ * Returns null for invalid inputs (non-numeric, negative, excess decimals).
+ * Exported as a named function so tests can reference it directly without new Function().
+ */
+function _ubGwDepStrToAtomic(amtStr, dec) {
+  var s = String(amtStr).trim();
+  if (!/^[0-9]+(\.[0-9]+)?$/.test(s)) return null;
+  var parts   = s.split('.');
+  var intPart = parts[0] || '0';
+  var fracRaw = parts[1] || '';
+  if (fracRaw.length > dec) return null; // excess precision — reject
+  var fracStr = fracRaw.padEnd(dec, '0');
+  var factor  = BigInt(Math.pow(10, dec));
+  return BigInt(intPart) * factor + BigInt(fracStr);
 }
 
 function _ubGwDepSetStatus(cls, msg) {
@@ -47309,22 +47348,27 @@ async function ubGwDepExecute() {
   var params = _ubGwDep.params;
   if (!params) { _ubGwDepSetStatus('error', 'Parameters not loaded. Please wait.'); return; }
 
-  var amtEl = document.getElementById('ub-gw-dep-amt');
-  var amt   = parseFloat(amtEl ? amtEl.value : '0');
-  if (!(amt > 0)) { _ubGwDepSetStatus('error', 'Enter a valid amount.'); return; }
+  var amtEl  = document.getElementById('ub-gw-dep-amt');
+  var amtRaw = (amtEl ? amtEl.value : '').trim();
 
-  var bal = parseFloat(_ubGwDep.walletBal || '0');
-  if (amt > bal) { _ubGwDepSetStatus('error', 'Insufficient balance.'); return; }
+  // Validate: non-empty, numeric, positive — using the raw string (no parseFloat).
+  if (!/^[0-9]+(\.[0-9]+)?$/.test(amtRaw) || amtRaw === '0') {
+    _ubGwDepSetStatus('error', 'Enter a valid amount.'); return;
+  }
 
-  // Convert amount to atomic units using BigInt (no float precision loss).
+  // Convert amount to atomic units via _ubGwDepStrToAtomic — no Number/float.
   var dec    = params.decimals;
-  var factor = BigInt(Math.pow(10, dec));
-  // Use string split to avoid float rounding before BigInt conversion.
-  var amtStr  = String(amt);
-  var parts   = amtStr.split('.');
-  var intStr  = parts[0] || '0';
-  var fracStr = (parts[1] || '').slice(0, dec).padEnd(dec, '0');
-  var rawAmt  = BigInt(intStr) * factor + BigInt(fracStr);
+  var rawAmt = _ubGwDepStrToAtomic(amtRaw, dec);
+  if (rawAmt === null) {
+    _ubGwDepSetStatus('error',
+      'Invalid amount. ' + params.token + ' supports up to ' + dec + ' decimal places.');
+    return;
+  }
+  if (rawAmt === 0n) { _ubGwDepSetStatus('error', 'Amount must be greater than zero.'); return; }
+
+  // Balance comparison also using BigInt (walletBal stored as decimal string).
+  var rawBal = _ubGwDepStrToAtomic(_ubGwDep.walletBal || '0', dec) || 0n;
+  if (rawAmt > rawBal) { _ubGwDepSetStatus('error', 'Insufficient balance.'); return; }
 
   // Ensure provider is available (ethers or window.ethereum).
   var provider;
