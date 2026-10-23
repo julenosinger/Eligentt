@@ -16949,6 +16949,7 @@ function switchNetwork(chainId) {
       refreshBalance().catch(() => {});
       _refreshAllSurfaceBalances();
       if (typeof saUpdateNetwork === 'function') saUpdateNetwork();
+      try { if (typeof swpSyncToActiveChain === 'function') swpSyncToActiveChain(); } catch(_) {}
     }).catch(e => {
       toast('Network switch failed: ' + (e.message || 'unknown error'), 'error');
     });
@@ -22981,7 +22982,9 @@ function _swpTokOut() {
     var o = SWP.tokenOutObj;
     return Object.assign({ sym: o.symbol, color: '#334155', icon: (o.symbol||'?')[0].toUpperCase() }, o);
   }
-  return TOKEN_LIST[SWP.tokenOutIdx] || TOKEN_LIST[1];
+  // tokenOutIdx === -1 means no valid token for this chain — return sentinel
+  if (SWP.tokenOutIdx < 0) return { sym: '—', name: 'Select token', decimals: 6, color: '#64748b', icon: '?', _noToken: true };
+  return TOKEN_LIST[SWP.tokenOutIdx] || { sym: '—', name: 'Select token', decimals: 6, color: '#64748b', icon: '?', _noToken: true };
 }
 
 /* Chain meta helper — used only for display in the Swap card */
@@ -32566,28 +32569,34 @@ function swpSyncToActiveChain() {
   SWP.tokenInObj  = null;
   SWP.tokenOutObj = null;
 
-  // 3. Select default token pair for this chain from existing TOKEN_LIST
-  // Prefer USDC→EURC on Arc (5042), USDC→ETH elsewhere if available
-  var avail = swapAvailableTokens(cid);
+  // 3. Select default token pair for this chain from existing TOKEN_LIST.
+  // Only use tokens whose address is registered for this chain — never fall
+  // back to an index that belongs to another chain's token.
+  var avail = swapAvailableTokens(cid); // only tokens with a valid address on cid
   var symIn  = 'USDC';
-  var symOut = (cid === 5042) ? 'EURC' : 'ETH';
-  // Verify preferred pair is available; fall back to first two available tokens
+  var symOut = null; // null = no valid second token
+  // Verify in-token is available; otherwise pick first available
   var hasIn  = avail.some(function(t){ return t.sym === symIn; });
-  var hasOut = avail.some(function(t){ return t.sym === symOut; });
-  if (!hasIn && avail.length > 0) symIn = avail[0].sym;
-  if (!hasOut && avail.length > 1) {
-    // pick first token that is not symIn
+  if (!hasIn) symIn = avail.length > 0 ? avail[0].sym : null;
+  // Pick best out-token: prefer EURC on Arc, first non-symIn token elsewhere
+  var preferred = (cid === 5042) ? 'EURC' : null;
+  var hasPreferred = preferred && avail.some(function(t){ return t.sym === preferred; });
+  if (hasPreferred) {
+    symOut = preferred;
+  } else if (avail.length > 1) {
     var alt = avail.find(function(t){ return t.sym !== symIn; });
-    symOut = alt ? alt.sym : symIn;
+    symOut = alt ? alt.sym : null;
   }
-  // Locate indices in TOKEN_LIST
+  // Locate indices in TOKEN_LIST (only if sym is available for this chain)
   var idxIn = -1, idxOut = -1;
   for (var i = 0; i < TOKEN_LIST.length; i++) {
-    if (TOKEN_LIST[i].sym === symIn  && idxIn  === -1) idxIn  = i;
-    if (TOKEN_LIST[i].sym === symOut && idxOut === -1) idxOut = i;
+    if (symIn  && TOKEN_LIST[i].sym === symIn  && idxIn  === -1) idxIn  = i;
+    if (symOut && TOKEN_LIST[i].sym === symOut && idxOut === -1) idxOut = i;
   }
   SWP.tokenInIdx  = idxIn  >= 0 ? idxIn  : 0;
-  SWP.tokenOutIdx = idxOut >= 0 ? idxOut : Math.min(1, TOKEN_LIST.length - 1);
+  // idxOut === -1 means no valid second token — keep -1 so applySwapTokens
+  // shows "Select token" instead of a token that does not exist on this chain.
+  SWP.tokenOutIdx = idxOut; // may be -1 (no valid pair)
 
   // 4. Invalidate all stale quote state
   SWP.lastQuote       = null;
@@ -32605,8 +32614,10 @@ function swpSyncToActiveChain() {
   // 5. Clear output amount and reset UI to neutral state
   var amtOut = document.getElementById('swap-amount-out');
   if (amtOut) amtOut.value = '';
+  // If no valid output token for this chain, show "Select token" — not "Enter an amount"
+  var _tOut5 = _swpTokOut();
   var swpBtn = document.getElementById('swp-exec-btn');
-  if (swpBtn) swpSetBtn('noamount', 'Enter an amount');
+  if (swpBtn) swpSetBtn('disabled', _tOut5._noToken ? 'Select output token' : 'Enter an amount');
 
   // 6. Re-render tokens, badges and balances
   applySwapTokens();
