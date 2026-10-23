@@ -9099,6 +9099,18 @@ select.cinput option { background: #161a24; color: #dde2f0; }
                   <option value="cirBTC">cirBTC</option>
                 </select>
               </div>
+              <!-- Destination Network -->
+              <div style="margin-bottom:10px">
+                <label class="pl-label">Destination Network <span style="color:var(--muted2);font-weight:400">(where recipient receives)</span></label>
+                <select id="pl-dest-chain" class="cinput" style="width:100%;font-size:10px;padding:7px 10px;cursor:pointer;font-family:inherit" onchange="plPreviewUpdate()">
+                  <option value="Arc Mainnet" selected>Arc Mainnet</option>
+                  <option value="Ethereum">Ethereum</option>
+                  <option value="Base">Base</option>
+                  <option value="Arbitrum">Arbitrum</option>
+                  <option value="Optimism">Optimism</option>
+                  <option value="Polygon">Polygon</option>
+                </select>
+              </div>
               <!-- Accepted Payment Methods -->
               <div style="margin-bottom:10px">
                 <label class="pl-label">Accepted Payment Methods</label>
@@ -27666,7 +27678,8 @@ function createPayLink() {
     feeReceiver: (typeof TREASURY_VAULT_ADDRESS !== 'undefined') ? TREASURY_VAULT_ADDRESS : '',
     type:      currentPlType || 'fixed',
     desc,
-    addr, recipient: addr, token: document.getElementById('pl-currency')?.value || 'USDC', chain: 'Arc Mainnet',
+    addr, recipient: addr, token: document.getElementById('pl-currency')?.value || 'USDC',
+    chain: document.getElementById('pl-dest-chain')?.value || 'Arc Mainnet',
     currency: document.getElementById('pl-currency')?.value || 'USDC',
     expiry, expiresAt, uses: 0, scans: 0, payments: 0,
     status: 'Active', created: new Date().toISOString(), url: payUrl,
@@ -27688,7 +27701,7 @@ function createPayLink() {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'same-origin',
-    body: JSON.stringify({ label, amount, type: currentPlType || 'fixed', desc, recipient: addr, token: link.currency || 'USDC', chain: 'Arc Mainnet', expiry })
+    body: JSON.stringify({ label, amount, type: currentPlType || 'fixed', desc, recipient: addr, token: link.currency || 'USDC', chain: link.chain || 'Arc Mainnet', expiry })
   }).then(r => r.json()).then(res => {
     if (res.ok && res.link) {
       const idx = payLinks.findIndex(x => x.id === link.id);
@@ -27722,6 +27735,7 @@ function createPayLink() {
   set('pl-prev-amount',    (currentPlType==='open'?'Any':amount) + ' ' + (link.currency||'USDC'));
   set('pl-prev-recipient', shortAddr(addr));
   set('pl-prev-expiry',    expiry === 'never' ? 'Never' : expiry);
+  set('pl-prev-chain',     link.chain || 'Arc Mainnet');
 
   plSelectCard(id);
   toast('Payment link created — ' + label,'success');
