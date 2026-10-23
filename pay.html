@@ -4,7 +4,7 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0"/>
 <title>Elligentt Pay — Secure Web3 Payment</title>
-<meta name="description" content="Secure Web3 payment powered by Elligentt. Pay USDC on Arc Mainnet directly from your wallet."/>
+<meta name="description" content="Secure Web3 payment powered by Elligentt. Pay USDC directly from your wallet."/>
 <meta name="robots" content="noindex"/>
 <meta name="theme-color" content="#050816"/>
 <link rel="icon" type="image/svg+xml" href="/favicon-main.svg"/>
@@ -220,7 +220,7 @@
                 <div class="block-title">Details</div>
                 <div class="rows">
                   <div class="row"><span class="k">Recipient</span><span class="v addr" id="s-recipient">—</span></div>
-                  <div class="row"><span class="k">Network</span><span class="v net">Arc Mainnet</span></div>
+                  <div class="row"><span class="k">Network</span><span class="v net" id="s-network">Arc Mainnet</span></div>
                   <div class="row"><span class="k">Token</span><span class="v tok" id="s-token">USDC</span></div>
                   <div class="row"><span class="k">Invoice</span><span class="v" id="s-label">—</span></div>
                   <div class="row"><span class="k">Status</span><span id="s-status"></span></div>
@@ -254,7 +254,7 @@
       </div>
     </div>
 
-    <div class="footer"><i class="ti ti-lock"></i> Powered by Elligentt · Arc Mainnet</div>
+    <div class="footer"><i class="ti ti-lock"></i> Powered by Elligentt</div>
   </div>
 
   <div class="toast" id="toast"></div>
@@ -263,20 +263,33 @@
 (function () {
   'use strict';
 
-  // ── Real config (single source of truth) with resilient fallbacks ──
-  var SC = window.SystemConfig || {};
-  var CH = window.ElligenteChains || {};
-  var CT = window.ElligenteContracts || {};
-  var FE = window.ElligenteFees || {};
+  // ── Config (single source of truth) ──────────────────────────────────────
+  var SC  = window.SystemConfig      || {};
+  var CH  = window.ElligenteChains   || {};
+  var CT  = window.ElligenteContracts || {};
 
+  // Arc fallback (used only when link.chainId is absent/unknown)
   var ARC_CHAIN_ID  = SC.ARC_CHAIN_ID  || CH.ARC_CHAIN_ID  || 5042;
-  var ARC_CHAIN_HEX = SC.ARC_CHAIN_HEX || CH.ARC_CHAIN_HEX || '0x13b2';
-  var ARC_RPC_URL   = SC.ARC_RPC_URL   || CH.ARC_RPC_URL   || 'https://rpc.mainnet.arc.io';
-  var ARC_EXPLORER  = SC.ARC_EXPLORER_URL || CH.ARC_EXPLORER_URL || 'https://explorer.arc.io';
-  var USDC_ADDRESS  = CT.USDC_ADDRESS  || SC.USDC_ADDRESS  || '0x3600000000000000000000000000000000000000';
-  var USDC_DECIMALS = CT.USDC_DECIMALS || SC.USDC_DECIMALS || 6;
   var MEMO_CONTRACT = SC.MEMO_CONTRACT_ADDRESS || '0x5294E9927c3306DcBaDb03fe70b92e01cCede505';
   var TREASURY_VAULT = CT.TREASURY_VAULT_ADDRESS || SC.TREASURY_VAULT_ADDRESS || '0xbfC9E8F79bd30b912081ae88F9ad0A515F08c2F1';
+
+  // ── Multi-chain registry (mirrors shared-config.mjs — client-side copy) ──
+  // Addresses are the canonical USDC addresses per chain.
+  // Source of truth: https://developers.circle.com/stablecoins/docs/usdc-on-main-networks
+  var CHAIN_REGISTRY = {
+    5042:  { name:'Arc Mainnet',  chainHex:'0x13b2', rpc:'https://rpc.mainnet.arc.io',       explorer:'https://explorer.arc.io',             usdc:'0x3600000000000000000000000000000000000000', decimals:6, nativeName:'USDC'  },
+    1:     { name:'Ethereum',     chainHex:'0x1',    rpc:'https://cloudflare-eth.com',        explorer:'https://etherscan.io',                usdc:'0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', decimals:6, nativeName:'ETH'   },
+    8453:  { name:'Base',         chainHex:'0x2105', rpc:'https://mainnet.base.org',          explorer:'https://basescan.org',                usdc:'0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', decimals:6, nativeName:'ETH'   },
+    42161: { name:'Arbitrum',     chainHex:'0xa4b1', rpc:'https://arb1.arbitrum.io/rpc',      explorer:'https://arbiscan.io',                 usdc:'0xaf88d065e77c8cC2239327C5EDb3A432268e5831', decimals:6, nativeName:'ETH'   },
+    10:    { name:'Optimism',     chainHex:'0xa',    rpc:'https://mainnet.optimism.io',       explorer:'https://optimistic.etherscan.io',     usdc:'0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85', decimals:6, nativeName:'ETH'   },
+    137:   { name:'Polygon',      chainHex:'0x89',   rpc:'https://polygon-rpc.com',           explorer:'https://polygonscan.com',             usdc:'0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359', decimals:6, nativeName:'MATIC'  }
+  };
+
+  // Resolve chain config from the stored link; fallback to Arc.
+  function resolveChain(linkChainId) {
+    var id = Number(linkChainId) || ARC_CHAIN_ID;
+    return CHAIN_REGISTRY[id] || CHAIN_REGISTRY[ARC_CHAIN_ID];
+  }
 
   var USDC_ABI = [
     'function balanceOf(address) view returns (uint256)',
@@ -289,7 +302,7 @@
   function isAddr(a){ return /^0x[0-9a-fA-F]{40}$/.test(a||''); }
   function shortAddr(a){ a=a||''; return a.length>12 ? a.slice(0,6)+'…'+a.slice(-4) : a; }
   function shortHash(h){ h=h||''; return h.length>14 ? h.slice(0,8)+'…'+h.slice(-6) : h; }
-  function toUsdc(n){ return ethers.parseUnits(Number(n).toFixed(USDC_DECIMALS), USDC_DECIMALS); }
+  function toUsdc(n, dec){ return ethers.parseUnits(Number(n).toFixed(dec||6), dec||6); }
   function fmt(n){ return (Number(n)||0).toFixed(2); }
 
   var _tt;
@@ -302,13 +315,14 @@
   }
 
   // ── State ──
-  var token = null;
-  var link  = null;          // real payment data from backend
-  var provider = null;       // ethers BrowserProvider
-  var signer = null;
-  var account = null;
-  var chainId = null;
-  var paying = false;
+  var token    = null;
+  var link     = null;   // real payment data from backend
+  var chainCfg = null;   // resolved CHAIN_REGISTRY entry for link.chainId
+  var provider = null;   // ethers BrowserProvider
+  var signer   = null;
+  var account  = null;
+  var chainId  = null;
+  var paying   = false;
 
   // ── Token extraction (path /pay/<token> or ?token=) ──
   function getToken(){
@@ -324,7 +338,8 @@
       .then(function(r){ return r.json().then(function(j){ return { status:r.status, body:j }; }); })
       .then(function(res){
         if (res.body && res.body.ok && res.body.link) {
-          link = res.body.link;
+          link     = res.body.link;
+          chainCfg = resolveChain(link.chainId);
           renderCheckout();
         } else {
           showError(res.body && res.body.error ? res.body.error : 'This payment link could not be found.');
@@ -345,28 +360,30 @@
   function statusBadge(status){
     var s = status || 'Active';
     var cls = 'active', label = s;
-    if (s === 'Paid')                       { cls='paid'; }
-    else if (s === 'Expired')               { cls='dead'; }
-    else if (s === 'Disabled'||s==='Cancelled'){ cls='dead'; }
-    else if (s === 'Overdue')               { cls='warn'; }
+    if (s === 'Paid')                              { cls='paid'; }
+    else if (s === 'Expired')                      { cls='dead'; }
+    else if (s === 'Disabled' || s==='Cancelled')  { cls='dead'; }
+    else if (s === 'Overdue')                      { cls='warn'; }
     return '<span class="badge '+cls+'">'+label+'</span>';
   }
 
   function renderCheckout(){
     var tk    = link.token || 'USDC';
-    var amt   = parseFloat(link.amount) || 0;          // recipient receives
-    var fee   = parseFloat(link.feeAmount) || 0;
+    var amt   = parseFloat(link.amount)      || 0;
+    var fee   = parseFloat(link.feeAmount)   || 0;
     var total = fee > 0 ? (parseFloat(link.totalAmount) || (amt + fee)) : amt;
     var label = link.number || link.label || link.id || '—';
+    var netName = chainCfg ? chainCfg.name : (link.chain || 'Arc Mainnet');
 
-    $('amt-total').textContent = fmt(total);
-    $('amt-token').textContent = tk;
-    $('amt-desc').textContent  = link.desc || link.label || ('Payment ' + (link.number || ''));
-    $('net-name').textContent  = link.chain || 'Arc Mainnet';
+    $('amt-total').textContent  = fmt(total);
+    $('amt-token').textContent  = tk;
+    $('amt-desc').textContent   = link.desc || link.label || ('Payment ' + (link.number || ''));
+    $('net-name').textContent   = netName;
+    $('s-network').textContent  = netName;
 
-    $('s-total').textContent    = fmt(total) + ' ' + tk;
-    $('s-receives').textContent = fmt(amt) + ' ' + tk;
-    $('s-fee').textContent      = fmt(fee) + ' ' + tk;
+    $('s-total').textContent    = fmt(total)  + ' ' + tk;
+    $('s-receives').textContent = fmt(amt)    + ' ' + tk;
+    $('s-fee').textContent      = fmt(fee)    + ' ' + tk;
     $('s-recipient').textContent= shortAddr(link.recipient || '');
     $('s-token').textContent    = tk;
     $('s-label').textContent    = label;
@@ -394,11 +411,11 @@
     try {
       new QRCode(el, { text: text, width:140, height:140, colorDark:'#0b0d12', colorLight:'#ffffff', correctLevel: QRCode.CorrectLevel.M });
       var img = el.querySelector('img'); if (img) img.style.cssText='display:block;border-radius:4px;width:140px;height:140px';
-      var cv = el.querySelector('canvas'); if (cv) cv.style.cssText='display:block;border-radius:4px';
+      var cv  = el.querySelector('canvas'); if (cv) cv.style.cssText='display:block;border-radius:4px';
     } catch(e){}
   }
 
-  // ── Primary button rendering by state ──
+  // ── Primary button ──
   function setBtn(html, opts){
     opts = opts || {};
     var btn = $('pay-btn');
@@ -414,9 +431,9 @@
 
   function renderPrimary(){
     if (paying) return;
-    var tk  = link.token || 'USDC';
-    var fee = parseFloat(link.feeAmount) || 0;
-    var amt = parseFloat(link.amount) || 0;
+    var tk    = link.token || 'USDC';
+    var fee   = parseFloat(link.feeAmount) || 0;
+    var amt   = parseFloat(link.amount) || 0;
     var total = fee > 0 ? (parseFloat(link.totalAmount) || (amt + fee)) : amt;
 
     if (link.status === 'Paid') {
@@ -436,16 +453,25 @@
       hideNotice();
       return;
     }
-    setBtn('<i class="ti ti-bolt"></i> Pay ' + fmt(total) + ' ' + tk);
+
+    // Wallet connected — show which chain the payment requires
+    var destChainId = Number(link.chainId) || ARC_CHAIN_ID;
+    if (chainId && chainId !== destChainId) {
+      var destName = chainCfg ? chainCfg.name : ('Chain ' + destChainId);
+      setBtn('<i class="ti ti-bolt"></i> Pay ' + fmt(total) + ' ' + tk + ' · Switch to ' + destName);
+    } else {
+      setBtn('<i class="ti ti-bolt"></i> Pay ' + fmt(total) + ' ' + tk);
+    }
   }
 
   function showNotice(kind, html){ var n=$('notice'); n.className='notice show '+kind; n.innerHTML=html; }
   function hideNotice(){ var n=$('notice'); n.className='notice'; n.innerHTML=''; }
   function explorerLink(hash){
-    return ' <br><a href="'+ARC_EXPLORER+'/tx/'+hash+'" target="_blank" rel="noopener">'+shortHash(hash)+'</a>';
+    var exp = (chainCfg && chainCfg.explorer) || 'https://explorer.arc.io';
+    return ' <br><a href="'+exp+'/tx/'+hash+'" target="_blank" rel="noopener">'+shortHash(hash)+'</a>';
   }
 
-  // ── Wallet connection (external / injected providers, incl. mobile) ──
+  // ── Wallet connection ──
   function hasInjected(){ return typeof window.ethereum !== 'undefined' && window.ethereum; }
   function isMobile(){ return /Android|iPhone|iPad|iPod|Mobile|Opera Mini|IEMobile|BlackBerry/i.test(navigator.userAgent || ''); }
   function mmDeepLink(){ return 'https://metamask.app.link/dapp/' + window.location.host + window.location.pathname + window.location.search; }
@@ -453,9 +479,6 @@
   function connectWallet(){
     if (!hasInjected()) {
       if (isMobile()) {
-        // Re-open this exact checkout inside the wallet's in-app browser
-        // (MetaMask Mobile and most mobile wallets honor this deep link), where
-        // an injected provider is available and the normal flow runs unchanged.
         toast('Opening your wallet app…', 'info');
         window.location.href = mmDeepLink();
         return Promise.reject(new Error('no wallet'));
@@ -480,9 +503,8 @@
       })
       .then(function(net){
         chainId = Number(net.chainId);
-        var chip = $('wallet-chip');
         $('wallet-addr').textContent = 'Connected ' + shortAddr(account);
-        chip.classList.add('show');
+        $('wallet-chip').classList.add('show');
         bindProviderEvents();
         renderPrimary();
       });
@@ -505,21 +527,34 @@
       chainId = parseInt(hex, 16);
       provider = new ethers.BrowserProvider(window.ethereum);
       provider.getSigner().then(function(s){ signer=s; }).catch(function(){});
+      renderPrimary();
     });
   }
 
-  function ensureArc(){
-    if (chainId === ARC_CHAIN_ID) return Promise.resolve();
-    toast('Switching to Arc Mainnet…', 'info');
-    return window.ethereum.request({ method:'wallet_switchEthereumChain', params:[{ chainId: ARC_CHAIN_HEX }] })
+  // ── ensureChain: switch wallet to link.chainId (not always Arc) ──
+  function ensureChain(){
+    var destChainId = Number(link.chainId) || ARC_CHAIN_ID;
+    if (chainId === destChainId) return Promise.resolve();
+    if (!chainCfg) return Promise.reject(new Error('Unsupported destination chain: ' + destChainId));
+
+    var name    = chainCfg.name;
+    var hex     = chainCfg.chainHex;
+    var rpc     = chainCfg.rpc;
+    var exp     = chainCfg.explorer;
+    var native  = chainCfg.nativeName || 'ETH';
+    var natDec  = (destChainId === ARC_CHAIN_ID) ? 18 : 18;
+
+    toast('Switching to ' + name + '…', 'info');
+    return window.ethereum.request({ method:'wallet_switchEthereumChain', params:[{ chainId: hex }] })
       .catch(function(err){
+        // Chain not in wallet — add it
         if (err && (err.code === 4902 || (err.data && err.data.originalError && err.data.originalError.code === 4902))) {
           return window.ethereum.request({ method:'wallet_addEthereumChain', params:[{
-            chainId: ARC_CHAIN_HEX,
-            chainName: 'Arc Mainnet',
-            nativeCurrency: { name:'USDC', symbol:'USDC', decimals:18 },
-            rpcUrls: [ARC_RPC_URL],
-            blockExplorerUrls: [ARC_EXPLORER]
+            chainId:              hex,
+            chainName:            name,
+            nativeCurrency:       { name: native, symbol: native, decimals: natDec },
+            rpcUrls:              [rpc],
+            blockExplorerUrls:    [exp]
           }]});
         }
         throw err;
@@ -528,7 +563,7 @@
         provider = new ethers.BrowserProvider(window.ethereum);
         return provider.getSigner();
       })
-      .then(function(s){ signer = s; chainId = ARC_CHAIN_ID; });
+      .then(function(s){ signer = s; chainId = destChainId; });
   }
 
   // ── Primary action ──
@@ -546,39 +581,51 @@
 
   function payNow(){
     var recipient = link.recipient || '';
-    var amount    = parseFloat(link.amount) || 0;
+    var amount    = parseFloat(link.amount)    || 0;
     var fee       = parseFloat(link.feeAmount) || 0;
     var tk        = link.token || 'USDC';
+    var dec       = Number(link.tokenDecimals) || 6;
+    // Resolve USDC address for the destination chain
+    var usdcAddr  = (chainCfg && chainCfg.usdc) || '0x3600000000000000000000000000000000000000';
 
     if (!isAddr(recipient)) { toast('Invalid recipient on this payment request', 'error'); return; }
     if (!(amount > 0))      { toast('Invalid amount on this payment request', 'error'); return; }
+    if (!isAddr(usdcAddr))  { toast('Unsupported token on this chain', 'error'); return; }
 
     paying = true;
     hideNotice();
     setBtn('<i class="ti ti-loader-2 spin"></i> Preparing payment…', { disabled:true });
 
-    var usdcRead, usdcWrite, memoWrite, tx, feeTxHash = null;
+    var usdcRead, tx, feeTxHash = null;
 
     Promise.resolve()
-      .then(function(){ return ensureArc(); })
+      .then(function(){ return ensureChain(); })
       .then(function(){
-        // Balance check
-        usdcRead = new ethers.Contract(USDC_ADDRESS, USDC_ABI, provider);
+        // Balance check using the correct USDC address for this chain
+        usdcRead = new ethers.Contract(usdcAddr, USDC_ABI, provider);
         return usdcRead.balanceOf(account);
       })
       .then(function(bal){
-        var need = toUsdc((amount + fee).toFixed(6));
+        var need = toUsdc((amount + fee).toFixed(dec), dec);
         if (bal < need) {
-          var have = ethers.formatUnits(bal, USDC_DECIMALS);
-          throw new Error('Insufficient USDC. You have ' + parseFloat(have).toFixed(2) + ', need ' + (amount + fee).toFixed(2));
+          var have = ethers.formatUnits(bal, dec);
+          throw new Error('Insufficient ' + tk + '. You have ' + parseFloat(have).toFixed(2) + ', need ' + (amount + fee).toFixed(2));
         }
-        // Send main transfer (memo-wrapped on Arc)
         setBtn('<i class="ti ti-loader-2 spin"></i> Confirm in wallet…', { disabled:true });
-        var iface = new ethers.Interface(['function transfer(address to, uint256 amount) returns (bool)']);
-        var data = iface.encodeFunctionData('transfer', [recipient, toUsdc(amount.toFixed(6))]);
-        var memoStr = 'ELLIGENTT|PAYMENT|' + (link.id || 'PAY') + '|' + tk + '|' + amount;
-        memoWrite = new ethers.Contract(MEMO_CONTRACT, MEMO_ABI, signer);
-        return memoWrite.memo(USDC_ADDRESS, data, ethers.id(String(link.id || 'payment')), ethers.toUtf8Bytes(memoStr));
+
+        var destChainId = Number(link.chainId) || ARC_CHAIN_ID;
+        if (destChainId === ARC_CHAIN_ID) {
+          // Arc: use memo-wrapped transfer (on-chain record)
+          var iface = new ethers.Interface(['function transfer(address to, uint256 amount) returns (bool)']);
+          var data  = iface.encodeFunctionData('transfer', [recipient, toUsdc(amount.toFixed(dec), dec)]);
+          var memoStr = 'ELLIGENTT|PAYMENT|' + (link.id || 'PAY') + '|' + tk + '|' + amount;
+          var memoWrite = new ethers.Contract(MEMO_CONTRACT, MEMO_ABI, signer);
+          return memoWrite.memo(usdcAddr, data, ethers.id(String(link.id || 'payment')), ethers.toUtf8Bytes(memoStr));
+        } else {
+          // Non-Arc chains: direct ERC-20 transfer (memo contract not deployed here)
+          var usdcWrite = new ethers.Contract(usdcAddr, USDC_ABI, signer);
+          return usdcWrite.transfer(recipient, toUsdc(amount.toFixed(dec), dec));
+        }
       })
       .then(function(t){
         tx = t;
@@ -591,14 +638,18 @@
       })
       .then(function(confirmed){
         if (!confirmed) throw Object.assign(new Error('pending'), { _pending:true });
-        // Fee transfer (separate, memo-wrapped)
-        if (fee > 0 && isAddr(TREASURY_VAULT)) {
-          var iface2 = new ethers.Interface(['function transfer(address to, uint256 amount) returns (bool)']);
-          var feeData = iface2.encodeFunctionData('transfer', [TREASURY_VAULT, toUsdc(fee.toFixed(6))]);
-          var feeMemo = 'ELLIGENTT|FEE|' + (link.id || 'PAY') + '|' + tk + '|' + fee;
-          var memoFee = new ethers.Contract(MEMO_CONTRACT, MEMO_ABI, signer);
+
+        // Fee transfer — only on Arc (memo contract + treasury vault)
+        var destChainId = Number(link.chainId) || ARC_CHAIN_ID;
+        if (fee > 0 && isAddr(TREASURY_VAULT) && destChainId === ARC_CHAIN_ID) {
+          var usdcAddr2 = (chainCfg && chainCfg.usdc) || '0x3600000000000000000000000000000000000000';
+          var dec2      = Number(link.tokenDecimals) || 6;
+          var iface2    = new ethers.Interface(['function transfer(address to, uint256 amount) returns (bool)']);
+          var feeData   = iface2.encodeFunctionData('transfer', [TREASURY_VAULT, toUsdc(fee.toFixed(dec2), dec2)]);
+          var feeMemo   = 'ELLIGENTT|FEE|' + (link.id || 'PAY') + '|' + tk + '|' + fee;
+          var memoFee   = new ethers.Contract(MEMO_CONTRACT, MEMO_ABI, signer);
           setBtn('<i class="ti ti-loader-2 spin"></i> Settling network fee…', { disabled:true });
-          return memoFee.memo(USDC_ADDRESS, feeData, ethers.id('fee-' + String(link.id || 'payment')), ethers.toUtf8Bytes(feeMemo))
+          return memoFee.memo(usdcAddr2, feeData, ethers.id('fee-' + String(link.id || 'payment')), ethers.toUtf8Bytes(feeMemo))
             .then(function(ft){ feeTxHash = ft.hash; return ft.wait().catch(function(){}); });
         }
         return null;
@@ -650,9 +701,9 @@
   }
 
   // expose for inline handlers
-  window.onPrimary = onPrimary;
-  window.copyLink = copyLink;
-  window.downloadQR = downloadQR;
+  window.onPrimary   = onPrimary;
+  window.copyLink    = copyLink;
+  window.downloadQR  = downloadQR;
 
   // ── Boot ──
   token = getToken();
