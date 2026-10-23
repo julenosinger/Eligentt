@@ -36200,31 +36200,39 @@ async function saExecuteSend() {
   } catch (_g) {}
 
   // Confirmation modal (app-native, not browser confirm)
+  var _saLight = document.documentElement.getAttribute('data-theme') === 'light';
+  var _saCardBg   = _saLight ? 'var(--surface)'  : 'linear-gradient(160deg,#0f1420 0%,#0a0e18 100%)';
+  var _saDivider  = _saLight ? 'var(--border2)'  : 'rgba(255,255,255,.06)';
+  var _saRowDiv   = _saLight ? 'var(--border2)'  : 'rgba(255,255,255,.04)';
+  var _saCloseBg  = _saLight ? 'var(--card2)'    : 'rgba(255,255,255,.05)';
+  var _saCloseBdr = _saLight ? 'var(--border2)'  : 'rgba(255,255,255,.08)';
+  var _saCancelBg = _saLight ? 'var(--card2)'    : 'rgba(255,255,255,.04)';
+  var _saCancelBdr= _saLight ? 'var(--border2)'  : 'rgba(255,255,255,.09)';
   var confirmed = false;
   var confHtml = '<div id="sa-confirm-overlay" onclick="if(event.target===this){document.getElementById(\'sa-confirm-overlay\').remove();window._saResolve&&window._saResolve(false);}" style="position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.72);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:center;padding:16px">'
-    + '<div onclick="event.stopPropagation()" style="width:420px;max-width:100%;background:linear-gradient(160deg,#0f1420 0%,#0a0e18 100%);border:1px solid rgba(79,142,247,.22);border-radius:18px;overflow:hidden;box-shadow:0 24px 64px rgba(0,0,0,.6),0 0 0 1px rgba(255,255,255,.04)">'
+    + '<div onclick="event.stopPropagation()" style="width:420px;max-width:100%;background:' + _saCardBg + ';border:1px solid rgba(79,142,247,.22);border-radius:18px;overflow:hidden;box-shadow:0 24px 64px rgba(0,0,0,.35),0 0 0 1px rgba(0,0,0,.04)">'
     // header
-    + '<div style="display:flex;align-items:center;gap:12px;padding:20px 20px 16px;border-bottom:1px solid rgba(255,255,255,.06)">'
+    + '<div style="display:flex;align-items:center;gap:12px;padding:20px 20px 16px;border-bottom:1px solid ' + _saDivider + '">'
     +   '<div style="width:38px;height:38px;border-radius:11px;background:rgba(79,142,247,.12);border:1px solid rgba(79,142,247,.25);display:flex;align-items:center;justify-content:center;flex-shrink:0"><i class="ti ti-send" style="font-size:17px;color:#4f8ef7"></i></div>'
     +   '<div><div style="font-size:13px;font-weight:700;color:var(--text)">Confirm Send</div><div style="font-size:9.5px;color:var(--muted2);margin-top:1px">Review transaction details</div></div>'
-    +   '<button onclick="document.getElementById(\'sa-confirm-overlay\').remove();window._saResolve&&window._saResolve(false);" style="margin-left:auto;width:28px;height:28px;border-radius:7px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);color:var(--muted2);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:13px;font-family:inherit"><i class="ti ti-x"></i></button>'
+    +   '<button onclick="document.getElementById(\'sa-confirm-overlay\').remove();window._saResolve&&window._saResolve(false);" style="margin-left:auto;width:28px;height:28px;border-radius:7px;background:' + _saCloseBg + ';border:1px solid ' + _saCloseBdr + ';color:var(--muted2);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:13px;font-family:inherit"><i class="ti ti-x"></i></button>'
     + '</div>'
     // amount hero
-    + '<div style="text-align:center;padding:22px 20px 16px;border-bottom:1px solid rgba(255,255,255,.06)">'
+    + '<div style="text-align:center;padding:22px 20px 16px;border-bottom:1px solid ' + _saDivider + '">'
     +   '<div style="font-size:32px;font-weight:800;color:var(--text);letter-spacing:-.5px;font-family:\'JetBrains Mono\',monospace">' + amount.toFixed(4) + '</div>'
     +   '<div style="font-size:13px;color:var(--muted2);margin-top:3px;font-weight:600">' + saCurrentAsset + '</div>'
     + '</div>'
     // rows
     + '<div style="padding:16px 20px;display:flex;flex-direction:column;gap:0">'
-    +   '<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid rgba(255,255,255,.04)">'
+    +   '<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid ' + _saRowDiv + '">'
     +     '<span style="font-size:10px;color:var(--muted2)">Recipient</span>'
     +     '<span style="font-family:\'JetBrains Mono\',monospace;font-size:9.5px;color:#4f8ef7;background:rgba(79,142,247,.08);border:1px solid rgba(79,142,247,.15);border-radius:5px;padding:3px 8px">' + shortAddr(recipient) + '</span>'
     +   '</div>'
-    +   '<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid rgba(255,255,255,.04)">'
+    +   '<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid ' + _saRowDiv + '">'
     +     '<span style="font-size:10px;color:var(--muted2)">Fee (' + (saFeeBps/100).toFixed(1) + '%)</span>'
     +     '<span style="font-size:10.5px;font-weight:600;color:var(--yellow)">' + feeAmt.toFixed(4) + ' ' + saCurrentAsset + '</span>'
     +   '</div>'
-    +   '<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid rgba(255,255,255,.04)">'
+    +   '<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid ' + _saRowDiv + '">'
     +     '<span style="font-size:10px;color:var(--muted2)">Est. Gas</span>'
     +     '<span style="font-size:10.5px;font-weight:600;color:var(--teal)">' + gasEst + '</span>'
     +   '</div>'
@@ -36235,7 +36243,7 @@ async function saExecuteSend() {
     + '</div>'
     // buttons
     + '<div style="display:flex;gap:10px;padding:0 20px 20px">'
-    +   '<button onclick="document.getElementById(\'sa-confirm-overlay\').remove();window._saResolve&&window._saResolve(false);" style="flex:1;padding:11px;border-radius:10px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.09);color:var(--muted2);font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;transition:background .15s">Cancel</button>'
+    +   '<button onclick="document.getElementById(\'sa-confirm-overlay\').remove();window._saResolve&&window._saResolve(false);" style="flex:1;padding:11px;border-radius:10px;background:' + _saCancelBg + ';border:1px solid ' + _saCancelBdr + ';color:var(--muted2);font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;transition:background .15s">Cancel</button>'
     +   '<button onclick="document.getElementById(\'sa-confirm-overlay\').remove();window._saResolve&&window._saResolve(true);" style="flex:2;padding:11px;border-radius:10px;background:linear-gradient(135deg,#4f8ef7,#7c6af7);border:none;color:#fff;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:6px;box-shadow:0 4px 16px rgba(79,142,247,.35)"><i class="ti ti-check" style="font-size:13px"></i>Confirm Send</button>'
     + '</div>'
     + '</div></div>';
