@@ -16629,6 +16629,10 @@ function setupProviderEvents(raw) {
     raw.on('accountsChanged', async accs => {
       if(!accs || accs.length === 0) { disconnectWallet(); return; }
       await refreshProviderState();
+      // Invalidate BalanceService cache for the PREVIOUS wallet before updating
+      // walletAddress — prevents old-account balances showing in the Swap widget.
+      try { if (typeof BalanceService !== 'undefined' && BalanceService.invalidate) BalanceService.invalidate(); } catch(_) {}
+      try { if (typeof _swpClearBalCache === 'function') _swpClearBalCache(); } catch(_) {}
       const short = shortAddr(walletAddress);
       const set = (id, val) => { const el=document.getElementById(id); if(el) el.textContent=val; };
       set('chip-lbl',     short);
@@ -32619,7 +32623,12 @@ function swpSyncToActiveChain() {
   var swpBtn = document.getElementById('swp-exec-btn');
   if (swpBtn) swpSetBtn('disabled', _tOut5._noToken ? 'Select output token' : 'Enter an amount');
 
-  // 6. Re-render tokens, badges and balances
+  // 6. Re-render tokens, badges and balances.
+  // Invalidate both cache layers so the display never shows a balance from
+  // the previous chain: BalanceService (RPC-level, 10s TTL) and the UI-layer
+  // last-known-good cache (_swpBalCache, displayed during stale-while-revalidate).
+  try { if (typeof BalanceService !== 'undefined' && BalanceService.invalidate) BalanceService.invalidate(walletAddress); } catch(_) {}
+  try { if (typeof _swpClearBalCache === 'function') _swpClearBalCache(); } catch(_) {}
   applySwapTokens();
   swpSyncStdHeader();
   try { if (typeof updateSwapBalancesDisplay === 'function') updateSwapBalancesDisplay(); } catch(_) {}

@@ -28,7 +28,7 @@ function fnBlock(text, name, size = 3000) {
 
 // ── N1: function exists and is properly structured ───────────────────────────
 describe('swpSyncToActiveChain — existence and structure', () => {
-  const syncFn = fnBlock(html, 'swpSyncToActiveChain', 3000);
+  const syncFn = fnBlock(html, 'swpSyncToActiveChain', 5000);
 
   it('N1.1: function is defined', () => {
     expect(syncFn).not.toBe('');
@@ -52,7 +52,7 @@ describe('swpSyncToActiveChain — existence and structure', () => {
 
 // ── N2: chain IDs reset ───────────────────────────────────────────────────────
 describe('swpSyncToActiveChain — chain ID reset', () => {
-  const syncFn = fnBlock(html, 'swpSyncToActiveChain', 3000);
+  const syncFn = fnBlock(html, 'swpSyncToActiveChain', 5000);
 
   it('N2.1: sets SWP.fromChainId to active chain', () => {
     expect(syncFn).toContain('SWP.fromChainId = cid');
@@ -65,7 +65,7 @@ describe('swpSyncToActiveChain — chain ID reset', () => {
 
 // ── N3: token objects cleared ─────────────────────────────────────────────────
 describe('swpSyncToActiveChain — token objects cleared', () => {
-  const syncFn = fnBlock(html, 'swpSyncToActiveChain', 3000);
+  const syncFn = fnBlock(html, 'swpSyncToActiveChain', 5000);
 
   it('N3.1: clears SWP.tokenInObj', () => {
     expect(syncFn).toContain('SWP.tokenInObj  = null');
@@ -78,7 +78,7 @@ describe('swpSyncToActiveChain — token objects cleared', () => {
 
 // ── N4: quote state invalidation ─────────────────────────────────────────────
 describe('swpSyncToActiveChain — quote state invalidation', () => {
-  const syncFn = fnBlock(html, 'swpSyncToActiveChain', 3000);
+  const syncFn = fnBlock(html, 'swpSyncToActiveChain', 5000);
 
   it('N4.1: clears SWP.lastQuote', () => {
     expect(syncFn).toContain('SWP.lastQuote');
@@ -101,7 +101,7 @@ describe('swpSyncToActiveChain — quote state invalidation', () => {
 
 // ── N5: default pair selection ────────────────────────────────────────────────
 describe('swpSyncToActiveChain — default token pair selection', () => {
-  const syncFn = fnBlock(html, 'swpSyncToActiveChain', 3000);
+  const syncFn = fnBlock(html, 'swpSyncToActiveChain', 5000);
 
   it('N5.1: calls swapAvailableTokens with the new chain', () => {
     expect(syncFn).toContain('swapAvailableTokens(cid)');
@@ -134,7 +134,7 @@ describe('swpSyncToActiveChain — default token pair selection', () => {
 
 // ── N6: UI update calls ───────────────────────────────────────────────────────
 describe('swpSyncToActiveChain — UI update calls', () => {
-  const syncFn = fnBlock(html, 'swpSyncToActiveChain', 3000);
+  const syncFn = fnBlock(html, 'swpSyncToActiveChain', 5000);
 
   it('N6.1: calls applySwapTokens', () => {
     expect(syncFn).toContain('applySwapTokens()');
@@ -192,7 +192,7 @@ describe('swpSyncToActiveChain — no duplicate registrations', () => {
 // ── N9: stale async guard — _swapQuoteSeq ─────────────────────────────────────
 describe('swpSyncToActiveChain — stale async response prevention', () => {
   it('N9.1: increments _swapQuoteSeq on sync to invalidate in-flight LI.FI callbacks', () => {
-    const syncFn = fnBlock(html, 'swpSyncToActiveChain', 3000);
+    const syncFn = fnBlock(html, 'swpSyncToActiveChain', 5000);
     expect(syncFn).toContain('_swapQuoteSeq++');
   });
 
@@ -247,6 +247,37 @@ describe('P3 — switchNetwork integrates swpSyncToActiveChain', () => {
   });
 });
 
+// ── N16: balance cache invalidation on chain switch ──────────────────────────
+describe('Balance cache invalidation on chain switch', () => {
+  const syncFn = fnBlock(html, 'swpSyncToActiveChain', 5000);
+
+  it('N16.1: swpSyncToActiveChain calls BalanceService.invalidate', () => {
+    expect(syncFn).toContain('BalanceService.invalidate');
+  });
+
+  it('N16.2: swpSyncToActiveChain calls _swpClearBalCache before updateSwapBalancesDisplay', () => {
+    const clearIdx = syncFn.indexOf('_swpClearBalCache');
+    const updateIdx = syncFn.indexOf('updateSwapBalancesDisplay');
+    expect(clearIdx).toBeGreaterThan(-1);
+    expect(updateIdx).toBeGreaterThan(-1);
+    expect(clearIdx).toBeLessThan(updateIdx);
+  });
+
+  it('N16.3: accountsChanged handler calls BalanceService.invalidate on wallet switch', () => {
+    const acBlock = blockAt(html, "raw.on('accountsChanged'", 1500);
+    expect(acBlock).toContain('BalanceService.invalidate');
+  });
+
+  it('N16.4: accountsChanged handler calls _swpClearBalCache before refreshBalance', () => {
+    const acBlock = blockAt(html, "raw.on('accountsChanged'", 1500);
+    const clearIdx = acBlock.indexOf('_swpClearBalCache');
+    const refreshIdx = acBlock.indexOf('refreshBalance');
+    expect(clearIdx).toBeGreaterThan(-1);
+    expect(refreshIdx).toBeGreaterThan(-1);
+    expect(clearIdx).toBeLessThan(refreshIdx);
+  });
+});
+
 // ── N13: P1 — _swpTokOut sentinel when tokenOutIdx === -1 ────────────────────
 describe('P1 — _swpTokOut sentinel for missing token', () => {
   it('N13.1: _swpTokOut handles negative tokenOutIdx without falling back to TOKEN_LIST[1]', () => {
@@ -261,7 +292,7 @@ describe('P1 — _swpTokOut sentinel for missing token', () => {
   });
 
   it('N13.3: swpSyncToActiveChain shows "Select output token" when no valid out-token', () => {
-    const syncFn = fnBlock(html, 'swpSyncToActiveChain', 3500);
+    const syncFn = fnBlock(html, 'swpSyncToActiveChain', 5000);
     expect(syncFn).toContain('Select output token');
     expect(syncFn).toContain('_noToken');
   });
