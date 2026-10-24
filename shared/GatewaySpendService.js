@@ -702,15 +702,15 @@
             { fatal:true, salt, recoverable:false }
           );
         }
-        if (kvRecord.status === 'accepted' || kvRecord.status === 'submitting') {
+        if (kvRecord.status === 'accepted' ||
+            kvRecord.status === 'submitting' ||
+            kvRecord.status === 'ambiguous') {
           throw Object.assign(
             new Error('gateway_submit_ambiguous: salt exists in KV with status ' + kvRecord.status),
             { fatal:false, salt, recoverable:true, kvStatus: kvRecord.status }
           );
         }
-        // "rejected" status — safe to retry with a NEW salt (do not reuse)
-        // Fall through to submit. The proxy will write a new KV entry (different salt).
-        // But: this salt was already rejected — need a new salt. Throw and let caller retry.
+        // "rejected" status — Circle definitively refused. Safe to retry with NEW salt.
         throw Object.assign(
           new Error('salt_was_rejected: previous submission rejected — generate new intent'),
           { fatal:false, salt, recoverable:false }

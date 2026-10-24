@@ -1071,7 +1071,11 @@ describe('GSS12 — P0/P1.4: KV persistence, cross-session recovery, isolation',
     );
     // tryUpdate (call-site, not definition) must be called after the forward
     const forwardPos = src.indexOf("GATEWAY_API + '/v1/transfer'");
-    const callSitePos = src.indexOf("tryUpdate(salt, { status: newStatus");
+    // tryUpdate call-site (not definition) — may use salt or item.burnIntent.spec.salt
+    const callSitePos = Math.max(
+      src.indexOf("tryUpdate(salt, { status: newStatus"),
+      src.indexOf("tryUpdate(item.burnIntent.spec.salt,")
+    );
     expect(forwardPos).toBeGreaterThan(-1);
     expect(callSitePos).toBeGreaterThan(-1);
     expect(callSitePos).toBeGreaterThan(forwardPos);
@@ -1091,17 +1095,19 @@ describe('GSS12 — P0/P1.4: KV persistence, cross-session recovery, isolation',
     expect(hasIsolation).toBe(true);
   });
 
-  // ── GSS12.11: PATCH — only 'failed' from client, 'confirmed' is internal ─
-  it('GSS12.11 — transfer.js PATCH only accepts status=failed from client', () => {
+  // ── GSS12.11: PATCH — only client-allowed transitions (ambiguous→failed) ──
+  it('GSS12.11 — transfer.js PATCH only accepts client-allowed transitions', () => {
     const src = require('fs').readFileSync(
       require('path').join(__dirname, '../functions/api/gateway/transfer.js'), 'utf8'
     );
     expect(src).toContain('onRequestPatch');
-    expect(src).toContain('invalid_status_for_client');
+    // Client-allowed transitions must be defined
+    expect(src).toContain('CLIENT_ALLOWED_TRANSITIONS');
+    expect(src).toContain('client_transition_not_allowed');
     // 'confirmed' must NOT be settable by client
-    const confirmedBlockedForClient = src.includes("patch.status !== 'failed'") &&
-                                      src.includes("'confirmed' is set internally");
-    expect(confirmedBlockedForClient).toBe(true);
+    expect(src).toContain("internal-only transitions");
+    // CLIENT_ALLOWED_TRANSITIONS defines what client may set
+    expect(src).toContain('CLIENT_ALLOWED_TRANSITIONS');
   });
 
   // ── GSS12.12: GatewaySpendService.queryGatewaySalt is exported ───────────
@@ -1230,12 +1236,18 @@ describe('GSS13 — P0/P1.5: atomicity, authorisation, state machine, fail-safe'
 
   // ── GSS13.5: 'confirmed' cannot be set by client PATCH ───────────────────
   it('GSS13.5 — proxy PATCH rejects status=confirmed from client', () => {
-    expect(proxySrc).toContain('invalid_status_for_client');
-    // 'confirmed' is set internally only
-    const confirmedInternalOnly = proxySrc.includes("'confirmed' is set internally");
-    expect(confirmedInternalOnly).toBe(true);
-    // Only 'failed' accepted from client
-    expect(proxySrc).toContain("patch.status !== 'failed'");
+    // Client-allowed transitions must be defined and exclude 'confirmed'
+    expect(proxySrc).toContain('CLIENT_ALLOWED_TRANSITIONS');
+    expect(proxySrc).toContain('client_transition_not_allowed');
+    // 'confirmed' is internal-only (per the comment and code)
+    expect(proxySrc).toContain("internal-only transitions");
+    // isClientAllowed check exists
+    expect(proxySrc).toContain('isClientAllowed(');
+    // 'confirmed' must NOT appear in CLIENT_ALLOWED_TRANSITIONS values
+    const caStart     = proxySrc.indexOf('CLIENT_ALLOWED_TRANSITIONS');
+    const caEnd       = proxySrc.indexOf('};', caStart) + 2;
+    const clientBlock = proxySrc.slice(caStart, caEnd);
+    expect(clientBlock).not.toContain("'confirmed'");
   });
 
   // ── GSS13.6: proxy PATCH requires depositor for isolation ────────────────
@@ -1270,16 +1282,23 @@ describe('GSS13 — P0/P1.5: atomicity, authorisation, state machine, fail-safe'
     expect(proxySrc).not.toContain('.delete(');
   });
 
-  // ── GSS13.10: timeout leaves salt at "submitting" (reconciliation path) ───
-  it('GSS13.10 — timeout response (504) does not update persistence status', () => {
-    // After abort, the code returns immediately — no tryUpdate call follows
-    const abortHandlerIdx  = proxySrc.indexOf("AbortError");
-    const tryUpdateAfter   = proxySrc.indexOf('tryUpdate(', abortHandlerIdx);
-    // tryUpdate must NOT be called in the abort/timeout path
-    // (it runs only after upRes is received)
-    const returnAfterAbort = proxySrc.indexOf('return jsonResp', abortHandlerIdx);
-    expect(returnAfterAbort).toBeGreaterThan(-1);
-    expect(returnAfterAbort).toBeLessThan(tryUpdateAfter === -1 ? Infinity : tryUpdateAfter);
+  // ── GSS13.10: timeout marks salt as "ambiguous" (reconciliation path) ─────
+  it('GSS13.10 — timeout (504) marks salt as ambiguous — not deleted, not failed', () => {
+    // After AbortError: tryUpdate('ambiguous') called, then 504 returned
+    const abortHandlerIdx = proxySrc.indexOf("AbortError");
+    expect(abortHandlerIdx).toBeGreaterThan(-1);
+
+    // Must call tryUpdate with 'ambiguous' after AbortError
+    const ambiguousUpdateIdx = proxySrc.indexOf("{ status: 'ambiguous' }", abortHandlerIdx);
+    expect(ambiguousUpdateIdx).toBeGreaterThan(abortHandlerIdx);
+
+    // Must return 504 (gateway_timeout)
+    const timeoutReturnIdx = proxySrc.indexOf('gateway_timeout', abortHandlerIdx);
+    expect(timeoutReturnIdx).toBeGreaterThan(abortHandlerIdx);
+
+    // KV entry must NOT be deleted on timeout
+    expect(proxySrc).not.toContain('kv.delete');
+    expect(proxySrc).not.toContain('.delete(');
   });
 
   // ── GSS13.11: DO /update validates transition from correct current state ──
@@ -1309,7 +1328,10 @@ describe('GSS13 — P0/P1.5: atomicity, authorisation, state machine, fail-safe'
   // ── GSS13.13: DO DELETE /release blocked unless terminal ─────────────────
   it('GSS13.13 — DO /release is blocked unless status is terminal', () => {
     expect(doSrc).toContain('not_terminal');
-    expect(doSrc).toContain("TERMINAL.includes(record.status)");
+    // Terminal check — either Set.has() or Array.includes()
+    const hasTerminalCheck = doSrc.includes('TERMINAL_STATES.has(record.status)') ||
+                             doSrc.includes('TERMINAL.includes(record.status)');
+    expect(hasTerminalCheck).toBe(true);
   });
 
   // ── GSS13.14: service execute() blocks concurrent same-lockKey calls ──────
@@ -1336,17 +1358,245 @@ describe('GSS13 — P0/P1.5: atomicity, authorisation, state machine, fail-safe'
 
   // ── GSS13.15: DO file does not store private keys or credentials ─────────
   it('GSS13.15 — DO only stores operational metadata in storage.put()', () => {
-    // The record persisted by the DO must contain only operational fields:
-    // salt, depositor, status, submittedAt, updatedAt, srcDomain, dstDomain, txHash, httpStatus
-    // Verify that no sensitive field name appears as a key in the stored record
     const recordBlock = doSrc.slice(doSrc.indexOf('const record = {'), doSrc.indexOf('await this.storage.put'));
     expect(recordBlock).not.toContain('privateKey');
     expect(recordBlock).not.toContain('secretKey');
     expect(recordBlock).not.toContain('seedPhrase');
     expect(recordBlock).not.toContain('rawSignature');
-    // Only metadata fields allowed
     expect(recordBlock).toContain('salt');
     expect(recordBlock).toContain('depositor');
     expect(recordBlock).toContain('status');
+  });
+});
+
+// ── GSS14: P0/P1.6 — full state machine, batch rollback, prod DO requirement ─
+describe('GSS14 — P0/P1.6: state machine, batch rollback, DO prod, rejected vs ambiguous', () => {
+  const fs       = require('fs');
+  const path     = require('path');
+  const proxySrc = fs.readFileSync(
+    path.join(__dirname, '../functions/api/gateway/transfer.js'), 'utf8'
+  );
+  const doSrc = fs.readFileSync(
+    path.join(__dirname, '../functions/api/gateway/gateway-op-lock.do.js'), 'utf8'
+  );
+
+  // ── GSS14.1: proxy state machine includes 'rejected' and 'ambiguous' ──────
+  it('GSS14.1 — VALID_TRANSITIONS includes rejected and ambiguous states', () => {
+    // proxy VALID_TRANSITIONS must define rejected and ambiguous
+    expect(proxySrc).toContain("rejected:");
+    expect(proxySrc).toContain("ambiguous:");
+    // 'rejected' is terminal (Circle definitively refused)
+    const proxyTransitions = proxySrc.slice(
+      proxySrc.indexOf('const VALID_TRANSITIONS'),
+      proxySrc.indexOf('const VALID_TRANSITIONS') + 500
+    );
+    expect(proxyTransitions).toContain("rejected:");
+    expect(proxyTransitions).toContain("ambiguous:");
+  });
+
+  // ── GSS14.2: DO state machine includes 'rejected' and 'ambiguous' ─────────
+  it('GSS14.2 — DO VALID_TRANSITIONS also defines rejected and ambiguous', () => {
+    const doTransitions = doSrc.slice(
+      doSrc.indexOf('const VALID_TRANSITIONS'),
+      doSrc.indexOf('const VALID_TRANSITIONS') + 600
+    );
+    expect(doTransitions).toContain("rejected:");
+    expect(doTransitions).toContain("ambiguous:");
+    // confirmed terminal in both
+    expect(doTransitions).toContain("confirmed:");
+    expect(doTransitions).toContain("failed:");
+  });
+
+  // ── GSS14.3: 'rejected' is terminal in both proxy and DO ─────────────────
+  it('GSS14.3 — rejected is a terminal state in proxy and DO', () => {
+    // proxy
+    const proxyTerminalBlock = proxySrc.slice(
+      proxySrc.indexOf('TERMINAL_STATES'),
+      proxySrc.indexOf('TERMINAL_STATES') + 200
+    );
+    expect(proxyTerminalBlock).toContain("'rejected'");
+    // DO — terminal Set or array
+    const doTerminalBlock = doSrc.slice(
+      doSrc.indexOf('TERMINAL_STATES'),
+      doSrc.indexOf('TERMINAL_STATES') + 200
+    );
+    expect(doTerminalBlock).toContain("'rejected'");
+  });
+
+  // ── GSS14.4: timeout sets salt to 'ambiguous' (not left at 'submitting') ──
+  it('GSS14.4 — timeout path updates status to ambiguous before returning 504', () => {
+    const abortIdx = proxySrc.indexOf('AbortError');
+    const ambiguousIdx = proxySrc.indexOf("'ambiguous'", abortIdx);
+    const returnIdx    = proxySrc.indexOf('return jsonResp', abortIdx);
+    expect(abortIdx).toBeGreaterThan(-1);
+    expect(ambiguousIdx).toBeGreaterThan(abortIdx);
+    // ambiguous update before the return
+    expect(ambiguousIdx).toBeLessThan(returnIdx);
+  });
+
+  // ── GSS14.5: Circle 4xx sets salt to 'rejected' (not 'failed') ────────────
+  it('GSS14.5 — Circle 4xx/5xx sets status to rejected (not failed or left as accepted)', () => {
+    // newStatus = upRes.ok ? 'accepted' : 'rejected'
+    expect(proxySrc).toContain("upRes.ok ? 'accepted' : 'rejected'");
+    // 'rejected' is used (not 'failed') for Circle refusal
+    const rejectStatusIdx = proxySrc.indexOf("'rejected'");
+    expect(rejectStatusIdx).toBeGreaterThan(-1);
+    // Must NOT set 'failed' on Circle HTTP response
+    const failedOnCircleResp = proxySrc.includes("upRes.ok ? 'accepted' : 'failed'");
+    expect(failedOnCircleResp).toBe(false);
+  });
+
+  // ── GSS14.6: batch rollback — reserved salts rolled back on partial failure ─
+  it('GSS14.6 — partial batch failure rolls back already-reserved salts', () => {
+    // tryRollback must be called in the partial failure path
+    expect(proxySrc).toContain('tryRollback(');
+    // rollback is called in the reserve loop
+    const reserveLoopIdx   = proxySrc.indexOf('for (const item of body)');
+    const rollbackCallIdx  = proxySrc.indexOf('tryRollback(', reserveLoopIdx);
+    expect(rollbackCallIdx).toBeGreaterThan(reserveLoopIdx);
+    // rollback happens before the forward
+    const forwardIdx = proxySrc.indexOf("GATEWAY_API + '/v1/transfer'");
+    expect(rollbackCallIdx).toBeLessThan(forwardIdx);
+  });
+
+  // ── GSS14.7: rollback uses 'failed' transition (preserves audit trail) ────
+  it('GSS14.7 — tryRollback uses status:failed (does not delete the record)', () => {
+    // tryRollback calls tryUpdate with status:'failed'
+    const rollbackFnIdx = proxySrc.indexOf('async function tryRollback');
+    expect(rollbackFnIdx).toBeGreaterThan(-1);
+    const rollbackBody = proxySrc.slice(rollbackFnIdx, rollbackFnIdx + 300);
+    expect(rollbackBody).toContain("'failed'");
+    // Must NOT call storage.delete() or kv.delete()
+    expect(rollbackBody).not.toContain('.delete(');
+    expect(rollbackBody).not.toContain('.delete(');
+  });
+
+  // ── GSS14.8: DO allows submitting→failed for rollback ────────────────────
+  it('GSS14.8 — DO VALID_TRANSITIONS: submitting can transition to failed (rollback)', () => {
+    const doTransitions = doSrc.slice(
+      doSrc.indexOf('const VALID_TRANSITIONS'),
+      doSrc.indexOf('const VALID_TRANSITIONS') + 400
+    );
+    // submitting must allow 'failed' (for rollback path)
+    expect(doTransitions).toContain("'failed'");
+    // The submitting entry must include 'failed'
+    const submittingLine = doTransitions.slice(
+      doTransitions.indexOf('submitting:'),
+      doTransitions.indexOf('submitting:') + 80
+    );
+    expect(submittingLine).toContain("'failed'");
+  });
+
+  // ── GSS14.9: DO blocked when production and DO missing ────────────────────
+  it('GSS14.9 — proxy returns 503 when DO absent in production environment', () => {
+    // isProduction() function must exist and check env.GATEWAY_ENV
+    expect(proxySrc).toContain('isProduction(');
+    expect(proxySrc).toContain('GATEWAY_ENV');
+    // Production without DO returns an error including 'do_required_in_production'
+    expect(proxySrc).toContain('do_required_in_production');
+  });
+
+  // ── GSS14.10: KV fallback only in non-production ──────────────────────────
+  it('GSS14.10 — KV fallback is guarded by !isProduction(env)', () => {
+    // The KV reserve path must check !prod
+    const kvFallbackIdx = proxySrc.indexOf('!prod');
+    expect(kvFallbackIdx).toBeGreaterThan(-1);
+    // The !prod guard must appear before the KV put
+    const kvPutIdx = proxySrc.indexOf("kvBinding.put(");
+    expect(kvFallbackIdx).toBeLessThan(kvPutIdx);
+  });
+
+  // ── GSS14.11: state machine in proxy and DO are consistent ───────────────
+  it('GSS14.11 — proxy and DO have the same 6 states', () => {
+    for (const state of ['submitting', 'accepted', 'rejected', 'ambiguous', 'confirmed', 'failed']) {
+      expect(proxySrc).toContain(`'${state}'`);
+      expect(doSrc).toContain(`'${state}'`);
+    }
+  });
+
+  // ── GSS14.12: ambiguous→failed is the only CLIENT_ALLOWED_TRANSITIONS entry
+  it('GSS14.12 — CLIENT_ALLOWED_TRANSITIONS only allows ambiguous→failed', () => {
+    // CLIENT_ALLOWED_TRANSITIONS block: only up to the closing };
+    const startIdx    = proxySrc.indexOf('const CLIENT_ALLOWED_TRANSITIONS');
+    const endIdx      = proxySrc.indexOf('};', startIdx) + 2;
+    const clientBlock = proxySrc.slice(startIdx, endIdx);
+    // Only 'ambiguous' key allowed
+    expect(clientBlock).toContain("ambiguous:");
+    // 'submitting', 'accepted', 'rejected' must NOT be client-modifiable
+    expect(clientBlock).not.toContain("submitting:");
+    expect(clientBlock).not.toContain("accepted:");
+    // 'confirmed' must NOT appear as a value in CLIENT_ALLOWED_TRANSITIONS
+    expect(clientBlock).not.toContain("'confirmed'");
+  });
+
+  // ── GSS14.13: service-level KV query blocks already-confirmed salts ───────
+  it('GSS14.13 — execute() blocks on already_confirmed (KV returned confirmed status)', async () => {
+    GatewaySpendService._testSetVerifier(() => ADDR_A);
+
+    global.fetch = vi.fn()
+      // balance check → sufficient
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ assets:[{ token:'USDC', balances:[{ domain:26, balance:'10.0' }] }] }),
+      })
+      // KV query → already confirmed
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ status:'confirmed', salt:'0xabc' }),
+      });
+
+    const r = await GatewaySpendService.execute(BASE_PARAMS, async () => VALID_SIG, () => {});
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain('already_confirmed');
+  });
+
+  // ── GSS14.14: service-level KV query blocks on 'accepted' (unconfirmed) ───
+  it('GSS14.14 — execute() blocks on accepted+ambiguous salt (prevents duplicate)', async () => {
+    GatewaySpendService._testSetVerifier(() => ADDR_A);
+
+    global.fetch = vi.fn()
+      // balance check
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ assets:[{ token:'USDC', balances:[{ domain:26, balance:'10.0' }] }] }),
+      })
+      // KV query → accepted (Circle already accepted, awaiting on-chain)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ status:'accepted', salt:'0xabc' }),
+      });
+
+    const r = await GatewaySpendService.execute(BASE_PARAMS, async () => VALID_SIG, () => {});
+    expect(r.ok).toBe(false);
+    // Service must block — error starts with gateway_submit_ambiguous
+    expect(r.error).toContain('gateway_submit_ambiguous');
+  });
+
+  // ── GSS14.15: DO VALID_TRANSITIONS state machine — all transitions correct ─
+  it('GSS14.15 — DO state machine transitions are exactly as specified', () => {
+    // submitting can go to: accepted, rejected, ambiguous, failed (rollback)
+    const submittingLine = doSrc.slice(
+      doSrc.indexOf('submitting:'),
+      doSrc.indexOf('submitting:') + 100
+    );
+    expect(submittingLine).toContain("'accepted'");
+    expect(submittingLine).toContain("'rejected'");
+    expect(submittingLine).toContain("'ambiguous'");
+    expect(submittingLine).toContain("'failed'");
+    // accepted can go to: confirmed, failed
+    const acceptedLine = doSrc.slice(
+      doSrc.indexOf("accepted:   ["),
+      doSrc.indexOf("accepted:   [") + 60
+    );
+    expect(acceptedLine).toContain("'confirmed'");
+    expect(acceptedLine).toContain("'failed'");
+    // ambiguous can go to: accepted, rejected, failed
+    const ambiguousLine = doSrc.slice(
+      doSrc.indexOf("ambiguous:"),
+      doSrc.indexOf("ambiguous:") + 80
+    );
+    expect(ambiguousLine).toContain("'accepted'");
+    expect(ambiguousLine).toContain("'rejected'");
+    expect(ambiguousLine).toContain("'failed'");
   });
 });
