@@ -90,13 +90,15 @@
 
   if (typeof window !== 'undefined' && window.GatewaySpendService) return;
 
-  // ── Verified mainnet contract addresses ────────────────────────────────────────
+  // ── Mainnet contract addresses (UNVERIFIED — do not treat as confirmed) ─────
   // arc-studio-allow-onchain-literal
   var GW_WALLET = '0x77777777Dcc4d5A8B6E418Fd04D8997ef11000eE'; // arc-studio-allow-onchain-literal
   var GW_MINTER = '0x2222222d7164433c4C09B0b0D809a9b52C04C205'; // arc-studio-allow-onchain-literal
   // CAUTION: these addresses are sourced from config/contracts.js and project docs.
-  // Circle's official transfer how-to only lists testnet addresses. Confirm mainnet
+  // They are NOT verified against Circle's official mainnet deployment. Circle's
+  // official transfer how-to only lists testnet addresses. Confirm mainnet
   // from https://developers.circle.com/gateway before production use.
+  // Do not treat these as "verified" — production must block until confirmed.
 
   // ── Testnet contract addresses (Circle official docs, Oct 2026) ───────────────
   // arc-studio-allow-onchain-literal
@@ -349,13 +351,14 @@
 
   /**
    * Update KV status after on-chain confirmation.
-   * Non-fatal — if it fails, the salt record stays at "accepted" which is still safe.
+   * Returns { ok:true } or { ok:false, status, error } — the caller MUST check the
+   * result. Never silently ignores a persistence failure.
    * MUST include depositor so the proxy can verify ownership before accepting the update.
    */
   async function patchGatewaySalt(salt, status, txHash, depositor) {
+    var dep = depositor || '';
     try {
-      var dep = depositor || '';
-      await fetch(
+      var res = await fetch(
         '/api/gateway/transfer?salt=' + encodeURIComponent(salt)
         + (dep ? '&depositor=' + encodeURIComponent(dep) : ''),
         {
@@ -364,7 +367,15 @@
           body:    JSON.stringify({ status, txHash: txHash || null }),
         }
       );
-    } catch(_) {}
+      var data = null;
+      try { data = await res.json(); } catch(_) { data = null; }
+      if (!res.ok) {
+        return { ok: false, status: res.status, error: (data && data.error) || 'patch_failed' };
+      }
+      return { ok: true, data };
+    } catch(e) {
+      return { ok: false, error: e && e.message ? e.message : 'network_error' };
+    }
   }
 
   /**
@@ -819,16 +830,19 @@
       }
 
       if (!receipt || receipt.status !== 1) {
-        // Update KV to "failed" — non-fatal for the throw path
-        patchGatewaySalt(salt, 'failed', mintTx.hash, params.depositor);
+        // Update KV to "failed" and check the persistence result (never silent).
+        var failedPersist = await patchGatewaySalt(salt, 'failed', mintTx.hash, params.depositor);
         throw Object.assign(
           new Error('tx_reverted'),
-          { fatal:false, txHash: mintTx.hash }
+          { fatal:false, txHash: mintTx.hash, persist: failedPersist }
         );
       }
 
-      // ── Update KV to confirmed ──────────────────────────────────────────────
-      patchGatewaySalt(salt, 'confirmed', receipt.hash || mintTx.hash, params.depositor);
+      // ── Update KV to confirmed and check the persistence result ─────────────
+      // Fase 1.8: a persistence failure here does NOT invalidate the on-chain mint,
+      // but it MUST be surfaced so the caller knows the record may still read
+      // "accepted" (safe — it blocks re-submission) instead of "confirmed".
+      var confirmPersist = await patchGatewaySalt(salt, 'confirmed', receipt.hash || mintTx.hash, params.depositor);
 
       // ── Done ────────────────────────────────────────────────────────────────
       var result = {
@@ -841,7 +855,9 @@
         dstChainId: params.dstChainId,
         recipient:  params.recipient,
         maxFee,
+        persist:    confirmPersist,
       };
+      if (!confirmPersist.ok) result.persistenceWarning = true;
       emit(STATE.DONE, result);
       return result;
 

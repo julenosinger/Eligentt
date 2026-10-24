@@ -69,6 +69,7 @@ const VALID_TRANSITIONS = {
 };
 
 const TERMINAL_STATES = new Set(['confirmed', 'failed', 'rejected']);
+const KNOWN_STATES = new Set(['submitting', 'accepted', 'rejected', 'ambiguous', 'confirmed', 'failed']);
 
 // ── Internal auth token ────────────────────────────────────────────────────────
 // The DO checks for an Authorization header on every request.
@@ -129,6 +130,14 @@ export class GatewayOpLock {
         return json({ error: 'invalid_json' }, 400);
       }
 
+      // Validate payload (fail-closed) — salt is 32-byte hex, depositor is 20-byte.
+      if (typeof body.salt !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(body.salt)) {
+        return json({ error: 'invalid_salt' }, 400);
+      }
+      if (typeof body.depositor !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(body.depositor)) {
+        return json({ error: 'invalid_depositor' }, 400);
+      }
+
       const existing = await this.storage.get('record');
       if (existing) {
         return json({ error: 'already_reserved', record: existing }, 409);
@@ -161,6 +170,10 @@ export class GatewayOpLock {
       if (!record) return json({ error: 'not_found' }, 404);
 
       const toStatus = body.status;
+      // Validate the requested status is a known state (fail-closed).
+      if (typeof toStatus !== 'string' || !KNOWN_STATES.has(toStatus)) {
+        return json({ error: 'unknown_status', detail: 'Unknown status: ' + toStatus }, 400);
+      }
       const allowed  = VALID_TRANSITIONS[record.status] || [];
 
       if (!allowed.includes(toStatus)) {
@@ -170,6 +183,12 @@ export class GatewayOpLock {
           to:      toStatus,
           allowed,
         }, 400);
+      }
+
+      // submitting → failed is ONLY allowed as a batch rollback (rollback:true).
+      // A non-rollback update must not silently mark an in-flight operation failed.
+      if (record.status === 'submitting' && toStatus === 'failed' && body.rollback !== true) {
+        return json({ error: 'rollback_required', from: record.status, to: toStatus }, 400);
       }
 
       const updated = {

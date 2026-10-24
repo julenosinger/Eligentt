@@ -420,14 +420,21 @@ export async function onRequestPost(ctx) {
   } catch(err) {
     clearTimeout(timerId);
     const isTimeout = err.name === 'AbortError';
-    // Ambiguous — salts stay in persistence at 'submitting'; update to 'ambiguous'
+    // Ambiguous — salts stay in persistence at 'submitting'; update to 'ambiguous'.
+    // If the update fails, surface it (the salt stays at 'submitting', which still
+    // blocks re-submission, but the caller must know the state is not recorded).
+    const persistFailures = [];
     for (const item of body) {
-      await tryUpdate(item.burnIntent.spec.salt, { status: 'ambiguous' }, env);
+      const up = await tryUpdate(item.burnIntent.spec.salt, { status: 'ambiguous' }, env);
+      if (!up.ok) persistFailures.push({ salt: item.burnIntent.spec.salt, error: up.error });
     }
     return jsonResp({
       error:     isTimeout ? 'gateway_timeout' : 'gateway_unreachable',
       detail:    err.message,
       ambiguous: true,
+      ...(persistFailures.length
+        ? { persistenceWarning: true, failedSalts: persistFailures }
+        : {}),
     }, isTimeout ? 504 : 502);
   }
   clearTimeout(timerId);
@@ -447,17 +454,40 @@ export async function onRequestPost(ctx) {
   // NEVER treat HTTP 5xx as a definitive rejection.
   function classifyHttpStatus(status) {
     if (status >= 200 && status < 300) return 'accepted';
-    if (status >= 400 && status < 500 && status !== 429) return 'rejected';
-    return 'ambiguous'; // 5xx, 429, or anything unexpected
+    // 408 Request Timeout: the server may have processed the intent but failed to
+    // respond in time — INDETERMINATE, never a definitive rejection.
+    if (status === 408) return 'ambiguous';
+    // 429 Rate Limit: INDETERMINATE (not a definitive rejection).
+    if (status === 429) return 'ambiguous';
+    if (status >= 400 && status < 500) return 'rejected'; // definitive client error
+    return 'ambiguous'; // 5xx or anything unexpected
   }
   const newStatus = classifyHttpStatus(upRes.status);
+  const persistFailures = [];
   for (const item of body) {
-    await tryUpdate(item.burnIntent.spec.salt,
+    const up = await tryUpdate(item.burnIntent.spec.salt,
       { status: newStatus, httpStatus: upRes.status }, env);
+    if (!up.ok) persistFailures.push({ salt: item.burnIntent.spec.salt, error: up.error });
   }
 
   let parsed;
   try { parsed = JSON.parse(upBody); } catch(_) { parsed = { raw: upBody }; }
+
+  // P0 — Circle responded but we could not persist the result. Do NOT present the
+  // operation as concluded and do NOT discard the Circle response. Return an
+  // explicit recoverable error that preserves the salt, original HTTP status, the
+  // computed state, and the Circle response body for later reconciliation.
+  if (persistFailures.length) {
+    return jsonResp({
+      error:          'persistence_failed_after_response',
+      blocked:        true,
+      recoverable:    true,
+      httpStatus:     upRes.status,
+      status:         newStatus,
+      circleResponse: parsed,
+      failedSalts:    persistFailures,
+    }, 502);
+  }
 
   return new Response(JSON.stringify(parsed), {
     status:  upRes.status,
