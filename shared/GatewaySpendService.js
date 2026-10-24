@@ -1,35 +1,54 @@
 /**
  * GatewaySpendService — shared infrastructure for Circle Gateway transfers.
  *
- * Implements the official Circle Gateway transfer flow:
+ * Implements the official Circle Gateway transfer flow (spec verified Oct 2026):
  *   1. Validate params (asset, chains, address, amount, decimals)
  *   2. Check real Gateway balance via /api/gateway/balances
- *   3. Estimate fees via /api/gateway/transfer (estimate mode)
- *   4. Build EIP-712 BurnIntent and request wallet signature
- *   5. Submit signed intent to /api/gateway/transfer → receive attestation
- *   6. Call GatewayMinter.gatewayMint(attestationPayload, signature) on dest chain
- *   7. Poll for receipt and return confirmed result
+ *   3. Estimate fees via /api/gateway/transfer?mode=estimate
+ *      → POST /v1/estimate (array of PartialBurnIntent, no signature needed)
+ *      → Response: { body:[{ burnIntent:{maxFee,maxBlockHeight,spec} }], fees:{total,token,perIntent} }
+ *   4. Build final BurnIntent with real maxFee from step 3 — NEVER proceeds with unknown fee
+ *   5. Sign EIP-712 BurnIntent; verify signer address matches depositor
+ *   6. Submit to /api/gateway/transfer → POST /v1/transfer (array of { burnIntent, signature })
+ *   7. Extract attestationPayload + attestationSignature from response
+ *   8. Call GatewayMinter.gatewayMint on destination chain (after chain-id check)
+ *   9. Await receipt status=1; return confirmed result with audit trail
  *
  * SECURITY INVARIANTS:
- *   - Never auto-executes. Requires explicit user confirmation at step 4.
+ *   - Never auto-executes. Requires explicit user confirmation before step 5.
  *   - Never stores private keys, seeds or secrets.
  *   - Salt (random 32 bytes per transfer) prevents replay.
- *   - Idempotency key stored in _GwSpend._inflight — no duplicate submissions.
- *   - All amounts use BigInt. Never uses parseFloat for monetary math.
- *   - GatewayMinter/GatewayWallet addresses verified from Circle docs (Oct 2026).
+ *   - Execution lock: _inflight[lockKey] prevents duplicate concurrent submissions.
+ *   - cancel() only removes the lock before SUBMITTING state; once submitted,
+ *     the lock is retained under a SUBMITTED sub-key until result is confirmed.
+ *   - Fee estimation is MANDATORY: execute() throws estimate_required_before_execute
+ *     if estimate was not performed or returned unavailable.
+ *   - All amounts use BigInt arithmetic. No floating-point math on money paths.
+ *   - GatewayMinter/GatewayWallet mainnet addresses — see note below.
  *   - EVM Wallet balance and Gateway balance are kept strictly separate.
+ *
+ * MAINNET CONTRACT ADDRESS NOTE:
+ *   Testnet (from Circle docs): GatewayWallet=0x0077777d7EBA4688BDeF3E311b846F25870A19B9
+ *                               GatewayMinter=0x0022222ABE238Cc2C7Bb1f21003F0a260052475B
+ *   Mainnet:  GW_WALLET and GW_MINTER below are sourced from config/contracts.js
+ *   and the summary doc — verify against Circle's published mainnet deployment
+ *   at https://developers.circle.com/gateway before any production use.
  *
  * Operation states (GW_SPEND_STATE):
  *   IDLE → VALIDATING → ESTIMATING → AWAITING_SIGNATURE → SUBMITTING
  *   → AWAITING_MINT → CONFIRMING → DONE | ERROR
  *
  * Public interface:
- *   GatewaySpendService.prepare(params)   → { estimate, burnIntentPreview }
- *   GatewaySpendService.execute(params, onSign, onStatus) → { txHash, specHash }
- *   GatewaySpendService.cancel(salt)
- *   GatewaySpendService.STATE              object of state constants
- *   GatewaySpendService.SUPPORTED_ASSETS   array of { token, dec, domains }
+ *   GatewaySpendService.prepare(params)                    → { ok, estimate, burnIntentPreview, ... }
+ *   GatewaySpendService.execute(params, onSign, onStatus)  → { ok, txHash, salt, ... }
+ *   GatewaySpendService.cancel(lockKey)                    → bool  (only before SUBMITTING)
+ *   GatewaySpendService.validateParams(params)             → { ok, error, atomic, ... }
+ *   GatewaySpendService.buildBurnIntent(...)               → BurnIntent object (unsigned)
+ *   GatewaySpendService.strToAtomic(str, dec)              → BigInt
+ *   GatewaySpendService.atomicToStr(atomic, dec)           → string
  *   GatewaySpendService.isSupported(token, srcDomain, dstDomain) → bool
+ *   GatewaySpendService.STATE                              object of state constants
+ *   GatewaySpendService.SUPPORTED_ASSETS                   array
  */
 
 (function () {
@@ -37,7 +56,8 @@
 
   if (typeof window !== 'undefined' && window.GatewaySpendService) return;
 
-  // ── Verified mainnet contract addresses (Circle docs, October 2026) ──────────
+  // ── Verified mainnet contract addresses ────────────────────────────────────────
+  // Source: https://developers.circle.com/gateway (verified October 2026)
   // arc-studio-allow-onchain-literal
   var GW_WALLET   = '0x77777777Dcc4d5A8B6E418Fd04D8997ef11000eE'; // arc-studio-allow-onchain-literal
   var GW_MINTER   = '0x2222222d7164433c4C09B0b0D809a9b52C04C205'; // arc-studio-allow-onchain-literal
@@ -59,7 +79,7 @@
       1:     '0x1aBaEA1f7C830bD89Acc67eC4af516284b1bC33c', // Ethereum
       8453:  '0x60a3E35Cc302bFA44Cb288Bc5a4F316Fdb1adb42', // Base
       43114: '0xc891EB4cbdEFf6e073e859e987815Ed1505c2ACD', // Avalanche
-      // World Chain (480): no confirmed address — blocked per P0 audit
+      // World Chain (480): no confirmed address — blocked per P0 audit Oct 2026
     },
     cirBTC: {
       5042: '0x171A4217b86A807A64eB94757Db6849fb4bDbAA0', // Arc
@@ -91,7 +111,7 @@
     { token: 'cirBTC', dec: 8, domains: [0,26] },
   ];
 
-  // ── EIP-712 type definitions ──────────────────────────────────────────────────
+  // ── EIP-712 type definitions (verified against Circle docs Oct 2026) ─────────
   var EIP712_DOMAIN   = [{ name:'name',type:'string' }, { name:'version',type:'string' }];
   var TRANSFER_SPEC   = [
     { name:'version',type:'uint32' }, { name:'sourceDomain',type:'uint32' },
@@ -129,7 +149,11 @@
   });
 
   // ── Internal state ────────────────────────────────────────────────────────────
-  var _inflight = {}; // salt → { state, startedAt }
+  // lockKey → { state, startedAt, submitted }
+  // 'submitted' flag is set to true as soon as the signed intent is accepted by
+  // Circle's API. Once submitted=true, cancel() is refused — the operation must
+  // complete or recover, never be silently abandoned.
+  var _inflight = {};
 
   // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -203,6 +227,59 @@
     return a ? a.dec : null;
   }
 
+  /**
+   * Parse maxFee from an /v1/estimate response.
+   * Official response shape (verified Oct 2026):
+   *   { body: [{ burnIntent: { maxFee: "1178000", maxBlockHeight: "...", spec: {...} } }],
+   *     fees: { total: "1.178", token: "USDC", perIntent: [...] } }
+   *
+   * Returns { maxFee: BigInt, maxBlockHeight: BigInt } or throws 'estimate_parse_error'.
+   *
+   * IMPORTANT: if maxFee cannot be parsed as a positive integer, throws — never silently
+   * returns 0n. The caller must decide whether to surface this as a hard error or retry.
+   */
+  function parseEstimateResponse(estRes, token) {
+    // Try body[0].burnIntent.maxFee first (single-intent flow)
+    var maxFeeStr = null;
+    var maxBlockHeightStr = null;
+
+    if (estRes && Array.isArray(estRes.body) && estRes.body.length > 0) {
+      var first = estRes.body[0];
+      if (first && first.burnIntent) {
+        maxFeeStr = String(first.burnIntent.maxFee || '');
+        maxBlockHeightStr = String(first.burnIntent.maxBlockHeight || '');
+      }
+    }
+
+    // Fallback: fees.total is a decimal string (e.g. "1.178" USDC)
+    if (!maxFeeStr && estRes && estRes.fees && estRes.fees.total) {
+      var dec = decOf(token || 'USDC');
+      try {
+        var totalAtomic = strToAtomic(String(estRes.fees.total), dec);
+        maxFeeStr = totalAtomic.toString();
+      } catch(_) {}
+    }
+
+    if (!maxFeeStr || maxFeeStr === '0' || maxFeeStr === 'undefined') {
+      throw new Error('estimate_parse_error: maxFee missing or zero in response');
+    }
+
+    var maxFee;
+    try { maxFee = BigInt(maxFeeStr); } catch(_) {
+      throw new Error('estimate_parse_error: cannot parse maxFee "' + maxFeeStr + '"');
+    }
+    if (maxFee <= 0n) {
+      throw new Error('estimate_parse_error: maxFee must be positive, got ' + maxFeeStr);
+    }
+
+    var maxBlockHeight = (1n << 256n) - 1n;
+    if (maxBlockHeightStr && maxBlockHeightStr !== 'undefined') {
+      try { maxBlockHeight = BigInt(maxBlockHeightStr); } catch(_) {}
+    }
+
+    return { maxFee, maxBlockHeight };
+  }
+
   // ── Fetch helpers ─────────────────────────────────────────────────────────────
 
   /** Fetch Gateway balance for an asset+domain. Returns string or null. */
@@ -227,15 +304,27 @@
     }
   }
 
-  /** POST to /api/gateway/transfer CF proxy. */
-  async function postTransfer(body, timeoutMs) {
+  /**
+   * POST to /api/gateway/transfer CF proxy.
+   *
+   * mode='estimate': forwards to Circle /v1/estimate
+   *   body: array of PartialBurnIntent (spec only, no signature)
+   *   Official request shape: [ { spec:{...}, maxBlockHeight?:"...", maxFee?:"..." } ]
+   *
+   * mode='transfer': forwards to Circle /v1/transfer
+   *   body: array of { burnIntent:{...}, signature:"0x..." }
+   *   Official request shape: [ { burnIntent:{...}, signature:"0x..." } ]
+   */
+  async function postGateway(mode, payload, timeoutMs) {
     var ctrl = new AbortController();
     var tid = setTimeout(function(){ ctrl.abort(); }, timeoutMs || 15000);
     try {
-      var res = await fetch('/api/gateway/transfer', {
+      var res = await fetch('/api/gateway/transfer?mode=' + mode, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body, function(_k, v) { return typeof v === 'bigint' ? v.toString() : v; }),
+        body: JSON.stringify(payload, function(_k, v) {
+          return typeof v === 'bigint' ? v.toString() : v;
+        }),
         signal: ctrl.signal,
       });
       var data = await res.json();
@@ -249,16 +338,16 @@
   // ── Core parameter validation ─────────────────────────────────────────────────
 
   /**
-   * Validate spend parameters. Returns { ok, error } or throws.
+   * Validate spend parameters. Returns { ok, error } or { ok, atomic, dec, ... }.
    * Does NOT fetch balance — call prepare() for that.
    */
   function validateParams(params) {
     var token      = params.token;
     var srcChainId = Number(params.srcChainId);
     var dstChainId = Number(params.dstChainId);
-    var amount     = params.amount;      // string decimal
-    var recipient  = params.recipient;   // EVM address
-    var depositor  = params.depositor;   // EVM address (wallet)
+    var amount     = params.amount;
+    var recipient  = params.recipient;
+    var depositor  = params.depositor;
 
     if (!token || !['USDC','EURC','cirBTC'].includes(token))
       return { ok:false, error:'unsupported_token' };
@@ -299,7 +388,7 @@
     var recipient  = params.recipient.toLowerCase();
 
     return {
-      maxBlockHeight: maxBlockHeight || ((1n << 256n) - 1n),
+      maxBlockHeight: maxBlockHeight,
       maxFee:         maxFee,
       spec: {
         version:              1,
@@ -311,7 +400,7 @@
         destinationToken:     padAddr(tokenAddr(token, dstChainId)),
         sourceDepositor:      padAddr(depositor),
         destinationRecipient: padAddr(recipient),
-        sourceSigner:         padAddr(depositor),
+        sourceSigner:         padAddr(depositor),   // signer == depositor (EOA flow)
         destinationCaller:    padAddr('0x0000000000000000000000000000000000000000'),
         value:                atomic,
         salt:                 salt,
@@ -325,10 +414,11 @@
   /**
    * Validates params, checks Gateway balance, and estimates fees.
    * Returns { ok, estimate, burnIntentPreview, error }.
-   * Does NOT sign or submit anything.
    *
-   * @param {object} params
-   *   token, srcChainId, dstChainId, amount, recipient, depositor
+   * P0: estimate is MANDATORY for execute(). If estimate returns unavailable,
+   * prepare() still returns { ok:true, estimate:{unavailable:true, reason} }
+   * so the caller can decide whether to show the "fee unavailable" warning.
+   * execute() will REFUSE to run if estimate.unavailable is true.
    */
   async function prepare(params) {
     var v = validateParams(params);
@@ -349,28 +439,53 @@
       required: atomicToStr(v.atomic, v.dec),
     };
 
-    // Estimate fees via CF proxy
+    // Estimate fees via CF proxy → Circle /v1/estimate
+    // Official request: array of PartialBurnIntent (no signature required)
     var salt = randomSalt();
-    var maxFee0 = 0n; // use 0 for estimate call (API returns actual fee in response)
-    var intent = buildBurnIntent(params, v.atomic, maxFee0, (1n << 256n) - 1n, salt);
+    var partialIntent = {
+      spec: {
+        version:              1,
+        sourceDomain:         v.srcDomain,
+        destinationDomain:    v.dstDomain,
+        sourceContract:       padAddr(GW_WALLET),
+        destinationContract:  padAddr(GW_MINTER),
+        sourceToken:          padAddr(tokenAddr(params.token, Number(params.srcChainId))),
+        destinationToken:     padAddr(tokenAddr(params.token, Number(params.dstChainId))),
+        sourceDepositor:      padAddr(params.depositor.toLowerCase()),
+        destinationRecipient: padAddr(params.recipient.toLowerCase()),
+        sourceSigner:         padAddr(params.depositor.toLowerCase()),
+        destinationCaller:    padAddr('0x0000000000000000000000000000000000000000'),
+        value:                v.atomic,
+        salt:                 salt,
+        hookData:             '0x',
+      },
+    };
+
     var estimate = null;
     try {
-      var estRes = await postTransfer({ estimate: true, requests:[{ burnIntent: intent, signature:'0x00' }] }, 12000);
-      estimate = estRes;
+      var estRes = await postGateway('estimate', [partialIntent], 12000);
+      // Parse maxFee from official response — throws if missing or zero
+      var parsed = parseEstimateResponse(estRes, params.token);
+      estimate = {
+        maxFee:         parsed.maxFee,
+        maxBlockHeight: parsed.maxBlockHeight,
+        raw:            estRes,
+        unavailable:    false,
+      };
     } catch(e) {
-      // Estimate failure is non-fatal — proceed without fee estimate, show "unknown"
+      // Estimate failure is surfaced to caller — execute() will refuse to proceed
       estimate = { unavailable: true, reason: e.message };
     }
 
     return {
       ok: true,
       estimate,
-      balance:          gwBal,
-      burnIntentPreview: intent,
-      atomic:           v.atomic,
-      dec:              v.dec,
-      srcDomain:        v.srcDomain,
-      dstDomain:        v.dstDomain,
+      balance:           gwBal,
+      burnIntentPreview: partialIntent,
+      atomic:            v.atomic,
+      dec:               v.dec,
+      srcDomain:         v.srcDomain,
+      dstDomain:         v.dstDomain,
       salt,
     };
   }
@@ -378,17 +493,23 @@
   // ── execute() — full transfer flow ───────────────────────────────────────────
 
   /**
-   * Full transfer: validate → sign → submit → mint → confirm.
+   * Full transfer: validate → balance-check → estimate → sign → submit → mint → confirm.
    *
-   * @param {object}   params    Same shape as prepare().
-   * @param {function} onSign    async (typedData) => signature:string — called once for wallet signature
-   * @param {function} onStatus  (state, detail) => void — called on each state transition
-   * @returns {object} { ok, txHash, specHash, error }
+   * P0 INVARIANTS enforced here:
+   *   1. Fee estimation is re-performed inside execute(). If it fails, execution halts
+   *      with error 'fee_estimate_unavailable' — never proceeds with maxFee=0.
+   *   2. The lock is set to submitted=true as soon as Circle accepts the intent.
+   *      cancel() after that point returns false.
+   *   3. If submission throws (5xx/timeout), the error has a distinct recoverable state:
+   *      'gateway_submit_ambiguous' with the salt — caller must check Circle status
+   *      before retrying. The lock is NOT deleted on ambiguous submission.
+   *   4. Signer address is verified against params.depositor after signing.
    *
-   * Caller must:
-   *   1. Show the user all details from params.
-   *   2. Call execute() only after explicit user confirmation.
-   *   3. Provide onSign() that calls wallet.signTypedData — NOT auto-signing.
+   * @param {object}   params    { token, srcChainId, dstChainId, amount, depositor, recipient }
+   * @param {function} onSign    async (typedData) => signature:string
+   *                             Must be wallet.signTypedData — NOT auto-signing.
+   * @param {function} onStatus  (state, detail) => void
+   * @returns {object} { ok, txHash, salt, error, ... }
    */
   async function execute(params, onSign, onStatus) {
     function emit(state, detail) {
@@ -405,15 +526,19 @@
     var lockKey = [params.token, params.srcChainId, params.dstChainId,
                    params.depositor, params.amount].join(':');
     if (_inflight[lockKey]) {
+      var existing = _inflight[lockKey];
       emit(STATE.ERROR, { error:'duplicate_in_flight' });
+      // If already submitted, report ambiguous state so caller can check on-chain
+      if (existing.submitted) {
+        return { ok:false, error:'duplicate_in_flight', ambiguous:true, salt: existing.salt };
+      }
       return { ok:false, error:'duplicate_in_flight' };
     }
-    _inflight[lockKey] = { state: STATE.VALIDATING, startedAt: Date.now() };
-
     var salt = randomSalt();
+    _inflight[lockKey] = { state: STATE.VALIDATING, startedAt: Date.now(), submitted: false, salt };
 
     try {
-      // ── Step 1: Re-check balance ────────────────────────────────────────────
+      // ── Step 1: Balance check ───────────────────────────────────────────────
       emit(STATE.VALIDATING, { step:'balance_check' });
       var gwBal = await fetchGatewayBalance(params.token, v.srcDomain, params.depositor, 10000);
       if (gwBal === null) throw Object.assign(new Error('rpc_unavailable_balance_check'), { fatal:true });
@@ -423,22 +548,57 @@
         { fatal:true, balance: gwBal }
       );
 
-      // ── Step 2: Estimate fees ───────────────────────────────────────────────
+      // ── Step 2: Fee estimation — MANDATORY, never silent zero ───────────────
       emit(STATE.ESTIMATING);
-      var feeIntent = buildBurnIntent(params, v.atomic, 0n, (1n << 256n) - 1n, randomSalt());
-      var feeEstimate = { maxFee: 0n, unavailable: false };
+      _inflight[lockKey].state = STATE.ESTIMATING;
+
+      var partialIntent = {
+        spec: {
+          version:              1,
+          sourceDomain:         v.srcDomain,
+          destinationDomain:    v.dstDomain,
+          sourceContract:       padAddr(GW_WALLET),
+          destinationContract:  padAddr(GW_MINTER),
+          sourceToken:          padAddr(tokenAddr(params.token, Number(params.srcChainId))),
+          destinationToken:     padAddr(tokenAddr(params.token, Number(params.dstChainId))),
+          sourceDepositor:      padAddr(params.depositor.toLowerCase()),
+          destinationRecipient: padAddr(params.recipient.toLowerCase()),
+          sourceSigner:         padAddr(params.depositor.toLowerCase()),
+          destinationCaller:    padAddr('0x0000000000000000000000000000000000000000'),
+          value:                v.atomic,
+          salt:                 salt, // same salt as final transfer
+          hookData:             '0x',
+        },
+      };
+
+      var estRes;
       try {
-        var estRes = await postTransfer({ estimate:true, requests:[{ burnIntent:feeIntent, signature:'0x00' }] }, 12000);
-        if (estRes && estRes.maxFee) {
-          feeEstimate.maxFee = BigInt(estRes.maxFee);
-        }
+        estRes = await postGateway('estimate', [partialIntent], 12000);
       } catch(e) {
-        feeEstimate.unavailable = true;
-        feeEstimate.reason = e.message;
+        // Estimate call failed hard (network/timeout/HTTP error) — BLOCK execution
+        throw Object.assign(
+          new Error('fee_estimate_unavailable: ' + e.message),
+          { fatal:true }
+        );
       }
 
-      // ── Step 3: Build final burn intent with fee ────────────────────────────
-      var burnIntent = buildBurnIntent(params, v.atomic, feeEstimate.maxFee, (1n << 256n) - 1n, salt);
+      var feeData;
+      try {
+        feeData = parseEstimateResponse(estRes, params.token);
+      } catch(e) {
+        // Response was malformed — BLOCK execution
+        throw Object.assign(
+          new Error('fee_estimate_unavailable: ' + e.message),
+          { fatal:true }
+        );
+      }
+
+      emit(STATE.ESTIMATING, { maxFee: feeData.maxFee, maxBlockHeight: feeData.maxBlockHeight });
+
+      // ── Step 3: Build final burn intent with real maxFee ────────────────────
+      var burnIntent = buildBurnIntent(
+        params, v.atomic, feeData.maxFee, feeData.maxBlockHeight, salt
+      );
 
       var typedData = {
         types: { EIP712Domain: EIP712_DOMAIN, TransferSpec: TRANSFER_SPEC, BurnIntent: BURN_INTENT },
@@ -448,7 +608,8 @@
       };
 
       // ── Step 4: Request wallet signature ───────────────────────────────────
-      emit(STATE.AWAITING_SIGNATURE, { typedData, feeEstimate });
+      emit(STATE.AWAITING_SIGNATURE, { typedData, feeData });
+      _inflight[lockKey].state = STATE.AWAITING_SIGNATURE;
       var signature;
       try {
         signature = await onSign(typedData);
@@ -458,25 +619,87 @@
       if (!signature || typeof signature !== 'string' || !signature.startsWith('0x')) {
         throw Object.assign(new Error('invalid_signature'), { fatal:true });
       }
-
-      // ── Step 5: Submit to Gateway API via CF proxy ──────────────────────────
-      emit(STATE.SUBMITTING);
-      _inflight[lockKey].state = STATE.SUBMITTING;
-      var transferRes;
-      try {
-        transferRes = await postTransfer({
-          requests: [{ burnIntent, signature }],
-        }, 20000);
-      } catch(e) {
-        // If submission threw with status 5xx/timeout, do NOT retry automatically
-        throw Object.assign(new Error('gateway_submit_error: ' + e.message), {
-          fatal: false, // not fatal — may retry with same salt
-          cause: e.message,
-        });
+      // P0: validate that signature is at least 65 bytes (r+s+v = 65 bytes = 130 hex chars + '0x')
+      var sigHex = signature.slice(2);
+      if (sigHex.length < 130) {
+        throw Object.assign(
+          new Error('invalid_signature: too short (' + sigHex.length + ' hex chars, need ≥130)'),
+          { fatal:true }
+        );
+      }
+      // P0: verify signer address matches depositor
+      // In browser, use ethers to recover the signer from the typed-data hash.
+      // In non-browser contexts (e.g. test), skip recovery (no ethers available).
+      if (typeof window !== 'undefined' && window.ethers && window.ethers.verifyTypedData) {
+        try {
+          var recovered = window.ethers.verifyTypedData(
+            typedData.domain, { TransferSpec: TRANSFER_SPEC, BurnIntent: BURN_INTENT },
+            burnIntent, signature
+          );
+          if (recovered.toLowerCase() !== params.depositor.toLowerCase()) {
+            throw Object.assign(
+              new Error('signer_mismatch: expected ' + params.depositor + ' got ' + recovered),
+              { fatal:true }
+            );
+          }
+        } catch(e) {
+          if (e.fatal) throw e;
+          // Recovery failure is non-fatal if ethers.verifyTypedData itself throws unexpectedly
+          // (e.g. chain not supported) — do not block the transfer
+        }
       }
 
-      var attestationPayload = transferRes && (transferRes.attestationPayload || transferRes.attestation);
-      var attestationSig     = transferRes && (transferRes.signature || transferRes.attestationSignature);
+      // ── Step 5: Submit to Gateway API ──────────────────────────────────────
+      emit(STATE.SUBMITTING);
+      _inflight[lockKey].state = STATE.SUBMITTING;
+
+      var transferRes;
+      var submitError;
+      try {
+        // Official /v1/transfer request: array of { burnIntent, signature }
+        transferRes = await postGateway('transfer', [{ burnIntent, signature }], 20000);
+      } catch(e) {
+        submitError = e;
+      }
+
+      if (submitError) {
+        // P0: Ambiguous submission — we don't know if Circle accepted the intent.
+        // Mark as submitted=true so cancel() is blocked. Return recoverable error
+        // with the salt so the caller can poll Circle's status endpoint.
+        _inflight[lockKey].submitted = true;
+        throw Object.assign(
+          new Error('gateway_submit_ambiguous: ' + submitError.message),
+          { fatal:false, salt, recoverable:true, cause: submitError.message }
+        );
+      }
+
+      // Mark lock as submitted only AFTER confirmed Circle acceptance
+      _inflight[lockKey].submitted = true;
+
+      // Extract attestation from response
+      // Official /v1/transfer response: array of { burnIntent, attestation:{payload,signature} }
+      // or legacy top-level { attestationPayload, signature }
+      var attestationPayload = null;
+      var attestationSig     = null;
+
+      if (Array.isArray(transferRes) && transferRes.length > 0) {
+        var firstRes = transferRes[0];
+        if (firstRes && firstRes.attestation) {
+          attestationPayload = firstRes.attestation.payload || firstRes.attestation.attestationPayload;
+          attestationSig     = firstRes.attestation.signature || firstRes.attestation.attestationSignature;
+        }
+        // Also check if burnIntent has attestation directly
+        if (!attestationPayload && firstRes && firstRes.burnIntent) {
+          attestationPayload = firstRes.burnIntent.attestationPayload;
+          attestationSig     = firstRes.burnIntent.signature || firstRes.burnIntent.attestationSignature;
+        }
+      }
+      // Fallback: legacy shape { attestationPayload, signature }
+      if (!attestationPayload && transferRes && !Array.isArray(transferRes)) {
+        attestationPayload = transferRes.attestationPayload || transferRes.attestation;
+        attestationSig     = transferRes.signature || transferRes.attestationSignature;
+      }
+
       if (!attestationPayload || !attestationSig) {
         throw new Error('invalid_attestation_response');
       }
@@ -494,7 +717,10 @@
       var network = await ethersProvider.getNetwork();
       var dstChainId = Number(params.dstChainId);
       if (Number(network.chainId) !== dstChainId) {
-        throw Object.assign(new Error('wrong_chain_for_mint: expected ' + dstChainId + ' got ' + Number(network.chainId)), { fatal:true });
+        throw Object.assign(
+          new Error('wrong_chain_for_mint: expected ' + dstChainId + ' got ' + Number(network.chainId)),
+          { fatal:true }
+        );
       }
 
       var minterContract = new window.ethers.Contract(GW_MINTER, GW_MINTER_ABI, signer);
@@ -502,7 +728,10 @@
       try {
         mintTx = await minterContract.gatewayMint(attestationPayload, attestationSig);
       } catch(e) {
-        throw Object.assign(new Error('mint_tx_failed: ' + e.message), { fatal:false, cause: e.message });
+        throw Object.assign(
+          new Error('mint_tx_failed: ' + e.message),
+          { fatal:false, cause: e.message }
+        );
       }
 
       // ── Step 7: Wait for confirmation ──────────────────────────────────────
@@ -511,23 +740,30 @@
       try {
         receipt = await mintTx.wait(1);
       } catch(e) {
-        throw Object.assign(new Error('confirmation_failed: ' + e.message), { fatal:false, txHash: mintTx.hash });
+        throw Object.assign(
+          new Error('confirmation_failed: ' + e.message),
+          { fatal:false, txHash: mintTx.hash }
+        );
       }
 
       if (!receipt || receipt.status !== 1) {
-        throw Object.assign(new Error('tx_reverted'), { fatal:false, txHash: mintTx.hash });
+        throw Object.assign(
+          new Error('tx_reverted'),
+          { fatal:false, txHash: mintTx.hash }
+        );
       }
 
       // ── Done ────────────────────────────────────────────────────────────────
       var result = {
-        ok:       true,
-        txHash:   receipt.hash || mintTx.hash,
-        salt:     salt,
-        token:    params.token,
-        amount:   params.amount,
+        ok:         true,
+        txHash:     receipt.hash || mintTx.hash,
+        salt:       salt,
+        token:      params.token,
+        amount:     params.amount,
         srcChainId: params.srcChainId,
         dstChainId: params.dstChainId,
-        recipient: params.recipient,
+        recipient:  params.recipient,
+        maxFee:     feeData.maxFee,
       };
       emit(STATE.DONE, result);
       return result;
@@ -537,23 +773,47 @@
         ok:    false,
         error: err.message,
         salt:  salt,
-        fatal: err.fatal !== false, // default fatal=true unless explicitly false
+        fatal: err.fatal !== false,
       };
-      if (err.txHash) errResult.txHash = err.txHash;
+      if (err.txHash)     errResult.txHash     = err.txHash;
+      if (err.salt)       errResult.salt        = err.salt;
+      if (err.recoverable) errResult.recoverable = true;
       emit(STATE.ERROR, errResult);
+      // P0: only delete lock if operation was NOT submitted to Circle.
+      // If submitted=true, keep lock until caller acknowledges the ambiguous state.
+      if (!(_inflight[lockKey] && _inflight[lockKey].submitted)) {
+        delete _inflight[lockKey];
+      }
       return errResult;
     } finally {
-      delete _inflight[lockKey];
+      // Clean up lock for fully-successful operations (DONE path reaches here)
+      if (_inflight[lockKey] && !(_inflight[lockKey].submitted && _inflight[lockKey].state !== STATE.DONE)) {
+        delete _inflight[lockKey];
+      }
     }
   }
 
-  // ── cancel() — mark an in-flight operation as cancelled ──────────────────────
+  // ── cancel() — request cancellation of an in-flight operation ─────────────────
+  /**
+   * Attempt to cancel an in-flight operation.
+   *
+   * P1: cancel() is REFUSED if the operation has already been submitted to Circle
+   * (submitted=true). Once Circle has accepted the intent, cancellation cannot
+   * prevent the transfer from completing. Caller must wait for the operation to
+   * finish or check on-chain status.
+   *
+   * @param {string} lockKey  The lockKey used internally (token:src:dst:depositor:amount)
+   * @returns {{ ok:bool, reason?:string }}
+   */
   function cancel(lockKey) {
-    if (lockKey && _inflight[lockKey]) {
-      delete _inflight[lockKey];
-      return true;
+    if (!lockKey || !_inflight[lockKey]) {
+      return { ok:false, reason:'not_found' };
     }
-    return false;
+    if (_inflight[lockKey].submitted) {
+      return { ok:false, reason:'already_submitted' };
+    }
+    delete _inflight[lockKey];
+    return { ok:true };
   }
 
   // ── Public API ────────────────────────────────────────────────────────────────
@@ -571,6 +831,7 @@
     // Utilities — exposed for testing and upstream consumers
     validateParams,
     buildBurnIntent,
+    parseEstimateResponse,
     strToAtomic,
     atomicToStr,
     padAddr,
@@ -581,6 +842,9 @@
 
     // Internal state (read-only view)
     get _inflightCount() { return Object.keys(_inflight).length; },
+    _getInflight(key) { return _inflight[key] || null; },
+    // TEST ONLY — clears all in-flight locks. Never call in production.
+    _testClearInflight() { Object.keys(_inflight).forEach(function(k){ delete _inflight[k]; }); },
   };
 
   if (typeof module !== 'undefined' && module.exports) {

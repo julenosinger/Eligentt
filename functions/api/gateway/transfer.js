@@ -1,42 +1,91 @@
 /**
  * CF Pages Function — POST /api/gateway/transfer
  *
- * Server-side proxy to the Circle Gateway /v1/transfer API.
- * Forwards signed burn intents to Circle and returns the attestation.
- * Also handles estimate mode (?estimate=true or body.estimate=true).
+ * Server-side proxy to Circle Gateway API.
+ * Routes to /v1/estimate or /v1/transfer depending on ?mode= query param.
+ *
+ * Official API shapes (verified Oct 2026):
+ *
+ *   Estimate (?mode=estimate):
+ *     Request:  POST /v1/estimate
+ *               body = [ { spec:{...}, maxBlockHeight?:"...", maxFee?:"..." } ]
+ *               (array of PartialBurnIntent — NO signature required)
+ *     Response: { body:[{ burnIntent:{maxFee:"...", maxBlockHeight:"...", spec:{...}} }],
+ *                 fees:{ total:"1.178", token:"USDC", perIntent:[...] } }
+ *
+ *   Transfer (?mode=transfer or no mode):
+ *     Request:  POST /v1/transfer
+ *               body = [ { burnIntent:{...}, signature:"0x..." } ]
+ *               (array of signed BurnIntent)
+ *     Response: array of { burnIntent:{...}, attestation:{payload:"...", signature:"..."} }
+ *               or legacy { attestationPayload:"...", signature:"..." }
  *
  * Security:
+ *   - CORS: exact-origin allowlist (not substring match).
  *   - Validates Content-Type and body shape before forwarding.
- *   - Strips any unexpected top-level fields from the request.
- *   - Never logs or stores attestations or signatures.
- *   - No credentials required (Gateway is permissionless).
- *   - CORS restricted to same origin (no arbitrary proxy use).
- *   - Body limited to 64 KB to prevent abuse.
+ *   - Strips any unexpected top-level fields.
+ *   - Never logs or stores attestations, signatures or private data.
+ *   - No credentials required (Gateway API is permissionless).
+ *   - Body limited to 64 KB.
+ *   - 18s server-side timeout (longer than frontend 20s guard → clean 504).
  *
- * Protocol (Circle Gateway v1, verified October 2026):
- *   POST /v1/transfer
- *   Body: { requests: [{ burnIntent, signature }] }  OR
- *         { estimate: true, requests: [...] }
- *   Response: { attestationPayload, signature } | { maxFee, ... }
+ * P1 fix (origin allowlist):
+ *   CORS guard uses an exact-match allowlist (not substring matching).
+ *   Configured via env ALLOWED_ORIGINS (comma-separated) plus safe defaults.
+ *   Localhost is allowed only for local development.
  */
 
 const GATEWAY_API  = 'https://gateway-api.circle.com';
 const MAX_BODY_LEN = 65536; // 64 KB
-const TIMEOUT_MS   = 18000; // 18s — longer than frontend (20s) to guarantee clean 504
+const TIMEOUT_MS   = 18000; // 18s
+
+/**
+ * Returns true if origin is in the exact allowlist.
+ * allowlist entries must be exact origins: scheme + host + optional port.
+ * e.g. ['https://app.elligentt.com', 'https://elligentt.pages.dev']
+ */
+function isAllowedOrigin(origin, env) {
+  if (!origin) return true; // server-to-server (no Origin header) — allowed
+  // Build allowlist from env var ALLOWED_ORIGINS (comma-separated) + safe defaults
+  const defaults = [
+    'https://elligentt.com',
+    'https://www.elligentt.com',
+    'https://app.elligentt.com',
+    'https://elligentt.pages.dev',
+  ];
+  const envList = env && env.ALLOWED_ORIGINS
+    ? env.ALLOWED_ORIGINS.split(',').map(s => s.trim()).filter(Boolean)
+    : [];
+  const allowlist = [...new Set([...defaults, ...envList])];
+
+  // Also allow localhost for development (never in production traffic)
+  if (/^https?:\/\/localhost(:\d+)?$/.test(origin)) return true;
+  if (/^https?:\/\/127\.0\.0\.1(:\d+)?$/.test(origin)) return true;
+
+  return allowlist.includes(origin);
+}
 
 export async function onRequestPost(ctx) {
-  const { request } = ctx;
+  const { request, env } = ctx;
 
-  // ── CORS: allow only same-origin calls ────────────────────────────────────
+  // ── CORS: exact-origin allowlist ──────────────────────────────────────────
   const origin = request.headers.get('Origin') || '';
-  if (origin && !origin.includes('elligentt')) {
+  if (!isAllowedOrigin(origin, env)) {
     return new Response(JSON.stringify({ error:'forbidden' }), {
       status: 403,
       headers: { 'Content-Type':'application/json' },
     });
   }
 
-  // ── Content-Type guard ─────────────────────────────────────────────────────
+  // ── Mode routing ──────────────────────────────────────────────────────────
+  const url     = new URL(request.url);
+  const mode    = url.searchParams.get('mode') || 'transfer';
+  const isEstimate = mode === 'estimate';
+  const endpoint   = isEstimate
+    ? GATEWAY_API + '/v1/estimate'
+    : GATEWAY_API + '/v1/transfer';
+
+  // ── Content-Type guard ────────────────────────────────────────────────────
   const ct = request.headers.get('Content-Type') || '';
   if (!ct.includes('application/json')) {
     return new Response(JSON.stringify({ error:'content_type_required' }), {
@@ -44,7 +93,7 @@ export async function onRequestPost(ctx) {
     });
   }
 
-  // ── Body size limit ────────────────────────────────────────────────────────
+  // ── Body size limit ───────────────────────────────────────────────────────
   const rawBody = await request.text();
   if (rawBody.length > MAX_BODY_LEN) {
     return new Response(JSON.stringify({ error:'request_too_large' }), {
@@ -52,7 +101,7 @@ export async function onRequestPost(ctx) {
     });
   }
 
-  // ── Parse and validate body ────────────────────────────────────────────────
+  // ── Parse body ────────────────────────────────────────────────────────────
   let body;
   try { body = JSON.parse(rawBody); } catch(_) {
     return new Response(JSON.stringify({ error:'invalid_json' }), {
@@ -60,46 +109,67 @@ export async function onRequestPost(ctx) {
     });
   }
 
-  if (!body || !Array.isArray(body.requests) || body.requests.length === 0) {
+  // Body must be an array (both /v1/estimate and /v1/transfer take arrays)
+  if (!Array.isArray(body) || body.length === 0) {
     return new Response(JSON.stringify({ error:'requests_required' }), {
       status: 400, headers: { 'Content-Type':'application/json' },
     });
   }
 
-  // ── Validate each request has burnIntent + signature ──────────────────────
-  for (const req of body.requests) {
-    if (!req || typeof req !== 'object') {
+  // ── Validate each item ────────────────────────────────────────────────────
+  for (const item of body) {
+    if (!item || typeof item !== 'object') {
       return new Response(JSON.stringify({ error:'invalid_request_item' }), {
         status: 400, headers: { 'Content-Type':'application/json' },
       });
     }
-    if (!req.burnIntent || typeof req.burnIntent !== 'object') {
-      return new Response(JSON.stringify({ error:'burnIntent_required' }), {
-        status: 400, headers: { 'Content-Type':'application/json' },
-      });
-    }
-    if (typeof req.signature !== 'string') {
-      return new Response(JSON.stringify({ error:'signature_required' }), {
-        status: 400, headers: { 'Content-Type':'application/json' },
-      });
+
+    if (isEstimate) {
+      // Estimate: each item must have a spec object
+      if (!item.spec || typeof item.spec !== 'object') {
+        return new Response(JSON.stringify({ error:'spec_required_for_estimate' }), {
+          status: 400, headers: { 'Content-Type':'application/json' },
+        });
+      }
+    } else {
+      // Transfer: each item must have burnIntent + signature
+      if (!item.burnIntent || typeof item.burnIntent !== 'object') {
+        return new Response(JSON.stringify({ error:'burnIntent_required' }), {
+          status: 400, headers: { 'Content-Type':'application/json' },
+        });
+      }
+      if (typeof item.signature !== 'string') {
+        return new Response(JSON.stringify({ error:'signature_required' }), {
+          status: 400, headers: { 'Content-Type':'application/json' },
+        });
+      }
+      // Basic signature format check (0x + at least 130 hex chars = 65 bytes)
+      if (!/^0x[0-9a-fA-F]{130,}$/.test(item.signature)) {
+        return new Response(JSON.stringify({ error:'invalid_signature_format' }), {
+          status: 400, headers: { 'Content-Type':'application/json' },
+        });
+      }
     }
   }
 
-  // ── Build clean upstream payload ───────────────────────────────────────────
-  // Only forward known fields — no arbitrary proxy use.
-  const upstream = {
-    requests: body.requests.map(r => ({
-      burnIntent: r.burnIntent,
-      signature:  r.signature,
-    })),
-  };
-  // estimate flag is passed as a query param if truthy
-  const isEstimate = !!body.estimate;
-  const endpoint = isEstimate
-    ? GATEWAY_API + '/v1/estimate'
-    : GATEWAY_API + '/v1/transfer';
+  // ── Build clean upstream payload ──────────────────────────────────────────
+  // Only forward known fields — strip anything unexpected.
+  let upstream;
+  if (isEstimate) {
+    upstream = body.map(item => {
+      const out = { spec: item.spec };
+      if (item.maxBlockHeight !== undefined) out.maxBlockHeight = item.maxBlockHeight;
+      if (item.maxFee !== undefined)         out.maxFee = item.maxFee;
+      return out;
+    });
+  } else {
+    upstream = body.map(item => ({
+      burnIntent: item.burnIntent,
+      signature:  item.signature,
+    }));
+  }
 
-  // ── Forward to Circle Gateway ──────────────────────────────────────────────
+  // ── Forward to Circle Gateway ─────────────────────────────────────────────
   const ctrl    = new AbortController();
   const timerId = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
 
@@ -123,7 +193,7 @@ export async function onRequestPost(ctx) {
   }
   clearTimeout(timerId);
 
-  // ── Parse and relay response ───────────────────────────────────────────────
+  // ── Parse and relay response ──────────────────────────────────────────────
   let parsed;
   try { parsed = JSON.parse(upBody); } catch(_) { parsed = { raw: upBody }; }
 
