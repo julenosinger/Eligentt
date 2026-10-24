@@ -70,10 +70,31 @@ const VALID_TRANSITIONS = {
 
 const TERMINAL_STATES = new Set(['confirmed', 'failed', 'rejected']);
 
+// ── Internal auth token ────────────────────────────────────────────────────────
+// The DO checks for an Authorization header on every request.
+// The caller (transfer.js) reads DO_INTERNAL_SECRET from env and sends it.
+// If absent or wrong, the DO returns 401 and the operation is blocked.
+// This prevents direct external access to DO routes even if someone discovers
+// the DO URL or binding name.
+//
+// CONFIGURATION: set env.DO_INTERNAL_SECRET to a random 32+ char string
+// in Cloudflare Pages → Settings → Environment Variables (Production only).
+// Without this secret, all DO operations return 401 and all transfers are blocked.
+//
+// The secret is compared with a constant-time equivalent (avoids timing attack).
+function timingSafeEqual(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
 export class GatewayOpLock {
-  constructor(state) {
+  constructor(state, env) {
     this.state   = state;
     this.storage = state.storage;
+    this.env     = env || {};
   }
 
   async fetch(request) {
@@ -84,6 +105,15 @@ export class GatewayOpLock {
       status:  status || 200,
       headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
     });
+
+    // ── Internal auth check ──────────────────────────────────────────────────
+    // Every request to the DO must carry the server-side secret.
+    // If DO_INTERNAL_SECRET is not set in env, all operations are blocked (fail-closed).
+    const expectedSecret = this.env && this.env.DO_INTERNAL_SECRET;
+    const providedSecret = request.headers.get('X-DO-Internal-Secret') || '';
+    if (!expectedSecret || !timingSafeEqual(expectedSecret, providedSecret)) {
+      return json({ error: 'unauthorized' }, 401);
+    }
 
     // ── GET /status ──────────────────────────────────────────────────────────
     if (request.method === 'GET' && action === 'status') {

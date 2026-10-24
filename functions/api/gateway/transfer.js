@@ -16,8 +16,8 @@
  *
  *   (none) → submitting            POST reserve
  *   submitting → accepted          Circle HTTP 2xx (internal)
- *   submitting → rejected          Circle HTTP 4xx (internal, definitive)
- *   submitting → ambiguous         timeout / network error (internal)
+ *   submitting → rejected          Circle HTTP 4xx definitive (internal; NOT 429, NOT 5xx)
+ *   submitting → ambiguous         timeout / network error / HTTP 5xx / HTTP 429 (internal)
  *   accepted   → confirmed         on-chain verification (internal, future)
  *   accepted   → failed            verified mint failure (internal)
  *   ambiguous  → accepted          reconciliation confirms Circle accepted
@@ -159,6 +159,16 @@ function normAddr(s) {
 // tryRollback: mark a reserved-but-unforwarded salt as 'failed' (rollback).
 //   Best-effort, idempotent.
 
+// Build headers for internal DO requests — includes the server-side secret.
+// If DO_INTERNAL_SECRET is not configured, the DO returns 401 (fail-closed).
+function doHeaders(env) {
+  const h = { 'Content-Type': 'application/json' };
+  if (env && env.DO_INTERNAL_SECRET) {
+    h['X-DO-Internal-Secret'] = env.DO_INTERNAL_SECRET;
+  }
+  return h;
+}
+
 async function tryReserve(salt, record, env) {
   const doBinding = env && env.GATEWAY_OP_LOCK;
   const kvBinding = env && env.GATEWAY_OPS_KV;
@@ -170,10 +180,11 @@ async function tryReserve(salt, record, env) {
       const doStub = doBinding.get(doId);
       const res    = await doStub.fetch('https://internal/reserve', {
         method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: doHeaders(env),
         body:    JSON.stringify(record),
       });
       const body = await res.json();
+      if (res.status === 401) return { ok: false, error: 'do_auth_failed' };
       if (res.status === 409) return { ok: false, record: body.record, conflict: true };
       if (!res.ok)            return { ok: false, error: 'do_reserve_failed' };
       return { ok: true, record: body.record };
@@ -211,8 +222,11 @@ async function tryRead(salt, env) {
     try {
       const doId   = doBinding.idFromName(salt);
       const doStub = doBinding.get(doId);
-      const res    = await doStub.fetch('https://internal/status');
+      const res    = await doStub.fetch('https://internal/status', {
+        headers: doHeaders(env),
+      });
       if (res.status === 404) return null;
+      if (res.status === 401) return null; // auth failed — treat as not-found for reads
       if (!res.ok) throw new Error('do_read_failed');
       const body = await res.json();
       return body.record || null;
@@ -238,10 +252,11 @@ async function tryUpdate(salt, update, env) {
       const doStub = doBinding.get(doId);
       const res    = await doStub.fetch('https://internal/update', {
         method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: doHeaders(env),
         body:    JSON.stringify(update),
       });
       const body = await res.json();
+      if (res.status === 401) return { ok: false, error: 'do_auth_failed' };
       if (!res.ok) return { ok: false, error: body.error };
       return { ok: true };
     } catch(_) {
@@ -270,11 +285,16 @@ async function tryUpdate(salt, update, env) {
 
 // Best-effort rollback for partial batch failures: mark salt as 'failed' so
 // the audit trail is preserved and the DO slot is not left as 'submitting'
-// indefinitely. Swallows errors — rollback is advisory.
+// indefinitely. Returns { ok, error? } so the caller knows whether rollback
+// succeeded — but the forward is BLOCKED regardless of rollback outcome.
 async function tryRollback(salt, env) {
   try {
-    await tryUpdate(salt, { status: 'failed', rollback: true }, env);
-  } catch(_) {}
+    const r = await tryUpdate(salt, { status: 'failed', rollback: true }, env);
+    if (!r.ok) return { ok: false, error: r.error, salt };
+    return { ok: true, salt };
+  } catch(e) {
+    return { ok: false, error: e.message, salt };
+  }
 }
 
 // ── POST /api/gateway/transfer ────────────────────────────────────────────────
@@ -345,25 +365,33 @@ export async function onRequestPost(ctx) {
     const result = await tryReserve(salt, record, env);
 
     if (!result.ok) {
-      // Roll back every salt already reserved in this batch
+      // Roll back every salt already reserved in this batch.
+      // Collect rollback failures so the caller can see which salts are stuck at 'submitting'.
+      const rollbackFailures = [];
       for (const rs of reserved) {
-        await tryRollback(rs, env);
+        const rb = await tryRollback(rs, env);
+        if (!rb.ok) rollbackFailures.push({ salt: rs, error: rb.error });
       }
 
       if (result.conflict) {
         return jsonResp({
-          error:       'already_submitted',
+          error:            'already_submitted',
           salt,
-          status:      result.record ? result.record.status : 'submitted',
-          submittedAt: result.record ? result.record.submittedAt : null,
-          depositor:   result.record ? result.record.depositor   : null,
-          recoverable: true,
+          status:           result.record ? result.record.status : 'submitted',
+          submittedAt:      result.record ? result.record.submittedAt : null,
+          depositor:        result.record ? result.record.depositor   : null,
+          recoverable:      true,
+          rollbackFailures: rollbackFailures.length ? rollbackFailures : undefined,
         }, 409);
       }
 
       const err = result.error || 'reserve_failed';
       const isPersistenceError = err.includes('unavailable') || err.includes('production');
-      return jsonResp({ error: err, blocked: true }, isPersistenceError ? 503 : 500);
+      return jsonResp({
+        error:            err,
+        blocked:          true,
+        rollbackFailures: rollbackFailures.length ? rollbackFailures : undefined,
+      }, isPersistenceError ? 503 : 500);
     }
 
     reserved.push(salt);
@@ -404,10 +432,25 @@ export async function onRequestPost(ctx) {
   }
   clearTimeout(timerId);
 
-  // ── Update persistence: accepted (2xx) or rejected (4xx/5xx) ─────────────
-  // 'rejected' is a definitive Circle refusal.
-  // 'confirmed' requires separate on-chain verification — never set here.
-  const newStatus = upRes.ok ? 'accepted' : 'rejected';
+  // ── Update persistence: accepted (2xx), rejected (4xx definitive), or ambiguous (5xx/uncertain) ─
+  //
+  // CLASSIFICATION RULES (per Circle Gateway semantics):
+  //   HTTP 2xx       → 'accepted'  — Circle confirmed it will process the intent
+  //   HTTP 4xx       → 'rejected'  — definitive client error (bad intent, already used salt,
+  //                                  invalid sig, etc.) — safe to retry with NEW salt
+  //   HTTP 5xx       → 'ambiguous' — Circle internal error; result is UNKNOWN.
+  //                                  Circle MAY have accepted internally before returning 5xx.
+  //                                  Do NOT mark as 'rejected' — that would allow a new salt
+  //                                  for an intent that may already be in-flight.
+  //   429 (rate limit) → 'ambiguous' — similarly uncertain
+  //
+  // NEVER treat HTTP 5xx as a definitive rejection.
+  function classifyHttpStatus(status) {
+    if (status >= 200 && status < 300) return 'accepted';
+    if (status >= 400 && status < 500 && status !== 429) return 'rejected';
+    return 'ambiguous'; // 5xx, 429, or anything unexpected
+  }
+  const newStatus = classifyHttpStatus(upRes.status);
   for (const item of body) {
     await tryUpdate(item.burnIntent.spec.salt,
       { status: newStatus, httpStatus: upRes.status }, env);

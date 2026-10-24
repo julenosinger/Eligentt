@@ -350,14 +350,20 @@
   /**
    * Update KV status after on-chain confirmation.
    * Non-fatal — if it fails, the salt record stays at "accepted" which is still safe.
+   * MUST include depositor so the proxy can verify ownership before accepting the update.
    */
-  async function patchGatewaySalt(salt, status, txHash) {
+  async function patchGatewaySalt(salt, status, txHash, depositor) {
     try {
-      await fetch('/api/gateway/transfer?salt=' + encodeURIComponent(salt), {
-        method:  'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ status, txHash: txHash || null }),
-      });
+      var dep = depositor || '';
+      await fetch(
+        '/api/gateway/transfer?salt=' + encodeURIComponent(salt)
+        + (dep ? '&depositor=' + encodeURIComponent(dep) : ''),
+        {
+          method:  'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ status, txHash: txHash || null }),
+        }
+      );
     } catch(_) {}
   }
 
@@ -814,7 +820,7 @@
 
       if (!receipt || receipt.status !== 1) {
         // Update KV to "failed" — non-fatal for the throw path
-        patchGatewaySalt(salt, 'failed', mintTx.hash);
+        patchGatewaySalt(salt, 'failed', mintTx.hash, params.depositor);
         throw Object.assign(
           new Error('tx_reverted'),
           { fatal:false, txHash: mintTx.hash }
@@ -822,7 +828,7 @@
       }
 
       // ── Update KV to confirmed ──────────────────────────────────────────────
-      patchGatewaySalt(salt, 'confirmed', receipt.hash || mintTx.hash);
+      patchGatewaySalt(salt, 'confirmed', receipt.hash || mintTx.hash, params.depositor);
 
       // ── Done ────────────────────────────────────────────────────────────────
       var result = {

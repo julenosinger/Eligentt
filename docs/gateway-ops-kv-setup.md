@@ -1,5 +1,24 @@
 # Gateway Operations — Persistence Setup
 
+## Required Environment Variables
+
+| Variable | Where to set | Purpose |
+|---|---|---|
+| `GATEWAY_OPS_KV` | wrangler.jsonc kv_namespaces binding | KV fallback for non-production idempotence |
+| `GATEWAY_OP_LOCK` | CF Pages DO binding | Primary atomic lock (required in production) |
+| `DO_INTERNAL_SECRET` | CF Pages → Env Variables → Production | Shared secret between proxy and DO (min 32 chars) |
+| `GATEWAY_ENV` | CF Pages → Env Variables → Production | Set to `'production'` to disable KV fallback |
+
+### DO_INTERNAL_SECRET
+The Durable Object verifies this secret on every internal request using a
+constant-time comparison. Without it, **all DO operations return 401** and all
+transfers are blocked (fail-closed). Generate with:
+```
+openssl rand -hex 32
+```
+Set it in CF Dashboard → Pages → Settings → Environment Variables → Production only.
+**Never** commit this value to source control or expose it in frontend code.
+
 ## Atomicity Architecture (Two-layer)
 
 ### Layer 1 — Durable Object (GATEWAY_OP_LOCK) — Primary

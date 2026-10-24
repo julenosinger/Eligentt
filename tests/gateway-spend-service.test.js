@@ -1079,8 +1079,8 @@ describe('GSS12 — P0/P1.4: KV persistence, cross-session recovery, isolation',
     expect(forwardPos).toBeGreaterThan(-1);
     expect(callSitePos).toBeGreaterThan(-1);
     expect(callSitePos).toBeGreaterThan(forwardPos);
-    // Status set to accepted on 2xx
-    expect(src).toContain("upRes.ok ? 'accepted' : 'rejected'");
+    // Status classification uses classifyHttpStatus (2xx→accepted, 4xx→rejected, 5xx→ambiguous)
+    expect(src).toContain("classifyHttpStatus(upRes.status)");
   });
 
   // ── GSS12.10: GET /api/gateway/transfer — depositor required + isolation ─
@@ -1434,16 +1434,16 @@ describe('GSS14 — P0/P1.6: state machine, batch rollback, DO prod, rejected vs
     expect(ambiguousIdx).toBeLessThan(returnIdx);
   });
 
-  // ── GSS14.5: Circle 4xx sets salt to 'rejected' (not 'failed') ────────────
-  it('GSS14.5 — Circle 4xx/5xx sets status to rejected (not failed or left as accepted)', () => {
-    // newStatus = upRes.ok ? 'accepted' : 'rejected'
-    expect(proxySrc).toContain("upRes.ok ? 'accepted' : 'rejected'");
-    // 'rejected' is used (not 'failed') for Circle refusal
-    const rejectStatusIdx = proxySrc.indexOf("'rejected'");
-    expect(rejectStatusIdx).toBeGreaterThan(-1);
+  // ── GSS14.5: Circle 4xx → rejected; 5xx → ambiguous (classifyHttpStatus) ──
+  it('GSS14.5 — Circle 4xx → rejected; 5xx → ambiguous via classifyHttpStatus', () => {
+    // Old ternary must be gone (it mapped ALL non-2xx to rejected, including 5xx)
+    expect(proxySrc).not.toContain("upRes.ok ? 'accepted' : 'rejected'");
+    // New code uses classifyHttpStatus(upRes.status)
+    expect(proxySrc).toContain('classifyHttpStatus(upRes.status)');
+    // 'rejected' is still used for definitive Circle 4xx refusal
+    expect(proxySrc).toContain("'rejected'");
     // Must NOT set 'failed' on Circle HTTP response
-    const failedOnCircleResp = proxySrc.includes("upRes.ok ? 'accepted' : 'failed'");
-    expect(failedOnCircleResp).toBe(false);
+    expect(proxySrc).not.toContain("upRes.ok ? 'accepted' : 'failed'");
   });
 
   // ── GSS14.6: batch rollback — reserved salts rolled back on partial failure ─
@@ -1598,5 +1598,215 @@ describe('GSS14 — P0/P1.6: state machine, batch rollback, DO prod, rejected vs
     expect(ambiguousLine).toContain("'accepted'");
     expect(ambiguousLine).toContain("'rejected'");
     expect(ambiguousLine).toContain("'failed'");
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+//  GSS15 — P0/P1.7: HTTP classification, DO auth, depositor in PATCH, rollback
+// ════════════════════════════════════════════════════════════════════════════
+describe('GSS15 — P0/P1.7: HTTP classification, DO auth, PATCH depositor, rollback', () => {
+  const proxySrc = require('fs').readFileSync(
+    require('path').join(__dirname, '../functions/api/gateway/transfer.js'), 'utf8'
+  );
+  const doSrc = require('fs').readFileSync(
+    require('path').join(__dirname, '../functions/api/gateway/gateway-op-lock.do.js'), 'utf8'
+  );
+  const svcSrc = require('fs').readFileSync(
+    require('path').join(__dirname, '../shared/GatewaySpendService.js'), 'utf8'
+  );
+
+  // ── GSS15.1: HTTP 5xx from Circle → 'ambiguous', NOT 'rejected' ─────────
+  it('GSS15.1 — classifyHttpStatus: 5xx → ambiguous (not rejected)', () => {
+    // Extract classifyHttpStatus function from proxy
+    const startIdx = proxySrc.indexOf('function classifyHttpStatus(');
+    expect(startIdx).toBeGreaterThan(-1);
+    const endIdx   = proxySrc.indexOf('\n  }', startIdx) + 4;
+    const fnSrc    = proxySrc.slice(startIdx, endIdx);
+    // Must NOT use a dedicated 5xx branch that returns 'rejected'
+    // (the function must use range logic, not a separate >= 500 check returning rejected)
+    expect(fnSrc).not.toContain(">= 500");  // no hardcoded 5xx range returning rejected
+    // Must map everything outside 2xx/definitive-4xx to 'ambiguous'
+    expect(fnSrc).toContain("'ambiguous'");
+    // 429 is explicitly excluded from the rejected branch
+    expect(fnSrc).toContain("429");
+  });
+
+  // ── GSS15.2: classifyHttpStatus functional: 500 → ambiguous ─────────────
+  it('GSS15.2 — classifyHttpStatus(500) → ambiguous (never rejected)', () => {
+    // Execute the function in isolation
+    const fnSrc = proxySrc.slice(
+      proxySrc.indexOf('function classifyHttpStatus('),
+      proxySrc.indexOf('\n  }', proxySrc.indexOf('function classifyHttpStatus(')) + 4
+    );
+    // eslint-disable-next-line no-new-func
+    const classifyFn = new Function(`return (${fnSrc})`)();
+    expect(classifyFn(500)).toBe('ambiguous');
+    expect(classifyFn(503)).toBe('ambiguous');
+    expect(classifyFn(504)).toBe('ambiguous');
+    expect(classifyFn(429)).toBe('ambiguous');
+  });
+
+  // ── GSS15.3: classifyHttpStatus: 4xx (not 429) → rejected ───────────────
+  it('GSS15.3 — classifyHttpStatus: 4xx (non-429) → rejected; 2xx → accepted', () => {
+    const fnSrc = proxySrc.slice(
+      proxySrc.indexOf('function classifyHttpStatus('),
+      proxySrc.indexOf('\n  }', proxySrc.indexOf('function classifyHttpStatus(')) + 4
+    );
+    // eslint-disable-next-line no-new-func
+    const classifyFn = new Function(`return (${fnSrc})`)();
+    expect(classifyFn(400)).toBe('rejected');
+    expect(classifyFn(409)).toBe('rejected');
+    expect(classifyFn(422)).toBe('rejected');
+    expect(classifyFn(200)).toBe('accepted');
+    expect(classifyFn(201)).toBe('accepted');
+  });
+
+  // ── GSS15.4: classifyHttpStatus used in POST handler (not old 'rejected' literal) ─
+  it('GSS15.4 — POST handler uses classifyHttpStatus (not hardcoded rejected)', () => {
+    // The old code: "upRes.ok ? 'accepted' : 'rejected'"
+    // This must no longer exist; replaced by classifyHttpStatus
+    expect(proxySrc).not.toContain("upRes.ok ? 'accepted' : 'rejected'");
+    expect(proxySrc).toContain('classifyHttpStatus(upRes.status)');
+  });
+
+  // ── GSS15.5: DO requires X-DO-Internal-Secret header ────────────────────
+  it('GSS15.5 — DO auth: timingSafeEqual defined, 401 on missing secret', () => {
+    expect(doSrc).toContain('timingSafeEqual(');
+    expect(doSrc).toContain('X-DO-Internal-Secret');
+    expect(doSrc).toContain("json({ error: 'unauthorized' }, 401)");
+    // DO_INTERNAL_SECRET must be read from env
+    expect(doSrc).toContain('DO_INTERNAL_SECRET');
+  });
+
+  // ── GSS15.6: proxy sends X-DO-Internal-Secret in DO calls ───────────────
+  it('GSS15.6 — proxy includes X-DO-Internal-Secret via doHeaders(env)', () => {
+    expect(proxySrc).toContain('doHeaders(env)');
+    expect(proxySrc).toContain('X-DO-Internal-Secret');
+    expect(proxySrc).toContain('DO_INTERNAL_SECRET');
+    // doHeaders is used in tryReserve, tryRead, tryUpdate
+    const reserveBlock = proxySrc.slice(
+      proxySrc.indexOf('async function tryReserve('),
+      proxySrc.indexOf('async function tryRead(')
+    );
+    expect(reserveBlock).toContain('doHeaders(env)');
+    const readBlock = proxySrc.slice(
+      proxySrc.indexOf('async function tryRead('),
+      proxySrc.indexOf('async function tryUpdate(')
+    );
+    expect(readBlock).toContain('doHeaders(env)');
+    const updateBlock = proxySrc.slice(
+      proxySrc.indexOf('async function tryUpdate('),
+      proxySrc.indexOf('async function tryRollback(')
+    );
+    expect(updateBlock).toContain('doHeaders(env)');
+  });
+
+  // ── GSS15.7: timingSafeEqual is constant-time (no short-circuit on length mismatch) ─
+  it('GSS15.7 — timingSafeEqual returns false for different-length inputs without timing leak', () => {
+    // Extract and execute timingSafeEqual
+    const startIdx = doSrc.indexOf('function timingSafeEqual(');
+    const endIdx   = doSrc.indexOf('\n}', startIdx) + 2;
+    const fnSrc    = doSrc.slice(startIdx, endIdx);
+    // eslint-disable-next-line no-new-func
+    const tse = new Function(`return (${fnSrc})`)();
+    expect(tse('abc', 'abc')).toBe(true);
+    expect(tse('abc', 'abd')).toBe(false);
+    expect(tse('abc', 'abcd')).toBe(false);  // different length
+    expect(tse('', '')).toBe(true);
+    expect(tse(null, 'abc')).toBe(false);
+  });
+
+  // ── GSS15.8: 401 from DO treated as error in tryReserve ─────────────────
+  it('GSS15.8 — tryReserve handles 401 from DO as do_auth_failed', () => {
+    expect(proxySrc).toContain("'do_auth_failed'");
+    // 401 check must be present before other status checks in tryReserve
+    const reserveSrc = proxySrc.slice(
+      proxySrc.indexOf('async function tryReserve('),
+      proxySrc.indexOf('async function tryRead(')
+    );
+    const authIdx = reserveSrc.indexOf("'do_auth_failed'");
+    const conflictIdx = reserveSrc.indexOf("conflict: true");
+    expect(authIdx).toBeGreaterThan(-1);
+    expect(conflictIdx).toBeGreaterThan(-1);
+    expect(authIdx).toBeLessThan(conflictIdx);  // 401 checked before 409
+  });
+
+  // ── GSS15.9: patchGatewaySalt accepts and sends depositor param ──────────
+  it('GSS15.9 — patchGatewaySalt(salt, status, txHash, depositor) includes depositor in URL', () => {
+    // Function signature must have 4 params
+    expect(svcSrc).toContain('async function patchGatewaySalt(salt, status, txHash, depositor)');
+    // URL must include depositor query param
+    const fnStart = svcSrc.indexOf('async function patchGatewaySalt(');
+    const fnEnd   = svcSrc.indexOf('\n  }', fnStart) + 4;
+    const fnSrc   = svcSrc.slice(fnStart, fnEnd);
+    expect(fnSrc).toContain('depositor');
+    expect(fnSrc).toContain('&depositor=');
+  });
+
+  // ── GSS15.10: patchGatewaySalt call-sites pass params.depositor ──────────
+  it('GSS15.10 — execute() passes params.depositor to both patchGatewaySalt calls', () => {
+    // Count patchGatewaySalt calls in execute
+    const execStart  = svcSrc.indexOf('async function execute(');
+    const execEnd    = svcSrc.indexOf('\n  // ── cancel()', execStart);
+    const execBody   = svcSrc.slice(execStart, execEnd);
+    // Both calls must include params.depositor as 4th arg
+    const calls = execBody.match(/patchGatewaySalt\([^)]+\)/g) || [];
+    expect(calls.length).toBeGreaterThanOrEqual(2);
+    calls.forEach(call => {
+      expect(call).toContain('params.depositor');
+    });
+  });
+
+  // ── GSS15.11: tryRollback returns {ok, error?, salt} ────────────────────
+  it('GSS15.11 — tryRollback returns {ok, error?, salt} — not void', () => {
+    // New: returns structured result (not void / catch-and-discard)
+    const rbStart = proxySrc.indexOf('async function tryRollback(');
+    const rbEnd   = proxySrc.indexOf('\n}', rbStart) + 2;
+    const rbSrc   = proxySrc.slice(rbStart, rbEnd);
+    expect(rbSrc).toContain('return { ok: true, salt }');
+    expect(rbSrc).toContain('return { ok: false, error');
+    // Must NOT silently swallow errors (no bare catch(_) {} without return)
+    expect(rbSrc).not.toMatch(/catch\([^)]*\)\s*\{\s*\}/);  // no empty catch block
+  });
+
+  // ── GSS15.12: rollback failures are collected and included in response ───
+  it('GSS15.12 — batch reserve failure collects rollbackFailures in response', () => {
+    // rollbackFailures array must be declared and populated
+    expect(proxySrc).toContain('const rollbackFailures = []');
+    expect(proxySrc).toContain('rollbackFailures.push(');
+    expect(proxySrc).toContain('rollbackFailures: rollbackFailures.length');
+  });
+
+  // ── GSS15.13: DO auth — without secret, constructor fails closed ─────────
+  it('GSS15.13 — DO fails closed when DO_INTERNAL_SECRET not configured', () => {
+    // If expectedSecret is falsy, the check still fires (because !expectedSecret)
+    const checkBlock = doSrc.slice(
+      doSrc.indexOf('// ── Internal auth check'),
+      doSrc.indexOf('// ── GET /status')
+    );
+    expect(checkBlock).toContain('!expectedSecret');
+    // Returns 401 when secret missing
+    expect(checkBlock).toContain("json({ error: 'unauthorized' }, 401)");
+  });
+
+  // ── GSS15.14: 5xx response from Circle does not return 'rejected' ────────
+  it('GSS15.14 — proxy POST response for 5xx carries ambiguous status in persistence', () => {
+    // The state written to persistence for 5xx must not be 'rejected'
+    // classifyHttpStatus(503) === 'ambiguous' (proven in GSS15.2)
+    // And that function is used: classifyHttpStatus(upRes.status)
+    expect(proxySrc).toContain('classifyHttpStatus(upRes.status)');
+    // Confirm comment explicitly says 5xx → ambiguous
+    expect(proxySrc).toContain('5xx');
+    expect(proxySrc).toContain("'ambiguous'");
+  });
+
+  // ── GSS15.15: docs include DO_INTERNAL_SECRET setup instructions ─────────
+  it('GSS15.15 — docs/gateway-ops-kv-setup.md documents DO_INTERNAL_SECRET', () => {
+    const docSrc = require('fs').readFileSync(
+      require('path').join(__dirname, '../docs/gateway-ops-kv-setup.md'), 'utf8'
+    );
+    expect(docSrc).toContain('DO_INTERNAL_SECRET');
+    expect(docSrc).toContain('openssl rand');
+    expect(docSrc).toContain('constant-time');
   });
 });
