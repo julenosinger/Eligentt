@@ -525,6 +525,8 @@ describe('GSS8 — lock lifecycle, cancel, resolveAmbiguous', () => {
         ok:   true,
         json: async () => ({ assets:[{ token:'USDC', balances:[{ domain:26, balance:'10.0' }] }] }),
       })
+      // KV pre-submit query → 404 (new salt)
+      .mockResolvedValueOnce({ ok: false, status: 404 })
       // transfer POST fails with network error (ambiguous)
       .mockRejectedValueOnce(new Error('connection reset'));
 
@@ -543,6 +545,7 @@ describe('GSS8 — lock lifecycle, cancel, resolveAmbiguous', () => {
         ok:   true,
         json: async () => ({ assets:[{ token:'USDC', balances:[{ domain:26, balance:'10.0' }] }] }),
       })
+      .mockResolvedValueOnce({ ok: false, status: 404 })
       .mockRejectedValueOnce(new Error('connection reset'));
 
     await GatewaySpendService.execute(BASE_PARAMS, async () => VALID_SIG, () => {});
@@ -559,6 +562,7 @@ describe('GSS8 — lock lifecycle, cancel, resolveAmbiguous', () => {
         ok:   true,
         json: async () => ({ assets:[{ token:'USDC', balances:[{ domain:26, balance:'10.0' }] }] }),
       })
+      .mockResolvedValueOnce({ ok: false, status: 404 })
       .mockRejectedValueOnce(new Error('connection reset'));
 
     await GatewaySpendService.execute(BASE_PARAMS, async () => VALID_SIG, () => {});
@@ -575,6 +579,7 @@ describe('GSS8 — lock lifecycle, cancel, resolveAmbiguous', () => {
         ok:   true,
         json: async () => ({ assets:[{ token:'USDC', balances:[{ domain:26, balance:'10.0' }] }] }),
       })
+      .mockResolvedValueOnce({ ok: false, status: 404 })
       .mockRejectedValueOnce(new Error('connection reset'));
 
     const r1 = await GatewaySpendService.execute(BASE_PARAMS, async () => VALID_SIG, () => {});
@@ -625,6 +630,9 @@ describe('GSS9 — execute() integration', () => {
         ok:   true,
         json: async () => ({ assets:[{ token:'USDC', balances:[{ domain:26, balance:'10.0' }] }] }),
       })
+      // KV pre-submit query → 404 (new salt, safe to proceed)
+      .mockResolvedValueOnce({ ok: false, status: 404 })
+      // transfer POST → Circle returns 5xx
       .mockResolvedValueOnce({
         ok:     false,
         status: 503,
@@ -817,6 +825,8 @@ describe('GSS11 — P0/P1 correctness', () => {
         ok:   true,
         json: async () => ({ assets:[{ token:'USDC', balances:[{ domain:26, balance:'10.0' }] }] }),
       })
+      // KV pre-submit query → not_found (404) — safe to proceed
+      .mockResolvedValueOnce({ ok: false, status: 404 })
       .mockRejectedValueOnce(new Error('network error'));
 
     const r1 = await GatewaySpendService.execute(BASE_PARAMS, async () => VALID_SIG, () => {});
@@ -836,6 +846,8 @@ describe('GSS11 — P0/P1 correctness', () => {
         ok:   true,
         json: async () => ({ assets:[{ token:'USDC', balances:[{ domain:26, balance:'10.0' }] }] }),
       })
+      // KV pre-submit query → not_found (404)
+      .mockResolvedValueOnce({ ok: false, status: 404 })
       .mockRejectedValueOnce(new Error('network error'));
 
     await GatewaySpendService.execute(BASE_PARAMS, async () => VALID_SIG, () => {});
@@ -951,27 +963,29 @@ describe('GSS12 — P0/P1.4: KV persistence, cross-session recovery, isolation',
     expect(transferPost).not.toHaveBeenCalled();
   });
 
-  // ── GSS12.3: KV query network failure — proceed (not block) ──────────────
-  it('GSS12.3 — KV query fails (network error) → execute proceeds normally', async () => {
+  // ── GSS12.3: KV query network failure — BLOCK (fail-safe) ───────────────
+  // P0 Fase 1.9: a failed KV query is treated as 'unavailable', NOT 'not_found'.
+  // Cannot confirm the salt is absent → block with kv_query_unavailable.
+  it('GSS12.3 — KV query fails (network error) → BLOCKED (fail-safe, not fail-open)', async () => {
     GatewaySpendService._testSetVerifier(() => ADDR_A);
 
+    const transferPost = vi.fn();
     global.fetch = vi.fn()
       // balance check
       .mockResolvedValueOnce({
         ok:   true,
         json: async () => ({ assets:[{ token:'USDC', balances:[{ domain:26, balance:'10.0' }] }] }),
       })
-      // KV query → network error → should proceed (fail-open for KV query, not for signing)
+      // KV query → network error → unavailable → block
       .mockRejectedValueOnce(new Error('kv-network-error'))
-      // transfer POST
-      .mockResolvedValueOnce({
-        ok:   true,
-        json: async () => ([{ attestation: { payload:'0xdeadbeef', signature:'0xcafebabe' } }]),
-      });
+      // transfer POST — should NOT be reached
+      .mockImplementationOnce(transferPost);
 
     const r = await GatewaySpendService.execute(BASE_PARAMS, async () => VALID_SIG, () => {});
-    // Should reach no_wallet_provider (Node env), not KV error
-    expect(r.error).toBe('no_wallet_provider');
+    // P0 Fase 1.9: unavailable blocks execution — cannot confirm salt is new
+    expect(r.error).toContain('kv_query_unavailable');
+    expect(r.fatal).toBe(true);
+    expect(transferPost).not.toHaveBeenCalled();
   });
 
   // ── GSS12.4: KV "rejected" salt → salt_was_rejected, not re-executed ─────
@@ -1235,19 +1249,23 @@ describe('GSS13 — P0/P1.5: atomicity, authorisation, state machine, fail-safe'
   });
 
   // ── GSS13.5: 'confirmed' cannot be set by client PATCH ───────────────────
-  it('GSS13.5 — proxy PATCH rejects status=confirmed from client', () => {
-    // Client-allowed transitions must be defined and exclude 'confirmed'
+  it('GSS13.5 — proxy PATCH: client-allowed transitions defined and guarded (updated Fase 1.9)', () => {
+    // P0 Fase 1.9: CLIENT_ALLOWED_TRANSITIONS now includes accepted→[failed,confirmed]
+    // when txHash is provided (receipt evidence). This supercedes the old Fase 1.5
+    // restriction that only ambiguous→failed was allowed.
     expect(proxySrc).toContain('CLIENT_ALLOWED_TRANSITIONS');
     expect(proxySrc).toContain('client_transition_not_allowed');
-    // 'confirmed' is internal-only (per the comment and code)
-    expect(proxySrc).toContain("internal-only transitions");
     // isClientAllowed check exists
     expect(proxySrc).toContain('isClientAllowed(');
-    // 'confirmed' must NOT appear in CLIENT_ALLOWED_TRANSITIONS values
-    const caStart     = proxySrc.indexOf('CLIENT_ALLOWED_TRANSITIONS');
+    // TRANSITIONS_REQUIRING_TXHASH guards accepted→confirmed and accepted→failed
+    expect(proxySrc).toContain('TRANSITIONS_REQUIRING_TXHASH');
+    expect(proxySrc).toContain('txhash_required');
+    // submitting and rejected must still NOT be client-modifiable
+    const caStart     = proxySrc.indexOf('const CLIENT_ALLOWED_TRANSITIONS');
     const caEnd       = proxySrc.indexOf('};', caStart) + 2;
     const clientBlock = proxySrc.slice(caStart, caEnd);
-    expect(clientBlock).not.toContain("'confirmed'");
+    expect(clientBlock).not.toContain("submitting:");
+    expect(clientBlock).not.toContain("rejected:");
   });
 
   // ── GSS13.6: proxy PATCH requires depositor for isolation ────────────────
@@ -1515,18 +1533,20 @@ describe('GSS14 — P0/P1.6: state machine, batch rollback, DO prod, rejected vs
   });
 
   // ── GSS14.12: ambiguous→failed is the only CLIENT_ALLOWED_TRANSITIONS entry
-  it('GSS14.12 — CLIENT_ALLOWED_TRANSITIONS only allows ambiguous→failed', () => {
-    // CLIENT_ALLOWED_TRANSITIONS block: only up to the closing };
+  it('GSS14.12 — CLIENT_ALLOWED_TRANSITIONS: accepted+ambiguous with txHash guard (Fase 1.9)', () => {
+    // Fase 1.9 update: accepted→[failed,confirmed] now allowed with txHash.
+    // ambiguous→failed still allowed (no txHash required).
+    // submitting, rejected remain internal-only.
     const startIdx    = proxySrc.indexOf('const CLIENT_ALLOWED_TRANSITIONS');
     const endIdx      = proxySrc.indexOf('};', startIdx) + 2;
     const clientBlock = proxySrc.slice(startIdx, endIdx);
-    // Only 'ambiguous' key allowed
     expect(clientBlock).toContain("ambiguous:");
-    // 'submitting', 'accepted', 'rejected' must NOT be client-modifiable
+    expect(clientBlock).toContain("accepted:");
+    // 'submitting' and 'rejected' must NOT be client-modifiable
     expect(clientBlock).not.toContain("submitting:");
-    expect(clientBlock).not.toContain("accepted:");
-    // 'confirmed' must NOT appear as a value in CLIENT_ALLOWED_TRANSITIONS
-    expect(clientBlock).not.toContain("'confirmed'");
+    expect(clientBlock).not.toContain("rejected:");
+    // txHash guard must exist for accepted transitions
+    expect(proxySrc).toContain('TRANSITIONS_REQUIRING_TXHASH');
   });
 
   // ── GSS14.13: service-level KV query blocks already-confirmed salts ───────
@@ -1808,5 +1828,249 @@ describe('GSS15 — P0/P1.7: HTTP classification, DO auth, PATCH depositor, roll
     expect(docSrc).toContain('DO_INTERNAL_SECRET');
     expect(docSrc).toContain('openssl rand');
     expect(docSrc).toContain('constant-time');
+  });
+});
+
+// ── GSS16: P0/P1 Fase 1.9 — reconciliação, PATCH, queryGatewaySalt discriminado ──
+describe('GSS16 — P0/P1.9: reconciliação, PATCH transitions, queryGatewaySalt discriminated', () => {
+  const proxySrc    = require('fs').readFileSync(require('path').join(__dirname, '../functions/api/gateway/transfer.js'), 'utf8');
+  const serviceSrc  = require('fs').readFileSync(require('path').join(__dirname, '../shared/GatewaySpendService.js'), 'utf8');
+
+  beforeEach(() => {
+    if (GatewaySpendService._testClearInflight) GatewaySpendService._testClearInflight();
+    if (GatewaySpendService._testClearVerifier) GatewaySpendService._testClearVerifier();
+  });
+
+  // ── GSS16.1: accepted→confirmed is now in CLIENT_ALLOWED_TRANSITIONS ────────
+  it('GSS16.1 — accepted→confirmed is allowed with txHash', () => {
+    expect(proxySrc).toContain("accepted:  ['failed', 'confirmed']");
+  });
+
+  // ── GSS16.2: accepted→failed is now in CLIENT_ALLOWED_TRANSITIONS ───────────
+  it('GSS16.2 — accepted→failed is allowed with txHash', () => {
+    expect(proxySrc).toContain("accepted:  ['failed', 'confirmed']");
+  });
+
+  // ── GSS16.3: txHash required for accepted→confirmed and accepted→failed ─────
+  it('GSS16.3 — proxy enforces txHash for accepted→confirmed and accepted→failed', () => {
+    expect(proxySrc).toContain('TRANSITIONS_REQUIRING_TXHASH');
+    expect(proxySrc).toContain('txhash_required');
+    expect(proxySrc).toContain("record.status === 'accepted' && TRANSITIONS_REQUIRING_TXHASH.has(toStatus)");
+  });
+
+  // ── GSS16.4: txHash must be 32-byte hex ─────────────────────────────────────
+  it('GSS16.4 — txHash validated as 0x + 64 hex chars (32 bytes)', () => {
+    // Must not accept a short or malformed hash
+    expect(proxySrc).toContain('/^0x[0-9a-fA-F]{64}$/');
+  });
+
+  // ── GSS16.5: PATCH can't set confirmed without txHash ──────────────────────
+  it('GSS16.5 — PATCH handler: accepted→confirmed blocked when txHash missing', async () => {
+    // Simulate PATCH handler logic: accepted→confirmed requires txHash
+    const { onRequestPatch } = require('../functions/api/gateway/transfer.js');
+    const kvStore = new Map();
+    kvStore.set('gw:op:0x' + 'ab'.repeat(32), {
+      salt: '0x' + 'ab'.repeat(32), depositor: ADDR_A,
+      status: 'accepted', submittedAt: new Date().toISOString(),
+    });
+    const mockEnv = {
+      GATEWAY_OPS_KV: {
+        get:  async (k, opts) => { const v = kvStore.get(k); return (opts && opts.type === 'json') ? v : JSON.stringify(v); },
+        put:  async () => {},
+      },
+      GATEWAY_ENV: 'test',
+    };
+    const req = new Request(
+      'https://worker.dev/api/gateway/transfer?salt=0x' + 'ab'.repeat(32) + '&depositor=' + ADDR_A,
+      { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'confirmed' }) }
+    );
+    const res = await onRequestPatch({ request: req, env: mockEnv });
+    const body = await res.json();
+    // Must fail with txhash_required
+    expect(body.error).toBe('txhash_required');
+    expect(res.status).toBe(400);
+  });
+
+  // ── GSS16.6: PATCH accepted→confirmed succeeds with valid txHash ─────────────
+  it('GSS16.6 — PATCH accepted→confirmed succeeds with valid txHash', async () => {
+    const { onRequestPatch } = require('../functions/api/gateway/transfer.js');
+    const validTxHash = '0x' + 'cc'.repeat(32);
+    const kvStore = new Map();
+    kvStore.set('gw:op:0x' + 'ab'.repeat(32), {
+      salt: '0x' + 'ab'.repeat(32), depositor: ADDR_A,
+      status: 'accepted', submittedAt: new Date().toISOString(),
+    });
+    const mockEnv = {
+      GATEWAY_OPS_KV: {
+        get:  async (k, opts) => { const v = kvStore.get(k); return (opts && opts.type === 'json') ? v : JSON.stringify(v); },
+        put:  async (k, v) => { kvStore.set(k, JSON.parse(v)); },
+      },
+      GATEWAY_ENV: 'test',
+    };
+    const req = new Request(
+      'https://worker.dev/api/gateway/transfer?salt=0x' + 'ab'.repeat(32) + '&depositor=' + ADDR_A,
+      { method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'confirmed', txHash: validTxHash }) }
+    );
+    const res = await onRequestPatch({ request: req, env: mockEnv });
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.status).toBe('confirmed');
+  });
+
+  // ── GSS16.7: PATCH accepted→failed succeeds with valid txHash ───────────────
+  it('GSS16.7 — PATCH accepted→failed succeeds with valid txHash', async () => {
+    const { onRequestPatch } = require('../functions/api/gateway/transfer.js');
+    const validTxHash = '0x' + 'dd'.repeat(32);
+    const kvStore = new Map();
+    kvStore.set('gw:op:0x' + 'ab'.repeat(32), {
+      salt: '0x' + 'ab'.repeat(32), depositor: ADDR_A,
+      status: 'accepted', submittedAt: new Date().toISOString(),
+    });
+    const mockEnv = {
+      GATEWAY_OPS_KV: {
+        get:  async (k, opts) => { const v = kvStore.get(k); return (opts && opts.type === 'json') ? v : JSON.stringify(v); },
+        put:  async (k, v) => { kvStore.set(k, JSON.parse(v)); },
+      },
+      GATEWAY_ENV: 'test',
+    };
+    const req = new Request(
+      'https://worker.dev/api/gateway/transfer?salt=0x' + 'ab'.repeat(32) + '&depositor=' + ADDR_A,
+      { method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'failed', txHash: validTxHash }) }
+    );
+    const res = await onRequestPatch({ request: req, env: mockEnv });
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.status).toBe('failed');
+  });
+
+  // ── GSS16.8: confirmed→anything is rejected (terminal) ──────────────────────
+  it('GSS16.8 — confirmed is terminal: PATCH confirmed→failed is rejected', async () => {
+    const { onRequestPatch } = require('../functions/api/gateway/transfer.js');
+    const kvStore = new Map();
+    kvStore.set('gw:op:0x' + 'ab'.repeat(32), {
+      salt: '0x' + 'ab'.repeat(32), depositor: ADDR_A,
+      status: 'confirmed', submittedAt: new Date().toISOString(),
+    });
+    const mockEnv = {
+      GATEWAY_OPS_KV: {
+        get:  async (k, opts) => { const v = kvStore.get(k); return (opts && opts.type === 'json') ? v : JSON.stringify(v); },
+        put:  async () => {},
+      },
+      GATEWAY_ENV: 'test',
+    };
+    const req = new Request(
+      'https://worker.dev/api/gateway/transfer?salt=0x' + 'ab'.repeat(32) + '&depositor=' + ADDR_A,
+      { method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'failed', txHash: '0x' + 'cc'.repeat(32) }) }
+    );
+    const res = await onRequestPatch({ request: req, env: mockEnv });
+    const body = await res.json();
+    expect(body.error).toBe('client_transition_not_allowed');
+    expect(res.status).toBe(400);
+  });
+
+  // ── GSS16.9: queryGatewaySalt returns discriminated result ──────────────────
+  it('GSS16.9 — queryGatewaySalt 404 → { found:false, unavailable:false }', () => {
+    expect(serviceSrc).toContain("if (res.status === 404) return { found: false, unavailable: false }");
+  });
+
+  it('GSS16.10 — queryGatewaySalt non-404 error → { found:false, unavailable:true }', () => {
+    expect(serviceSrc).toContain("return { found: false, unavailable: true, httpStatus: res.status }");
+  });
+
+  it('GSS16.11 — queryGatewaySalt network error → { found:false, unavailable:true }', () => {
+    expect(serviceSrc).toContain("return { found: false, unavailable: true, error: e && e.message }");
+  });
+
+  // ── GSS16.12: KV unavailable blocks execution (fail-safe) ───────────────────
+  it('GSS16.12 — execute() blocks with kv_query_unavailable when query fails', async () => {
+    GatewaySpendService._testSetVerifier(() => ADDR_A);
+    const transferPost = vi.fn();
+    global.fetch = vi.fn()
+      // balance check
+      .mockResolvedValueOnce({
+        ok:   true,
+        json: async () => ({ assets:[{ token:'USDC', balances:[{ domain:26, balance:'10.0' }] }] }),
+      })
+      // KV query → HTTP 503 (KV down) — unavailable, not 404
+      .mockResolvedValueOnce({ ok: false, status: 503 })
+      // transfer POST — must NOT be reached
+      .mockImplementationOnce(transferPost);
+
+    const r = await GatewaySpendService.execute(BASE_PARAMS, async () => VALID_SIG, () => {});
+    expect(r.error).toContain('kv_query_unavailable');
+    expect(r.fatal).toBe(true);
+    expect(transferPost).not.toHaveBeenCalled();
+  });
+
+  // ── GSS16.13: execute() proceeds when KV returns genuine 404 ────────────────
+  it('GSS16.13 — execute() proceeds when KV returns 404 (salt genuinely absent)', async () => {
+    GatewaySpendService._testSetVerifier(() => ADDR_A);
+    global.fetch = vi.fn()
+      .mockResolvedValueOnce({
+        ok:   true,
+        json: async () => ({ assets:[{ token:'USDC', balances:[{ domain:26, balance:'10.0' }] }] }),
+      })
+      // KV query → genuine 404
+      .mockResolvedValueOnce({ ok: false, status: 404 })
+      // transfer POST → succeed
+      .mockResolvedValueOnce({
+        ok:   true,
+        json: async () => ([{ attestation: { payload:'0xdeadbeef', signature:'0xcafebabe' } }]),
+      });
+    const r = await GatewaySpendService.execute(BASE_PARAMS, async () => VALID_SIG, () => {});
+    // In Node, reaches no_wallet_provider — proves it passed the KV check
+    expect(r.error).toBe('no_wallet_provider');
+  });
+
+  // ── GSS16.14: PATCH confirmed→failed blocked even with txHash ───────────────
+  it('GSS16.14 — confirmed is truly terminal — cannot be reversed even with txHash', async () => {
+    const { onRequestPatch } = require('../functions/api/gateway/transfer.js');
+    const kvStore = new Map();
+    kvStore.set('gw:op:0x' + 'ff'.repeat(32), {
+      salt: '0x' + 'ff'.repeat(32), depositor: ADDR_A, status: 'confirmed',
+    });
+    const mockEnv = {
+      GATEWAY_OPS_KV: {
+        get: async (k, opts) => { const v = kvStore.get(k); return (opts && opts.type === 'json') ? v : JSON.stringify(v); },
+        put: async () => {},
+      },
+      GATEWAY_ENV: 'test',
+    };
+    const req = new Request(
+      'https://worker.dev/api/gateway/transfer?salt=0x' + 'ff'.repeat(32) + '&depositor=' + ADDR_A,
+      { method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'failed', txHash: '0x' + 'aa'.repeat(32) }) }
+    );
+    const res = await onRequestPatch({ request: req, env: mockEnv });
+    const body = await res.json();
+    expect(body.error).toBe('client_transition_not_allowed');
+  });
+
+  // ── GSS16.15: ambiguous→failed still allowed without txHash ─────────────────
+  it('GSS16.15 — ambiguous→failed is still allowed without txHash', async () => {
+    const { onRequestPatch } = require('../functions/api/gateway/transfer.js');
+    const kvStore = new Map();
+    kvStore.set('gw:op:0x' + 'bb'.repeat(32), {
+      salt: '0x' + 'bb'.repeat(32), depositor: ADDR_A, status: 'ambiguous',
+    });
+    const mockEnv = {
+      GATEWAY_OPS_KV: {
+        get: async (k, opts) => { const v = kvStore.get(k); return (opts && opts.type === 'json') ? v : JSON.stringify(v); },
+        put: async (k, v) => { kvStore.set(k, JSON.parse(v)); },
+      },
+      GATEWAY_ENV: 'test',
+    };
+    const req = new Request(
+      'https://worker.dev/api/gateway/transfer?salt=0x' + 'bb'.repeat(32) + '&depositor=' + ADDR_A,
+      { method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'failed' }) }
+    );
+    const res = await onRequestPatch({ request: req, env: mockEnv });
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.status).toBe('failed');
   });
 });

@@ -87,9 +87,23 @@ const VALID_TRANSITIONS = {
 };
 
 // Transitions the client may request via PATCH
+// ── Rules ──────────────────────────────────────────────────────────────────────
+//   ambiguous  → failed:    caller verified no on-chain mint; no txHash required.
+//   accepted   → failed:    caller has receipt showing revert; txHash REQUIRED.
+//   accepted   → confirmed: caller has receipt showing success; txHash REQUIRED.
+//
+// NOTE: 'confirmed' set by the client is based on client-provided evidence (receipt).
+// The server cannot independently verify the txHash against the chain without an
+// RPC binding. The proxy validates txHash format and requires it; the client's
+// receipt is the trust anchor for this transition. Full server-side verification
+// (RPC receipt check) is a P2 enhancement requiring an RPC binding in the Worker.
 const CLIENT_ALLOWED_TRANSITIONS = {
-  ambiguous: ['failed'],   // only after caller verifies no on-chain mint
+  ambiguous: ['failed'],                 // only after caller verifies no on-chain mint
+  accepted:  ['failed', 'confirmed'],    // caller must provide txHash (receipt evidence)
 };
+
+// Transitions that require a txHash from the client
+const TRANSITIONS_REQUIRING_TXHASH = new Set(['failed', 'confirmed']);
 
 const TERMINAL_STATES = new Set(['confirmed', 'failed', 'rejected']);
 
@@ -572,6 +586,20 @@ export async function onRequestPatch(ctx) {
       detail:  'Allowed client transitions: ' +
                JSON.stringify(CLIENT_ALLOWED_TRANSITIONS),
     }, 400);
+  }
+
+  // For accepted→failed and accepted→confirmed, txHash is REQUIRED.
+  // The txHash is the evidence that a mint was attempted on-chain.
+  // Without it, we cannot distinguish "mint reverted" from "client guessing".
+  if (record.status === 'accepted' && TRANSITIONS_REQUIRING_TXHASH.has(toStatus)) {
+    const txHash = patch.txHash;
+    if (!txHash || typeof txHash !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(txHash)) {
+      return jsonResp({
+        error:  'txhash_required',
+        detail: 'A valid 32-byte txHash (0x + 64 hex chars) is required to transition ' +
+                "from 'accepted' to '" + toStatus + "'.",
+      }, 400);
+    }
   }
 
   const result = await tryUpdate(salt, { status: toStatus, txHash: patch.txHash || null }, env);

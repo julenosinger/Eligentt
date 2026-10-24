@@ -327,9 +327,17 @@
   }
 
   /**
-   * Query KV status for a salt before submitting.
-   * Returns null if KV is unavailable or salt not found.
-   * Returns { status, submittedAt, depositor } if found.
+   * Query KV/DO status for a salt before submitting.
+   *
+   * Returns one of three discriminated results:
+   *   { found: false, unavailable: false }   — 404: salt not found, safe to proceed
+   *   { found: false, unavailable: true  }   — network error / non-404 HTTP error:
+   *                                            query FAILED; caller must decide whether
+   *                                            to proceed (risky) or block (safe).
+   *   { found: true,  status, ...record  }   — record found; inspect status before submitting
+   *
+   * The caller MUST NOT treat 'unavailable' as 'not_found'.
+   * A failed query does not prove the salt is absent — it proves the query failed.
    */
   async function queryGatewaySalt(salt, depositor, timeoutMs) {
     var ctrl = new AbortController();
@@ -338,12 +346,15 @@
       var url = '/api/gateway/transfer?salt=' + encodeURIComponent(salt)
               + '&depositor=' + encodeURIComponent(depositor);
       var res = await fetch(url, { signal: ctrl.signal });
-      // 404 = not found (normal for new transfers)
-      if (res.status === 404) return null;
-      if (!res.ok) return null; // KV unavailable — proceed with caution
-      return await res.json();
+      // 404 = not found — salt is genuinely absent from persistence (safe to proceed)
+      if (res.status === 404) return { found: false, unavailable: false };
+      // Other non-2xx = query failed (KV down, DO unavailable, auth error, etc.)
+      if (!res.ok) return { found: false, unavailable: true, httpStatus: res.status };
+      var data = await res.json();
+      return { found: true, unavailable: false, ...data };
     } catch(e) {
-      return null; // network error — proceed, let proxy handle idempotence
+      // Network error or AbortError — query failed; treat as unavailable, NOT as not_found
+      return { found: false, unavailable: true, error: e && e.message };
     } finally {
       clearTimeout(tid);
     }
@@ -700,16 +711,30 @@
       // There is NO fallback — block if verifier is unavailable.
       verifyBurnIntentSignature(burnIntent, typedData, signature, params.depositor);
 
-      // ── Step 5a: KV pre-submit check (cross-session replay guard) ──────────
+      // ── Step 5a: KV/DO pre-submit check (cross-session replay guard) ─────────
       // Query whether this salt was already submitted in a previous session.
-      // If found as "accepted" or "confirmed", the transfer was already completed —
-      // block with 'already_submitted'. If "submitting" (ambiguous from prior crash),
-      // block with 'gateway_submit_ambiguous' so the caller can reconcile on-chain.
+      //
+      // Three outcomes from queryGatewaySalt():
+      //   found:false + unavailable:false  → 404: genuinely new salt, safe to proceed
+      //   found:false + unavailable:true   → query FAILED (KV/DO down or network error)
+      //                                       Block with 'kv_query_unavailable'.
+      //                                       Do NOT treat as 'not found' — we cannot
+      //                                       confirm the salt is absent.
+      //   found:true                       → record exists; inspect status
       emit(STATE.SUBMITTING);
       _inflight[lockKey].state = STATE.SUBMITTING;
 
       var kvRecord = await queryGatewaySalt(salt, params.depositor, 5000);
-      if (kvRecord && kvRecord.status) {
+
+      // Query failed — block (fail-safe): cannot confirm salt is new
+      if (kvRecord.unavailable) {
+        throw Object.assign(
+          new Error('kv_query_unavailable: persistence check failed — cannot confirm salt is new'),
+          { fatal:true, salt, recoverable:false }
+        );
+      }
+
+      if (kvRecord.found && kvRecord.status) {
         reachedSubmitted = true;
         _inflight[lockKey].submitted = true;
         _inflight[lockKey].state     = STATE.ERROR;
@@ -733,6 +758,7 @@
           { fatal:false, salt, recoverable:false }
         );
       }
+      // kvRecord.found === false AND unavailable === false → 404, genuinely new, proceed
 
       // ── Step 5b: Submit to Gateway API ─────────────────────────────────────
       var transferRes;
@@ -830,7 +856,11 @@
       }
 
       if (!receipt || receipt.status !== 1) {
-        // Update KV to "failed" and check the persistence result (never silent).
+        // Transition: accepted → failed.
+        // Requires txHash (proxy enforces this for accepted→failed).
+        // The txHash is the receipt evidence that a mint was attempted and reverted.
+        // If patchGatewaySalt fails, the record stays at 'accepted' (safe — blocks
+        // re-submission). Surface the failure so the caller can reconcile manually.
         var failedPersist = await patchGatewaySalt(salt, 'failed', mintTx.hash, params.depositor);
         throw Object.assign(
           new Error('tx_reverted'),
@@ -838,10 +868,12 @@
         );
       }
 
-      // ── Update KV to confirmed and check the persistence result ─────────────
-      // Fase 1.8: a persistence failure here does NOT invalidate the on-chain mint,
-      // but it MUST be surfaced so the caller knows the record may still read
-      // "accepted" (safe — it blocks re-submission) instead of "confirmed".
+      // ── Transition: accepted → confirmed (requires txHash) ──────────────────
+      // Fase 1.9: the proxy now accepts accepted→confirmed from the client when
+      // txHash is provided. This is the evidence of successful on-chain mint.
+      // Full server-side RPC verification is a P2 enhancement.
+      // If patchGatewaySalt fails, the record stays at 'accepted' (safe — blocks
+      // re-submission). Surface the failure; the on-chain mint is still valid.
       var confirmPersist = await patchGatewaySalt(salt, 'confirmed', receipt.hash || mintTx.hash, params.depositor);
 
       // ── Done ────────────────────────────────────────────────────────────────

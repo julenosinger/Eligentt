@@ -238,24 +238,53 @@ describe('transfer.js onRequestPatch — client cannot forge confirmed/failed', 
     expect(data.error).toBe('client_transition_not_allowed');
   });
 
-  it('accepted → confirmed is forbidden (internal-only)', async () => {
+  // Fase 1.9 update: accepted→confirmed and accepted→failed are NOW allowed
+  // with a valid txHash (receipt evidence from the on-chain mint attempt).
+  // Without txHash: returns txhash_required (not client_transition_not_allowed).
+  it('accepted → confirmed without txHash → txhash_required (Fase 1.9)', async () => {
     const kv = makeKV();
     await seed(kv, 'accepted');
     const env = { GATEWAY_OPS_KV: kv };
     const res = await onRequestPatch({ request: makePatchRequest('0x' + '11'.repeat(32), DEPOSITOR, { status: 'confirmed' }), env });
     expect(res.status).toBe(400);
     const data = await res.json();
-    expect(data.error).toBe('client_transition_not_allowed');
+    // Fase 1.9: now blocked at txhash_required, not client_transition_not_allowed
+    expect(data.error).toBe('txhash_required');
   });
 
-  it('accepted → failed is forbidden (internal-only)', async () => {
+  it('accepted → failed without txHash → txhash_required (Fase 1.9)', async () => {
     const kv = makeKV();
     await seed(kv, 'accepted');
     const env = { GATEWAY_OPS_KV: kv };
     const res = await onRequestPatch({ request: makePatchRequest('0x' + '11'.repeat(32), DEPOSITOR, { status: 'failed' }), env });
     expect(res.status).toBe(400);
     const data = await res.json();
-    expect(data.error).toBe('client_transition_not_allowed');
+    // Fase 1.9: now blocked at txhash_required, not client_transition_not_allowed
+    expect(data.error).toBe('txhash_required');
+  });
+
+  it('accepted → confirmed with valid txHash succeeds (Fase 1.9)', async () => {
+    const kv = makeKV();
+    await seed(kv, 'accepted');
+    const env = { GATEWAY_OPS_KV: kv };
+    const txHash = '0x' + 'cc'.repeat(32);
+    const res = await onRequestPatch({ request: makePatchRequest('0x' + '11'.repeat(32), DEPOSITOR, { status: 'confirmed', txHash }), env });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.ok).toBe(true);
+    expect(data.status).toBe('confirmed');
+  });
+
+  it('accepted → failed with valid txHash succeeds (Fase 1.9)', async () => {
+    const kv = makeKV();
+    await seed(kv, 'accepted');
+    const env = { GATEWAY_OPS_KV: kv };
+    const txHash = '0x' + 'dd'.repeat(32);
+    const res = await onRequestPatch({ request: makePatchRequest('0x' + '11'.repeat(32), DEPOSITOR, { status: 'failed', txHash }), env });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.ok).toBe(true);
+    expect(data.status).toBe('failed');
   });
 });
 
