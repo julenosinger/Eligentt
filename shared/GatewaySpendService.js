@@ -30,9 +30,13 @@
  *   - Never stores private keys, seeds, or secrets.
  *   - Random 32-byte salt per transfer prevents replay at the protocol level.
  *   - In-browser lock (_inflight) prevents concurrent duplicate submissions in the
- *     same tab session. Cross-session / cross-device replay is prevented at the
- *     protocol level by the salt — a spent salt cannot be replayed. The CF proxy
- *     does NOT need server-side locking because Circle's API is idempotent per salt.
+ *     same tab session.
+ *   - CF proxy (transfer.js) records each salt in GATEWAY_OPS_KV BEFORE forwarding to
+ *     Circle. If the salt already exists in KV, the proxy returns 'already_submitted'
+ *     (409) and blocks the forward. This provides cross-session replay protection even
+ *     after a page reload or browser crash.
+ *   - Before submitting, execute() queries GET /api/gateway/transfer?salt=... to check
+ *     whether the salt was already recorded in KV (e.g. from a previous crashed session).
  *   - cancel() is refused once the intent has been submitted to Circle.
  *   - Signer verification is MANDATORY and fail-closed: if ethers.verifyTypedData
  *     is not available, execution is blocked with 'sig_verifier_unavailable'.
@@ -321,6 +325,43 @@
   }
 
   /**
+   * Query KV status for a salt before submitting.
+   * Returns null if KV is unavailable or salt not found.
+   * Returns { status, submittedAt, depositor } if found.
+   */
+  async function queryGatewaySalt(salt, depositor, timeoutMs) {
+    var ctrl = new AbortController();
+    var tid = setTimeout(function(){ ctrl.abort(); }, timeoutMs || 5000);
+    try {
+      var url = '/api/gateway/transfer?salt=' + encodeURIComponent(salt)
+              + '&depositor=' + encodeURIComponent(depositor);
+      var res = await fetch(url, { signal: ctrl.signal });
+      // 404 = not found (normal for new transfers)
+      if (res.status === 404) return null;
+      if (!res.ok) return null; // KV unavailable — proceed with caution
+      return await res.json();
+    } catch(e) {
+      return null; // network error — proceed, let proxy handle idempotence
+    } finally {
+      clearTimeout(tid);
+    }
+  }
+
+  /**
+   * Update KV status after on-chain confirmation.
+   * Non-fatal — if it fails, the salt record stays at "accepted" which is still safe.
+   */
+  async function patchGatewaySalt(salt, status, txHash) {
+    try {
+      await fetch('/api/gateway/transfer?salt=' + encodeURIComponent(salt), {
+        method:  'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ status, txHash: txHash || null }),
+      });
+    } catch(_) {}
+  }
+
+  /**
    * POST to /api/gateway/transfer CF proxy (transfer only — no estimate endpoint).
    * Official /v1/transfer request: array of { burnIntent, signature }.
    */
@@ -527,7 +568,7 @@
         maxFee:          fee,
         maxFeeFormatted: atomicToStr(fee, v.dec),
         token:           params.token,
-        note:            'Conservative upper bound per Circle docs. Actual fee is typically lower.',
+        note:            'Pre-authorized ceiling per Circle docs (MAX_FEE = 2_010000 for USDC). This is NOT a real-time fee quote. Circle deducts the actual fee (typically lower) and returns the remainder.',
       },
       atomic:     v.atomic,
       dec:        v.dec,
@@ -642,10 +683,41 @@
       // There is NO fallback — block if verifier is unavailable.
       verifyBurnIntentSignature(burnIntent, typedData, signature, params.depositor);
 
-      // ── Step 5: Submit to Gateway API ──────────────────────────────────────
+      // ── Step 5a: KV pre-submit check (cross-session replay guard) ──────────
+      // Query whether this salt was already submitted in a previous session.
+      // If found as "accepted" or "confirmed", the transfer was already completed —
+      // block with 'already_submitted'. If "submitting" (ambiguous from prior crash),
+      // block with 'gateway_submit_ambiguous' so the caller can reconcile on-chain.
       emit(STATE.SUBMITTING);
       _inflight[lockKey].state = STATE.SUBMITTING;
 
+      var kvRecord = await queryGatewaySalt(salt, params.depositor, 5000);
+      if (kvRecord && kvRecord.status) {
+        reachedSubmitted = true;
+        _inflight[lockKey].submitted = true;
+        _inflight[lockKey].state     = STATE.ERROR;
+        if (kvRecord.status === 'confirmed') {
+          throw Object.assign(
+            new Error('already_confirmed: salt was already minted on-chain'),
+            { fatal:true, salt, recoverable:false }
+          );
+        }
+        if (kvRecord.status === 'accepted' || kvRecord.status === 'submitting') {
+          throw Object.assign(
+            new Error('gateway_submit_ambiguous: salt exists in KV with status ' + kvRecord.status),
+            { fatal:false, salt, recoverable:true, kvStatus: kvRecord.status }
+          );
+        }
+        // "rejected" status — safe to retry with a NEW salt (do not reuse)
+        // Fall through to submit. The proxy will write a new KV entry (different salt).
+        // But: this salt was already rejected — need a new salt. Throw and let caller retry.
+        throw Object.assign(
+          new Error('salt_was_rejected: previous submission rejected — generate new intent'),
+          { fatal:false, salt, recoverable:false }
+        );
+      }
+
+      // ── Step 5b: Submit to Gateway API ─────────────────────────────────────
       var transferRes;
       var submitError;
       try {
@@ -741,11 +813,16 @@
       }
 
       if (!receipt || receipt.status !== 1) {
+        // Update KV to "failed" — non-fatal for the throw path
+        patchGatewaySalt(salt, 'failed', mintTx.hash);
         throw Object.assign(
           new Error('tx_reverted'),
           { fatal:false, txHash: mintTx.hash }
         );
       }
+
+      // ── Update KV to confirmed ──────────────────────────────────────────────
+      patchGatewaySalt(salt, 'confirmed', receipt.hash || mintTx.hash);
 
       // ── Done ────────────────────────────────────────────────────────────────
       var result = {
@@ -848,6 +925,8 @@
     domainOf,
     decOf,
     maxFeeFor,
+    queryGatewaySalt,
+    patchGatewaySalt,
 
     // Internal state (read-only)
     get _inflightCount() { return Object.keys(_inflight).length; },
