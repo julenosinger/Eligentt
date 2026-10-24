@@ -1,72 +1,64 @@
-# GATEWAY_OPS_KV — Setup Instructions
+# Gateway Operations — Persistence Setup
 
-## Purpose
+## Atomicity Architecture (Two-layer)
 
-`GATEWAY_OPS_KV` is a Cloudflare KV namespace used by `/api/gateway/transfer` to
-provide **cross-session idempotence** for Circle Gateway transfer operations.
+### Layer 1 — Durable Object (GATEWAY_OP_LOCK) — Primary
+Provides true atomic serialization. One DO instance per salt. The CF runtime queues
+concurrent requests to the same DO instance, so the reserve-then-forward step is
+inherently race-free without compare-and-swap.
 
-Before forwarding a transfer intent to Circle, the proxy writes a record keyed by
-`gw:op:{salt}`. If the same salt is submitted again (e.g. after a page reload or
-network crash), the proxy returns `409 already_submitted` instead of blindly forwarding
-a potential duplicate — preventing double-spend at the infrastructure layer.
+**Setup:**
+1. The DO class is in `functions/api/gateway/gateway-op-lock.do.js`.
+2. Deploy a separate Worker that exports `GatewayOpLock` from that file.
+3. In Cloudflare Dashboard → Pages → Settings → Functions → Durable Object bindings:
+   - Variable name: `GATEWAY_OP_LOCK`
+   - Durable Object namespace: (namespace from step 2)
+4. Re-deploy the Pages project.
 
-## Key format
+### Layer 2 — Workers KV (GATEWAY_OPS_KV) — Fallback
+Best-effort idempotence. Strong protection for sequential/retried calls.
+Best-effort for concurrent requests within the same millisecond window.
 
+**Setup (wrangler.jsonc):**
+```json
+"kv_namespaces": [
+  {
+    "binding": "GATEWAY_OPS_KV",
+    "id": "<create-with-wrangler-kv-namespace-create-GATEWAY_OPS_KV>"
+  }
+]
 ```
-gw:op:0x{64 hex chars}   →   { submittedAt, depositor, status, srcDomain, dstDomain }
-```
 
-**Status values:** `submitting` → `accepted` → `confirmed` | `rejected` | `failed`
-
-TTL: 7 days (604800 seconds). Safe to expire since Circle's protocol rejects
-     stale attestations after the transfer window closes.
-
-## Without this binding
-
-If `GATEWAY_OPS_KV` is not bound at runtime, `transfer.js` logs a warning and
-falls back to **forward-only mode** — the transfer proceeds without replay protection
-at the proxy layer. The in-browser `_inflight` lock and the cryptographic salt still
-prevent duplicates within a single session, but a page reload after a timeout
-could theoretically result in a duplicate submission attempt.
-
-**Recommendation: always provision this binding in production.**
-
-## How to create
-
+Create the namespace:
 ```bash
-# Create the namespace
 wrangler kv namespace create GATEWAY_OPS_KV
-
-# Output example:
-# ✨  Created namespace "GATEWAY_OPS_KV"
-# { binding: 'GATEWAY_OPS_KV', id: 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx' }
+# Note the id from the output, add to wrangler.jsonc above
 ```
 
-Then add to `wrangler.jsonc` under `kv_namespaces`:
+### Fail-safe Behaviour
+If BOTH layers are unavailable: the POST to `/api/gateway/transfer` is **blocked with
+HTTP 503** and the transfer is NOT forwarded to Circle. No transfer occurs without
+at least one persistence layer confirmed active.
 
-```jsonc
-{
-  "binding": "GATEWAY_OPS_KV",
-  "id": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-}
+## State Machine
+
+```
+(none) → submitting → accepted → confirmed  [internal: POST on Circle 2xx]
+                    → failed               [client: PATCH with status=failed]
+submitting → failed                         [client or internal]
+confirmed / failed: terminal
 ```
 
-## Cloudflare Dashboard (alternative)
+## Security Notes
 
-Pages → {project} → Settings → Functions → KV namespace bindings → Add binding:
-- Variable name: `GATEWAY_OPS_KV`
-- Namespace: (select the namespace you created above)
+- `status='confirmed'` can only be set by the proxy on a successful Circle response.
+  The PATCH handler rejects `confirmed` from the client.
+- GET and PATCH both require `?depositor=` — wrong depositor returns 404 (no existence leak).
+- CORS: exact-origin allowlist + `env.ALLOWED_ORIGINS` for extensions.
 
-## DO vs KV
+## Pending
 
-A Durable Object would provide true atomic `put-if-absent` semantics.
-The project's existing `PaymentLock` DO pattern is described in `wrangler.jsonc`.
-
-KV does NOT provide atomic CAS. The race window (between `get` and `put`) is
-typically < 1ms in practice, but in theory two concurrent requests could both
-see "not found" and both forward. For the Gateway use case, this is acceptable
-because Circle's own salt uniqueness enforcement provides the final guarantee —
-two successful submissions with the same salt produce only one transfer.
-
-The KV layer is an additional guard, not the only one. The cryptographic salt
-(random 32 bytes per transfer) is the ultimate replay prevention mechanism.
+- `wrangler.jsonc` has CRLF line endings; add the binding manually in the Dashboard
+  or via `wrangler kv namespace create` + manual JSON edit.
+- Mainnet GW_WALLET / GW_MINTER addresses: verify at https://developers.circle.com/gateway
+  before production use. Testnet: 0x0077.../0x0022... (confirmed Circle docs Oct 2026).

@@ -1036,17 +1036,20 @@ describe('GSS12 — P0/P1.4: KV persistence, cross-session recovery, isolation',
     expect(src).toContain('sourceSigner_required');
   });
 
-  // ── GSS12.7: proxy writes KV BEFORE forwarding ────────────────────────────
-  it('GSS12.7 — transfer.js writes KV entry before forwarding to Circle', () => {
+  // ── GSS12.7: proxy reserves salt (atomic) BEFORE forwarding ─────────────
+  it('GSS12.7 — transfer.js reserves salt before forwarding to Circle (fail-safe)', () => {
     const src = require('fs').readFileSync(
       require('path').join(__dirname, '../functions/api/gateway/transfer.js'), 'utf8'
     );
-    // KV write must appear before the fetch() call to Circle
-    const kvWritePos  = src.indexOf("'submitting'");
-    const forwardPos  = src.indexOf("GATEWAY_API + '/v1/transfer'");
-    expect(kvWritePos).toBeGreaterThan(-1);
+    // tryReserve (DO or KV) must appear before the fetch() to Circle
+    const reservePos = src.indexOf('tryReserve(');
+    const forwardPos = src.indexOf("GATEWAY_API + '/v1/transfer'");
+    expect(reservePos).toBeGreaterThan(-1);
     expect(forwardPos).toBeGreaterThan(-1);
-    expect(kvWritePos).toBeLessThan(forwardPos);
+    expect(reservePos).toBeLessThan(forwardPos);
+    // FAIL-SAFE: persistence_unavailable must block the forward
+    expect(src).toContain('persistence_unavailable');
+    expect(src).toContain('503');
   });
 
   // ── GSS12.8: proxy keeps KV entry on timeout (ambiguous) ─────────────────
@@ -1061,40 +1064,44 @@ describe('GSS12 — P0/P1.4: KV persistence, cross-session recovery, isolation',
     expect(src).not.toContain('kv.delete');
   });
 
-  // ── GSS12.9: proxy updates KV to "accepted" on Circle 200 ────────────────
-  it('GSS12.9 — transfer.js updates KV status to accepted on Circle 2xx', () => {
+  // ── GSS12.9: proxy updates persistence to "accepted" after Circle 200 ────
+  it('GSS12.9 — transfer.js updates status to accepted on Circle 2xx', () => {
     const src = require('fs').readFileSync(
       require('path').join(__dirname, '../functions/api/gateway/transfer.js'), 'utf8'
     );
-    expect(src).toContain("'accepted'");
-    // Update happens after upRes is received
-    const updatePos  = src.indexOf("'accepted'");
+    // tryUpdate (call-site, not definition) must be called after the forward
     const forwardPos = src.indexOf("GATEWAY_API + '/v1/transfer'");
-    expect(updatePos).toBeGreaterThan(forwardPos);
+    const callSitePos = src.indexOf("tryUpdate(salt, { status: newStatus");
+    expect(forwardPos).toBeGreaterThan(-1);
+    expect(callSitePos).toBeGreaterThan(-1);
+    expect(callSitePos).toBeGreaterThan(forwardPos);
+    // Status set to accepted on 2xx
+    expect(src).toContain("upRes.ok ? 'accepted' : 'rejected'");
   });
 
-  // ── GSS12.10: GET /api/gateway/transfer — depositor isolation ────────────
-  it('GSS12.10 — transfer.js GET handler returns 404 for wrong depositor (isolation)', () => {
+  // ── GSS12.10: GET /api/gateway/transfer — depositor required + isolation ─
+  it('GSS12.10 — transfer.js GET requires depositor and returns 404 for wrong one', () => {
     const src = require('fs').readFileSync(
       require('path').join(__dirname, '../functions/api/gateway/transfer.js'), 'utf8'
     );
     expect(src).toContain('onRequestGet');
-    expect(src).toContain('depositor');
-    // Isolation: wrong depositor returns 404, not 403 (avoids leaking existence)
-    const isolationCheck = src.includes("error: 'not_found', salt") &&
-                           src.includes('norm(record.depositor) !== norm(depositor)');
-    expect(isolationCheck).toBe(true);
+    expect(src).toContain('depositor_required');
+    // Isolation: wrong depositor returns 404, not 403
+    const hasIsolation = src.includes("normAddr(record.depositor) !== normAddr(depositor)");
+    expect(hasIsolation).toBe(true);
   });
 
-  // ── GSS12.11: PATCH /api/gateway/transfer — status update ────────────────
-  it('GSS12.11 — transfer.js PATCH handler exists for on-chain confirmation updates', () => {
+  // ── GSS12.11: PATCH — only 'failed' from client, 'confirmed' is internal ─
+  it('GSS12.11 — transfer.js PATCH only accepts status=failed from client', () => {
     const src = require('fs').readFileSync(
       require('path').join(__dirname, '../functions/api/gateway/transfer.js'), 'utf8'
     );
     expect(src).toContain('onRequestPatch');
-    expect(src).toContain("'confirmed'");
-    expect(src).toContain("'failed'");
-    expect(src).toContain('txHash');
+    expect(src).toContain('invalid_status_for_client');
+    // 'confirmed' must NOT be settable by client
+    const confirmedBlockedForClient = src.includes("patch.status !== 'failed'") &&
+                                      src.includes("'confirmed' is set internally");
+    expect(confirmedBlockedForClient).toBe(true);
   });
 
   // ── GSS12.12: GatewaySpendService.queryGatewaySalt is exported ───────────
@@ -1139,15 +1146,207 @@ describe('GSS12 — P0/P1.4: KV persistence, cross-session recovery, isolation',
     expect(rB.error).not.toBe('duplicate_in_flight');
   });
 
-  // ── GSS12.15: docs file for GATEWAY_OPS_KV setup exists ──────────────────
-  it('GSS12.15 — docs/gateway-ops-kv-setup.md exists with setup instructions', () => {
+  // ── GSS12.16: GatewayOpLock DO file exists ───────────────────────────────
+  it('GSS12.16 — gateway-op-lock.do.js Durable Object file exists', () => {
+    const fs = require('fs');
+    const doPath = require('path').join(
+      __dirname, '../functions/api/gateway/gateway-op-lock.do.js'
+    );
+    expect(fs.existsSync(doPath)).toBe(true);
+    const src = fs.readFileSync(doPath, 'utf8');
+    expect(src).toContain('GatewayOpLock');
+    expect(src).toContain('reserve');
+    expect(src).toContain('update');
+    expect(src).toContain('invalid_transition');
+    // Terminal states block further transitions
+    expect(src).toContain('confirmed');
+    expect(src).toContain('failed');
+  });
+
+  // ── GSS12.15: docs file for persistence setup exists ────────────────────
+  it('GSS12.15 — docs/gateway-ops-kv-setup.md exists with DO + KV setup instructions', () => {
     const fs = require('fs');
     const path = require('path');
     const docPath = path.join(__dirname, '../docs/gateway-ops-kv-setup.md');
     expect(fs.existsSync(docPath)).toBe(true);
     const doc = fs.readFileSync(docPath, 'utf8');
     expect(doc).toContain('GATEWAY_OPS_KV');
-    expect(doc).toContain('gw:op:');
-    expect(doc).toContain('put-if-absent');
+    expect(doc).toContain('GATEWAY_OP_LOCK');
+    expect(doc).toContain('Durable Object');
+    expect(doc).toContain('Fail-safe');
+  });
+});
+
+// ── GSS13: P0/P1.5 — atomicity, authorisation, state machine, fail-safe ──────
+describe('GSS13 — P0/P1.5: atomicity, authorisation, state machine, fail-safe', () => {
+  const fs   = require('fs');
+  const path = require('path');
+  const proxySrc = fs.readFileSync(
+    path.join(__dirname, '../functions/api/gateway/transfer.js'), 'utf8'
+  );
+  const doSrc = fs.readFileSync(
+    path.join(__dirname, '../functions/api/gateway/gateway-op-lock.do.js'), 'utf8'
+  );
+
+  // ── GSS13.1: fail-safe — both layers unavailable blocks forward ───────────
+  it('GSS13.1 — persistence_unavailable (both DO and KV absent) blocks the forward', () => {
+    // The proxy must return 503 if tryReserve returns persistence_unavailable
+    // Verify by code structure: 503 must be returned before GATEWAY_API fetch
+    expect(proxySrc).toContain("'persistence_unavailable'");
+    const blockPos   = proxySrc.indexOf("'persistence_unavailable'");
+    const forwardPos = proxySrc.indexOf("GATEWAY_API + '/v1/transfer'");
+    expect(blockPos).toBeGreaterThan(-1);
+    expect(forwardPos).toBeGreaterThan(-1);
+    // Block response must come before forward
+    const returnBlockPos = proxySrc.indexOf("503", blockPos);
+    expect(returnBlockPos).toBeGreaterThan(-1);
+    expect(returnBlockPos).toBeLessThan(forwardPos);
+  });
+
+  // ── GSS13.2: DO route calls /reserve before forwarding ───────────────────
+  it('GSS13.2 — DO tryReserve is called before posting to Circle', () => {
+    expect(proxySrc).toContain('tryReserve(');
+    const reserveIdx = proxySrc.indexOf('tryReserve(');
+    const fetchIdx   = proxySrc.indexOf("GATEWAY_API + '/v1/transfer'");
+    expect(reserveIdx).toBeLessThan(fetchIdx);
+  });
+
+  // ── GSS13.3: DO state machine — terminal states block transitions ─────────
+  it('GSS13.3 — DO state machine: confirmed and failed are terminal', () => {
+    expect(doSrc).toContain('confirmed:  []');
+    expect(doSrc).toContain('failed:     []');
+    expect(doSrc).toContain('invalid_transition');
+    // confirmed can only follow accepted
+    expect(doSrc).toContain("accepted:   ['confirmed', 'failed']");
+  });
+
+  // ── GSS13.4: DO /reserve returns 409 for duplicate salt ──────────────────
+  it('GSS13.4 — DO /reserve returns already_reserved on duplicate salt', () => {
+    expect(doSrc).toContain("error: 'already_reserved'");
+    expect(doSrc).toContain('409');
+    // The existing record is returned, enabling reconciliation
+    expect(doSrc).toContain('record: existing');
+  });
+
+  // ── GSS13.5: 'confirmed' cannot be set by client PATCH ───────────────────
+  it('GSS13.5 — proxy PATCH rejects status=confirmed from client', () => {
+    expect(proxySrc).toContain('invalid_status_for_client');
+    // 'confirmed' is set internally only
+    const confirmedInternalOnly = proxySrc.includes("'confirmed' is set internally");
+    expect(confirmedInternalOnly).toBe(true);
+    // Only 'failed' accepted from client
+    expect(proxySrc).toContain("patch.status !== 'failed'");
+  });
+
+  // ── GSS13.6: proxy PATCH requires depositor for isolation ────────────────
+  it('GSS13.6 — proxy PATCH requires depositor param (isolation)', () => {
+    expect(proxySrc).toContain('onRequestPatch');
+    // depositor_required must be validated in PATCH handler
+    const patchHandlerIdx = proxySrc.indexOf('onRequestPatch');
+    const depReqIdx       = proxySrc.indexOf('depositor_required', patchHandlerIdx);
+    expect(depReqIdx).toBeGreaterThan(patchHandlerIdx);
+  });
+
+  // ── GSS13.7: proxy GET requires depositor — no anonymous status lookup ────
+  it('GSS13.7 — proxy GET requires depositor (prevents salt enumeration)', () => {
+    expect(proxySrc).toContain('onRequestGet');
+    const getHandlerIdx = proxySrc.indexOf('onRequestGet');
+    const depReqIdx     = proxySrc.indexOf('depositor_required', getHandlerIdx);
+    expect(depReqIdx).toBeGreaterThan(getHandlerIdx);
+    // Wrong depositor returns 404 (not 403 — avoids leaking existence)
+    expect(proxySrc).toContain("error: 'not_found', salt");
+  });
+
+  // ── GSS13.8: tryUpdate enforces valid transitions in KV fallback ──────────
+  it('GSS13.8 — tryUpdate in KV fallback validates state transitions', () => {
+    // The KV fallback in tryUpdate must check isValidTransition
+    expect(proxySrc).toContain('isValidTransition(');
+    expect(proxySrc).toContain('invalid_transition');
+  });
+
+  // ── GSS13.9: proxy does not call kv.delete() (no lock erasure on timeout) ─
+  it('GSS13.9 — proxy never calls kv.delete() (ambiguous locks are not erased)', () => {
+    expect(proxySrc).not.toContain('kv.delete');
+    expect(proxySrc).not.toContain('.delete(');
+  });
+
+  // ── GSS13.10: timeout leaves salt at "submitting" (reconciliation path) ───
+  it('GSS13.10 — timeout response (504) does not update persistence status', () => {
+    // After abort, the code returns immediately — no tryUpdate call follows
+    const abortHandlerIdx  = proxySrc.indexOf("AbortError");
+    const tryUpdateAfter   = proxySrc.indexOf('tryUpdate(', abortHandlerIdx);
+    // tryUpdate must NOT be called in the abort/timeout path
+    // (it runs only after upRes is received)
+    const returnAfterAbort = proxySrc.indexOf('return jsonResp', abortHandlerIdx);
+    expect(returnAfterAbort).toBeGreaterThan(-1);
+    expect(returnAfterAbort).toBeLessThan(tryUpdateAfter === -1 ? Infinity : tryUpdateAfter);
+  });
+
+  // ── GSS13.11: DO /update validates transition from correct current state ──
+  it('GSS13.11 — DO /update checks current status before allowing transition', () => {
+    expect(doSrc).toContain('VALID_TRANSITIONS');
+    // Must read current state before allowing update
+    const readIdx   = doSrc.indexOf("this.storage.get('record')");
+    const checkIdx  = doSrc.indexOf('VALID_TRANSITIONS[record.status]');
+    expect(readIdx).toBeGreaterThan(-1);
+    expect(checkIdx).toBeGreaterThan(-1);
+    expect(checkIdx).toBeGreaterThan(readIdx);
+  });
+
+  // ── GSS13.12: service patchGatewaySalt only sends status=failed to client ─
+  it('GSS13.12 — patchGatewaySalt in service sends only "confirmed" or "failed"', () => {
+    const svcSrc = fs.readFileSync(
+      path.join(__dirname, '../shared/GatewaySpendService.js'), 'utf8'
+    );
+    expect(svcSrc).toContain('patchGatewaySalt');
+    // Service sends 'confirmed' after on-chain receipt and 'failed' after revert
+    const confirmedCall = svcSrc.includes("patchGatewaySalt(salt, 'confirmed'");
+    const failedCall    = svcSrc.includes("patchGatewaySalt(salt, 'failed'");
+    expect(confirmedCall).toBe(true);
+    expect(failedCall).toBe(true);
+  });
+
+  // ── GSS13.13: DO DELETE /release blocked unless terminal ─────────────────
+  it('GSS13.13 — DO /release is blocked unless status is terminal', () => {
+    expect(doSrc).toContain('not_terminal');
+    expect(doSrc).toContain("TERMINAL.includes(record.status)");
+  });
+
+  // ── GSS13.14: service execute() blocks concurrent same-lockKey calls ──────
+  it('GSS13.14 — execute() blocks concurrent calls with the same lockKey', async () => {
+    // First call holds the in-browser lock; second returns duplicate_in_flight
+    GatewaySpendService._testClearInflight();
+
+    let resolveBalance;
+    global.fetch = vi.fn().mockImplementation(() =>
+      new Promise(res => { resolveBalance = res; })
+    );
+
+    const p1 = GatewaySpendService.execute(BASE_PARAMS, async () => VALID_SIG, () => {});
+    // Allow microtasks to run so p1 can set the lock
+    await new Promise(r => setTimeout(r, 5));
+
+    const p2 = await GatewaySpendService.execute(BASE_PARAMS, async () => VALID_SIG, () => {});
+    expect(p2.error).toBe('duplicate_in_flight');
+
+    // Clean up p1
+    resolveBalance({ ok: false, status: 503, json: async () => ({}) });
+    await p1;
+  });
+
+  // ── GSS13.15: DO file does not store private keys or credentials ─────────
+  it('GSS13.15 — DO only stores operational metadata in storage.put()', () => {
+    // The record persisted by the DO must contain only operational fields:
+    // salt, depositor, status, submittedAt, updatedAt, srcDomain, dstDomain, txHash, httpStatus
+    // Verify that no sensitive field name appears as a key in the stored record
+    const recordBlock = doSrc.slice(doSrc.indexOf('const record = {'), doSrc.indexOf('await this.storage.put'));
+    expect(recordBlock).not.toContain('privateKey');
+    expect(recordBlock).not.toContain('secretKey');
+    expect(recordBlock).not.toContain('seedPhrase');
+    expect(recordBlock).not.toContain('rawSignature');
+    // Only metadata fields allowed
+    expect(recordBlock).toContain('salt');
+    expect(recordBlock).toContain('depositor');
+    expect(recordBlock).toContain('status');
   });
 });
