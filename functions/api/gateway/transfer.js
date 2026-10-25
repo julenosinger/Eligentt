@@ -631,40 +631,139 @@ export async function onRequestDelete() { return jsonResp({ error: 'method_not_a
 // Called by GatewaySpendService.execute() after receiving a mint receipt.
 // Body: { salt, depositor, txHash, dstChainId }
 //
-// Verification steps (Fase 2.2):
+// Verification steps (Fase 2.3):
 //   1. Read the operation record and verify depositor isolation.
 //   2. Validate txHash format and that the record is 'accepted' or 'ambiguous'.
 //   3. Resolve per-chain RPC from env.GATEWAY_RPC_URLS[chainId] (no fallback).
 //   4. Verify RPC is on the correct chain via eth_chainId.
-//   5. Call eth_getTransactionReceipt via RPC.
-//   6. Verify receipt.to matches GatewayMinter for this chain.
-//   7. Verify receipt.status is exactly '0x1' or '0x0' (null = inconclusive).
-//   8. Verify salt appears in calldata (links tx to this specific operation).
+//   5. Call eth_getTransactionByHash — primary source for 'input' (calldata).
+//      Verify tx.hash === txHash (hash cross-check).
+//      Verify tx.to === minterAddr.
+//   6. Call eth_getTransactionReceipt — primary source for 'status'.
+//      Verify receipt.status is exactly '0x1' (success) or '0x0' (revert).
+//      null/undefined/other = inconclusive, preserve recoverable state.
+//   7. Decode gatewayMint calldata from tx.input:
+//      a. Verify function selector matches gatewayMint(bytes,bytes).
+//      b. Extract attestationPayload bytes using ABI offset encoding.
+//      c. Detect Attestation vs AttestationSet via magic bytes.
+//      d. Locate salt at the documented offset in TransferSpec.
+//      e. Compare extracted salt with the operation's recorded salt.
+//   8. transaction.from is NOT validated — the caller may be the user, a
+//      relayer, or Circle's Forwarding Service. The spec sets destinationCaller=0
+//      to allow any caller by default. Salt linkage is the binding proof.
 //   9. Write 'confirmed' (success) or 'failed' (revert) atomically.
 //
-// If GATEWAY_RPC_URLS[chainId] is not configured → 503 recoverable.
-// If RPC call fails, times out, or chainId mismatches → 502 recoverable.
-// If receipt is null (tx pending), status inconclusive, or input absent → recoverable.
-// Never trusts client-provided receipt, status, or success — always re-fetches.
+// Error codes:
+//   503 rpc_not_configured            — GATEWAY_RPC_URLS[chainId] missing
+//   504 rpc_timeout                   — RPC call aborted
+//   502 rpc_http_error                — RPC returned non-2xx
+//   502 rpc_unreachable               — RPC threw (network/DNS)
+//   502 rpc_chain_mismatch            — eth_chainId disagrees with dstChainId
+//   404 tx_not_found                  — transaction not mined (pending or unknown hash)
+//   422 tx_wrong_contract             — tx.to !== GatewayMinter
+//   502 receipt_status_inconclusive   — receipt.status is null/undefined/malformed
+//   422 calldata_selector_mismatch    — not a gatewayMint call
+//   502 calldata_too_short            — payload shorter than minimum expected layout
+//   502 attestation_payload_too_short — attestation bytes shorter than needed
+//   502 attestation_magic_unknown     — first 4 bytes not a known Circle magic
+//   422 tx_salt_mismatch              — salt not found at expected offset
+//   502 persistence_failed_after_verify — verified on-chain but DB write failed
+//
+// All recoverable errors preserve 'accepted' or 'ambiguous' state. Only
+// tx_wrong_contract and tx_salt_mismatch return non-recoverable 422.
 //
 // PENDING: env.GATEWAY_RPC_URLS (JSON: { "421614": "https://..." }) must be
 // configured in CF Pages environment settings per destination chain.
 
-// Canonical GatewayMinter addresses per chain (official Circle docs).
-// ONLY chains listed here are supported. Unlisted chains → 422.
-// NOTE: Mainnet addresses require confirmation at https://developers.circle.com/gateway
-// before enabling for real funds. Entries marked [UNVERIFIED] must be confirmed.
+// ── GatewayMinter addresses per chain (official Circle docs, verified) ───────
+// Source: https://developers.circle.com/gateway/references/contract-addresses.md
+// ONLY chains listed here are supported for /confirm. Unlisted chains → 422.
+//
+// Testnet (confirmed, same address on all testnet chains):
+//   Arc Testnet (chainId 1777078 / domain 26), Arbitrum Sepolia (421614),
+//   Base Sepolia (84532), ETH Sepolia (11155111), Avalanche Fuji (43113),
+//   OP Sepolia (11155420), Polygon Amoy (80002), Sei Atlantic (713715),
+//   Sonic Testnet (57054), Unichain Sepolia (1301), World Chain Sepolia (4801)
+//
+// Mainnet (confirmed in Circle docs, Oct 2026 — same address on all mainnet chains):
+//   Arbitrum (42161), Arc (5042), Avalanche (43114), Base (8453),
+//   Ethereum (1), HyperEVM (999), OP (10), Polygon PoS (137),
+//   Sei (1329), Sonic (146), Unichain (130), World Chain (480)
+//
+// NOTE: Mainnet entries are enabled here per the confirmed Circle docs address.
+//       GATEWAY_SPEND_BLOCKED=true in index.html prevents real execution until
+//       all security validations are completed.
+const GATEWAY_MINTER_TESTNET = '0x0022222ABE238Cc2C7Bb1f21003F0a260052475B';
+const GATEWAY_MINTER_MAINNET = '0x2222222d7164433c4C09B0b0D809a9b52C04C205';
+
 const GATEWAY_MINTER_ADDRESSES = {
-  // Testnet (confirmed in Circle docs):
-  421614: '0x0022222ABE238Cc2C7Bb1f21003F0a260052475B', // Arbitrum Sepolia
-  84532:  '0x0022222ABE238Cc2C7Bb1f21003F0a260052475B', // Base Sepolia
-  11155111:'0x0022222ABE238Cc2C7Bb1f21003F0a260052475B', // Ethereum Sepolia
-  // Mainnet — [UNVERIFIED: confirm at developers.circle.com/gateway before enabling]
-  // 5042:   '0x2222222d7164433c4C09B0b0D809a9b52C04C205', // Arc — BLOCKED pending verification
-  // 1:      '0x2222222d7164433c4C09B0b0D809a9b52C04C205', // Ethereum — BLOCKED pending verification
-  // 8453:   '0x2222222d7164433c4C09B0b0D809a9b52C04C205', // Base — BLOCKED pending verification
-  // 42161:  '0x2222222d7164433c4C09B0b0D809a9b52C04C205', // Arbitrum — BLOCKED pending verification
+  // ── Testnet ───────────────────────────────────────────────────────────────
+  421614:   GATEWAY_MINTER_TESTNET, // Arbitrum Sepolia
+  84532:    GATEWAY_MINTER_TESTNET, // Base Sepolia
+  11155111: GATEWAY_MINTER_TESTNET, // Ethereum Sepolia
+  43113:    GATEWAY_MINTER_TESTNET, // Avalanche Fuji
+  11155420: GATEWAY_MINTER_TESTNET, // OP Sepolia
+  80002:    GATEWAY_MINTER_TESTNET, // Polygon Amoy
+  713715:   GATEWAY_MINTER_TESTNET, // Sei Atlantic
+  57054:    GATEWAY_MINTER_TESTNET, // Sonic Testnet
+  1301:     GATEWAY_MINTER_TESTNET, // Unichain Sepolia
+  4801:     GATEWAY_MINTER_TESTNET, // World Chain Sepolia
+  1777078:  GATEWAY_MINTER_TESTNET, // Arc Testnet (domain 26)
+  // ── Mainnet ───────────────────────────────────────────────────────────────
+  42161:  GATEWAY_MINTER_MAINNET,  // Arbitrum
+  5042:   GATEWAY_MINTER_MAINNET,  // Arc
+  43114:  GATEWAY_MINTER_MAINNET,  // Avalanche
+  8453:   GATEWAY_MINTER_MAINNET,  // Base
+  1:      GATEWAY_MINTER_MAINNET,  // Ethereum
+  999:    GATEWAY_MINTER_MAINNET,  // HyperEVM
+  10:     GATEWAY_MINTER_MAINNET,  // OP
+  137:    GATEWAY_MINTER_MAINNET,  // Polygon PoS
+  1329:   GATEWAY_MINTER_MAINNET,  // Sei
+  146:    GATEWAY_MINTER_MAINNET,  // Sonic
+  130:    GATEWAY_MINTER_MAINNET,  // Unichain
+  480:    GATEWAY_MINTER_MAINNET,  // World Chain
 };
+
+// ── gatewayMint ABI constants (from official Circle source) ───────────────────
+// Source: https://github.com/circlefin/evm-gateway-contracts
+//
+// function gatewayMint(bytes memory attestationPayload, bytes memory signature)
+//   Selector: keccak256("gatewayMint(bytes,bytes)")[0..3] = 0x9fb01cc5
+//
+// ABI calldata layout (bytes, big-endian):
+//   [0..3]    selector              4 bytes  0x9fb01cc5
+//   [4..35]   offset to param0     32 bytes  always 0x40 = 64 (standard ABI)
+//   [36..67]  offset to param1     32 bytes  (after param0 data)
+//   [68..99]  length of param0     32 bytes  byteLength of attestationPayload
+//   [100..]   attestationPayload   variable
+//
+// Attestation binary layout (single, magic = 0xff6fb334):
+//   [0..3]    magic                4 bytes  0xff6fb334
+//   [4..35]   maxBlockHeight      32 bytes
+//   [36..39]  transferSpecLength   4 bytes
+//   [40..]    TransferSpec         variable
+//
+// TransferSpec binary layout at the above offset (within attestationPayload):
+//   [0..3]    magic (0xca85def7)   4 bytes
+//   [4..7]    version              4 bytes
+//   ...
+//   [304..335] salt               32 bytes  ← THE FIELD WE VERIFY
+//
+// Combined: salt is at attestationPayload byte offset (40 + 304) = 344
+//           in calldata: byte 100 + 344 = 444
+//
+// AttestationSet layout (magic = 0x1e12db71):
+//   [0..3]    magic                4 bytes  0x1e12db71
+//   [4..7]    numAttestations      4 bytes
+//   [8..]     attestations         variable (first starts at 8)
+// Salt of first attestation in set: attestationPayload byte (8 + 40 + 304) = 352
+//   in calldata: byte 100 + 352 = 452
+const GATEWAY_MINT_SELECTOR         = '9fb01cc5'; // hex, no 0x prefix
+const ATTESTATION_MAGIC             = 'ff6fb334';
+const ATTESTATION_SET_MAGIC         = '1e12db71';
+const TRANSFER_SPEC_SALT_IN_SPEC    = 304; // byte offset of salt within a TransferSpec blob
+const ATTESTATION_SPEC_OFFSET       = 40;  // bytes before TransferSpec within a single Attestation
+const ATTESTATION_SET_FIRST_OFFSET  = 8;   // bytes before first Attestation within an AttestationSet
 
 export async function onRequestPostConfirm(ctx) {
   const { request, env } = ctx;
@@ -682,7 +781,7 @@ export async function onRequestPostConfirm(ctx) {
 
   const { salt, depositor, txHash, dstChainId } = body;
 
-  // Validate inputs
+  // ── Validate inputs ───────────────────────────────────────────────────────
   if (!salt || !/^0x[0-9a-fA-F]{64}$/.test(salt))
     return jsonResp({ error: 'salt_required' }, 400);
   if (!depositor || !/^0x[0-9a-fA-F]{40}$/.test(depositor))
@@ -693,37 +792,33 @@ export async function onRequestPostConfirm(ctx) {
   if (!chainId || isNaN(chainId))
     return jsonResp({ error: 'dstchainid_required' }, 400);
 
-  // Check for GatewayMinter address on this chain
+  // ── Verify GatewayMinter address is known for this chain ─────────────────
   const minterAddr = GATEWAY_MINTER_ADDRESSES[chainId];
   if (!minterAddr) {
     return jsonResp({
       error:   'chain_not_supported_for_confirm',
       chainId: chainId,
-      detail:  'This chain does not have a verified GatewayMinter address. ' +
-               'Confirmation is blocked until the address is confirmed in Circle docs.',
+      detail:  'This chain does not have a verified GatewayMinter address in the confirmed Circle docs. ' +
+               'Confirmation is blocked.',
     }, 422);
   }
 
-  // Fetch operation record and verify depositor
+  // ── Fetch operation record and verify depositor isolation ─────────────────
   const record = await tryRead(salt, env);
   if (!record)                                             return jsonResp({ error: 'not_found', salt }, 404);
   if (normAddr(record.depositor) !== normAddr(depositor))  return jsonResp({ error: 'not_found', salt }, 404);
 
-  // Only 'accepted' or 'ambiguous' records can be confirmed/reconciled.
-  // 'ambiguous' operations also route through /confirm for safe reconciliation.
+  // Only 'accepted' or 'ambiguous' records can be reconciled.
   if (record.status !== 'accepted' && record.status !== 'ambiguous') {
     return jsonResp({
       error:   'not_reconcilable_state',
       current: record.status,
-      detail:  "Only operations in 'accepted' or 'ambiguous' state can be reconciled. " +
+      detail:  "Only 'accepted' or 'ambiguous' operations can be reconciled. " +
                "Current state: '" + record.status + "'.",
     }, 409);
   }
 
-  // ── Get RPC URL for the destination chain (per-chain only, no fallback) ────
-  // P1 — Fase 2.2: GATEWAY_RPC_URL (single fallback) is removed.
-  // Only GATEWAY_RPC_URLS[chainId] is accepted. This prevents a misconfigured
-  // single-chain RPC from silently verifying receipts on the wrong network.
+  // ── Resolve per-chain RPC URL (no single-RPC fallback) ───────────────────
   let rpcUrl = null;
   if (env && env.GATEWAY_RPC_URLS) {
     try {
@@ -761,12 +856,19 @@ export async function onRequestPostConfirm(ctx) {
     }
   }
 
-  // ── P1 (Fase 2.2): Verify RPC is on the correct chain via eth_chainId ─────
-  // This prevents a misconfigured GATEWAY_RPC_URLS entry (e.g. Ethereum RPC
-  // used for Arbitrum chainId) from confirming transactions on the wrong network.
+  // ── Step 1: Verify RPC is on the correct chain via eth_chainId ────────────
+  // Prevents a misconfigured GATEWAY_RPC_URLS entry from verifying on the wrong network.
   let rpcChainId;
   try {
     const chainIdHex = await rpcCall('eth_chainId', []);
+    if (typeof chainIdHex !== 'string' || !/^0x[0-9a-fA-F]+$/.test(chainIdHex)) {
+      return jsonResp({
+        error:       'rpc_chain_id_malformed',
+        received:    chainIdHex,
+        recoverable: true,
+        detail:      'eth_chainId returned an unexpected value.',
+      }, 502);
+    }
     rpcChainId = parseInt(chainIdHex, 16);
   } catch(e) {
     const isTimeout = e && e.name === 'AbortError';
@@ -778,7 +880,7 @@ export async function onRequestPostConfirm(ctx) {
   }
   if (rpcChainId !== chainId) {
     return jsonResp({
-      error:          'rpc_chain_mismatch',
+      error:           'rpc_chain_mismatch',
       expectedChainId: chainId,
       rpcChainId:      rpcChainId,
       recoverable:     true,
@@ -788,7 +890,64 @@ export async function onRequestPostConfirm(ctx) {
     }, 502);
   }
 
-  // ── Fetch transaction receipt ─────────────────────────────────────────────
+  // ── Step 2: Fetch transaction (primary source for calldata) ───────────────
+  // eth_getTransactionByHash returns the 'input' field (the calldata).
+  // eth_getTransactionReceipt does NOT guarantee 'input' — this is the P0 fix.
+  let tx = null;
+  try {
+    tx = await rpcCall('eth_getTransactionByHash', [txHash]);
+  } catch(e) {
+    const isTimeout = e && e.name === 'AbortError';
+    return jsonResp({
+      error:       isTimeout ? 'rpc_timeout' : (e.httpStatus ? 'rpc_http_error' : 'rpc_unreachable'),
+      recoverable: true,
+      detail:      e && e.message ? e.message : String(e),
+      ...(e.httpStatus ? { httpStatus: e.httpStatus } : {}),
+    }, isTimeout ? 504 : 502);
+  }
+
+  // null = transaction not mined yet, or hash not found — INDETERMINATE
+  if (!tx) {
+    return jsonResp({
+      error:       'tx_not_found',
+      recoverable: true,
+      detail:      'Transaction not found on-chain (not mined or unknown hash). ' +
+                   'Operation remains recoverable.',
+    }, 404);
+  }
+
+  // ── Step 3: Hash cross-check ──────────────────────────────────────────────
+  // An RPC that returns a different hash is malformed or proxying incorrect data.
+  const returnedHash = (tx.hash || '').toLowerCase();
+  if (returnedHash !== txHash.toLowerCase()) {
+    return jsonResp({
+      error:       'tx_hash_mismatch',
+      requested:   txHash,
+      returned:    tx.hash,
+      recoverable: true,
+      detail:      'RPC returned a transaction whose hash does not match the requested txHash. ' +
+                   'This indicates a malformed RPC response.',
+    }, 502);
+  }
+
+  // ── Step 4: Verify transaction.to matches GatewayMinter ──────────────────
+  // Use tx.to from eth_getTransactionByHash — the authoritative source.
+  const txTo           = (tx.to || '').toLowerCase();
+  const expectedMinter = minterAddr.toLowerCase();
+  if (txTo !== expectedMinter) {
+    return jsonResp({
+      error:    'tx_wrong_contract',
+      to:       tx.to,
+      expected: minterAddr,
+      detail:   'Transaction was not sent to the verified GatewayMinter contract. ' +
+                'This transaction does not correspond to a Gateway mint.',
+    }, 422);
+  }
+
+  // ── Step 5: Fetch receipt (primary source for status) ────────────────────
+  // eth_getTransactionReceipt is the authoritative source for status.
+  // A null receipt means the tx exists in mempool or was just included —
+  // status is INDETERMINATE. Do not treat as failure.
   let receipt = null;
   try {
     receipt = await rpcCall('eth_getTransactionReceipt', [txHash]);
@@ -802,34 +961,21 @@ export async function onRequestPostConfirm(ctx) {
     }, isTimeout ? 504 : 502);
   }
 
-  // Receipt is null = transaction not yet mined (or hash does not exist).
-  // This is INDETERMINATE — not a proof of failure. Preserve ambiguous state.
   if (!receipt) {
+    // Transaction is known (eth_getTransactionByHash returned it) but receipt
+    // is not yet available — still pending. INDETERMINATE.
     return jsonResp({
-      error:       'tx_not_found',
+      error:       'tx_pending',
       recoverable: true,
-      detail:      'Transaction not found on-chain yet. It may be pending or the hash may be incorrect.',
+      detail:      'Transaction is known but not yet mined (no receipt). ' +
+                   'Operation remains recoverable. Retry after the next block.',
     }, 404);
   }
 
-  // ── P0.2 (Fase 2.2): Verify receipt fields ────────────────────────────────
-  //
-  // 1. to-address must match the GatewayMinter contract (case-insensitive)
-  const receiptTo      = (receipt.to || '').toLowerCase();
-  const expectedMinter = minterAddr.toLowerCase();
-  if (receiptTo !== expectedMinter) {
-    return jsonResp({
-      error:    'tx_wrong_contract',
-      to:       receipt.to,
-      expected: minterAddr,
-      detail:   'Transaction was not sent to the GatewayMinter contract.',
-    }, 422);
-  }
-
-  // 2. receipt.status — ONLY '0x1' (success) or '0x0' (revert) are accepted.
-  //    null / undefined / any other value = receipt is incomplete or malformed.
-  //    Do NOT treat an incomplete receipt as a revert — that would incorrectly
-  //    mark a successful operation as 'failed'.
+  // ── Step 6: Verify receipt.status ────────────────────────────────────────
+  // ONLY '0x1' (success) or '0x0' (revert) are accepted.
+  // null/undefined/other = receipt is incomplete or malformed.
+  // Do NOT treat an incomplete status as a revert.
   const statusHex = receipt.status;
   const txSuccess = (statusHex === '0x1' || statusHex === 1);
   const txRevert  = (statusHex === '0x0' || statusHex === 0);
@@ -843,48 +989,165 @@ export async function onRequestPostConfirm(ctx) {
     }, 502);
   }
 
-  // 3. P0.3 (Fase 2.2): Verify calldata contains the operation's salt.
-  //    GatewayMinter.gatewayMint(bytes attestation, bytes signature)
-  //    The attestation payload from Circle encodes the BurnIntent, which includes
-  //    the salt. We verify the salt appears in the calldata to prove this transaction
-  //    corresponds to THIS operation and not a different mint.
+  // ── Step 7: Decode gatewayMint calldata and verify salt ───────────────────
   //
-  //    LIMITATION: The exact ABI encoding of the attestation is Circle-internal.
-  //    We verify the salt bytes appear somewhere in the calldata (hex substring match).
-  //    This is a best-effort verification — an attacker would need to find another
-  //    valid GatewayMinter transaction whose calldata happens to contain this salt,
-  //    which is computationally infeasible for a random 32-byte salt.
+  // gatewayMint(bytes attestationPayload, bytes signature)
+  // Selector: 0x9fb01cc5 (keccak256("gatewayMint(bytes,bytes)")[0..3])
   //
-  //    If Circle publishes the attestation ABI, this can be upgraded to a full decode.
-  //    If calldata is absent (receipt has no input), treat as inconclusive.
-  const inputData   = receipt.input || receipt.data || null;
-  const saltHex     = salt.toLowerCase().replace(/^0x/, '');
-  if (inputData && typeof inputData === 'string') {
-    const calldata = inputData.toLowerCase().replace(/^0x/, '');
-    if (!calldata.includes(saltHex)) {
-      return jsonResp({
-        error:   'tx_salt_mismatch',
-        detail:  'The transaction calldata does not contain this operation\'s salt. ' +
-                 'This transaction does not correspond to this Gateway operation.',
-      }, 422);
-    }
-  } else {
-    // Input data absent — cannot verify salt binding.
+  // The calldata is structured as standard ABI encoding:
+  //   bytes 0..3:   selector
+  //   bytes 4..67:  two 32-byte offsets (standard ABI dynamic params)
+  //   bytes 68..99: length of attestationPayload (as uint256)
+  //   bytes 100..:  attestationPayload data
+  //
+  // Inside attestationPayload (from Circle source code):
+  //   Single Attestation (magic 0xff6fb334):
+  //     bytes 0..3:   magic
+  //     bytes 4..35:  maxBlockHeight (uint256)
+  //     bytes 36..39: transferSpecLength (uint32)
+  //     bytes 40..:   TransferSpec
+  //   AttestationSet (magic 0x1e12db71):
+  //     bytes 0..3:   magic
+  //     bytes 4..7:   numAttestations (uint32)
+  //     bytes 8..:    first Attestation (then others)
+  //
+  // TransferSpec layout (at its start offset):
+  //   bytes 304..335: salt (bytes32)
+  //
+  // Salt absolute offset in calldata:
+  //   Single:   100 + 40 + 304 = 444
+  //   Set:      100 + 8 + 40 + 304 = 452
+  //
+  // We verify the salt at its DOCUMENTED FIXED OFFSET rather than a substring
+  // search, which would pass for any transaction whose calldata happens to
+  // contain the salt bytes anywhere. Fixed-offset verification is cryptographically
+  // stronger: it proves the salt was placed in the TransferSpec.salt field of the
+  // first attestation, which is the exact field that links the mint to this intent.
+  //
+  // We also do NOT validate transaction.from. Per the Circle docs and contracts:
+  // - destinationCaller=0 means any address may call gatewayMint
+  // - The Forwarding Service calls it on the user's behalf
+  // - The salt+minterAddr+chainId binding IS the proof of linkage
+
+  const inputHex = tx.input || tx.data || null;
+  if (!inputHex || typeof inputHex !== 'string') {
     return jsonResp({
-      error:       'receipt_input_absent',
+      error:       'calldata_absent',
       recoverable: true,
-      detail:      'Receipt has no input data — cannot verify salt binding. ' +
-                   'Operation remains recoverable.',
+      detail:      'Transaction has no input data. Cannot verify salt binding.',
     }, 502);
   }
 
-  const newStatus = txSuccess ? 'confirmed' : 'failed';
+  // Strip 0x prefix and work in lowercase hex
+  const calldata = inputHex.toLowerCase().replace(/^0x/, '');
 
-  // Write the verified state atomically
+  // Minimum calldata length: 4 (selector) + 32 + 32 + 32 = 100 bytes = 200 hex chars
+  if (calldata.length < 200) {
+    return jsonResp({
+      error:       'calldata_too_short',
+      length:      calldata.length / 2,
+      recoverable: true,
+      detail:      'Calldata is shorter than the minimum expected for gatewayMint.',
+    }, 502);
+  }
+
+  // Verify selector
+  const selector = calldata.slice(0, 8);
+  if (selector !== GATEWAY_MINT_SELECTOR) {
+    return jsonResp({
+      error:    'calldata_selector_mismatch',
+      selector: '0x' + selector,
+      expected: '0x' + GATEWAY_MINT_SELECTOR,
+      detail:   'Transaction does not call gatewayMint(bytes,bytes). ' +
+                'This is not a GatewayMinter mint transaction.',
+    }, 422);
+  }
+
+  // ABI-decode the offset to attestationPayload (first dynamic param).
+  // Standard ABI: offset is at bytes 4..35 of calldata (hex chars 8..71).
+  // The value is big-endian uint256, representing a byte offset from byte 4.
+  const param0OffsetHex = calldata.slice(8, 8 + 64); // 32 bytes = 64 hex chars
+  const param0Offset    = parseInt(param0OffsetHex, 16); // offset from start of params (byte 4)
+  // param0 data starts at: 4 + param0Offset bytes into calldata
+  // Calldata hex offset: (4 + param0Offset) * 2 hex chars
+  // Standard ABI encoding sets param0Offset = 64 (= 0x40) — two 32-byte offset slots.
+  // We do NOT hardcode 64; we read it from the calldata to handle non-standard encoders.
+  const payloadLenOffset = (4 + param0Offset) * 2; // hex offset of the length uint256
+  if (calldata.length < payloadLenOffset + 64) {
+    return jsonResp({
+      error:       'calldata_too_short',
+      recoverable: true,
+      detail:      'Calldata is too short to read attestationPayload length.',
+    }, 502);
+  }
+  const payloadLenHex  = calldata.slice(payloadLenOffset, payloadLenOffset + 64);
+  const payloadLen     = parseInt(payloadLenHex, 16); // byte length of attestationPayload
+  const payloadStart   = payloadLenOffset + 64;        // hex offset of first byte of attestationPayload
+
+  // Minimum attestation payload size:
+  //   Single: magic(4) + maxBlockHeight(32) + specLen(4) + TransferSpec(340+) = 380 bytes
+  //   Set:    magic(4) + numAttestations(4) + [single attestation 380+] = 388 bytes
+  const MIN_PAYLOAD_BYTES = 380;
+  if (payloadLen < MIN_PAYLOAD_BYTES || calldata.length < payloadStart + payloadLen * 2) {
+    return jsonResp({
+      error:       'attestation_payload_too_short',
+      payloadLen:  payloadLen,
+      recoverable: true,
+      detail:      'attestationPayload is shorter than the minimum expected ' +
+                   'layout for a valid Circle Gateway attestation.',
+    }, 502);
+  }
+
+  // Extract first 4 bytes of attestationPayload = magic bytes
+  const payloadMagic = calldata.slice(payloadStart, payloadStart + 8); // 4 bytes = 8 hex
+
+  // Determine salt offset within attestationPayload based on magic
+  let saltOffsetInPayload;
+  if (payloadMagic === ATTESTATION_MAGIC) {
+    // Single Attestation: salt at (ATTESTATION_SPEC_OFFSET + TRANSFER_SPEC_SALT_IN_SPEC)
+    saltOffsetInPayload = ATTESTATION_SPEC_OFFSET + TRANSFER_SPEC_SALT_IN_SPEC; // = 344
+  } else if (payloadMagic === ATTESTATION_SET_MAGIC) {
+    // AttestationSet: first attestation at ATTESTATION_SET_FIRST_OFFSET (8),
+    // then salt at (ATTESTATION_SPEC_OFFSET + TRANSFER_SPEC_SALT_IN_SPEC) within that attestation
+    saltOffsetInPayload = ATTESTATION_SET_FIRST_OFFSET + ATTESTATION_SPEC_OFFSET + TRANSFER_SPEC_SALT_IN_SPEC; // = 352
+  } else {
+    return jsonResp({
+      error:    'attestation_magic_unknown',
+      magic:    '0x' + payloadMagic,
+      recoverable: true,
+      detail:   'attestationPayload does not start with a known Circle Gateway magic value. ' +
+                'Expected 0xff6fb334 (Attestation) or 0x1e12db71 (AttestationSet). ' +
+                'Cannot safely decode salt offset.',
+    }, 502);
+  }
+
+  // Extract salt from the expected fixed offset (32 bytes = 64 hex chars)
+  const saltHexOffset = payloadStart + saltOffsetInPayload * 2; // in calldata hex chars
+  if (calldata.length < saltHexOffset + 64) {
+    return jsonResp({
+      error:       'attestation_payload_too_short',
+      recoverable: true,
+      detail:      'attestationPayload is too short to read salt at expected offset ' +
+                   saltOffsetInPayload + '.',
+    }, 502);
+  }
+
+  const extractedSalt = calldata.slice(saltHexOffset, saltHexOffset + 64); // 32 bytes hex, no 0x
+  const expectedSalt  = salt.toLowerCase().replace(/^0x/, '');
+
+  if (extractedSalt !== expectedSalt) {
+    return jsonResp({
+      error:   'tx_salt_mismatch',
+      detail:  'The salt at the expected offset in the attestation calldata does not match ' +
+               'this operation\'s salt. This transaction does not correspond to this Gateway operation.',
+    }, 422);
+  }
+
+  // ── Step 8: Write verified state atomically ───────────────────────────────
+  const newStatus    = txSuccess ? 'confirmed' : 'failed';
   const updateResult = await tryUpdate(salt, {
-    status:  newStatus,
-    txHash:  txHash,
-    // Store verified block number for auditability
+    status:      newStatus,
+    txHash:      txHash,
     blockNumber: receipt.blockNumber || null,
   }, env);
 
@@ -901,11 +1164,11 @@ export async function onRequestPostConfirm(ctx) {
   }
 
   return jsonResp({
-    ok:         true,
-    salt:       salt,
-    status:     newStatus,
-    txHash:     txHash,
-    txSuccess:  txSuccess,
+    ok:          true,
+    salt:        salt,
+    status:      newStatus,
+    txHash:      txHash,
+    txSuccess:   txSuccess,
     blockNumber: receipt.blockNumber || null,
   });
 }

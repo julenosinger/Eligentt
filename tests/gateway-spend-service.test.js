@@ -2125,11 +2125,14 @@ describe('GSS17 — Fase 2.1 P0: /confirm endpoint and client transition restric
     expect(proxySrc).toContain('eth_getTransactionReceipt');
   });
 
-  it('GSS17.5 — /confirm endpoint checks receipt.to matches GatewayMinter', () => {
+  // Fase 2.3: to-check now comes from tx (eth_getTransactionByHash), not receipt.
+  // Variable renamed to txTo; expectedMinter remains.
+  it('GSS17.5 — /confirm endpoint checks tx.to matches GatewayMinter (Fase 2.3: from tx)', () => {
     const i = proxySrc.indexOf('onRequestPostConfirm');
     const block = proxySrc.slice(i, i + 10000);
-    expect(block).toContain('receiptTo');
+    expect(block).toContain('txTo');
     expect(block).toContain('expectedMinter');
+    expect(block).toContain('tx_wrong_contract');
   });
 
   it('GSS17.6 — /confirm endpoint verifies receipt.status (0x1 or 0x0)', () => {
@@ -2239,14 +2242,19 @@ describe('GSS17 — Fase 2.1 P0: /confirm endpoint and client transition restric
     expect(block).toContain('2.01');
   });
 
-  it('GSS17.15 — GATEWAY_MINTER_ADDRESSES mainnet entries commented/blocked', () => {
+  // Fase 2.3: mainnet GatewayMinter address (0x2222222d7164433c4C09B0b0D809a9b52C04C205)
+  // confirmed in official Circle docs (Oct 2026). Entries now enabled, not commented.
+  // GATEWAY_SPEND_BLOCKED=true in index.html still prevents real execution.
+  it('GSS17.15 — GATEWAY_MINTER_ADDRESSES mainnet entries confirmed and enabled (Fase 2.3)', () => {
     const i = proxySrc.indexOf('GATEWAY_MINTER_ADDRESSES');
-    const block = proxySrc.slice(i, i + 1200);
-    // All mainnet entries (chain IDs 5042, 1, 8453, 42161) must be commented out
-    expect(block).not.toMatch(/^\s*5042\s*:/m);
-    expect(block).not.toMatch(/^\s*1\s*:/m);
-    expect(block).not.toMatch(/^\s*8453\s*:/m);
-    expect(block).not.toMatch(/^\s*42161\s*:/m);
+    const block = proxySrc.slice(i, i + 2000);
+    // Mainnet address confirmed in Circle docs
+    expect(block).toContain('GATEWAY_MINTER_MAINNET');
+    // Mainnet chain IDs must be present and active (not all commented out)
+    expect(block).toMatch(/5042\s*:/);   // Arc mainnet
+    expect(block).toMatch(/8453\s*:/);   // Base mainnet
+    expect(block).toMatch(/42161\s*:/);  // Arbitrum mainnet
+    expect(block).toMatch(/1\s*:/);      // Ethereum mainnet
   });
 });
 
@@ -2323,30 +2331,91 @@ describe('GSS18 — Fase 2.2 P0: reconciliation security', () => {
     expect(body.error).toBe('client_transition_not_allowed');
   });
 
+  // ── Helper: build valid gatewayMint calldata containing a given salt ─────
+  // Source layout from Circle's open-source contracts (TransferSpec.sol, Attestations.sol):
+  //   Single Attestation (magic 0xff6fb334):
+  //     bytes 0..3:   magic (4)
+  //     bytes 4..35:  maxBlockHeight (32)
+  //     bytes 36..39: specLength = 340 (4)
+  //     bytes 40..:   TransferSpec (340)
+  //       at offset 304 within TransferSpec = overall byte 40+304 = 344: salt (32)
+  //   ABI wrapper:
+  //     bytes 0..3:   selector 0x9fb01cc5
+  //     bytes 4..35:  param0 offset = 64
+  //     bytes 36..67: param1 offset = 64+32+380+32 = 508 (but we simplify)
+  //     bytes 68..99: param0 length = 380
+  //     bytes 100..:  attestationPayload (380 bytes)
+  //   Salt in calldata at: 100 + 344 = byte 444 = hex offset 888
+  function buildGatewayMintCalldata(saltHexNoPrefix) {
+    const specLength = 340; // bytes
+    // TransferSpec (340 bytes = 680 hex): at byte 304 (hex 608) = salt 32 bytes
+    const specHex =
+      'ca85def7' +     // magic (4)
+      '00000001' +     // version (4)
+      '00000000' +     // sourceDomain (4)
+      '00000000' +     // destinationDomain (4)
+      '00'.repeat(32) + // sourceContract (32)
+      '00'.repeat(32) + // destinationContract (32)
+      '00'.repeat(32) + // sourceToken (32)
+      '00'.repeat(32) + // destinationToken (32)
+      '00'.repeat(32) + // sourceDepositor (32)
+      '00'.repeat(32) + // destinationRecipient (32)
+      '00'.repeat(32) + // sourceSigner (32)
+      '00'.repeat(32) + // destinationCaller (32)
+      '00'.repeat(32) + // value (32)
+      saltHexNoPrefix + // salt (32) ← byte 304 in TransferSpec
+      '00000000';      // hookDataLength (4)
+    // spec = 4+4+4+4 + 8*32 + 32 + 4 = 16 + 256 + 32 + 4 = 308... let me count properly
+    // magic(4)+version(4)+sourceDomain(4)+dstDomain(4)+8x32(256)+value(32)+salt(32)+hookLen(4) = 340 ✓
+
+    const attestHex =
+      'ff6fb334' +                    // Attestation magic (4)
+      '00'.repeat(32) +               // maxBlockHeight (32)
+      specLength.toString(16).padStart(8, '0') + // specLength uint32 = 0x00000154 (4)
+      specHex;                        // TransferSpec (340)
+
+    // attestHex length = 8 + 64 + 8 + 680 = 760 hex = 380 bytes ✓
+
+    const payloadLen = 380;
+    const selector  = '9fb01cc5';
+    const param0Off = (64).toString(16).padStart(64, '0');  // 0x40
+    const param1Off = (64 + 32 + payloadLen).toString(16).padStart(64, '0'); // 0x1dc
+    const len0      = payloadLen.toString(16).padStart(64, '0');
+    // Pad attestHex to 32-byte boundary (380 → 384 bytes)
+    const padded    = attestHex + '00'.repeat(384 - payloadLen);
+    // Signature param: length 65, data 65 bytes zeros padded to 96
+    const len1      = (65).toString(16).padStart(64, '0');
+    const sig       = '00'.repeat(65) + '00'.repeat(31); // 96 bytes
+
+    return '0x' + selector + param0Off + param1Off + len0 + padded + len1 + sig;
+  }
+
   // ── GSS18.4: /confirm accepts 'ambiguous' state (not just 'accepted') ─────
   it('GSS18.4 — /confirm accepts ambiguous records for reconciliation', async () => {
-    const txHash = '0x' + 'aa'.repeat(32);
+    const txHash  = '0x' + 'aa'.repeat(32);
     const saltHex = SALT_BB.replace(/^0x/, '');
+    const calldata = buildGatewayMintCalldata(saltHex);
     const env = makeKvEnv(
       { [SALT_BB]: { salt: SALT_BB, depositor: ADDR_X, status: 'ambiguous' } },
-      {
-        GATEWAY_RPC_URLS: JSON.stringify({ '421614': 'https://mock-rpc' }),
-      }
+      { GATEWAY_RPC_URLS: JSON.stringify({ '421614': 'https://mock-rpc' }) }
     );
-    // Mock global.fetch for this test
     const origFetch = global.fetch;
-    let callCount = 0;
     global.fetch = async (url, opts) => {
       const body = JSON.parse(opts.body);
-      callCount++;
       if (body.method === 'eth_chainId') {
         return { ok: true, json: async () => ({ jsonrpc: '2.0', id: 1, result: '0x' + (421614).toString(16) }) };
       }
+      if (body.method === 'eth_getTransactionByHash') {
+        return { ok: true, json: async () => ({ jsonrpc: '2.0', id: 1, result: {
+          hash:  txHash,
+          to:    '0x0022222abe238cc2c7bb1f21003f0a260052475b',
+          input: calldata,
+        }}) };
+      }
       if (body.method === 'eth_getTransactionReceipt') {
         return { ok: true, json: async () => ({ jsonrpc: '2.0', id: 1, result: {
-          to:     '0x0022222abe238cc2c7bb1f21003f0a260052475b',
-          status: '0x1',
-          input:  '0x' + 'ff'.repeat(10) + saltHex + 'ff'.repeat(10),
+          to:          '0x0022222abe238cc2c7bb1f21003f0a260052475b',
+          status:      '0x1',
           blockNumber: '0x1',
         }}) };
       }
@@ -2365,10 +2434,10 @@ describe('GSS18 — Fase 2.2 P0: reconciliation security', () => {
     } finally { global.fetch = origFetch; }
   });
 
-  // ── GSS18.5: /confirm rejects tx sent to wrong contract ──────────────────
-  it('GSS18.5 — /confirm rejects receipt.to !== GatewayMinter (wrong contract)', async () => {
+  // ── GSS18.5: /confirm rejects tx.to !== GatewayMinter (wrong contract) ──────
+  // Fase 2.3: tx.to comes from eth_getTransactionByHash, not eth_getTransactionReceipt.
+  it('GSS18.5 — /confirm rejects tx.to !== GatewayMinter (wrong contract)', async () => {
     const txHash  = '0x' + 'cc'.repeat(32);
-    const saltHex = SALT_BB.replace(/^0x/, '');
     const env = makeKvEnv(
       { [SALT_BB]: { salt: SALT_BB, depositor: ADDR_X, status: 'accepted' } },
       { GATEWAY_RPC_URLS: JSON.stringify({ '421614': 'https://mock-rpc' }) }
@@ -2376,13 +2445,15 @@ describe('GSS18 — Fase 2.2 P0: reconciliation security', () => {
     const origFetch = global.fetch;
     global.fetch = async (url, opts) => {
       const body = JSON.parse(opts.body);
-      if (body.method === 'eth_chainId') return { ok: true, json: async () => ({ result: '0x' + (421614).toString(16) }) };
-      return { ok: true, json: async () => ({ result: {
-        to: '0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef', // wrong contract
-        status: '0x1',
-        input: '0x' + saltHex,
-        blockNumber: '0x1',
-      }}) };
+      if (body.method === 'eth_chainId')
+        return { ok: true, json: async () => ({ result: '0x' + (421614).toString(16) }) };
+      if (body.method === 'eth_getTransactionByHash')
+        return { ok: true, json: async () => ({ result: {
+          hash: txHash,
+          to:   '0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef', // wrong contract
+          input: '0x' + '00'.repeat(200),
+        }}) };
+      return { ok: true, json: async () => ({ result: null }) };
     };
     try {
       const req = new Request('https://worker.dev/api/gateway/transfer/confirm', {
@@ -2396,9 +2467,13 @@ describe('GSS18 — Fase 2.2 P0: reconciliation security', () => {
     } finally { global.fetch = origFetch; }
   });
 
-  // ── GSS18.6: /confirm rejects tx whose calldata lacks the salt ───────────
-  it('GSS18.6 — /confirm rejects receipt input missing salt (different intent)', async () => {
-    const txHash = '0x' + 'dd'.repeat(32);
+  // ── GSS18.6: /confirm rejects when calldata has wrong salt (different intent) ─
+  // Fase 2.3: calldata from eth_getTransactionByHash, salt decoded at fixed offset.
+  // A different-but-legitimate mint's calldata (cc..cc salt) must not confirm SALT_BB.
+  it('GSS18.6 — /confirm rejects tx calldata with wrong salt (different intent)', async () => {
+    const txHash        = '0x' + 'dd'.repeat(32);
+    const wrongSaltHex  = 'cc'.repeat(32); // NOT SALT_BB
+    const wrongCalldata = buildGatewayMintCalldata(wrongSaltHex);
     const env = makeKvEnv(
       { [SALT_BB]: { salt: SALT_BB, depositor: ADDR_X, status: 'accepted' } },
       { GATEWAY_RPC_URLS: JSON.stringify({ '421614': 'https://mock-rpc' }) }
@@ -2406,13 +2481,20 @@ describe('GSS18 — Fase 2.2 P0: reconciliation security', () => {
     const origFetch = global.fetch;
     global.fetch = async (url, opts) => {
       const body = JSON.parse(opts.body);
-      if (body.method === 'eth_chainId') return { ok: true, json: async () => ({ result: '0x' + (421614).toString(16) }) };
-      return { ok: true, json: async () => ({ result: {
-        to: '0x0022222abe238cc2c7bb1f21003f0a260052475b',
-        status: '0x1',
-        input: '0x' + 'cc'.repeat(64),  // DIFFERENT salt in calldata — not SALT_BB
-        blockNumber: '0x1',
-      }}) };
+      if (body.method === 'eth_chainId')
+        return { ok: true, json: async () => ({ result: '0x' + (421614).toString(16) }) };
+      if (body.method === 'eth_getTransactionByHash')
+        return { ok: true, json: async () => ({ result: {
+          hash:  txHash,
+          to:    '0x0022222abe238cc2c7bb1f21003f0a260052475b',
+          input: wrongCalldata,
+        }}) };
+      if (body.method === 'eth_getTransactionReceipt')
+        return { ok: true, json: async () => ({ result: {
+          to: '0x0022222abe238cc2c7bb1f21003f0a260052475b',
+          status: '0x1', blockNumber: '0x1',
+        }}) };
+      return { ok: false, status: 500, json: async () => ({}) };
     };
     try {
       const req = new Request('https://worker.dev/api/gateway/transfer/confirm', {
@@ -2455,8 +2537,10 @@ describe('GSS18 — Fase 2.2 P0: reconciliation security', () => {
     } finally { global.fetch = origFetch; }
   });
 
-  // ── GSS18.8: /confirm returns recoverable on receipt null (pending) ───────
-  it('GSS18.8 — /confirm returns recoverable when tx not yet mined (receipt=null)', async () => {
+  // ── GSS18.8: /confirm returns tx_not_found when eth_getTransactionByHash=null ─
+  // Fase 2.3: tx_not_found means hash unknown to the chain (eth_getTransactionByHash=null).
+  // This is distinct from tx_pending (tx found but receipt not yet available).
+  it('GSS18.8 — /confirm returns tx_not_found when eth_getTransactionByHash returns null', async () => {
     const txHash = '0x' + 'ff'.repeat(32);
     const env = makeKvEnv(
       { [SALT_BB]: { salt: SALT_BB, depositor: ADDR_X, status: 'accepted' } },
@@ -2465,8 +2549,11 @@ describe('GSS18 — Fase 2.2 P0: reconciliation security', () => {
     const origFetch = global.fetch;
     global.fetch = async (url, opts) => {
       const body = JSON.parse(opts.body);
-      if (body.method === 'eth_chainId') return { ok: true, json: async () => ({ result: '0x' + (421614).toString(16) }) };
-      return { ok: true, json: async () => ({ result: null }) }; // tx not yet mined
+      if (body.method === 'eth_chainId')
+        return { ok: true, json: async () => ({ result: '0x' + (421614).toString(16) }) };
+      if (body.method === 'eth_getTransactionByHash')
+        return { ok: true, json: async () => ({ result: null }) }; // tx unknown
+      return { ok: true, json: async () => ({ result: null }) };
     };
     try {
       const req = new Request('https://worker.dev/api/gateway/transfer/confirm', {
@@ -2481,10 +2568,12 @@ describe('GSS18 — Fase 2.2 P0: reconciliation security', () => {
     } finally { global.fetch = origFetch; }
   });
 
-  // ── GSS18.9: /confirm returns inconclusive when status is null ────────────
+  // ── GSS18.9: /confirm returns inconclusive when receipt.status is null ───────
+  // Fase 2.3: receipt.status=null = malformed receipt. INDETERMINATE, not a failure.
   it('GSS18.9 — /confirm returns inconclusive when receipt.status is null', async () => {
-    const txHash  = '0x' + 'a1'.repeat(32);
-    const saltHex = SALT_BB.replace(/^0x/, '');
+    const txHash   = '0x' + 'a1'.repeat(32);
+    const saltHex  = SALT_BB.replace(/^0x/, '');
+    const calldata = buildGatewayMintCalldata(saltHex);
     const env = makeKvEnv(
       { [SALT_BB]: { salt: SALT_BB, depositor: ADDR_X, status: 'accepted' } },
       { GATEWAY_RPC_URLS: JSON.stringify({ '421614': 'https://mock-rpc' }) }
@@ -2492,18 +2581,26 @@ describe('GSS18 — Fase 2.2 P0: reconciliation security', () => {
     const origFetch = global.fetch;
     global.fetch = async (url, opts) => {
       const body = JSON.parse(opts.body);
-      if (body.method === 'eth_chainId') return { ok: true, json: async () => ({ result: '0x' + (421614).toString(16) }) };
-      return { ok: true, json: async () => ({ result: {
-        to: '0x0022222abe238cc2c7bb1f21003f0a260052475b',
-        status: null,  // malformed receipt — status absent
-        input: '0x' + saltHex,
-        blockNumber: '0x1',
-      }}) };
+      if (body.method === 'eth_chainId')
+        return { ok: true, json: async () => ({ result: '0x' + (421614).toString(16) }) };
+      if (body.method === 'eth_getTransactionByHash')
+        return { ok: true, json: async () => ({ result: {
+          hash:  txHash,
+          to:    '0x0022222abe238cc2c7bb1f21003f0a260052475b',
+          input: calldata,
+        }}) };
+      if (body.method === 'eth_getTransactionReceipt')
+        return { ok: true, json: async () => ({ result: {
+          to: '0x0022222abe238cc2c7bb1f21003f0a260052475b',
+          status: null,  // malformed — INDETERMINATE
+          blockNumber: '0x1',
+        }}) };
+      return { ok: false, status: 500, json: async () => ({}) };
     };
     try {
       const req = new Request('https://worker.dev/api/gateway/transfer/confirm', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ salt: SALT_BB, depositor: ADDR_X, txHash: txHash, dstChainId: 421614 }),
+        body: JSON.stringify({ salt: SALT_BB, depositor: ADDR_X, txHash, dstChainId: 421614 }),
       });
       const res  = await onRequestPostConfirm({ request: req, env });
       const body = await res.json();
@@ -2549,8 +2646,11 @@ describe('GSS18 — Fase 2.2 P0: reconciliation security', () => {
     expect(body.error).toBe('not_reconcilable_state');
   });
 
-  // ── GSS18.12: /confirm returns inconclusive when receipt has no input data ─
-  it('GSS18.12 — /confirm returns inconclusive when receipt.input absent', async () => {
+  // ── GSS18.12: /confirm returns calldata_absent when tx.input is null ────────
+  // Fase 2.3: calldata comes from eth_getTransactionByHash (tx.input).
+  // A null tx.input means we cannot verify salt binding → recoverable.
+  // Receipt must return a valid status so the code reaches the calldata check.
+  it('GSS18.12 — /confirm returns calldata_absent when tx.input is null', async () => {
     const txHash = '0x' + 'a4'.repeat(32);
     const env = makeKvEnv(
       { [SALT_BB]: { salt: SALT_BB, depositor: ADDR_X, status: 'accepted' } },
@@ -2559,13 +2659,21 @@ describe('GSS18 — Fase 2.2 P0: reconciliation security', () => {
     const origFetch = global.fetch;
     global.fetch = async (url, opts) => {
       const body = JSON.parse(opts.body);
-      if (body.method === 'eth_chainId') return { ok: true, json: async () => ({ result: '0x' + (421614).toString(16) }) };
-      return { ok: true, json: async () => ({ result: {
-        to: '0x0022222abe238cc2c7bb1f21003f0a260052475b',
-        status: '0x1',
-        input: null,  // no calldata
-        blockNumber: '0x1',
-      }}) };
+      if (body.method === 'eth_chainId')
+        return { ok: true, json: async () => ({ result: '0x' + (421614).toString(16) }) };
+      if (body.method === 'eth_getTransactionByHash')
+        return { ok: true, json: async () => ({ result: {
+          hash:  txHash,
+          to:    '0x0022222abe238cc2c7bb1f21003f0a260052475b',
+          input: null,  // no calldata
+        }}) };
+      // Receipt also called, must return a receipt with status to get past receipt checks
+      if (body.method === 'eth_getTransactionReceipt')
+        return { ok: true, json: async () => ({ result: {
+          to: '0x0022222abe238cc2c7bb1f21003f0a260052475b',
+          status: '0x1', blockNumber: '0x1',
+        }}) };
+      return { ok: false, status: 500, json: async () => ({}) };
     };
     try {
       const req = new Request('https://worker.dev/api/gateway/transfer/confirm', {
@@ -2575,7 +2683,7 @@ describe('GSS18 — Fase 2.2 P0: reconciliation security', () => {
       const res  = await onRequestPostConfirm({ request: req, env });
       const body = await res.json();
       expect(res.status).toBe(502);
-      expect(body.error).toBe('receipt_input_absent');
+      expect(body.error).toBe('calldata_absent');
       expect(body.recoverable).toBe(true);
     } finally { global.fetch = origFetch; }
   });
@@ -2589,23 +2697,417 @@ describe('GSS18 — Fase 2.2 P0: reconciliation security', () => {
     expect(confirmBlock).toContain('rpcChainId');
   });
 
-  // ── GSS18.14: transfer.js src contains salt calldata verification ─────────
-  it('GSS18.14 — /confirm source verifies salt in calldata (tx linked to this operation)', () => {
-    const confirmStart = proxySrc.indexOf('onRequestPostConfirm');
-    const confirmBlock = proxySrc.slice(confirmStart, confirmStart + 10000);
-    expect(confirmBlock).toContain('saltHex');
+  // ── GSS18.14: transfer.js src contains Fase 2.3 verification ─────────────
+  it('GSS18.14 — /confirm source verifies salt via calldata at fixed offset (Fase 2.3)', () => {
+    // The function body is large (~400 lines). Search the whole confirm section.
+    const confirmStart = proxySrc.indexOf('export async function onRequestPostConfirm');
+    const confirmBlock = proxySrc.slice(confirmStart, confirmStart + 24000);
+    // Fase 2.3: uses eth_getTransactionByHash for calldata, not receipt
+    expect(confirmBlock).toContain('eth_getTransactionByHash');
+    // Salt decoded at fixed offset, not substring search
+    expect(confirmBlock).toContain('saltHexOffset');
+    expect(confirmBlock).toContain('extractedSalt');
     expect(confirmBlock).toContain('tx_salt_mismatch');
-    expect(confirmBlock).toContain('calldata');
+    // Selector verification
+    expect(confirmBlock).toContain('GATEWAY_MINT_SELECTOR');
+    expect(confirmBlock).toContain('calldata_selector_mismatch');
   });
 
   // ── GSS18.15: transfer.js src: GATEWAY_RPC_URL fallback removed ──────────
   it('GSS18.15 — GATEWAY_RPC_URL single fallback is removed (per-chain only)', () => {
     const confirmStart = proxySrc.indexOf('onRequestPostConfirm');
     const confirmBlock = proxySrc.slice(confirmStart, confirmStart + 10000);
-    // The old fallback line was: "if (!rpcUrl && env && env.GATEWAY_RPC_URL)"
-    // It must NOT exist in the confirm function body
     expect(confirmBlock).not.toContain('GATEWAY_RPC_URL)');
-    // Per-chain lookup must exist
     expect(confirmBlock).toContain('GATEWAY_RPC_URLS');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GSS19 — Fase 2.3: eth_getTransactionByHash, hash cross-check, fixed-offset
+//          calldata decode, selector verify, AttestationSet, pending/revert
+// ─────────────────────────────────────────────────────────────────────────────
+describe('GSS19 — Fase 2.3: secure on-chain calldata verification', () => {
+  const fs   = require('fs');
+  const path = require('path');
+  const { onRequestPostConfirm } = require('../functions/api/gateway/transfer.js');
+  const proxySrc = fs.readFileSync(path.join(__dirname, '../functions/api/gateway/transfer.js'), 'utf8');
+
+  const SALT_CC  = '0x' + 'cc'.repeat(32);
+  const ADDR_Y   = '0x' + '11'.repeat(20);
+  const CHAIN_ID = 421614;
+  const MINTER   = '0x0022222abe238cc2c7bb1f21003f0a260052475b';
+  const MINTER_MAINNET = '0x2222222d7164433c4c09b0b0d809a9b52c04c205';
+
+  // Build valid ABI-encoded gatewayMint calldata with given salt (32 bytes, no 0x)
+  function buildCalldata(saltHexNoPrefix, magic = 'ff6fb334') {
+    const specLength = 340;
+    const specHex =
+      'ca85def7' + '00000001' + '00000000' + '00000000' +
+      '00'.repeat(32) + '00'.repeat(32) + '00'.repeat(32) + '00'.repeat(32) +
+      '00'.repeat(32) + '00'.repeat(32) + '00'.repeat(32) + '00'.repeat(32) +
+      '00'.repeat(32) + saltHexNoPrefix + '00000000';
+
+    let attestHex;
+    if (magic === 'ff6fb334') {
+      // Single Attestation
+      attestHex = 'ff6fb334' + '00'.repeat(32) +
+        specLength.toString(16).padStart(8, '0') + specHex;
+    } else {
+      // AttestationSet: magic + numAttestations(1) + inline attestation
+      const innerAttest = 'ff6fb334' + '00'.repeat(32) +
+        specLength.toString(16).padStart(8, '0') + specHex;
+      attestHex = magic + '00000001' + innerAttest;
+    }
+
+    const payloadLen = attestHex.length / 2;
+    const padLen     = Math.ceil(payloadLen / 32) * 32;
+    const padded     = attestHex + '00'.repeat(padLen - payloadLen);
+    const selector   = '9fb01cc5';
+    const param0Off  = (64).toString(16).padStart(64, '0');
+    const param1Off  = (64 + 32 + padLen).toString(16).padStart(64, '0');
+    const len0       = payloadLen.toString(16).padStart(64, '0');
+    const len1       = (65).toString(16).padStart(64, '0');
+    const sig        = '00'.repeat(96);
+    return '0x' + selector + param0Off + param1Off + len0 + padded + len1 + sig;
+  }
+
+  function makeKvEnv(records, extra = {}) {
+    const kvStore = new Map();
+    for (const [k, v] of Object.entries(records)) kvStore.set('gw:op:' + k, v);
+    return {
+      GATEWAY_OPS_KV: {
+        get:  async (k, opts) => { const v = kvStore.get(k); return (opts && opts.type === 'json') ? (v || null) : (v ? JSON.stringify(v) : null); },
+        put:  async (k, v)    => { kvStore.set(k, JSON.parse(v)); },
+      },
+      GATEWAY_ENV: 'test',
+      ...extra,
+    };
+  }
+
+  function mockRpc(txHash, txInput, txTo, receiptStatus) {
+    return async (url, opts) => {
+      const body = JSON.parse(opts.body);
+      if (body.method === 'eth_chainId')
+        return { ok: true, json: async () => ({ result: '0x' + CHAIN_ID.toString(16) }) };
+      if (body.method === 'eth_getTransactionByHash')
+        return { ok: true, json: async () => ({ result: txInput === null ? null : {
+          hash:  txHash,
+          to:    txTo || MINTER,
+          input: txInput,
+        }}) };
+      if (body.method === 'eth_getTransactionReceipt')
+        return { ok: true, json: async () => ({ result: receiptStatus === null ? null : {
+          to: txTo || MINTER, status: receiptStatus, blockNumber: '0x2',
+        }}) };
+      return { ok: false, status: 500, json: async () => ({}) };
+    };
+  }
+
+  async function callConfirm(salt, depositor, txHash, dstChainId, env) {
+    const req = new Request('https://worker.dev/api/gateway/transfer/confirm', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ salt, depositor, txHash, dstChainId }),
+    });
+    return onRequestPostConfirm({ request: req, env });
+  }
+
+  // ── GSS19.1: valid single Attestation calldata → confirmed ───────────────
+  it('GSS19.1 — valid single Attestation calldata → confirmed', async () => {
+    const txHash   = '0x' + 'a1'.repeat(32);
+    const saltHex  = SALT_CC.replace(/^0x/, '');
+    const calldata = buildCalldata(saltHex);
+    const env = makeKvEnv(
+      { [SALT_CC]: { salt: SALT_CC, depositor: ADDR_Y, status: 'accepted' } },
+      { GATEWAY_RPC_URLS: JSON.stringify({ [String(CHAIN_ID)]: 'https://rpc' }) }
+    );
+    const origFetch = global.fetch;
+    global.fetch = mockRpc(txHash, calldata, MINTER, '0x1');
+    try {
+      const res  = await callConfirm(SALT_CC, ADDR_Y, txHash, CHAIN_ID, env);
+      const body = await res.json();
+      expect(res.status).toBe(200);
+      expect(body.ok).toBe(true);
+      expect(body.status).toBe('confirmed');
+    } finally { global.fetch = origFetch; }
+  });
+
+  // ── GSS19.2: valid calldata but receipt.status=0x0 → failed ──────────────
+  it('GSS19.2 — valid calldata, receipt.status=0x0 → failed (revert)', async () => {
+    const txHash   = '0x' + 'a2'.repeat(32);
+    const saltHex  = SALT_CC.replace(/^0x/, '');
+    const calldata = buildCalldata(saltHex);
+    const env = makeKvEnv(
+      { [SALT_CC]: { salt: SALT_CC, depositor: ADDR_Y, status: 'accepted' } },
+      { GATEWAY_RPC_URLS: JSON.stringify({ [String(CHAIN_ID)]: 'https://rpc' }) }
+    );
+    const origFetch = global.fetch;
+    global.fetch = mockRpc(txHash, calldata, MINTER, '0x0');
+    try {
+      const res  = await callConfirm(SALT_CC, ADDR_Y, txHash, CHAIN_ID, env);
+      const body = await res.json();
+      expect(res.status).toBe(200);
+      expect(body.ok).toBe(true);
+      expect(body.status).toBe('failed'); // revert verified on-chain
+    } finally { global.fetch = origFetch; }
+  });
+
+  // ── GSS19.3: AttestationSet calldata → confirmed ──────────────────────────
+  it('GSS19.3 — valid AttestationSet calldata → confirmed (salt at set offset)', async () => {
+    const txHash   = '0x' + 'a3'.repeat(32);
+    const saltHex  = SALT_CC.replace(/^0x/, '');
+    const calldata = buildCalldata(saltHex, '1e12db71'); // AttestationSet magic
+    const env = makeKvEnv(
+      { [SALT_CC]: { salt: SALT_CC, depositor: ADDR_Y, status: 'accepted' } },
+      { GATEWAY_RPC_URLS: JSON.stringify({ [String(CHAIN_ID)]: 'https://rpc' }) }
+    );
+    const origFetch = global.fetch;
+    global.fetch = mockRpc(txHash, calldata, MINTER, '0x1');
+    try {
+      const res  = await callConfirm(SALT_CC, ADDR_Y, txHash, CHAIN_ID, env);
+      const body = await res.json();
+      expect(res.status).toBe(200);
+      expect(body.ok).toBe(true);
+      expect(body.status).toBe('confirmed');
+    } finally { global.fetch = origFetch; }
+  });
+
+  // ── GSS19.4: wrong magic bytes → attestation_magic_unknown (recoverable) ──
+  it('GSS19.4 — unknown magic → attestation_magic_unknown (recoverable, not 422)', async () => {
+    const txHash   = '0x' + 'a4'.repeat(32);
+    const saltHex  = SALT_CC.replace(/^0x/, '');
+    const calldata = buildCalldata(saltHex, 'deadbeef'); // unknown magic
+    const env = makeKvEnv(
+      { [SALT_CC]: { salt: SALT_CC, depositor: ADDR_Y, status: 'accepted' } },
+      { GATEWAY_RPC_URLS: JSON.stringify({ [String(CHAIN_ID)]: 'https://rpc' }) }
+    );
+    const origFetch = global.fetch;
+    global.fetch = mockRpc(txHash, calldata, MINTER, '0x1');
+    try {
+      const res  = await callConfirm(SALT_CC, ADDR_Y, txHash, CHAIN_ID, env);
+      const body = await res.json();
+      expect(res.status).toBe(502);
+      expect(body.error).toBe('attestation_magic_unknown');
+      expect(body.recoverable).toBe(true);
+    } finally { global.fetch = origFetch; }
+  });
+
+  // ── GSS19.5: calldata selector mismatch → calldata_selector_mismatch ──────
+  it('GSS19.5 — wrong selector → calldata_selector_mismatch (not a gatewayMint call)', async () => {
+    const txHash   = '0x' + 'a5'.repeat(32);
+    // Replace first 4 bytes (selector) with a different function signature
+    const saltHex  = SALT_CC.replace(/^0x/, '');
+    const real     = buildCalldata(saltHex);
+    const tampered = '0x' + 'aabbccdd' + real.slice(10); // wrong selector
+    const env = makeKvEnv(
+      { [SALT_CC]: { salt: SALT_CC, depositor: ADDR_Y, status: 'accepted' } },
+      { GATEWAY_RPC_URLS: JSON.stringify({ [String(CHAIN_ID)]: 'https://rpc' }) }
+    );
+    const origFetch = global.fetch;
+    global.fetch = mockRpc(txHash, tampered, MINTER, '0x1');
+    try {
+      const res  = await callConfirm(SALT_CC, ADDR_Y, txHash, CHAIN_ID, env);
+      const body = await res.json();
+      expect(res.status).toBe(422);
+      expect(body.error).toBe('calldata_selector_mismatch');
+    } finally { global.fetch = origFetch; }
+  });
+
+  // ── GSS19.6: tx_pending — tx found, receipt null → tx_pending ─────────────
+  it('GSS19.6 — tx found but receipt null → tx_pending (INDETERMINATE, not failed)', async () => {
+    const txHash   = '0x' + 'a6'.repeat(32);
+    const saltHex  = SALT_CC.replace(/^0x/, '');
+    const calldata = buildCalldata(saltHex);
+    const env = makeKvEnv(
+      { [SALT_CC]: { salt: SALT_CC, depositor: ADDR_Y, status: 'accepted' } },
+      { GATEWAY_RPC_URLS: JSON.stringify({ [String(CHAIN_ID)]: 'https://rpc' }) }
+    );
+    const origFetch = global.fetch;
+    // tx found, receipt null = pending
+    global.fetch = async (url, opts) => {
+      const body = JSON.parse(opts.body);
+      if (body.method === 'eth_chainId')
+        return { ok: true, json: async () => ({ result: '0x' + CHAIN_ID.toString(16) }) };
+      if (body.method === 'eth_getTransactionByHash')
+        return { ok: true, json: async () => ({ result: { hash: txHash, to: MINTER, input: calldata } }) };
+      if (body.method === 'eth_getTransactionReceipt')
+        return { ok: true, json: async () => ({ result: null }) }; // pending
+      return { ok: false, status: 500, json: async () => ({}) };
+    };
+    try {
+      const res  = await callConfirm(SALT_CC, ADDR_Y, txHash, CHAIN_ID, env);
+      const body = await res.json();
+      expect(res.status).toBe(404);
+      expect(body.error).toBe('tx_pending');
+      expect(body.recoverable).toBe(true);
+    } finally { global.fetch = origFetch; }
+  });
+
+  // ── GSS19.7: hash cross-check — RPC returns different hash → 502 ──────────
+  it('GSS19.7 — RPC returns tx with different hash → tx_hash_mismatch (502 recoverable)', async () => {
+    const requestedHash = '0x' + 'a7'.repeat(32);
+    const differentHash = '0x' + 'b7'.repeat(32);
+    const env = makeKvEnv(
+      { [SALT_CC]: { salt: SALT_CC, depositor: ADDR_Y, status: 'accepted' } },
+      { GATEWAY_RPC_URLS: JSON.stringify({ [String(CHAIN_ID)]: 'https://rpc' }) }
+    );
+    const origFetch = global.fetch;
+    global.fetch = async (url, opts) => {
+      const body = JSON.parse(opts.body);
+      if (body.method === 'eth_chainId')
+        return { ok: true, json: async () => ({ result: '0x' + CHAIN_ID.toString(16) }) };
+      if (body.method === 'eth_getTransactionByHash')
+        return { ok: true, json: async () => ({ result: {
+          hash:  differentHash, // ← different from requested
+          to:    MINTER,
+          input: buildCalldata(SALT_CC.replace(/^0x/, '')),
+        }}) };
+      return { ok: false, status: 500, json: async () => ({}) };
+    };
+    try {
+      const res  = await callConfirm(SALT_CC, ADDR_Y, requestedHash, CHAIN_ID, env);
+      const body = await res.json();
+      expect(res.status).toBe(502);
+      expect(body.error).toBe('tx_hash_mismatch');
+      expect(body.recoverable).toBe(true);
+    } finally { global.fetch = origFetch; }
+  });
+
+  // ── GSS19.8: RPC 5xx → rpc_http_error (recoverable) ─────────────────────
+  it('GSS19.8 — RPC 5xx on eth_getTransactionByHash → rpc_http_error (recoverable)', async () => {
+    const txHash = '0x' + 'a8'.repeat(32);
+    const env = makeKvEnv(
+      { [SALT_CC]: { salt: SALT_CC, depositor: ADDR_Y, status: 'accepted' } },
+      { GATEWAY_RPC_URLS: JSON.stringify({ [String(CHAIN_ID)]: 'https://rpc' }) }
+    );
+    const origFetch = global.fetch;
+    global.fetch = async (url, opts) => {
+      const body = JSON.parse(opts.body);
+      if (body.method === 'eth_chainId')
+        return { ok: true, json: async () => ({ result: '0x' + CHAIN_ID.toString(16) }) };
+      // eth_getTransactionByHash returns 503
+      return { ok: false, status: 503, json: async () => ({}) };
+    };
+    try {
+      const res  = await callConfirm(SALT_CC, ADDR_Y, txHash, CHAIN_ID, env);
+      const body = await res.json();
+      expect(res.status).toBe(502);
+      expect(body.error).toBe('rpc_http_error');
+      expect(body.recoverable).toBe(true);
+    } finally { global.fetch = origFetch; }
+  });
+
+  // ── GSS19.9: mainnet chain IDs are now supported ──────────────────────────
+  it('GSS19.9 — mainnet chainIds (5042, 1, 8453, 42161) are now supported for /confirm', () => {
+    const mainnetChains = [5042, 1, 8453, 42161, 10, 137];
+    // The hex constant is defined BEFORE GATEWAY_MINTER_ADDRESSES; start from that constant.
+    const i = proxySrc.indexOf('GATEWAY_MINTER_MAINNET');
+    const block = proxySrc.slice(i, i + 3000);
+    for (const chainId of mainnetChains) {
+      expect(block).toContain(String(chainId) + ':');
+    }
+    // Mainnet address literal must be present (case-insensitive hex)
+    expect(block.toLowerCase()).toContain(MINTER_MAINNET.toLowerCase());
+  });
+
+  // ── GSS19.10: calldata too short → recoverable ───────────────────────────
+  it('GSS19.10 — too-short calldata → calldata_too_short (recoverable)', async () => {
+    const txHash = '0x' + 'a9'.repeat(32);
+    const env = makeKvEnv(
+      { [SALT_CC]: { salt: SALT_CC, depositor: ADDR_Y, status: 'accepted' } },
+      { GATEWAY_RPC_URLS: JSON.stringify({ [String(CHAIN_ID)]: 'https://rpc' }) }
+    );
+    // Valid selector + only 40 bytes = not enough for full ABI header
+    const shortCalldata = '0x9fb01cc5' + '00'.repeat(40);
+    const origFetch = global.fetch;
+    global.fetch = mockRpc(txHash, shortCalldata, MINTER, '0x1');
+    try {
+      const res  = await callConfirm(SALT_CC, ADDR_Y, txHash, CHAIN_ID, env);
+      const body = await res.json();
+      expect(res.status).toBe(502);
+      // calldata_too_short OR calldata_selector_mismatch (selector check passes, length fails)
+      expect(['calldata_too_short', 'attestation_payload_too_short']).toContain(body.error);
+      expect(body.recoverable).toBe(true);
+    } finally { global.fetch = origFetch; }
+  });
+
+  // ── GSS19.11: depositor isolation — wrong depositor cannot confirm ─────────
+  it('GSS19.11 — wrong depositor returns 404 (depositor isolation)', async () => {
+    const txHash  = '0x' + 'b1'.repeat(32);
+    const wrongDepositor = '0x' + '22'.repeat(20);
+    const env = makeKvEnv(
+      { [SALT_CC]: { salt: SALT_CC, depositor: ADDR_Y, status: 'accepted' } },
+      { GATEWAY_RPC_URLS: JSON.stringify({ [String(CHAIN_ID)]: 'https://rpc' }) }
+    );
+    const res  = await callConfirm(SALT_CC, wrongDepositor, txHash, CHAIN_ID, env);
+    const body = await res.json();
+    expect(res.status).toBe(404); // wrong depositor → not found
+    expect(body.error).toBe('not_found');
+  });
+
+  // ── GSS19.12: persistence failure after verify → recoverable 502 ──────────
+  it('GSS19.12 — persistence failure after on-chain verify → 502 with verified:true', async () => {
+    const txHash   = '0x' + 'b2'.repeat(32);
+    const saltHex  = SALT_CC.replace(/^0x/, '');
+    const calldata = buildCalldata(saltHex);
+    // KV that always fails on put (simulates persistence failure post-verify)
+    const kvFail = {
+      get:  async (k, opts) => {
+        const rec = { salt: SALT_CC, depositor: ADDR_Y, status: 'accepted' };
+        return (opts && opts.type === 'json') ? rec : JSON.stringify(rec);
+      },
+      put: async () => { throw new Error('kv_write_failed'); },
+    };
+    const env = { GATEWAY_OPS_KV: kvFail, GATEWAY_ENV: 'test',
+      GATEWAY_RPC_URLS: JSON.stringify({ [String(CHAIN_ID)]: 'https://rpc' }) };
+    const origFetch = global.fetch;
+    global.fetch = mockRpc(txHash, calldata, MINTER, '0x1');
+    try {
+      const res  = await callConfirm(SALT_CC, ADDR_Y, txHash, CHAIN_ID, env);
+      const body = await res.json();
+      expect(res.status).toBe(502);
+      expect(body.error).toBe('persistence_failed_after_verify');
+      expect(body.verified).toBe(true);
+      expect(body.recoverable).toBe(true);
+      expect(body.txSuccess).toBe(true);
+    } finally { global.fetch = origFetch; }
+  });
+
+  // ── GSS19.13: idempotent — second /confirm on confirmed record → 409 ──────
+  it('GSS19.13 — /confirm on already-confirmed record → 409 not_reconcilable_state', async () => {
+    const txHash = '0x' + 'b3'.repeat(32);
+    const env = makeKvEnv(
+      { [SALT_CC]: { salt: SALT_CC, depositor: ADDR_Y, status: 'confirmed' } },
+      { GATEWAY_RPC_URLS: JSON.stringify({ [String(CHAIN_ID)]: 'https://rpc' }) }
+    );
+    const res  = await callConfirm(SALT_CC, ADDR_Y, txHash, CHAIN_ID, env);
+    const body = await res.json();
+    expect(res.status).toBe(409);
+    expect(body.error).toBe('not_reconcilable_state');
+    expect(body.current).toBe('confirmed');
+  });
+
+  // ── GSS19.14: source verifies selector, hash cross-check, eth_getTransactionByHash
+  it('GSS19.14 — source code contains all Fase 2.3 structural requirements', () => {
+    const start = proxySrc.indexOf('export async function onRequestPostConfirm');
+    const block = proxySrc.slice(start, start + 24000);
+    // P0: calldata from eth_getTransactionByHash
+    expect(block).toContain('eth_getTransactionByHash');
+    // Hash cross-check
+    expect(block).toContain('tx_hash_mismatch');
+    expect(block).toContain('returnedHash');
+    // Fixed-offset decode, not substring search
+    expect(block).toContain('saltHexOffset');
+    expect(block).toContain('extractedSalt');
+    // Selector verification
+    expect(block).toContain('GATEWAY_MINT_SELECTOR');
+    expect(block).toContain('9fb01cc5');
+    // AttestationSet support
+    expect(block).toContain('ATTESTATION_SET_MAGIC');
+    expect(block).toContain('1e12db71');
+    // tx_pending separate from tx_not_found
+    expect(block).toContain('tx_pending');
+    expect(block).toContain('tx_not_found');
+    // transaction.from NOT validated (comment must explain why)
+    expect(block).toContain('transaction.from');
   });
 });
