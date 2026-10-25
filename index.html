@@ -26408,8 +26408,11 @@ async function _fetchBridgeRoutes(fromChain, toChain, amt, walletAddr) {
       available:  true,
       _gwBlocked: typeof GATEWAY_SPEND_BLOCKED !== 'undefined' && GATEWAY_SPEND_BLOCKED,
       inAmt:      Number(amt) || 0,
-      outAmt:     Number(amt) || 0,  // 1:1 — Gateway burns and mints exact amount minus maxFee
-      minAmt:     Number(amt) || 0,
+      // outAmt is inAmt minus the documented fee ceiling (2.01 USDC for USDC/EURC).
+      // This is a CONSERVATIVE ESTIMATE — actual fee may be lower.
+      // DO NOT present this as a guaranteed output amount.
+      outAmt:     Math.max(0, (Number(amt) || 0) - 2.01),
+      minAmt:     Math.max(0, (Number(amt) || 0) - 2.01),
       feePct:     null,
       gasUsd:     null,
       feesUsd:    null,  // maxFee is conservative ceil, not a real-time quote
@@ -37352,7 +37355,11 @@ function saLoadGatewayBalance() {
       } else if (data[asset]) {
         bal = data[asset];
       }
-      pill.textContent = bal ? (Number(bal).toFixed(2) + ' GW') : '0.00 GW';
+      // Display balance. The /api/gateway/balances API returns human-readable
+      // decimal strings (e.g. "1.234567"), NOT atomic units. Display as-is with
+      // 6 decimal places. Never use Number() for financial arithmetic.
+      var displayBal = bal ? (parseFloat(bal) || 0).toFixed(6) : '0.000000';
+      pill.textContent = displayBal + ' GW';
     })
     .catch(function(){ pill.textContent = '— GW'; });
 }
@@ -37453,7 +37460,8 @@ function swpLoadGatewayBalance() {
         var entry = data.balances.find(function(b){ return b.token && b.token.toUpperCase() === asset.toUpperCase(); });
         if (entry) bal = entry.balance || entry.amount || entry.value;
       } else if (data[asset]) bal = data[asset];
-      lbl.textContent = bal ? ('GW: ' + Number(bal).toFixed(2)) : 'GW: 0.00';
+      // /api/gateway/balances returns human-readable decimal strings, not atomic units.
+      lbl.textContent = bal ? ('GW: ' + (parseFloat(bal) || 0).toFixed(6)) : 'GW: 0.000000';
     })
     .catch(function(){ lbl.textContent = 'GW: —'; });
 }

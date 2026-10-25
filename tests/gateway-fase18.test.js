@@ -238,53 +238,56 @@ describe('transfer.js onRequestPatch — client cannot forge confirmed/failed', 
     expect(data.error).toBe('client_transition_not_allowed');
   });
 
-  // Fase 1.9 update: accepted→confirmed and accepted→failed are NOW allowed
-  // with a valid txHash (receipt evidence from the on-chain mint attempt).
-  // Without txHash: returns txhash_required (not client_transition_not_allowed).
-  it('accepted → confirmed without txHash → txhash_required (Fase 1.9)', async () => {
+  // Fase 2.1 update: accepted→confirmed and accepted→failed are NO LONGER allowed
+  // via client PATCH. These transitions require server-side RPC verification via
+  // POST /api/gateway/transfer/confirm. The PATCH endpoint returns
+  // client_transition_not_allowed for any attempted accepted→* transition.
+  it('accepted → confirmed via PATCH → client_transition_not_allowed (Fase 2.1)', async () => {
     const kv = makeKV();
     await seed(kv, 'accepted');
     const env = { GATEWAY_OPS_KV: kv };
     const res = await onRequestPatch({ request: makePatchRequest('0x' + '11'.repeat(32), DEPOSITOR, { status: 'confirmed' }), env });
     expect(res.status).toBe(400);
     const data = await res.json();
-    // Fase 1.9: now blocked at txhash_required, not client_transition_not_allowed
-    expect(data.error).toBe('txhash_required');
+    // Fase 2.1: all accepted→* transitions are now blocked at client level
+    expect(data.error).toBe('client_transition_not_allowed');
   });
 
-  it('accepted → failed without txHash → txhash_required (Fase 1.9)', async () => {
+  it('accepted → failed via PATCH → client_transition_not_allowed (Fase 2.1)', async () => {
     const kv = makeKV();
     await seed(kv, 'accepted');
     const env = { GATEWAY_OPS_KV: kv };
     const res = await onRequestPatch({ request: makePatchRequest('0x' + '11'.repeat(32), DEPOSITOR, { status: 'failed' }), env });
     expect(res.status).toBe(400);
     const data = await res.json();
-    // Fase 1.9: now blocked at txhash_required, not client_transition_not_allowed
-    expect(data.error).toBe('txhash_required');
+    // Fase 2.1: accepted→failed requires /confirm endpoint, not PATCH
+    expect(data.error).toBe('client_transition_not_allowed');
   });
 
-  it('accepted → confirmed with valid txHash succeeds (Fase 1.9)', async () => {
+  it('accepted → confirmed with txHash via PATCH still blocked (Fase 2.1)', async () => {
+    // Even with a valid txHash, the PATCH endpoint cannot set confirmed.
+    // The client must use POST /api/gateway/transfer/confirm instead.
     const kv = makeKV();
     await seed(kv, 'accepted');
     const env = { GATEWAY_OPS_KV: kv };
     const txHash = '0x' + 'cc'.repeat(32);
     const res = await onRequestPatch({ request: makePatchRequest('0x' + '11'.repeat(32), DEPOSITOR, { status: 'confirmed', txHash }), env });
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(400);
     const data = await res.json();
-    expect(data.ok).toBe(true);
-    expect(data.status).toBe('confirmed');
+    expect(data.error).toBe('client_transition_not_allowed');
   });
 
-  it('accepted → failed with valid txHash succeeds (Fase 1.9)', async () => {
+  it('accepted → failed with txHash via PATCH still blocked (Fase 2.1)', async () => {
+    // Even with a valid txHash, PATCH cannot set failed for an accepted operation.
+    // Use POST /api/gateway/transfer/confirm instead.
     const kv = makeKV();
     await seed(kv, 'accepted');
     const env = { GATEWAY_OPS_KV: kv };
     const txHash = '0x' + 'dd'.repeat(32);
     const res = await onRequestPatch({ request: makePatchRequest('0x' + '11'.repeat(32), DEPOSITOR, { status: 'failed', txHash }), env });
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(400);
     const data = await res.json();
-    expect(data.ok).toBe(true);
-    expect(data.status).toBe('failed');
+    expect(data.error).toBe('client_transition_not_allowed');
   });
 });
 

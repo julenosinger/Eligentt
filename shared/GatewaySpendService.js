@@ -390,6 +390,38 @@
   }
 
   /**
+   * confirmGatewaySalt — calls POST /api/gateway/transfer/confirm for server-side
+   * RPC verification before writing 'confirmed' or 'failed'.
+   * The proxy independently verifies the receipt on-chain.
+   * Returns { ok:true, status } or { ok:false, error, recoverable }.
+   * If RPC is not configured (503) the record stays at 'accepted' (safe).
+   */
+  async function confirmGatewaySalt(salt, txHash, depositor, dstChainId) {
+    try {
+      var res = await fetch('/api/gateway/transfer/confirm', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ salt, txHash, depositor, dstChainId }),
+      });
+      var data = null;
+      try { data = await res.json(); } catch(_) { data = null; }
+      if (res.ok) return { ok: true, status: (data && data.status) || 'confirmed', data };
+      // 503 = RPC not configured — safe fallback: record stays at 'accepted'
+      // 422 = chain not supported for confirm — same fallback
+      // 404 = tx not mined yet — recoverable
+      return {
+        ok:          false,
+        error:       (data && data.error) || 'confirm_failed',
+        httpStatus:  res.status,
+        recoverable: res.status === 503 || res.status === 422 || res.status === 404,
+        data,
+      };
+    } catch(e) {
+      return { ok: false, error: e && e.message ? e.message : 'network_error', recoverable: true };
+    }
+  }
+
+  /**
    * POST to /api/gateway/transfer CF proxy (transfer only — no estimate endpoint).
    * Official /v1/transfer request: array of { burnIntent, signature }.
    */
@@ -857,24 +889,28 @@
 
       if (!receipt || receipt.status !== 1) {
         // Transition: accepted → failed.
-        // Requires txHash (proxy enforces this for accepted→failed).
-        // The txHash is the receipt evidence that a mint was attempted and reverted.
-        // If patchGatewaySalt fails, the record stays at 'accepted' (safe — blocks
+        // Fase 2.1: use server-side /confirm endpoint so the proxy can independently
+        // verify the revert on-chain (RPC receipt check). The client's receipt is used
+        // as a hint, but the server re-fetches and verifies independently.
+        // If confirmGatewaySalt fails, the record stays at 'accepted' (safe — blocks
         // re-submission). Surface the failure so the caller can reconcile manually.
-        var failedPersist = await patchGatewaySalt(salt, 'failed', mintTx.hash, params.depositor);
+        var failedPersist = await confirmGatewaySalt(salt, mintTx.hash, params.depositor, params.dstChainId);
         throw Object.assign(
           new Error('tx_reverted'),
           { fatal:false, txHash: mintTx.hash, persist: failedPersist }
         );
       }
 
-      // ── Transition: accepted → confirmed (requires txHash) ──────────────────
-      // Fase 1.9: the proxy now accepts accepted→confirmed from the client when
-      // txHash is provided. This is the evidence of successful on-chain mint.
-      // Full server-side RPC verification is a P2 enhancement.
-      // If patchGatewaySalt fails, the record stays at 'accepted' (safe — blocks
-      // re-submission). Surface the failure; the on-chain mint is still valid.
-      var confirmPersist = await patchGatewaySalt(salt, 'confirmed', receipt.hash || mintTx.hash, params.depositor);
+      // ── Transition: accepted → confirmed ────────────────────────────────────
+      // Fase 2.1: use server-side /confirm endpoint. The proxy independently calls
+      // eth_getTransactionReceipt via GATEWAY_RPC_URLS env binding and verifies:
+      //   - receipt exists on the correct chain
+      //   - receipt.to === GatewayMinter for that chain
+      //   - receipt.status === 0x1 (success)
+      // Client-provided txHash is verified server-side — client cannot fabricate status.
+      // If confirmGatewaySalt fails (RPC unavailable, etc.), the record stays at
+      // 'accepted' (safe — blocks re-submission). Surface the warning; mint is valid.
+      var confirmPersist = await confirmGatewaySalt(salt, receipt.hash || mintTx.hash, params.depositor, params.dstChainId);
 
       // ── Done ────────────────────────────────────────────────────────────────
       var result = {
@@ -981,6 +1017,7 @@
     maxFeeFor,
     queryGatewaySalt,
     patchGatewaySalt,
+    confirmGatewaySalt,
 
     // Internal state (read-only)
     get _inflightCount() { return Object.keys(_inflight).length; },

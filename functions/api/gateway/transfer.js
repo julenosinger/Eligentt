@@ -87,23 +87,28 @@ const VALID_TRANSITIONS = {
 };
 
 // Transitions the client may request via PATCH
-// ── Rules ──────────────────────────────────────────────────────────────────────
-//   ambiguous  → failed:    caller verified no on-chain mint; no txHash required.
-//   accepted   → failed:    caller has receipt showing revert; txHash REQUIRED.
-//   accepted   → confirmed: caller has receipt showing success; txHash REQUIRED.
+// ── Rules (P0 — Fase 2.1) ──────────────────────────────────────────────────────
+//   ambiguous → failed:    client asserts no on-chain mint. No txHash required.
+//                          The server cannot independently verify this assertion,
+//                          but 'failed' is the safer terminal for an ambiguous op
+//                          that the caller is certain did not land on-chain.
 //
-// NOTE: 'confirmed' set by the client is based on client-provided evidence (receipt).
-// The server cannot independently verify the txHash against the chain without an
-// RPC binding. The proxy validates txHash format and requires it; the client's
-// receipt is the trust anchor for this transition. Full server-side verification
-// (RPC receipt check) is a P2 enhancement requiring an RPC binding in the Worker.
+// ALL other transitions are INTERNAL-ONLY:
+//   accepted  → confirmed: ONLY via POST /api/gateway/transfer/confirm
+//                          (server-side RPC receipt verification required).
+//   accepted  → failed:    ONLY via POST /api/gateway/transfer/confirm
+//                          (server verifies revert on-chain before writing 'failed').
+//
+// The client MUST NOT be able to set 'confirmed' or 'failed' for an accepted
+// operation. Doing so without server-side verification would allow fabricating
+// a confirmed state for a transfer that never executed on-chain.
 const CLIENT_ALLOWED_TRANSITIONS = {
-  ambiguous: ['failed'],                 // only after caller verifies no on-chain mint
-  accepted:  ['failed', 'confirmed'],    // caller must provide txHash (receipt evidence)
+  ambiguous: ['failed'],   // only when caller is certain no on-chain activity occurred
+  // 'accepted' has NO client-writable transitions — use /confirm endpoint instead.
 };
 
-// Transitions that require a txHash from the client
-const TRANSITIONS_REQUIRING_TXHASH = new Set(['failed', 'confirmed']);
+// Transitions that the /confirm endpoint may set (server-side, after RPC verification)
+const SERVER_CONFIRM_TRANSITIONS = new Set(['confirmed', 'failed']);
 
 const TERMINAL_STATES = new Set(['confirmed', 'failed', 'rejected']);
 
@@ -588,21 +593,11 @@ export async function onRequestPatch(ctx) {
     }, 400);
   }
 
-  // For accepted→failed and accepted→confirmed, txHash is REQUIRED.
-  // The txHash is the evidence that a mint was attempted on-chain.
-  // Without it, we cannot distinguish "mint reverted" from "client guessing".
-  if (record.status === 'accepted' && TRANSITIONS_REQUIRING_TXHASH.has(toStatus)) {
-    const txHash = patch.txHash;
-    if (!txHash || typeof txHash !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(txHash)) {
-      return jsonResp({
-        error:  'txhash_required',
-        detail: 'A valid 32-byte txHash (0x + 64 hex chars) is required to transition ' +
-                "from 'accepted' to '" + toStatus + "'.",
-      }, 400);
-    }
-  }
-
-  const result = await tryUpdate(salt, { status: toStatus, txHash: patch.txHash || null }, env);
+  // No txHash required for client PATCH — the only allowed client transition is
+  // ambiguous→failed, which does not involve on-chain evidence.
+  // accepted→confirmed and accepted→failed require server-side RPC verification
+  // via POST /api/gateway/transfer/confirm — they are NOT reachable here.
+  const result = await tryUpdate(salt, { status: toStatus, txHash: null }, env);
   if (!result.ok) {
     if (result.error === 'invalid_transition') {
       return jsonResp({
@@ -619,3 +614,210 @@ export async function onRequestPatch(ctx) {
 
 export async function onRequestPut()    { return jsonResp({ error: 'method_not_allowed' }, 405); }
 export async function onRequestDelete() { return jsonResp({ error: 'method_not_allowed' }, 405); }
+
+// ── POST /api/gateway/transfer/confirm ───────────────────────────────────────
+// Server-side reconciliation: verifies a txHash on-chain via RPC before writing
+// 'confirmed' or 'failed' to the operation record.
+//
+// Called by GatewaySpendService.execute() after receiving a mint receipt.
+// Body: { salt, depositor, txHash, dstChainId }
+//
+// Verification steps:
+//   1. Read the operation record and verify depositor isolation.
+//   2. Validate txHash format and that the record is in 'accepted' state.
+//   3. Call eth_getTransactionReceipt via env.GATEWAY_RPC_URL (chain-specific).
+//   4. Verify receipt: status=1 (success), to-address matches GatewayMinter, no revert.
+//   5. Write 'confirmed' (success) or 'failed' (revert) atomically.
+//
+// If GATEWAY_RPC_URL is not configured for the destination chain, returns 503.
+// If RPC call fails or times out, returns 502 with recoverable:true.
+// Never trusts client-provided receipt or status — always re-fetches from chain.
+//
+// PENDING: env.GATEWAY_RPC_URLS (JSON map of chainId→rpcUrl) must be configured
+// in CF Pages environment settings before this endpoint can operate in production.
+
+// Canonical GatewayMinter addresses per chain (official Circle docs).
+// ONLY chains listed here are supported. Unlisted chains → 422.
+// NOTE: Mainnet addresses require confirmation at https://developers.circle.com/gateway
+// before enabling for real funds. Entries marked [UNVERIFIED] must be confirmed.
+const GATEWAY_MINTER_ADDRESSES = {
+  // Testnet (confirmed in Circle docs):
+  421614: '0x0022222ABE238Cc2C7Bb1f21003F0a260052475B', // Arbitrum Sepolia
+  84532:  '0x0022222ABE238Cc2C7Bb1f21003F0a260052475B', // Base Sepolia
+  11155111:'0x0022222ABE238Cc2C7Bb1f21003F0a260052475B', // Ethereum Sepolia
+  // Mainnet — [UNVERIFIED: confirm at developers.circle.com/gateway before enabling]
+  // 5042:   '0x2222222d7164433c4C09B0b0D809a9b52C04C205', // Arc — BLOCKED pending verification
+  // 1:      '0x2222222d7164433c4C09B0b0D809a9b52C04C205', // Ethereum — BLOCKED pending verification
+  // 8453:   '0x2222222d7164433c4C09B0b0D809a9b52C04C205', // Base — BLOCKED pending verification
+  // 42161:  '0x2222222d7164433c4C09B0b0D809a9b52C04C205', // Arbitrum — BLOCKED pending verification
+};
+
+export async function onRequestPostConfirm(ctx) {
+  const { request, env } = ctx;
+
+  const origin = request.headers.get('Origin') || '';
+  if (!isAllowedOrigin(origin, env)) return jsonResp({ error: 'forbidden' }, 403);
+
+  // Body size guard
+  const contentLength = parseInt(request.headers.get('Content-Length') || '0', 10);
+  if (contentLength > MAX_BODY_LEN) return jsonResp({ error: 'body_too_large' }, 413);
+
+  const rawBody = await request.text().catch(() => '{}');
+  let body;
+  try { body = JSON.parse(rawBody); } catch(_) { return jsonResp({ error: 'invalid_json' }, 400); }
+
+  const { salt, depositor, txHash, dstChainId } = body;
+
+  // Validate inputs
+  if (!salt || !/^0x[0-9a-fA-F]{64}$/.test(salt))
+    return jsonResp({ error: 'salt_required' }, 400);
+  if (!depositor || !/^0x[0-9a-fA-F]{40}$/.test(depositor))
+    return jsonResp({ error: 'depositor_required' }, 400);
+  if (!txHash || !/^0x[0-9a-fA-F]{64}$/.test(txHash))
+    return jsonResp({ error: 'txhash_required' }, 400);
+  const chainId = parseInt(dstChainId, 10);
+  if (!chainId || isNaN(chainId))
+    return jsonResp({ error: 'dstchainid_required' }, 400);
+
+  // Check for GatewayMinter address on this chain
+  const minterAddr = GATEWAY_MINTER_ADDRESSES[chainId];
+  if (!minterAddr) {
+    return jsonResp({
+      error:   'chain_not_supported_for_confirm',
+      chainId: chainId,
+      detail:  'This chain does not have a verified GatewayMinter address. ' +
+               'Confirmation is blocked until the address is confirmed in Circle docs.',
+    }, 422);
+  }
+
+  // Fetch operation record and verify depositor
+  const record = await tryRead(salt, env);
+  if (!record)                                             return jsonResp({ error: 'not_found', salt }, 404);
+  if (normAddr(record.depositor) !== normAddr(depositor))  return jsonResp({ error: 'not_found', salt }, 404);
+
+  // Only 'accepted' records can be confirmed (not ambiguous — those need reconciliation first)
+  if (record.status !== 'accepted') {
+    return jsonResp({
+      error:   'not_acceptable_state',
+      current: record.status,
+      detail:  "Only operations in 'accepted' state can be confirmed. " +
+               "Current state: '" + record.status + "'.",
+    }, 409);
+  }
+
+  // Get RPC URL for the destination chain
+  let rpcUrl = null;
+  if (env && env.GATEWAY_RPC_URLS) {
+    try {
+      const rpcMap = JSON.parse(env.GATEWAY_RPC_URLS);
+      rpcUrl = rpcMap[String(chainId)] || rpcMap[chainId] || null;
+    } catch(_) {}
+  }
+  if (!rpcUrl && env && env.GATEWAY_RPC_URL) {
+    rpcUrl = env.GATEWAY_RPC_URL;  // single-chain fallback
+  }
+  if (!rpcUrl) {
+    return jsonResp({
+      error:       'rpc_not_configured',
+      chainId:     chainId,
+      recoverable: true,
+      detail:      'GATEWAY_RPC_URLS is not configured for chainId ' + chainId + '. ' +
+                   'Set this in CF Pages environment settings to enable server-side confirmation.',
+    }, 503);
+  }
+
+  // Call eth_getTransactionReceipt via JSON-RPC
+  let receipt = null;
+  try {
+    const rpcBody = JSON.stringify({
+      jsonrpc: '2.0',
+      id:      1,
+      method:  'eth_getTransactionReceipt',
+      params:  [txHash],
+    });
+    const rpcCtrl = new AbortController();
+    const rpcTimer = setTimeout(() => rpcCtrl.abort(), 10000); // 10s RPC timeout
+    let rpcRes;
+    try {
+      rpcRes = await fetch(rpcUrl, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    rpcBody,
+        signal:  rpcCtrl.signal,
+      });
+    } finally {
+      clearTimeout(rpcTimer);
+    }
+    if (!rpcRes.ok) {
+      return jsonResp({ error: 'rpc_http_error', httpStatus: rpcRes.status, recoverable: true }, 502);
+    }
+    const rpcData = await rpcRes.json();
+    if (rpcData.error) {
+      return jsonResp({ error: 'rpc_error', detail: rpcData.error.message || String(rpcData.error), recoverable: true }, 502);
+    }
+    receipt = rpcData.result;
+  } catch(e) {
+    const isTimeout = e && e.name === 'AbortError';
+    return jsonResp({
+      error:       isTimeout ? 'rpc_timeout' : 'rpc_unreachable',
+      recoverable: true,
+      detail:      e && e.message ? e.message : String(e),
+    }, isTimeout ? 504 : 502);
+  }
+
+  // Receipt is null = transaction not yet mined (or not found)
+  if (!receipt) {
+    return jsonResp({
+      error:       'tx_not_found',
+      recoverable: true,
+      detail:      'Transaction not found on-chain yet. It may be pending or the hash is incorrect.',
+    }, 404);
+  }
+
+  // Verify receipt fields:
+  // 1. to-address must match the GatewayMinter contract (case-insensitive)
+  const receiptTo = (receipt.to || '').toLowerCase();
+  const expectedMinter = minterAddr.toLowerCase();
+  if (receiptTo !== expectedMinter) {
+    // The transaction went to a different address — not a Gateway mint.
+    return jsonResp({
+      error:   'tx_wrong_contract',
+      to:      receipt.to,
+      expected: minterAddr,
+      detail:  'Transaction was not sent to the GatewayMinter contract.',
+    }, 422);
+  }
+
+  // 2. status: '0x1' = success, '0x0' = reverted
+  const txSuccess = receipt.status === '0x1' || receipt.status === 1;
+  const newStatus = txSuccess ? 'confirmed' : 'failed';
+
+  // Write the verified state atomically
+  const updateResult = await tryUpdate(salt, {
+    status:  newStatus,
+    txHash:  txHash,
+    // Store verified block number for auditability
+    blockNumber: receipt.blockNumber || null,
+  }, env);
+
+  if (!updateResult.ok) {
+    return jsonResp({
+      error:       'persistence_failed_after_verify',
+      verified:    true,
+      txSuccess:   txSuccess,
+      txHash:      txHash,
+      newStatus:   newStatus,
+      detail:      updateResult.error,
+      recoverable: true,
+    }, 502);
+  }
+
+  return jsonResp({
+    ok:         true,
+    salt:       salt,
+    status:     newStatus,
+    txHash:     txHash,
+    txSuccess:  txSuccess,
+    blockNumber: receipt.blockNumber || null,
+  });
+}

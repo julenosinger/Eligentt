@@ -1257,8 +1257,9 @@ describe('GSS13 — P0/P1.5: atomicity, authorisation, state machine, fail-safe'
     expect(proxySrc).toContain('client_transition_not_allowed');
     // isClientAllowed check exists
     expect(proxySrc).toContain('isClientAllowed(');
-    // TRANSITIONS_REQUIRING_TXHASH guards accepted→confirmed and accepted→failed
-    expect(proxySrc).toContain('TRANSITIONS_REQUIRING_TXHASH');
+    // Fase 2.1: TRANSITIONS_REQUIRING_TXHASH replaced by SERVER_CONFIRM_TRANSITIONS
+    // (server-side confirm endpoint). /confirm uses txhash_required validation.
+    expect(proxySrc).toContain('SERVER_CONFIRM_TRANSITIONS');
     expect(proxySrc).toContain('txhash_required');
     // submitting and rejected must still NOT be client-modifiable
     const caStart     = proxySrc.indexOf('const CLIENT_ALLOWED_TRANSITIONS');
@@ -1335,12 +1336,11 @@ describe('GSS13 — P0/P1.5: atomicity, authorisation, state machine, fail-safe'
     const svcSrc = fs.readFileSync(
       path.join(__dirname, '../shared/GatewaySpendService.js'), 'utf8'
     );
-    expect(svcSrc).toContain('patchGatewaySalt');
-    // Service sends 'confirmed' after on-chain receipt and 'failed' after revert
-    const confirmedCall = svcSrc.includes("patchGatewaySalt(salt, 'confirmed'");
-    const failedCall    = svcSrc.includes("patchGatewaySalt(salt, 'failed'");
+    // Fase 2.1: service now uses confirmGatewaySalt (server-side /confirm endpoint)
+    // for confirmed/failed transitions after on-chain receipt.
+    expect(svcSrc).toContain('confirmGatewaySalt');
+    const confirmedCall = svcSrc.includes("confirmGatewaySalt(salt,");
     expect(confirmedCall).toBe(true);
-    expect(failedCall).toBe(true);
   });
 
   // ── GSS13.13: DO DELETE /release blocked unless terminal ─────────────────
@@ -1532,21 +1532,21 @@ describe('GSS14 — P0/P1.6: state machine, batch rollback, DO prod, rejected vs
     }
   });
 
-  // ── GSS14.12: ambiguous→failed is the only CLIENT_ALLOWED_TRANSITIONS entry
-  it('GSS14.12 — CLIENT_ALLOWED_TRANSITIONS: accepted+ambiguous with txHash guard (Fase 1.9)', () => {
-    // Fase 1.9 update: accepted→[failed,confirmed] now allowed with txHash.
-    // ambiguous→failed still allowed (no txHash required).
-    // submitting, rejected remain internal-only.
+  // ── GSS14.12: ambiguous→failed is the ONLY CLIENT_ALLOWED_TRANSITIONS entry (Fase 2.1)
+  it('GSS14.12 — CLIENT_ALLOWED_TRANSITIONS: only ambiguous→failed allowed (Fase 2.1)', () => {
+    // Fase 2.1: accepted→* removed from client. Only ambiguous→failed remains.
+    // accepted→confirmed/failed now requires POST /api/gateway/transfer/confirm.
     const startIdx    = proxySrc.indexOf('const CLIENT_ALLOWED_TRANSITIONS');
     const endIdx      = proxySrc.indexOf('};', startIdx) + 2;
     const clientBlock = proxySrc.slice(startIdx, endIdx);
     expect(clientBlock).toContain("ambiguous:");
-    expect(clientBlock).toContain("accepted:");
+    // Fase 2.1: accepted must NOT be in CLIENT_ALLOWED_TRANSITIONS
+    expect(clientBlock).not.toContain("accepted:");
     // 'submitting' and 'rejected' must NOT be client-modifiable
     expect(clientBlock).not.toContain("submitting:");
     expect(clientBlock).not.toContain("rejected:");
-    // txHash guard must exist for accepted transitions
-    expect(proxySrc).toContain('TRANSITIONS_REQUIRING_TXHASH');
+    // SERVER_CONFIRM_TRANSITIONS replaces TRANSITIONS_REQUIRING_TXHASH
+    expect(proxySrc).toContain('SERVER_CONFIRM_TRANSITIONS');
   });
 
   // ── GSS14.13: service-level KV query blocks already-confirmed salts ───────
@@ -1763,15 +1763,15 @@ describe('GSS15 — P0/P1.7: HTTP classification, DO auth, PATCH depositor, roll
     expect(fnSrc).toContain('&depositor=');
   });
 
-  // ── GSS15.10: patchGatewaySalt call-sites pass params.depositor ──────────
-  it('GSS15.10 — execute() passes params.depositor to both patchGatewaySalt calls', () => {
-    // Count patchGatewaySalt calls in execute
+  // ── GSS15.10: confirmGatewaySalt call-sites pass params.depositor (Fase 2.1) ─
+  it('GSS15.10 — execute() passes params.depositor to confirmGatewaySalt calls (Fase 2.1)', () => {
+    // Fase 2.1: patchGatewaySalt replaced by confirmGatewaySalt for confirmed/failed.
     const execStart  = svcSrc.indexOf('async function execute(');
     const execEnd    = svcSrc.indexOf('\n  // ── cancel()', execStart);
     const execBody   = svcSrc.slice(execStart, execEnd);
-    // Both calls must include params.depositor as 4th arg
-    const calls = execBody.match(/patchGatewaySalt\([^)]+\)/g) || [];
-    expect(calls.length).toBeGreaterThanOrEqual(2);
+    // confirmGatewaySalt calls must include params.depositor
+    const calls = execBody.match(/confirmGatewaySalt\([^)]+\)/g) || [];
+    expect(calls.length).toBeGreaterThanOrEqual(1);
     calls.forEach(call => {
       expect(call).toContain('params.depositor');
     });
@@ -1841,32 +1841,37 @@ describe('GSS16 — P0/P1.9: reconciliação, PATCH transitions, queryGatewaySal
     if (GatewaySpendService._testClearVerifier) GatewaySpendService._testClearVerifier();
   });
 
-  // ── GSS16.1: accepted→confirmed is now in CLIENT_ALLOWED_TRANSITIONS ────────
-  it('GSS16.1 — accepted→confirmed is allowed with txHash', () => {
-    expect(proxySrc).toContain("accepted:  ['failed', 'confirmed']");
+  // ── GSS16.1: accepted→* NOT in CLIENT_ALLOWED_TRANSITIONS (Fase 2.1) ─────────
+  it('GSS16.1 — accepted→* NOT in CLIENT_ALLOWED_TRANSITIONS (Fase 2.1)', () => {
+    // Fase 2.1: CLIENT_ALLOWED_TRANSITIONS.accepted is absent — use /confirm endpoint.
+    const i = proxySrc.indexOf('CLIENT_ALLOWED_TRANSITIONS');
+    const block = proxySrc.slice(i, i + 300);
+    expect(block).not.toMatch(/accepted\s*:\s*\[/);
   });
 
-  // ── GSS16.2: accepted→failed is now in CLIENT_ALLOWED_TRANSITIONS ───────────
-  it('GSS16.2 — accepted→failed is allowed with txHash', () => {
-    expect(proxySrc).toContain("accepted:  ['failed', 'confirmed']");
+  // ── GSS16.2: accepted→* transitions are INTERNAL-ONLY (Fase 2.1) ────────────
+  it('GSS16.2 — accepted→* transitions require /confirm endpoint, not PATCH', () => {
+    // SERVER_CONFIRM_TRANSITIONS replaces TRANSITIONS_REQUIRING_TXHASH
+    expect(proxySrc).toContain('SERVER_CONFIRM_TRANSITIONS');
+    expect(proxySrc).toContain('onRequestPostConfirm');
   });
 
-  // ── GSS16.3: txHash required for accepted→confirmed and accepted→failed ─────
-  it('GSS16.3 — proxy enforces txHash for accepted→confirmed and accepted→failed', () => {
-    expect(proxySrc).toContain('TRANSITIONS_REQUIRING_TXHASH');
+  // ── GSS16.3: /confirm endpoint exists and validates (Fase 2.1) ──────────────
+  it('GSS16.3 — /confirm endpoint validates txHash, depositor, chainId', () => {
     expect(proxySrc).toContain('txhash_required');
-    expect(proxySrc).toContain("record.status === 'accepted' && TRANSITIONS_REQUIRING_TXHASH.has(toStatus)");
+    expect(proxySrc).toContain('depositor_required');
+    expect(proxySrc).toContain('dstchainid_required');
   });
 
-  // ── GSS16.4: txHash must be 32-byte hex ─────────────────────────────────────
-  it('GSS16.4 — txHash validated as 0x + 64 hex chars (32 bytes)', () => {
-    // Must not accept a short or malformed hash
-    expect(proxySrc).toContain('/^0x[0-9a-fA-F]{64}$/');
+  // ── GSS16.4: txHash must be 32-byte hex in /confirm ──────────────────────────
+  it('GSS16.4 — txHash validated as 0x + 64 hex chars in /confirm endpoint', () => {
+    const i = proxySrc.indexOf('onRequestPostConfirm');
+    const block = proxySrc.slice(i, i + 800);
+    expect(block).toContain('/^0x[0-9a-fA-F]{64}$/');
   });
 
-  // ── GSS16.5: PATCH can't set confirmed without txHash ──────────────────────
-  it('GSS16.5 — PATCH handler: accepted→confirmed blocked when txHash missing', async () => {
-    // Simulate PATCH handler logic: accepted→confirmed requires txHash
+  // ── GSS16.5: PATCH accepted→confirmed is now client_transition_not_allowed ───
+  it('GSS16.5 — PATCH accepted→confirmed → client_transition_not_allowed (Fase 2.1)', async () => {
     const { onRequestPatch } = require('../functions/api/gateway/transfer.js');
     const kvStore = new Map();
     kvStore.set('gw:op:0x' + 'ab'.repeat(32), {
@@ -1886,13 +1891,13 @@ describe('GSS16 — P0/P1.9: reconciliação, PATCH transitions, queryGatewaySal
     );
     const res = await onRequestPatch({ request: req, env: mockEnv });
     const body = await res.json();
-    // Must fail with txhash_required
-    expect(body.error).toBe('txhash_required');
+    // Fase 2.1: accepted→confirmed is blocked at client level, not at txHash level
+    expect(body.error).toBe('client_transition_not_allowed');
     expect(res.status).toBe(400);
   });
 
-  // ── GSS16.6: PATCH accepted→confirmed succeeds with valid txHash ─────────────
-  it('GSS16.6 — PATCH accepted→confirmed succeeds with valid txHash', async () => {
+  // ── GSS16.6: PATCH accepted→confirmed with txHash also blocked (Fase 2.1) ────
+  it('GSS16.6 — PATCH accepted→confirmed with txHash still blocked (Fase 2.1)', async () => {
     const { onRequestPatch } = require('../functions/api/gateway/transfer.js');
     const validTxHash = '0x' + 'cc'.repeat(32);
     const kvStore = new Map();
@@ -1914,12 +1919,13 @@ describe('GSS16 — P0/P1.9: reconciliação, PATCH transitions, queryGatewaySal
     );
     const res = await onRequestPatch({ request: req, env: mockEnv });
     const body = await res.json();
-    expect(body.ok).toBe(true);
-    expect(body.status).toBe('confirmed');
+    // Fase 2.1: accepted→confirmed requires /confirm, not PATCH
+    expect(body.error).toBe('client_transition_not_allowed');
+    expect(res.status).toBe(400);
   });
 
-  // ── GSS16.7: PATCH accepted→failed succeeds with valid txHash ───────────────
-  it('GSS16.7 — PATCH accepted→failed succeeds with valid txHash', async () => {
+  // ── GSS16.7: PATCH accepted→failed with txHash also blocked (Fase 2.1) ───────
+  it('GSS16.7 — PATCH accepted→failed with txHash also blocked (Fase 2.1)', async () => {
     const { onRequestPatch } = require('../functions/api/gateway/transfer.js');
     const validTxHash = '0x' + 'dd'.repeat(32);
     const kvStore = new Map();
@@ -1941,8 +1947,9 @@ describe('GSS16 — P0/P1.9: reconciliação, PATCH transitions, queryGatewaySal
     );
     const res = await onRequestPatch({ request: req, env: mockEnv });
     const body = await res.json();
-    expect(body.ok).toBe(true);
-    expect(body.status).toBe('failed');
+    // Fase 2.1: accepted→failed requires /confirm, not PATCH
+    expect(body.error).toBe('client_transition_not_allowed');
+    expect(res.status).toBe(400);
   });
 
   // ── GSS16.8: confirmed→anything is rejected (terminal) ──────────────────────
@@ -2072,5 +2079,166 @@ describe('GSS16 — P0/P1.9: reconciliação, PATCH transitions, queryGatewaySal
     const body = await res.json();
     expect(body.ok).toBe(true);
     expect(body.status).toBe('failed');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GSS17 — Fase 2.1: server-side /confirm; accepted→confirmed removed from client
+// ─────────────────────────────────────────────────────────────────────────────
+describe('GSS17 — Fase 2.1 P0: /confirm endpoint and client transition restrictions', () => {
+  const proxySrc = require('fs').readFileSync(
+    new URL('../functions/api/gateway/transfer.js', import.meta.url).pathname, 'utf8');
+  const svcSrc = require('fs').readFileSync(
+    new URL('../shared/GatewaySpendService.js', import.meta.url).pathname, 'utf8');
+  const confirmSrc = (() => {
+    try {
+      return require('fs').readFileSync(
+        new URL('../functions/api/gateway/transfer/confirm.js', import.meta.url).pathname, 'utf8');
+    } catch(_) { return ''; }
+  })();
+
+  it('GSS17.1 — CLIENT_ALLOWED_TRANSITIONS does NOT include accepted→confirmed', () => {
+    const i = proxySrc.indexOf('CLIENT_ALLOWED_TRANSITIONS');
+    const block = proxySrc.slice(i, i + 300);
+    // After Fase 2.1, accepted key must be absent or have empty/no transitions
+    const hasAccepted = /accepted\s*:\s*\[.*'confirmed'/.test(block);
+    expect(hasAccepted).toBe(false);
+  });
+
+  it('GSS17.2 — CLIENT_ALLOWED_TRANSITIONS does NOT include accepted→failed', () => {
+    const i = proxySrc.indexOf('CLIENT_ALLOWED_TRANSITIONS');
+    const block = proxySrc.slice(i, i + 300);
+    const hasAcceptedFailed = /accepted\s*:\s*\[.*'failed'/.test(block);
+    expect(hasAcceptedFailed).toBe(false);
+  });
+
+  it('GSS17.3 — onRequestPostConfirm exported from transfer.js', () => {
+    expect(proxySrc).toContain('onRequestPostConfirm');
+  });
+
+  it('GSS17.4 — /confirm endpoint verifies via eth_getTransactionReceipt', () => {
+    expect(proxySrc).toContain('eth_getTransactionReceipt');
+  });
+
+  it('GSS17.5 — /confirm endpoint checks receipt.to matches GatewayMinter', () => {
+    const i = proxySrc.indexOf('onRequestPostConfirm');
+    const block = proxySrc.slice(i, i + 5500);
+    expect(block).toContain('receiptTo');
+    expect(block).toContain('expectedMinter');
+  });
+
+  it('GSS17.6 — /confirm endpoint verifies receipt.status === 0x1', () => {
+    const i = proxySrc.indexOf('onRequestPostConfirm');
+    const block = proxySrc.slice(i, i + 5500);
+    expect(block).toContain("receipt.status === '0x1'");
+  });
+
+  it('GSS17.7 — /confirm returns 503 when GATEWAY_RPC_URLS not configured', async () => {
+    const { onRequestPostConfirm } = await import('../functions/api/gateway/transfer.js?t=' + Date.now());
+    const body = JSON.stringify({
+      salt:       '0x' + 'ab'.repeat(32),
+      depositor:  '0x' + 'cd'.repeat(20),
+      txHash:     '0x' + 'ef'.repeat(32),
+      dstChainId: 421614,
+    });
+    const req = new Request('https://test/api/gateway/transfer/confirm', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json', 'Origin': 'https://elligentt.com' },
+      body,
+    });
+    // Use testnet chainId (421614) but no RPC configured.
+    // KV.get with { type:'json' } returns a parsed object (not a JSON string).
+    const env = {
+      GATEWAY_OP_LOCK: null,
+      GATEWAY_OPS_KV: {
+        get: async (_k, opts) => opts && opts.type === 'json'
+          ? { status: 'accepted', depositor: '0x' + 'cd'.repeat(20), salt: '0x' + 'ab'.repeat(32),
+              srcDomain: 0, dstDomain: 3, submittedAt: Date.now() }
+          : JSON.stringify({ status: 'accepted', depositor: '0x' + 'cd'.repeat(20) }),
+        put: async () => {},
+      },
+    };
+    const res = await onRequestPostConfirm({ request: req, env });
+    expect(res.status).toBe(503);
+    const rb = await res.json();
+    expect(rb.error).toBe('rpc_not_configured');
+    expect(rb.recoverable).toBe(true);
+  });
+
+  it('GSS17.8 — /confirm returns 422 for unlisted/unverified chain', async () => {
+    const { onRequestPostConfirm } = await import('../functions/api/gateway/transfer.js?t=' + Date.now() + 1);
+    const req = new Request('https://test/api/gateway/transfer/confirm', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json', 'Origin': 'https://elligentt.com' },
+      body: JSON.stringify({
+        salt:       '0x' + 'aa'.repeat(32),
+        depositor:  '0x' + 'bb'.repeat(20),
+        txHash:     '0x' + 'cc'.repeat(32),
+        dstChainId: 9999, // not in GATEWAY_MINTER_ADDRESSES
+      }),
+    });
+    const res = await onRequestPostConfirm({ request: req, env: {} });
+    expect(res.status).toBe(422);
+    const rb = await res.json();
+    expect(rb.error).toBe('chain_not_supported_for_confirm');
+  });
+
+  it('GSS17.9 — /confirm returns 400 without txHash', async () => {
+    const { onRequestPostConfirm } = await import('../functions/api/gateway/transfer.js?t=' + Date.now() + 2);
+    const req = new Request('https://test/api/gateway/transfer/confirm', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json', 'Origin': 'https://elligentt.com' },
+      body: JSON.stringify({
+        salt:       '0x' + 'a1'.repeat(32),
+        depositor:  '0x' + 'b2'.repeat(20),
+        dstChainId: 421614,
+        // txHash missing
+      }),
+    });
+    const res = await onRequestPostConfirm({ request: req, env: {} });
+    expect(res.status).toBe(400);
+    const rb = await res.json();
+    expect(rb.error).toBe('txhash_required');
+  });
+
+  it('GSS17.10 — /confirm stub file exports onRequestPost', () => {
+    expect(confirmSrc).toContain('onRequestPostConfirm as onRequestPost');
+  });
+
+  it('GSS17.11 — /confirm stub routes to /api/gateway/transfer/confirm', () => {
+    expect(confirmSrc).toContain("from '../transfer.js'");
+  });
+
+  it('GSS17.12 — GatewaySpendService exposes confirmGatewaySalt', () => {
+    expect(typeof GatewaySpendService.confirmGatewaySalt).toBe('function');
+  });
+
+  it('GSS17.13 — GatewaySpendService.execute uses confirmGatewaySalt, not patchGatewaySalt for confirmed', () => {
+    const i = svcSrc.indexOf('Transition: accepted');
+    const block = svcSrc.slice(i, i + 600);
+    expect(block).toContain('confirmGatewaySalt');
+    expect(block).not.toContain("patchGatewaySalt(salt, 'confirmed'");
+  });
+
+  it('GSS17.14 — Bridge route outAmt accounts for fee ceiling', () => {
+    const htmlSrc = require('fs').readFileSync(
+      new URL('../index.html', import.meta.url).pathname, 'utf8');
+    const i = htmlSrc.indexOf("provider:   'gateway'");
+    const block = htmlSrc.slice(i, i + 600);
+    expect(block).toContain('outAmt');
+    // outAmt must not be a plain copy of inAmt (fabricated output)
+    expect(block).not.toContain('outAmt:     Number(amt) || 0,');
+    // Must reference the fee deduction
+    expect(block).toContain('2.01');
+  });
+
+  it('GSS17.15 — GATEWAY_MINTER_ADDRESSES mainnet entries commented/blocked', () => {
+    const i = proxySrc.indexOf('GATEWAY_MINTER_ADDRESSES');
+    const block = proxySrc.slice(i, i + 1200);
+    // All mainnet entries (chain IDs 5042, 1, 8453, 42161) must be commented out
+    expect(block).not.toMatch(/^\s*5042\s*:/m);
+    expect(block).not.toMatch(/^\s*1\s*:/m);
+    expect(block).not.toMatch(/^\s*8453\s*:/m);
+    expect(block).not.toMatch(/^\s*42161\s*:/m);
   });
 });
