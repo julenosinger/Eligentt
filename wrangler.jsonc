@@ -5,46 +5,64 @@
   "compatibility_date": "2024-01-01",
   "compatibility_flags": ["nodejs_compat"],
 
-  // KV Namespaces
-  // AUTH_KV      — Usuários, sessões, códigos de verificação, wallets
-  // PAYMENT_LINKS — Links de pagamento
-  // RATE_LIMIT_KV — Rate limiting e proteção de replay
   "kv_namespaces": [
+    // AUTH_KV — users, sessions, verification codes, wallets
     {
       "binding": "AUTH_KV",
       "id": "beae285652be47c993a4113359f22898"
     },
+    // PAYMENT_LINKS — payment links
     {
       "binding": "PAYMENT_LINKS",
       "id": "a7a400f24ad441d29c3ab9e36f62069f"
     },
+    // RATE_LIMIT_KV — rate limiting and replay protection
     {
       "binding": "RATE_LIMIT_KV",
       "id": "fb9584b52abe49618e4835836c8ec453"
     }
+    // GATEWAY_OPS_KV — Circle Gateway operation state (non-production fallback only; DO is primary in prod).
+    // To activate:
+    //   1. CF Dashboard -> KV -> Create namespace -> name "GATEWAY_OPS_KV"
+    //   2. Copy the namespace ID below (replace placeholder), uncomment, re-deploy.
+    //   NOTE: KV is NOT atomic. Used only as non-production fallback. In production,
+    //         GATEWAY_OP_LOCK (Durable Object, see below) is required; KV is disabled.
+    // ,{
+    //   "binding": "GATEWAY_OPS_KV",
+    //   "id": "<your-gateway-ops-kv-namespace-id>"
+    // }
   ],
 
-  // Treasury Core API — production feature flags (Phase: Go Live).
-  // These affect ONLY the /api/core/* surface. Existing endpoints are unaffected.
-  //   AUTH_MODE=strict        → every /api/core/* call (except public health) must
-  //                             carry a valid HMAC signature.
-  //   RATE_LIMIT_MODE=enforce → per Application/Client/IP/endpoint throttling.
-  //   CORE_ALLOWED_ORIGINS    → additional CORS origins (never "*").
-  // The ExecDaat shared secret lives ONLY as a Cloudflare Secret (EXECDAAT_APP_SECRET);
-  // core state (nonces/rate/audit/registry-overrides/cache) uses RATE_LIMIT_KV.
-  // Durable Objects — PaymentLock provides true atomic serialization for
-  // chainId+txHash idempotency in payment/[token].js.
+  // ── Durable Object bindings ───────────────────────────────────────────────
   //
-  // Cloudflare Pages does NOT support inline DO class definitions or migrations
-  // in wrangler.jsonc.  To activate the DO in production:
-  //   1. Deploy a separate Worker that exports PaymentLock from payment-lock.do.js
-  //   2. In Cloudflare Dashboard → Pages → elligentttest → Settings → Functions
-  //      → Durable Object bindings, add:
-  //        Variable name: PAYMENT_LOCK
-  //        Durable Object namespace: (the DO namespace from step 1)
-  //   3. Re-deploy.
-  // Until activated, payment/[token].js falls back to the KV-sentinel strategy
-  // (strong protection for sequential/retried; best-effort for concurrent).
+  // CF Pages cannot declare DO bindings inline for DOs hosted in a separate Worker.
+  // The bindings below MUST be configured in CF Dashboard (not in this file).
+  //
+  // GATEWAY_OP_LOCK — atomic per-salt idempotence lock for Circle Gateway operations.
+  // Activation steps:
+  //   1. Create a separate CF Worker. Its wrangler.toml needs:
+  //        [[durable_objects.bindings]]
+  //        name = "GATEWAY_OP_LOCK"
+  //        class_name = "GatewayOpLock"
+  //        [[migrations]]
+  //        tag = "v1"
+  //        new_classes = ["GatewayOpLock"]
+  //      Source file: functions/api/gateway/gateway-op-lock.do.js (export GatewayOpLock).
+  //      Deploy: `wrangler deploy` from the Worker directory.
+  //   2. CF Dashboard -> Pages -> elligentt -> Settings -> Functions
+  //      -> Durable Object bindings -> Add:
+  //        Variable name: GATEWAY_OP_LOCK
+  //        Namespace: (the namespace created in step 1)
+  //   3. CF Dashboard -> Pages -> elligentt -> Settings -> Environment variables
+  //      -> Production -> Add:
+  //        DO_INTERNAL_SECRET  = <openssl rand -hex 32>   (random 32-byte secret)
+  //        GATEWAY_RPC_URLS    = {"42161":"https://...","5042":"https://...","8453":"https://...","1":"https://...","10":"https://...","137":"https://..."}
+  //        GATEWAY_ENV         = production
+  //   4. Re-deploy the Pages project.
+  //
+  // PAYMENT_LOCK — atomic per-(chainId+txHash) idempotence lock for payment links.
+  //   Same activation process, using PaymentLock class from functions/api/payment-lock.do.js.
+  //   Until activated, payment/[token].js falls back to KV-sentinel strategy.
 
   "vars": {
     "AUTH_MODE": "strict",

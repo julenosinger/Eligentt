@@ -985,12 +985,30 @@ export async function onRequestPostConfirm(ctx) {
   // ── Step 5b: Cross-check receipt.transactionHash ──────────────────────────
   // Ensures the receipt corresponds to the requested transaction, not a
   // different one returned by a malformed or misconfigured RPC node.
-  const receiptTxHash = (receipt.transactionHash || receipt.hash || '').toLowerCase();
-  if (receiptTxHash && receiptTxHash !== txHash.toLowerCase()) {
+  //
+  // P0 (Fase 2.6): absence of transactionHash is NOT silently accepted.
+  //   - Some RPC nodes omit transactionHash in the receipt object.
+  //   - An absent field is indistinguishable from a node that returned the
+  //     wrong receipt — we cannot confirm the receipt belongs to txHash.
+  //   - Treat as inconclusive (recoverable) rather than silently passing.
+  //   - The caller should retry with a node that returns transactionHash,
+  //     or wait for the field to be populated.
+  const receiptTxHashRaw = receipt.transactionHash || receipt.hash || null;
+  if (!receiptTxHashRaw) {
+    return jsonResp({
+      error:       'receipt_tx_hash_absent',
+      recoverable: true,
+      detail:      'receipt.transactionHash (and receipt.hash) are absent. ' +
+                   'Cannot confirm the receipt belongs to txHash=' + txHash + '. ' +
+                   'Operation remains recoverable. Retry with an RPC that returns transactionHash.',
+    }, 502);
+  }
+  const receiptTxHash = receiptTxHashRaw.toLowerCase();
+  if (receiptTxHash !== txHash.toLowerCase()) {
     return jsonResp({
       error:       'receipt_tx_hash_mismatch',
       requested:   txHash,
-      receiptHash: receipt.transactionHash || receipt.hash,
+      receiptHash: receiptTxHashRaw,
       recoverable: true,
       detail:      'receipt.transactionHash does not match the requested txHash. ' +
                    'The RPC returned a receipt for a different transaction.',
@@ -1083,17 +1101,19 @@ export async function onRequestPostConfirm(ctx) {
   // Strip 0x prefix and work in lowercase hex
   const calldata = inputHex.toLowerCase().replace(/^0x/, '');
 
-  // ── P1: Safe ABI decoding — all offsets and lengths bounded before use ────
+  // ── P1: Safe ABI decoding — BigInt for all offsets and lengths ───────────
   //
-  // We use plain Number arithmetic throughout but apply explicit upper-bound
-  // guards BEFORE any multiplication or array index so that a crafted calldata
-  // with extreme values cannot cause precision loss or integer wrap.
+  // Per Fase 2.6 spec: use BigInt for offsets and lengths to eliminate any
+  // possibility of Number precision loss on crafted large values.
+  // Explicit upper-bound guards are applied BEFORE any arithmetic:
+  //   ABI_MAX_PARAM_OFFSET  (4096n bytes)   — param0Offset from the ABI head
+  //   ABI_MAX_PAYLOAD_LEN   (262144n bytes) — declared length of attestationPayload
   //
-  // Guards used:
-  //   ABI_MAX_PARAM_OFFSET  (4096 bytes)  — param0Offset from the ABI head
-  //   ABI_MAX_PAYLOAD_LEN   (262144 bytes) — declared length of attestationPayload
-  //
-  // Both are well within Number.MAX_SAFE_INTEGER after *2 (hex), so no BigInt needed.
+  // All downstream index arithmetic converts back to Number only AFTER bounds
+  // checks confirm the value is safe (well under Number.MAX_SAFE_INTEGER).
+
+  const BIG_ABI_MAX_PARAM_OFFSET = BigInt(ABI_MAX_PARAM_OFFSET);
+  const BIG_ABI_MAX_PAYLOAD_LEN  = BigInt(ABI_MAX_PAYLOAD_LEN);
 
   // Minimum calldata length: selector(4) + offset0(32) + offset1(32) + len0(32) = 100 bytes
   if (calldata.length < 200) {
@@ -1117,20 +1137,22 @@ export async function onRequestPostConfirm(ctx) {
     }, 422);
   }
 
-  // ABI-decode param0 offset (bytes 4..35 of calldata).
+  // ABI-decode param0 offset (bytes 4..35 of calldata) — BigInt parse, bounded.
   // Standard ABI: param0Offset = 64 (two 32-byte slots). We read it rather than hardcoding.
-  // Guard: reject anything above ABI_MAX_PARAM_OFFSET to prevent integer precision issues.
-  const param0OffsetHex = calldata.slice(8, 8 + 64);
-  const param0Offset    = parseInt(param0OffsetHex, 16);
-  if (!Number.isFinite(param0Offset) || param0Offset > ABI_MAX_PARAM_OFFSET) {
+  let param0OffsetBig;
+  try { param0OffsetBig = BigInt('0x' + calldata.slice(8, 8 + 64)); }
+  catch(_) { param0OffsetBig = null; }
+  if (param0OffsetBig === null || param0OffsetBig > BIG_ABI_MAX_PARAM_OFFSET) {
     return jsonResp({
-      error:       'abi_offset_out_of_bounds',
-      param0Offset: param0Offset,
-      recoverable: true,
-      detail:      'ABI param0 offset (' + param0Offset + ') exceeds safe bound (' +
-                   ABI_MAX_PARAM_OFFSET + '). Rejecting to prevent precision loss.',
+      error:        'abi_offset_out_of_bounds',
+      param0Offset: param0OffsetBig === null ? 'unparseable' : String(param0OffsetBig),
+      recoverable:  true,
+      detail:       'ABI param0 offset exceeds safe bound (' + ABI_MAX_PARAM_OFFSET +
+                    '). Rejecting to prevent precision loss.',
     }, 502);
   }
+  // Safe to convert: value ≤ 4096, far below Number.MAX_SAFE_INTEGER.
+  const param0Offset = Number(param0OffsetBig);
 
   // payloadLenOffset: hex index of the uint256 length word for attestationPayload.
   // (4 + param0Offset) bytes into calldata → ×2 for hex chars.
@@ -1143,18 +1165,21 @@ export async function onRequestPostConfirm(ctx) {
     }, 502);
   }
 
-  // Read and bound-check payloadLen before any use.
-  const payloadLenHex = calldata.slice(payloadLenOffset, payloadLenOffset + 64);
-  const payloadLen    = parseInt(payloadLenHex, 16);
-  if (!Number.isFinite(payloadLen) || payloadLen > ABI_MAX_PAYLOAD_LEN) {
+  // Read and bound-check payloadLen (BigInt) before any use.
+  let payloadLenBig;
+  try { payloadLenBig = BigInt('0x' + calldata.slice(payloadLenOffset, payloadLenOffset + 64)); }
+  catch(_) { payloadLenBig = null; }
+  if (payloadLenBig === null || payloadLenBig > BIG_ABI_MAX_PAYLOAD_LEN) {
     return jsonResp({
       error:       'abi_payload_len_out_of_bounds',
-      payloadLen:  payloadLen,
+      payloadLen:  payloadLenBig === null ? 'unparseable' : String(payloadLenBig),
       recoverable: true,
-      detail:      'Declared attestationPayload length (' + payloadLen + ') exceeds safe bound (' +
+      detail:      'Declared attestationPayload length exceeds safe bound (' +
                    ABI_MAX_PAYLOAD_LEN + '). Rejecting to prevent memory/precision issues.',
     }, 502);
   }
+  // Safe to convert: value ≤ 262144, far below Number.MAX_SAFE_INTEGER.
+  const payloadLen = Number(payloadLenBig);
 
   // payloadStart: hex index of the first byte of attestationPayload data.
   const payloadStart = payloadLenOffset + 64;
@@ -1212,19 +1237,20 @@ export async function onRequestPostConfirm(ctx) {
                      MIN_PAYLOAD_BYTES_SET + ' bytes.',
       }, 502);
     }
-    // Read numAttestations from payload bytes 4..7.
-    const numAttestationsHex = calldata.slice(payloadStart + 8, payloadStart + 16); // 4 bytes = 8 hex
-    const numAttestations    = parseInt(numAttestationsHex, 16);
-    if (!Number.isFinite(numAttestations) || numAttestations < 1) {
+    // Read numAttestations from payload bytes 4..7 (BigInt, bounded to sane range).
+    let numAttestationsBig;
+    try { numAttestationsBig = BigInt('0x' + calldata.slice(payloadStart + 8, payloadStart + 16)); }
+    catch(_) { numAttestationsBig = 0n; }
+    if (numAttestationsBig < 1n || numAttestationsBig > 65535n) {
       return jsonResp({
         error:            'attestation_set_empty',
-        numAttestations:  numAttestations,
+        numAttestations:  String(numAttestationsBig),
         recoverable:      true,
-        detail:           'AttestationSet has numAttestations=' + numAttestations +
+        detail:           'AttestationSet has numAttestations=' + String(numAttestationsBig) +
                           '. Cannot extract first attestation salt.',
       }, 502);
     }
-    // Verify the first attestation's magic is present at payloadStart + 8 bytes = [8..11].
+    // Verify the first attestation's magic is present at payload offset [8..11].
     const firstAttesMagicHex = calldata.slice(payloadStart + 16, payloadStart + 24); // 4 bytes = 8 hex
     if (firstAttesMagicHex !== ATTESTATION_MAGIC) {
       return jsonResp({

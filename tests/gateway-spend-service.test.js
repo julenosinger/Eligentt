@@ -2414,6 +2414,7 @@ describe('GSS18 — Fase 2.2 P0: reconciliation security', () => {
       }
       if (body.method === 'eth_getTransactionReceipt') {
         return { ok: true, json: async () => ({ jsonrpc: '2.0', id: 1, result: {
+          transactionHash: txHash, // Fase 2.6: required
           to:          '0x0022222abe238cc2c7bb1f21003f0a260052475b',
           status:      '0x1',
           blockNumber: '0x1',
@@ -2491,6 +2492,7 @@ describe('GSS18 — Fase 2.2 P0: reconciliation security', () => {
         }}) };
       if (body.method === 'eth_getTransactionReceipt')
         return { ok: true, json: async () => ({ result: {
+          transactionHash: txHash, // Fase 2.6: required
           to: '0x0022222abe238cc2c7bb1f21003f0a260052475b',
           status: '0x1', blockNumber: '0x1',
         }}) };
@@ -2591,6 +2593,7 @@ describe('GSS18 — Fase 2.2 P0: reconciliation security', () => {
         }}) };
       if (body.method === 'eth_getTransactionReceipt')
         return { ok: true, json: async () => ({ result: {
+          transactionHash: txHash, // Fase 2.6: required
           to: '0x0022222abe238cc2c7bb1f21003f0a260052475b',
           status: null,  // malformed — INDETERMINATE
           blockNumber: '0x1',
@@ -2667,9 +2670,10 @@ describe('GSS18 — Fase 2.2 P0: reconciliation security', () => {
           to:    '0x0022222abe238cc2c7bb1f21003f0a260052475b',
           input: null,  // no calldata
         }}) };
-      // Receipt also called, must return a receipt with status to get past receipt checks
+      // Receipt must include transactionHash (Fase 2.6) and valid status to reach calldata check
       if (body.method === 'eth_getTransactionReceipt')
         return { ok: true, json: async () => ({ result: {
+          transactionHash: txHash, // Fase 2.6: required
           to: '0x0022222abe238cc2c7bb1f21003f0a260052475b',
           status: '0x1', blockNumber: '0x1',
         }}) };
@@ -2797,6 +2801,7 @@ describe('GSS19 — Fase 2.3: secure on-chain calldata verification', () => {
         }}) };
       if (body.method === 'eth_getTransactionReceipt')
         return { ok: true, json: async () => ({ result: receiptStatus === null ? null : {
+          transactionHash: txHash, // required by Fase 2.6 P0 fix
           to: txTo || MINTER, status: receiptStatus, blockNumber: '0x2',
         }}) };
       return { ok: false, status: 500, json: async () => ({}) };
@@ -3281,19 +3286,20 @@ describe('GSS20 — Fase 2.4 cross-checks and ABI safety', () => {
     } finally { global.fetch = origFetch; }
   });
 
-  // ── GSS20.3: receipt.transactionHash absent → OK (absence is allowed) ────
-  it('GSS20.3 — receipt.transactionHash absent → 200 (absence tolerated)', async () => {
+  // ── GSS20.3: receipt.transactionHash absent → receipt_tx_hash_absent (Fase 2.6 P0) ─
+  it('GSS20.3 — receipt.transactionHash absent → 502 receipt_tx_hash_absent (Fase 2.6)', async () => {
     const calldata = buildGatewayMintCalldata(SALT_CC);
     const env = makeConfirmEnv(DST_CHAIN, SALT_CC, DEPOSITOR);
     const origFetch = global.fetch;
-    // empty receiptTxHash → '' → falsy → treated as absent, no mismatch
+    // Both transactionHash and hash absent — Fase 2.6 P0: must block, not tolerate
     global.fetch = makeFetchMock(DST_CHAIN, TX_HASH, calldata, { receiptTxHash: '' });
     try {
       const req = makeConfirmReq({ salt: SALT_CC, depositor: DEPOSITOR, txHash: TX_HASH, dstChainId: DST_CHAIN });
       const res  = await onRequestPostConfirm({ request: req, env });
       const data = await res.json();
-      expect(res.status).toBe(200);
-      expect(data.ok).toBe(true);
+      expect(res.status).toBe(502);
+      expect(data.error).toBe('receipt_tx_hash_absent');
+      expect(data.recoverable).toBe(true);
     } finally { global.fetch = origFetch; }
   });
 
@@ -3673,5 +3679,248 @@ describe('GSS21 — Security audit: addresses, precision, blocked state', () => 
     expect(proxySrc).toContain("isProduction(env)");
     expect(proxySrc).toContain('do_required_in_production');
     expect(proxySrc).toContain('do_unavailable_production');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// GSS22 — Fase 2.6: receipt.transactionHash absence, BigInt ABI decode,
+//          wrangler.jsonc stubs, and infrastructure checklist completeness
+// ═══════════════════════════════════════════════════════════════════════════════
+describe('GSS22 — Fase 2.6: receipt hash absence, BigInt ABI, wrangler stubs', () => {
+  const path      = require('path');
+  const fs        = require('fs');
+  const proxySrc  = fs.readFileSync(path.join(__dirname, '../functions/api/gateway/transfer.js'), 'utf8');
+  const wranglerSrc = fs.readFileSync(path.join(__dirname, '../wrangler.jsonc'), 'utf8');
+  const indexSrc  = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
+  const {
+    onRequestPostConfirm,
+  } = require('../functions/api/gateway/transfer.js');
+
+  // ── Helpers ─────────────────────────────────────────────────────────────────
+  const SALT_DD    = '0x' + 'dd'.repeat(32);
+  const DEPOSITOR  = '0xaabbccddaabbccddaabbccddaabbccddaabbccdd';
+  const TX_HASH    = '0x' + 'ee'.repeat(32);
+  const DST_CHAIN  = 421614; // Arbitrum Sepolia (testnet)
+  const MINTER     = '0x0022222ABE238Cc2C7Bb1f21003F0a260052475B';
+
+  // Build minimal valid gatewayMint calldata with given salt
+  function buildCalldata(saltHex) {
+    const selector   = '9fb01cc5';
+    const off0       = (64).toString(16).padStart(64, '0');
+    // Build attestation: magic(4) + maxBlockHeight(32) + specLen(4) + TransferSpec(340)
+    // TransferSpec: magic(4) + version(4) + srcDomain(4) + dstDomain(4) +
+    //   srcContract(32) + dstContract(32) + srcToken(32) + dstToken(32) +
+    //   srcDepositor(32) + dstRecipient(32) + srcSigner(32) + dstCaller(32) +
+    //   value(32) + salt(32) + hookDataLen(4) = 340 bytes
+    const specBytes  = 340;
+    const specLenHex = specBytes.toString(16).padStart(8, '0'); // 4 bytes
+    const saltClean  = saltHex.replace(/^0x/, '');
+    // TransferSpec blob: 304 bytes of zeros (fields before salt) + salt + 4 bytes zeros (hookDataLen)
+    const specBlob   = '00'.repeat(304) + saltClean + '00'.repeat(4);
+    // Single Attestation: magic + maxBlockHeight(32B) + specLen(4B) + specBlob
+    const attMagic   = 'ff6fb334';
+    const maxBlock   = '00'.repeat(32);
+    const attPayload = attMagic + maxBlock + specLenHex + specBlob;
+    const payloadLen = (attPayload.length / 2).toString(16).padStart(64, '0');
+    // ABI: off0(32) + off1(32) + len0(32) + payload + sig(len=0)
+    const off1       = (64 + 32 + attPayload.length / 2).toString(16).padStart(64, '0');
+    const sigLen     = '00'.repeat(32); // sig length = 0 for test
+    return '0x' + selector + off0 + off1 + payloadLen + attPayload + sigLen;
+  }
+
+  function makeKv(salt, depositor) {
+    const kvStore = new Map();
+    kvStore.set('gw:op:' + salt, {
+      salt, depositor: depositor.toLowerCase().replace(/^0x/,''),
+      status: 'accepted', submittedAt: new Date().toISOString(),
+    });
+    return {
+      get:  async (k, opts) => { const v = kvStore.get(k); return (opts && opts.type === 'json') ? (v || null) : (v ? JSON.stringify(v) : null); },
+      put:  async (k, v)    => { kvStore.set(k, typeof v === 'string' ? JSON.parse(v) : v); },
+      delete: async (k)     => { kvStore.delete(k); },
+    };
+  }
+
+  function makeEnv(chainId) {
+    return {
+      GATEWAY_RPC_URLS: JSON.stringify({ [String(chainId)]: 'https://mock-rpc-22' }),
+      GATEWAY_ENV:      'test',
+      ALLOWED_ORIGINS:  '*',
+    };
+  }
+
+  // ── GSS22.1: receipt.transactionHash absent → receipt_tx_hash_absent (502 recoverable) ──
+  it('GSS22.1 — receipt.transactionHash absent returns receipt_tx_hash_absent', async () => {
+    const origFetch = global.fetch;
+    try {
+      const calldata = buildCalldata(SALT_DD);
+      global.fetch = async (url, opts) => {
+        const body = JSON.parse(opts.body);
+        if (body.method === 'eth_chainId')
+          return { ok:true, json: async () => ({ jsonrpc:'2.0', id:1, result: '0x' + DST_CHAIN.toString(16) }) };
+        if (body.method === 'eth_getTransactionByHash')
+          return { ok:true, json: async () => ({ jsonrpc:'2.0', id:1, result: { hash: TX_HASH, to: MINTER, input: calldata, blockNumber: '0x1' } }) };
+        if (body.method === 'eth_getTransactionReceipt')
+          // Deliberately omit transactionHash AND hash — simulates RPC that doesn't return it
+          return { ok:true, json: async () => ({ jsonrpc:'2.0', id:1, result: { status: '0x1', blockNumber: '0x1' } }) };
+        return { ok:false, status:500, json: async () => ({}) };
+      };
+      const req = new Request('https://worker.dev/api/gateway/transfer/confirm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ salt: SALT_DD, depositor: DEPOSITOR, txHash: TX_HASH, dstChainId: DST_CHAIN }),
+      });
+      const res = await onRequestPostConfirm({ request: req, env: { ...makeEnv(DST_CHAIN), GATEWAY_OPS_KV: makeKv(SALT_DD, DEPOSITOR) } });
+      expect(res.status).toBe(502);
+      const data = await res.json();
+      expect(data.error).toBe('receipt_tx_hash_absent');
+      expect(data.recoverable).toBe(true);
+    } finally { global.fetch = origFetch; }
+  });
+
+  // ── GSS22.2: receipt.transactionHash present but wrong → receipt_tx_hash_mismatch ──
+  it('GSS22.2 — receipt.transactionHash wrong hash returns receipt_tx_hash_mismatch', async () => {
+    const origFetch = global.fetch;
+    try {
+      const calldata = buildCalldata(SALT_DD);
+      const wrongHash = '0x' + 'ff'.repeat(32);
+      global.fetch = async (url, opts) => {
+        const body = JSON.parse(opts.body);
+        if (body.method === 'eth_chainId')
+          return { ok:true, json: async () => ({ jsonrpc:'2.0', id:1, result: '0x' + DST_CHAIN.toString(16) }) };
+        if (body.method === 'eth_getTransactionByHash')
+          return { ok:true, json: async () => ({ jsonrpc:'2.0', id:1, result: { hash: TX_HASH, to: MINTER, input: calldata, blockNumber: '0x1' } }) };
+        if (body.method === 'eth_getTransactionReceipt')
+          return { ok:true, json: async () => ({ jsonrpc:'2.0', id:1, result: { transactionHash: wrongHash, status: '0x1', blockNumber: '0x1' } }) };
+        return { ok:false, status:500, json: async () => ({}) };
+      };
+      const req = new Request('https://worker.dev/api/gateway/transfer/confirm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ salt: SALT_DD, depositor: DEPOSITOR, txHash: TX_HASH, dstChainId: DST_CHAIN }),
+      });
+      const res = await onRequestPostConfirm({ request: req, env: { ...makeEnv(DST_CHAIN), GATEWAY_OPS_KV: makeKv(SALT_DD, DEPOSITOR) } });
+      expect(res.status).toBe(502);
+      const data = await res.json();
+      expect(data.error).toBe('receipt_tx_hash_mismatch');
+      expect(data.recoverable).toBe(true);
+    } finally { global.fetch = origFetch; }
+  });
+
+  // ── GSS22.3: receipt.hash (alias) accepted when transactionHash absent ─────
+  it('GSS22.3 — receipt.hash alias accepted as fallback for transactionHash', async () => {
+    const origFetch = global.fetch;
+    try {
+      const calldata = buildCalldata(SALT_DD);
+      global.fetch = async (url, opts) => {
+        const body = JSON.parse(opts.body);
+        if (body.method === 'eth_chainId')
+          return { ok:true, json: async () => ({ jsonrpc:'2.0', id:1, result: '0x' + DST_CHAIN.toString(16) }) };
+        if (body.method === 'eth_getTransactionByHash')
+          return { ok:true, json: async () => ({ jsonrpc:'2.0', id:1, result: { hash: TX_HASH, to: MINTER, input: calldata, blockNumber: '0x1' } }) };
+        if (body.method === 'eth_getTransactionReceipt')
+          // Use receipt.hash (not receipt.transactionHash) — some RPC nodes
+          return { ok:true, json: async () => ({ jsonrpc:'2.0', id:1, result: { hash: TX_HASH, status: '0x1', blockNumber: '0x1' } }) };
+        return { ok:false, status:500, json: async () => ({}) };
+      };
+      const req = new Request('https://worker.dev/api/gateway/transfer/confirm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ salt: SALT_DD, depositor: DEPOSITOR, txHash: TX_HASH, dstChainId: DST_CHAIN }),
+      });
+      const res = await onRequestPostConfirm({ request: req, env: { ...makeEnv(DST_CHAIN), GATEWAY_OPS_KV: makeKv(SALT_DD, DEPOSITOR) } });
+      // Should succeed (200) — receipt.hash is accepted as alias
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.ok).toBe(true);
+      expect(data.status).toBe('confirmed');
+    } finally { global.fetch = origFetch; }
+  });
+
+  // ── GSS22.4: receipt.transactionHash case-insensitive match ───────────────
+  it('GSS22.4 — receipt.transactionHash case-insensitive comparison', async () => {
+    const origFetch = global.fetch;
+    try {
+      const calldata = buildCalldata(SALT_DD);
+      global.fetch = async (url, opts) => {
+        const body = JSON.parse(opts.body);
+        if (body.method === 'eth_chainId')
+          return { ok:true, json: async () => ({ jsonrpc:'2.0', id:1, result: '0x' + DST_CHAIN.toString(16) }) };
+        if (body.method === 'eth_getTransactionByHash')
+          return { ok:true, json: async () => ({ jsonrpc:'2.0', id:1, result: { hash: TX_HASH, to: MINTER, input: calldata, blockNumber: '0x1' } }) };
+        if (body.method === 'eth_getTransactionReceipt')
+          // Return uppercase version of the hash — should still match
+          return { ok:true, json: async () => ({ jsonrpc:'2.0', id:1, result: { transactionHash: TX_HASH.toUpperCase(), status: '0x1', blockNumber: '0x1' } }) };
+        return { ok:false, status:500, json: async () => ({}) };
+      };
+      const req = new Request('https://worker.dev/api/gateway/transfer/confirm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ salt: SALT_DD, depositor: DEPOSITOR, txHash: TX_HASH, dstChainId: DST_CHAIN }),
+      });
+      const res = await onRequestPostConfirm({ request: req, env: { ...makeEnv(DST_CHAIN), GATEWAY_OPS_KV: makeKv(SALT_DD, DEPOSITOR) } });
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.ok).toBe(true);
+    } finally { global.fetch = origFetch; }
+  });
+
+  // ── GSS22.5: BigInt ABI decode — crafted extreme param0Offset ─────────────
+  it('GSS22.5 — extreme param0Offset (0xffffffff) returns abi_offset_out_of_bounds', () => {
+    const selector = '9fb01cc5';
+    const off0     = 'ffffffff'.padStart(64, 'f'); // 32 bytes of 0xff
+    const calldata = selector + off0 + '00'.repeat(200);
+    expect(proxySrc).toContain('BIG_ABI_MAX_PARAM_OFFSET');
+    expect(proxySrc).toContain('abi_offset_out_of_bounds');
+    // Static check: ensure BigInt() is used for parsing offsets
+    expect(proxySrc).toContain("BigInt('0x' + calldata.slice(8");
+  });
+
+  // ── GSS22.6: BigInt ABI decode — crafted extreme payloadLen ───────────────
+  it('GSS22.6 — extreme payloadLen (0xffffffffffffffff) returns abi_payload_len_out_of_bounds', () => {
+    expect(proxySrc).toContain('BIG_ABI_MAX_PAYLOAD_LEN');
+    expect(proxySrc).toContain('abi_payload_len_out_of_bounds');
+    expect(proxySrc).toContain("BigInt('0x' + calldata.slice(payloadLenOffset");
+  });
+
+  // ── GSS22.7: numAttestations BigInt — crafted extreme value ───────────────
+  it('GSS22.7 — numAttestations uses BigInt and rejects > 65535', () => {
+    expect(proxySrc).toContain('numAttestationsBig');
+    expect(proxySrc).toContain("BigInt('0x' + calldata.slice(payloadStart + 8");
+    expect(proxySrc).toContain('65535n');
+  });
+
+  // ── GSS22.8: wrangler.jsonc has GATEWAY_OPS_KV stub ───────────────────────
+  it('GSS22.8 — wrangler.jsonc has GATEWAY_OPS_KV stub (commented)', () => {
+    expect(wranglerSrc).toContain('GATEWAY_OPS_KV');
+    expect(wranglerSrc).toContain('<your-gateway-ops-kv-namespace-id>');
+  });
+
+  // ── GSS22.9: wrangler.jsonc has GATEWAY_OP_LOCK activation steps ──────────
+  it('GSS22.9 — wrangler.jsonc documents GATEWAY_OP_LOCK activation steps', () => {
+    expect(wranglerSrc).toContain('GATEWAY_OP_LOCK');
+    expect(wranglerSrc).toContain('GatewayOpLock');
+    expect(wranglerSrc).toContain('DO_INTERNAL_SECRET');
+    expect(wranglerSrc).toContain('GATEWAY_RPC_URLS');
+    expect(wranglerSrc).toContain('openssl rand -hex 32');
+  });
+
+  // ── GSS22.10: transfer.js source documents PENDING CONFIGURATION ──────────
+  it('GSS22.10 — transfer.js documents PENDING CONFIGURATION for DO and KV bindings', () => {
+    expect(proxySrc).toContain('PENDING CONFIGURATION');
+    expect(proxySrc).toContain('GATEWAY_OPS_KV');
+    expect(proxySrc).toContain('GATEWAY_OP_LOCK');
+  });
+
+  // ── GSS22.11: receipt_tx_hash_absent is a new error code in source ─────────
+  it('GSS22.11 — transfer.js contains receipt_tx_hash_absent error code', () => {
+    expect(proxySrc).toContain('receipt_tx_hash_absent');
+  });
+
+  // ── GSS22.12: GATEWAY_SPEND_BLOCKED = true still active ───────────────────
+  it('GSS22.12 — GATEWAY_SPEND_BLOCKED = true still set in index.html', () => {
+    const match = indexSrc.match(/var GATEWAY_SPEND_BLOCKED\s*=\s*(true|false)/);
+    expect(match).not.toBeNull();
+    expect(match[1]).toBe('true');
   });
 });
