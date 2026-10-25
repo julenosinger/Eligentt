@@ -7497,6 +7497,19 @@ select.cinput option { background: #161a24; color: #dde2f0; }
                     <button class="st-swap-max" id="swp-max-btn" type="button" onclick="swpSetMax()">MAX</button>
                   </div>
                 </div>
+                <!-- Gateway source selector for Swap -->
+                <div id="swp-gw-source-row" style="display:flex;align-items:center;gap:5px;margin-top:5px">
+                  <span style="font-size:7.5px;font-weight:700;color:var(--muted2);text-transform:uppercase;letter-spacing:.6px">Source</span>
+                  <button id="swp-src-evm" onclick="swpSetSource('evm')"
+                    style="font-size:8px;font-weight:700;padding:2px 8px;border-radius:999px;border:1px solid rgba(79,142,247,.4);background:rgba(79,142,247,.12);color:var(--blue);cursor:pointer;transition:all .15s">
+                    Wallet
+                  </button>
+                  <button id="swp-src-gw" onclick="swpSetSource('gateway')"
+                    style="font-size:8px;font-weight:700;padding:2px 8px;border-radius:999px;border:1px solid rgba(167,139,250,.2);background:transparent;color:var(--muted2);cursor:pointer;transition:all .15s">
+                    Gateway
+                  </button>
+                  <span id="swp-gw-bal-label" style="display:none;font-size:7.5px;color:#a78bfa;margin-left:auto">GW: —</span>
+                </div>
               </div>
 
               <!-- Cross-chain indicator -->
@@ -7973,6 +7986,32 @@ select.cinput option { background: #161a24; color: #dde2f0; }
                 <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
                   <div id="sa-xroute-to-dot" style="width:12px;height:12px;border-radius:50%;background:#ff0202;box-shadow:0 0 6px #ff020266"></div>
                   <span id="sa-xroute-to" style="font-size:9px;font-weight:600;color:var(--text)">Ethereum</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- ── Gateway Origin Toggle ──────────────────────────────────────── -->
+            <div id="sa-origin-bar" style="display:flex;align-items:center;gap:6px;margin-bottom:6px;background:rgba(0,0,0,.18);border:1px solid var(--border);border-radius:9px;padding:4px 6px">
+              <span style="font-size:8.5px;font-weight:700;color:var(--muted2);text-transform:uppercase;letter-spacing:.7px;flex-shrink:0">Source</span>
+              <div style="display:flex;gap:4px;flex:1">
+                <button id="sa-origin-evm" class="sa-origin-btn sa-origin-active" onclick="saSetOrigin('evm')"
+                  style="flex:1;padding:4px 8px;font-size:9px;font-weight:700;border-radius:6px;border:1px solid rgba(79,142,247,.4);background:rgba(79,142,247,.15);color:var(--blue);cursor:pointer;transition:all .15s">
+                  <i class="ti ti-wallet" style="font-size:10px;margin-right:3px"></i>EVM Wallet
+                </button>
+                <button id="sa-origin-gw" class="sa-origin-btn" onclick="saSetOrigin('gateway')"
+                  style="flex:1;padding:4px 8px;font-size:9px;font-weight:700;border-radius:6px;border:1px solid rgba(167,139,250,.25);background:transparent;color:var(--muted2);cursor:pointer;transition:all .15s">
+                  <i class="ti ti-circle-dotted" style="font-size:10px;margin-right:3px"></i>Circle Gateway
+                </button>
+              </div>
+              <span id="sa-gw-bal-pill" style="display:none;font-size:8px;font-weight:700;color:#a78bfa;background:rgba(167,139,250,.12);border:1px solid rgba(167,139,250,.25);border-radius:999px;padding:2px 7px;flex-shrink:0">— GW</span>
+            </div>
+            <!-- Gateway notice (shown when GW origin selected) -->
+            <div id="sa-gw-notice" style="display:none;background:rgba(167,139,250,.06);border:1px solid rgba(167,139,250,.2);border-radius:7px;padding:8px 12px;margin-bottom:6px">
+              <div style="display:flex;align-items:flex-start;gap:7px">
+                <i class="ti ti-shield-lock" style="color:#a78bfa;font-size:12px;margin-top:1px;flex-shrink:0"></i>
+                <div style="font-size:8.5px;color:var(--muted2);line-height:1.5">
+                  <b style="color:#a78bfa">Circle Gateway</b> — Transfers use your unified Gateway balance via EIP-712 signed burn intent + on-chain mint on the destination network.<br>
+                  <span id="sa-gw-blocked-msg" style="color:var(--yellow)">Security validation pending — Gateway transfers are not yet enabled for real funds.</span>
                 </div>
               </div>
             </div>
@@ -26349,6 +26388,40 @@ async function _fetchBridgeRoutes(fromChain, toChain, amt, walletAddr) {
   var routes = lifiRoutes.slice();
   if (cctpRoute) routes.push(cctpRoute);
 
+  // Provider 3: Circle Gateway — only for USDC/EURC on officially supported chain pairs.
+  // Requires wallet address to check actual GW balance. Route is informational only —
+  // execution is blocked by GATEWAY_SPEND_BLOCKED until server-side confirmation is ready.
+  var gwSupportedTokens = ['USDC', 'EURC']; // cirBTC GW support not yet verified
+  if (
+    walletAddr &&
+    gwSupportedTokens.indexOf(fromSym) >= 0 &&
+    fromSym === toSym && // Gateway bridges same-token across chains
+    typeof window.GatewaySpendService !== 'undefined' &&
+    typeof window.GatewaySpendService.isSupported === 'function' &&
+    window.GatewaySpendService.isSupported(fromSym, fromChain.chainId, toChain.chainId)
+  ) {
+    var gwRoute = {
+      provider:   'gateway',
+      id:         'gateway-' + fromChain.chainId + '-' + toChain.chainId,
+      label:      'Circle Gateway',
+      protocol:   'Circle Unified Balance',
+      available:  true,
+      _gwBlocked: typeof GATEWAY_SPEND_BLOCKED !== 'undefined' && GATEWAY_SPEND_BLOCKED,
+      inAmt:      Number(amt) || 0,
+      outAmt:     Number(amt) || 0,  // 1:1 — Gateway burns and mints exact amount minus maxFee
+      minAmt:     Number(amt) || 0,
+      feePct:     null,
+      gasUsd:     null,
+      feesUsd:    null,  // maxFee is conservative ceil, not a real-time quote
+      execSec:    30,    // typically <30s for Gateway mint
+      steps:      2,     // sign burn intent + on-chain mint
+      stepsData:  [],
+      quote:      null,
+      _maxFeeNote: 'Fee ceiling: 2.01 USDC (Circle Gateway MAX_FEE). Actual fee may be lower.',
+    };
+    routes.push(gwRoute);
+  }
+
   // Sort: available first, then by outAmt desc (best rate first).
   // This determines card ORDER only — selection is always explicit by the user.
   routes.sort(function(a, b){
@@ -26467,6 +26540,10 @@ function _brsRenderRoutes(routes, fromChain, toChain) {
     if (isFastest) badges += '<div class="brs-best-badge" style="right:auto;left:12px;background:var(--purple)">Fastest</div>';
     // EURC CCTP informational note (eligible but not yet sandbox-verified with real funds).
     if (route._unverifiedEurc) badges += '<div class="brs-best-badge" style="right:auto;left:12px;top:auto;bottom:6px;background:rgba(245,158,11,.18);color:#f59e0b;border:1px solid rgba(245,158,11,.3);font-size:6.5px">EURC · not sandbox-verified</div>';
+    // Circle Gateway: show "Validation Pending" badge when blocked
+    if (route.provider === 'gateway' && route._gwBlocked) badges += '<div class="brs-best-badge" style="right:auto;left:12px;background:rgba(167,139,250,.18);color:#a78bfa;border:1px solid rgba(167,139,250,.3);font-size:6.5px"><i class="ti ti-shield-lock" style="font-size:7px;margin-right:2px"></i>Validation Pending</div>';
+    // Gateway fee note replaces feesStr
+    if (route.provider === 'gateway') feesStr = route._maxFeeNote ? '≤2.01 USDC' : '—';
 
     var selectBtn = route.available
       ? (isSel
@@ -37228,6 +37305,179 @@ saUpdateRoute = function() {
 
 // ── END CPN FIAT PAYOUT ───────────────────────────────────────────────────────
 
+// ── GATEWAY ORIGIN — Send Assets ─────────────────────────────────────────────
+// GATEWAY_SPEND_BLOCKED: set to false only after server-side confirmation path
+// (on-chain receipt verification via CF Worker RPC) is implemented and validated.
+// While true: UI is shown, but execution is blocked with an explicit message.
+var GATEWAY_SPEND_BLOCKED = true;
+
+var _saGwOrigin = false; // false=EVM (default), true=Gateway
+
+function saSetOrigin(mode) {
+  _saGwOrigin = (mode === 'gateway');
+  var evmBtn  = document.getElementById('sa-origin-evm');
+  var gwBtn   = document.getElementById('sa-origin-gw');
+  var notice  = document.getElementById('sa-gw-notice');
+  var activeStyle = { border:'1px solid rgba(167,139,250,.5)', background:'rgba(167,139,250,.15)', color:'#a78bfa' };
+  var inactiveStyle = { border:'1px solid rgba(79,142,247,.25)', background:'transparent', color:'var(--muted2)' };
+  if (_saGwOrigin) {
+    if (evmBtn) { evmBtn.style.cssText = evmBtn.style.cssText.replace(/border:[^;]+;|background:[^;]+;|color:[^;]+;/g,''); Object.assign(evmBtn.style, { border:'1px solid rgba(79,142,247,.25)', background:'transparent', color:'var(--muted2)' }); }
+    if (gwBtn)  { Object.assign(gwBtn.style, { border:'1px solid rgba(167,139,250,.5)', background:'rgba(167,139,250,.15)', color:'#a78bfa' }); }
+    if (notice) notice.style.display = '';
+    saLoadGatewayBalance();
+  } else {
+    if (evmBtn) { Object.assign(evmBtn.style, { border:'1px solid rgba(79,142,247,.4)', background:'rgba(79,142,247,.15)', color:'var(--blue)' }); }
+    if (gwBtn)  { Object.assign(gwBtn.style, { border:'1px solid rgba(167,139,250,.25)', background:'transparent', color:'var(--muted2)' }); }
+    if (notice) notice.style.display = 'none';
+  }
+  if (typeof saUpdateRoute === 'function') saUpdateRoute();
+}
+
+function saLoadGatewayBalance() {
+  var pill = document.getElementById('sa-gw-bal-pill');
+  if (!pill) return;
+  var addr = (typeof walletAddress !== 'undefined') ? walletAddress : null;
+  if (!addr) { pill.style.display = 'none'; return; }
+  pill.style.display = '';
+  pill.textContent   = '… GW';
+  var asset = (typeof saCurrentAsset !== 'undefined') ? saCurrentAsset : 'USDC';
+  fetch('/api/gateway/balances?address=' + encodeURIComponent(addr))
+    .then(function(r){ return r.ok ? r.json() : null; })
+    .then(function(data){
+      if (!data) { pill.textContent = '— GW'; return; }
+      var bal = null;
+      if (Array.isArray(data.balances)) {
+        var entry = data.balances.find(function(b){ return b.token && b.token.toUpperCase() === asset.toUpperCase(); });
+        if (entry) bal = entry.balance || entry.amount || entry.value;
+      } else if (data[asset]) {
+        bal = data[asset];
+      }
+      pill.textContent = bal ? (Number(bal).toFixed(2) + ' GW') : '0.00 GW';
+    })
+    .catch(function(){ pill.textContent = '— GW'; });
+}
+
+async function saExecGateway() {
+  var btn = document.getElementById('sa-send-btn');
+  var btnContent = document.getElementById('sa-send-btn-content');
+  // Hard block — real Gateway transfers require server-side confirmation not yet available.
+  if (GATEWAY_SPEND_BLOCKED) {
+    toast('Circle Gateway transfers are not yet enabled for real funds. Security validation is pending.', 'warn');
+    return;
+  }
+  // Below only reached after GATEWAY_SPEND_BLOCKED is cleared by the Fase 2 completion:
+  if (!window.GatewaySpendService) { toast('Gateway Spend Service not available', 'error'); return; }
+  var addr  = (typeof walletAddress !== 'undefined') ? walletAddress : null;
+  var recip = (document.getElementById('sa-recipient') || {}).value || '';
+  var amtEl = document.getElementById('sa-amount');
+  var amt   = amtEl ? amtEl.value : '';
+  var asset = (typeof saCurrentAsset !== 'undefined') ? saCurrentAsset : 'USDC';
+  var chainId = (typeof activeChainId !== 'undefined') ? activeChainId : 5042;
+  var destChainEl = document.getElementById('sa-dest-chain');
+  var destChainId = destChainEl ? parseInt(destChainEl.value) : chainId;
+  if (!addr)  { toast('Connect your wallet first', 'warn'); return; }
+  if (!recip) { toast('Enter a recipient address', 'warn'); return; }
+  if (!amt || isNaN(Number(amt)) || Number(amt) <= 0) { toast('Enter a valid amount', 'warn'); return; }
+  if (btn) btn.disabled = true;
+  if (btnContent) btnContent.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i> Preparing…';
+  try {
+    var result = await window.GatewaySpendService.execute({
+      depositor:   addr,
+      recipient:   recip,
+      token:       asset,
+      amount:      amt,
+      srcChainId:  chainId,
+      dstChainId:  destChainId,
+    }, function(typedData){ return window.ethereum.request({ method:'eth_signTypedData_v4', params:[addr, JSON.stringify(typedData)] }); },
+    function(state){ if (btnContent) btnContent.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i> ' + state; });
+    if (result && result.ok) {
+      toast('Gateway transfer submitted. Awaiting on-chain confirmation.', 'success');
+      if (typeof saUpdateRoute === 'function') saUpdateRoute();
+    } else {
+      toast('Gateway transfer failed: ' + (result && result.error ? result.error : 'unknown error'), 'error');
+    }
+  } catch(e) {
+    toast('Gateway error: ' + (e && e.message ? e.message : String(e)), 'error');
+  } finally {
+    if (btn) btn.disabled = false;
+    if (btnContent) btnContent.innerHTML = '<i class="ti ti-send"></i>Send Asset';
+  }
+}
+
+// Patch saDispatchSend to route to Gateway when _saGwOrigin is true
+var _saDispatchSendOrig = saDispatchSend;
+saDispatchSend = function() {
+  if (_saGwOrigin && !_saCPNMode) {
+    saExecGateway();
+  } else {
+    _saDispatchSendOrig.apply(this, arguments);
+  }
+};
+// ── END GATEWAY ORIGIN — Send Assets ─────────────────────────────────────────
+
+// ── GATEWAY SOURCE — Swap ─────────────────────────────────────────────────────
+var _swpGwSource = false; // false=EVM wallet (default), true=Gateway
+
+function swpSetSource(mode) {
+  _swpGwSource = (mode === 'gateway');
+  var evmBtn = document.getElementById('swp-src-evm');
+  var gwBtn  = document.getElementById('swp-src-gw');
+  var gwLbl  = document.getElementById('swp-gw-bal-label');
+  if (evmBtn) Object.assign(evmBtn.style, _swpGwSource
+    ? { border:'1px solid rgba(79,142,247,.2)', background:'transparent', color:'var(--muted2)' }
+    : { border:'1px solid rgba(79,142,247,.4)', background:'rgba(79,142,247,.12)', color:'var(--blue)' });
+  if (gwBtn) Object.assign(gwBtn.style, _swpGwSource
+    ? { border:'1px solid rgba(167,139,250,.5)', background:'rgba(167,139,250,.12)', color:'#a78bfa' }
+    : { border:'1px solid rgba(167,139,250,.2)', background:'transparent', color:'var(--muted2)' });
+  if (gwLbl) gwLbl.style.display = _swpGwSource ? '' : 'none';
+  if (_swpGwSource) swpLoadGatewayBalance();
+  // Quotes use the same LI.FI/Tower routes regardless of source — source only affects execution.
+  // Show a note in the swap summary area.
+  var srcVal = document.getElementById('swp-source-val');
+  if (srcVal && _swpGwSource) srcVal.textContent = 'Circle Gateway';
+}
+
+function swpLoadGatewayBalance() {
+  var lbl   = document.getElementById('swp-gw-bal-label');
+  var asset = (typeof SWP !== 'undefined' && SWP && SWP.tokens && SWP.tokenInIdx != null)
+    ? (SWP.tokens[SWP.tokenInIdx] || {}).symbol || 'USDC' : 'USDC';
+  var addr  = (typeof walletAddress !== 'undefined') ? walletAddress : null;
+  if (!addr || !lbl) return;
+  lbl.textContent = 'GW: …';
+  fetch('/api/gateway/balances?address=' + encodeURIComponent(addr))
+    .then(function(r){ return r.ok ? r.json() : null; })
+    .then(function(data){
+      if (!data) { lbl.textContent = 'GW: —'; return; }
+      var bal = null;
+      if (Array.isArray(data.balances)) {
+        var entry = data.balances.find(function(b){ return b.token && b.token.toUpperCase() === asset.toUpperCase(); });
+        if (entry) bal = entry.balance || entry.amount || entry.value;
+      } else if (data[asset]) bal = data[asset];
+      lbl.textContent = bal ? ('GW: ' + Number(bal).toFixed(2)) : 'GW: 0.00';
+    })
+    .catch(function(){ lbl.textContent = 'GW: —'; });
+}
+
+// Patch swpExecute to intercept Gateway source before actual execution.
+// The quote path is unaffected — Gateway source only changes how execution is funded.
+if (typeof swpExecuteLiFi === 'function') {
+  var _swpExecuteLiFiOrig = swpExecuteLiFi;
+  swpExecuteLiFi = function() {
+    if (_swpGwSource) {
+      if (GATEWAY_SPEND_BLOCKED) {
+        toast('Circle Gateway as swap source is not yet enabled for real funds. Security validation is pending.', 'warn');
+        return;
+      }
+      // Fase 2+ implementation: bridge from Gateway to wallet first, then swap.
+      // Not yet implemented — must not proceed silently.
+      toast('Gateway-sourced swap execution is not yet available. Use Wallet source.', 'info');
+      return;
+    }
+    return _swpExecuteLiFiOrig.apply(this, arguments);
+  };
+}
+// ── END GATEWAY SOURCE — Swap ─────────────────────────────────────────────────
+
 function saLogTx(tx) {
   saRecentTxs.unshift(tx);
   if (saRecentTxs.length > 20) saRecentTxs.pop();
@@ -40555,6 +40805,17 @@ function executeBridgeOrTurbo() {
     }
     if (route.provider === 'lifi') {
       executeBridgeViaLiFi();
+      return;
+    }
+    if (route.provider === 'gateway') {
+      // Gateway execution requires server-side confirmation path (CF Worker RPC binding).
+      // GATEWAY_SPEND_BLOCKED remains true until that path is implemented and validated.
+      if (typeof GATEWAY_SPEND_BLOCKED === 'undefined' || GATEWAY_SPEND_BLOCKED) {
+        toast('Circle Gateway bridge is not yet enabled for real funds. Security validation is pending.', 'warn');
+        return;
+      }
+      // Reached only after GATEWAY_SPEND_BLOCKED is cleared:
+      toast('Circle Gateway bridge execution is not yet wired in this version.', 'info');
       return;
     }
     // Unknown provider — fall through to default routing.
