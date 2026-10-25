@@ -764,6 +764,16 @@ const ATTESTATION_SET_MAGIC         = '1e12db71';
 const TRANSFER_SPEC_SALT_IN_SPEC    = 304; // byte offset of salt within a TransferSpec blob
 const ATTESTATION_SPEC_OFFSET       = 40;  // bytes before TransferSpec within a single Attestation
 const ATTESTATION_SET_FIRST_OFFSET  = 8;   // bytes before first Attestation within an AttestationSet
+// Minimum attestation payload sizes (bytes):
+//   Single:  magic(4) + maxBlockHeight(32) + specLen(4) + TransferSpec(340+) = 380
+//   Set:     magic(4) + numAttestations(4) + [first attestation 380+]        = 388
+const MIN_PAYLOAD_BYTES_SINGLE      = 380;
+const MIN_PAYLOAD_BYTES_SET         = 388;
+// ABI safety bounds — prevents integer overflow / precision loss via crafted calldata.
+// param0Offset from ABI head: must be ≤ 4096 to stay within Number.MAX_SAFE_INTEGER territory.
+// payloadLen: must be ≤ 256 KB; realistic attestations are < 4 KB.
+const ABI_MAX_PARAM_OFFSET          = 4096;   // bytes; param0Offset upper bound
+const ABI_MAX_PAYLOAD_LEN           = 262144; // bytes; 256 KB upper bound on attestationPayload
 
 export async function onRequestPostConfirm(ctx) {
   const { request, env } = ctx;
@@ -972,6 +982,38 @@ export async function onRequestPostConfirm(ctx) {
     }, 404);
   }
 
+  // ── Step 5b: Cross-check receipt.transactionHash ──────────────────────────
+  // Ensures the receipt corresponds to the requested transaction, not a
+  // different one returned by a malformed or misconfigured RPC node.
+  const receiptTxHash = (receipt.transactionHash || receipt.hash || '').toLowerCase();
+  if (receiptTxHash && receiptTxHash !== txHash.toLowerCase()) {
+    return jsonResp({
+      error:       'receipt_tx_hash_mismatch',
+      requested:   txHash,
+      receiptHash: receipt.transactionHash || receipt.hash,
+      recoverable: true,
+      detail:      'receipt.transactionHash does not match the requested txHash. ' +
+                   'The RPC returned a receipt for a different transaction.',
+    }, 502);
+  }
+
+  // ── Step 5c: Cross-check blockNumber consistency ──────────────────────────
+  // tx.blockNumber and receipt.blockNumber must agree when both are present.
+  // A transaction from mempool (blockNumber = null) and a receipt is contradictory.
+  const txBlockNum      = tx.blockNumber      != null ? String(tx.blockNumber)      : null;
+  const receiptBlockNum = receipt.blockNumber != null ? String(receipt.blockNumber) : null;
+  if (txBlockNum !== null && receiptBlockNum !== null && txBlockNum !== receiptBlockNum) {
+    return jsonResp({
+      error:             'block_number_mismatch',
+      txBlockNumber:     tx.blockNumber,
+      receiptBlockNumber: receipt.blockNumber,
+      recoverable:       true,
+      detail:            'tx.blockNumber (' + tx.blockNumber + ') does not match ' +
+                         'receipt.blockNumber (' + receipt.blockNumber + '). ' +
+                         'RPC response is inconsistent.',
+    }, 502);
+  }
+
   // ── Step 6: Verify receipt.status ────────────────────────────────────────
   // ONLY '0x1' (success) or '0x0' (revert) are accepted.
   // null/undefined/other = receipt is incomplete or malformed.
@@ -1041,7 +1083,19 @@ export async function onRequestPostConfirm(ctx) {
   // Strip 0x prefix and work in lowercase hex
   const calldata = inputHex.toLowerCase().replace(/^0x/, '');
 
-  // Minimum calldata length: 4 (selector) + 32 + 32 + 32 = 100 bytes = 200 hex chars
+  // ── P1: Safe ABI decoding — all offsets and lengths bounded before use ────
+  //
+  // We use plain Number arithmetic throughout but apply explicit upper-bound
+  // guards BEFORE any multiplication or array index so that a crafted calldata
+  // with extreme values cannot cause precision loss or integer wrap.
+  //
+  // Guards used:
+  //   ABI_MAX_PARAM_OFFSET  (4096 bytes)  — param0Offset from the ABI head
+  //   ABI_MAX_PAYLOAD_LEN   (262144 bytes) — declared length of attestationPayload
+  //
+  // Both are well within Number.MAX_SAFE_INTEGER after *2 (hex), so no BigInt needed.
+
+  // Minimum calldata length: selector(4) + offset0(32) + offset1(32) + len0(32) = 100 bytes
   if (calldata.length < 200) {
     return jsonResp({
       error:       'calldata_too_short',
@@ -1063,16 +1117,24 @@ export async function onRequestPostConfirm(ctx) {
     }, 422);
   }
 
-  // ABI-decode the offset to attestationPayload (first dynamic param).
-  // Standard ABI: offset is at bytes 4..35 of calldata (hex chars 8..71).
-  // The value is big-endian uint256, representing a byte offset from byte 4.
-  const param0OffsetHex = calldata.slice(8, 8 + 64); // 32 bytes = 64 hex chars
-  const param0Offset    = parseInt(param0OffsetHex, 16); // offset from start of params (byte 4)
-  // param0 data starts at: 4 + param0Offset bytes into calldata
-  // Calldata hex offset: (4 + param0Offset) * 2 hex chars
-  // Standard ABI encoding sets param0Offset = 64 (= 0x40) — two 32-byte offset slots.
-  // We do NOT hardcode 64; we read it from the calldata to handle non-standard encoders.
-  const payloadLenOffset = (4 + param0Offset) * 2; // hex offset of the length uint256
+  // ABI-decode param0 offset (bytes 4..35 of calldata).
+  // Standard ABI: param0Offset = 64 (two 32-byte slots). We read it rather than hardcoding.
+  // Guard: reject anything above ABI_MAX_PARAM_OFFSET to prevent integer precision issues.
+  const param0OffsetHex = calldata.slice(8, 8 + 64);
+  const param0Offset    = parseInt(param0OffsetHex, 16);
+  if (!Number.isFinite(param0Offset) || param0Offset > ABI_MAX_PARAM_OFFSET) {
+    return jsonResp({
+      error:       'abi_offset_out_of_bounds',
+      param0Offset: param0Offset,
+      recoverable: true,
+      detail:      'ABI param0 offset (' + param0Offset + ') exceeds safe bound (' +
+                   ABI_MAX_PARAM_OFFSET + '). Rejecting to prevent precision loss.',
+    }, 502);
+  }
+
+  // payloadLenOffset: hex index of the uint256 length word for attestationPayload.
+  // (4 + param0Offset) bytes into calldata → ×2 for hex chars.
+  const payloadLenOffset = (4 + param0Offset) * 2;
   if (calldata.length < payloadLenOffset + 64) {
     return jsonResp({
       error:       'calldata_too_short',
@@ -1080,50 +1142,130 @@ export async function onRequestPostConfirm(ctx) {
       detail:      'Calldata is too short to read attestationPayload length.',
     }, 502);
   }
-  const payloadLenHex  = calldata.slice(payloadLenOffset, payloadLenOffset + 64);
-  const payloadLen     = parseInt(payloadLenHex, 16); // byte length of attestationPayload
-  const payloadStart   = payloadLenOffset + 64;        // hex offset of first byte of attestationPayload
 
-  // Minimum attestation payload size:
-  //   Single: magic(4) + maxBlockHeight(32) + specLen(4) + TransferSpec(340+) = 380 bytes
-  //   Set:    magic(4) + numAttestations(4) + [single attestation 380+] = 388 bytes
-  const MIN_PAYLOAD_BYTES = 380;
-  if (payloadLen < MIN_PAYLOAD_BYTES || calldata.length < payloadStart + payloadLen * 2) {
+  // Read and bound-check payloadLen before any use.
+  const payloadLenHex = calldata.slice(payloadLenOffset, payloadLenOffset + 64);
+  const payloadLen    = parseInt(payloadLenHex, 16);
+  if (!Number.isFinite(payloadLen) || payloadLen > ABI_MAX_PAYLOAD_LEN) {
     return jsonResp({
-      error:       'attestation_payload_too_short',
+      error:       'abi_payload_len_out_of_bounds',
       payloadLen:  payloadLen,
       recoverable: true,
-      detail:      'attestationPayload is shorter than the minimum expected ' +
-                   'layout for a valid Circle Gateway attestation.',
+      detail:      'Declared attestationPayload length (' + payloadLen + ') exceeds safe bound (' +
+                   ABI_MAX_PAYLOAD_LEN + '). Rejecting to prevent memory/precision issues.',
     }, 502);
   }
 
-  // Extract first 4 bytes of attestationPayload = magic bytes
-  const payloadMagic = calldata.slice(payloadStart, payloadStart + 8); // 4 bytes = 8 hex
+  // payloadStart: hex index of the first byte of attestationPayload data.
+  const payloadStart = payloadLenOffset + 64;
 
-  // Determine salt offset within attestationPayload based on magic
+  // Verify the full declared payload is present in calldata (no truncation).
+  if (calldata.length < payloadStart + payloadLen * 2) {
+    return jsonResp({
+      error:       'attestation_payload_truncated',
+      payloadLen:  payloadLen,
+      available:   (calldata.length - payloadStart) / 2,
+      recoverable: true,
+      detail:      'Calldata is truncated: declared attestationPayload length (' + payloadLen +
+                   ' bytes) exceeds available bytes (' + ((calldata.length - payloadStart) / 2) + ').',
+    }, 502);
+  }
+
+  // Extract the 4-byte magic at the start of attestationPayload.
+  const payloadMagic = calldata.slice(payloadStart, payloadStart + 8);
+
+  // ── P0.2: Magic-specific structure validation and salt extraction ─────────
   let saltOffsetInPayload;
+
   if (payloadMagic === ATTESTATION_MAGIC) {
-    // Single Attestation: salt at (ATTESTATION_SPEC_OFFSET + TRANSFER_SPEC_SALT_IN_SPEC)
-    saltOffsetInPayload = ATTESTATION_SPEC_OFFSET + TRANSFER_SPEC_SALT_IN_SPEC; // = 344
+    // Single Attestation layout:
+    //   [0..3]    magic (0xff6fb334)
+    //   [4..35]   maxBlockHeight (uint256, 32 bytes)
+    //   [36..39]  transferSpecLength (uint32, 4 bytes)
+    //   [40..]    TransferSpec
+    // Salt is at: ATTESTATION_SPEC_OFFSET(40) + TRANSFER_SPEC_SALT_IN_SPEC(304) = 344
+    if (payloadLen < MIN_PAYLOAD_BYTES_SINGLE) {
+      return jsonResp({
+        error:       'attestation_payload_too_short',
+        payloadLen:  payloadLen,
+        required:    MIN_PAYLOAD_BYTES_SINGLE,
+        recoverable: true,
+        detail:      'Single Attestation payload is shorter than the minimum ' +
+                     MIN_PAYLOAD_BYTES_SINGLE + ' bytes.',
+      }, 502);
+    }
+    saltOffsetInPayload = ATTESTATION_SPEC_OFFSET + TRANSFER_SPEC_SALT_IN_SPEC; // 344
+
   } else if (payloadMagic === ATTESTATION_SET_MAGIC) {
-    // AttestationSet: first attestation at ATTESTATION_SET_FIRST_OFFSET (8),
-    // then salt at (ATTESTATION_SPEC_OFFSET + TRANSFER_SPEC_SALT_IN_SPEC) within that attestation
-    saltOffsetInPayload = ATTESTATION_SET_FIRST_OFFSET + ATTESTATION_SPEC_OFFSET + TRANSFER_SPEC_SALT_IN_SPEC; // = 352
+    // AttestationSet layout:
+    //   [0..3]  magic (0x1e12db71)
+    //   [4..7]  numAttestations (uint32)
+    //   [8..]   attestations[]
+    // Salt is in first attestation at: SET_FIRST_OFFSET(8) + SPEC_OFFSET(40) + SALT_IN_SPEC(304) = 352
+    if (payloadLen < MIN_PAYLOAD_BYTES_SET) {
+      return jsonResp({
+        error:       'attestation_payload_too_short',
+        payloadLen:  payloadLen,
+        required:    MIN_PAYLOAD_BYTES_SET,
+        recoverable: true,
+        detail:      'AttestationSet payload is shorter than the minimum ' +
+                     MIN_PAYLOAD_BYTES_SET + ' bytes.',
+      }, 502);
+    }
+    // Read numAttestations from payload bytes 4..7.
+    const numAttestationsHex = calldata.slice(payloadStart + 8, payloadStart + 16); // 4 bytes = 8 hex
+    const numAttestations    = parseInt(numAttestationsHex, 16);
+    if (!Number.isFinite(numAttestations) || numAttestations < 1) {
+      return jsonResp({
+        error:            'attestation_set_empty',
+        numAttestations:  numAttestations,
+        recoverable:      true,
+        detail:           'AttestationSet has numAttestations=' + numAttestations +
+                          '. Cannot extract first attestation salt.',
+      }, 502);
+    }
+    // Verify the first attestation's magic is present at payloadStart + 8 bytes = [8..11].
+    const firstAttesMagicHex = calldata.slice(payloadStart + 16, payloadStart + 24); // 4 bytes = 8 hex
+    if (firstAttesMagicHex !== ATTESTATION_MAGIC) {
+      return jsonResp({
+        error:       'attestation_set_first_magic_unknown',
+        magic:       '0x' + firstAttesMagicHex,
+        recoverable: true,
+        detail:      'First Attestation inside AttestationSet does not start with ' +
+                     '0xff6fb334. Cannot safely decode salt.',
+      }, 502);
+    }
+    saltOffsetInPayload = ATTESTATION_SET_FIRST_OFFSET + ATTESTATION_SPEC_OFFSET + TRANSFER_SPEC_SALT_IN_SPEC; // 352
+
   } else {
     return jsonResp({
-      error:    'attestation_magic_unknown',
-      magic:    '0x' + payloadMagic,
+      error:       'attestation_magic_unknown',
+      magic:       '0x' + payloadMagic,
       recoverable: true,
-      detail:   'attestationPayload does not start with a known Circle Gateway magic value. ' +
-                'Expected 0xff6fb334 (Attestation) or 0x1e12db71 (AttestationSet). ' +
-                'Cannot safely decode salt offset.',
+      detail:      'attestationPayload does not start with a known Circle Gateway magic value. ' +
+                   'Expected 0xff6fb334 (Attestation) or 0x1e12db71 (AttestationSet). ' +
+                   'Cannot safely decode salt offset.',
     }, 502);
   }
 
-  // Extract salt from the expected fixed offset (32 bytes = 64 hex chars)
-  const saltHexOffset = payloadStart + saltOffsetInPayload * 2; // in calldata hex chars
+  // Verify salt is within the declared payload bounds (not in padding or signature).
+  const saltEndInPayload = saltOffsetInPayload + 32; // exclusive byte end of salt within payload
+  if (saltEndInPayload > payloadLen) {
+    return jsonResp({
+      error:       'salt_outside_payload_bounds',
+      saltEnd:     saltEndInPayload,
+      payloadLen:  payloadLen,
+      recoverable: true,
+      detail:      'Salt field (' + saltOffsetInPayload + '–' + saltEndInPayload + ') extends ' +
+                   'beyond the declared attestationPayload length (' + payloadLen + '). ' +
+                   'Rejecting: salt would be in padding or adjacent data.',
+    }, 502);
+  }
+
+  // Extract salt from the expected fixed offset (32 bytes = 64 hex chars).
+  const saltHexOffset = payloadStart + saltOffsetInPayload * 2;
   if (calldata.length < saltHexOffset + 64) {
+    // Should not be reachable given the checks above, but fail safe.
     return jsonResp({
       error:       'attestation_payload_too_short',
       recoverable: true,
@@ -1132,7 +1274,7 @@ export async function onRequestPostConfirm(ctx) {
     }, 502);
   }
 
-  const extractedSalt = calldata.slice(saltHexOffset, saltHexOffset + 64); // 32 bytes hex, no 0x
+  const extractedSalt = calldata.slice(saltHexOffset, saltHexOffset + 64);
   const expectedSalt  = salt.toLowerCase().replace(/^0x/, '');
 
   if (extractedSalt !== expectedSalt) {

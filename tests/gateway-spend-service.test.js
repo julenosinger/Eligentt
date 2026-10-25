@@ -2137,8 +2137,8 @@ describe('GSS17 — Fase 2.1 P0: /confirm endpoint and client transition restric
 
   it('GSS17.6 — /confirm endpoint verifies receipt.status (0x1 or 0x0)', () => {
     // Fase 2.2: statusHex variable, checked as '0x1' and '0x0'
-    const i = proxySrc.indexOf('onRequestPostConfirm');
-    const block = proxySrc.slice(i, i + 10000);
+    const i = proxySrc.indexOf('export async function onRequestPostConfirm');
+    const block = proxySrc.slice(i, i + 18000);
     expect(block).toContain("statusHex === '0x1'");
     expect(block).toContain("receipt_status_inconclusive");
   });
@@ -3109,5 +3109,428 @@ describe('GSS19 — Fase 2.3: secure on-chain calldata verification', () => {
     expect(block).toContain('tx_not_found');
     // transaction.from NOT validated (comment must explain why)
     expect(block).toContain('transaction.from');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GSS20 — Fase 2.4: receipt/tx cross-checks + safe ABI decode
+// ─────────────────────────────────────────────────────────────────────────────
+describe('GSS20 — Fase 2.4 cross-checks and ABI safety', () => {
+  const _fs   = require('fs');
+  const _path = require('path');
+  const proxySrc = _fs.readFileSync(
+    _path.join(__dirname, '../functions/api/gateway/transfer.js'), 'utf8');
+
+  // Shared helpers
+  const SALT_CC   = '0x' + 'cc'.repeat(32);
+  const TX_HASH   = '0x' + 'aa'.repeat(32);
+  const DEPOSITOR = '0x' + '11'.repeat(20);
+  const DST_CHAIN = 421614;
+  const MINTER    = '0x0022222ABE238Cc2C7Bb1f21003F0a260052475B';
+
+  // Build a minimal valid gatewayMint calldata for a given salt (single Attestation)
+  // Layout: selector(4) + offset0(32) + offset1(32) + payloadLen(32) + attestation(380) + sigLen(32) + sig(65 padded 96)
+  function buildGatewayMintCalldata(saltHex) {
+    const saltBytes = saltHex.replace(/^0x/, '').toLowerCase(); // 64 hex chars
+    // TransferSpec: 340 bytes.  Offsets: magic(4)+ver(4)+srcDomain(4)+dstDomain(4)+srcCtx(32)+dstCtx(32)+srcTok(32)+dstTok(32)+srcDep(32)+dstRec(32)+srcSig(32)+dstCal(32)+val(32)+salt(32)+hookLen(4) = 340
+    const specMagic = 'ca85def7';
+    const specHead  = '00000001' + '00000000' + '00000000'; // version + srcDomain + dstDomain
+    const addr32    = '00'.repeat(32); // padded address (32 bytes) ×8 = 256 bytes
+    const value32   = '00'.repeat(32); // value (32 bytes)
+    const hookLen   = '00000000'; // hookDataLength = 0 (4 bytes)
+    const transferSpec = specMagic + specHead + (addr32.repeat(8)) + value32 + saltBytes + hookLen;
+    // transferSpec should be 340 bytes = 680 hex chars; verify
+    // specMagic(8)+specHead(24)+addr32*8(512)+value32(64)+salt(64)+hookLen(8) = 8+24+512+64+64+8 = 680 ✓
+
+    // Single Attestation: magic(4)+maxBlockHeight(32)+specLen(4)+TransferSpec(340) = 380 bytes
+    const attMagic  = 'ff6fb334';
+    const blockH    = '00'.repeat(32); // maxBlockHeight (32 bytes)
+    const specLen   = '00000154'; // 340 = 0x154 (4 bytes)
+    const attestation = attMagic + blockH + specLen + transferSpec;
+    // 8 + 64 + 8 + 680 = 760 hex chars = 380 bytes ✓
+
+    const payloadLen = 380;
+    const payloadLenHex = payloadLen.toString(16).padStart(64, '0'); // 32 bytes
+    const sigLen    = (65).toString(16).padStart(64, '0'); // 32 bytes
+    const sigData   = '00'.repeat(65).padEnd(96 * 2, '0'); // 65 bytes padded to 96
+
+    const selector = '9fb01cc5';
+    // param0 offset = 64 = 0x40 (standard ABI, from start of params = after selector)
+    const off0 = (64).toString(16).padStart(64, '0');
+    // param1 offset = 64 + 32 + 380 = 476 = 0x1dc
+    const off1 = (476).toString(16).padStart(64, '0');
+
+    return '0x' + selector + off0 + off1 + payloadLenHex + attestation + sigLen + sigData;
+  }
+
+  // Build an AttestationSet calldata wrapping one attestation
+  function buildGatewayMintCalldataSet(saltHex) {
+    const saltBytes = saltHex.replace(/^0x/, '').toLowerCase();
+    const specMagic = 'ca85def7';
+    const specHead  = '00000001' + '00000000' + '00000000';
+    const addr32    = '00'.repeat(32);
+    const value32   = '00'.repeat(32);
+    const hookLen   = '00000000';
+    const transferSpec = specMagic + specHead + (addr32.repeat(8)) + value32 + saltBytes + hookLen;
+
+    const attMagic  = 'ff6fb334';
+    const blockH    = '00'.repeat(32);
+    const specLen   = '00000154'; // 340
+    const singleAtt = attMagic + blockH + specLen + transferSpec; // 380 bytes = 760 hex
+
+    // AttestationSet: magic(4)+numAttestations(4)+attestation(380) = 388 bytes
+    const setMagic = '1e12db71';
+    const numAtts  = '00000001'; // 1 attestation (4 bytes)
+    const attestationSet = setMagic + numAtts + singleAtt; // 388 bytes = 776 hex
+
+    const payloadLen    = 388;
+    const payloadLenHex = payloadLen.toString(16).padStart(64, '0');
+    const sigLen        = (65).toString(16).padStart(64, '0');
+    const sigData       = '00'.repeat(65).padEnd(96 * 2, '0');
+
+    const selector = '9fb01cc5';
+    const off0 = (64).toString(16).padStart(64, '0');
+    const off1 = (64 + 32 + 388).toString(16).padStart(64, '0'); // = 484 = 0x1e4
+    return '0x' + selector + off0 + off1 + payloadLenHex + attestationSet + sigLen + sigData;
+  }
+
+  // Build a mock environment + KV
+  const { onRequestPostConfirm } = require('../functions/api/gateway/transfer.js');
+
+  // ── Shared env builder (no Origin header → isAllowedOrigin returns true) ──
+  function makeConfirmEnv(chainId, saltKey, depositorAddr) {
+    const rpcMap = {}; rpcMap[String(chainId)] = 'https://mock-rpc-24';
+    const kvStore = new Map();
+    kvStore.set('gw:op:' + saltKey, { status: 'accepted', depositor: depositorAddr, createdAt: Date.now() });
+    return {
+      GATEWAY_ENV:      'test',
+      GATEWAY_RPC_URLS: JSON.stringify(rpcMap),
+      GATEWAY_OPS_KV: {
+        get:    async (k, opts) => { const v = kvStore.get(k); return (opts && opts.type === 'json') ? (v || null) : null; },
+        put:    async (k, v)    => { kvStore.set(k, JSON.parse(typeof v === 'string' ? v : JSON.stringify(v))); },
+        delete: async (k)       => { kvStore.delete(k); },
+      },
+    };
+  }
+
+  // ── Build a request (no Origin → isAllowedOrigin returns true) ───────────
+  function makeConfirmReq(body) {
+    return new Request('https://worker.dev/api/gateway/transfer/confirm', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(body),
+    });
+  }
+
+  // ── Standard RPC mock for a successful confirmed tx ───────────────────────
+  function makeFetchMock(chainId, txHashVal, inputVal, opts = {}) {
+    return async (url, reqOpts) => {
+      const rpc = JSON.parse(reqOpts.body);
+      if (rpc.method === 'eth_chainId')
+        return { ok: true, json: async () => ({ jsonrpc: '2.0', id: 1, result: '0x' + chainId.toString(16) }) };
+      if (rpc.method === 'eth_getTransactionByHash')
+        return { ok: true, json: async () => ({ jsonrpc: '2.0', id: 1, result: {
+          hash:        opts.txHashReturn || txHashVal,
+          to:          opts.toAddr || MINTER,
+          input:       inputVal,
+          blockNumber: opts.txBlock !== undefined ? opts.txBlock : '0x1',
+        }}) };
+      if (rpc.method === 'eth_getTransactionReceipt')
+        return { ok: true, json: async () => ({ jsonrpc: '2.0', id: 1, result:
+          opts.receiptNull ? null : {
+            transactionHash: opts.receiptTxHash !== undefined ? opts.receiptTxHash : txHashVal,
+            blockNumber:     opts.receiptBlock  !== undefined ? opts.receiptBlock  : '0x1',
+            status:          opts.status !== undefined ? opts.status : '0x1',
+          }
+        }) };
+      return { ok: false, status: 500, json: async () => ({}) };
+    };
+  }
+
+  // ── GSS20.1: receipt.transactionHash mismatch → 502 recoverable ──────────
+  it('GSS20.1 — receipt.transactionHash mismatch → 502 receipt_tx_hash_mismatch', async () => {
+    const calldata = buildGatewayMintCalldata(SALT_CC);
+    const differentHash = '0x' + 'bb'.repeat(32);
+    const env = makeConfirmEnv(DST_CHAIN, SALT_CC, DEPOSITOR);
+    const origFetch = global.fetch;
+    global.fetch = makeFetchMock(DST_CHAIN, TX_HASH, calldata, { receiptTxHash: differentHash });
+    try {
+      const req = makeConfirmReq({ salt: SALT_CC, depositor: DEPOSITOR, txHash: TX_HASH, dstChainId: DST_CHAIN });
+      const res  = await onRequestPostConfirm({ request: req, env });
+      const data = await res.json();
+      expect(res.status).toBe(502);
+      expect(data.error).toBe('receipt_tx_hash_mismatch');
+      expect(data.recoverable).toBe(true);
+      expect(data.requested).toBe(TX_HASH);
+    } finally { global.fetch = origFetch; }
+  });
+
+  // ── GSS20.2: receipt.transactionHash matches (case-insensitive) → OK ──────
+  it('GSS20.2 — receipt.transactionHash matches (uppercase) → 200 confirmed', async () => {
+    const calldata = buildGatewayMintCalldata(SALT_CC);
+    const env = makeConfirmEnv(DST_CHAIN, SALT_CC, DEPOSITOR);
+    const origFetch = global.fetch;
+    // receiptTxHash in uppercase — should normalise and accept
+    global.fetch = makeFetchMock(DST_CHAIN, TX_HASH, calldata, { receiptTxHash: TX_HASH.toUpperCase() });
+    try {
+      const req = makeConfirmReq({ salt: SALT_CC, depositor: DEPOSITOR, txHash: TX_HASH, dstChainId: DST_CHAIN });
+      const res  = await onRequestPostConfirm({ request: req, env });
+      const data = await res.json();
+      expect(res.status).toBe(200);
+      expect(data.ok).toBe(true);
+    } finally { global.fetch = origFetch; }
+  });
+
+  // ── GSS20.3: receipt.transactionHash absent → OK (absence is allowed) ────
+  it('GSS20.3 — receipt.transactionHash absent → 200 (absence tolerated)', async () => {
+    const calldata = buildGatewayMintCalldata(SALT_CC);
+    const env = makeConfirmEnv(DST_CHAIN, SALT_CC, DEPOSITOR);
+    const origFetch = global.fetch;
+    // empty receiptTxHash → '' → falsy → treated as absent, no mismatch
+    global.fetch = makeFetchMock(DST_CHAIN, TX_HASH, calldata, { receiptTxHash: '' });
+    try {
+      const req = makeConfirmReq({ salt: SALT_CC, depositor: DEPOSITOR, txHash: TX_HASH, dstChainId: DST_CHAIN });
+      const res  = await onRequestPostConfirm({ request: req, env });
+      const data = await res.json();
+      expect(res.status).toBe(200);
+      expect(data.ok).toBe(true);
+    } finally { global.fetch = origFetch; }
+  });
+
+  // ── GSS20.4: tx.blockNumber / receipt.blockNumber mismatch → 502 ─────────
+  it('GSS20.4 — blockNumber mismatch (tx=1, receipt=2) → 502 block_number_mismatch', async () => {
+    const calldata = buildGatewayMintCalldata(SALT_CC);
+    const env = makeConfirmEnv(DST_CHAIN, SALT_CC, DEPOSITOR);
+    const origFetch = global.fetch;
+    global.fetch = makeFetchMock(DST_CHAIN, TX_HASH, calldata, { txBlock: '0x1', receiptBlock: '0x2' });
+    try {
+      const req = makeConfirmReq({ salt: SALT_CC, depositor: DEPOSITOR, txHash: TX_HASH, dstChainId: DST_CHAIN });
+      const res  = await onRequestPostConfirm({ request: req, env });
+      const data = await res.json();
+      expect(res.status).toBe(502);
+      expect(data.error).toBe('block_number_mismatch');
+      expect(data.recoverable).toBe(true);
+    } finally { global.fetch = origFetch; }
+  });
+
+  // ── GSS20.5: blockNumbers match → OK ─────────────────────────────────────
+  it('GSS20.5 — blockNumber match (both 0x5) → 200 confirmed', async () => {
+    const calldata = buildGatewayMintCalldata(SALT_CC);
+    const env = makeConfirmEnv(DST_CHAIN, SALT_CC, DEPOSITOR);
+    const origFetch = global.fetch;
+    global.fetch = makeFetchMock(DST_CHAIN, TX_HASH, calldata, { txBlock: '0x5', receiptBlock: '0x5' });
+    try {
+      const req = makeConfirmReq({ salt: SALT_CC, depositor: DEPOSITOR, txHash: TX_HASH, dstChainId: DST_CHAIN });
+      const res  = await onRequestPostConfirm({ request: req, env });
+      const data = await res.json();
+      expect(res.status).toBe(200);
+      expect(data.ok).toBe(true);
+    } finally { global.fetch = origFetch; }
+  });
+
+  // ── GSS20.6: tx.blockNumber null, receipt.blockNumber present → OK ───────
+  it('GSS20.6 — tx.blockNumber null + receipt.blockNumber present → 200 (no mismatch)', async () => {
+    const calldata = buildGatewayMintCalldata(SALT_CC);
+    const env = makeConfirmEnv(DST_CHAIN, SALT_CC, DEPOSITOR);
+    const origFetch = global.fetch;
+    global.fetch = makeFetchMock(DST_CHAIN, TX_HASH, calldata, { txBlock: null, receiptBlock: '0x3' });
+    try {
+      const req = makeConfirmReq({ salt: SALT_CC, depositor: DEPOSITOR, txHash: TX_HASH, dstChainId: DST_CHAIN });
+      const res  = await onRequestPostConfirm({ request: req, env });
+      const data = await res.json();
+      expect(res.status).toBe(200);
+      expect(data.ok).toBe(true);
+    } finally { global.fetch = origFetch; }
+  });
+
+  // ── GSS20.7: ABI param0Offset over bound → 502 recoverable ───────────────
+  it('GSS20.7 — oversized ABI param0Offset → 502 abi_offset_out_of_bounds', async () => {
+    const badOffset   = 'ffffffff'.padStart(64, '0'); // way over ABI_MAX_PARAM_OFFSET
+    const off1        = (64).toString(16).padStart(64, '0');
+    const payloadLen  = (380).toString(16).padStart(64, '0');
+    const padding     = '00'.repeat(380 + 32 + 65);
+    const badCalldata = '0x9fb01cc5' + badOffset + off1 + payloadLen + padding;
+    const env = makeConfirmEnv(DST_CHAIN, SALT_CC, DEPOSITOR);
+    const origFetch = global.fetch;
+    global.fetch = makeFetchMock(DST_CHAIN, TX_HASH, badCalldata);
+    try {
+      const req = makeConfirmReq({ salt: SALT_CC, depositor: DEPOSITOR, txHash: TX_HASH, dstChainId: DST_CHAIN });
+      const res  = await onRequestPostConfirm({ request: req, env });
+      const data = await res.json();
+      expect(res.status).toBe(502);
+      expect(data.error).toBe('abi_offset_out_of_bounds');
+      expect(data.recoverable).toBe(true);
+    } finally { global.fetch = origFetch; }
+  });
+
+  // ── GSS20.8: declared payloadLen over bound → 502 recoverable ────────────
+  it('GSS20.8 — oversized payloadLen → 502 abi_payload_len_out_of_bounds', async () => {
+    const off0       = (64).toString(16).padStart(64, '0');
+    const off1       = (64 + 32 + 380).toString(16).padStart(64, '0');
+    const hugeLenHex = 'ffffffff'.padStart(64, '0'); // 4 GB declared length
+    const padding    = '00'.repeat(380 + 32 + 65);
+    const badCalldata = '0x9fb01cc5' + off0 + off1 + hugeLenHex + padding;
+    const env = makeConfirmEnv(DST_CHAIN, SALT_CC, DEPOSITOR);
+    const origFetch = global.fetch;
+    global.fetch = makeFetchMock(DST_CHAIN, TX_HASH, badCalldata);
+    try {
+      const req = makeConfirmReq({ salt: SALT_CC, depositor: DEPOSITOR, txHash: TX_HASH, dstChainId: DST_CHAIN });
+      const res  = await onRequestPostConfirm({ request: req, env });
+      const data = await res.json();
+      expect(res.status).toBe(502);
+      expect(data.error).toBe('abi_payload_len_out_of_bounds');
+      expect(data.recoverable).toBe(true);
+    } finally { global.fetch = origFetch; }
+  });
+
+  // ── GSS20.9: payload truncated (declared > available) → 502 recoverable ──
+  it('GSS20.9 — truncated attestationPayload → 502 attestation_payload_truncated', async () => {
+    const off0       = (64).toString(16).padStart(64, '0');
+    const off1       = (64 + 32 + 380).toString(16).padStart(64, '0');
+    const payloadLen = (500).toString(16).padStart(64, '0'); // declared 500, only 100 present
+    const shortData  = '00'.repeat(100);
+    const badCalldata = '0x9fb01cc5' + off0 + off1 + payloadLen + shortData;
+    const env = makeConfirmEnv(DST_CHAIN, SALT_CC, DEPOSITOR);
+    const origFetch = global.fetch;
+    global.fetch = makeFetchMock(DST_CHAIN, TX_HASH, badCalldata);
+    try {
+      const req = makeConfirmReq({ salt: SALT_CC, depositor: DEPOSITOR, txHash: TX_HASH, dstChainId: DST_CHAIN });
+      const res  = await onRequestPostConfirm({ request: req, env });
+      const data = await res.json();
+      expect(res.status).toBe(502);
+      expect(['attestation_payload_truncated', 'attestation_payload_too_short']).toContain(data.error);
+      expect(data.recoverable).toBe(true);
+    } finally { global.fetch = origFetch; }
+  });
+
+  // ── GSS20.10: salt outside declared payload bounds → 502 recoverable ─────
+  it('GSS20.10 — salt beyond declared payloadLen → 502 salt_outside_payload_bounds', async () => {
+    // payloadLen = 350: att magic is present, salt at offset 344 → 344+32=376 > 350 → out of bounds
+    const off0       = (64).toString(16).padStart(64, '0');
+    const payLen     = 350;
+    const off1       = (64 + 32 + payLen).toString(16).padStart(64, '0');
+    const payLenHex  = payLen.toString(16).padStart(64, '0');
+    // Build attestation bytes up to exactly 350 bytes
+    const attMagic   = 'ff6fb334';
+    const blockH     = '00'.repeat(32);
+    const specLen    = '00000154';
+    const specFill   = '00'.repeat(350 - 4 - 32 - 4); // fill up to 350 bytes total
+    const attTrunc   = attMagic + blockH + specLen + specFill; // exactly 350 bytes
+    const sigLen     = (65).toString(16).padStart(64, '0');
+    const sigData    = '00'.repeat(96);
+    const badCalldata = '0x9fb01cc5' + off0 + off1 + payLenHex + attTrunc + sigLen + sigData;
+    const env = makeConfirmEnv(DST_CHAIN, SALT_CC, DEPOSITOR);
+    const origFetch = global.fetch;
+    global.fetch = makeFetchMock(DST_CHAIN, TX_HASH, badCalldata);
+    try {
+      const req = makeConfirmReq({ salt: SALT_CC, depositor: DEPOSITOR, txHash: TX_HASH, dstChainId: DST_CHAIN });
+      const res  = await onRequestPostConfirm({ request: req, env });
+      const data = await res.json();
+      expect(res.status).toBe(502);
+      expect(['salt_outside_payload_bounds', 'attestation_payload_too_short']).toContain(data.error);
+      expect(data.recoverable).toBe(true);
+    } finally { global.fetch = origFetch; }
+  });
+
+  // ── GSS20.11: AttestationSet numAttestations = 0 → 502 recoverable ───────
+  it('GSS20.11 — AttestationSet numAttestations=0 → 502 attestation_set_empty', async () => {
+    const setMagic  = '1e12db71';
+    const numAtts   = '00000000'; // 0 attestations
+    const padding   = '00'.repeat(384);
+    const attSet    = setMagic + numAtts + padding; // 392 bytes
+    const payLen    = 392;
+    const payLenHex = payLen.toString(16).padStart(64, '0');
+    const off0      = (64).toString(16).padStart(64, '0');
+    const off1      = (64 + 32 + payLen).toString(16).padStart(64, '0');
+    const sigLen    = (65).toString(16).padStart(64, '0');
+    const sigData   = '00'.repeat(96);
+    const badCalldata = '0x9fb01cc5' + off0 + off1 + payLenHex + attSet + sigLen + sigData;
+    const env = makeConfirmEnv(DST_CHAIN, SALT_CC, DEPOSITOR);
+    const origFetch = global.fetch;
+    global.fetch = makeFetchMock(DST_CHAIN, TX_HASH, badCalldata);
+    try {
+      const req = makeConfirmReq({ salt: SALT_CC, depositor: DEPOSITOR, txHash: TX_HASH, dstChainId: DST_CHAIN });
+      const res  = await onRequestPostConfirm({ request: req, env });
+      const data = await res.json();
+      expect(res.status).toBe(502);
+      expect(data.error).toBe('attestation_set_empty');
+      expect(data.recoverable).toBe(true);
+    } finally { global.fetch = origFetch; }
+  });
+
+  // ── GSS20.12: AttestationSet with valid first att, correct salt → 200 ────
+  it('GSS20.12 — AttestationSet with 1 attestation, correct salt → 200 confirmed', async () => {
+    const calldata = buildGatewayMintCalldataSet(SALT_CC);
+    const env = makeConfirmEnv(DST_CHAIN, SALT_CC, DEPOSITOR);
+    const origFetch = global.fetch;
+    global.fetch = makeFetchMock(DST_CHAIN, TX_HASH, calldata);
+    try {
+      const req = makeConfirmReq({ salt: SALT_CC, depositor: DEPOSITOR, txHash: TX_HASH, dstChainId: DST_CHAIN });
+      const res  = await onRequestPostConfirm({ request: req, env });
+      const data = await res.json();
+      expect(res.status).toBe(200);
+      expect(data.ok).toBe(true);
+      expect(data.status).toBe('confirmed');
+    } finally { global.fetch = origFetch; }
+  });
+
+  // ── GSS20.13: AttestationSet wrong salt → 422 tx_salt_mismatch ───────────
+  it('GSS20.13 — AttestationSet with wrong salt → 422 tx_salt_mismatch', async () => {
+    const wrongSalt = '0x' + 'dd'.repeat(32);
+    const calldata = buildGatewayMintCalldataSet(wrongSalt);
+    const env = makeConfirmEnv(DST_CHAIN, SALT_CC, DEPOSITOR);
+    const origFetch = global.fetch;
+    global.fetch = makeFetchMock(DST_CHAIN, TX_HASH, calldata);
+    try {
+      const req = makeConfirmReq({ salt: SALT_CC, depositor: DEPOSITOR, txHash: TX_HASH, dstChainId: DST_CHAIN });
+      const res  = await onRequestPostConfirm({ request: req, env });
+      const data = await res.json();
+      expect(res.status).toBe(422);
+      expect(data.error).toBe('tx_salt_mismatch');
+    } finally { global.fetch = origFetch; }
+  });
+
+  // ── GSS20.14: source contains Fase 2.4 cross-checks ──────────────────────
+  it('GSS20.14 — source code contains all Fase 2.4 structural requirements', () => {
+    const start = proxySrc.indexOf('export async function onRequestPostConfirm');
+    const block = proxySrc.slice(start, start + 28000);
+    // P0.1: receipt.transactionHash cross-check
+    expect(block).toContain('receipt_tx_hash_mismatch');
+    expect(block).toContain('receiptTxHash');
+    // P0.1: blockNumber cross-check
+    expect(block).toContain('block_number_mismatch');
+    expect(block).toContain('receiptBlockNum');
+    expect(block).toContain('txBlockNum');
+    // P1: ABI offset guard
+    expect(block).toContain('abi_offset_out_of_bounds');
+    expect(block).toContain('ABI_MAX_PARAM_OFFSET');
+    // P1: payload length guard
+    expect(block).toContain('abi_payload_len_out_of_bounds');
+    expect(block).toContain('ABI_MAX_PAYLOAD_LEN');
+    // P1: truncated payload check
+    expect(block).toContain('attestation_payload_truncated');
+    // P0.2: salt outside bounds check
+    expect(block).toContain('salt_outside_payload_bounds');
+    // P0.2: numAttestations validation for AttestationSet
+    expect(block).toContain('attestation_set_empty');
+    expect(block).toContain('numAttestations');
+    // P0.2: first attestation magic check in AttestationSet
+    expect(block).toContain('attestation_set_first_magic_unknown');
+    // P0.2: separate MIN constants for single vs set
+    expect(proxySrc).toContain('MIN_PAYLOAD_BYTES_SINGLE');
+    expect(proxySrc).toContain('MIN_PAYLOAD_BYTES_SET');
+    // P1: ABI bounds defined as module-level constants
+    expect(proxySrc).toContain('ABI_MAX_PARAM_OFFSET');
+    expect(proxySrc).toContain('ABI_MAX_PAYLOAD_LEN');
+  });
+
+  // ── GSS20.15: GATEWAY_SPEND_BLOCKED still active in index.html ───────────
+  it('GSS20.15 — GATEWAY_SPEND_BLOCKED = true is still set in index.html', () => {
+    const indexSrc = _fs.readFileSync(_path.join(__dirname, '../index.html'), 'utf8');
+    expect(indexSrc).toContain('GATEWAY_SPEND_BLOCKED');
+    // Must be set to true (not false)
+    const match = indexSrc.match(/GATEWAY_SPEND_BLOCKED\s*=\s*(true|false)/);
+    expect(match).not.toBeNull();
+    expect(match[1]).toBe('true');
   });
 });
