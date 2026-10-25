@@ -1110,18 +1110,17 @@ describe('GSS12 — P0/P1.4: KV persistence, cross-session recovery, isolation',
   });
 
   // ── GSS12.11: PATCH — only client-allowed transitions (ambiguous→failed) ──
-  it('GSS12.11 — transfer.js PATCH only accepts client-allowed transitions', () => {
+  it('GSS12.11 — transfer.js PATCH: no client transitions allowed (Fase 2.2)', () => {
     const src = require('fs').readFileSync(
       require('path').join(__dirname, '../functions/api/gateway/transfer.js'), 'utf8'
     );
     expect(src).toContain('onRequestPatch');
-    // Client-allowed transitions must be defined
     expect(src).toContain('CLIENT_ALLOWED_TRANSITIONS');
     expect(src).toContain('client_transition_not_allowed');
-    // 'confirmed' must NOT be settable by client
-    expect(src).toContain("internal-only transitions");
-    // CLIENT_ALLOWED_TRANSITIONS defines what client may set
-    expect(src).toContain('CLIENT_ALLOWED_TRANSITIONS');
+    // Fase 2.2: no client transitions — the comment makes this explicit
+    expect(src).toContain('No client-writable transitions');
+    // SERVER_CONFIRM_TRANSITIONS replaces client transitions
+    expect(src).toContain('SERVER_CONFIRM_TRANSITIONS');
   });
 
   // ── GSS12.12: GatewaySpendService.queryGatewaySalt is exported ───────────
@@ -1532,20 +1531,21 @@ describe('GSS14 — P0/P1.6: state machine, batch rollback, DO prod, rejected vs
     }
   });
 
-  // ── GSS14.12: ambiguous→failed is the ONLY CLIENT_ALLOWED_TRANSITIONS entry (Fase 2.1)
-  it('GSS14.12 — CLIENT_ALLOWED_TRANSITIONS: only ambiguous→failed allowed (Fase 2.1)', () => {
-    // Fase 2.1: accepted→* removed from client. Only ambiguous→failed remains.
-    // accepted→confirmed/failed now requires POST /api/gateway/transfer/confirm.
+  // ── GSS14.12: CLIENT_ALLOWED_TRANSITIONS is EMPTY (Fase 2.2) ───────────────
+  it('GSS14.12 — CLIENT_ALLOWED_TRANSITIONS: empty — no client transitions (Fase 2.2)', () => {
+    // Fase 2.2: ambiguous→failed removed from client. ALL transitions are server-only.
+    // All reconciliation goes through POST /api/gateway/transfer/confirm.
     const startIdx    = proxySrc.indexOf('const CLIENT_ALLOWED_TRANSITIONS');
     const endIdx      = proxySrc.indexOf('};', startIdx) + 2;
     const clientBlock = proxySrc.slice(startIdx, endIdx);
-    expect(clientBlock).toContain("ambiguous:");
-    // Fase 2.1: accepted must NOT be in CLIENT_ALLOWED_TRANSITIONS
+    // Fase 2.2: neither 'accepted' nor 'ambiguous' are client-modifiable
     expect(clientBlock).not.toContain("accepted:");
-    // 'submitting' and 'rejected' must NOT be client-modifiable
+    expect(clientBlock).not.toContain("ambiguous:");
     expect(clientBlock).not.toContain("submitting:");
     expect(clientBlock).not.toContain("rejected:");
-    // SERVER_CONFIRM_TRANSITIONS replaces TRANSITIONS_REQUIRING_TXHASH
+    // The comment says 'No client-writable transitions'
+    expect(clientBlock).toContain('No client-writable transitions');
+    // SERVER_CONFIRM_TRANSITIONS must exist
     expect(proxySrc).toContain('SERVER_CONFIRM_TRANSITIONS');
   });
 
@@ -2057,7 +2057,8 @@ describe('GSS16 — P0/P1.9: reconciliação, PATCH transitions, queryGatewaySal
   });
 
   // ── GSS16.15: ambiguous→failed still allowed without txHash ─────────────────
-  it('GSS16.15 — ambiguous→failed is still allowed without txHash', async () => {
+  it('GSS16.15 — ambiguous→failed via PATCH is BLOCKED (Fase 2.2: no client transitions)', async () => {
+    // Fase 2.2: ALL PATCH transitions blocked. ambiguous→failed must go through /confirm.
     const { onRequestPatch } = require('../functions/api/gateway/transfer.js');
     const kvStore = new Map();
     kvStore.set('gw:op:0x' + 'bb'.repeat(32), {
@@ -2077,8 +2078,12 @@ describe('GSS16 — P0/P1.9: reconciliação, PATCH transitions, queryGatewaySal
     );
     const res = await onRequestPatch({ request: req, env: mockEnv });
     const body = await res.json();
-    expect(body.ok).toBe(true);
-    expect(body.status).toBe('failed');
+    // Must be rejected — client cannot set terminal state
+    expect(res.status).toBe(400);
+    expect(body.error).toBe('client_transition_not_allowed');
+    // Record must remain 'ambiguous' (not modified)
+    const rec = kvStore.get('gw:op:0x' + 'bb'.repeat(32));
+    expect(rec.status).toBe('ambiguous');
   });
 });
 
@@ -2122,15 +2127,17 @@ describe('GSS17 — Fase 2.1 P0: /confirm endpoint and client transition restric
 
   it('GSS17.5 — /confirm endpoint checks receipt.to matches GatewayMinter', () => {
     const i = proxySrc.indexOf('onRequestPostConfirm');
-    const block = proxySrc.slice(i, i + 5500);
+    const block = proxySrc.slice(i, i + 10000);
     expect(block).toContain('receiptTo');
     expect(block).toContain('expectedMinter');
   });
 
-  it('GSS17.6 — /confirm endpoint verifies receipt.status === 0x1', () => {
+  it('GSS17.6 — /confirm endpoint verifies receipt.status (0x1 or 0x0)', () => {
+    // Fase 2.2: statusHex variable, checked as '0x1' and '0x0'
     const i = proxySrc.indexOf('onRequestPostConfirm');
-    const block = proxySrc.slice(i, i + 5500);
-    expect(block).toContain("receipt.status === '0x1'");
+    const block = proxySrc.slice(i, i + 10000);
+    expect(block).toContain("statusHex === '0x1'");
+    expect(block).toContain("receipt_status_inconclusive");
   });
 
   it('GSS17.7 — /confirm returns 503 when GATEWAY_RPC_URLS not configured', async () => {
@@ -2240,5 +2247,365 @@ describe('GSS17 — Fase 2.1 P0: /confirm endpoint and client transition restric
     expect(block).not.toMatch(/^\s*1\s*:/m);
     expect(block).not.toMatch(/^\s*8453\s*:/m);
     expect(block).not.toMatch(/^\s*42161\s*:/m);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GSS18 — Fase 2.2: secure reconciliation, calldata salt, chainId verify, no-client-PATCH
+// ─────────────────────────────────────────────────────────────────────────────
+describe('GSS18 — Fase 2.2 P0: reconciliation security', () => {
+  const fs   = require('fs');
+  const path = require('path');
+  const { onRequestPatch, onRequestPostConfirm } = require('../functions/api/gateway/transfer.js');
+
+  const proxySrc = fs.readFileSync(path.join(__dirname, '../functions/api/gateway/transfer.js'), 'utf8');
+  const SALT_BB  = '0x' + 'bb'.repeat(32);
+  const ADDR_X   = '0x' + 'aa'.repeat(20);
+
+  // ── Shared mock builder ───────────────────────────────────────────────────
+  function makeKvEnv(records, extra = {}) {
+    const kvStore = new Map();
+    for (const [k, v] of Object.entries(records)) {
+      kvStore.set('gw:op:' + k, v);
+    }
+    return {
+      GATEWAY_OPS_KV: {
+        get: async (k, opts) => {
+          const v = kvStore.get(k);
+          return (opts && opts.type === 'json') ? (v || null) : (v ? JSON.stringify(v) : null);
+        },
+        put: async (k, v) => { kvStore.set(k, JSON.parse(v)); },
+      },
+      GATEWAY_ENV: 'test',
+      ...extra,
+    };
+  }
+
+  // ── GSS18.1: PATCH ambiguous→failed returns 400 (Fase 2.2) ───────────────
+  it('GSS18.1 — PATCH ambiguous→failed blocked; returns client_transition_not_allowed', async () => {
+    const env = makeKvEnv({ [SALT_BB]: { salt: SALT_BB, depositor: ADDR_X, status: 'ambiguous' } });
+    const req = new Request(
+      'https://worker.dev/api/gateway/transfer?salt=' + SALT_BB + '&depositor=' + ADDR_X,
+      { method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'failed' }) }
+    );
+    const res  = await onRequestPatch({ request: req, env });
+    const body = await res.json();
+    expect(res.status).toBe(400);
+    expect(body.error).toBe('client_transition_not_allowed');
+  });
+
+  // ── GSS18.2: PATCH accepted→failed returns 400 ───────────────────────────
+  it('GSS18.2 — PATCH accepted→failed blocked; returns client_transition_not_allowed', async () => {
+    const env = makeKvEnv({ [SALT_BB]: { salt: SALT_BB, depositor: ADDR_X, status: 'accepted' } });
+    const req = new Request(
+      'https://worker.dev/api/gateway/transfer?salt=' + SALT_BB + '&depositor=' + ADDR_X,
+      { method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'failed', txHash: '0x' + 'ab'.repeat(32) }) }
+    );
+    const res  = await onRequestPatch({ request: req, env });
+    const body = await res.json();
+    expect(res.status).toBe(400);
+    expect(body.error).toBe('client_transition_not_allowed');
+  });
+
+  // ── GSS18.3: PATCH confirmed→anything returns 400 ────────────────────────
+  it('GSS18.3 — PATCH confirmed→failed blocked', async () => {
+    const env = makeKvEnv({ [SALT_BB]: { salt: SALT_BB, depositor: ADDR_X, status: 'confirmed' } });
+    const req = new Request(
+      'https://worker.dev/api/gateway/transfer?salt=' + SALT_BB + '&depositor=' + ADDR_X,
+      { method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'failed' }) }
+    );
+    const res  = await onRequestPatch({ request: req, env });
+    const body = await res.json();
+    expect(res.status).toBe(400);
+    expect(body.error).toBe('client_transition_not_allowed');
+  });
+
+  // ── GSS18.4: /confirm accepts 'ambiguous' state (not just 'accepted') ─────
+  it('GSS18.4 — /confirm accepts ambiguous records for reconciliation', async () => {
+    const txHash = '0x' + 'aa'.repeat(32);
+    const saltHex = SALT_BB.replace(/^0x/, '');
+    const env = makeKvEnv(
+      { [SALT_BB]: { salt: SALT_BB, depositor: ADDR_X, status: 'ambiguous' } },
+      {
+        GATEWAY_RPC_URLS: JSON.stringify({ '421614': 'https://mock-rpc' }),
+      }
+    );
+    // Mock global.fetch for this test
+    const origFetch = global.fetch;
+    let callCount = 0;
+    global.fetch = async (url, opts) => {
+      const body = JSON.parse(opts.body);
+      callCount++;
+      if (body.method === 'eth_chainId') {
+        return { ok: true, json: async () => ({ jsonrpc: '2.0', id: 1, result: '0x' + (421614).toString(16) }) };
+      }
+      if (body.method === 'eth_getTransactionReceipt') {
+        return { ok: true, json: async () => ({ jsonrpc: '2.0', id: 1, result: {
+          to:     '0x0022222abe238cc2c7bb1f21003f0a260052475b',
+          status: '0x1',
+          input:  '0x' + 'ff'.repeat(10) + saltHex + 'ff'.repeat(10),
+          blockNumber: '0x1',
+        }}) };
+      }
+      return { ok: false, status: 500, json: async () => ({}) };
+    };
+    try {
+      const req = new Request('https://worker.dev/api/gateway/transfer/confirm', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ salt: SALT_BB, depositor: ADDR_X, txHash, dstChainId: 421614 }),
+      });
+      const res  = await onRequestPostConfirm({ request: req, env });
+      const body = await res.json();
+      expect(res.status).toBe(200);
+      expect(body.ok).toBe(true);
+      expect(body.status).toBe('confirmed');
+    } finally { global.fetch = origFetch; }
+  });
+
+  // ── GSS18.5: /confirm rejects tx sent to wrong contract ──────────────────
+  it('GSS18.5 — /confirm rejects receipt.to !== GatewayMinter (wrong contract)', async () => {
+    const txHash  = '0x' + 'cc'.repeat(32);
+    const saltHex = SALT_BB.replace(/^0x/, '');
+    const env = makeKvEnv(
+      { [SALT_BB]: { salt: SALT_BB, depositor: ADDR_X, status: 'accepted' } },
+      { GATEWAY_RPC_URLS: JSON.stringify({ '421614': 'https://mock-rpc' }) }
+    );
+    const origFetch = global.fetch;
+    global.fetch = async (url, opts) => {
+      const body = JSON.parse(opts.body);
+      if (body.method === 'eth_chainId') return { ok: true, json: async () => ({ result: '0x' + (421614).toString(16) }) };
+      return { ok: true, json: async () => ({ result: {
+        to: '0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef', // wrong contract
+        status: '0x1',
+        input: '0x' + saltHex,
+        blockNumber: '0x1',
+      }}) };
+    };
+    try {
+      const req = new Request('https://worker.dev/api/gateway/transfer/confirm', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ salt: SALT_BB, depositor: ADDR_X, txHash, dstChainId: 421614 }),
+      });
+      const res  = await onRequestPostConfirm({ request: req, env });
+      const body = await res.json();
+      expect(res.status).toBe(422);
+      expect(body.error).toBe('tx_wrong_contract');
+    } finally { global.fetch = origFetch; }
+  });
+
+  // ── GSS18.6: /confirm rejects tx whose calldata lacks the salt ───────────
+  it('GSS18.6 — /confirm rejects receipt input missing salt (different intent)', async () => {
+    const txHash = '0x' + 'dd'.repeat(32);
+    const env = makeKvEnv(
+      { [SALT_BB]: { salt: SALT_BB, depositor: ADDR_X, status: 'accepted' } },
+      { GATEWAY_RPC_URLS: JSON.stringify({ '421614': 'https://mock-rpc' }) }
+    );
+    const origFetch = global.fetch;
+    global.fetch = async (url, opts) => {
+      const body = JSON.parse(opts.body);
+      if (body.method === 'eth_chainId') return { ok: true, json: async () => ({ result: '0x' + (421614).toString(16) }) };
+      return { ok: true, json: async () => ({ result: {
+        to: '0x0022222abe238cc2c7bb1f21003f0a260052475b',
+        status: '0x1',
+        input: '0x' + 'cc'.repeat(64),  // DIFFERENT salt in calldata — not SALT_BB
+        blockNumber: '0x1',
+      }}) };
+    };
+    try {
+      const req = new Request('https://worker.dev/api/gateway/transfer/confirm', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ salt: SALT_BB, depositor: ADDR_X, txHash, dstChainId: 421614 }),
+      });
+      const res  = await onRequestPostConfirm({ request: req, env });
+      const body = await res.json();
+      expect(res.status).toBe(422);
+      expect(body.error).toBe('tx_salt_mismatch');
+    } finally { global.fetch = origFetch; }
+  });
+
+  // ── GSS18.7: /confirm rejects when RPC returns wrong chainId ─────────────
+  it('GSS18.7 — /confirm rejects when RPC chainId !== requested chainId', async () => {
+    const txHash = '0x' + 'ee'.repeat(32);
+    const env = makeKvEnv(
+      { [SALT_BB]: { salt: SALT_BB, depositor: ADDR_X, status: 'accepted' } },
+      { GATEWAY_RPC_URLS: JSON.stringify({ '421614': 'https://mock-rpc' }) }
+    );
+    const origFetch = global.fetch;
+    global.fetch = async (url, opts) => {
+      const body = JSON.parse(opts.body);
+      // RPC responds with Ethereum mainnet chainId (1) instead of Arbitrum Sepolia (421614)
+      if (body.method === 'eth_chainId') return { ok: true, json: async () => ({ result: '0x1' }) };
+      return { ok: true, json: async () => ({ result: {} }) };
+    };
+    try {
+      const req = new Request('https://worker.dev/api/gateway/transfer/confirm', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ salt: SALT_BB, depositor: ADDR_X, txHash, dstChainId: 421614 }),
+      });
+      const res  = await onRequestPostConfirm({ request: req, env });
+      const body = await res.json();
+      expect(res.status).toBe(502);
+      expect(body.error).toBe('rpc_chain_mismatch');
+      expect(body.recoverable).toBe(true);
+      expect(body.rpcChainId).toBe(1);
+      expect(body.expectedChainId).toBe(421614);
+    } finally { global.fetch = origFetch; }
+  });
+
+  // ── GSS18.8: /confirm returns recoverable on receipt null (pending) ───────
+  it('GSS18.8 — /confirm returns recoverable when tx not yet mined (receipt=null)', async () => {
+    const txHash = '0x' + 'ff'.repeat(32);
+    const env = makeKvEnv(
+      { [SALT_BB]: { salt: SALT_BB, depositor: ADDR_X, status: 'accepted' } },
+      { GATEWAY_RPC_URLS: JSON.stringify({ '421614': 'https://mock-rpc' }) }
+    );
+    const origFetch = global.fetch;
+    global.fetch = async (url, opts) => {
+      const body = JSON.parse(opts.body);
+      if (body.method === 'eth_chainId') return { ok: true, json: async () => ({ result: '0x' + (421614).toString(16) }) };
+      return { ok: true, json: async () => ({ result: null }) }; // tx not yet mined
+    };
+    try {
+      const req = new Request('https://worker.dev/api/gateway/transfer/confirm', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ salt: SALT_BB, depositor: ADDR_X, txHash, dstChainId: 421614 }),
+      });
+      const res  = await onRequestPostConfirm({ request: req, env });
+      const body = await res.json();
+      expect(res.status).toBe(404);
+      expect(body.error).toBe('tx_not_found');
+      expect(body.recoverable).toBe(true);
+    } finally { global.fetch = origFetch; }
+  });
+
+  // ── GSS18.9: /confirm returns inconclusive when status is null ────────────
+  it('GSS18.9 — /confirm returns inconclusive when receipt.status is null', async () => {
+    const txHash  = '0x' + 'a1'.repeat(32);
+    const saltHex = SALT_BB.replace(/^0x/, '');
+    const env = makeKvEnv(
+      { [SALT_BB]: { salt: SALT_BB, depositor: ADDR_X, status: 'accepted' } },
+      { GATEWAY_RPC_URLS: JSON.stringify({ '421614': 'https://mock-rpc' }) }
+    );
+    const origFetch = global.fetch;
+    global.fetch = async (url, opts) => {
+      const body = JSON.parse(opts.body);
+      if (body.method === 'eth_chainId') return { ok: true, json: async () => ({ result: '0x' + (421614).toString(16) }) };
+      return { ok: true, json: async () => ({ result: {
+        to: '0x0022222abe238cc2c7bb1f21003f0a260052475b',
+        status: null,  // malformed receipt — status absent
+        input: '0x' + saltHex,
+        blockNumber: '0x1',
+      }}) };
+    };
+    try {
+      const req = new Request('https://worker.dev/api/gateway/transfer/confirm', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ salt: SALT_BB, depositor: ADDR_X, txHash: txHash, dstChainId: 421614 }),
+      });
+      const res  = await onRequestPostConfirm({ request: req, env });
+      const body = await res.json();
+      expect(res.status).toBe(502);
+      expect(body.error).toBe('receipt_status_inconclusive');
+      expect(body.recoverable).toBe(true);
+    } finally { global.fetch = origFetch; }
+  });
+
+  // ── GSS18.10: /confirm rejects when GATEWAY_RPC_URL fallback used (no URLS) ─
+  it('GSS18.10 — /confirm returns 503 when GATEWAY_RPC_URLS not set (no fallback)', async () => {
+    const env = makeKvEnv(
+      { [SALT_BB]: { salt: SALT_BB, depositor: ADDR_X, status: 'accepted' } },
+      {
+        // GATEWAY_RPC_URLS absent, single GATEWAY_RPC_URL also absent
+        GATEWAY_RPC_URL: 'https://should-not-be-used',  // should NOT be used as fallback
+      }
+    );
+    const req = new Request('https://worker.dev/api/gateway/transfer/confirm', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ salt: SALT_BB, depositor: ADDR_X, txHash: '0x' + 'a2'.repeat(32), dstChainId: 421614 }),
+    });
+    const res  = await onRequestPostConfirm({ request: req, env });
+    const body = await res.json();
+    expect(res.status).toBe(503);
+    expect(body.error).toBe('rpc_not_configured');
+    expect(body.recoverable).toBe(true);
+  });
+
+  // ── GSS18.11: /confirm not_reconcilable when record not accepted/ambiguous ─
+  it('GSS18.11 — /confirm returns 409 not_reconcilable_state for already-terminal record', async () => {
+    const env = makeKvEnv(
+      { [SALT_BB]: { salt: SALT_BB, depositor: ADDR_X, status: 'confirmed' } },
+      { GATEWAY_RPC_URLS: JSON.stringify({ '421614': 'https://mock-rpc' }) }
+    );
+    const req = new Request('https://worker.dev/api/gateway/transfer/confirm', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ salt: SALT_BB, depositor: ADDR_X, txHash: '0x' + 'a3'.repeat(32), dstChainId: 421614 }),
+    });
+    const res  = await onRequestPostConfirm({ request: req, env });
+    const body = await res.json();
+    expect(res.status).toBe(409);
+    expect(body.error).toBe('not_reconcilable_state');
+  });
+
+  // ── GSS18.12: /confirm returns inconclusive when receipt has no input data ─
+  it('GSS18.12 — /confirm returns inconclusive when receipt.input absent', async () => {
+    const txHash = '0x' + 'a4'.repeat(32);
+    const env = makeKvEnv(
+      { [SALT_BB]: { salt: SALT_BB, depositor: ADDR_X, status: 'accepted' } },
+      { GATEWAY_RPC_URLS: JSON.stringify({ '421614': 'https://mock-rpc' }) }
+    );
+    const origFetch = global.fetch;
+    global.fetch = async (url, opts) => {
+      const body = JSON.parse(opts.body);
+      if (body.method === 'eth_chainId') return { ok: true, json: async () => ({ result: '0x' + (421614).toString(16) }) };
+      return { ok: true, json: async () => ({ result: {
+        to: '0x0022222abe238cc2c7bb1f21003f0a260052475b',
+        status: '0x1',
+        input: null,  // no calldata
+        blockNumber: '0x1',
+      }}) };
+    };
+    try {
+      const req = new Request('https://worker.dev/api/gateway/transfer/confirm', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ salt: SALT_BB, depositor: ADDR_X, txHash, dstChainId: 421614 }),
+      });
+      const res  = await onRequestPostConfirm({ request: req, env });
+      const body = await res.json();
+      expect(res.status).toBe(502);
+      expect(body.error).toBe('receipt_input_absent');
+      expect(body.recoverable).toBe(true);
+    } finally { global.fetch = origFetch; }
+  });
+
+  // ── GSS18.13: transfer.js src contains eth_chainId verification ───────────
+  it('GSS18.13 — /confirm source contains eth_chainId verification', () => {
+    const confirmStart = proxySrc.indexOf('onRequestPostConfirm');
+    const confirmBlock = proxySrc.slice(confirmStart, confirmStart + 10000);
+    expect(confirmBlock).toContain('eth_chainId');
+    expect(confirmBlock).toContain('rpc_chain_mismatch');
+    expect(confirmBlock).toContain('rpcChainId');
+  });
+
+  // ── GSS18.14: transfer.js src contains salt calldata verification ─────────
+  it('GSS18.14 — /confirm source verifies salt in calldata (tx linked to this operation)', () => {
+    const confirmStart = proxySrc.indexOf('onRequestPostConfirm');
+    const confirmBlock = proxySrc.slice(confirmStart, confirmStart + 10000);
+    expect(confirmBlock).toContain('saltHex');
+    expect(confirmBlock).toContain('tx_salt_mismatch');
+    expect(confirmBlock).toContain('calldata');
+  });
+
+  // ── GSS18.15: transfer.js src: GATEWAY_RPC_URL fallback removed ──────────
+  it('GSS18.15 — GATEWAY_RPC_URL single fallback is removed (per-chain only)', () => {
+    const confirmStart = proxySrc.indexOf('onRequestPostConfirm');
+    const confirmBlock = proxySrc.slice(confirmStart, confirmStart + 10000);
+    // The old fallback line was: "if (!rpcUrl && env && env.GATEWAY_RPC_URL)"
+    // It must NOT exist in the confirm function body
+    expect(confirmBlock).not.toContain('GATEWAY_RPC_URL)');
+    // Per-chain lookup must exist
+    expect(confirmBlock).toContain('GATEWAY_RPC_URLS');
   });
 });

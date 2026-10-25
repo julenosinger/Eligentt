@@ -218,14 +218,15 @@ describe('transfer.js onRequestPatch — client cannot forge confirmed/failed', 
     }));
   }
 
-  it('ambiguous → failed is allowed (client reconciliation escape hatch)', async () => {
+  // Fase 2.2: ambiguous→failed removed from client. ALL transitions require /confirm.
+  it('ambiguous → failed via PATCH is BLOCKED (Fase 2.2: no client transitions)', async () => {
     const kv = makeKV();
     await seed(kv, 'ambiguous');
     const env = { GATEWAY_OPS_KV: kv };
     const res = await onRequestPatch({ request: makePatchRequest('0x' + '11'.repeat(32), DEPOSITOR, { status: 'failed' }), env });
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(400);
     const data = await res.json();
-    expect(data.status).toBe('failed');
+    expect(data.error).toBe('client_transition_not_allowed');
   });
 
   it('submitting → confirmed is forbidden', async () => {

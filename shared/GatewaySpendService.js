@@ -366,6 +366,11 @@
    * result. Never silently ignores a persistence failure.
    * MUST include depositor so the proxy can verify ownership before accepting the update.
    */
+  // patchGatewaySalt — legacy PATCH helper.
+  // NOTE (Fase 2.2): CLIENT_ALLOWED_TRANSITIONS is now empty — the proxy returns
+  // 400 for ANY status sent via PATCH. Use confirmGatewaySalt() instead for all
+  // terminal transitions (accepted/ambiguous → confirmed/failed).
+  // This function is kept for compatibility but should NOT be called for terminal states.
   async function patchGatewaySalt(salt, status, txHash, depositor) {
     var dep = depositor || '';
     try {

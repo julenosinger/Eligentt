@@ -63,7 +63,7 @@ const VALID_TRANSITIONS = {
   submitting: ['accepted', 'rejected', 'ambiguous', 'failed'],  // 'failed' for rollback
   accepted:   ['confirmed', 'failed'],
   rejected:   [],   // terminal
-  ambiguous:  ['accepted', 'rejected', 'failed'],
+  ambiguous:  ['accepted', 'rejected', 'failed', 'confirmed'],  // 'confirmed' via /confirm
   confirmed:  [],   // terminal
   failed:     [],   // terminal
 };

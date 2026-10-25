@@ -3,8 +3,9 @@
  *
  * POST:  Proxy to Circle Gateway /v1/transfer with atomic idempotence.
  * GET:   Query operation status by salt + depositor.
- * PATCH: Attempt client-initiated reconciliation to 'failed' or 'ambiguous'
- *        only. 'accepted' and 'confirmed' are internal-only transitions.
+ * PATCH: No client-writable transitions as of Fase 2.2.
+ *        All reconciliation (ambiguous→failed, accepted→confirmed/failed) requires
+ *        POST /api/gateway/transfer/confirm (server-side RPC verification).
  *
  * ── OFFICIAL API SHAPE (Circle docs, Oct 2026) ─────────────────────────────
  *   POST https://gateway-api.circle.com/v1/transfer
@@ -22,12 +23,12 @@
  *   accepted   → failed            verified mint failure (internal)
  *   ambiguous  → accepted          reconciliation confirms Circle accepted
  *   ambiguous  → rejected          reconciliation confirms Circle rejected
- *   ambiguous  → failed            caller verifies no on-chain activity
+ *   ambiguous  → confirmed         /confirm verifies on-chain success
+ *   ambiguous  → failed            /confirm verifies no on-chain activity
  *   confirmed / failed / rejected: TERMINAL — no further transitions
  *
- *   Transitions the CLIENT may request via PATCH:
- *     ambiguous → failed           (only when caller has verified no on-chain mint)
- *   All other transitions are internal-only.
+ *   Client PATCH: NO transitions allowed (Fase 2.2).
+ *   All state changes require server-side RPC verification via POST /confirm.
  *
  *   NOTE: 'rejected' means Circle returned a definitive 4xx. It is distinct from
  *   'failed' (mint failed or caller-verified failure) and from 'ambiguous'
@@ -53,7 +54,7 @@
  *
  * ── ISOLATION ────────────────────────────────────────────────────────────────
  *   GET + PATCH require ?salt= AND ?depositor=. Wrong depositor → 404.
- *   CLIENT PATCH: only ambiguous→failed allowed. All others: 400.
+ *   CLIENT PATCH: NO transitions allowed (Fase 2.2). Returns 400 for any status.
  *
  * ── SECURITY ─────────────────────────────────────────────────────────────────
  *   CORS exact-origin allowlist (env ALLOWED_ORIGINS extends defaults).
@@ -81,30 +82,38 @@ const VALID_TRANSITIONS = {
   submitting: ['accepted', 'rejected', 'ambiguous'],
   accepted:   ['confirmed', 'failed'],
   rejected:   [],   // terminal — retry with new salt
-  ambiguous:  ['accepted', 'rejected', 'failed'],
+  ambiguous:  ['accepted', 'rejected', 'failed', 'confirmed'],
+  //           ↑ 'confirmed' added: /confirm can verify an ambiguous op succeeded
   confirmed:  [],   // terminal
   failed:     [],   // terminal
 };
 
 // Transitions the client may request via PATCH
-// ── Rules (P0 — Fase 2.1) ──────────────────────────────────────────────────────
-//   ambiguous → failed:    client asserts no on-chain mint. No txHash required.
-//                          The server cannot independently verify this assertion,
-//                          but 'failed' is the safer terminal for an ambiguous op
-//                          that the caller is certain did not land on-chain.
+// ── Rules (P0 — Fase 2.2) ──────────────────────────────────────────────────────
+//   NONE. There are NO client-writable transitions.
 //
-// ALL other transitions are INTERNAL-ONLY:
+//   ambiguous → failed:    REMOVED in Fase 2.2.
+//                          A client asserting 'no on-chain activity' without
+//                          independent server-side verification is unsafe:
+//                          - The operation may have been accepted by Circle and minted.
+//                          - Marking it 'failed' releases the salt slot and could be
+//                          used to cover up a successful transfer the attacker wants
+//                          to re-execute or claim failed for dispute purposes.
+//                          Reconciliation of 'ambiguous' MUST go through
+//                          POST /api/gateway/transfer/confirm (server verifies RPC).
+//
 //   accepted  → confirmed: ONLY via POST /api/gateway/transfer/confirm
-//                          (server-side RPC receipt verification required).
+//                          (server-side RPC receipt + chainId + calldata verification).
 //   accepted  → failed:    ONLY via POST /api/gateway/transfer/confirm
 //                          (server verifies revert on-chain before writing 'failed').
+//   ambiguous → failed:    ONLY via POST /api/gateway/transfer/confirm
+//                          (server verifies no activity on-chain before writing 'failed').
 //
-// The client MUST NOT be able to set 'confirmed' or 'failed' for an accepted
-// operation. Doing so without server-side verification would allow fabricating
-// a confirmed state for a transfer that never executed on-chain.
+// The client MUST NOT be able to set any terminal state. ALL terminal transitions
+// require server-side RPC verification.
 const CLIENT_ALLOWED_TRANSITIONS = {
-  ambiguous: ['failed'],   // only when caller is certain no on-chain activity occurred
-  // 'accepted' has NO client-writable transitions — use /confirm endpoint instead.
+  // No client-writable transitions in Fase 2.2.
+  // All reconciliation goes through POST /api/gateway/transfer/confirm.
 };
 
 // Transitions that the /confirm endpoint may set (server-side, after RPC verification)
@@ -622,19 +631,24 @@ export async function onRequestDelete() { return jsonResp({ error: 'method_not_a
 // Called by GatewaySpendService.execute() after receiving a mint receipt.
 // Body: { salt, depositor, txHash, dstChainId }
 //
-// Verification steps:
+// Verification steps (Fase 2.2):
 //   1. Read the operation record and verify depositor isolation.
-//   2. Validate txHash format and that the record is in 'accepted' state.
-//   3. Call eth_getTransactionReceipt via env.GATEWAY_RPC_URL (chain-specific).
-//   4. Verify receipt: status=1 (success), to-address matches GatewayMinter, no revert.
-//   5. Write 'confirmed' (success) or 'failed' (revert) atomically.
+//   2. Validate txHash format and that the record is 'accepted' or 'ambiguous'.
+//   3. Resolve per-chain RPC from env.GATEWAY_RPC_URLS[chainId] (no fallback).
+//   4. Verify RPC is on the correct chain via eth_chainId.
+//   5. Call eth_getTransactionReceipt via RPC.
+//   6. Verify receipt.to matches GatewayMinter for this chain.
+//   7. Verify receipt.status is exactly '0x1' or '0x0' (null = inconclusive).
+//   8. Verify salt appears in calldata (links tx to this specific operation).
+//   9. Write 'confirmed' (success) or 'failed' (revert) atomically.
 //
-// If GATEWAY_RPC_URL is not configured for the destination chain, returns 503.
-// If RPC call fails or times out, returns 502 with recoverable:true.
-// Never trusts client-provided receipt or status — always re-fetches from chain.
+// If GATEWAY_RPC_URLS[chainId] is not configured → 503 recoverable.
+// If RPC call fails, times out, or chainId mismatches → 502 recoverable.
+// If receipt is null (tx pending), status inconclusive, or input absent → recoverable.
+// Never trusts client-provided receipt, status, or success — always re-fetches.
 //
-// PENDING: env.GATEWAY_RPC_URLS (JSON map of chainId→rpcUrl) must be configured
-// in CF Pages environment settings before this endpoint can operate in production.
+// PENDING: env.GATEWAY_RPC_URLS (JSON: { "421614": "https://..." }) must be
+// configured in CF Pages environment settings per destination chain.
 
 // Canonical GatewayMinter addresses per chain (official Circle docs).
 // ONLY chains listed here are supported. Unlisted chains → 422.
@@ -695,101 +709,175 @@ export async function onRequestPostConfirm(ctx) {
   if (!record)                                             return jsonResp({ error: 'not_found', salt }, 404);
   if (normAddr(record.depositor) !== normAddr(depositor))  return jsonResp({ error: 'not_found', salt }, 404);
 
-  // Only 'accepted' records can be confirmed (not ambiguous — those need reconciliation first)
-  if (record.status !== 'accepted') {
+  // Only 'accepted' or 'ambiguous' records can be confirmed/reconciled.
+  // 'ambiguous' operations also route through /confirm for safe reconciliation.
+  if (record.status !== 'accepted' && record.status !== 'ambiguous') {
     return jsonResp({
-      error:   'not_acceptable_state',
+      error:   'not_reconcilable_state',
       current: record.status,
-      detail:  "Only operations in 'accepted' state can be confirmed. " +
+      detail:  "Only operations in 'accepted' or 'ambiguous' state can be reconciled. " +
                "Current state: '" + record.status + "'.",
     }, 409);
   }
 
-  // Get RPC URL for the destination chain
+  // ── Get RPC URL for the destination chain (per-chain only, no fallback) ────
+  // P1 — Fase 2.2: GATEWAY_RPC_URL (single fallback) is removed.
+  // Only GATEWAY_RPC_URLS[chainId] is accepted. This prevents a misconfigured
+  // single-chain RPC from silently verifying receipts on the wrong network.
   let rpcUrl = null;
   if (env && env.GATEWAY_RPC_URLS) {
     try {
       const rpcMap = JSON.parse(env.GATEWAY_RPC_URLS);
-      rpcUrl = rpcMap[String(chainId)] || rpcMap[chainId] || null;
+      rpcUrl = rpcMap[String(chainId)] || null;
     } catch(_) {}
-  }
-  if (!rpcUrl && env && env.GATEWAY_RPC_URL) {
-    rpcUrl = env.GATEWAY_RPC_URL;  // single-chain fallback
   }
   if (!rpcUrl) {
     return jsonResp({
       error:       'rpc_not_configured',
       chainId:     chainId,
       recoverable: true,
-      detail:      'GATEWAY_RPC_URLS is not configured for chainId ' + chainId + '. ' +
-                   'Set this in CF Pages environment settings to enable server-side confirmation.',
+      detail:      'GATEWAY_RPC_URLS[' + chainId + '] is not configured. ' +
+                   'Set GATEWAY_RPC_URLS (JSON map chainId→rpcUrl) in CF Pages environment settings.',
     }, 503);
   }
 
-  // Call eth_getTransactionReceipt via JSON-RPC
-  let receipt = null;
-  try {
-    const rpcBody = JSON.stringify({
-      jsonrpc: '2.0',
-      id:      1,
-      method:  'eth_getTransactionReceipt',
-      params:  [txHash],
-    });
-    const rpcCtrl = new AbortController();
-    const rpcTimer = setTimeout(() => rpcCtrl.abort(), 10000); // 10s RPC timeout
-    let rpcRes;
+  // ── Helper: single JSON-RPC call with 10s timeout ─────────────────────────
+  async function rpcCall(method, params) {
+    const ctrl  = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 10000);
     try {
-      rpcRes = await fetch(rpcUrl, {
+      const res = await fetch(rpcUrl, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    rpcBody,
-        signal:  rpcCtrl.signal,
+        body:    JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+        signal:  ctrl.signal,
       });
+      if (!res.ok) throw Object.assign(new Error('rpc_http_error'), { httpStatus: res.status });
+      const data = await res.json();
+      if (data.error) throw Object.assign(new Error('rpc_error'), { detail: data.error.message || String(data.error) });
+      return data.result;
     } finally {
-      clearTimeout(rpcTimer);
+      clearTimeout(timer);
     }
-    if (!rpcRes.ok) {
-      return jsonResp({ error: 'rpc_http_error', httpStatus: rpcRes.status, recoverable: true }, 502);
-    }
-    const rpcData = await rpcRes.json();
-    if (rpcData.error) {
-      return jsonResp({ error: 'rpc_error', detail: rpcData.error.message || String(rpcData.error), recoverable: true }, 502);
-    }
-    receipt = rpcData.result;
+  }
+
+  // ── P1 (Fase 2.2): Verify RPC is on the correct chain via eth_chainId ─────
+  // This prevents a misconfigured GATEWAY_RPC_URLS entry (e.g. Ethereum RPC
+  // used for Arbitrum chainId) from confirming transactions on the wrong network.
+  let rpcChainId;
+  try {
+    const chainIdHex = await rpcCall('eth_chainId', []);
+    rpcChainId = parseInt(chainIdHex, 16);
   } catch(e) {
     const isTimeout = e && e.name === 'AbortError';
     return jsonResp({
-      error:       isTimeout ? 'rpc_timeout' : 'rpc_unreachable',
+      error:       isTimeout ? 'rpc_timeout' : (e.httpStatus ? 'rpc_http_error' : 'rpc_unreachable'),
       recoverable: true,
       detail:      e && e.message ? e.message : String(e),
     }, isTimeout ? 504 : 502);
   }
+  if (rpcChainId !== chainId) {
+    return jsonResp({
+      error:          'rpc_chain_mismatch',
+      expectedChainId: chainId,
+      rpcChainId:      rpcChainId,
+      recoverable:     true,
+      detail:          'The RPC endpoint is on chainId ' + rpcChainId +
+                       ' but the operation targets chainId ' + chainId +
+                       '. Update GATEWAY_RPC_URLS[' + chainId + '] to the correct RPC.',
+    }, 502);
+  }
 
-  // Receipt is null = transaction not yet mined (or not found)
+  // ── Fetch transaction receipt ─────────────────────────────────────────────
+  let receipt = null;
+  try {
+    receipt = await rpcCall('eth_getTransactionReceipt', [txHash]);
+  } catch(e) {
+    const isTimeout = e && e.name === 'AbortError';
+    return jsonResp({
+      error:       isTimeout ? 'rpc_timeout' : (e.httpStatus ? 'rpc_http_error' : 'rpc_unreachable'),
+      recoverable: true,
+      detail:      e && e.message ? e.message : String(e),
+      ...(e.httpStatus ? { httpStatus: e.httpStatus } : {}),
+    }, isTimeout ? 504 : 502);
+  }
+
+  // Receipt is null = transaction not yet mined (or hash does not exist).
+  // This is INDETERMINATE — not a proof of failure. Preserve ambiguous state.
   if (!receipt) {
     return jsonResp({
       error:       'tx_not_found',
       recoverable: true,
-      detail:      'Transaction not found on-chain yet. It may be pending or the hash is incorrect.',
+      detail:      'Transaction not found on-chain yet. It may be pending or the hash may be incorrect.',
     }, 404);
   }
 
-  // Verify receipt fields:
+  // ── P0.2 (Fase 2.2): Verify receipt fields ────────────────────────────────
+  //
   // 1. to-address must match the GatewayMinter contract (case-insensitive)
-  const receiptTo = (receipt.to || '').toLowerCase();
+  const receiptTo      = (receipt.to || '').toLowerCase();
   const expectedMinter = minterAddr.toLowerCase();
   if (receiptTo !== expectedMinter) {
-    // The transaction went to a different address — not a Gateway mint.
     return jsonResp({
-      error:   'tx_wrong_contract',
-      to:      receipt.to,
+      error:    'tx_wrong_contract',
+      to:       receipt.to,
       expected: minterAddr,
-      detail:  'Transaction was not sent to the GatewayMinter contract.',
+      detail:   'Transaction was not sent to the GatewayMinter contract.',
     }, 422);
   }
 
-  // 2. status: '0x1' = success, '0x0' = reverted
-  const txSuccess = receipt.status === '0x1' || receipt.status === 1;
+  // 2. receipt.status — ONLY '0x1' (success) or '0x0' (revert) are accepted.
+  //    null / undefined / any other value = receipt is incomplete or malformed.
+  //    Do NOT treat an incomplete receipt as a revert — that would incorrectly
+  //    mark a successful operation as 'failed'.
+  const statusHex = receipt.status;
+  const txSuccess = (statusHex === '0x1' || statusHex === 1);
+  const txRevert  = (statusHex === '0x0' || statusHex === 0);
+  if (!txSuccess && !txRevert) {
+    return jsonResp({
+      error:       'receipt_status_inconclusive',
+      status:      statusHex,
+      recoverable: true,
+      detail:      'Receipt status is absent or unexpected (' + JSON.stringify(statusHex) + '). ' +
+                   'Cannot determine success or failure. Operation remains recoverable.',
+    }, 502);
+  }
+
+  // 3. P0.3 (Fase 2.2): Verify calldata contains the operation's salt.
+  //    GatewayMinter.gatewayMint(bytes attestation, bytes signature)
+  //    The attestation payload from Circle encodes the BurnIntent, which includes
+  //    the salt. We verify the salt appears in the calldata to prove this transaction
+  //    corresponds to THIS operation and not a different mint.
+  //
+  //    LIMITATION: The exact ABI encoding of the attestation is Circle-internal.
+  //    We verify the salt bytes appear somewhere in the calldata (hex substring match).
+  //    This is a best-effort verification — an attacker would need to find another
+  //    valid GatewayMinter transaction whose calldata happens to contain this salt,
+  //    which is computationally infeasible for a random 32-byte salt.
+  //
+  //    If Circle publishes the attestation ABI, this can be upgraded to a full decode.
+  //    If calldata is absent (receipt has no input), treat as inconclusive.
+  const inputData   = receipt.input || receipt.data || null;
+  const saltHex     = salt.toLowerCase().replace(/^0x/, '');
+  if (inputData && typeof inputData === 'string') {
+    const calldata = inputData.toLowerCase().replace(/^0x/, '');
+    if (!calldata.includes(saltHex)) {
+      return jsonResp({
+        error:   'tx_salt_mismatch',
+        detail:  'The transaction calldata does not contain this operation\'s salt. ' +
+                 'This transaction does not correspond to this Gateway operation.',
+      }, 422);
+    }
+  } else {
+    // Input data absent — cannot verify salt binding.
+    return jsonResp({
+      error:       'receipt_input_absent',
+      recoverable: true,
+      detail:      'Receipt has no input data — cannot verify salt binding. ' +
+                   'Operation remains recoverable.',
+    }, 502);
+  }
+
   const newStatus = txSuccess ? 'confirmed' : 'failed';
 
   // Write the verified state atomically
