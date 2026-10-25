@@ -3528,9 +3528,150 @@ describe('GSS20 — Fase 2.4 cross-checks and ABI safety', () => {
   it('GSS20.15 — GATEWAY_SPEND_BLOCKED = true is still set in index.html', () => {
     const indexSrc = _fs.readFileSync(_path.join(__dirname, '../index.html'), 'utf8');
     expect(indexSrc).toContain('GATEWAY_SPEND_BLOCKED');
-    // Must be set to true (not false)
-    const match = indexSrc.match(/GATEWAY_SPEND_BLOCKED\s*=\s*(true|false)/);
+    // Must be var-declared as true (not false) — find the var declaration specifically
+    const match = indexSrc.match(/var GATEWAY_SPEND_BLOCKED\s*=\s*(true|false)/);
     expect(match).not.toBeNull();
     expect(match[1]).toBe('true');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// GSS21 — Fase 2.5: Auditoria de Segurança — Endereços, Precisão e Infraestrutura
+// ═══════════════════════════════════════════════════════════════════════════════
+describe('GSS21 — Security audit: addresses, precision, blocked state', () => {
+  const fs   = require('fs');
+  const path = require('path');
+  const svcSrc   = fs.readFileSync(path.join(__dirname, '../shared/GatewaySpendService.js'), 'utf8');
+  const indexSrc = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
+  const proxySrc = fs.readFileSync(path.join(__dirname, '../functions/api/gateway/transfer.js'), 'utf8');
+
+  // ── GSS21.1: GW_WALLET confirmed address present ─────────────────────────
+  it('GSS21.1 — GW_WALLET = 0x77777777...eE (Circle docs mainnet, confirmed)', () => {
+    expect(svcSrc).toContain("'0x77777777Dcc4d5A8B6E418Fd04D8997ef11000eE'");
+    // Must be marked as confirmed, not UNVERIFIED
+    const walletIdx = svcSrc.indexOf('0x77777777Dcc4d5A8B6E418Fd04D8997ef11000eE');
+    const surrounding = svcSrc.slice(Math.max(0, walletIdx - 200), walletIdx + 200);
+    expect(surrounding.toUpperCase()).not.toContain('UNVERIFIED');
+  });
+
+  // ── GSS21.2: GW_MINTER confirmed address present ─────────────────────────
+  it('GSS21.2 — GW_MINTER = 0x2222222d...05 (Circle docs mainnet, confirmed)', () => {
+    expect(svcSrc).toContain("'0x2222222d7164433c4C09B0b0D809a9b52C04C205'");
+    const minterIdx = svcSrc.indexOf('0x2222222d7164433c4C09B0b0D809a9b52C04C205');
+    const surrounding = svcSrc.slice(Math.max(0, minterIdx - 200), minterIdx + 200);
+    expect(surrounding.toUpperCase()).not.toContain('UNVERIFIED');
+  });
+
+  // ── GSS21.3: GW_WALLET_TESTNET and GW_MINTER_TESTNET present ─────────────
+  it('GSS21.3 — testnet addresses confirmed', () => {
+    expect(svcSrc).toContain("'0x0077777d7EBA4688BDeF3E311b846F25870A19B9'");
+    expect(svcSrc).toContain("'0x0022222ABE238Cc2C7Bb1f21003F0a260052475B'");
+  });
+
+  // ── GSS21.4: GATEWAY_SPEND_BLOCKED = true ────────────────────────────────
+  it('GSS21.4 — GATEWAY_SPEND_BLOCKED is true in index.html', () => {
+    const match = indexSrc.match(/var GATEWAY_SPEND_BLOCKED\s*=\s*(true|false)/);
+    expect(match).not.toBeNull();
+    expect(match[1]).toBe('true');
+  });
+
+  // ── GSS21.5: CF infra checklist present in index.html ────────────────────
+  it('GSS21.5 — CF infrastructure checklist present in GATEWAY_SPEND_BLOCKED comment', () => {
+    // Find the var declaration block (not the first reference)
+    const blockIdx = indexSrc.indexOf('var GATEWAY_SPEND_BLOCKED');
+    expect(blockIdx).toBeGreaterThan(-1);
+    // The checklist is in the comment block just before the var declaration
+    // Look 2000 chars before+after the declaration
+    const surrounding = indexSrc.slice(Math.max(0, blockIdx - 1500), blockIdx + 200);
+    expect(surrounding).toContain('GATEWAY_OP_LOCK');
+    expect(surrounding).toContain('GATEWAY_OPS_KV');
+    expect(surrounding).toContain('DO_INTERNAL_SECRET');
+    expect(surrounding).toContain('GATEWAY_RPC_URLS');
+  });
+
+  // ── GSS21.6: no parseFloat on GW balance display path ────────────────────
+  it('GSS21.6 — saLoadGatewayBalance does not use parseFloat for display', () => {
+    const fnIdx = indexSrc.indexOf('function saLoadGatewayBalance');
+    const fnBlock = indexSrc.slice(fnIdx, fnIdx + 2000);
+    // Should not use parseFloat anymore
+    expect(fnBlock).not.toContain('parseFloat(bal)');
+    // Should use string-based truncation
+    expect(fnBlock).toContain('dotIdx');
+  });
+
+  // ── GSS21.7: strToAtomic uses BigInt, no parseFloat ───────────────────────
+  it('GSS21.7 — strToAtomic is BigInt-based, no parseFloat/Number on money path', () => {
+    const fnIdx = svcSrc.indexOf('function strToAtomic');
+    const fnBlock = svcSrc.slice(fnIdx, fnIdx + 600);
+    expect(fnBlock).toContain('BigInt(');
+    expect(fnBlock).not.toContain('parseFloat');
+    expect(fnBlock).not.toContain('Number(');
+  });
+
+  // ── GSS21.8: execute() does NOT call parseFloat/toFixed on atomic amounts ─
+  it('GSS21.8 — execute() uses strToAtomic for balance comparison, no float', () => {
+    const execIdx = svcSrc.indexOf('async function execute(');
+    const execBlock = svcSrc.slice(execIdx, execIdx + 3000);
+    // Must call strToAtomic for balance conversion
+    expect(execBlock).toContain('strToAtomic(gwBal');
+    // Must not use parseFloat or toFixed on atomic values
+    expect(execBlock).not.toContain('parseFloat(gwBal');
+    expect(execBlock).not.toContain('parseFloat(v.atomic');
+  });
+
+  // ── GSS21.9: EIP-712 types include required BurnIntent fields ─────────────
+  it('GSS21.9 — EIP-712 BURN_INTENT type has maxBlockHeight, maxFee, spec', () => {
+    expect(svcSrc).toContain("{ name:'maxBlockHeight',type:'uint256' }");
+    expect(svcSrc).toContain("{ name:'maxFee',type:'uint256' }");
+    expect(svcSrc).toContain("{ name:'spec',type:'TransferSpec' }");
+  });
+
+  // ── GSS21.10: TRANSFER_SPEC includes salt at correct EIP-712 position ─────
+  it('GSS21.10 — TRANSFER_SPEC type includes salt as bytes32', () => {
+    expect(svcSrc).toContain("{ name:'salt',type:'bytes32' }");
+  });
+
+  // ── GSS21.11: verifyBurnIntentSignature is fail-closed ────────────────────
+  it('GSS21.11 — verifyBurnIntentSignature throws sig_verifier_unavailable when no verifier', () => {
+    const fnIdx = svcSrc.indexOf('function verifyBurnIntentSignature');
+    const fnBlock = svcSrc.slice(fnIdx, fnIdx + 1200);
+    expect(fnBlock).toContain('sig_verifier_unavailable');
+    expect(fnBlock).toContain('throw');
+    // Must NOT return false silently
+    expect(fnBlock).not.toContain('return false');
+  });
+
+  // ── GSS21.12: kv_query_unavailable blocks when salt pre-check fails ───────
+  it('GSS21.12 — execute() blocks with kv_query_unavailable when queryGatewaySalt unavailable', () => {
+    const execIdx = svcSrc.indexOf('async function execute(');
+    const execBlock = svcSrc.slice(execIdx, execIdx + 5000);
+    expect(execBlock).toContain('kv_query_unavailable');
+    expect(execBlock).toContain('kvRecord.unavailable');
+  });
+
+  // ── GSS21.13: cancel() refused after submitted ────────────────────────────
+  it('GSS21.13 — cancel() returns already_submitted when submitted=true', () => {
+    const fnIdx = svcSrc.indexOf('function cancel(');
+    const fnBlock = svcSrc.slice(fnIdx, fnIdx + 400);
+    expect(fnBlock).toContain('already_submitted');
+    expect(fnBlock).toContain('submitted');
+  });
+
+  // ── GSS21.14: transfer.js CLIENT_ALLOWED_TRANSITIONS is empty ────────────
+  it('GSS21.14 — CLIENT_ALLOWED_TRANSITIONS is empty — no client PATCH allowed', () => {
+    // Should be an object with no keys (as of Fase 2.2)
+    const match = proxySrc.match(/const CLIENT_ALLOWED_TRANSITIONS\s*=\s*\{([^}]*)\}/);
+    expect(match).not.toBeNull();
+    const inner = match[1].trim();
+    // Empty or only comments
+    const strippedComments = inner.replace(/\/\/[^\n]*/g, '').trim();
+    expect(strippedComments).toBe('');
+  });
+
+  // ── GSS21.15: transfer.js isProduction disables KV in production ──────────
+  it('GSS21.15 — isProduction check disables KV fallback and requires DO in production', () => {
+    expect(proxySrc).toContain("isProduction(env)");
+    expect(proxySrc).toContain('do_required_in_production');
+    expect(proxySrc).toContain('do_unavailable_production');
   });
 });

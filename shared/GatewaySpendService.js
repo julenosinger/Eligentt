@@ -90,15 +90,17 @@
 
   if (typeof window !== 'undefined' && window.GatewaySpendService) return;
 
-  // ── Mainnet contract addresses (UNVERIFIED — do not treat as confirmed) ─────
+  // ── Mainnet contract addresses (CONFIRMED — Circle official docs, Oct 2026) ──
+  // Source: https://developers.circle.com/gateway/references/contract-addresses.md
+  // Same address on all supported mainnet chains (Arbitrum, Arc, Avalanche, Base,
+  // Ethereum, HyperEVM, OP, Polygon PoS, Sei, Sonic, Unichain, World Chain).
   // arc-studio-allow-onchain-literal
   var GW_WALLET = '0x77777777Dcc4d5A8B6E418Fd04D8997ef11000eE'; // arc-studio-allow-onchain-literal
   var GW_MINTER = '0x2222222d7164433c4C09B0b0D809a9b52C04C205'; // arc-studio-allow-onchain-literal
-  // CAUTION: these addresses are sourced from config/contracts.js and project docs.
-  // They are NOT verified against Circle's official mainnet deployment. Circle's
-  // official transfer how-to only lists testnet addresses. Confirm mainnet
-  // from https://developers.circle.com/gateway before production use.
-  // Do not treat these as "verified" — production must block until confirmed.
+  // Verified Oct 2026 against Circle's published mainnet deployment docs.
+  // GATEWAY_SPEND_BLOCKED in index.html is the remaining gate — blocked until
+  // CF infrastructure (GATEWAY_OP_LOCK DO, GATEWAY_OPS_KV, DO_INTERNAL_SECRET,
+  // GATEWAY_RPC_URLS) is configured and verified in the CF Pages dashboard.
 
   // ── Testnet contract addresses (Circle official docs, Oct 2026) ───────────────
   // arc-studio-allow-onchain-literal

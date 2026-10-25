@@ -37309,9 +37309,26 @@ saUpdateRoute = function() {
 // ── END CPN FIAT PAYOUT ───────────────────────────────────────────────────────
 
 // ── GATEWAY ORIGIN — Send Assets ─────────────────────────────────────────────
-// GATEWAY_SPEND_BLOCKED: set to false only after server-side confirmation path
-// (on-chain receipt verification via CF Worker RPC) is implemented and validated.
-// While true: UI is shown, but execution is blocked with an explicit message.
+// GATEWAY_SPEND_BLOCKED: controls real Gateway fund execution across Send, Swap, Bridge.
+//
+// Security audit (Fase 2.1–2.5, Oct 2026) status:
+//   APPROVED: GW_WALLET 0x7777...eE, GW_MINTER 0x2222...05 — confirmed Circle docs
+//   APPROVED: attestation integrity, salt fixed-offset decode, ABI bounds
+//   APPROVED: receipt cross-checks (hash, blockNumber, status)
+//   APPROVED: no client-writable state transitions
+//   APPROVED: fail-closed signature verification, frozen BurnIntent
+//   APPROVED: BigInt arithmetic, no float on money paths
+//   APPROVED: idempotence, replay protection, ambiguous-state handling
+//
+// REMAINING BLOCKERS — CF infrastructure not yet configured in production:
+//   [ ] GATEWAY_OP_LOCK: Durable Object Worker not deployed + binding not set
+//   [ ] GATEWAY_OPS_KV: KV namespace binding not configured in wrangler.jsonc
+//   [ ] DO_INTERNAL_SECRET: env var not set in CF Pages Dashboard
+//   [ ] GATEWAY_RPC_URLS: per-chain JSON env var not configured
+//
+// Set GATEWAY_SPEND_BLOCKED = false ONLY after ALL four items above are checked.
+// Without them the backend returns 503 on every operation, making real execution
+// impossible and degrading the UX without any security benefit.
 var GATEWAY_SPEND_BLOCKED = true;
 
 var _saGwOrigin = false; // false=EVM (default), true=Gateway
@@ -37356,9 +37373,19 @@ function saLoadGatewayBalance() {
         bal = data[asset];
       }
       // Display balance. The /api/gateway/balances API returns human-readable
-      // decimal strings (e.g. "1.234567"), NOT atomic units. Display as-is with
-      // 6 decimal places. Never use Number() for financial arithmetic.
-      var displayBal = bal ? (parseFloat(bal) || 0).toFixed(6) : '0.000000';
+      // decimal strings (e.g. "1.234567"). Display as-is, truncated to 6 decimal
+      // places for readability. This is display-only — the execution path uses
+      // GatewaySpendService.strToAtomic which is BigInt-based and has no float.
+      var displayBal = '0.000000';
+      if (bal) {
+        var balStr = String(bal).trim();
+        var dotIdx = balStr.indexOf('.');
+        if (dotIdx === -1) {
+          displayBal = balStr + '.000000';
+        } else {
+          displayBal = balStr.slice(0, dotIdx + 7).padEnd(dotIdx + 7, '0');
+        }
+      }
       pill.textContent = displayBal + ' GW';
     })
     .catch(function(){ pill.textContent = '— GW'; });
