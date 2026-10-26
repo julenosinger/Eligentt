@@ -782,7 +782,10 @@ describe('BAL — _rwaUpdateBalances real balanceOf implementation', () => {
   });
 
   it('uses getCachedProvider with the resolved rpcUrl', () => {
-    expect(fetchFn).toContain('getCachedProvider(rpcUrl)');
+    // Fase 2.9.1b: fallback loop uses rpcList[i] instead of a single rpcUrl variable.
+    // Verify getCachedProvider is still called and passes an element from the rpc list.
+    expect(fetchFn).toContain('getCachedProvider(');
+    expect(fetchFn).toContain('rpcList');
   });
 
   it('calls balanceOf with the wallet address', () => {
@@ -920,10 +923,10 @@ describe('FIX-BALANCE — all chains use same-origin RPC proxies', () => {
   });
 
   it('returns null when rpcUrl is absent (not throw)', () => {
-    // No RPC configured → return null, not throw Error
-    const noRpcBlock = blockAt(fetchFn, 'rpcUrl', 80);
-    expect(noRpcBlock).toContain('return null');
-    expect(noRpcBlock).not.toContain('throw');
+    // No chain config or empty rpc list → return null, not throw Error.
+    // Fase 2.9.1b: guard is now on chainCfg (null chain) and rpcList.length (empty list).
+    expect(fetchFn).toContain('if (!chainCfg) return null');
+    expect(fetchFn).toContain('if (!rpcList.length) return null');
   });
 
   it('does not have the old CORS startsWith guard (all chains have proxy now)', () => {

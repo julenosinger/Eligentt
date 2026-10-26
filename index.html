@@ -63654,13 +63654,25 @@ var _rwaBalSeq = { from: 0, to: 0 };
  */
 async function _rwaFetchTokenBalance(tokenAddr, chainId, wallet) {
   var chainCfg = (typeof CHAIN_REGISTRY !== 'undefined') ? CHAIN_REGISTRY[chainId] : null;
-  var rpcUrl = chainCfg ? chainCfg.rpc : null;
-  if (!rpcUrl) return null;  // No RPC configured → show dash, not error
-  // All chains in CHAIN_REGISTRY use same-origin proxy paths (/api/rpc/*)
-  // so direct eth_call from the browser never hits CORS restrictions.
-  var prov = getCachedProvider(rpcUrl);
-  var contract = new ethers.Contract(tokenAddr, _RWA_BAL_ABI, prov);
-  return await contract.balanceOf(wallet);
+  if (!chainCfg) return null;
+  // Build ordered list: primary proxy first, then public fallbacks from CHAIN_REGISTRY.
+  // The proxy (/api/rpc/*) is preferred — it avoids CORS and hides credentials.
+  // In dev/preview environments where the proxy isn't running, fallbacks serve the same data.
+  var rpcList = [chainCfg.rpc].concat(Array.isArray(chainCfg.rpcFallbacks) ? chainCfg.rpcFallbacks : [])
+    .filter(Boolean);
+  if (!rpcList.length) return null;
+  var lastErr;
+  for (var i = 0; i < rpcList.length; i++) {
+    try {
+      var prov = getCachedProvider(rpcList[i]);
+      var contract = new ethers.Contract(tokenAddr, _RWA_BAL_ABI, prov);
+      return await contract.balanceOf(wallet);
+    } catch (e) {
+      lastErr = e;
+      // continue to next fallback
+    }
+  }
+  throw lastErr; // all failed — caller's .catch() will show 'Balance: —'
 }
 
 function _rwaUpdateBalances() {
