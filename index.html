@@ -22065,6 +22065,22 @@ function _swpChartPush(rate, symIn, symOut) {
   if (last && Math.abs(last.rate - rate) < 1e-9 && now - last.ts < 5000) return;
   _swpChartData.push({ ts: now, rate: rate });
   if (_swpChartData.length > _SWP_CHART_MAX) _swpChartData.shift();
+  // Keep the Swap terminal chart (big candlestick) in sync with the same real rate.
+  // Write directly into _stTickStore bypassing the 3s debounce so every real
+  // LI.FI quote point is reflected in the candlestick chart too.
+  if (typeof _stTickStore !== 'undefined') {
+    var stArr = _stTickStore[pair] || (_stTickStore[pair] = []);
+    stArr.push({ t: now, p: rate });
+    if (stArr.length > 900) stArr.splice(0, stArr.length - 600);
+    _stLastRecord[pair] = now;
+    // Also update LI.FI price cache from the quote rate so stFetchLifiPrice
+    // doesn't overwrite with a less-precise USD-ratio approximation.
+    if (typeof _stLifiPriceCache !== 'undefined') {
+      // We can't recover individual USD prices from the ratio, but we can
+      // anchor the pair price so the chart uses the quote rate.
+      _stLifiPriceCache['__pair__' + pair] = rate;
+    }
+  }
   _swpChartRender();
 }
 
@@ -25107,10 +25123,14 @@ async function stFetchLifiPrice() {
 }
 
 function _stLifiPriceForPair(symIn, symOut) {
+  // Prefer exact quote rate anchored by a real LI.FI swap quote (most accurate).
+  var anchored = _stLifiPriceCache['__pair__' + symIn + '/' + symOut];
+  if (anchored && anchored > 0) return anchored;
+  // Fall back to USD price ratio from /v1/token (less precise but still real data).
   var pIn  = _stLifiPriceCache[symIn];
   var pOut = _stLifiPriceCache[symOut];
   if (!pIn || !pOut || pIn <= 0 || pOut <= 0) return 0;
-  return pIn / pOut; // how many symOut per 1 symIn
+  return pIn / pOut;
 }
 
 function stStartLifiPoll() {
@@ -25879,7 +25899,9 @@ function stSwitchPair(index) {
   document.getElementById('swap-amount-in').value = '';
   document.getElementById('swap-amount-out').value = '';
   if (typeof _swpChartReset === 'function') _swpChartReset();
-  _stLifiPriceCache = {};
+  _stLifiPriceCache = {}; // clears both USD prices and __pair__ anchors
+  _stTickStore = {};     // reset chart history for new pair
+  _stLastRecord = {};
   if (typeof stStartLifiPoll === 'function') { stStopLifiPoll(); stStartLifiPoll(); }
   applySwapTokens();
   updateSwapRate();
