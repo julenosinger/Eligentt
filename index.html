@@ -2683,6 +2683,14 @@ body.swap-standard-mode .site-footer{display:block !important}
 .swp-pool-val{font-size:10px;font-weight:600;color:var(--text)}
 
 /* Rate bar (inline between input and button) */
+.swp-chart-wrap{margin:8px 0 4px;border:1px solid var(--border);border-radius:8px;overflow:hidden;background:var(--card2)}
+.swp-chart-header{display:flex;justify-content:space-between;align-items:center;padding:6px 10px 2px}
+.swp-chart-label{font-size:10px;font-weight:600;color:var(--muted2);text-transform:uppercase;letter-spacing:.04em}
+.swp-chart-pts{font-size:9px;color:var(--muted2)}
+.swp-chart-body{position:relative;padding:0 0 6px}
+.swp-chart-svg{display:block;width:100%;height:80px}
+.swp-chart-yaxis{position:absolute;right:6px;top:0;bottom:6px;display:flex;flex-direction:column;justify-content:space-between;pointer-events:none}
+.swp-chart-yaxis span{font-size:8px;color:var(--muted2);line-height:1}
 .swp-rate-bar{
   display:flex;align-items:center;justify-content:space-between;
   padding:8px 16px;margin:0 12px;
@@ -7550,6 +7558,28 @@ select.cinput option { background: #161a24; color: #dde2f0; }
                 <div class="st-swap-detail-row"><span><i class="ti ti-shield-check" style="font-size:8px;margin-right:3px;color:var(--green)"></i>Min Received</span><span class="st-swap-detail-val green" id="swp-min-received">—</span></div>
                 <div class="st-swap-detail-row"><span><i class="ti ti-coins" style="font-size:8px;margin-right:3px;color:var(--muted2)"></i>LP Fee</span><span class="st-swap-detail-val" id="swp-fee-val">—</span></div>
                 <div class="st-swap-detail-row"><span><i class="ti ti-route" style="font-size:8px;margin-right:3px;color:var(--purple)"></i>Route</span><span class="st-swap-detail-val purple" id="swp-route-pool">—</span></div>
+              </div>
+
+              <!-- Price Chart -->
+              <div class="swp-chart-wrap" id="swp-chart-wrap" style="display:none">
+                <div class="swp-chart-header">
+                  <span class="swp-chart-label" id="swp-chart-label">Rate history</span>
+                  <span class="swp-chart-pts" id="swp-chart-pts"></span>
+                </div>
+                <div class="swp-chart-body">
+                  <svg id="swp-chart-svg" class="swp-chart-svg" viewBox="0 0 300 80" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+                    <defs>
+                      <linearGradient id="swpChartGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stop-color="var(--blue)" stop-opacity="0.25"/>
+                        <stop offset="100%" stop-color="var(--blue)" stop-opacity="0.02"/>
+                      </linearGradient>
+                    </defs>
+                    <path id="swp-chart-fill" fill="url(#swpChartGrad)" stroke="none" d=""/>
+                    <polyline id="swp-chart-line" fill="none" stroke="var(--blue)" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" points=""/>
+                    <line id="swp-chart-last" x1="0" y1="0" x2="0" y2="80" stroke="var(--blue)" stroke-width="0.5" stroke-dasharray="2,2" opacity="0.4"/>
+                  </svg>
+                  <div class="swp-chart-yaxis" id="swp-chart-yaxis"></div>
+                </div>
               </div>
 
               <!-- Quick Pair Switcher -->
@@ -22012,6 +22042,92 @@ const SwapEngine = {
 };
 
 // ── State ────────────────────────────────────────────────
+// ── Swap Rate Chart ─────────────────────────────────────────────────────────
+// Accumulates (timestamp, rate) pairs from every LI.FI / AMM quote and renders
+// a lightweight SVG sparkline. No external deps; no network calls.
+var _swpChartData = [];   // [{ ts: Number, rate: Number }]
+var _swpChartPair = '';   // e.g. 'USDC/EURC' — reset when pair changes
+var _SWP_CHART_MAX = 60;  // keep last N data points
+
+function _swpChartPush(rate, symIn, symOut) {
+  if (!isFinite(rate) || rate <= 0) return;
+  var pair = symIn + '/' + symOut;
+  if (pair !== _swpChartPair) {
+    // Pair changed — reset history
+    _swpChartData = [];
+    _swpChartPair = pair;
+  }
+  // Deduplicate: skip if last point has same rate and was < 5s ago
+  var last = _swpChartData[_swpChartData.length - 1];
+  var now = Date.now();
+  if (last && Math.abs(last.rate - rate) < 1e-9 && now - last.ts < 5000) return;
+  _swpChartData.push({ ts: now, rate: rate });
+  if (_swpChartData.length > _SWP_CHART_MAX) _swpChartData.shift();
+  _swpChartRender();
+}
+
+function _swpChartRender() {
+  var wrap = document.getElementById('swp-chart-wrap');
+  if (!wrap) return;
+  var pts = _swpChartData;
+  if (pts.length < 2) { wrap.style.display = 'none'; return; }
+
+  wrap.style.display = '';
+  var lbl = document.getElementById('swp-chart-label');
+  if (lbl) lbl.textContent = _swpChartPair + ' rate';
+  var ptsEl = document.getElementById('swp-chart-pts');
+  if (ptsEl) ptsEl.textContent = pts.length + ' pts';
+
+  var W = 300, H = 80, PAD = 4;
+  var rates = pts.map(function(p){ return p.rate; });
+  var minR = Math.min.apply(null, rates);
+  var maxR = Math.max.apply(null, rates);
+  var span = maxR - minR || minR * 0.001 || 1e-9; // avoid div-by-zero
+
+  // Map each point to SVG coords
+  var coords = pts.map(function(p, i) {
+    var x = PAD + (i / (pts.length - 1)) * (W - PAD * 2);
+    var y = H - PAD - ((p.rate - minR) / span) * (H - PAD * 2);
+    return [+x.toFixed(2), +y.toFixed(2)];
+  });
+
+  // Polyline points string
+  var polyPts = coords.map(function(c){ return c[0] + ',' + c[1]; }).join(' ');
+  var lineEl = document.getElementById('swp-chart-line');
+  if (lineEl) lineEl.setAttribute('points', polyPts);
+
+  // Gradient fill path (close down to bottom)
+  var firstX = coords[0][0], lastX = coords[coords.length - 1][0];
+  var fillD = 'M ' + firstX + ' ' + (H - PAD) +
+    ' L ' + coords.map(function(c){ return c[0]+' '+c[1]; }).join(' L ') +
+    ' L ' + lastX + ' ' + (H - PAD) + ' Z';
+  var fillEl = document.getElementById('swp-chart-fill');
+  if (fillEl) fillEl.setAttribute('d', fillD);
+
+  // Vertical line at last point
+  var lastCoord = coords[coords.length - 1];
+  var vLine = document.getElementById('swp-chart-last');
+  if (vLine) { vLine.setAttribute('x1', lastCoord[0]); vLine.setAttribute('x2', lastCoord[0]); }
+
+  // Y-axis labels (min / max)
+  var yaxis = document.getElementById('swp-chart-yaxis');
+  if (yaxis) {
+    var fmt = function(v) {
+      return v < 0.001 ? v.toExponential(3) : v < 1 ? v.toFixed(6) : v.toFixed(4);
+    };
+    yaxis.innerHTML = '<span>' + fmt(maxR) + '</span><span>' + fmt(minR) + '</span>';
+  }
+}
+
+// Reset chart when pair tokens change
+function _swpChartReset() {
+  _swpChartData = [];
+  _swpChartPair = '';
+  var wrap = document.getElementById('swp-chart-wrap');
+  if (wrap) wrap.style.display = 'none';
+}
+// ────────────────────────────────────────────────────────────────────────────
+
 const SWP = {
   slippage:   0.5,
   detailOpen: false,
@@ -23598,6 +23714,8 @@ function swpApplySelectedQuote(q) {
   var rateEl = document.getElementById('swap-rate');
   if (rateEl) rateEl.textContent = '1 ' + tIn.sym + ' ≈ ' + rate.toFixed(6) + ' ' + tOut.sym;
   swpSet('swp-rate-detail', '1 ' + tIn.sym + ' = ' + rate.toFixed(6) + ' ' + tOut.sym);
+  // Feed rate into the price chart accumulator
+  if (typeof _swpChartPush === 'function') _swpChartPush(rate, tIn.sym, tOut.sym);
   swpSet('swp-min-received', minReceived.toFixed(6) + ' ' + tOut.sym);
   swpSet('swp-fee-val', feeAmt.toFixed(6) + ' ' + tIn.sym + ' (' + (feeBps/100).toFixed(1) + '%)');
   var fromId = SWP.fromChainId || activeChainId;
@@ -23926,6 +24044,7 @@ async function updateSwapRate() {
         if (outEl) { outEl.value = tOutAmt.toFixed(6); outEl.style.color = 'var(--text)'; }
         if (rateEl) rateEl.textContent = '1 ' + tIn.sym + ' ≈ ' + tRate.toFixed(6) + ' ' + tOut.sym;
         swpSet('swp-rate-detail', '1 ' + tIn.sym + ' = ' + tRate.toFixed(6) + ' ' + tOut.sym);
+        if (typeof _swpChartPush === 'function') _swpChartPush(tRate, tIn.sym, tOut.sym);
         swpSet('swp-min-received', tMinReceived.toFixed(6) + ' ' + tOut.sym);
         swpSet('swp-fee-val', (amtIn * (tFeeBps / 10000)).toFixed(6) + ' ' + tIn.sym + (tFeeBps ? ' (' + (tFeeBps / 100).toFixed(1) + '%)' : ''));
         var _fId = SWP.fromChainId || activeChainId; var _tId = SWP.toChainId || activeChainId;
@@ -24087,6 +24206,7 @@ async function updateSwapRate() {
 
       const impactCls = priceImpact < 1 ? 'green' : priceImpact < 3 ? 'yellow' : 'red';
       swpSet('swp-rate-detail',    `1 ${tIn.sym} = ${rate.toFixed(6)} ${tOut.sym}`);
+      if (typeof _swpChartPush === 'function') _swpChartPush(rate, tIn.sym, tOut.sym);
       swpSet('swp-impact-val',     priceImpact.toFixed(3) + '%', impactCls);
       swpSet('swp-min-received',   minReceived.toFixed(6) + ' ' + tOut.sym);
       swpSet('swp-fee-val',        feeAmt.toFixed(6) + ' ' + tIn.sym + ' (' + (totalFee/100).toFixed(1) + '%)');
@@ -25682,6 +25802,7 @@ function stSwitchPair(index) {
   SWP.tokenOutIdx = pair.idxB;
   document.getElementById('swap-amount-in').value = '';
   document.getElementById('swap-amount-out').value = '';
+  if (typeof _swpChartReset === 'function') _swpChartReset();
   applySwapTokens();
   updateSwapRate();
   // Update active pill
