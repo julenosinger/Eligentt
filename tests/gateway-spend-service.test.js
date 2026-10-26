@@ -3530,14 +3530,14 @@ describe('GSS20 — Fase 2.4 cross-checks and ABI safety', () => {
     expect(proxySrc).toContain('ABI_MAX_PAYLOAD_LEN');
   });
 
-  // ── GSS20.15: GATEWAY_SPEND_BLOCKED still active in index.html ───────────
-  it('GSS20.15 — GATEWAY_SPEND_BLOCKED = true is still set in index.html', () => {
+  // ── GSS20.15: GATEWAY_SPEND_BLOCKED declared in index.html ───────────────
+  it('GSS20.15 — GATEWAY_SPEND_BLOCKED is declared in index.html (Fase 2.9.2: false — security approved)', () => {
     const indexSrc = _fs.readFileSync(_path.join(__dirname, '../index.html'), 'utf8');
     expect(indexSrc).toContain('GATEWAY_SPEND_BLOCKED');
-    // Must be var-declared as true (not false) — find the var declaration specifically
     const match = indexSrc.match(/var GATEWAY_SPEND_BLOCKED\s*=\s*(true|false)/);
     expect(match).not.toBeNull();
-    expect(match[1]).toBe('true');
+    // Fase 2.9.2: security audit complete — flag set to false; CF infra checklist in comment.
+    expect(match[1]).toBe('false');
   });
 });
 
@@ -3574,11 +3574,12 @@ describe('GSS21 — Security audit: addresses, precision, blocked state', () => 
     expect(svcSrc).toContain("'0x0022222ABE238Cc2C7Bb1f21003F0a260052475B'");
   });
 
-  // ── GSS21.4: GATEWAY_SPEND_BLOCKED = true ────────────────────────────────
-  it('GSS21.4 — GATEWAY_SPEND_BLOCKED is true in index.html', () => {
+  // ── GSS21.4: GATEWAY_SPEND_BLOCKED declared ──────────────────────────────
+  it('GSS21.4 — GATEWAY_SPEND_BLOCKED is false in index.html (Fase 2.9.2: security approved)', () => {
     const match = indexSrc.match(/var GATEWAY_SPEND_BLOCKED\s*=\s*(true|false)/);
     expect(match).not.toBeNull();
-    expect(match[1]).toBe('true');
+    // Fase 2.9.2: all code-level security checks approved — flag set to false.
+    expect(match[1]).toBe('false');
   });
 
   // ── GSS21.5: CF infra checklist present in index.html ────────────────────
@@ -3917,10 +3918,10 @@ describe('GSS22 — Fase 2.6: receipt hash absence, BigInt ABI, wrangler stubs',
     expect(proxySrc).toContain('receipt_tx_hash_absent');
   });
 
-  // ── GSS22.12: GATEWAY_SPEND_BLOCKED = true still active ───────────────────
-  it('GSS22.12 — GATEWAY_SPEND_BLOCKED = true still set in index.html', () => {
+  // ── GSS22.12: GATEWAY_SPEND_BLOCKED declared ─────────────────────────────
+  it('GSS22.12 — GATEWAY_SPEND_BLOCKED is false in index.html (Fase 2.9.2: security approved)', () => {
     const match = indexSrc.match(/var GATEWAY_SPEND_BLOCKED\s*=\s*(true|false)/);
     expect(match).not.toBeNull();
-    expect(match[1]).toBe('true');
+    expect(match[1]).toBe('false');
   });
 });

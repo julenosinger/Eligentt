@@ -101,40 +101,40 @@ describe('GF2-2 — JS: functions present and wired', () => {
 
 // ── GF2-3: GATEWAY_SPEND_BLOCKED guards ─────────────────────────────────────
 describe('GF2-3 — GATEWAY_SPEND_BLOCKED blocks execution in all three modules', () => {
-  it('GATEWAY_SPEND_BLOCKED = true is the default', () => {
-    expect(src).toContain('var GATEWAY_SPEND_BLOCKED = true');
+  it('GATEWAY_SPEND_BLOCKED is declared (Fase 2.9.2: now false — security approved)', () => {
+    expect(src).toContain('var GATEWAY_SPEND_BLOCKED = false');
   });
-  it('saExecGateway checks GATEWAY_SPEND_BLOCKED and returns early', () => {
+  it('saExecGateway no longer hard-blocks — proceeds to execution (Fase 2.9.2)', () => {
     const fnIdx = src.indexOf('async function saExecGateway()');
     expect(fnIdx).toBeGreaterThan(-1);
     const fnBody = src.slice(fnIdx, fnIdx + 1000);
-    expect(fnBody).toContain('GATEWAY_SPEND_BLOCKED');
+    // GATEWAY_SPEND_BLOCKED is false — the hard block is removed; GatewaySpendService check remains.
+    expect(fnBody).toContain('GatewaySpendService');
     expect(fnBody).toContain('toast(');
-    // Fase 2.9.1: returns a discriminated object { status: 'blocked', ... } instead of bare return
-    expect(fnBody).toMatch(/return\s*\{[^}]*status[^}]*blocked/);
   });
-  it('swpExecuteLiFi patch blocks Gateway source when GATEWAY_SPEND_BLOCKED', () => {
+  it('swpExecuteLiFi patch blocks Gateway source with informational message (no GATEWAY_SPEND_BLOCKED check)', () => {
     const patchIdx = src.indexOf('_swpExecuteLiFiOrig = swpExecuteLiFi');
     expect(patchIdx).toBeGreaterThan(-1);
     const patchBody = src.slice(patchIdx, patchIdx + 500);
-    expect(patchBody).toContain('GATEWAY_SPEND_BLOCKED');
+    // Swap still blocked for Gateway (P2P not DEX) — but with an honest message, not a flag check.
     expect(patchBody).toContain('toast(');
     expect(patchBody).toContain('return;');
   });
-  it('executeBridgeOrTurbo Gateway branch checks GATEWAY_SPEND_BLOCKED', () => {
-    // Find the gateway branch within executeBridgeOrTurbo (not in _brsRenderRoutes)
+  it('executeBridgeOrTurbo Gateway branch shows informational message (no GATEWAY_SPEND_BLOCKED check)', () => {
     const fnIdx  = src.indexOf('function executeBridgeOrTurbo()');
     expect(fnIdx).toBeGreaterThan(-1);
     const fnBody = src.slice(fnIdx, fnIdx + 5000);
     const gwIdx  = fnBody.indexOf("if (route.provider === 'gateway')");
     expect(gwIdx).toBeGreaterThan(-1);
-    const gwBody = fnBody.slice(gwIdx, gwIdx + 600);
-    expect(gwBody).toContain('GATEWAY_SPEND_BLOCKED');
+    const gwBody = fnBody.slice(gwIdx, gwIdx + 400);
+    // Bridge still blocked for Gateway (P2P not bridge router) — honest info message.
     expect(gwBody).toContain('toast(');
     expect(gwBody).toContain('return;');
   });
-  it('GATEWAY_SPEND_BLOCKED guard comment references security reason', () => {
-    expect(src).toContain('server-side confirmation');
+  it('GATEWAY_SPEND_BLOCKED comment references CF infra checklist (Fase 2.9.2)', () => {
+    // Flag is now false; comment documents what CF infra must be configured.
+    expect(src).toContain('GATEWAY_OPS_KV');
+    expect(src).toContain('DO_INTERNAL_SECRET');
   });
 });
 

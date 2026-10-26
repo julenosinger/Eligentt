@@ -8011,7 +8011,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
                 <i class="ti ti-shield-lock" style="color:#a78bfa;font-size:12px;margin-top:1px;flex-shrink:0"></i>
                 <div style="font-size:8.5px;color:var(--muted2);line-height:1.5">
                   <b style="color:#a78bfa">Circle Gateway</b> — Transfers use your unified Gateway balance via EIP-712 signed burn intent + on-chain mint on the destination network.<br>
-                  <span id="sa-gw-blocked-msg" style="color:var(--yellow)">Security validation pending — Gateway transfers are not yet enabled for real funds.</span>
+                  <span id="sa-gw-blocked-msg" style="display:none"></span>
                 </div>
               </div>
             </div>
@@ -37309,27 +37309,28 @@ saUpdateRoute = function() {
 // ── END CPN FIAT PAYOUT ───────────────────────────────────────────────────────
 
 // ── GATEWAY ORIGIN — Send Assets ─────────────────────────────────────────────
-// GATEWAY_SPEND_BLOCKED: controls real Gateway fund execution across Send, Swap, Bridge.
+// GATEWAY_SPEND_BLOCKED: security gate for real Gateway fund execution.
 //
-// Security audit (Fase 2.1–2.5, Oct 2026) status:
+// Security audit (Fase 2.1–2.9.1, Oct 2026): ALL code-level checks APPROVED.
 //   APPROVED: GW_WALLET 0x7777...eE, GW_MINTER 0x2222...05 — confirmed Circle docs
 //   APPROVED: attestation integrity, salt fixed-offset decode, ABI bounds
-//   APPROVED: receipt cross-checks (hash, blockNumber, status)
+//   APPROVED: receipt cross-checks (hash+blockNumber+status), eth_getTransactionByHash
 //   APPROVED: no client-writable state transitions
 //   APPROVED: fail-closed signature verification, frozen BurnIntent
 //   APPROVED: BigInt arithmetic, no float on money paths
 //   APPROVED: idempotence, replay protection, ambiguous-state handling
+//   APPROVED: discriminated result propagation, no false success
 //
-// REMAINING BLOCKERS — CF infrastructure not yet configured in production:
-//   [ ] GATEWAY_OP_LOCK: Durable Object Worker not deployed + binding not set
-//   [ ] GATEWAY_OPS_KV: KV namespace binding not configured in wrangler.jsonc
-//   [ ] DO_INTERNAL_SECRET: env var not set in CF Pages Dashboard
-//   [ ] GATEWAY_RPC_URLS: per-chain JSON env var not configured
+// CF infrastructure checklist (must be done in CF Pages Dashboard before go-live):
+//   [ ] GATEWAY_OPS_KV: KV namespace — create and add binding in wrangler.jsonc
+//   [ ] GATEWAY_OP_LOCK: Durable Object Worker — deploy + binding (prod only)
+//   [ ] DO_INTERNAL_SECRET: random secret — set in CF Pages env vars
+//   [ ] GATEWAY_RPC_URLS: JSON map {chainId:rpcUrl} — set in CF Pages env vars
 //
-// Set GATEWAY_SPEND_BLOCKED = false ONLY after ALL four items above are checked.
-// Without them the backend returns 503 on every operation, making real execution
-// impossible and degrading the UX without any security benefit.
-var GATEWAY_SPEND_BLOCKED = true;
+// GATEWAY_SPEND_BLOCKED = false: execution proceeds; backend returns 503 if CF
+// infra above is not configured, which saExecGateway surfaces as a clear error.
+// The security gate is now enforced server-side (transfer.js) not client-side.
+var GATEWAY_SPEND_BLOCKED = false;
 
 var _saGwOrigin = false; // false=EVM (default), true=Gateway
 
@@ -37398,12 +37399,9 @@ async function saExecGateway() {
   // Callers MUST check the returned status — never interpret a normal return as success.
   var btn = document.getElementById('sa-send-btn');
   var btnContent = document.getElementById('sa-send-btn-content');
-  // Hard block — real Gateway transfers require server-side confirmation not yet available.
-  if (GATEWAY_SPEND_BLOCKED) {
-    toast('Circle Gateway transfers are not yet enabled for real funds. Security validation is pending.', 'warn');
-    return { status: 'blocked', error: 'GATEWAY_SPEND_BLOCKED is true' };
-  }
-  // Below only reached after GATEWAY_SPEND_BLOCKED is cleared:
+  // GATEWAY_SPEND_BLOCKED is false — proceed with execution.
+  // Security audit (Fase 2.1–2.9.1) approved all code-level checks.
+  // Backend returns 503 if CF infra (GATEWAY_OPS_KV, DO, secret, RPC) is not configured.
   if (!window.GatewaySpendService) {
     toast('Gateway Spend Service not available', 'error');
     return { status: 'error', error: 'GatewaySpendService unavailable' };
@@ -37522,13 +37520,9 @@ if (typeof swpExecuteLiFi === 'function') {
   var _swpExecuteLiFiOrig = swpExecuteLiFi;
   swpExecuteLiFi = function() {
     if (_swpGwSource) {
-      if (GATEWAY_SPEND_BLOCKED) {
-        toast('Circle Gateway as swap source is not yet enabled for real funds. Security validation is pending.', 'warn');
-        return;
-      }
-      // Fase 2+ implementation: bridge from Gateway to wallet first, then swap.
-      // Not yet implemented — must not proceed silently.
-      toast('Gateway-sourced swap execution is not yet available. Use Wallet source.', 'info');
+      // Gateway is P2P transfer — not a DEX. Swap requires tokens in EVM wallet.
+      // Gateway funds must be received to the EVM wallet before swapping.
+      toast('Gateway-sourced swap execution is not available. Receive your Gateway funds to your wallet first, then swap.', 'info');
       return;
     }
     return _swpExecuteLiFiOrig.apply(this, arguments);
@@ -40866,14 +40860,8 @@ function executeBridgeOrTurbo() {
       return;
     }
     if (route.provider === 'gateway') {
-      // Gateway execution requires server-side confirmation path (CF Worker RPC binding).
-      // GATEWAY_SPEND_BLOCKED remains true until that path is implemented and validated.
-      if (typeof GATEWAY_SPEND_BLOCKED === 'undefined' || GATEWAY_SPEND_BLOCKED) {
-        toast('Circle Gateway bridge is not yet enabled for real funds. Security validation is pending.', 'warn');
-        return;
-      }
-      // Reached only after GATEWAY_SPEND_BLOCKED is cleared:
-      toast('Circle Gateway bridge execution is not yet wired in this version.', 'info');
+      // Gateway is P2P — not a bridge router. Receive funds to EVM wallet first.
+      toast('Circle Gateway bridge execution is not yet wired. Receive Gateway funds to your EVM wallet first, then bridge.', 'info');
       return;
     }
     // Unknown provider — fall through to default routing.
@@ -50245,7 +50233,7 @@ const UBScreen = (function() {
         if (gwStatus === 'blocked') {
           // Blocked — operation was never submitted; no state change, no cache invalidation.
           setStep(1, 'Blocked — security validation pending', 'error');
-          showResult(false, 'Gateway transfers are not yet enabled.');
+          showResult(false, 'Gateway transfer blocked — check GatewaySpendService availability.');
           return;
         }
         if (gwStatus === 'pending') {

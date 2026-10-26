@@ -268,11 +268,12 @@ describe('GUB8 — _saFmtGwBal formats balance without float arithmetic', () => 
 });
 
 // ── GUB9: GATEWAY_SPEND_BLOCKED structural integrity ─────────────────────────
-describe('GUB9 — GATEWAY_SPEND_BLOCKED remains true', () => {
-  it('GUB9.1 — var GATEWAY_SPEND_BLOCKED is declared as true', () => {
+describe('GUB9 — GATEWAY_SPEND_BLOCKED is declared and set to false (Fase 2.9.2: security approved)', () => {
+  it('GUB9.1 — var GATEWAY_SPEND_BLOCKED is declared as false', () => {
     const declIdx = indexSrc.indexOf('var GATEWAY_SPEND_BLOCKED = ');
     expect(declIdx).toBeGreaterThan(-1);
     const decl = indexSrc.slice(declIdx, declIdx + 50);
-    expect(decl).toContain('true');
+    // Fase 2.9.2: all code-level security checks approved; CF infra checklist in comment.
+    expect(decl).toContain('false');
   });
 });
