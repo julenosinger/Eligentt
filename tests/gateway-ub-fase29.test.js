@@ -164,10 +164,11 @@ describe('GF29-6 — enterUnifiedBalanceMode routes gateway to UBScreen', () => 
 describe('GF29-7 — GATEWAY_SPEND_BLOCKED guard (Fase 2.9.2)', () => {
   const body = extractFn(src, 'saExecGateway');
 
-  it('saExecGateway routes to GatewaySpendService (flag removed in Fase 2.9.2)', () => {
+  it('saExecGateway signs BurnIntent inline and POSTs to /api/gateway/transfer (Fase 2.9.3)', () => {
     // GATEWAY_SPEND_BLOCKED removed from saExecGateway in Fase 2.9.2.
-    // Backend availability is surfaced at runtime via GatewaySpendService.execute.
-    expect(body).toContain('GatewaySpendService');
+    // Fase 2.9.3: inline EIP-712 sign + POST replaces window.GatewaySpendService.
+    expect(body).toContain('eth_signTypedData_v4');
+    expect(body).toContain('/api/gateway/transfer');
   });
 
   it('saExecGateway returns a discriminated result object', () => {

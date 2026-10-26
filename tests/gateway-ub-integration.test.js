@@ -188,10 +188,10 @@ describe('GUB6 — saExecGateway invalidates cache after confirmed operation', (
   it('GUB6.1 — saExecGateway calls ubInvalidateGatewayCache on result.ok', () => {
     const fnSrc = extractFn(indexSrc, 'saExecGateway');
     expect(fnSrc).not.toBeNull();
-    // Find the result.ok branch.
-    const okIdx = fnSrc.indexOf('result.ok');
+    // Find the resp.ok success branch (Fase 2.9.3: inline implementation).
+    const okIdx = fnSrc.indexOf('resp.ok');
     expect(okIdx).toBeGreaterThan(-1);
-    const okBranch = fnSrc.slice(okIdx, okIdx + 400);
+    const okBranch = fnSrc.slice(okIdx, okIdx + 500);
     expect(okBranch).toContain('ubInvalidateGatewayCache');
   });
 
@@ -206,16 +206,21 @@ describe('GUB6 — saExecGateway invalidates cache after confirmed operation', (
     expect(invalidateCount).toBeLessThanOrEqual(3); // typeof guard + call, max 1 call site
     // Confirm it is NOT in the catch or finally block.
     const catchIdx = fnSrc.indexOf('} catch(');
-    if (catchIdx > -1) {
-      const catchBlock = fnSrc.slice(catchIdx);
+    // Look for the outer `} catch(e) {` block (not inner `catch(_)` guards)
+    const outerCatchIdx = fnSrc.indexOf('} catch(e) {');
+    if (outerCatchIdx > -1) {
+      const catchBlock = fnSrc.slice(outerCatchIdx);
       expect(catchBlock).not.toContain('ubInvalidateGatewayCache');
     }
   });
 
-  it('GUB6.3 — GATEWAY_SPEND_BLOCKED guard is still active in saExecGateway', () => {
+  it('GUB6.3 — saExecGateway uses inline EIP-712 sign and validates wallet + amount (Fase 2.9.3)', () => {
     const fnSrc = extractFn(indexSrc, 'saExecGateway');
-    expect(fnSrc).toContain('GATEWAY_SPEND_BLOCKED');
-    expect(fnSrc).toContain('return');
+    // Fase 2.9.3: GATEWAY_SPEND_BLOCKED removed, inline implementation with explicit guards.
+    expect(fnSrc).toContain('eth_signTypedData_v4');
+    expect(fnSrc).toContain('BurnIntent');
+    expect(fnSrc).toContain('no_wallet');
+    expect(fnSrc).toContain('invalid_amount');
   });
 });
 

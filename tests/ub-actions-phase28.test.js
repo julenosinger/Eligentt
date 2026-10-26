@@ -180,7 +180,7 @@ describe('UB28-5 — ubGwCache is single source for Gateway balances', () => {
 
   it('saExecGateway calls ubInvalidateGatewayCache after success', () => {
     const idx = src.indexOf('async function saExecGateway(');
-    const fnBody = src.slice(idx, idx + 4000);
+    const fnBody = src.slice(idx, idx + 8000);
     expect(fnBody).toContain('ubInvalidateGatewayCache');
   });
 });
@@ -194,14 +194,15 @@ describe('UB28-6 — GATEWAY_SPEND_BLOCKED enforcement', () => {
     expect(decl).toContain('false');
   });
 
-  it('saExecGateway no longer hard-blocks execution (Fase 2.9.2: flag removed, backend health-check instead)', () => {
-    // Fase 2.9.2: GATEWAY_SPEND_BLOCKED removed from saExecGateway.
-    // Backend availability is checked by GatewaySpendService.execute at runtime.
+  it('saExecGateway uses inline EIP-712 sign + POST to /api/gateway/transfer (Fase 2.9.3: no window.GatewaySpendService)', () => {
+    // Fase 2.9.3: GatewaySpendService is a server-side CF module, not available in browser.
+    // saExecGateway now builds and signs the BurnIntent inline, posts to /api/gateway/transfer.
     const idx = src.indexOf('async function saExecGateway(');
     expect(idx).toBeGreaterThan(0);
-    const fnBody = src.slice(idx, idx + 3000);
-    // Must route to GatewaySpendService.execute
-    expect(fnBody).toContain('GatewaySpendService');
+    const fnBody = src.slice(idx, idx + 8000);
+    expect(fnBody).toContain('eth_signTypedData_v4');
+    expect(fnBody).toContain('/api/gateway/transfer');
+    expect(fnBody).toContain('BurnIntent');
   });
 });
 

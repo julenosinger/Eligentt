@@ -61,9 +61,9 @@ describe('GF291-1 — saExecGateway returns a discriminated result', () => {
   });
 
   it('ambiguous path returns status: ambiguous', () => {
-    // opStatus is set to 'ambiguous' when gwStatus === 'ambiguous'
+    // ambiguous status returned when server responds 5xx/429
     expect(body).toMatch(/['"]ambiguous['"]/);
-    expect(body).toContain("status: opStatus");
+    expect(body).toMatch(/status:\s*['"]ambiguous['"]/);
   });
 
   it('error path returns status: error', () => {

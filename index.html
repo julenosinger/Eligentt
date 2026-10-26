@@ -37402,10 +37402,6 @@ async function saExecGateway() {
   // GATEWAY_SPEND_BLOCKED is false — proceed with execution.
   // Security audit (Fase 2.1–2.9.1) approved all code-level checks.
   // Backend returns 503 if CF infra (GATEWAY_OPS_KV, DO, secret, RPC) is not configured.
-  if (!window.GatewaySpendService) {
-    toast('Gateway Spend Service not available', 'error');
-    return { status: 'error', error: 'GatewaySpendService unavailable' };
-  }
   var addr  = (typeof walletAddress !== 'undefined') ? walletAddress : null;
   var recip = (document.getElementById('sa-recipient') || {}).value || '';
   var amtEl = document.getElementById('sa-amount');
@@ -37420,34 +37416,129 @@ async function saExecGateway() {
     toast('Enter a valid amount', 'warn');
     return { status: 'error', error: 'invalid_amount' };
   }
+  if (!window.ethereum) {
+    toast('No wallet provider found', 'error');
+    return { status: 'error', error: 'no_provider' };
+  }
   if (btn) btn.disabled = true;
   if (btnContent) btnContent.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i> Preparing…';
   try {
-    var result = await window.GatewaySpendService.execute({
-      depositor:   addr,
-      recipient:   recip,
-      token:       asset,
-      amount:      amt,
-      srcChainId:  chainId,
-      dstChainId:  destChainId,
-    }, function(typedData){ return window.ethereum.request({ method:'eth_signTypedData_v4', params:[addr, JSON.stringify(typedData)] }); },
-    function(state){ if (btnContent) btnContent.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i> ' + state; });
-    if (result && result.ok) {
-      // submitted — confirmation is separate; do NOT call this 'confirmed'
+    // ── Token config ─────────────────────────────────────────────────────────
+    var GW_TOKENS = {
+      USDC:  { address: '0x3600000000000000000000000000000000000000', decimals: 6 },
+      EURC:  { address: '0xbEf5f6d51CB62b58e6A8f77868681825C6fe21c1', decimals: 6 },
+      cirBTC:{ address: '0x171A4217b86A807A64eB94757Db6849fb4bDbAA0', decimals: 8 },
+    };
+    var GW_MINTER = '0x2222222d7164433c4C09B0b0D809a9b52C04C205'; // Circle-verified mainnet
+    var GW_WALLET = '0x77777777Dcc4d5A8B6E418Fd04D8997ef11000eE'; // Circle-verified mainnet
+    var tokenCfg = GW_TOKENS[asset];
+    if (!tokenCfg) {
+      toast('Token ' + asset + ' not supported via Gateway', 'error');
+      return { status: 'error', error: 'unsupported_token' };
+    }
+    // ── Convert amount to atomic units (BigInt, no float) ────────────────────
+    var amtStr = String(amt).trim();
+    var dotIdx = amtStr.indexOf('.');
+    var intPart = dotIdx === -1 ? amtStr : amtStr.slice(0, dotIdx);
+    var fracPart = dotIdx === -1 ? '' : amtStr.slice(dotIdx + 1);
+    fracPart = (fracPart + '000000000').slice(0, tokenCfg.decimals);
+    var amtAtomic = BigInt(intPart || '0') * BigInt(10 ** tokenCfg.decimals) + BigInt(fracPart || '0');
+    if (amtAtomic <= 0n) {
+      toast('Amount too small', 'warn');
+      return { status: 'error', error: 'amount_too_small' };
+    }
+    // ── Generate random 32-byte salt ─────────────────────────────────────────
+    var saltBytes = new Uint8Array(32);
+    crypto.getRandomValues(saltBytes);
+    var salt = '0x' + Array.from(saltBytes).map(function(b){ return b.toString(16).padStart(2,'0'); }).join('');
+    // ── Build EIP-712 BurnIntent typed data ──────────────────────────────────
+    // Structure matches GatewaySpendService.js BurnIntent definition (Fase 2.1)
+    var typedData = {
+      types: {
+        EIP712Domain: [
+          { name: 'name',    type: 'string'  },
+          { name: 'version', type: 'string'  },
+          { name: 'chainId', type: 'uint256' },
+        ],
+        BurnIntent: [
+          { name: 'token',       type: 'address' },
+          { name: 'amount',      type: 'uint256' },
+          { name: 'recipient',   type: 'address' },
+          { name: 'depositor',   type: 'address' },
+          { name: 'srcChainId',  type: 'uint256' },
+          { name: 'dstChainId',  type: 'uint256' },
+          { name: 'salt',        type: 'bytes32'  },
+          { name: 'maxFee',      type: 'uint256' },
+          { name: 'minter',      type: 'address' },
+          { name: 'sourceWallet',type: 'address' },
+        ],
+      },
+      primaryType: 'BurnIntent',
+      domain: {
+        name:    'CircleGateway',
+        version: '1',
+        chainId: chainId,
+      },
+      message: {
+        token:        tokenCfg.address,
+        amount:       amtAtomic.toString(),
+        recipient:    recip,
+        depositor:    addr,
+        srcChainId:   chainId,
+        dstChainId:   destChainId,
+        salt:         salt,
+        maxFee:       asset === 'cirBTC' ? '2100' : '2010000',
+        minter:       GW_MINTER,
+        sourceWallet: GW_WALLET,
+      },
+    };
+    if (btnContent) btnContent.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i> Sign in wallet…';
+    var signature = await window.ethereum.request({
+      method: 'eth_signTypedData_v4',
+      params: [addr, JSON.stringify(typedData)],
+    });
+    if (btnContent) btnContent.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i> Submitting…';
+    // ── POST to /api/gateway/transfer ─────────────────────────────────────────
+    var resp = await fetch('/api/gateway/transfer', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Origin': window.location.origin },
+      body: JSON.stringify({
+        sourceSigner: addr,
+        token:        asset,
+        amount:       amtAtomic.toString(),
+        recipient:    recip,
+        srcChainId:   chainId,
+        dstChainId:   destChainId,
+        salt:         salt,
+        signature:    signature,
+        maxFee:       typedData.message.maxFee,
+      }),
+    });
+    var respBody = null;
+    try { respBody = await resp.json(); } catch(_) {}
+    if (resp.ok && respBody && (respBody.status === 'accepted' || respBody.status === 'confirmed')) {
       toast('Gateway transfer submitted. Awaiting on-chain confirmation.', 'success');
       if (typeof saUpdateRoute === 'function') saUpdateRoute();
       // Invalidate shared Gateway balance cache only on successful submission.
       try { if (typeof ubInvalidateGatewayCache === 'function') ubInvalidateGatewayCache(); } catch(_) {}
-      return { status: 'pending', salt: result.salt };
-    } else {
-      var errCode = result && result.error ? result.error : 'unknown_error';
-      // Distinguish ambiguous (submitted but unconfirmed) from hard failure
-      var gwStatus = result && result.gwStatus ? result.gwStatus : null;
-      var opStatus = (gwStatus === 'ambiguous') ? 'ambiguous' : 'error';
-      toast('Gateway transfer failed: ' + errCode, 'error');
-      return { status: opStatus, error: errCode, salt: result && result.salt };
+      return { status: 'pending', salt: salt };
     }
+    // 5xx / 429 → ambiguous (submitted but outcome unknown)
+    if (resp.status >= 500 || resp.status === 429) {
+      var ambigMsg = 'Transfer outcome unknown (server error ' + resp.status + '). Check history before retrying.';
+      toast(ambigMsg, 'warn');
+      return { status: 'ambiguous', salt: salt, error: 'server_' + resp.status };
+    }
+    // 4xx → definitive failure
+    var errCode = (respBody && respBody.error) ? respBody.error : ('http_' + resp.status);
+    toast('Gateway transfer failed: ' + errCode, 'error');
+    return { status: 'error', error: errCode };
   } catch(e) {
+    // User rejected signature → specific message
+    if (e && (e.code === 4001 || (e.message && e.message.includes('rejected')))) {
+      toast('Signature rejected by wallet', 'warn');
+      return { status: 'error', error: 'user_rejected' };
+    }
     toast('Gateway error: ' + (e && e.message ? e.message : String(e)), 'error');
     return { status: 'error', error: e && e.message ? e.message : String(e) };
   } finally {

@@ -104,12 +104,13 @@ describe('GF2-3 — GATEWAY_SPEND_BLOCKED blocks execution in all three modules'
   it('GATEWAY_SPEND_BLOCKED is declared (Fase 2.9.2: now false — security approved)', () => {
     expect(src).toContain('var GATEWAY_SPEND_BLOCKED = false');
   });
-  it('saExecGateway no longer hard-blocks — proceeds to execution (Fase 2.9.2)', () => {
+  it('saExecGateway uses inline EIP-712 sign + POST to /api/gateway/transfer (Fase 2.9.3)', () => {
     const fnIdx = src.indexOf('async function saExecGateway()');
     expect(fnIdx).toBeGreaterThan(-1);
-    const fnBody = src.slice(fnIdx, fnIdx + 1000);
-    // GATEWAY_SPEND_BLOCKED is false — the hard block is removed; GatewaySpendService check remains.
-    expect(fnBody).toContain('GatewaySpendService');
+    const fnBody = src.slice(fnIdx, fnIdx + 8000);
+    // Fase 2.9.3: GatewaySpendService is server-side CF only; browser uses inline impl.
+    expect(fnBody).toContain('eth_signTypedData_v4');
+    expect(fnBody).toContain('BurnIntent');
     expect(fnBody).toContain('toast(');
   });
   it('swpExecuteLiFi patch blocks Gateway source with informational message (no GATEWAY_SPEND_BLOCKED check)', () => {
