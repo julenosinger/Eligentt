@@ -49982,7 +49982,7 @@ const UBScreen = (function() {
         '<div class="ub-op-field-label">Recipient Address</div>' +
         '<div class="ub-scr-input-row"><i class="ti ti-wallet" style="color:var(--muted2);font-size:12px"></i><input class="ub-op-input ub-scr-plain" id="ub-scr-send-addr" type="text" placeholder="0x..." style="font-size:9px;flex:1"/></div>' +
         '<div class="ub-op-row">' +
-        '<div style="flex:1"><div class="ub-op-field-label">Token</div><select class="ub-op-input" id="ub-scr-send-token" style="cursor:pointer;font-size:9px"><option>USDC</option><option>EURC</option></select></div>' +
+        '<div style="flex:1"><div class="ub-op-field-label">Token</div><select class="ub-op-input" id="ub-scr-send-token" style="cursor:pointer;font-size:9px"><option>USDC</option><option>EURC</option>' + ((_ubSourceWallet === 'gateway') ? '<option>cirBTC</option>' : '') + '</select></div>' +
         '<div style="flex:1"><div class="ub-op-field-label">Amount</div><div class="ub-scr-input-row"><span style="color:var(--muted2);font-size:12px;font-weight:700">$</span><input class="ub-op-input ub-scr-plain" id="ub-scr-send-amt" type="number" placeholder="0.00" style="font-size:14px;font-weight:700"/></div></div>' +
         '</div>' +
         '<div class="ub-scr-info-row"><span>Available</span><span id="ub-scr-send-bal" style="color:var(--teal)">—</span></div>' +
@@ -50002,6 +50002,29 @@ const UBScreen = (function() {
           var sym = (tokEl && tokEl.value) || 'USDC';
           if (!addr) { balEl.textContent = '—'; return; }
           balEl.textContent = '…';
+          // Gateway source: read from shared cache — never issue a separate EVM fetch.
+          if (typeof _ubSourceWallet !== 'undefined' && _ubSourceWallet === 'gateway') {
+            var gwStr = (typeof ubGetGatewayBalance === 'function') ? ubGetGatewayBalance(sym) : null;
+            if (gwStr === null) {
+              balEl.textContent = '…';
+              // Trigger a cache refresh then re-read once.
+              if (typeof ubGatewaySyncRefresh === 'function') {
+                ubGatewaySyncRefresh().then(function() {
+                  if (!document.getElementById('ub-scr-send-bal')) return;
+                  var refreshed = (typeof ubGetGatewayBalance === 'function') ? ubGetGatewayBalance(sym) : null;
+                  balEl.textContent = refreshed !== null ? (refreshed + ' ' + sym) : '— (unavailable)';
+                }).catch(function() {
+                  if (document.getElementById('ub-scr-send-bal')) balEl.textContent = '— (error)';
+                });
+              } else {
+                balEl.textContent = '— (unavailable)';
+              }
+            } else {
+              balEl.textContent = gwStr + ' ' + sym;
+            }
+            return;
+          }
+          // EVM / Agent source: resolve tokenObj then read via BalanceService.
           var tokenObj = null;
           if (typeof TOKEN_LIST !== 'undefined') {
             for (var i = 0; i < TOKEN_LIST.length; i++) {

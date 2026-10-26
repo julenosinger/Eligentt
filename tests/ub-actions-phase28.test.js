@@ -72,9 +72,9 @@ describe('UB28-2 — Send drawer balance display', () => {
     expect(src).toContain('id="ub-scr-send-bal"');
   });
 
-  it('send balance uses BalanceService.getTokenBalance', () => {
+  it('send balance uses BalanceService.getTokenBalance for EVM source', () => {
     const idx = src.indexOf('id="ub-scr-send-bal"');
-    const region = src.slice(idx, idx + 3000);
+    const region = src.slice(idx, idx + 4500);
     expect(region).toContain('BalanceService.getTokenBalance');
   });
 
@@ -86,14 +86,14 @@ describe('UB28-2 — Send drawer balance display', () => {
 
   it('send balance updates on token change', () => {
     const idx = src.indexOf("_ubScrSendLoadBal");
-    const region = src.slice(idx, idx + 2000);
+    const region = src.slice(idx, idx + 3500);
     expect(region).toContain("addEventListener('change', _ubScrSendLoadBal)");
   });
 
   it('send total updates with selected token symbol not hardcoded USDC', () => {
     // sym2 is defined in the amount input handler inside the setTimeout
     const idx = src.indexOf('_ubScrSendLoadBal');
-    const region = src.slice(idx, idx + 2500);
+    const region = src.slice(idx, idx + 4500);
     expect(region).toContain('sym2');
   });
 });
@@ -185,19 +185,23 @@ describe('UB28-5 — ubGwCache is single source for Gateway balances', () => {
   });
 });
 
-// ── UB28-6: GATEWAY_SPEND_BLOCKED remains true ───────────────────────────────
+// ── UB28-6: GATEWAY_SPEND_BLOCKED (Fase 2.9.2: set to false — security approved) ─
 describe('UB28-6 — GATEWAY_SPEND_BLOCKED enforcement', () => {
-  it('GATEWAY_SPEND_BLOCKED is declared as true', () => {
+  it('GATEWAY_SPEND_BLOCKED is declared as false (Fase 2.9.2: all security checks approved)', () => {
     const idx = src.indexOf('var GATEWAY_SPEND_BLOCKED');
     expect(idx).toBeGreaterThan(0);
     const decl = src.slice(idx, idx + 60);
-    expect(decl).toContain('true');
+    expect(decl).toContain('false');
   });
 
-  it('saExecGateway checks GATEWAY_SPEND_BLOCKED before execution', () => {
+  it('saExecGateway no longer hard-blocks execution (Fase 2.9.2: flag removed, backend health-check instead)', () => {
+    // Fase 2.9.2: GATEWAY_SPEND_BLOCKED removed from saExecGateway.
+    // Backend availability is checked by GatewaySpendService.execute at runtime.
     const idx = src.indexOf('async function saExecGateway(');
-    const fnBody = src.slice(idx, idx + 2000);
-    expect(fnBody).toContain('GATEWAY_SPEND_BLOCKED');
+    expect(idx).toBeGreaterThan(0);
+    const fnBody = src.slice(idx, idx + 3000);
+    // Must route to GatewaySpendService.execute
+    expect(fnBody).toContain('GatewaySpendService');
   });
 });
 

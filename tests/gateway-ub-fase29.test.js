@@ -160,19 +160,18 @@ describe('GF29-6 — enterUnifiedBalanceMode routes gateway to UBScreen', () => 
   });
 });
 
-// ── GF29-7: GATEWAY_SPEND_BLOCKED guard still present ────────────────────
-describe('GF29-7 — GATEWAY_SPEND_BLOCKED guard preserved', () => {
+// ── GF29-7: GATEWAY_SPEND_BLOCKED guard (Fase 2.9.2: flag removed from saExecGateway) ──
+describe('GF29-7 — GATEWAY_SPEND_BLOCKED guard (Fase 2.9.2)', () => {
   const body = extractFn(src, 'saExecGateway');
 
-  it('saExecGateway still checks GATEWAY_SPEND_BLOCKED', () => {
-    expect(body).toContain('GATEWAY_SPEND_BLOCKED');
+  it('saExecGateway routes to GatewaySpendService (flag removed in Fase 2.9.2)', () => {
+    // GATEWAY_SPEND_BLOCKED removed from saExecGateway in Fase 2.9.2.
+    // Backend availability is surfaced at runtime via GatewaySpendService.execute.
+    expect(body).toContain('GatewaySpendService');
   });
 
-  it('returns early when GATEWAY_SPEND_BLOCKED is truthy', () => {
-    const blockIdx = body.indexOf('GATEWAY_SPEND_BLOCKED');
-    // Include chars before the match to capture the 'if (' prefix
-    const snippet  = body.slice(Math.max(0, blockIdx - 10), blockIdx + 60);
-    expect(snippet).toMatch(/if\s*\(\s*GATEWAY_SPEND_BLOCKED\s*\)/);
+  it('saExecGateway returns a discriminated result object', () => {
+    expect(body).toContain("status: 'error'");
   });
 });
 
