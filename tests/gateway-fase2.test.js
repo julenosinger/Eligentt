@@ -174,17 +174,23 @@ describe('GF2-4 — Bridge: Gateway route shape and rendering', () => {
 
 // ── GF2-5: No double-counting, no balance merge ──────────────────────────────
 describe('GF2-5 — No double-counting or balance merge', () => {
-  it('saLoadGatewayBalance reads from /api/gateway/balances, not EVM state', () => {
+  // Fase 2.7: saLoadGatewayBalance now reads from the shared _ubGwCache via
+  // ubGetGatewayBalance() — it no longer calls /api/gateway/balances directly.
+  // The shared cache is the single fetch path; no independent fetch is allowed.
+  it('saLoadGatewayBalance reads from shared cache (ubGetGatewayBalance), not EVM state', () => {
     const fnIdx = src.indexOf('function saLoadGatewayBalance()');
-    const fnBody = src.slice(fnIdx, fnIdx + 700);
-    expect(fnBody).toContain('/api/gateway/balances');
+    const fnBody = src.slice(fnIdx, fnIdx + 1000);
+    expect(fnBody).toContain('ubGetGatewayBalance');  // reads shared cache
+    expect(fnBody).not.toContain("fetch('/api/gateway/balances");  // no direct fetch
     expect(fnBody).not.toContain('_saLastBalance');
     expect(fnBody).not.toContain('UB.state');
   });
-  it('swpLoadGatewayBalance reads from /api/gateway/balances, not swap balance state', () => {
+  // Fase 2.7: swpLoadGatewayBalance also reads from shared cache.
+  it('swpLoadGatewayBalance reads from shared cache (ubGetGatewayBalance), not swap balance state', () => {
     const fnIdx = src.indexOf('function swpLoadGatewayBalance()');
-    const fnBody = src.slice(fnIdx, fnIdx + 700);
-    expect(fnBody).toContain('/api/gateway/balances');
+    const fnBody = src.slice(fnIdx, fnIdx + 1000);
+    expect(fnBody).toContain('ubGetGatewayBalance');  // reads shared cache
+    expect(fnBody).not.toContain("fetch('/api/gateway/balances");  // no direct fetch
     expect(fnBody).not.toContain('swp-bal-in-val');
     expect(fnBody).not.toContain('SWP.balance');
   });

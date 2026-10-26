@@ -37359,36 +37359,38 @@ function saLoadGatewayBalance() {
   var addr = (typeof walletAddress !== 'undefined') ? walletAddress : null;
   if (!addr) { pill.style.display = 'none'; return; }
   pill.style.display = '';
-  pill.textContent   = '… GW';
   var asset = (typeof saCurrentAsset !== 'undefined') ? saCurrentAsset : 'USDC';
-  fetch('/api/gateway/balances?address=' + encodeURIComponent(addr))
-    .then(function(r){ return r.ok ? r.json() : null; })
-    .then(function(data){
-      if (!data) { pill.textContent = '— GW'; return; }
-      var bal = null;
-      if (Array.isArray(data.balances)) {
-        var entry = data.balances.find(function(b){ return b.token && b.token.toUpperCase() === asset.toUpperCase(); });
-        if (entry) bal = entry.balance || entry.amount || entry.value;
-      } else if (data[asset]) {
-        bal = data[asset];
+
+  // Read from the shared Unified Balance Gateway cache — no independent fetch.
+  // The cache is populated by ubGatewayFetch() which is called from ubRefresh().
+  // If the cache is empty or stale, trigger a background refresh and show pending.
+  var cached = (typeof ubGetGatewayBalance === 'function') ? ubGetGatewayBalance(asset) : null;
+  if (cached === null) {
+    // Cache miss — show pending and trigger a background refresh.
+    pill.textContent = '… GW';
+    try { if (typeof ubGatewaySyncRefresh === 'function') ubGatewaySyncRefresh(); } catch(_) {}
+    // Re-read after a short delay once the fetch may have completed.
+    setTimeout(function() {
+      var refreshed = (typeof ubGetGatewayBalance === 'function') ? ubGetGatewayBalance(asset) : null;
+      if (refreshed !== null) {
+        pill.textContent = _saFmtGwBal(refreshed) + ' GW';
+      } else {
+        pill.textContent = '— GW';
       }
-      // Display balance. The /api/gateway/balances API returns human-readable
-      // decimal strings (e.g. "1.234567"). Display as-is, truncated to 6 decimal
-      // places for readability. This is display-only — the execution path uses
-      // GatewaySpendService.strToAtomic which is BigInt-based and has no float.
-      var displayBal = '0.000000';
-      if (bal) {
-        var balStr = String(bal).trim();
-        var dotIdx = balStr.indexOf('.');
-        if (dotIdx === -1) {
-          displayBal = balStr + '.000000';
-        } else {
-          displayBal = balStr.slice(0, dotIdx + 7).padEnd(dotIdx + 7, '0');
-        }
-      }
-      pill.textContent = displayBal + ' GW';
-    })
-    .catch(function(){ pill.textContent = '— GW'; });
+    }, 3000);
+    return;
+  }
+  pill.textContent = _saFmtGwBal(cached) + ' GW';
+}
+
+// Format a Gateway balance string for display (truncate to 6 decimal places).
+// Input: human-readable decimal string from cache e.g. "12.345678901".
+// Output: "12.345678" — display-only, never used for arithmetic.
+function _saFmtGwBal(balStr) {
+  var s = String(balStr || '0').trim();
+  var dotIdx = s.indexOf('.');
+  if (dotIdx === -1) return s + '.000000';
+  return s.slice(0, dotIdx + 7).padEnd(dotIdx + 7, '0');
 }
 
 async function saExecGateway() {
@@ -37427,6 +37429,9 @@ async function saExecGateway() {
     if (result && result.ok) {
       toast('Gateway transfer submitted. Awaiting on-chain confirmation.', 'success');
       if (typeof saUpdateRoute === 'function') saUpdateRoute();
+      // Invalidate shared Gateway balance cache so Send, Swap, Bridge and UB all
+      // show a fresh balance after this spend. The cache refresh is non-blocking.
+      try { if (typeof ubInvalidateGatewayCache === 'function') ubInvalidateGatewayCache(); } catch(_) {}
     } else {
       toast('Gateway transfer failed: ' + (result && result.error ? result.error : 'unknown error'), 'error');
     }
@@ -37477,20 +37482,23 @@ function swpLoadGatewayBalance() {
     ? (SWP.tokens[SWP.tokenInIdx] || {}).symbol || 'USDC' : 'USDC';
   var addr  = (typeof walletAddress !== 'undefined') ? walletAddress : null;
   if (!addr || !lbl) return;
-  lbl.textContent = 'GW: …';
-  fetch('/api/gateway/balances?address=' + encodeURIComponent(addr))
-    .then(function(r){ return r.ok ? r.json() : null; })
-    .then(function(data){
-      if (!data) { lbl.textContent = 'GW: —'; return; }
-      var bal = null;
-      if (Array.isArray(data.balances)) {
-        var entry = data.balances.find(function(b){ return b.token && b.token.toUpperCase() === asset.toUpperCase(); });
-        if (entry) bal = entry.balance || entry.amount || entry.value;
-      } else if (data[asset]) bal = data[asset];
-      // /api/gateway/balances returns human-readable decimal strings, not atomic units.
-      lbl.textContent = bal ? ('GW: ' + (parseFloat(bal) || 0).toFixed(6)) : 'GW: 0.000000';
-    })
-    .catch(function(){ lbl.textContent = 'GW: —'; });
+
+  // Read from the shared Unified Balance Gateway cache — no independent fetch.
+  // Cache is populated by ubGatewayFetch() called from ubRefresh().
+  var cached = (typeof ubGetGatewayBalance === 'function') ? ubGetGatewayBalance(asset) : null;
+  if (cached === null) {
+    lbl.textContent = 'GW: …';
+    try { if (typeof ubGatewaySyncRefresh === 'function') ubGatewaySyncRefresh(); } catch(_) {}
+    setTimeout(function() {
+      var refreshed = (typeof ubGetGatewayBalance === 'function') ? ubGetGatewayBalance(asset) : null;
+      lbl.textContent = refreshed !== null
+        ? 'GW: ' + (typeof _saFmtGwBal === 'function' ? _saFmtGwBal(refreshed) : refreshed)
+        : 'GW: —';
+    }, 3000);
+    return;
+  }
+  // _saFmtGwBal is defined alongside saLoadGatewayBalance — reuse for consistency.
+  lbl.textContent = 'GW: ' + (typeof _saFmtGwBal === 'function' ? _saFmtGwBal(cached) : cached);
 }
 
 // Patch swpExecute to intercept Gateway source before actual execution.
@@ -47186,6 +47194,16 @@ var _ubGwSeq     = 0;   // anti-race generation counter
 var _ubGwOpen    = true; // panel collapsed state
 var _ubGwFetching = false;
 var _ubGwLastData = null; // last successful Gateway data — used by ubFilterAssets for asset rows
+// ── Shared Gateway balance cache ─────────────────────────────────────────────
+// Single source of truth consumed by UB, Send, Swap, Bridge. Populated by
+// ubGatewayRender() (the only path that calls /api/gateway/balances). Other
+// modules MUST read via ubGetGatewayBalance() — never issue their own fetch.
+var _ubGwCache = {
+  data:   null,   // raw API response { USDC:[...], EURC:[...], cirBTC:[...] }
+  ts:     0,      // Date.now() of last successful fetch
+  addr:   '',     // wallet address the cache belongs to
+  status: 'empty' // 'empty' | 'ok' | 'error'
+};
 
 // Asset display metadata
 var _UB_GW_ASSETS = [
@@ -47330,8 +47348,13 @@ function ubGatewayRender(data) {
   assEl.innerHTML = html;
   assEl.style.display = '';
 
-  // Store data and update Unified Portfolio subcards + asset rows
+  // Store data and update Unified Portfolio subcards + asset rows.
+  // Update shared cache — single source of truth for Send, Swap, Bridge.
   _ubGwLastData = data;
+  _ubGwCache.data   = data;
+  _ubGwCache.ts     = Date.now();
+  _ubGwCache.addr   = (typeof walletAddress !== 'undefined' ? walletAddress : '') || '';
+  _ubGwCache.status = 'ok';
   _ubUpRenderGwSubcard(data);
   ubFilterAssets(); // re-render asset groups with Gateway sub-rows
 }
@@ -47375,6 +47398,53 @@ function _ubUpRenderGwSubcard(data) {
  * Called from ubRenderHero after UB.state is populated.
  * Never includes Gateway balances.
  */
+
+/**
+ * ubGetGatewayBalance(sym) — read Gateway balance for one asset from the
+ * shared cache. Returns a human-readable decimal string (same format as the
+ * /api/gateway/balances API), or null when the cache is empty, stale (>90 s),
+ * or belongs to a different wallet.
+ *
+ * NEVER issues a network request. Callers that need fresh data must call
+ * ubGatewayFetch() (or ubRefresh() which calls it) first.
+ */
+function ubGetGatewayBalance(sym) {
+  var addr = (typeof walletAddress !== 'undefined' ? walletAddress : '') || '';
+  // Invalidate if cache is for a different wallet.
+  if (_ubGwCache.addr && addr && _ubGwCache.addr.toLowerCase() !== addr.toLowerCase()) return null;
+  if (_ubGwCache.status !== 'ok' || !_ubGwCache.data) return null;
+  // Consider stale after 90 s — callers should display stale indicator.
+  if (_ubGwCache.ts && (Date.now() - _ubGwCache.ts) > 90000) return null;
+  var data = _ubGwCache.data;
+  var rows = data[sym] || data[(sym || '').toUpperCase()];
+  if (!rows || !Array.isArray(rows) || !rows.length) return '0';
+  // Find the asset metadata for decimal places.
+  var dec = 6;
+  for (var i = 0; i < _UB_GW_ASSETS.length; i++) {
+    if (_UB_GW_ASSETS[i].token === sym || _UB_GW_ASSETS[i].sym === sym) { dec = _UB_GW_ASSETS[i].dec; break; }
+  }
+  // Sum all chain rows using _ubGwAddStr (string arithmetic — no float).
+  var total = '0';
+  for (var r = 0; r < rows.length; r++) {
+    total = _ubGwAddStr(total, String(rows[r].balance || '0'), dec);
+  }
+  return total; // e.g. "12.345678"
+}
+
+/**
+ * ubInvalidateGatewayCache() — mark cache stale and schedule a fresh fetch.
+ * Call after a Gateway spend operation completes or is confirmed, so the next
+ * time Send/Swap/Bridge read the balance they trigger a fresh load.
+ * Does NOT clear _ubGwLastData (keeps asset rows visible until new data arrives).
+ */
+function ubInvalidateGatewayCache() {
+  _ubGwCache.status = 'empty';
+  _ubGwCache.ts     = 0;
+  // Trigger a non-blocking refresh of the Gateway balance section only.
+  // ubRefresh() would also re-fetch EVM balances — overkill for a spend confirmation.
+  try { ubGatewaySyncRefresh(); } catch(_e) {}
+}
+
 function _ubUpRenderEvmSubcard() {
   var body = document.getElementById('ub-up-evm-body');
   var footer = document.getElementById('ub-up-evm-footer');
