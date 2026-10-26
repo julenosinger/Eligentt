@@ -50709,20 +50709,58 @@ const UBScreen = (function() {
 
     // Call gatewayMint(bytes attestationPayload, bytes signature)
     // ABI: https://developers.circle.com/gateway/howtos/transfer-unified-usdc-balance.md
+    // Selector: keccak256("gatewayMint(bytes,bytes)") = 0x9fb01cc5 (verified)
+    // Encode calldata manually to avoid ethers Interface fragment-not-found errors in v6 UMD.
     if (!attestation || !attestation.startsWith('0x')) throw new Error('Missing attestation from Circle API (got: ' + String(attestation).slice(0,40) + ')');
     if (!operatorSig || !operatorSig.startsWith('0x')) throw new Error('Missing operator signature from Circle API (got: ' + String(operatorSig).slice(0,40) + ')');
-    var iface = new ethers.Interface([
-      'function gatewayMint(bytes attestationPayload, bytes signature) nonpayable',
-    ]);
-    var calldata = iface.encodeFunctionData('gatewayMint', [attestation, operatorSig]);
+
+    // Manual ABI encoding: gatewayMint(bytes attestationPayload, bytes signature)
+    // Layout: selector(4) + offset1(32) + offset2(32) + len1(32) + data1(padded) + len2(32) + data2(padded)
+    function _hexToBytes(hex) {
+      var h = hex.startsWith('0x') ? hex.slice(2) : hex;
+      if (h.length % 2) h = '0' + h;
+      return h;
+    }
+    function _pad32(hexStr) { return hexStr.padStart(64, '0'); }
+    function _encodeBytes(hex) {
+      var h = _hexToBytes(hex);
+      var byteLen = h.length / 2;
+      var lenHex = _pad32(byteLen.toString(16));
+      var paddedData = h.length % 64 === 0 ? h : h + '0'.repeat(64 - (h.length % 64));
+      return lenHex + paddedData;
+    }
+    var attEncoded = _encodeBytes(attestation);
+    var sigEncoded = _encodeBytes(operatorSig);
+    // offset1 = 64 (points past the two offset words to att data)
+    // offset2 = 64 + 32 + len(attEncoded in bytes)
+    var offset1 = 64; // 2 offset words × 32 bytes
+    var attEncodedByteLen = attEncoded.length / 2; // bytes including length word + padded data
+    var offset2 = offset1 + attEncodedByteLen;
+    var calldata = '0x9fb01cc5'
+      + _pad32(offset1.toString(16))
+      + _pad32(offset2.toString(16))
+      + attEncoded
+      + sigEncoded;
+
+    // Enforce 20 Gwei floor on Arc (#-39000) and use live fee data on other chains.
+    var _mintProvider = new ethers.BrowserProvider(window.ethereum);
+    var _mintFee = null;
+    try { _mintFee = await _mintProvider.getFeeData(); } catch(_) {}
+    var _mintFloor = BigInt('20000000000'); // 20 Gwei
+    var _mintMaxFee = (_mintFee && _mintFee.maxFeePerGas && _mintFee.maxFeePerGas > _mintFloor)
+      ? _mintFee.maxFeePerGas : _mintFloor;
+    var _mintPrio = (_mintFee && _mintFee.maxPriorityFeePerGas && _mintFee.maxPriorityFeePerGas > 0n)
+      ? _mintFee.maxPriorityFeePerGas : BigInt('1500000000'); // 1.5 Gwei
 
     var mintTxHash = await window.ethereum.request({
       method: 'eth_sendTransaction',
       params: [{
-        from:  walletAddress,
-        to:    MINTER_ADDR,
-        data:  calldata,
-        value: '0x0',
+        from:             walletAddress,
+        to:               MINTER_ADDR,
+        data:             calldata,
+        value:            '0x0',
+        maxFeePerGas:     '0x' + _mintMaxFee.toString(16),
+        maxPriorityFeePerGas: '0x' + _mintPrio.toString(16),
       }],
     });
 
