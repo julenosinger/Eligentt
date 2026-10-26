@@ -36788,7 +36788,22 @@ async function saExecuteSend() {
       var mc3Iface = new ethers.Interface(mc3Abi);
       var aggData = mc3Iface.encodeFunctionData('aggregate3', [aggCalls]);
       var memoC = new ethers.Contract(MEMO_CONTRACT_ADDRESS, MEMO_ABI, signer);
-      tx = await memoC.memo(M3F_ADDR, aggData, ethers.id(memoText.slice(0, 64)), ethers.toUtf8Bytes(memoText));
+      // Arc Mainnet enforces a 20 Gwei maxFeePerGas floor (#-39000).
+      // Fetch live fee data and enforce the floor explicitly so both
+      // the wallet simulation and the actual tx use a valid gas price.
+      var _arcFeeData = null;
+      try { _arcFeeData = await signer.provider.getFeeData(); } catch(_) {}
+      var _arcFloor = ethers.parseUnits('20', 'gwei');
+      var _arcMaxFee = (_arcFeeData && _arcFeeData.maxFeePerGas && _arcFeeData.maxFeePerGas > _arcFloor)
+        ? _arcFeeData.maxFeePerGas : _arcFloor;
+      var _arcPrio = (_arcFeeData && _arcFeeData.maxPriorityFeePerGas && _arcFeeData.maxPriorityFeePerGas > 0n)
+        ? _arcFeeData.maxPriorityFeePerGas : ethers.parseUnits('1.5', 'gwei');
+      tx = await memoC.memo(
+        M3F_ADDR, aggData,
+        ethers.id(memoText.slice(0, 64)),
+        ethers.toUtf8Bytes(memoText),
+        { maxFeePerGas: _arcMaxFee, maxPriorityFeePerGas: _arcPrio }
+      );
     } else {
       tx = await mc3.aggregate3(aggCalls);
     }
