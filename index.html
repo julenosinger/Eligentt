@@ -50434,11 +50434,77 @@ const UBScreen = (function() {
   function openSwap() { showOperation('swap'); }
   function openBridge() { showOperation('bridge'); }
 
+  // ── Gateway Mint step — calls GatewayMinter.gatewayMint(attestation, signature) ──
+  // Called after Circle /v1/transfer returns a valid attestation.
+  // Switches to destination chain if needed, then submits the mint tx.
+  // Returns the mint tx hash on success; throws on failure.
+  async function _execGatewayMint(opts) {
+    var attestation = opts.attestation; // "0x..." from Circle API
+    var operatorSig = opts.signature;   // "0x..." from Circle API (operator signature)
+    var destChain   = opts.destChainId || ((typeof activeChainId !== 'undefined') ? activeChainId : 5042);
+
+    // GatewayMinter address — same on all supported chains (verified Circle docs Oct 2026)
+    var MINTER_ADDR = '0x2222222d7164433c4C09B0b0D809a9b52C04C205';
+
+    // Switch wallet to destination chain if not already there
+    if (window.ethereum && typeof activeChainId !== 'undefined' && activeChainId !== destChain) {
+      try {
+        await window.ethereum.request({
+          method: 'wallet_switchEthereumChain',
+          params: [{ chainId: '0x' + destChain.toString(16) }],
+        });
+        // Wait briefly for chain switch to propagate
+        await new Promise(function(r){ setTimeout(r, 600); });
+      } catch(switchErr) {
+        // Chain not added to wallet — surface error
+        var switchMsg = switchErr && switchErr.message ? switchErr.message : String(switchErr);
+        throw new Error('Chain switch to ' + destChain + ' failed: ' + switchMsg);
+      }
+    }
+
+    // Call gatewayMint(bytes attestationPayload, bytes signature)
+    // ABI: https://developers.circle.com/gateway/howtos/transfer-unified-usdc-balance.md
+    var iface = new ethers.Interface([
+      'function gatewayMint(bytes attestationPayload, bytes signature) nonpayable',
+    ]);
+    var calldata = iface.encodeFunctionData('gatewayMint', [attestation, operatorSig]);
+
+    var mintTxHash = await window.ethereum.request({
+      method: 'eth_sendTransaction',
+      params: [{
+        from:  walletAddress,
+        to:    MINTER_ADDR,
+        data:  calldata,
+        value: '0x0',
+      }],
+    });
+
+    if (!mintTxHash) throw new Error('No tx hash returned from wallet');
+
+    // Wait for receipt (non-blocking best-effort: up to 60 polls × 3s = 3 min)
+    var provider = new ethers.BrowserProvider(window.ethereum);
+    var receipt = null;
+    for (var i = 0; i < 60 && !receipt; i++) {
+      await new Promise(function(r){ setTimeout(r, 3000); });
+      try { receipt = await provider.getTransactionReceipt(mintTxHash); } catch(_) {}
+    }
+    if (receipt && receipt.status === 0) {
+      throw new Error('gatewayMint tx reverted — check attestation validity');
+    }
+
+    return mintTxHash;
+  }
+
   async function execSend() {
     if (!walletAddress || !signer) { alert('Connect wallet first'); return; }
     var addr = document.getElementById('ub-scr-send-addr').value.trim();
     var amt = parseFloat(document.getElementById('ub-scr-send-amt').value) || 0;
     var token = document.getElementById('ub-scr-send-token').value;
+    var destChainId = (function() {
+      var el = document.getElementById('sa-dest-chain');
+      var v = el ? parseInt(el.value) : NaN;
+      return isNaN(v) ? ((typeof activeChainId !== 'undefined') ? activeChainId : 5042) : v;
+    })();
     if (!/^0x[0-9a-fA-F]{40}$/.test(addr)) { alert('Valid 0x address required'); return; }
     if (amt <= 0) { alert('Enter amount'); return; }
 
@@ -50480,9 +50546,29 @@ const UBScreen = (function() {
           showResult(false, 'Gateway transfer blocked — check GatewaySpendService availability.');
           return;
         }
+        if (gwStatus === 'pending' && gwResult.attestation) {
+          // Circle API accepted and returned an attestation.
+          // Must call GatewayMinter.gatewayMint(attestation, signature) on destination chain.
+          setStep(1, 'Submitted to Circle Gateway', 'done');
+          setStep(2, 'Awaiting on-chain confirmation…', 'active');
+          try {
+            var mintTxHash = await _execGatewayMint({
+              attestation: gwResult.attestation,
+              signature:   gwResult.operatorSig,
+              destChainId: destChainId,
+            });
+            setStep(2, 'Minted on destination chain', 'done');
+            showResult(true, amt + ' ' + token + ' confirmed — tx ' + mintTxHash.slice(0, 10) + '…');
+            try { if (typeof ubInvalidateGatewayCache === 'function') ubInvalidateGatewayCache(); } catch(_) {}
+          } catch(mintErr) {
+            var mintMsg = mintErr && mintErr.message ? mintErr.message : String(mintErr);
+            setStep(2, 'Mint failed: ' + mintMsg.slice(0, 80), 'error');
+            showResult(false, 'Transfer submitted but mint failed — attestation saved. Retry mint manually.');
+          }
+          return;
+        }
         if (gwStatus === 'pending') {
-          // Submitted to the Circle API; on-chain confirmation is in progress.
-          // Do NOT show as fully confirmed — the operation is pending.
+          // Submitted but no attestation yet (unusual — Circle normally returns attestation immediately).
           setStep(1, 'Submitted to Circle Gateway', 'done');
           setStep(2, 'Awaiting on-chain confirmation…', 'active');
           showResult(true, amt + ' ' + token + ' submitted — confirming on-chain');

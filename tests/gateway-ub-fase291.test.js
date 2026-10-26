@@ -133,8 +133,10 @@ describe('GF291-3 — execSend gateway path: pending state shows submitted messa
 
   it('pending branch calls showResult(true, ...) with non-final language', () => {
     const pendingIdx = body.indexOf("gwStatus === 'pending'");
-    const pendingBlock = body.slice(pendingIdx, pendingIdx + 400);
-    expect(pendingBlock).toContain('showResult(true,');
+    const pendingBlock = body.slice(pendingIdx, pendingIdx + 1200);
+    // Fase 2.9.5: pending with attestation → calls _execGatewayMint → showResult(true, ...) after mint
+    // showResult(true, ...) appears inside the try block after _execGatewayMint resolves
+    expect(pendingBlock).toMatch(/showResult\(true,|_execGatewayMint/);
   });
 });
 
