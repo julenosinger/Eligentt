@@ -25356,7 +25356,9 @@ function stDrawChart() {
   var bucketMs = _stTfMs(ST.tf);
   var nowBucket = Math.floor(Date.now() / bucketMs) * bucketMs;
   var ticks = _stTickStore[pairKey] || [];
-  var rnd = _stRnd(_stHash(pairKey));
+  // Seed the per-bucket RNG with bucket start time so each bucket has a
+  // stable but unique sequence. Re-seeding per draw with pair hash makes
+  // all candles repeat the same values on every redraw.
   var volatility = price * 0.004;
   var candles = [];
   var volumes = [];
@@ -25364,6 +25366,7 @@ function stDrawChart() {
   for (var i = 0; i < bars; i++) {
     var bStart = nowBucket - (bars - 1 - i) * bucketMs;
     var bEnd = bStart + bucketMs;
+    var rnd = _stRnd(_stHash(pairKey + ':' + bStart));
     var o = 0, h = -Infinity, l = Infinity, c = 0, n = 0;
     for (var k = 0; k < ticks.length; k++) {
       var s = ticks[k];
