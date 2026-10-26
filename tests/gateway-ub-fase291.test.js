@@ -49,11 +49,12 @@ describe('GF291-1 — saExecGateway returns a discriminated result', () => {
   it('returns an object with status field — not void', () => {
     // Every early-return must carry { status: ... }
     const returns = body.match(/return\s*\{[^}]*status\s*:/g) || [];
-    expect(returns.length).toBeGreaterThanOrEqual(4); // blocked, error×2, pending, ambiguous/error
+    expect(returns.length).toBeGreaterThanOrEqual(4); // error×3+, pending, ambiguous
   });
 
-  it('blocked path returns status: blocked', () => {
-    expect(body).toContain("status: 'blocked'");
+  it('Fase 2.9.4: no blocked status — GATEWAY_SPEND_BLOCKED removed from saExecGateway', () => {
+    // Blocked status was removed in Fase 2.9.2; saExecGateway now proceeds directly.
+    expect(body).not.toContain("status: 'blocked'");
   });
 
   it('pending path returns status: pending', () => {
@@ -70,11 +71,9 @@ describe('GF291-1 — saExecGateway returns a discriminated result', () => {
     expect(body).toContain("status: 'error'");
   });
 
-  it('does NOT have a bare return without a status object after the BLOCKED check', () => {
-    // Remove the BLOCKED early-return line, then check no bare 'return;'
-    const afterBlocked = body.slice(body.indexOf("status: 'blocked'") + 20);
+  it('does NOT have a bare return without a status object', () => {
     // bare return: 'return;' or 'return\n' (not 'return {')
-    const bareReturns = (afterBlocked.match(/\breturn\s*;/g) || []).length;
+    const bareReturns = (body.match(/\breturn\s*;/g) || []).length;
     expect(bareReturns).toBe(0);
   });
 });
@@ -278,10 +277,12 @@ describe('GF291-10 — saExecGateway: cache not invalidated when blocked', () =>
     expect(invalidateIdx).toBeGreaterThan(okIdx);
   });
 
-  it('ubInvalidateGatewayCache is NOT called in the BLOCKED path', () => {
-    const blockedIdx    = body.indexOf("status: 'blocked'");
+  it('ubInvalidateGatewayCache is only called in the success path (Fase 2.9.4)', () => {
+    // Fase 2.9.4: no blocked path; invalidate only on resp.ok + attestation received.
     const invalidateIdx = body.indexOf('ubInvalidateGatewayCache');
-    // invalidate comes after the blocked return, so blocked path cannot reach it
-    expect(invalidateIdx).toBeGreaterThan(blockedIdx);
+    expect(invalidateIdx).toBeGreaterThan(-1);
+    // It must be inside the success branch (after resp.ok check)
+    const okIdx = body.indexOf('resp.ok');
+    expect(invalidateIdx).toBeGreaterThan(okIdx);
   });
 });

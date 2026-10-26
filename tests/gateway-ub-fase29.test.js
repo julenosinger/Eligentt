@@ -164,11 +164,12 @@ describe('GF29-6 — enterUnifiedBalanceMode routes gateway to UBScreen', () => 
 describe('GF29-7 — GATEWAY_SPEND_BLOCKED guard (Fase 2.9.2)', () => {
   const body = extractFn(src, 'saExecGateway');
 
-  it('saExecGateway signs BurnIntent inline and POSTs to /api/gateway/transfer (Fase 2.9.3)', () => {
+  it('saExecGateway signs BurnIntent inline and POSTs to Circle Gateway API /v1/transfer (Fase 2.9.4)', () => {
     // GATEWAY_SPEND_BLOCKED removed from saExecGateway in Fase 2.9.2.
     // Fase 2.9.3: inline EIP-712 sign + POST replaces window.GatewaySpendService.
     expect(body).toContain('eth_signTypedData_v4');
-    expect(body).toContain('/api/gateway/transfer');
+    // Fase 2.9.4: posts directly to Circle Gateway API (gateway-api.circle.com/v1/transfer)
+    expect(body).toContain('gateway-api');
   });
 
   it('saExecGateway returns a discriminated result object', () => {
