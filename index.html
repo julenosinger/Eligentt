@@ -50184,16 +50184,60 @@ const UBScreen = (function() {
     var token = document.getElementById('ub-scr-send-token').value;
     if (!/^0x[0-9a-fA-F]{40}$/.test(addr)) { alert('Valid 0x address required'); return; }
     if (amt <= 0) { alert('Enter amount'); return; }
-    showProgress('Sending ' + amt + ' ' + token + '...');
-    setStep(0, 'Preparing transaction', 'active');
-    try {
-      // Ensure required DOM elements exist for saExecuteSend
+
+    // ── Gateway Send path ─────────────────────────────────────────────────
+    // When the user selected Circle Gateway as the fund source, route to the
+    // secure GatewaySpendService executor (saExecGateway). This path:
+    //   • signs a BurnIntent (EIP-712) with the connected EVM wallet,
+    //   • submits to the Circle Gateway API via /api/gateway/transfer,
+    //   • awaits server-side on-chain confirmation (/api/gateway/transfer/confirm),
+    //   • invalidates the shared _ubGwCache on success.
+    // The GATEWAY_SPEND_BLOCKED guard inside saExecGateway is the single point
+    // of truth — do NOT duplicate it here.
+    if (_ubSourceWallet === 'gateway') {
+      // Populate the DOM inputs that saExecGateway reads.
       var hr = document.getElementById('sa-recipient');
       if (!hr) { hr = document.createElement('input'); hr.id = 'sa-recipient'; hr.type = 'hidden'; document.body.appendChild(hr); }
       hr.value = addr;
       var ha = document.getElementById('sa-amount');
       if (!ha) { ha = document.createElement('input'); ha.id = 'sa-amount'; ha.type = 'hidden'; document.body.appendChild(ha); }
       ha.value = amt.toString();
+      if (typeof saCurrentAsset !== 'undefined') saCurrentAsset = token;
+      showProgress('Sending ' + amt + ' ' + token + ' via Circle Gateway...');
+      setStep(0, 'Preparing Gateway BurnIntent', 'active');
+      try {
+        if (typeof saExecGateway !== 'function') {
+          setStep(0, 'Gateway executor unavailable', 'error');
+          showResult(false, 'Gateway executor unavailable');
+          return;
+        }
+        setStep(0, 'BurnIntent ready', 'done');
+        setStep(1, 'Sign in wallet...', 'active');
+        // saExecGateway manages its own state (toast + btn disable).
+        // We await it here to catch throws and update the UBScreen drawer.
+        await saExecGateway();
+        // saExecGateway toasts its own result; reflect the outcome in the drawer.
+        setStep(1, 'Submitted to Circle Gateway', 'done');
+        setStep(2, 'Awaiting on-chain confirmation', 'active');
+        showResult(true, amt + ' ' + token + ' sent via Gateway');
+      } catch(e) {
+        setStep(1, (e.shortMessage || e.message || 'Failed'), 'error');
+        showResult(false, e.shortMessage || 'Gateway Send failed');
+      }
+      return;
+    }
+
+    // ── EVM Send path (default) ───────────────────────────────────────────
+    showProgress('Sending ' + amt + ' ' + token + '...');
+    setStep(0, 'Preparing transaction', 'active');
+    try {
+      // Ensure required DOM elements exist for saExecuteSend
+      var hr2 = document.getElementById('sa-recipient');
+      if (!hr2) { hr2 = document.createElement('input'); hr2.id = 'sa-recipient'; hr2.type = 'hidden'; document.body.appendChild(hr2); }
+      hr2.value = addr;
+      var ha2 = document.getElementById('sa-amount');
+      if (!ha2) { ha2 = document.createElement('input'); ha2.id = 'sa-amount'; ha2.type = 'hidden'; document.body.appendChild(ha2); }
+      ha2.value = amt.toString();
       var hm = document.getElementById('sa-memo');
       if (!hm) { hm = document.createElement('input'); hm.id = 'sa-memo'; hm.type = 'hidden'; document.body.appendChild(hm); }
       hm.value = '';
@@ -50221,6 +50265,25 @@ const UBScreen = (function() {
     var to = document.getElementById('ub-scr-swap-to').value;
     if (amt <= 0) { alert('Enter amount'); return; }
     if (from === to) { alert('Different tokens required'); return; }
+
+    // ── Gateway Swap: not supported ───────────────────────────────────────
+    // Swap providers (LI.FI, Tower, Elligentt Pool) require tokens already in
+    // the connected EVM wallet to sign approve+swap transactions. Circle Gateway
+    // holds a custodied balance that is released via BurnIntent — it cannot be
+    // used directly as the input side of a DEX or bridge-router swap. To swap
+    // Gateway funds: first send them to your EVM wallet, then swap from there.
+    if (_ubSourceWallet === 'gateway') {
+      showProgress('Gateway Swap');
+      setStep(0, 'Checking route compatibility', 'active');
+      setStep(0, 'Not supported with Circle Gateway', 'error');
+      showResult(false,
+        'Swap requires tokens in your EVM wallet. ' +
+        'Circle Gateway funds cannot be used directly as a swap input. ' +
+        'Send your Gateway balance to your EVM wallet first, then swap from there.'
+      );
+      return;
+    }
+
     if (typeof SWP === 'undefined' || typeof executeSwap !== 'function') {
       if (typeof showPage === 'function') showPage('swap');
       hideOperation(); return;
@@ -50303,6 +50366,26 @@ const UBScreen = (function() {
     var tIdx = tSel ? (isNaN(parseInt(tSel.value)) ? 0 : parseInt(tSel.value)) : 0;
     if (amt <= 0) { alert('Enter amount'); return; }
     if (fIdx === tIdx) { alert('Different chains required'); return; }
+
+    // ── Gateway Bridge: not supported ─────────────────────────────────────
+    // Bridge providers (CCTP, LI.FI, Tower) require tokens in the EVM wallet
+    // to sign approve+burn or approve+lock transactions. Circle Gateway funds
+    // cannot be used directly as the source of a cross-chain bridge — the
+    // BurnIntent mechanism is a Gateway-specific P2P transfer, not a CCTP/LI.FI
+    // bridge. To bridge Gateway funds: first send them to your EVM wallet via
+    // a Gateway Send, then bridge from the EVM wallet.
+    if (_ubSourceWallet === 'gateway') {
+      showProgress('Gateway Bridge');
+      setStep(0, 'Checking route compatibility', 'active');
+      setStep(0, 'Not supported with Circle Gateway', 'error');
+      showResult(false,
+        'Bridge requires tokens in your EVM wallet. ' +
+        'Circle Gateway funds cannot be used directly as a bridge source. ' +
+        'Send your Gateway balance to your EVM wallet first, then bridge from there.'
+      );
+      return;
+    }
+
     if (typeof executeBridgeOrTurbo !== 'function') {
       if (typeof showPage === 'function') { showPage('bridge'); hideOperation(); }
       return;
@@ -50751,7 +50834,7 @@ var UB_ACTION_MODES = ['send', 'swap', 'move', 'bridge'];
 // only changes the origin of funds + signer used. The REAL EVM flows are the
 // default; Circle Agent remains available as an explicit option (never the
 // mandatory content of the operation drawer).
-let _ubSourceWallet = 'evm'; // 'evm' | 'agent'
+let _ubSourceWallet = 'evm'; // 'evm' | 'agent' | 'gateway'
 
 // True while an EVM-Wallet operation is executing from the Unified Balance
 // drawer. When true: swap excludes the local pool (LI.FI/Tower only) and bridge
@@ -50759,14 +50842,14 @@ let _ubSourceWallet = 'evm'; // 'evm' | 'agent'
 let _ubEVMOpActive = false;
 
 function _ubSetSource(v) {
-  _ubSourceWallet = (v === 'evm') ? 'evm' : 'agent';
+  _ubSourceWallet = (v === 'evm') ? 'evm' : (v === 'gateway') ? 'gateway' : 'agent';
   // Reset the EVM-op context whenever the source changes; the EVM drawer
   // re-establishes it on open (showOperation), the Circle Agent panel does not.
   _ubEVMOpActive = false;
   var mode = (typeof UB !== 'undefined' && UB.liveMode) ? UB.liveMode : 'send';
   if (mode === 'move') mode = 'bridge';
   try {
-    if (_ubSourceWallet === 'evm') {
+    if (_ubSourceWallet === 'evm' || _ubSourceWallet === 'gateway') {
       if (typeof UBScreen !== 'undefined') {
         if (mode === 'send') UBScreen.openSend();
         else if (mode === 'swap') UBScreen.openSwap();
@@ -50805,11 +50888,17 @@ function _ubInjectSourceSelector() {
         '<div style="font-size:9px;font-weight:700;color:var(--teal);font-family:JetBrains Mono,monospace">' + (bal > 0 ? '$' + bal.toFixed(2) : '—') + '</div>' +
         '</div>';
     }
+    // Gateway balance: read from shared cache (no extra fetch).
+    var gwBalStr = (typeof ubGetGatewayBalance === 'function') ? ubGetGatewayBalance('USDC') : null;
+    var gwBal = gwBalStr !== null ? parseFloat(gwBalStr) || 0 : 0;
+    // Gateway wallet address: the depositor is the connected EVM wallet.
+    var gwAddr = evmAddr;
     row.innerHTML =
       '<div style="font-size:7.5px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted2);margin-bottom:5px">From Wallet</div>' +
       '<div style="display:flex;flex-direction:column;gap:5px">' +
         card('agent', 'Circle AI Smart Wallet', circleAddr, circleBal, _ubSourceWallet === 'agent', '#2775ca', 'rgba(39,117,202,.4)') +
         card('evm', 'EVM Wallet', evmAddr, evmBal, _ubSourceWallet === 'evm', '#06F7E9', 'rgba(6,247,233,.4)') +
+        card('gateway', 'Circle Gateway', gwAddr, gwBal, _ubSourceWallet === 'gateway', '#a78bfa', 'rgba(167,139,250,.4)') +
       '</div>';
   } catch(_) {}
 }
@@ -50826,7 +50915,7 @@ function enterUnifiedBalanceMode(mode) {
   // Open the operation DRAWER (never page navigation) with the REAL flows —
   // UBScreen delegates to saExecuteSend / executeSwap / xcExecuteSend. Circle
   // Agent remains an explicit option via the fund-source selector.
-  if (_ubSourceWallet === 'evm') {
+  if (_ubSourceWallet === 'evm' || _ubSourceWallet === 'gateway') {
     try {
       if (typeof UBScreen !== 'undefined') {
         if (mode === 'send') UBScreen.openSend();
