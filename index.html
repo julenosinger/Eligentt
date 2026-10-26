@@ -49972,18 +49972,51 @@ const UBScreen = (function() {
         '<div style="flex:1"><div class="ub-op-field-label">Token</div><select class="ub-op-input" id="ub-scr-send-token" style="cursor:pointer;font-size:9px"><option>USDC</option><option>EURC</option></select></div>' +
         '<div style="flex:1"><div class="ub-op-field-label">Amount</div><div class="ub-scr-input-row"><span style="color:var(--muted2);font-size:12px;font-weight:700">$</span><input class="ub-op-input ub-scr-plain" id="ub-scr-send-amt" type="number" placeholder="0.00" style="font-size:14px;font-weight:700"/></div></div>' +
         '</div>' +
+        '<div class="ub-scr-info-row"><span>Available</span><span id="ub-scr-send-bal" style="color:var(--teal)">—</span></div>' +
         '<div class="ub-scr-info-row"><span>Network</span><span style="color:var(--text)">Arc Mainnet</span></div>' +
         '<div class="ub-scr-info-row"><span>Fee</span><span style="color:var(--yellow)">0.20%</span></div>' +
         '<div class="ub-scr-info-row" style="font-weight:600"><span>Total</span><span id="ub-scr-send-total" style="color:var(--blue)">—</span></div>' +
         '<button class="ub-op-btn send" onclick="UBScreen.execSend()">Send</button>' +
         '<button class="ub-op-btn back" onclick="exitUnifiedBalanceMode()"><i class="ti ti-arrow-left"></i> Back to Live</button>';
-      // Bind amount change to update total
+      // Bind amount change to update total; load real balance via BalanceService.
       setTimeout(function(){
         var amtEl = document.getElementById('ub-scr-send-amt');
+        var tokEl = document.getElementById('ub-scr-send-token');
+        function _ubScrSendLoadBal() {
+          var balEl = document.getElementById('ub-scr-send-bal');
+          if (!balEl) return;
+          var addr = (typeof walletAddress !== 'undefined') ? walletAddress : null;
+          var sym = (tokEl && tokEl.value) || 'USDC';
+          if (!addr) { balEl.textContent = '—'; return; }
+          balEl.textContent = '…';
+          var tokenObj = null;
+          if (typeof TOKEN_LIST !== 'undefined') {
+            for (var i = 0; i < TOKEN_LIST.length; i++) {
+              if (TOKEN_LIST[i].sym === sym) { tokenObj = TOKEN_LIST[i]; break; }
+            }
+          }
+          if (!tokenObj) { balEl.textContent = '—'; return; }
+          var chainId = (typeof activeChainId !== 'undefined') ? activeChainId : 5042;
+          if (typeof BalanceService !== 'undefined' && BalanceService.getTokenBalance) {
+            BalanceService.getTokenBalance(addr, tokenObj, chainId)
+              .then(function(v) {
+                if (!document.getElementById('ub-scr-send-bal')) return;
+                if (v == null) { balEl.textContent = '0 ' + sym; return; }
+                var str = typeof v === 'bigint'
+                  ? (Number(v) / Math.pow(10, tokenObj.decimals || 6)).toFixed(4)
+                  : Number(v).toFixed(4);
+                balEl.textContent = str + ' ' + sym;
+              })
+              .catch(function() { balEl.textContent = '— (RPC error)'; });
+          } else { balEl.textContent = '—'; }
+        }
+        _ubScrSendLoadBal();
+        if (tokEl) tokEl.addEventListener('change', _ubScrSendLoadBal);
         if (amtEl) amtEl.addEventListener('input', function(){
           var a = parseFloat(this.value) || 0;
           var t = document.getElementById('ub-scr-send-total');
-          if (t) t.textContent = (a * 1.002).toFixed(4) + ' USDC';
+          var sym2 = (tokEl && tokEl.value) || 'USDC';
+          if (t) t.textContent = (a * 1.002).toFixed(4) + ' ' + sym2;
         });
       }, 50);
     } else if (op === 'swap') {
@@ -50369,17 +50402,53 @@ const UBScreen = (function() {
     var rateEl = document.getElementById('ub-scr-swap-rate');
     var outEl = document.getElementById('ub-scr-swap-out');
     var rteEl = document.getElementById('ub-scr-swap-route');
-    // Balance lookup
-    try {
-      if (typeof UB !== 'undefined' && UB.state && UB.state.assets) {
-        var bal = 0;
-        for (var i = 0; i < UB.state.assets.length; i++) {
-          if (UB.state.assets[i].token === from) bal += UB.state.assets[i].balance;
-        }
-        var balEl = document.getElementById('ub-scr-swap-bal');
-        if (balEl) balEl.textContent = 'Balance: ' + bal.toFixed(2) + ' ' + from;
+    // Balance lookup — use the same sources as the main Swap panel:
+    // EVM wallet via BalanceService (live, RPC-backed, anti-race), or
+    // Circle Gateway cache via ubGetGatewayBalance when the source is 'gateway'.
+    // Never read from UB.state.assets — that object is only populated after a
+    // full UBLive cycle and carries stale float values, not live RPC results.
+    (function _ubScrSwapBal() {
+      var balEl = document.getElementById('ub-scr-swap-bal');
+      if (!balEl) return;
+      var addr = (typeof walletAddress !== 'undefined') ? walletAddress : null;
+      if (!addr) { balEl.textContent = 'Balance: —'; return; }
+
+      // Gateway source: read from shared UB cache (no extra fetch).
+      if (typeof _ubSourceWallet !== 'undefined' && _ubSourceWallet === 'gateway') {
+        var gwBal = (typeof ubGetGatewayBalance === 'function') ? ubGetGatewayBalance(from) : null;
+        balEl.textContent = gwBal !== null
+          ? 'Balance: ' + gwBal + ' ' + from + ' (GW)'
+          : 'Balance: — (GW)';
+        return;
       }
-    } catch(_) {}
+
+      // EVM wallet: live read via BalanceService (stale-while-revalidate).
+      // Show '…' immediately, update when the read completes.
+      balEl.textContent = 'Balance: …';
+      var tokenObj = null;
+      if (typeof TOKEN_LIST !== 'undefined') {
+        for (var i = 0; i < TOKEN_LIST.length; i++) {
+          if (TOKEN_LIST[i].sym === from) { tokenObj = TOKEN_LIST[i]; break; }
+        }
+      }
+      if (!tokenObj) { balEl.textContent = 'Balance: —'; return; }
+      var chainId = (typeof activeChainId !== 'undefined') ? activeChainId : 5042;
+      if (typeof BalanceService !== 'undefined' && BalanceService.getTokenBalance) {
+        BalanceService.getTokenBalance(addr, tokenObj, chainId)
+          .then(function(v) {
+            if (!document.getElementById('ub-scr-swap-bal')) return; // panel closed
+            if (v == null) { balEl.textContent = 'Balance: 0 ' + from; return; }
+            // Format: keep 4 decimal places, strip trailing zeros after 2.
+            var str = typeof v === 'bigint'
+              ? (Number(v) / Math.pow(10, tokenObj.decimals || 6)).toFixed(4)
+              : Number(v).toFixed(4);
+            balEl.textContent = 'Balance: ' + str + ' ' + from;
+          })
+          .catch(function() { balEl.textContent = 'Balance: — (RPC error)'; });
+      } else {
+        balEl.textContent = 'Balance: —';
+      }
+    })();
     // Button state
     var btn = document.querySelector('.ub-op-btn.swap');
     if (btn) btn.disabled = amt <= 0 || from === to;
