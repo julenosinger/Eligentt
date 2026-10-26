@@ -107,10 +107,11 @@ describe('GF2-3 — GATEWAY_SPEND_BLOCKED blocks execution in all three modules'
   it('saExecGateway checks GATEWAY_SPEND_BLOCKED and returns early', () => {
     const fnIdx = src.indexOf('async function saExecGateway()');
     expect(fnIdx).toBeGreaterThan(-1);
-    const fnBody = src.slice(fnIdx, fnIdx + 600);
+    const fnBody = src.slice(fnIdx, fnIdx + 1000);
     expect(fnBody).toContain('GATEWAY_SPEND_BLOCKED');
     expect(fnBody).toContain('toast(');
-    expect(fnBody).toContain('return;');
+    // Fase 2.9.1: returns a discriminated object { status: 'blocked', ... } instead of bare return
+    expect(fnBody).toMatch(/return\s*\{[^}]*status[^}]*blocked/);
   });
   it('swpExecuteLiFi patch blocks Gateway source when GATEWAY_SPEND_BLOCKED', () => {
     const patchIdx = src.indexOf('_swpExecuteLiFiOrig = swpExecuteLiFi');

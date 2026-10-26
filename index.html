@@ -37394,15 +37394,20 @@ function _saFmtGwBal(balStr) {
 }
 
 async function saExecGateway() {
+  // Returns a discriminated result: { status: 'blocked'|'error'|'pending'|'ambiguous'|'confirmed', error?, salt? }
+  // Callers MUST check the returned status — never interpret a normal return as success.
   var btn = document.getElementById('sa-send-btn');
   var btnContent = document.getElementById('sa-send-btn-content');
   // Hard block — real Gateway transfers require server-side confirmation not yet available.
   if (GATEWAY_SPEND_BLOCKED) {
     toast('Circle Gateway transfers are not yet enabled for real funds. Security validation is pending.', 'warn');
-    return;
+    return { status: 'blocked', error: 'GATEWAY_SPEND_BLOCKED is true' };
   }
-  // Below only reached after GATEWAY_SPEND_BLOCKED is cleared by the Fase 2 completion:
-  if (!window.GatewaySpendService) { toast('Gateway Spend Service not available', 'error'); return; }
+  // Below only reached after GATEWAY_SPEND_BLOCKED is cleared:
+  if (!window.GatewaySpendService) {
+    toast('Gateway Spend Service not available', 'error');
+    return { status: 'error', error: 'GatewaySpendService unavailable' };
+  }
   var addr  = (typeof walletAddress !== 'undefined') ? walletAddress : null;
   var recip = (document.getElementById('sa-recipient') || {}).value || '';
   var amtEl = document.getElementById('sa-amount');
@@ -37411,9 +37416,12 @@ async function saExecGateway() {
   var chainId = (typeof activeChainId !== 'undefined') ? activeChainId : 5042;
   var destChainEl = document.getElementById('sa-dest-chain');
   var destChainId = destChainEl ? parseInt(destChainEl.value) : chainId;
-  if (!addr)  { toast('Connect your wallet first', 'warn'); return; }
-  if (!recip) { toast('Enter a recipient address', 'warn'); return; }
-  if (!amt || isNaN(Number(amt)) || Number(amt) <= 0) { toast('Enter a valid amount', 'warn'); return; }
+  if (!addr)  { toast('Connect your wallet first', 'warn'); return { status: 'error', error: 'no_wallet' }; }
+  if (!recip) { toast('Enter a recipient address', 'warn'); return { status: 'error', error: 'no_recipient' }; }
+  if (!amt || isNaN(Number(amt)) || Number(amt) <= 0) {
+    toast('Enter a valid amount', 'warn');
+    return { status: 'error', error: 'invalid_amount' };
+  }
   if (btn) btn.disabled = true;
   if (btnContent) btnContent.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i> Preparing…';
   try {
@@ -37427,16 +37435,23 @@ async function saExecGateway() {
     }, function(typedData){ return window.ethereum.request({ method:'eth_signTypedData_v4', params:[addr, JSON.stringify(typedData)] }); },
     function(state){ if (btnContent) btnContent.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i> ' + state; });
     if (result && result.ok) {
+      // submitted — confirmation is separate; do NOT call this 'confirmed'
       toast('Gateway transfer submitted. Awaiting on-chain confirmation.', 'success');
       if (typeof saUpdateRoute === 'function') saUpdateRoute();
-      // Invalidate shared Gateway balance cache so Send, Swap, Bridge and UB all
-      // show a fresh balance after this spend. The cache refresh is non-blocking.
+      // Invalidate shared Gateway balance cache only on successful submission.
       try { if (typeof ubInvalidateGatewayCache === 'function') ubInvalidateGatewayCache(); } catch(_) {}
+      return { status: 'pending', salt: result.salt };
     } else {
-      toast('Gateway transfer failed: ' + (result && result.error ? result.error : 'unknown error'), 'error');
+      var errCode = result && result.error ? result.error : 'unknown_error';
+      // Distinguish ambiguous (submitted but unconfirmed) from hard failure
+      var gwStatus = result && result.gwStatus ? result.gwStatus : null;
+      var opStatus = (gwStatus === 'ambiguous') ? 'ambiguous' : 'error';
+      toast('Gateway transfer failed: ' + errCode, 'error');
+      return { status: opStatus, error: errCode, salt: result && result.salt };
     }
   } catch(e) {
     toast('Gateway error: ' + (e && e.message ? e.message : String(e)), 'error');
+    return { status: 'error', error: e && e.message ? e.message : String(e) };
   } finally {
     if (btn) btn.disabled = false;
     if (btnContent) btnContent.innerHTML = '<i class="ti ti-send"></i>Send Asset';
@@ -47198,11 +47213,19 @@ var _ubGwLastData = null; // last successful Gateway data — used by ubFilterAs
 // Single source of truth consumed by UB, Send, Swap, Bridge. Populated by
 // ubGatewayRender() (the only path that calls /api/gateway/balances). Other
 // modules MUST read via ubGetGatewayBalance() — never issue their own fetch.
+// _ubGwCache.status values:
+//   'idle'    — never fetched (initial state)
+//   'loading' — fetch in flight
+//   'ok'      — data present and fresh
+//   'empty'   — invalidated / stale (triggers refresh)
+//   'error'   — last fetch failed
+// ubGetGatewayBalance() returns null for any status other than 'ok'.
+// _ubInjectSourceSelector distinguishes these states — never treats null as zero.
 var _ubGwCache = {
   data:   null,   // raw API response { USDC:[...], EURC:[...], cirBTC:[...] }
   ts:     0,      // Date.now() of last successful fetch
   addr:   '',     // wallet address the cache belongs to
-  status: 'empty' // 'empty' | 'ok' | 'error'
+  status: 'idle'  // 'idle'(never fetched) | 'loading' | 'ok' | 'empty'(stale) | 'error'
 };
 
 // Asset display metadata
@@ -47238,6 +47261,7 @@ function ubGatewayFetch() {
   card.style.display = '';
   if (_ubGwFetching) return; // already in-flight
   _ubGwFetching = true;
+  _ubGwCache.status = 'loading';
   var seq = ++_ubGwSeq;
 
   var loadEl  = document.getElementById('ub-gw-loading');
@@ -47267,6 +47291,7 @@ function ubGatewayFetch() {
       clearTimeout(timer);
       _ubGwFetching = false;
       if (seq !== _ubGwSeq) return;
+      _ubGwCache.status = 'error';
       if (loadEl) loadEl.style.display = 'none';
       if (errEl)  { errEl.style.display = ''; errEl.textContent = 'Gateway unavailable: ' + (err.message || 'fetch error'); }
       if (icon)   { icon.className = 'ti ti-refresh'; icon.style.animation = ''; }
@@ -50213,13 +50238,40 @@ const UBScreen = (function() {
         }
         setStep(0, 'BurnIntent ready', 'done');
         setStep(1, 'Sign in wallet...', 'active');
-        // saExecGateway manages its own state (toast + btn disable).
-        // We await it here to catch throws and update the UBScreen drawer.
-        await saExecGateway();
-        // saExecGateway toasts its own result; reflect the outcome in the drawer.
-        setStep(1, 'Submitted to Circle Gateway', 'done');
-        setStep(2, 'Awaiting on-chain confirmation', 'active');
-        showResult(true, amt + ' ' + token + ' sent via Gateway');
+        // saExecGateway returns a discriminated result — MUST be checked.
+        // Never interpret a normal return or the absence of a throw as success.
+        var gwResult = await saExecGateway();
+        var gwStatus = gwResult && gwResult.status ? gwResult.status : 'error';
+        if (gwStatus === 'blocked') {
+          // Blocked — operation was never submitted; no state change, no cache invalidation.
+          setStep(1, 'Blocked — security validation pending', 'error');
+          showResult(false, 'Gateway transfers are not yet enabled.');
+          return;
+        }
+        if (gwStatus === 'pending') {
+          // Submitted to the Circle API; on-chain confirmation is in progress.
+          // Do NOT show as fully confirmed — the operation is pending.
+          setStep(1, 'Submitted to Circle Gateway', 'done');
+          setStep(2, 'Awaiting on-chain confirmation…', 'active');
+          showResult(true, amt + ' ' + token + ' submitted — confirming on-chain');
+          return;
+        }
+        if (gwStatus === 'ambiguous') {
+          // Submitted but confirmation is inconclusive — preserve recoverable state.
+          setStep(1, 'Submitted — confirmation inconclusive', 'active');
+          setStep(2, 'Status: ambiguous — do not resubmit', 'active');
+          showResult(false, 'Transfer submitted but unconfirmed — check status before retrying');
+          return;
+        }
+        if (gwStatus === 'confirmed') {
+          setStep(1, 'Confirmed on-chain', 'done');
+          setStep(2, 'Complete', 'done');
+          showResult(true, amt + ' ' + token + ' confirmed via Gateway');
+          return;
+        }
+        // error or unknown — show failure
+        setStep(1, (gwResult && gwResult.error ? gwResult.error : 'Failed'), 'error');
+        showResult(false, gwResult && gwResult.error ? gwResult.error : 'Gateway Send failed');
       } catch(e) {
         setStep(1, (e.shortMessage || e.message || 'Failed'), 'error');
         showResult(false, e.shortMessage || 'Gateway Send failed');
@@ -50888,17 +50940,40 @@ function _ubInjectSourceSelector() {
         '<div style="font-size:9px;font-weight:700;color:var(--teal);font-family:JetBrains Mono,monospace">' + (bal > 0 ? '$' + bal.toFixed(2) : '—') + '</div>' +
         '</div>';
     }
-    // Gateway balance: read from shared cache (no extra fetch).
-    var gwBalStr = (typeof ubGetGatewayBalance === 'function') ? ubGetGatewayBalance('USDC') : null;
-    var gwBal = gwBalStr !== null ? parseFloat(gwBalStr) || 0 : 0;
+    // Gateway balance: read from shared cache (no extra fetch, no parseFloat fallback).
+    // Distinguish loading / error / zero / available — never treat null as confirmed zero.
+    var gwBalStr  = (typeof ubGetGatewayBalance === 'function') ? ubGetGatewayBalance('USDC') : null;
+    var gwCacheStatus = (typeof _ubGwCache !== 'undefined') ? _ubGwCache.status : 'idle';
+    // gwBalLabel: string shown in the card balance slot
+    var gwBalLabel;
+    if (gwBalStr !== null) {
+      // Cache hit with a valid value — could be '0.000000' or a real amount
+      var gwBalNum = Number(gwBalStr.replace(/[^0-9.]/g, '')) || 0;
+      gwBalLabel = gwBalNum > 0 ? ('$' + gwBalNum.toFixed(2)) : '$0.00';
+    } else if (gwCacheStatus === 'loading') {
+      gwBalLabel = '…';
+    } else if (gwCacheStatus === 'error') {
+      gwBalLabel = 'N/A';
+    } else {
+      // idle / empty / stale — balance unknown, not zero
+      gwBalLabel = '—';
+    }
     // Gateway wallet address: the depositor is the connected EVM wallet.
     var gwAddr = evmAddr;
+    // Rebuild card() to accept a pre-formatted balLabel string instead of a number
+    function cardLabel(key, label, addr, balLabel, selected, dot, border) {
+      return '<div onclick="_ubSetSource(\'' + key + '\')" style="display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:7px;cursor:pointer;border:1px solid ' + (selected ? border : 'var(--border)') + ';background:' + (selected ? 'rgba(6,247,233,.06)' : 'var(--overlay-sm)') + '">' +
+        '<span style="width:9px;height:9px;border-radius:50%;border:2px solid ' + (selected ? dot : 'var(--muted2)') + ';background:' + (selected ? dot : 'transparent') + ';flex-shrink:0"></span>' +
+        '<div style="flex:1;min-width:0"><div style="font-size:9px;font-weight:600;color:var(--text)">' + label + '</div><div style="font-size:7px;color:var(--muted2);font-family:JetBrains Mono,monospace">' + short(addr) + '</div></div>' +
+        '<div style="font-size:9px;font-weight:700;color:var(--teal);font-family:JetBrains Mono,monospace">' + balLabel + '</div>' +
+        '</div>';
+    }
     row.innerHTML =
       '<div style="font-size:7.5px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted2);margin-bottom:5px">From Wallet</div>' +
       '<div style="display:flex;flex-direction:column;gap:5px">' +
         card('agent', 'Circle AI Smart Wallet', circleAddr, circleBal, _ubSourceWallet === 'agent', '#2775ca', 'rgba(39,117,202,.4)') +
         card('evm', 'EVM Wallet', evmAddr, evmBal, _ubSourceWallet === 'evm', '#06F7E9', 'rgba(6,247,233,.4)') +
-        card('gateway', 'Circle Gateway', gwAddr, gwBal, _ubSourceWallet === 'gateway', '#a78bfa', 'rgba(167,139,250,.4)') +
+        cardLabel('gateway', 'Circle Gateway', gwAddr, gwBalLabel, _ubSourceWallet === 'gateway', '#a78bfa', 'rgba(167,139,250,.4)') +
       '</div>';
   } catch(_) {}
 }

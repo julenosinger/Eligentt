@@ -45,7 +45,7 @@ describe('GF29-2 — UBScreen.execSend gateway path', () => {
   // execSend is an inner function; find it via its unique context
   function getExecSend() {
     const idx = src.indexOf('async function execSend()');
-    return src.slice(idx, idx + 5000);
+    return src.slice(idx, idx + 7000);
   }
 
   it('checks _ubSourceWallet === gateway', () => {
@@ -73,7 +73,7 @@ describe('GF29-2 — UBScreen.execSend gateway path', () => {
 describe('GF29-3 — UBScreen.execSwap blocks gateway with clear message', () => {
   function getExecSwap() {
     const idx = src.indexOf('async function execSwap()');
-    return src.slice(idx, idx + 5000);
+    return src.slice(idx, idx + 7000);
   }
 
   it('checks _ubSourceWallet === gateway', () => {
@@ -133,7 +133,8 @@ describe('GF29-5 — _ubInjectSourceSelector renders Circle Gateway card', () =>
   });
 
   it("card key is 'gateway'", () => {
-    expect(body).toContain("card('gateway'");
+    // Gateway card now uses cardLabel() helper (state-aware label instead of numeric balance)
+    expect(body).toMatch(/card(Label)?\('gateway'/); 
   });
 
   it("selected state checks _ubSourceWallet === 'gateway'", () => {
