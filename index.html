@@ -36671,68 +36671,137 @@ async function saExecuteSend() {
     }
   } catch (_g) {}
 
-  // Confirmation modal (app-native, not browser confirm)
-  var _saLight = document.documentElement.getAttribute('data-theme') === 'light';
-  var _saCardBg   = _saLight ? 'var(--surface)'  : 'linear-gradient(160deg,#0f1420 0%,#0a0e18 100%)';
-  var _saDivider  = _saLight ? 'var(--border2)'  : 'rgba(255,255,255,.06)';
-  var _saRowDiv   = _saLight ? 'var(--border2)'  : 'rgba(255,255,255,.04)';
-  var _saCloseBg  = _saLight ? 'var(--card2)'    : 'rgba(255,255,255,.05)';
-  var _saCloseBdr = _saLight ? 'var(--border2)'  : 'rgba(255,255,255,.08)';
-  var _saCancelBg = _saLight ? 'var(--card2)'    : 'rgba(255,255,255,.04)';
-  var _saCancelBdr= _saLight ? 'var(--border2)'  : 'rgba(255,255,255,.09)';
-  var confirmed = false;
-  var confHtml = '<div id="sa-confirm-overlay" onclick="if(event.target===this){document.getElementById(\'sa-confirm-overlay\').remove();window._saResolve&&window._saResolve(false);}" style="position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.72);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:center;padding:16px">'
-    + '<div onclick="event.stopPropagation()" style="width:440px;max-width:calc(100vw - 32px);background:' + _saCardBg + ';border:1px solid rgba(79,142,247,.18);border-radius:20px;overflow:hidden;box-shadow:0 32px 80px rgba(0,0,0,.45),0 0 0 1px rgba(0,0,0,.06);animation:saModalIn .18s cubic-bezier(.4,0,.2,1)">'
-    // header
-    + '<div style="display:flex;align-items:center;gap:12px;padding:20px 24px 18px;border-bottom:1px solid ' + _saDivider + '">'
-    +   '<div style="width:40px;height:40px;border-radius:12px;background:rgba(79,142,247,.13);border:1px solid rgba(79,142,247,.28);display:flex;align-items:center;justify-content:center;flex-shrink:0"><i class="ti ti-send" style="font-size:18px;color:#4f8ef7"></i></div>'
-    +   '<div><div style="font-size:14px;font-weight:700;color:var(--text);letter-spacing:-.01em">Confirm Send</div><div style="font-size:10px;color:var(--muted2);margin-top:2px">Review before broadcasting</div></div>'
-    +   '<button onclick="document.getElementById(\'sa-confirm-overlay\').remove();window._saResolve&&window._saResolve(false);" style="margin-left:auto;width:30px;height:30px;border-radius:8px;background:' + _saCloseBg + ';border:1px solid ' + _saCloseBdr + ';color:var(--muted2);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:14px;font-family:inherit;flex-shrink:0"><i class="ti ti-x"></i></button>'
+  // ── Confirmation modal — premium redesign per approved reference ──
+  var _saLight   = document.documentElement.getAttribute('data-theme') === 'light';
+  var _saDiv     = _saLight ? 'rgba(0,0,0,.08)' : 'rgba(255,255,255,.06)';
+  var _saRowDiv  = _saLight ? 'rgba(0,0,0,.06)' : 'rgba(255,255,255,.05)';
+
+  // Derive source label from context
+  var _saFromLabel = 'EVM Wallet';
+  var _saFromIcon  = '<i class="ti ti-wallet" style="font-size:13px;color:#4f8ef7"></i>';
+  if (typeof _saGwOrigin !== 'undefined' && _saGwOrigin) {
+    _saFromLabel = 'Circle Gateway';
+    _saFromIcon  = '<i class="ti ti-network" style="font-size:13px;color:#4f8ef7"></i>';
+  } else if (typeof activeWalletType !== 'undefined' && activeWalletType === 'intelligent') {
+    _saFromLabel = 'Circle AI Smart Wallet';
+    _saFromIcon  = '<i class="ti ti-robot" style="font-size:13px;color:#a78bfa"></i>';
+  }
+
+  // Token color from SA_TOKENS
+  var _saTokColor = (typeof SA_TOKENS !== 'undefined' && SA_TOKENS[saCurrentAsset] && SA_TOKENS[saCurrentAsset].color) || '#2775ca';
+
+  // Network name — use active chain
+  var _saNetName = (typeof getActiveChain === 'function' && getActiveChain() && getActiveChain().name) || 'Arc Mainnet';
+
+  // Precise fee using BigInt to avoid float drift
+  var _saDecimals = (typeof saGetTokenDecimals === 'function') ? saGetTokenDecimals() : 6;
+  var _saScale    = Math.pow(10, _saDecimals);
+  var _saRawAmt   = BigInt(Math.round(amount * _saScale));
+  var _saRawFee   = (_saRawAmt * BigInt(saFeeBps)) / 10000n;
+  var _saRawTotal = _saRawAmt + _saRawFee;
+  var _saFeeDisp  = (Number(_saRawFee)  / _saScale).toFixed(4);
+  var _saTotDisp  = (Number(_saRawTotal)/ _saScale).toFixed(4);
+  var _saAmtDisp  = (Number(_saRawAmt)  / _saScale).toFixed(4);
+
+  var _CLOSE = 'document.getElementById(\'sa-confirm-overlay\').remove();window._saResolve&&window._saResolve(false);';
+  var _CONFIRM = 'document.getElementById(\'sa-confirm-overlay\').remove();window._saResolve&&window._saResolve(true);';
+
+  var confHtml = ''
+    // backdrop
+    + '<div id="sa-confirm-overlay" onclick="if(event.target===this){' + _CLOSE + '}" style="position:fixed;inset:0;z-index:9999;background:rgba(2,6,20,.8);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;padding:16px">'
+    // card
+    + '<div onclick="event.stopPropagation()" style="width:460px;max-width:calc(100vw - 24px);background:' + (_saLight ? '#f8faff' : 'linear-gradient(170deg,#0d1526 0%,#080e1c 100%)') + ';border:1px solid rgba(79,142,247,.22);border-radius:22px;overflow:hidden;box-shadow:0 40px 100px rgba(0,0,0,.55),0 0 0 1px rgba(0,0,0,.08);animation:saModalIn .2s cubic-bezier(.34,1.1,.64,1)">'
+
+    // ── Header ──────────────────────────────────────────────────────────────
+    + '<div style="display:flex;align-items:center;gap:12px;padding:18px 22px 16px;border-bottom:1px solid ' + _saDiv + '">'
+    +   '<div style="width:42px;height:42px;border-radius:13px;background:linear-gradient(135deg,rgba(79,142,247,.2),rgba(124,106,247,.15));border:1px solid rgba(79,142,247,.3);display:flex;align-items:center;justify-content:center;flex-shrink:0"><i class="ti ti-send" style="font-size:19px;color:#4f8ef7"></i></div>'
+    +   '<div style="line-height:1.3"><div style="font-size:15px;font-weight:700;color:var(--text);letter-spacing:-.02em">Confirm Send</div><div style="font-size:10.5px;color:var(--muted2)">Review before broadcasting</div></div>'
+    +   '<button onclick="' + _CLOSE + '" style="margin-left:auto;width:32px;height:32px;border-radius:9px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.09);color:var(--muted2);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:15px;font-family:inherit;flex-shrink:0"><i class="ti ti-x"></i></button>'
     + '</div>'
-    // amount hero — token icon + large amount + symbol
-    + '<div style="padding:28px 24px 22px;border-bottom:1px solid ' + _saDivider + ';display:flex;flex-direction:column;align-items:center;gap:6px">'
-    +   '<div style="display:flex;align-items:baseline;gap:10px">'
-    +     '<span style="font-size:40px;font-weight:800;color:var(--text);letter-spacing:-.03em;font-family:\'JetBrains Mono\',monospace;line-height:1">' + amount.toFixed(4) + '</span>'
-    +     '<span style="font-size:18px;font-weight:700;color:var(--muted2);letter-spacing:.02em">' + saCurrentAsset + '</span>'
-    +   '</div>'
-    +   '<div style="font-size:10px;color:var(--muted2);letter-spacing:.04em;text-transform:uppercase">Amount to send</div>'
-    + '</div>'
-    // detail rows
-    + '<div style="padding:8px 24px 4px;display:flex;flex-direction:column">'
-    // recipient row with copy button
-    +   '<div style="display:flex;justify-content:space-between;align-items:center;padding:11px 0;border-bottom:1px solid ' + _saRowDiv + '">'
-    +     '<span style="font-size:10.5px;color:var(--muted2);font-weight:500">To</span>'
-    +     '<div style="display:flex;align-items:center;gap:6px">'
-    +       '<span title="' + recipient + '" style="font-family:\'JetBrains Mono\',monospace;font-size:10px;color:#4f8ef7;background:rgba(79,142,247,.09);border:1px solid rgba(79,142,247,.18);border-radius:6px;padding:4px 10px;cursor:default">' + shortAddr(recipient) + '</span>'
-    +       '<button title="Copy address" data-addr="' + recipient + '" onclick="_saCopyAddr(this)" style="width:26px;height:26px;border-radius:6px;background:rgba(79,142,247,.07);border:1px solid rgba(79,142,247,.15);color:var(--muted2);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:11px;font-family:inherit;flex-shrink:0"><i class="ti ti-copy"></i></button>'
+
+    // ── Amount hero ─────────────────────────────────────────────────────────
+    + '<div style="padding:22px 22px 18px;border-bottom:1px solid ' + _saDiv + ';display:flex;align-items:center;gap:16px">'
+    +   '<div style="width:52px;height:52px;border-radius:16px;background:linear-gradient(135deg,' + _saTokColor + '33,' + _saTokColor + '18);border:1.5px solid ' + _saTokColor + '55;display:flex;align-items:center;justify-content:center;flex-shrink:0"><i class="ti ti-currency-dollar" style="font-size:24px;color:' + _saTokColor + '"></i></div>'
+    +   '<div style="flex:1;min-width:0">'
+    +     '<div style="font-size:11px;font-weight:600;color:var(--muted2);letter-spacing:.03em;text-transform:uppercase;margin-bottom:2px">' + saCurrentAsset + ' &middot; ERC-20</div>'
+    +     '<div style="display:flex;align-items:baseline;gap:8px">'
+    +       '<span style="font-size:36px;font-weight:800;color:var(--text);letter-spacing:-.04em;font-family:\'JetBrains Mono\',monospace;line-height:1">' + _saAmtDisp + '</span>'
+    +       '<span style="font-size:16px;font-weight:700;color:var(--muted2)">' + saCurrentAsset + '</span>'
+    +     '</div>'
+    +     '<div style="display:inline-flex;align-items:center;gap:4px;margin-top:5px;padding:2px 9px;border-radius:20px;background:rgba(79,142,247,.1);border:1px solid rgba(79,142,247,.18)">'
+    +       '<span style="font-size:9.5px;font-weight:600;color:#4f8ef7;letter-spacing:.02em">You will send</span>'
     +     '</div>'
     +   '</div>'
-    // network
-    +   '<div style="display:flex;justify-content:space-between;align-items:center;padding:11px 0;border-bottom:1px solid ' + _saRowDiv + '">'
-    +     '<span style="font-size:10.5px;color:var(--muted2);font-weight:500">Network</span>'
-    +     '<span style="font-size:10.5px;font-weight:600;color:var(--text);display:flex;align-items:center;gap:5px"><span style="width:7px;height:7px;border-radius:50%;background:#22c55e;display:inline-block;flex-shrink:0"></span>Arc Mainnet</span>'
+    + '</div>'
+
+    // ── From / To / Network ─────────────────────────────────────────────────
+    + '<div style="padding:14px 22px 0">'
+    // From row
+    +   '<div style="display:flex;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid ' + _saRowDiv + '">'
+    +     '<span style="font-size:11px;font-weight:600;color:var(--muted2);width:38px;flex-shrink:0">From</span>'
+    +     '<div style="display:flex;align-items:center;gap:6px;background:rgba(79,142,247,.07);border:1px solid rgba(79,142,247,.14);border-radius:8px;padding:5px 10px;font-size:11px;font-weight:600;color:var(--text)">'
+    +       _saFromIcon
+    +       '<span>' + _saFromLabel + '</span>'
+    +     '</div>'
+    +     '<div style="margin-left:auto;display:flex;align-items:center;gap:5px;background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.2);border-radius:8px;padding:5px 10px">'
+    +       '<span style="width:6px;height:6px;border-radius:50%;background:#22c55e;display:inline-block;flex-shrink:0"></span>'
+    +       '<span style="font-size:10.5px;font-weight:600;color:var(--text)">' + _saNetName + '</span>'
+    +     '</div>'
     +   '</div>'
-    // fee
-    +   '<div style="display:flex;justify-content:space-between;align-items:center;padding:11px 0;border-bottom:1px solid ' + _saRowDiv + '">'
-    +     '<span style="font-size:10.5px;color:var(--muted2);font-weight:500">Fee <span style="font-size:9px;opacity:.7">(' + (saFeeBps/100).toFixed(1) + '%)</span></span>'
-    +     '<span style="font-size:10.5px;font-weight:600;color:var(--yellow)">' + feeAmt.toFixed(4) + ' ' + saCurrentAsset + '</span>'
-    +   '</div>'
-    // gas
-    +   '<div style="display:flex;justify-content:space-between;align-items:center;padding:11px 0;border-bottom:1px solid ' + _saRowDiv + '">'
-    +     '<span style="font-size:10.5px;color:var(--muted2);font-weight:500">Est. Gas</span>'
-    +     '<span style="font-size:10.5px;font-weight:600;color:var(--teal)">' + gasEst + '</span>'
-    +   '</div>'
-    // total — heavier, with subtle background strip
-    +   '<div style="display:flex;justify-content:space-between;align-items:center;padding:13px 12px;margin:6px -12px 0;border-radius:10px;background:rgba(79,142,247,.06);border:1px solid rgba(79,142,247,.1)">'
-    +     '<span style="font-size:12px;font-weight:700;color:var(--text)">Total</span>'
-    +     '<span style="font-size:13px;font-weight:800;color:var(--text);font-family:\'JetBrains Mono\',monospace;letter-spacing:-.02em">' + totalAmt.toFixed(4) + ' <span style="font-size:11px;font-weight:600;color:var(--muted2)">' + saCurrentAsset + '</span></span>'
+    // To row
+    +   '<div style="display:flex;align-items:center;gap:10px;padding:12px 0;border-bottom:1px solid ' + _saRowDiv + '">'
+    +     '<div style="width:34px;height:34px;border-radius:50%;background:rgba(124,106,247,.12);border:1px solid rgba(124,106,247,.22);display:flex;align-items:center;justify-content:center;flex-shrink:0"><i class="ti ti-user" style="font-size:15px;color:#a78bfa"></i></div>'
+    +     '<div style="flex:1;min-width:0">'
+    +       '<div style="font-size:10px;color:var(--muted2);font-weight:500;margin-bottom:1px">Recipient</div>'
+    +       '<div style="font-family:\'JetBrains Mono\',monospace;font-size:11.5px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + recipient + '">' + shortAddr(recipient) + '</div>'
+    +     '</div>'
+    +     '<button title="Copy address" data-addr="' + recipient + '" onclick="_saCopyAddr(this)" style="width:30px;height:30px;border-radius:8px;background:rgba(79,142,247,.07);border:1px solid rgba(79,142,247,.15);color:var(--muted2);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:13px;font-family:inherit;flex-shrink:0"><i class="ti ti-copy"></i></button>'
     +   '</div>'
     + '</div>'
-    // buttons
-    + '<div style="display:flex;gap:10px;padding:20px 24px 24px">'
-    +   '<button onclick="document.getElementById(\'sa-confirm-overlay\').remove();window._saResolve&&window._saResolve(false);" style="flex:1;min-height:46px;padding:0 16px;border-radius:12px;background:' + _saCancelBg + ';border:1px solid ' + _saCancelBdr + ';color:var(--muted2);font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;transition:opacity .15s">Cancel</button>'
-    +   '<button onclick="document.getElementById(\'sa-confirm-overlay\').remove();window._saResolve&&window._saResolve(true);" style="flex:2;min-height:46px;padding:0 20px;border-radius:12px;background:linear-gradient(135deg,#4f8ef7 0%,#7c6af7 100%);border:none;color:#fff;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:7px;box-shadow:0 4px 20px rgba(79,142,247,.4);letter-spacing:.01em"><i class="ti ti-send" style="font-size:14px"></i>Confirm Send</button>'
+
+    // ── Fee breakdown ────────────────────────────────────────────────────────
+    + '<div style="padding:4px 22px 0">'
+    // service fee
+    +   '<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid ' + _saRowDiv + '">'
+    +     '<span style="font-size:10.5px;color:var(--muted2);display:flex;align-items:center;gap:5px">Service fee <span style="font-size:9px;opacity:.65;padding:1px 5px;border-radius:4px;border:1px solid rgba(255,255,255,.08)">(' + (saFeeBps/100).toFixed(1) + '%)</span></span>'
+    +     '<span style="font-size:10.5px;font-weight:600;color:#f59e0b;font-family:\'JetBrains Mono\',monospace">' + _saFeeDisp + ' ' + saCurrentAsset + '</span>'
+    +   '</div>'
+    // estimated gas
+    +   '<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid ' + _saRowDiv + '">'
+    +     '<span style="font-size:10.5px;color:var(--muted2);display:flex;align-items:center;gap:5px">Estimated gas</span>'
+    +     '<span style="font-size:10.5px;font-weight:600;color:var(--teal);font-family:\'JetBrains Mono\',monospace">' + gasEst + ' <span style="font-size:9px;opacity:.6;border:1px solid rgba(45,212,191,.2);border-radius:4px;padding:0 4px">Est.</span></span>'
+    +   '</div>'
+    // total + recipient receives — blue highlighted block
+    +   '<div style="margin:8px 0 4px;border-radius:12px;border:1px solid rgba(79,142,247,.16);overflow:hidden">'
+    +     '<div style="display:flex;justify-content:space-between;align-items:center;padding:11px 14px;background:rgba(79,142,247,.07);border-bottom:1px solid rgba(79,142,247,.1)">'
+    +       '<span style="font-size:11px;font-weight:600;color:#4f8ef7;display:flex;align-items:center;gap:5px"><i class="ti ti-calculator" style="font-size:11px"></i>Total estimated debit</span>'
+    +       '<span style="font-size:12px;font-weight:700;color:var(--text);font-family:\'JetBrains Mono\',monospace">' + _saTotDisp + ' <span style="font-size:10px;color:var(--muted2)">' + saCurrentAsset + '</span></span>'
+    +     '</div>'
+    +     '<div style="display:flex;justify-content:space-between;align-items:center;padding:11px 14px;background:rgba(79,142,247,.04)">'
+    +       '<span style="font-size:11px;font-weight:600;color:#4f8ef7">Recipient receives</span>'
+    +       '<span style="font-size:12px;font-weight:700;color:#4f8ef7;font-family:\'JetBrains Mono\',monospace">' + _saAmtDisp + ' <span style="font-size:10px">' + saCurrentAsset + '</span></span>'
+    +     '</div>'
+    +   '</div>'
     + '</div>'
+
+    // ── Disclaimer ──────────────────────────────────────────────────────────
+    + '<div style="padding:10px 22px 6px;display:flex;align-items:flex-start;gap:7px">'
+    +   '<i class="ti ti-info-circle" style="font-size:12px;color:var(--muted2);margin-top:1px;flex-shrink:0"></i>'
+    +   '<span style="font-size:9.5px;color:var(--muted2);line-height:1.5">The final amount may vary slightly due to network conditions and gas price changes.</span>'
+    + '</div>'
+
+    // ── Buttons ─────────────────────────────────────────────────────────────
+    + '<div style="display:flex;gap:10px;padding:10px 22px 22px">'
+    +   '<button onclick="' + _CLOSE + '" style="flex:1;min-height:50px;padding:0 16px;border-radius:14px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);color:var(--muted2);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;letter-spacing:.01em">Cancel</button>'
+    +   '<button onclick="' + _CONFIRM + '" style="flex:2;min-height:50px;padding:0 20px;border-radius:14px;background:linear-gradient(135deg,#4f8ef7 0%,#7c6af7 100%);border:none;color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px;box-shadow:0 4px 24px rgba(79,142,247,.45);letter-spacing:.01em">'
+    +     '<i class="ti ti-send" style="font-size:15px"></i>'
+    +     '<span style="display:flex;flex-direction:column;align-items:flex-start;line-height:1.2">'
+    +       '<span>Confirm Send</span>'
+    +       '<span style="font-size:10.5px;font-weight:500;opacity:.85">' + _saAmtDisp + ' ' + saCurrentAsset + '</span>'
+    +     '</span>'
+    +   '</button>'
+    + '</div>'
+
     + '</div></div>';
   var overlay = document.createElement('div'); overlay.innerHTML = confHtml; document.body.appendChild(overlay.firstElementChild);
   var _saLocalResolve;
