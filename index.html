@@ -36619,6 +36619,18 @@ function saResetXCSteps() {
 }
 
 // ── Execute send ──────────────────────────────────────────
+// Copy-address helper for the Confirm Send modal copy button.
+// Using a named function avoids nested-quote escaping issues in inline onclick.
+function _saCopyAddr(btn) {
+  var addr = btn && btn.getAttribute('data-addr');
+  if (!addr) return;
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(addr).catch(function(){});
+  }
+  btn.innerHTML = '<i class="ti ti-check" style="color:#22c55e"></i>';
+  setTimeout(function() { btn.innerHTML = '<i class="ti ti-copy"></i>'; }, 1400);
+}
+
 async function saExecuteSend() {
   // ── Cross-chain routing ──
   if (saIsCrossChain()) {
@@ -36692,7 +36704,7 @@ async function saExecuteSend() {
     +     '<span style="font-size:10.5px;color:var(--muted2);font-weight:500">To</span>'
     +     '<div style="display:flex;align-items:center;gap:6px">'
     +       '<span title="' + recipient + '" style="font-family:\'JetBrains Mono\',monospace;font-size:10px;color:#4f8ef7;background:rgba(79,142,247,.09);border:1px solid rgba(79,142,247,.18);border-radius:6px;padding:4px 10px;cursor:default">' + shortAddr(recipient) + '</span>'
-    +       '<button title="Copy address" onclick="navigator.clipboard&&navigator.clipboard.writeText(\'' + recipient + '\');this.innerHTML=\'<i class=\\\"ti ti-check\\\" style=\\\"color:#22c55e\\\"></i>\';setTimeout(function(){this.innerHTML=\'<i class=\\\"ti ti-copy\\\"></i>\'},1200);" style="width:26px;height:26px;border-radius:6px;background:rgba(79,142,247,.07);border:1px solid rgba(79,142,247,.15);color:var(--muted2);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:11px;font-family:inherit;flex-shrink:0"><i class="ti ti-copy"></i></button>'
+    +       '<button title="Copy address" data-addr="' + recipient + '" onclick="_saCopyAddr(this)" style="width:26px;height:26px;border-radius:6px;background:rgba(79,142,247,.07);border:1px solid rgba(79,142,247,.15);color:var(--muted2);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:11px;font-family:inherit;flex-shrink:0"><i class="ti ti-copy"></i></button>'
     +     '</div>'
     +   '</div>'
     // network
