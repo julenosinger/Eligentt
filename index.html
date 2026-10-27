@@ -16207,6 +16207,8 @@ function showPage(id) {
           if (typeof updateSwapBalancesDisplay === 'function') updateSwapBalancesDisplay();
           if (typeof swapBalStartPolling === 'function') swapBalStartPolling();
           if (typeof swapStartQuoteAutoRefresh === 'function') swapStartQuoteAutoRefresh();
+          // Show mini chart shell immediately — no waiting for amount or quote.
+          if (typeof _swpChartRender === 'function') _swpChartRender();
           setTimeout(function() {
             stInitTerminal();
             stStartAutoRefresh();
@@ -22088,12 +22090,34 @@ function _swpChartRender() {
   var wrap = document.getElementById('swp-chart-wrap');
   if (!wrap) return;
   var pts = _swpChartData;
-  if (pts.length < 2) { wrap.style.display = 'none'; return; }
 
+  // Always show the shell — never collapse to display:none while the Swap page is open.
   wrap.style.display = '';
   var lbl = document.getElementById('swp-chart-label');
-  if (lbl) lbl.textContent = _swpChartPair + ' rate';
   var ptsEl = document.getElementById('swp-chart-pts');
+
+  if (pts.length < 2) {
+    // Shell with loading / empty state — pair label still shown.
+    var loadingPair = _swpChartPair || (function(){
+      var tIn  = (typeof TOKEN_LIST !== 'undefined' && TOKEN_LIST[typeof SWP !== 'undefined' ? SWP.tokenInIdx  : 0]) || { sym: 'USDC' };
+      var tOut = (typeof TOKEN_LIST !== 'undefined' && TOKEN_LIST[typeof SWP !== 'undefined' ? SWP.tokenOutIdx : 1]) || { sym: 'EURC' };
+      return tIn.sym + '/' + tOut.sym;
+    })();
+    if (lbl) lbl.textContent = loadingPair + ' rate';
+    if (ptsEl) ptsEl.textContent = pts.length === 0 ? 'Loading…' : '1 pt';
+    // Clear existing polyline so stale data does not show for a new pair
+    var lineEl = document.getElementById('swp-chart-line');
+    if (lineEl) lineEl.setAttribute('points', '');
+    var fillEl = document.getElementById('swp-chart-fill');
+    if (fillEl) fillEl.setAttribute('d', '');
+    var vLine = document.getElementById('swp-chart-last');
+    if (vLine) { vLine.setAttribute('x1', 0); vLine.setAttribute('x2', 0); }
+    var yaxis = document.getElementById('swp-chart-yaxis');
+    if (yaxis) yaxis.innerHTML = '';
+    return;
+  }
+
+  if (lbl) lbl.textContent = _swpChartPair + ' rate';
   if (ptsEl) ptsEl.textContent = pts.length + ' pts';
 
   var W = 300, H = 80, PAD = 4;
@@ -22137,12 +22161,11 @@ function _swpChartRender() {
   }
 }
 
-// Reset chart when pair tokens change
+// Reset chart when pair tokens change — keep shell visible with loading state.
 function _swpChartReset() {
   _swpChartData = [];
   _swpChartPair = '';
-  var wrap = document.getElementById('swp-chart-wrap');
-  if (wrap) wrap.style.display = 'none';
+  _swpChartRender(); // shows shell with "Loading…" immediately
 }
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -25117,7 +25140,9 @@ async function stFetchLifiPrice() {
     arr.push({ t: Date.now(), p: pricePair });
     if (arr.length > 900) arr.splice(0, arr.length - 600);
     _stLastRecord[pairKey] = Date.now();
-    // Redraw if chart is visible
+    // Also push into the mini chart (swp-chart-wrap) so it fills without a quote.
+    if (typeof _swpChartPush === 'function') _swpChartPush(pricePair, tIn.sym, tOut.sym);
+    // Redraw the terminal chart if visible
     if (document.getElementById('st-chart-canvas')) stDrawChart();
   }
 }
@@ -25135,7 +25160,10 @@ function _stLifiPriceForPair(symIn, symOut) {
 
 function stStartLifiPoll() {
   if (_stLifiPollTimer) return; // already running
-  stFetchLifiPrice(); // immediate first fetch
+  stFetchLifiPrice(); // immediate first fetch — seeds point 1
+  // Seed a second point 6s later so the mini chart has 2 pts and renders the line
+  // without waiting 30s for the next interval tick.
+  setTimeout(stFetchLifiPrice, 6000);
   _stLifiPollTimer = setInterval(stFetchLifiPrice, 30000); // every 30s
 }
 
