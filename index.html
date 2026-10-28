@@ -9378,50 +9378,117 @@ select.cinput option { background: #161a24; color: #dde2f0; }
     </div>
 
 <div class="page" id="page-recipients">
-      <div class="page-header">
-        <div class="page-icon" style="background:rgba(167,139,250,.1);color:var(--purple)"><i class="ti ti-users"></i></div>
-        <div><div class="page-title">Recipients</div><div class="page-sub">Saved wallet addresses and contacts</div></div>
-        <div style="margin-left:auto;display:flex;gap:8px">
-          <button class="btn" onclick="document.getElementById('rcp-csv-in').click()"><i class="ti ti-upload"></i>Import CSV</button>
+      <!-- ── Recipients Premium Header ── -->
+      <div style="padding:20px 20px 0;display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap">
+        <div style="display:flex;align-items:center;gap:14px">
+          <div style="width:46px;height:46px;border-radius:14px;background:linear-gradient(135deg,rgba(167,139,250,.2),rgba(79,142,247,.15));border:1px solid rgba(167,139,250,.25);display:flex;align-items:center;justify-content:center;flex-shrink:0">
+            <i class="ti ti-users" style="font-size:22px;color:var(--purple)"></i>
+          </div>
+          <div>
+            <div style="font-size:20px;font-weight:800;color:var(--text);letter-spacing:-.02em">Recipients</div>
+            <div style="font-size:11px;color:var(--muted2);margin-top:2px">Your trusted contacts across supported networks</div>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <button class="btn" onclick="document.getElementById('rcp-csv-in').click()" style="font-size:10.5px;padding:7px 13px"><i class="ti ti-upload"></i>Import CSV</button>
           <input type="file" id="rcp-csv-in" accept=".csv" style="display:none" onchange="importContactCSV(this)"/>
-          <button class="btn" onclick="exportContactsCSV()"><i class="ti ti-download"></i>Export</button>
-          <button class="btn primary" onclick="addContact()"><i class="ti ti-plus"></i>Add Contact</button>
+          <button class="btn" onclick="exportContactsCSV()" style="font-size:10.5px;padding:7px 13px"><i class="ti ti-download"></i>Export</button>
+          <button class="btn primary" onclick="addContact()" style="font-size:10.5px;padding:7px 14px;background:linear-gradient(135deg,#4f8ef7,#7c6af7);border:none;box-shadow:0 2px 12px rgba(79,142,247,.35)"><i class="ti ti-plus"></i>Add Contact</button>
         </div>
       </div>
-      <div style="flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px">
+
+      <!-- ── Stats bar ── -->
+      <div id="rcp-stats-bar" style="padding:16px 20px 0;display:flex;gap:10px;flex-wrap:wrap"></div>
+
+      <div style="flex:1;overflow-y:auto;padding:14px 20px;display:flex;flex-direction:column;gap:12px">
+
+        <!-- ── Toolbar: search + filters + tabs ── -->
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-          <div style="position:relative;flex:1;min-width:180px;max-width:280px">
-            <i class="ti ti-search" style="position:absolute;left:9px;top:50%;transform:translateY(-50%);color:var(--muted2);font-size:12px;pointer-events:none"></i>
-            <input id="rcp-search" class="cinput" type="text" placeholder="Search name or address..." style="padding-left:28px;font-size:10px" oninput="renderContacts()"/>
+          <div style="position:relative;flex:1;min-width:200px;max-width:320px">
+            <i class="ti ti-search" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--muted2);font-size:12px;pointer-events:none"></i>
+            <input id="rcp-search" class="cinput" type="text" placeholder="Search by name, address, tag or network…" style="padding-left:32px;font-size:10.5px;width:100%" oninput="renderContacts();_rcpUpdateStats()"/>
           </div>
-          <select id="rcp-chain-filter" class="btn" style="cursor:pointer;font-family:inherit;font-size:9.5px" onchange="renderContacts()">
+          <select id="rcp-chain-filter" class="btn" style="cursor:pointer;font-family:inherit;font-size:10px;padding:7px 10px" onchange="renderContacts();_rcpUpdateStats()">
             <option value="all">All Chains</option>
-            <option value="Arc_Mainnet">🔴 Arc Mainnet</option>
-            <option value="Ethereum">🔵 Ethereum</option>
-            <option value="Base">🔵 Base</option>
-            <option value="Arbitrum">🔵 Arbitrum</option>
-            <option value="Solana_Devnet">🟣 Solana</option>
+            <option value="Arc_Mainnet">Arc</option>
+            <option value="Ethereum">Ethereum</option>
+            <option value="Base">Base</option>
+            <option value="Arbitrum">Arbitrum</option>
+            <option value="Solana_Devnet">Solana</option>
           </select>
-          <button class="btn primary" id="rcpf-all" onclick="filterContacts('all',this)" style="padding:4px 10px;font-size:9.5px">All</button>
-          <button class="btn" id="rcpf-fav" onclick="filterContacts('fav',this)" style="padding:4px 10px;font-size:9.5px"><i class="ti ti-star"></i>Favorites</button>
-          <span style="margin-left:10px;font-size:9px;color:var(--muted2);">Sel: <span id="rcp-selected-count" style="font-weight:600;color:var(--text)">0</span></span>
-          <button class="btn" style="padding:2px 6px;font-size:8px" onclick="toggleSelectAllVisible()">Sel Vis</button>
-          <button class="btn primary" style="padding:2px 6px;font-size:8px" onclick="addSelectedContactsToBatch()"><i class="ti ti-plus"></i> Add Sel</button>
-          <button class="btn" style="padding:2px 6px;font-size:8px" onclick="addAllFilteredToBatch()">Add All Vis</button>
+          <!-- Filter pills -->
+          <div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap">
+            <button class="btn primary" id="rcpf-all" onclick="filterContacts('all',this)" style="font-size:10px;padding:5px 12px;border-radius:20px">All</button>
+            <button class="btn" id="rcpf-fav" onclick="filterContacts('fav',this)" style="font-size:10px;padding:5px 12px;border-radius:20px"><i class="ti ti-star" style="font-size:10px"></i>Favorites</button>
+            <button class="btn" id="rcpf-recent" onclick="filterContacts('recent',this)" style="font-size:10px;padding:5px 12px;border-radius:20px">Recent</button>
+          </div>
+          <!-- Batch ops -->
+          <div style="display:flex;gap:4px;align-items:center;margin-left:auto">
+            <span style="font-size:9.5px;color:var(--muted2)">Selected: <span id="rcp-selected-count" style="font-weight:700;color:var(--text)">0</span></span>
+            <button class="btn" style="padding:4px 9px;font-size:9px" onclick="toggleSelectAllVisible()" title="Select all visible"><i class="ti ti-checkbox"></i></button>
+            <button class="btn primary" style="padding:4px 9px;font-size:9px" onclick="addSelectedContactsToBatch()" title="Add selected to batch"><i class="ti ti-plus"></i>Batch</button>
+          </div>
         </div>
-        <!-- Chain availability legend -->
-        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
-          <span style="font-size:8.5px;color:var(--muted2)">CCTP Chains:</span>
-          <span style="font-size:8px;color:var(--muted2)">✓</span><span style="display:flex;align-items:center;gap:3px;font-size:8.5px"><div style="width:8px;height:8px;border-radius:50%;background:#ff0202;display:inline-block"></div> Arc Mainnet</span>
-          <span style="font-size:8px;color:var(--muted2)">✓</span><span style="display:flex;align-items:center;gap:3px;font-size:8.5px"><div style="width:8px;height:8px;border-radius:50%;background:#627eea;display:inline-block"></div> Ethereum</span>
-          <span style="font-size:8px;color:var(--muted2)">✓</span><span style="display:flex;align-items:center;gap:3px;font-size:8.5px"><div style="width:8px;height:8px;border-radius:50%;background:#0052ff;display:inline-block"></div> Base</span>
-          <span style="font-size:8px;color:var(--muted2)">✓</span><span style="display:flex;align-items:center;gap:3px;font-size:8.5px"><div style="width:8px;height:8px;border-radius:50%;background:#12aaff;display:inline-block"></div> Arbitrum</span>
-          <span style="font-size:8px;color:var(--muted2)">✓</span><span style="display:flex;align-items:center;gap:3px;font-size:8.5px"><div style="width:8px;height:8px;border-radius:50%;background:#9945ff;display:inline-block"></div> Solana</span>
-        </div>
-        <div id="contacts-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:8px"></div>
-        <div id="rcp-empty" style="display:none;padding:48px;text-align:center;color:var(--muted2)">
-          <i class="ti ti-users" style="font-size:40px;display:block;margin-bottom:10px;opacity:.3"></i>No contacts yet.
-        </div>
+
+        <!-- ── Main area: list + quick actions ── -->
+        <div style="display:flex;gap:14px;align-items:flex-start">
+
+          <!-- Contact list (table style) -->
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:0">
+            <!-- Table header -->
+            <div style="display:grid;grid-template-columns:32px 36px 1fr 140px 110px 100px auto;gap:10px;align-items:center;padding:7px 12px;border-bottom:1px solid var(--border2);margin-bottom:2px">
+              <span></span>
+              <span></span>
+              <span style="font-size:9px;font-weight:600;color:var(--muted2);text-transform:uppercase;letter-spacing:.05em">Contact</span>
+              <span style="font-size:9px;font-weight:600;color:var(--muted2);text-transform:uppercase;letter-spacing:.05em">Network · Asset</span>
+              <span style="font-size:9px;font-weight:600;color:var(--muted2);text-transform:uppercase;letter-spacing:.05em">Tags</span>
+              <span style="font-size:9px;font-weight:600;color:var(--muted2);text-transform:uppercase;letter-spacing:.05em">Last active</span>
+              <span></span>
+            </div>
+            <div id="contacts-grid"></div>
+            <div id="rcp-empty" style="display:none;padding:56px 24px;text-align:center">
+              <div style="width:60px;height:60px;border-radius:18px;background:rgba(167,139,250,.08);border:1px solid rgba(167,139,250,.15);display:flex;align-items:center;justify-content:center;margin:0 auto 16px">
+                <i class="ti ti-users" style="font-size:26px;color:var(--purple);opacity:.5"></i>
+              </div>
+              <div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:6px">No contacts yet</div>
+              <div style="font-size:11px;color:var(--muted2);margin-bottom:18px">Add your trusted wallet addresses to send payments faster</div>
+              <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+                <button class="btn primary" onclick="addContact()" style="font-size:10.5px;padding:8px 16px"><i class="ti ti-plus"></i>Add your first contact</button>
+                <button class="btn" onclick="document.getElementById('rcp-csv-in').click()" style="font-size:10.5px;padding:8px 16px"><i class="ti ti-upload"></i>Import contacts</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- ── Quick Actions panel ── -->
+          <div style="width:200px;flex-shrink:0;display:flex;flex-direction:column;gap:10px">
+            <div style="background:var(--card2);border:1px solid var(--border2);border-radius:12px;overflow:hidden">
+              <div style="padding:11px 14px 8px;border-bottom:1px solid var(--border2);display:flex;align-items:center;gap:7px">
+                <i class="ti ti-bolt" style="font-size:13px;color:#f59e0b"></i>
+                <span style="font-size:10.5px;font-weight:700;color:var(--text)">Quick Actions</span>
+              </div>
+              <div style="padding:8px 10px;display:flex;flex-direction:column;gap:4px">
+                <button class="btn" onclick="showPage('send')" style="justify-content:flex-start;gap:8px;font-size:10px;padding:7px 10px;border-radius:8px;width:100%"><i class="ti ti-send" style="color:#4f8ef7;font-size:12px"></i>Send</button>
+                <button class="btn" onclick="showPage('billing')" style="justify-content:flex-start;gap:8px;font-size:10px;padding:7px 10px;border-radius:8px;width:100%"><i class="ti ti-file-invoice" style="color:#22c55e;font-size:12px"></i>Create Invoice</button>
+                <button class="btn" onclick="showPage('billing')" style="justify-content:flex-start;gap:8px;font-size:10px;padding:7px 10px;border-radius:8px;width:100%"><i class="ti ti-link" style="color:#a78bfa;font-size:12px"></i>Payment Link</button>
+                <button class="btn" onclick="showPage('schedule')" style="justify-content:flex-start;gap:8px;font-size:10px;padding:7px 10px;border-radius:8px;width:100%"><i class="ti ti-calendar" style="color:#f59e0b;font-size:12px"></i>Schedule</button>
+                <button class="btn" onclick="showPage('autonoma')" style="justify-content:flex-start;gap:8px;font-size:10px;padding:7px 10px;border-radius:8px;width:100%"><i class="ti ti-robot" style="color:#06F7E9;font-size:12px"></i>Ask Autonoma</button>
+              </div>
+            </div>
+            <!-- Selected contacts panel -->
+            <div id="rcp-sel-panel" style="background:var(--card2);border:1px solid var(--border2);border-radius:12px;overflow:hidden;display:none">
+              <div style="padding:10px 14px 8px;border-bottom:1px solid var(--border2);display:flex;align-items:center;justify-content:space-between">
+                <span style="font-size:10px;font-weight:700;color:var(--text)">Selected (<span id="rcp-sel-count2">0</span>)</span>
+                <button onclick="selectedContacts.clear();renderContacts();updateSelectedCount()" style="font-size:9px;color:var(--muted2);background:none;border:none;cursor:pointer;font-family:inherit">Clear</button>
+              </div>
+              <div id="rcp-sel-avatars" style="padding:8px 12px 6px;display:flex;flex-wrap:wrap;gap:4px;min-height:32px"></div>
+              <div style="padding:6px 10px 10px;display:flex;flex-direction:column;gap:4px">
+                <button class="btn primary" onclick="addSelectedContactsToBatch()" style="font-size:10px;padding:7px;border-radius:8px;width:100%;background:linear-gradient(135deg,#4f8ef7,#7c6af7);border:none">Send to selected</button>
+                <button class="btn" onclick="addSelectedContactsToBatch()" style="font-size:10px;padding:7px;border-radius:8px;width:100%">Add to Batch</button>
+              </div>
+            </div>
+          </div>
+
+        </div><!-- end main area -->
 
         <!-- Add Contact Modal -->
         <div id="add-contact-modal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.7);z-index:9999;align-items:center;justify-content:center">
@@ -16235,7 +16302,7 @@ function showPage(id) {
     if (id === 'treasury') { showPage('send'); return; }
     if (id === 'reports') { renderReports(); }
     if (id === 'xcdashboard') { showPage('send'); return; }
-    if (id === 'recipients') { renderContacts(); updateSelectedCount(); }
+    if (id === 'recipients') { renderContacts(); updateSelectedCount(); if(typeof _rcpUpdateStats==='function') _rcpUpdateStats(); }
     if (id === 'batch') { setTimeout(() => { renderTable(); updateBottomBar(); }, 50); }
     if (id === 'bridge') { setTimeout(() => { refreshBridgeBalances(); }, 50); }
     if (id === 'xchain') { showPage('send'); return; }
@@ -30116,17 +30183,27 @@ function filterContacts(type, btn) {
   document.querySelectorAll('[id^="rcpf-"]').forEach(b=>b.classList.remove('primary'));
   if(btn) btn.classList.add('primary');
   renderContacts();
+  _rcpUpdateStats();
 }
 
 function getFilteredContacts() {
   const q = (document.getElementById('rcp-search')?.value||'').toLowerCase();
   const chainFilt = document.getElementById('rcp-chain-filter')?.value || 'all';
-  return contacts.filter(c => {
+  const sevenDaysAgo = Date.now() - 7*24*60*60*1000;
+  let list = contacts.filter(c => {
     if(contactFilter==='fav' && !c.favorite) return false;
+    if(contactFilter==='recent' && (!c.lastUsed || new Date(c.lastUsed).getTime() < sevenDaysAgo)) return false;
     if(chainFilt !== 'all' && c.chainId !== chainFilt) return false;
-    if(q && !c.name.toLowerCase().includes(q) && !(c.addr||'').toLowerCase().includes(q) && !(c.note||'').toLowerCase().includes(q)) return false;
+    if(q && !c.name.toLowerCase().includes(q) && !(c.addr||'').toLowerCase().includes(q) && !(c.note||'').toLowerCase().includes(q) && !(c.tags||[]).join(' ').toLowerCase().includes(q)) return false;
     return true;
   });
+  // Sort: favorites first, then by lastUsed desc
+  list.sort((a,b) => {
+    if(a.favorite && !b.favorite) return -1;
+    if(!a.favorite && b.favorite) return 1;
+    return new Date(b.lastUsed||0) - new Date(a.lastUsed||0);
+  });
+  return list;
 }
 
 function toggleContactSelect(cb) {
@@ -30143,6 +30220,7 @@ function toggleContactSelect(cb) {
 function updateSelectedCount() {
   const el = document.getElementById('rcp-selected-count');
   if (el) el.textContent = selectedContacts.size;
+  if (typeof _rcpUpdateSelPanel === 'function') _rcpUpdateSelPanel();
 }
 
 function toggleSelectAllVisible() {
@@ -30217,43 +30295,108 @@ function renderContacts() {
   const empty = document.getElementById('rcp-empty');
   if(!grid) return;
   let list = getFilteredContacts();
-  if(!list.length){ grid.innerHTML=''; empty.style.display=''; updateSelectedCount(); return; }
+  if(!list.length){ grid.innerHTML=''; empty.style.display='flex'; empty.style.flexDirection='column'; empty.style.alignItems='center'; updateSelectedCount(); _rcpUpdateStats(); return; }
   empty.style.display='none';
-  const GRAD=['linear-gradient(135deg,#4f8ef7,#a78bfa)','linear-gradient(135deg,#f59e0b,#ef4444)','linear-gradient(135deg,#22c55e,#4f8ef7)','linear-gradient(135deg,#a78bfa,#ef4444)'];
+  const GRAD=['linear-gradient(135deg,#4f8ef7,#a78bfa)','linear-gradient(135deg,#f59e0b,#ef4444)','linear-gradient(135deg,#22c55e,#4f8ef7)','linear-gradient(135deg,#a78bfa,#ef4444)','linear-gradient(135deg,#06F7E9,#4f8ef7)','linear-gradient(135deg,#f59e0b,#a78bfa)'];
   grid.innerHTML = list.map((c,i)=>{
-    const chain = CHAINS.find(ch=>ch.id===(c.chainId||'Arc_Mainnet'))||null;
-    const soc = c.socials || {};
-    const socialLinks = [
-      soc.x       ? `<a href="https://x.com/${escHtml(soc.x.replace('@',''))}" target="_blank" style="font-size:8px;color:var(--blue);text-decoration:none;display:flex;align-items:center;gap:2px"><i class="ti ti-brand-x" style="font-size:9px"></i>${escHtml(soc.x)}</a>` : '',
-      soc.telegram? `<a href="https://t.me/${escHtml(soc.telegram.replace('@',''))}" target="_blank" style="font-size:8px;color:var(--blue);text-decoration:none;display:flex;align-items:center;gap:2px"><i class="ti ti-brand-telegram" style="font-size:9px"></i>${escHtml(soc.telegram)}</a>` : '',
-      soc.email   ? `<a href="mailto:${escHtml(soc.email)}" style="font-size:8px;color:var(--blue);text-decoration:none;display:flex;align-items:center;gap:2px"><i class="ti ti-mail" style="font-size:9px"></i>${escHtml(soc.email)}</a>` : '',
-    ].filter(Boolean).join('');
-    const addrShort = c.addr ? shortAddr(c.addr) : '<span style="color:var(--muted2);font-style:italic">No address</span>';
+    const chain = CHAINS.find(ch=>ch.id===(c.chainId||'Arc_Mainnet'))||{name:'Arc',color:'#ff0202'};
+    const addrShort = c.addr ? shortAddr(c.addr) : '';
     const isSel = selectedContacts.has(c.id) ? 'checked' : '';
-    return `
-    <div class="card" style="padding:13px;display:flex;align-items:flex-start;gap:10px;transition:border .15s" onmouseenter="this.style.borderColor='var(--blue)'" onmouseleave="this.style.borderColor=''" >
-      <div style="width:36px;height:36px;border-radius:50%;background:${GRAD[i%GRAD.length]};display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:#fff;flex-shrink:0">${escHtml((c.name||'?')[0].toUpperCase())}</div>
-      <div style="flex:1;min-width:0">
-        <div style="font-size:11px;font-weight:600;display:flex;align-items:center;gap:5px;flex-wrap:wrap">
-          ${escHtml(c.name)}
-          <i class="ti ${c.favorite?'ti-star-filled':'ti-star'}" style="font-size:11px;color:${c.favorite?'var(--yellow)':'var(--muted2)'};cursor:pointer;margin-left:auto" onclick="toggleFav('${c.id}',this)" title="Favorite"></i>
+    const selBg = selectedContacts.has(c.id) ? 'background:rgba(79,142,247,.06);' : '';
+    const tags = (c.tags||[]).slice(0,2).map(t=>`<span style="font-size:8px;padding:2px 7px;border-radius:10px;background:rgba(167,139,250,.12);color:var(--purple);border:1px solid rgba(167,139,250,.2)">${escHtml(t)}</span>`).join('');
+    const prefToken = c.paymentPreferences?.preferredToken || c.prefToken || 'USDC';
+    const lastAct = c.lastUsed ? _rcpRelTime(c.lastUsed) : '—';
+    const initials = (c.name||'?').split(' ').slice(0,2).map(w=>w[0]||'').join('').toUpperCase()||'?';
+    return `<div style="display:grid;grid-template-columns:32px 36px 1fr 140px 110px 100px auto;gap:10px;align-items:center;padding:10px 12px;border-bottom:1px solid var(--border2);transition:background .12s;cursor:default;${selBg}" onmouseenter="if(!this.querySelector('input:checked'))this.style.background='var(--card2)'" onmouseleave="if(!this.querySelector('input:checked'))this.style.background=''">
+      <input type="checkbox" class="contact-select" data-id="${escHtml(c.id)}" ${isSel} onchange="toggleContactSelect(this);_rcpUpdateSelPanel()" style="accent-color:var(--blue);width:14px;height:14px;cursor:pointer" title="Select"/>
+      <div style="width:36px;height:36px;border-radius:50%;background:${GRAD[i%GRAD.length]};display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:#fff;flex-shrink:0;user-select:none">${escHtml(initials)}</div>
+      <div style="min-width:0">
+        <div style="display:flex;align-items:center;gap:6px">
+          <span style="font-size:11.5px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(c.name)}</span>
+          <i class="ti ${c.favorite?'ti-star-filled':'ti-star'}" style="font-size:11px;color:${c.favorite?'#f59e0b':'var(--muted2)'};cursor:pointer;flex-shrink:0" onclick="toggleFav('${escHtml(c.id)}',this)" title="Favorite"></i>
         </div>
-        <div style="font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--muted2);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${addrShort}</div>
-        <div style="display:flex;align-items:center;gap:4px;margin-top:3px;flex-wrap:wrap">
-          <div style="width:7px;height:7px;border-radius:50%;background:${chain.color}"></div>
-          <span style="font-size:8px;color:var(--muted2)">${chain.name}</span>
-        </div>
-        ${socialLinks?`<div style="display:flex;gap:8px;margin-top:5px;flex-wrap:wrap">${socialLinks}</div>`:''}
-        ${c.note&&!c.socials?`<div style="font-size:8.5px;color:var(--muted2);margin-top:3px">${escHtml(c.note)}</div>`:''}
+        ${addrShort?`<div style="display:flex;align-items:center;gap:4px;margin-top:1px">
+          <span style="font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--muted2)">${addrShort}</span>
+          <button onclick="_rcpCopyAddr('${escHtml(c.addr)}')" title="Copy address" style="background:none;border:none;color:var(--muted2);cursor:pointer;font-size:9px;padding:1px 3px;border-radius:3px;line-height:1" onmouseover="this.style.color='var(--blue)'" onmouseout="this.style.color='var(--muted2)'"><i class="ti ti-copy"></i></button>
+        </div>`:'<span style="font-size:9px;color:var(--muted2);font-style:italic">No address</span>'}
       </div>
-      <div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0; align-items:flex-end;">
-        <input type="checkbox" class="contact-select" data-id="${c.id}" ${isSel} onchange="toggleContactSelect(this)" style="margin-bottom:2px; accent-color:var(--blue);" title="Select for batch" />
-        ${c.addr?`<button class="btn" style="padding:2px 7px;font-size:8.5px" onclick="addToCurrentBatch('${c.id}')"><i class="ti ti-plus"></i>Add</button>`:''}
-        <button class="btn" style="padding:2px 7px;font-size:8.5px;color:var(--red)" onclick="deleteContact('${c.id}')"><i class="ti ti-trash"></i></button>
+      <div style="display:flex;flex-direction:column;gap:3px">
+        <div style="display:flex;align-items:center;gap:5px">
+          <div style="width:7px;height:7px;border-radius:50%;background:${chain.color};flex-shrink:0"></div>
+          <span style="font-size:9.5px;color:var(--text);font-weight:500">${escHtml(chain.name)}</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:4px">
+          <span style="font-size:8.5px;padding:1px 7px;border-radius:10px;background:rgba(39,117,202,.12);color:#4f8ef7;border:1px solid rgba(79,142,247,.2)">${escHtml(prefToken)}</span>
+        </div>
+      </div>
+      <div style="display:flex;gap:3px;flex-wrap:wrap">${tags||'<span style="font-size:9px;color:var(--muted2)">—</span>'}</div>
+      <div style="font-size:9px;color:var(--muted2)">${lastAct}</div>
+      <div style="display:flex;gap:4px;align-items:center">
+        ${c.addr?`<button class="btn" title="Send" onclick="document.getElementById('sa-recipient')&&(document.getElementById('sa-recipient').value='${escHtml(c.addr)}');showPage('send')" style="width:28px;height:28px;padding:0;display:flex;align-items:center;justify-content:center;border-radius:7px"><i class="ti ti-send" style="font-size:11px"></i></button>`:''}
+        ${c.addr?`<button class="btn" title="Add to batch" onclick="addToCurrentBatch('${escHtml(c.id)}')" style="width:28px;height:28px;padding:0;display:flex;align-items:center;justify-content:center;border-radius:7px"><i class="ti ti-plus" style="font-size:11px"></i></button>`:''}
+        <button class="btn" title="Delete" onclick="deleteContact('${escHtml(c.id)}')" style="width:28px;height:28px;padding:0;display:flex;align-items:center;justify-content:center;border-radius:7px;color:var(--red)"><i class="ti ti-trash" style="font-size:11px"></i></button>
       </div>
     </div>`;
   }).join('');
   updateSelectedCount();
+  _rcpUpdateStats();
+  _rcpUpdateSelPanel();
+}
+
+// ── Recipients helpers ──────────────────────────────────────────────────────
+function _rcpRelTime(iso) {
+  if (!iso) return '—';
+  const ms = Date.now() - new Date(iso).getTime();
+  if (ms < 0) return 'just now';
+  const s = Math.floor(ms/1000), m = Math.floor(s/60), h = Math.floor(m/60), d = Math.floor(h/24);
+  if (d > 6) return d + ' days ago';
+  if (d > 0) return d + (d===1?' day':' days') + ' ago';
+  if (h > 0) return h + (h===1?' hour':' hours') + ' ago';
+  if (m > 0) return m + (m===1?' min':' min') + ' ago';
+  return 'just now';
+}
+function _rcpCopyAddr(addr) {
+  if (navigator.clipboard) navigator.clipboard.writeText(addr).catch(function(){});
+  toast('Address copied', 'success');
+}
+function _rcpUpdateStats() {
+  const bar = document.getElementById('rcp-stats-bar');
+  if (!bar) return;
+  const total = contacts.length;
+  const favs  = contacts.filter(c=>c.favorite).length;
+  const nets  = new Set(contacts.map(c=>c.chainId||'Arc_Mainnet')).size;
+  const sevenDaysAgo = Date.now() - 7*24*60*60*1000;
+  const recent= contacts.filter(c=>c.lastUsed && new Date(c.lastUsed).getTime() > sevenDaysAgo).length;
+  const netNames = [...new Set(contacts.map(c=>{const ch=CHAINS.find(x=>x.id===(c.chainId||'Arc_Mainnet'));return ch?ch.name.split(' ')[0]:'Arc';}))].slice(0,3);
+  bar.innerHTML = [
+    {icon:'ti-users', color:'#4f8ef7', label:'Total contacts', val:total, sub:'contacts saved'},
+    {icon:'ti-star-filled', color:'#f59e0b', label:'Favorites', val:favs, sub:total>0?(Math.round(favs/total*100)+'% of total'):'—'},
+    {icon:'ti-world', color:'#22c55e', label:'Networks', val:nets, sub:netNames.join(' · ')||'—'},
+    {icon:'ti-clock', color:'#a78bfa', label:'Recent activity', val:recent, sub:'Last 7 days'},
+  ].map(s=>`<div style="flex:1;min-width:120px;background:var(--card2);border:1px solid var(--border2);border-radius:12px;padding:13px 16px;display:flex;align-items:center;gap:12px">
+    <div style="width:36px;height:36px;border-radius:10px;background:${s.color}1a;border:1px solid ${s.color}33;display:flex;align-items:center;justify-content:center;flex-shrink:0"><i class="ti ${s.icon}" style="font-size:16px;color:${s.color}"></i></div>
+    <div><div style="font-size:18px;font-weight:800;color:var(--text);line-height:1">${s.val}</div><div style="font-size:9.5px;font-weight:600;color:var(--muted2);margin-top:1px">${s.label}</div><div style="font-size:9px;color:var(--muted2);margin-top:1px">${s.sub}</div></div>
+  </div>`).join('');
+}
+function _rcpUpdateSelPanel() {
+  const panel = document.getElementById('rcp-sel-panel');
+  const avatars = document.getElementById('rcp-sel-avatars');
+  const cnt2 = document.getElementById('rcp-sel-count2');
+  if (!panel) return;
+  const n = selectedContacts.size;
+  if (n === 0) { panel.style.display = 'none'; return; }
+  panel.style.display = 'block';
+  if (cnt2) cnt2.textContent = n;
+  if (avatars) {
+    const GRAD=['linear-gradient(135deg,#4f8ef7,#a78bfa)','linear-gradient(135deg,#f59e0b,#ef4444)','linear-gradient(135deg,#22c55e,#4f8ef7)','linear-gradient(135deg,#a78bfa,#ef4444)'];
+    const ids = [...selectedContacts].slice(0,6);
+    avatars.innerHTML = ids.map((id,i)=>{
+      const c = contacts.find(x=>x.id===id);
+      if (!c) return '';
+      const init = (c.name||'?').split(' ').slice(0,2).map(w=>w[0]||'').join('').toUpperCase()||'?';
+      return `<div style="width:28px;height:28px;border-radius:50%;background:${GRAD[i%GRAD.length]};display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;flex-shrink:0" title="${escHtml(c.name)}">${escHtml(init)}</div>`;
+    }).join('') + (n>6?`<div style="width:28px;height:28px;border-radius:50%;background:var(--card);border:1px solid var(--border2);display:flex;align-items:center;justify-content:center;font-size:9px;color:var(--muted2)">+${n-6}</div>`:'');
+  }
 }
 
 function toggleFav(id, ico) {
@@ -30307,9 +30450,19 @@ function importContactCSV(input) {
 }
 
 function exportContactsCSV() {
-  const rows=[['name','address','note','chain'],...contacts.map(c=>[c.name,c.addr,c.note||'',(CHAINS.find(ch=>ch.id===c.chainId)||{name:'Unknown'}).name])];
+  // Escape a CSV cell: quote if it contains comma, quote, newline, or starts with =+-@ (injection guard).
+  function _csvCell(v) {
+    const s = String(v==null?'':v);
+    // Strip leading formula chars to prevent CSV injection.
+    const safe = s.replace(/^[=+\-@\t\r]/, "'$&");
+    if (safe.includes(',') || safe.includes('"') || safe.includes('\n') || safe.includes('\r')) {
+      return '"' + safe.replace(/"/g, '""') + '"';
+    }
+    return safe;
+  }
+  const rows=[['name','address','note','chain'],...contacts.map(c=>[c.name,c.addr||'',c.note||'',(CHAINS.find(ch=>ch.id===c.chainId)||{name:'Unknown'}).name])];
   const a=document.createElement('a');
-  a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(rows.map(r=>r.join(',')).join('\n'));
+  a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(rows.map(r=>r.map(_csvCell).join(',')).join('\r\n'));
   a.download='elligente-contacts.csv'; a.click(); toast('Exported','success');
 }
 
@@ -36923,12 +37076,7 @@ async function saExecuteSend() {
         ? _arcFeeData.maxFeePerGas : _arcFloor;
       var _arcPrio = (_arcFeeData && _arcFeeData.maxPriorityFeePerGas && _arcFeeData.maxPriorityFeePerGas > 0n)
         ? _arcFeeData.maxPriorityFeePerGas : ethers.parseUnits('1.5', 'gwei');
-      tx = await memoC.memo(
-        M3F_ADDR, aggData,
-        ethers.id(memoText.slice(0, 64)),
-        ethers.toUtf8Bytes(memoText),
-        { maxFeePerGas: _arcMaxFee, maxPriorityFeePerGas: _arcPrio }
-      );
+      tx = await memoC.memo(M3F_ADDR, aggData, ethers.id(memoText.slice(0, 64)), ethers.toUtf8Bytes(memoText), { maxFeePerGas: _arcMaxFee, maxPriorityFeePerGas: _arcPrio });
     } else {
       tx = await mc3.aggregate3(aggCalls);
     }
