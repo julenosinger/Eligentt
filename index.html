@@ -189,6 +189,8 @@
 /* ── Network Selector Modal ────────────────────────────────────── */
 .ns-overlay{position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.82);backdrop-filter:blur(6px);opacity:0;animation:nsFadeIn .2s forwards}
 @keyframes saModalIn{from{opacity:0;transform:translateY(8px) scale(.98)}to{opacity:1;transform:translateY(0) scale(1)}}
+@media(max-width:900px){.rcp-row{grid-template-columns:32px 36px 1fr auto!important}.rcp-row>:nth-child(4),.rcp-row>:nth-child(5),.rcp-row>:nth-child(6){display:none!important}}
+@media(max-width:600px){#rcp-stats-bar{flex-wrap:wrap!important}#rcp-stats-bar>div{min-width:calc(50% - 6px)!important}.rcp-row{grid-template-columns:28px 30px 1fr auto!important;gap:6px!important}}
 @keyframes nsFadeIn{to{opacity:1}}
 .ns-box{background:#111520;border:1px solid #232940;border-radius:18px;width:760px;max-width:96vw;max-height:90vh;overflow:hidden;box-shadow:0 32px 80px rgba(0,0,0,.85);position:relative;display:flex;flex-direction:column;transform:translateY(16px) scale(.97);animation:nsSlideIn .22s cubic-bezier(.23,1,.32,1) forwards}
 @keyframes nsSlideIn{to{transform:translateY(0) scale(1)}}
@@ -9483,7 +9485,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
               <div id="rcp-sel-avatars" style="padding:8px 12px 6px;display:flex;flex-wrap:wrap;gap:4px;min-height:32px"></div>
               <div style="padding:6px 10px 10px;display:flex;flex-direction:column;gap:4px">
                 <button class="btn primary" onclick="addSelectedContactsToBatch()" style="font-size:10px;padding:7px;border-radius:8px;width:100%;background:linear-gradient(135deg,#4f8ef7,#7c6af7);border:none">Send to selected</button>
-                <button class="btn" onclick="addSelectedContactsToBatch()" style="font-size:10px;padding:7px;border-radius:8px;width:100%">Add to Batch</button>
+                <button class="btn" onclick="_rcpAddToBatchOnly()" style="font-size:10px;padding:7px;border-radius:8px;width:100%">Add to Batch</button>
               </div>
             </div>
           </div>
@@ -30272,6 +30274,27 @@ function addSelectedContactsToBatch() {
   }
 }
 
+function _rcpAddToBatchOnly() {
+  // Add selected contacts to batch WITHOUT navigating away from Recipients.
+  const valid = [];
+  selectedContacts.forEach(function(id) {
+    const c = contacts.find(function(x){ return x.id===id; });
+    if (c && (isAddr(c.addr)||isEns(c.addr))) {
+      if (!recipients.find(function(r){ return r.addr===c.addr; })) {
+        valid.push(c);
+      }
+    }
+  });
+  if (!valid.length) { toast('No valid contacts to add','error'); return; }
+  valid.forEach(function(c) {
+    recipients.push({addr:c.addr, amount:'', note:c.name});
+    c.lastUsed = new Date().toISOString();
+  });
+  Store.save('contacts', contacts);
+  if (typeof renderTable === 'function') renderTable();
+  toast(valid.length + ' contact(s) added to batch', 'success');
+}
+
 function addAllFilteredToBatch() {
   const list = getFilteredContacts();
   if (!list.length) {
@@ -30307,17 +30330,17 @@ function renderContacts() {
     const prefToken = c.paymentPreferences?.preferredToken || c.prefToken || 'USDC';
     const lastAct = c.lastUsed ? _rcpRelTime(c.lastUsed) : '—';
     const initials = (c.name||'?').split(' ').slice(0,2).map(w=>w[0]||'').join('').toUpperCase()||'?';
-    return `<div style="display:grid;grid-template-columns:32px 36px 1fr 140px 110px 100px auto;gap:10px;align-items:center;padding:10px 12px;border-bottom:1px solid var(--border2);transition:background .12s;cursor:default;${selBg}" onmouseenter="if(!this.querySelector('input:checked'))this.style.background='var(--card2)'" onmouseleave="if(!this.querySelector('input:checked'))this.style.background=''">
-      <input type="checkbox" class="contact-select" data-id="${escHtml(c.id)}" ${isSel} onchange="toggleContactSelect(this);_rcpUpdateSelPanel()" style="accent-color:var(--blue);width:14px;height:14px;cursor:pointer" title="Select"/>
+    return `<div class="rcp-row" data-cid="${escHtml(c.id)}" style="display:grid;grid-template-columns:32px 36px 1fr 140px 110px 100px auto;gap:10px;align-items:center;padding:10px 12px;border-bottom:1px solid var(--border2);transition:background .12s;cursor:default;${selBg}">
+      <input type="checkbox" class="contact-select" data-id="${escHtml(c.id)}" ${isSel} style="accent-color:var(--blue);width:14px;height:14px;cursor:pointer" title="Select"/>
       <div style="width:36px;height:36px;border-radius:50%;background:${GRAD[i%GRAD.length]};display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:#fff;flex-shrink:0;user-select:none">${escHtml(initials)}</div>
       <div style="min-width:0">
         <div style="display:flex;align-items:center;gap:6px">
           <span style="font-size:11.5px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(c.name)}</span>
-          <i class="ti ${c.favorite?'ti-star-filled':'ti-star'}" style="font-size:11px;color:${c.favorite?'#f59e0b':'var(--muted2)'};cursor:pointer;flex-shrink:0" onclick="toggleFav('${escHtml(c.id)}',this)" title="Favorite"></i>
+          <i class="ti ${c.favorite?'ti-star-filled':'ti-star'} rcp-fav-btn" data-cid="${escHtml(c.id)}" style="font-size:11px;color:${c.favorite?'#f59e0b':'var(--muted2)'};cursor:pointer;flex-shrink:0" title="Favorite"></i>
         </div>
         ${addrShort?`<div style="display:flex;align-items:center;gap:4px;margin-top:1px">
           <span style="font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--muted2)">${addrShort}</span>
-          <button onclick="_rcpCopyAddr('${escHtml(c.addr)}')" title="Copy address" style="background:none;border:none;color:var(--muted2);cursor:pointer;font-size:9px;padding:1px 3px;border-radius:3px;line-height:1" onmouseover="this.style.color='var(--blue)'" onmouseout="this.style.color='var(--muted2)'"><i class="ti ti-copy"></i></button>
+          <button class="rcp-copy-btn" data-addr="${escHtml(c.addr)}" title="Copy address" style="background:none;border:none;color:var(--muted2);cursor:pointer;font-size:9px;padding:1px 3px;border-radius:3px;line-height:1"><i class="ti ti-copy"></i></button>
         </div>`:'<span style="font-size:9px;color:var(--muted2);font-style:italic">No address</span>'}
       </div>
       <div style="display:flex;flex-direction:column;gap:3px">
@@ -30332,15 +30355,16 @@ function renderContacts() {
       <div style="display:flex;gap:3px;flex-wrap:wrap">${tags||'<span style="font-size:9px;color:var(--muted2)">—</span>'}</div>
       <div style="font-size:9px;color:var(--muted2)">${lastAct}</div>
       <div style="display:flex;gap:4px;align-items:center">
-        ${c.addr?`<button class="btn" title="Send" onclick="document.getElementById('sa-recipient')&&(document.getElementById('sa-recipient').value='${escHtml(c.addr)}');showPage('send')" style="width:28px;height:28px;padding:0;display:flex;align-items:center;justify-content:center;border-radius:7px"><i class="ti ti-send" style="font-size:11px"></i></button>`:''}
-        ${c.addr?`<button class="btn" title="Add to batch" onclick="addToCurrentBatch('${escHtml(c.id)}')" style="width:28px;height:28px;padding:0;display:flex;align-items:center;justify-content:center;border-radius:7px"><i class="ti ti-plus" style="font-size:11px"></i></button>`:''}
-        <button class="btn" title="Delete" onclick="deleteContact('${escHtml(c.id)}')" style="width:28px;height:28px;padding:0;display:flex;align-items:center;justify-content:center;border-radius:7px;color:var(--red)"><i class="ti ti-trash" style="font-size:11px"></i></button>
+        ${c.addr?`<button class="btn rcp-send-btn" data-cid="${escHtml(c.id)}" title="Send" style="width:28px;height:28px;padding:0;display:flex;align-items:center;justify-content:center;border-radius:7px"><i class="ti ti-send" style="font-size:11px"></i></button>`:''}
+        ${c.addr?`<button class="btn rcp-batch-btn" data-cid="${escHtml(c.id)}" title="Add to batch" style="width:28px;height:28px;padding:0;display:flex;align-items:center;justify-content:center;border-radius:7px"><i class="ti ti-plus" style="font-size:11px"></i></button>`:''}
+        <button class="btn rcp-del-btn" data-cid="${escHtml(c.id)}" title="Delete" style="width:28px;height:28px;padding:0;display:flex;align-items:center;justify-content:center;border-radius:7px;color:var(--red)"><i class="ti ti-trash" style="font-size:11px"></i></button>
       </div>
     </div>`;
   }).join('');
   updateSelectedCount();
   _rcpUpdateStats();
   _rcpUpdateSelPanel();
+  if (typeof _rcpBindGrid === 'function') _rcpBindGrid();
 }
 
 // ── Recipients helpers ──────────────────────────────────────────────────────
@@ -30359,6 +30383,50 @@ function _rcpCopyAddr(addr) {
   if (navigator.clipboard) navigator.clipboard.writeText(addr).catch(function(){});
   toast('Address copied', 'success');
 }
+// ── Delegated event handler for contacts-grid (security: no data in onclick) ──
+(function _rcpInitGrid() {
+  var _bound = false;
+  window._rcpBindGrid = function() {
+    const grid = document.getElementById('contacts-grid');
+    if (!grid || _bound) return;
+    _bound = true;
+    grid.addEventListener('change', function(e) {
+      const cb = e.target.closest('.contact-select');
+      if (cb) { toggleContactSelect(cb); _rcpUpdateSelPanel(); }
+    });
+    grid.addEventListener('click', function(e) {
+      // fav toggle
+      const fav = e.target.closest('.rcp-fav-btn');
+      if (fav) { toggleFav(fav.dataset.cid, fav); return; }
+      // copy address
+      const copy = e.target.closest('.rcp-copy-btn');
+      if (copy) { _rcpCopyAddr(copy.dataset.addr); return; }
+      // send — navigate to Send page with address pre-filled
+      const send = e.target.closest('.rcp-send-btn');
+      if (send) {
+        const c = contacts.find(function(x){ return x.id === send.dataset.cid; });
+        if (!c || !c.addr) return;
+        const inp = document.getElementById('sa-recipient');
+        if (inp) inp.value = c.addr;
+        showPage('send');
+        return;
+      }
+      // add to batch
+      const batch = e.target.closest('.rcp-batch-btn');
+      if (batch) { addToCurrentBatch(batch.dataset.cid); return; }
+      // delete
+      const del = e.target.closest('.rcp-del-btn');
+      if (del) { deleteContact(del.dataset.cid); return; }
+      // row hover highlight
+      const row = e.target.closest('.rcp-row');
+      if (row) {
+        row.addEventListener('mouseenter', function(){ if(!row.querySelector('input:checked')) row.style.background='var(--card2)'; }, {once:false});
+        row.addEventListener('mouseleave', function(){ if(!row.querySelector('input:checked')) row.style.background=''; }, {once:false});
+      }
+    });
+  };
+})();
+
 function _rcpUpdateStats() {
   const bar = document.getElementById('rcp-stats-bar');
   if (!bar) return;
@@ -30372,7 +30440,7 @@ function _rcpUpdateStats() {
     {icon:'ti-users', color:'#4f8ef7', label:'Total contacts', val:total, sub:'contacts saved'},
     {icon:'ti-star-filled', color:'#f59e0b', label:'Favorites', val:favs, sub:total>0?(Math.round(favs/total*100)+'% of total'):'—'},
     {icon:'ti-world', color:'#22c55e', label:'Networks', val:nets, sub:netNames.join(' · ')||'—'},
-    {icon:'ti-clock', color:'#a78bfa', label:'Recent activity', val:recent, sub:'Last 7 days'},
+    {icon:'ti-clock', color:'#a78bfa', label:'Recently used', val:recent, sub:'Used in last 7 days'},
   ].map(s=>`<div style="flex:1;min-width:120px;background:var(--card2);border:1px solid var(--border2);border-radius:12px;padding:13px 16px;display:flex;align-items:center;gap:12px">
     <div style="width:36px;height:36px;border-radius:10px;background:${s.color}1a;border:1px solid ${s.color}33;display:flex;align-items:center;justify-content:center;flex-shrink:0"><i class="ti ${s.icon}" style="font-size:16px;color:${s.color}"></i></div>
     <div><div style="font-size:18px;font-weight:800;color:var(--text);line-height:1">${s.val}</div><div style="font-size:9.5px;font-weight:600;color:var(--muted2);margin-top:1px">${s.label}</div><div style="font-size:9px;color:var(--muted2);margin-top:1px">${s.sub}</div></div>
@@ -30424,46 +30492,80 @@ function deleteContact(id) {
   Store.save('contacts',contacts); renderContacts();
 }
 function importContactCSV(input) {
-  const file=input.files[0]; if(!file) return;
-  const reader=new FileReader();
-  reader.onload=e=>{
-    const lines=e.target.result.split('\n').filter(l=>l.trim());
-    let n=0;
-    lines.forEach(line=>{
-      const cols=line.split(',').map(s=>s.trim());
-      let addr,name,note='',chainId='Arc_Mainnet';
-      // Support: addr,name,note[,chain]  OR  name,addr,note[,chain]
-      if(cols.length>=2){
-        if(isAddr(cols[0])||isEns(cols[0])){ [addr,name,note]=cols; if(cols[3]){ chainId=CHAIN_MAP[cols[3].toLowerCase()]||'Arc_Mainnet'; } }
-        else { [name,addr,note]=cols; if(cols[3]){ chainId=CHAIN_MAP[cols[3].toLowerCase()]||'Arc_Mainnet'; } }
+  const file = input.files[0]; if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    const raw = e.target.result.replace(/\r\n/g,'\n').replace(/\r/g,'\n');
+    const lines = raw.split('\n').filter(function(l){ return l.trim(); });
+    let n = 0, skipped = 0, dupes = 0;
+    const parseCSV = typeof _rcpParseCSVLine === 'function' ? _rcpParseCSVLine : function(l){ return l.split(',').map(function(s){ return s.trim(); }); };
+    lines.forEach(function(line, idx) {
+      const cols = parseCSV(line);
+      let addr, name, note = '', chainId = 'Arc_Mainnet';
+      if (cols.length < 2) { skipped++; return; }
+      // Support: addr,name,note[,chain] OR name,addr,note[,chain] OR header row
+      if (isAddr(cols[0]) || isEns(cols[0])) {
+        addr = cols[0]; name = cols[1]; note = cols[2]||'';
+        if (cols[3]) { chainId = (typeof CHAIN_MAP!=='undefined'&&CHAIN_MAP[cols[3].toLowerCase()])||'Arc_Mainnet'; }
+      } else {
+        name = cols[0]; addr = cols[1]; note = cols[2]||'';
+        if (cols[3]) { chainId = (typeof CHAIN_MAP!=='undefined'&&CHAIN_MAP[cols[3].toLowerCase()])||'Arc_Mainnet'; }
       }
-      if(!addr||addr.toLowerCase()==='address') return;
-      if((isAddr(addr)||isEns(addr))&&name){
-        contacts.push({id:'C'+Date.now()+n, name, addr, note:note||'', chainId, favorite:false, lastUsed:new Date().toISOString()});
-        n++;
-      }
+      if (!addr || addr.toLowerCase() === 'address' || cols[0].toLowerCase() === 'name') return; // header row
+      if (!(isAddr(addr) || isEns(addr)) || !name) { skipped++; return; }
+      if (contacts.find(function(c){ return c.addr && c.addr.toLowerCase() === addr.toLowerCase(); })) { dupes++; return; }
+      contacts.push({id:'C'+Date.now()+n, name:name.trim(), addr:addr.trim(), note:note.trim(), chainId:chainId, favorite:false, lastUsed:new Date().toISOString()});
+      n++;
     });
-    Store.save('contacts',contacts); renderContacts();
-    toast(`${n} contact(s) imported`,'success');
+    Store.save('contacts', contacts); renderContacts();
+    var msg = n + ' contact(s) imported';
+    if (dupes) msg += ', ' + dupes + ' duplicate(s) skipped';
+    if (skipped) msg += ', ' + skipped + ' invalid line(s) ignored';
+    toast(msg, n > 0 ? 'success' : 'error');
   };
-  reader.readAsText(file); input.value='';
+  reader.readAsText(file); input.value = '';
 }
 
 function exportContactsCSV() {
-  // Escape a CSV cell: quote if it contains comma, quote, newline, or starts with =+-@ (injection guard).
+  // RFC 4180 + formula injection prevention.
+  // Injection chars: =, +, -, @, TAB, CR, LF — also after leading whitespace.
   function _csvCell(v) {
-    const s = String(v==null?'':v);
-    // Strip leading formula chars to prevent CSV injection.
-    const safe = s.replace(/^[=+\-@\t\r]/, "'$&");
+    const s = String(v == null ? '' : v);
+    // Strip leading whitespace, then check for formula chars.
+    const trimmed = s.replace(/^[\s\u00a0]+/, '');
+    const FORMULA_CHARS = /^[=+\-@\t\r\n]/;
+    const safe = FORMULA_CHARS.test(trimmed) ? "'" + s : s;
     if (safe.includes(',') || safe.includes('"') || safe.includes('\n') || safe.includes('\r')) {
       return '"' + safe.replace(/"/g, '""') + '"';
     }
     return safe;
   }
-  const rows=[['name','address','note','chain'],...contacts.map(c=>[c.name,c.addr||'',c.note||'',(CHAINS.find(ch=>ch.id===c.chainId)||{name:'Unknown'}).name])];
-  const a=document.createElement('a');
-  a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(rows.map(r=>r.map(_csvCell).join(',')).join('\r\n'));
-  a.download='elligente-contacts.csv'; a.click(); toast('Exported','success');
+  const rows = [['name','address','note','chain'], ...contacts.map(function(c) {
+    return [c.name, c.addr||'', c.note||'', (CHAINS.find(function(ch){ return ch.id===c.chainId; })||{name:'Unknown'}).name];
+  })];
+  const a = document.createElement('a');
+  a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(rows.map(function(r){ return r.map(_csvCell).join(','); }).join('\r\n'));
+  a.download = 'elligente-contacts.csv'; a.click(); toast('Exported', 'success');
+}
+
+// RFC 4180 CSV parser — handles quoted fields with embedded commas, quotes, newlines.
+function _rcpParseCSVLine(line) {
+  var result = [], cur = '', inQ = false, i = 0;
+  while (i < line.length) {
+    var ch = line[i];
+    if (inQ) {
+      if (ch === '"') {
+        if (line[i+1] === '"') { cur += '"'; i += 2; } // escaped quote
+        else { inQ = false; i++; }
+      } else { cur += ch; i++; }
+    } else {
+      if (ch === '"') { inQ = true; i++; }
+      else if (ch === ',') { result.push(cur.trim()); cur = ''; i++; }
+      else { cur += ch; i++; }
+    }
+  }
+  result.push(cur.trim());
+  return result;
 }
 
 // ══════════════════════════════════════════════════════════
