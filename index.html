@@ -9741,8 +9741,8 @@ select.cinput option { background: #161a24; color: #dde2f0; }
                 <button class="btn" onclick="showPage('send')" style="justify-content:flex-start;gap:8px;font-size:10px;padding:7px 10px;border-radius:8px;width:100%"><i class="ti ti-send" style="color:#4f8ef7;font-size:12px"></i>Send</button>
                 <button class="btn" onclick="showPage('billing')" style="justify-content:flex-start;gap:8px;font-size:10px;padding:7px 10px;border-radius:8px;width:100%"><i class="ti ti-file-invoice" style="color:#22c55e;font-size:12px"></i>Create Invoice</button>
                 <button class="btn" onclick="showPage('billing')" style="justify-content:flex-start;gap:8px;font-size:10px;padding:7px 10px;border-radius:8px;width:100%"><i class="ti ti-link" style="color:#a78bfa;font-size:12px"></i>Payment Link</button>
-                <button class="btn" onclick="showPage('schedule')" style="justify-content:flex-start;gap:8px;font-size:10px;padding:7px 10px;border-radius:8px;width:100%"><i class="ti ti-calendar" style="color:#f59e0b;font-size:12px"></i>Schedule</button>
-                <button class="btn" onclick="showPage('autonoma')" style="justify-content:flex-start;gap:8px;font-size:10px;padding:7px 10px;border-radius:8px;width:100%"><i class="ti ti-robot" style="color:#06F7E9;font-size:12px"></i>Ask Autonoma</button>
+                <button class="btn" onclick="_rcpOpenSchedule()" style="justify-content:flex-start;gap:8px;font-size:10px;padding:7px 10px;border-radius:8px;width:100%"><i class="ti ti-calendar" style="color:#f59e0b;font-size:12px"></i>Schedule</button>
+                <button class="btn" onclick="_rcpOpenAutonoma()" style="justify-content:flex-start;gap:8px;font-size:10px;padding:7px 10px;border-radius:8px;width:100%"><i class="ti ti-robot" style="color:#06F7E9;font-size:12px"></i>Ask Autonoma</button>
               </div>
             </div>
             <!-- Selected contacts panel -->
@@ -30621,6 +30621,84 @@ function _rcpAddToBatchOnly() {
   Store.save('contacts', contacts);
   if (typeof renderTable === 'function') renderTable();
   toast(valid.length + ' contact(s) added to batch', 'success');
+}
+
+// ── Recipients → Schedule integration ────────────────────────────────────────
+// Gets the first selected contact (or prompts if none selected).
+// Navigates to Schedule, opens the create panel, and pre-fills the recipient.
+function _rcpGetActiveContact() {
+  // First selected contact from the set
+  if (selectedContacts && selectedContacts.size > 0) {
+    const firstId = selectedContacts.values().next().value;
+    return contacts.find(function(c){ return c.id === firstId; }) || null;
+  }
+  return null;
+}
+
+function _rcpOpenSchedule() {
+  const c = _rcpGetActiveContact();
+  showPage('schedule');
+  // scheduleCreateNew resets and opens the create panel
+  setTimeout(function() {
+    if (typeof scheduleCreateNew === 'function') scheduleCreateNew();
+    if (!c) return; // no contact selected — form opened blank, user fills manually
+    // Pre-fill recipient address
+    const addrEl = document.getElementById('sch-address');
+    if (addrEl && c.addr) { addrEl.value = c.addr; }
+    // Pre-fill schedule name with contact name
+    const nameEl = document.getElementById('sch-name');
+    if (nameEl && c.name && !nameEl.value) {
+      nameEl.value = 'Payment to ' + c.name;
+    }
+    // Pre-fill token if available and matches known options
+    const VALID_TOKENS = ['USDC','EURC','cirBTC','ETH'];
+    const prefToken = (c.paymentPreferences && c.paymentPreferences.preferredToken) || c.prefToken;
+    const tokenEl = document.getElementById('sch-token');
+    if (tokenEl && prefToken && VALID_TOKENS.indexOf(prefToken) !== -1) {
+      tokenEl.value = prefToken;
+      tokenEl.dispatchEvent(new Event('change'));
+    }
+    // Update lastUsed on contact
+    c.lastUsed = new Date().toISOString();
+    if (typeof Store !== 'undefined') Store.save('contacts', contacts);
+  }, 80); // wait for page transition + panel render
+}
+
+// ── Recipients → Autonoma integration ────────────────────────────────────────
+// Navigates to Autonoma and seeds a contextual message with the contact's data.
+function _rcpOpenAutonoma() {
+  const c = _rcpGetActiveContact();
+  showPage('autonoma');
+  setTimeout(function() {
+    if (!c) {
+      // No contact selected — just open Autonoma normally
+      if (typeof autonomaQuickAction === 'function') autonomaQuickAction('send');
+      return;
+    }
+    // Build a contextual message that gives Autonoma everything it needs
+    // without executing anything — user must confirm all actions
+    var addrPart  = c.addr ? ' (address: ' + c.addr + ')' : '';
+    var chainPart = '';
+    if (c.chainId) {
+      var CHAIN_NAMES = {
+        Arc_Mainnet:'Arc Mainnet', Ethereum:'Ethereum', Base:'Base',
+        Arbitrum:'Arbitrum', Optimism:'Optimism', Polygon:'Polygon', Solana_Devnet:'Solana'
+      };
+      chainPart = ' on ' + (CHAIN_NAMES[c.chainId] || c.chainId);
+    }
+    var tokenPart = '';
+    var prefToken = (c.paymentPreferences && c.paymentPreferences.preferredToken) || c.prefToken;
+    if (prefToken) tokenPart = ' using ' + prefToken;
+    var msg = 'I want to prepare a payment to ' + c.name + addrPart + chainPart + tokenPart + '. Please help me review the details before sending anything.';
+    if (typeof autonomaSendQuick === 'function') {
+      autonomaSendQuick(msg);
+    } else if (typeof autonomaQuickAction === 'function') {
+      autonomaQuickAction('send');
+    }
+    // Update lastUsed
+    c.lastUsed = new Date().toISOString();
+    if (typeof Store !== 'undefined') Store.save('contacts', contacts);
+  }, 120); // wait for Autonoma page + chat to initialize
 }
 
 function addAllFilteredToBatch() {
