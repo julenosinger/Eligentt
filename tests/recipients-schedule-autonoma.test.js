@@ -1,7 +1,6 @@
 /**
- * Recipients → Schedule + Autonoma integration tests
- * Tests _rcpOpenSchedule, _rcpOpenAutonoma, and _rcpGetActiveContact
- * by extracting functions from index.html and exercising their logic.
+ * Recipients → Schedule + Autonoma integration tests (Hotfix 2.0)
+ * Tests _rcpOpenSchedule, _rcpOpenAutonoma, pending context, and layout.
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
@@ -20,10 +19,12 @@ function extractFn(src, name) {
   return src.slice(start + 1, i + 1);
 }
 
-const scheduleSrc  = extractFn(html, '_rcpOpenSchedule');
-const autonomaSrc  = extractFn(html, '_rcpOpenAutonoma');
-const getCtxSrc    = extractFn(html, '_rcpGetActiveContact');
-const addBatchSrc  = extractFn(html, '_rcpAddToBatchOnly');
+const scheduleSrc   = extractFn(html, '_rcpOpenSchedule');
+const autonomaSrc   = extractFn(html, '_rcpOpenAutonoma');
+const buildMsgSrc   = extractFn(html, '_rcpBuildAutonomaMsg');
+const consumeCtxSrc = extractFn(html, '_rcpConsumeAutonomaCtx');
+const getCtxSrc     = extractFn(html, '_rcpGetActiveContact');
+const addBatchSrc   = extractFn(html, '_rcpAddToBatchOnly');
 
 // ── RSAI-1: _rcpGetActiveContact ─────────────────────────────────────────────
 describe('RSAI-1: _rcpGetActiveContact', () => {
@@ -49,18 +50,16 @@ describe('RSAI-2: _rcpOpenSchedule', () => {
     expect(scheduleSrc).toContain("showPage('schedule')");
   });
 
-  it('RSAI-2.2: calls scheduleCreateNew()', () => {
-    expect(scheduleSrc).toContain('scheduleCreateNew');
+  it('RSAI-2.2: uses schPrefill (canonical API) or scheduleCreateNew fallback', () => {
+    // Must use schPrefill as primary path
+    expect(scheduleSrc).toContain('schPrefill');
   });
 
-  it('RSAI-2.3: fills sch-address with contact address', () => {
-    expect(scheduleSrc).toContain("getElementById('sch-address')");
-    expect(scheduleSrc).toContain('c.addr');
-    expect(scheduleSrc).toContain('.value = c.addr');
+  it('RSAI-2.3: fills address via schPrefill params object', () => {
+    expect(scheduleSrc).toContain('address: c.addr');
   });
 
-  it('RSAI-2.4: prefills sch-name with contact name', () => {
-    expect(scheduleSrc).toContain("getElementById('sch-name')");
+  it('RSAI-2.4: prefills name with contact name', () => {
     expect(scheduleSrc).toContain('Payment to');
     expect(scheduleSrc).toContain('c.name');
   });
@@ -77,16 +76,22 @@ describe('RSAI-2: _rcpOpenSchedule', () => {
     expect(scheduleSrc).not.toContain('execSend');
   });
 
-  it('RSAI-2.7: works without a selected contact (no crash)', () => {
-    // When no contact, function returns early after scheduleCreateNew
-    expect(scheduleSrc).toContain('if (!c) return');
+  it('RSAI-2.7: shows toast and returns early when no contact selected (size=0)', () => {
+    expect(scheduleSrc).toContain('n === 0');
+    expect(scheduleSrc).toContain('toast(');
+    expect(scheduleSrc).toContain('return');
   });
 
-  it('RSAI-2.8: wraps DOM manipulation in setTimeout for page transition', () => {
-    expect(scheduleSrc).toContain('setTimeout');
+  it('RSAI-2.8: shows toast and returns when multiple contacts selected', () => {
+    expect(scheduleSrc).toContain('n > 1');
+    expect(scheduleSrc).toContain('toast(');
   });
 
-  it('RSAI-2.9: updates lastUsed on contact', () => {
+  it('RSAI-2.9: uses requestAnimationFrame to avoid DOM race', () => {
+    expect(scheduleSrc).toContain('requestAnimationFrame');
+  });
+
+  it('RSAI-2.10: updates lastUsed on contact', () => {
     expect(scheduleSrc).toContain('lastUsed');
     expect(scheduleSrc).toContain('Store.save');
   });
@@ -98,62 +103,81 @@ describe('RSAI-3: _rcpOpenAutonoma', () => {
     expect(autonomaSrc).toContain("showPage('autonoma')");
   });
 
-  it('RSAI-3.2: includes contact name in message', () => {
-    expect(autonomaSrc).toContain('c.name');
-    expect(autonomaSrc).toContain('prepare a payment to');
+  it('RSAI-3.2: stores context in _rcpPendingAutonomaCtx before navigation', () => {
+    expect(autonomaSrc).toContain('_rcpPendingAutonomaCtx');
+    expect(autonomaSrc).toContain('msg:');
   });
 
-  it('RSAI-3.3: includes contact address in message', () => {
-    expect(autonomaSrc).toContain('c.addr');
-    expect(autonomaSrc).toContain('address:');
+  it('RSAI-3.3: calls _rcpBuildAutonomaMsg to build the message', () => {
+    expect(autonomaSrc).toContain('_rcpBuildAutonomaMsg');
   });
 
-  it('RSAI-3.4: includes network/chain in message when available', () => {
-    expect(autonomaSrc).toContain('chainPart');
-    expect(autonomaSrc).toContain('CHAIN_NAMES');
+  it('RSAI-3.4: _rcpBuildAutonomaMsg includes contact name', () => {
+    expect(buildMsgSrc).toContain('c.name');
+    expect(buildMsgSrc).toContain('prepare a payment to');
   });
 
-  it('RSAI-3.5: includes preferred token in message when available', () => {
-    expect(autonomaSrc).toContain('tokenPart');
-    expect(autonomaSrc).toContain('prefToken');
+  it('RSAI-3.5: _rcpBuildAutonomaMsg includes contact address', () => {
+    expect(buildMsgSrc).toContain('c.addr');
+    expect(buildMsgSrc).toContain('address:');
   });
 
-  it('RSAI-3.6: calls autonomaSendQuick with the contextual message', () => {
-    expect(autonomaSrc).toContain('autonomaSendQuick');
-    expect(autonomaSrc).toContain('msg');
+  it('RSAI-3.6: _rcpBuildAutonomaMsg includes network/chain', () => {
+    expect(buildMsgSrc).toContain('chainPart');
+    expect(buildMsgSrc).toContain('CHAIN_NAMES');
   });
 
-  it('RSAI-3.7: message explicitly says to review before sending', () => {
-    expect(autonomaSrc).toContain('review the details before sending');
+  it('RSAI-3.7: _rcpBuildAutonomaMsg includes preferred token', () => {
+    expect(buildMsgSrc).toContain('tokenPart');
+    expect(buildMsgSrc).toContain('prefToken');
   });
 
-  it('RSAI-3.8: does not execute transactions or sign anything', () => {
+  it('RSAI-3.8: message says to review before sending', () => {
+    expect(buildMsgSrc).toContain('review the details before sending');
+  });
+
+  it('RSAI-3.9: _rcpConsumeAutonomaCtx calls autonomaSendQuick with msg', () => {
+    expect(consumeCtxSrc).toContain('autonomaSendQuick');
+    expect(consumeCtxSrc).toContain('ctx.msg');
+  });
+
+  it('RSAI-3.10: _rcpConsumeAutonomaCtx clears pending context after use (consume once)', () => {
+    expect(consumeCtxSrc).toContain('_rcpPendingAutonomaCtx = null');
+  });
+
+  it('RSAI-3.11: _rcpConsumeAutonomaCtx falls back to autonomaQuickAction', () => {
+    expect(consumeCtxSrc).toContain('autonomaQuickAction');
+  });
+
+  it('RSAI-3.12: autonomaInit hooks _rcpConsumeAutonomaCtx to consume pending context', () => {
+    // autonomaInit must call _rcpConsumeAutonomaCtx
+    const initIdx = html.indexOf('window.autonomaInit = function()');
+    const initEnd = html.indexOf('window.autonomaNewChat', initIdx);
+    const initSrc = html.slice(initIdx, initEnd);
+    expect(initSrc).toContain('_rcpConsumeAutonomaCtx');
+  });
+
+  it('RSAI-3.13: does not execute transactions or sign anything', () => {
     expect(autonomaSrc).not.toContain('sendTransaction');
     expect(autonomaSrc).not.toContain('signTypedData');
     expect(autonomaSrc).not.toContain('saExecuteSend');
     expect(autonomaSrc).not.toContain('execSend');
-    expect(autonomaSrc).not.toContain('autonomaQuickAction(\'send\')'.replace('send', 'execut'));
   });
 
-  it('RSAI-3.9: falls back to autonomaQuickAction when autonomaSendQuick unavailable', () => {
-    expect(autonomaSrc).toContain('autonomaQuickAction');
-  });
-
-  it('RSAI-3.10: works without a selected contact', () => {
-    expect(autonomaSrc).toContain('if (!c)');
-    expect(autonomaSrc).toContain('autonomaQuickAction');
-  });
-
-  it('RSAI-3.11: updates lastUsed on contact', () => {
-    expect(autonomaSrc).toContain('lastUsed');
-    expect(autonomaSrc).toContain('Store.save');
+  it('RSAI-3.14: opens autonoma normally without inventing context when no contact', () => {
+    // When no contact, _rcpOpenAutonoma navigates without setting _rcpPendingAutonomaCtx
+    // The pending ctx is only set when msg is truthy (requires a contact)
+    expect(autonomaSrc).toContain('if (msg)');
+    expect(autonomaSrc).toContain('_rcpPendingAutonomaCtx = {');
+    expect(autonomaSrc).not.toContain("c.name + ' unknown'");
+    // Falls back to autonomaQuickAction when no contact
+    expect(autonomaSrc).toContain('if (!c && typeof autonomaQuickAction');
   });
 });
 
 // ── RSAI-4: Button wiring ─────────────────────────────────────────────────────
 describe('RSAI-4: Quick Actions button wiring', () => {
   it('RSAI-4.1: Schedule button calls _rcpOpenSchedule', () => {
-    // _rcpOpenSchedule must appear somewhere in the HTML (as onclick)
     expect(html).toContain('onclick="_rcpOpenSchedule()"');
   });
 
@@ -162,18 +186,40 @@ describe('RSAI-4: Quick Actions button wiring', () => {
   });
 });
 
-// ── RSAI-5: No regression on Add to Batch ────────────────────────────────────
-describe('RSAI-5: Regression — Add to Batch still intact', () => {
-  it('RSAI-5.1: _rcpAddToBatchOnly validates address before adding', () => {
+// ── RSAI-5: Compact layout ────────────────────────────────────────────────────
+describe('RSAI-5: Compact row layout', () => {
+  it('RSAI-5.1: row uses 8px padding (compact)', () => {
+    expect(html).toContain('padding:8px 10px');
+  });
+
+  it('RSAI-5.2: avatar is 32px (compact, down from 36px)', () => {
+    // Avatar div in rcp row uses 32px
+    const rowIdx = html.indexOf('class="rcp-row"');
+    const rowEnd = html.indexOf('</div>', rowIdx + 2000);
+    const rowSrc = html.slice(rowIdx, rowEnd);
+    expect(rowSrc).toContain('width:32px;height:32px');
+  });
+
+  it('RSAI-5.3: action buttons are 24px (compact, down from 28px)', () => {
+    expect(html).toContain('rcp-send-btn');
+    const sendBtnIdx = html.indexOf('rcp-send-btn');
+    const sendBtnCtx = html.slice(sendBtnIdx - 10, sendBtnIdx + 200);
+    expect(sendBtnCtx).toContain('24px');
+  });
+});
+
+// ── RSAI-6: No regression on Add to Batch ────────────────────────────────────
+describe('RSAI-6: Regression — Add to Batch still intact', () => {
+  it('RSAI-6.1: _rcpAddToBatchOnly validates address before adding', () => {
     expect(addBatchSrc).toContain('isAddr');
     expect(addBatchSrc).toContain('valid');
   });
 
-  it('RSAI-5.2: _rcpAddToBatchOnly does not navigate away', () => {
+  it('RSAI-6.2: _rcpAddToBatchOnly does not navigate away', () => {
     expect(addBatchSrc).not.toContain('showPage');
   });
 
-  it('RSAI-5.3: _rcpAddToBatchOnly does not send transactions', () => {
+  it('RSAI-6.3: _rcpAddToBatchOnly does not send transactions', () => {
     expect(addBatchSrc).not.toContain('sendTransaction');
     expect(addBatchSrc).not.toContain('saExecuteSend');
   });
