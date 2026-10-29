@@ -5601,6 +5601,23 @@ select.sa-input option { background:var(--select-opt-bg); color:var(--select-opt
 .intent-table tbody tr:hover { background:rgba(255,255,255,.02); }
 .intent-empty-row td { padding:32px; text-align:center; color:var(--muted2); font-size:10px; }
 
+/* Liquidity page */
+.liq-tab-btn{background:none;border:none;border-bottom:2px solid transparent;padding:8px 14px;font-size:10px;font-weight:600;color:var(--muted2);cursor:pointer;font-family:inherit;display:flex;align-items:center;gap:5px;transition:color .15s,border-color .15s;margin-bottom:-1px}
+.liq-tab-btn:hover{color:var(--text)}
+.liq-tab-active{color:#2dd4bf!important;border-bottom-color:#2dd4bf!important}
+.liq-pool-row{background:var(--card2);border:1px solid var(--border2);border-radius:12px;padding:14px 16px;display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center;cursor:default;transition:border-color .15s}
+.liq-pool-row:hover{border-color:rgba(45,212,191,.3)}
+.liq-pool-pair{display:flex;align-items:center;gap:0;flex-shrink:0}
+.liq-tok-icon{width:30px;height:30px;border-radius:50%;border:2px solid var(--card2);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;flex-shrink:0}
+.liq-tok-icon:last-child{margin-left:-8px}
+.liq-badge{font-size:8px;padding:2px 7px;border-radius:10px;font-weight:600;letter-spacing:.3px}
+.liq-badge-live{background:rgba(34,197,94,.12);color:#22c55e;border:1px solid rgba(34,197,94,.25)}
+.liq-badge-pending{background:rgba(245,158,11,.1);color:#f59e0b;border:1px solid rgba(245,158,11,.25)}
+.liq-metric-chip{display:flex;flex-direction:column;gap:1px;min-width:80px}
+.liq-metric-chip .lmc-val{font-size:11px;font-weight:700;color:var(--text)}
+.liq-metric-chip .lmc-lbl{font-size:8.5px;color:var(--muted2)}
+@keyframes liqSpin{to{transform:rotate(360deg)}}
+@media(max-width:640px){.liq-pool-row{grid-template-columns:auto 1fr}}.liq-pool-detail{background:var(--card);border:1px solid var(--border2);border-radius:10px;padding:14px 16px;margin-top:10px;display:none}
 /* Liquidity pools */
 .liq-pools-grid { display:flex; flex-direction:column; gap:12px; }
 .liq-pool-card {
@@ -7943,20 +7960,117 @@ select.cinput option { background: #161a24; color: #dde2f0; }
          PAGE: POOL  (Multi-Pool AMM — Pool Registry)
     ══════════════════════════════════════ -->
         <div class="page" id="page-pool">
-      <div class="page-header">
-        <div class="page-icon" style="background:rgba(45,212,191,.12);color:var(--text)"><i class="ti ti-droplet"></i></div>
-        <div>
-          <div class="page-title">Liquidity</div>
-          <div class="page-sub">Liquidity pools &amp; yield</div>
+      <!-- ── Liquidity Page ──────────────────────────────────────────────────── -->
+      <div style="display:flex;flex-direction:column;height:100%;overflow:hidden">
+
+        <!-- Header -->
+        <div style="padding:16px 20px 0;flex-shrink:0">
+          <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+            <div style="display:flex;align-items:center;gap:12px">
+              <div style="width:40px;height:40px;border-radius:12px;background:rgba(45,212,191,.12);border:1px solid rgba(45,212,191,.2);display:flex;align-items:center;justify-content:center;flex-shrink:0">
+                <i class="ti ti-droplet" style="font-size:18px;color:#2dd4bf"></i>
+              </div>
+              <div>
+                <div style="font-size:16px;font-weight:800;color:var(--text)">Liquidity</div>
+                <div style="font-size:10px;color:var(--muted2)">AMM pools on Arc Mainnet · Read-only</div>
+              </div>
+            </div>
+            <!-- Network badge -->
+            <div style="display:flex;align-items:center;gap:6px;background:rgba(45,212,191,.06);border:1px solid rgba(45,212,191,.18);border-radius:20px;padding:5px 12px">
+              <div style="width:7px;height:7px;border-radius:50%;background:#2dd4bf;flex-shrink:0"></div>
+              <span style="font-size:9.5px;font-weight:600;color:#2dd4bf">Arc Mainnet</span>
+              <span style="font-size:9px;color:var(--muted2)">Chain 5042</span>
+            </div>
+          </div>
+
+          <!-- Notice banner -->
+          <div style="margin-top:12px;background:rgba(245,158,11,.06);border:1px solid rgba(245,158,11,.2);border-radius:8px;padding:9px 13px;display:flex;align-items:flex-start;gap:9px">
+            <i class="ti ti-info-circle" style="color:#f59e0b;font-size:13px;margin-top:1px;flex-shrink:0"></i>
+            <div style="font-size:9px;color:var(--muted2);line-height:1.5">
+              <b style="color:#f59e0b">Read-only view.</b> Pool data is read live from Arc Mainnet contracts. Add/Remove Liquidity will be available in a future release. Only pools with verified on-chain bytecode are listed.
+            </div>
+          </div>
+
+          <!-- Tab bar -->
+          <div style="display:flex;gap:4px;margin-top:12px;border-bottom:1px solid var(--border2)">
+            <button id="liq-tab-explore" class="liq-tab-btn liq-tab-active" onclick="liqSwitchTab('explore')">
+              <i class="ti ti-search" style="font-size:11px"></i> Explore Pools
+            </button>
+            <button id="liq-tab-positions" class="liq-tab-btn" onclick="liqSwitchTab('positions')">
+              <i class="ti ti-briefcase" style="font-size:11px"></i> My Positions
+            </button>
+          </div>
         </div>
-      </div>
-      <div class="page-content" style="display:flex;align-items:center;justify-content:center;flex:1">
-        <div class="card" style="text-align:center;padding:60px 32px;max-width:460px;width:100%">
-          <i class="ti ti-tools" style="font-size:38px;color:var(--muted2);opacity:.5"></i>
-          <div style="font-size:18px;font-weight:700;color:var(--text);margin-top:14px">Liquidity</div>
-          <div style="font-size:14px;color:var(--muted2);margin-top:6px;letter-spacing:.4px">Under Construction</div>
-        </div>
-      </div>
+
+        <!-- Tab content -->
+        <div style="flex:1;overflow-y:auto;padding:14px 20px 20px">
+
+          <!-- ── EXPLORE POOLS ─────────────────────────────────────────────── -->
+          <div id="liq-panel-explore">
+
+            <!-- Search + filter bar -->
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;align-items:center">
+              <div style="position:relative;flex:1;min-width:180px">
+                <i class="ti ti-search" style="position:absolute;left:9px;top:50%;transform:translateY(-50%);font-size:12px;color:var(--muted2);pointer-events:none"></i>
+                <input id="liq-search" class="cinput" type="text" placeholder="Search pools…" style="padding-left:28px;width:100%;font-size:10px" oninput="liqRenderPools()"/>
+              </div>
+              <select id="liq-filter-status" class="cinput" style="font-size:10px;padding:6px 10px;cursor:pointer" onchange="liqRenderPools()">
+                <option value="all">All Pools</option>
+                <option value="deployed">Deployed</option>
+                <option value="pending">Pending Deploy</option>
+              </select>
+              <button class="btn" onclick="liqLoadPools()" style="font-size:10px;padding:6px 11px" title="Refresh pool data">
+                <i class="ti ti-refresh" id="liq-refresh-icon"></i> Refresh
+              </button>
+            </div>
+
+            <!-- Pool list -->
+            <div id="liq-pool-list"></div>
+
+            <!-- Loading state -->
+            <div id="liq-loading" style="display:none;text-align:center;padding:40px 20px;color:var(--muted2)">
+              <div style="display:inline-block;width:24px;height:24px;border:2px solid var(--border);border-top-color:#2dd4bf;border-radius:50%;animation:liqSpin .8s linear infinite;margin-bottom:10px"></div>
+              <div style="font-size:11px">Loading pool data from Arc Mainnet…</div>
+            </div>
+
+            <!-- Error state -->
+            <div id="liq-error" style="display:none;background:rgba(239,68,68,.06);border:1px solid rgba(239,68,68,.2);border-radius:10px;padding:20px;text-align:center">
+              <i class="ti ti-alert-circle" style="font-size:24px;color:var(--red);opacity:.7;margin-bottom:8px;display:block"></i>
+              <div style="font-size:11px;font-weight:600;color:var(--text);margin-bottom:4px">Failed to load pool data</div>
+              <div id="liq-error-msg" style="font-size:9.5px;color:var(--muted2);margin-bottom:10px">RPC request failed.</div>
+              <button class="btn" onclick="liqLoadPools()" style="font-size:10px">Retry</button>
+            </div>
+
+          </div>
+
+          <!-- ── MY POSITIONS ───────────────────────────────────────────────── -->
+          <div id="liq-panel-positions" style="display:none">
+
+            <!-- Wallet required -->
+            <div id="liq-pos-no-wallet" style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:60px 20px;text-align:center;color:var(--muted2)">
+              <div style="width:56px;height:56px;border-radius:16px;background:rgba(255,255,255,.04);border:1px solid var(--border2);display:flex;align-items:center;justify-content:center;margin-bottom:14px">
+                <i class="ti ti-wallet" style="font-size:24px;opacity:.4"></i>
+              </div>
+              <div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:6px">Connect your wallet</div>
+              <div style="font-size:10px;opacity:.7;max-width:280px;line-height:1.5">Connect an EVM wallet to view your liquidity positions on Arc Mainnet.</div>
+            </div>
+
+            <!-- Positions list (loaded when wallet connected) -->
+            <div id="liq-pos-list" style="display:none"></div>
+
+            <!-- Empty state (wallet connected, no positions) -->
+            <div id="liq-pos-empty" style="display:none;flex-direction:column;align-items:center;justify-content:center;padding:60px 20px;text-align:center;color:var(--muted2)">
+              <div style="width:56px;height:56px;border-radius:16px;background:rgba(45,212,191,.06);border:1px solid rgba(45,212,191,.15);display:flex;align-items:center;justify-content:center;margin-bottom:14px">
+                <i class="ti ti-plant" style="font-size:24px;color:#2dd4bf;opacity:.6"></i>
+              </div>
+              <div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:6px">No positions found</div>
+              <div style="font-size:10px;opacity:.7;max-width:280px;line-height:1.5">You have no LP positions in the deployed pools. Add Liquidity will be available in a future release.</div>
+            </div>
+
+          </div>
+
+        </div><!-- end tab content -->
+      </div><!-- end liquidity page -->
     </div>
 
 <div class="page" id="page-send">
@@ -16422,7 +16536,7 @@ function showPage(id) {
     if (id === 'pool' || id === 'swap') {
       // Instant paint: render immediately from registry + cached poolData
       // (cards show cached TVL or "Loading..."), then refresh from chain.
-      if (id === 'pool') { showPoolList(); }
+      if (id === 'pool') { showPoolList(); if (typeof liqOnPageOpen === 'function') liqOnPageOpen(); }
       loadAllPools().then(() => {
         if (id === 'pool') { renderPoolList(); updatePoolStats(); }
         if (id === 'swap') {
@@ -32672,6 +32786,267 @@ function filterPoolList() {
 }
 
 // ── Pool Selection ──────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+//  LIQUIDITY PAGE CONTROLLER  (UI-only, read-only — no write operations)
+// ══════════════════════════════════════════════════════════════════════════════
+var _liqState = { tab: 'explore', loading: false, pools: [], loadedAt: null };
+
+var _LIQ_TOKEN_COLORS = {
+  USDC:   { bg: 'linear-gradient(135deg,#2775ca,#1a4fa0)', label: 'U' },
+  EURC:   { bg: 'linear-gradient(135deg,#1a56a0,#0d3a70)', label: 'E' },
+  cirBTC: { bg: 'linear-gradient(135deg,#f7931a,#e2740a)', label: '₿' },
+  ETH:    { bg: 'linear-gradient(135deg,#627eea,#3c50c0)', label: 'Ξ' },
+};
+
+function liqSwitchTab(tab) {
+  _liqState.tab = tab;
+  var panels = ['explore', 'positions'];
+  panels.forEach(function(p) {
+    var panel = document.getElementById('liq-panel-' + p);
+    var btn   = document.getElementById('liq-tab-' + p);
+    if (!panel || !btn) return;
+    if (p === tab) {
+      panel.style.display = '';
+      btn.classList.add('liq-tab-active');
+    } else {
+      panel.style.display = 'none';
+      btn.classList.remove('liq-tab-active');
+    }
+  });
+  if (tab === 'positions') liqRenderPositions();
+}
+
+function liqOnPageOpen() {
+  // Called by showPage('pool')
+  if (!_liqState.loadedAt) liqLoadPools();
+  liqRenderPositions();
+}
+
+function liqLoadPools() {
+  if (_liqState.loading) return;
+  _liqState.loading = true;
+  var list  = document.getElementById('liq-pool-list');
+  var load  = document.getElementById('liq-loading');
+  var err   = document.getElementById('liq-error');
+  var icon  = document.getElementById('liq-refresh-icon');
+  if (list) list.style.display = 'none';
+  if (load) load.style.display = 'block';
+  if (err)  err.style.display  = 'none';
+  if (icon) icon.style.animation = 'liqSpin .8s linear infinite';
+
+  // Read pool registry from PoolEngine (no RPC needed for registry)
+  var PE = (typeof window !== 'undefined' && window.PoolEngine) ? window.PoolEngine : null;
+  var registry = PE ? PE.REGISTRY : [];
+
+  // Try to enrich with on-chain reserve data (read-only eth_call)
+  _liqEnrichPools(registry).then(function(pools) {
+    _liqState.pools    = pools;
+    _liqState.loadedAt = Date.now();
+    _liqState.loading  = false;
+    if (load) load.style.display = 'none';
+    if (icon) icon.style.animation = '';
+    liqRenderPools();
+  }).catch(function(e) {
+    _liqState.loading = false;
+    if (load) load.style.display = 'none';
+    if (icon) icon.style.animation = '';
+    var errMsg = document.getElementById('liq-error-msg');
+    if (errMsg) errMsg.textContent = (e && e.message) ? e.message : 'RPC request failed.';
+    if (err) err.style.display = 'block';
+    // Still show registry data without reserves
+    _liqState.pools    = (registry || []).map(function(p) { return Object.assign({}, p, { reserveA: null, reserveB: null, lpSupply: null }); });
+    _liqState.loadedAt = Date.now();
+    liqRenderPools();
+  });
+}
+
+function _liqEnrichPools(registry) {
+  // Read-only: fetch reserves from each deployed pool contract.
+  // Returns a Promise that resolves with enriched pool objects.
+  var PE = (typeof window !== 'undefined' && window.PoolEngine) ? window.PoolEngine : null;
+  if (!registry || !registry.length) return Promise.resolve([]);
+
+  var enriched = registry.map(function(p) { return Object.assign({}, p, { reserveA: null, reserveB: null, lpSupply: null }); });
+
+  if (!PE || typeof ethers === 'undefined' || !window.provider) return Promise.resolve(enriched);
+
+  var POOL_ABI = [
+    'function getReserves() view returns (uint112,uint112,uint32)',
+    'function totalSupply() view returns (uint256)'
+  ];
+
+  var tasks = enriched.map(function(p, idx) {
+    if (!p.deployed || !p.address) return Promise.resolve();
+    try {
+      var contract = new ethers.Contract(p.address, POOL_ABI, window.provider);
+      return Promise.all([
+        contract.getReserves().catch(function(){ return null; }),
+        contract.totalSupply().catch(function(){ return null; })
+      ]).then(function(res) {
+        if (res[0]) { enriched[idx].reserveA = res[0][0]; enriched[idx].reserveB = res[0][1]; }
+        if (res[1]) { enriched[idx].lpSupply = res[1]; }
+      }).catch(function() {});
+    } catch(e) { return Promise.resolve(); }
+  });
+
+  return Promise.all(tasks).then(function() { return enriched; });
+}
+
+function liqRenderPools() {
+  var list    = document.getElementById('liq-pool-list');
+  if (!list) return;
+  list.style.display = '';
+
+  var search  = (document.getElementById('liq-search')?.value || '').toLowerCase().trim();
+  var filter  = document.getElementById('liq-filter-status')?.value || 'all';
+
+  var pools = (_liqState.pools || []).filter(function(p) {
+    if (filter === 'deployed' && !p.deployed) return false;
+    if (filter === 'pending'  &&  p.deployed) return false;
+    if (search) {
+      var haystack = ((p.tokenA || '') + ' ' + (p.tokenB || '') + ' ' + (p.id || '') + ' ' + (p.type || '')).toLowerCase();
+      if (!haystack.includes(search)) return false;
+    }
+    return true;
+  });
+
+  if (!pools.length) {
+    list.innerHTML = '<div style="text-align:center;padding:48px 20px;color:var(--muted2)"><i class="ti ti-droplet-off" style="font-size:32px;opacity:.3;display:block;margin-bottom:10px"></i><div style="font-size:11px">No pools match your filters.</div></div>';
+    return;
+  }
+
+  var PE = (typeof window !== 'undefined' && window.PoolEngine) ? window.PoolEngine : null;
+
+  list.innerHTML = pools.map(function(p) {
+    var tokA   = _LIQ_TOKEN_COLORS[p.tokenA] || { bg: 'var(--card)', label: p.tokenA ? p.tokenA[0] : '?' };
+    var tokB   = _LIQ_TOKEN_COLORS[p.tokenB] || { bg: 'var(--card)', label: p.tokenB ? p.tokenB[0] : '?' };
+    var badge  = p.deployed
+      ? '<span class="liq-badge liq-badge-live">Live</span>'
+      : '<span class="liq-badge liq-badge-pending">Pending Deploy</span>';
+
+    // TVL from reserves if available
+    var tvlStr = '—';
+    if (PE && p.reserveA != null && p.reserveB != null) {
+      try {
+        var PE_TOKENS = PE.getToken ? PE : null;
+        var tA = PE_TOKENS ? PE_TOKENS.getToken(p.tokenA) : null;
+        var tB = PE_TOKENS ? PE_TOKENS.getToken(p.tokenB) : null;
+        var decA = tA ? tA.decimals : 6;
+        var decB = tB ? tB.decimals : 6;
+        var rA = Number(p.reserveA) / Math.pow(10, decA);
+        var rB = Number(p.reserveB) / Math.pow(10, decB);
+        if (rA > 0 || rB > 0) tvlStr = '$' + (rA + rB).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      } catch(e) {}
+    } else if (p.deployed) {
+      tvlStr = 'Loading…';
+    }
+
+    var feePct = p.feeBps != null ? (p.feeBps / 100).toFixed(2) + '%' : '—';
+    var addrShort = p.address ? p.address.slice(0,6)+'…'+p.address.slice(-4) : '—';
+    var explorerHref = p.address && p.deployed ? 'https://explorer.arc.io/address/' + p.address : null;
+
+    return '<div class="liq-pool-row" id="liq-row-' + escHtml(p.id) + '">' +
+      '<div class="liq-pool-pair">' +
+        '<div class="liq-tok-icon" style="background:' + tokA.bg + '">' + tokA.label + '</div>' +
+        '<div class="liq-tok-icon" style="background:' + tokB.bg + '">' + tokB.label + '</div>' +
+      '</div>' +
+      '<div style="min-width:0">' +
+        '<div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">' +
+          '<span style="font-size:12px;font-weight:700;color:var(--text)">' + escHtml(p.tokenA||'') + ' / ' + escHtml(p.tokenB||'') + '</span>' +
+          badge +
+          (p.type ? '<span style="font-size:8px;color:var(--muted2);background:var(--card);border:1px solid var(--border2);border-radius:6px;padding:1px 6px">' + escHtml(p.type) + '</span>' : '') +
+        '</div>' +
+        '<div style="display:flex;gap:14px;margin-top:6px;flex-wrap:wrap">' +
+          '<div class="liq-metric-chip"><div class="lmc-val">' + tvlStr + '</div><div class="lmc-lbl">TVL</div></div>' +
+          '<div class="liq-metric-chip"><div class="lmc-val">' + feePct + '</div><div class="lmc-lbl">Fee tier</div></div>' +
+          '<div class="liq-metric-chip"><div class="lmc-val" style="font-family:monospace;font-size:10px">' + addrShort + '</div><div class="lmc-lbl">Contract</div></div>' +
+        '</div>' +
+      '</div>' +
+      '<div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end;flex-shrink:0">' +
+        (explorerHref ? '<a href="' + explorerHref + '" target="_blank" rel="noopener" class="btn" style="font-size:9px;padding:5px 9px;text-decoration:none"><i class="ti ti-external-link" style="font-size:10px"></i> Explorer</a>' : '') +
+        (!p.deployed ? '' : '<button class="btn" disabled style="font-size:9px;padding:5px 9px;opacity:.45;cursor:not-allowed" title="Available in a future release"><i class="ti ti-plus" style="font-size:10px"></i> Add Liq.</button>') +
+      '</div>' +
+    '</div>';
+  }).join('');
+}
+
+function liqRenderPositions() {
+  var noWallet = document.getElementById('liq-pos-no-wallet');
+  var posList  = document.getElementById('liq-pos-list');
+  var posEmpty = document.getElementById('liq-pos-empty');
+  if (!noWallet) return;
+
+  var addr = (typeof walletAddress !== 'undefined') ? walletAddress : null;
+  if (!addr) {
+    noWallet.style.display = 'flex';
+    if (posList)  posList.style.display  = 'none';
+    if (posEmpty) posEmpty.style.display = 'none';
+    return;
+  }
+
+  noWallet.style.display = 'none';
+
+  // Try to read LP balances
+  var PE = (typeof window !== 'undefined' && window.PoolEngine) ? window.PoolEngine : null;
+  var deployed = PE ? PE.REGISTRY.filter(function(p){ return p.deployed; }) : [];
+
+  if (!deployed.length || !window.provider) {
+    if (posList)  posList.style.display  = 'none';
+    if (posEmpty) { posEmpty.style.display = 'flex'; posEmpty.style.flexDirection = 'column'; }
+    return;
+  }
+
+  var LP_ABI = ['function balanceOf(address) view returns (uint256)'];
+  var tasks  = deployed.map(function(p) {
+    try {
+      return new ethers.Contract(p.address, LP_ABI, window.provider).balanceOf(addr).catch(function(){ return 0n; });
+    } catch(e) { return Promise.resolve(0n); }
+  });
+
+  Promise.all(tasks).then(function(bals) {
+    var positions = deployed.filter(function(_, i){ return bals[i] && BigInt(bals[i]) > 0n; }).map(function(p, _i) {
+      var i = deployed.indexOf(p);
+      return { pool: p, lpBal: bals[i] };
+    });
+
+    if (!positions.length) {
+      if (posList)  posList.style.display  = 'none';
+      if (posEmpty) { posEmpty.style.display = 'flex'; posEmpty.style.flexDirection = 'column'; }
+      return;
+    }
+
+    if (posEmpty) posEmpty.style.display = 'none';
+    if (posList) {
+      posList.style.display = 'block';
+      posList.innerHTML = positions.map(function(pos) {
+        var tokA = _LIQ_TOKEN_COLORS[pos.pool.tokenA] || { bg: 'var(--card)', label: '?' };
+        var tokB = _LIQ_TOKEN_COLORS[pos.pool.tokenB] || { bg: 'var(--card)', label: '?' };
+        var lpFmt = (Number(pos.lpBal) / 1e18).toFixed(6);
+        return '<div class="liq-pool-row" style="margin-bottom:10px">' +
+          '<div class="liq-pool-pair">' +
+            '<div class="liq-tok-icon" style="background:' + tokA.bg + '">' + tokA.label + '</div>' +
+            '<div class="liq-tok-icon" style="background:' + tokB.bg + '">' + tokB.label + '</div>' +
+          '</div>' +
+          '<div><div style="font-size:12px;font-weight:700;color:var(--text)">' + escHtml(pos.pool.tokenA||'') + ' / ' + escHtml(pos.pool.tokenB||'') + '</div>' +
+          '<div style="font-size:9.5px;color:var(--muted2);margin-top:3px">LP Balance: <span style="color:var(--text);font-weight:600">' + lpFmt + '</span></div></div>' +
+          '<div style="flex-shrink:0"><button class="btn" disabled style="font-size:9px;padding:5px 9px;opacity:.45;cursor:not-allowed" title="Available in a future release"><i class="ti ti-minus" style="font-size:10px"></i> Remove</button></div>' +
+        '</div>';
+      }).join('');
+    }
+  }).catch(function() {
+    if (posList)  posList.style.display  = 'none';
+    if (posEmpty) { posEmpty.style.display = 'flex'; posEmpty.style.flexDirection = 'column'; }
+  });
+}
+
+// Hook into showPage
+var _liqOrigShowPage = null;
+(function() {
+  if (typeof showPage === 'function') {
+    _liqOrigShowPage = showPage;
+  }
+})();
+
 function selectPool(poolId) {
   activePoolId = poolId;
   document.getElementById('pool-list-view').style.display = 'none';
