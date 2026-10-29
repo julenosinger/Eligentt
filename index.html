@@ -9738,9 +9738,9 @@ select.cinput option { background: #161a24; color: #dde2f0; }
                 <span style="font-size:10.5px;font-weight:700;color:var(--text)">Quick Actions</span>
               </div>
               <div style="padding:8px 10px;display:flex;flex-direction:column;gap:4px">
-                <button class="btn" onclick="showPage('send')" style="justify-content:flex-start;gap:8px;font-size:10px;padding:7px 10px;border-radius:8px;width:100%"><i class="ti ti-send" style="color:#4f8ef7;font-size:12px"></i>Send</button>
-                <button class="btn" onclick="showPage('billing')" style="justify-content:flex-start;gap:8px;font-size:10px;padding:7px 10px;border-radius:8px;width:100%"><i class="ti ti-file-invoice" style="color:#22c55e;font-size:12px"></i>Create Invoice</button>
-                <button class="btn" onclick="showPage('billing')" style="justify-content:flex-start;gap:8px;font-size:10px;padding:7px 10px;border-radius:8px;width:100%"><i class="ti ti-link" style="color:#a78bfa;font-size:12px"></i>Payment Link</button>
+                <button class="btn" onclick="_rcpOpenSend()" style="justify-content:flex-start;gap:8px;font-size:10px;padding:7px 10px;border-radius:8px;width:100%"><i class="ti ti-send" style="color:#4f8ef7;font-size:12px"></i>Send</button>
+                <button class="btn" onclick="_rcpOpenInvoice()" style="justify-content:flex-start;gap:8px;font-size:10px;padding:7px 10px;border-radius:8px;width:100%"><i class="ti ti-file-invoice" style="color:#22c55e;font-size:12px"></i>Create Invoice</button>
+                <button class="btn" onclick="_rcpOpenPayLink()" style="justify-content:flex-start;gap:8px;font-size:10px;padding:7px 10px;border-radius:8px;width:100%"><i class="ti ti-link" style="color:#a78bfa;font-size:12px"></i>Payment Link</button>
                 <button class="btn" onclick="_rcpOpenSchedule()" style="justify-content:flex-start;gap:8px;font-size:10px;padding:7px 10px;border-radius:8px;width:100%"><i class="ti ti-calendar" style="color:#f59e0b;font-size:12px"></i>Schedule</button>
                 <button class="btn" onclick="_rcpOpenAutonoma()" style="justify-content:flex-start;gap:8px;font-size:10px;padding:7px 10px;border-radius:8px;width:100%"><i class="ti ti-robot" style="color:#06F7E9;font-size:12px"></i>Ask Autonoma</button>
               </div>
@@ -30695,6 +30695,67 @@ function _rcpOpenSchedule() {
 // Pending context: stored before navigation, consumed once by autonomaInit.
 // This avoids relying on a fixed timer and prevents double-consumption.
 window._rcpPendingAutonomaCtx = null;
+
+// ── Recipients → Send integration ─────────────────────────────────────────────
+function _rcpOpenSend() {
+  const c = _rcpGetActiveContact();
+  if (!c) { toast('Select a contact first, then click Send', 'info'); return; }
+  if (!c.addr) { toast('Contact has no wallet address', 'warning'); return; }
+  showPage('send');
+  setTimeout(function() {
+    requestAnimationFrame(function() {
+      var inp = document.getElementById('sa-recipient');
+      if (inp) {
+        inp.value = c.addr;
+        if (typeof saUpdateRoute === 'function') saUpdateRoute();
+        if (typeof saAutocomplete === 'function') saAutocomplete(c.addr);
+      }
+      c.lastUsed = new Date().toISOString();
+      if (typeof Store !== 'undefined') Store.save('contacts', contacts);
+    });
+  }, 80);
+}
+
+// ── Recipients → Invoice integration ──────────────────────────────────────────
+function _rcpOpenInvoice() {
+  const c = _rcpGetActiveContact();
+  showPage('invoices');
+  setTimeout(function() {
+    requestAnimationFrame(function() {
+      if (typeof billingSetMode === 'function') billingSetMode('invoices');
+      if (typeof invSwitchTab === 'function') invSwitchTab('create');
+      if (!c) return;
+      var nameEl = document.getElementById('inv-to-name');
+      if (nameEl && !nameEl.value && c.name) nameEl.value = c.name;
+      var addrEl = document.getElementById('inv-to-addr');
+      if (addrEl && !addrEl.value && c.addr) addrEl.value = c.addr;
+      if (typeof invPreviewUpdate === 'function') invPreviewUpdate();
+      c.lastUsed = new Date().toISOString();
+      if (typeof Store !== 'undefined') Store.save('contacts', contacts);
+    });
+  }, 100);
+}
+
+// ── Recipients → Payment Link integration ─────────────────────────────────────
+function _rcpOpenPayLink() {
+  const c = _rcpGetActiveContact();
+  // showPage('links') sets _billingPending = 'links' then redirects to 'invoices'
+  showPage('links');
+  setTimeout(function() {
+    requestAnimationFrame(function() {
+      if (typeof billingSetMode === 'function') billingSetMode('links');
+      if (typeof createPayLink === 'function') createPayLink();
+      if (!c) return;
+      var labelEl = document.getElementById('pl-label');
+      if (labelEl && !labelEl.value && c.name) labelEl.value = 'Payment to ' + c.name;
+      var addrEl = document.getElementById('pl-addr');
+      if (addrEl && !addrEl.value && c.addr) addrEl.value = c.addr;
+      if (typeof plPreviewUpdate === 'function') plPreviewUpdate();
+      c.lastUsed = new Date().toISOString();
+      if (typeof Store !== 'undefined') Store.save('contacts', contacts);
+    });
+  }, 120);
+}
 
 function _rcpBuildAutonomaMsg(c) {
   if (!c) return null;
