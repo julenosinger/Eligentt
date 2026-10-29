@@ -7987,7 +7987,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
           <div style="margin-top:12px;background:rgba(245,158,11,.06);border:1px solid rgba(245,158,11,.2);border-radius:8px;padding:9px 13px;display:flex;align-items:flex-start;gap:9px">
             <i class="ti ti-info-circle" style="color:#f59e0b;font-size:13px;margin-top:1px;flex-shrink:0"></i>
             <div style="font-size:9px;color:var(--muted2);line-height:1.5">
-              <b style="color:#f59e0b">Read-only view.</b> Pool data is read live from Arc Mainnet contracts. Add/Remove Liquidity will be available in a future release. Only pools with verified on-chain bytecode are listed.
+              <b style="color:#f59e0b">Read-only view.</b> Pool data is read live from Arc Mainnet contracts. Add/Remove Liquidity will be available in a future release.
             </div>
           </div>
 
@@ -32879,14 +32879,28 @@ function _liqEnrichPools(registry) {
     if (!p.deployed || !p.address) return Promise.resolve();
     try {
       var contract = new ethers.Contract(p.address, POOL_ABI, window.provider);
-      return Promise.all([
-        contract.getReserves().catch(function(){ return null; }),
-        contract.totalSupply().catch(function(){ return null; })
-      ]).then(function(res) {
-        if (res[0]) { enriched[idx].reserveA = res[0][0]; enriched[idx].reserveB = res[0][1]; }
-        if (res[1]) { enriched[idx].lpSupply = res[1]; }
-      }).catch(function() {});
-    } catch(e) { return Promise.resolve(); }
+      var reservesP = contract.getReserves().then(function(r){ return { ok: true, val: r }; }).catch(function(e){ return { ok: false, err: e && e.code ? e.code : 'RPC_ERROR' }; });
+      var supplyP   = contract.totalSupply().then(function(r){ return { ok: true, val: r }; }).catch(function(e){ return { ok: false, err: e && e.code ? e.code : 'RPC_ERROR' }; });
+      // LP decimals: try to read from contract, fall back to null (never assume 18)
+      var LP_DEC_ABI = ['function decimals() view returns (uint8)'];
+      var decContract = new ethers.Contract(p.address, LP_DEC_ABI, window.provider);
+      var lpDecP = decContract.decimals().then(function(d){ return { ok: true, val: Number(d) }; }).catch(function(){ return { ok: false }; });
+      return Promise.all([reservesP, supplyP, lpDecP]).then(function(res) {
+        var rRes = res[0], sRes = res[1], dRes = res[2];
+        if (rRes.ok) {
+          enriched[idx].reserveA    = rRes.val[0];
+          enriched[idx].reserveB    = rRes.val[1];
+          enriched[idx].reserveErr  = null;
+        } else {
+          enriched[idx].reserveA    = null;
+          enriched[idx].reserveB    = null;
+          enriched[idx].reserveErr  = rRes.err; // 'CALL_EXCEPTION' | 'NETWORK_ERROR' | 'RPC_ERROR'
+        }
+        enriched[idx].lpSupply   = sRes.ok ? sRes.val : null;
+        enriched[idx].lpSupplyErr= sRes.ok ? null : sRes.err;
+        enriched[idx].lpDecimals = dRes.ok ? dRes.val : null; // null = unknown, never assume 18
+      });
+    } catch(e) { enriched[idx].reserveErr = 'EXCEPTION'; return Promise.resolve(); }
   });
 
   return Promise.all(tasks).then(function() { return enriched; });
@@ -32924,20 +32938,32 @@ function liqRenderPools() {
       ? '<span class="liq-badge liq-badge-live">Live</span>'
       : '<span class="liq-badge liq-badge-pending">Pending Deploy</span>';
 
-    // TVL from reserves if available
+    // Reserves display: show raw token amounts only — no USD sum without verified prices
     var tvlStr = '—';
-    if (PE && p.reserveA != null && p.reserveB != null) {
+    if (p.reserveErr) {
+      var _errMap = { 'CALL_EXCEPTION': 'Method unsupported', 'NETWORK_ERROR': 'RPC unreachable', 'EXCEPTION': 'Read error' };
+      tvlStr = '<span style="color:var(--warn,#f59e0b);font-size:9px">' + escHtml(_errMap[p.reserveErr] || 'Unavailable') + '</span>';
+    } else if (p.reserveA != null && p.reserveB != null) {
       try {
-        var PE_TOKENS = PE.getToken ? PE : null;
-        var tA = PE_TOKENS ? PE_TOKENS.getToken(p.tokenA) : null;
-        var tB = PE_TOKENS ? PE_TOKENS.getToken(p.tokenB) : null;
-        var decA = tA ? tA.decimals : 6;
-        var decB = tB ? tB.decimals : 6;
-        var rA = Number(p.reserveA) / Math.pow(10, decA);
-        var rB = Number(p.reserveB) / Math.pow(10, decB);
-        if (rA > 0 || rB > 0) tvlStr = '$' + (rA + rB).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-      } catch(e) {}
-    } else if (p.deployed) {
+        var _tA = PE && PE.getToken ? PE.getToken(p.tokenA) : null;
+        var _tB = PE && PE.getToken ? PE.getToken(p.tokenB) : null;
+        var _decA = _tA && _tA.decimals != null ? _tA.decimals : null;
+        var _decB = _tB && _tB.decimals != null ? _tB.decimals : null;
+        if (_decA === null || _decB === null) {
+          tvlStr = '<span style="color:var(--muted2);font-size:9px">Decimals unavailable</span>';
+        } else {
+          var _rA = Number(BigInt(p.reserveA)) / Math.pow(10, _decA);
+          var _rB = Number(BigInt(p.reserveB)) / Math.pow(10, _decB);
+          if (_rA === 0 && _rB === 0) {
+            tvlStr = '<span style="color:var(--muted2);font-size:9px">Empty pool</span>';
+          } else {
+            // Show reserves as token amounts — NOT as USD (no price oracle available)
+            tvlStr = _rA.toLocaleString('en-US',{maximumFractionDigits:2}) + ' ' + escHtml(p.tokenA||'') +
+                     ' / ' + _rB.toLocaleString('en-US',{maximumFractionDigits:2}) + ' ' + escHtml(p.tokenB||'');
+          }
+        }
+      } catch(e) { tvlStr = '<span style="color:var(--muted2);font-size:9px">Parse error</span>'; }
+    } else if (p.deployed && !p.reserveErr) {
       tvlStr = 'Loading…';
     }
 
@@ -32957,7 +32983,7 @@ function liqRenderPools() {
           (p.type ? '<span style="font-size:8px;color:var(--muted2);background:var(--card);border:1px solid var(--border2);border-radius:6px;padding:1px 6px">' + escHtml(p.type) + '</span>' : '') +
         '</div>' +
         '<div style="display:flex;gap:14px;margin-top:6px;flex-wrap:wrap">' +
-          '<div class="liq-metric-chip"><div class="lmc-val">' + tvlStr + '</div><div class="lmc-lbl">TVL</div></div>' +
+          '<div class="liq-metric-chip" style="min-width:0;flex:1"><div class="lmc-val" style="font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + tvlStr + '</div><div class="lmc-lbl">Reserves</div></div>' +
           '<div class="liq-metric-chip"><div class="lmc-val">' + feePct + '</div><div class="lmc-lbl">Fee tier</div></div>' +
           '<div class="liq-metric-chip"><div class="lmc-val" style="font-family:monospace;font-size:10px">' + addrShort + '</div><div class="lmc-lbl">Contract</div></div>' +
         '</div>' +
@@ -32996,18 +33022,47 @@ function liqRenderPositions() {
     return;
   }
 
-  var LP_ABI = ['function balanceOf(address) view returns (uint256)'];
-  var tasks  = deployed.map(function(p) {
+  var LP_ABI = ['function balanceOf(address) view returns (uint256)', 'function decimals() view returns (uint8)'];
+  // Capture wallet at read time — discard results if wallet changed during async read
+  var addrAtRead = addr;
+  var tasks = deployed.map(function(p) {
     try {
-      return new ethers.Contract(p.address, LP_ABI, window.provider).balanceOf(addr).catch(function(){ return 0n; });
-    } catch(e) { return Promise.resolve(0n); }
+      var c = new ethers.Contract(p.address, LP_ABI, window.provider);
+      var balP = c.balanceOf(addr).then(function(b){ return { ok: true, val: b }; }).catch(function(e){ return { ok: false, err: e && e.code ? e.code : 'RPC_ERROR' }; });
+      var decP = c.decimals().then(function(d){ return { ok: true, val: Number(d) }; }).catch(function(){ return { ok: false }; });
+      return Promise.all([balP, decP]);
+    } catch(e) { return Promise.resolve([{ ok: false, err: 'EXCEPTION' }, { ok: false }]); }
   });
 
-  Promise.all(tasks).then(function(bals) {
-    var positions = deployed.filter(function(_, i){ return bals[i] && BigInt(bals[i]) > 0n; }).map(function(p, _i) {
-      var i = deployed.indexOf(p);
-      return { pool: p, lpBal: bals[i] };
+  Promise.all(tasks).then(function(results) {
+    // Stale-wallet guard: discard if wallet changed
+    var currentAddr = (typeof walletAddress !== 'undefined') ? walletAddress : null;
+    if (currentAddr !== addrAtRead) return;
+
+    var anyFailed = results.some(function(r){ return !r[0].ok; });
+    var positions = [];
+    results.forEach(function(r, i) {
+      if (r[0].ok && r[0].val != null && BigInt(r[0].val) > 0n) {
+        positions.push({ pool: deployed[i], lpBal: r[0].val, lpDec: r[1].ok ? r[1].val : null });
+      }
     });
+
+    // If any read failed and no positions found, show partial-failure warning
+    if (anyFailed && !positions.length) {
+      if (posList) posList.style.display = 'none';
+      if (posEmpty) {
+        posEmpty.style.display = 'flex'; posEmpty.style.flexDirection = 'column';
+        var warn = posEmpty.querySelector('.liq-pos-warn');
+        if (!warn) {
+          var d = document.createElement('div');
+          d.className = 'liq-pos-warn';
+          d.style.cssText = 'font-size:9px;color:var(--warn,#f59e0b);margin-top:8px;text-align:center';
+          d.textContent = 'Some pool reads failed — positions may be incomplete.';
+          posEmpty.appendChild(d);
+        }
+      }
+      return;
+    }
 
     if (!positions.length) {
       if (posList)  posList.style.display  = 'none';
@@ -33021,21 +33076,35 @@ function liqRenderPositions() {
       posList.innerHTML = positions.map(function(pos) {
         var tokA = _LIQ_TOKEN_COLORS[pos.pool.tokenA] || { bg: 'var(--card)', label: '?' };
         var tokB = _LIQ_TOKEN_COLORS[pos.pool.tokenB] || { bg: 'var(--card)', label: '?' };
-        var lpFmt = (Number(pos.lpBal) / 1e18).toFixed(6);
+        // Use verified decimals from contract — never assume 18
+        var lpFmt = pos.lpDec != null
+          ? (Number(BigInt(pos.lpBal)) / Math.pow(10, pos.lpDec)).toFixed(pos.lpDec > 6 ? 6 : pos.lpDec)
+          : 'Balance unavailable (decimals unknown)';
         return '<div class="liq-pool-row" style="margin-bottom:10px">' +
           '<div class="liq-pool-pair">' +
             '<div class="liq-tok-icon" style="background:' + tokA.bg + '">' + tokA.label + '</div>' +
             '<div class="liq-tok-icon" style="background:' + tokB.bg + '">' + tokB.label + '</div>' +
           '</div>' +
           '<div><div style="font-size:12px;font-weight:700;color:var(--text)">' + escHtml(pos.pool.tokenA||'') + ' / ' + escHtml(pos.pool.tokenB||'') + '</div>' +
-          '<div style="font-size:9.5px;color:var(--muted2);margin-top:3px">LP Balance: <span style="color:var(--text);font-weight:600">' + lpFmt + '</span></div></div>' +
+          '<div style="font-size:9.5px;color:var(--muted2);margin-top:3px">LP Balance: <span style="color:var(--text);font-weight:600">' + escHtml(String(lpFmt)) + '</span>' +
+          (pos.lpDec != null ? '' : '') + '</div></div>' +
           '<div style="flex-shrink:0"><button class="btn" disabled style="font-size:9px;padding:5px 9px;opacity:.45;cursor:not-allowed" title="Available in a future release"><i class="ti ti-minus" style="font-size:10px"></i> Remove</button></div>' +
         '</div>';
       }).join('');
     }
   }).catch(function() {
     if (posList)  posList.style.display  = 'none';
-    if (posEmpty) { posEmpty.style.display = 'flex'; posEmpty.style.flexDirection = 'column'; }
+    if (posEmpty) {
+      posEmpty.style.display = 'flex'; posEmpty.style.flexDirection = 'column';
+      var warn2 = posEmpty.querySelector('.liq-pos-warn');
+      if (!warn2) {
+        var d2 = document.createElement('div');
+        d2.className = 'liq-pos-warn';
+        d2.style.cssText = 'font-size:9px;color:var(--warn,#f59e0b);margin-top:8px;text-align:center';
+        d2.textContent = 'Position read failed — check RPC connection.';
+        posEmpty.appendChild(d2);
+      }
+    }
   });
 }
 
