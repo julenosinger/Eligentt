@@ -33022,89 +33022,121 @@ function liqRenderPositions() {
     return;
   }
 
+  // Chain-ID guard: verify we are on Arc Mainnet (5042) before showing data as mainnet
+  var ARC_MAINNET_CHAIN_ID = 5042;
   var LP_ABI = ['function balanceOf(address) view returns (uint256)', 'function decimals() view returns (uint8)'];
-  // Capture wallet at read time — discard results if wallet changed during async read
-  var addrAtRead = addr;
-  var tasks = deployed.map(function(p) {
-    try {
-      var c = new ethers.Contract(p.address, LP_ABI, window.provider);
-      var balP = c.balanceOf(addr).then(function(b){ return { ok: true, val: b }; }).catch(function(e){ return { ok: false, err: e && e.code ? e.code : 'RPC_ERROR' }; });
-      var decP = c.decimals().then(function(d){ return { ok: true, val: Number(d) }; }).catch(function(){ return { ok: false }; });
-      return Promise.all([balP, decP]);
-    } catch(e) { return Promise.resolve([{ ok: false, err: 'EXCEPTION' }, { ok: false }]); }
-  });
 
-  Promise.all(tasks).then(function(results) {
-    // Stale-wallet guard: discard if wallet changed
-    var currentAddr = (typeof walletAddress !== 'undefined') ? walletAddress : null;
-    if (currentAddr !== addrAtRead) return;
+  function _liqSetPosWarn(container, msg) {
+    if (!container) return;
+    var existing = container.querySelector('.liq-pos-warn');
+    if (existing) { existing.textContent = msg; return; }
+    var d = document.createElement('div');
+    d.className = 'liq-pos-warn';
+    d.style.cssText = 'font-size:9px;color:var(--warn,#f59e0b);margin-top:8px;text-align:center';
+    d.textContent = msg;
+    container.appendChild(d);
+  }
+  function _liqClearPosWarn(container) {
+    if (!container) return;
+    var w = container.querySelector('.liq-pos-warn');
+    if (w) w.remove();
+  }
 
-    var anyFailed = results.some(function(r){ return !r[0].ok; });
-    var positions = [];
-    results.forEach(function(r, i) {
-      if (r[0].ok && r[0].val != null && BigInt(r[0].val) > 0n) {
-        positions.push({ pool: deployed[i], lpBal: r[0].val, lpDec: r[1].ok ? r[1].val : null });
-      }
+  // Validate decimals: must be a non-negative integer within sane bounds (0–36)
+  function _liqValidateDec(d) {
+    return typeof d === 'number' && Number.isInteger(d) && d >= 0 && d <= 36;
+  }
+
+  // Capture wallet and provider at read time — discard results if either changed
+  var addrAtRead    = addr;
+  var providerAtRead = window.provider;
+
+  // Verify chain ID before reading
+  var chainCheckP = (providerAtRead && typeof providerAtRead.getNetwork === 'function')
+    ? providerAtRead.getNetwork().then(function(n){ return { ok: true, chainId: Number(n.chainId) }; }).catch(function(){ return { ok: false }; })
+    : Promise.resolve({ ok: false });
+
+  chainCheckP.then(function(net) {
+    // Chain guard: warn if chain cannot be confirmed as Arc Mainnet 5042
+    var wrongChain = net.ok && net.chainId !== ARC_MAINNET_CHAIN_ID;
+    if (wrongChain) {
+      if (posList) posList.style.display = 'none';
+      if (posEmpty) { posEmpty.style.display = 'flex'; posEmpty.style.flexDirection = 'column'; }
+      _liqSetPosWarn(posEmpty, 'Wrong network — connect to Arc Mainnet (Chain 5042).');
+      return;
+    }
+    if (!net.ok) {
+      // Cannot confirm chain — show warning but continue read (provider may not expose getNetwork)
+    }
+
+    var tasks = deployed.map(function(p) {
+      try {
+        var c = new ethers.Contract(p.address, LP_ABI, providerAtRead);
+        var balP = c.balanceOf(addrAtRead).then(function(b){ return { ok: true, val: b }; }).catch(function(e){ return { ok: false, err: e && e.code ? e.code : 'RPC_ERROR' }; });
+        var decP = c.decimals().then(function(d){ return { ok: true, val: Number(d) }; }).catch(function(){ return { ok: false }; });
+        return Promise.all([balP, decP]);
+      } catch(e) { return Promise.resolve([{ ok: false, err: 'EXCEPTION' }, { ok: false }]); }
     });
 
-    // If any read failed and no positions found, show partial-failure warning
-    if (anyFailed && !positions.length) {
-      if (posList) posList.style.display = 'none';
-      if (posEmpty) {
-        posEmpty.style.display = 'flex'; posEmpty.style.flexDirection = 'column';
-        var warn = posEmpty.querySelector('.liq-pos-warn');
-        if (!warn) {
-          var d = document.createElement('div');
-          d.className = 'liq-pos-warn';
-          d.style.cssText = 'font-size:9px;color:var(--warn,#f59e0b);margin-top:8px;text-align:center';
-          d.textContent = 'Some pool reads failed — positions may be incomplete.';
-          posEmpty.appendChild(d);
+    Promise.all(tasks).then(function(results) {
+      // Stale guard: discard if wallet or provider changed during async read
+      var currentAddr     = (typeof walletAddress !== 'undefined') ? walletAddress : null;
+      var currentProvider = window.provider;
+      if (currentAddr !== addrAtRead || currentProvider !== providerAtRead) return;
+
+      var anyFailed = results.some(function(r){ return !r[0].ok; });
+      var positions = [];
+      results.forEach(function(r, i) {
+        if (r[0].ok && r[0].val != null && BigInt(r[0].val) > 0n) {
+          var rawDec = r[1].ok ? r[1].val : null;
+          positions.push({ pool: deployed[i], lpBal: r[0].val, lpDec: _liqValidateDec(rawDec) ? rawDec : null });
         }
-      }
-      return;
-    }
+      });
 
-    if (!positions.length) {
-      if (posList)  posList.style.display  = 'none';
+      if (!positions.length) {
+        if (posList) posList.style.display = 'none';
+        if (posEmpty) { posEmpty.style.display = 'flex'; posEmpty.style.flexDirection = 'column'; }
+        // Show partial-failure warning whenever any read failed (even if other reads returned zero)
+        if (anyFailed) {
+          _liqSetPosWarn(posEmpty, 'Some pool reads failed — positions may be incomplete. Try refreshing.');
+        } else {
+          _liqClearPosWarn(posEmpty); // all reads succeeded, confirmed zero positions
+        }
+        return;
+      }
+
+      // Positions found: clear warnings and render
+      if (posEmpty) posEmpty.style.display = 'none';
+      if (posList) {
+        posList.style.display = 'block';
+        // Show partial-failure banner at top of list if some reads failed
+        var partialBanner = anyFailed
+          ? '<div style="font-size:9px;color:var(--warn,#f59e0b);background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.18);border-radius:7px;padding:7px 11px;margin-bottom:10px"><i class="ti ti-alert-triangle" style="margin-right:5px"></i>Some pool reads failed — list may be incomplete.</div>'
+          : '';
+        posList.innerHTML = partialBanner + positions.map(function(pos) {
+          var tokA = _LIQ_TOKEN_COLORS[pos.pool.tokenA] || { bg: 'var(--card)', label: '?' };
+          var tokB = _LIQ_TOKEN_COLORS[pos.pool.tokenB] || { bg: 'var(--card)', label: '?' };
+          // Use ethers.formatUnits — safe for large BigInt, no Number precision loss
+          var lpFmt = (pos.lpDec != null && typeof ethers !== 'undefined' && ethers.formatUnits)
+            ? ethers.formatUnits(pos.lpBal, pos.lpDec)
+            : 'Unavailable (decimals unknown)';
+          return '<div class="liq-pool-row" style="margin-bottom:10px">' +
+            '<div class="liq-pool-pair">' +
+              '<div class="liq-tok-icon" style="background:' + tokA.bg + '">' + tokA.label + '</div>' +
+              '<div class="liq-tok-icon" style="background:' + tokB.bg + '">' + tokB.label + '</div>' +
+            '</div>' +
+            '<div><div style="font-size:12px;font-weight:700;color:var(--text)">' + escHtml(pos.pool.tokenA||'') + ' / ' + escHtml(pos.pool.tokenB||'') + '</div>' +
+            '<div style="font-size:9.5px;color:var(--muted2);margin-top:3px">LP Balance: <span style="color:var(--text);font-weight:600">' + escHtml(String(lpFmt)) + '</span></div></div>' +
+            '<div style="flex-shrink:0"><button class="btn" disabled style="font-size:9px;padding:5px 9px;opacity:.45;cursor:not-allowed" title="Available in a future release"><i class="ti ti-minus" style="font-size:10px"></i> Remove</button></div>' +
+          '</div>';
+        }).join('');
+      }
+    }).catch(function(e) {
+      if (posList) posList.style.display = 'none';
       if (posEmpty) { posEmpty.style.display = 'flex'; posEmpty.style.flexDirection = 'column'; }
-      return;
-    }
-
-    if (posEmpty) posEmpty.style.display = 'none';
-    if (posList) {
-      posList.style.display = 'block';
-      posList.innerHTML = positions.map(function(pos) {
-        var tokA = _LIQ_TOKEN_COLORS[pos.pool.tokenA] || { bg: 'var(--card)', label: '?' };
-        var tokB = _LIQ_TOKEN_COLORS[pos.pool.tokenB] || { bg: 'var(--card)', label: '?' };
-        // Use verified decimals from contract — never assume 18
-        var lpFmt = pos.lpDec != null
-          ? (Number(BigInt(pos.lpBal)) / Math.pow(10, pos.lpDec)).toFixed(pos.lpDec > 6 ? 6 : pos.lpDec)
-          : 'Balance unavailable (decimals unknown)';
-        return '<div class="liq-pool-row" style="margin-bottom:10px">' +
-          '<div class="liq-pool-pair">' +
-            '<div class="liq-tok-icon" style="background:' + tokA.bg + '">' + tokA.label + '</div>' +
-            '<div class="liq-tok-icon" style="background:' + tokB.bg + '">' + tokB.label + '</div>' +
-          '</div>' +
-          '<div><div style="font-size:12px;font-weight:700;color:var(--text)">' + escHtml(pos.pool.tokenA||'') + ' / ' + escHtml(pos.pool.tokenB||'') + '</div>' +
-          '<div style="font-size:9.5px;color:var(--muted2);margin-top:3px">LP Balance: <span style="color:var(--text);font-weight:600">' + escHtml(String(lpFmt)) + '</span>' +
-          (pos.lpDec != null ? '' : '') + '</div></div>' +
-          '<div style="flex-shrink:0"><button class="btn" disabled style="font-size:9px;padding:5px 9px;opacity:.45;cursor:not-allowed" title="Available in a future release"><i class="ti ti-minus" style="font-size:10px"></i> Remove</button></div>' +
-        '</div>';
-      }).join('');
-    }
-  }).catch(function() {
-    if (posList)  posList.style.display  = 'none';
-    if (posEmpty) {
-      posEmpty.style.display = 'flex'; posEmpty.style.flexDirection = 'column';
-      var warn2 = posEmpty.querySelector('.liq-pos-warn');
-      if (!warn2) {
-        var d2 = document.createElement('div');
-        d2.className = 'liq-pos-warn';
-        d2.style.cssText = 'font-size:9px;color:var(--warn,#f59e0b);margin-top:8px;text-align:center';
-        d2.textContent = 'Position read failed — check RPC connection.';
-        posEmpty.appendChild(d2);
-      }
-    }
+      var errMsg = (e && e.code === 'NETWORK_ERROR') ? 'RPC unreachable — check connection.' : 'Position read failed — try refreshing.';
+      _liqSetPosWarn(posEmpty, errMsg);
+    });
   });
 }
 

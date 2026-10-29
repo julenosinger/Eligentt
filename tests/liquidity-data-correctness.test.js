@@ -1,5 +1,5 @@
 /**
- * Liquidity 1.0.1 — data correctness tests
+ * Liquidity 1.0.2 — data correctness tests (extends 1.0.1)
  * Tests the _liqEnrichPools enrichment logic and liqRenderPositions behavior
  * by extracting the functions from index.html and exercising them directly.
  */
@@ -98,20 +98,25 @@ describe('LIQ-3: My Positions — balanceOf fail-safe', () => {
     expect(renderSrc).toContain('currentAddr !== addrAtRead');
   });
 
-  it('LIQ-3.4: LP decimals from contract, not hardcoded 1e18', () => {
+  it('LIQ-3.4: uses ethers.formatUnits instead of unsafe Number(BigInt)/1e18', () => {
     expect(renderSrc).not.toContain('/ 1e18');
-    expect(renderSrc).toContain('lpDec != null');
-    expect(renderSrc).toContain('Math.pow(10, pos.lpDec)');
+    expect(renderSrc).not.toContain('Number(BigInt(pos.lpBal))');
+    expect(renderSrc).toContain('ethers.formatUnits');
   });
 
-  it('LIQ-3.5: shows "Balance unavailable (decimals unknown)" when lpDec null', () => {
-    expect(renderSrc).toContain('Balance unavailable (decimals unknown)');
+  it('LIQ-3.5: shows "Unavailable (decimals unknown)" when lpDec null', () => {
+    expect(renderSrc).toContain('Unavailable (decimals unknown)');
   });
 
-  it('LIQ-3.6: "No positions found" only shown when all reads ok AND balances are 0', () => {
-    // anyFailed check must gate the empty state
+  it('LIQ-3.6: anyFailed warning shown even when positions exist (partial failure)', () => {
     expect(renderSrc).toContain('anyFailed');
-    expect(renderSrc).toContain('anyFailed && !positions.length');
+    // warn shown both when positions.length === 0 AND when positions exist
+    expect(renderSrc).toContain('partialBanner');
+  });
+
+  it('LIQ-3.7: _liqValidateDec rejects negative, non-integer, and out-of-range decimals', () => {
+    expect(renderSrc).toContain('_liqValidateDec');
+    expect(renderSrc).toContain('d >= 0 && d <= 36');
   });
 });
 
@@ -142,5 +147,43 @@ describe('LIQ-5: Contract status clarity', () => {
     const liqSection = html.slice(html.indexOf('id="page-pool"'), html.indexOf('id="page-send"') || html.length);
     expect(liqSection).not.toContain('verified on-chain bytecode');
     expect(liqSection).not.toContain('verified on-chain');
+  });
+});
+
+describe('LIQ-6: 1.0.2 — chain guard, formatUnits, retry cleanup', () => {
+  it('LIQ-6.1: chainId guard checks for Arc Mainnet 5042', () => {
+    expect(renderSrc).toContain('ARC_MAINNET_CHAIN_ID');
+    expect(renderSrc).toContain('5042');
+    expect(renderSrc).toContain('Wrong network');
+  });
+
+  it('LIQ-6.2: stale guard checks both wallet AND provider', () => {
+    expect(renderSrc).toContain('providerAtRead');
+    expect(renderSrc).toContain('currentProvider !== providerAtRead');
+  });
+
+  it('LIQ-6.3: _liqSetPosWarn updates existing warning node instead of appending duplicate', () => {
+    expect(renderSrc).toContain('_liqSetPosWarn');
+    expect(renderSrc).toContain('existing.textContent = msg');
+  });
+
+  it('LIQ-6.4: _liqClearPosWarn removes warning on confirmed-zero success', () => {
+    expect(renderSrc).toContain('_liqClearPosWarn');
+  });
+
+  it('LIQ-6.5: NETWORK_ERROR maps to specific RPC message in catch', () => {
+    expect(renderSrc).toContain('NETWORK_ERROR');
+    expect(renderSrc).toContain('RPC unreachable');
+  });
+
+  it('LIQ-6.6: partial failure banner shown at top of positions list when anyFailed', () => {
+    expect(renderSrc).toContain('partialBanner');
+    expect(renderSrc).toContain('list may be incomplete');
+  });
+
+  it('LIQ-6.7: no USD TVL sum in pool render', () => {
+    expect(poolsSrc).not.toContain("'$'");
+    expect(poolsSrc).not.toContain('"$"');
+    expect(poolsSrc).not.toContain('+ rB)');
   });
 });
