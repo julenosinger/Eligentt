@@ -24786,6 +24786,52 @@ async function swpRunPrecheck(amtIn, amtOut, minReceived, route) {
 // ── Tower execution — approve → validate → execute calldata ──
 // QUOTE ≠ EXECUTION: Tower calldata is executed ONLY when Tower is the selected
 // route and it passes every validation. minOut is ALWAYS recomputed locally.
+// ── Generic chain-switch helper for swap execution ───────────────────────────
+// Switches wallet to targetChainId before signing. Handles add-chain (4902),
+// user rejection (4001), and refreshes provider state after a real switch.
+// Returns true if wallet is now on targetChainId, false if switch failed.
+async function _swpEnsureChain(targetChainId) {
+  if (!targetChainId) return true; // no target — nothing to do
+  const eth = (typeof _safeEth === 'function' && _safeEth()) || window.ethereum;
+  if (!eth || !eth.request) return true; // no injected wallet — let the tx fail naturally
+  try {
+    const currentHex = await eth.request({ method: 'eth_chainId' });
+    const current = parseInt(currentHex, 16);
+    if (current === targetChainId) return true; // already on correct chain
+    const targetHex = '0x' + targetChainId.toString(16);
+    toast('Switching to source chain (chainId ' + targetChainId + ')…', 'info');
+    try {
+      await eth.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: targetHex }] });
+    } catch (swErr) {
+      if (swErr.code === 4902 || swErr.code === -32603) {
+        // Chain not added to wallet — surface clear error, don't guess params
+        toast('Add the source network (chainId ' + targetChainId + ') to your wallet first, then retry', 'error');
+        return false;
+      }
+      if (swErr.code === 4001) {
+        // User rejected the switch
+        toast('Network switch rejected — swap requires the source chain to sign', 'warning');
+        return false;
+      }
+      // Other errors: log and continue — some wallets switch silently
+      _warn && _warn('[_swpEnsureChain] switch error:', swErr.message);
+    }
+    // Refresh provider so ethers v6 BrowserProvider picks up the new chain
+    try { if (typeof refreshProviderState === 'function') await refreshProviderState(); } catch(_) {}
+    // Verify the switch actually happened
+    const newHex = await eth.request({ method: 'eth_chainId' });
+    const newChain = parseInt(newHex, 16);
+    if (newChain !== targetChainId) {
+      toast('Wallet is still on chain ' + newChain + ' — expected ' + targetChainId, 'error');
+      return false;
+    }
+    return true;
+  } catch(e) {
+    _warn && _warn('[_swpEnsureChain] unexpected error:', e.message);
+    return true; // non-fatal — let the tx attempt proceed
+  }
+}
+
 async function swpExecuteTowerOnly(tIn, tOut, amtIn, slippageBps) {
   const q = SWP._towerQuoteData;
   if (!q || !q.calldata) { toast('Tower quote unavailable', 'error'); return; }
@@ -24810,6 +24856,14 @@ async function swpExecuteTowerOnly(tIn, tOut, amtIn, slippageBps) {
 
   const tInAddr = getTokAddr(tIn.sym);
   const isNative = !tInAddr || tInAddr === '0x0000000000000000000000000000000000000000';
+
+  // ── Switch to source chain before approving/signing ──────────────────────
+  const towerFromChain = q.quotedFromChainId || SWP.fromChainId || activeChainId;
+  if (towerFromChain && towerFromChain !== activeChainId) {
+    swpSetBtn('approving', 'Switching network…');
+    const switched = await _swpEnsureChain(towerFromChain);
+    if (!switched) { _swpExecuting = false; swpSetBtn('ready', 'Swap'); return; }
+  }
 
   // 1) Approve the Tower spender (exact amount — never double the amount).
   if (!isNative) {
@@ -24933,6 +24987,13 @@ async function swpExecuteLiFi(tIn, tOut, amtIn, slippageBps) {
   const expectedOutRaw = q.expectedOutRaw;
   const nativeSentinels = ['0x0000000000000000000000000000000000000000', '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'];
   const isNative = !fromToken || nativeSentinels.includes(fromToken);
+
+  // ── Switch to source chain before approving/signing ──────────────────────
+  if (execFromChain && execFromChain !== activeChainId) {
+    swpSetBtn('approving', 'Switching network…');
+    const switched = await _swpEnsureChain(execFromChain);
+    if (!switched) { _swpExecuting = false; swpSetBtn('ready', 'Swap'); return; }
+  }
 
   // 1) Approve the LI.FI spender for the source token (skip for native).
   if (!isNative && fromToken) {
