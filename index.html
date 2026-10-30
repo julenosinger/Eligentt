@@ -65314,6 +65314,7 @@ function rwaTab(name) {
   if (panelEl) panelEl.classList.add('active');
   if (name === 'history') rwaRenderHistory();
   if (name === 'portfolio') rwaLoadPortfolio();
+  if (name === 'trade') _rwaRefreshTradeBtn();
 }
 
 // ── Refresh
@@ -65650,6 +65651,35 @@ function _rwaUpdateBalances() {
         if (_rwaBalSeq.to !== toSeq) return;
         if (toBalEl) toBalEl.textContent = 'Balance: —';
       });
+    }
+  }
+}
+
+// ── Sync trade button to global wallet state ──────────────────────────────
+// Called on init, wallet connect/disconnect/switch, and tab open.
+// Does NOT override a valid quote — if the button already shows a real trade
+// label (set by rwaFetchQuote success), leave it alone.
+function _rwaRefreshTradeBtn() {
+  var btn = document.getElementById('rwa-trade-btn');
+  if (!btn) return;
+  var connected = (typeof walletAddress === 'string' && walletAddress.length > 0);
+  if (!connected) {
+    btn.disabled = true;
+    btn.textContent = 'Connect wallet to trade';
+    return;
+  }
+  // Wallet is connected. If there's no active quote and the button still shows
+  // the "Connect wallet…" placeholder, replace it with the neutral ready state.
+  var stillShowingConnect = btn.textContent === 'Connect wallet to trade';
+  if (stillShowingConnect) {
+    var amtEl = document.getElementById('rwa-amount-in');
+    var amt = amtEl ? parseFloat(amtEl.value) : 0;
+    if (amt > 0) {
+      // Amount is set — try fetching a quote right away.
+      rwaFetchQuote();
+    } else {
+      btn.disabled = true;
+      btn.textContent = 'Enter an amount';
     }
   }
 }
@@ -66269,9 +66299,12 @@ if (_origShowPage) {
       rwaRenderHistory();
       // Fetch balances immediately if wallet already connected (event already fired).
       _rwaUpdateBalances();
-      // Also refresh whenever wallet connects or switches address/chain after init.
-      document.addEventListener('WALLET_CONNECTED', function() { _rwaUpdateBalances(); });
-      document.addEventListener('WALLET_SWITCHED',  function() { _rwaUpdateBalances(); });
+      // Sync trade button to current wallet state immediately.
+      _rwaRefreshTradeBtn();
+      // Also refresh whenever wallet connects, disconnects, or switches address/chain.
+      document.addEventListener('WALLET_CONNECTED',    function() { _rwaUpdateBalances(); _rwaRefreshTradeBtn(); });
+      document.addEventListener('WALLET_SWITCHED',     function() { _rwaUpdateBalances(); _rwaRefreshTradeBtn(); });
+      document.addEventListener('WALLET_DISCONNECTED', function() { _rwaRefreshTradeBtn(); });
     }
   };
 }
@@ -66279,6 +66312,7 @@ if (_origShowPage) {
 // Expose globals
 window.rwaTab = rwaTab;
 window.rwaRefresh = rwaRefresh;
+window._rwaRefreshTradeBtn = _rwaRefreshTradeBtn;
 window.rwaFilterMarkets = rwaFilterMarkets;
 window.rwaOpenPicker = rwaOpenPicker;
 window.rwaClosePicker = rwaClosePicker;
