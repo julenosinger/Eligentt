@@ -26932,29 +26932,55 @@ function _brsFromLiFi(quote, toDecimals) {
 // token: optional token symbol to set the _unverifiedEurc flag for EURC routes.
 function _brsFromCCTP(est, fromChainId, toChainId, token) {
   if (!est || est.ok === false) return null;
-  var outAmt = est.outAmt != null ? Number(est.outAmt) : null;
-  var fee    = est.fee    != null ? Number(est.fee)    : null;
-  var execSec = est.execSec != null ? Number(est.execSec) : 120; // CCTP ~2min typical
-  var inAmt  = est.inAmt != null ? Number(est.inAmt)  : null;
-  // EURC CCTP route: eligible (Arc↔Base) but not sandbox-verified with real funds.
-  // Flag it so the UI can show an informational note.
+
+  // Circle App Kit EstimateResult shape:
+  //   est.amount  — input amount as string (e.g. "0.1")
+  //   est.fees[]  — [{ type:'kit'|'provider'|'forwarder', amount:string|null, token:string }]
+  // Legacy shape (manual estimate): est.outAmt / est.fee / est.inAmt (numbers).
+  var inAmt, fee, outAmt, execSec;
+
+  if (est.amount != null && Array.isArray(est.fees)) {
+    // Modern kit EstimateResult
+    inAmt = parseFloat(est.amount) || 0;
+    // Sum all non-gas protocol fees charged in the bridged token (USDC/EURC).
+    fee = 0;
+    est.fees.forEach(function(f) {
+      if (f.amount != null) {
+        var n = parseFloat(String(f.amount));
+        if (isFinite(n) && n > 0) fee += n;
+      }
+    });
+    outAmt = Math.max(0, inAmt - fee);
+    execSec = 120; // CCTP v2 typical ~2 min
+  } else {
+    // Legacy manual estimate shape
+    outAmt  = est.outAmt  != null ? Number(est.outAmt)  : null;
+    fee     = est.fee     != null ? Number(est.fee)      : null;
+    inAmt   = est.inAmt   != null ? Number(est.inAmt)    : null;
+    execSec = est.execSec != null ? Number(est.execSec)  : 120;
+    // If outAmt is still null/0 but inAmt is set, CCTP is free on this pair.
+    if ((outAmt == null || outAmt === 0) && inAmt != null && inAmt > 0) {
+      outAmt = inAmt - (fee || 0);
+    }
+  }
+
   var isEurc = token && String(token).toUpperCase() === 'EURC';
   return {
-    provider:       'cctp',
-    id:             'cctp-' + fromChainId + '-' + toChainId,
-    label:          'Circle CCTP',
-    protocol:       'CCTP V2',
-    available:      true,
-    inAmt:          inAmt,
-    outAmt:         outAmt,
-    minAmt:         outAmt,
-    feePct:         (fee != null && inAmt != null && inAmt > 0) ? (fee / inAmt * 100) : null,
-    gasUsd:         null,
-    feesUsd:        fee,
-    execSec:        execSec,
-    steps:          4,   // approve + burn + attest + mint
-    quote:          est,
-    _unverifiedEurc: !!isEurc, // EURC CCTP not verified with real funds on this pair
+    provider:        'cctp',
+    id:              'cctp-' + fromChainId + '-' + toChainId,
+    label:           'Circle CCTP',
+    protocol:        'CCTP V2',
+    available:       true,
+    inAmt:           inAmt,
+    outAmt:          outAmt,
+    minAmt:          outAmt,
+    feePct:          (fee != null && fee > 0 && inAmt > 0) ? (fee / inAmt * 100) : 0,
+    gasUsd:          null,
+    feesUsd:         fee || 0,
+    execSec:         execSec,
+    steps:           4,  // approve + burn + attest + mint
+    quote:           est,
+    _unverifiedEurc: !!isEurc,
   };
 }
 
@@ -27026,17 +27052,30 @@ async function _fetchBridgeRoutes(fromChain, toChain, amt, walletAddr) {
 
   // Provider 2: CCTP (BridgeKitRouter.estimate) — ONLY for tokens/chains eligible for CCTP.
   // BridgeKitRouter.isEligible checks: token is USDC/EURC AND both chains have CCTP domains.
-  if (
+  var _cctpEligible = (
     typeof BridgeKitRouter !== 'undefined' &&
-    BridgeKitRouter.isAvailable() &&
-    typeof BridgeKitRouter.estimate === 'function' &&
     typeof BridgeKitRouter.isEligible === 'function' &&
     BridgeKitRouter.isEligible(fromChain.chainId, toChain.chainId, fromSym)
-  ) {
-    try {
-      var cctpEst = await BridgeKitRouter.estimate(fromChain.chainId, toChain.chainId, amt, fromSym);
-      cctpRoute = _brsFromCCTP(cctpEst, fromChain.chainId, toChain.chainId, fromSym);
-    } catch(_e2) {}
+  );
+  if (_cctpEligible) {
+    if (BridgeKitRouter.isAvailable() && typeof BridgeKitRouter.estimate === 'function') {
+      try {
+        var cctpEst = await BridgeKitRouter.estimate(fromChain.chainId, toChain.chainId, amt, fromSym);
+        cctpRoute = _brsFromCCTP(cctpEst, fromChain.chainId, toChain.chainId, fromSym);
+      } catch(_e2) {}
+    }
+    // Fallback: kit unavailable or estimate threw — synthesise a free-fee estimate.
+    // CCTP v2 slow mode charges no protocol fee on USDC (fee is 0); this gives
+    // the user a realistic receive-amount preview without a live kit call.
+    if (!cctpRoute) {
+      var _amtNum = parseFloat(amt) || 0;
+      if (_amtNum > 0) {
+        cctpRoute = _brsFromCCTP(
+          { amount: String(_amtNum), fees: [] },
+          fromChain.chainId, toChain.chainId, fromSym
+        );
+      }
+    }
   }
 
   if (seq !== _bridgeRoutesSeq) return null; // stale — newer request supersedes this one
