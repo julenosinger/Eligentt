@@ -66049,12 +66049,38 @@ async function rwaExecuteTrade() {
 
   rwaCloseConfirm();
 
-  // Sign and send via existing wallet infrastructure
+  // Sign and send via existing wallet infrastructure (same signer as Swap/Send).
+  // `signer` and `provider` are module-level globals set by refreshProviderState()
+  // on wallet connect — never re-create a BrowserProvider from walletProvider here.
   var txHash = null;
   try {
-    if (typeof walletProvider !== 'undefined' && walletProvider) {
-      var ethersProvider = new ethers.BrowserProvider(walletProvider);
-      var signer = await ethersProvider.getSigner();
+    // Resolve signer: prefer module-level `signer`, fall back to re-deriving
+    // from `provider` (also module-level), then from window.ethereum directly.
+    var _rwaSigner = (typeof signer !== 'undefined' && signer) ? signer : null;
+    if (!_rwaSigner && typeof provider !== 'undefined' && provider) {
+      try { _rwaSigner = await provider.getSigner(); } catch (_) {}
+    }
+    if (!_rwaSigner && window.ethereum) {
+      try {
+        var _rwaFallbackProv = new ethers.BrowserProvider(window.ethereum);
+        _rwaSigner = await _rwaFallbackProv.getSigner();
+      } catch (_) {}
+    }
+    if (_rwaSigner) {
+      // Switch to the source chain before approving/signing.
+      if (typeof _swpEnsureChain === 'function' && _rwaFromChainId && _rwaFromChainId !== activeChainId) {
+        var _rwaChainOk = await _swpEnsureChain(_rwaFromChainId);
+        if (!_rwaChainOk) {
+          _rwaExecPending = false;
+          if (okBtn) { okBtn.disabled = false; okBtn.textContent = 'Confirm & Sign'; }
+          return;
+        }
+        // After chain switch, re-derive signer on new chain.
+        if (typeof provider !== 'undefined' && provider) {
+          try { _rwaSigner = await provider.getSigner(); } catch (_) {}
+        }
+      }
+      var signer = _rwaSigner;
       // ERC-20 approval if needed
       if (stepWithTx.estimate && stepWithTx.estimate.approvalAddress && _rwaFromToken && _rwaFromToken.address) {
         var amtEl = document.getElementById('rwa-amount-in');
@@ -66135,16 +66161,20 @@ async function rwaExecuteTrade() {
         if (_rwaActiveTab === 'history') rwaRenderHistory();
       });
     } else {
+      // No signer resolved — wallet not connected or provider unavailable.
       if (typeof toast === 'function') toast('No wallet provider. Connect a wallet to sign transactions.', 'error');
+      if (typeof openWalletModal === 'function') openWalletModal();
+      if (okBtn) { okBtn.disabled = false; okBtn.textContent = 'Confirm & Sign'; }
     }
   } catch (e) {
     var code = e && e.code;
     if (code === 4001 || (e && e.message && e.message.indexOf('rejected') !== -1)) {
-      if (typeof toast === 'function') toast('Transaction rejected by user.', 'warn');
+      if (typeof toast === 'function') toast('Transaction rejected by user.', 'warning');
     } else {
       if (typeof toast === 'function') toast('Transaction failed: ' + (e && e.message || 'unknown error'), 'error');
       if (txHash) _rwaUpdateStatus(txHash, 'failed');
     }
+    if (okBtn) { okBtn.disabled = false; okBtn.textContent = 'Confirm & Sign'; }
   }
 
   _rwaExecPending = false;
