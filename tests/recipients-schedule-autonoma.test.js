@@ -197,14 +197,14 @@ describe('RSAI-5: Compact row layout', () => {
     const rowIdx = html.indexOf('class="rcp-row"');
     const rowEnd = html.indexOf('</div>', rowIdx + 2000);
     const rowSrc = html.slice(rowIdx, rowEnd);
-    expect(rowSrc).toContain('width:32px;height:32px');
+    expect(rowSrc).toContain('width:28px;height:28px');
   });
 
-  it('RSAI-5.3: action buttons are 24px (compact, down from 28px)', () => {
+  it('RSAI-5.3: action buttons are 22px (compact)', () => {
     expect(html).toContain('rcp-send-btn');
     const sendBtnIdx = html.indexOf('rcp-send-btn');
     const sendBtnCtx = html.slice(sendBtnIdx - 10, sendBtnIdx + 200);
-    expect(sendBtnCtx).toContain('24px');
+    expect(sendBtnCtx).toContain('22px');
   });
 });
 
