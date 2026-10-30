@@ -66081,43 +66081,90 @@ async function rwaExecuteTrade() {
         }
       }
       var signer = _rwaSigner;
-      // ERC-20 approval if needed
-      if (stepWithTx.estimate && stepWithTx.estimate.approvalAddress && _rwaFromToken && _rwaFromToken.address) {
-        var amtEl = document.getElementById('rwa-amount-in');
-        var amtNum = amtEl ? parseFloat(amtEl.value) : 0;
-        // P3-fix: use the same split-string BigInt conversion as rwaFetchQuote
-        // (D1-fix) to avoid Number precision loss for tokens with 18 decimals.
-        var _aprvDec = _rwaFromToken.decimals || 6;
-        var amtRaw = (function(a, d) {
-          try {
-            var s = String(a);
-            var dot = s.indexOf('.');
-            if (dot === -1) return BigInt(s) * (10n ** BigInt(d));
-            var intPart = s.slice(0, dot) || '0';
-            var fracPart = s.slice(dot + 1);
-            if (fracPart.length > d) fracPart = fracPart.slice(0, d);
-            while (fracPart.length < d) fracPart += '0';
-            return BigInt(intPart) * (10n ** BigInt(d)) + BigInt(fracPart);
-          } catch (_) { return 0n; }
-        })(amtNum, _aprvDec);
-        var erc20 = new ethers.Contract(_rwaFromToken.address,
-          ['function allowance(address,address) view returns (uint256)',
-           'function approve(address,uint256) returns (bool)'], signer);
-        var allowance = await erc20.allowance(walletAddress, stepWithTx.estimate.approvalAddress);
-        if (BigInt(allowance.toString()) < amtRaw) {
-          if (typeof toast === 'function') toast('Approving ' + _rwaFromToken.symbol + '…', 'info');
-          var approveTx = await erc20.approve(stepWithTx.estimate.approvalAddress, amtRaw);
-          await approveTx.wait();
+      // ── ERC-20 approval ─────────────────────────────────────────
+      // Resolve the spender and token address from the LI.FI step itself —
+      // _rwaFromToken.address may be null for default tokens (e.g. USDC before
+      // picker selection). The step's action.fromToken.address is canonical.
+      var _aprvSpender = (stepWithTx.estimate && stepWithTx.estimate.approvalAddress) || null;
+      var _aprvTokenAddr = (stepWithTx.action && stepWithTx.action.fromToken && stepWithTx.action.fromToken.address) || null;
+      // Fallback: resolve from local token object or CHAIN_REGISTRY.
+      if (!_aprvTokenAddr && _rwaFromToken) {
+        _aprvTokenAddr = _rwaFromToken.address || null;
+        if (!_aprvTokenAddr && typeof getTokenAddressForChain === 'function') {
+          try { _aprvTokenAddr = getTokenAddressForChain(_rwaFromChainId, _rwaFromToken.symbol) || null; } catch (_) {}
+        }
+        if (!_aprvTokenAddr) {
+          var _reg = (typeof CHAIN_REGISTRY !== 'undefined') ? CHAIN_REGISTRY[_rwaFromChainId] : null;
+          var _entry = _reg && _reg.tokens && _reg.tokens[(_rwaFromToken.symbol||'').toUpperCase()];
+          if (_entry) _aprvTokenAddr = _entry.address || null;
         }
       }
+      // Zero-address and ETH sentinels are native — skip approve.
+      var _NATIVE_SENTINELS = ['0x0000000000000000000000000000000000000000','0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'];
+      var _aprvIsNative = !_aprvTokenAddr || _NATIVE_SENTINELS.indexOf((_aprvTokenAddr||'').toLowerCase()) !== -1;
+
+      if (_aprvSpender && _aprvTokenAddr && !_aprvIsNative) {
+        // Use action.fromAmount (exact raw integer from LI.FI) — avoids float
+        // precision loss and always matches what the bridge contract expects.
+        var _aprvAmtRaw = 0n;
+        try {
+          _aprvAmtRaw = BigInt(String(stepWithTx.action.fromAmount || '0'));
+        } catch (_) {
+          // Fallback: derive from user input if LI.FI field missing.
+          var amtEl2 = document.getElementById('rwa-amount-in');
+          var amtNum2 = amtEl2 ? parseFloat(amtEl2.value) : 0;
+          var _aprvDec = (stepWithTx.action && stepWithTx.action.fromToken && stepWithTx.action.fromToken.decimals) || (_rwaFromToken && _rwaFromToken.decimals) || 6;
+          _aprvAmtRaw = (function(a, d) {
+            try {
+              var s = String(a); var dot = s.indexOf('.');
+              if (dot === -1) return BigInt(s) * (10n ** BigInt(d));
+              var ip = s.slice(0, dot) || '0'; var fp = s.slice(dot + 1);
+              if (fp.length > d) fp = fp.slice(0, d);
+              while (fp.length < d) fp += '0';
+              return BigInt(ip) * (10n ** BigInt(d)) + BigInt(fp);
+            } catch (_) { return 0n; }
+          })(amtNum2, _aprvDec);
+        }
+        if (_aprvAmtRaw > 0n) {
+          var _aprvErc20 = new ethers.Contract(_aprvTokenAddr,
+            ['function allowance(address,address) view returns (uint256)',
+             'function approve(address,uint256) returns (bool)'], signer);
+          var _aprvAllowance = 0n;
+          try { _aprvAllowance = BigInt((await _aprvErc20.allowance(walletAddress, _aprvSpender)).toString()); } catch (_) {}
+          if (_aprvAllowance < _aprvAmtRaw) {
+            if (typeof toast === 'function') toast('Approving ' + ((_rwaFromToken && _rwaFromToken.symbol) || 'token') + '…', 'info');
+            var _aprvTx = await _aprvErc20.approve(_aprvSpender, _aprvAmtRaw);
+            var _aprvReceipt = await _aprvTx.wait();
+            if (!_aprvReceipt || _aprvReceipt.status !== 1) throw new Error('Approve transaction reverted on-chain');
+            // Verify allowance reflected before proceeding.
+            var _newAllowance = 0n;
+            try { _newAllowance = BigInt((await _aprvErc20.allowance(walletAddress, _aprvSpender)).toString()); } catch (_) {}
+            if (_newAllowance < _aprvAmtRaw) throw new Error('Allowance not reflected after approve — retry');
+          }
+        }
+      }
+
+      // ── Send bridge/swap transaction ─────────────────────────────
       if (typeof toast === 'function') toast('Sending RWA trade transaction…', 'info');
-      var tx = await signer.sendTransaction({
-        to:       tr.to,
-        data:     tr.data,
-        value:    tr.value ? BigInt(tr.value) : 0n,
-        chainId:  Number(_rwaFromChainId),
-        gasLimit: tr.gasLimit ? BigInt(tr.gasLimit) : undefined,
-      });
+      // Arc requires maxFeePerGas ≥ 20 Gwei to avoid -39000 revert.
+      var _rwaTxParams = {
+        to:      tr.to,
+        data:    tr.data,
+        value:   tr.value ? BigInt(tr.value) : 0n,
+        chainId: Number(_rwaFromChainId),
+      };
+      if (tr.gasLimit) _rwaTxParams.gasLimit = BigInt(tr.gasLimit);
+      // Apply 20 Gwei floor on Arc (chainId 5042) to prevent -39000.
+      if (Number(_rwaFromChainId) === 5042) {
+        try {
+          var _rwaFeeData = await signer.provider.getFeeData();
+          var _rwaMinGas = 20000000000n; // 20 Gwei
+          _rwaTxParams.maxFeePerGas = (_rwaFeeData.maxFeePerGas && _rwaFeeData.maxFeePerGas > _rwaMinGas)
+            ? _rwaFeeData.maxFeePerGas : _rwaMinGas;
+          _rwaTxParams.maxPriorityFeePerGas = _rwaTxParams.maxFeePerGas;
+        } catch (_) {}
+      }
+      var tx = await signer.sendTransaction(_rwaTxParams);
       txHash = tx.hash;
       if (typeof toast === 'function') toast('Transaction sent: ' + _rwaShortAddr(txHash), 'success');
 
@@ -66168,10 +66215,22 @@ async function rwaExecuteTrade() {
     }
   } catch (e) {
     var code = e && e.code;
-    if (code === 4001 || (e && e.message && e.message.indexOf('rejected') !== -1)) {
+    var isReject = code === 4001
+      || code === 'ACTION_REJECTED'
+      || (e && e.message && (e.message.indexOf('rejected') !== -1 || e.message.indexOf('denied') !== -1 || e.message.indexOf('cancelled') !== -1));
+    if (isReject) {
       if (typeof toast === 'function') toast('Transaction rejected by user.', 'warning');
     } else {
-      if (typeof toast === 'function') toast('Transaction failed: ' + (e && e.message || 'unknown error'), 'error');
+      // Try to surface the on-chain revert reason.
+      var _rwaErrMsg = (e && e.message) || 'unknown error';
+      // ethers v6 puts the revert reason in e.reason or e.shortMessage.
+      if (e && e.reason) _rwaErrMsg = e.reason;
+      else if (e && e.shortMessage) _rwaErrMsg = e.shortMessage;
+      // Arc error code -39000 means simulation failure — make it readable.
+      if (_rwaErrMsg.indexOf('39000') !== -1 || _rwaErrMsg.indexOf('simulation') !== -1) {
+        _rwaErrMsg = 'Simulation failed: insufficient allowance or gas. Check approve and retry.';
+      }
+      if (typeof toast === 'function') toast('Trade failed: ' + _rwaErrMsg, 'error');
       if (txHash) _rwaUpdateStatus(txHash, 'failed');
     }
     if (okBtn) { okBtn.disabled = false; okBtn.textContent = 'Confirm & Sign'; }
