@@ -64834,27 +64834,78 @@ BP._injectBulkLinks = function(){
   else col.insertBefore(card, col.firstChild);
 };
 
-BP._genBulkLinks = function(){
+BP._genBulkLinks = async function(){
   var result = document.getElementById('bp-links-result');
+  if (!result) return;
   result.style.display = 'block';
-  result.innerHTML = '<span style="color:var(--yellow)">Generating links...</span>';
-  try {
-    var rcpts = typeof recipients !== 'undefined' ? recipients : [];
-    if(!rcpts.length){ result.innerHTML = 'No recipients in table.'; return; }
-    var base = window.location.origin + '/pay/';
-    var lines = [];
-    for(var i = 0; i < rcpts.length; i++){
-      var r = rcpts[i];
-      var link = base + 'batch-' + (i+1) + '-' + Date.now().toString(36);
-      lines.push('<a href="' + link + '" target="_blank">Recipient #' + (i+1) + ': ' + (r.amount||'—') + ' ' + (r.token||'USDC') + (r.note ? ' (' + r.note + ')' : '') + '</a>');
+  result.innerHTML = '<span style="color:var(--yellow)">Creating payment links…</span>';
+
+  var rcpts = (typeof recipients !== 'undefined' ? recipients : []).filter(function(r) {
+    return r && r.addr && /^0x[0-9a-fA-F]{40}$/.test(r.addr) && parseFloat(r.amount) > 0;
+  });
+  if (!rcpts.length) {
+    result.innerHTML = '<span style="color:var(--red)">No valid recipients (need address + amount).</span>';
+    return;
+  }
+
+  var base = window.location.origin + '/pay/';
+  var lines = [];
+  var csvRows = ['Recipient,Name,Amount,Token,Link'];
+  var errors = 0;
+
+  for (var i = 0; i < rcpts.length; i++) {
+    var r = rcpts[i];
+    var label = (r.name || ('Recipient #' + (i + 1))) + (r.note ? ' — ' + r.note : '');
+    try {
+      var res = await fetch('/api/payment-links', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          label:     label,
+          amount:    parseFloat(r.amount),
+          type:      'fixed',
+          desc:      r.note || '',
+          recipient: r.addr,
+          token:     r.token || 'USDC',
+          chain:     r.chainId === 'Arc_Mainnet' ? 'Arc Mainnet' : (r.chainId || 'Arc Mainnet'),
+          expiry:    'never',
+        }),
+      });
+      var data = await res.json();
+      if (data && data.ok && data.link && data.link.id) {
+        var url = base + encodeURIComponent(data.link.id);
+        lines.push(
+          '<div style="display:flex;align-items:center;gap:6px;padding:4px 0;border-bottom:1px solid var(--border2)">' +
+          '<span style="color:var(--muted2);font-size:8.5px;min-width:16px">' + (i+1) + '.</span>' +
+          '<a href="' + url + '" target="_blank" style="font-size:8.5px;color:var(--blue);word-break:break-all;flex:1">' + url + '</a>' +
+          '<span style="font-size:8px;color:var(--muted2);white-space:nowrap">' + (r.amount||'') + ' ' + (r.token||'USDC') + '</span>' +
+          '</div>'
+        );
+        csvRows.push((r.name||('#'+(i+1)))+','+r.amount+','+(r.token||'USDC')+','+url);
+      } else {
+        var errMsg = (data && data.error) || 'Failed';
+        lines.push('<div style="font-size:8.5px;color:var(--red);padding:3px 0">Recipient #' + (i+1) + ': ' + errMsg + '</div>');
+        errors++;
+      }
+    } catch (e) {
+      lines.push('<div style="font-size:8.5px;color:var(--red);padding:3px 0">Recipient #' + (i+1) + ': network error</div>');
+      errors++;
     }
-    result.innerHTML = lines.join('');
-    if(typeof navigator.clipboard !== 'undefined'){
-      var csv = 'Recipient,Amount,Token,Link\n' + rcpts.map(function(r,i){ return '#'+(i+1)+','+(r.amount||'')+','+(r.token||'USDC')+','+base+'batch-'+(i+1); }).join('\n');
+  }
+
+  result.innerHTML =
+    '<div style="font-size:9px;font-weight:600;color:var(--muted2);margin-bottom:6px">' +
+      (rcpts.length - errors) + ' link(s) created' + (errors ? ', ' + errors + ' failed' : '') +
+    '</div>' +
+    lines.join('');
+
+  if (lines.length > errors) {
+    var csv = csvRows.join('\n');
+    if (typeof navigator.clipboard !== 'undefined') {
       navigator.clipboard.writeText(csv).catch(function(){});
-      result.innerHTML += '<div style="margin-top:8px;font-size:8px;color:var(--green)">Links copied to clipboard (CSV format)</div>';
+      result.innerHTML += '<div style="margin-top:6px;font-size:8px;color:var(--green)">CSV copied to clipboard</div>';
     }
-  } catch(e){ result.innerHTML = 'Error: ' + e.message; }
+  }
 };
 
 // ── 5. BATCH VIA CHAT (Autonoma Quick Actions) ───────────────
