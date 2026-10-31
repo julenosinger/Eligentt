@@ -40254,6 +40254,22 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 });
 
+// ── SA_X402 wallet-event integration ─────────────────────────────────
+// When the connected wallet changes (connect, disconnect, switch), any
+// in-flight x402 discovery or prepare is stale — it was bound to the
+// previous wallet's identity and session. _resetSession() invalidates
+// all pending async responses via sessionToken so they cannot write
+// state intended for the new wallet.
+// ZERO touch on Single Send, Batch Send, SendGuard, or any other module.
+(function _sa402WalletListeners() {
+  function _sa402Reset() {
+    try { if (typeof SA_X402 !== 'undefined' && typeof SA_X402._resetSession === 'function') SA_X402._resetSession(); } catch(_) {}
+  }
+  document.addEventListener('WALLET_CONNECTED',    _sa402Reset);
+  document.addEventListener('WALLET_DISCONNECTED', _sa402Reset);
+  document.addEventListener('WALLET_SWITCHED',     _sa402Reset);
+})();
+
 
 
 
