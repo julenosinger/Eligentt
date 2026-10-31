@@ -7890,14 +7890,22 @@ select.cinput option { background: #161a24; color: #dde2f0; }
               </div>
             </div>
 
-            <!-- CTA -->
+            <!-- Route divider — Fase 4 -->
+            <div class="brg-route-divider" id="brg-route-divider">
+              <div class="brg-route-divider-line"></div>
+              <div class="brg-route-divider-label" id="brg-route-divider-label">Select a route</div>
+              <div class="brg-route-divider-line"></div>
+            </div>
+
+            <!-- Gas check panel — populated by initDGV; sits flush at card bottom -->
+            <div id="dgv-panel-bridge"></div>
+
+            <!-- CTA — below gas check -->
             <div class="brg-btn-wrap">
               <button class="action-btn teal-btn" id="bridge-btn" onclick="executeBridgeOrTurbo()">
                 <i class="ti ti-arrows-transfer-up"></i>Bridge USDC
               </button>
             </div>
-            <!-- Gas check panel — populated by initDGV; sits flush at card bottom -->
-            <div id="dgv-panel-bridge"></div>
           </div>
 
           <!-- Right panel: shows routes while idle, steps during execution.
@@ -27340,19 +27348,37 @@ function brSelectRoute(idx) {
   _bridgeSetText('bridge-min',         minAmt  != null ? '~' + minAmt.toFixed(4)  + ' ' + toSym : '—');
   _bridgeSetText('bridge-time',        execSec != null ? '~' + _bridgeFmtDuration(execSec) : '—');
 
-  // Show rate-box and flash update animation — Fase 3
+  // Fase 3: show rate-box + flash animation
   var rateBox = document.getElementById('bridge-rate-box');
   if (rateBox) {
     rateBox.style.display = '';
     rateBox.classList.remove('brg-updated');
-    void rateBox.offsetWidth; // force reflow to restart animation
+    void rateBox.offsetWidth;
     rateBox.classList.add('brg-updated');
   }
 
-  // Update Bridge button label
+  // Fase 4: remove loading skeleton from TO amount
+  var _outWrap4 = document.getElementById('bridge-amount-out');
+  if (_outWrap4 && _outWrap4.parentElement) _outWrap4.parentElement.classList.remove('brg-fetching');
+
+  // Fase 4: show and update route divider
+  var _divEl = document.getElementById('brg-route-divider');
+  var _divLbl = document.getElementById('brg-route-divider-label');
+  if (_divEl) _divEl.classList.add('visible');
+  if (_divLbl) _divLbl.textContent = (route.label || 'LI.FI') + (route.protocol && route.protocol !== route.label ? ' · ' + route.protocol : '');
+
+  // Fase 4: Bridge button label with from/to amounts
   var fromSym  = (typeof bridgeFromToken !== 'undefined' && bridgeFromToken) || 'USDC';
+  var toSym2   = (typeof bridgeToToken !== 'undefined' && bridgeToToken) || 'USDC';
+  var fromAmt4 = (function(){ try { return parseFloat(document.getElementById('bridge-amount').value) || 0; } catch(_){return 0;} })();
   var btn = document.getElementById('bridge-btn');
-  if (btn) btn.innerHTML = '<i class="ti ti-topology-star-3"></i>Bridge ' + escHtml(fromSym) + ' via ' + escHtml(route.label);
+  if (btn) {
+    if (fromAmt4 > 0 && outAmt > 0) {
+      btn.innerHTML = '<i class="ti ti-arrows-transfer-up"></i>Bridge ' + fromAmt4.toFixed(fromAmt4 < 1 ? 4 : 2) + ' ' + escHtml(fromSym) + ' → ' + outAmt.toFixed(4) + ' ' + escHtml(toSym2);
+    } else {
+      btn.innerHTML = '<i class="ti ti-arrows-transfer-up"></i>Bridge ' + escHtml(fromSym) + ' via ' + escHtml(route.label);
+    }
+  }
 }
 
 // Clear routes (on chain/amount change) — hides the right panel entirely.
@@ -27418,11 +27444,18 @@ function updateBridgeEst(){
 
   _bridgeSetText('bridge-usd', `≈ $${amt.toFixed(2)} USD`);
   _bridgeSetText('bridge-protocol', 'LI.FI');
-  _bridgeSetText('bridge-amount-out', '0.00');
+  _bridgeSetText('bridge-amount-out', '—');
   _bridgeSetText('bridge-receive', '—');
   _bridgeSetText('bridge-fee-display', '—');
   _bridgeSetText('bridge-min', '—');
   _bridgeSetText('bridge-time', 'Fetching route…');
+
+  // Fase 4: loading skeleton on TO amount while fetching
+  var _outWrap = document.getElementById('bridge-amount-out');
+  if (_outWrap && _outWrap.parentElement) _outWrap.parentElement.classList.add('brg-fetching');
+  // Hide route divider while fetching
+  var _div = document.getElementById('brg-route-divider');
+  if (_div) _div.classList.remove('visible');
 
   // Clear route panel while new routes are loading.
   _brsClearRoutes();
