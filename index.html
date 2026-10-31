@@ -64640,8 +64640,26 @@ BP._injectSplitBill = function(){
     '</div>' +
     '<div class="bp-split-body">' +
       '<div class="bp-split-row"><input class="bp-split-input" id="bp-split-total" type="number" placeholder="Total (USDC)" step="0.000001" min="0.000001"/></div>' +
-      '<div class="bp-split-row"><input class="bp-split-input" id="bp-split-count" type="number" placeholder="Number of people" min="2" max="500"/></div>' +
-      '<button class="bp-split-btn primary" onclick="BP._doSplit()">Split &amp; Fill Table</button>' +
+      // Mode toggle
+      '<div style="display:flex;gap:4px;margin-bottom:6px">' +
+        '<button id="bp-split-mode-manual" class="bp-split-btn primary" style="flex:1;font-size:9px;padding:4px 6px" onclick="BP._setSplitMode(\'manual\')">Manual</button>' +
+        '<button id="bp-split-mode-contacts" class="bp-split-btn" style="flex:1;font-size:9px;padding:4px 6px" onclick="BP._setSplitMode(\'contacts\')">From Contacts</button>' +
+      '</div>' +
+      // Manual mode
+      '<div id="bp-split-manual-section">' +
+        '<div class="bp-split-row"><input class="bp-split-input" id="bp-split-count" type="number" placeholder="Number of people" min="2" max="500"/></div>' +
+      '</div>' +
+      // Contacts mode
+      '<div id="bp-split-contacts-section" style="display:none">' +
+        '<div style="font-size:8.5px;color:var(--muted2);margin-bottom:4px">Select recipients from your contacts:</div>' +
+        '<div style="position:relative;margin-bottom:4px">' +
+          '<input id="bp-split-contact-search" class="bp-split-input" placeholder="Search contacts…" oninput="BP._filterSplitContacts()" style="padding-right:24px"/>' +
+          '<i class="ti ti-search" style="position:absolute;right:7px;top:50%;transform:translateY(-50%);font-size:10px;color:var(--muted2);pointer-events:none"></i>' +
+        '</div>' +
+        '<div id="bp-split-contact-list" style="max-height:120px;overflow-y:auto;border:1px solid var(--border);border-radius:5px;background:var(--card2);margin-bottom:4px"></div>' +
+        '<div style="font-size:8px;color:var(--muted2)"><span id="bp-split-sel-count">0</span> selected</div>' +
+      '</div>' +
+      '<button class="bp-split-btn primary" style="width:100%;margin-top:6px" onclick="BP._doSplit()">Split &amp; Fill Table</button>' +
       '<div style="font-size:8px;color:var(--muted2);margin-top:5px">Amounts use 6-decimal precision. Remainder distributed to first rows.</div>' +
     '</div>';
 
@@ -64650,34 +64668,138 @@ BP._injectSplitBill = function(){
   else col.insertBefore(card, col.firstChild);
 };
 
+// ── Split Bill mode toggle ───────────────────────────────────────────────────
+BP._splitMode = 'manual'; // 'manual' | 'contacts'
+BP._splitSelectedContacts = []; // array of contact ids selected in contacts mode
+
+BP._setSplitMode = function(mode) {
+  BP._splitMode = mode;
+  var manBtn  = document.getElementById('bp-split-mode-manual');
+  var conBtn  = document.getElementById('bp-split-mode-contacts');
+  var manSec  = document.getElementById('bp-split-manual-section');
+  var conSec  = document.getElementById('bp-split-contacts-section');
+  if (!manBtn || !conBtn || !manSec || !conSec) return;
+  if (mode === 'contacts') {
+    manBtn.className = 'bp-split-btn';
+    conBtn.className = 'bp-split-btn primary';
+    manSec.style.display = 'none';
+    conSec.style.display = '';
+    BP._renderSplitContactList('');
+  } else {
+    manBtn.className = 'bp-split-btn primary';
+    conBtn.className = 'bp-split-btn';
+    manSec.style.display = '';
+    conSec.style.display = 'none';
+  }
+};
+
+BP._renderSplitContactList = function(filter) {
+  var listEl = document.getElementById('bp-split-contact-list');
+  var cntEl  = document.getElementById('bp-split-sel-count');
+  if (!listEl) return;
+  var ctcs = (typeof contacts !== 'undefined' ? contacts : []).filter(function(c) {
+    if (!c || !c.name) return false;
+    var q = (filter || '').toLowerCase();
+    return !q || c.name.toLowerCase().indexOf(q) !== -1 ||
+           (c.addr || '').toLowerCase().indexOf(q) !== -1 ||
+           (c.tags || []).join(' ').toLowerCase().indexOf(q) !== -1;
+  });
+  if (!ctcs.length) {
+    listEl.innerHTML = '<div style="padding:8px 10px;font-size:9px;color:var(--muted2)">No contacts found. Add contacts in the Recipients page.</div>';
+    if (cntEl) cntEl.textContent = '0';
+    return;
+  }
+  var html = '';
+  ctcs.forEach(function(c) {
+    var sel = BP._splitSelectedContacts.indexOf(c.id) !== -1;
+    var shortAddr = c.addr ? c.addr.slice(0,6) + '…' + c.addr.slice(-4) : 'No address';
+    var initials = (c.name||'?').split(' ').slice(0,2).map(function(w){return w[0]||'';}).join('').toUpperCase()||'?';
+    var GRAD = ['#4f8ef7','#a78bfa','#22c55e','#f59e0b','#ef4444','#06b6d4','#8b5cf6','#ec4899'];
+    var bg = GRAD[(c.name||'').length % GRAD.length];
+    html += '<div onclick="BP._toggleSplitContact(' + JSON.stringify(c.id) + ')" style="display:flex;align-items:center;gap:7px;padding:5px 8px;cursor:pointer;border-bottom:1px solid var(--border2);' + (sel ? 'background:rgba(79,142,247,.1);' : '') + '">' +
+      '<div style="width:6px;height:6px;border-radius:50%;background:' + (sel ? '#4f8ef7' : 'var(--border)') + ';flex-shrink:0"></div>' +
+      '<div style="width:22px;height:22px;border-radius:50%;background:' + bg + ';display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:#fff;flex-shrink:0">' + initials + '</div>' +
+      '<div style="min-width:0;flex:1">' +
+        '<div style="font-size:9.5px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + (c.name||'') + '</div>' +
+        '<div style="font-size:8px;color:var(--muted2);font-family:monospace">' + shortAddr + (c.addr ? '' : ' — no address') + '</div>' +
+      '</div>' +
+    '</div>';
+  });
+  listEl.innerHTML = html;
+  var selCount = BP._splitSelectedContacts.length;
+  if (cntEl) cntEl.textContent = selCount;
+};
+
+BP._toggleSplitContact = function(id) {
+  var idx = BP._splitSelectedContacts.indexOf(id);
+  if (idx === -1) BP._splitSelectedContacts.push(id);
+  else            BP._splitSelectedContacts.splice(idx, 1);
+  var searchEl = document.getElementById('bp-split-contact-search');
+  BP._renderSplitContactList(searchEl ? searchEl.value : '');
+};
+
+BP._filterSplitContacts = function() {
+  var searchEl = document.getElementById('bp-split-contact-search');
+  BP._renderSplitContactList(searchEl ? searchEl.value : '');
+};
+
 BP._doSplit = function(){
   var total = parseFloat(document.getElementById('bp-split-total').value);
-  var count = parseInt(document.getElementById('bp-split-count').value);
-  if(!(total > 0) || !(count > 0) || count > 500){ alert('Enter valid total and count (max 500).'); return; }
+  if(!(total > 0)){ if(typeof toast === 'function') toast('Enter a valid total amount', 'warning'); return; }
+
+  var splitContacts = []; // [{addr, name, chainId, token}]
+  var count;
+
+  if (BP._splitMode === 'contacts') {
+    // Contacts mode: use selected contacts (must have address)
+    var ctcs = typeof contacts !== 'undefined' ? contacts : [];
+    var selIds = BP._splitSelectedContacts;
+    selIds.forEach(function(id) {
+      var c = ctcs.find(function(x){ return x && x.id === id; });
+      if (c && c.addr) splitContacts.push({ addr: c.addr, name: c.name || '', chainId: c.chainId || 'Arc_Mainnet', token: (c.paymentPreferences && c.paymentPreferences.preferredToken) || c.prefToken || 'USDC' });
+    });
+    if (!splitContacts.length) {
+      if(typeof toast === 'function') toast('Select at least one contact with a wallet address', 'warning');
+      return;
+    }
+    count = splitContacts.length;
+  } else {
+    // Manual mode: N empty rows
+    count = parseInt(document.getElementById('bp-split-count').value);
+    if(!(count > 0) || count > 500){ if(typeof toast === 'function') toast('Enter valid count (2–500)', 'warning'); return; }
+    for (var j = 0; j < count; j++) splitContacts.push({ addr: '', name: '', chainId: 'Arc_Mainnet', token: 'USDC' });
+  }
+
   // Integer-safe per-person amount: avoid 3×0.1 ≠ 0.3 float drift
-  // Scale to 6-decimal integers (USDC), then distribute remainder to first rows
-  var totalMicro = Math.round(total * 1e6); // total in USDC micro-units
+  var totalMicro = Math.round(total * 1e6);
   var baseMicro  = Math.floor(totalMicro / count);
-  var remainder  = totalMicro - baseMicro * count; // distribute cents to first `remainder` rows
+  var remainder  = totalMicro - baseMicro * count;
+
   for(var i = 0; i < count; i++){
     var rowMicro = baseMicro + (i < remainder ? 1 : 0);
     var rowAmt = (rowMicro / 1e6).toFixed(6).replace(/\.?0+$/, '') || '0.00';
-    // Keep at least 2 decimal places
     if (rowAmt.indexOf('.') === -1) rowAmt += '.00';
     else if (rowAmt.split('.')[1].length < 2) rowAmt += '0'.repeat(2 - rowAmt.split('.')[1].length);
     recipients.push({
-      addr: '',
-      amount: rowAmt,
-      note: 'Split ' + (i+1) + '/' + count,
-      name: '',
-      chainId: 'Arc_Mainnet',
-      token: 'USDC'
+      addr:    splitContacts[i].addr,
+      amount:  rowAmt,
+      note:    'Split ' + (i+1) + '/' + count,
+      name:    splitContacts[i].name,
+      chainId: splitContacts[i].chainId,
+      token:   splitContacts[i].token
     });
   }
   saveRecipients();
   renderTable();
   try { if(typeof updateMultiSendReview === 'function') updateMultiSendReview(); } catch(_){}
   if(typeof toast === 'function') toast('Split: ' + count + ' rows at ' + (baseMicro/1e6).toFixed(6) + '+ USDC each', 'info');
+  // Reset contacts selection after split
+  if (BP._splitMode === 'contacts') {
+    BP._splitSelectedContacts = [];
+    var searchEl = document.getElementById('bp-split-contact-search');
+    if (searchEl) searchEl.value = '';
+    BP._renderSplitContactList('');
+  }
 };
 
 // ── 4. BULK PAYMENT LINKS ────────────────────────────────────
