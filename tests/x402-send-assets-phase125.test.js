@@ -105,48 +105,40 @@ function makeEventDoc(ids = []) {
 }
 
 /* ══════════════════════════════════════════════════════════════════════════════
-   1. _setSettlementOverride — hook correctness
+   1. settlementAvailable() — real gate correctness (Phase 1.2.6: no bypass hook)
 ══════════════════════════════════════════════════════════════════════════════ */
-describe('Phase 1.2.5 — _setSettlementOverride hook', () => {
+describe('Phase 1.2.5 — settlementAvailable() gate', () => {
 
-  it('_setSettlementOverride(true) makes settlementAvailable() return true', () => {
+  it('returns false when no status is set', () => {
     const SA = buildSA(makeDoc(['sa-x402-panel']), makeX402());
-    // Without override and without status: must be false
-    expect(SA._settlementAvailable()).toBe(false);
-    // With override: must be true
-    SA._setSettlementOverride(true);
-    expect(SA._settlementAvailable()).toBe(true);
-  });
-
-  it('_setSettlementOverride(null) restores real behaviour', () => {
-    const SA = buildSA(makeDoc(['sa-x402-panel']), makeX402());
-    SA._setSettlementOverride(true);
-    expect(SA._settlementAvailable()).toBe(true);
-    SA._setSettlementOverride(null);
     expect(SA._settlementAvailable()).toBe(false);
   });
 
-  it('override does not persist across buildSA() instances', () => {
+  it('returns true only when status.settlement.available === true', () => {
+    const SA = buildSA(makeDoc(['sa-x402-panel']), makeX402());
+    SA._setStatus({ settlement: { available: true } });
+    expect(SA._settlementAvailable()).toBe(true);
+  });
+
+  it('returns false when settlement.available is false', () => {
+    const SA = buildSA(makeDoc(['sa-x402-panel']), makeX402());
+    SA._setStatus({ settlement: { available: false } });
+    expect(SA._settlementAvailable()).toBe(false);
+  });
+
+  it('two instances have independent settlement state', () => {
     const SA1 = buildSA(makeDoc(['sa-x402-panel']), makeX402());
     const SA2 = buildSA(makeDoc(['sa-x402-panel']), makeX402());
-    SA1._setSettlementOverride(true);
+    SA1._setStatus({ settlement: { available: true } });
     expect(SA1._settlementAvailable()).toBe(true);
-    // SA2 is a separate closure — its override is null
     expect(SA2._settlementAvailable()).toBe(false);
   });
 
-  it('_resetSession() does NOT clear the override (override is a test instrument)', () => {
+  it('_resetSession() clears _status so settlementAvailable() returns false', () => {
     const SA = buildSA(makeDoc(['sa-x402-panel']), makeX402());
-    SA._setSettlementOverride(true);
+    SA._setStatus({ settlement: { available: true } });
     SA._resetSession();
-    // Override survives session reset — it is a test instrument, not session state
-    expect(SA._settlementAvailable()).toBe(true);
-  });
-
-  it('production code: _settlementOverride starts as null (fails closed)', () => {
-    const SA = buildSA(makeDoc(['sa-x402-panel']), makeX402());
-    // Without any call to _setSettlementOverride, gate is closed
-    expect(SA._settlementAvailable()).toBe(false);
+    expect(SA._settlementAvailable()).toBe(false); // status cleared by reset
   });
 });
 
@@ -165,8 +157,7 @@ describe('Phase 1.2.5 — Scenario A: stale pay() success does not affect sessio
     const doc  = makeDoc(['sa-x402-panel']);
     const SA   = buildSA(doc, X402);
 
-    SA._setSettlementOverride(true);
-    SA._setStatus({ user: { id: 'u-1' }, settlement: { available: false } });
+    SA._setStatus({ user: { id: 'u-1' }, settlement: { available: true } });
     SA._setPrepare(makePrepare(makeIntent('a-success-1')));
 
     // Session A starts pay()
@@ -205,10 +196,9 @@ describe('Phase 1.2.5 — Scenario A: stale pay() success does not affect sessio
     const X402 = makeX402({ pay: vi.fn(() => payPromA) });
     const SA   = buildSA(makeDoc(['sa-x402-panel']), X402);
 
-    SA._setSettlementOverride(true);
     const intent = makeIntent('a-prepare-check');
     SA._setPrepare(makePrepare(intent));
-    SA._setStatus({ settlement: { available: false } });
+    SA._setStatus({ settlement: { available: true } });
 
     const payProm = SA.pay();
     expect(X402.pay).toHaveBeenCalledTimes(1);
@@ -231,9 +221,8 @@ describe('Phase 1.2.5 — Scenario A: stale pay() success does not affect sessio
     const X402 = makeX402({ pay: vi.fn(() => payPromA) });
     const SA   = buildSA(makeDoc(['sa-x402-panel']), X402);
 
-    SA._setSettlementOverride(true);
     SA._setPrepare(makePrepare(makeIntent('a-token')));
-    SA._setStatus({ settlement: { available: false } });
+    SA._setStatus({ settlement: { available: true } });
 
     const payProm = SA.pay();
     SA._resetSession();
@@ -260,9 +249,8 @@ describe('Phase 1.2.5 — Scenario A: stale pay() success does not affect sessio
     doc.els['sax402-url'] = { value: 'https://svc.example.com' };
     const SA = buildSA(doc, X402);
 
-    SA._setSettlementOverride(true);
     SA._setPrepare(makePrepare(makeIntent('a-busy-check')));
-    SA._setStatus({ settlement: { available: false } });
+    SA._setStatus({ settlement: { available: true } });
 
     const payProm = SA.pay();
     expect(X402.pay).toHaveBeenCalledTimes(1);
@@ -289,9 +277,8 @@ describe('Phase 1.2.5 — Scenario B: stale pay() rejection does not affect sess
     const X402 = makeX402({ pay: vi.fn(() => payPromA) });
     const SA   = buildSA(makeDoc(['sa-x402-panel']), X402);
 
-    SA._setSettlementOverride(true);
     SA._setPrepare(makePrepare(makeIntent('b-reject-1')));
-    SA._setStatus({ settlement: { available: false } });
+    SA._setStatus({ settlement: { available: true } });
 
     const payProm = SA.pay();
     expect(X402.pay).toHaveBeenCalledTimes(1);
@@ -321,9 +308,8 @@ describe('Phase 1.2.5 — Scenario B: stale pay() rejection does not affect sess
     doc.els['sax402-url'] = { value: 'https://x.example.com' };
     const SA = buildSA(doc, X402);
 
-    SA._setSettlementOverride(true);
     SA._setPrepare(makePrepare(makeIntent('b-busy-lock')));
-    SA._setStatus({ settlement: { available: false } });
+    SA._setStatus({ settlement: { available: true } });
 
     const payProm = SA.pay();
     SA._resetSession();
@@ -342,9 +328,8 @@ describe('Phase 1.2.5 — Scenario B: stale pay() rejection does not affect sess
     const X402 = makeX402({ pay: vi.fn(() => payPromA) });
     const SA   = buildSA(makeDoc(['sa-x402-panel']), X402);
 
-    SA._setSettlementOverride(true);
     SA._setPrepare(makePrepare(makeIntent('b-prepare')));
-    SA._setStatus({ settlement: { available: false } });
+    SA._setStatus({ settlement: { available: true } });
 
     const payProm = SA.pay();
     SA._resetSession(); // clears _prepare
@@ -364,9 +349,8 @@ describe('Phase 1.2.5 — Scenario B: stale pay() rejection does not affect sess
     const X402 = makeX402({ pay: vi.fn(() => payPromA) });
     const SA   = buildSA(makeDoc(['sa-x402-panel']), X402, toast);
 
-    SA._setSettlementOverride(true);
     SA._setPrepare(makePrepare(makeIntent('b-toast')));
-    SA._setStatus({ settlement: { available: false } });
+    SA._setStatus({ settlement: { available: true } });
 
     const payProm = SA.pay();
     SA._resetSession();
@@ -404,9 +388,8 @@ describe('Phase 1.2.5 — Concurrent session A (pay) + session B (discover)', ()
     const SA = buildSA(doc, X402);
 
     // === SESSION A ===
-    SA._setSettlementOverride(true);
     SA._setPrepare(makePrepare(makeIntent('concurrent-A')));
-    SA._setStatus({ settlement: { available: false } });
+    SA._setStatus({ settlement: { available: true } });
 
     const payProm = SA.pay();
     expect(payCallCount).toBe(1);
@@ -414,7 +397,6 @@ describe('Phase 1.2.5 — Concurrent session A (pay) + session B (discover)', ()
 
     // === RESET — invalidate A ===
     SA._resetSession();
-    SA._setSettlementOverride(true); // override survives reset
 
     // === SESSION B — starts discover ===
     const discUrl = 'https://svc.example.com';
@@ -455,14 +437,12 @@ describe('Phase 1.2.5 — Concurrent session A (pay) + session B (discover)', ()
     doc.els['sax402-url'] = { value: 'https://svc.example.com' };
     const SA = buildSA(doc, X402);
 
-    SA._setSettlementOverride(true);
     SA._setPrepare(makePrepare(makeIntent('concurrent-B')));
-    SA._setStatus({ settlement: { available: false } });
+    SA._setStatus({ settlement: { available: true } });
 
     const payProm = SA.pay();
 
     SA._resetSession();
-    SA._setSettlementOverride(true);
     doc.els['sax402-url'] = { value: 'https://svc.example.com' };
     const discProm = SA.discover();
 
@@ -532,7 +512,7 @@ describe('Phase 1.2.5 — wallet event dispatch clears session state', () => {
   it('wallet event invalidates a pending prepare — goConfirm routes to discover', () => {
     const { SA } = makeEventSA();
     SA._setPrepare(makePrepare(makeIntent('evt-inv')));
-    SA._setStatus({ settlement: { available: false } });
+    SA._setStatus({ settlement: { available: true } });
 
     SA._resetSession(); // wallet event fires
 
@@ -546,9 +526,8 @@ describe('Phase 1.2.5 — wallet event dispatch clears session state', () => {
     const X402 = makeX402({ pay: vi.fn(() => payPromA) });
     const { SA } = { SA: buildSA(makeEventDoc(['sa-x402-panel']), X402) };
 
-    SA._setSettlementOverride(true);
     SA._setPrepare(makePrepare(makeIntent('evt-pay-inflight')));
-    SA._setStatus({ settlement: { available: false } });
+    SA._setStatus({ settlement: { available: true } });
 
     const payProm = SA.pay();
     expect(X402.pay).toHaveBeenCalledTimes(1);
@@ -609,9 +588,9 @@ describe('Phase 1.2.5 — source wiring verification', () => {
     expect(block).toContain('SA_X402_CHAIN_CHANGED');
   });
 
-  it('_setSettlementOverride hook is present in SA_X402 source', () => {
-    expect(sa402Src).toContain('_setSettlementOverride');
-    expect(sa402Src).toContain('_settlementOverride');
+  it('_setSettlementOverride and _settlementOverride are NOT in SA_X402 source (Phase 1.2.6 removed them)', () => {
+    expect(sa402Src).not.toContain('_setSettlementOverride');
+    expect(sa402Src).not.toContain('_settlementOverride');
   });
 });
 
@@ -624,12 +603,12 @@ describe('Phase 1.2.5 — source wiring verification', () => {
 ══════════════════════════════════════════════════════════════════════════════ */
 describe('Phase 1.2.5 — listener dedup and instance isolation', () => {
 
-  it('two buildSA() instances have independent _settlementOverride state', () => {
+  it('two buildSA() instances have independent settlement state', () => {
     const SA1 = buildSA(makeDoc(['sa-x402-panel']), makeX402());
     const SA2 = buildSA(makeDoc(['sa-x402-panel']), makeX402());
-    SA1._setSettlementOverride(true);
+    SA1._setStatus({ settlement: { available: true } });
     expect(SA1._settlementAvailable()).toBe(true);
-    expect(SA2._settlementAvailable()).toBe(false); // SA2 unaffected
+    expect(SA2._settlementAvailable()).toBe(false); // SA2 has no status set
   });
 
   it('two buildSA() instances have independent _sessionToken', () => {
@@ -671,7 +650,7 @@ describe('Phase 1.2.5 — settlement gate preserved after Phase 1.2.5 changes', 
     const X402 = makeX402({ pay: vi.fn() });
     const SA   = buildSA(makeDoc(['sa-x402-panel']), X402);
 
-    // No override — settlementAvailable() returns false
+    // settlement.available is false → gate closed
     SA._setPrepare(makePrepare(makeIntent('gate-check')));
     SA._setStatus({ settlement: { available: false } });
 
@@ -679,13 +658,12 @@ describe('Phase 1.2.5 — settlement gate preserved after Phase 1.2.5 changes', 
     expect(X402.pay).not.toHaveBeenCalled();
   });
 
-  it('with override=true, pay() reaches X402.pay() (injection path)', async () => {
+  it('with settlement.available=true in status, pay() reaches X402.pay()', async () => {
     const X402 = makeX402({ pay: vi.fn().mockResolvedValue({ ok: false, status: 503, data: {} }) });
     const SA   = buildSA(makeDoc(['sa-x402-panel']), X402);
 
-    SA._setSettlementOverride(true);
     SA._setPrepare(makePrepare(makeIntent('gate-bypass')));
-    SA._setStatus({ settlement: { available: false } });
+    SA._setStatus({ settlement: { available: true } }); // real path, not override
 
     await SA.pay();
     expect(X402.pay).toHaveBeenCalledTimes(1);

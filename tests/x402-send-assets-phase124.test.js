@@ -77,9 +77,8 @@ describe('Phase 1.2.4 — pay() success path session guard', () => {
     const X402 = makeX402({ pay: vi.fn(() => stalePromise) });
     const SA   = buildSA(makeDoc(['sa-x402-panel']), X402);
 
-    SA._setSettlementOverride(true);
     SA._setPrepare(makePrepare(makeIntent('p124-succ-step')));
-    SA._setStatus({ settlement: { available: false } });
+    SA._setStatus({ settlement: { available: true } });
 
     const payProm = SA.pay();
     expect(X402.pay).toHaveBeenCalledTimes(1); // reached X402.pay
@@ -107,9 +106,8 @@ describe('Phase 1.2.4 — pay() success path session guard', () => {
     const X402 = makeX402({ pay: vi.fn(() => stalePromise) });
     const SA   = buildSA(doc, X402);
 
-    SA._setSettlementOverride(true);
     SA._setPrepare(makePrepare(makeIntent('p124-succ-html')));
-    SA._setStatus({ settlement: { available: false } });
+    SA._setStatus({ settlement: { available: true } });
 
     const payProm = SA.pay();
     const htmlBeforeReset = panel.innerHTML;
@@ -136,9 +134,8 @@ describe('Phase 1.2.4 — pay() success path session guard', () => {
     doc.els['sax402-url'] = { value: 'https://test.example.com' };
     const SA = buildSA(doc, X402);
 
-    SA._setSettlementOverride(true);
     SA._setPrepare(makePrepare(makeIntent('p124-discover-after')));
-    SA._setStatus({ settlement: { available: false } });
+    SA._setStatus({ settlement: { available: true } });
 
     const payProm = SA.pay();
     SA._resetSession();
@@ -147,7 +144,6 @@ describe('Phase 1.2.4 — pay() success path session guard', () => {
     await payProm;
 
     // _busy must be false — session B discover can run
-    SA._setSettlementOverride(true);
     await SA.discover();
     expect(discoverRan).toBe(true);
   });
@@ -164,9 +160,8 @@ describe('Phase 1.2.4 — pay() catch path session guard', () => {
     const X402 = makeX402({ pay: vi.fn(() => stalePromise) });
     const SA   = buildSA(makeDoc(['sa-x402-panel']), X402);
 
-    SA._setSettlementOverride(true);
     SA._setPrepare(makePrepare(makeIntent('p124-err-step')));
-    SA._setStatus({ settlement: { available: false } });
+    SA._setStatus({ settlement: { available: true } });
 
     const payProm = SA.pay();
     expect(X402.pay).toHaveBeenCalledTimes(1);
@@ -187,9 +182,8 @@ describe('Phase 1.2.4 — pay() catch path session guard', () => {
     const X402 = makeX402({ pay: vi.fn(() => stalePromise) });
     const SA   = buildSA(makeDoc(['sa-x402-panel']), X402, toast);
 
-    SA._setSettlementOverride(true);
     SA._setPrepare(makePrepare(makeIntent('p124-err-toast')));
-    SA._setStatus({ settlement: { available: false } });
+    SA._setStatus({ settlement: { available: true } });
 
     const payProm = SA.pay();
     SA._resetSession();
@@ -214,9 +208,8 @@ describe('Phase 1.2.4 — pay() catch path session guard', () => {
     doc.els['sax402-url'] = { value: 'https://test.example.com' };
     const SA = buildSA(doc, X402);
 
-    SA._setSettlementOverride(true);
     SA._setPrepare(makePrepare(makeIntent('p124-err-busy')));
-    SA._setStatus({ settlement: { available: false } });
+    SA._setStatus({ settlement: { available: true } });
 
     const payProm = SA.pay();
     SA._resetSession();
@@ -224,7 +217,6 @@ describe('Phase 1.2.4 — pay() catch path session guard', () => {
     rejectStale(new Error('timeout'));
     await payProm;
 
-    SA._setSettlementOverride(true);
     await SA.discover();
     expect(discoverRan).toBe(true);
   });
@@ -235,26 +227,25 @@ describe('Phase 1.2.4 — pay() catch path session guard', () => {
 ══════════════════════════════════════════════════════════════════════════════ */
 describe('Phase 1.2.4 — settlement gate integrity', () => {
 
-  it('without override, pay() never reaches X402.pay()', async () => {
+  it('settlement.available=false closes gate — pay() never reaches X402.pay()', async () => {
     const X402 = makeX402({ pay: vi.fn() });
     const SA   = buildSA(makeDoc(['sa-x402-panel']), X402);
     SA._setPrepare(makePrepare(makeIntent('gate-no-override')));
-    SA._setStatus({ settlement: { available: false } });
+    SA._setStatus({ settlement: { available: false } }); // gate closed
     await SA.pay();
     expect(X402.pay).not.toHaveBeenCalled();
   });
 
-  it('_setSettlementOverride(null) re-closes the gate', async () => {
+  it('settlement.available=false re-closes the gate', async () => {
     const X402 = makeX402({ pay: vi.fn().mockResolvedValue({ ok: false, status: 503, data: {} }) });
     const SA   = buildSA(makeDoc(['sa-x402-panel']), X402);
-    SA._setSettlementOverride(true);
     SA._setPrepare(makePrepare(makeIntent('gate-reclose-1')));
-    SA._setStatus({ settlement: { available: false } });
+    SA._setStatus({ settlement: { available: true } });
     await SA.pay();
     expect(X402.pay).toHaveBeenCalledTimes(1);
 
-    // Now close the gate
-    SA._setSettlementOverride(null);
+    // Close the gate by setting available=false
+    SA._setStatus({ settlement: { available: false } });
     SA._setPrepare(makePrepare(makeIntent('gate-reclose-2')));
     await SA.pay();
     expect(X402.pay).toHaveBeenCalledTimes(1); // NOT called again

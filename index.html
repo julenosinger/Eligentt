@@ -39801,12 +39801,7 @@ var SA_X402 = (function() {
   /* ── settlement availability check ─────────────────────── */
   // Returns true ONLY when the server has confirmed settlement is available.
   // Fails closed (false) when status is absent or ambiguous.
-  // _settlementOverride is null in production and can only be set to true
-  // via the _setSettlementOverride test hook, which is excluded from production
-  // builds by the fact that it can only be called from test-injected code.
-  var _settlementOverride = null;
   function settlementAvailable() {
-    if (_settlementOverride === true) return true;
     return !!(
       _status &&
       _status.settlement &&
@@ -40250,11 +40245,6 @@ var SA_X402 = (function() {
     // Force a session reset (simulates user/wallet change)
     _resetSession:      resetSession,
     _settlementAvailable: settlementAvailable,
-    // TEST ONLY: override settlementAvailable() to return true/false without
-    // changing production flags. Pass null to restore real behaviour.
-    // This override is only reachable via test-injected code — not callable
-    // from any production path because no production code references this hook.
-    _setSettlementOverride: function(v){ _settlementOverride = (v===true) ? true : null; },
     // Returns whether the global wallet listeners have been registered
     _listenersRegistered: function(){ return !!window._sa402ListenersRegistered; },
   };
