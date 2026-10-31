@@ -669,28 +669,24 @@
       var addrShort = c.addr ? shortAddr(c.addr) : '<span style="color:var(--muted2);font-style:italic">No address</span>';
       var isSel = selectedContacts.has(c.id) ? 'checked' : '';
       var enriched = enrichContact(c);
-      return '<div class="card" style="padding:13px;display:flex;align-items:flex-start;gap:10px;transition:border .15s" onmouseenter="this.style.borderColor=\'var(--blue)\'" onmouseleave="this.style.borderColor=\'\'">' +
-        '<div style="width:36px;height:36px;border-radius:50%;background:' + GRAD[i % GRAD.length] + ';display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:#fff;flex-shrink:0">' + (c.name || '?')[0].toUpperCase() + '</div>' +
-        '<div style="flex:1;min-width:0">' +
-          '<div style="font-size:11px;font-weight:600;display:flex;align-items:center;gap:5px;flex-wrap:wrap">' +
-            c.name +
-            '<i class="ti ' + (c.favorite ? 'ti-star-filled' : 'ti-star') + '" style="font-size:11px;color:' + (c.favorite ? 'var(--yellow)' : 'var(--muted2)') + ';cursor:pointer;margin-left:auto" onclick="toggleFav(\'' + c.id + '\',this)" title="Favorite"></i>' +
-          '</div>' +
-          '<div style="font-family:\'JetBrains Mono\',monospace;font-size:9px;color:var(--muted2);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + addrShort + '</div>' +
-          '<div style="display:flex;align-items:center;gap:4px;margin-top:3px;flex-wrap:wrap">' +
-            '<div style="width:7px;height:7px;border-radius:50%;background:' + (chain ? chain.color : '#888') + '"></div>' +
-            '<span style="font-size:8px;color:var(--muted2)">' + (chain ? chain.name : 'Unknown') + '</span>' +
-          '</div>' +
-          getBadgeHTML(c) +
-          getPrefsHTML(enriched) +
-          getPayrollHTML(enriched) +
-          (c.note ? '<div style="font-size:8.5px;color:var(--muted2);margin-top:3px">' + c.note + '</div>' : '') +
+      return '<div class="rcp-row" data-cid="' + c.id + '" style="display:grid;grid-template-columns:22px 28px 1fr 150px 100px 80px auto;gap:8px;align-items:center;padding:6px 10px;border-bottom:1px solid var(--border2);transition:background .12s;cursor:default" onmouseenter="this.style.background=\'var(--hover)\'" onmouseleave="this.style.background=\'\'">' +
+        '<input type="checkbox" class="contact-select" data-id="' + c.id + '" ' + isSel + ' onchange="toggleContactSelect(this)" style="accent-color:var(--blue);width:12px;height:12px;cursor:pointer" title="Select"/>' +
+        '<div style="width:28px;height:28px;border-radius:50%;background:' + GRAD[i % GRAD.length] + ';display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;flex-shrink:0">' + (c.name || '?')[0].toUpperCase() + '</div>' +
+        '<div style="min-width:0;display:flex;align-items:center;gap:6px;overflow:hidden">' +
+          '<span style="font-size:11px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex-shrink:0;max-width:40%">' + (c.name || '') + '</span>' +
+          '<i class="ti ' + (c.favorite ? 'ti-star-filled' : 'ti-star') + '" style="font-size:10px;color:' + (c.favorite ? '#f59e0b' : 'var(--muted2)') + ';cursor:pointer;flex-shrink:0" onclick="toggleFav(\'' + c.id + '\',this)" title="Favorite"></i>' +
+          (c.addr ? '<span style="font-family:\'JetBrains Mono\',monospace;font-size:8.5px;color:var(--muted2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + addrShort + '</span>' : '<span style="font-size:8.5px;color:var(--muted2);font-style:italic">No address</span>') +
         '</div>' +
-        '<div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0;align-items:flex-end">' +
-          '<input type="checkbox" class="contact-select" data-id="' + c.id + '" ' + isSel + ' onchange="toggleContactSelect(this)" style="margin-bottom:2px;accent-color:var(--blue)" title="Select for batch">' +
-          (c.addr ? '<button class="btn" style="padding:2px 7px;font-size:8.5px" onclick="addToCurrentBatch(\'' + c.id + '\')"><i class="ti ti-plus"></i>Add</button>' : '') +
-          '<button class="btn" style="padding:2px 7px;font-size:8.5px" onclick="ContactsHub.openContactCard(\'' + c.id + '\')" title="Details"><i class="ti ti-info-circle"></i></button>' +
-          '<button class="btn" style="padding:2px 7px;font-size:8.5px;color:var(--red)" onclick="deleteContact(\'' + c.id + '\')"><i class="ti ti-trash"></i></button>' +
+        '<div style="display:flex;align-items:center;gap:4px;overflow:hidden">' +
+          '<div style="width:5px;height:5px;border-radius:50%;background:' + (chain ? chain.color : '#888') + ';flex-shrink:0"></div>' +
+          '<span style="font-size:8.5px;color:var(--text);font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + (chain ? chain.name : 'Unknown') + '</span>' +
+        '</div>' +
+        '<div style="display:flex;gap:3px;flex-wrap:wrap;align-items:center">' + getBadgeHTML(c) + '</div>' +
+        '<div style="font-size:8px;color:var(--muted2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + (c.lastUsed ? c.lastUsed.slice(0,10) : '—') + '</div>' +
+        '<div style="display:flex;gap:2px;align-items:center">' +
+          (c.addr ? '<button class="btn" style="width:22px;height:22px;padding:0;display:flex;align-items:center;justify-content:center;border-radius:5px" onclick="addToCurrentBatch(\'' + c.id + '\')" title="Add to batch"><i class="ti ti-plus" style="font-size:9px"></i></button>' : '') +
+          '<button class="btn" style="width:22px;height:22px;padding:0;display:flex;align-items:center;justify-content:center;border-radius:5px" onclick="ContactsHub.openContactCard(\'' + c.id + '\')" title="Details"><i class="ti ti-info-circle" style="font-size:9px"></i></button>' +
+          '<button class="btn" style="width:22px;height:22px;padding:0;display:flex;align-items:center;justify-content:center;border-radius:5px;color:var(--red)" onclick="deleteContact(\'' + c.id + '\')" title="Delete"><i class="ti ti-trash" style="font-size:9px"></i></button>' +
         '</div>' +
       '</div>';
     }).join('');
