@@ -40204,8 +40204,10 @@ var SA_X402 = (function() {
       _step='settling';renderSettling();setBusy(true);
       try{
         var res=await X402.pay(it);
-        // Discard result if session changed during async settle
-        if(_sessionToken!==mySession){setBusy(false);return;}
+        // Discard stale result: session was reset while we were awaiting.
+        // Do NOT call setBusy(false) here — resetSession() already cleared
+        // _busy=false and a newer operation may now own the busy lock.
+        if(_sessionToken!==mySession){return;}
         setBusy(false);_step='done';
         if(res.ok&&res.data&&(res.data.txHash||res.data.transaction)){
           renderDone({ok:true,txHash:res.data.txHash||res.data.transaction});
@@ -40217,7 +40219,11 @@ var SA_X402 = (function() {
           }
           renderDone({ok:false,reason:reason||'Settlement not confirmed'});
         }
-      }catch(e){setBusy(false);_step='done';renderDone({ok:false,reason:e.message||'Payment error'});}
+      }catch(e){
+        // Same session guard in the error path.
+        if(_sessionToken!==mySession){return;}
+        setBusy(false);_step='done';renderDone({ok:false,reason:e.message||'Payment error'});
+      }
     },
 
     reset: function(){
