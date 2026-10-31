@@ -9894,7 +9894,11 @@ select.cinput option { background: #161a24; color: #dde2f0; }
         <div style="margin-left:auto;display:flex;gap:8px">
           <select id="report-type" class="btn" style="cursor:pointer;font-family:inherit" onchange="renderReports()">
             <option value="">All Types</option>
-            <option>Batch</option><option>Bridge</option><option>Single Send</option><option>Cross-Chain</option><option>Invoice</option><option>Payment Link</option>
+            <option>Batch</option><option>Single Send</option><option>Cross-Chain</option>
+            <option>Swap</option><option>Swap Cross-Chain</option>
+            <option>Bridge</option>
+            <option>Schedule</option>
+            <option>Invoice</option><option>Payment Link</option>
           </select>
           <select id="report-period" class="btn" style="cursor:pointer;font-family:inherit" onchange="renderReports()">
             <option value="7">Last 7 days</option>
@@ -31320,18 +31324,122 @@ function _rptRenderNow() {
   var typeFilter = document.getElementById('report-type')?.value || '';
   var cutoff = period===0 ? null : new Date(Date.now()-period*86400000);
 
-  // Gather all data sources
+  // ── Helper: resolve explorer URL per chain ──────────────────────────────
+  function _rptExplorerUrl(txHash, chainId) {
+    if (!txHash) return '';
+    var explorers = {
+      5042:  'https://explorer.arc.io/tx/',
+      1:     'https://etherscan.io/tx/',
+      8453:  'https://basescan.org/tx/',
+      42161: 'https://arbiscan.io/tx/',
+      10:    'https://optimistic.etherscan.io/tx/',
+      137:   'https://polygonscan.com/tx/',
+    };
+    var base = explorers[Number(chainId)] || 'https://explorer.arc.io/tx/';
+    return base + txHash;
+  }
+
+  // ── Gather all data sources ──────────────────────────────────────────────
   var allData = [];
-  txHistory.forEach(function(t) { allData.push({ date: t.date, id: t.id, type: /batch/i.test(t.type) ? 'Batch' : /bridge/i.test(t.type) ? 'Bridge' : /cross.chain/i.test(t.type) ? 'Cross-Chain' : 'Single Send', recipients: t.recipients, amount: t.amount, fee: t.fee, status: t.status, txHash: t.txHash }); });
+
+  // 1. txHistory (Batch / Single Send / Cross-Chain)
+  txHistory.forEach(function(t) {
+    allData.push({
+      date: t.date, id: t.id,
+      type: /batch/i.test(t.type) ? 'Batch' : /bridge/i.test(t.type) ? 'Bridge' : /cross.chain/i.test(t.type) ? 'Cross-Chain' : 'Single Send',
+      recipients: t.recipients, amount: t.amount, fee: t.fee, status: t.status,
+      txHash: t.txHash, chainId: 5042, detail: null
+    });
+  });
+
+  // 2. Invoices
   try {
     if (typeof invoiceList !== 'undefined') invoiceList.forEach(function(inv) {
-      if (inv.status === 'Paid') allData.push({ date: inv.paidOn || inv.created, id: inv.id, type: 'Invoice', recipients: 1, amount: inv.subtotal || inv.total || 0, fee: inv.protocolFee || 0, status: 'Success', txHash: inv.txHash || '' });
+      if (inv.status === 'Paid') allData.push({
+        date: inv.paidOn || inv.created, id: inv.id, type: 'Invoice',
+        recipients: 1, amount: +(inv.subtotal || inv.total || 0), fee: +(inv.protocolFee || 0),
+        status: 'Success', txHash: inv.txHash || '', chainId: 5042, detail: null
+      });
     });
   } catch(_) {}
+
+  // 3. Payment Links
   try {
     if (typeof payLinks !== 'undefined') payLinks.forEach(function(l) {
-      if (l.status === 'Paid') allData.push({ date: l.paidOn || l.created, id: l.id, type: 'Payment Link', recipients: 1, amount: l.amount || 0, fee: l.feeAmount || 0, status: 'Success', txHash: l.paidTx || '' });
+      if (l.status === 'Paid') allData.push({
+        date: l.paidOn || l.created, id: l.id, type: 'Payment Link',
+        recipients: 1, amount: +(l.amount || 0), fee: +(l.feeAmount || 0),
+        status: 'Success', txHash: l.paidTx || '', chainId: 5042, detail: null
+      });
     });
+  } catch(_) {}
+
+  // 4. Swap history (per-wallet localStorage)
+  try {
+    var _swpAddr = (typeof walletAddress !== 'undefined' && walletAddress) ? walletAddress.toLowerCase() : 'anon';
+    var _swpRaw = localStorage.getItem('swpLocalHistory_' + _swpAddr);
+    var _swpEntries = _swpRaw ? JSON.parse(_swpRaw) : [];
+    if (Array.isArray(_swpEntries)) _swpEntries.forEach(function(s) {
+      if (!s.txHash) return;
+      allData.push({
+        date: s.timestamp ? new Date(s.timestamp).toISOString() : new Date().toISOString(),
+        id: s.txHash.slice(0, 12) + '…',
+        type: s.type === 'cross-chain' ? 'Swap Cross-Chain' : 'Swap',
+        recipients: 1,
+        amount: +(s.amountIn) || 0,
+        fee: 0,
+        status: s.status === 'done' ? 'Success' : s.status === 'failed' ? 'Failed' : 'Pending',
+        txHash: s.txHash,
+        chainId: s.chainId || 5042,
+        detail: { tokenIn: s.tokenIn, tokenOut: s.tokenOut, amountIn: s.amountIn, amountOut: s.amountOut, provider: s.provider, chainIdDst: s.chainIdDst, txHashDst: s.txHashDst }
+      });
+    });
+  } catch(_) {}
+
+  // 5. Bridge history (localStorage arcpay_bridge_history)
+  try {
+    var _brRaw = localStorage.getItem('arcpay_bridge_history');
+    var _brEntries = _brRaw ? JSON.parse(_brRaw) : [];
+    if (Array.isArray(_brEntries)) _brEntries.forEach(function(b) {
+      if (!b.txHash && !b.id) return;
+      allData.push({
+        date: b.timestamp ? new Date(b.timestamp).toISOString() : (b.date || new Date().toISOString()),
+        id: b.id || (b.txHash || '').slice(0, 12) + '…',
+        type: 'Bridge',
+        recipients: 1,
+        amount: +(b.amountIn || b.amount || 0),
+        fee: +(b.fee || 0),
+        status: b.status === 'completed' || b.status === 'Success' ? 'Success' : b.status === 'failed' ? 'Failed' : 'Pending',
+        txHash: b.txHash || '',
+        chainId: b.fromChainId || b.chainId || 5042,
+        detail: { protocol: b.protocol || b.provider, fromChain: b.fromChain, toChain: b.toChain, token: b.token, amountOut: b.amountOut || b.amount }
+      });
+    });
+  } catch(_) {}
+
+  // 6. Schedule execution history
+  try {
+    if (typeof ScheduleEngine !== 'undefined') {
+      var _scheds = ScheduleEngine.getAll ? ScheduleEngine.getAll() : [];
+      _scheds.forEach(function(sch) {
+        if (!Array.isArray(sch.executionHistory)) return;
+        sch.executionHistory.forEach(function(ex) {
+          if (!ex.txHash && ex.status !== 'confirmed') return;
+          allData.push({
+            date: ex.executedAt || ex.date || new Date().toISOString(),
+            id: sch.id,
+            type: 'Schedule',
+            recipients: Array.isArray(sch.recipients) ? sch.recipients.length : 1,
+            amount: +(sch.amount || 0),
+            fee: 0,
+            status: ex.status === 'confirmed' || ex.status === 'executed' ? 'Success' : ex.status === 'failed' ? 'Failed' : 'Pending',
+            txHash: ex.txHash || '',
+            chainId: 5042,
+            detail: { scheduleName: sch.name, freq: sch.freq, token: sch.token, reason: ex.reason }
+          });
+        });
+      });
+    }
   } catch(_) {}
 
   var data = cutoff ? allData.filter(function(t) { return new Date(t.date) >= cutoff; }) : allData;
@@ -31434,24 +31542,44 @@ function _rptRenderNow() {
   if (!data.length) { tbody.innerHTML = ''; if (empty) empty.style.display = ''; return; }
   if (empty) empty.style.display = 'none';
   tbody.innerHTML = data.map(function(t) {
-    var explorerUrl = 'https://explorer.arc.io/tx/' + (t.txHash || '');
-    var txLink = t.txHash ? '<a href="' + explorerUrl + '" target="_blank" style="color:var(--blue);text-decoration:none;font-size:9px" title="' + t.txHash + '">' + shortAddr(t.txHash) + '</a>' : '—';
-    return '<tr style="cursor:pointer" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display===`none`?``:`none`" title="Click to expand">' +
+    var explorerUrl = _rptExplorerUrl(t.txHash, t.chainId);
+    var txLink = t.txHash ? '<a href="' + explorerUrl + '" target="_blank" style="color:var(--blue);text-decoration:none;font-size:9px" title="' + t.txHash + '">' + shortAddr(t.txHash) + ' <i class="ti ti-external-link" style="font-size:7px"></i></a>' : '—';
+    var statusColor = t.status === 'Success' ? 'var(--green)' : t.status === 'Failed' ? 'var(--red)' : 'var(--yellow)';
+    // Build detail rows from t.detail
+    var detailRows = '';
+    if (t.detail) {
+      var d = t.detail;
+      if (d.tokenIn)       detailRows += '<div>Token In: <span style="color:var(--text)">' + d.tokenIn + '</span></div>';
+      if (d.tokenOut)      detailRows += '<div>Token Out: <span style="color:var(--text)">' + d.tokenOut + '</span></div>';
+      if (d.amountIn)      detailRows += '<div>Amount In: <span style="color:var(--text)">' + d.amountIn + '</span></div>';
+      if (d.amountOut)     detailRows += '<div>Amount Out: <span style="color:var(--text)">' + d.amountOut + '</span></div>';
+      if (d.provider)      detailRows += '<div>Provider: <span style="color:var(--teal)">' + d.provider + '</span></div>';
+      if (d.protocol)      detailRows += '<div>Protocol: <span style="color:var(--teal)">' + d.protocol + '</span></div>';
+      if (d.fromChain)     detailRows += '<div>From Chain: <span style="color:var(--text)">' + d.fromChain + '</span></div>';
+      if (d.toChain)       detailRows += '<div>To Chain: <span style="color:var(--text)">' + d.toChain + '</span></div>';
+      if (d.scheduleName)  detailRows += '<div>Schedule: <span style="color:var(--text)">' + d.scheduleName + '</span></div>';
+      if (d.freq)          detailRows += '<div>Frequency: <span style="color:var(--text)">' + d.freq + '</span></div>';
+      if (d.reason)        detailRows += '<div style="color:var(--red)">Reason: ' + d.reason + '</div>';
+      if (d.txHashDst)     detailRows += '<div>Dst Tx: <a href="' + _rptExplorerUrl(d.txHashDst, d.chainIdDst || 5042) + '" target="_blank" style="color:var(--teal);text-decoration:none;font-family:monospace;font-size:8px">' + shortAddr(d.txHashDst) + ' <i class="ti ti-external-link" style="font-size:7px"></i></a></div>';
+    }
+    return '<tr style="cursor:pointer" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display===\'none\'?\'\':\' none\'" title="Click for details">' +
       '<td style="font-size:9px;color:var(--muted2)">' + new Date(t.date).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) + '</td>' +
-      '<td style="color:var(--blue)">' + t.id + '</td>' +
+      '<td style="color:var(--blue);font-family:monospace;font-size:9px">' + (t.id||'—') + '</td>' +
       '<td>' + t.type + '</td>' +
       '<td>' + t.recipients + '</td>' +
-      '<td style="font-weight:600">' + t.amount.toFixed(2) + ' USDC</td>' +
-      '<td style="color:var(--yellow)">' + t.fee.toFixed(2) + ' USDC</td>' +
-      '<td><span style="color:var(--green)">' + t.status + '</span></td>' +
+      '<td style="font-weight:600">' + (+t.amount||0).toFixed(4) + '</td>' +
+      '<td style="color:var(--yellow)">' + (+t.fee||0).toFixed(4) + '</td>' +
+      '<td><span style="color:' + statusColor + '">' + t.status + '</span></td>' +
       '<td>' + txLink + '</td>' +
       '</tr>' +
-      '<tr style="display:none;background:rgba(0,0,0,.15)"><td colspan="8" style="padding:8px 12px;font-size:9px">' +
-      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;color:var(--muted2)">' +
-      '<div>Tx Hash: <a href="' + explorerUrl + '" target="_blank" style="color:var(--teal);text-decoration:none;font-family:monospace;font-size:8px">' + shortAddr(t.txHash || '—') + ' <i class="ti ti-external-link" style="font-size:7px"></i></a></div>' +
+      '<tr style="display:none;background:rgba(0,0,0,.18)"><td colspan="8" style="padding:8px 14px;font-size:9px">' +
+      '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px 16px;color:var(--muted2)">' +
+      '<div>Full Tx: ' + (t.txHash ? '<a href="' + explorerUrl + '" target="_blank" style="color:var(--teal);text-decoration:none;font-family:monospace;font-size:8px">' + t.txHash + ' <i class="ti ti-external-link" style="font-size:7px"></i></a>' : '—') + '</div>' +
       '<div>Date: <span style="color:var(--text)">' + new Date(t.date).toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) + '</span></div>' +
       '<div>Type: <span style="color:var(--text)">' + t.type + '</span></div>' +
-      '<div>Amount: <span style="color:var(--text);font-weight:600">$' + t.amount.toFixed(2) + '</span></div>' +
+      '<div>Amount: <span style="color:var(--text);font-weight:600">' + (+t.amount||0).toFixed(6) + ' USDC</span></div>' +
+      '<div>Fee: <span style="color:var(--yellow)">' + (+t.fee||0).toFixed(6) + ' USDC</span></div>' +
+      detailRows +
       '</div></td></tr>';
   }).join('');
 }
@@ -31459,17 +31587,31 @@ function _rptRenderNow() {
 // Auto-refresh via EventBus
 try {
   if (typeof EventBus !== 'undefined') {
-    EventBus.on('TX_HISTORY_UPDATED', function() { renderReports(); });
-    EventBus.on('INVOICE_PAID', function() { renderReports(); });
-    EventBus.on('PAYMENT_LINK_PAID', function() { renderReports(); });
+    EventBus.on('TX_HISTORY_UPDATED',   function() { renderReports(); });
+    EventBus.on('INVOICE_PAID',         function() { renderReports(); });
+    EventBus.on('PAYMENT_LINK_PAID',    function() { renderReports(); });
+    EventBus.on('SWAP_COMPLETED',       function() { renderReports(); });
+    EventBus.on('SWAP_FAILED',          function() { renderReports(); });
+    EventBus.on('BRIDGE_COMPLETED',     function() { renderReports(); });
+    EventBus.on('SCHEDULE_EXECUTED',    function() { renderReports(); });
   }
 } catch(_) {}
 
 function exportReportCSV() {
-  const rows=[['Date','Batch ID','Type','Recipients','Amount','Fee','Status','Tx Hash'],...txHistory.map(t=>[new Date(t.date).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}),t.id,t.type,t.recipients,t.amount,t.fee,t.status,t.txHash])];
+  // Re-use same data assembly as _rptRenderNow so CSV matches what's on screen
+  var all = [];
+  txHistory.forEach(function(t){ all.push({ date:t.date, id:t.id, type:/batch/i.test(t.type)?'Batch':/bridge/i.test(t.type)?'Bridge':/cross.chain/i.test(t.type)?'Cross-Chain':'Single Send', recipients:t.recipients, amount:t.amount, fee:t.fee, status:t.status, txHash:t.txHash }); });
+  try { if(typeof invoiceList!=='undefined') invoiceList.forEach(function(inv){ if(inv.status==='Paid') all.push({ date:inv.paidOn||inv.created, id:inv.id, type:'Invoice', recipients:1, amount:+(inv.subtotal||inv.total||0), fee:+(inv.protocolFee||0), status:'Success', txHash:inv.txHash||'' }); }); } catch(_){}
+  try { if(typeof payLinks!=='undefined') payLinks.forEach(function(l){ if(l.status==='Paid') all.push({ date:l.paidOn||l.created, id:l.id, type:'Payment Link', recipients:1, amount:+(l.amount||0), fee:+(l.feeAmount||0), status:'Success', txHash:l.paidTx||'' }); }); } catch(_){}
+  try { var _a=(typeof walletAddress!=='undefined'&&walletAddress)?walletAddress.toLowerCase():'anon'; var _r=localStorage.getItem('swpLocalHistory_'+_a); var _s=_r?JSON.parse(_r):[]; if(Array.isArray(_s)) _s.forEach(function(s){ if(!s.txHash)return; all.push({ date:s.timestamp?new Date(s.timestamp).toISOString():new Date().toISOString(), id:s.txHash.slice(0,12)+'…', type:s.type==='cross-chain'?'Swap Cross-Chain':'Swap', recipients:1, amount:+(s.amountIn)||0, fee:0, status:s.status==='done'?'Success':s.status==='failed'?'Failed':'Pending', txHash:s.txHash }); }); } catch(_){}
+  try { var _br=localStorage.getItem('arcpay_bridge_history'); var _be=_br?JSON.parse(_br):[]; if(Array.isArray(_be)) _be.forEach(function(b){ if(!b.txHash&&!b.id)return; all.push({ date:b.timestamp?new Date(b.timestamp).toISOString():(b.date||new Date().toISOString()), id:b.id||(b.txHash||'').slice(0,12)+'…', type:'Bridge', recipients:1, amount:+(b.amountIn||b.amount||0), fee:+(b.fee||0), status:b.status==='completed'||b.status==='Success'?'Success':b.status==='failed'?'Failed':'Pending', txHash:b.txHash||'' }); }); } catch(_){}
+  try { if(typeof ScheduleEngine!=='undefined'){ var _sc=ScheduleEngine.getAll?ScheduleEngine.getAll():[]; _sc.forEach(function(sch){ if(!Array.isArray(sch.executionHistory))return; sch.executionHistory.forEach(function(ex){ if(!ex.txHash&&ex.status!=='confirmed')return; all.push({ date:ex.executedAt||ex.date||new Date().toISOString(), id:sch.id, type:'Schedule', recipients:Array.isArray(sch.recipients)?sch.recipients.length:1, amount:+(sch.amount||0), fee:0, status:ex.status==='confirmed'||ex.status==='executed'?'Success':ex.status==='failed'?'Failed':'Pending', txHash:ex.txHash||'' }); }); }); } } catch(_){}
+  all.sort(function(a,b){ return new Date(b.date)-new Date(a.date); });
+  var rows=[['Date','ID','Type','Recipients','Amount','Fee','Status','Tx Hash']];
+  all.forEach(function(t){ rows.push([new Date(t.date).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}),'"'+(t.id||'')+ '"',t.type,t.recipients,(+t.amount||0).toFixed(6),(+t.fee||0).toFixed(6),t.status,t.txHash||'']); });
   const a=document.createElement('a');
-  a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(rows.map(r=>r.join(',')).join('\n'));
-  a.download='elligente-report.csv'; a.click(); toast('Report exported','success');
+  a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(rows.map(function(r){return r.join(',');}).join('\n'));
+  a.download='elligente-report.csv'; a.click(); toast('Report exported ('+all.length+' rows)','success');
 }
 
 // ══════════════════════════════════════════════════════════
