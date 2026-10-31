@@ -332,6 +332,41 @@
     return q ? decodeURIComponent(q) : null;
   }
 
+  // ── Param-based mode: /pay/?r=ADDR&a=AMT&t=TOKEN&c=CHAINID&n=LABEL ──
+  // Used by Bulk Payment Links — no KV, no auth, no API call required.
+  function tryLoadFromParams(){
+    var p = new URLSearchParams(window.location.search);
+    var r = p.get('r'); // recipient address
+    var a = p.get('a'); // amount
+    if (!r || !/^0x[0-9a-fA-F]{40}$/.test(r)) return false;
+    if (!a || isNaN(parseFloat(a)) || parseFloat(a) <= 0) return false;
+    var t  = (p.get('t') || 'USDC').toUpperCase();
+    var c  = parseInt(p.get('c') || '5042', 10);
+    var n  = p.get('n') || 'Payment';
+    var amt = parseFloat(a);
+    link = {
+      id:          'direct',
+      label:       n,
+      amount:      amt,
+      feeAmount:   0,
+      totalAmount: amt,
+      feeBps:      0,
+      type:        'fixed',
+      desc:        n,
+      recipient:   r,
+      token:       t,
+      tokenDecimals: 6,
+      chain:       (CHAIN_REGISTRY[c] || {}).name || 'Arc Mainnet',
+      chainId:     c,
+      status:      'Active',
+      payments:    0,
+      scans:       0,
+    };
+    chainCfg = resolveChain(c);
+    renderCheckout();
+    return true;
+  }
+
   // ── Load real payment data ──
   function loadPayment(){
     fetch('/api/payment/' + encodeURIComponent(token), { headers: { 'Accept':'application/json' } })
@@ -707,10 +742,12 @@
 
   // ── Boot ──
   token = getToken();
-  if (!token) {
-    showError('No payment reference provided.');
-  } else if (typeof ethers === 'undefined') {
+  if (typeof ethers === 'undefined') {
     showError('Payment engine failed to load. Please refresh.');
+  } else if (!token && tryLoadFromParams()) {
+    // param-based link loaded directly — no API call needed
+  } else if (!token) {
+    showError('No payment reference provided.');
   } else {
     loadPayment();
     // Best-effort silent reconnect if wallet already authorized
