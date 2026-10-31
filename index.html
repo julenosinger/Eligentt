@@ -39712,19 +39712,26 @@ function saGenerateQR() {
 //  other existing Send flow.
 // ════════════════════════════════════════════════════════════
 function saSetModeTab(mode, btn) {
-  // Toggle tab active state
+  // Guard: avoid double-toggling if already on the correct tab
   var tabs = document.querySelectorAll('#sa-mode-tabs .sa-mode-tab');
   tabs.forEach(function(t) { t.classList.remove('sa-mode-active'); });
-  if (btn) btn.classList.add('sa-mode-active');
+  // Re-query by id so we activate the right button regardless of which
+  // element reference was passed (handles synthetic calls without a btn arg).
+  var targetBtn = btn || document.getElementById(mode === 'x402' ? 'sa-mtab-x402' : 'sa-mtab-send');
+  if (targetBtn) targetBtn.classList.add('sa-mode-active');
 
   var sendPanel = document.getElementById('sa-panel-send');
   var x402Panel = document.getElementById('sa-x402-panel');
 
   if (mode === 'x402') {
     if (sendPanel) sendPanel.style.display = 'none';
-    if (x402Panel) { x402Panel.style.display = 'flex'; SA_X402.init(); }
+    if (x402Panel) {
+      x402Panel.style.display = 'flex';
+      // init() is idempotent — safe to call every time the tab is shown
+      SA_X402.init();
+    }
   } else {
-    if (sendPanel) sendPanel.style.display = '';
+    if (sendPanel) sendPanel.style.display = '';  // restore sa-body flex layout
     if (x402Panel) x402Panel.style.display = 'none';
   }
 }
@@ -39733,393 +39740,426 @@ function saSetModeTab(mode, btn) {
 //  SA_X402 — Inline x402 panel controller for Send Assets.
 //  Reuses X402 client (x402Client.js) + /api/x402/* endpoints.
 //  No new client, no new auth, no new settlement code.
+//
+//  Phase 1.1 fixes:
+//  - renderConfirm: Authorize button DISABLED + pay() BLOCKED when
+//    settlement is unavailable. 503 from /pay is never shown as a
+//    signing failure or ambiguous success.
+//  - init(): idempotent — repeated calls on tab-switch don't re-fetch
+//    status or reset discovery state. User identity cleared on session
+//    change.
+//  - Error messages: distinct copy for discover/auth/prepare/503 errors.
 // ════════════════════════════════════════════════════════════
 var SA_X402 = (function() {
   'use strict';
 
-  // Step machine states
-  // discover → review → source → confirm → settling → done/failed
-  var _step = 'discover';   // current step
-  var _status = null;       // /api/x402/status result
-  var _discovery = null;    // /api/x402/discover result
-  var _selReq = null;       // selected requirement object
-  var _prepare = null;      // /api/x402/prepare result
+  // Step machine: discover → review → source → confirm → [settling] → done
+  var _step = 'discover';
+  var _status = null;        // last /api/x402/status response data
+  var _statusUserId = null;  // userId the current _status belongs to (session guard)
+  var _discovery = null;     // last /api/x402/discover response
+  var _selReq = null;        // selected requirement
+  var _prepare = null;       // last /api/x402/prepare response
   var _busy = false;
-  var _initialized = false;
+  var _initialized = false;  // true after first getStatus() completes
 
   var STEPS = ['discover','review','source','confirm','settling','done'];
-  var STEP_LABELS = {
-    discover: '1. Discover',
-    review:   '2. Review',
-    source:   '3. Wallet',
-    confirm:  '4. Confirm',
-    settling: '5. Settling',
-    done:     '6. Result',
-  };
+  var STEP_LABELS = { discover:'1. Discover', review:'2. Review', source:'3. Wallet', confirm:'4. Confirm', settling:'5. Settling', done:'6. Result' };
 
-  function esc(s) {
-    return String(s == null ? '' : s).replace(/[&<>"']/g, function(c) {
-      return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
-    });
-  }
-  function shortAddr(a) { a=String(a||''); return a.length>12?a.slice(0,6)+'…'+a.slice(-4):a; }
-  function fmtUsd(atomic, dec) {
-    var n = Number(atomic); if (!isFinite(n)) return '—';
-    return '$'+(n/Math.pow(10,dec||6)).toLocaleString('en-US',{maximumFractionDigits:6});
-  }
-  function networkLabel(caip) {
-    var m = {'eip155:84532':'Base Sepolia','eip155:8453':'Base','eip155:137':'Polygon PoS','eip155:5042':'Arc Mainnet'};
-    return m[caip] || caip || '—';
-  }
+  /* ── helpers ───────────────────────────────────────────── */
+  function esc(s) { return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+  function shortAddr(a){a=String(a||'');return a.length>12?a.slice(0,6)+'…'+a.slice(-4):a;}
+  function fmtUsd(atomic,dec){var n=Number(atomic);if(!isFinite(n))return'—';return'$'+(n/Math.pow(10,dec||6)).toLocaleString('en-US',{maximumFractionDigits:6});}
+  function netLabel(caip){var m={'eip155:84532':'Base Sepolia','eip155:8453':'Base','eip155:137':'Polygon PoS','eip155:5042':'Arc Mainnet'};return m[caip]||caip||'—';}
+  function panel(){return document.getElementById('sa-x402-panel');}
+  function notify(msg,kind){try{if(typeof toast==='function')toast(msg,kind||'info');}catch(_){}}
 
-  function panel() { return document.getElementById('sa-x402-panel'); }
-
-  function stepBar() {
-    var done = STEPS.indexOf(_step);
-    return '<div class="x402-step-bar">' + STEPS.map(function(s,i) {
-      var cls = i < done ? 'done' : (s === _step ? 'active' : '');
-      var icon = i < done ? '<i class="ti ti-check" style="font-size:9px"></i>' : (i+1);
-      return (i > 0 ? '<div class="x402-step-sep' + (i <= done ? ' done' : '') + '"></div>' : '') +
-        '<div class="x402-step ' + cls + '">' + icon + ' ' + esc(STEP_LABELS[s]) + '</div>';
-    }).join('') + '</div>';
+  function kv(label,val,mono){
+    return '<div style="display:flex;flex-direction:column;gap:1px;min-width:0">'+
+      '<span style="font-size:8px;color:var(--muted2);text-transform:uppercase;letter-spacing:.4px">'+esc(label)+'</span>'+
+      '<b style="font-size:10px;color:var(--text);word-break:break-all'+(mono?';font-family:monospace':'')+'">'+(val)+'</b></div>';
+  }
+  function badge(label,color){
+    var c={green:'rgba(34,197,94,.14)|var(--green)',yellow:'rgba(245,158,11,.14)|var(--yellow)',red:'rgba(239,68,68,.14)|var(--red)',teal:'rgba(6,247,233,.12)|var(--teal,#06F7E9)',muted:'rgba(148,163,184,.14)|var(--muted2)'}[color]||'rgba(148,163,184,.14)|var(--muted2)';
+    var p=c.split('|');
+    return '<span style="font-size:8px;font-weight:700;padding:2px 7px;border-radius:4px;background:'+p[0]+';color:'+p[1]+'">'+esc(label)+'</span>';
+  }
+  function checkRow(c){
+    return '<div style="display:flex;align-items:center;gap:7px;font-size:9px;color:var(--muted2)">'+
+      '<i class="ti ti-'+(c.passed?'check':'x')+'" style="font-size:10px;color:'+(c.passed?'var(--green)':'var(--red)')+';flex-shrink:0"></i>'+
+      '<span style="color:var(--text);font-weight:600;min-width:120px">'+esc(c.name)+'</span>'+
+      '<span style="margin-left:auto;font-size:8px">'+esc(c.detail||'')+'</span></div>';
   }
 
-  function kv(label, val, mono) {
-    return '<div style="display:flex;flex-direction:column;gap:1px;min-width:0">' +
-      '<span style="font-size:8px;color:var(--muted2);text-transform:uppercase;letter-spacing:.4px">' + esc(label) + '</span>' +
-      '<b style="font-size:10px;color:var(--text);word-break:break-all' + (mono?';font-family:monospace':'') + '">' + val + '</b></div>';
+  /* ── settlement availability check ─────────────────────── */
+  // Returns true ONLY when the server has confirmed settlement is available.
+  // Fails closed (false) when status is absent or ambiguous.
+  function settlementAvailable() {
+    return !!(
+      _status &&
+      _status.settlement &&
+      _status.settlement.available === true
+    );
   }
 
-  function badge(label, color) {
-    var colors = {green:'rgba(34,197,94,.14)|var(--green)', yellow:'rgba(245,158,11,.14)|var(--yellow)', red:'rgba(239,68,68,.14)|var(--red)', teal:'rgba(6,247,233,.12)|var(--teal,#06F7E9)', muted:'rgba(148,163,184,.14)|var(--muted2)'};
-    var c = (colors[color]||colors.muted).split('|');
-    return '<span style="font-size:8px;font-weight:700;padding:2px 7px;border-radius:4px;background:'+c[0]+';color:'+c[1]+'">' + esc(label) + '</span>';
+  function stepBar(){
+    var done=STEPS.indexOf(_step);
+    return '<div class="x402-step-bar">'+STEPS.map(function(s,i){
+      var cls=i<done?'done':(s===_step?'active':'');
+      var icon=i<done?'<i class="ti ti-check" style="font-size:9px"></i>':(i+1);
+      return(i>0?'<div class="x402-step-sep'+(i<=done?' done':'')+'"></div>':'')+
+        '<div class="x402-step '+cls+'">'+icon+' '+esc(STEP_LABELS[s])+'</div>';
+    }).join('')+'</div>';
   }
 
-  function statusBanner() {
-    if (!_status) return '';
-    var s = _status;
-    var state = s.state || 'disabled';
-    var color = state === 'available' ? 'green' : state === 'settlement_unavailable' ? 'yellow' : 'red';
-    return '<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:7px;background:rgba(0,0,0,.15);border:1px solid var(--border2)">' +
-      badge(state === 'available' ? 'Available' : state === 'settlement_unavailable' ? 'Discovery only' : 'Disabled', color) +
-      '<span style="font-size:9px;color:var(--muted2);flex:1">' + esc(s.reason||'') + '</span>' +
-      (s.wallet && s.wallet.provisioned
-        ? '<span style="font-size:9px;color:var(--green)"><i class="ti ti-wallet"></i> ' + esc(shortAddr(s.wallet.address)) + '</span>'
-        : '<span style="font-size:9px;color:var(--yellow)"><i class="ti ti-wallet-off"></i> Circle Wallet not provisioned</span>') +
+  function statusBanner(){
+    if(!_status) return '';
+    var s=_status;
+    var state=s.state||'disabled';
+    var color=state==='available'?'green':state==='settlement_unavailable'?'yellow':'red';
+    var walletHtml=s.wallet&&s.wallet.provisioned
+      ?'<span style="font-size:9px;color:var(--green)"><i class="ti ti-wallet"></i> '+esc(shortAddr(s.wallet.address))+'</span>'
+      :'<span style="font-size:9px;color:var(--yellow)"><i class="ti ti-wallet-off"></i> Circle Wallet not provisioned</span>';
+    return '<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:7px;background:rgba(0,0,0,.15);border:1px solid var(--border2)">'+
+      badge(state==='available'?'Available':state==='settlement_unavailable'?'Discovery only':'Disabled',color)+
+      '<span style="font-size:9px;color:var(--muted2);flex:1">'+esc(s.reason||'')+'</span>'+walletHtml+'</div>';
+  }
+
+  /* ── renderers ─────────────────────────────────────────── */
+  function renderDiscover(){
+    var p=panel();if(!p)return;
+    p.innerHTML=stepBar()+statusBanner()+
+      '<div class="x402-card">'+
+        '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">'+
+          '<i class="ti ti-search" style="font-size:13px;color:var(--teal,#06F7E9)"></i>'+
+          '<span style="font-size:11px;font-weight:700;color:var(--text)">Discover a paid service</span>'+
+        '</div>'+
+        '<div style="font-size:9px;color:var(--muted2);line-height:1.5;margin-bottom:8px">Enter the URL of an x402-enabled service. The server probes it for an HTTP 402 response — no payment occurs at this step.</div>'+
+        '<div style="display:flex;gap:8px">'+
+          '<input id="sax402-url" class="cinput" placeholder="https://api.example.com/premium-data" spellcheck="false" autocomplete="off" style="flex:1;font-family:monospace;font-size:10px" onkeydown="if(event.key===\'Enter\')SA_X402.discover()"/>'+
+          '<button class="btn primary" id="sax402-disc-btn" onclick="SA_X402.discover()" style="padding:7px 14px;font-size:10px;white-space:nowrap"><i class="ti ti-radar"></i>Discover</button>'+
+        '</div>'+
+        '<div style="font-size:8.5px;color:var(--muted2);margin-top:6px">Supported: Base, Polygon, Base Sepolia · scheme: exact · EIP-3009 USDC only</div>'+
+      '</div>'+renderHistory();
+  }
+
+  function renderReview(){
+    var p=panel();if(!p)return;
+    var d=_discovery&&_discovery.data;
+    if(!d||!d.requirements||!d.requirements.length){_step='discover';return renderDiscover();}
+    var svc=(d.resource&&d.resource.serviceName)?d.resource.serviceName:d.resourceUrl;
+    var html=stepBar()+statusBanner()+
+      '<div class="x402-card">'+
+        '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">'+
+          '<i class="ti ti-api" style="font-size:13px;color:var(--blue)"></i>'+
+          '<span style="font-size:11px;font-weight:700;color:var(--text)">'+esc(svc||'Service')+'</span>'+badge('HTTP 402','yellow')+
+        '</div>'+
+        (d.resource&&d.resource.description?'<div style="font-size:9px;color:var(--muted2)">'+esc(d.resource.description)+'</div>':'')+
+        '<div style="font-size:8.5px;color:var(--muted2);font-family:monospace">'+esc(d.resourceUrl)+'</div>'+
       '</div>';
-  }
-
-  function renderDiscover() {
-    var p = panel(); if (!p) return;
-    p.innerHTML = stepBar() + statusBanner() +
-      '<div class="x402-card">' +
-        '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">' +
-          '<i class="ti ti-search" style="font-size:13px;color:var(--teal,#06F7E9)"></i>' +
-          '<span style="font-size:11px;font-weight:700;color:var(--text)">Discover a paid service</span>' +
-        '</div>' +
-        '<div style="font-size:9px;color:var(--muted2);line-height:1.5;margin-bottom:8px">Enter the URL of an x402-enabled service. The server probes it for an HTTP 402 response and reads its payment requirements — no payment occurs at this step.</div>' +
-        '<div style="display:flex;gap:8px">' +
-          '<input id="sax402-url" class="cinput" placeholder="https://api.example.com/premium-data" spellcheck="false" autocomplete="off" style="flex:1;font-family:monospace;font-size:10px" onkeydown="if(event.key===\'Enter\')SA_X402.discover()"/>' +
-          '<button class="btn primary" id="sax402-disc-btn" onclick="SA_X402.discover()" style="padding:7px 14px;font-size:10px;white-space:nowrap"><i class="ti ti-radar"></i>Discover</button>' +
-        '</div>' +
-        '<div style="font-size:8.5px;color:var(--muted2);margin-top:6px">Supported: Base, Polygon, Base Sepolia · scheme: exact · EIP-3009 USDC only</div>' +
-      '</div>' +
-      renderHistory();
-  }
-
-  function renderReview() {
-    var p = panel(); if (!p) return;
-    var d = _discovery && _discovery.data;
-    if (!d || !d.requirements || !d.requirements.length) { _step='discover'; return renderDiscover(); }
-    var svc = (d.resource && d.resource.serviceName) ? d.resource.serviceName : d.resourceUrl;
-    var html = stepBar() + statusBanner() +
-      '<div class="x402-card">' +
-        '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">' +
-          '<i class="ti ti-api" style="font-size:13px;color:var(--blue)"></i>' +
-          '<span style="font-size:11px;font-weight:700;color:var(--text)">' + esc(svc||'Service') + '</span>' +
-          badge('HTTP 402', 'yellow') +
-        '</div>' +
-        (d.resource && d.resource.description ? '<div style="font-size:9px;color:var(--muted2)">' + esc(d.resource.description) + '</div>' : '') +
-        '<div style="font-size:8.5px;color:var(--muted2);font-family:monospace">' + esc(d.resourceUrl) + '</div>' +
-      '</div>';
-
-    d.requirements.forEach(function(r, i) {
-      var valid = r.valid;
-      var checkRows = (r.checks||[]).map(function(c) {
-        return '<div style="display:flex;align-items:center;gap:7px;font-size:9px;color:var(--muted2)">' +
-          '<i class="ti ti-' + (c.passed?'check':'x') + '" style="font-size:10px;color:' + (c.passed?'var(--green)':'var(--red)') + ';flex-shrink:0"></i>' +
-          '<span style="color:var(--text);font-weight:600;min-width:110px">' + esc(c.name) + '</span>' +
-          '<span style="margin-left:auto;text-align:right;font-size:8px">' + esc(c.detail||'') + '</span></div>';
-      }).join('');
-      html += '<div class="x402-card" style="' + (valid?'border-color:rgba(34,197,94,.25)':'') + '">' +
-        '<div style="display:flex;align-items:center;gap:8px">' +
-          '<span style="font-size:10px;font-weight:700;color:var(--text)">Payment option ' + (i+1) + '</span>' +
-          badge(valid?'Valid':'Blocked', valid?'green':'red') +
-        '</div>' +
-        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:6px 0">' +
-          kv('Amount', esc(fmtUsd(r.amount)) + ' USDC') +
-          kv('Token', esc(r.asset||'USDC'), true) +
-          kv('Network', esc(networkLabel(r.network))) +
-          kv('Recipient', esc(shortAddr(r.payTo)), true) +
-          kv('Scheme', esc(r.scheme)) +
-          kv('Timeout', esc(r.maxTimeoutSeconds) + 's') +
-        '</div>' +
-        '<details style="margin-top:4px"><summary style="font-size:8.5px;color:var(--muted2);cursor:pointer">Validation checks (' + (r.checks||[]).filter(function(c){return c.passed;}).length + '/' + (r.checks||[]).length + ' passed)</summary>' +
-          '<div style="display:flex;flex-direction:column;gap:3px;margin-top:6px">' + checkRows + '</div>' +
-        '</details>' +
-        '<button class="btn' + (valid?' primary':'') + '" onclick="SA_X402.selectReq(' + i + ')"' + (valid?'':' disabled title="Requirement blocked"') + ' style="margin-top:6px;font-size:10px;padding:7px 14px">' +
-          '<i class="ti ti-' + (valid?'shield-check':'lock') + '"></i>' + (valid?'Select &amp; continue':'Blocked') +
-        '</button>' +
+    d.requirements.forEach(function(r,i){
+      var valid=r.valid;
+      html+='<div class="x402-card" style="'+(valid?'border-color:rgba(34,197,94,.25)':'')+'">'+
+        '<div style="display:flex;align-items:center;gap:8px">'+
+          '<span style="font-size:10px;font-weight:700;color:var(--text)">Payment option '+(i+1)+'</span>'+badge(valid?'Valid':'Blocked',valid?'green':'red')+
+        '</div>'+
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:6px 0">'+
+          kv('Amount',esc(fmtUsd(r.amount))+' USDC')+kv('Token',esc(r.asset||'USDC'),true)+
+          kv('Network',esc(netLabel(r.network)))+kv('Recipient',esc(shortAddr(r.payTo)),true)+
+          kv('Scheme',esc(r.scheme))+kv('Timeout',esc(r.maxTimeoutSeconds)+'s')+
+        '</div>'+
+        '<details style="margin-top:4px"><summary style="font-size:8.5px;color:var(--muted2);cursor:pointer">Validation checks ('+((r.checks||[]).filter(function(c){return c.passed;}).length)+'/'+(r.checks||[]).length+' passed)</summary>'+
+          '<div style="display:flex;flex-direction:column;gap:3px;margin-top:6px">'+((r.checks||[]).map(checkRow).join(''))+'</div>'+
+        '</details>'+
+        '<button class="btn'+(valid?' primary':'')+'" onclick="SA_X402.selectReq('+i+')"'+(valid?'':' disabled title="Requirement blocked"')+' style="margin-top:6px;font-size:10px;padding:7px 14px">'+
+          '<i class="ti ti-'+(valid?'shield-check':'lock')+'"></i>'+(valid?'Select &amp; continue':'Blocked')+
+        '</button>'+
       '</div>';
     });
-    html += '<button class="btn" onclick="SA_X402.back()" style="font-size:9px;margin-top:4px"><i class="ti ti-arrow-left"></i>Back</button>';
-    p.innerHTML = html;
+    html+='<button class="btn" onclick="SA_X402.back()" style="font-size:9px;margin-top:4px"><i class="ti ti-arrow-left"></i>Back</button>';
+    p.innerHTML=html;
   }
 
-  function renderSource() {
-    var p = panel(); if (!p) return;
-    var it = _prepare && _prepare.data && _prepare.data.intent;
-    if (!it) { _step='review'; return renderReview(); }
-    var ready = it.status === 'ready';
-    var checks = (it.checks||[]).map(function(c) {
-      return '<div style="display:flex;align-items:center;gap:7px;font-size:9px;color:var(--muted2)">' +
-        '<i class="ti ti-' + (c.passed?'check':'x') + '" style="font-size:10px;color:' + (c.passed?'var(--green)':'var(--red)') + ';flex-shrink:0"></i>' +
-        '<span style="color:var(--text);font-weight:600;min-width:120px">' + esc(c.name) + '</span>' +
-        '<span style="margin-left:auto;font-size:8px">' + esc(c.detail||'') + '</span></div>';
+  function renderSource(){
+    var p=panel();if(!p)return;
+    var it=_prepare&&_prepare.data&&_prepare.data.intent;
+    if(!it){_step='review';return renderReview();}
+    var ready=it.status==='ready';
+    p.innerHTML=stepBar()+statusBanner()+
+      '<div class="x402-card">'+
+        '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">'+
+          '<i class="ti ti-wallet" style="font-size:13px;color:var(--purple)"></i>'+
+          '<span style="font-size:11px;font-weight:700;color:var(--text)">Payment wallet</span>'+badge(ready?'Ready':'Blocked',ready?'green':'red')+
+        '</div>'+
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px">'+
+          kv('Circle AI Smart Wallet',it.walletAddress?esc(shortAddr(it.walletAddress)):'Not provisioned',true)+
+          kv('Amount','$'+esc((it.amountUsd||0).toFixed(6))+' USDC')+
+          kv('Network',esc(it.network||netLabel(it.networkCaip)))+
+          kv('Recipient',esc(shortAddr(it.payTo)),true)+
+        '</div>'+
+        (it.blockedReason?'<div style="background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);color:var(--red);border-radius:7px;padding:9px 11px;font-size:10px;margin-bottom:8px"><i class="ti ti-alert-triangle"></i> '+esc(it.blockedReason)+'</div>':'')+
+        '<details style="margin-bottom:8px"><summary style="font-size:8.5px;color:var(--muted2);cursor:pointer">All checks ('+((it.checks||[]).filter(function(c){return c.passed;}).length)+'/'+(it.checks||[]).length+' passed)</summary>'+
+          '<div style="display:flex;flex-direction:column;gap:3px;margin-top:6px">'+((it.checks||[]).map(checkRow).join(''))+'</div>'+
+        '</details>'+
+        '<div style="display:flex;gap:8px">'+
+          '<button class="btn" onclick="SA_X402.back()" style="font-size:9px"><i class="ti ti-arrow-left"></i>Back</button>'+
+          '<button class="btn primary" onclick="SA_X402.goConfirm()" '+(ready?'':'disabled')+' style="font-size:10px;padding:7px 14px"><i class="ti ti-arrow-right"></i>Review &amp; confirm</button>'+
+        '</div>'+
+      '</div>';
+  }
+
+  function renderConfirm(){
+    var p=panel();if(!p)return;
+    var it=_prepare&&_prepare.data&&_prepare.data.intent;
+    if(!it||it.status!=='ready'){_step='source';return renderSource();}
+    var d=_discovery&&_discovery.data;
+    var svc=(d&&d.resource&&d.resource.serviceName)?d.resource.serviceName:((d&&d.resourceUrl)||'—');
+
+    // ── FIX 1: settlement gate ───────────────────────────
+    // settlementAvailable() is the ONLY source of truth.
+    // When false: button is disabled, label says "Settlement unavailable",
+    // and SA_X402.pay() is guarded independently so a race condition
+    // (e.g. onclick fires before DOM updates) cannot bypass the gate.
+    var canPay = settlementAvailable();
+    var payBtn = canPay
+      ? '<button class="btn primary" id="sax402-pay-btn" onclick="SA_X402.pay()" style="font-size:10px;padding:7px 18px;background:linear-gradient(135deg,#06F7E9,#4f8ef7);color:#081018;border:none"><i class="ti ti-credit-card-pay"></i>Authorize payment</button>'
+      : '<button class="btn" id="sax402-pay-btn" disabled title="Settlement not yet implemented — no funds can move" style="font-size:10px;padding:7px 18px;opacity:.5;cursor:not-allowed"><i class="ti ti-lock"></i>Settlement unavailable</button>';
+
+    p.innerHTML=stepBar()+statusBanner()+
+      '<div class="x402-card" style="border-color:rgba(6,247,233,.25)">'+
+        '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">'+
+          '<i class="ti ti-shield-check" style="font-size:14px;color:var(--teal,#06F7E9)"></i>'+
+          '<span style="font-size:11px;font-weight:700;color:var(--text)">Review &amp; authorize payment</span>'+
+        '</div>'+
+        '<div style="font-size:9px;color:var(--muted2);margin-bottom:10px;line-height:1.5">Review every detail. Funds move <strong style="color:var(--text)">only after</strong> you click Authorize — never automatically.</div>'+
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">'+
+          kv('Service',esc(svc))+
+          kv('Resource URL','<span style="font-family:monospace;font-size:8.5px">'+esc((d&&d.resourceUrl)||'—')+'</span>')+
+          kv('Amount','<span style="color:var(--teal,#06F7E9);font-weight:800;font-size:13px">$'+esc((it.amountUsd||0).toFixed(6))+' USDC</span>')+
+          kv('Network',esc(it.network||netLabel(it.networkCaip)))+
+          kv('Recipient','<span style="font-family:monospace">'+esc(shortAddr(it.payTo))+'</span>')+
+          kv('Payment wallet','<span style="font-family:monospace">'+esc(shortAddr(it.walletAddress))+'</span>')+
+          kv('Scheme','exact (EIP-3009)')+
+          kv('Intent ID','<span style="font-family:monospace;font-size:8px">'+esc(it.id)+'</span>')+
+        '</div>'+
+        // Always show settlement status block — no hidden state
+        (!canPay
+          ? '<div style="background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);color:var(--yellow);border-radius:7px;padding:9px 11px;font-size:9.5px;margin-bottom:10px">'+
+              '<i class="ti ti-alert-triangle"></i> <strong>Settlement not implemented (Phase 1).</strong> '+
+              'This intent is valid and ready. No funds will move until settlement is enabled server-side. '+
+              'You can review the intent and return when settlement is available.'+
+            '</div>'
+          : '')+
+        '<div style="display:flex;gap:8px">'+
+          '<button class="btn" onclick="SA_X402.back()" style="font-size:9px"><i class="ti ti-arrow-left"></i>Back</button>'+
+          payBtn+
+        '</div>'+
+      '</div>';
+  }
+
+  function renderSettling(){
+    var p=panel();if(!p)return;
+    p.innerHTML=stepBar()+
+      '<div class="x402-card" style="align-items:center;padding:24px">'+
+        '<div class="aut-typing"><span></span><span></span><span></span></div>'+
+        '<div style="font-size:10px;color:var(--muted2);margin-top:12px">Sending authorization to Facilitator…</div>'+
+      '</div>';
+  }
+
+  function renderDone(result){
+    var p=panel();if(!p)return;
+    var ok=result&&result.ok;
+    var txHash=result&&(result.txHash||result.transaction);
+    p.innerHTML=stepBar()+
+      '<div class="x402-card" style="border-color:'+(ok?'rgba(34,197,94,.3)':'rgba(239,68,68,.3)')+';align-items:center;padding:20px">'+
+        '<i class="ti ti-'+(ok?'circle-check':'circle-x')+'" style="font-size:32px;color:'+(ok?'var(--green)':'var(--red)')+';margin-bottom:8px"></i>'+
+        '<div style="font-size:13px;font-weight:700;color:var(--text)">'+(ok?'Payment authorized':'Payment blocked')+'</div>'+
+        '<div style="font-size:9px;color:var(--muted2);margin-top:4px;text-align:center">'+
+          (ok&&txHash?'Settlement confirmed · tx: <span style="font-family:monospace;color:var(--teal)">'+esc(shortAddr(txHash))+'</span>':esc((result&&result.reason)||'Settlement not enabled (Phase 1) — no funds moved.'))+
+        '</div>'+
+        (!ok?'<div style="font-size:8.5px;color:var(--muted2);margin-top:8px;text-align:center">This intent has been validated and recorded. No funds moved.</div>':'')+
+        '<div style="display:flex;gap:8px;margin-top:14px">'+
+          '<button class="btn" onclick="SA_X402.reset()" style="font-size:9px"><i class="ti ti-refresh"></i>New payment</button>'+
+        '</div>'+
+      '</div>'+renderHistory();
+  }
+
+  function renderHistory(){
+    var h=[];try{if(typeof X402!=='undefined'&&typeof X402.getHistory==='function')h=X402.getHistory();}catch(_){}
+    if(!h.length)return'';
+    var rows=h.slice(0,5).map(function(e){
+      var b=e.status==='paid'?badge('paid','green'):e.status==='blocked'?badge('blocked','yellow'):badge(e.status,'muted');
+      return'<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border2,#232940);font-size:9px">'+b+
+        '<span style="flex:1;color:var(--muted2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(e.service||'')+'</span>'+
+        '<span style="color:var(--text);font-weight:600;flex-shrink:0">'+(e.amountAtomic!=null?fmtUsd(e.amountAtomic):'—')+'</span></div>';
     }).join('');
-    p.innerHTML = stepBar() + statusBanner() +
-      '<div class="x402-card">' +
-        '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">' +
-          '<i class="ti ti-wallet" style="font-size:13px;color:var(--purple)"></i>' +
-          '<span style="font-size:11px;font-weight:700;color:var(--text)">Payment wallet</span>' +
-          badge(ready?'Ready':'Blocked', ready?'green':'red') +
-        '</div>' +
-        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px">' +
-          kv('Circle AI Smart Wallet', it.walletAddress ? esc(shortAddr(it.walletAddress)) : 'Not provisioned', true) +
-          kv('Amount', '$' + esc((it.amountUsd||0).toFixed(6)) + ' USDC') +
-          kv('Network', esc(it.network||networkLabel(it.networkCaip))) +
-          kv('Recipient', esc(shortAddr(it.payTo)), true) +
-        '</div>' +
-        (it.blockedReason ? '<div style="background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);color:var(--red);border-radius:7px;padding:9px 11px;font-size:10px;margin-bottom:8px"><i class="ti ti-alert-triangle"></i> ' + esc(it.blockedReason) + '</div>' : '') +
-        '<details style="margin-bottom:8px"><summary style="font-size:8.5px;color:var(--muted2);cursor:pointer">All checks (' + (it.checks||[]).filter(function(c){return c.passed;}).length + '/' + (it.checks||[]).length + ' passed)</summary>' +
-          '<div style="display:flex;flex-direction:column;gap:3px;margin-top:6px">' + checks + '</div>' +
-        '</details>' +
-        '<div style="display:flex;gap:8px">' +
-          '<button class="btn" onclick="SA_X402.back()" style="font-size:9px"><i class="ti ti-arrow-left"></i>Back</button>' +
-          '<button class="btn primary" onclick="SA_X402.goConfirm()" ' + (ready?'':'disabled') + ' style="font-size:10px;padding:7px 14px"><i class="ti ti-arrow-right"></i>Review &amp; confirm</button>' +
-        '</div>' +
-      '</div>';
+    return'<div class="x402-card"><div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><i class="ti ti-history" style="color:var(--muted2)"></i><span style="font-size:10px;font-weight:700;color:var(--text)">Recent x402 activity</span></div>'+rows+'</div>';
   }
 
-  function renderConfirm() {
-    var p = panel(); if (!p) return;
-    var it = _prepare && _prepare.data && _prepare.data.intent;
-    if (!it || it.status !== 'ready') { _step='source'; return renderSource(); }
-    var d = _discovery && _discovery.data;
-    var svc = (d && d.resource && d.resource.serviceName) ? d.resource.serviceName : (d && d.resourceUrl) || '—';
-    p.innerHTML = stepBar() + statusBanner() +
-      '<div class="x402-card" style="border-color:rgba(6,247,233,.25)">' +
-        '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">' +
-          '<i class="ti ti-shield-check" style="font-size:14px;color:var(--teal,#06F7E9)"></i>' +
-          '<span style="font-size:11px;font-weight:700;color:var(--text)">Review &amp; authorize payment</span>' +
-        '</div>' +
-        '<div style="font-size:9px;color:var(--muted2);margin-bottom:10px;line-height:1.5">Review every detail. Funds move <strong style="color:var(--text)">only after</strong> you click Authorize — never automatically.</div>' +
-        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">' +
-          kv('Service', esc(svc)) +
-          kv('Resource URL', '<span style="font-family:monospace;font-size:8.5px">' + esc(d && d.resourceUrl || '—') + '</span>') +
-          kv('Amount', '<span style="color:var(--teal,#06F7E9);font-weight:800;font-size:13px">$' + esc((it.amountUsd||0).toFixed(6)) + ' USDC</span>') +
-          kv('Network', esc(it.network || networkLabel(it.networkCaip))) +
-          kv('Recipient', '<span style="font-family:monospace">' + esc(shortAddr(it.payTo)) + '</span>') +
-          kv('Payment wallet', '<span style="font-family:monospace">' + esc(shortAddr(it.walletAddress)) + '</span>') +
-          kv('Scheme', 'exact (EIP-3009)') +
-          kv('Intent ID', '<span style="font-family:monospace;font-size:8px">' + esc(it.id) + '</span>') +
-        '</div>' +
-        ((_status && _status.settlement && !_status.settlement.available)
-          ? '<div style="background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);color:var(--yellow);border-radius:7px;padding:9px 11px;font-size:9.5px;margin-bottom:10px"><i class="ti ti-alert-triangle"></i> Settlement not yet implemented. Clicking authorize will document the intent and confirm the path is correct — no funds will move until settlement is enabled.</div>'
-          : '') +
-        '<div style="display:flex;gap:8px">' +
-          '<button class="btn" onclick="SA_X402.back()" style="font-size:9px"><i class="ti ti-arrow-left"></i>Back</button>' +
-          '<button class="btn primary" id="sax402-pay-btn" onclick="SA_X402.pay()" style="font-size:10px;padding:7px 18px;background:linear-gradient(135deg,#06F7E9,#4f8ef7);color:#081018;border:none"><i class="ti ti-credit-card-pay"></i>Authorize payment</button>' +
-        '</div>' +
-      '</div>';
+  /* ── busy / button helpers ──────────────────────────────── */
+  function setBusy(b){
+    _busy=b;
+    var disc=document.getElementById('sax402-disc-btn');if(disc)disc.disabled=b;
+    // pay btn: only toggle busy-disabled when settlement is available — if
+    // settlement is unavailable the button is already permanently disabled.
+    var pay=document.getElementById('sax402-pay-btn');
+    if(pay&&settlementAvailable())pay.disabled=b;
   }
 
-  function renderSettling() {
-    var p = panel(); if (!p) return;
-    p.innerHTML = stepBar() +
-      '<div class="x402-card" style="align-items:center;padding:24px">' +
-        '<div class="aut-typing"><span></span><span></span><span></span></div>' +
-        '<div style="font-size:10px;color:var(--muted2);margin-top:12px">Sending authorization to Facilitator…</div>' +
-      '</div>';
+  /* ── error message helpers (Fix 3) ─────────────────────── */
+  function discoverErrMsg(res){
+    if(!res||!res.data)return'Discovery failed';
+    var e=res.data.error||'';
+    if(res.status===401||res.status===403)return'Authentication required — please sign in to use x402 discovery';
+    if(res.status===400&&e.includes('blocked'))return'URL blocked: '+e;
+    if(res.status===502)return'Service unreachable: '+e;
+    return e||'Discovery failed';
+  }
+  function prepareErrMsg(res){
+    if(!res||!res.data)return'Prepare failed';
+    var e=res.data.error||'';
+    if(res.status===401||res.status===403)return'Session expired — please sign in again';
+    return e||'Prepare failed';
   }
 
-  function renderDone(result) {
-    var p = panel(); if (!p) return;
-    var ok = result && result.ok;
-    var txHash = result && (result.txHash || result.transaction);
-    p.innerHTML = stepBar() +
-      '<div class="x402-card" style="border-color:' + (ok?'rgba(34,197,94,.3)':'rgba(239,68,68,.3)') + ';align-items:center;padding:20px">' +
-        '<i class="ti ti-' + (ok?'circle-check':'circle-x') + '" style="font-size:32px;color:' + (ok?'var(--green)':'var(--red)') + ';margin-bottom:8px"></i>' +
-        '<div style="font-size:13px;font-weight:700;color:var(--text)">' + (ok ? 'Payment authorized' : 'Payment blocked') + '</div>' +
-        '<div style="font-size:9px;color:var(--muted2);margin-top:4px;text-align:center">' +
-          (ok && txHash ? 'Settlement confirmed · tx: <span style="font-family:monospace;color:var(--teal)">' + esc(shortAddr(txHash)) + '</span>' :
-            esc((result && result.reason) || 'Settlement not enabled (Phase 1) — no funds moved.')) +
-        '</div>' +
-        (ok && txHash ? '' : '<div style="font-size:8.5px;color:var(--muted2);margin-top:8px;text-align:center">This intent has been validated and recorded. Funds will only move once settlement is enabled.</div>') +
-        '<div style="display:flex;gap:8px;margin-top:14px">' +
-          '<button class="btn" onclick="SA_X402.reset()" style="font-size:9px"><i class="ti ti-refresh"></i>New payment</button>' +
-        '</div>' +
-      '</div>' +
-      renderHistory();
-  }
-
-  function renderHistory() {
-    // Delegate to X402 client's history when available
-    var h = [];
-    try { if (typeof X402 !== 'undefined' && typeof X402.getHistory === 'function') h = X402.getHistory(); } catch(_) {}
-    if (!h.length) return '';
-    var rows = h.slice(0,5).map(function(e) {
-      var badgeHtml = e.status==='paid' ? badge('paid','green') : e.status==='blocked' ? badge('blocked','yellow') : badge(e.status,'muted');
-      return '<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border2,#232940);font-size:9px">' +
-        badgeHtml +
-        '<span style="flex:1;color:var(--muted2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(e.service||'') + '</span>' +
-        '<span style="color:var(--text);font-weight:600;flex-shrink:0">' + (e.amountAtomic!=null?fmtUsd(e.amountAtomic):'—') + '</span>' +
-      '</div>';
-    }).join('');
-    return '<div class="x402-card">' +
-      '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><i class="ti ti-history" style="color:var(--muted2)"></i><span style="font-size:10px;font-weight:700;color:var(--text)">Recent x402 activity</span></div>' +
-      rows + '</div>';
-  }
-
-  // ── Actions ───────────────────────────────────────────────
-  function setBusy(b) {
-    _busy = b;
-    var btn = document.getElementById('sax402-disc-btn');
-    if (btn) btn.disabled = b;
-    var pay = document.getElementById('sax402-pay-btn');
-    if (pay) pay.disabled = b;
-  }
-
+  /* ── public API ─────────────────────────────────────────── */
   return {
+    // ── init: idempotent — safe to call on every tab-switch ──
+    // Re-fetches status when the user identity changes (session switch / logout),
+    // but preserves _discovery and _step for the same session.
     init: async function() {
-      if (_initialized && _status) { SA_X402.render(); return; }
+      var currentUserId = null;
+      try {
+        if(typeof X402!=='undefined'&&typeof X402.getStatus==='function'){
+          // Peek at cached status for user id without forcing a re-fetch
+          var cached = await X402.getStatus(false);
+          currentUserId = (cached&&cached.user&&cached.user.id)||null;
+        }
+      }catch(_){}
+
+      // Session changed: clear wallet-bound state, force re-fetch
+      if(_initialized && currentUserId !== _statusUserId) {
+        _status = null; _discovery = null; _selReq = null; _prepare = null;
+        _step = 'discover'; _initialized = false;
+        if(typeof X402!=='undefined'&&typeof X402._setUserId==='function') X402._setUserId(null);
+      }
+
+      if(_initialized && _status) {
+        // Already loaded for this session — just re-render (preserves step/state)
+        SA_X402.render(); return;
+      }
+
+      // First load: show discover immediately, then load status in background
       _step = 'discover';
       renderDiscover();
-      // Load status in background — panel is usable immediately
       try {
-        if (typeof X402 !== 'undefined') {
+        if(typeof X402!=='undefined'){
           _status = await X402.getStatus(true);
-          // Bind per-user history namespace
-          if (_status && _status.user && _status.user.id && typeof X402._setUserId === 'function') {
-            X402._setUserId(_status.user.id);
-          }
+          _statusUserId = (_status&&_status.user&&_status.user.id)||null;
+          if(_statusUserId&&typeof X402._setUserId==='function') X402._setUserId(_statusUserId);
         }
-      } catch(_) { _status = { state: 'unavailable', reason: 'Could not reach /api/x402/status' }; }
+      }catch(_){ _status={state:'unavailable',reason:'Could not reach /api/x402/status'}; _statusUserId=null; }
       _initialized = true;
       SA_X402.render();
     },
 
-    render: function() {
-      if (_step === 'discover')  return renderDiscover();
-      if (_step === 'review')    return renderReview();
-      if (_step === 'source')    return renderSource();
-      if (_step === 'confirm')   return renderConfirm();
-      if (_step === 'settling')  return renderSettling();
+    render: function(){
+      if(_step==='discover') return renderDiscover();
+      if(_step==='review')   return renderReview();
+      if(_step==='source')   return renderSource();
+      if(_step==='confirm')  return renderConfirm();
+      if(_step==='settling') return renderSettling();
+      // 'done' is rendered by renderDone() directly
     },
 
-    discover: async function() {
-      if (_busy) return;
-      var inp = document.getElementById('sax402-url');
-      if (!inp) return;
-      var url = inp.value.trim();
-      if (!url) { try { toast('Enter a service URL','error'); } catch(_){} return; }
-      _discovery = null; _selReq = null; _prepare = null;
+    discover: async function(){
+      if(_busy)return;
+      var inp=document.getElementById('sax402-url');if(!inp)return;
+      var url=inp.value.trim();
+      if(!url){notify('Enter a service URL','error');return;}
+      _discovery=null;_selReq=null;_prepare=null;
       setBusy(true);
-      try {
-        if (typeof X402 === 'undefined') throw new Error('X402 client not loaded');
-        var res = await X402.discover(url);
+      try{
+        if(typeof X402==='undefined')throw new Error('X402 client not loaded');
+        var res=await X402.discover(url);
         setBusy(false);
-        if (!res.ok) {
-          try { toast((res.data && res.data.error) || 'Discovery failed','error'); } catch(_){}
-          renderDiscover(); return;
+        if(!res.ok){notify(discoverErrMsg(res),'error');renderDiscover();return;}
+        _discovery=res;
+        if(res.data&&res.data.x402&&res.data.requirements&&res.data.requirements.length){
+          _step='review';notify('Payment required — review the requirements','info');
+        } else if(res.data&&!res.data.x402){
+          notify('No payment required (HTTP '+res.data.status+')','info');
+        } else if(res.data&&res.data.parseError){
+          notify('Service returned 402 but requirements could not be parsed','warning');
         }
-        _discovery = res;
-        if (res.data && res.data.x402 && res.data.requirements && res.data.requirements.length) {
-          _step = 'review';
-          try { toast('Payment required — review the requirements','info'); } catch(_){}
-        } else if (res.data && !res.data.x402) {
-          try { toast('No payment required (HTTP ' + res.data.status + ')','info'); } catch(_){}
-        }
-      } catch(e) {
+      }catch(e){setBusy(false);notify(e.message||'Discovery error','error');}
+      SA_X402.render();
+    },
+
+    selectReq: async function(idx){
+      if(_busy)return;
+      var d=_discovery&&_discovery.data;
+      if(!d||!d.requirements||!d.requirements[idx])return;
+      _selReq=d.requirements[idx];
+      setBusy(true);
+      try{
+        var res=await X402.prepare(d.resourceUrl,_selReq);
         setBusy(false);
-        try { toast(e.message || 'Discovery error','error'); } catch(_){}
+        if(!res.ok){notify(prepareErrMsg(res),'error');setBusy(false);return;}
+        _prepare=res;
+        if(typeof X402._setLastPrepare==='function')X402._setLastPrepare(res);
+        _step='source';
+      }catch(e){setBusy(false);notify(e.message||'Prepare error','error');}
+      SA_X402.render();
+    },
+
+    goConfirm: function(){_step='confirm';SA_X402.render();},
+
+    back: function(){
+      if(_step==='review')        _step='discover';
+      else if(_step==='source')   _step='review';
+      else if(_step==='confirm')  _step='source';
+      else                        _step='discover';
+      SA_X402.render();
+    },
+
+    pay: async function(){
+      if(_busy)return;
+      // ── FIX 1: hard gate — never call X402.pay() when settlement unavailable
+      if(!settlementAvailable()){
+        notify('Settlement is not available — no payment sent','error');
+        return;
       }
-      SA_X402.render();
-    },
-
-    selectReq: async function(idx) {
-      if (_busy) return;
-      var d = _discovery && _discovery.data;
-      if (!d || !d.requirements || !d.requirements[idx]) return;
-      _selReq = d.requirements[idx];
-      setBusy(true);
-      try {
-        var res = await X402.prepare(d.resourceUrl, _selReq);
-        setBusy(false);
-        if (!res.ok) {
-          try { toast((res.data && res.data.error) || 'Prepare failed','error'); } catch(_){}
-          return;
-        }
-        _prepare = res;
-        // Set the discovery state on the X402 client so _pay() can reuse it
-        if (typeof X402._setLastPrepare === 'function') X402._setLastPrepare(res);
-        _step = 'source';
-      } catch(e) {
-        setBusy(false);
-        try { toast(e.message||'Prepare error','error'); } catch(_){}
-      }
-      SA_X402.render();
-    },
-
-    goConfirm: function() { _step = 'confirm'; SA_X402.render(); },
-    back: function() {
-      if (_step === 'review')   { _step = 'discover'; }
-      else if (_step === 'source')  { _step = 'review'; }
-      else if (_step === 'confirm') { _step = 'source'; }
-      else { _step = 'discover'; }
-      SA_X402.render();
-    },
-
-    pay: async function() {
-      if (_busy) return;
-      var it = _prepare && _prepare.data && _prepare.data.intent;
-      if (!it) return;
-      _step = 'settling';
-      renderSettling();
-      setBusy(true);
-      try {
-        // Delegate entirely to X402 client — it handles dedup, history, and
-        // never records a payment without real settlement evidence.
-        var res = await X402.pay(it);
-        setBusy(false);
-        _step = 'done';
-        if (res.ok && (res.data && (res.data.txHash || res.data.transaction))) {
-          renderDone({ ok: true, txHash: res.data.txHash || res.data.transaction });
+      var it=_prepare&&_prepare.data&&_prepare.data.intent;
+      if(!it)return;
+      _step='settling';renderSettling();setBusy(true);
+      try{
+        var res=await X402.pay(it);
+        setBusy(false);_step='done';
+        if(res.ok&&res.data&&(res.data.txHash||res.data.transaction)){
+          renderDone({ok:true,txHash:res.data.txHash||res.data.transaction});
         } else {
-          renderDone({ ok: false, reason: (res.data && res.data.error) || 'Settlement not confirmed' });
+          // ── FIX 3: 503 from /pay is "settlement not enabled", not a signing failure
+          var reason=(res.data&&res.data.error)||'';
+          if(res.status===503||(!res.ok&&reason.includes('not enabled'))){
+            reason='Settlement not yet enabled on this server (Phase 1) — no funds moved.';
+          }
+          renderDone({ok:false,reason:reason||'Settlement not confirmed'});
         }
-      } catch(e) {
-        setBusy(false);
-        _step = 'done';
-        renderDone({ ok: false, reason: e.message || 'Payment error' });
-      }
+      }catch(e){setBusy(false);_step='done';renderDone({ok:false,reason:e.message||'Payment error'});}
     },
 
-    reset: function() {
-      _step = 'discover'; _discovery = null; _selReq = null; _prepare = null; _busy = false;
+    reset: function(){
+      _step='discover';_discovery=null;_selReq=null;_prepare=null;_busy=false;
       SA_X402.render();
     },
+
+    // ── Test/debug hooks (no secrets) ────────────────────
+    _getStatus:    function(){ return _status; },
+    _getStep:      function(){ return _step; },
+    _setStatus:    function(s){ _status=s; },
+    _getDiscovery: function(){ return _discovery; },
+    _settlementAvailable: settlementAvailable,
   };
 })();
 
