@@ -39762,6 +39762,8 @@ var SA_X402 = (function() {
   var _prepare = null;       // last /api/x402/prepare response
   var _busy = false;
   var _initialized = false;  // true after first getStatus() completes
+  var _opToken = 0;          // incremented on each discover/selectReq call; stale async results are dropped
+  var _lastPayArg = null;    // last intent object passed to X402.pay() — exposed for tests
 
   var STEPS = ['discover','review','source','confirm','settling','done'];
   var STEP_LABELS = { discover:'1. Discover', review:'2. Review', source:'3. Wallet', confirm:'4. Confirm', settling:'5. Settling', done:'6. Result' };
@@ -40078,10 +40080,13 @@ var SA_X402 = (function() {
       var url=inp.value.trim();
       if(!url){notify('Enter a service URL','error');return;}
       _discovery=null;_selReq=null;_prepare=null;
+      // Concurrency guard: each call gets a token; stale async results are ignored
+      _opToken++;var myToken=_opToken;
       setBusy(true);
       try{
         if(typeof X402==='undefined')throw new Error('X402 client not loaded');
         var res=await X402.discover(url);
+        if(_opToken!==myToken)return; // superseded by a newer call
         setBusy(false);
         if(!res.ok){notify(discoverErrMsg(res),'error');renderDiscover();return;}
         _discovery=res;
@@ -40092,8 +40097,8 @@ var SA_X402 = (function() {
         } else if(res.data&&res.data.parseError){
           notify('Service returned 402 but requirements could not be parsed','warning');
         }
-      }catch(e){setBusy(false);notify(e.message||'Discovery error','error');}
-      SA_X402.render();
+      }catch(e){if(_opToken===myToken){setBusy(false);notify(e.message||'Discovery error','error');}}
+      if(_opToken===myToken)SA_X402.render();
     },
 
     selectReq: async function(idx){
@@ -40101,19 +40106,26 @@ var SA_X402 = (function() {
       var d=_discovery&&_discovery.data;
       if(!d||!d.requirements||!d.requirements[idx])return;
       _selReq=d.requirements[idx];
+      _opToken++;var myToken=_opToken;
       setBusy(true);
       try{
         var res=await X402.prepare(d.resourceUrl,_selReq);
+        if(_opToken!==myToken)return; // superseded
         setBusy(false);
-        if(!res.ok){notify(prepareErrMsg(res),'error');setBusy(false);return;}
+        if(!res.ok){notify(prepareErrMsg(res),'error');return;}
         _prepare=res;
         if(typeof X402._setLastPrepare==='function')X402._setLastPrepare(res);
         _step='source';
-      }catch(e){setBusy(false);notify(e.message||'Prepare error','error');}
-      SA_X402.render();
+      }catch(e){if(_opToken===myToken){setBusy(false);notify(e.message||'Prepare error','error');}}
+      if(_opToken===myToken)SA_X402.render();
     },
 
-    goConfirm: function(){_step='confirm';SA_X402.render();},
+    goConfirm: function(){
+      var prev=_step;
+      _step='confirm';
+      try{ SA_X402.render(); }
+      catch(e){ _step=prev; notify('Could not render confirmation step','error'); }
+    },
 
     back: function(){
       if(_step==='review')        _step='discover';
@@ -40125,13 +40137,18 @@ var SA_X402 = (function() {
 
     pay: async function(){
       if(_busy)return;
-      // ── FIX 1: hard gate — never call X402.pay() when settlement unavailable
-      if(!settlementAvailable()){
-        notify('Settlement is not available — no payment sent','error');
+      // Hard gate (atomic): verify BOTH settlement availability AND intent presence
+      // before any state mutation. Never proceeds if either is missing.
+      var it=_prepare&&_prepare.data&&_prepare.data.intent;
+      if(!settlementAvailable()||!it){
+        // Distinguish: if we have an intent but settlement is gated, say so clearly.
+        if(it&&!settlementAvailable()){
+          notify('Settlement is not available — no payment sent','error');
+        }
+        // No intent = programming error, silently abort (button should be unreachable)
         return;
       }
-      var it=_prepare&&_prepare.data&&_prepare.data.intent;
-      if(!it)return;
+      _lastPayArg=it; // exposed via _getLastPayArg() for tests
       _step='settling';renderSettling();setBusy(true);
       try{
         var res=await X402.pay(it);
@@ -40139,7 +40156,7 @@ var SA_X402 = (function() {
         if(res.ok&&res.data&&(res.data.txHash||res.data.transaction)){
           renderDone({ok:true,txHash:res.data.txHash||res.data.transaction});
         } else {
-          // ── FIX 3: 503 from /pay is "settlement not enabled", not a signing failure
+          // 503 from /pay is "settlement not enabled" — never a signing failure
           var reason=(res.data&&res.data.error)||'';
           if(res.status===503||(!res.ok&&reason.includes('not enabled'))){
             reason='Settlement not yet enabled on this server (Phase 1) — no funds moved.';
@@ -40155,10 +40172,14 @@ var SA_X402 = (function() {
     },
 
     // ── Test/debug hooks (no secrets) ────────────────────
-    _getStatus:    function(){ return _status; },
-    _getStep:      function(){ return _step; },
-    _setStatus:    function(s){ _status=s; },
-    _getDiscovery: function(){ return _discovery; },
+    _getStatus:      function(){ return _status; },
+    _getStep:        function(){ return _step; },
+    _setStatus:      function(s){ _status=s; },
+    _getDiscovery:   function(){ return _discovery; },
+    _getLastPayArg:  function(){ return _lastPayArg; },
+    _getOpToken:     function(){ return _opToken; },
+    // Inject a prepared intent for testing pay() gate without running selectReq()
+    _setPrepare:     function(p){ _prepare=p; },
     _settlementAvailable: settlementAvailable,
   };
 })();

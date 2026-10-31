@@ -65,15 +65,6 @@ function makeEnv(overrides = {}) {
 }
 
 function buildSA402(ctx) {
-  // Evaluate the SA_X402 block inside a sandboxed context
-  const code = `
-    var document = _doc;
-    var X402 = _X402;
-    var toast = _toast;
-    ${sa402Src}
-    _SA402 = SA_X402;
-  `;
-  const fn = new Function('_doc', '_X402', '_toast', '_SA402ref', code);
   let ref;
   try {
     const wrapper = new Function('_doc','_X402','_toast', `
@@ -115,10 +106,12 @@ describe('SA_X402 — settlement gate', () => {
   it('pay() returns early without calling X402.pay() when settlement unavailable', async () => {
     const ctx = makeEnv();
     const SA = buildSA402(ctx);
-    // Set up a ready intent
     SA._setStatus({ state: 'settlement_unavailable', settlement: { available: false } });
-    // Inject a prepared intent via internal state (simulate selectReq having run)
-    // We can't set _prepare directly, but we can verify X402.pay is never called
+    // Inject a ready intent so the gate path (intent present, settlement false) is exercised
+    SA._setPrepare({ ok: true, status: 200, data: { intent: {
+      id: 'i1', status: 'ready', walletAddress: '0xDead', payTo: '0xCafe',
+      amountUsd: 1, amountAtomic: '1000000', network: 'Base', networkCaip: 'eip155:8453', scheme: 'exact',
+    }}});
     const paySpy = ctx.X402.pay;
     await SA.pay();
     expect(paySpy).not.toHaveBeenCalled();
@@ -128,6 +121,12 @@ describe('SA_X402 — settlement gate', () => {
     const ctx = makeEnv();
     const SA = buildSA402(ctx);
     SA._setStatus({ state: 'settlement_unavailable', settlement: { available: false } });
+    // Must inject a real intent — gate only fires toast when intent is present
+    // but settlement is blocked (both conditions must be true for the toast path)
+    SA._setPrepare({ ok: true, status: 200, data: { intent: {
+      id: 'i1', status: 'ready', walletAddress: '0xDead', payTo: '0xCafe',
+      amountUsd: 1, amountAtomic: '1000000', network: 'Base', networkCaip: 'eip155:8453', scheme: 'exact',
+    }}});
     await SA.pay();
     expect(ctx.toast).toHaveBeenCalledWith(
       expect.stringContaining('Settlement'),
