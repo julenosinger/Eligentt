@@ -4701,6 +4701,21 @@ select.ub-op-input{cursor:pointer;-webkit-appearance:none;appearance:none;backgr
 .sa-header-title { font-size:16px; font-weight:800; color:var(--text); letter-spacing:-.3px; }
 .sa-header-sub { font-size:9.5px; color:var(--muted2); margin-top:2px; }
 .sa-body { flex:1; overflow-y:auto; padding:20px 24px; display:flex; gap:18px; min-height:0; }
+/* ── x402 mode tabs ── */
+.sa-mode-tabs{display:flex;gap:0;padding:0 24px;border-bottom:1px solid var(--border2);flex-shrink:0;background:rgba(0,0,0,.12)}
+.sa-mode-tab{background:none;border:none;border-bottom:2px solid transparent;padding:10px 16px;font-size:10px;font-weight:600;color:var(--muted2);cursor:pointer;display:flex;align-items:center;gap:6px;transition:color .15s,border-color .15s;white-space:nowrap;font-family:inherit}
+.sa-mode-tab:hover{color:var(--text)}
+.sa-mode-active{color:var(--teal,#06F7E9)!important;border-bottom-color:var(--teal,#06F7E9)!important}
+.sa-mode-tab-badge{font-size:7px;font-weight:700;padding:1px 5px;border-radius:4px;background:rgba(6,247,233,.12);color:var(--teal,#06F7E9);border:1px solid rgba(6,247,233,.25);margin-left:2px}
+/* ── x402 inline panel (reuses x402Client.js CSS vars) ── */
+#sa-x402-panel{overflow-y:auto;padding:16px 24px 20px;display:flex;flex-direction:column;gap:12px}
+#sa-x402-panel .x402-card{background:rgba(0,0,0,.18);border:1px solid var(--border2,#232940);border-radius:9px;padding:12px;display:flex;flex-direction:column;gap:8px}
+#sa-x402-panel .x402-step-bar{display:flex;align-items:center;gap:0;margin-bottom:4px;overflow-x:auto}
+#sa-x402-panel .x402-step{display:flex;align-items:center;gap:4px;font-size:8.5px;color:var(--muted2);white-space:nowrap;flex-shrink:0}
+#sa-x402-panel .x402-step.active{color:var(--teal,#06F7E9);font-weight:700}
+#sa-x402-panel .x402-step.done{color:var(--green)}
+#sa-x402-panel .x402-step-sep{width:20px;height:1px;background:var(--border2,#232940);margin:0 4px;flex-shrink:0}
+#sa-x402-panel .x402-step-sep.done{background:var(--green)}
 .sa-left { width:380px; flex-shrink:0; display:flex; flex-direction:column; gap:14px; }
 .sa-right { flex:1; min-width:0; display:flex; flex-direction:column; gap:14px; }
 .sa-card { background:var(--card-alpha); border:1px solid var(--border); border-radius:14px; padding:18px; }
@@ -8107,8 +8122,22 @@ select.cinput option { background: #161a24; color: #dde2f0; }
           <div class="sa-network-badge" id="sa-network-badge"><span style="width:6px;height:6px;border-radius:50%;background:var(--green);display:inline-block"></span><span id="sa-network-badge-text">Arc</span></div>
         </div>
 
+        <!-- ── Mode tabs ─────────────────────────────────────────────────── -->
+        <div class="sa-mode-tabs" id="sa-mode-tabs">
+          <button class="sa-mode-tab sa-mode-active" id="sa-mtab-send" onclick="saSetModeTab('send',this)">
+            <i class="ti ti-send"></i>Single &amp; Batch Send
+          </button>
+          <button class="sa-mode-tab" id="sa-mtab-x402" onclick="saSetModeTab('x402',this)">
+            <i class="ti ti-credit-card-pay" style="color:#06F7E9"></i>x402 Payments
+            <span class="sa-mode-tab-badge">Beta</span>
+          </button>
+        </div>
+
+        <!-- ── x402 Payments panel ───────────────────────────────────────── -->
+        <div id="sa-x402-panel" style="display:none;padding:0 0 14px"></div>
+
         <!-- Body -->
-        <div class="sa-body">
+        <div class="sa-body" id="sa-panel-send">
 
           <!-- LEFT: Form -->
           <div class="sa-left">
@@ -39675,6 +39704,424 @@ function saGenerateQR() {
   var overlay = document.createElement('div'); overlay.innerHTML = html; document.body.appendChild(overlay.firstElementChild);
   setTimeout(function() { drawQRReal('sa-qr-temp', payUrl, 180); }, 100);
 }
+
+// ════════════════════════════════════════════════════════════
+//  SEND ASSETS — Mode Tab Controller
+//  Switches between "Single & Batch Send" and "x402 Payments".
+//  ZERO touch on saExecuteSend, SendGuard, BatchSend, or any
+//  other existing Send flow.
+// ════════════════════════════════════════════════════════════
+function saSetModeTab(mode, btn) {
+  // Toggle tab active state
+  var tabs = document.querySelectorAll('#sa-mode-tabs .sa-mode-tab');
+  tabs.forEach(function(t) { t.classList.remove('sa-mode-active'); });
+  if (btn) btn.classList.add('sa-mode-active');
+
+  var sendPanel = document.getElementById('sa-panel-send');
+  var x402Panel = document.getElementById('sa-x402-panel');
+
+  if (mode === 'x402') {
+    if (sendPanel) sendPanel.style.display = 'none';
+    if (x402Panel) { x402Panel.style.display = 'flex'; SA_X402.init(); }
+  } else {
+    if (sendPanel) sendPanel.style.display = '';
+    if (x402Panel) x402Panel.style.display = 'none';
+  }
+}
+
+// ════════════════════════════════════════════════════════════
+//  SA_X402 — Inline x402 panel controller for Send Assets.
+//  Reuses X402 client (x402Client.js) + /api/x402/* endpoints.
+//  No new client, no new auth, no new settlement code.
+// ════════════════════════════════════════════════════════════
+var SA_X402 = (function() {
+  'use strict';
+
+  // Step machine states
+  // discover → review → source → confirm → settling → done/failed
+  var _step = 'discover';   // current step
+  var _status = null;       // /api/x402/status result
+  var _discovery = null;    // /api/x402/discover result
+  var _selReq = null;       // selected requirement object
+  var _prepare = null;      // /api/x402/prepare result
+  var _busy = false;
+  var _initialized = false;
+
+  var STEPS = ['discover','review','source','confirm','settling','done'];
+  var STEP_LABELS = {
+    discover: '1. Discover',
+    review:   '2. Review',
+    source:   '3. Wallet',
+    confirm:  '4. Confirm',
+    settling: '5. Settling',
+    done:     '6. Result',
+  };
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function(c) {
+      return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+    });
+  }
+  function shortAddr(a) { a=String(a||''); return a.length>12?a.slice(0,6)+'…'+a.slice(-4):a; }
+  function fmtUsd(atomic, dec) {
+    var n = Number(atomic); if (!isFinite(n)) return '—';
+    return '$'+(n/Math.pow(10,dec||6)).toLocaleString('en-US',{maximumFractionDigits:6});
+  }
+  function networkLabel(caip) {
+    var m = {'eip155:84532':'Base Sepolia','eip155:8453':'Base','eip155:137':'Polygon PoS','eip155:5042':'Arc Mainnet'};
+    return m[caip] || caip || '—';
+  }
+
+  function panel() { return document.getElementById('sa-x402-panel'); }
+
+  function stepBar() {
+    var done = STEPS.indexOf(_step);
+    return '<div class="x402-step-bar">' + STEPS.map(function(s,i) {
+      var cls = i < done ? 'done' : (s === _step ? 'active' : '');
+      var icon = i < done ? '<i class="ti ti-check" style="font-size:9px"></i>' : (i+1);
+      return (i > 0 ? '<div class="x402-step-sep' + (i <= done ? ' done' : '') + '"></div>' : '') +
+        '<div class="x402-step ' + cls + '">' + icon + ' ' + esc(STEP_LABELS[s]) + '</div>';
+    }).join('') + '</div>';
+  }
+
+  function kv(label, val, mono) {
+    return '<div style="display:flex;flex-direction:column;gap:1px;min-width:0">' +
+      '<span style="font-size:8px;color:var(--muted2);text-transform:uppercase;letter-spacing:.4px">' + esc(label) + '</span>' +
+      '<b style="font-size:10px;color:var(--text);word-break:break-all' + (mono?';font-family:monospace':'') + '">' + val + '</b></div>';
+  }
+
+  function badge(label, color) {
+    var colors = {green:'rgba(34,197,94,.14)|var(--green)', yellow:'rgba(245,158,11,.14)|var(--yellow)', red:'rgba(239,68,68,.14)|var(--red)', teal:'rgba(6,247,233,.12)|var(--teal,#06F7E9)', muted:'rgba(148,163,184,.14)|var(--muted2)'};
+    var c = (colors[color]||colors.muted).split('|');
+    return '<span style="font-size:8px;font-weight:700;padding:2px 7px;border-radius:4px;background:'+c[0]+';color:'+c[1]+'">' + esc(label) + '</span>';
+  }
+
+  function statusBanner() {
+    if (!_status) return '';
+    var s = _status;
+    var state = s.state || 'disabled';
+    var color = state === 'available' ? 'green' : state === 'settlement_unavailable' ? 'yellow' : 'red';
+    return '<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:7px;background:rgba(0,0,0,.15);border:1px solid var(--border2)">' +
+      badge(state === 'available' ? 'Available' : state === 'settlement_unavailable' ? 'Discovery only' : 'Disabled', color) +
+      '<span style="font-size:9px;color:var(--muted2);flex:1">' + esc(s.reason||'') + '</span>' +
+      (s.wallet && s.wallet.provisioned
+        ? '<span style="font-size:9px;color:var(--green)"><i class="ti ti-wallet"></i> ' + esc(shortAddr(s.wallet.address)) + '</span>'
+        : '<span style="font-size:9px;color:var(--yellow)"><i class="ti ti-wallet-off"></i> Circle Wallet not provisioned</span>') +
+      '</div>';
+  }
+
+  function renderDiscover() {
+    var p = panel(); if (!p) return;
+    p.innerHTML = stepBar() + statusBanner() +
+      '<div class="x402-card">' +
+        '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">' +
+          '<i class="ti ti-search" style="font-size:13px;color:var(--teal,#06F7E9)"></i>' +
+          '<span style="font-size:11px;font-weight:700;color:var(--text)">Discover a paid service</span>' +
+        '</div>' +
+        '<div style="font-size:9px;color:var(--muted2);line-height:1.5;margin-bottom:8px">Enter the URL of an x402-enabled service. The server probes it for an HTTP 402 response and reads its payment requirements — no payment occurs at this step.</div>' +
+        '<div style="display:flex;gap:8px">' +
+          '<input id="sax402-url" class="cinput" placeholder="https://api.example.com/premium-data" spellcheck="false" autocomplete="off" style="flex:1;font-family:monospace;font-size:10px" onkeydown="if(event.key===\'Enter\')SA_X402.discover()"/>' +
+          '<button class="btn primary" id="sax402-disc-btn" onclick="SA_X402.discover()" style="padding:7px 14px;font-size:10px;white-space:nowrap"><i class="ti ti-radar"></i>Discover</button>' +
+        '</div>' +
+        '<div style="font-size:8.5px;color:var(--muted2);margin-top:6px">Supported: Base, Polygon, Base Sepolia · scheme: exact · EIP-3009 USDC only</div>' +
+      '</div>' +
+      renderHistory();
+  }
+
+  function renderReview() {
+    var p = panel(); if (!p) return;
+    var d = _discovery && _discovery.data;
+    if (!d || !d.requirements || !d.requirements.length) { _step='discover'; return renderDiscover(); }
+    var svc = (d.resource && d.resource.serviceName) ? d.resource.serviceName : d.resourceUrl;
+    var html = stepBar() + statusBanner() +
+      '<div class="x402-card">' +
+        '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">' +
+          '<i class="ti ti-api" style="font-size:13px;color:var(--blue)"></i>' +
+          '<span style="font-size:11px;font-weight:700;color:var(--text)">' + esc(svc||'Service') + '</span>' +
+          badge('HTTP 402', 'yellow') +
+        '</div>' +
+        (d.resource && d.resource.description ? '<div style="font-size:9px;color:var(--muted2)">' + esc(d.resource.description) + '</div>' : '') +
+        '<div style="font-size:8.5px;color:var(--muted2);font-family:monospace">' + esc(d.resourceUrl) + '</div>' +
+      '</div>';
+
+    d.requirements.forEach(function(r, i) {
+      var valid = r.valid;
+      var checkRows = (r.checks||[]).map(function(c) {
+        return '<div style="display:flex;align-items:center;gap:7px;font-size:9px;color:var(--muted2)">' +
+          '<i class="ti ti-' + (c.passed?'check':'x') + '" style="font-size:10px;color:' + (c.passed?'var(--green)':'var(--red)') + ';flex-shrink:0"></i>' +
+          '<span style="color:var(--text);font-weight:600;min-width:110px">' + esc(c.name) + '</span>' +
+          '<span style="margin-left:auto;text-align:right;font-size:8px">' + esc(c.detail||'') + '</span></div>';
+      }).join('');
+      html += '<div class="x402-card" style="' + (valid?'border-color:rgba(34,197,94,.25)':'') + '">' +
+        '<div style="display:flex;align-items:center;gap:8px">' +
+          '<span style="font-size:10px;font-weight:700;color:var(--text)">Payment option ' + (i+1) + '</span>' +
+          badge(valid?'Valid':'Blocked', valid?'green':'red') +
+        '</div>' +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:6px 0">' +
+          kv('Amount', esc(fmtUsd(r.amount)) + ' USDC') +
+          kv('Token', esc(r.asset||'USDC'), true) +
+          kv('Network', esc(networkLabel(r.network))) +
+          kv('Recipient', esc(shortAddr(r.payTo)), true) +
+          kv('Scheme', esc(r.scheme)) +
+          kv('Timeout', esc(r.maxTimeoutSeconds) + 's') +
+        '</div>' +
+        '<details style="margin-top:4px"><summary style="font-size:8.5px;color:var(--muted2);cursor:pointer">Validation checks (' + (r.checks||[]).filter(function(c){return c.passed;}).length + '/' + (r.checks||[]).length + ' passed)</summary>' +
+          '<div style="display:flex;flex-direction:column;gap:3px;margin-top:6px">' + checkRows + '</div>' +
+        '</details>' +
+        '<button class="btn' + (valid?' primary':'') + '" onclick="SA_X402.selectReq(' + i + ')"' + (valid?'':' disabled title="Requirement blocked"') + ' style="margin-top:6px;font-size:10px;padding:7px 14px">' +
+          '<i class="ti ti-' + (valid?'shield-check':'lock') + '"></i>' + (valid?'Select &amp; continue':'Blocked') +
+        '</button>' +
+      '</div>';
+    });
+    html += '<button class="btn" onclick="SA_X402.back()" style="font-size:9px;margin-top:4px"><i class="ti ti-arrow-left"></i>Back</button>';
+    p.innerHTML = html;
+  }
+
+  function renderSource() {
+    var p = panel(); if (!p) return;
+    var it = _prepare && _prepare.data && _prepare.data.intent;
+    if (!it) { _step='review'; return renderReview(); }
+    var ready = it.status === 'ready';
+    var checks = (it.checks||[]).map(function(c) {
+      return '<div style="display:flex;align-items:center;gap:7px;font-size:9px;color:var(--muted2)">' +
+        '<i class="ti ti-' + (c.passed?'check':'x') + '" style="font-size:10px;color:' + (c.passed?'var(--green)':'var(--red)') + ';flex-shrink:0"></i>' +
+        '<span style="color:var(--text);font-weight:600;min-width:120px">' + esc(c.name) + '</span>' +
+        '<span style="margin-left:auto;font-size:8px">' + esc(c.detail||'') + '</span></div>';
+    }).join('');
+    p.innerHTML = stepBar() + statusBanner() +
+      '<div class="x402-card">' +
+        '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">' +
+          '<i class="ti ti-wallet" style="font-size:13px;color:var(--purple)"></i>' +
+          '<span style="font-size:11px;font-weight:700;color:var(--text)">Payment wallet</span>' +
+          badge(ready?'Ready':'Blocked', ready?'green':'red') +
+        '</div>' +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px">' +
+          kv('Circle AI Smart Wallet', it.walletAddress ? esc(shortAddr(it.walletAddress)) : 'Not provisioned', true) +
+          kv('Amount', '$' + esc((it.amountUsd||0).toFixed(6)) + ' USDC') +
+          kv('Network', esc(it.network||networkLabel(it.networkCaip))) +
+          kv('Recipient', esc(shortAddr(it.payTo)), true) +
+        '</div>' +
+        (it.blockedReason ? '<div style="background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);color:var(--red);border-radius:7px;padding:9px 11px;font-size:10px;margin-bottom:8px"><i class="ti ti-alert-triangle"></i> ' + esc(it.blockedReason) + '</div>' : '') +
+        '<details style="margin-bottom:8px"><summary style="font-size:8.5px;color:var(--muted2);cursor:pointer">All checks (' + (it.checks||[]).filter(function(c){return c.passed;}).length + '/' + (it.checks||[]).length + ' passed)</summary>' +
+          '<div style="display:flex;flex-direction:column;gap:3px;margin-top:6px">' + checks + '</div>' +
+        '</details>' +
+        '<div style="display:flex;gap:8px">' +
+          '<button class="btn" onclick="SA_X402.back()" style="font-size:9px"><i class="ti ti-arrow-left"></i>Back</button>' +
+          '<button class="btn primary" onclick="SA_X402.goConfirm()" ' + (ready?'':'disabled') + ' style="font-size:10px;padding:7px 14px"><i class="ti ti-arrow-right"></i>Review &amp; confirm</button>' +
+        '</div>' +
+      '</div>';
+  }
+
+  function renderConfirm() {
+    var p = panel(); if (!p) return;
+    var it = _prepare && _prepare.data && _prepare.data.intent;
+    if (!it || it.status !== 'ready') { _step='source'; return renderSource(); }
+    var d = _discovery && _discovery.data;
+    var svc = (d && d.resource && d.resource.serviceName) ? d.resource.serviceName : (d && d.resourceUrl) || '—';
+    p.innerHTML = stepBar() + statusBanner() +
+      '<div class="x402-card" style="border-color:rgba(6,247,233,.25)">' +
+        '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">' +
+          '<i class="ti ti-shield-check" style="font-size:14px;color:var(--teal,#06F7E9)"></i>' +
+          '<span style="font-size:11px;font-weight:700;color:var(--text)">Review &amp; authorize payment</span>' +
+        '</div>' +
+        '<div style="font-size:9px;color:var(--muted2);margin-bottom:10px;line-height:1.5">Review every detail. Funds move <strong style="color:var(--text)">only after</strong> you click Authorize — never automatically.</div>' +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">' +
+          kv('Service', esc(svc)) +
+          kv('Resource URL', '<span style="font-family:monospace;font-size:8.5px">' + esc(d && d.resourceUrl || '—') + '</span>') +
+          kv('Amount', '<span style="color:var(--teal,#06F7E9);font-weight:800;font-size:13px">$' + esc((it.amountUsd||0).toFixed(6)) + ' USDC</span>') +
+          kv('Network', esc(it.network || networkLabel(it.networkCaip))) +
+          kv('Recipient', '<span style="font-family:monospace">' + esc(shortAddr(it.payTo)) + '</span>') +
+          kv('Payment wallet', '<span style="font-family:monospace">' + esc(shortAddr(it.walletAddress)) + '</span>') +
+          kv('Scheme', 'exact (EIP-3009)') +
+          kv('Intent ID', '<span style="font-family:monospace;font-size:8px">' + esc(it.id) + '</span>') +
+        '</div>' +
+        ((_status && _status.settlement && !_status.settlement.available)
+          ? '<div style="background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);color:var(--yellow);border-radius:7px;padding:9px 11px;font-size:9.5px;margin-bottom:10px"><i class="ti ti-alert-triangle"></i> Settlement not yet implemented. Clicking authorize will document the intent and confirm the path is correct — no funds will move until settlement is enabled.</div>'
+          : '') +
+        '<div style="display:flex;gap:8px">' +
+          '<button class="btn" onclick="SA_X402.back()" style="font-size:9px"><i class="ti ti-arrow-left"></i>Back</button>' +
+          '<button class="btn primary" id="sax402-pay-btn" onclick="SA_X402.pay()" style="font-size:10px;padding:7px 18px;background:linear-gradient(135deg,#06F7E9,#4f8ef7);color:#081018;border:none"><i class="ti ti-credit-card-pay"></i>Authorize payment</button>' +
+        '</div>' +
+      '</div>';
+  }
+
+  function renderSettling() {
+    var p = panel(); if (!p) return;
+    p.innerHTML = stepBar() +
+      '<div class="x402-card" style="align-items:center;padding:24px">' +
+        '<div class="aut-typing"><span></span><span></span><span></span></div>' +
+        '<div style="font-size:10px;color:var(--muted2);margin-top:12px">Sending authorization to Facilitator…</div>' +
+      '</div>';
+  }
+
+  function renderDone(result) {
+    var p = panel(); if (!p) return;
+    var ok = result && result.ok;
+    var txHash = result && (result.txHash || result.transaction);
+    p.innerHTML = stepBar() +
+      '<div class="x402-card" style="border-color:' + (ok?'rgba(34,197,94,.3)':'rgba(239,68,68,.3)') + ';align-items:center;padding:20px">' +
+        '<i class="ti ti-' + (ok?'circle-check':'circle-x') + '" style="font-size:32px;color:' + (ok?'var(--green)':'var(--red)') + ';margin-bottom:8px"></i>' +
+        '<div style="font-size:13px;font-weight:700;color:var(--text)">' + (ok ? 'Payment authorized' : 'Payment blocked') + '</div>' +
+        '<div style="font-size:9px;color:var(--muted2);margin-top:4px;text-align:center">' +
+          (ok && txHash ? 'Settlement confirmed · tx: <span style="font-family:monospace;color:var(--teal)">' + esc(shortAddr(txHash)) + '</span>' :
+            esc((result && result.reason) || 'Settlement not enabled (Phase 1) — no funds moved.')) +
+        '</div>' +
+        (ok && txHash ? '' : '<div style="font-size:8.5px;color:var(--muted2);margin-top:8px;text-align:center">This intent has been validated and recorded. Funds will only move once settlement is enabled.</div>') +
+        '<div style="display:flex;gap:8px;margin-top:14px">' +
+          '<button class="btn" onclick="SA_X402.reset()" style="font-size:9px"><i class="ti ti-refresh"></i>New payment</button>' +
+        '</div>' +
+      '</div>' +
+      renderHistory();
+  }
+
+  function renderHistory() {
+    // Delegate to X402 client's history when available
+    var h = [];
+    try { if (typeof X402 !== 'undefined' && typeof X402.getHistory === 'function') h = X402.getHistory(); } catch(_) {}
+    if (!h.length) return '';
+    var rows = h.slice(0,5).map(function(e) {
+      var badgeHtml = e.status==='paid' ? badge('paid','green') : e.status==='blocked' ? badge('blocked','yellow') : badge(e.status,'muted');
+      return '<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border2,#232940);font-size:9px">' +
+        badgeHtml +
+        '<span style="flex:1;color:var(--muted2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(e.service||'') + '</span>' +
+        '<span style="color:var(--text);font-weight:600;flex-shrink:0">' + (e.amountAtomic!=null?fmtUsd(e.amountAtomic):'—') + '</span>' +
+      '</div>';
+    }).join('');
+    return '<div class="x402-card">' +
+      '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><i class="ti ti-history" style="color:var(--muted2)"></i><span style="font-size:10px;font-weight:700;color:var(--text)">Recent x402 activity</span></div>' +
+      rows + '</div>';
+  }
+
+  // ── Actions ───────────────────────────────────────────────
+  function setBusy(b) {
+    _busy = b;
+    var btn = document.getElementById('sax402-disc-btn');
+    if (btn) btn.disabled = b;
+    var pay = document.getElementById('sax402-pay-btn');
+    if (pay) pay.disabled = b;
+  }
+
+  return {
+    init: async function() {
+      if (_initialized && _status) { SA_X402.render(); return; }
+      _step = 'discover';
+      renderDiscover();
+      // Load status in background — panel is usable immediately
+      try {
+        if (typeof X402 !== 'undefined') {
+          _status = await X402.getStatus(true);
+          // Bind per-user history namespace
+          if (_status && _status.user && _status.user.id && typeof X402._setUserId === 'function') {
+            X402._setUserId(_status.user.id);
+          }
+        }
+      } catch(_) { _status = { state: 'unavailable', reason: 'Could not reach /api/x402/status' }; }
+      _initialized = true;
+      SA_X402.render();
+    },
+
+    render: function() {
+      if (_step === 'discover')  return renderDiscover();
+      if (_step === 'review')    return renderReview();
+      if (_step === 'source')    return renderSource();
+      if (_step === 'confirm')   return renderConfirm();
+      if (_step === 'settling')  return renderSettling();
+    },
+
+    discover: async function() {
+      if (_busy) return;
+      var inp = document.getElementById('sax402-url');
+      if (!inp) return;
+      var url = inp.value.trim();
+      if (!url) { try { toast('Enter a service URL','error'); } catch(_){} return; }
+      _discovery = null; _selReq = null; _prepare = null;
+      setBusy(true);
+      try {
+        if (typeof X402 === 'undefined') throw new Error('X402 client not loaded');
+        var res = await X402.discover(url);
+        setBusy(false);
+        if (!res.ok) {
+          try { toast((res.data && res.data.error) || 'Discovery failed','error'); } catch(_){}
+          renderDiscover(); return;
+        }
+        _discovery = res;
+        if (res.data && res.data.x402 && res.data.requirements && res.data.requirements.length) {
+          _step = 'review';
+          try { toast('Payment required — review the requirements','info'); } catch(_){}
+        } else if (res.data && !res.data.x402) {
+          try { toast('No payment required (HTTP ' + res.data.status + ')','info'); } catch(_){}
+        }
+      } catch(e) {
+        setBusy(false);
+        try { toast(e.message || 'Discovery error','error'); } catch(_){}
+      }
+      SA_X402.render();
+    },
+
+    selectReq: async function(idx) {
+      if (_busy) return;
+      var d = _discovery && _discovery.data;
+      if (!d || !d.requirements || !d.requirements[idx]) return;
+      _selReq = d.requirements[idx];
+      setBusy(true);
+      try {
+        var res = await X402.prepare(d.resourceUrl, _selReq);
+        setBusy(false);
+        if (!res.ok) {
+          try { toast((res.data && res.data.error) || 'Prepare failed','error'); } catch(_){}
+          return;
+        }
+        _prepare = res;
+        // Set the discovery state on the X402 client so _pay() can reuse it
+        if (typeof X402._setLastPrepare === 'function') X402._setLastPrepare(res);
+        _step = 'source';
+      } catch(e) {
+        setBusy(false);
+        try { toast(e.message||'Prepare error','error'); } catch(_){}
+      }
+      SA_X402.render();
+    },
+
+    goConfirm: function() { _step = 'confirm'; SA_X402.render(); },
+    back: function() {
+      if (_step === 'review')   { _step = 'discover'; }
+      else if (_step === 'source')  { _step = 'review'; }
+      else if (_step === 'confirm') { _step = 'source'; }
+      else { _step = 'discover'; }
+      SA_X402.render();
+    },
+
+    pay: async function() {
+      if (_busy) return;
+      var it = _prepare && _prepare.data && _prepare.data.intent;
+      if (!it) return;
+      _step = 'settling';
+      renderSettling();
+      setBusy(true);
+      try {
+        // Delegate entirely to X402 client — it handles dedup, history, and
+        // never records a payment without real settlement evidence.
+        var res = await X402.pay(it);
+        setBusy(false);
+        _step = 'done';
+        if (res.ok && (res.data && (res.data.txHash || res.data.transaction))) {
+          renderDone({ ok: true, txHash: res.data.txHash || res.data.transaction });
+        } else {
+          renderDone({ ok: false, reason: (res.data && res.data.error) || 'Settlement not confirmed' });
+        }
+      } catch(e) {
+        setBusy(false);
+        _step = 'done';
+        renderDone({ ok: false, reason: e.message || 'Payment error' });
+      }
+    },
+
+    reset: function() {
+      _step = 'discover'; _discovery = null; _selReq = null; _prepare = null; _busy = false;
+      SA_X402.render();
+    },
+  };
+})();
 
 // ── Init when page shown ──────────────────────────────────
 const _origShowPage = showPage;
