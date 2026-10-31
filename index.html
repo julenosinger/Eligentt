@@ -39763,6 +39763,7 @@ var SA_X402 = (function() {
   var _busy = false;
   var _initialized = false;  // true after first getStatus() completes
   var _opToken = 0;          // incremented on each discover/selectReq call; stale async results are dropped
+  var _sessionToken = 0;     // incremented on every session reset (user/wallet change); invalidates all in-flight ops
   var _lastPayArg = null;    // last intent object passed to X402.pay() — exposed for tests
 
   var STEPS = ['discover','review','source','confirm','settling','done'];
@@ -39802,6 +39803,17 @@ var SA_X402 = (function() {
       _status.settlement &&
       _status.settlement.available === true
     );
+  }
+
+  /* ── session reset ──────────────────────────────────────── */
+  // Called when user identity or wallet changes. Increments _sessionToken so
+  // any in-flight discover/selectReq/init responses are silently dropped when
+  // they check their captured sessionSnap against the current _sessionToken.
+  function resetSession() {
+    _sessionToken++;
+    _status = null; _discovery = null; _selReq = null; _prepare = null;
+    _step = 'discover'; _initialized = false; _busy = false; _lastPayArg = null;
+    if(typeof X402!=='undefined'&&typeof X402._setUserId==='function') X402._setUserId(null);
   }
 
   function stepBar(){
@@ -40029,21 +40041,28 @@ var SA_X402 = (function() {
     // ── init: idempotent — safe to call on every tab-switch ──
     // Re-fetches status when the user identity changes (session switch / logout),
     // but preserves _discovery and _step for the same session.
+    // Uses _sessionToken to invalidate in-flight responses from prior sessions.
     init: async function() {
+      // Snap session token before any async work — lets us detect if a reset
+      // happened while we were awaiting getStatus(false).
+      var snapSession = _sessionToken;
+
+      // Peek at the cached status to read the current user id without forcing a re-fetch
       var currentUserId = null;
       try {
         if(typeof X402!=='undefined'&&typeof X402.getStatus==='function'){
-          // Peek at cached status for user id without forcing a re-fetch
           var cached = await X402.getStatus(false);
           currentUserId = (cached&&cached.user&&cached.user.id)||null;
         }
       }catch(_){}
 
-      // Session changed: clear wallet-bound state, force re-fetch
+      // Drop this init if a newer session reset happened while we were awaiting
+      if(_sessionToken !== snapSession) return;
+
+      // Session changed: reset all wallet-bound state, then re-init
       if(_initialized && currentUserId !== _statusUserId) {
-        _status = null; _discovery = null; _selReq = null; _prepare = null;
-        _step = 'discover'; _initialized = false;
-        if(typeof X402!=='undefined'&&typeof X402._setUserId==='function') X402._setUserId(null);
+        resetSession(); // increments _sessionToken, clears everything
+        snapSession = _sessionToken; // re-snap after reset
       }
 
       if(_initialized && _status) {
@@ -40051,16 +40070,23 @@ var SA_X402 = (function() {
         SA_X402.render(); return;
       }
 
-      // First load: show discover immediately, then load status in background
+      // First load (or after session reset): show discover immediately, load status async
       _step = 'discover';
       renderDiscover();
       try {
         if(typeof X402!=='undefined'){
-          _status = await X402.getStatus(true);
+          var freshStatus = await X402.getStatus(true);
+          // Drop if a reset happened during the fetch
+          if(_sessionToken !== snapSession) return;
+          _status = freshStatus;
           _statusUserId = (_status&&_status.user&&_status.user.id)||null;
           if(_statusUserId&&typeof X402._setUserId==='function') X402._setUserId(_statusUserId);
         }
-      }catch(_){ _status={state:'unavailable',reason:'Could not reach /api/x402/status'}; _statusUserId=null; }
+      }catch(_){
+        if(_sessionToken !== snapSession) return;
+        _status={state:'unavailable',reason:'Could not reach /api/x402/status'};
+        _statusUserId=null;
+      }
       _initialized = true;
       SA_X402.render();
     },
@@ -40080,13 +40106,20 @@ var SA_X402 = (function() {
       var url=inp.value.trim();
       if(!url){notify('Enter a service URL','error');return;}
       _discovery=null;_selReq=null;_prepare=null;
-      // Concurrency guard: each call gets a token; stale async results are ignored
-      _opToken++;var myToken=_opToken;
+      // Dual guard: opToken (newer discover() in same session) +
+      // sessionToken (session was reset while this call was in-flight).
+      // A stale result must NEVER update _discovery/_step or call setBusy(false)
+      // on a newer op (which would leave the new op's UI broken).
+      _opToken++;var myToken=_opToken;var mySession=_sessionToken;
       setBusy(true);
       try{
         if(typeof X402==='undefined')throw new Error('X402 client not loaded');
         var res=await X402.discover(url);
-        if(_opToken!==myToken)return; // superseded by a newer call
+        // Stale: a newer discover() or a session reset — release busy only if still ours
+        if(_opToken!==myToken||_sessionToken!==mySession){
+          if(_opToken===myToken)setBusy(false); // only release if no newer op holds it
+          return;
+        }
         setBusy(false);
         if(!res.ok){notify(discoverErrMsg(res),'error');renderDiscover();return;}
         _discovery=res;
@@ -40097,8 +40130,10 @@ var SA_X402 = (function() {
         } else if(res.data&&res.data.parseError){
           notify('Service returned 402 but requirements could not be parsed','warning');
         }
-      }catch(e){if(_opToken===myToken){setBusy(false);notify(e.message||'Discovery error','error');}}
-      if(_opToken===myToken)SA_X402.render();
+      }catch(e){
+        if(_opToken===myToken&&_sessionToken===mySession){setBusy(false);notify(e.message||'Discovery error','error');}
+      }
+      if(_opToken===myToken&&_sessionToken===mySession)SA_X402.render();
     },
 
     selectReq: async function(idx){
@@ -40106,18 +40141,24 @@ var SA_X402 = (function() {
       var d=_discovery&&_discovery.data;
       if(!d||!d.requirements||!d.requirements[idx])return;
       _selReq=d.requirements[idx];
-      _opToken++;var myToken=_opToken;
+      // Dual guard — same pattern as discover()
+      _opToken++;var myToken=_opToken;var mySession=_sessionToken;
       setBusy(true);
       try{
         var res=await X402.prepare(d.resourceUrl,_selReq);
-        if(_opToken!==myToken)return; // superseded
+        if(_opToken!==myToken||_sessionToken!==mySession){
+          if(_opToken===myToken)setBusy(false);
+          return;
+        }
         setBusy(false);
         if(!res.ok){notify(prepareErrMsg(res),'error');return;}
         _prepare=res;
         if(typeof X402._setLastPrepare==='function')X402._setLastPrepare(res);
         _step='source';
-      }catch(e){if(_opToken===myToken){setBusy(false);notify(e.message||'Prepare error','error');}}
-      if(_opToken===myToken)SA_X402.render();
+      }catch(e){
+        if(_opToken===myToken&&_sessionToken===mySession){setBusy(false);notify(e.message||'Prepare error','error');}
+      }
+      if(_opToken===myToken&&_sessionToken===mySession)SA_X402.render();
     },
 
     goConfirm: function(){
@@ -40171,15 +40212,18 @@ var SA_X402 = (function() {
       SA_X402.render();
     },
 
-    // ── Test/debug hooks (no secrets) ────────────────────
-    _getStatus:      function(){ return _status; },
-    _getStep:        function(){ return _step; },
-    _setStatus:      function(s){ _status=s; },
-    _getDiscovery:   function(){ return _discovery; },
-    _getLastPayArg:  function(){ return _lastPayArg; },
-    _getOpToken:     function(){ return _opToken; },
+    // ── Test/debug hooks (no secrets exposed) ────────────
+    _getStatus:         function(){ return _status; },
+    _getStep:           function(){ return _step; },
+    _setStatus:         function(s){ _status=s; },
+    _getDiscovery:      function(){ return _discovery; },
+    _getLastPayArg:     function(){ return _lastPayArg; },
+    _getOpToken:        function(){ return _opToken; },
+    _getSessionToken:   function(){ return _sessionToken; },
     // Inject a prepared intent for testing pay() gate without running selectReq()
-    _setPrepare:     function(p){ _prepare=p; },
+    _setPrepare:        function(p){ _prepare=p; },
+    // Force a session reset (simulates user/wallet change)
+    _resetSession:      resetSession,
     _settlementAvailable: settlementAvailable,
   };
 })();
