@@ -162,7 +162,8 @@ describe('SA_X402 — step machine', () => {
   it('goConfirm() advances step to confirm', () => {
     const ctx = makeEnv();
     const SA = buildSA402(ctx);
-    // Can only verify state change; render may fail without full DOM
+    // Phase 1.2.3: goConfirm() requires a valid _prepare with intent
+    SA._setPrepare({ ok: true, data: { intent: { id: 'test-intent' } } });
     try { SA.goConfirm(); } catch(_) {}
     expect(SA._getStep()).toBe('confirm');
   });

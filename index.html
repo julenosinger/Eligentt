@@ -17286,6 +17286,9 @@ function setupProviderEvents(raw) {
     raw.on('chainChanged', async hexChainId => {
       const newChainId = parseInt(hexChainId, 16);
       _log('[chainChanged] new chainId:', newChainId);
+      // Notify SA_X402 that the network changed — any x402 prepare bound to
+      // the previous chain is now stale and must be invalidated.
+      try { document.dispatchEvent(new CustomEvent('SA_X402_CHAIN_CHANGED', { detail: { chainId: newChainId } })); } catch(_) {}
       // Reset pending guard so the chain-change refresh is never skipped
       _refreshBalancePending = false;
       await refreshProviderState();
@@ -40162,6 +40165,11 @@ var SA_X402 = (function() {
     },
 
     goConfirm: function(){
+      // Guard: if session was reset between source and confirm, _prepare is null.
+      // Silently route back to discover rather than advancing with stale data.
+      if(!_prepare||!_prepare.data||!_prepare.data.intent){
+        _step='discover'; SA_X402.render(); return;
+      }
       var prev=_step;
       _step='confirm';
       try{ SA_X402.render(); }
@@ -40178,6 +40186,9 @@ var SA_X402 = (function() {
 
     pay: async function(){
       if(_busy)return;
+      // Snap session token before any await — used to discard responses from a
+      // prior session that arrive after a wallet/network change during settle.
+      var mySession=_sessionToken;
       // Hard gate (atomic): verify BOTH settlement availability AND intent presence
       // before any state mutation. Never proceeds if either is missing.
       var it=_prepare&&_prepare.data&&_prepare.data.intent;
@@ -40193,6 +40204,8 @@ var SA_X402 = (function() {
       _step='settling';renderSettling();setBusy(true);
       try{
         var res=await X402.pay(it);
+        // Discard result if session changed during async settle
+        if(_sessionToken!==mySession){setBusy(false);return;}
         setBusy(false);_step='done';
         if(res.ok&&res.data&&(res.data.txHash||res.data.transaction)){
           renderDone({ok:true,txHash:res.data.txHash||res.data.transaction});
@@ -40225,6 +40238,8 @@ var SA_X402 = (function() {
     // Force a session reset (simulates user/wallet change)
     _resetSession:      resetSession,
     _settlementAvailable: settlementAvailable,
+    // Returns whether the global wallet listeners have been registered
+    _listenersRegistered: function(){ return !!window._sa402ListenersRegistered; },
   };
 })();
 
@@ -40255,20 +40270,25 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // ── SA_X402 wallet-event integration ─────────────────────────────────
-// When the connected wallet changes (connect, disconnect, switch), any
-// in-flight x402 discovery or prepare is stale — it was bound to the
-// previous wallet's identity and session. _resetSession() invalidates
-// all pending async responses via sessionToken so they cannot write
-// state intended for the new wallet.
-// ZERO touch on Single Send, Batch Send, SendGuard, or any other module.
-(function _sa402WalletListeners() {
+// When the connected wallet changes (connect, disconnect, switch, or
+// network change), any in-flight x402 discovery or prepare is stale.
+// _resetSession() invalidates all pending async responses via
+// sessionToken so they cannot write state intended for the new session.
+// ZERO touch on Single Send, Batch Send, send guard, or any other module.
+// Guard flag prevents duplicate listener registration (HMR / re-parse).
+if (!window._sa402ListenersRegistered) {
+  window._sa402ListenersRegistered = true;
   function _sa402Reset() {
     try { if (typeof SA_X402 !== 'undefined' && typeof SA_X402._resetSession === 'function') SA_X402._resetSession(); } catch(_) {}
   }
   document.addEventListener('WALLET_CONNECTED',    _sa402Reset);
   document.addEventListener('WALLET_DISCONNECTED', _sa402Reset);
   document.addEventListener('WALLET_SWITCHED',     _sa402Reset);
-})();
+  // chainChanged fires on the EIP-1193 provider (not a DOM event).
+  // We intercept it here via a document-level custom event dispatched
+  // by the _sa402ChainChangedHook below, injected into setupProviderEvents.
+  document.addEventListener('SA_X402_CHAIN_CHANGED', _sa402Reset);
+}
 
 
 

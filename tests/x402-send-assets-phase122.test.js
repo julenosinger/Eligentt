@@ -38,7 +38,12 @@ const sa402End   = html.indexOf('})();', sa402Start) + 5;
 const sa402Src   = sa402Start > -1 ? html.slice(sa402Start, sa402End) : 'var SA_X402={};';
 
 // Wallet listener block
-const walletListenerBlock = html.indexOf('_sa402WalletListeners');
+// Phase 1.2.3 renamed _sa402WalletListeners IIFE to a global guard pattern.
+// Anchor to the comment block that introduces the listener registration code
+// so the slice window always contains all four addEventListener calls.
+const _anchor1 = html.indexOf('SA_X402 wallet-event integration');
+const _anchor2 = html.indexOf('_sa402WalletListeners'); // legacy fallback
+const walletListenerBlock = _anchor1 > -1 ? _anchor1 : _anchor2;
 
 /* ── Helpers ────────────────────────────────────────────────────────── */
 function makeX402(overrides = {}) {
@@ -410,23 +415,24 @@ describe('Phase 1.2.2 — selectReq() real execution', () => {
 ══════════════════════════════════════════════════════════════════════ */
 describe('Phase 1.2.2 — wallet event integration', () => {
 
-  it('_sa402WalletListeners is present in index.html source', () => {
+  it('wallet listener registration block is present in index.html source', () => {
     expect(walletListenerBlock).toBeGreaterThan(-1);
   });
 
   it('source wires WALLET_CONNECTED to _sa402Reset', () => {
-    const src = html.slice(walletListenerBlock, walletListenerBlock + 600);
+    // Search a wider window (guard pattern is more spread out than the old IIFE)
+    const src = html.slice(walletListenerBlock, walletListenerBlock + 1200);
     expect(src).toContain('WALLET_CONNECTED');
     expect(src).toContain('_sa402Reset');
   });
 
   it('source wires WALLET_DISCONNECTED to _sa402Reset', () => {
-    const src = html.slice(walletListenerBlock, walletListenerBlock + 600);
+    const src = html.slice(walletListenerBlock, walletListenerBlock + 1200);
     expect(src).toContain('WALLET_DISCONNECTED');
   });
 
   it('source wires WALLET_SWITCHED to _sa402Reset', () => {
-    const src = html.slice(walletListenerBlock, walletListenerBlock + 600);
+    const src = html.slice(walletListenerBlock, walletListenerBlock + 1200);
     expect(src).toContain('WALLET_SWITCHED');
   });
 
