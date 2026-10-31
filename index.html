@@ -64710,22 +64710,35 @@ BP._renderSplitContactList = function(filter) {
     return;
   }
   var html = '';
+  var GRAD = ['#4f8ef7','#a78bfa','#22c55e','#f59e0b','#ef4444','#06b6d4','#8b5cf6','#ec4899'];
   ctcs.forEach(function(c) {
     var sel = BP._splitSelectedContacts.indexOf(c.id) !== -1;
     var shortAddr = c.addr ? c.addr.slice(0,6) + '…' + c.addr.slice(-4) : 'No address';
     var initials = (c.name||'?').split(' ').slice(0,2).map(function(w){return w[0]||'';}).join('').toUpperCase()||'?';
-    var GRAD = ['#4f8ef7','#a78bfa','#22c55e','#f59e0b','#ef4444','#06b6d4','#8b5cf6','#ec4899'];
     var bg = GRAD[(c.name||'').length % GRAD.length];
-    html += '<div onclick="BP._toggleSplitContact(' + JSON.stringify(c.id) + ')" style="display:flex;align-items:center;gap:7px;padding:5px 8px;cursor:pointer;border-bottom:1px solid var(--border2);' + (sel ? 'background:rgba(79,142,247,.1);' : '') + '">' +
-      '<div style="width:6px;height:6px;border-radius:50%;background:' + (sel ? '#4f8ef7' : 'var(--border)') + ';flex-shrink:0"></div>' +
+    var noAddr = !c.addr;
+    // Use data-cid attribute — no inline onclick quoting issues.
+    html += '<div class="bp-split-citem" data-cid="' + c.id.replace(/"/g,'&quot;') + '" style="display:flex;align-items:center;gap:7px;padding:5px 8px;cursor:' + (noAddr ? 'not-allowed' : 'pointer') + ';border-bottom:1px solid var(--border2);opacity:' + (noAddr ? '0.45' : '1') + ';' + (sel ? 'background:rgba(79,142,247,.12);' : '') + '" title="' + (noAddr ? 'No address — cannot select' : (sel ? 'Click to deselect' : 'Click to select')) + '">' +
+      '<div style="width:6px;height:6px;border-radius:50%;background:' + (sel ? '#4f8ef7' : 'var(--border)') + ';flex-shrink:0;transition:background .12s"></div>' +
       '<div style="width:22px;height:22px;border-radius:50%;background:' + bg + ';display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:#fff;flex-shrink:0">' + initials + '</div>' +
       '<div style="min-width:0;flex:1">' +
-        '<div style="font-size:9.5px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + (c.name||'') + '</div>' +
-        '<div style="font-size:8px;color:var(--muted2);font-family:monospace">' + shortAddr + (c.addr ? '' : ' — no address') + '</div>' +
+        '<div style="font-size:9.5px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + (c.name||'') + (sel ? ' <span style="color:#4f8ef7;font-size:8px">✓</span>' : '') + '</div>' +
+        '<div style="font-size:8px;color:var(--muted2);font-family:monospace">' + shortAddr + '</div>' +
       '</div>' +
     '</div>';
   });
   listEl.innerHTML = html;
+  // Event delegation: one listener on the container, read data-cid from the row.
+  listEl.onclick = function(e) {
+    var row = e.target.closest('.bp-split-citem');
+    if (!row) return;
+    var cid = row.getAttribute('data-cid');
+    if (!cid) return;
+    // Block contacts without address.
+    var c = (typeof contacts !== 'undefined' ? contacts : []).find(function(x){ return x && x.id === cid; });
+    if (!c || !c.addr) return;
+    BP._toggleSplitContact(cid);
+  };
   var selCount = BP._splitSelectedContacts.length;
   if (cntEl) cntEl.textContent = selCount;
 };
