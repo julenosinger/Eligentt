@@ -7856,7 +7856,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
             <!-- Swap arrow -->
             <div class="swap-arrow brg-swap-arrow" onclick="swapBridgeChains()"><i class="ti ti-arrows-up-down"></i></div>
 
-            <!-- TO section -->
+            <!-- TO section + rate summary embedded inside -->
             <div class="brg-section brg-section-to">
               <div class="brg-section-label">TO CHAIN</div>
               <div class="chain-row brg-chain-row">
@@ -7879,15 +7879,15 @@ select.cinput option { background: #161a24; color: #dde2f0; }
                 </div>
               </div>
               <div class="brg-bal-row"><i class="ti ti-wallet"></i>Balance: <span id="bridge-to-bal">—</span> <span id="bridge-to-bal-sym">USDC</span></div>
-            </div>
 
-            <!-- Rate summary -->
-            <div class="rate-box brg-rate-box" style="display:none" id="bridge-rate-box">
-              <div class="rate-row"><span>Route</span><span class="rate-val teal" id="bridge-protocol">LI.FI</span></div>
-              <div class="rate-row"><span>Bridge Fee</span><span class="rate-val" id="bridge-fee-display">—</span></div>
-              <div class="rate-row"><span>Estimated Time</span><span class="rate-val" id="bridge-time">Fetching route…</span></div>
-              <div class="rate-row"><span>You Receive</span><span class="rate-val teal" id="bridge-receive">—</span></div>
-              <div class="rate-row"><span>Minimum Received</span><span class="rate-val" id="bridge-min">—</span></div>
+              <!-- Rate summary — embedded in TO section, Fase 3 -->
+              <div class="rate-box brg-rate-box brg-rate-embedded" style="display:none" id="bridge-rate-box">
+                <div class="rate-row"><span>Route</span><span class="rate-val teal" id="bridge-protocol">LI.FI</span></div>
+                <div class="rate-row"><span>Bridge Fee</span><span class="rate-val" id="bridge-fee-display">—</span></div>
+                <div class="rate-row"><span>Estimated Time</span><span class="rate-val" id="bridge-time">Fetching route…</span></div>
+                <div class="rate-row"><span>You Receive</span><span class="rate-val teal" id="bridge-receive">—</span></div>
+                <div class="rate-row"><span>Minimum Received</span><span class="rate-val" id="bridge-min">—</span></div>
+              </div>
             </div>
 
             <!-- CTA -->
@@ -7896,6 +7896,8 @@ select.cinput option { background: #161a24; color: #dde2f0; }
                 <i class="ti ti-arrows-transfer-up"></i>Bridge USDC
               </button>
             </div>
+            <!-- Gas check panel — populated by initDGV; sits flush at card bottom -->
+            <div id="dgv-panel-bridge"></div>
           </div>
 
           <!-- Right panel: shows routes while idle, steps during execution.
@@ -27237,6 +27239,14 @@ function _brsRenderRoutes(routes, fromChain, toChain) {
       (!route.available ? ' brs-unavail' : '');
 
     var provLetter = (route.label || 'B').charAt(0).toUpperCase();
+    // Protocol icon class — Fase 2 color coding
+    var _provId = (route.provider || route.label || '').toLowerCase();
+    var _provCls = _provId.indexOf('cctp') !== -1 ? 'prov-cctp'
+                 : _provId.indexOf('relay') !== -1 ? 'prov-relay'
+                 : _provId.indexOf('across') !== -1 ? 'prov-across'
+                 : _provId.indexOf('symbiosis') !== -1 || _provId.indexOf('sym') !== -1 ? 'prov-sym'
+                 : _provId.indexOf('layer') !== -1 ? 'prov-layer'
+                 : 'prov-lifi';
     var outStr    = route.outAmt  != null ? route.outAmt.toFixed(4)      : '—';
     var feePctStr = route.feePct  != null ? route.feePct.toFixed(3) + '%': '—';
     var gasStr    = route.gasUsd  != null ? _brsFmtUsd(route.gasUsd)     : '—';
@@ -27264,7 +27274,7 @@ function _brsRenderRoutes(routes, fromChain, toChain) {
       badges +
       /* Row 1: icon · provider · amount · select */
       '<div class="brs-route-top">' +
-        '<div class="brs-provider-icon">' + provLetter + '</div>' +
+        '<div class="brs-provider-icon ' + _provCls + '">' + provLetter + '</div>' +
         '<div style="flex:1;min-width:0;overflow:hidden">' +
           '<div class="brs-provider-name">' + escHtml(route.label) + '</div>' +
           '<div class="brs-protocol-tag">' + escHtml(route.protocol) + '</div>' +
@@ -27329,6 +27339,15 @@ function brSelectRoute(idx) {
   _bridgeSetText('bridge-fee-display', feePct  != null ? '~' + feePct.toFixed(3)  + '%'    : '—');
   _bridgeSetText('bridge-min',         minAmt  != null ? '~' + minAmt.toFixed(4)  + ' ' + toSym : '—');
   _bridgeSetText('bridge-time',        execSec != null ? '~' + _bridgeFmtDuration(execSec) : '—');
+
+  // Show rate-box and flash update animation — Fase 3
+  var rateBox = document.getElementById('bridge-rate-box');
+  if (rateBox) {
+    rateBox.style.display = '';
+    rateBox.classList.remove('brg-updated');
+    void rateBox.offsetWidth; // force reflow to restart animation
+    rateBox.classList.add('brg-updated');
+  }
 
   // Update Bridge button label
   var fromSym  = (typeof bridgeFromToken !== 'undefined' && bridgeFromToken) || 'USDC';
@@ -53525,10 +53544,11 @@ function _ubDirectExec(intent, params, mode) {
       if (!btn || !btn.parentNode) return false;
 
       var panelHTML =
-        '<div style="display:flex;align-items:center;gap:7px;margin-bottom:6px">' +
+        '<div class="dgv-head" style="display:flex;align-items:center;gap:7px;margin-bottom:6px">' +
           '<span class="dgv-dot" style="width:9px;height:9px;border-radius:50%;background:' + DOT.UNKNOWN + ';flex-shrink:0;box-shadow:0 0 6px ' + DOT.UNKNOWN + '88"></span>' +
           '<span style="font-weight:700;color:var(--text)">' + (cfg.title || 'Destination Gas Check') + '</span>' +
           '<span class="dgv-badge" style="margin-left:auto;font-size:8px;font-weight:700;padding:2px 8px;border-radius:999px;background:rgba(255,255,255,.06);border:1px solid var(--border);color:var(--muted2)">Checking…</span>' +
+          '<button class="dgv-toggle-btn" title="Toggle details" tabindex="-1">▲</button>' +
         '</div>' +
         '<div class="dgv-rows" style="display:flex;flex-direction:column;gap:2px">' +
           row(cfg.walletLabel || 'Destination Wallet', 'dgv-wallet') +
@@ -53568,6 +53588,14 @@ function _ubDirectExec(intent, params, mode) {
       return true;
 
       function finishPanel(container){
+        // Accordion toggle — bridge panel only (dgv-panel-bridge)
+        if (container.id === 'dgv-panel-bridge') {
+          var head = container.querySelector('.dgv-head');
+          if (head) head.addEventListener('click', function(e) {
+            if (e.target && e.target.classList.contains('dgv-ack-cb')) return;
+            container.classList.toggle('dgv-collapsed');
+          });
+        }
         // Compact status pill (placement is fully controlled per-page via cfg.mountPill).
         // Bridge/Cross-Chain intentionally have NO injected pill (the panel below shows status).
         if (typeof cfg.mountPill === 'function' && !document.getElementById(cfg.pillId)){
@@ -53876,12 +53904,10 @@ function _ubDirectExec(intent, params, mode) {
     if (!document.getElementById('dgv-bridge-fit-style')){
       var st = document.createElement('style');
       st.id = 'dgv-bridge-fit-style';
+      // Phase 1 CSS handles padding/layout — only keep the dgv panel margin here
       st.textContent =
         '#page-bridge .page-content{align-items:flex-start}' +
-        '#page-bridge .swap-card{padding:16px;max-width:460px}' +
-        '#page-bridge .chain-row{padding:8px 12px}' +
-        '#page-bridge #bridge-rate-box{margin-top:8px}' +
-        '#page-bridge #dgv-panel-bridge{margin-top:9px}';
+        '#page-bridge #dgv-panel-bridge{margin:0;border-radius:0 0 10px 10px;border-top:1px solid rgba(255,255,255,0.06);border-left:none;border-right:none;border-bottom:none;background:rgba(0,0,0,0.18)}';
       document.head.appendChild(st);
     }
     controllers.forEach(function(c){ c.ensure(); });
