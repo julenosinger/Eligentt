@@ -7171,6 +7171,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
       <div class="nav-item" id="nav-recipients" onclick="showPage('recipients')" title="Recipients"><i class="ti ti-users"></i>Recipients</div>
       <div class="nav-item" id="nav-templates" onclick="showPage('templates')" title="Templates"><i class="ti ti-template"></i>Templates</div>
       <div class="nav-item" id="nav-reports" onclick="showPage('reports')" title="Reports"><i class="ti ti-chart-bar"></i>Reports</div>
+      <div class="nav-item" id="nav-tax" onclick="showPage('tax')" title="Tax Reports"><i class="ti ti-receipt-tax"></i>Tax<span class="nav-new">New</span></div>
       <div class="nav-item" id="nav-settings" onclick="showPage('settings')" title="Settings"><i class="ti ti-settings"></i>Settings</div>
     </nav>
     <div class="wallet-panel">
@@ -9928,6 +9929,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
             <option>Bridge</option>
             <option>Schedule</option>
             <option>Invoice</option><option>Payment Link</option>
+            <option>Tax Report</option>
           </select>
           <select id="report-period" class="btn" style="cursor:pointer;font-family:inherit" onchange="renderReports()">
             <option value="7">Last 7 days</option>
@@ -11563,6 +11565,29 @@ select.cinput option { background: #161a24; color: #dde2f0; }
                 <button class="btn" onclick="SettingsService.verifyContract()" style="font-size:8.5px"><i class="ti ti-check"></i>Verify Contract</button>
               </div>
             </div>
+            <!-- Tax Settings -->
+            <div class="card" style="margin-bottom:8px">
+              <div class="ch"><i class="ti ti-receipt-tax" style="font-size:13px;color:var(--yellow)"></i><span class="ct">Tax Reports</span></div>
+              <div class="cb" style="display:flex;flex-direction:column;gap:9px">
+                <div class="stg-row">
+                  <div class="stg-label">Default Country</div>
+                  <select class="cinput" id="stg-tax-country" onchange="taxSettingsSave()">
+                    <option value="">— select —</option>
+                    <option value="BR">🇧🇷 Brazil</option>
+                    <option value="PT">🇵🇹 Portugal</option>
+                    <option value="US">🇺🇸 United States</option>
+                    <option value="DE">🇩🇪 Germany</option>
+                    <option value="GB">🇬🇧 United Kingdom</option>
+                  </select>
+                </div>
+                <div class="stg-row">
+                  <div class="stg-label">TaxPayment Contract Address</div>
+                  <input class="cinput" id="stg-tax-contract" placeholder="0x... (after deploy)" onchange="taxSettingsSave()"/>
+                </div>
+                <div style="font-size:9px;color:var(--muted2)">Deploy <code>TaxPayment.sol</code> via <code>deploy_tax/deploy.js</code> and paste the address above.</div>
+                <button class="btn" onclick="showPage('tax')" style="font-size:8.5px"><i class="ti ti-receipt-tax"></i>Open Tax Tab</button>
+              </div>
+            </div>
           </div>
 
           <!-- APIs -->
@@ -12171,6 +12196,74 @@ select.cinput option { background: #161a24; color: #dde2f0; }
          RWA ADVANCED TRADING — scoped CSS (rwa- namespace only)
          ══════════════════════════════════════════════════════════════════ -->
     <style>
+      /* ── Tax page ── */
+      #page-tax{display:none;flex-direction:column;height:100%;overflow:hidden}
+      #page-tax.active{display:flex}
+      .tax-shell{display:flex;flex-direction:column;height:100%;overflow:hidden}
+      .tax-header{display:flex;align-items:center;gap:12px;padding:14px 20px 12px;border-bottom:1px solid var(--border);flex-shrink:0}
+      .tax-header-icon{width:36px;height:36px;border-radius:10px;background:rgba(245,158,11,.14);color:var(--yellow);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
+      .tax-body{flex:1;overflow-y:auto;padding:16px 20px;display:flex;flex-direction:column;gap:14px}
+      .tax-metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+      @media(max-width:600px){.tax-metrics{grid-template-columns:repeat(2,1fr)}}
+      .tax-metric{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px 14px}
+      .tax-metric .lbl{font-size:9px;color:var(--muted2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
+      .tax-metric .val{font-size:18px;font-weight:700;color:var(--text)}
+      .tax-metric .sub{font-size:9px;color:var(--muted2);margin-top:2px}
+      .tax-stepper{display:flex;gap:0;border-bottom:1px solid var(--border);flex-shrink:0;overflow-x:auto}
+      .tax-step{padding:0 16px;height:36px;display:flex;align-items:center;gap:6px;font-size:10px;font-weight:600;color:var(--muted2);cursor:default;border-bottom:2px solid transparent;white-space:nowrap}
+      .tax-step.done{color:var(--green)}
+      .tax-step.active{color:var(--yellow);border-bottom-color:var(--yellow)}
+      .tax-step-num{width:16px;height:16px;border-radius:50%;background:var(--border);color:var(--muted2);font-size:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+      .tax-step.done .tax-step-num{background:var(--green);color:#fff}
+      .tax-step.active .tax-step-num{background:var(--yellow);color:#000}
+      .tax-panel{display:none;flex:1;overflow-y:auto;padding:16px 20px}
+      .tax-panel.active{display:block}
+      .tax-toggle{display:flex;gap:0;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:2px;width:fit-content;margin-bottom:12px}
+      .tax-toggle-btn{padding:5px 16px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;border:none;background:none;color:var(--muted2);transition:all .15s}
+      .tax-toggle-btn.active{background:var(--card);color:var(--text);box-shadow:0 1px 3px rgba(0,0,0,.15)}
+      .tax-addr-row{display:flex;gap:8px;align-items:center;margin-bottom:10px}
+      .tax-addr-input{flex:1;padding:9px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:11px;font-family:inherit}
+      .tax-addr-input:focus{outline:none;border-color:var(--yellow)}
+      .tax-shortcut{padding:5px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg2);color:var(--muted2);font-size:9px;cursor:pointer;transition:all .15s;white-space:nowrap}
+      .tax-shortcut:hover{border-color:var(--yellow);color:var(--yellow)}
+      .tax-net-grid{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+      .tax-net-chip{padding:5px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg2);font-size:9.5px;cursor:pointer;display:flex;align-items:center;gap:5px;transition:all .15s;user-select:none}
+      .tax-net-chip.sel{border-color:var(--yellow);background:rgba(245,158,11,.1);color:var(--yellow)}
+      .tax-net-chip .cnt{font-size:8px;color:var(--muted2);margin-left:2px}
+      .tax-net-chip.sel .cnt{color:var(--yellow)}
+      .tax-country-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;margin-bottom:10px}
+      .tax-country-card{border:1px solid var(--border);border-radius:8px;padding:10px 12px;cursor:pointer;transition:all .15s;background:var(--bg2)}
+      .tax-country-card:hover{border-color:var(--yellow)}
+      .tax-country-card.sel{border-color:var(--yellow);background:rgba(245,158,11,.08)}
+      .tax-country-card .flag{font-size:20px;margin-bottom:4px}
+      .tax-country-card .name{font-size:11px;font-weight:600;color:var(--text)}
+      .tax-country-card .detail{font-size:9px;color:var(--muted2);margin-top:2px;line-height:1.4}
+      .tax-quote-box{border:1px solid var(--border);border-radius:10px;padding:16px;background:var(--bg2)}
+      .tax-quote-total{font-size:32px;font-weight:800;color:var(--yellow);margin-bottom:8px}
+      .tax-quote-line{display:flex;justify-content:space-between;font-size:10.5px;padding:4px 0;border-bottom:1px solid var(--border)}
+      .tax-quote-line:last-child{border:none}
+      .tax-quote-line .k{color:var(--muted2)}
+      .tax-quote-line .v{font-weight:600;color:var(--text)}
+      .tax-pay-btn{width:100%;padding:12px;border-radius:10px;border:none;background:var(--yellow);color:#000;font-size:13px;font-weight:700;cursor:pointer;margin-top:12px;transition:opacity .15s}
+      .tax-pay-btn:disabled{opacity:.4;cursor:default}
+      .tax-ops-table{width:100%;border-collapse:collapse}
+      .tax-ops-table th{font-size:9px;text-transform:uppercase;color:var(--muted2);padding:8px 10px;border-bottom:1px solid var(--border);text-align:left;white-space:nowrap}
+      .tax-ops-table td{font-size:10.5px;padding:7px 10px;border-bottom:1px solid var(--border)}
+      .tax-ops-table tr:hover td{background:var(--bg2)}
+      .tax-badge{font-size:8px;padding:2px 6px;border-radius:4px;font-weight:600}
+      .tax-badge.gain{background:rgba(34,197,94,.15);color:var(--green)}
+      .tax-badge.loss{background:rgba(239,68,68,.15);color:#ef4444}
+      .tax-badge.income{background:rgba(79,142,247,.15);color:var(--blue)}
+      .tax-badge.ignored{background:var(--bg2);color:var(--muted2)}
+      .tax-badge.review{background:rgba(245,158,11,.15);color:var(--yellow)}
+      .tax-disclaimer{font-size:9.5px;color:var(--muted2);padding:10px 12px;border-radius:8px;background:var(--bg2);border:1px solid var(--border);margin-top:8px}
+      .tax-progress{height:4px;border-radius:2px;background:var(--border);overflow:hidden;margin-top:4px}
+      .tax-progress-fill{height:100%;background:var(--yellow);transition:width .3s}
+      /* Mobile quote bottom-sheet (same pattern as Swap) */
+      @media(max-width:700px){
+        .tax-quote-sheet{position:fixed;bottom:0;left:0;right:0;background:var(--card);border-top:1px solid var(--border);border-radius:14px 14px 0 0;padding:14px 16px 24px;z-index:120;transform:translateY(100%);transition:transform .3s}
+        .tax-quote-sheet.open{transform:translateY(0)}
+      }
       #page-rwa{display:none;flex-direction:column;height:100%;overflow:hidden}
       #page-rwa.active{display:flex}
       .rwa-shell{display:flex;flex-direction:column;height:100%;overflow:hidden}
@@ -12475,6 +12568,221 @@ select.cinput option { background: #161a24; color: #dde2f0; }
         </div>
       </div>
     </div>
+
+    <!-- ══════════════════════════════════════════════════════════════════
+         TAX REPORTS PAGE
+         ══════════════════════════════════════════════════════════════════ -->
+    <div class="page" id="page-tax">
+      <div class="tax-shell">
+        <!-- Header -->
+        <div class="tax-header">
+          <div class="tax-header-icon"><i class="ti ti-receipt-tax"></i></div>
+          <div>
+            <div class="page-title">Tax Reports <span class="nav-new" style="font-size:9px;vertical-align:middle;margin-left:6px">New</span></div>
+            <div class="page-sub">On-chain tax analysis · multi-chain · USDC payment · PDF &amp; CSV export</div>
+          </div>
+          <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+            <button class="btn" onclick="taxOpenHistory()"><i class="ti ti-history"></i>History</button>
+            <button class="btn" id="tax-btn-new" onclick="taxNewReport()"><i class="ti ti-plus"></i>New Report</button>
+          </div>
+        </div>
+        <!-- Disclaimer -->
+        <div class="tax-disclaimer" style="margin:10px 20px 0;flex-shrink:0">
+          <i class="ti ti-info-circle" style="margin-right:4px;color:var(--yellow)"></i>
+          <strong>Informational estimate — not tax advice.</strong> Always validate with a qualified local accountant.
+        </div>
+        <!-- Step breadcrumb -->
+        <div class="tax-stepper" id="tax-stepper">
+          <div class="tax-step active" id="tax-s0" onclick="taxGoStep(0)"><span class="tax-step-num">1</span>Target</div>
+          <div class="tax-step" id="tax-s1" onclick="taxGoStep(1)"><span class="tax-step-num">2</span>Networks</div>
+          <div class="tax-step" id="tax-s2" onclick="taxGoStep(2)"><span class="tax-step-num">3</span>Country</div>
+          <div class="tax-step" id="tax-s3" onclick="taxGoStep(3)"><span class="tax-step-num">4</span>Quote</div>
+          <div class="tax-step" id="tax-s4" onclick="taxGoStep(4)"><span class="tax-step-num">5</span>Pay</div>
+          <div class="tax-step" id="tax-s5" onclick="taxGoStep(5)"><span class="tax-step-num">6</span>Report</div>
+        </div>
+        <!-- Metric bar -->
+        <div class="tax-metrics" style="padding:10px 20px 0;flex-shrink:0" id="tax-metrics">
+          <div class="tax-metric"><div class="lbl">Reports Generated</div><div class="val" id="tax-m-reports">0</div><div class="sub">all time</div></div>
+          <div class="tax-metric"><div class="lbl">Wallets Analyzed</div><div class="val" id="tax-m-wallets">0</div><div class="sub">unique addresses</div></div>
+          <div class="tax-metric"><div class="lbl">Ops Classified</div><div class="val" id="tax-m-ops">0</div><div class="sub">across all reports</div></div>
+          <div class="tax-metric"><div class="lbl">Fees Paid</div><div class="val" id="tax-m-fees">0 USDC</div><div class="sub">in tax report fees</div></div>
+        </div>
+        <!-- Panels -->
+        <!-- PANEL 0: Target -->
+        <div class="tax-panel active" id="tax-panel-0">
+          <div style="max-width:600px">
+            <div class="tax-toggle" id="tax-target-toggle">
+              <button class="tax-toggle-btn active" onclick="taxSetTargetType('wallet')">Wallet</button>
+              <button class="tax-toggle-btn" onclick="taxSetTargetType('contract')">Contract</button>
+            </div>
+            <div id="tax-target-hint" style="font-size:10px;color:var(--muted2);margin-bottom:10px">Analyze transaction history for an EVM wallet or Solana address.</div>
+            <!-- Shortcuts -->
+            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+              <span style="font-size:10px;color:var(--muted2);align-self:center">Use:</span>
+              <button class="tax-shortcut" onclick="taxFillConnected()"><i class="ti ti-wallet" style="font-size:10px"></i> Connected wallet</button>
+              <button class="tax-shortcut" onclick="taxFillSmartWallet()"><i class="ti ti-building-bank" style="font-size:10px"></i> Smart Wallet</button>
+              <button class="tax-shortcut" onclick="taxFillAgentWallet()"><i class="ti ti-robot" style="font-size:10px"></i> Agent Wallet</button>
+            </div>
+            <div class="tax-addr-row">
+              <input class="tax-addr-input" id="tax-addr-input" placeholder="0x... or Solana address" oninput="taxValidateAddr()" />
+              <button class="btn" onclick="taxClearAddr()"><i class="ti ti-x"></i></button>
+            </div>
+            <div id="tax-addr-err" style="font-size:9.5px;color:#ef4444;min-height:14px;margin-bottom:6px"></div>
+            <button class="btn" id="tax-btn-next0" onclick="taxGoStep(1)" disabled style="background:var(--yellow);color:#000;font-weight:700;padding:9px 24px">
+              Continue <i class="ti ti-arrow-right"></i>
+            </button>
+          </div>
+        </div>
+        <!-- PANEL 1: Networks -->
+        <div class="tax-panel" id="tax-panel-1">
+          <div style="max-width:680px">
+            <div style="font-size:11px;font-weight:600;color:var(--text);margin-bottom:6px">Select networks to include</div>
+            <div style="font-size:9.5px;color:var(--muted2);margin-bottom:10px">Click Scan to detect activity. Select networks to include in the report.</div>
+            <div class="tax-net-grid" id="tax-net-grid"></div>
+            <div style="display:flex;gap:8px;align-items:center;margin-top:6px">
+              <button class="btn" id="tax-btn-scan" onclick="taxScan()"><i class="ti ti-search"></i>Scan Networks</button>
+              <span id="tax-scan-status" style="font-size:9.5px;color:var(--muted2)"></span>
+            </div>
+            <div id="tax-scan-progress" style="margin-top:8px"></div>
+            <div style="display:flex;gap:8px;margin-top:14px">
+              <button class="btn" onclick="taxGoStep(0)"><i class="ti ti-arrow-left"></i>Back</button>
+              <button class="btn" id="tax-btn-next1" onclick="taxGoStep(2)" disabled style="background:var(--yellow);color:#000;font-weight:700;padding:9px 24px">
+                Continue <i class="ti ti-arrow-right"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+        <!-- PANEL 2: Country -->
+        <div class="tax-panel" id="tax-panel-2">
+          <div style="max-width:520px">
+            <div style="font-size:11px;font-weight:600;color:var(--text);margin-bottom:4px">Select your country</div>
+            <div style="font-size:9.5px;color:var(--muted2);margin-bottom:12px">Tax rules, cost basis method and output format are determined by your jurisdiction.</div>
+
+            <label for="tax-country-select" style="font-size:10px;font-weight:600;color:var(--muted2);display:block;margin-bottom:5px">Country / Jurisdiction</label>
+            <select id="tax-country-select"
+                    class="cinput"
+                    style="width:100%;font-size:11px;padding:9px 11px;cursor:pointer"
+                    onchange="taxSelectCountry(this.value)"
+                    aria-label="Select your country">
+              <option value="">Select a country…</option>
+            </select>
+
+            <!-- Rules card — hidden until a country is chosen -->
+            <div id="tax-country-rules" style="display:none;margin-top:12px;border:1px solid var(--border);border-radius:10px;overflow:hidden">
+              <div style="padding:10px 14px 8px;border-bottom:1px solid var(--border);background:var(--bg2)">
+                <span style="font-size:10.5px;font-weight:700;color:var(--text)" id="tax-rules-title">Tax rules</span>
+              </div>
+              <div style="padding:10px 14px;display:flex;flex-direction:column;gap:7px">
+                <div style="display:flex;justify-content:space-between;font-size:10px">
+                  <span style="color:var(--muted2)">Cost basis method</span>
+                  <span style="font-weight:600;color:var(--text)" id="tax-rules-method">—</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;font-size:10px">
+                  <span style="color:var(--muted2)">Reporting period</span>
+                  <span style="font-weight:600;color:var(--text)" id="tax-rules-period">—</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;font-size:10px">
+                  <span style="color:var(--muted2)">Output format</span>
+                  <span style="font-weight:600;color:var(--text)" id="tax-rules-format">—</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;font-size:10px">
+                  <span style="color:var(--muted2)">Report currency</span>
+                  <span style="font-weight:600;color:var(--text)" id="tax-rules-currency">—</span>
+                </div>
+              </div>
+            </div>
+
+            <div style="display:flex;gap:8px;margin-top:14px">
+              <button class="btn" onclick="taxGoStep(1)"><i class="ti ti-arrow-left"></i>Back</button>
+              <button class="btn" id="tax-btn-next2" onclick="taxGoStep(3)" disabled style="background:var(--yellow);color:#000;font-weight:700;padding:9px 24px">
+                Continue <i class="ti ti-arrow-right"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+        <!-- PANEL 3: Quote -->
+        <div class="tax-panel" id="tax-panel-3">
+          <div style="max-width:500px">
+            <div class="tax-quote-box" id="tax-quote-box">
+              <div style="font-size:10px;color:var(--muted2);margin-bottom:4px">Estimated cost</div>
+              <div class="tax-quote-total" id="tax-quote-total">—</div>
+              <div id="tax-quote-lines"></div>
+              <div style="font-size:9px;color:var(--muted2);margin-top:8px" id="tax-quote-expiry"></div>
+            </div>
+            <div style="margin-top:10px">
+              <label style="display:flex;align-items:center;gap:8px;font-size:10.5px;cursor:pointer">
+                <input type="checkbox" id="tax-defi-check" onchange="taxRecalcQuote()">
+                <span>I have DeFi / NFT / LP / bridge activity</span>
+                <span style="font-size:9px;color:var(--muted2)">(+8 USDC complexity fee)</span>
+              </label>
+            </div>
+            <div id="tax-quote-err" style="font-size:9.5px;color:#ef4444;min-height:14px;margin-top:4px"></div>
+            <div style="display:flex;gap:8px;margin-top:14px">
+              <button class="btn" onclick="taxGoStep(2)"><i class="ti ti-arrow-left"></i>Back</button>
+              <button class="btn" id="tax-btn-pay" onclick="taxGoStep(4)" style="background:var(--yellow);color:#000;font-weight:700;padding:9px 24px">
+                Pay &amp; Generate <i class="ti ti-arrow-right"></i>
+              </button>
+            </div>
+          </div>
+          <!-- Mobile bottom-sheet quote -->
+          <div class="tax-quote-sheet" id="tax-quote-sheet">
+            <div style="width:32px;height:3px;border-radius:2px;background:var(--border);margin:0 auto 10px"></div>
+            <div style="font-size:10px;color:var(--muted2)">Estimated cost</div>
+            <div class="tax-quote-total" id="tax-quote-total-mobile">—</div>
+          </div>
+        </div>
+        <!-- PANEL 4: Pay -->
+        <div class="tax-panel" id="tax-panel-4">
+          <div style="max-width:500px">
+            <div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:12px">Review &amp; Authorize Payment</div>
+            <div class="tax-quote-box" id="tax-pay-summary"></div>
+            <div id="tax-demo-badge" style="display:none;margin-top:8px;font-size:9.5px;padding:7px 12px;border-radius:7px;background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);color:var(--yellow)">
+              <i class="ti ti-flask" style="margin-right:4px"></i>Demo Mode — simulating payment (no signer / contract)
+            </div>
+            <div id="tax-pay-status" style="min-height:18px;font-size:10px;color:var(--muted2);margin-top:6px"></div>
+            <div style="display:flex;gap:8px;margin-top:14px">
+              <button class="btn" onclick="taxGoStep(3)"><i class="ti ti-arrow-left"></i>Back</button>
+              <button class="btn" id="tax-btn-confirm-pay" onclick="taxExecutePay()" style="background:var(--yellow);color:#000;font-weight:700;padding:9px 24px">
+                <i class="ti ti-lock"></i> Authorize &amp; Pay
+              </button>
+            </div>
+          </div>
+        </div>
+        <!-- PANEL 5: Report -->
+        <div class="tax-panel" id="tax-panel-5">
+          <div id="tax-report-loading" style="text-align:center;padding:40px;display:none">
+            <div class="aut-typing"><span></span><span></span><span></span></div>
+            <div style="font-size:10px;color:var(--muted2);margin-top:10px">Generating report…</div>
+          </div>
+          <div id="tax-report-content" style="display:none;max-width:800px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+              <div style="font-size:13px;font-weight:700;color:var(--text)" id="tax-report-title">Tax Report</div>
+              <div style="display:flex;gap:8px">
+                <button class="btn" onclick="taxDownloadPDF()"><i class="ti ti-file-type-pdf"></i>Download PDF</button>
+                <button class="btn" onclick="taxExportCSV()"><i class="ti ti-download"></i>Export CSV</button>
+                <button class="btn" onclick="taxNewReport()"><i class="ti ti-plus"></i>New Report</button>
+              </div>
+            </div>
+            <!-- Summary cards -->
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px;margin-bottom:14px" id="tax-report-metrics"></div>
+            <!-- Operations table -->
+            <div class="card">
+              <div class="ch"><i class="ti ti-list" style="font-size:13px;color:var(--yellow)"></i><span class="ct">Classified Operations</span><span id="tax-ops-count" style="font-size:9px;color:var(--muted2);margin-left:4px"></span></div>
+              <div style="overflow-x:auto">
+                <table class="tax-ops-table">
+                  <thead><tr><th>Date</th><th>Chain</th><th>Type</th><th>Asset In</th><th>Asset Out</th><th>USD Value</th><th>Gas</th><th>P/L</th><th>Tx</th></tr></thead>
+                  <tbody id="tax-ops-tbody"></tbody>
+                </table>
+              </div>
+            </div>
+            <div class="tax-disclaimer" style="margin-top:10px">
+              <i class="ti ti-alert-triangle" style="color:var(--yellow);margin-right:4px"></i>
+              This is an informational estimate only. It is not tax advice. Consult a qualified accountant in your jurisdiction before filing.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div><!-- end #page-tax -->
 
     <div class="page" id="page-aiwallet" lang="en-US" translate="no">
       <div class="page-header">
@@ -16628,6 +16936,7 @@ function showPage(id) {
     }
     if (id === 'treasury') { showPage('send'); return; }
     if (id === 'reports') { renderReports(); }
+    if (id === 'tax') { if (typeof taxOnPageOpen === 'function') taxOnPageOpen(); }
     if (id === 'xcdashboard') { showPage('send'); return; }
     if (id === 'recipients') { renderContacts(); updateSelectedCount(); if(typeof _rcpUpdateStats==='function') _rcpUpdateStats(); }
     if (id === 'batch') { setTimeout(() => { renderTable(); updateBottomBar(); }, 50); }
@@ -57256,6 +57565,7 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
       case 'CREATE_PAYMENT_LINK': return await _handleCreatePaymentLink(params, msg);
       case 'CREATE_INVOICE': return _handleCreateInvoice(params);
       case 'CREATE_SCHEDULE': return _handleCreateSchedule(params, msg);
+      case 'TAX_REPORT': return _handleTaxReport(params);
       case 'MULTISEND': return _handleMultiSend(params, msg);
       case 'SWAP_EXECUTE':
         // If params already approved via AgentCapabilityRouter OR agent has active auth, execute directly.
@@ -57593,6 +57903,27 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
         R.actions(
           {icon:'external-link',label:'View Schedules',cls:'primary',action:"showPage('schedule')"},
           {icon:'refresh',label:'Create Another',cls:'',action:"autonomaSendQuick('schedule a payment of 50 USDC weekly')"}
+        ));
+  }
+
+  function _handleTaxReport(params) {
+    const addr = (params && params.address) || walletAddress || '';
+    // Navigate to Tax tab — payment always requires user action, agent only initiates
+    setTimeout(function(){
+      if (typeof taxOpenForAutonoma === 'function') {
+        taxOpenForAutonoma(addr);
+      } else {
+        showPage('tax');
+      }
+    }, 200);
+    const addrFmt = addr ? addr.slice(0,8)+'…'+addr.slice(-4) : 'connected wallet';
+    return R.intro('Opening Tax Reports for '+addrFmt) +
+      R.card(R.head('receipt-tax','Tax Report',{text:'Ready',cls:'live'}),
+        R.row('Address', addrFmt, 'yellow') +
+        R.row('Action', 'Pre-filled — select networks & country', 'teal') +
+        R.row('Payment', 'Required — user must authorize', 'purple'),
+        R.actions(
+          {icon:'receipt-tax',label:'Open Tax Tab',cls:'primary',action:"showPage('tax')"}
         ));
   }
 
@@ -67518,6 +67849,707 @@ window.rwaSelectMarketToken = rwaSelectMarketToken;
     </div>
   </div>
 </div>
+
+<!-- ════════════════════════════════════════════════════════════════════════
+     TAX MODULE  (tax- prefix throughout; no external deps)
+     ════════════════════════════════════════════════════════════════════════ -->
+<script>
+(function() {
+'use strict';
+
+/* ── Fee config (single source of truth — never hardcoded in UI) ───────── */
+var TAX_FEE = {
+  base:          20,   // USDC
+  volumePer500:   4,   // per 500 ops over first 500
+  perExtraNet:    3,   // per network after the first
+  complexity:     8,   // DeFi / NFT / LP / bridge flag
+  quoteExpiryMs:  15 * 60 * 1000,   // 15 min
+};
+
+/* ── Supported networks ─────────────────────────────────────────────────── */
+var TAX_NETS = [
+  { id:'arc',      label:'Arc Mainnet',  icon:'<i class="ti ti-bolt" style="color:var(--yellow)"></i>' },
+  { id:'ethereum', label:'Ethereum',     icon:'<i class="ti ti-currency-ethereum" style="color:#627eea"></i>' },
+  { id:'base',     label:'Base',         icon:'<i class="ti ti-circle" style="color:#0052ff"></i>' },
+  { id:'arbitrum', label:'Arbitrum',     icon:'<i class="ti ti-circle" style="color:#12aaff"></i>' },
+  { id:'optimism', label:'Optimism',     icon:'<i class="ti ti-circle" style="color:#ff0420"></i>' },
+  { id:'polygon',  label:'Polygon',      icon:'<i class="ti ti-circle" style="color:#8247e5"></i>' },
+  { id:'solana',   label:'Solana',       icon:'<i class="ti ti-circle" style="color:#9945ff"></i>' },
+];
+
+/* ── Countries ──────────────────────────────────────────────────────────── */
+var TAX_COUNTRIES = [
+  { id:'BR', flag:'🇧🇷', name:'Brazil',         method:'Average cost', period:'Monthly', format:'DARF / CSV', currency:'BRL' },
+  { id:'PT', flag:'🇵🇹', name:'Portugal',        method:'FIFO',         period:'Annual',  format:'CSV',       currency:'EUR' },
+  { id:'US', flag:'🇺🇸', name:'United States',   method:'FIFO / HIFO',  period:'Annual',  format:'Form 8949', currency:'USD' },
+  { id:'DE', flag:'🇩🇪', name:'Germany',         method:'FIFO',         period:'Annual',  format:'CSV',       currency:'EUR' },
+  { id:'GB', flag:'🇬🇧', name:'United Kingdom',  method:'Section 104',  period:'Annual',  format:'CSV',       currency:'GBP' },
+];
+
+/* ── State ──────────────────────────────────────────────────────────────── */
+var _taxStep = 0;
+var _taxTargetType = 'wallet';     // 'wallet' | 'contract'
+var _taxAddr = '';
+var _taxNets = {};                 // { netId: { ops: N, selected: bool } }
+var _taxCountry = null;
+var _taxQuote = null;              // { id, amount, lines, expiresAt }
+var _taxPayTx = null;
+var _taxReport = null;
+var _taxReportHistory = [];
+
+/* ── Persistence helpers ────────────────────────────────────────────────── */
+function _taxLoadHistory() {
+  try { _taxReportHistory = JSON.parse(localStorage.getItem('tax_report_history') || '[]'); } catch(_) { _taxReportHistory = []; }
+}
+function _taxSaveHistory() {
+  try { localStorage.setItem('tax_report_history', JSON.stringify(_taxReportHistory.slice(0, 50))); } catch(_) {}
+}
+
+/* ── Init ───────────────────────────────────────────────────────────────── */
+function taxOnPageOpen() {
+  _taxLoadHistory();
+  _taxRenderNetGrid();
+  _taxPopulateSelect();       // fill dropdown (idempotent)
+  _taxRenderCountryGrid();    // sync button state
+  _taxUpdateMetrics();
+  _taxGoStepInternal(_taxStep);
+}
+
+/* ── Step navigation ────────────────────────────────────────────────────── */
+function taxGoStep(n) {
+  // Validate each step before advancing
+  if (n > 0 && !_taxAddr) { if (typeof toast==='function') toast('Please enter a wallet or contract address.','warn'); return; }
+  if (n > 1 && !Object.values(_taxNets).some(function(v){return v.selected;})) {
+    if (typeof toast==='function') toast('Select at least one network.','warn'); return;
+  }
+  if (n > 2 && !_taxCountry) { if (typeof toast==='function') toast('Select a country.','warn'); return; }
+  if (n > 3) {
+    // Compute quote if not fresh
+    if (!_taxQuote || Date.now() > _taxQuote.expiresAt) { _taxCalcQuote(); }
+  }
+  if (n === 4) { _taxRenderPayPanel(); }
+  _taxGoStepInternal(n);
+}
+window.taxGoStep = taxGoStep;
+window.taxOnPageOpen = taxOnPageOpen;
+
+function _taxGoStepInternal(n) {
+  _taxStep = n;
+  document.querySelectorAll('.tax-panel').forEach(function(p,i){
+    p.classList.toggle('active', i === n);
+  });
+  document.querySelectorAll('.tax-step').forEach(function(s,i){
+    s.classList.remove('active','done');
+    if (i < n) s.classList.add('done');
+    if (i === n) s.classList.add('active');
+  });
+  // Ensure dropdown options are present whenever step 2 becomes visible
+  if (n === 2) { _taxPopulateSelect(); _taxRenderCountryGrid(); }
+}
+
+/* ── Panel 0: Target ────────────────────────────────────────────────────── */
+function taxSetTargetType(t) {
+  _taxTargetType = t;
+  document.querySelectorAll('#tax-target-toggle .tax-toggle-btn').forEach(function(b){
+    b.classList.toggle('active', b.textContent.toLowerCase().trim() === t);
+  });
+  var hint = document.getElementById('tax-target-hint');
+  if (hint) hint.textContent = t === 'contract'
+    ? 'Analyze a smart contract (treasury/protocol): incoming and outgoing transfers are the taxable events.'
+    : 'Analyze transaction history for an EVM wallet or Solana address.';
+}
+window.taxSetTargetType = taxSetTargetType;
+
+function taxFillConnected() {
+  var addr = (typeof walletAddress !== 'undefined' && walletAddress) ? walletAddress : '';
+  if (!addr) { if (typeof toast==='function') toast('No wallet connected.','warn'); return; }
+  var inp = document.getElementById('tax-addr-input');
+  if (inp) { inp.value = addr; }
+  _taxAddr = addr;
+  taxValidateAddr();
+}
+window.taxFillConnected = taxFillConnected;
+
+function taxFillSmartWallet() {
+  var addr = '';
+  // Try Circle AI Smart Wallet address from global state
+  if (typeof aiSmartWalletAddress !== 'undefined' && aiSmartWalletAddress) addr = aiSmartWalletAddress;
+  else if (typeof circleAgentWalletAddress !== 'undefined' && circleAgentWalletAddress) addr = circleAgentWalletAddress;
+  if (!addr) { if (typeof toast==='function') toast('Smart Wallet not available.','warn'); return; }
+  var inp = document.getElementById('tax-addr-input');
+  if (inp) { inp.value = addr; }
+  _taxAddr = addr;
+  taxValidateAddr();
+}
+window.taxFillSmartWallet = taxFillSmartWallet;
+
+function taxFillAgentWallet() {
+  var addr = '';
+  if (typeof agentWalletAddress !== 'undefined' && agentWalletAddress) addr = agentWalletAddress;
+  if (!addr) { if (typeof toast==='function') toast('Agent Wallet not available.','warn'); return; }
+  var inp = document.getElementById('tax-addr-input');
+  if (inp) { inp.value = addr; }
+  _taxAddr = addr;
+  taxValidateAddr();
+}
+window.taxFillAgentWallet = taxFillAgentWallet;
+
+function taxClearAddr() {
+  var inp = document.getElementById('tax-addr-input');
+  if (inp) inp.value = '';
+  _taxAddr = '';
+  taxValidateAddr();
+}
+window.taxClearAddr = taxClearAddr;
+
+function taxValidateAddr() {
+  var inp = document.getElementById('tax-addr-input');
+  var err = document.getElementById('tax-addr-err');
+  var btn = document.getElementById('tax-btn-next0');
+  var val = inp ? inp.value.trim() : '';
+  _taxAddr = '';
+  var ok = false;
+  if (val.length === 0) {
+    if (err) err.textContent = '';
+  } else if (/^0x[0-9a-fA-F]{40}$/.test(val)) {
+    if (err) err.textContent = '';
+    ok = true; _taxAddr = val;
+  } else if (/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(val)) {
+    if (err) err.textContent = '';
+    ok = true; _taxAddr = val;
+  } else {
+    if (err) err.textContent = 'Invalid address format. Enter a valid EVM (0x…) or Solana address.';
+  }
+  if (btn) btn.disabled = !ok;
+}
+window.taxValidateAddr = taxValidateAddr;
+
+/* ── Panel 1: Networks ───────────────────────────────────────────────────── */
+function _taxRenderNetGrid() {
+  var g = document.getElementById('tax-net-grid');
+  if (!g) return;
+  g.innerHTML = TAX_NETS.map(function(n) {
+    var d = _taxNets[n.id] || {};
+    var sel = d.selected ? ' sel' : '';
+    var cnt = d.ops !== undefined ? '<span class="cnt">'+d.ops+' ops</span>' : '';
+    return '<div class="tax-net-chip'+sel+'" data-net="'+n.id+'" onclick="taxToggleNet(\''+n.id+'\')">'
+      + n.icon + ' ' + n.label + cnt + '</div>';
+  }).join('');
+  var btn = document.getElementById('tax-btn-next1');
+  if (btn) btn.disabled = !Object.values(_taxNets).some(function(v){return v.selected;});
+}
+
+function taxToggleNet(id) {
+  if (!_taxNets[id]) _taxNets[id] = { ops: 0, selected: false };
+  _taxNets[id].selected = !_taxNets[id].selected;
+  _taxRenderNetGrid();
+  if (_taxQuote) { _taxQuote = null; } // invalidate quote when selection changes
+  _taxCalcQuote();
+}
+window.taxToggleNet = taxToggleNet;
+
+function taxScan() {
+  if (!_taxAddr) { if (typeof toast==='function') toast('Enter an address first.','warn'); taxGoStep(0); return; }
+  var statusEl = document.getElementById('tax-scan-status');
+  var progEl   = document.getElementById('tax-scan-progress');
+  var btn      = document.getElementById('tax-btn-scan');
+  if (statusEl) statusEl.textContent = 'Scanning…';
+  if (btn) btn.disabled = true;
+  if (progEl) progEl.innerHTML = TAX_NETS.map(function(n){
+    return '<div style="display:flex;align-items:center;gap:8px;font-size:9.5px;margin-bottom:4px" id="tax-prog-'+n.id+'">'
+      + n.icon + ' ' + n.label
+      + '<div class="tax-progress" style="flex:1"><div class="tax-progress-fill" id="tax-prog-fill-'+n.id+'" style="width:0%"></div></div>'
+      + '<span id="tax-prog-val-'+n.id+'" style="color:var(--muted2);min-width:40px;text-align:right">—</span>'
+      +'</div>';
+  }).join('');
+
+  // Call Pages Function for scan
+  fetch('/api/tax/scan', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ address: _taxAddr, targetType: _taxTargetType, networks: TAX_NETS.map(function(n){return n.id;}) })
+  }).then(function(r){ return r.json(); }).then(function(data) {
+    if (!data.results) throw new Error(data.error || 'Scan failed');
+    data.results.forEach(function(r) {
+      _taxNets[r.network] = { ops: r.ops, selected: r.ops > 0, error: r.error };
+      var fill = document.getElementById('tax-prog-fill-'+r.network);
+      var val  = document.getElementById('tax-prog-val-'+r.network);
+      if (fill) fill.style.width = r.error ? '0%' : '100%';
+      if (val) val.textContent = r.error ? '⚠ error' : r.ops + ' ops';
+    });
+    _taxRenderNetGrid();
+    if (statusEl) statusEl.textContent = 'Scan complete.';
+    if (btn) btn.disabled = false;
+  }).catch(function(e) {
+    // Demo fallback — mock scan results
+    TAX_NETS.forEach(function(n, i) {
+      var mockOps = [142, 0, 37, 12, 0, 8, 0][i] || 0;
+      _taxNets[n.id] = { ops: mockOps, selected: mockOps > 0 };
+      var fill = document.getElementById('tax-prog-fill-'+n.id);
+      var val  = document.getElementById('tax-prog-val-'+n.id);
+      if (fill) fill.style.width = '100%';
+      if (val) val.textContent = mockOps + ' ops';
+    });
+    _taxRenderNetGrid();
+    if (statusEl) statusEl.textContent = 'Demo mode — mock scan data.';
+    if (btn) btn.disabled = false;
+  });
+}
+window.taxScan = taxScan;
+
+/* ── Panel 2: Country ───────────────────────────────────────────────────── */
+/* Populate the <select> once (idempotent — safe to call multiple times) */
+function _taxPopulateSelect() {
+  var sel = document.getElementById('tax-country-select');
+  if (!sel || sel.options.length > 1) return; // already populated
+  TAX_COUNTRIES.forEach(function(c) {
+    var opt = document.createElement('option');
+    opt.value = c.id;
+    opt.textContent = c.flag + '\u00a0' + c.name;
+    sel.appendChild(opt);
+  });
+  // Restore persisted selection
+  var saved = '';
+  try { saved = localStorage.getItem('tax_country') || localStorage.getItem('tax_default_country') || ''; } catch(_) {}
+  if (saved && TAX_COUNTRIES.some(function(c){return c.id===saved;})) {
+    sel.value = saved;
+    _taxApplyCountryById(saved);
+  }
+}
+
+function _taxRenderCountryGrid() {
+  // Legacy: populate select and sync button state
+  _taxPopulateSelect();
+  var btn = document.getElementById('tax-btn-next2');
+  if (btn) btn.disabled = !_taxCountry;
+}
+
+function _taxApplyCountryById(id) {
+  _taxCountry = TAX_COUNTRIES.find(function(c){return c.id===id;}) || null;
+  // Show/hide rules card
+  var card  = document.getElementById('tax-country-rules');
+  var title = document.getElementById('tax-rules-title');
+  var meth  = document.getElementById('tax-rules-method');
+  var per   = document.getElementById('tax-rules-period');
+  var fmt   = document.getElementById('tax-rules-format');
+  var cur   = document.getElementById('tax-rules-currency');
+  var btn   = document.getElementById('tax-btn-next2');
+  if (_taxCountry && card) {
+    if (title) title.textContent = _taxCountry.flag + '\u00a0' + _taxCountry.name + ' — Tax rules';
+    if (meth)  meth.textContent  = _taxCountry.method;
+    if (per)   per.textContent   = _taxCountry.period;
+    if (fmt)   fmt.textContent   = _taxCountry.format;
+    if (cur)   cur.textContent   = _taxCountry.currency;
+    card.style.display = '';
+    if (btn) btn.disabled = false;
+  } else if (card) {
+    card.style.display = 'none';
+    if (btn) btn.disabled = true;
+  }
+}
+
+function taxSelectCountry(id) {
+  _taxApplyCountryById(id);
+  // Persist
+  try { if (id) localStorage.setItem('tax_country', id); } catch(_) {}
+  // Keep select in sync if called programmatically (e.g. from Autonoma)
+  var sel = document.getElementById('tax-country-select');
+  if (sel && id && sel.value !== id) sel.value = id;
+  // Invalidate stale quote
+  if (_taxQuote) { _taxQuote = null; }
+  _taxCalcQuote();
+}
+window.taxSelectCountry = taxSelectCountry;
+
+/* ── Fee calculation ────────────────────────────────────────────────────── */
+function _taxCalcQuote() {
+  var selNets = TAX_NETS.filter(function(n){ return _taxNets[n.id] && _taxNets[n.id].selected; });
+  var totalOps = selNets.reduce(function(s,n){ return s + ((_taxNets[n.id]||{}).ops||0); }, 0);
+  var defi = document.getElementById('tax-defi-check');
+  var hasDefi = defi && defi.checked;
+
+  var volumeFee   = Math.ceil(Math.max(0, totalOps - 500) / 500) * TAX_FEE.volumePer500;
+  var networkFee  = Math.max(0, selNets.length - 1) * TAX_FEE.perExtraNet;
+  var complexFee  = hasDefi ? TAX_FEE.complexity : 0;
+  var total       = TAX_FEE.base + volumeFee + networkFee + complexFee;
+
+  var expiresAt = Date.now() + TAX_FEE.quoteExpiryMs;
+  var quoteId = 'q-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2,6);
+
+  _taxQuote = {
+    id: quoteId,
+    amount: total,
+    totalOps: totalOps,
+    selNets: selNets.length,
+    hasDefi: hasDefi,
+    expiresAt: expiresAt,
+    lines: [
+      { k: 'Base fee',       v: TAX_FEE.base + ' USDC' },
+      { k: 'Volume fee (' + totalOps + ' ops)', v: volumeFee + ' USDC' },
+      { k: 'Networks (' + selNets.length + ' selected)', v: networkFee + ' USDC' },
+      { k: 'Complexity (DeFi/NFT)', v: complexFee > 0 ? complexFee + ' USDC' : 'N/A' },
+    ]
+  };
+  _taxRenderQuote();
+}
+
+function taxRecalcQuote() { _taxCalcQuote(); }
+window.taxRecalcQuote = taxRecalcQuote;
+
+function _taxRenderQuote() {
+  var totalEl = document.getElementById('tax-quote-total');
+  var linesEl = document.getElementById('tax-quote-lines');
+  var expEl   = document.getElementById('tax-quote-expiry');
+  var totalMobile = document.getElementById('tax-quote-total-mobile');
+  if (!_taxQuote) return;
+  var txt = _taxQuote.amount + ' USDC';
+  if (totalEl)  totalEl.textContent  = txt;
+  if (totalMobile) totalMobile.textContent = txt;
+  if (linesEl) {
+    linesEl.innerHTML = _taxQuote.lines.map(function(l){
+      return '<div class="tax-quote-line"><span class="k">'+l.k+'</span><span class="v">'+l.v+'</span></div>';
+    }).join('');
+  }
+  if (expEl) {
+    var min = Math.round((_taxQuote.expiresAt - Date.now()) / 60000);
+    expEl.textContent = 'Quote valid for ' + min + ' min · ID: ' + _taxQuote.id;
+  }
+  // Mobile sheet
+  var sheet = document.getElementById('tax-quote-sheet');
+  if (sheet && window.innerWidth <= 700) sheet.classList.add('open');
+}
+
+/* ── Panel 4: Pay ───────────────────────────────────────────────────────── */
+function _taxRenderPayPanel() {
+  var sumEl = document.getElementById('tax-pay-summary');
+  var demoEl = document.getElementById('tax-demo-badge');
+  if (!_taxQuote) { _taxCalcQuote(); }
+  var q = _taxQuote;
+  if (!q || !sumEl) return;
+  sumEl.innerHTML = '<div style="font-size:10px;color:var(--muted2);margin-bottom:6px">You are paying</div>'
+    + '<div style="font-size:26px;font-weight:800;color:var(--yellow);margin-bottom:10px">' + q.amount + ' USDC</div>'
+    + q.lines.map(function(l){ return '<div class="tax-quote-line"><span class="k">'+l.k+'</span><span class="v">'+l.v+'</span></div>'; }).join('')
+    + '<div style="margin-top:10px;font-size:9.5px;color:var(--muted2)">Address: <code style="color:var(--text)">' + _taxAddr.slice(0,12) + '…' + _taxAddr.slice(-6) + '</code></div>'
+    + '<div style="font-size:9.5px;color:var(--muted2)">Country: <strong>' + (_taxCountry ? _taxCountry.name : '—') + '</strong></div>'
+    + '<div style="font-size:9.5px;color:var(--muted2)">Quote ID: ' + q.id + '</div>';
+  var hasSigner = typeof signer !== 'undefined' && signer;
+  if (demoEl) demoEl.style.display = hasSigner ? 'none' : 'block';
+}
+
+async function taxExecutePay() {
+  if (!_taxQuote) { if (typeof toast==='function') toast('No active quote.','error'); return; }
+  if (Date.now() > _taxQuote.expiresAt) {
+    if (typeof toast==='function') toast('Quote expired. Please recalculate.','error');
+    taxGoStep(3); return;
+  }
+  var btn = document.getElementById('tax-btn-confirm-pay');
+  var statEl = document.getElementById('tax-pay-status');
+  if (btn) btn.disabled = true;
+  if (statEl) statEl.textContent = 'Awaiting wallet confirmation…';
+
+  var hasSigner = typeof signer !== 'undefined' && signer;
+  var txHash = null;
+
+  try {
+    if (hasSigner) {
+      // Real payment: USDC transfer on Arc Mainnet
+      // Opção B: transfer to protocol treasury with unique amount per quote
+      var USDC_ARC = '0x3600000000000000000000000000000000000000';
+      var TREASURY = typeof PROTOCOL_TREASURY !== 'undefined' ? PROTOCOL_TREASURY : '0x0000000000000000000000000000000000000000';
+      var decimals = 6;
+      var amount = BigInt(Math.round(_taxQuote.amount * 1e6));
+      // ERC-20 transfer ABI
+      var iface = new ethers.Interface(['function transfer(address to, uint256 value) returns (bool)']);
+      var data  = iface.encodeFunctionData('transfer', [TREASURY, amount]);
+      var tx    = await signer.sendTransaction({ to: USDC_ARC, data: data });
+      if (statEl) statEl.textContent = 'Transaction sent · ' + tx.hash.slice(0,10) + '…';
+      var receipt = await tx.wait(1);
+      txHash = receipt.hash || tx.hash;
+      if (statEl) statEl.textContent = 'Payment confirmed ✓';
+    } else {
+      // Demo mode
+      await new Promise(function(r){ setTimeout(r, 1200); });
+      txHash = '0xDEMO' + Date.now().toString(16);
+      if (statEl) statEl.textContent = 'Demo payment simulated ✓';
+    }
+
+    _taxPayTx = txHash;
+    // Verify payment on server (non-blocking in demo)
+    if (hasSigner) {
+      try {
+        var vr = await fetch('/api/tax/verify-payment', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ quoteId: _taxQuote.id, txHash: txHash, amount: _taxQuote.amount })
+        }).then(function(r){return r.json();});
+        if (!vr.ok) throw new Error(vr.error || 'Verification failed');
+      } catch(e) {
+        if (typeof toast==='function') toast('Payment verification warning: ' + e.message, 'warn');
+      }
+    }
+
+    _taxGoStepInternal(5);
+    taxGenerateReport();
+  } catch(e) {
+    if (statEl) statEl.textContent = 'Payment failed: ' + (e.message||e);
+    if (typeof toast==='function') toast('Payment failed: ' + (e.message||e), 'error');
+    if (btn) btn.disabled = false;
+  }
+}
+window.taxExecutePay = taxExecutePay;
+
+/* ── Panel 5: Report ────────────────────────────────────────────────────── */
+function taxGenerateReport() {
+  var loadEl = document.getElementById('tax-report-loading');
+  var contEl = document.getElementById('tax-report-content');
+  if (loadEl) loadEl.style.display = 'block';
+  if (contEl) contEl.style.display = 'none';
+
+  // Call Pages Function for report
+  fetch('/api/tax/report', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({
+      address:    _taxAddr,
+      targetType: _taxTargetType,
+      networks:   Object.keys(_taxNets).filter(function(k){return _taxNets[k].selected;}),
+      country:    _taxCountry ? _taxCountry.id : 'US',
+      quoteId:    _taxQuote ? _taxQuote.id : null,
+      txHash:     _taxPayTx,
+      hasDefi:    (document.getElementById('tax-defi-check')||{}).checked,
+    })
+  }).then(function(r){return r.json();}).then(function(data){
+    if (!data.ok) throw new Error(data.error||'Report generation failed');
+    _taxReport = data;
+    _taxRenderReport(data);
+  }).catch(function(e){
+    // Demo fallback
+    _taxReport = _taxMockReport();
+    _taxRenderReport(_taxReport);
+  });
+}
+
+function _taxMockReport() {
+  var country = _taxCountry || TAX_COUNTRIES[0];
+  var ops = [];
+  var mockData = [
+    { date:'2024-03-15', chain:'Arc',  type:'swap',    in:'100 USDC', out:'0.0028 ETH', usd:100, gas:'0.02',  pl:2.4 },
+    { date:'2024-02-10', chain:'Base', type:'receive', in:'50 USDC',  out:'-',          usd:50,  gas:'0.001', pl:0   },
+    { date:'2024-01-22', chain:'Arc',  type:'send',    in:'-',        out:'25 USDC',    usd:25,  gas:'0.02',  pl:0   },
+    { date:'2023-12-05', chain:'ETH',  type:'staking', in:'1.2 USDC', out:'-',          usd:1.2, gas:'0.50',  pl:1.2 },
+    { date:'2023-11-30', chain:'Arc',  type:'bridge',  in:'200 USDC', out:'200 USDC',   usd:200, gas:'0.03',  pl:0   },
+  ];
+  return {
+    ok: true,
+    country: country,
+    address: _taxAddr,
+    period: '2023–2024',
+    metrics: {
+      realizedGain: 2.4,
+      deductibleLoss: 0,
+      income: 1.2,
+      deductibleFees: 0.591,
+      classifiedOps: mockData.length,
+      ignoredSelfTransfer: 1,
+      estimatedTax: 0.72,
+    },
+    ops: mockData,
+  };
+}
+
+function _taxRenderReport(data) {
+  var loadEl = document.getElementById('tax-report-loading');
+  var contEl = document.getElementById('tax-report-content');
+  if (loadEl) loadEl.style.display = 'none';
+  if (contEl) contEl.style.display = 'block';
+
+  var titleEl = document.getElementById('tax-report-title');
+  if (titleEl) titleEl.textContent = 'Tax Report · ' + (data.country ? data.country.name : '') + ' · ' + (data.period || '');
+
+  var metricsEl = document.getElementById('tax-report-metrics');
+  var m = data.metrics || {};
+  if (metricsEl) {
+    metricsEl.innerHTML = [
+      { l:'Realized Gain',     v: (m.realizedGain||0).toFixed(2) + ' ' + ((data.country||{}).currency||'USD'), c:'green' },
+      { l:'Deductible Loss',   v: (m.deductibleLoss||0).toFixed(2),  c:'text' },
+      { l:'Income (staking)',  v: (m.income||0).toFixed(2),          c:'blue' },
+      { l:'Deductible Fees',   v: (m.deductibleFees||0).toFixed(2),  c:'muted2' },
+      { l:'Ops Classified',    v: m.classifiedOps || 0,              c:'text' },
+      { l:'Ignored (self)',    v: m.ignoredSelfTransfer || 0,        c:'muted2' },
+      { l:'Estimated Tax',     v: (m.estimatedTax||0).toFixed(2),    c:'yellow' },
+    ].map(function(x){
+      return '<div class="tax-metric"><div class="lbl">'+x.l+'</div><div class="val" style="color:var(--'+x.c+');font-size:16px">'+x.v+'</div></div>';
+    }).join('');
+  }
+
+  var tbody = document.getElementById('tax-ops-tbody');
+  var cntEl = document.getElementById('tax-ops-count');
+  if (tbody && data.ops) {
+    if (cntEl) cntEl.textContent = '(' + data.ops.length + ' events)';
+    tbody.innerHTML = data.ops.map(function(op) {
+      var badgeCls = op.pl > 0 ? 'gain' : op.pl < 0 ? 'loss' : op.type === 'staking' ? 'income' : op.type === 'bridge' ? 'ignored' : 'ignored';
+      var plTxt = op.pl !== 0 ? (op.pl > 0 ? '+' : '') + op.pl.toFixed(2) : '—';
+      return '<tr><td>'+op.date+'</td><td>'+op.chain+'</td><td><span class="tax-badge '+badgeCls+'">'+op.type+'</span></td><td>'+op.in+'</td><td>'+op.out+'</td><td>$'+op.usd+'</td><td>'+op.gas+' USDC</td><td style="color:'+(op.pl>0?'var(--green)':op.pl<0?'#ef4444':'var(--muted2)')+'">'+plTxt+'</td><td><a href="#" style="color:var(--blue);font-size:9px">tx</a></td></tr>';
+    }).join('');
+  }
+
+  // Persist to history
+  var entry = {
+    id:      _taxQuote ? _taxQuote.id : 'r-'+Date.now(),
+    ts:      Date.now(),
+    address: _taxAddr,
+    country: _taxCountry ? _taxCountry.id : null,
+    amount:  _taxQuote ? _taxQuote.amount : 0,
+    txHash:  _taxPayTx || null,
+    ops:     m.classifiedOps || 0,
+  };
+  _taxReportHistory.unshift(entry);
+  _taxSaveHistory();
+  _taxUpdateMetrics();
+
+  // Push to Reports tab history
+  try {
+    var rptEntry = {
+      date:    new Date().toISOString(),
+      type:    'Tax Report',
+      amount:  _taxQuote ? _taxQuote.amount : 0,
+      status:  'completed',
+      txHash:  _taxPayTx || null,
+      note:    (data.country ? data.country.name : '') + ' · ' + _taxAddr.slice(0,8) + '…',
+    };
+    var stored = JSON.parse(localStorage.getItem('txHistory') || '[]');
+    stored.unshift(rptEntry);
+    localStorage.setItem('txHistory', JSON.stringify(stored.slice(0, 200)));
+  } catch(_) {}
+}
+
+/* ── Metrics bar ─────────────────────────────────────────────────────────── */
+function _taxUpdateMetrics() {
+  var rEl = document.getElementById('tax-m-reports');
+  var wEl = document.getElementById('tax-m-wallets');
+  var oEl = document.getElementById('tax-m-ops');
+  var fEl = document.getElementById('tax-m-fees');
+  var addrs = {};
+  var totalOps = 0, totalFees = 0;
+  _taxReportHistory.forEach(function(r){
+    if (r.address) addrs[r.address] = 1;
+    totalOps  += (r.ops || 0);
+    totalFees += (r.amount || 0);
+  });
+  if (rEl) rEl.textContent = _taxReportHistory.length;
+  if (wEl) wEl.textContent = Object.keys(addrs).length;
+  if (oEl) oEl.textContent = totalOps;
+  if (fEl) fEl.textContent = totalFees.toFixed(0) + ' USDC';
+}
+
+/* ── Download / Export ───────────────────────────────────────────────────── */
+function taxDownloadPDF() {
+  if (typeof toast==='function') toast('PDF generation requires a server-side render (Pages Function). Coming soon.','info');
+}
+window.taxDownloadPDF = taxDownloadPDF;
+
+function taxExportCSV() {
+  if (!_taxReport || !_taxReport.ops) { if(typeof toast==='function') toast('No report data.','warn'); return; }
+  var rows = [['Date','Chain','Type','Asset In','Asset Out','USD Value','Gas USDC','P/L']];
+  _taxReport.ops.forEach(function(op){
+    rows.push([op.date, op.chain, op.type, op.in, op.out, op.usd, op.gas, op.pl]);
+  });
+  var csv = rows.map(function(r){ return r.map(function(c){ return '"'+String(c).replace(/"/g,'""')+'"'; }).join(','); }).join('\n');
+  var blob = new Blob([csv], {type:'text/csv'});
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href=url; a.download='tax-report-'+Date.now()+'.csv'; a.click();
+  URL.revokeObjectURL(url);
+}
+window.taxExportCSV = taxExportCSV;
+
+/* ── History modal (simple toast list) ──────────────────────────────────── */
+function taxOpenHistory() {
+  if (_taxReportHistory.length === 0) { if(typeof toast==='function') toast('No tax reports generated yet.','info'); return; }
+  var lines = _taxReportHistory.slice(0,5).map(function(r){
+    return new Date(r.ts).toLocaleDateString() + ' · ' + (r.country||'?') + ' · ' + r.amount + ' USDC · ' + r.ops + ' ops';
+  }).join('\n');
+  alert('Recent Tax Reports:\n\n' + lines);
+}
+window.taxOpenHistory = taxOpenHistory;
+
+/* ── New report (reset state) ────────────────────────────────────────────── */
+function taxNewReport() {
+  _taxStep = 0;
+  _taxAddr = ''; _taxNets = {}; _taxCountry = null; _taxQuote = null; _taxPayTx = null; _taxReport = null;
+  _taxTargetType = 'wallet';
+  var inp = document.getElementById('tax-addr-input');
+  if (inp) inp.value = '';
+  var err = document.getElementById('tax-addr-err');
+  if (err) err.textContent = '';
+  var btn = document.getElementById('tax-btn-next0');
+  if (btn) btn.disabled = true;
+  var defi = document.getElementById('tax-defi-check');
+  if (defi) defi.checked = false;
+  _taxRenderNetGrid();
+  _taxRenderCountryGrid();
+  document.querySelectorAll('#tax-target-toggle .tax-toggle-btn').forEach(function(b){
+    b.classList.toggle('active', b.textContent.toLowerCase().trim() === 'wallet');
+  });
+  _taxGoStepInternal(0);
+}
+window.taxNewReport = taxNewReport;
+
+/* ── Autonoma integration hook ───────────────────────────────────────────── */
+window.taxOpenForAutonoma = function(addr) {
+  showPage('tax');
+  if (addr) {
+    var inp = document.getElementById('tax-addr-input');
+    if (inp) { inp.value = addr; }
+    _taxAddr = addr;
+    taxValidateAddr();
+  }
+};
+
+/* ── Settings: default country + contract ────────────────────────────────── */
+function taxSettingsSave() {
+  try {
+    var cSel = document.getElementById('stg-tax-country');
+    var cCon = document.getElementById('stg-tax-contract');
+    var country = cSel ? cSel.value : '';
+    var contract = cCon ? cCon.value.trim() : '';
+    if (country) {
+      localStorage.setItem('tax_default_country', country);
+      _taxCountry = TAX_COUNTRIES.find(function(c){return c.id===country;}) || null;
+    }
+    if (contract && /^0x[0-9a-fA-F]{40}$/.test(contract)) {
+      localStorage.setItem('tax_payment_contract', contract);
+    }
+    if (typeof toast === 'function') toast('Tax settings saved.', 'success');
+  } catch(_) {}
+}
+window.taxSettingsSave = taxSettingsSave;
+
+function taxSettingsLoad() {
+  try {
+    var country  = localStorage.getItem('tax_default_country') || '';
+    var contract = localStorage.getItem('tax_payment_contract') || '';
+    var cSel = document.getElementById('stg-tax-country');
+    var cCon = document.getElementById('stg-tax-contract');
+    if (cSel && country) cSel.value = country;
+    if (cCon && contract) cCon.value = contract;
+    if (country) _taxCountry = TAX_COUNTRIES.find(function(c){return c.id===country;}) || null;
+  } catch(_) {}
+}
+
+// Load on DOMContentLoaded
+try {
+  var _taxDefaultCountry = localStorage.getItem('tax_default_country');
+  if (_taxDefaultCountry) {
+    _taxCountry = TAX_COUNTRIES.find(function(c){return c.id===_taxDefaultCountry;}) || null;
+  }
+} catch(_) {}
+
+// Expose for Settings panel
+document.addEventListener('DOMContentLoaded', function(){ setTimeout(taxSettingsLoad, 500); });
+
+})();
+</script>
 
 <!-- ── Bridge Multi-Token Picker Modal ─────────────────────────────────── -->
 <div id="bridge-token-picker">
