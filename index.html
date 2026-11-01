@@ -68048,6 +68048,64 @@ function taxToggleNet(id) {
 }
 window.taxToggleNet = taxToggleNet;
 
+/* ── Front-end scan cache (5 min per address+net) ──────────────────────── */
+var _taxScanCache = {};
+function _taxScanCacheKey(addr, net) { return (addr||'').toLowerCase() + ':' + net; }
+function _taxScanFromCache(addr, net) {
+  var k = _taxScanCacheKey(addr, net);
+  var e = _taxScanCache[k];
+  if (!e) return null;
+  if (Date.now() - e.ts > 5*60*1000) { delete _taxScanCache[k]; return null; }
+  return e.result;
+}
+function _taxScanToCache(addr, net, result) {
+  _taxScanCache[_taxScanCacheKey(addr, net)] = { ts: Date.now(), result: result };
+}
+
+/* ── Status label helper ────────────────────────────────────────────────── */
+function _taxScanLabel(r) {
+  if (!r) return { text: '…', color: 'var(--muted2)', fill: 0 };
+  switch (r.status) {
+    case 'done':
+      return r.ops > 0
+        ? { text: r.ops + ' ops', color: 'var(--green)', fill: 100 }
+        : { text: '0 ops', color: 'var(--muted2)', fill: 20 };
+    case 'not_configured':
+      return { text: 'Not configured', color: 'var(--muted2)', fill: 0, tip: r.error };
+    case 'coming_soon':
+      return { text: 'Coming soon', color: 'var(--muted2)', fill: 0, tip: r.error };
+    case 'not_supported':
+      return { text: 'N/A', color: 'var(--muted2)', fill: 0 };
+    case 'rate_limited':
+      return { text: 'Rate limited', color: 'var(--yellow)', fill: 0, tip: r.error };
+    case 'failed':
+      return { text: 'Failed', color: '#ef4444', fill: 0, tip: r.error };
+    default:
+      return r.error
+        ? { text: 'Error', color: '#ef4444', fill: 0, tip: r.error }
+        : { text: r.ops + ' ops', color: 'var(--green)', fill: 100 };
+  }
+}
+
+function _taxApplyScanResult(r) {
+  var lbl = _taxScanLabel(r);
+  var fillEl = document.getElementById('tax-prog-fill-'+r.network);
+  var valEl  = document.getElementById('tax-prog-val-'+r.network);
+  if (fillEl) fillEl.style.width = lbl.fill + '%';
+  if (valEl) {
+    valEl.textContent = lbl.text;
+    valEl.style.color = lbl.color;
+    if (lbl.tip) valEl.title = lbl.tip;
+  }
+  // Store state
+  var isUsable = r.status === 'done' || r.status === 'coming_soon';
+  _taxNets[r.network] = { ops: r.ops || 0, selected: r.ops > 0, status: r.status, error: r.error };
+  // Enable Continue if at least one net has ops > 0
+  var anyOps = Object.values(_taxNets).some(function(v){ return v.ops > 0; });
+  var next1 = document.getElementById('tax-btn-next1');
+  if (next1) next1.disabled = !anyOps;
+}
+
 function taxScan() {
   if (!_taxAddr) { if (typeof toast==='function') toast('Enter an address first.','warn'); taxGoStep(0); return; }
   var statusEl = document.getElementById('tax-scan-status');
@@ -68055,40 +68113,54 @@ function taxScan() {
   var btn      = document.getElementById('tax-btn-scan');
   if (statusEl) statusEl.textContent = 'Scanning…';
   if (btn) btn.disabled = true;
+
+  var nets = TAX_NETS.map(function(n){ return n.id; });
+
+  // Build progress rows — one per network
   if (progEl) progEl.innerHTML = TAX_NETS.map(function(n){
+    var cached = _taxScanFromCache(_taxAddr, n.id);
+    var lbl    = cached ? _taxScanLabel(cached) : { text: '…', color: 'var(--muted2)', fill: 0 };
     return '<div style="display:flex;align-items:center;gap:8px;font-size:9.5px;margin-bottom:4px" id="tax-prog-'+n.id+'">'
-      + n.icon + ' ' + n.label
-      + '<div class="tax-progress" style="flex:1"><div class="tax-progress-fill" id="tax-prog-fill-'+n.id+'" style="width:0%"></div></div>'
-      + '<span id="tax-prog-val-'+n.id+'" style="color:var(--muted2);min-width:40px;text-align:right">—</span>'
+      + n.icon + ' <span style="min-width:78px">' + n.label + '</span>'
+      + '<div class="tax-progress" style="flex:1"><div class="tax-progress-fill" id="tax-prog-fill-'+n.id+'" style="width:'+lbl.fill+'%"></div></div>'
+      + '<span id="tax-prog-val-'+n.id+'" style="color:'+lbl.color+';min-width:90px;text-align:right;font-family:monospace" title="'+(lbl.tip||'')+'">'+lbl.text+'</span>'
       +'</div>';
   }).join('');
 
-  // Call Pages Function for scan
+  // Apply cached results immediately so the UI isn't blank while waiting
+  nets.forEach(function(netId) {
+    var cached = _taxScanFromCache(_taxAddr, netId);
+    if (cached) _taxApplyScanResult(cached);
+  });
+
   fetch('/api/tax/scan', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ address: _taxAddr, targetType: _taxTargetType, networks: TAX_NETS.map(function(n){return n.id;}) })
-  }).then(function(r){ return r.json(); }).then(function(data) {
+    body: JSON.stringify({ address: _taxAddr, targetType: _taxTargetType, networks: nets })
+  })
+  .then(function(r) {
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return r.json();
+  })
+  .then(function(data) {
     if (!data.results) throw new Error(data.error || 'Scan failed');
     data.results.forEach(function(r) {
-      _taxNets[r.network] = { ops: r.ops, selected: r.ops > 0, error: r.error };
-      var fill = document.getElementById('tax-prog-fill-'+r.network);
-      var val  = document.getElementById('tax-prog-val-'+r.network);
-      if (fill) fill.style.width = r.error ? '0%' : '100%';
-      if (val) val.textContent = r.error ? '⚠ error' : r.ops + ' ops';
+      _taxScanToCache(_taxAddr, r.network, r);
+      _taxApplyScanResult(r);
     });
     _taxRenderNetGrid();
-    if (statusEl) statusEl.textContent = 'Scan complete.';
+    var anyOps = Object.values(_taxNets).some(function(v){ return v.ops > 0; });
+    if (statusEl) statusEl.textContent = anyOps ? 'Scan complete.' : 'Scan complete — no activity found.';
     if (btn) btn.disabled = false;
-  }).catch(function(e) {
-    // Demo fallback — mock scan results
-    TAX_NETS.forEach(function(n, i) {
-      var mockOps = [142, 0, 37, 12, 0, 8, 0][i] || 0;
-      _taxNets[n.id] = { ops: mockOps, selected: mockOps > 0 };
-      var fill = document.getElementById('tax-prog-fill-'+n.id);
-      var val  = document.getElementById('tax-prog-val-'+n.id);
-      if (fill) fill.style.width = '100%';
-      if (val) val.textContent = mockOps + ' ops';
+  })
+  .catch(function(e) {
+    // Network/CF unreachable — fall back to demo mode
+    var mockOpsMap = { arc: 142, ethereum: 0, base: 37, arbitrum: 12, optimism: 0, polygon: 8, solana: 0 };
+    TAX_NETS.forEach(function(n) {
+      var mockOps = mockOpsMap[n.id] || 0;
+      var r = { network: n.id, ops: mockOps, status: mockOps > 0 ? 'done' : 'done' };
+      _taxNets[n.id] = { ops: mockOps, selected: mockOps > 0, status: r.status };
+      _taxApplyScanResult(r);
     });
     _taxRenderNetGrid();
     if (statusEl) statusEl.textContent = 'Demo mode — mock scan data.';
