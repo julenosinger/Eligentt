@@ -176,6 +176,11 @@ export function deduplicateTransfers(transfers) {
     const hash = (t.hash || '').toLowerCase();
     const cat  = (t.category || '').toLowerCase();
 
+    // P0.3 (Phase 1.1.2): if hash is absent/empty we cannot build a reliable key
+    // for ANY category — force fallback so these records are preserved, not silently
+    // collapsed with each other or with legitimate zero-hash placeholders.
+    const hasHash = hash.length > 0 && hash !== '0x';
+
     if (t.uniqueId) {
       // Phase 1.1.1: scope uniqueId by network so the same Alchemy uniqueId on two
       // different chains (edge case, but possible with wrapped assets) is not collapsed.
@@ -184,12 +189,12 @@ export function deduplicateTransfers(transfers) {
     } else if (cat === 'erc20' || cat === 'erc721' || cat === 'erc1155' || cat === 'specialnft') {
       const logIdx   = t.log?.logIndex != null ? String(t.log.logIndex) : null;
       const contract = (t.rawContract?.address || '').toLowerCase();
-      if (logIdx !== null) {
+      if (hasHash && logIdx !== null) {
         key        = `tok:${net}:${hash}:${contract}:${logIdx}`;
         isConfident = true;
       } else {
-        // No logIndex — fallback; do NOT discard on collision
-        key        = `tok_fl:${net}:${hash}:${contract}:${t.value || ''}`;
+        // No logIndex or no hash — fallback; do NOT discard on collision
+        key        = `tok_fl:${net}:${hash}:${contract}:${logIdx || ''}:${t.value || ''}`;
         isConfident = false;
         fallbackKeys++;
       }
@@ -197,7 +202,7 @@ export function deduplicateTransfers(transfers) {
       const trace = t.traceAddress
         ? JSON.stringify(t.traceAddress)
         : (t.internalIndex != null ? String(t.internalIndex) : null);
-      if (trace !== null) {
+      if (hasHash && trace !== null) {
         key        = `int:${net}:${hash}:${trace}`;
         isConfident = true;
       } else {
@@ -206,9 +211,16 @@ export function deduplicateTransfers(transfers) {
         fallbackKeys++;
       }
     } else {
-      // External/native: hash uniquely identifies this event in context of from+to
-      key        = `ext:${net}:${hash}:${(t.from || '').toLowerCase()}:${(t.to || '').toLowerCase()}`;
-      isConfident = true;
+      if (hasHash) {
+        // External/native: hash uniquely identifies this event in context of from+to
+        key        = `ext:${net}:${hash}:${(t.from || '').toLowerCase()}:${(t.to || '').toLowerCase()}`;
+        isConfident = true;
+      } else {
+        // No hash — cannot build a reliable key; preserve and flag
+        key        = `ext_fl:${net}:${(t.from || '').toLowerCase()}:${(t.to || '').toLowerCase()}:${t.value || ''}:${Date.now()}:${Math.random()}`;
+        isConfident = false;
+        fallbackKeys++;
+      }
     }
 
     if (isConfident) {
@@ -316,6 +328,11 @@ function normalizeTransfer(t, address, network) {
     uniqueId:    t.uniqueId        || undefined,
     traceAddress: t.traceAddress   || undefined,
     internalIndex: t.internalIndex || undefined,
+    // P0.2 (Phase 1.1.2): propagate dedup metadata set by deduplicateTransfers()
+    // so the op table and downstream classification retain audit trail fields.
+    _dedupKey:         t._dedupKey          || undefined,
+    _dedupFallback:    t._dedupFallback     || undefined,
+    _possibleDuplicate: t._possibleDuplicate || undefined,
   };
 }
 
@@ -454,18 +471,25 @@ export async function onRequestPost({ request, env }) {
     if (res.dedupStats)  dedupStatsByNetwork[net] = res.dedupStats;
   }
 
-  // ── P0-D: aggCoverage — [].every() trap eliminated
+  // ── P0-D / P1.5 (Phase 1.1.2): aggCoverage with explicit error precedence
+  // Precedence: error > partial > complete > unavailable
+  //   error      — at least one network returned a provider error (not just unavailable)
+  //   partial    — mix of states, or at least one network is partial or truncated
+  //   complete   — every queried network returned full history
+  //   unavailable— every network is unavailable (none queryable)
   // validNets.length ≥ 1 is guaranteed by the guard above.
   const coverageValues = Object.values(coverageMap);
   let aggCoverage;
   if (coverageValues.length === 0) {
     aggCoverage = 'unavailable';   // unreachable given the guard — explicit for safety
+  } else if (coverageValues.some(c => c === 'error')) {
+    aggCoverage = 'error';         // any provider error propagates up
   } else if (coverageValues.every(c => c === 'complete')) {
     aggCoverage = 'complete';
   } else if (coverageValues.every(c => c === 'unavailable')) {
     aggCoverage = 'unavailable';
   } else {
-    aggCoverage = 'partial';
+    aggCoverage = 'partial';       // any mix of partial/complete/unavailable
   }
 
   // ── P0-A: Enrich with historical prices — null stays null
@@ -565,6 +589,8 @@ export async function onRequestPost({ request, env }) {
     }),
     {}
   );
+  // P1.4 (Phase 1.1.2): always emit dedupStats — zero values must be explicit, not undefined.
+  const EMPTY_DEDUP = { input: 0, provenDuplicates: 0, preserved: 0, possibleDuplicates: 0, fallbackKeys: 0 };
   const hasDedupStats = Object.keys(totalDedupStats).length > 0;
 
   // ── Op table — null price serialised as null (never as 0 or 1)
@@ -610,7 +636,7 @@ export async function onRequestPost({ request, env }) {
                    'gain/loss calculations. Results are not final until all prices are resolved.',
         }
       : undefined,
-    dedupStats: hasDedupStats ? totalDedupStats : undefined,
+    dedupStats: hasDedupStats ? totalDedupStats : EMPTY_DEDUP,
     metrics,
     ops:  opTable,
     demo: false,

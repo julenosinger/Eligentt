@@ -170,10 +170,10 @@ async function etherscanFetchAll(chainId, action, address, apiKey, maxRetries = 
     page++;
   }
 
-  // Conservative: if the loop ended because page > ETHERSCAN_MAX_PAGES, we truncated.
-  // Also: if the last full page was exactly ETHERSCAN_PAGE_SIZE × ETHERSCAN_MAX_PAGES
-  // we cannot rule out more records — mark as truncated.
-  const truncated = page > ETHERSCAN_MAX_PAGES;
+  // Conservative truncation: either we hit the page cap, OR total reached Etherscan's
+  // documented 10 000-row limit per endpoint — in both cases we cannot claim completeness.
+  const ETHERSCAN_PROVIDER_LIMIT = 10000;
+  const truncated = page > ETHERSCAN_MAX_PAGES || total >= ETHERSCAN_PROVIDER_LIMIT;
   return { total, hashes, truncated };
 }
 
