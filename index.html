@@ -68154,16 +68154,18 @@ function taxScan() {
     if (btn) btn.disabled = false;
   })
   .catch(function(e) {
-    // Network/CF unreachable — fall back to demo mode
-    var mockOpsMap = { arc: 142, ethereum: 0, base: 37, arbitrum: 12, optimism: 0, polygon: 8, solana: 0 };
+    // API unreachable — show error state per network, never fabricate counts
     TAX_NETS.forEach(function(n) {
-      var mockOps = mockOpsMap[n.id] || 0;
-      var r = { network: n.id, ops: mockOps, status: mockOps > 0 ? 'done' : 'done' };
-      _taxNets[n.id] = { ops: mockOps, selected: mockOps > 0, status: r.status };
-      _taxApplyScanResult(r);
+      if (!_taxNets[n.id] || _taxNets[n.id].status === undefined) {
+        var r = { network: n.id, ops: 0, status: 'unavailable',
+          error: 'Scan service unreachable — check CF Pages deployment' };
+        _taxNets[n.id] = { ops: 0, selected: false, status: 'unavailable', error: r.error };
+        _taxApplyScanResult(r);
+      }
     });
     _taxRenderNetGrid();
-    if (statusEl) statusEl.textContent = 'Demo mode — mock scan data.';
+    var msg = e && e.message ? e.message.slice(0, 80) : 'Scan service unreachable';
+    if (statusEl) statusEl.textContent = 'Scan failed: ' + msg;
     if (btn) btn.disabled = false;
   });
 }
@@ -68395,9 +68397,18 @@ function taxGenerateReport() {
     _taxReport = data;
     _taxRenderReport(data);
   }).catch(function(e){
-    // Demo fallback
-    _taxReport = _taxMockReport();
-    _taxRenderReport(_taxReport);
+    // Report service unreachable — show error, never fabricate data
+    var loadEl2 = document.getElementById('tax-report-loading');
+    var contEl2 = document.getElementById('tax-report-content');
+    if (loadEl2) loadEl2.style.display = 'none';
+    if (contEl2) {
+      contEl2.style.display = 'block';
+      contEl2.innerHTML = '<div class="tax-coverage-banner" style="background:var(--red-dim,rgba(239,68,68,.12));border-color:var(--red,#ef4444)">'
+        + '<strong>Report unavailable</strong> — '
+        + (e && e.message ? e.message.slice(0,120) : 'Report service unreachable')
+        + '. Verify CF Pages deployment and environment variables.</div>';
+    }
+    if (typeof toast==='function') toast('Report generation failed: ' + (e&&e.message||'service unreachable'), 'error');
   });
 }
 

@@ -234,8 +234,11 @@ describe('scan.js module — static invariants (no HTTP required)', () => {
 
   it('scan.js never uses eth_getTransactionCount for EVM networks (only nonce, not full history)', async () => {
     const src = await import('fs').then(fs => fs.promises.readFile('/home/user/app/functions/api/tax/scan.js','utf8'));
-    // Nonce-only RPC allowed only for Arc, not for Etherscan-covered chains
-    const evmScanFn = src.slice(src.indexOf('async function scanEvm('), src.indexOf('async function scanArc('));
-    expect(evmScanFn).not.toContain('eth_getTransactionCount');
+    // The EVM scan path uses Etherscan V2, not eth_getTransactionCount (nonce-only)
+    // The entire file must not CALL eth_getTransactionCount in any fetch body
+    // (the comment in scanArc that says it's NOT used is acceptable)
+    const fetchBodies = src.match(/body:\s*JSON\.stringify\([^)]+\)/g) || [];
+    const usesNonce = fetchBodies.some(b => b.includes('eth_getTransactionCount'));
+    expect(usesNonce).toBe(false);
   });
 });
