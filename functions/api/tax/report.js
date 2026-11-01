@@ -1,16 +1,20 @@
 /**
  * POST /api/tax/report
  *
- * Phase 1.1 hardening:
- *   P0-A  fetchPrice()         — null for every missing/unknown/error case; no $1 fallback
- *   P0-B  deduplicateTransfers() — uniqueId preferred; hash+contract+logIndex for ERC-20;
- *                                  hash+traceIndex for internal; preserves distinct events
- *   P0-C  countEtherscanOps()  — NOTE: cross-category counting limitation documented in scan.js
- *   P0-D  aggCoverage          — empty networks → 'unavailable'; [].every() trap eliminated
+ * Phase 1.1.1 corrections on top of Phase 1.1:
+ *   P0-A  deduplicateTransfers() — uniqueId now scoped by network;
+ *                                  fallback-key collision PRESERVES both records (no silent discard);
+ *                                  dedupStats exposed on every response.
+ *   P0-B  report response        — dataCoverage + calculationCompleteness (independent states);
+ *                                  legacy coverage field kept for frontend compatibility.
  *
  * Body:    { address, targetType, networks, country, quoteId, txHash, hasDefi }
- * Returns: { ok, country, address, period, coverage, partial, warnings, metrics, ops,
- *             priceWarnings? }
+ * Returns: { ok, country, address, period,
+ *             coverage,                        ← legacy compat (same as dataCoverage)
+ *             dataCoverage,                    ← completeness of raw tx ingestion per network
+ *             calculationCompleteness,         ← completeness of price-enriched calculations
+ *             partial, warnings, metrics, ops,
+ *             dedupStats, priceWarnings? }
  *
  * coverage values per network: 'complete' | 'partial' | 'unavailable' | 'error'
  * Aggregate coverage: 'complete' only when every queried network returned complete data.
@@ -33,7 +37,7 @@ const VALID_NETWORKS = new Set(['ethereum', 'base', 'arbitrum', 'optimism', 'pol
 const ALCHEMY_MAX_PAGES = 50;
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   P0-A  fetchPrice — null for every non-authoritative case
+   P0-A (Phase 1.1)  fetchPrice — null for every non-authoritative case
    ═══════════════════════════════════════════════════════════════════════════ */
 /**
  * Fetch historical USD price for an asset at a given timestamp.
@@ -127,78 +131,118 @@ export async function fetchPrice(assetId, ts, env) {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   P0-B  deduplicateTransfers — preserve distinct events, drop only true dupes
+   P0-A (Phase 1.1.1)  deduplicateTransfers — corrected dedup logic
    ═══════════════════════════════════════════════════════════════════════════ */
 /**
  * Dedup key priority:
- *   1. Alchemy `uniqueId` field — most precise; present on most transfers
+ *   1. Alchemy `uniqueId` field — scoped by network (Phase 1.1.1 fix: was unscoped)
  *   2. ERC-20/721/1155:  network + hash + rawContract.address + log.logIndex
  *   3. External/native:  network + hash + 'external' + from + to
  *   4. Internal:         network + hash + 'internal' + traceAddress (or index)
  *   5. Fallback:         network + hash + category + value + from + to
- *      (preserves unknown events but flags possible_duplicate)
+ *      IMPORTANT (Phase 1.1.1 fix): fallback-key collision PRESERVES BOTH records
+ *      and marks possibleDuplicate on each. We never silently discard a record
+ *      whose identity cannot be fully established.
  *
- * Transfers that share a hash but are genuinely distinct (e.g. two ERC-20
- * events inside one swap tx) are NEVER collapsed because their logIndex differs.
- *
- * Returns: { deduped: object[], possibleDuplicates: number }
+ * Returns: {
+ *   deduped:            Transfer[] with _dedupKey / _dedupFallback / _possibleDuplicate,
+ *   stats: {
+ *     input:            number of records received,
+ *     provenDuplicates: number removed (confident dedup only),
+ *     preserved:        number in output,
+ *     possibleDuplicates: number flagged (in output, not removed),
+ *     fallbackKeys:     number that used the fallback path,
+ *   }
+ * }
  */
 export function deduplicateTransfers(transfers) {
-  const seen    = new Map();   // key → first-seen transfer (for audit trail)
-  const deduped = [];
+  // Two separate seen-sets:
+  //   seenConfident — for keys built with reliable identifiers (uid, logIndex, traceAddress)
+  //   seenFallback  — for fallback keys; collision → PRESERVE + flag (not discard)
+  const seenConfident = new Map();   // key → true (for audit)
+  const seenFallback  = new Map();   // key → count of times seen
+
+  const deduped          = [];
+  let provenDuplicates   = 0;
   let possibleDuplicates = 0;
+  let fallbackKeys       = 0;
 
   for (const t of transfers) {
     let key;
-    let isFallback = false;
+    let isConfident = true;   // true → collision = proven duplicate → discard
+                              // false → collision = possible duplicate → preserve + flag
+
+    const net  = t._network || '';
+    const hash = (t.hash || '').toLowerCase();
+    const cat  = (t.category || '').toLowerCase();
 
     if (t.uniqueId) {
-      // Alchemy's own dedup field — most reliable
-      key = 'uid:' + t.uniqueId;
-    } else {
-      const net  = t._network || '';
-      const hash = (t.hash || '').toLowerCase();
-      const cat  = (t.category || '').toLowerCase();
-
-      if (cat === 'erc20' || cat === 'erc721' || cat === 'erc1155' || cat === 'specialnft') {
-        // Token events: differentiated by log index within the tx
-        const logIdx    = t.log?.logIndex != null ? String(t.log.logIndex) : null;
-        const contract  = (t.rawContract?.address || '').toLowerCase();
-        if (logIdx !== null) {
-          key = `tok:${net}:${hash}:${contract}:${logIdx}`;
-        } else {
-          // No logIndex — use fallback with flag
-          key = `tok_fl:${net}:${hash}:${contract}:${(t.value || '')}`;
-          isFallback = true;
-        }
-      } else if (cat === 'internal') {
-        // Internal calls: differentiated by traceAddress or index
-        const trace = t.traceAddress
-          ? JSON.stringify(t.traceAddress)
-          : (t.internalIndex != null ? String(t.internalIndex) : null);
-        if (trace !== null) {
-          key = `int:${net}:${hash}:${trace}`;
-        } else {
-          key = `int_fl:${net}:${hash}:${(t.from || '').toLowerCase()}:${(t.to || '').toLowerCase()}:${t.value || ''}`;
-          isFallback = true;
-        }
+      // Phase 1.1.1: scope uniqueId by network so the same Alchemy uniqueId on two
+      // different chains (edge case, but possible with wrapped assets) is not collapsed.
+      key        = `uid:${net}:${t.uniqueId}`;
+      isConfident = true;
+    } else if (cat === 'erc20' || cat === 'erc721' || cat === 'erc1155' || cat === 'specialnft') {
+      const logIdx   = t.log?.logIndex != null ? String(t.log.logIndex) : null;
+      const contract = (t.rawContract?.address || '').toLowerCase();
+      if (logIdx !== null) {
+        key        = `tok:${net}:${hash}:${contract}:${logIdx}`;
+        isConfident = true;
       } else {
-        // External/native ETH transfer: hash + from + to identifies the event
-        // (a tx can only have one external ETH transfer for a given from+to pair)
-        key = `ext:${net}:${hash}:${(t.from || '').toLowerCase()}:${(t.to || '').toLowerCase()}`;
+        // No logIndex — fallback; do NOT discard on collision
+        key        = `tok_fl:${net}:${hash}:${contract}:${t.value || ''}`;
+        isConfident = false;
+        fallbackKeys++;
       }
+    } else if (cat === 'internal') {
+      const trace = t.traceAddress
+        ? JSON.stringify(t.traceAddress)
+        : (t.internalIndex != null ? String(t.internalIndex) : null);
+      if (trace !== null) {
+        key        = `int:${net}:${hash}:${trace}`;
+        isConfident = true;
+      } else {
+        key        = `int_fl:${net}:${hash}:${(t.from || '').toLowerCase()}:${(t.to || '').toLowerCase()}:${t.value || ''}`;
+        isConfident = false;
+        fallbackKeys++;
+      }
+    } else {
+      // External/native: hash uniquely identifies this event in context of from+to
+      key        = `ext:${net}:${hash}:${(t.from || '').toLowerCase()}:${(t.to || '').toLowerCase()}`;
+      isConfident = true;
     }
 
-    if (seen.has(key)) {
-      if (isFallback) possibleDuplicates++;
-      continue;  // genuine duplicate — discard
+    if (isConfident) {
+      if (seenConfident.has(key)) {
+        provenDuplicates++;
+        continue;   // proven duplicate — safe to discard
+      }
+      seenConfident.set(key, true);
+      deduped.push({ ...t, _dedupKey: key });
+    } else {
+      // Fallback path: ALWAYS preserve; flag possibleDuplicate when key was seen before
+      const count = (seenFallback.get(key) || 0) + 1;
+      seenFallback.set(key, count);
+      const isPossDup = count > 1;
+      if (isPossDup) possibleDuplicates++;
+      deduped.push({
+        ...t,
+        _dedupKey:         key,
+        _dedupFallback:    true,
+        _possibleDuplicate: isPossDup || undefined,
+      });
     }
-    seen.set(key, t);
-    // Tag the transfer with its dedup key for auditability
-    deduped.push({ ...t, _dedupKey: key, _dedupFallback: isFallback || undefined });
   }
 
-  return { deduped, possibleDuplicates };
+  return {
+    deduped,
+    stats: {
+      input:             transfers.length,
+      provenDuplicates,
+      preserved:         deduped.length,
+      possibleDuplicates,
+      fallbackKeys,
+    },
+  };
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -316,14 +360,14 @@ async function fetchEvmTxs(address, network, env) {
       ...inRes.transfers.map(t => ({ ...t, _network: network })),
     ];
 
-    const { deduped, possibleDuplicates } = deduplicateTransfers(raw);
+    const { deduped, stats } = deduplicateTransfers(raw);
     const ops = deduped.map(t => normalizeTransfer(t, address, network));
 
     const truncated = outRes.truncated || inRes.truncated;
     return {
       ops,
       coverage: truncated ? 'partial' : 'complete',
-      possibleDuplicates,
+      dedupStats: stats,
       ...(truncated ? { note: 'History truncated at ' + ALCHEMY_MAX_PAGES + ' pages per direction' } : {}),
     };
   } catch (e) {
@@ -335,6 +379,7 @@ async function fetchEvmTxs(address, network, env) {
 
 /* ═══════════════════════════════════════════════════════════════════════════
    P0-D  Main handler — empty-networks guard + correct aggCoverage
+   Phase 1.1.1: dataCoverage + calculationCompleteness (independent states)
    ═══════════════════════════════════════════════════════════════════════════ */
 export async function onRequestPost({ request, env }) {
   let body;
@@ -358,16 +403,16 @@ export async function onRequestPost({ request, env }) {
     return errResp('networks must be a non-empty array');
   }
   // Deduplicate and validate network names
-  const seen = new Set();
-  const validNets = [];
+  const seenNets   = new Set();
+  const validNets  = [];
   const invalidNets = [];
   for (const n of networks) {
     if (typeof n !== 'string' || !VALID_NETWORKS.has(n)) {
       invalidNets.push(n);
       continue;
     }
-    if (seen.has(n)) continue;   // silently drop duplicates
-    seen.add(n);
+    if (seenNets.has(n)) continue;   // silently drop duplicates
+    seenNets.add(n);
     validNets.push(n);
   }
   if (invalidNets.length > 0) {
@@ -380,9 +425,10 @@ export async function onRequestPost({ request, env }) {
   const isEvm = /^0x[0-9a-fA-F]{40}$/.test(address);
 
   // ── Collect per-network
-  let allOps    = [];
+  let allOps       = [];
   const coverageMap = {};
   const noteMap     = {};
+  const dedupStatsByNetwork = {};
 
   for (const net of validNets) {
     if (net === 'solana' && isEvm) {
@@ -404,7 +450,8 @@ export async function onRequestPost({ request, env }) {
     const res          = await fetchEvmTxs(address, net, env);
     allOps             = allOps.concat(res.ops);
     coverageMap[net]   = res.coverage;
-    if (res.note) noteMap[net] = res.note;
+    if (res.note)        noteMap[net]         = res.note;
+    if (res.dedupStats)  dedupStatsByNetwork[net] = res.dedupStats;
   }
 
   // ── P0-D: aggCoverage — [].every() trap eliminated
@@ -412,8 +459,7 @@ export async function onRequestPost({ request, env }) {
   const coverageValues = Object.values(coverageMap);
   let aggCoverage;
   if (coverageValues.length === 0) {
-    // Should be unreachable given the guard, but be explicit
-    aggCoverage = 'unavailable';
+    aggCoverage = 'unavailable';   // unreachable given the guard — explicit for safety
   } else if (coverageValues.every(c => c === 'complete')) {
     aggCoverage = 'complete';
   } else if (coverageValues.every(c => c === 'unavailable')) {
@@ -479,6 +525,48 @@ export async function onRequestPost({ request, env }) {
     }
   }
 
+  // ── Phase 1.1.1: dataCoverage vs calculationCompleteness (independent states)
+  //
+  // dataCoverage        — did we successfully ingest all available history?
+  //                       'complete'   → every queried network returned full history
+  //                       'partial'    → at least one network is partial or unavailable
+  //                       'unavailable'→ every network is unavailable
+  //                       'error'      → at least one network errored
+  //
+  // calculationCompleteness — are tax calculations meaningful over the collected ops?
+  //                       'complete'   → all relevant ops have prices; safe to finalize
+  //                       'partial'    → some ops lack prices; calculations are estimates
+  //                       'unavailable'→ no ops with prices found (nothing calculated)
+  //
+  // Both can differ: ingestion can be 'complete' while prices are 'partial', and vice versa.
+  const dataCoverage = aggCoverage;  // same logic, renamed for clarity
+
+  let calculationCompleteness;
+  if (ops.length === 0) {
+    calculationCompleteness = opsWithoutPrice.length === 0 ? 'complete' : 'unavailable';
+  } else if (opsWithoutPrice.length === 0) {
+    calculationCompleteness = 'complete';
+  } else if (opsWithPrice.length === 0) {
+    calculationCompleteness = 'unavailable';
+  } else {
+    calculationCompleteness = 'partial';
+  }
+
+  const isPartial = dataCoverage !== 'complete' || calculationCompleteness !== 'complete';
+
+  // ── Aggregate dedup stats across networks
+  const totalDedupStats = Object.values(dedupStatsByNetwork).reduce(
+    (acc, s) => ({
+      input:             (acc.input             || 0) + s.input,
+      provenDuplicates:  (acc.provenDuplicates  || 0) + s.provenDuplicates,
+      preserved:         (acc.preserved         || 0) + s.preserved,
+      possibleDuplicates:(acc.possibleDuplicates || 0) + s.possibleDuplicates,
+      fallbackKeys:      (acc.fallbackKeys       || 0) + s.fallbackKeys,
+    }),
+    {}
+  );
+  const hasDedupStats = Object.keys(totalDedupStats).length > 0;
+
   // ── Op table — null price serialised as null (never as 0 or 1)
   const opTable = ops.slice(0, 500).map(op => ({
     date:         op.ts ? new Date(op.ts).toISOString().slice(0, 10) : null,
@@ -496,6 +584,7 @@ export async function onRequestPost({ request, env }) {
                     : null,
     hash:         op.hash || null,
     dedupKey:     op._dedupKey || undefined,
+    possibleDuplicate: op._possibleDuplicate || undefined,
   }));
 
   return jsonResp({
@@ -503,17 +592,25 @@ export async function onRequestPost({ request, env }) {
     address,
     country:  countryMeta,
     period,
-    coverage: aggCoverage,
-    partial:  aggCoverage !== 'complete',
+
+    // Legacy field — kept for frontend compatibility
+    coverage: dataCoverage,
+
+    // Phase 1.1.1: independent state fields
+    dataCoverage,
+    calculationCompleteness,
+
+    partial:  isPartial,
     warnings: coverageWarnings.length ? coverageWarnings : undefined,
     priceWarnings: priceWarnings.length
       ? {
           count:   priceWarnings.length,
           samples: priceWarnings.slice(0, 10),
-          note:    'Operations with missing prices are shown in the table but excluded from gain/loss calculations. ' +
-                   'Results are not final until all prices are resolved.',
+          note:    'Operations with missing prices are shown in the table but excluded from ' +
+                   'gain/loss calculations. Results are not final until all prices are resolved.',
         }
       : undefined,
+    dedupStats: hasDedupStats ? totalDedupStats : undefined,
     metrics,
     ops:  opTable,
     demo: false,

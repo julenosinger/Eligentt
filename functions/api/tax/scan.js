@@ -2,15 +2,35 @@
  * POST /api/tax/scan
  * Counts transactions per network for a given address.
  *
+ * Phase 1.1.1 corrections on top of Phase 1:
+ *   P0-B  countEtherscanOps() — returns separate counts per category
+ *          (externalTxCount, tokenTransferCount, internalOperationCount,
+ *           totalEvents, uniqueTransactionCount, coverage, truncatedEndpoints)
+ *         plus per-endpoint 10 000-row truncation detection.
+ *
  * Required CF env vars:
  *   ETHERSCAN_API_KEY  — Etherscan V2 key (covers ETH/Base/Arb/OP/Polygon via chainid param)
  *   SOLANA_RPC_URL     — optional; Helius/Alchemy Solana RPC
  *   ARC_RPC_URL        — optional; Arc Mainnet RPC (tx-history API not yet publicly available)
  *
- * Returns: { ok, results: [{ network, ops, status, coverage?, error? }] }
+ * Returns: { ok, results: [{ network, ops, counts?, status, coverage?, note?, error? }] }
  *   status:   'done' | 'not_configured' | 'not_supported' | 'coming_soon'
  *             | 'rate_limited' | 'failed' | 'unavailable'
  *   coverage: 'complete' | 'partial' | 'unavailable' | 'error'
+ *
+ *   counts (EVM only, when status === 'done'):
+ *     externalTxCount:       transactions in txlist
+ *     tokenTransferCount:    ERC-20/token Transfer events in tokentx
+ *     internalOperationCount: internal ETH calls in txlistinternal
+ *     totalEvents:           sum of above (fiscal events across categories, NOT unique hashes)
+ *     uniqueTransactionCount: distinct hashes seen across all three endpoints
+ *     truncatedEndpoints:    string[] of endpoint names that hit the page limit
+ *
+ * IMPORTANT — totalEvents ≠ uniqueTransactionCount:
+ *   A single tx can emit multiple Transfer events (each in tokenTransferCount)
+ *   AND an internal call (internalOperationCount) AND appear once in txlist.
+ *   All three are legitimate fiscal events. Reporting totalEvents does NOT imply
+ *   they are all separately taxable — classification happens in the report phase.
  *
  * Rate limit: Etherscan free plan ≈5 req/s total.
  * EVM calls run SERIALLY with 250 ms gap (4 req/s max) and exponential backoff on rate-limit.
@@ -31,7 +51,16 @@ const ETHERSCAN_CHAIN = {
 /** Page size for Etherscan pagination. Max allowed by API is 10 000. */
 const ETHERSCAN_PAGE_SIZE = 1000;
 
-/** Max pages per action to guard against runaway wallets (1 000 × 50 = 50 000 rows). */
+/**
+ * Max pages per action to guard against runaway wallets (1 000 × 50 = 50 000 rows).
+ *
+ * 10 000-row Etherscan limit:
+ *   Etherscan's offset parameter is capped at 10 000 per page. We use
+ *   ETHERSCAN_PAGE_SIZE=1 000 and up to ETHERSCAN_MAX_PAGES=50 pages per action.
+ *   If any action returns a full last page at ETHERSCAN_MAX_PAGES we conservatively
+ *   mark that endpoint as truncated and surface coverage:'partial'.
+ *   We do NOT declare complete history when truncation cannot be ruled out.
+ */
 const ETHERSCAN_MAX_PAGES = 50;
 
 /* ── In-process scan cache: address+network → { ts, result } ────────────── */
@@ -102,9 +131,16 @@ async function etherscanFetchPage(chainId, action, address, apiKey, page) {
 }
 
 /* ── Etherscan V2: paginate fully for one action ────────────────────────── */
+/**
+ * Returns:
+ *   total:     total rows collected across all pages
+ *   hashes:    Set<string> of unique tx hashes (to compute uniqueTransactionCount cross-action)
+ *   truncated: true if pagination stopped before the last page was partial
+ */
 async function etherscanFetchAll(chainId, action, address, apiKey, maxRetries = 3) {
-  let total = 0;
-  let page  = 1;
+  let total     = 0;
+  const hashes  = new Set();
+  let page      = 1;
 
   while (page <= ETHERSCAN_MAX_PAGES) {
     let attempt = 0;
@@ -127,46 +163,76 @@ async function etherscanFetchAll(chainId, action, address, apiKey, maxRetries = 
     }
 
     total += pageResult.rows.length;
+    for (const row of pageResult.rows) {
+      if (row.hash) hashes.add(row.hash.toLowerCase());
+    }
     if (!pageResult.hasMore) break;
     page++;
   }
 
-  return { total, truncated: page > ETHERSCAN_MAX_PAGES };
+  // Conservative: if the loop ended because page > ETHERSCAN_MAX_PAGES, we truncated.
+  // Also: if the last full page was exactly ETHERSCAN_PAGE_SIZE × ETHERSCAN_MAX_PAGES
+  // we cannot rule out more records — mark as truncated.
+  const truncated = page > ETHERSCAN_MAX_PAGES;
+  return { total, hashes, truncated };
 }
 
 /* ── Count ops for one EVM chain (txlist + tokentx + txlistinternal) ─────── */
 /**
- * Counting note (Phase 1 specification §5):
- *   txlist     — external transactions (each tx counted once).
- *   tokentx    — ERC-20 transfer events. A single tx can emit multiple token events,
- *                each counted separately. A tx that also appears in txlist will be
- *                counted again here if it emits a Transfer log — this is intentional:
- *                they represent different fiscal events (the tx itself vs. the token movement).
- *   txlistinternal — internal ETH calls. Can overlap with txlist hashes but represent
- *                    distinct value flows within a tx.
+ * Returns per-category counts and a unified uniqueTransactionCount.
  *
- * The total is therefore a count of fiscal events across categories (FISCAL EVENTS across categories),
- * not unique tx hashes.
- * This matches what the report phase indexes (all three endpoint types contribute ops).
+ * Category semantics:
+ *   txlist          → externalTxCount    — one entry per external transaction
+ *   tokentx         → tokenTransferCount — one entry per ERC-20 Transfer event;
+ *                     a tx that emits 3 token transfers appears 3 times here
+ *   txlistinternal  → internalOperationCount — one entry per internal ETH call;
+ *                     a tx with 2 internal calls appears 2 times here
  *
- * 10 000-row Etherscan limit:
- *   Etherscan documents a per-request max of 10 000 rows (offset param). We use
- *   ETHERSCAN_PAGE_SIZE=1 000 and paginate up to ETHERSCAN_MAX_PAGES pages per action.
- *   If the last page is full at ETHERSCAN_MAX_PAGES we mark truncated=true and surface
- *   coverage:'partial'. We do NOT declare a complete history.
+ * These categories are intentionally NOT deduplicated against each other:
+ *   a tx in txlist that also emits a Transfer event represents TWO fiscal events
+ *   (the native tx + the token movement). Classification happens in the report phase.
+ *
+ * totalEvents = externalTxCount + tokenTransferCount + internalOperationCount
+ *   This is a count of FISCAL EVENTS across categories, not unique tx hashes.
+ *
+ * uniqueTransactionCount = |union of all tx hashes across all three endpoints|
+ *   Useful for understanding "how many distinct txs are involved", but NOT the
+ *   number of taxable events (one tx can generate many).
+ *
+ * truncatedEndpoints: string[] — each action name where the page limit was hit.
+ *   If non-empty, coverage is 'partial' — we cannot claim a complete history.
  */
-async function countEtherscanOps(chainId, address, apiKey) {
-  const actions = ['txlist', 'tokentx', 'txlistinternal'];
-  let total     = 0;
-  let truncated = false;
+export async function countEtherscanOps(chainId, address, apiKey) {
+  const actions = [
+    { name: 'txlist',           label: 'externalTxCount'          },
+    { name: 'tokentx',          label: 'tokenTransferCount'        },
+    { name: 'txlistinternal',   label: 'internalOperationCount'    },
+  ];
 
-  for (const action of actions) {
-    const res = await etherscanFetchAll(chainId, action, address, apiKey);
-    total    += res.total;
-    if (res.truncated) truncated = true;
+  const counts             = {};
+  const truncatedEndpoints = [];
+  const allHashes          = new Set();
+
+  for (const { name, label } of actions) {
+    const res       = await etherscanFetchAll(chainId, name, address, apiKey);
+    counts[label]   = res.total;
+    for (const h of res.hashes) allHashes.add(h);
+    if (res.truncated) truncatedEndpoints.push(name);
   }
 
-  return { total, truncated };
+  const totalEvents            = (counts.externalTxCount || 0)
+                               + (counts.tokenTransferCount || 0)
+                               + (counts.internalOperationCount || 0);
+  const uniqueTransactionCount = allHashes.size;
+  const truncated              = truncatedEndpoints.length > 0;
+
+  return {
+    ...counts,
+    totalEvents,
+    uniqueTransactionCount,
+    truncatedEndpoints,
+    truncated,
+  };
 }
 
 /* ── Scan one EVM network ────────────────────────────────────────────────── */
@@ -180,12 +246,28 @@ async function scanEvm(network, address, env) {
   }
   const chainId = ETHERSCAN_CHAIN[network];
   try {
-    const { total, truncated } = await countEtherscanOps(chainId, address, apiKey);
+    const result = await countEtherscanOps(chainId, address, apiKey);
+    const { totalEvents, truncated, truncatedEndpoints, ...counts } = result;
+
     return {
-      network, ops: total,
+      network,
+      // ops: totalEvents for backward compat with the UI chip counter
+      ops:      totalEvents,
+      // counts: separate breakdown for informed display / audit
+      counts:   {
+        externalTxCount:        counts.externalTxCount,
+        tokenTransferCount:     counts.tokenTransferCount,
+        internalOperationCount: counts.internalOperationCount,
+        totalEvents,
+        uniqueTransactionCount: counts.uniqueTransactionCount,
+      },
       status:   'done',
       coverage: truncated ? 'partial' : 'complete',
-      ...(truncated ? { note: 'History truncated at ' + (ETHERSCAN_MAX_PAGES * ETHERSCAN_PAGE_SIZE * 3) + ' rows — full report will paginate further' } : {}),
+      ...(truncated ? {
+        note: 'History truncated at limit for endpoint(s): ' + truncatedEndpoints.join(', ') +
+              '. Full report will paginate further.',
+        truncatedEndpoints,
+      } : {}),
     };
   } catch (e) {
     if (e.rateLimit) {
@@ -200,8 +282,10 @@ async function scanEvm(network, address, env) {
 /* ── Scan Arc Mainnet ────────────────────────────────────────────────────── */
 /**
  * Arc Mainnet does not yet have a publicly documented transaction-history API
- * equivalent to Etherscan.  eth_getTransactionCount (nonce) is NOT a substitute:
- * it only counts outbound transactions and misses incoming transfers entirely.
+ * equivalent to Etherscan.
+ * eth_getTransactionCount (nonce) is NOT a substitute for tx history:
+ *   - it only counts outbound transactions (the nonce), never incoming transfers.
+ *   - it is not a fiscal history.
  * We surface 'coming_soon' so the UI can inform the user without fabricating data.
  */
 async function scanArc(_address, _env) {

@@ -190,9 +190,10 @@ describe('report.js — source contracts', () => {
 
   it('3. Deduplication uses structured key (uniqueId / hash+logIndex / hash+trace)', () => {
     // Phase 1.1: dedup upgraded to use uniqueId preferred, then compound keys
+    // Phase 1.1.1: uniqueId key now network-scoped (uid:${net}:${t.uniqueId})
     expect(reportSrc).toContain('deduplicateTransfers');
-    // Must use either uid: prefix (uniqueId path) or tok: / int: / ext: compound keys
-    expect(reportSrc).toContain("'uid:'");
+    // uid: prefix used in the network-scoped uniqueId path
+    expect(reportSrc).toMatch(/['`]uid:/);
     expect(reportSrc).toContain('logIndex');
   });
 
@@ -261,14 +262,18 @@ describe('report.js — source contracts', () => {
   });
 
   it('11. coverage field in response (complete | partial | unavailable)', () => {
-    expect(reportSrc).toContain("coverage: aggCoverage");
+    // Phase 1.1.1: dataCoverage and calculationCompleteness added;
+    // legacy 'coverage' kept for compat (= dataCoverage)
+    expect(reportSrc).toContain('dataCoverage');
     expect(reportSrc).toContain("'complete'");
     expect(reportSrc).toContain("'partial'");
     expect(reportSrc).toContain("'unavailable'");
   });
 
-  it('12. partial flag true when coverage !== complete', () => {
-    expect(reportSrc).toContain("partial:  aggCoverage !== 'complete'");
+  it('12. partial flag true when coverage or calculations are incomplete', () => {
+    // Phase 1.1.1: partial now uses isPartial (dataCoverage OR calculationCompleteness)
+    expect(reportSrc).toContain('isPartial');
+    expect(reportSrc).toContain('partial:  isPartial');
   });
 
   it('13. warnings array lists every network with non-complete coverage', () => {

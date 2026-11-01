@@ -183,13 +183,18 @@ describe('deduplicateTransfers() — preserve distinct events, drop only true du
     expect(deduped).toHaveLength(2);
   });
 
-  it('5. event without logIndex — fallback key used, flagged, first instance kept', () => {
+  it('5. event without logIndex — fallback key used, BOTH preserved, second flagged (Phase 1.1.1)', () => {
+    // Phase 1.1.1 change: fallback-key collisions are PRESERVED (not discarded).
+    // The first gets no flag; the second gets _possibleDuplicate.
+    // We never silently discard a record whose identity cannot be fully established.
     const a = { hash: '0xabc', category: 'erc20', _network: 'ethereum',
                 rawContract: { address: '0xtok' }, value: '5', from: '0xf', to: '0xt' };
     const b = { ...a }; // exact copy — same fallback key
-    const { deduped, possibleDuplicates } = deduplicateTransfersFn([a, b]);
-    expect(deduped).toHaveLength(1);
-    expect(possibleDuplicates).toBeGreaterThanOrEqual(0); // counted as uncertain
+    const { deduped, stats } = deduplicateTransfersFn([a, b]);
+    expect(deduped).toHaveLength(2);           // both preserved
+    expect(deduped[1]._possibleDuplicate).toBe(true);
+    expect(stats.possibleDuplicates).toBe(1);
+    expect(stats.provenDuplicates).toBe(0);
   });
 
   it('6. same recipient, sender, and amount in different txs → both preserved', () => {
@@ -220,7 +225,8 @@ describe('scan.js — counting contracts (source inspection)', () => {
 
   it('1. 10k limit documented — truncated flag when max pages hit', () => {
     expect(scanSrc).toContain('ETHERSCAN_MAX_PAGES');
-    expect(scanSrc).toContain("truncated: page > ETHERSCAN_MAX_PAGES");
+    // Phase 1.1.1: etherscanFetchAll sets truncated after the loop, not inline
+    expect(scanSrc).toMatch(/truncated\s*=\s*page\s*>\s*ETHERSCAN_MAX_PAGES/);
   });
 
   it('2. cross-category counting limitation is documented in code', () => {
