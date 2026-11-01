@@ -188,9 +188,12 @@ describe('report.js — source contracts', () => {
     expect(reportSrc).toContain('if (!pageKey) break');
   });
 
-  it('3. Deduplication uses hash + logIndex key', () => {
+  it('3. Deduplication uses structured key (uniqueId / hash+logIndex / hash+trace)', () => {
+    // Phase 1.1: dedup upgraded to use uniqueId preferred, then compound keys
     expect(reportSrc).toContain('deduplicateTransfers');
-    expect(reportSrc).toContain("t.hash || '') + ':' + logIdx");
+    // Must use either uid: prefix (uniqueId path) or tok: / int: / ext: compound keys
+    expect(reportSrc).toContain("'uid:'");
+    expect(reportSrc).toContain('logIndex');
   });
 
   it('4. Distinct transfers with same hash but different logIndex are preserved', () => {
@@ -203,8 +206,15 @@ describe('report.js — source contracts', () => {
   });
 
   it('5. Every normalized op carries the network field from caller', () => {
-    // normalizeTransfer takes network as parameter and sets it on the result
-    expect(reportSrc).toContain('network:    network,');
+    // normalizeTransfer sets network on the result object
+    // Phase 1.1: shorthand property 'network,' (same as network: network)
+    const normFn = reportSrc.slice(
+      reportSrc.indexOf('function normalizeTransfer('),
+      reportSrc.indexOf('\n/* ── Fetch all transfers')
+    );
+    expect(normFn).toMatch(/network[,\s]/);
+    // Caller passes network as 3rd argument
+    expect(reportSrc).toContain('normalizeTransfer(t, address, network)');
   });
 
   it('6. Arc Mainnet: coverageMap set to unavailable, no RPC call attempted', () => {
@@ -238,13 +248,16 @@ describe('report.js — source contracts', () => {
   });
 
   it('9. Empty ops returns [] not null (so caller knows collection ran)', () => {
-    expect(reportSrc).toContain('ops.length > 0');
-    // The empty path must return [] not null
-    expect(reportSrc).toContain(': [],  // empty array');
+    // Phase 1.1: ops is always an array (opTable); empty ops → empty array
+    expect(reportSrc).toContain('ops:  opTable');
+    // The table is built from ops.slice(0,500) which returns [] for empty ops
+    expect(reportSrc).toContain('ops.slice(0, 500)');
   });
 
   it('10. period is null when no timestamps, never fabricated', () => {
-    expect(reportSrc).toContain('return null; // no data — do not invent a period');
+    // Phase 1.1: period null path preserved
+    expect(reportSrc).toContain('return null;');
+    expect(reportSrc).toContain('timestamps.length === 0');
   });
 
   it('11. coverage field in response (complete | partial | unavailable)', () => {
@@ -259,8 +272,10 @@ describe('report.js — source contracts', () => {
   });
 
   it('13. warnings array lists every network with non-complete coverage', () => {
-    expect(reportSrc).toContain("warnings: warnings.length ? warnings : undefined");
+    // Phase 1.1: warnings renamed to coverageWarnings internally, still emitted as 'warnings'
     expect(reportSrc).toContain("if (cov !== 'complete')");
+    // The response key is 'warnings' (coverage warnings)
+    expect(reportSrc).toContain("warnings:");
   });
 
   it('14. API key never in any return object', () => {

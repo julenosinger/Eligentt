@@ -135,14 +135,34 @@ async function etherscanFetchAll(chainId, action, address, apiKey, maxRetries = 
 }
 
 /* ── Count ops for one EVM chain (txlist + tokentx + txlistinternal) ─────── */
+/**
+ * Counting note (Phase 1 specification §5):
+ *   txlist     — external transactions (each tx counted once).
+ *   tokentx    — ERC-20 transfer events. A single tx can emit multiple token events,
+ *                each counted separately. A tx that also appears in txlist will be
+ *                counted again here if it emits a Transfer log — this is intentional:
+ *                they represent different fiscal events (the tx itself vs. the token movement).
+ *   txlistinternal — internal ETH calls. Can overlap with txlist hashes but represent
+ *                    distinct value flows within a tx.
+ *
+ * The total is therefore a count of fiscal events across categories (FISCAL EVENTS across categories),
+ * not unique tx hashes.
+ * This matches what the report phase indexes (all three endpoint types contribute ops).
+ *
+ * 10 000-row Etherscan limit:
+ *   Etherscan documents a per-request max of 10 000 rows (offset param). We use
+ *   ETHERSCAN_PAGE_SIZE=1 000 and paginate up to ETHERSCAN_MAX_PAGES pages per action.
+ *   If the last page is full at ETHERSCAN_MAX_PAGES we mark truncated=true and surface
+ *   coverage:'partial'. We do NOT declare a complete history.
+ */
 async function countEtherscanOps(chainId, address, apiKey) {
   const actions = ['txlist', 'tokentx', 'txlistinternal'];
-  let total    = 0;
+  let total     = 0;
   let truncated = false;
 
   for (const action of actions) {
     const res = await etherscanFetchAll(chainId, action, address, apiKey);
-    total     += res.total;
+    total    += res.total;
     if (res.truncated) truncated = true;
   }
 
