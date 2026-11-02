@@ -54956,25 +54956,61 @@ function _ubDirectExec(intent, params, mode) {
       if (!btn || !btn.parentNode) return false;
 
       var panelHTML =
-        '<div class="dgv-head" style="display:flex;align-items:center;gap:7px;margin-bottom:6px">' +
-          '<span class="dgv-dot" style="width:9px;height:9px;border-radius:50%;background:' + DOT.UNKNOWN + ';flex-shrink:0;box-shadow:0 0 6px ' + DOT.UNKNOWN + '88"></span>' +
-          '<span style="font-weight:700;color:var(--text)">' + (cfg.title || 'Destination Gas Check') + '</span>' +
-          '<span class="dgv-badge" style="margin-left:auto;font-size:8px;font-weight:700;padding:2px 8px;border-radius:999px;background:rgba(255,255,255,.06);border:1px solid var(--border);color:var(--muted2)">Checking…</span>' +
-          '<button class="dgv-toggle-btn" title="Toggle details" tabindex="-1">▲</button>' +
-        '</div>' +
-        '<div class="dgv-rows" style="display:flex;flex-direction:column;gap:2px">' +
-          row(cfg.walletLabel || 'Destination Wallet', 'dgv-wallet') +
-          row('Network', 'dgv-network') +
-          row('Native Token', 'dgv-native') +
-          row('Current Balance', 'dgv-balance') +
-          row('Estimated Required', 'dgv-required') +
-          row('Validation Status', 'dgv-status') +
-        '</div>' +
-        '<div class="dgv-msg" style="display:none;margin-top:9px;padding:8px 10px;border-radius:7px;font-size:9px"></div>' +
-        '<ul class="dgv-suggest" style="display:none;margin:8px 0 0;padding-left:16px;color:var(--muted2);font-size:8.5px"></ul>' +
-        '<label class="dgv-ack" style="display:none;align-items:center;gap:6px;margin-top:9px;font-size:9px;color:var(--yellow);cursor:pointer">' +
-          '<input type="checkbox" class="dgv-ack-cb" style="cursor:pointer"/> I understand my funds may be unusable until I add native gas.' +
-        '</label>';
+        '<div class="dgv2-wrap">' +
+          /* ── Header ── */
+          '<div class="dgv2-hdr dgv-head">' +
+            '<span class="dgv2-dot dgv-dot"></span>' +
+            '<span class="dgv2-title">' + (cfg.title || 'Destination Readiness') + '</span>' +
+            '<span class="dgv2-live">LIVE</span>' +
+            '<span class="dgv2-updated dgv-updated"></span>' +
+            '<button class="dgv2-refresh dgv-refresh-btn" onclick="event.stopPropagation();if(typeof window.__DGVRefreshActive===\'function\')window.__DGVRefreshActive(true)" title="Refresh"><i class="ti ti-refresh"></i></button>' +
+            '<span class="dgv2-badge dgv-badge">Checking…</span>' +
+          '</div>' +
+          /* ── Detail body (collapsible) ── */
+          '<div class="dgv2-body dgv-rows">' +
+            /* Wallet + Network row */
+            '<div class="dgv2-grid">' +
+              '<div class="dgv2-row" style="flex-direction:column;gap:1px;border-bottom:none">' +
+                '<span class="dgv2-lbl">Wallet</span>' +
+                '<span class="dgv2-val dgv-wallet">—</span>' +
+              '</div>' +
+              '<div class="dgv2-row" style="flex-direction:column;gap:1px;border-bottom:none">' +
+                '<span class="dgv2-lbl">Network</span>' +
+                '<span class="dgv2-val dgv-network">—</span>' +
+              '</div>' +
+            '</div>' +
+            /* Gas row */
+            '<div class="dgv2-row">' +
+              '<span class="dgv2-lbl">Gas token</span>' +
+              '<span class="dgv2-val dgv-native">—</span>' +
+            '</div>' +
+            '<div class="dgv2-row">' +
+              '<span class="dgv2-lbl">Balance</span>' +
+              '<span class="dgv2-val dgv-balance">—</span>' +
+            '</div>' +
+            '<div class="dgv2-row">' +
+              '<span class="dgv2-lbl">Required</span>' +
+              '<span class="dgv2-val dgv-required">—</span>' +
+            '</div>' +
+            '<div class="dgv2-row">' +
+              '<span class="dgv2-lbl">Status</span>' +
+              '<span class="dgv2-val dgv-status" style="color:var(--muted2)">—</span>' +
+            '</div>' +
+            /* Readiness bar */
+            '<div class="dgv2-readiness">' +
+              '<div class="dgv2-bar-bg"><div class="dgv2-bar-fg dgv-bar-fg" style="width:0%;background:#7b8291"></div></div>' +
+              '<span class="dgv2-checks dgv-checks">—</span>' +
+            '</div>' +
+            /* State message */
+            '<div class="dgv-msg" style="display:none;margin-top:5px;padding:7px 9px;border-radius:6px;font-size:9px"></div>' +
+            /* Suggestions list */
+            '<ul class="dgv-suggest dgv2-suggest"></ul>' +
+            /* Acknowledge */
+            '<label class="dgv-ack dgv2-ack">' +
+              '<input type="checkbox" class="dgv-ack-cb" style="cursor:pointer"/> I understand my funds may be unusable until I add native gas.' +
+            '</label>' +
+          '</div>' +
+        '</div>';
 
       // A pre-placed container may already exist in the markup (e.g. Cross-Chain's
       // #dgv-panel-xchain lives inside the "Destination Gas" card). If so, populate
@@ -55004,7 +55040,9 @@ function _ubDirectExec(intent, params, mode) {
         if (container.id === 'dgv-panel-bridge') {
           var head = container.querySelector('.dgv-head');
           if (head) head.addEventListener('click', function(e) {
-            if (e.target && e.target.classList.contains('dgv-ack-cb')) return;
+            if (e.target && (e.target.classList.contains('dgv-ack-cb') || e.target.classList.contains('dgv2-refresh') || e.target.closest && e.target.closest('.dgv2-refresh'))) return;
+            var body = container.querySelector('.dgv2-body');
+            if (body) body.classList.toggle('collapsed');
             container.classList.toggle('dgv-collapsed');
           });
         }
@@ -55051,7 +55089,12 @@ function _ubDirectExec(intent, params, mode) {
         suggest: p.querySelector('.dgv-suggest'),
         ack: p.querySelector('.dgv-ack'),
         ackCb: p.querySelector('.dgv-ack-cb'),
-        pill: document.getElementById(cfg.pillId)
+        pill: document.getElementById(cfg.pillId),
+        // new v2 elements
+        updated: p.querySelector('.dgv-updated'),
+        barFg: p.querySelector('.dgv-bar-fg'),
+        checks: p.querySelector('.dgv-checks'),
+        body: p.querySelector('.dgv2-body')
       };
     }
 
@@ -55066,7 +55109,12 @@ function _ubDirectExec(intent, params, mode) {
     function setDot(s){
       if (!els) return;
       var c = DOT[s] || DOT.UNKNOWN;
-      if (els.dot){ els.dot.style.background = c; els.dot.style.boxShadow = '0 0 6px ' + c + '88'; }
+      if (els.dot){
+        els.dot.style.background = c;
+        els.dot.style.boxShadow = (s==='UNKNOWN'||s==='CHECKING') ? 'none' : '0 0 5px ' + c + '99';
+        if (s === 'CHECKING') els.dot.classList.add('checking');
+        else els.dot.classList.remove('checking');
+      }
     }
 
     function applyButtonState(){
@@ -55079,13 +55127,31 @@ function _ubDirectExec(intent, params, mode) {
       else { btn.style.opacity = ''; btn.style.filter = ''; }
     }
 
+    function _nowStamp(){ try{ return new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'}); }catch(e){ return ''; } }
+    function _barConfig(s, exempt){
+      if (s==='CHECKING') return { pct:0, bg:'#7b8291' };
+      if (s==='UNKNOWN')  return { pct:0, bg:'#7b8291' };
+      if (s==='SAFE')     return { pct:100, bg: exempt?'#06F7E9':'#22c55e' };
+      if (s==='WARNING')  return { pct:60, bg:'#f59e0b' };
+      if (s==='BLOCKED')  return { pct:20, bg:'#ef4444' };
+      return { pct:0, bg:'#7b8291' };
+    }
+    function _checksText(s, exempt){
+      if (s==='CHECKING') return '…';
+      if (s==='UNKNOWN')  return '—';
+      if (s==='SAFE')     return exempt?'3/3 (gas exempt)':'3/3 passed';
+      if (s==='WARNING')  return '2/3 passed';
+      if (s==='BLOCKED')  return '1/3 passed';
+      return '—';
+    }
+
     function render(res){
       if (!els) return;
       state = res.state;
       setDot(res.state); setPill(res.state);
       var badgeText = (res.state === 'SAFE' && res.exempt)
-        ? 'Exempt (Arc)'
-        : ({ SAFE: 'Ready', WARNING: 'Low Gas', BLOCKED: 'No Gas', UNKNOWN: 'Unavailable', CHECKING: 'Checking…' }[res.state] || '—');
+        ? 'Ready (Arc)'
+        : ({ SAFE: 'READY', WARNING: 'LOW GAS', BLOCKED: 'BLOCKED', UNKNOWN: 'Unavailable', CHECKING: 'Checking…', ERROR: 'ERROR', STALE: 'STALE' }[res.state] || '—');
       var c = DOT[res.state] || DOT.UNKNOWN;
       if (els.badge){
         els.badge.textContent = badgeText;
@@ -55093,20 +55159,27 @@ function _ubDirectExec(intent, params, mode) {
         els.badge.style.borderColor = (res.state==='UNKNOWN'||res.state==='CHECKING') ? 'var(--border)' : c + '55';
         els.badge.style.background = (res.state==='UNKNOWN'||res.state==='CHECKING') ? 'rgba(255,255,255,.06)' : c + '1f';
       }
+      // timestamp
+      if (els.updated && res.state !== 'CHECKING') els.updated.textContent = 'Updated ' + _nowStamp();
+      // readiness bar
+      var bc = _barConfig(res.state, res.exempt);
+      if (els.barFg){ els.barFg.style.width = bc.pct + '%'; els.barFg.style.background = bc.bg; }
+      if (els.checks) els.checks.textContent = _checksText(res.state, res.exempt);
+
       if (els.wallet)  els.wallet.textContent  = res.address ? shortAddr(res.address) : '—';
-      if (els.network) els.network.textContent = res.chainName || '—';
+      if (els.network) els.network.textContent = res.chainName ? res.chainName + (res.chainId?' · '+res.chainId:'') : '—';
       if (els.native)  els.native.textContent  = res.native || '—';
       if (els.balance){
         els.balance.textContent = (res.balance === undefined || res.balance === null) ? '—' : (fmt(res.balance, 4) + ' ' + (res.native||''));
         els.balance.style.color = res.state==='BLOCKED' ? DOT.BLOCKED : (res.state==='WARNING' ? DOT.WARNING : 'var(--text)');
       }
-      if (els.required) els.required.textContent = res.exempt ? 'N/A — gas token = asset (USDC)' : ((res.required!=null? fmt(res.required,4):'—') + ' ' + (res.native||''));
+      if (els.required) els.required.textContent = res.exempt ? 'N/A (USDC = gas on Arc)' : ((res.required!=null? fmt(res.required,4):'—') + ' ' + (res.native||''));
       if (els.status){
         var st;
         if (res.state === 'SAFE' && res.exempt) {
-          st = '✅ Exempt — Arc uses USDC as gas (not required)';
+          st = '✓ Gas-free — Arc uses USDC as gas';
         } else {
-          st = { SAFE: '✅ Ready', WARNING: '⚠ Low gas balance', BLOCKED: '❌ Cannot proceed', UNKNOWN: '— Not validated', CHECKING: '⏳ Checking…' }[res.state] || '—';
+          st = { SAFE: '✓ Ready', WARNING: '⚠ Low gas balance', BLOCKED: '✕ Insufficient gas', UNKNOWN: 'Not validated', CHECKING: 'Checking…' }[res.state] || '—';
         }
         els.status.textContent = st;
         els.status.style.color = (res.state==='UNKNOWN'||res.state==='CHECKING') ? 'var(--muted2)' : c;
@@ -55164,10 +55237,13 @@ function _ubDirectExec(intent, params, mode) {
       if (!els) return;
       setDot('CHECKING'); setPill('CHECKING');
       if (els.badge){ els.badge.textContent = 'Checking…'; els.badge.style.color = 'var(--muted2)'; els.badge.style.borderColor='var(--border)'; els.badge.style.background='rgba(255,255,255,.06)'; }
+      if (els.updated) els.updated.textContent = '';
+      if (els.barFg){ els.barFg.style.width='0%'; els.barFg.style.background='#7b8291'; }
+      if (els.checks) els.checks.textContent = '…';
       if (els.wallet)  els.wallet.textContent  = res.address ? shortAddr(res.address) : '—';
-      if (els.network) els.network.textContent = res.chainName || '—';
+      if (els.network) els.network.textContent = res.chainName ? res.chainName + (res.chainId?' · '+res.chainId:'') : '—';
       if (els.native)  els.native.textContent  = res.native || '—';
-      if (els.status){ els.status.textContent = '⏳ Checking…'; els.status.style.color = 'var(--muted2)'; }
+      if (els.status){ els.status.textContent = 'Checking…'; els.status.style.color = 'var(--muted2)'; }
     }
 
     async function run(){
@@ -55316,10 +55392,39 @@ function _ubDirectExec(intent, params, mode) {
     if (!document.getElementById('dgv-bridge-fit-style')){
       var st = document.createElement('style');
       st.id = 'dgv-bridge-fit-style';
-      // Phase 1 CSS handles padding/layout — only keep the dgv panel margin here
       st.textContent =
         '#page-bridge .page-content{align-items:flex-start}' +
-        '#page-bridge #dgv-panel-bridge{margin:0;border-radius:0 0 10px 10px;border-top:1px solid rgba(255,255,255,0.06);border-left:none;border-right:none;border-bottom:none;background:rgba(0,0,0,0.18)}';
+        '#page-bridge #dgv-panel-bridge{margin:0;border-radius:0 0 10px 10px;border-top:1px solid rgba(255,255,255,0.06);border-left:none;border-right:none;border-bottom:none;background:rgba(0,0,0,0.18)}' +
+        /* ── Live Destination Readiness panel ── */
+        '.dgv2-wrap{padding:10px 14px 12px;font-size:9.5px;line-height:1.45;box-sizing:border-box}' +
+        '.dgv2-hdr{display:flex;align-items:center;gap:7px;margin-bottom:8px;cursor:pointer;user-select:none}' +
+        '.dgv2-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;transition:background .3s,box-shadow .3s}' +
+        '.dgv2-title{font-size:10px;font-weight:700;color:var(--text);flex:1}' +
+        '.dgv2-live{font-size:7.5px;font-weight:700;letter-spacing:.06em;padding:1px 5px;border-radius:3px;background:rgba(34,197,94,.12);color:#22c55e;border:1px solid rgba(34,197,94,.2)}' +
+        '.dgv2-updated{font-size:7.5px;color:var(--muted2)}' +
+        '.dgv2-refresh{background:none;border:1px solid var(--border);border-radius:4px;color:var(--muted2);cursor:pointer;font-size:8px;padding:1px 6px;font-family:inherit;line-height:1.4;transition:border-color .15s,color .15s;flex-shrink:0}' +
+        '.dgv2-refresh:hover{color:var(--text);border-color:var(--muted2)}' +
+        '.dgv2-badge{font-size:8px;font-weight:700;padding:2px 9px;border-radius:999px;border:1px solid var(--border);color:var(--muted2);background:rgba(255,255,255,.05);transition:color .25s,border-color .25s,background .25s;flex-shrink:0}' +
+        '.dgv2-body{display:flex;flex-direction:column;gap:4px;overflow:hidden;transition:max-height .25s ease}' +
+        '.dgv2-body.collapsed{max-height:0!important;overflow:hidden}' +
+        '.dgv2-grid{display:grid;grid-template-columns:1fr 1fr;gap:3px 14px}' +
+        '.dgv2-row{display:flex;justify-content:space-between;gap:8px;padding:2px 0;border-bottom:1px solid rgba(255,255,255,.04)}' +
+        '.dgv2-row:last-child{border-bottom:none}' +
+        '.dgv2-lbl{color:var(--muted2)}' +
+        '.dgv2-val{color:var(--text);font-weight:600;text-align:right;font-variant-numeric:tabular-nums}' +
+        '.dgv2-section{margin-top:5px;padding:7px 9px;border-radius:6px;font-size:9px;border:1px solid var(--border);background:rgba(255,255,255,.03)}' +
+        '.dgv2-section.safe{border-color:rgba(34,197,94,.25);background:rgba(34,197,94,.05)}' +
+        '.dgv2-section.warn{border-color:rgba(245,158,11,.25);background:rgba(245,158,11,.05)}' +
+        '.dgv2-section.blocked{border-color:rgba(239,68,68,.25);background:rgba(239,68,68,.05)}' +
+        '.dgv2-section.unknown{border-color:var(--border);background:rgba(255,255,255,.03)}' +
+        '.dgv2-readiness{margin-top:6px;display:flex;align-items:center;gap:8px}' +
+        '.dgv2-bar-bg{flex:1;height:3px;border-radius:2px;background:rgba(255,255,255,.08);overflow:hidden}' +
+        '.dgv2-bar-fg{height:100%;border-radius:2px;transition:width .4s ease,background .4s ease}' +
+        '.dgv2-checks{font-size:8px;color:var(--muted2);white-space:nowrap;flex-shrink:0}' +
+        '.dgv2-ack{display:none;align-items:center;gap:6px;margin-top:7px;font-size:9px;color:var(--yellow);cursor:pointer}' +
+        '.dgv2-suggest{display:none;margin:6px 0 0;padding-left:14px;color:var(--muted2);font-size:8.5px;line-height:1.6}' +
+        '@keyframes dgv2-pulse{0%,100%{opacity:1}50%{opacity:.45}}' +
+        '.dgv2-dot.checking{animation:dgv2-pulse 1.2s ease-in-out infinite}';
       document.head.appendChild(st);
     }
     controllers.forEach(function(c){ c.ensure(); });
