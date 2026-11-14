@@ -157,13 +157,32 @@ describe('isolation and no side effects', () => {
 });
 
 describe('READY line colour', () => {
-  it('READY keeps the line (fill + start dot) blue while the end circle and caption stay green', () => {
-    expect(cssSrc).toContain("data-state=safe]{--lc:#4f8ef7;--lcs:rgba(79,142,247,.12)}");
+  it('READY line (fill + start dot) uses the checking blue; only READY sets --lc', () => {
+    expect(cssSrc).toContain("data-state=safe]{--lc:#4f8ef7;--lcs:rgba(79,142,247,.12);");
     expect(cssSrc).toContain('.dgv3-fill{position:absolute;left:0;top:0;height:100%;border-radius:2px;background:var(--lc,var(--c))');
     expect(cssSrc).toContain('.dgv3-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;background:var(--lc,var(--c))');
-    expect(cssSrc).toContain("data-state=safe]{--c:#22c55e");
+    expect(cssSrc).toContain("data-state=safe]{--c:#22c55e"); // base READY palette (end circle/caption overridden below)
     // the line override is READY only: no other state sets --lc
     expect((cssSrc.match(/--lc:/g) || []).length).toBe(1);
+  });
+});
+
+describe('READY neon end circle, caption and status text', () => {
+  it('READY end circle is blue with a neon glow and white check; caption is blue', () => {
+    expect(cssSrc).toContain('--nc:#4f8ef7;--cc:#4f8ef7;--ng:0 0 0 3px rgba(79,142,247,.22),0 0 9px 1px rgba(79,142,247,.8)');
+    expect(cssSrc).toContain('background:var(--nc,var(--c));color:#0b1220;box-shadow:var(--ng,0 0 0 3px var(--cs))');
+    expect(cssSrc).toContain('data-state=safe] .dgv3-node{color:#fff}');
+    expect(cssSrc).toContain('color:var(--cc,var(--c))');
+    expect((cssSrc.match(/--nc:/g) || []).length).toBe(1);
+    expect((cssSrc.match(/--cc:/g) || []).length).toBe(1);
+  });
+  it('status text turns blue only for READY on the bridge panel (els.route); other states keep their colour', () => {
+    expect(renderSrc).toContain("((els.route && res.state==='SAFE') ? '#4f8ef7' : c)");
+    expect(renderSrc).toContain("(res.state==='UNKNOWN'||res.state==='CHECKING') ? 'var(--muted2)'");
+  });
+  it('status/caption wording is unchanged', () => {
+    expect(renderSrc).toContain("'✓ Gas-free — Arc uses USDC as gas'");
+    expect(src).toContain("if (s==='SAFE')     return exempt?'3/3 (gas exempt)':'3/3 passed';");
   });
 });
 
