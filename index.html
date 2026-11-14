@@ -12606,6 +12606,19 @@ select.cinput option { background: #161a24; color: #dde2f0; }
       .rwa-card-price{font-size:12px;font-weight:600;color:var(--text);margin-top:8px}
       .rwa-card-tag{position:absolute;top:10px;right:10px;font-size:8px;font-weight:700;padding:2px 6px;border-radius:4px;background:rgba(168,85,247,.13);color:#a855f7;border:1px solid rgba(168,85,247,.25);text-transform:uppercase}
       .rwa-card-addr{font-size:8px;color:var(--muted);margin-top:4px;font-family:monospace;word-break:break-all}
+      .rwa-card-cta{position:absolute;bottom:10px;right:10px;display:inline-flex;align-items:center;gap:3px;padding:3px 9px;border-radius:999px;font-size:9px;font-weight:700;font-family:inherit;cursor:pointer;color:#a855f7;background:rgba(168,85,247,.10);border:1px solid rgba(168,85,247,.30);opacity:0;transform:translateY(2px);transition:opacity .15s,transform .15s,background .15s}
+      .rwa-card:hover .rwa-card-cta,.rwa-card-cta:focus-visible{opacity:1;transform:none}
+      .rwa-card-cta:hover{background:rgba(168,85,247,.20)}
+      @media (hover:none){.rwa-card-cta{opacity:.9;transform:none}}
+      .rwa-chips{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:-4px 0 12px}
+      .rwa-chip{display:inline-flex;align-items:center;gap:5px;max-width:240px;padding:3px 5px 3px 10px;border-radius:999px;font-size:10px;font-weight:600;color:var(--text);background:rgba(168,85,247,.10);border:1px solid rgba(168,85,247,.28)}
+      .rwa-chip-txt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .rwa-chip-x{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;padding:0;border:none;border-radius:50%;background:transparent;color:var(--muted2);cursor:pointer;font-size:12px;line-height:1;font-family:inherit}
+      .rwa-chip-x:hover{background:rgba(168,85,247,.22);color:var(--text)}
+      .rwa-chips-clear{background:none;border:none;padding:3px 4px;font-size:10px;font-weight:600;color:var(--muted2);cursor:pointer;text-decoration:underline;font-family:inherit}
+      .rwa-chips-clear:hover{color:var(--text)}
+      .rwa-empty-btn{margin-top:12px;padding:6px 14px;border-radius:7px;font-size:10.5px;font-weight:700;font-family:inherit;cursor:pointer;color:#a855f7;background:rgba(168,85,247,.10);border:1px solid rgba(168,85,247,.30)}
+      .rwa-empty-btn:hover{background:rgba(168,85,247,.20)}
       /* ── Trade terminal ── */
       .rwa-trade-wrap{max-width:520px;margin:0 auto}
       .rwa-field-group{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:10px}
@@ -12749,6 +12762,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
               <option value="robinhood">Robinhood</option>
             </select>
           </div>
+          <div id="rwa-filter-chips" class="rwa-chips" style="display:none"></div>
           <div id="rwa-markets-grid" class="rwa-grid"><div class="rwa-empty"><div class="rwa-spinner"></div><div class="rwa-empty-title" style="margin-top:12px">Loading RWA markets…</div></div></div>
         </div>
         <!-- Trade Terminal -->
@@ -67868,7 +67882,8 @@ function rwaFilterMarkets() {
   if (!grid) return;
 
   if (_rwaMarketsFiltered.length === 0) {
-    grid.innerHTML = '<div class="rwa-empty"><i class="ti ti-building-store"></i><div class="rwa-empty-title">No matches</div><div class="rwa-empty-sub">Try adjusting the search or filters.</div></div>';
+    grid.innerHTML = '<div class="rwa-empty"><i class="ti ti-building-store"></i><div class="rwa-empty-title">No matches</div><div class="rwa-empty-sub">Try adjusting the search or filters.</div><button type="button" class="rwa-empty-btn" onclick="rwaClearFilters()">Clear filters</button></div>';
+    _rwaRenderFilterChips();
     return;
   }
 
@@ -67911,18 +67926,19 @@ function rwaFilterMarkets() {
     iss.style.color = issuer.color;
     var chn = document.createElement('div'); chn.className = 'rwa-card-chain';
     chn.textContent = '\u{1F517} ' + chain.name;
-    var tag = document.createElement('div'); tag.className = 'rwa-card-tag'; tag.textContent = 'RWA';
     var addr = document.createElement('div'); addr.className = 'rwa-card-addr'; addr.textContent = _rwaShortAddr(t.address);
+    var cta = document.createElement('button'); cta.type = 'button'; cta.className = 'rwa-card-cta'; cta.textContent = 'Trade \u2192'; cta.setAttribute('aria-label', 'Trade ' + (t.symbol || 'token'));
 
     card.appendChild(hdr); card.appendChild(iss); card.appendChild(chn);
     if (t.priceUSD) { var pr = document.createElement('div'); pr.className = 'rwa-card-price'; pr.textContent = '$' + parseFloat(t.priceUSD).toFixed(4); card.appendChild(pr); }
-    card.appendChild(tag); card.appendChild(addr);
+    card.appendChild(addr); card.appendChild(cta);
 
     card.addEventListener('click', function() { rwaSelectMarketToken(t); });
     frag.appendChild(card);
   });
   grid.innerHTML = '';
   grid.appendChild(frag);
+  _rwaRenderFilterChips();
 }
 
 function rwaSelectMarketToken(token) {
@@ -68890,6 +68906,48 @@ window.rwaRenderHistory = rwaRenderHistory;
 window.rwaHistFilter = rwaHistFilter;
 window.rwaLoadPortfolio = rwaLoadPortfolio;
 window.rwaSelectMarketToken = rwaSelectMarketToken;
+
+// ── RWA Markets phase 1 (presentation only) ────────────────────────────────
+// The Trade button's click bubbles to the card handler (rwaSelectMarketToken): same action as before.
+function _rwaRenderFilterChips() {
+  var box = document.getElementById('rwa-filter-chips');
+  if (!box) return;
+  var search = document.getElementById('rwa-search');
+  var chainSel = document.getElementById('rwa-chain-filter');
+  var issuerSel = document.getElementById('rwa-issuer-filter');
+  var active = [];
+  var q = search ? search.value.trim() : '';
+  if (q) active.push({ kind: 'search', label: 'Search: \u201C' + q + '\u201D' });
+  if (chainSel && chainSel.value) active.push({ kind: 'chain', label: 'Chain: ' + (chainSel.selectedOptions[0] ? chainSel.selectedOptions[0].textContent : chainSel.value) });
+  if (issuerSel && issuerSel.value) active.push({ kind: 'issuer', label: 'Issuer: ' + (issuerSel.selectedOptions[0] ? issuerSel.selectedOptions[0].textContent : issuerSel.value) });
+  box.textContent = '';
+  if (!active.length) { box.style.display = 'none'; return; }
+  active.forEach(function(a) {
+    var chip = document.createElement('span'); chip.className = 'rwa-chip';
+    var txt = document.createElement('span'); txt.className = 'rwa-chip-txt'; txt.textContent = a.label; txt.title = a.label;
+    var x = document.createElement('button'); x.type = 'button'; x.className = 'rwa-chip-x'; x.textContent = '\u00D7';
+    x.setAttribute('aria-label', 'Remove filter: ' + a.label);
+    x.addEventListener('click', function() { _rwaClearOneFilter(a.kind); });
+    chip.appendChild(txt); chip.appendChild(x); box.appendChild(chip);
+  });
+  var all = document.createElement('button'); all.type = 'button'; all.className = 'rwa-chips-clear'; all.textContent = 'Clear all';
+  all.addEventListener('click', rwaClearFilters);
+  box.appendChild(all);
+  box.style.display = 'flex';
+}
+function _rwaClearOneFilter(kind) {
+  var el = document.getElementById(kind === 'search' ? 'rwa-search' : kind === 'chain' ? 'rwa-chain-filter' : 'rwa-issuer-filter');
+  if (el) el.value = '';
+  rwaFilterMarkets();
+}
+function rwaClearFilters() {
+  ['rwa-search', 'rwa-chain-filter', 'rwa-issuer-filter'].forEach(function(id) {
+    var el = document.getElementById(id); if (el) el.value = '';
+  });
+  rwaFilterMarkets();
+}
+
+window.rwaClearFilters = rwaClearFilters;
 
 })();
 </script>
