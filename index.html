@@ -1250,6 +1250,61 @@ body{display:flex;flex-direction:column;overflow-y:auto;}
 
 /* Site footer: visible only in Standard swap mode (overrides the mobile hide) */
 body.swap-standard-mode .site-footer{display:block !important}
+
+/* ── Advanced mode polish · phase 1 (every rule is scoped to #page-swap.swp-advanced; Standard is untouched) ── */
+/* Readability: raise sub-9px labels to a 9px floor */
+#page-swap.swp-advanced .st-market-stat-label,
+#page-swap.swp-advanced .st-market-change,
+#page-swap.swp-advanced .st-chart-action,
+#page-swap.swp-advanced .st-chart-tf-label,
+#page-swap.swp-advanced .st-swap-label,
+#page-swap.swp-advanced .swp-net-badge,
+#page-swap.swp-advanced .st-swap-bal-row,
+#page-swap.swp-advanced .st-swap-max,
+#page-swap.swp-advanced .st-pair-pill,
+#page-swap.swp-advanced .st-protocol-info,
+#page-swap.swp-advanced .st-pool-status,
+#page-swap.swp-advanced .st-refresh-label{font-size:9px}
+#page-swap.swp-advanced .st-swap-tab-soon{font-size:8px}
+#page-swap.swp-advanced .st-swap-detail-row,
+#page-swap.swp-advanced .st-swap-detail-val{font-size:9.5px}
+/* Pool status: never let a long technical reason blow up the panel (full text stays in the tooltip) */
+#page-swap.swp-advanced .st-pool-status{align-items:flex-start;line-height:1.4}
+#page-swap.swp-advanced .st-pool-dot{margin-top:4px}
+#page-swap.swp-advanced #swp-pool-label{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;overflow-wrap:anywhere}
+/* Light theme: the chart canvas paints a fixed dark palette, so invert it for light (CSS only; HTML overlays are unaffected) */
+[data-theme="light"] #page-swap.swp-advanced #st-chart-canvas{filter:invert(1) hue-rotate(180deg)}
+/* Light theme: hard-coded #1a1f2e borders / translucent-black fills look heavy on white */
+[data-theme="light"] #page-swap.swp-advanced .st-slip-pill,
+[data-theme="light"] #page-swap.swp-advanced .st-pair-pill{border-color:var(--border)}
+[data-theme="light"] #page-swap.swp-advanced .st-slip-pill:hover{border-color:rgba(34,197,94,.45)}
+[data-theme="light"] #page-swap.swp-advanced .st-pair-pill:hover{border-color:rgba(79,142,247,.45)}
+[data-theme="light"] #page-swap.swp-advanced .st-slip-pill.active{border-color:rgba(31,209,143,.5);color:#0e9f6e}
+[data-theme="light"] #page-swap.swp-advanced .st-slip-custom{background:var(--card2);border-color:var(--border)}
+[data-theme="light"] #page-swap.swp-advanced .st-slip-custom:focus{background:var(--card);border-color:#1fd18f}
+[data-theme="light"] #page-swap.swp-advanced .st-market-pair,
+[data-theme="light"] #page-swap.swp-advanced .st-market-price-wrap,
+[data-theme="light"] #page-swap.swp-advanced .st-market-stat{border-right-color:var(--border)}
+[data-theme="light"] #page-swap.swp-advanced .st-refresh-btn{border-color:var(--border)}
+
+/* ── Advanced mode polish · phase 2 (scoped to #page-swap.swp-advanced; Standard is untouched) ── */
+/* Top bar: Advanced showed two wallet buttons and two network pills (page header + terminal header).
+   Keep the page-header cluster (dynamic: real address / active chain) and hide the static duplicates. Desktop only. */
+@media(min-width:769px){
+  #page-swap.swp-advanced .st-header .st-net-pill,
+  #page-swap.swp-advanced .st-header .st-wallet-btn{display:none}
+}
+/* Market bar: pair / price / stats as compact cards (desktop only, so the responsive hide rules keep working) */
+@media(min-width:961px){
+  #page-swap.swp-advanced .st-market-bar{height:46px;gap:6px;padding:0 8px}
+  #page-swap.swp-advanced .st-market-pair,
+  #page-swap.swp-advanced .st-market-price-wrap,
+  #page-swap.swp-advanced .st-market-stat{height:calc(100% - 12px);padding:0 12px;border:1px solid var(--panel-border);border-radius:8px;background:var(--panel-bg2)}
+  #page-swap.swp-advanced .st-market-stat{min-width:96px}
+  #page-swap.swp-advanced .st-market-stat-label{letter-spacing:.6px}
+  #page-swap.swp-advanced .st-market-stat-val{font-size:11px}
+  #page-swap.swp-advanced .st-market-price{font-size:14px}
+}
 .swap-route-head{display:flex;align-items:center;gap:6px;padding:8px 10px;border-bottom:1px solid var(--panel-border);font-size:9px;font-weight:800;color:var(--text);letter-spacing:.8px;flex-shrink:0}
 .swap-route-status{margin-left:auto;font-size:7.5px;font-weight:600;color:var(--muted2);letter-spacing:.3px}
 .swap-route-list{flex:1;overflow-y:auto;padding:8px;display:flex;flex-direction:column;gap:6px}
@@ -24334,8 +24389,15 @@ function swpUpdatePoolInfo() {
     const inactiveReason = PROTECTION.getInactiveReason(poolCfg.id);
     if (dot) dot.style.background = isActive && hasLiq ? riskInfo.color : 'var(--yellow)';
     if (lbl) {
-      if (!isActive) lbl.textContent = inactiveReason || 'Pool inactive';
-      else lbl.textContent = `${poolCfg.tokenA}/${poolCfg.tokenB} · ${riskInfo.text}`;
+      if (!isActive) {
+        const _poolReason = inactiveReason || 'Pool inactive';
+        // Raw RPC/provider errors are not user-facing: show a short message, keep the full reason in the tooltip.
+        lbl.textContent = /^Cannot verify pool deployment/i.test(_poolReason) ? 'Could not verify the pool right now. Try again shortly.' : _poolReason;
+        lbl.title = _poolReason;
+      } else {
+        lbl.textContent = `${poolCfg.tokenA}/${poolCfg.tokenB} · ${riskInfo.text}`;
+        lbl.title = '';
+      }
     }
     if (tvlE2) tvlE2.textContent = '';
   }
