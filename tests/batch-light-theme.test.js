@@ -67,3 +67,20 @@ describe('Billing light theme — #page-invoices .cinput', () => {
     rules.forEach(l => expect(l.startsWith('[data-theme="light"] #page-invoices')).toBe(true));
   });
 });
+
+// ── Batch light theme: stats strip frame + table surface ──────────────────────
+describe('Batch light theme — stats strip and table surface', () => {
+  const rule = (sel) => {
+    const i = src.indexOf(sel);
+    expect(i).toBeGreaterThan(-1);
+    return src.slice(i, src.indexOf('}', i) + 1);
+  };
+  it('stats strip frame uses the surface token (no --border frame) in light only', () => {
+    expect(rule('[data-theme="light"] #page-batch .stats-row{')).toContain('var(--surface)');
+    expect(rule('[data-theme="light"] #page-batch .stats-row .stat-box+.stat-box{')).toContain('border-left:1px solid var(--border)');
+  });
+  it('table wrapper is a light surface in light only; base rules untouched', () => {
+    expect(rule('[data-theme="light"] #page-batch .ms-table-wrap{')).toContain('var(--surface)');
+    expect(src).toContain('.stats-row{display:flex;gap:1px;background:var(--border);flex-shrink:0}');
+  });
+});
