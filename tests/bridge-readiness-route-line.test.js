@@ -160,7 +160,7 @@ describe('READY line colour', () => {
   it('READY line (fill + start dot) uses the checking blue; only READY sets --lc', () => {
     expect(cssSrc).toContain("data-state=safe]{--lc:#4f8ef7;--lcs:rgba(79,142,247,.12);");
     expect(cssSrc).toContain('.dgv3-fill{position:absolute;left:0;top:0;height:100%;border-radius:2px;background:var(--lc,var(--c))');
-    expect(cssSrc).toContain('.dgv3-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;background:var(--lc,var(--c))');
+    expect(cssSrc).toContain('.dgv3-dot{width:12px;height:12px;border-radius:50%;flex-shrink:0;background:var(--lc,var(--c))');
     expect(cssSrc).toContain("data-state=safe]{--c:#22c55e"); // base READY palette (end circle/caption overridden below)
     // the line override is READY only: no other state sets --lc
     expect((cssSrc.match(/--lc:/g) || []).length).toBe(1);
@@ -187,13 +187,38 @@ describe('READY neon end circle, caption and status text', () => {
 });
 
 describe('route spacing (node/dot inset from the card edge)', () => {
-  it('route is inset 8px on both sides and sits 14px below the Status row, scoped to the bridge panel', () => {
+  it('route sits in a boxed strip (10px 14px padding, like Payment Route) 14px below the Status row, scoped to the bridge panel', () => {
     expect(cssSrc).toContain("#dgv-panel-bridge .dgv3-route{");
-    expect(cssSrc).toMatch(/#dgv-panel-bridge \.dgv3-route\{[^}]*gap:5px;margin-top:14px;padding:0 8px\}/);
+    expect(cssSrc).toMatch(/#dgv-panel-bridge \.dgv3-route\{[^}]*gap:5px;margin-top:14px;padding:10px 14px;background:rgba\(0,0,0,\.2\);border:1px solid var\(--border\);border-radius:8px\}/);
   });
   it('caption stays aligned with the node (shares the route inset, no extra margin)', () => {
     expect(cssSrc).toMatch(/\.dgv3-caption\{align-self:flex-end;/);
     expect(cssSrc).not.toMatch(/\.dgv3-caption\{[^}]*margin/);
+  });
+});
+
+describe('Payment-Route look (gradient line, $ coin, glowing dots)', () => {
+  it('READY uses the Send Assets gradient (blue → amber → red) on a pseudo-element, fill is hidden', () => {
+    expect(cssSrc).toContain('data-state=safe] .dgv3-track::before{content:"";position:absolute;inset:0;border-radius:2px;background:linear-gradient(90deg,#4f8ef7,#f59e0b,#ff0202);opacity:.6}');
+    expect(cssSrc).toContain('data-state=safe] .dgv3-fill{background:transparent}');
+    // the gradient exists only for READY (no gradient/progress look for any other state)
+    expect(cssSrc.match(/linear-gradient\(90deg,#4f8ef7,#f59e0b,#ff0202\)/g)).toHaveLength(1);
+  });
+  it('the coin is a 14px gold disc with a "$"; shown only while CHECKING (travelling) or READY (parked at the end)', () => {
+    expect(cssSrc).toContain('.dgv3-packet{display:none;position:absolute;top:50%;left:0;width:14px;height:14px;margin-top:-7px;border-radius:50%;background:#f59e0b;box-shadow:0 0 10px #f59e0b;pointer-events:none}');
+    expect(cssSrc).toContain('.dgv3-packet::after{content:"$"');
+    expect(cssSrc).toContain('data-state=checking] .dgv3-packet{display:block;animation:dgv3-travel 2.2s linear infinite}');
+    expect(cssSrc).toContain('data-state=safe] .dgv3-packet{display:block;left:calc(100% - 14px)}');
+    const shows = cssSrc.match(/\.dgv3-route\[data-state=\w+\] \.dgv3-packet\{display:block/g) || [];
+    expect(shows).toHaveLength(2); // never for warning / blocked / error / stale / unknown
+    expect(cssSrc).toContain('@keyframes dgv3-travel{from{left:0}to{left:calc(100% - 14px)}}');
+  });
+  it('start dot is 12px with a soft glow; light theme swaps the strip background to the card token', () => {
+    expect(cssSrc).toContain('box-shadow:0 0 6px var(--lcg,var(--cb))');
+    expect(cssSrc).toContain("'[data-theme=\"light\"] #dgv-panel-bridge .dgv3-route{background:var(--card2)}'");
+  });
+  it('reduced motion still stops the coin', () => {
+    expect(cssSrc).toContain('.dgv3-packet{animation:none;left:calc(50% - 7px)}');
   });
 });
 
