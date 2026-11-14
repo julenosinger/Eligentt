@@ -167,18 +167,29 @@ describe('READY line colour', () => {
   });
 });
 
-describe('READY neon end circle, caption and status text', () => {
-  it('READY end circle is blue with a neon glow and white check; caption is blue', () => {
-    expect(cssSrc).toContain('--nc:#4f8ef7;--cc:#4f8ef7;--ng:0 0 0 3px rgba(79,142,247,.22),0 0 9px 1px rgba(79,142,247,.8)');
+describe('READY red destination dot, ochre caption and status text', () => {
+  it('READY end node is a red 12px dot (same size as the start dot) with a soft red glow and no check icon', () => {
+    expect(cssSrc).toContain('--nc:#ff0202;--cc:var(--dgv3-ready-ink,#c8963e);--ng:0 0 6px rgba(255,2,2,.4)');
     expect(cssSrc).toContain('background:var(--nc,var(--c));color:#0b1220;box-shadow:var(--ng,0 0 0 3px var(--cs))');
-    expect(cssSrc).toContain('data-state=safe] .dgv3-node{color:#fff}');
+    expect(cssSrc).toContain('data-state=safe] .dgv3-node{width:12px;height:12px;color:#fff}');
+    expect(cssSrc).toContain('data-state=safe] .dgv3-node .ic-ok{display:none}');
+    expect(cssSrc).toContain('.dgv3-dot{width:12px;height:12px;');
     expect(cssSrc).toContain('color:var(--cc,var(--c))');
     expect((cssSrc.match(/--nc:/g) || []).length).toBe(1);
     expect((cssSrc.match(/--cc:/g) || []).length).toBe(1);
   });
-  it('status text turns blue only for READY on the bridge panel (els.route); other states keep their colour', () => {
-    expect(renderSrc).toContain("((els.route && res.state==='SAFE') ? '#4f8ef7' : c)");
+  it('other states keep their 18px icon node (BLOCKED/WARNING/ERROR/STALE are never a plain red dot)', () => {
+    expect(cssSrc).toContain('.dgv3-node{width:18px;height:18px;');
+    expect((cssSrc.match(/\.dgv3-route\[data-state=\w+\] \.dgv3-node\{width:12px/g) || [])).toHaveLength(1);
+  });
+  it('ochre tokens: dark #c8963e, light #8a5a12, scoped to the bridge panel', () => {
+    expect(cssSrc).toContain("'#dgv-panel-bridge{--dgv3-ready-ink:#c8963e}'");
+    expect(cssSrc).toContain("'[data-theme=\"light\"] #dgv-panel-bridge{--dgv3-ready-ink:#8a5a12}'");
+  });
+  it('status text uses the ochre token only for READY on the bridge panel (els.route); other states keep their colour', () => {
+    expect(renderSrc).toContain("((els.route && res.state==='SAFE') ? 'var(--dgv3-ready-ink,#c8963e)' : c)");
     expect(renderSrc).toContain("(res.state==='UNKNOWN'||res.state==='CHECKING') ? 'var(--muted2)'");
+    expect(renderSrc).not.toContain("'#4f8ef7' : c)");
   });
   it('status/caption wording is unchanged', () => {
     expect(renderSrc).toContain("'✓ Gas-free — Arc uses USDC as gas'");
