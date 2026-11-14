@@ -1305,6 +1305,21 @@ body.swap-standard-mode .site-footer{display:block !important}
   #page-swap.swp-advanced .st-market-stat-val{font-size:11px}
   #page-swap.swp-advanced .st-market-price{font-size:14px}
 }
+
+/* ── Advanced mode polish · phase 3 — order details as one collapsible card ──
+   The toggle is hidden everywhere except Advanced. Standard never renders it.
+   Collapsing only hides rows through CSS; no value, id or quote logic changes. */
+.swp-det-toggle{display:none}
+#page-swap.swp-advanced .swp-det-toggle{display:flex;align-items:center;justify-content:space-between;width:100%;margin-top:6px;padding:5px 9px;font-family:inherit;font-size:9px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted2);background:var(--swap-details-bg);border:1px solid var(--swap-details-border);border-radius:6px 6px 0 0;cursor:pointer;transition:color .12s}
+#page-swap.swp-advanced .swp-det-toggle:hover{color:var(--text)}
+#page-swap.swp-advanced .swp-det-toggle:focus-visible{outline:1px solid var(--blue);outline-offset:1px}
+#page-swap.swp-advanced .swp-det-toggle i{font-size:10px;transition:transform .15s}
+#page-swap.swp-advanced .swp-det-toggle[aria-expanded="false"] i{transform:rotate(-90deg)}
+#page-swap.swp-advanced .swp-det-toggle + #swp-rate-bar{margin-top:-5px;border-top:0;border-radius:0}
+#page-swap.swp-advanced #swp-rate-bar ~ #swp-chart-wrap{margin:-5px 0 4px;background:var(--swap-details-bg);border:1px solid var(--swap-details-border);border-top:1px dashed var(--swap-details-border);border-radius:0 0 6px 6px}
+#page-swap.swp-advanced #swp-rate-bar.swp-det-collapsed{border-radius:0 0 6px 6px}
+#page-swap.swp-advanced #swp-rate-bar.swp-det-collapsed .st-swap-detail-row:nth-child(n+3){display:none}
+#page-swap.swp-advanced #swp-rate-bar.swp-det-collapsed ~ #swp-chart-wrap{display:none}
 .swap-route-head{display:flex;align-items:center;gap:6px;padding:8px 10px;border-bottom:1px solid var(--panel-border);font-size:9px;font-weight:800;color:var(--text);letter-spacing:.8px;flex-shrink:0}
 .swap-route-status{margin-left:auto;font-size:7.5px;font-weight:600;color:var(--muted2);letter-spacing:.3px}
 .swap-route-list{flex:1;overflow-y:auto;padding:8px;display:flex;flex-direction:column;gap:6px}
@@ -7911,6 +7926,8 @@ select.cinput option { background: #161a24; color: #dde2f0; }
                 </div>
               </div>
 
+              <!-- Order details toggle (Advanced only; hidden by CSS elsewhere) -->
+              <button type="button" class="swp-det-toggle" id="swp-det-toggle" aria-expanded="true" aria-controls="swp-rate-bar" onclick="swpToggleOrderDetails()"><span>Order details</span><i class="ti ti-chevron-down"></i></button>
               <!-- Rate Details -->
               <div class="st-swap-details" id="swp-rate-bar">
                 <div class="st-swap-detail-row"><span><i class="ti ti-arrow-right-bar" style="font-size:8px;margin-right:3px;color:var(--blue)"></i>Rate</span><span class="st-swap-detail-val blue" id="swap-rate">—</span></div>
@@ -26435,7 +26452,7 @@ function stOnPairChange(val) {
   document.getElementById('swap-amount-out').value = '';
   applySwapTokens();
   updateSwapRate();
-  setTimeout(function() { stDrawChart(); stRenderDepth(); stUpdateMarket(); stPopulatePairs(); }, 300);
+  setTimeout(function() { stDrawChart(); stRenderDepth(); stUpdateMarket(); stPopulatePairs(); stPopulatePairPills(); }, 300);
 }
 function stSetPrec(p) { ST.prec = p; document.querySelectorAll('.st-ob-prec-btn').forEach(function(b){b.classList.toggle('active', b.textContent.trim()===(p===2?'0.01':'0.0001'))}); stRenderDepth(); }
 
@@ -27057,6 +27074,16 @@ function stPopulatePairPills() {
   container.innerHTML = html || '<span style="font-size:7px;color:var(--muted)">No pairs</span>';
 }
 
+// ── Advanced: collapsible order details (presentation only: toggles a CSS class) ──
+function swpToggleOrderDetails() {
+  var bar = document.getElementById('swp-rate-bar');
+  var btn = document.getElementById('swp-det-toggle');
+  if (!bar || !btn) return;
+  var collapsed = !bar.classList.contains('swp-det-collapsed');
+  bar.classList.toggle('swp-det-collapsed', collapsed);
+  btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+}
+
 function stSwitchPair(index) {
   if (typeof POOL_REGISTRY === 'undefined' || typeof TOKEN_LIST === 'undefined') return;
   var seen = {};
@@ -27092,7 +27119,7 @@ function stSwitchPair(index) {
   updateSwapRate();
   // Update active pill
   document.querySelectorAll('.st-pair-pill').forEach(function(b, i) { b.classList.toggle('active', i === index); });
-  setTimeout(function() { stDrawChart(); stUpdateMarket(); stUpdateProtocolInfo(); stPopulatePairPills(); }, 300);
+  setTimeout(function() { stDrawChart(); stUpdateMarket(); stUpdateProtocolInfo(); stPopulatePairPills(); stPopulatePairs(); }, 300);
 }
 
 // ── Protocol Info ──────────────────────────

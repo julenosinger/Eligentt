@@ -10,7 +10,7 @@ import path from 'path';
 
 const html = fs.readFileSync(path.resolve(__dirname, '../index.html'), 'utf8');
 const start = html.indexOf('/* ── Advanced mode polish · phase 2');
-const end = html.indexOf('\n.swap-route-head{', start);
+const end = html.indexOf('/* ── Advanced mode polish · phase 3', start);
 const block = html.slice(start, end);
 
 describe('Advanced phase 2 CSS block', () => {

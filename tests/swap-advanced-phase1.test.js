@@ -8,7 +8,7 @@ import path from 'path';
 
 const html = fs.readFileSync(path.resolve(__dirname, '../index.html'), 'utf8');
 const start = html.indexOf('/* ── Advanced mode polish · phase 1');
-const end = html.indexOf('.swp-side-col', start) > -1 ? html.indexOf('\n.swap-route-head{', start) : -1;
+const end = html.indexOf('.swp-side-col', start) > -1 ? html.indexOf('/* ── Advanced mode polish · phase 2', start) : -1;
 const block = html.slice(start, end);
 
 describe('Advanced phase 1 CSS block', () => {
