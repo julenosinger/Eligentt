@@ -55589,12 +55589,12 @@ function _ubDirectExec(intent, params, mode) {
       // (visual only, same .dgv-bar-fg / .dgv-checks hooks); other panels keep the original bar.
       var readinessHTML = (cfg.panelId === 'dgv-panel-bridge')
         ? '<div class="dgv2-readiness dgv3-route" data-state="unknown" role="status" aria-live="polite">' +
-            '<span class="dgv3-dot" aria-hidden="true"></span>' +
-            '<div class="dgv2-bar-bg dgv3-track">' +
-              '<div class="dgv2-bar-fg dgv-bar-fg dgv3-fill" style="width:0%"></div>' +
-              '<span class="dgv3-packet" aria-hidden="true"></span>' +
-            '</div>' +
-            '<span class="dgv3-end">' +
+            '<div class="dgv3-line">' +
+              '<span class="dgv3-dot" aria-hidden="true"></span>' +
+              '<div class="dgv2-bar-bg dgv3-track">' +
+                '<div class="dgv2-bar-fg dgv-bar-fg dgv3-fill" style="width:0%"></div>' +
+                '<span class="dgv3-packet" aria-hidden="true"></span>' +
+              '</div>' +
               '<span class="dgv3-node" aria-hidden="true">' +
                 '<svg class="dgv3-ic ic-ok" viewBox="0 0 16 16"><path d="M3.5 8.5l3 3 6-7"/></svg>' +
                 '<svg class="dgv3-ic ic-bad" viewBox="0 0 16 16"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg>' +
@@ -55602,8 +55602,8 @@ function _ubDirectExec(intent, params, mode) {
                 '<svg class="dgv3-ic ic-stale" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5"/><path d="M8 5v3.2l2 1.3"/></svg>' +
                 '<svg class="dgv3-ic ic-wait" viewBox="0 0 16 16"><path d="M4 8h.01M8 8h.01M12 8h.01"/></svg>' +
               '</span>' +
-              '<span class="dgv2-checks dgv-checks">—</span>' +
-            '</span>' +
+            '</div>' +
+            '<span class="dgv2-checks dgv-checks dgv3-caption">—</span>' +
           '</div>'
         : '<div class="dgv2-readiness">' +
             '<div class="dgv2-bar-bg"><div class="dgv2-bar-fg dgv-bar-fg" style="width:0%;background:#7b8291"></div></div>' +
@@ -56081,26 +56081,28 @@ function _ubDirectExec(intent, params, mode) {
         '@keyframes dgv2-pulse{0%,100%{opacity:1}50%{opacity:.45}}' +
         '.dgv2-dot.checking{animation:dgv2-pulse 1.2s ease-in-out infinite}' +
         /* ── Bridge readiness: continuous route line (visual only, scoped to #dgv-panel-bridge) ── */
-        '#dgv-panel-bridge .dgv3-route{--c:#7b8291;--cs:rgba(123,130,145,.12);--cb:rgba(123,130,145,.32);gap:9px;margin-top:8px;min-height:22px}' +
+        '#dgv-panel-bridge .dgv3-route{--c:#7b8291;--cs:rgba(123,130,145,.12);--cb:rgba(123,130,145,.32);display:flex;flex-direction:column;align-items:stretch;gap:5px;margin-top:11px}' +
         '#dgv-panel-bridge .dgv3-route[data-state=safe]{--c:#22c55e;--cs:rgba(34,197,94,.12);--cb:rgba(34,197,94,.38)}' +
         '#dgv-panel-bridge .dgv3-route[data-state=checking]{--c:#4f8ef7;--cs:rgba(79,142,247,.12);--cb:rgba(79,142,247,.35)}' +
+        /* READY: the line (fill + start dot) keeps the blue used while checking; the end circle and caption stay green */
+        '#dgv-panel-bridge .dgv3-route[data-state=safe]{--lc:#4f8ef7;--lcs:rgba(79,142,247,.12)}' +
         '#dgv-panel-bridge .dgv3-route[data-state=warning],#dgv-panel-bridge .dgv3-route[data-state=stale]{--c:#f59e0b;--cs:rgba(245,158,11,.12);--cb:rgba(245,158,11,.38)}' +
         '#dgv-panel-bridge .dgv3-route[data-state=blocked],#dgv-panel-bridge .dgv3-route[data-state=error]{--c:#ef4444;--cs:rgba(239,68,68,.12);--cb:rgba(239,68,68,.38)}' +
-        '#dgv-panel-bridge .dgv3-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;background:var(--c);box-shadow:0 0 0 3px var(--cs);transition:background .3s ease,box-shadow .3s ease}' +
+        '#dgv-panel-bridge .dgv3-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;background:var(--lc,var(--c));box-shadow:0 0 0 3px var(--lcs,var(--cs));transition:background .3s ease,box-shadow .3s ease}' +
         '#dgv-panel-bridge .dgv3-track{position:relative;flex:1;min-width:24px;height:2px;border-radius:2px;overflow:visible;background:var(--border)}' +
-        '#dgv-panel-bridge .dgv3-fill{position:absolute;left:0;top:0;height:100%;border-radius:2px;background:var(--c);transition:width .4s ease,background .4s ease}' +
+        '#dgv-panel-bridge .dgv3-fill{position:absolute;left:0;top:0;height:100%;border-radius:2px;background:var(--lc,var(--c));transition:width .4s ease,background .4s ease}' +
         '#dgv-panel-bridge .dgv3-route[data-state=unknown] .dgv3-track,#dgv-panel-bridge .dgv3-route[data-state=error] .dgv3-track,#dgv-panel-bridge .dgv3-route[data-state=stale] .dgv3-track{background:repeating-linear-gradient(90deg,var(--c) 0 4px,transparent 4px 8px);opacity:.6}' +
         '#dgv-panel-bridge .dgv3-route[data-state=checking] .dgv3-track::after{content:"";position:absolute;inset:0;border-radius:2px;background:linear-gradient(90deg,transparent,var(--c),transparent);background-size:40% 100%;background-repeat:no-repeat;background-position:-60% 0;animation:dgv3-sweep 1.4s ease-in-out infinite}' +
         '#dgv-panel-bridge .dgv3-packet{display:none;position:absolute;top:50%;left:0;width:10px;height:10px;margin-top:-5px;border-radius:50%;background:var(--c);box-shadow:0 0 8px var(--cb)}' +
         '#dgv-panel-bridge .dgv3-route[data-state=checking] .dgv3-packet{display:block;animation:dgv3-travel 1.6s ease-in-out infinite alternate}' +
-        '#dgv-panel-bridge .dgv3-end{display:inline-flex;align-items:center;gap:6px;flex-shrink:0;padding:2px 9px 2px 2px;border-radius:999px;border:1px solid var(--cb);background:var(--cs);transition:border-color .3s ease,background .3s ease}' +
-        '#dgv-panel-bridge .dgv3-node{width:16px;height:16px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;background:var(--c);color:#0b1220;transition:background .3s ease}' +
-        '#dgv-panel-bridge .dgv3-end .dgv2-checks{color:var(--c);font-weight:600;transition:color .3s ease}' +
+        '#dgv-panel-bridge .dgv3-line{display:flex;align-items:center;gap:9px;min-height:20px}' +
+        '#dgv-panel-bridge .dgv3-node{width:18px;height:18px;flex-shrink:0;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;background:var(--c);color:#0b1220;box-shadow:0 0 0 3px var(--cs);transition:background .3s ease,box-shadow .3s ease}' +
+        '#dgv-panel-bridge .dgv3-caption{align-self:flex-end;font-size:8.5px;font-weight:600;line-height:1.2;letter-spacing:.2px;color:var(--c);transition:color .3s ease}' +
         '#dgv-panel-bridge .dgv3-ic{display:none;width:11px;height:11px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}' +
         '#dgv-panel-bridge .dgv3-route[data-state=safe] .ic-ok,#dgv-panel-bridge .dgv3-route[data-state=blocked] .ic-bad,#dgv-panel-bridge .dgv3-route[data-state=warning] .ic-warn,#dgv-panel-bridge .dgv3-route[data-state=error] .ic-warn,#dgv-panel-bridge .dgv3-route[data-state=stale] .ic-stale,#dgv-panel-bridge .dgv3-route[data-state=unknown] .ic-wait,#dgv-panel-bridge .dgv3-route[data-state=checking] .ic-wait{display:block}' +
         '@keyframes dgv3-sweep{0%{background-position:-60% 0}100%{background-position:160% 0}}' +
         '@keyframes dgv3-travel{from{left:0}to{left:calc(100% - 10px)}}' +
-        '@media(prefers-reduced-motion:reduce){#dgv-panel-bridge .dgv3-route[data-state=checking] .dgv3-track::after{animation:none;background-position:50% 0}#dgv-panel-bridge .dgv3-route[data-state=checking] .dgv3-packet{animation:none;left:calc(50% - 5px)}#dgv-panel-bridge .dgv3-fill,#dgv-panel-bridge .dgv3-dot,#dgv-panel-bridge .dgv3-end,#dgv-panel-bridge .dgv3-node{transition:none}}';
+        '@media(prefers-reduced-motion:reduce){#dgv-panel-bridge .dgv3-route[data-state=checking] .dgv3-track::after{animation:none;background-position:50% 0}#dgv-panel-bridge .dgv3-route[data-state=checking] .dgv3-packet{animation:none;left:calc(50% - 5px)}#dgv-panel-bridge .dgv3-fill,#dgv-panel-bridge .dgv3-dot,#dgv-panel-bridge .dgv3-caption,#dgv-panel-bridge .dgv3-node{transition:none}}';
       document.head.appendChild(st);
     }
     controllers.forEach(function(c){ c.ensure(); });

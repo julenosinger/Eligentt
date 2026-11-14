@@ -31,7 +31,21 @@ describe('route line markup', () => {
     expect(buildPanelSrc).toContain("cfg.panelId === 'dgv-panel-bridge'");
     expect(buildPanelSrc).toContain('dgv2-readiness dgv3-route');
     expect(buildPanelSrc).toContain('dgv3-track');
-    expect(buildPanelSrc).toContain('dgv3-end');
+    // Option A: full-width line ending in the circle node; label is a caption below-right (no boxed pill)
+    expect(buildPanelSrc).toContain('dgv3-line');
+    expect(buildPanelSrc).toContain('dgv3-node');
+    expect(buildPanelSrc).toContain('dgv2-checks dgv-checks dgv3-caption');
+    expect(buildPanelSrc).not.toContain('dgv3-end');
+  });
+  it('caption sits after the line, outside it, right-aligned and unboxed', () => {
+    const readiness = buildPanelSrc.slice(buildPanelSrc.indexOf('var readinessHTML'), buildPanelSrc.indexOf('var panelHTML'));
+    expect(readiness.indexOf('dgv3-caption')).toBeGreaterThan(readiness.indexOf('dgv3-node'));
+    const line = readiness.slice(readiness.indexOf('dgv3-line'), readiness.indexOf('<span class="dgv2-checks'));
+    expect(line).not.toContain('dgv-checks');
+    const css = cssSrc.slice(cssSrc.indexOf('.dgv3-caption{'), cssSrc.indexOf('}', cssSrc.indexOf('.dgv3-caption{')) + 1);
+    expect(css).toContain('align-self:flex-end');
+    expect(css).not.toMatch(/border|background|padding/);
+    expect(cssSrc).not.toContain('.dgv3-end');
   });
   it('keeps original hooks dgv-bar-fg and dgv-checks (DOM contract)', () => {
     expect(buildPanelSrc).toContain('dgv2-bar-fg dgv-bar-fg dgv3-fill');
@@ -141,3 +155,15 @@ describe('isolation and no side effects', () => {
     expect(src).toContain("panelId: 'dgv-panel-bridge'");
   });
 });
+
+describe('READY line colour', () => {
+  it('READY keeps the line (fill + start dot) blue while the end circle and caption stay green', () => {
+    expect(cssSrc).toContain("data-state=safe]{--lc:#4f8ef7;--lcs:rgba(79,142,247,.12)}");
+    expect(cssSrc).toContain('.dgv3-fill{position:absolute;left:0;top:0;height:100%;border-radius:2px;background:var(--lc,var(--c))');
+    expect(cssSrc).toContain('.dgv3-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;background:var(--lc,var(--c))');
+    expect(cssSrc).toContain("data-state=safe]{--c:#22c55e");
+    // the line override is READY only: no other state sets --lc
+    expect((cssSrc.match(/--lc:/g) || []).length).toBe(1);
+  });
+});
+
