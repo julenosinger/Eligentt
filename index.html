@@ -55543,6 +55543,31 @@ function _ubDirectExec(intent, params, mode) {
       var btn = document.getElementById(cfg.buttonId);
       if (!btn || !btn.parentNode) return false;
 
+      // Readiness indicator markup. Bridge gets the continuous route line
+      // (visual only, same .dgv-bar-fg / .dgv-checks hooks); other panels keep the original bar.
+      var readinessHTML = (cfg.panelId === 'dgv-panel-bridge')
+        ? '<div class="dgv2-readiness dgv3-route" data-state="unknown" role="status" aria-live="polite">' +
+            '<span class="dgv3-dot" aria-hidden="true"></span>' +
+            '<div class="dgv2-bar-bg dgv3-track">' +
+              '<div class="dgv2-bar-fg dgv-bar-fg dgv3-fill" style="width:0%"></div>' +
+              '<span class="dgv3-packet" aria-hidden="true"></span>' +
+            '</div>' +
+            '<span class="dgv3-end">' +
+              '<span class="dgv3-node" aria-hidden="true">' +
+                '<svg class="dgv3-ic ic-ok" viewBox="0 0 16 16"><path d="M3.5 8.5l3 3 6-7"/></svg>' +
+                '<svg class="dgv3-ic ic-bad" viewBox="0 0 16 16"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg>' +
+                '<svg class="dgv3-ic ic-warn" viewBox="0 0 16 16"><path d="M8 3.5v5.5M8 12v.4"/></svg>' +
+                '<svg class="dgv3-ic ic-stale" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5"/><path d="M8 5v3.2l2 1.3"/></svg>' +
+                '<svg class="dgv3-ic ic-wait" viewBox="0 0 16 16"><path d="M4 8h.01M8 8h.01M12 8h.01"/></svg>' +
+              '</span>' +
+              '<span class="dgv2-checks dgv-checks">—</span>' +
+            '</span>' +
+          '</div>'
+        : '<div class="dgv2-readiness">' +
+            '<div class="dgv2-bar-bg"><div class="dgv2-bar-fg dgv-bar-fg" style="width:0%;background:#7b8291"></div></div>' +
+            '<span class="dgv2-checks dgv-checks">—</span>' +
+          '</div>';
+
       var panelHTML =
         '<div class="dgv2-wrap">' +
           /* ── Header ── */
@@ -55584,11 +55609,8 @@ function _ubDirectExec(intent, params, mode) {
               '<span class="dgv2-lbl">Status</span>' +
               '<span class="dgv2-val dgv-status" style="color:var(--muted2)">—</span>' +
             '</div>' +
-            /* Readiness bar */
-            '<div class="dgv2-readiness">' +
-              '<div class="dgv2-bar-bg"><div class="dgv2-bar-fg dgv-bar-fg" style="width:0%;background:#7b8291"></div></div>' +
-              '<span class="dgv2-checks dgv-checks">—</span>' +
-            '</div>' +
+            /* Readiness bar (Bridge: continuous route line; other panels unchanged) */
+            readinessHTML +
             /* State message */
             '<div class="dgv-msg" style="display:none;margin-top:5px;padding:7px 9px;border-radius:6px;font-size:9px"></div>' +
             /* Suggestions list */
@@ -55682,6 +55704,7 @@ function _ubDirectExec(intent, params, mode) {
         updated: p.querySelector('.dgv-updated'),
         barFg: p.querySelector('.dgv-bar-fg'),
         checks: p.querySelector('.dgv-checks'),
+        route: p.querySelector('.dgv3-route'),
         body: p.querySelector('.dgv2-body')
       };
     }
@@ -55751,7 +55774,8 @@ function _ubDirectExec(intent, params, mode) {
       if (els.updated && res.state !== 'CHECKING') els.updated.textContent = 'Updated ' + _nowStamp();
       // readiness bar
       var bc = _barConfig(res.state, res.exempt);
-      if (els.barFg){ els.barFg.style.width = bc.pct + '%'; els.barFg.style.background = bc.bg; }
+      if (els.barFg){ els.barFg.style.width = bc.pct + '%'; if (!els.route) els.barFg.style.background = bc.bg; }
+      if (els.route) els.route.setAttribute('data-state', String(res.state || 'UNKNOWN').toLowerCase());
       if (els.checks) els.checks.textContent = _checksText(res.state, res.exempt);
 
       if (els.wallet)  els.wallet.textContent  = res.address ? shortAddr(res.address) : '—';
@@ -55826,7 +55850,8 @@ function _ubDirectExec(intent, params, mode) {
       setDot('CHECKING'); setPill('CHECKING');
       if (els.badge){ els.badge.textContent = 'Checking…'; els.badge.style.color = 'var(--muted2)'; els.badge.style.borderColor='var(--border)'; els.badge.style.background='rgba(255,255,255,.06)'; }
       if (els.updated) els.updated.textContent = '';
-      if (els.barFg){ els.barFg.style.width='0%'; els.barFg.style.background='#7b8291'; }
+      if (els.barFg){ els.barFg.style.width='0%'; if (!els.route) els.barFg.style.background='#7b8291'; }
+      if (els.route) els.route.setAttribute('data-state', 'checking');
       if (els.checks) els.checks.textContent = '…';
       if (els.wallet)  els.wallet.textContent  = res.address ? shortAddr(res.address) : '—';
       if (els.network) els.network.textContent = res.chainName ? res.chainName + (res.chainId?' · '+res.chainId:'') : '—';
@@ -56012,7 +56037,28 @@ function _ubDirectExec(intent, params, mode) {
         '.dgv2-ack{display:none;align-items:center;gap:6px;margin-top:7px;font-size:9px;color:var(--yellow);cursor:pointer}' +
         '.dgv2-suggest{display:none;margin:6px 0 0;padding-left:14px;color:var(--muted2);font-size:8.5px;line-height:1.6}' +
         '@keyframes dgv2-pulse{0%,100%{opacity:1}50%{opacity:.45}}' +
-        '.dgv2-dot.checking{animation:dgv2-pulse 1.2s ease-in-out infinite}';
+        '.dgv2-dot.checking{animation:dgv2-pulse 1.2s ease-in-out infinite}' +
+        /* ── Bridge readiness: continuous route line (visual only, scoped to #dgv-panel-bridge) ── */
+        '#dgv-panel-bridge .dgv3-route{--c:#7b8291;--cs:rgba(123,130,145,.12);--cb:rgba(123,130,145,.32);gap:9px;margin-top:8px;min-height:22px}' +
+        '#dgv-panel-bridge .dgv3-route[data-state=safe]{--c:#22c55e;--cs:rgba(34,197,94,.12);--cb:rgba(34,197,94,.38)}' +
+        '#dgv-panel-bridge .dgv3-route[data-state=checking]{--c:#4f8ef7;--cs:rgba(79,142,247,.12);--cb:rgba(79,142,247,.35)}' +
+        '#dgv-panel-bridge .dgv3-route[data-state=warning],#dgv-panel-bridge .dgv3-route[data-state=stale]{--c:#f59e0b;--cs:rgba(245,158,11,.12);--cb:rgba(245,158,11,.38)}' +
+        '#dgv-panel-bridge .dgv3-route[data-state=blocked],#dgv-panel-bridge .dgv3-route[data-state=error]{--c:#ef4444;--cs:rgba(239,68,68,.12);--cb:rgba(239,68,68,.38)}' +
+        '#dgv-panel-bridge .dgv3-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;background:var(--c);box-shadow:0 0 0 3px var(--cs);transition:background .3s ease,box-shadow .3s ease}' +
+        '#dgv-panel-bridge .dgv3-track{position:relative;flex:1;min-width:24px;height:2px;border-radius:2px;overflow:visible;background:var(--border)}' +
+        '#dgv-panel-bridge .dgv3-fill{position:absolute;left:0;top:0;height:100%;border-radius:2px;background:var(--c);transition:width .4s ease,background .4s ease}' +
+        '#dgv-panel-bridge .dgv3-route[data-state=unknown] .dgv3-track,#dgv-panel-bridge .dgv3-route[data-state=error] .dgv3-track,#dgv-panel-bridge .dgv3-route[data-state=stale] .dgv3-track{background:repeating-linear-gradient(90deg,var(--c) 0 4px,transparent 4px 8px);opacity:.6}' +
+        '#dgv-panel-bridge .dgv3-route[data-state=checking] .dgv3-track::after{content:"";position:absolute;inset:0;border-radius:2px;background:linear-gradient(90deg,transparent,var(--c),transparent);background-size:40% 100%;background-repeat:no-repeat;background-position:-60% 0;animation:dgv3-sweep 1.4s ease-in-out infinite}' +
+        '#dgv-panel-bridge .dgv3-packet{display:none;position:absolute;top:50%;left:0;width:10px;height:10px;margin-top:-5px;border-radius:50%;background:var(--c);box-shadow:0 0 8px var(--cb)}' +
+        '#dgv-panel-bridge .dgv3-route[data-state=checking] .dgv3-packet{display:block;animation:dgv3-travel 1.6s ease-in-out infinite alternate}' +
+        '#dgv-panel-bridge .dgv3-end{display:inline-flex;align-items:center;gap:6px;flex-shrink:0;padding:2px 9px 2px 2px;border-radius:999px;border:1px solid var(--cb);background:var(--cs);transition:border-color .3s ease,background .3s ease}' +
+        '#dgv-panel-bridge .dgv3-node{width:16px;height:16px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;background:var(--c);color:#0b1220;transition:background .3s ease}' +
+        '#dgv-panel-bridge .dgv3-end .dgv2-checks{color:var(--c);font-weight:600;transition:color .3s ease}' +
+        '#dgv-panel-bridge .dgv3-ic{display:none;width:11px;height:11px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}' +
+        '#dgv-panel-bridge .dgv3-route[data-state=safe] .ic-ok,#dgv-panel-bridge .dgv3-route[data-state=blocked] .ic-bad,#dgv-panel-bridge .dgv3-route[data-state=warning] .ic-warn,#dgv-panel-bridge .dgv3-route[data-state=error] .ic-warn,#dgv-panel-bridge .dgv3-route[data-state=stale] .ic-stale,#dgv-panel-bridge .dgv3-route[data-state=unknown] .ic-wait,#dgv-panel-bridge .dgv3-route[data-state=checking] .ic-wait{display:block}' +
+        '@keyframes dgv3-sweep{0%{background-position:-60% 0}100%{background-position:160% 0}}' +
+        '@keyframes dgv3-travel{from{left:0}to{left:calc(100% - 10px)}}' +
+        '@media(prefers-reduced-motion:reduce){#dgv-panel-bridge .dgv3-route[data-state=checking] .dgv3-track::after{animation:none;background-position:50% 0}#dgv-panel-bridge .dgv3-route[data-state=checking] .dgv3-packet{animation:none;left:calc(50% - 5px)}#dgv-panel-bridge .dgv3-fill,#dgv-panel-bridge .dgv3-dot,#dgv-panel-bridge .dgv3-end,#dgv-panel-bridge .dgv3-node{transition:none}}';
       document.head.appendChild(st);
     }
     controllers.forEach(function(c){ c.ensure(); });
