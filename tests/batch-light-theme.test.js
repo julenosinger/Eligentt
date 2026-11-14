@@ -84,3 +84,19 @@ describe('Batch light theme — stats strip and table surface', () => {
     expect(src).toContain('.stats-row{display:flex;gap:1px;background:var(--border);flex-shrink:0}');
   });
 });
+
+// ── Bridge Destination Readiness panel (light) ────────────────────────────────
+describe('Bridge light theme — Destination Readiness panel', () => {
+  it('light override uses surface tokens, scoped to the bridge panel', () => {
+    const sel = '[data-theme="light"] #page-bridge #dgv-panel-bridge{';
+    const i = src.indexOf(sel);
+    expect(i).toBeGreaterThan(-1);
+    const r = src.slice(i, src.indexOf('}', i) + 1);
+    expect(r).toContain('var(--card2)');
+    expect(r).toContain('var(--border)');
+    expect(r).not.toMatch(/rgba\(0,\s*0,\s*0/);
+  });
+  it('dark base rule for the panel is unchanged', () => {
+    expect(src).toContain("#page-bridge #dgv-panel-bridge{margin:0;border-radius:0 0 10px 10px;border-top:1px solid rgba(255,255,255,0.06);border-left:none;border-right:none;border-bottom:none;background:rgba(0,0,0,0.18)}");
+  });
+});
