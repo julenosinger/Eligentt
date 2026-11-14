@@ -186,3 +186,14 @@ describe('READY neon end circle, caption and status text', () => {
   });
 });
 
+describe('route spacing (node/dot inset from the card edge)', () => {
+  it('route is inset 8px on both sides and sits 14px below the Status row, scoped to the bridge panel', () => {
+    expect(cssSrc).toContain("#dgv-panel-bridge .dgv3-route{");
+    expect(cssSrc).toMatch(/#dgv-panel-bridge \.dgv3-route\{[^}]*gap:5px;margin-top:14px;padding:0 8px\}/);
+  });
+  it('caption stays aligned with the node (shares the route inset, no extra margin)', () => {
+    expect(cssSrc).toMatch(/\.dgv3-caption\{align-self:flex-end;/);
+    expect(cssSrc).not.toMatch(/\.dgv3-caption\{[^}]*margin/);
+  });
+});
+
