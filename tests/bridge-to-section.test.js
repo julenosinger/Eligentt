@@ -36,3 +36,16 @@ describe('Bridge TO section', () => {
     expect(toSection).toContain('<span>Minimum Received</span>');
   });
 });
+
+describe('Bridge TO section — destination balance row spacing', () => {
+  it('the row has breathing room above (chain row) and below (Destination Readiness), scoped to the TO section', () => {
+    expect(html).toContain('.brg-section-to .brg-bal-row { margin: 9px 0 11px; padding: 0 2px; }');
+  });
+  it('the FROM balance row and the markup/ids are untouched (rule is scoped to .brg-section-to)', () => {
+    const rules = html.match(/[^\n}]*\.brg-bal-row \{/g) || [];
+    expect(rules).toHaveLength(1);
+    expect(rules[0].trim()).toBe('.brg-section-to .brg-bal-row {');
+    expect(html).toContain('<div class="brg-bal-row"><i class="ti ti-wallet"></i>Balance: <span id="bridge-from-bal">—</span>');
+    expect(html).toContain('<div class="brg-bal-row"><i class="ti ti-wallet"></i>Balance: <span id="bridge-to-bal">—</span>');
+  });
+});
