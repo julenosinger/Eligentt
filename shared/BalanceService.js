@@ -193,11 +193,12 @@
 
     var natSym = (chain && chain.nativeCurrency && chain.nativeCurrency.symbol) || null;
     var isNative = false;
-    if (addr === ZERO_ADDRESS || addr === ETH_SENTINEL) {
-      isNative = true;
-    } else if (!addr) {
-      // No ERC-20 address resolvable: native only when the symbol matches the
-      // chain's native currency (e.g. ETH on Base/Ethereum/Arbitrum/Optimism).
+    if (addr === ZERO_ADDRESS || addr === ETH_SENTINEL || !addr) {
+      // Native markers (zero address, 0xeee…e sentinel) or a missing address are
+      // native ONLY when the symbol matches the chain's native currency. This
+      // keeps classification chain-aware and fail-closed — a zero-address "ETH"
+      // on Arc (native USDC) or a zero-address "FOO" is never treated as native —
+      // and it matches the Swap picker's _swpTokenIsNative contract.
       isNative = !!(natSym && S === String(natSym).toUpperCase());
     }
     // else: has a real address → ERC-20 (balanceOf).

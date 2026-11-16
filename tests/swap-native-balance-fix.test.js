@@ -71,6 +71,13 @@ function buildResolveTokenMeta() {
   return fn(ZERO_ADDRESS, ETH_SENTINEL, () => null, () => null);
 }
 
+/** Build the real _swpTokBal (picker display formatter) from index.html. */
+function buildTokBal() {
+  const src = extractFn(html, 'function _swpTokBal(v)');
+  const fn = new Function(src + '\nreturn _swpTokBal;');
+  return fn();
+}
+
 // ═════════════════════════════════════════════════════════════════════════════
 // GROUP A — EVM networks (native ETH)
 // ═════════════════════════════════════════════════════════════════════════════
@@ -175,6 +182,29 @@ describe('BalanceService._resolveTokenMeta (behavioral)', () => {
     const m = meta({ nativeCurrency: { symbol: 'ETH' }, tokens: {} }, 8453, { symbol: 'FOO' });
     expect(m.isNative).toBe(false);
   });
+  // ── Unification: native markers now require the chain's native symbol ──────
+  it('zero-address ETH on Arc → isNative false (Arc native is USDC, never ETH)', () => {
+    const m = meta({ nativeCurrency: { symbol: 'USDC', decimals: 18 }, tokens: {} }, 5042, { address: ZERO_ADDRESS, symbol: 'ETH', decimals: 18 });
+    expect(m.isNative).toBe(false);
+  });
+  it('zero-address FOO on Base → isNative false (fail closed on unknown symbol)', () => {
+    const m = meta({ nativeCurrency: { symbol: 'ETH' }, tokens: {} }, 8453, { address: ZERO_ADDRESS, symbol: 'FOO', decimals: 18 });
+    expect(m.isNative).toBe(false);
+  });
+  it('sentinel 0xeee…e with WETH symbol → isNative false (sentinel needs correct context)', () => {
+    const m = meta({ nativeCurrency: { symbol: 'ETH' }, tokens: {} }, 8453, { address: ETH_SENTINEL, symbol: 'WETH', decimals: 18 });
+    expect(m.isNative).toBe(false);
+  });
+  it('zero-address USDC on Arc → isNative true (Arc native gas is USDC)', () => {
+    const m = meta({ nativeCurrency: { symbol: 'USDC', decimals: 18 }, tokens: {} }, 5042, { address: ZERO_ADDRESS, symbol: 'USDC', decimals: 18 });
+    expect(m.isNative).toBe(true);
+  });
+  it('symbol-only "USDC" on Arc resolves to the ERC-20 interface (0x3600…0000), not native', () => {
+    const m = meta({ nativeCurrency: { symbol: 'USDC', decimals: 18 }, tokens: { USDC: { address: ARC_USDC, decimals: 6 } } }, 5042, 'USDC');
+    expect(m.isNative).toBe(false);
+    expect(m.address.toLowerCase()).toBe(ARC_USDC);
+    expect(m.decimals).toBe(6);
+  });
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -250,5 +280,46 @@ describe('Group A #8 — render-generation guard', () => {
     expect(renderSrc).toContain('const gen = ++_tokRenderGen');
     // Both the per-row DOM update and the re-sort must be guarded.
     expect(renderSrc).toContain('if (gen !== _tokRenderGen) return');
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Precision & display safety (behavioral) — _swpTokBal
+// ═════════════════════════════════════════════════════════════════════════════
+describe('Precision — _swpTokBal display formatter (behavioral)', () => {
+  const fmt = buildTokBal();
+
+  it('null/undefined → "—" (unavailable, never a fake zero)', () => {
+    expect(fmt(null)).toBe('—');
+    expect(fmt(undefined)).toBe('—');
+  });
+  it('NaN → "—" (invalid artifact, never shown as a number)', () => {
+    expect(fmt(NaN)).toBe('—');
+    expect(fmt('not-a-number')).toBe('—');
+  });
+  it('Infinity → "—" (invalid artifact)', () => {
+    expect(fmt(Infinity)).toBe('—');
+    expect(fmt('Infinity')).toBe('—');
+  });
+  it('negative → "—" (invalid artifact, never a misleading value)', () => {
+    expect(fmt(-1)).toBe('—');
+    expect(fmt('-0.5')).toBe('—');
+  });
+  it('confirmed zero → "0.0000" (distinguishable from unavailable)', () => {
+    expect(fmt('0')).toBe('0.0000');
+    expect(fmt('0.0')).toBe('0.0000');
+    expect(fmt(0)).toBe('0.0000');
+  });
+  it('tiny positive below 0.0001 → "<0.0001" (never rounded to a fake zero)', () => {
+    expect(fmt('0.00001')).toBe('<0.0001');
+    expect(fmt('0.00009')).toBe('<0.0001');
+  });
+  it('normal positive → 4-decimal display', () => {
+    expect(fmt('0.0111')).toBe('0.0111');
+    expect(fmt('5')).toBe('5.0000');
+    expect(fmt('1.234567')).toBe('1.2346');
+  });
+  it('the threshold boundary 0.0001 itself is shown as-is (not "<")', () => {
+    expect(fmt('0.0001')).toBe('0.0001');
   });
 });

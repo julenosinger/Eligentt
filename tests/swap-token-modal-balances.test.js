@@ -59,7 +59,7 @@ describe('renderTokenList — source-level regression', () => {
 
   it('only a non-null BalanceService result is treated as a confirmed balance', () => {
     expect(renderSrc).toContain('if (raw != null)');
-    expect(renderSrc).toContain('bal = parseFloat(raw).toFixed(4)');
+    expect(renderSrc).toContain('bal = _swpTokBal(raw)');
   });
 
   // ── 2. No-wallet path ─────────────────────────────────────────────────────
@@ -181,9 +181,11 @@ describe('renderTokenList — integration with BalanceService contract', () => {
     expect(renderSrc).toContain('const tokenArg = { address: t.address, symbol: t.symbol, decimals: t.decimals }');
   });
 
-  it('parses the formatted string from BalanceService with parseFloat', () => {
-    // getTokenBalance returns a formatted string — use parseFloat, not formatUnits.
-    expect(renderSrc).toContain('bal = parseFloat(raw).toFixed(4)');
+  it('formats a confirmed read with the display-only helper _swpTokBal', () => {
+    // getTokenBalance returns a formatted string — _swpTokBal maps it to a
+    // safe display string (zero/tiny/invalid handled), not bare toFixed.
+    expect(renderSrc).toContain('bal = _swpTokBal(raw)');
+    expect(html).toContain('function _swpTokBal(v)');
   });
 
   it('null result from BalanceService keeps bal as "—" (unavailable, not NaN/zero)', () => {

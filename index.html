@@ -8596,11 +8596,11 @@ select.cinput option { background: #161a24; color: #dde2f0; }
             <div class="sa-card">
               <div class="sa-card-title" style="justify-content:space-between">
                 <span><i class="ti ti-form"></i>Transfer Details</span>
-                <!-- CPN Fiat Payout toggle — hidden while SA_CPN_ENABLED is false -->
+                <!-- CPN Fiat Payout toggle -->
                 <button id="sa-cpn-toggle"
                   onclick="saToggleCPN()"
                   title="Send to a bank account via Circle Payments Network (requires OFI onboarding)"
-                  style="display:none;align-items:center;gap:5px;background:rgba(45,212,191,.08);border:1px solid rgba(45,212,191,.2);border-radius:6px;padding:4px 10px;cursor:pointer;font-size:9px;font-weight:600;color:var(--teal);transition:all .2s">
+                  style="display:flex;align-items:center;gap:5px;background:rgba(45,212,191,.08);border:1px solid rgba(45,212,191,.2);border-radius:6px;padding:4px 10px;cursor:pointer;font-size:9px;font-weight:600;color:var(--teal);transition:all .2s">
                   <i class="ti ti-building-bank" style="font-size:11px"></i>
                   <span id="sa-cpn-toggle-label">Send to Bank (CPN)</span>
                 </button>
@@ -24041,6 +24041,24 @@ function _swpTokenIsNative(t, chainId) {
   return sym === natSym;
 }
 
+// ── Token picker balance formatter (display-only, NEVER used for execution) ──
+// Maps a confirmed balance read to a display string without misleading the user:
+//   null/undefined        → '—'        (unavailable — caller keeps this state)
+//   NaN/Infinity/negative → '—'        (invalid artifact, not a fake zero)
+//   0                     → '0.0000'   (confirmed zero)
+//   0 < v < 0.0001        → '<0.0001'  (tiny positive — never shown as zero)
+//   otherwise             → v.toFixed(4)
+// Full precision remains available upstream (BalanceService / raw bigint) for
+// MAX, approvals and transaction execution — this only formats the row display.
+function _swpTokBal(v) {
+  if (v == null) return '—';
+  var n = parseFloat(v);
+  if (!Number.isFinite(n) || n < 0) return '—';
+  if (n === 0) return '0.0000';
+  if (n < 0.0001) return '<0.0001';
+  return n.toFixed(4);
+}
+
 async function renderTokenList(filterText) {
   const list = document.getElementById('tok-list');
   if (!list) return;
@@ -24143,6 +24161,7 @@ async function renderTokenList(filterText) {
   //   '—'      → unavailable (RPC failure/timeout) or still loading — never a
   //              fake zero and never confused with a confirmed balance.
   //   '0.0000' → confirmed zero balance.
+  //   '<0.0001'→ tiny positive balance (never rounded down to a fake zero).
   //   <number> → confirmed positive balance (4 decimals).
   if (walletAddress) {
     const useBS = typeof BalanceService !== 'undefined' && BalanceService.getTokenBalance;
@@ -24162,9 +24181,9 @@ async function renderTokenList(filterText) {
           const tokenArg = { address: t.address, symbol: t.symbol, decimals: t.decimals };
           const raw = await BalanceService.getTokenBalance(walletAddress, tokenArg, chainId);
           if (raw != null) {
-            // getTokenBalance returns a formatted string, or null on RPC failure.
-            // Only a non-null result is a confirmed balance (0 → "0.0000").
-            bal = parseFloat(raw).toFixed(4);
+            // Confirmed read: format for display (zero → "0.0000", tiny positive
+            // → "<0.0001", invalid → "—"). Never a misleading fake zero.
+            bal = _swpTokBal(raw);
           }
         } else if (prov) {
           const b = await Promise.race([
@@ -24173,7 +24192,7 @@ async function renderTokenList(filterText) {
               : new ethers.Contract(addr, USDC_ABI, prov).balanceOf(walletAddress),
             new Promise((_,r) => setTimeout(() => r(), 6000)),
           ]);
-          if (b != null) bal = parseFloat(ethers.formatUnits(b, t.decimals || 18)).toFixed(4);
+          if (b != null) bal = _swpTokBal(ethers.formatUnits(b, t.decimals || 18));
         }
       } catch (_) { bal = '—'; }
 
@@ -39680,11 +39699,6 @@ async function saExecuteSend() {
 //  CPN_API_KEY is injected server-side — never reaches the browser.
 // ══════════════════════════════════════════════════════════════════════════════
 
-// Feature flag — "Send to Bank (CPN)" fiat payouts are not yet functional for
-// end users. While false, the entry point (sa-cpn-toggle) stays hidden and the
-// toggle handler no-ops. Flip to true and unhide the button once CPN is ready.
-var SA_CPN_ENABLED = false;
-
 let _saCPNMode = false;                // true when "Send to Bank (CPN)" is active
 let _saCPNQuotes = [];                 // last fetched quote array
 let _saCPNSelectedQuote = null;        // user-selected quote object
@@ -39723,7 +39737,6 @@ var _CPN_USDC_DECIMALS = 6;
 
 // ── Toggle CPN mode ───────────────────────────────────────────────────────────
 function saToggleCPN() {
-  if (!SA_CPN_ENABLED) return;
   _saCPNMode = !_saCPNMode;
   var form     = document.getElementById('sa-cpn-form');
   var notice   = document.getElementById('sa-cpn-notice');
