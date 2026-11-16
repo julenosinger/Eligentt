@@ -86,6 +86,7 @@
 <script src="/shared/ubMerchantHub.js"></script>
 <script src="/shared/rpcManager.js"></script>
 <script src="/shared/BalanceService.js"></script>
+<script src="/shared/FastBalanceEngine.js"></script>
 <script src="/shared/chainSimulator.js"></script>
 <script src="/shared/poolAbiDiscovery.js"></script>
 <script src="/shared/priceImpact.js"></script>
@@ -18003,6 +18004,10 @@ function setupProviderEvents(raw) {
       // walletAddress — prevents old-account balances showing in the Swap widget.
       try { if (typeof BalanceService !== 'undefined' && BalanceService.invalidate) BalanceService.invalidate(); } catch(_) {}
       try { if (typeof _swpClearBalCache === 'function') _swpClearBalCache(); } catch(_) {}
+      // Reset the fast balance engine in-flight map + recent-positive hints so
+      // the previous account's in-flight/prioritized state never leaks across.
+      try { if (typeof FastBalanceEngine !== 'undefined' && FastBalanceEngine.reset) FastBalanceEngine.reset(); } catch(_) {}
+      try { _swpRecentPositive = {}; } catch(_) {}
       const short = shortAddr(walletAddress);
       const set = (id, val) => { const el=document.getElementById(id); if(el) el.textContent=val; };
       set('chip-lbl',     short);
@@ -24059,6 +24064,44 @@ function _swpTokBal(v) {
   return n.toFixed(4);
 }
 
+// ── Priority tiers for the fast (non-Arc) balance scheduler ────────────────
+// Lower = higher priority. Priority uses chain-specific metadata: native
+// detection goes through _swpTokenIsNative (never symbol-only assumptions).
+var _SWP_MAJOR_TOKENS = {
+  USDC:1, EURC:1, CIRBTC:1, DAI:1, USDT:1, USDS:1, USDE:1, SUSDS:1, PYUSD:1,
+  WBTC:1, WETH:1, CBETH:1, WSTETH:1, RETH:1, TBTC:1, LUSD:1, FRAX:1, USDC_BRIDGED:1
+};
+// Recently confirmed positive balances (hint only; keyed by wallet+chain+symbol).
+var _swpRecentPositive = {};
+
+function _swpTokenPriority(t, chainId) {
+  var sym  = String((t && t.symbol) || '').toUpperCase();
+  var addr = (t && t.address) ? String(t.address).toLowerCase() : '';
+
+  // 0: currently selected input/output tokens.
+  var sel = [SWP.tokenInObj, SWP.tokenOutObj];
+  for (var s = 0; s < sel.length; s++) {
+    var so = sel[s];
+    if (so) {
+      if (so.address && addr && String(so.address).toLowerCase() === addr) return 0;
+      if (so.symbol && String(so.symbol).toUpperCase() === sym) return 0;
+    }
+  }
+
+  // 1: chain-native asset (ETH on Base/Arb/ETH/OP; MATIC on Polygon).
+  if (_swpTokenIsNative(t, chainId)) return 1;
+
+  // 2: major stablecoins / wrapped majors.
+  if (_SWP_MAJOR_TOKENS[sym]) return 2;
+
+  // 3: previously confirmed positive balance.
+  var rk = String(walletAddress || '').toLowerCase() + '::' + sym + '::' + Number(chainId);
+  if (_swpRecentPositive[rk]) return 3;
+
+  // 4: remaining visible tokens.
+  return 4;
+}
+
 async function renderTokenList(filterText) {
   const list = document.getElementById('tok-list');
   if (!list) return;
@@ -24165,71 +24208,122 @@ async function renderTokenList(filterText) {
   //   <number> → confirmed positive balance (4 decimals).
   if (walletAddress) {
     const useBS = typeof BalanceService !== 'undefined' && BalanceService.getTokenBalance;
-    // Fetch all balances concurrently; when all settle, re-sort rows so tokens
-    // with a positive balance appear at the top.
-    const balFetches = visible.map(async (t, i) => {
-      const addr = (t.address || '').toLowerCase();
-      // Chain-aware native classification: zero-address/sentinel native markers
-      // (e.g. ETH on Base/Arbitrum) are read via getBalance, not skipped.
-      const isNative = _swpTokenIsNative(t, chainId);
-      let bal = '—';   // unavailable default: RPC failure/timeout is NOT a zero
-      try {
-        if (useBS) {
-          // getTokenBalance(walletAddress, token, chainId) — address is first arg.
-          // Pass the full token object so BalanceService can resolve native vs
-          // ERC-20 (getBalance vs balanceOf) using the same chain-aware logic.
-          const tokenArg = { address: t.address, symbol: t.symbol, decimals: t.decimals };
-          const raw = await BalanceService.getTokenBalance(walletAddress, tokenArg, chainId);
-          if (raw != null) {
-            // Confirmed read: format for display (zero → "0.0000", tiny positive
-            // → "<0.0001", invalid → "—"). Never a misleading fake zero.
-            bal = _swpTokBal(raw);
+    const fastEngine = (typeof FastBalanceEngine !== 'undefined' && FastBalanceEngine.isSupported && FastBalanceEngine.isSupported(chainId))
+      ? FastBalanceEngine : null;
+
+    if (fastEngine) {
+      // ── Non-Arc fast path: priority + bounded concurrency + in-flight dedup ──
+      // Arc (5042) NEVER reaches here — it keeps the existing path below.
+      const prioritized = visible.map((t, i) => ({ t, i, prio: _swpTokenPriority(t, chainId) }));
+      prioritized.sort((a, b) => a.prio - b.prio); // stable sort (modern JS)
+
+      const updateRow = (i, t, raw) => {
+        const bal = raw != null ? _swpTokBal(raw) : '—';
+        const items = list.querySelectorAll('.tok-item');
+        if (items[i]) {
+          const valEl = items[i].querySelector('.tok-item-bal-val');
+          if (valEl) valEl.textContent = bal;
+          if (t.priceUSD && parseFloat(bal) > 0) {
+            const usdEl = items[i].querySelector('.tok-item-bal-usd');
+            if (usdEl) usdEl.textContent = '$' + (parseFloat(bal) * parseFloat(t.priceUSD)).toFixed(2);
           }
-        } else if (prov) {
-          const b = await Promise.race([
-            isNative
-              ? prov.getBalance(walletAddress)
-              : new ethers.Contract(addr, USDC_ABI, prov).balanceOf(walletAddress),
-            new Promise((_,r) => setTimeout(() => r(), 6000)),
-          ]);
-          if (b != null) bal = _swpTokBal(ethers.formatUnits(b, t.decimals || 18));
         }
-      } catch (_) { bal = '—'; }
-
-      // Update DOM row immediately as each result arrives — but only if this
-      // render generation is still current (a stale render must never touch DOM).
-      if (gen !== _tokRenderGen) return { i, bal };
-      const items = list.querySelectorAll('.tok-item');
-      if (items[i]) {
-        const valEl = items[i].querySelector('.tok-item-bal-val');
-        if (valEl) valEl.textContent = bal;
-        if (t.priceUSD && parseFloat(bal) > 0) {
-          const usdEl = items[i].querySelector('.tok-item-bal-usd');
-          if (usdEl) usdEl.textContent = '$' + (parseFloat(bal) * parseFloat(t.priceUSD)).toFixed(2);
+        // Remember confirmed positive balances to prioritize them next render.
+        if (raw != null) {
+          const n = parseFloat(raw);
+          if (Number.isFinite(n) && n > 0) {
+            _swpRecentPositive[String(walletAddress || '').toLowerCase() + '::' + String(t.symbol || '').toUpperCase() + '::' + Number(chainId)] = true;
+          }
         }
-      }
-      return { i, bal };
-    });
+      };
 
-    // After all fetches settle, re-sort list so tokens with balance > 0 float up.
-    Promise.allSettled(balFetches).then(results => {
-      if (gen !== _tokRenderGen) return; // stale render — skip re-sort
-      const balMap = {};
-      results.forEach(r => { if (r.status === 'fulfilled' && r.value) balMap[r.value.i] = parseFloat(r.value.bal) || 0; });
-      const items = Array.from(list.querySelectorAll('.tok-item'));
-      if (!items.length) return;
-      items.sort((a, b) => {
-        const ia = parseInt(a.dataset.tokIdx, 10);
-        const ib = parseInt(b.dataset.tokIdx, 10);
-        const ba = balMap[ia] || 0;
-        const bb = balMap[ib] || 0;
-        if (bb !== ba) return bb - ba; // higher balance first
-        return ia - ib;               // preserve original order within same balance
+      fastEngine.schedule(walletAddress, prioritized, chainId, (i, t, raw) => {
+        if (gen !== _tokRenderGen) return; // stale render — never touch DOM
+        updateRow(i, t, raw);
+      }).then((results) => {
+        if (gen !== _tokRenderGen) return; // stale render — skip re-sort
+        const balMap = {};
+        (results || []).forEach(r => { if (r && r.bal != null) balMap[r.i] = parseFloat(r.bal) || 0; });
+        const items = Array.from(list.querySelectorAll('.tok-item'));
+        if (!items.length) return;
+        items.sort((a, b) => {
+          const ia = parseInt(a.dataset.tokIdx, 10);
+          const ib = parseInt(b.dataset.tokIdx, 10);
+          const ba = balMap[ia] || 0;
+          const bb = balMap[ib] || 0;
+          if (bb !== ba) return bb - ba; // higher balance first
+          return ia - ib;               // preserve original order within same balance
+        });
+        items.forEach(el => list.insertBefore(el, list.querySelector('.tok-empty') || null));
       });
-      const parent = list;
-      // Re-append in sorted order (moves existing DOM nodes, no re-render).
-      items.forEach(el => parent.insertBefore(el, parent.querySelector('.tok-empty') || null));
-    });
+    } else {
+      // ── Arc (or no engine): existing path, unchanged ─────────────────────
+      // Fetch all balances concurrently; when all settle, re-sort rows so tokens
+      // with a positive balance appear at the top.
+      const balFetches = visible.map(async (t, i) => {
+        const addr = (t.address || '').toLowerCase();
+        // Chain-aware native classification: zero-address/sentinel native markers
+        // (e.g. ETH on Base/Arbitrum) are read via getBalance, not skipped.
+        const isNative = _swpTokenIsNative(t, chainId);
+        let bal = '—';   // unavailable default: RPC failure/timeout is NOT a zero
+        try {
+          if (useBS) {
+            // getTokenBalance(walletAddress, token, chainId) — address is first arg.
+            // Pass the full token object so BalanceService can resolve native vs
+            // ERC-20 (getBalance vs balanceOf) using the same chain-aware logic.
+            const tokenArg = { address: t.address, symbol: t.symbol, decimals: t.decimals };
+            const raw = await BalanceService.getTokenBalance(walletAddress, tokenArg, chainId);
+            if (raw != null) {
+              // Confirmed read: format for display (zero → "0.0000", tiny positive
+              // → "<0.0001", invalid → "—"). Never a misleading fake zero.
+              bal = _swpTokBal(raw);
+            }
+          } else if (prov) {
+            const b = await Promise.race([
+              isNative
+                ? prov.getBalance(walletAddress)
+                : new ethers.Contract(addr, USDC_ABI, prov).balanceOf(walletAddress),
+              new Promise((_,r) => setTimeout(() => r(), 6000)),
+            ]);
+            if (b != null) bal = _swpTokBal(ethers.formatUnits(b, t.decimals || 18));
+          }
+        } catch (_) { bal = '—'; }
+
+        // Update DOM row immediately as each result arrives — but only if this
+        // render generation is still current (a stale render must never touch DOM).
+        if (gen !== _tokRenderGen) return { i, bal };
+        const items = list.querySelectorAll('.tok-item');
+        if (items[i]) {
+          const valEl = items[i].querySelector('.tok-item-bal-val');
+          if (valEl) valEl.textContent = bal;
+          if (t.priceUSD && parseFloat(bal) > 0) {
+            const usdEl = items[i].querySelector('.tok-item-bal-usd');
+            if (usdEl) usdEl.textContent = '$' + (parseFloat(bal) * parseFloat(t.priceUSD)).toFixed(2);
+          }
+        }
+        return { i, bal };
+      });
+
+      // After all fetches settle, re-sort list so tokens with balance > 0 float up.
+      Promise.allSettled(balFetches).then(results => {
+        if (gen !== _tokRenderGen) return; // stale render — skip re-sort
+        const balMap = {};
+        results.forEach(r => { if (r.status === 'fulfilled' && r.value) balMap[r.value.i] = parseFloat(r.value.bal) || 0; });
+        const items = Array.from(list.querySelectorAll('.tok-item'));
+        if (!items.length) return;
+        items.sort((a, b) => {
+          const ia = parseInt(a.dataset.tokIdx, 10);
+          const ib = parseInt(b.dataset.tokIdx, 10);
+          const ba = balMap[ia] || 0;
+          const bb = balMap[ib] || 0;
+          if (bb !== ba) return bb - ba; // higher balance first
+          return ia - ib;               // preserve original order within same balance
+        });
+        const parent = list;
+        // Re-append in sorted order (moves existing DOM nodes, no re-render).
+        items.forEach(el => parent.insertBefore(el, parent.querySelector('.tok-empty') || null));
+      });
+    }
   } else {
     // No wallet connected — show "—" (disconnected), never a fake zero balance.
     const items = list.querySelectorAll('.tok-item');

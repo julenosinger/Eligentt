@@ -66,8 +66,9 @@ describe('renderTokenList — source-level regression', () => {
 
   it('has an else branch for no-wallet that shows "—" (disconnected)', () => {
     expect(renderSrc).toContain("valEl.textContent = '—'");
-    // The else branch (no walletAddress) must exist and set '—'
-    const elseIdx = renderSrc.indexOf('} else {');
+    // The no-wallet branch is the FINAL else in renderTokenList (the fast
+    // non-Arc path adds an earlier `} else {` for the Arc fallback).
+    const elseIdx = renderSrc.lastIndexOf('} else {');
     expect(elseIdx).toBeGreaterThan(-1);
     const elseBlock = renderSrc.slice(elseIdx, elseIdx + 300);
     expect(elseBlock).toContain("'—'");
