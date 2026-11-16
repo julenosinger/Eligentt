@@ -24071,20 +24071,35 @@ var _SWP_MAJOR_TOKENS = {
   USDC:1, EURC:1, CIRBTC:1, DAI:1, USDT:1, USDS:1, USDE:1, SUSDS:1, PYUSD:1,
   WBTC:1, WETH:1, CBETH:1, WSTETH:1, RETH:1, TBTC:1, LUSD:1, FRAX:1, USDC_BRIDGED:1
 };
-// Recently confirmed positive balances (hint only; keyed by wallet+chain+symbol).
+// Recently confirmed positive balances (hint only; keyed by wallet+chain+token
+// identity — NEVER symbol, so wrapped/native/bridged tokens stay distinct).
 var _swpRecentPositive = {};
+
+// Canonical token identity for priority/cache keys: contract address, or
+// 'native' for zero-address/sentinel/missing native markers. Never symbol.
+function _swpTokId(t) {
+  var addr = (t && t.address) ? String(t.address).toLowerCase() : '';
+  if (!addr || addr === '0x0000000000000000000000000000000000000000' || addr === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee') {
+    return 'native';
+  }
+  return addr;
+}
 
 function _swpTokenPriority(t, chainId) {
   var sym  = String((t && t.symbol) || '').toUpperCase();
   var addr = (t && t.address) ? String(t.address).toLowerCase() : '';
+  var id   = _swpTokId(t);
 
-  // 0: currently selected input/output tokens.
+  // 0: currently selected input/output tokens (by canonical address — never
+  // symbol-only, which could match a same-symbol token on another chain).
   var sel = [SWP.tokenInObj, SWP.tokenOutObj];
   for (var s = 0; s < sel.length; s++) {
     var so = sel[s];
     if (so) {
-      if (so.address && addr && String(so.address).toLowerCase() === addr) return 0;
-      if (so.symbol && String(so.symbol).toUpperCase() === sym) return 0;
+      if (addr && String(so.address || '').toLowerCase() === addr) return 0;
+      // Narrow fallback: only when the selected token has NO address AND the
+      // symbol matches (legacy entries). Never cross-chain symbol matching.
+      if (!so.address && so.symbol && String(so.symbol).toUpperCase() === sym) return 0;
     }
   }
 
@@ -24094,8 +24109,8 @@ function _swpTokenPriority(t, chainId) {
   // 2: major stablecoins / wrapped majors.
   if (_SWP_MAJOR_TOKENS[sym]) return 2;
 
-  // 3: previously confirmed positive balance.
-  var rk = String(walletAddress || '').toLowerCase() + '::' + sym + '::' + Number(chainId);
+  // 3: previously confirmed positive balance (canonical identity, not symbol).
+  var rk = String(walletAddress || '').toLowerCase() + '::' + id + '::' + Number(chainId);
   if (_swpRecentPositive[rk]) return 3;
 
   // 4: remaining visible tokens.
@@ -24232,7 +24247,7 @@ async function renderTokenList(filterText) {
         if (raw != null) {
           const n = parseFloat(raw);
           if (Number.isFinite(n) && n > 0) {
-            _swpRecentPositive[String(walletAddress || '').toLowerCase() + '::' + String(t.symbol || '').toUpperCase() + '::' + Number(chainId)] = true;
+            _swpRecentPositive[String(walletAddress || '').toLowerCase() + '::' + _swpTokId(t) + '::' + Number(chainId)] = true;
           }
         }
       };

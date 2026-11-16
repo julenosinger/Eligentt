@@ -31,6 +31,8 @@ const ETHERSCAN_CHAIN = { 1: true, 42161: true, 137: true };
 const ETHERSCAN_BASE = 'https://api.etherscan.io/v2/api';
 const FETCH_TIMEOUT_MS = 12000;
 const THROTTLE_MS = 250; // ≤4 req/s, shared with the tax scanner
+const RATE_WINDOW_MS = 1000; // sliding window for the hard cap
+const RATE_MAX = 4;          // hard cap of Etherscan requests per second
 
 function json(data, status) {
   return new Response(JSON.stringify(data), {
@@ -41,7 +43,15 @@ function json(data, status) {
 
 const isAddr = (s) => typeof s === 'string' && /^0x[0-9a-fA-F]{40}$/.test(s);
 
-/* ── Global throttle (best-effort, per-isolate) ───────────────────────────── */
+/* ── Rate limiting (P7 fix): sliding-window hard cap + throttle spacing ────── */
+let _window = [];
+function allowRequest() {
+  const now = Date.now();
+  _window = _window.filter((ts) => now - ts < RATE_WINDOW_MS);
+  if (_window.length >= RATE_MAX) return false;
+  _window.push(now);
+  return true;
+}
 let _lastCall = 0;
 async function throttle() {
   const wait = _lastCall + THROTTLE_MS - Date.now();
@@ -84,6 +94,9 @@ export async function onRequestGet({ request, env }) {
 
   const target = ETHERSCAN_BASE + '?' + params.toString();
 
+  if (!allowRequest()) {
+    return json({ ok: false, error: 'rate_limited' }, 429);
+  }
   await throttle();
 
   let resp;

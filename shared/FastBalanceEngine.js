@@ -1,22 +1,28 @@
 /**
  * FastBalanceEngine — fast, chain-aware balance loader for NON-Arc EVM networks.
  * ═══════════════════════════════════════════════════════════════════════════
- * Phase 1.4 — surgical performance layer for the Swap token selector.
+ * Phase 1.4 / 1.4.2 — surgical performance layer for the Swap token selector.
  *
  * ARC MAINNET (5042) IS DELIBERATELY OUT OF SCOPE. Arc already loads fast and its
  * native USDC / gas accounting must never be altered. This engine refuses to touch
  * Arc: `getTokenBalance` for Arc transparently delegates to BalanceService, so the
  * Arc read path, cache and classification are byte-for-byte unchanged.
  *
- * For the supported non-Arc EVM networks (Ethereum 1, Base 8453, Arbitrum 42161,
- * Optimism 10, Polygon 137) it provides:
- *   - Bounded concurrency (no thundering herd of 50 simultaneous RPC calls).
- *   - In-flight request coalescing (identical reads share one Promise).
- *   - Optional Etherscan V2 (server-side proxy) as a RELIABILITY fallback for
- *     eligible chains, with RPC remaining the authoritative read path.
+ * Provider selection for non-Arc EVM (Ethereum 1, Base 8453, Arbitrum 42161,
+ * Optimism 10, Polygon 137):
  *
- * It reads THROUGH BalanceService (never a second independent read path) and
- * reuses its cache, providers, native/ERC-20 classification and timeouts.
+ *   Alchemy (if ALCHEMY_BALANCE_ENABLED && eligible)  →  primary
+ *     └─ RPC (BalanceService)                          →  fallback
+ *         └─ Etherscan V2 (eligible chains only)       →  secondary fallback
+ *
+ *   Without the flag (default): RPC → Etherscan (Phase 1.4 behavior).
+ *
+ * Alchemy is behind a configurable feature flag (`window.ALCHEMY_BALANCE_ENABLED`
+ * === true), DEFAULT DISABLED, so it can be rolled back without any deployment of
+ * unrelated changes.
+ *
+ * It reads THROUGH BalanceService (never a second independent read path for RPC)
+ * and reuses its cache, providers, native/ERC-20 classification and timeouts.
  *
  * Attached to window.FastBalanceEngine.
  */
@@ -30,13 +36,19 @@
   // Non-Arc EVM networks accelerated by this engine.
   var SUPPORTED = { 1: true, 8453: true, 42161: true, 10: true, 137: true };
 
-  // Etherscan V2 free-tier eligible chains. Base/Optimism/Arc are intentionally
-  // excluded (free-tier availability is NOT assumed for them — they use RPC).
+  // Etherscan V2 free-tier eligible chains (Ethereum, Arbitrum, Polygon).
   var ETHERSCAN_ELIGIBLE = { 1: true, 42161: true, 137: true };
 
+  // Alchemy-eligible chains (all five non-Arc targets). Arc is NEVER here.
+  var ALCHEMY_ELIGIBLE = { 1: true, 8453: true, 42161: true, 10: true, 137: true };
+
   var CONCURRENCY = 5;               // bounded reads in flight per render
-  var ETHERSCAN_TIMEOUT_MS = 3500;   // soft timeout for the server proxy
+  var ETHERSCAN_TIMEOUT_MS = 3500;   // soft timeout for the Etherscan proxy
+  var ALCHEMY_TIMEOUT_MS = 3500;     // soft timeout for the Alchemy proxy
   var INFLIGHT_TTL_MS = 15000;       // safety net for stuck in-flight entries
+
+  var ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
+  var ETH_SENTINEL = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
 
   var _inflight = {};                // key -> { promise, ts }
 
@@ -47,9 +59,6 @@
     if (!a) return '';
     return String(a).toLowerCase();
   }
-  function _key(address, tokenAddr, chainId) {
-    return _normAddr(address) + '::' + (tokenAddr ? _normAddr(tokenAddr) : 'native') + '::' + Number(chainId);
-  }
   function _tokenAddr(token) {
     if (token && typeof token === 'object' && token.address) return _normAddr(token.address);
     return null;
@@ -59,19 +68,39 @@
     return (d != null && Number.isFinite(d) && d >= 0) ? d : 18;
   }
 
+  // P7 fix — canonical token identity: distinguishes native vs ERC-20 and includes
+  // the representation decimals so incompatible identities never share a dedup key.
+  function _isNativeToken(token) {
+    var addr = _tokenAddr(token);
+    return !addr || addr === ZERO_ADDRESS || addr === ETH_SENTINEL;
+  }
+  function _tokenIdentity(token) {
+    if (_isNativeToken(token)) return 'native';
+    return _tokenAddr(token) + '::' + _tokenDecimals(token);
+  }
+  function _key(address, token, chainId) {
+    return _normAddr(address) + '::' + _tokenIdentity(token) + '::' + Number(chainId);
+  }
+
   function isSupported(chainId) { return !!SUPPORTED[Number(chainId)]; }
   function canUseEtherscan(chainId) { return !!ETHERSCAN_ELIGIBLE[Number(chainId)]; }
+  function canUseAlchemy(chainId) { return !!ALCHEMY_ELIGIBLE[Number(chainId)]; }
+
+  // P5 — feature flag, DEFAULT DISABLED. Enable only after integration checks.
+  function _alchemyEnabled() {
+    try { return typeof window !== 'undefined' && window.ALCHEMY_BALANCE_ENABLED === true; } catch (_) { return false; }
+  }
 
   /* ════════════════════════════════════════════
      RAW → FORMATTED STRING (full precision, display-agnostic)
   ════════════════════════════════════════════ */
   function _fmtRaw(raw, decimals) {
     try {
-      var d = _tokenDecimals({ decimals: decimals });
+      var d = Number(decimals);
+      if (!Number.isFinite(d) || d < 0) d = 18;
       if (typeof ethers !== 'undefined' && ethers.formatUnits) {
         return ethers.formatUnits(BigInt(String(raw)), d);
       }
-      // Manual fallback (no ethers): bigint string → decimal string.
       var s = String(raw);
       if (d === 0) return s;
       while (s.length <= d) s = '0' + s;
@@ -83,50 +112,93 @@
 
   /* ════════════════════════════════════════════
      ETHERSCAN V2 (server-side proxy — key never reaches the browser)
+     P7 fix: native tokens use action=balance (NO contractaddress); only real
+     ERC-20 addresses use action=tokenbalance.
   ════════════════════════════════════════════ */
   function _readEtherscan(address, token, chainId) {
-    var addr = _tokenAddr(token);
+    var isNative = _isNativeToken(token);
     var url = '/api/balance/etherscan?chainid=' + Number(chainId) +
       '&address=' + encodeURIComponent(address);
-    if (addr) url += '&contractaddress=' + encodeURIComponent(addr);
+    if (!isNative) url += '&contractaddress=' + encodeURIComponent(_tokenAddr(token));
 
     var fetchP = fetch(url, { credentials: 'same-origin' })
       .then(function (r) { return r.json(); })
       .then(function (d) {
-        // Server returns { ok:true, balance:"<raw>" } on success. Anything else
-        // (error, rate-limit, unsupported) is treated as unavailable — never a
-        // fabricated zero.
         if (d && d.ok && d.balance != null && d.balance !== '') return String(d.balance);
         return null;
       });
-
     var timeoutP = new Promise(function (_, reject) {
       setTimeout(function () { reject(new Error('etherscan timeout')); }, ETHERSCAN_TIMEOUT_MS);
     });
-
     return Promise.race([fetchP, timeoutP]).catch(function () { return null; });
   }
 
   /* ════════════════════════════════════════════
-     CORE READ — RPC authoritative, Etherscan as reliability fallback
+     ALCHEMY (server-side proxy — key never reaches the browser)
+     Native → eth_getBalance; ERC-20 → alchemy_getTokenBalances.
   ════════════════════════════════════════════ */
-  function _read(address, token, id) {
-    var bs = (typeof BalanceService !== 'undefined' && BalanceService.getTokenBalance)
-      ? BalanceService.getTokenBalance(address, token, id)
-      : Promise.resolve(null);
+  function _readAlchemy(address, token, chainId) {
+    var isNative = _isNativeToken(token);
+    var body = { chainid: Number(chainId), address: address };
+    if (!isNative) body.contract = _tokenAddr(token);
 
-    // Arc is handled by the caller (never reaches here for 5042).
-    if (!canUseEtherscan(id)) return bs;
-
-    // RPC first (authoritative). Only if RPC fails do we consult Etherscan —
-    // this preserves RPC as the source of truth and avoids parallel duplicate
-    // reads to every provider by default.
-    return bs.then(function (rpcRaw) {
-      if (rpcRaw != null) return rpcRaw;
-      return _readEtherscan(address, token, id).then(function (raw) {
-        return raw != null ? _fmtRaw(raw, _tokenDecimals(token)) : null;
-      });
+    var fetchP = fetch('/api/balance/alchemy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify(body),
+    }).then(function (r) { return r.json(); }).then(function (d) {
+      // Server returns { ok:true, balance:"<decimal string>" }. Any error/rate-
+      // limit/unsupported is unavailable — never a fabricated zero.
+      if (d && d.ok && d.balance != null && d.balance !== '') return String(d.balance);
+      return null;
     });
+    var timeoutP = new Promise(function (_, reject) {
+      setTimeout(function () { reject(new Error('alchemy timeout')); }, ALCHEMY_TIMEOUT_MS);
+    });
+    return Promise.race([fetchP, timeoutP]).catch(function () { return null; });
+  }
+
+  /* ════════════════════════════════════════════
+     PROVIDER SELECTION (P5)
+     Alchemy (flag) → RPC (authoritative) → Etherscan (eligible).
+     RPC is created LAZILY so Alchemy success avoids the RPC call entirely.
+  ════════════════════════════════════════════ */
+  function _rpcRead(address, token, id) {
+    if (typeof BalanceService !== 'undefined' && BalanceService.getTokenBalance) {
+      return BalanceService.getTokenBalance(address, token, id);
+    }
+    return Promise.resolve(null);
+  }
+
+  function _read(address, token, id) {
+    if (_alchemyEnabled() && canUseAlchemy(id)) {
+      return _readAlchemy(address, token, id).then(function (alRaw) {
+        if (alRaw != null) return _fmtRaw(alRaw, _tokenDecimals(token));
+        // Alchemy unavailable → RPC → (Etherscan).
+        return _rpcRead(address, token, id).then(function (rpcRaw) {
+          if (rpcRaw != null) return rpcRaw;
+          if (canUseEtherscan(id)) {
+            return _readEtherscan(address, token, id).then(function (raw) {
+              return raw != null ? _fmtRaw(raw, _tokenDecimals(token)) : null;
+            });
+          }
+          return null;
+        });
+      });
+    }
+
+    // Default (no Alchemy): RPC → Etherscan.
+    var bs = _rpcRead(address, token, id);
+    if (canUseEtherscan(id)) {
+      return bs.then(function (rpcRaw) {
+        if (rpcRaw != null) return rpcRaw;
+        return _readEtherscan(address, token, id).then(function (raw) {
+          return raw != null ? _fmtRaw(raw, _tokenDecimals(token)) : null;
+        });
+      });
+    }
+    return bs;
   }
 
   /* ════════════════════════════════════════════
@@ -145,7 +217,7 @@
       return Promise.resolve(null);
     }
 
-    var key = _key(address, _tokenAddr(token), id);
+    var key = _key(address, token, id);
     var now = Date.now();
     var entry = _inflight[key];
     if (entry && (now - entry.ts) < INFLIGHT_TTL_MS) return entry.promise;
@@ -164,14 +236,6 @@
   /* ════════════════════════════════════════════
      PUBLIC — priority + bounded-concurrency batch scheduler
   ════════════════════════════════════════════ */
-  /**
-   * @param {string} address   wallet address
-   * @param {Array}  items     [{ t, i }] sorted by priority (ascending)
-   * @param {number} chainId   non-Arc EVM chain
-   * @param {Function} onResult (i, t, balString) called per settled read
-   * @param {number} [concurrency]
-   * @returns {Promise<Array<{i, bal}>>} all results (for re-sort)
-   */
   function schedule(address, items, chainId, onResult, concurrency) {
     var limit = Math.max(1, Math.min(concurrency || CONCURRENCY, items.length));
     var queue = items.slice();
@@ -219,11 +283,12 @@
 
   /** @public */
   window.FastBalanceEngine = {
-    VERSION: '1.0.0',
+    VERSION: '1.1.0',
     ARC_CHAIN_ID: ARC_CHAIN_ID,
     DEFAULT_CONCURRENCY: CONCURRENCY,
     isSupported: isSupported,
     canUseEtherscan: canUseEtherscan,
+    canUseAlchemy: canUseAlchemy,
     getTokenBalance: getTokenBalance,
     schedule: schedule,
     reset: reset
