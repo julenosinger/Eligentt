@@ -24117,6 +24117,59 @@ function _swpTokenPriority(t, chainId) {
   return 4;
 }
 
+// ── Canonical token logo resolution (chainId + address based) ───────────────
+// Returns the logo HTML for a token row. Known assets use local trusted logos;
+// native ETH uses the Ethereum diamond; unknown tokens use their validated
+// LI.FI logoURI, falling back to a neutral per-symbol badge. Never infers a
+// token's identity from a single letter (the old decorate() MutationObserver
+// wrongly mapped any 'U'/'E'/'B' fallback to the USDC/EURC/BTC coin logo).
+var _SWP_KNOWN_LOGOS = {
+  USDC:   '/assets/tokens/usdc.svg',
+  EURC:   '/assets/tokens/eurc.svg',
+  CIRBTC: '/assets/tokens/btc.svg'
+};
+var _SWP_ETH_DIAMOND = '<svg viewBox="0 0 32 32" width="16" height="16"><path d="M16 4v9l-8 4 8-4 8 4-8-4V4zM16 19l-8-4 8 10 8-10-8 4z" fill="#fff"/></svg>';
+
+// Deterministic per-symbol hue so unknown tokens get distinct (not identical) badges.
+function _swpSymbolHue(sym) {
+  var h = 0;
+  for (var i = 0; i < sym.length; i++) h = (h * 31 + sym.charCodeAt(i)) >>> 0;
+  return h % 360;
+}
+
+function _swpTokenLogo(t, chainId) {
+  var sym = String((t && t.symbol) || '').toUpperCase();
+  var letter = sym ? sym.charAt(0) : '?';
+  var hue = _swpSymbolHue(sym);
+  var badge = '<div class="tok-item-icon" style="background:hsl(' + hue + ',42%,36%)">' + escHtml(letter) + '</div>';
+
+  // Native asset → Ethereum diamond for ETH-like native; neutral badge otherwise.
+  if (_swpTokenIsNative(t, chainId)) {
+    var nm = '';
+    try {
+      nm = (CHAIN_REGISTRY && CHAIN_REGISTRY[Number(chainId)] && CHAIN_REGISTRY[Number(chainId)].nativeCurrency && CHAIN_REGISTRY[Number(chainId)].nativeCurrency.symbol) || '';
+    } catch (_) {}
+    if (String(nm).toUpperCase() === 'ETH') {
+      return '<div class="tok-item-icon" style="background:#627eea">' + _SWP_ETH_DIAMOND + '</div>';
+    }
+    return badge;
+  }
+
+  // Known assets → local trusted logo (never LI.FI's cross-chain artwork).
+  if (_SWP_KNOWN_LOGOS[sym]) {
+    return '<img class="tok-item-logo" src="' + _SWP_KNOWN_LOGOS[sym] + '" alt="' + escHtml(t.symbol || '') + '" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'">'
+      + '<div class="tok-item-icon" style="display:none;background:hsl(' + hue + ',42%,36%)">' + escHtml(letter) + '</div>';
+  }
+
+  // Unknown token → validated LI.FI logoURI, else neutral per-symbol badge.
+  if (t.logoURI) {
+    return '<img class="tok-item-logo" src="' + escHtml(t.logoURI) + '" alt="' + escHtml(t.symbol || '') + '" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'">'
+      + '<div class="tok-item-icon" style="display:none;background:hsl(' + hue + ',42%,36%)">' + escHtml(letter) + '</div>';
+  }
+
+  return badge;
+}
+
 async function renderTokenList(filterText) {
   const list = document.getElementById('tok-list');
   if (!list) return;
@@ -24186,10 +24239,7 @@ async function renderTokenList(filterText) {
   const renderItem = (t, bal) => {
     const addr = (t.address || '').toLowerCase();
     const isOther = addr && addr === otherAddr;
-    const logoHtml = t.logoURI
-      ? `<img class="tok-item-logo" src="${escHtml(t.logoURI)}" alt="${escHtml(t.symbol)}" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
-        + `<div class="tok-item-icon" style="display:none;background:#334155">${escHtml((t.symbol||'?')[0].toUpperCase())}</div>`
-      : `<div class="tok-item-icon" style="background:#334155">${escHtml((t.symbol||'?')[0].toUpperCase())}</div>`;
+    const logoHtml = _swpTokenLogo(t, chainId);
     const balHtml = bal != null ? `<div class="tok-item-bal-val">${bal}</div>` : '';
     const usdHtml = (t.priceUSD && bal && bal !== '—' && bal !== '0.0000')
       ? `<div class="tok-item-bal-usd">$${(parseFloat(bal) * parseFloat(t.priceUSD)).toFixed(2)}</div>` : '';
@@ -24208,9 +24258,21 @@ async function renderTokenList(filterText) {
 
   // Reset render map each time we (re-)render the list.
   _tokRenderMap = [];
-  // Render first 50 tokens immediately with "—" placeholder.
+  // Detect the fast (non-Arc) engine once, before the initial render, so cached
+  // balances can be shown instantly (stale-while-revalidate) on non-Arc chains.
+  const fastEngine = (typeof FastBalanceEngine !== 'undefined' && FastBalanceEngine.isSupported && FastBalanceEngine.isSupported(chainId))
+    ? FastBalanceEngine : null;
+  // Render first 50 tokens immediately. Non-Arc chains show a valid cached
+  // balance right away (refreshed in the background); otherwise "—" placeholder.
   const visible = tokens.slice(0, 50);
-  list.innerHTML = visible.map(t => renderItem(t, '—')).join('')
+  list.innerHTML = visible.map(t => {
+    let initial = '—';
+    if (fastEngine && walletAddress) {
+      const cached = fastEngine.getCachedBalance(walletAddress, t, chainId);
+      if (cached != null) initial = _swpTokBal(cached);
+    }
+    return renderItem(t, initial);
+  }).join('')
     + (tokens.length > 50 ? `<div class="tok-empty" style="padding:8px">${tokens.length - 50} more — search to narrow</div>` : '');
 
   // Fetch balances async for visible tokens.
@@ -24223,8 +24285,6 @@ async function renderTokenList(filterText) {
   //   <number> → confirmed positive balance (4 decimals).
   if (walletAddress) {
     const useBS = typeof BalanceService !== 'undefined' && BalanceService.getTokenBalance;
-    const fastEngine = (typeof FastBalanceEngine !== 'undefined' && FastBalanceEngine.isSupported && FastBalanceEngine.isSupported(chainId))
-      ? FastBalanceEngine : null;
 
     if (fastEngine) {
       // ── Non-Arc fast path: priority + bounded concurrency + in-flight dedup ──
@@ -57477,7 +57537,7 @@ function _ubDirectExec(intent, params, mode) {
 (function(){
   var LOGO = { usdc:'/assets/tokens/usdc.svg', eurc:'/assets/tokens/eurc.svg', btc:'/assets/tokens/btc.svg' };
   var MAP = { 'U':'usdc', 'USDC':'usdc', 'E':'eurc', 'EURC':'eurc', '\u20ac':'eurc', '\u20bf':'btc', 'B':'btc', 'BTC':'btc', 'cirBTC':'btc', 'CIRBTC':'btc' };
-  var SEL = '.st-token-icon,.token-icon,.sa-asset-icon,.aut-tk-icon,.swp-tok-icon,.pool-detail-icon,.tkn-logo-ico,.plist-pair-icon,.tok-item-icon,.ms-usdc-icon,.vac-tk-icon,#xc-token-icon,#reserve-icon-a,#reserve-icon-b,#pool-add-icon-a,#pool-add-icon-b';
+  var SEL = '.st-token-icon,.token-icon,.sa-asset-icon,.aut-tk-icon,.swp-tok-icon,.pool-detail-icon,.tkn-logo-ico,.plist-pair-icon,.ms-usdc-icon,.vac-tk-icon,#xc-token-icon,#reserve-icon-a,#reserve-icon-b,#pool-add-icon-a,#pool-add-icon-b';
   function decorate(el){
     if (!el || !el.style) return;
     var sym = MAP[(el.textContent || '').trim()];

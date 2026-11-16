@@ -149,10 +149,12 @@ describe('renderTokenList — source-level regression', () => {
     });
   });
 
-  it('the initial render still uses "—" as placeholder (before async fetch)', () => {
-    // The synchronous first-pass render must use '—' so the user sees something
-    // instantly, even before balances load.
-    expect(renderSrc).toContain("renderItem(t, '—')");
+  it('the initial render uses "—" as default, with cached balances shown instantly (stale-while-revalidate)', () => {
+    // The synchronous first-pass render defaults to '—' but shows a valid cached
+    // balance immediately when available (Phase 1.4.3 instant display).
+    expect(renderSrc).toContain("let initial = '—'");
+    expect(renderSrc).toContain('getCachedBalance(walletAddress, t, chainId)');
+    expect(renderSrc).toContain('renderItem(t, initial)');
   });
 
   it('defines a chain-aware native classifier (_swpTokenIsNative)', () => {

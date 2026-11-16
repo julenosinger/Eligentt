@@ -52,6 +52,12 @@
 
   var _inflight = {};                // key -> { promise, ts }
 
+  // Display-only cache (stale-while-revalidate). NEVER used for MAX/approval/
+  // execution — it only makes the token picker render instantly. Keyed by
+  // wallet + chain + canonical token identity.
+  var _displayCache = {};
+  var DISPLAY_CACHE_TTL_MS = 60000;  // stale-while-revalidate window (display only)
+
   function _isAddr(v) {
     return typeof v === 'string' && /^0x[0-9a-fA-F]{40}$/.test(v);
   }
@@ -224,6 +230,10 @@
 
     var p = _read(address, token, id).then(function (raw) {
       delete _inflight[key];
+      if (raw != null) {
+        // Cache the confirmed value for instant (stale-while-revalidate) display.
+        _displayCache[key] = { value: String(raw), ts: now };
+      }
       return raw;
     }, function () {
       delete _inflight[key];
@@ -231,6 +241,24 @@
     });
     _inflight[key] = { promise: p, ts: now };
     return p;
+  }
+
+  /* ════════════════════════════════════════════
+     PUBLIC — synchronous cached read (P3 instant display)
+  ════════════════════════════════════════════ */
+  /**
+   * Return a previously confirmed formatted balance WITHOUT fetching, so the
+   * token picker can render immediately and refresh in the background.
+   * Returns null when nothing is cached (caller shows "—"/loading).
+   */
+  function getCachedBalance(address, token, chainId) {
+    if (!_isAddr(address)) return null;
+    var id = Number(chainId);
+    if (!Number.isFinite(id)) return null;
+    var entry = _displayCache[_key(address, token, id)];
+    if (!entry) return null;
+    if (Date.now() - entry.ts > DISPLAY_CACHE_TTL_MS) return null;
+    return entry.value;
   }
 
   /* ════════════════════════════════════════════
@@ -276,9 +304,10 @@
     });
   }
 
-  /** Clear all in-flight entries (call on wallet/account change). */
+  /** Clear all in-flight + display-cache entries (call on wallet/account change). */
   function reset() {
     _inflight = {};
+    _displayCache = {};
   }
 
   /** @public */
@@ -290,6 +319,7 @@
     canUseEtherscan: canUseEtherscan,
     canUseAlchemy: canUseAlchemy,
     getTokenBalance: getTokenBalance,
+    getCachedBalance: getCachedBalance,
     schedule: schedule,
     reset: reset
   };

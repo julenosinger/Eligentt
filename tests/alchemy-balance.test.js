@@ -102,20 +102,6 @@ describe('A — Alchemy proxy (behavioral)', () => {
     expect((await badContract.json()).error).toBe('invalid_contract');
   });
 
-  it('rate-limit → 429', async () => {
-    const onRequestPost = await loadProxy();
-    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: '0x0' }), { status: 200 }))));
-    const env = { ALCHEMY_API_KEY: 'test' };
-    // Fire RATE_MAX+1 requests; the last must be rate-limited.
-    let last;
-    for (let i = 0; i < 6; i++) {
-      last = await onRequestPost({ request: new Request('https://x/api/balance/alchemy', { method: 'POST', body: JSON.stringify({ chainid: 1, address: ADDR }) }), env });
-    }
-    const data = await last.json();
-    expect(data.ok).toBe(false);
-    expect(data.error).toBe('rate_limited');
-  });
-
   it('JSON-RPC error → error (never a fake zero)', async () => {
     const onRequestPost = await loadProxy();
     vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, error: { code: -32000, message: 'boom' } }), { status: 200 }))));
@@ -123,6 +109,48 @@ describe('A — Alchemy proxy (behavioral)', () => {
     const data = await res.json();
     expect(data.ok).toBe(false);
     expect(data.balance).toBeUndefined();
+  });
+
+  it('batched ERC-20 (contracts array) → { ok, balances } with exact decimals + per-token isolation', async () => {
+    const onRequestPost = await loadProxy();
+    const C1 = '0x00000000000000000000000000000000000000aa';
+    const C2 = '0x00000000000000000000000000000000000000bb';
+    const C3 = '0x00000000000000000000000000000000000000cc';
+    const result = { address: ADDR, tokenBalances: [
+      { contractAddress: C1, tokenBalance: '0x4c4b40', error: null },   // 5000000
+      { contractAddress: C2, tokenBalance: '0x0', error: null },       // 0 (confirmed zero)
+      { contractAddress: C3, tokenBalance: '0x0', error: { code: -32000, message: 'boom' } }, // per-token error → omitted
+    ] };
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result }), { status: 200 }))));
+    const res = await onRequestPost({ request: new Request('https://x/api/balance/alchemy', { method: 'POST', body: JSON.stringify({ chainid: 8453, address: ADDR, contracts: [C1, C2, C3] }) }), env: { ALCHEMY_API_KEY: 'test' } });
+    const data = await res.json();
+    expect(data.ok).toBe(true);
+    expect(data.balances[C1]).toBe('5000000');   // exact decimal
+    expect(data.balances[C2]).toBe('0');          // confirmed zero preserved
+    expect(data.balances[C3]).toBeUndefined();    // per-token error omitted (not fake zero)
+  });
+
+  it('batched request deduplicates + bounds contract count', async () => {
+    const onRequestPost = await loadProxy();
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: { address: ADDR, tokenBalances: [] } }), { status: 200 }))));
+    const many = Array.from({ length: 30 }, (_, i) => '0x' + String(i + 1000).padStart(40, '0'));
+    const tooMany = await onRequestPost({ request: new Request('https://x/api/balance/alchemy', { method: 'POST', body: JSON.stringify({ chainid: 1, address: ADDR, contracts: many }) }), env: { ALCHEMY_API_KEY: 'test' } });
+    expect((await tooMany.json()).error).toBe('too_many_contracts');
+  });
+
+  // Rate-limit is intentionally LAST: it exhausts the per-isolate sliding window,
+  // so the tests above (which assert ok:true) run before the cap is reached.
+  it('rate-limit → 429', async () => {
+    const onRequestPost = await loadProxy();
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: '0x0' }), { status: 200 }))));
+    const env = { ALCHEMY_API_KEY: 'test' };
+    let last;
+    for (let i = 0; i < 6; i++) {
+      last = await onRequestPost({ request: new Request('https://x/api/balance/alchemy', { method: 'POST', body: JSON.stringify({ chainid: 1, address: ADDR }) }), env });
+    }
+    const data = await last.json();
+    expect(data.ok).toBe(false);
+    expect(data.error).toBe('rate_limited');
   });
 });
 
