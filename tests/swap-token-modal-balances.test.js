@@ -6,14 +6,16 @@
  * this test suite.
  *
  * Requirements enforced:
- * 1. After all fetches settle, "—" must not remain: either a real balance or
- *    "0.0000" is written to the DOM row.
- * 2. When walletAddress is falsy, "0.0000" is set immediately without any fetch.
- * 3. BalanceService.getTokenBalance is used when available (preferred path).
- * 4. Falls back to direct ethers call when BalanceService is absent.
- * 5. A fetch error results in "0.0000", not a re-throw or "—".
- * 6. After all fetches settle, tokens with balance > 0 are re-sorted to the top.
- * 7. No regressions: selectTokenObj, filterTokenList, renderItem still present.
+ * 1. Native assets (ETH on Base/Arbitrum/Ethereum/Optimism) are NOT skipped —
+ *    classified chain-aware and read via BalanceService.getTokenBalance.
+ * 2. Balance states are distinct: "—" = unavailable/loading, "0.0000" = confirmed
+ *    zero, <number> = confirmed balance. RPC failure → "—" (never a fake zero).
+ * 3. When walletAddress is falsy, "—" (disconnected) is shown, never "0.0000".
+ * 4. BalanceService.getTokenBalance is used when available (preferred path).
+ * 5. Falls back to direct ethers call when BalanceService is absent.
+ * 6. A render-generation guard prevents stale async results from touching the DOM.
+ * 7. After all fetches settle, tokens with balance > 0 are re-sorted to the top.
+ * 8. No regressions: selectTokenObj, filterTokenList, renderItem still present.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -41,28 +43,34 @@ const renderSrc = extractFn(html, 'renderTokenList');
 
 describe('renderTokenList — source-level regression', () => {
 
-  // ── 1. No "—" left after fetch ────────────────────────────────────────────
+  // ── 1. Distinct balance states (unavailable "—" vs confirmed zero) ────────
 
-  it('sets bal to "0.0000" as default before the try block (never leaves "—" on error)', () => {
-    // The variable initialisation `let bal = '0.0000'` must appear INSIDE the
-    // async forEach / map callback, before the try block.
-    expect(renderSrc).toContain("let bal = '0.0000'");
+  it('sets bal to "—" as default before the try block (RPC failure is NOT a fake zero)', () => {
+    // The variable initialisation `let bal = '—'` must appear INSIDE the
+    // async forEach / map callback, before the try block — so a failed read
+    // never masquerades as a confirmed "0.0000" balance.
+    expect(renderSrc).toContain("let bal = '—'");
   });
 
-  it('catches fetch errors and keeps bal as "0.0000"', () => {
-    // catch block must assign '0.0000', not re-throw or leave empty.
-    expect(renderSrc).toMatch(/catch\s*\([^)]*\)\s*\{\s*bal\s*=\s*'0\.0000'/);
+  it('catches fetch errors and keeps bal as "—" (unavailable, not zero)', () => {
+    // catch block must assign '—' (unavailable), not '0.0000' and not re-throw.
+    expect(renderSrc).toMatch(/catch\s*\([^)]*\)\s*\{\s*bal\s*=\s*'—'/);
+  });
+
+  it('only a non-null BalanceService result is treated as a confirmed balance', () => {
+    expect(renderSrc).toContain('if (raw != null)');
+    expect(renderSrc).toContain('bal = parseFloat(raw).toFixed(4)');
   });
 
   // ── 2. No-wallet path ─────────────────────────────────────────────────────
 
-  it('has an else branch for no-wallet that sets all rows to "0.0000"', () => {
-    expect(renderSrc).toContain("valEl.textContent = '0.0000'");
-    // The else branch (no walletAddress) must exist and set '0.0000'
+  it('has an else branch for no-wallet that shows "—" (disconnected)', () => {
+    expect(renderSrc).toContain("valEl.textContent = '—'");
+    // The else branch (no walletAddress) must exist and set '—'
     const elseIdx = renderSrc.indexOf('} else {');
     expect(elseIdx).toBeGreaterThan(-1);
     const elseBlock = renderSrc.slice(elseIdx, elseIdx + 300);
-    expect(elseBlock).toContain("'0.0000'");
+    expect(elseBlock).toContain("'—'");
   });
 
   // ── 3. BalanceService preferred ───────────────────────────────────────────
@@ -131,13 +139,12 @@ describe('renderTokenList — source-level regression', () => {
     expect(renderSrc).toContain('tok-item-bal-val');
   });
 
-  // ── 8. No old broken "—" path remains ────────────────────────────────────
+  // ── 8. Unavailable state and native classification markers ────────────────
 
-  it('does not leave "—" in a catch/finally block (no catch assigning "—")', () => {
-    // Ensure no catch block assigns the dash placeholder.
+  it('catch block assigns "—" (unavailable), never "0.0000" (no fake zero)', () => {
     const catchBlocks = renderSrc.match(/catch\s*\([^)]*\)\s*\{[^}]*\}/g) || [];
     catchBlocks.forEach(block => {
-      expect(block).not.toContain("'—'");
+      expect(block).not.toContain("'0.0000'");
     });
   });
 
@@ -145,6 +152,21 @@ describe('renderTokenList — source-level regression', () => {
     // The synchronous first-pass render must use '—' so the user sees something
     // instantly, even before balances load.
     expect(renderSrc).toContain("renderItem(t, '—')");
+  });
+
+  it('defines a chain-aware native classifier (_swpTokenIsNative)', () => {
+    expect(html).toContain('function _swpTokenIsNative(t, chainId)');
+  });
+
+  it('native classification consults the chain registry, never assumes ETH globally', () => {
+    expect(html).toContain('nativeCurrency');
+    expect(html).toContain('CHAIN_REGISTRY[Number(chainId)]');
+  });
+
+  it('uses a render-generation guard so stale async results never touch the DOM', () => {
+    expect(html).toContain('let _tokRenderGen = 0');
+    expect(renderSrc).toContain('const gen = ++_tokRenderGen');
+    expect(renderSrc).toContain('if (gen !== _tokRenderGen) return');
   });
 });
 
@@ -164,8 +186,9 @@ describe('renderTokenList — integration with BalanceService contract', () => {
     expect(renderSrc).toContain('bal = parseFloat(raw).toFixed(4)');
   });
 
-  it('null result from BalanceService keeps bal as "0.0000" (not NaN or crash)', () => {
-    // The check `if (raw != null)` guards against null/undefined from BalanceService.
+  it('null result from BalanceService keeps bal as "—" (unavailable, not NaN/zero)', () => {
+    // The check `if (raw != null)` guards against null/undefined from BalanceService:
+    // a null result means RPC failure → bal stays "—" (unavailable).
     expect(renderSrc).toContain('if (raw != null)');
   });
 });

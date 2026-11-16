@@ -8596,11 +8596,11 @@ select.cinput option { background: #161a24; color: #dde2f0; }
             <div class="sa-card">
               <div class="sa-card-title" style="justify-content:space-between">
                 <span><i class="ti ti-form"></i>Transfer Details</span>
-                <!-- CPN Fiat Payout toggle -->
+                <!-- CPN Fiat Payout toggle — hidden while SA_CPN_ENABLED is false -->
                 <button id="sa-cpn-toggle"
                   onclick="saToggleCPN()"
                   title="Send to a bank account via Circle Payments Network (requires OFI onboarding)"
-                  style="display:flex;align-items:center;gap:5px;background:rgba(45,212,191,.08);border:1px solid rgba(45,212,191,.2);border-radius:6px;padding:4px 10px;cursor:pointer;font-size:9px;font-weight:600;color:var(--teal);transition:all .2s">
+                  style="display:none;align-items:center;gap:5px;background:rgba(45,212,191,.08);border:1px solid rgba(45,212,191,.2);border-radius:6px;padding:4px 10px;cursor:pointer;font-size:9px;font-weight:600;color:var(--teal);transition:all .2s">
                   <i class="ti ti-building-bank" style="font-size:11px"></i>
                   <span id="sa-cpn-toggle-label">Send to Bank (CPN)</span>
                 </button>
@@ -24007,11 +24007,46 @@ var _tokListCache = {};
 // Avoids JSON injection inside onclick="" attributes (quote-escaping bugs).
 var _tokRenderMap = [];
 
+// Monotonic render generation — guards async balance fetches so a stale render
+// (e.g. a fast Base→Arbitrum chain switch or modal reopen) can never overwrite
+// the DOM of a newer render. Every renderTokenList() call bumps it; async
+// callbacks bail out when their captured generation no longer matches.
+let _tokRenderGen = 0;
+
+// ── Native asset classification (chain-aware) ────────────────────────────────
+// Determines whether a token in the selector is the chain's NATIVE asset (read
+// via provider.getBalance) vs an ERC-20 contract (read via balanceOf).
+//
+// The native asset is NEVER assumed to be ETH globally: it always consults the
+// target chain's nativeCurrency (Arc Mainnet 5042 → USDC, Base/Arbitrum/
+// Ethereum/Optimism → ETH, Polygon → MATIC). Rules (chainId + symbol + address):
+//   • Real contract address  → ERC-20 (WETH, ETHx, Arc USDC@0x3600…0000, …)
+//   • Zero address           → native (LI.FI's canonical native-gas marker)
+//   • 0xeee…e sentinel       → native only when the symbol matches the native currency
+//   • Missing address        → native only when the symbol matches the native currency
+function _swpTokenIsNative(t, chainId) {
+  const addr = (t && t.address) ? String(t.address).toLowerCase() : '';
+  const sym  = String((t && t.symbol) || '').toUpperCase();
+  const chainMeta = (typeof CHAIN_REGISTRY !== 'undefined') ? CHAIN_REGISTRY[Number(chainId)] : null;
+  const natSym = (chainMeta && chainMeta.nativeCurrency && chainMeta.nativeCurrency.symbol)
+    ? String(chainMeta.nativeCurrency.symbol).toUpperCase() : null;
+
+  // A real ERC-20 contract address is NEVER native (WETH, ETHx, Arc USDC, …).
+  if (addr && addr !== '0x0000000000000000000000000000000000000000' && addr !== '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee') {
+    return false;
+  }
+  // Native markers are native only when the symbol matches the chain's native
+  // currency. No native symbol known → fail closed to ERC-20 (never guess).
+  if (!natSym) return false;
+  return sym === natSym;
+}
+
 async function renderTokenList(filterText) {
   const list = document.getElementById('tok-list');
   if (!list) return;
   const search = (filterText || document.getElementById('tok-search')?.value || '').toLowerCase();
   const chainId = SWP._tokModalChainId || 5042;
+  const gen = ++_tokRenderGen;   // render-generation guard for async results
 
   // Show loading state if we don't have tokens yet.
   if (!_tokListCache[chainId]) {
@@ -24031,6 +24066,10 @@ async function renderTokenList(filterText) {
       })).filter(t => t.address);
     }
   }
+
+  // A newer render superseded this one while tokens were loading — bail out
+  // before touching the DOM with a stale list.
+  if (gen !== _tokRenderGen) return;
 
   let tokens = _tokListCache[chainId] || [];
 
@@ -24100,30 +24139,34 @@ async function renderTokenList(filterText) {
 
   // Fetch balances async for visible tokens.
   // Uses BalanceService when available (handles multi-RPC, retries, timeout).
-  // Falls back to direct ethers call. Always resolves to a display string —
-  // never leaves a token at "—" after the fetch completes (shows "0.0000" on
-  // error/zero so the user knows the data was fetched, not missing).
+  // Falls back to direct ethers call. Balance states:
+  //   '—'      → unavailable (RPC failure/timeout) or still loading — never a
+  //              fake zero and never confused with a confirmed balance.
+  //   '0.0000' → confirmed zero balance.
+  //   <number> → confirmed positive balance (4 decimals).
   if (walletAddress) {
     const useBS = typeof BalanceService !== 'undefined' && BalanceService.getTokenBalance;
     // Fetch all balances concurrently; when all settle, re-sort rows so tokens
     // with a positive balance appear at the top.
     const balFetches = visible.map(async (t, i) => {
       const addr = (t.address || '').toLowerCase();
-      if (!addr || addr === '0x0000000000000000000000000000000000000000') return { i, bal: '0.0000' };
-      let bal = '0.0000';
+      // Chain-aware native classification: zero-address/sentinel native markers
+      // (e.g. ETH on Base/Arbitrum) are read via getBalance, not skipped.
+      const isNative = _swpTokenIsNative(t, chainId);
+      let bal = '—';   // unavailable default: RPC failure/timeout is NOT a zero
       try {
         if (useBS) {
           // getTokenBalance(walletAddress, token, chainId) — address is first arg.
-          // Pass the full token object so BalanceService can resolve the contract
-          // address directly instead of looking up by symbol.
+          // Pass the full token object so BalanceService can resolve native vs
+          // ERC-20 (getBalance vs balanceOf) using the same chain-aware logic.
           const tokenArg = { address: t.address, symbol: t.symbol, decimals: t.decimals };
           const raw = await BalanceService.getTokenBalance(walletAddress, tokenArg, chainId);
           if (raw != null) {
-            // getTokenBalance already returns a formatted string (not a BigInt raw).
+            // getTokenBalance returns a formatted string, or null on RPC failure.
+            // Only a non-null result is a confirmed balance (0 → "0.0000").
             bal = parseFloat(raw).toFixed(4);
           }
         } else if (prov) {
-          const isNative = addr === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
           const b = await Promise.race([
             isNative
               ? prov.getBalance(walletAddress)
@@ -24132,9 +24175,11 @@ async function renderTokenList(filterText) {
           ]);
           if (b != null) bal = parseFloat(ethers.formatUnits(b, t.decimals || 18)).toFixed(4);
         }
-      } catch (_) { bal = '0.0000'; }
+      } catch (_) { bal = '—'; }
 
-      // Update DOM row immediately as each result arrives.
+      // Update DOM row immediately as each result arrives — but only if this
+      // render generation is still current (a stale render must never touch DOM).
+      if (gen !== _tokRenderGen) return { i, bal };
       const items = list.querySelectorAll('.tok-item');
       if (items[i]) {
         const valEl = items[i].querySelector('.tok-item-bal-val');
@@ -24149,6 +24194,7 @@ async function renderTokenList(filterText) {
 
     // After all fetches settle, re-sort list so tokens with balance > 0 float up.
     Promise.allSettled(balFetches).then(results => {
+      if (gen !== _tokRenderGen) return; // stale render — skip re-sort
       const balMap = {};
       results.forEach(r => { if (r.status === 'fulfilled' && r.value) balMap[r.value.i] = parseFloat(r.value.bal) || 0; });
       const items = Array.from(list.querySelectorAll('.tok-item'));
@@ -24166,11 +24212,11 @@ async function renderTokenList(filterText) {
       items.forEach(el => parent.insertBefore(el, parent.querySelector('.tok-empty') || null));
     });
   } else {
-    // No wallet connected — show 0.0000 for all tokens immediately.
+    // No wallet connected — show "—" (disconnected), never a fake zero balance.
     const items = list.querySelectorAll('.tok-item');
     items.forEach(el => {
       const valEl = el.querySelector('.tok-item-bal-val');
-      if (valEl) valEl.textContent = '0.0000';
+      if (valEl) valEl.textContent = '—';
     });
   }
 }
@@ -39634,6 +39680,11 @@ async function saExecuteSend() {
 //  CPN_API_KEY is injected server-side — never reaches the browser.
 // ══════════════════════════════════════════════════════════════════════════════
 
+// Feature flag — "Send to Bank (CPN)" fiat payouts are not yet functional for
+// end users. While false, the entry point (sa-cpn-toggle) stays hidden and the
+// toggle handler no-ops. Flip to true and unhide the button once CPN is ready.
+var SA_CPN_ENABLED = false;
+
 let _saCPNMode = false;                // true when "Send to Bank (CPN)" is active
 let _saCPNQuotes = [];                 // last fetched quote array
 let _saCPNSelectedQuote = null;        // user-selected quote object
@@ -39672,6 +39723,7 @@ var _CPN_USDC_DECIMALS = 6;
 
 // ── Toggle CPN mode ───────────────────────────────────────────────────────────
 function saToggleCPN() {
+  if (!SA_CPN_ENABLED) return;
   _saCPNMode = !_saCPNMode;
   var form     = document.getElementById('sa-cpn-form');
   var notice   = document.getElementById('sa-cpn-notice');
