@@ -116,4 +116,46 @@ describe('X402IntentStore — SQLite persistence across runtime recreation', () 
     await mf.dispose();
     fs.rmSync(persistDir, { recursive: true, force: true });
   });
+
+  it('persists operator approval consumption and revocation across restart', async () => {
+    const persistDir = fs.mkdtempSync(path.join(os.tmpdir(), 'x402-do-approval-'));
+    const walletAddress = signerAddress();
+    const approvalId = crypto.randomUUID();
+    const attemptId = crypto.randomUUID();
+    const fingerprint = 'a'.repeat(64);
+
+    // Phase 1: consume an approval + revoke another.
+    let mf = makeMf(persistDir);
+    let ns = await mf.getDurableObjectNamespace('X402_INTENT_LOCK');
+    let stub = ns.get(ns.idFromName(walletAddress));
+    const H = { 'X-DO-Internal-Secret': SECRET, 'Content-Type': 'application/json' };
+    const fetchDo = (p, b) => stub.fetch('https://x402-intent-do/' + p, { method: 'POST', headers: H, body: JSON.stringify(b) });
+
+    const consume = await fetchDo('consume-approval', { approvalId, approvalFingerprint: fingerprint, expectedAttemptId: attemptId });
+    expect((await consume.json()).consumed).toBe(true);
+
+    const revokeId = crypto.randomUUID();
+    await fetchDo('revoke-approval', { approvalId: revokeId });
+
+    await mf.dispose();
+
+    // Phase 2: recreate the runtime.
+    mf = makeMf(persistDir);
+    ns = await mf.getDurableObjectNamespace('X402_INTENT_LOCK');
+    stub = ns.get(ns.idFromName(walletAddress));
+
+    // Consumed approval remains consumed (duplicate → no new grant).
+    const dup = await stub.fetch('https://x402-intent-do/consume-approval', { method: 'POST', headers: H, body: JSON.stringify({ approvalId, approvalFingerprint: fingerprint, expectedAttemptId: attemptId }) });
+    const dupBody = await dup.json();
+    expect(dupBody.consumed).toBe(false);
+    expect(dupBody.already).toBe(true);
+
+    // Revoked approval remains revoked (consume → approval_revoked).
+    const revokedConsume = await stub.fetch('https://x402-intent-do/consume-approval', { method: 'POST', headers: H, body: JSON.stringify({ approvalId: revokeId, approvalFingerprint: fingerprint, expectedAttemptId: attemptId }) });
+    const revokedBody = await revokedConsume.json();
+    expect(revokedBody.error).toBe('approval_revoked');
+
+    await mf.dispose();
+    fs.rmSync(persistDir, { recursive: true, force: true });
+  });
 });

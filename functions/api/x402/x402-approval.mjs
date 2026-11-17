@@ -36,6 +36,19 @@ async function hmacHex(secret, data) {
   return Array.from(new Uint8Array(sig)).map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
+async function sha256Hex(data) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(data));
+  return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * Canonical fingerprint (SHA-256) of a signed approval, for durable consumption
+ * binding. Not the raw HMAC signature (avoid persisting the raw auth material).
+ */
+export async function approvalFingerprint(approval) {
+  return sha256Hex(canonical(approval) + ':' + approval.signature);
+}
+
 /**
  * Build (sign) an operator approval. `opts.maxAmountAtomic` and `feeCeiling` are
  * canonical atomic decimal strings (exact, never Number).
@@ -99,4 +112,26 @@ export async function validateApproval(secret, approval, request, state) {
   if (amount > maxAmount) return { ok: false, reason: 'amount_exceeds_approval' };
 
   return { ok: true, approvalId: approval.id };
+}
+
+/**
+ * P0.2 — durable, atomic approval consumption. Validates the HMAC + scope +
+ * expiry, then atomically consumes the approval through the Durable Object
+ * (one-time-use, survives restart, exactly one winner under concurrency).
+ */
+export async function consumeApprovalDurable(env, { approval, request, walletAddress, userId, state }) {
+  const secret = (env && env.X402_OPERATOR_APPROVAL_SECRET) || '';
+  const v = await validateApproval(secret, approval, request, state);
+  if (!v.ok) return { ok: false, reason: v.reason };
+
+  const fp = await approvalFingerprint(approval);
+  // Deferred import avoids a cycle at module load (intent-service imports _x402).
+  const { doConsumeApproval } = await import('./intent-service.mjs');
+  const res = await doConsumeApproval(env, walletAddress, userId, approval.id, fp, request.settlementAttemptId);
+  if (!res.ok) {
+    if (res.error === 'approval_revoked') return { ok: false, reason: 'approval_revoked' };
+    if (res.error === 'approval_conflict') return { ok: false, reason: 'approval_conflict' };
+    return { ok: false, reason: res.error };
+  }
+  return { ok: true, consumed: res.body.consumed, already: !!res.body.already };
 }

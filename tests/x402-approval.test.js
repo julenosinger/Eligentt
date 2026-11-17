@@ -6,7 +6,8 @@
  * reused approval, or a mismatched payment. No live approval is created.
  */
 import { describe, it, expect } from 'vitest';
-import { buildApproval, validateApproval } from '../functions/api/x402/x402-approval.mjs';
+import { X402IntentStore } from '../functions/api/x402/x402-intent.do.js';
+import { buildApproval, validateApproval, consumeApprovalDurable, approvalFingerprint } from '../functions/api/x402/x402-approval.mjs';
 
 const SECRET = 'operator-approval-secret-0123456789';
 const OP = 'operator-1';
@@ -106,5 +107,85 @@ describe('x402 operator approval — lifecycle', () => {
     const approval = await makeApproval();
     const res = await validateApproval('', approval, request(), {});
     expect(res.reason).toBe('approval_secret_unconfigured');
+  });
+});
+
+describe('x402 operator approval — durable atomic consumption (P0.2)', () => {
+  const DO_SECRET = 'test-internal-secret-0123456789abcdef';
+
+  function makeMutex() { let t = Promise.resolve(); return (fn) => { const r = t.then(fn, fn); t = r.catch(() => {}); return r; }; }
+  function makeDOBinding() {
+    const instances = new Map();
+    return {
+      idFromName(name) { return { __name: String(name) }; },
+      get(id) {
+        const name = id.__name;
+        if (!instances.has(name)) {
+          const store = new Map();
+          const lock = makeMutex();
+          const txn = { get: async (k) => store.has(k) ? store.get(k) : undefined, put: async (k, v) => store.set(k, v), delete: async (k) => store.delete(k) };
+          const state = { storage: { get: async (k) => store.has(k) ? store.get(k) : undefined, put: async (k, v) => store.set(k, v), delete: async (k) => store.delete(k), setAlarm: async () => {}, deleteAlarm: async () => {}, getAlarm: async () => null, transaction: async (cb) => cb(txn) }, blockConcurrencyWhile: async (cb) => lock(cb), _store: store };
+          instances.set(name, new X402IntentStore(state, { DO_INTERNAL_SECRET: DO_SECRET }));
+        }
+        const doObj = instances.get(name);
+        return { fetch: (url, opts) => doObj.fetch(new Request(url, opts)) };
+      },
+      _instances: instances,
+    };
+  }
+
+  function env(binding) {
+    return { X402_OPERATOR_APPROVAL_SECRET: SECRET, X402_INTENT_LOCK: binding, DO_INTERNAL_SECRET: DO_SECRET };
+  }
+
+  it('consumes an approval exactly once (duplicate returns no new grant)', async () => {
+    const binding = makeDOBinding();
+    const approval = await makeApproval();
+    const e = env(binding);
+    const first = await consumeApprovalDurable(e, { approval, request: request(), walletAddress: SENDER, userId: 'user-1', state: {} });
+    expect(first.ok).toBe(true);
+    expect(first.consumed).toBe(true);
+    const second = await consumeApprovalDurable(e, { approval, request: request(), walletAddress: SENDER, userId: 'user-1', state: {} });
+    expect(second.ok).toBe(true);
+    expect(second.consumed).toBe(false);
+    expect(second.already).toBe(true);
+  });
+
+  it('serializes 50 concurrent consumption attempts to exactly ONE grant', async () => {
+    const binding = makeDOBinding();
+    const approval = await makeApproval();
+    const e = env(binding);
+    const results = await Promise.all(
+      Array.from({ length: 50 }, () => consumeApprovalDurable(e, { approval, request: request(), walletAddress: SENDER, userId: 'user-1', state: {} }))
+    );
+    const grants = results.filter((r) => r.consumed === true);
+    const duplicates = results.filter((r) => r.consumed === false && r.already === true);
+    expect(grants).toHaveLength(1);
+    expect(duplicates).toHaveLength(49);
+  });
+
+  it('rejects a revoked approval at consumption time', async () => {
+    const binding = makeDOBinding();
+    const approval = await makeApproval();
+    const e = env(binding);
+    // Revoke via the DO directly.
+    const stub = binding.get(binding.idFromName(SENDER));
+    await stub.fetch('https://do/revoke-approval', { method: 'POST', headers: { 'X-DO-Internal-Secret': DO_SECRET, 'Content-Type': 'application/json' }, body: JSON.stringify({ approvalId: approval.id }) });
+    const res = await consumeApprovalDurable(e, { approval, request: request(), walletAddress: SENDER, userId: 'user-1', state: {} });
+    expect(res.ok).toBe(false);
+    expect(res.reason).toBe('approval_revoked');
+  });
+
+  it('rejects a tampered approval before any durable consumption', async () => {
+    const binding = makeDOBinding();
+    const approval = await makeApproval();
+    const tampered = { ...approval, maxAmountAtomic: '999999999999' };
+    const res = await consumeApprovalDurable(env(binding), { approval: tampered, request: request(), walletAddress: SENDER, userId: 'user-1', state: {} });
+    expect(res.ok).toBe(false);
+    expect(res.reason).toBe('approval_signature_invalid');
+    // Nothing was consumed.
+    const stub = binding.get(binding.idFromName(SENDER));
+    const chk = await stub.fetch('https://do/consume-approval', { method: 'POST', headers: { 'X-DO-Internal-Secret': DO_SECRET, 'Content-Type': 'application/json' }, body: JSON.stringify({ approvalId: approval.id, approvalFingerprint: await approvalFingerprint(approval), expectedAttemptId: ATTEMPT }) });
+    expect(chk.status).toBe(201);
   });
 });

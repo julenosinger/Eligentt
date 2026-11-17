@@ -11,10 +11,16 @@ import {
   rpcCall,
   fetchChainId,
   fetchTransactionReceipt,
+  fetchTransaction,
   fetchAuthorizationState,
   decodeTransferEvent,
   validateReceiptEvidence,
+  decodeTransferWithAuthorizationInput,
+  decodeAuthorizationUsedEvent,
+  validateAuthorizationBinding,
   TRANSFER_TOPIC,
+  TRANSFER_WITH_AUTHORIZATION_SELECTOR,
+  AUTHORIZATION_USED_TOPIC,
   AUTHORIZATION_STATE_SELECTOR,
 } from '../functions/api/x402/x402-rpc.mjs';
 
@@ -108,5 +114,87 @@ describe('x402 RPC — Transfer-event decoding & evidence binding', () => {
     const res = validateReceiptEvidence(receipt, { from: OWNER, to: RECIPIENT, value: '1000000' });
     expect(res.ok).toBe(false);
     expect(res.reason).toBe('transfer_event_not_found');
+  });
+});
+
+describe('x402 P0.1 — authorization-to-transaction binding', () => {
+  const NONCE = '0x' + '11'.repeat(32);
+
+  function authorizationCalldata(from, to, value, validAfter, validBefore, nonce) {
+    const addr = (a) => String(a).slice(2).padStart(64, '0');
+    const uint = (n) => BigInt(n).toString(16).padStart(64, '0');
+    const bytes32 = (b) => String(b).slice(2).padStart(64, '0');
+    return '0x' + TRANSFER_WITH_AUTHORIZATION_SELECTOR.slice(2) + addr(from) + addr(to) + uint(value) + uint(validAfter) + uint(validBefore) + bytes32(nonce);
+  }
+
+  function authUsedLog(authorizer, nonce) {
+    return { topics: [AUTHORIZATION_USED_TOPIC, '0x' + '0'.repeat(24) + authorizer.slice(2), nonce], data: '0x' };
+  }
+
+  function transferLog(from, to, value) {
+    return { topics: [TRANSFER_TOPIC, '0x' + '0'.repeat(24) + from.slice(2), '0x' + '0'.repeat(24) + to.slice(2)], data: '0x' + BigInt(value).toString(16).padStart(64, '0') };
+  }
+
+  function receiptWith(logs) {
+    return { status: '0x1', confirmations: 3, transactionHash: '0x' + 'aa'.repeat(32), blockNumber: '0x10', logs };
+  }
+
+  it('decodes the transferWithAuthorization input (exact nonce)', () => {
+    const input = authorizationCalldata(OWNER, RECIPIENT, 1000000, 0, 9999999999, NONCE);
+    const decoded = decodeTransferWithAuthorizationInput(input);
+    expect(decoded.ok).toBe(true);
+    expect(decoded.from).toBe(OWNER);
+    expect(decoded.to).toBe(RECIPIENT);
+    expect(decoded.value).toBe('1000000');
+    expect(decoded.nonce).toBe(NONCE);
+  });
+
+  it('rejects a non-transferWithAuthorization input (plain ERC-20 transfer is NOT proof)', () => {
+    // A plain transfer(address,uint256) selector is 0xa9059cbb.
+    const input = '0xa9059cbb' + '0'.repeat(64) + BigInt(1000000).toString(16).padStart(64, '0');
+    expect(decodeTransferWithAuthorizationInput(input).reason).toBe('not_transfer_with_authorization');
+  });
+
+  it('validates the full binding (input nonce + Transfer event + AuthorizationUsed event)', () => {
+    const transaction = { input: authorizationCalldata(OWNER, RECIPIENT, 1000000, 0, 9999999999, NONCE) };
+    const receipt = receiptWith([transferLog(OWNER, RECIPIENT, 1000000), authUsedLog(OWNER, NONCE)]);
+    const res = validateAuthorizationBinding(transaction, receipt, { from: OWNER, to: RECIPIENT, value: '1000000', nonce: NONCE });
+    expect(res.ok).toBe(true);
+    expect(res.evidence.nonce).toBe(NONCE);
+    expect(res.evidence.authorizationUsedEventMatched).toBe(true);
+  });
+
+  it('rejects a transaction whose input nonce differs from the reconciled authorization', () => {
+    const transaction = { input: authorizationCalldata(OWNER, RECIPIENT, 1000000, 0, 9999999999, '0x' + '22'.repeat(32)) };
+    const receipt = receiptWith([transferLog(OWNER, RECIPIENT, 1000000)]);
+    const res = validateAuthorizationBinding(transaction, receipt, { from: OWNER, to: RECIPIENT, value: '1000000', nonce: NONCE });
+    expect(res.ok).toBe(false);
+    expect(res.reason).toBe('input_nonce_mismatch');
+  });
+
+  it('rejects a same-amount/same-recipient plain transfer (no nonce linkage)', () => {
+    // A regular ERC-20 transfer to the same recipient for the same amount is NOT
+    // proof the EIP-3009 authorization was executed.
+    const transaction = { input: '0xa9059cbb' + '0'.repeat(24) + RECIPIENT.slice(2) + BigInt(1000000).toString(16).padStart(64, '0') };
+    const receipt = receiptWith([transferLog(OWNER, RECIPIENT, 1000000)]);
+    const res = validateAuthorizationBinding(transaction, receipt, { from: OWNER, to: RECIPIENT, value: '1000000', nonce: NONCE });
+    expect(res.ok).toBe(false);
+    expect(res.reason).toBe('not_transfer_with_authorization');
+  });
+
+  it('rejects a conflicting AuthorizationUsed event nonce', () => {
+    const transaction = { input: authorizationCalldata(OWNER, RECIPIENT, 1000000, 0, 9999999999, NONCE) };
+    const receipt = receiptWith([transferLog(OWNER, RECIPIENT, 1000000), authUsedLog(OWNER, '0x' + '33'.repeat(32))]);
+    const res = validateAuthorizationBinding(transaction, receipt, { from: OWNER, to: RECIPIENT, value: '1000000', nonce: NONCE });
+    expect(res.ok).toBe(false);
+    expect(res.reason).toBe('authorization_nonce_mismatch');
+  });
+
+  it('decodes the AuthorizationUsed event (authorizer + nonce)', () => {
+    const receipt = receiptWith([authUsedLog(OWNER, NONCE)]);
+    const ev = decodeAuthorizationUsedEvent(receipt);
+    expect(ev.ok).toBe(true);
+    expect(ev.authorizer).toBe(OWNER);
+    expect(ev.nonce).toBe(NONCE);
   });
 });

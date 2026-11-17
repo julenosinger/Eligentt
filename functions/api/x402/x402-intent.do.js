@@ -161,6 +161,8 @@ const KEY_INDEX  = 'index:intents';
 const KEY_SETTLEMENT = 'settlement:';
 const KEY_CLAIM  = 'claim:';
 const KEY_SETTLEMENT_IDEM = 'settlement-idem:';
+const KEY_APPROVAL = 'approval:';
+const KEY_APPROVAL_REVOKED = 'approval-revoked:';
 
 // EIP-3009 authorization nonce is a `bytes32`. Canonical form is lowercase hex
 // `0x` + exactly 64 hex characters (no sign, no decimal, no truncation).
@@ -242,6 +244,12 @@ export class X402IntentStore {
         }
         if (request.method === 'POST' && path === '/settlement-evidence') {
           return this._settlementEvidence(request);
+        }
+        if (request.method === 'POST' && path === '/consume-approval') {
+          return this._consumeApproval(request);
+        }
+        if (request.method === 'POST' && path === '/revoke-approval') {
+          return this._revokeApproval(request);
         }
         return X402IntentStore.json({ error: 'not_found' }, 404);
       });
@@ -760,6 +768,47 @@ export class X402IntentStore {
     });
 
     return X402IntentStore.json(outcome.body, outcome.status);
+  }
+
+  /* ── Durable operator approval consumption (P0.2) ───────────────────── */
+  // Atomic one-time-use consumption. Exactly one caller may consume an approval;
+  // a duplicate receives `consumed:false` (no new execution grant). The
+  // fingerprint binds the consumption to the exact signed approval.
+  async _consumeApproval(request) {
+    let body;
+    try { body = await request.json(); } catch (_) { return X402IntentStore.json({ error: 'invalid_json' }, 400); }
+    const { approvalId, approvalFingerprint, expectedAttemptId } = body || {};
+    if (!INTENT_ID_RE.test(String(approvalId || ''))) return X402IntentStore.json({ error: 'invalid_approval_id' }, 400);
+    if (typeof approvalFingerprint !== 'string' || !DIGEST_RE.test(approvalFingerprint)) return X402IntentStore.json({ error: 'invalid_fingerprint' }, 400);
+    if (!INTENT_ID_RE.test(String(expectedAttemptId || ''))) return X402IntentStore.json({ error: 'invalid_attempt_id' }, 400);
+
+    const outcome = await this.storage.transaction(async (txn) => {
+      const revoked = await txn.get(KEY_APPROVAL_REVOKED + approvalId);
+      if (revoked) return { status: 403, body: { ok: false, error: 'approval_revoked' } };
+      const existing = await txn.get(KEY_APPROVAL + approvalId);
+      if (existing) {
+        if (existing.approvalFingerprint === approvalFingerprint && existing.attemptId === expectedAttemptId) {
+          return { status: 200, body: { ok: true, consumed: false, already: true } };
+        }
+        return { status: 409, body: { ok: false, error: 'approval_conflict' } };
+      }
+      await txn.put(KEY_APPROVAL + approvalId, { approvalFingerprint, attemptId: expectedAttemptId, consumedAt: iso(Date.now()) });
+      return { status: 201, body: { ok: true, consumed: true } };
+    });
+
+    return X402IntentStore.json(outcome.body, outcome.status);
+  }
+
+  // Durable revocation (idempotent, terminal).
+  async _revokeApproval(request) {
+    let body;
+    try { body = await request.json(); } catch (_) { return X402IntentStore.json({ error: 'invalid_json' }, 400); }
+    const { approvalId } = body || {};
+    if (!INTENT_ID_RE.test(String(approvalId || ''))) return X402IntentStore.json({ error: 'invalid_approval_id' }, 400);
+    await this.storage.transaction(async (txn) => {
+      await txn.put(KEY_APPROVAL_REVOKED + approvalId, { revokedAt: iso(Date.now()) });
+    });
+    return X402IntentStore.json({ ok: true });
   }
 
   /* ── Lazy / alarm expiration ───────────────────────────────────────── */

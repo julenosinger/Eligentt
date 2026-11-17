@@ -19,6 +19,10 @@ export const ARC_USDC = '0x3600000000000000000000000000000000000000';
 export const TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
 // EIP-3009 authorizationState(address,bytes32) selector.
 export const AUTHORIZATION_STATE_SELECTOR = '0xe94a0102';
+// EIP-3009 transferWithAuthorization(address,address,uint256,uint256,uint256,bytes32,uint8,bytes32,bytes32).
+export const TRANSFER_WITH_AUTHORIZATION_SELECTOR = '0xe3ee160e';
+// EIP-3009 AuthorizationUsed(address indexed authorizer, bytes32 indexed nonce).
+export const AUTHORIZATION_USED_TOPIC = '0x98de503528ee59b575ef0c0a2576a82497bfc029a5685b209e9ec333479b10a5';
 
 function padBytes32(value) {
   const clean = String(value).replace(/^0x/, '');
@@ -73,6 +77,23 @@ export async function fetchTransactionReceipt(rpcUrl, txHash, transport) {
       blockNumber: r.blockNumber,
       to: r.to,
       logs: r.logs || [],
+    },
+  };
+}
+
+/** eth_getTransactionByHash → normalized transaction, or error. */
+export async function fetchTransaction(rpcUrl, txHash, transport) {
+  const res = await rpcCall(rpcUrl, 'eth_getTransactionByHash', [txHash], transport);
+  if (!res.ok) return res;
+  if (res.result == null) return { ok: false, error: 'transaction_missing' };
+  const t = res.result;
+  return {
+    ok: true,
+    transaction: {
+      hash: t.hash,
+      to: t.to,
+      input: t.input,
+      blockNumber: t.blockNumber,
     },
   };
 }
@@ -136,6 +157,96 @@ export function validateReceiptEvidence(receipt, { from, to, value, requiredConf
       from: ev.from,
       to: ev.to,
       value: ev.value,
+    },
+  };
+}
+
+/**
+ * Decode a `transferWithAuthorization` transaction input into its authorization
+ * parameters. This is the PRIMARY authorization-to-transaction linkage: the
+ * nonce in the calldata proves the transaction executed THIS exact authorization,
+ * not some unrelated transfer. Returns null reason on wrong selector/short input.
+ */
+export function decodeTransferWithAuthorizationInput(input) {
+  if (typeof input !== 'string' || !input.startsWith('0x')) return { ok: false, reason: 'invalid_input' };
+  if (input.slice(0, 10) !== TRANSFER_WITH_AUTHORIZATION_SELECTOR) {
+    return { ok: false, reason: 'not_transfer_with_authorization' };
+  }
+  const d = input.slice(10);
+  if (d.length < 384) return { ok: false, reason: 'input_too_short' };
+  const from = '0x' + d.slice(24, 64);
+  const to = '0x' + d.slice(88, 128);
+  const value = BigInt('0x' + d.slice(128, 192)).toString();
+  const validAfter = BigInt('0x' + d.slice(192, 256)).toString();
+  const validBefore = BigInt('0x' + d.slice(256, 320)).toString();
+  const nonce = '0x' + d.slice(320, 384);
+  return {
+    ok: true,
+    from: from.toLowerCase(),
+    to: to.toLowerCase(),
+    value,
+    validAfter,
+    validBefore,
+    nonce: nonce.toLowerCase(),
+  };
+}
+
+/**
+ * Decode the EIP-3009 `AuthorizationUsed(authorizer, nonce)` event from a
+ * receipt's logs (when the contract emits it). Returns the consumed nonce.
+ */
+export function decodeAuthorizationUsedEvent(receipt) {
+  if (!receipt || !Array.isArray(receipt.logs)) return { ok: false, reason: 'no_logs' };
+  for (const log of receipt.logs) {
+    if (!log || !Array.isArray(log.topics) || log.topics[0] !== AUTHORIZATION_USED_TOPIC) continue;
+    if (log.topics.length < 3) continue;
+    const authorizer = '0x' + String(log.topics[1]).slice(-40);
+    const nonce = '0x' + String(log.topics[2]).slice(-64);
+    return { ok: true, authorizer: authorizer.toLowerCase(), nonce: nonce.toLowerCase() };
+  }
+  return { ok: false, reason: 'authorization_used_event_not_found' };
+}
+
+/**
+ * P0.1 — exact authorization-to-transaction binding. A SETTLED decision requires
+ * ALL of: successful receipt + confirmations + a Transfer event binding the exact
+ * terms AND a transaction input that decodes to `transferWithAuthorization` with
+ * the EXACT authorization nonce (and matching terms). If the AuthorizationUsed
+ * event is present it must also match. A plain ERC-20 transfer (same amount/
+ * recipient) is NOT proof — the nonce linkage is mandatory.
+ */
+export function validateAuthorizationBinding(transaction, receipt, { from, to, value, nonce, requiredConfirmations = 1 }) {
+  if (!transaction) return { ok: false, reason: 'transaction_missing' };
+
+  // 1. Receipt: success + confirmations + Transfer(from,to,value) exact.
+  const receiptCheck = validateReceiptEvidence(receipt, { from, to, value, requiredConfirmations });
+  if (!receiptCheck.ok) return receiptCheck;
+
+  // 2. Transaction input: must be the exact transferWithAuthorization nonce.
+  const inputCheck = decodeTransferWithAuthorizationInput(transaction.input);
+  if (!inputCheck.ok) return { ok: false, reason: inputCheck.reason };
+  if (inputCheck.from !== String(from).toLowerCase()) return { ok: false, reason: 'input_authorizer_mismatch' };
+  if (inputCheck.to !== String(to).toLowerCase()) return { ok: false, reason: 'input_recipient_mismatch' };
+  if (inputCheck.value !== String(value)) return { ok: false, reason: 'input_amount_mismatch' };
+  if (inputCheck.nonce !== String(nonce).toLowerCase()) return { ok: false, reason: 'input_nonce_mismatch' };
+
+  // 3. AuthorizationUsed event (when present) must match the nonce.
+  const authEvent = decodeAuthorizationUsedEvent(receipt);
+  if (authEvent.ok && authEvent.nonce !== String(nonce).toLowerCase()) {
+    return { ok: false, reason: 'authorization_nonce_mismatch' };
+  }
+
+  return {
+    ok: true,
+    evidence: {
+      transactionHash: receipt.transactionHash,
+      blockNumber: receipt.blockNumber,
+      confirmations: receipt.confirmations,
+      from: inputCheck.from,
+      to: inputCheck.to,
+      value: inputCheck.value,
+      nonce: inputCheck.nonce,
+      authorizationUsedEventMatched: authEvent.ok,
     },
   };
 }

@@ -341,3 +341,13 @@ export function doSettlementEvidence(env, walletAddress, userId, attemptId, expe
   return doFetch(env, walletAddress, 'settlement-evidence', { attemptId, expectedVersion, evidence })
     .then((res) => guardOwnership(res, userId));
 }
+
+export function doConsumeApproval(env, walletAddress, userId, approvalId, approvalFingerprint, expectedAttemptId) {
+  return doFetch(env, walletAddress, 'consume-approval', { approvalId, approvalFingerprint, expectedAttemptId })
+    .then((res) => guardOwnership(res, userId));
+}
+
+export function doRevokeApproval(env, walletAddress, userId, approvalId) {
+  return doFetch(env, walletAddress, 'revoke-approval', { approvalId })
+    .then((res) => guardOwnership(res, userId));
+}
