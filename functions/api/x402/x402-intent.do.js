@@ -52,6 +52,67 @@
 
 const SCHEMA_VERSION = 1;
 
+// Settlement-attempt states (kept SEPARATE from the intent state machine so the
+// signed intent is never mutated by settlement tracking). Mirrors the pure model
+// in x402-settlement.mjs (the DO is self-contained for standalone Worker deploy).
+const SETTLEMENT_STATES = Object.freeze({
+  SETTLEMENT_READY:   'SETTLEMENT_READY',
+  SUBMITTING:         'SUBMITTING',
+  SETTLEMENT_UNKNOWN: 'SETTLEMENT_UNKNOWN',
+  SETTLED:            'SETTLED',
+  FAILED:             'FAILED',
+});
+const SETTLEMENT_TRANSITIONS = Object.freeze({
+  SETTLEMENT_READY:   ['SUBMITTING'],
+  SUBMITTING:         ['SETTLEMENT_UNKNOWN', 'SETTLED', 'FAILED'],
+  SETTLEMENT_UNKNOWN: ['SETTLED', 'FAILED'],
+  SETTLED:            [],
+  FAILED:             [],
+});
+
+async function _settlementFingerprint(intent) {
+  const canon = JSON.stringify([
+    String(intent.chainId),
+    String(intent.assetAddress).toLowerCase(),
+    String(intent.walletAddress).toLowerCase(),
+    String(intent.amountAtomic),
+    String(intent.payTo).toLowerCase(),
+    String(intent.authorizationValidAfter),
+    String(intent.authorizationValidBefore),
+    String(intent.authorizationNonce).toLowerCase(),
+    String(intent.authorizationSignature),
+  ]);
+  const data = new TextEncoder().encode(canon);
+  const digest = await crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+function _settlementNonceKey(intent) {
+  return [
+    String(intent.chainId),
+    String(intent.assetAddress).toLowerCase(),
+    String(intent.walletAddress).toLowerCase(),
+    String(intent.authorizationNonce).toLowerCase(),
+  ].join(':');
+}
+
+function _validateSettlementTransition(from, to, evidence) {
+  if (!SETTLEMENT_STATES[to]) return { ok: false, reason: 'unknown_state' };
+  const allowed = SETTLEMENT_TRANSITIONS[from] || [];
+  if (!allowed.includes(to)) return { ok: false, reason: 'invalid_transition', from, to, allowed };
+  if (to === SETTLEMENT_STATES.SETTLED) {
+    const hasTx = !!(evidence && evidence.transactionHash);
+    const hasRef = !!(evidence && evidence.providerReference && evidence.finality === 'confirmed');
+    if (!hasTx && !hasRef) return { ok: false, reason: 'settled_requires_evidence' };
+  }
+  if (to === SETTLEMENT_STATES.FAILED) {
+    if (!(evidence && evidence.classification === 'definitive_rejection')) {
+      return { ok: false, reason: 'failed_requires_definitive_rejection' };
+    }
+  }
+  return { ok: true };
+}
+
 const STATES = Object.freeze({
   CREATED:                 'CREATED',
   PREPARED:                'PREPARED',
@@ -97,6 +158,9 @@ const KEY_INTENT = 'intent:';
 const KEY_IDEM   = 'idem:';
 const KEY_NONCE  = 'nonce:';
 const KEY_INDEX  = 'index:intents';
+const KEY_SETTLEMENT = 'settlement:';
+const KEY_CLAIM  = 'claim:';
+const KEY_SETTLEMENT_IDEM = 'settlement-idem:';
 
 // EIP-3009 authorization nonce is a `bytes32`. Canonical form is lowercase hex
 // `0x` + exactly 64 hex characters (no sign, no decimal, no truncation).
@@ -169,6 +233,15 @@ export class X402IntentStore {
         }
         if (request.method === 'POST' && path === '/record-verification') {
           return this._recordVerification(request);
+        }
+        if (request.method === 'POST' && path === '/claim-settlement') {
+          return this._claimSettlement(request);
+        }
+        if (request.method === 'POST' && path === '/settlement-transition') {
+          return this._settlementTransition(request);
+        }
+        if (request.method === 'POST' && path === '/settlement-evidence') {
+          return this._settlementEvidence(request);
         }
         return X402IntentStore.json({ error: 'not_found' }, 404);
       });
@@ -518,6 +591,8 @@ export class X402IntentStore {
         return { status: 200, body: { ok: true, idempotent: true, intent } };
       }
       const now = Date.now();
+      // Bind the verification record to the exact authorization it evaluated.
+      const fingerprint = await _settlementFingerprint(intent);
       const updated = {
         ...intent,
         facilitatorVerification: {
@@ -525,11 +600,163 @@ export class X402IntentStore {
           isValid: verification.isValid,
           invalidReason: verification.invalidReason || null,
           checkedAt,
+          authorizationFingerprint: fingerprint,
+          intentVersion: intent.stateVersion,
         },
         updatedAt: iso(now),
       };
       await txn.put(KEY_INTENT + intentId, updated);
       return { status: 200, body: { ok: true, intent: updated } };
+    });
+
+    return X402IntentStore.json(outcome.body, outcome.status);
+  }
+
+  /* ── Settlement-attempt ledger (PREPARATION ONLY — no provider submission) ── */
+
+  // Atomic settlement claim: exactly one active claim per authorization. The
+  // fingerprint is derived from the persisted intent (never client input). The
+  // idempotency key gives the caller a safe retry handle.
+  async _claimSettlement(request) {
+    let body;
+    try { body = await request.json(); } catch (_) { return X402IntentStore.json({ error: 'invalid_json' }, 400); }
+    const { intentId, expectedVersion, idempotencyKey, settlementAttemptId } = body || {};
+    if (!INTENT_ID_RE.test(String(intentId || ''))) return X402IntentStore.json({ error: 'invalid_intent_id' }, 400);
+    if (!Number.isInteger(expectedVersion) || expectedVersion < 1) return X402IntentStore.json({ error: 'invalid_version' }, 400);
+    if (typeof idempotencyKey !== 'string' || !IDEM_KEY_RE.test(idempotencyKey)) return X402IntentStore.json({ error: 'invalid_idempotency_key' }, 400);
+    if (!INTENT_ID_RE.test(String(settlementAttemptId || ''))) return X402IntentStore.json({ error: 'invalid_attempt_id' }, 400);
+
+    const intent = await this.storage.get(KEY_INTENT + intentId);
+    if (!intent) return X402IntentStore.json({ error: 'not_found' }, 404);
+    if (intent.state !== STATES.AUTHORIZED) {
+      return X402IntentStore.json({ error: 'not_authorized', state: intent.state }, 409);
+    }
+    if (intent.stateVersion !== expectedVersion) {
+      return X402IntentStore.json({ error: 'stale_version', current: intent.stateVersion, expected: expectedVersion }, 409);
+    }
+
+    const fingerprint = await _settlementFingerprint(intent);
+    const nonceKey = _settlementNonceKey(intent);
+
+    const outcome = await this.storage.transaction(async (txn) => {
+      // Caller idempotency: same key → same attempt.
+      const idem = await txn.get(KEY_SETTLEMENT_IDEM + idempotencyKey);
+      if (idem) {
+        const existing = await txn.get(KEY_SETTLEMENT + idem.settlementAttemptId);
+        return { status: 200, body: { ok: true, claimed: false, idempotent: true, attempt: existing || null } };
+      }
+      // Authoritative claim: one active claim per authorization.
+      const existingClaim = await txn.get(KEY_CLAIM + nonceKey);
+      if (existingClaim) {
+        if (existingClaim.authorizationFingerprint === fingerprint) {
+          const existing = await txn.get(KEY_SETTLEMENT + existingClaim.settlementAttemptId);
+          return { status: 200, body: { ok: true, claimed: false, idempotent: true, attempt: existing || null } };
+        }
+        return { status: 409, body: { ok: false, error: 'claim_conflict' } };
+      }
+
+      const now = new Date().toISOString();
+      const attempt = {
+        schemaVersion: 1,
+        settlementAttemptId,
+        intentId: intent.intentId,
+        userId: intent.userId,
+        walletAddress: intent.walletAddress,
+        authorizationFingerprint: fingerprint,
+        nonceKey,
+        chainId: intent.chainId,
+        tokenAddress: intent.assetAddress,
+        amountAtomic: intent.amountAtomic,
+        payTo: intent.payTo,
+        state: SETTLEMENT_STATES.SETTLEMENT_READY,
+        stateVersion: 1,
+        idempotencyKey,
+        providerReference: null,
+        transactionHash: null,
+        createdAt: now,
+        updatedAt: now,
+        evidence: [],
+      };
+      await txn.put(KEY_SETTLEMENT + settlementAttemptId, attempt);
+      await txn.put(KEY_CLAIM + nonceKey, { settlementAttemptId, authorizationFingerprint: fingerprint, claimedAt: iso(Date.now()) });
+      await txn.put(KEY_SETTLEMENT_IDEM + idempotencyKey, { settlementAttemptId });
+      return { status: 201, body: { ok: true, claimed: true, attempt } };
+    });
+
+    return X402IntentStore.json(outcome.body, outcome.status);
+  }
+
+  // Trusted internal settlement transition. SETTLED/FAILED require evidence.
+  async _settlementTransition(request) {
+    let body;
+    try { body = await request.json(); } catch (_) { return X402IntentStore.json({ error: 'invalid_json' }, 400); }
+    const { attemptId, to, expectedVersion, evidence } = body || {};
+    if (!INTENT_ID_RE.test(String(attemptId || ''))) return X402IntentStore.json({ error: 'invalid_attempt_id' }, 400);
+    if (!Number.isInteger(expectedVersion) || expectedVersion < 1) return X402IntentStore.json({ error: 'invalid_version' }, 400);
+    if (typeof to !== 'string' || !SETTLEMENT_STATES[to]) return X402IntentStore.json({ error: 'unknown_state' }, 400);
+    if (evidence != null && typeof evidence !== 'object') return X402IntentStore.json({ error: 'invalid_evidence' }, 400);
+
+    const outcome = await this.storage.transaction(async (txn) => {
+      const attempt = await txn.get(KEY_SETTLEMENT + attemptId);
+      if (!attempt) return { status: 404, body: { ok: false, error: 'not_found' } };
+      if (attempt.stateVersion !== expectedVersion) {
+        return { status: 409, body: { ok: false, error: 'stale_version', current: attempt.stateVersion, expected: expectedVersion } };
+      }
+      if (attempt.state === to) return { status: 200, body: { ok: true, idempotent: true, attempt } };
+
+      const v = _validateSettlementTransition(attempt.state, to, evidence || {});
+      if (!v.ok) {
+        return { status: 400, body: { ok: false, error: v.reason, from: attempt.state, to, allowed: SETTLEMENT_TRANSITIONS[attempt.state] || [] } };
+      }
+
+      const now = Date.now();
+      const evidenceEntry = evidence ? { ...evidence, at: iso(now) } : null;
+      const updated = {
+        ...attempt,
+        state: to,
+        stateVersion: attempt.stateVersion + 1,
+        updatedAt: iso(now),
+        providerReference: (evidence && evidence.providerReference) || attempt.providerReference || null,
+        transactionHash: (evidence && evidence.transactionHash) || attempt.transactionHash || null,
+        evidence: evidenceEntry ? attempt.evidence.concat([evidenceEntry]) : attempt.evidence,
+      };
+      await txn.put(KEY_SETTLEMENT + attemptId, updated);
+      return { status: 200, body: { ok: true, attempt: updated } };
+    });
+
+    return X402IntentStore.json(outcome.body, outcome.status);
+  }
+
+  // Append settlement evidence (trusted internal). Contradictory terminal
+  // evidence is rejected rather than silently overwritten.
+  async _settlementEvidence(request) {
+    let body;
+    try { body = await request.json(); } catch (_) { return X402IntentStore.json({ error: 'invalid_json' }, 400); }
+    const { attemptId, expectedVersion, evidence } = body || {};
+    if (!INTENT_ID_RE.test(String(attemptId || ''))) return X402IntentStore.json({ error: 'invalid_attempt_id' }, 400);
+    if (!Number.isInteger(expectedVersion) || expectedVersion < 1) return X402IntentStore.json({ error: 'invalid_version' }, 400);
+    if (!evidence || typeof evidence !== 'object') return X402IntentStore.json({ error: 'evidence_required' }, 400);
+
+    const outcome = await this.storage.transaction(async (txn) => {
+      const attempt = await txn.get(KEY_SETTLEMENT + attemptId);
+      if (!attempt) return { status: 404, body: { ok: false, error: 'not_found' } };
+      if (attempt.stateVersion !== expectedVersion) {
+        return { status: 409, body: { ok: false, error: 'stale_version', current: attempt.stateVersion, expected: expectedVersion } };
+      }
+      // Contradictory evidence: a new transactionHash that differs from a
+      // previously recorded one must not silently replace it.
+      if (evidence.transactionHash && attempt.transactionHash &&
+          String(evidence.transactionHash).toLowerCase() !== String(attempt.transactionHash).toLowerCase()) {
+        return { status: 409, body: { ok: false, error: 'contradictory_evidence' } };
+      }
+      const now = Date.now();
+      const updated = {
+        ...attempt,
+        evidence: attempt.evidence.concat([{ ...evidence, at: iso(now) }]),
+        updatedAt: iso(now),
+      };
+      await txn.put(KEY_SETTLEMENT + attemptId, updated);
+      return { status: 200, body: { ok: true, attempt: updated } };
     });
 
     return X402IntentStore.json(outcome.body, outcome.status);

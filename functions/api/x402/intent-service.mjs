@@ -326,3 +326,18 @@ export function doRecordVerification(env, walletAddress, userId, intentId, expec
   return doFetch(env, walletAddress, 'record-verification', { intentId, expectedVersion, verification })
     .then((res) => guardOwnership(res, userId));
 }
+
+export function doClaimSettlement(env, walletAddress, userId, intentId, expectedVersion, idempotencyKey, settlementAttemptId) {
+  return doFetch(env, walletAddress, 'claim-settlement', { intentId, expectedVersion, idempotencyKey, settlementAttemptId })
+    .then((res) => guardOwnership(res, userId));
+}
+
+export function doSettlementTransition(env, walletAddress, userId, attemptId, to, expectedVersion, evidence) {
+  return doFetch(env, walletAddress, 'settlement-transition', { attemptId, to, expectedVersion, evidence })
+    .then((res) => guardOwnership(res, userId));
+}
+
+export function doSettlementEvidence(env, walletAddress, userId, attemptId, expectedVersion, evidence) {
+  return doFetch(env, walletAddress, 'settlement-evidence', { attemptId, expectedVersion, evidence })
+    .then((res) => guardOwnership(res, userId));
+}
