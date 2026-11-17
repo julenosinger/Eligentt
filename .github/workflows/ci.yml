@@ -50,8 +50,29 @@ jobs:
           grep -c "ethers" index.html > /dev/null && echo "  ethers: OK" || echo "  ethers: MISSING"
           grep -c "dompurify" index.html > /dev/null && echo "  dompurify: OK" || echo "  dompurify: MISSING"
 
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - run: npm ci
+      - name: Token-logo contract + Swap/Balance regression tests
+        run: |
+          npx vitest run \
+            tests/swap-token-logo-contract.test.js \
+            tests/swap-token-modal-balances.test.js \
+            tests/swap-native-balance-fix.test.js \
+            tests/balance-service.test.js \
+            tests/swap-standard-routing.test.js \
+            tests/swap-route-picker.test.js \
+            tests/swap-stale-route.test.js \
+            tests/fast-balance-engine.test.js \
+            tests/alchemy-balance.test.js \
+            tests/instant-balance-logos.test.js
+
   deploy-preview:
-    needs: [syntax, bundle-check, security]
+    needs: [syntax, bundle-check, security, test]
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:

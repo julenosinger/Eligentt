@@ -24118,11 +24118,13 @@ function _swpTokenPriority(t, chainId) {
   return 4;
 }
 
-// ── Token logo resolution (P1.4.3.1: LI.FI is the primary logo source) ───────
-// Uses each token's original LI.FI logoURI. Only a MISSING or invalid logo falls
-// back to a neutral, token-specific badge (deterministic per-symbol hue + first
-// letter). Never replaces a valid LI.FI logo with a symbol-based map or generic
-// coin artwork, and never infers identity from a single letter.
+// ── Token logo resolution (P1.4.4: LI.FI primary + verified-registry fallback) ─
+// Precedence (never identify a token by symbol alone):
+//   1. LI.FI logoURI (primary source of truth — never replaced).
+//   2. Native ETH → local verified logo (native classification).
+//   3. Verified registry logo by canonical contract address (only when LI.FI
+//      metadata is missing).
+//   4. Neutral token-specific badge (deterministic per-symbol hue + first letter).
 // Deterministic per-symbol hue so unknown tokens get distinct (not identical) badges.
 function _swpSymbolHue(sym) {
   var h = 0;
@@ -24137,17 +24139,53 @@ function _swpSafeLogoUri(u) {
   return u;
 }
 
-function _swpTokenLogo(t) {
+// Verified registry logos keyed by canonical contract address (lowercased).
+// Used ONLY as a fallback when LI.FI provides no valid logoURI.
+var _SWP_VERIFIED_LOGOS = {
+  '0x3600000000000000000000000000000000000000': '/assets/tokens/usdc-coin.svg',  // Arc USDC
+  '0xbef5f6d51cb62b58e6a8f77868681825c6fe21c1': '/assets/tokens/eurc-coin.svg',  // Arc EURC
+  '0x171a4217b86a807a64eb94757db6849fb4bdbaa0': '/assets/tokens/cirbtc/Logos/PNG/cirBTC_Icon.png', // Arc cirBTC
+  '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48': '/assets/tokens/usdc-coin.svg',  // Ethereum USDC
+  '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913': '/assets/tokens/usdc-coin.svg',  // Base USDC
+  '0xaf88d065e77c8cc2239327c5edb3a432268e5831': '/assets/tokens/usdc-coin.svg',  // Arbitrum USDC
+  '0x0b2c639c533813f4aa9d7837caf62653d097ff85': '/assets/tokens/usdc-coin.svg',  // OP USDC
+  '0x3c499c542cef5e3811e1192ce70d8cc03d5c3359': '/assets/tokens/usdc-coin.svg',  // Polygon USDC
+  '0x60a3e35cc302bfa44cb288bc5a4f316fdb1adb42': '/assets/tokens/eurc-coin.svg',  // Base EURC
+};
+
+function _swpLogoImg(src, alt, hue, letter) {
+  return '<img class="tok-item-logo" src="' + escHtml(src) + '" alt="' + escHtml(alt) + '" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'">'
+    + '<div class="tok-item-icon" style="display:none;background:hsl(' + hue + ',42%,36%)">' + escHtml(letter) + '</div>';
+}
+
+function _swpTokenLogo(t, chainId) {
   var sym = String((t && t.symbol) || '').toUpperCase();
   var letter = sym ? sym.charAt(0) : '?';
   var hue = _swpSymbolHue(sym);
   var badge = '<div class="tok-item-icon" style="background:hsl(' + hue + ',42%,36%)">' + escHtml(letter) + '</div>';
 
+  // 1. LI.FI logoURI (primary source of truth — never replaced).
   var logo = _swpSafeLogoUri(t && t.logoURI);
-  if (logo) {
-    return '<img class="tok-item-logo" src="' + escHtml(logo) + '" alt="' + escHtml(t.symbol || '') + '" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'">'
-      + '<div class="tok-item-icon" style="display:none;background:hsl(' + hue + ',42%,36%)">' + escHtml(letter) + '</div>';
+  if (logo) return _swpLogoImg(logo, t.symbol || '', hue, letter);
+
+  // 2. Native ETH → local verified logo (native classification, not symbol).
+  if (_swpTokenIsNative(t, chainId)) {
+    var nm = '';
+    try {
+      nm = (CHAIN_REGISTRY && CHAIN_REGISTRY[Number(chainId)] && CHAIN_REGISTRY[Number(chainId)].nativeCurrency && CHAIN_REGISTRY[Number(chainId)].nativeCurrency.symbol) || '';
+    } catch (_) {}
+    if (String(nm).toUpperCase() === 'ETH') {
+      return _swpLogoImg('/assets/tokens/eth.svg', t.symbol || '', hue, letter);
+    }
+    return badge;
   }
+
+  // 3. Verified registry fallback (by canonical contract address).
+  var addr = (t && t.address) ? String(t.address).toLowerCase() : '';
+  var regLogo = _SWP_VERIFIED_LOGOS[addr];
+  if (regLogo) return _swpLogoImg(regLogo, t.symbol || '', hue, letter);
+
+  // 4. Neutral token-specific fallback.
   return badge;
 }
 
@@ -24220,7 +24258,7 @@ async function renderTokenList(filterText) {
   const renderItem = (t, bal) => {
     const addr = (t.address || '').toLowerCase();
     const isOther = addr && addr === otherAddr;
-    const logoHtml = _swpTokenLogo(t);
+    const logoHtml = _swpTokenLogo(t, chainId);
     const balHtml = bal != null ? `<div class="tok-item-bal-val">${bal}</div>` : '';
     const usdHtml = (t.priceUSD && parseFloat(bal) > 0)
       ? `<div class="tok-item-bal-usd">$${(parseFloat(bal) * parseFloat(t.priceUSD)).toFixed(2)}</div>` : '';

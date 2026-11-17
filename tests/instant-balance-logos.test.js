@@ -69,15 +69,15 @@ describe('Instant display — stale-while-revalidate cache', () => {
 });
 
 describe('Token logo integrity', () => {
-  it('renderItem uses _swpTokenLogo which preserves the original LI.FI logoURI', () => {
-    expect(html).toContain('function _swpTokenLogo(t)');
-    expect(html).toContain('const logoHtml = _swpTokenLogo(t)');
+  it('renderItem uses the canonical _swpTokenLogo resolver (chainId + address)', () => {
+    expect(html).toContain('function _swpTokenLogo(t, chainId)');
+    expect(html).toContain('const logoHtml = _swpTokenLogo(t, chainId)');
   });
 
-  it('LI.FI logoURI is the PRIMARY logo source (no symbol-based map, no ETH diamond override)', () => {
+  it('LI.FI logoURI is the PRIMARY logo source (registry/badge are fallback only)', () => {
     expect(html).toContain('var logo = _swpSafeLogoUri(t && t.logoURI)');
-    expect(html).not.toContain('_SWP_KNOWN_LOGOS');
-    expect(html).not.toContain('_SWP_ETH_DIAMOND');
+    expect(html).not.toContain('_SWP_KNOWN_LOGOS');   // no symbol-based map replacing LI.FI
+    expect(html).not.toContain('_SWP_ETH_DIAMOND');   // no hardcoded ETH diamond override
   });
 
   it('logoURI is validated to http(s) only (no javascript:/data: injection)', () => {
