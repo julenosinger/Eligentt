@@ -38,7 +38,7 @@ const sa402RawSrc   = sa402RawStart > -1 ? html.slice(sa402RawStart, sa402RawEnd
 //   }
 // We replace it so it reads __testSettlement.available — a variable injected
 // as a function parameter. This patch exists ONLY in the string, never on disk.
-const REAL_SA_BODY  = `function settlementAvailable() {
+const REAL_SA_BODY  = `  function settlementAvailable() {
     return !!(
       _status &&
       _status.settlement &&
@@ -55,7 +55,10 @@ const PATCHED_SA_BODY = `function settlementAvailable() {
   }`;
 
 function patchSrc(src) {
-  return src.replace(REAL_SA_BODY, PATCHED_SA_BODY);
+  // index.html uses CRLF line endings on Windows, while JS template literals
+  // normalize their own CRLF → LF. Normalize the source to LF before matching so
+  // the patch is line-ending agnostic (production source on disk is untouched).
+  return src.replace(/\r\n/g, '\n').replace(REAL_SA_BODY, PATCHED_SA_BODY);
 }
 
 /* ── Minimal document/window stub ────────────────────────────────────── */

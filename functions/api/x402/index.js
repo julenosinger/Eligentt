@@ -74,7 +74,7 @@ function extractToken(request) {
  *     wallet) as a user identity.
  *   - Rejects expired sessions (defense-in-depth; primary expiry is KV TTL).
  */
-async function resolveUserWallet(env, request) {
+export async function resolveUserWallet(env, request) {
   const unauth = (reason, status) => ({
     authed: false, reason, status, userId: null, email: null,
     walletId: '', walletAddress: '', needsProvision: true,

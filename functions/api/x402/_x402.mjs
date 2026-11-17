@@ -68,10 +68,6 @@ const NETWORK_SLUG_MAP = {
  * We NEVER trust `extra.name === "USDC"` alone — a malicious server could label
  * any token "USDC". The contract address + network + domain must all match a
  * known, EIP-3009-capable USDC deployment.
- *
- * Arc Mainnet (`eip155:5042`) is listed for completeness but is blocked at the
- * network level (`eip3009Compatible: false`) — its native USDC is a precompile,
- * NOT a standard EIP-3009 ERC-20.
  */
 export const TRUSTED_ASSETS = Object.freeze({
   'eip155:84532': Object.freeze({ address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e', symbol: 'USDC', decimals: 6, domainName: 'USDC', domainVersion: '2' }),
