@@ -676,11 +676,11 @@ describe('Phase 1.2.5 — settlement gate preserved after Phase 1.2.5 changes', 
     expect(mjs.slice(idx, idx + 50)).toContain('false');
   });
 
-  it('_x402.mjs Arc eip3009Compatible=false is unchanged', () => {
+  it('_x402.mjs Arc eip3009Compatible=true (confirmed on-chain)', () => {
     const mjs = readFileSync(resolve(__dirname, '../functions/api/x402/_x402.mjs'), 'utf8');
     const arcIdx = mjs.indexOf("'eip155:5042'");
     expect(arcIdx).toBeGreaterThan(-1);
     expect(mjs.slice(arcIdx, arcIdx + 120)).toContain('eip3009Compatible');
-    expect(mjs.slice(arcIdx, arcIdx + 120)).toContain('false');
+    expect(mjs.slice(arcIdx, arcIdx + 120)).toContain('true');
   });
 });

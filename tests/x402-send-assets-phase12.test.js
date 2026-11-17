@@ -475,7 +475,7 @@ describe('x402 backend regression — Phase 1.2 baseline', () => {
     expect(SA._settlementAvailable()).toBe(true);
   });
 
-  it('Arc Mainnet blocked in validateRequirement', () => {
+  it('Arc Mainnet passes validateRequirement (EIP-3009 confirmed on-chain)', () => {
     const req = {
       scheme: 'exact', network: 'eip155:5042',
       amount: '100000', asset: '0x3600000000000000000000000000000000000000',
@@ -483,9 +483,9 @@ describe('x402 backend regression — Phase 1.2 baseline', () => {
       extra: { name: 'USDC', version: '2', assetTransferMethod: 'eip3009' },
     };
     const r = validateRequirement(req, { maxUsd: 25 });
-    expect(r.ok).toBe(false);
+    expect(r.ok).toBe(true);
     const check = r.checks.find(c => c.name === 'network_eip3009');
-    expect(check && check.passed).toBe(false);
+    expect(check && check.passed).toBe(true);
   });
 
   it('Base USDC passes validateRequirement', () => {

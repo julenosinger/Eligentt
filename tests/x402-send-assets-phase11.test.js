@@ -366,15 +366,15 @@ describe('x402 backend regression — unchanged after Phase 1.1', () => {
     expect(SETTLEMENT_IMPLEMENTED).toBe(false);
   });
 
-  it('Arc Mainnet eip3009Compatible is still false', () => {
-    expect(X402_NETWORKS['eip155:5042'].eip3009Compatible).toBe(false);
+  it('Arc Mainnet eip3009Compatible is true (confirmed on-chain)', () => {
+    expect(X402_NETWORKS['eip155:5042'].eip3009Compatible).toBe(true);
   });
 
   it('Base eip3009Compatible is still true', () => {
     expect(X402_NETWORKS['eip155:8453'].eip3009Compatible).toBe(true);
   });
 
-  it('validateRequirement blocks Arc Mainnet (EIP-3009 unconfirmed)', () => {
+  it('validateRequirement allows Arc Mainnet (EIP-3009 confirmed on-chain)', () => {
     const req = {
       scheme: 'exact', network: 'eip155:5042',
       amount: '100000', asset: '0x3600000000000000000000000000000000000000',
@@ -382,10 +382,10 @@ describe('x402 backend regression — unchanged after Phase 1.1', () => {
       extra: { name: 'USDC', version: '2', assetTransferMethod: 'eip3009' },
     };
     const r = validateRequirement(req, { maxUsd: 25 });
-    expect(r.ok).toBe(false);
+    expect(r.ok).toBe(true);
     const eip3009Check = r.checks.find(c => c.name === 'network_eip3009');
     expect(eip3009Check).toBeTruthy();
-    expect(eip3009Check.passed).toBe(false);
+    expect(eip3009Check.passed).toBe(true);
   });
 
   it('validateRequirement allows Base with valid USDC requirement', () => {

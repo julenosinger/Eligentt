@@ -36,18 +36,18 @@ export const FACILITATOR_URL = 'https://x402.org/facilitator';
 /**
  * Supported x402 networks (CAIP-2 → metadata).
  *
- * `eip3009Compatible` reflects whether we have CONFIRMED that the canonical USDC
- * asset on that network implements EIP-3009 `transferWithAuthorization` (the
- * mechanism used by the `exact` scheme). Arc Mainnet is marked `false` because
- * its USDC is a native precompile (`0x3600…0000`, native gas token = USDC), NOT
- * a standard ERC-20 with EIP-3009 support — this must be confirmed on-chain
- * before real payments can be enabled (see docs/x402-integration.md).
+ * `eip3009Compatible` reflects whether the canonical USDC asset on that network
+ * implements EIP-3009 `transferWithAuthorization` (the mechanism used by the
+ * `exact` scheme). Arc Mainnet (5042) is CONFIRMED EIP-3009 compatible
+ * (on-chain DOMAIN_SEPARATOR matches EIP-712 domain USDC/2/5042 — see
+ * docs/x402-mainnet-certification-corrective.md). NOTE: token capability does
+ * NOT mean settlement is available; that stays gated by the settlement flag.
  */
 export const X402_NETWORKS = Object.freeze({
   'eip155:84532': Object.freeze({ chainId: 84532, label: 'Base Sepolia', testnet: true, eip3009Compatible: true }),
   'eip155:8453':  Object.freeze({ chainId: 8453,  label: 'Base',         testnet: false, eip3009Compatible: true }),
   'eip155:137':   Object.freeze({ chainId: 137,   label: 'Polygon PoS',  testnet: false, eip3009Compatible: true }),
-  'eip155:5042':  Object.freeze({ chainId: 5042,  label: 'Arc Mainnet',  testnet: false, eip3009Compatible: false }),
+  'eip155:5042':  Object.freeze({ chainId: 5042,  label: 'Arc Mainnet',  testnet: false, eip3009Compatible: true }),
 });
 
 // Legacy slug → CAIP-2 mapping (some servers still advertise short slugs).
@@ -80,7 +80,43 @@ export const TRUSTED_ASSETS = Object.freeze({
   'eip155:5042':  Object.freeze({ address: '0x3600000000000000000000000000000000000000', symbol: 'USDC', decimals: 6, domainName: 'USDC', domainVersion: '2' }),
 });
 
-export const DEFAULT_MAX_USD = 25; // hard cap on a single x402 payment (Phase 1)
+export const DEFAULT_MAX_USD = '25'; // decimal string (authoritative; USDC = 6 decimals)
+export const USDC_DECIMALS = 6;
+
+/**
+ * Exact decimal-string → BigInt atomic units. NO Number/parseFloat/Math.round.
+ * Rejects malformed, negative, scientific notation, NaN/Infinity, empty and
+ * excess decimal precision. Returns null on invalid input.
+ *
+ *   parseDecimalUnits("1.25", 6)      → 1250000n
+ *   parseDecimalUnits("0.0000001", 6) → null   (excess precision)
+ *   parseDecimalUnits("1e3", 6)       → null   (scientific)
+ *   parseDecimalUnits("-1", 6)        → null   (negative)
+ */
+export function parseDecimalUnits(str, decimals) {
+  if (str == null) return null;
+  const s = String(str).trim();
+  const dec = Number(decimals);
+  if (!Number.isInteger(dec) || dec < 0 || dec > 77) return null; // unsupported decimals
+  if (!/^\d+(\.\d+)?$/.test(s)) return null;
+  const parts = s.split('.');
+  const intPart = parts[0];
+  const fracPart = parts[1] || '';
+  if (fracPart.length > dec) return null; // excess precision → reject
+  return BigInt(intPart + fracPart + '0'.repeat(dec - fracPart.length));
+}
+
+/**
+ * Canonical atomic-units string → BigInt. The payment requirement amount is
+ * ALREADY in atomic units: a positive unsigned integer string with no sign, no
+ * decimal point, no scientific notation. Returns null on invalid input.
+ */
+export function parseAtomicUnits(str) {
+  if (str == null) return null;
+  const s = String(str).trim();
+  if (!/^\d+$/.test(s)) return null;
+  return BigInt(s);
+}
 
 // Settlement is NOT implemented in Phase 1. This code-level flag guarantees the
 // status endpoint can never claim payments are "available" while there is no
@@ -210,7 +246,7 @@ export function normalizePaymentRequired(paymentRequired) {
       amount,
       asset: String(r.asset || ''),
       payTo: String(r.payTo || ''),
-      maxTimeoutSeconds: Number(r.maxTimeoutSeconds) || 60,
+      maxTimeoutSeconds: r.maxTimeoutSeconds, // preserve raw (invalid → rejected in validateRequirement)
       extra: {
         assetTransferMethod: extra.assetTransferMethod || 'eip3009',
         name: String(extra.name || ''),
@@ -228,7 +264,14 @@ export function normalizePaymentRequired(paymentRequired) {
  */
 export function validateRequirement(req, opts = {}) {
   const checks = [];
-  const maxUsd = Number(opts.maxUsd) > 0 ? Number(opts.maxUsd) : DEFAULT_MAX_USD;
+  // Authoritative max cap → exact atomic BigInt (decimal string, fail-closed).
+  // Never coerces invalid config into a higher cap; never uses Number/float.
+  const maxUsdAtomic = (() => {
+    const parsed = parseDecimalUnits(opts.maxUsd, USDC_DECIMALS);
+    if (parsed != null && parsed > 0n) return parsed;
+    return parseDecimalUnits(DEFAULT_MAX_USD, USDC_DECIMALS); // "25" → 25000000n
+  })();
+  const maxUsdDisplay = (Number(maxUsdAtomic) / 1e6).toFixed(2); // DISPLAY only
   const add = (name, passed, detail) => checks.push({ name, passed: !!passed, detail });
 
   add('scheme', req.scheme === SCHEME_EXACT, req.scheme === SCHEME_EXACT ? 'exact' : 'unsupported scheme "' + req.scheme + '"');
@@ -268,19 +311,23 @@ export function validateRequirement(req, opts = {}) {
 
   add('payto_valid', isAddress(req.payTo), isAddress(req.payTo) ? req.payTo : 'invalid recipient address');
 
-  const decimals = (trusted && trusted.decimals) || 6;
-  const amountBig = (() => { try { return BigInt(String(req.amount || '').trim()); } catch (_) { return null; } })();
-  const amountUsd = amountBig !== null ? Number(amountBig) / Math.pow(10, decimals) : NaN;
-  add('amount_valid', amountBig !== null && amountBig > 0n, amountBig !== null && amountBig > 0n
-    ? (amountUsd.toFixed(2) + ' USDC')
-    : 'invalid or non-positive amount');
-  add('amount_within_max', amountBig !== null && amountUsd <= maxUsd, amountBig !== null && amountUsd <= maxUsd
-    ? amountUsd.toFixed(2) + ' ≤ max ' + maxUsd.toFixed(2)
-    : 'exceeds max authorized ' + maxUsd.toFixed(2) + ' USDC');
+  // EXACT financial arithmetic (BigInt). The requirement amount is a canonical
+  // atomic-units integer string (NOT a human decimal). amountUsd is DISPLAY-only.
+  const decimals = (trusted && trusted.decimals) || USDC_DECIMALS;
+  const amountAtomic = parseAtomicUnits(req.amount);
+  const amountUsd = amountAtomic !== null ? Number(amountAtomic) / Number(10n ** BigInt(decimals)) : NaN;
+  add('amount_valid', amountAtomic !== null && amountAtomic > 0n,
+    amountAtomic !== null && amountAtomic > 0n
+      ? (amountUsd.toFixed(2) + ' USDC')
+      : 'invalid or non-positive amount');
+  add('amount_within_max', amountAtomic !== null && amountAtomic <= maxUsdAtomic,
+    amountAtomic !== null && amountAtomic <= maxUsdAtomic
+      ? amountUsd.toFixed(2) + ' ≤ max ' + maxUsdDisplay
+      : 'exceeds max authorized ' + maxUsdDisplay + ' USDC');
 
   const timeout = Number(req.maxTimeoutSeconds);
-  add('timeout_valid', Number.isFinite(timeout) && timeout > 0 && timeout <= 3600,
-    Number.isFinite(timeout) && timeout > 0 && timeout <= 3600 ? timeout + 's' : 'invalid timeout');
+  add('timeout_valid', Number.isInteger(timeout) && timeout > 0 && timeout <= 3600,
+    Number.isInteger(timeout) && timeout > 0 && timeout <= 3600 ? timeout + 's' : 'invalid timeout');
 
   const passed = checks.every((c) => c.passed);
   return {
@@ -378,9 +425,18 @@ export function parseAllowedHosts(env) {
  * Read the x402 feature flags from env. Everything defaults to OFF/fail-closed.
  */
 export function readFlags(env) {
+  const rawMaxUsd = (env && env.X402_MAX_USD != null && String(env.X402_MAX_USD).trim() !== '')
+    ? String(env.X402_MAX_USD).trim()
+    : DEFAULT_MAX_USD;
+  // Fail-closed: an invalid / zero / negative / excess-precision cap falls back
+  // to the DEFAULT — never a higher cap, never a bypass.
+  const parsedMax = parseDecimalUnits(rawMaxUsd, USDC_DECIMALS);
+  const maxUsd = (parsedMax != null && parsedMax > 0n) ? rawMaxUsd : DEFAULT_MAX_USD;
+  const maxUsdAtomic = parseDecimalUnits(maxUsd, USDC_DECIMALS);
   return {
     enabled: String((env && env.X402_ENABLED) || 'false').toLowerCase() === 'true',
-    maxUsd: (() => { const n = Number(env && env.X402_MAX_USD); return Number.isFinite(n) && n > 0 ? n : DEFAULT_MAX_USD; })(),
+    maxUsd,             // decimal string (authoritative config)
+    maxUsdAtomic,       // BigInt atomic units (authoritative comparison)
     allowedHosts: parseAllowedHosts(env),
   };
 }

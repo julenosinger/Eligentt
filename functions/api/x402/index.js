@@ -320,7 +320,7 @@ async function handlePrepare(env, request) {
     amount: String(req.amount != null ? req.amount : ''),
     asset: String(req.asset || ''),
     payTo: String(req.payTo || ''),
-    maxTimeoutSeconds: Number(req.maxTimeoutSeconds) || 60,
+    maxTimeoutSeconds: req.maxTimeoutSeconds,
     extra: Object.assign({}, req.extra),
   };
 

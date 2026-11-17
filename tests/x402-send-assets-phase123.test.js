@@ -513,12 +513,12 @@ describe('Phase 1.2.3 — settlement gate preserved', () => {
     expect(snippet).toContain('false');
   });
 
-  it('X402_NETWORKS Arc entry has eip3009Compatible=false in _x402.mjs', () => {
+  it('X402_NETWORKS Arc entry has eip3009Compatible=true in _x402.mjs', () => {
     const arcIdx = x402mjs.indexOf("'eip155:5042'");
     expect(arcIdx).toBeGreaterThan(-1);
     const arcBlock = x402mjs.slice(arcIdx, arcIdx + 200);
     expect(arcBlock).toContain('eip3009Compatible');
-    expect(arcBlock).toContain('false');
+    expect(arcBlock).toContain('true');
   });
 
   it('pay() never calls X402.pay() when settlement=false', async () => {

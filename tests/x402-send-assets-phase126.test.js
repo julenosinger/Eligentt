@@ -168,14 +168,14 @@ describe('Phase 1.2.6 — Production source integrity', () => {
     expect(x402src).toMatch(/SETTLEMENT_IMPLEMENTED\s*=\s*false/);
   });
 
-  it('Arc Mainnet eip3009Compatible is false', () => {
+  it('Arc Mainnet eip3009Compatible is true (confirmed on-chain)', () => {
     const x402src = fs.readFileSync(
       path.resolve(__dirname, '../functions/api/x402/_x402.mjs'), 'utf8'
     );
     const arcIdx = x402src.indexOf("'eip155:5042'");
     expect(arcIdx).toBeGreaterThan(-1);
     const arcBlock = x402src.slice(arcIdx, arcIdx + 200);
-    expect(arcBlock).toMatch(/eip3009Compatible\s*:\s*false/);
+    expect(arcBlock).toMatch(/eip3009Compatible\s*:\s*true/);
   });
 });
 
@@ -502,12 +502,12 @@ describe('Phase 1.2.6 — Settlement gate still blocks', () => {
     expect(X402.pay).not.toHaveBeenCalled();
   });
 
-  it('Arc Mainnet eip3009Compatible=false means it cannot be used as x402 network', () => {
+  it('Arc Mainnet eip3009Compatible=true reflects on-chain EIP-3009 capability', () => {
     const x402src = fs.readFileSync(
       path.resolve(__dirname, '../functions/api/x402/_x402.mjs'), 'utf8'
     );
     const arcIdx = x402src.indexOf("'eip155:5042'");
     const arcBlock = x402src.slice(arcIdx, arcIdx + 250);
-    expect(arcBlock).toMatch(/eip3009Compatible\s*:\s*false/);
+    expect(arcBlock).toMatch(/eip3009Compatible\s*:\s*true/);
   });
 });

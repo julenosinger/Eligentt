@@ -26,6 +26,8 @@ import {
   SETTLEMENT_IMPLEMENTED,
   FACILITATOR_URL,
   DEFAULT_MAX_USD,
+  USDC_DECIMALS,
+  parseDecimalUnits,
   validateRequirement,
 } from '../functions/api/x402/_x402.mjs';
 
@@ -33,13 +35,11 @@ const ARC_CAIP = 'eip155:5042';
 const ARC_USDC = '0x3600000000000000000000000000000000000000';
 
 describe('x402 Arc Mainnet certification (static contract)', () => {
-  it('Arc (eip155:5042) registered; eip3009Compatible flag is conservatively false until X402-2.1', () => {
+  it('Arc (eip155:5042) registered with eip3009Compatible:true (confirmed on-chain)', () => {
     expect(X402_NETWORKS[ARC_CAIP]).toBeTruthy();
     expect(X402_NETWORKS[ARC_CAIP].chainId).toBe(5042);
-    // CORRECTED: on-chain evidence CONFIRMS EIP-3009 (see corrective doc). This
-    // flag stays false only because settlement is not implemented yet; X402-2.1
-    // must flip it to true when wiring the pay path.
-    expect(X402_NETWORKS[ARC_CAIP].eip3009Compatible).toBe(false);
+    // CONFIRMED: Arc USDC DOMAIN_SEPARATOR matches EIP-712 domain USDC/2/5042.
+    expect(X402_NETWORKS[ARC_CAIP].eip3009Compatible).toBe(true);
   });
 
   it('Arc trusted asset is the canonical 0x3600…0000 USDC (6 decimals)', () => {
@@ -57,11 +57,12 @@ describe('x402 Arc Mainnet certification (static contract)', () => {
     expect(FACILITATOR_URL.length).toBeGreaterThan(0);
   });
 
-  it('default per-payment cap is a positive dollar amount', () => {
-    expect(DEFAULT_MAX_USD).toBeGreaterThan(0);
+  it('default per-payment cap is a positive decimal string (exactly parseable)', () => {
+    expect(typeof DEFAULT_MAX_USD).toBe('string');
+    expect(parseDecimalUnits(DEFAULT_MAX_USD, USDC_DECIMALS)).toBeGreaterThan(0n);
   });
 
-  it('validateRequirement blocks Arc via the network_eip3009 check (never "ready")', () => {
+  it('validateRequirement accepts an Arc USDC requirement structurally (settlement is a separate gate)', () => {
     const req = {
       scheme: 'exact',
       network: ARC_CAIP,
@@ -73,8 +74,7 @@ describe('x402 Arc Mainnet certification (static contract)', () => {
       extra: { assetTransferMethod: 'eip3009', name: 'USDC', version: '2' },
     };
     const v = validateRequirement(req, { maxUsd: DEFAULT_MAX_USD });
-    expect(v.ok).toBe(false);
-    const eip3009Check = v.checks.find((c) => c.name === 'network_eip3009');
-    expect(eip3009Check.passed).toBe(false);
+    expect(v.checks.find((c) => c.name === 'network_eip3009').passed).toBe(true);
+    expect(v.ok).toBe(true); // structural checks pass; settlement gated separately
   });
 });

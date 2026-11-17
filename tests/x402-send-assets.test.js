@@ -212,11 +212,11 @@ describe('/api/x402/status', () => {
     const res = await onRequest({ request: req('/api/x402/status'), env: makeEnv() });
     const d = await res.json();
     expect(Array.isArray(d.networks)).toBe(true);
-    // Arc Mainnet must be NOT eip3009Compatible
+    // Arc Mainnet is EIP-3009 capable (confirmed on-chain).
     const arc = d.networks.find(n => n.caip === 'eip155:5042');
     expect(arc).toBeTruthy();
-    expect(arc.eip3009Compatible).toBe(false);
-    // Base must be compatible
+    expect(arc.eip3009Compatible).toBe(true);
+    // Base is also compatible.
     const base = d.networks.find(n => n.caip === 'eip155:8453');
     expect(base.eip3009Compatible).toBe(true);
   });
@@ -367,11 +367,11 @@ describe('validateRequirement', () => {
     expect(c.passed).toBe(false);
   });
 
-  it('blocks Arc Mainnet (EIP-3009 unconfirmed)', () => {
+  it('Arc Mainnet is EIP-3009 capable (confirmed on-chain)', () => {
     const v = validateRequirement(baseReq({ network: 'eip155:5042', networkRaw: 'eip155:5042', asset: USDC_ARC }));
     const c = v.checks.find(c => c.name === 'network_eip3009');
     expect(c).toBeTruthy();
-    expect(c.passed).toBe(false);
+    expect(c.passed).toBe(true);
   });
 
   it('blocks wrong asset address', () => {

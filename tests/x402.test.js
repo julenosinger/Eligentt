@@ -4,8 +4,9 @@
  *   1. PAYMENT-REQUIRED parsing (base64 JSON header, raw JSON, body fallback).
  *   2. Requirement normalisation (v2 + legacy v1 field fallback, CAIP-2).
  *   3. Requirement validation (scheme, network, EIP-3009, asset, payTo,
- *      amount, max-price, timeout) — including Arc Mainnet being blocked
- *      because its native USDC EIP-3009 compatibility is unconfirmed.
+ *      amount, max-price, timeout) — including exact BigInt financial
+ *      arithmetic (parseDecimalUnits / parseAtomicUnits) and Arc Mainnet
+ *      EIP-3009 capability (confirmed on-chain; settlement stays gated).
  *   4. SSRF guard (private IP / localhost blocked, public https allowed).
  *   5. /api/x402/status reports `disabled` by default (no fake activation).
  *   6. /api/x402/discover detects 402 and returns normalised requirements.
@@ -22,6 +23,10 @@ import {
   normalizeNetwork,
   requirementId,
   assertSafeTarget,
+  parseDecimalUnits,
+  parseAtomicUnits,
+  DEFAULT_MAX_USD,
+  USDC_DECIMALS,
   X402_NETWORKS,
   HEADER_PAYMENT_REQUIRED,
 } from '../functions/api/x402/_x402.mjs';
@@ -179,15 +184,16 @@ describe('x402 _x402.mjs helpers', () => {
     expect(v.checks.find((c) => c.name === 'asset_known').passed).toBe(false);
   });
 
-  it('blocks Arc Mainnet (EIP-3009 unconfirmed)', () => {
+  it('Arc Mainnet is EIP-3009 capable (structural validation passes)', () => {
     const arcReq = {
       scheme: 'exact', network: 'eip155:5042', amount: '10000', asset: '0x3600000000000000000000000000000000000000',
       payTo: PAYTO, maxTimeoutSeconds: 60, extra: { name: 'USDC', version: '2' },
     };
     const v = validateRequirement(arcReq);
-    expect(v.ok).toBe(false);
-    const eip = v.checks.find((c) => c.name === 'network_eip3009');
-    expect(eip.passed).toBe(false);
+    // Arc token capability is confirmed (see corrective cert) — structural
+    // validation passes; settlement stays gated by SETTLEMENT_IMPLEMENTED.
+    expect(v.checks.find((c) => c.name === 'network_eip3009').passed).toBe(true);
+    expect(v.ok).toBe(true);
   });
 
   it('blocks unsupported network, non-USDC asset, bad payTo, zero amount, over-max amount', () => {
@@ -216,6 +222,87 @@ describe('x402 _x402.mjs helpers', () => {
   });
 });
 
+/* ── Exact financial precision (BigInt) ──────────────────────────────── */
+
+describe('x402 exact financial precision (BigInt)', () => {
+  it('parseDecimalUnits converts exact 6-decimal USDC amounts', () => {
+    expect(parseDecimalUnits('1', USDC_DECIMALS)).toBe(1000000n);
+    expect(parseDecimalUnits('1.25', USDC_DECIMALS)).toBe(1250000n);
+    expect(parseDecimalUnits('0.000001', USDC_DECIMALS)).toBe(1n); // minimum atomic unit
+    expect(parseDecimalUnits('25', USDC_DECIMALS)).toBe(25000000n); // maximum authorized
+    expect(parseDecimalUnits('0', USDC_DECIMALS)).toBe(0n);
+    expect(parseDecimalUnits('1.250000', USDC_DECIMALS)).toBe(1250000n); // trailing zeros OK
+    expect(parseDecimalUnits('123456789.123456', USDC_DECIMALS)).toBe(123456789123456n); // large integer
+  });
+
+  it('parseDecimalUnits rejects malformed and unsafe input', () => {
+    expect(parseDecimalUnits('0.0000001', USDC_DECIMALS)).toBeNull(); // excess precision
+    expect(parseDecimalUnits('1e3', USDC_DECIMALS)).toBeNull(); // scientific
+    expect(parseDecimalUnits('-1', USDC_DECIMALS)).toBeNull(); // negative
+    expect(parseDecimalUnits('1.2345678', USDC_DECIMALS)).toBeNull(); // excess precision
+    expect(parseDecimalUnits('NaN', USDC_DECIMALS)).toBeNull();
+    expect(parseDecimalUnits('Infinity', USDC_DECIMALS)).toBeNull();
+    expect(parseDecimalUnits('', USDC_DECIMALS)).toBeNull();
+    expect(parseDecimalUnits(null, USDC_DECIMALS)).toBeNull();
+    expect(parseDecimalUnits(undefined, USDC_DECIMALS)).toBeNull();
+    expect(parseDecimalUnits('1.2.3', USDC_DECIMALS)).toBeNull();
+    expect(parseDecimalUnits('  ', USDC_DECIMALS)).toBeNull();
+    expect(parseDecimalUnits('1', -1)).toBeNull(); // unsupported decimals
+    expect(parseDecimalUnits('1', 100)).toBeNull(); // unsupported decimals
+    expect(parseDecimalUnits('1', 6.5)).toBeNull(); // non-integer decimals
+  });
+
+  it('parseAtomicUnits accepts canonical positive unsigned integer strings', () => {
+    expect(parseAtomicUnits('1')).toBe(1n);
+    expect(parseAtomicUnits('1000000')).toBe(1000000n);
+    expect(parseAtomicUnits('25000000')).toBe(25000000n);
+    expect(parseAtomicUnits('0')).toBe(0n);
+    expect(parseAtomicUnits('999999999999999999999999999999')).toBe(999999999999999999999999999999n);
+  });
+
+  it('parseAtomicUnits rejects non-canonical / malformed atomic strings', () => {
+    expect(parseAtomicUnits('-1')).toBeNull(); // negative
+    expect(parseAtomicUnits('1.0')).toBeNull(); // decimal point
+    expect(parseAtomicUnits('1e6')).toBeNull(); // scientific
+    expect(parseAtomicUnits('0x10')).toBeNull(); // hex
+    expect(parseAtomicUnits('')).toBeNull();
+    expect(parseAtomicUnits(null)).toBeNull();
+    expect(parseAtomicUnits(' 1 ')).toBe(1n); // trims surrounding whitespace
+    expect(parseAtomicUnits('1 ')).toBe(1n);
+  });
+
+  it('DEFAULT_MAX_USD is an exact decimal string parsed to 25e6 atomic units', () => {
+    expect(typeof DEFAULT_MAX_USD).toBe('string');
+    expect(parseDecimalUnits(DEFAULT_MAX_USD, USDC_DECIMALS)).toBe(25000000n);
+  });
+
+  it('validateRequirement enforces the cap with exact BigInt arithmetic (no float drift)', () => {
+    const base = { scheme: 'exact', network: 'eip155:8453', asset: USDC_BASE, payTo: PAYTO, maxTimeoutSeconds: 60, extra: { name: 'USDC', version: '2' } };
+    // Exactly at the cap → passes.
+    expect(validateRequirement({ ...base, amount: '25000000' }).ok).toBe(true);
+    // One atomic unit above the cap → fails (25.000001 USDC).
+    const over = validateRequirement({ ...base, amount: '25000001' });
+    expect(over.ok).toBe(false);
+    expect(over.checks.find((c) => c.name === 'amount_within_max').passed).toBe(false);
+    // Well above the cap → fails.
+    expect(validateRequirement({ ...base, amount: String(100 * 1e6) }).ok).toBe(false);
+    // Malformed amount → fails closed (never coerced to a valid default).
+    expect(validateRequirement({ ...base, amount: '-1' }).ok).toBe(false);
+    expect(validateRequirement({ ...base, amount: '1.5' }).ok).toBe(false);
+    expect(validateRequirement({ ...base, amount: '1e6' }).ok).toBe(false);
+  });
+
+  it('validateRequirement rejects invalid timeout instead of coercing to 60', () => {
+    const base = { scheme: 'exact', network: 'eip155:8453', asset: USDC_BASE, payTo: PAYTO, amount: '10000', extra: { name: 'USDC', version: '2' } };
+    expect(validateRequirement({ ...base, maxTimeoutSeconds: 60 }).ok).toBe(true);
+    expect(validateRequirement({ ...base, maxTimeoutSeconds: 'abc' }).ok).toBe(false);
+    expect(validateRequirement({ ...base, maxTimeoutSeconds: 0 }).ok).toBe(false);
+    expect(validateRequirement({ ...base, maxTimeoutSeconds: -5 }).ok).toBe(false);
+    expect(validateRequirement({ ...base, maxTimeoutSeconds: 3601 }).ok).toBe(false);
+    expect(validateRequirement({ ...base }).ok).toBe(false); // missing timeout → reject
+  });
+});
+
 /* ── HTTP endpoints ──────────────────────────────────────────────────── */
 
 describe('x402 /api/x402 endpoints', () => {
@@ -231,7 +318,7 @@ describe('x402 /api/x402 endpoints', () => {
     expect(data.state).toBe('disabled');
     expect(data.enabled).toBe(false);
     expect(data.networks).toEqual(expect.arrayContaining([
-      expect.objectContaining({ caip: 'eip155:5042', eip3009Compatible: false }),
+      expect.objectContaining({ caip: 'eip155:5042', eip3009Compatible: true }),
     ]));
   });
 
@@ -313,7 +400,7 @@ describe('x402 /api/x402 endpoints', () => {
     expect(data.intent.blockedCheck).toBe('payments_enabled');
   });
 
-  it('POST /prepare blocks Arc network even if the flag were on', async () => {
+  it('POST /prepare blocks settlement on Arc even if the flag were on (settlement not implemented)', async () => {
     const arcReq = {
       scheme: 'exact', network: 'eip155:5042', amount: '10000', asset: '0x3600000000000000000000000000000000000000',
       payTo: PAYTO, maxTimeoutSeconds: 60, extra: { name: 'USDC', version: '2' },
@@ -323,8 +410,11 @@ describe('x402 /api/x402 endpoints', () => {
       env: makeEnv({ X402_ENABLED: 'true', CIRCLE_API_KEY: 'k', CIRCLE_ENTITY_SECRET: 's' }),
     });
     const data = await jsonOf(res);
+    // Arc is EIP-3009 capable now, so the structural check passes; the blocking
+    // gate is settlement not being implemented (SETTLEMENT_IMPLEMENTED=false).
     expect(data.intent.status).toBe('blocked');
-    expect(data.intent.checks.find((c) => c.name === 'network_eip3009').passed).toBe(false);
+    expect(data.intent.checks.find((c) => c.name === 'network_eip3009').passed).toBe(true);
+    expect(data.intent.checks.find((c) => c.name === 'settlement_implemented').passed).toBe(false);
   });
 
   it('POST /prepare blocks settlement even when the flag is on (settlement not implemented)', async () => {
