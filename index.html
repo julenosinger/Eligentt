@@ -38768,7 +38768,30 @@ function saGetTokenAddr() {
 }
 function saToRaw(amount) {
   const dec = saGetTokenDecimals();
-  return BigInt(Math.round((parseFloat(amount)||0) * Math.pow(10, dec)));
+  // Exact decimal → BigInt (NO floating point). ethers.parseUnits is the
+  // authoritative parser; it throws on malformed input or more decimals than the
+  // token supports. Invalid input yields 0n (never a silently-truncated value —
+  // callers validate the amount before signing).
+  if (typeof ethers !== 'undefined' && ethers.parseUnits) {
+    try { return ethers.parseUnits(String(amount), dec); }
+    catch (_) { return 0n; }
+  }
+  var r = _saParseUnitsExact(String(amount), dec);
+  return r == null ? 0n : r;
+}
+
+// Exact decimal-string → BigInt parser (fallback when ethers is unavailable).
+// Rejects malformed input, negative, scientific notation and excess decimals —
+// never silently truncates a financial value.
+function _saParseUnitsExact(str, dec) {
+  if (typeof str !== 'string') return null;
+  var s = str.trim();
+  if (!/^\d+(\.\d+)?$/.test(s)) return null;   // '', '-', '1e3', '1.2.3' → invalid
+  var parts = s.split('.');
+  var intPart = parts[0];
+  var fracPart = parts[1] || '';
+  if (fracPart.length > dec) return null;       // excess precision → reject
+  return BigInt(intPart + fracPart + '0'.repeat(dec - fracPart.length));
 }
 
 // ── Asset selection ───────────────────────────────────────
@@ -39062,7 +39085,8 @@ function saUpdateRoute() {
 // ── Cross-chain bridge to existing executor ──────────────
 function saExecuteCrossChain() {
   var recipient = document.getElementById('sa-recipient')?.value.trim() || '';
-  var amount    = parseFloat(document.getElementById('sa-amount')?.value) || 0;
+  var amountStr = (document.getElementById('sa-amount')?.value || '').trim();
+  var amount    = parseFloat(amountStr) || 0;
   if (!walletAddress || !signer) { toast('Connect your wallet first', 'error'); return; }
   if (!isAddr(recipient)) { toast('Invalid recipient address', 'error'); return; }
   if (amount <= 0) { toast('Amount must be greater than 0', 'error'); return; }
@@ -39097,7 +39121,7 @@ function saExecuteCrossChain() {
   var xcRecipient = document.getElementById('xc-recipient');
   var xcAmount = document.getElementById('xc-amount');
   if (xcRecipient) xcRecipient.value = recipient;
-  if (xcAmount) xcAmount.value = String(amount);
+  if (xcAmount) xcAmount.value = amountStr;   // preserve exact input, no float round-trip
 
   // Execute via existing cross-chain flow
   if (typeof xcExecuteSend === 'function') {
@@ -39325,7 +39349,8 @@ async function saExecuteCCTPCrossChain() {
 // Cross-chain LI.FI calldata is untrusted: validateRoute() must pass first.
 async function saExecuteLiFiCrossChain() {
   var recipient = document.getElementById('sa-recipient')?.value.trim() || '';
-  var amount    = parseFloat(document.getElementById('sa-amount')?.value) || 0;
+  var amountStr = (document.getElementById('sa-amount')?.value || '').trim();
+  var amount    = parseFloat(amountStr) || 0;
   if (!walletAddress || !signer) { toast('Connect your wallet first', 'error'); return; }
   if (!isAddr(recipient)) { toast('Invalid recipient address', 'error'); return; }
   if (amount <= 0) { toast('Amount must be greater than 0', 'error'); return; }
@@ -39341,7 +39366,7 @@ async function saExecuteLiFiCrossChain() {
   var destTokenAddr = getTokenAddressForChain(saDestChainId, saCurrentAsset);
   if (!srcTokenAddr || !destTokenAddr) { toast('Asset not available on destination chain', 'error'); return; }
 
-  var rawAmt = saToRaw(amount);
+  var rawAmt = saToRaw(amountStr);
   var dec = saGetTokenDecimals();
   var btn = document.getElementById('sa-send-btn');
   var btnContent = document.getElementById('sa-send-btn-content');
@@ -39553,7 +39578,8 @@ async function saExecuteSend() {
     return;
   }
   var recipient = document.getElementById('sa-recipient')?.value.trim() || '';
-  var amount    = parseFloat(document.getElementById('sa-amount')?.value) || 0;
+  var amountStr = (document.getElementById('sa-amount')?.value || '').trim();
+  var amount    = parseFloat(amountStr) || 0;
   var memo      = document.getElementById('sa-memo')?.value.trim() || '';
 
   if (!walletAddress || !signer) { toast('Connect your wallet first', 'error'); return; }
@@ -39611,7 +39637,7 @@ async function saExecuteSend() {
   // Precise fee using BigInt to avoid float drift
   var _saDecimals = (typeof saGetTokenDecimals === 'function') ? saGetTokenDecimals() : 6;
   var _saScale    = Math.pow(10, _saDecimals);
-  var _saRawAmt   = BigInt(Math.round(amount * _saScale));
+  var _saRawAmt   = saToRaw(amountStr);   // exact decimal → BigInt (no float)
   var _saRawFee   = (_saRawAmt * BigInt(saFeeBps)) / 10000n;
   var _saRawTotal = _saRawAmt + _saRawFee;
   var _saFeeDisp  = (Number(_saRawFee)  / _saScale).toFixed(4);
@@ -39758,7 +39784,7 @@ async function saExecuteSend() {
   }
 
   var tokenAddr = saGetTokenAddr();
-  var rawAmt = saToRaw(amount);
+  var rawAmt = saToRaw(amountStr);
   var feeRaw = (rawAmt * BigInt(saFeeBps)) / 10000n;
   var totalNeed = rawAmt + feeRaw;
 

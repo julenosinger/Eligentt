@@ -200,7 +200,7 @@ describe('SendGuard — live chainId detection (Phase 2)', () => {
 describe('Send flow wiring — source-level regression checks', () => {
   it('saExecuteSend validates the token before the allowance() call', () => {
     const fnStart = html.indexOf('async function saExecuteSend()');
-    const fnBody = html.slice(fnStart, fnStart + 16000);
+    const fnBody = html.slice(fnStart, fnStart + 30000);
     const guardIdx = fnBody.indexOf('SendGuard.assertERC20Token');
     const allowanceIdx = fnBody.indexOf('contract.allowance(walletAddress, MC3_ADDR)');
     expect(guardIdx).toBeGreaterThan(-1);
@@ -210,7 +210,7 @@ describe('Send flow wiring — source-level regression checks', () => {
 
   it('saExecuteSend hard-refreshes the provider after wallet_switchEthereumChain', () => {
     const fnStart = html.indexOf('async function saExecuteSend()');
-    const fnBody = html.slice(fnStart, fnStart + 16000);
+    const fnBody = html.slice(fnStart, fnStart + 30000);
     const switchIdx = fnBody.indexOf('wallet_switchEthereumChain');
     const refreshIdx = fnBody.indexOf('refreshProviderState', switchIdx);
     expect(switchIdx).toBeGreaterThan(-1);
@@ -219,7 +219,7 @@ describe('Send flow wiring — source-level regression checks', () => {
 
   it('saExecuteSend re-verifies the chainId after the switch (never proceeds off-chain)', () => {
     const fnStart = html.indexOf('async function saExecuteSend()');
-    const fnBody = html.slice(fnStart, fnStart + 16000);
+    const fnBody = html.slice(fnStart, fnStart + 30000);
     const switchIdx = fnBody.indexOf('wallet_switchEthereumChain');
     const recheck = fnBody.indexOf('if (!isArcChainId(activeChainId))', switchIdx);
     expect(recheck).toBeGreaterThan(switchIdx);
@@ -227,7 +227,7 @@ describe('Send flow wiring — source-level regression checks', () => {
 
   it('saExecuteSend blocks native tokens from the ERC-20 path', () => {
     const fnStart = html.indexOf('async function saExecuteSend()');
-    const fnBody = html.slice(fnStart, fnStart + 16000);
+    const fnBody = html.slice(fnStart, fnStart + 30000);
     expect(fnBody).toContain('saTokenCfg.isNative');
   });
 

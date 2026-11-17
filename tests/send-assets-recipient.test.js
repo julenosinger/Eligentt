@@ -68,8 +68,11 @@ describe('Send Assets — Arc Mainnet + token + amount', () => {
     expect(html).toContain('address: () => activeUSDC()');
   });
 
-  it('amount is parsed in the token native decimals (6 for USDC)', () => {
-    expect(fn('function saToRaw(amount)', '// ── Asset selection')).toContain('Math.pow(10, dec)');
+  it('amount is parsed in the token native decimals (6 for USDC) — exactly, no float', () => {
+    const src = fn('function saToRaw(amount)', '// ── Asset selection');
+    expect(src).toContain('saGetTokenDecimals()');
+    expect(src).toContain('parseUnits');          // exact decimal → BigInt (SA-1 fix)
+    expect(src).not.toContain('Math.pow(10, dec)'); // no floating-point scaling
   });
 });
 
