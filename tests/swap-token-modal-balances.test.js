@@ -112,9 +112,10 @@ describe('renderTokenList — source-level regression', () => {
 
   // ── 6. USD value only shown for non-zero balances ─────────────────────────
 
-  it('does not compute USD value for "0.0000" balances', () => {
-    // usdHtml condition must exclude '0.0000'
-    expect(renderSrc).toContain("bal !== '0.0000'");
+  it('does not compute USD value for "0.0000" / tiny / unavailable balances', () => {
+    // usdHtml condition must gate on a real positive number (parseFloat > 0),
+    // which excludes "0.0000", "<0.0001" and "—" (never a "$NaN").
+    expect(renderSrc).toContain('parseFloat(bal) > 0');
   });
 
   it('checks parseFloat(bal) > 0 before writing USD value in the async update', () => {
@@ -159,6 +160,12 @@ describe('renderTokenList — source-level regression', () => {
 
   it('defines a chain-aware native classifier (_swpTokenIsNative)', () => {
     expect(html).toContain('function _swpTokenIsNative(t, chainId)');
+  });
+
+  it('a failed read never overwrites a displayed cached balance with "—" (P1.4.3.1)', () => {
+    // updateRow must bail on failure (raw == null) so the stale-while-revalidate
+    // cached value is preserved instead of flashing to "—".
+    expect(renderSrc).toContain('if (raw == null) return;');
   });
 
   it('native classification consults the chain registry, never assumes ETH globally', () => {

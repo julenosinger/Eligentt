@@ -69,20 +69,20 @@ describe('Instant display — stale-while-revalidate cache', () => {
 });
 
 describe('Token logo integrity', () => {
-  it('renderItem uses the canonical _swpTokenLogo resolver (not raw logoURI)', () => {
-    expect(html).toContain('function _swpTokenLogo(t, chainId)');
-    expect(html).toContain('const logoHtml = _swpTokenLogo(t, chainId)');
+  it('renderItem uses _swpTokenLogo which preserves the original LI.FI logoURI', () => {
+    expect(html).toContain('function _swpTokenLogo(t)');
+    expect(html).toContain('const logoHtml = _swpTokenLogo(t)');
   });
 
-  it('native ETH gets the Ethereum diamond (not the WETH logoURI from LI.FI)', () => {
-    expect(html).toContain('_SWP_ETH_DIAMOND');
-    expect(html).toContain("toUpperCase() === 'ETH'");
+  it('LI.FI logoURI is the PRIMARY logo source (no symbol-based map, no ETH diamond override)', () => {
+    expect(html).toContain('var logo = _swpSafeLogoUri(t && t.logoURI)');
+    expect(html).not.toContain('_SWP_KNOWN_LOGOS');
+    expect(html).not.toContain('_SWP_ETH_DIAMOND');
   });
 
-  it('known assets (USDC/EURC/cirBTC) use local trusted logos', () => {
-    expect(html).toContain("USDC:   '/assets/tokens/usdc.svg'");
-    expect(html).toContain("EURC:   '/assets/tokens/eurc.svg'");
-    expect(html).toContain("CIRBTC: '/assets/tokens/btc.svg'");
+  it('logoURI is validated to http(s) only (no javascript:/data: injection)', () => {
+    expect(html).toContain('function _swpSafeLogoUri(u)');
+    expect(html).toContain('/^https?:\\/\\//i');
   });
 
   it('the decorate() MutationObserver no longer touches .tok-item-icon (single-letter→coin bug fixed)', () => {
@@ -93,8 +93,8 @@ describe('Token logo integrity', () => {
     expect(selMatch[1]).not.toContain('.tok-item-icon');
   });
 
-  it('unknown tokens use a neutral per-symbol badge (deterministic hue), not a coin logo', () => {
+  it('missing logoURI falls back to a neutral per-symbol badge (deterministic hue), not a coin logo', () => {
     expect(html).toContain('function _swpSymbolHue(sym)');
-    expect(html).toContain('background:hsl(' + "'" + ' + hue + ');
+    expect(html).toContain("background:hsl(' + hue + ");
   });
 });

@@ -24117,19 +24117,11 @@ function _swpTokenPriority(t, chainId) {
   return 4;
 }
 
-// ── Canonical token logo resolution (chainId + address based) ───────────────
-// Returns the logo HTML for a token row. Known assets use local trusted logos;
-// native ETH uses the Ethereum diamond; unknown tokens use their validated
-// LI.FI logoURI, falling back to a neutral per-symbol badge. Never infers a
-// token's identity from a single letter (the old decorate() MutationObserver
-// wrongly mapped any 'U'/'E'/'B' fallback to the USDC/EURC/BTC coin logo).
-var _SWP_KNOWN_LOGOS = {
-  USDC:   '/assets/tokens/usdc.svg',
-  EURC:   '/assets/tokens/eurc.svg',
-  CIRBTC: '/assets/tokens/btc.svg'
-};
-var _SWP_ETH_DIAMOND = '<svg viewBox="0 0 32 32" width="16" height="16"><path d="M16 4v9l-8 4 8-4 8 4-8-4V4zM16 19l-8-4 8 10 8-10-8 4z" fill="#fff"/></svg>';
-
+// ── Token logo resolution (P1.4.3.1: LI.FI is the primary logo source) ───────
+// Uses each token's original LI.FI logoURI. Only a MISSING or invalid logo falls
+// back to a neutral, token-specific badge (deterministic per-symbol hue + first
+// letter). Never replaces a valid LI.FI logo with a symbol-based map or generic
+// coin artwork, and never infers identity from a single letter.
 // Deterministic per-symbol hue so unknown tokens get distinct (not identical) badges.
 function _swpSymbolHue(sym) {
   var h = 0;
@@ -24137,36 +24129,24 @@ function _swpSymbolHue(sym) {
   return h % 360;
 }
 
-function _swpTokenLogo(t, chainId) {
+// Only allow http(s) logo URLs (prevents javascript:/data: injection).
+function _swpSafeLogoUri(u) {
+  if (typeof u !== 'string') return null;
+  if (!/^https?:\/\//i.test(u)) return null;
+  return u;
+}
+
+function _swpTokenLogo(t) {
   var sym = String((t && t.symbol) || '').toUpperCase();
   var letter = sym ? sym.charAt(0) : '?';
   var hue = _swpSymbolHue(sym);
   var badge = '<div class="tok-item-icon" style="background:hsl(' + hue + ',42%,36%)">' + escHtml(letter) + '</div>';
 
-  // Native asset → Ethereum diamond for ETH-like native; neutral badge otherwise.
-  if (_swpTokenIsNative(t, chainId)) {
-    var nm = '';
-    try {
-      nm = (CHAIN_REGISTRY && CHAIN_REGISTRY[Number(chainId)] && CHAIN_REGISTRY[Number(chainId)].nativeCurrency && CHAIN_REGISTRY[Number(chainId)].nativeCurrency.symbol) || '';
-    } catch (_) {}
-    if (String(nm).toUpperCase() === 'ETH') {
-      return '<div class="tok-item-icon" style="background:#627eea">' + _SWP_ETH_DIAMOND + '</div>';
-    }
-    return badge;
-  }
-
-  // Known assets → local trusted logo (never LI.FI's cross-chain artwork).
-  if (_SWP_KNOWN_LOGOS[sym]) {
-    return '<img class="tok-item-logo" src="' + _SWP_KNOWN_LOGOS[sym] + '" alt="' + escHtml(t.symbol || '') + '" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'">'
+  var logo = _swpSafeLogoUri(t && t.logoURI);
+  if (logo) {
+    return '<img class="tok-item-logo" src="' + escHtml(logo) + '" alt="' + escHtml(t.symbol || '') + '" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'">'
       + '<div class="tok-item-icon" style="display:none;background:hsl(' + hue + ',42%,36%)">' + escHtml(letter) + '</div>';
   }
-
-  // Unknown token → validated LI.FI logoURI, else neutral per-symbol badge.
-  if (t.logoURI) {
-    return '<img class="tok-item-logo" src="' + escHtml(t.logoURI) + '" alt="' + escHtml(t.symbol || '') + '" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'">'
-      + '<div class="tok-item-icon" style="display:none;background:hsl(' + hue + ',42%,36%)">' + escHtml(letter) + '</div>';
-  }
-
   return badge;
 }
 
@@ -24239,9 +24219,9 @@ async function renderTokenList(filterText) {
   const renderItem = (t, bal) => {
     const addr = (t.address || '').toLowerCase();
     const isOther = addr && addr === otherAddr;
-    const logoHtml = _swpTokenLogo(t, chainId);
+    const logoHtml = _swpTokenLogo(t);
     const balHtml = bal != null ? `<div class="tok-item-bal-val">${bal}</div>` : '';
-    const usdHtml = (t.priceUSD && bal && bal !== '—' && bal !== '0.0000')
+    const usdHtml = (t.priceUSD && parseFloat(bal) > 0)
       ? `<div class="tok-item-bal-usd">$${(parseFloat(bal) * parseFloat(t.priceUSD)).toFixed(2)}</div>` : '';
     // Store token in render map by index to avoid JSON injection in onclick.
     const idx = _tokRenderMap.length;
@@ -24293,7 +24273,10 @@ async function renderTokenList(filterText) {
       prioritized.sort((a, b) => a.prio - b.prio); // stable sort (modern JS)
 
       const updateRow = (i, t, raw) => {
-        const bal = raw != null ? _swpTokBal(raw) : '—';
+        // On failure (raw == null), keep the currently displayed value — a valid
+        // cached balance or "—". Never overwrite a good value with a late failure.
+        if (raw == null) return;
+        const bal = _swpTokBal(raw);
         const items = list.querySelectorAll('.tok-item');
         if (items[i]) {
           const valEl = items[i].querySelector('.tok-item-bal-val');
@@ -24304,11 +24287,9 @@ async function renderTokenList(filterText) {
           }
         }
         // Remember confirmed positive balances to prioritize them next render.
-        if (raw != null) {
-          const n = parseFloat(raw);
-          if (Number.isFinite(n) && n > 0) {
-            _swpRecentPositive[String(walletAddress || '').toLowerCase() + '::' + _swpTokId(t) + '::' + Number(chainId)] = true;
-          }
+        const n = parseFloat(raw);
+        if (Number.isFinite(n) && n > 0) {
+          _swpRecentPositive[String(walletAddress || '').toLowerCase() + '::' + _swpTokId(t) + '::' + Number(chainId)] = true;
         }
       };
 
