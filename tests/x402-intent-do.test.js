@@ -119,6 +119,7 @@ function makeIntent(over = {}) {
     authorizationSignature: null,
     authorizationValidAfter: null,
     authorizationValidBefore: null,
+    facilitatorVerification: null,
     settlementAttemptId: null,
     settlementStatus: null,
     transactionHash: null,
@@ -699,5 +700,53 @@ describe('X402IntentStore — trusted internal /authorize', () => {
     await doObj.alarm();
     const after = await bodyOf(await doFetch(doObj, 'intent?id=' + intent.intentId));
     expect(after.intent.state).toBe('AUTHORIZED');
+  });
+
+  it('records verification evidence without changing the core state or version', async () => {
+    const { doObj } = makeDO();
+    const intent = await preparedIntent(doObj);
+    const { td, signature } = await signFor(intent);
+    await doFetch(doObj, 'authorize', { method: 'POST', body: {
+      intentId: intent.intentId, expectedVersion: 3,
+      authorization: { from: td.value.from, to: td.value.to, value: td.value.value, validAfter: '0', validBefore: '9999999999', nonce: td.value.nonce, signature },
+    } });
+    const resp = await doFetch(doObj, 'record-verification', { method: 'POST', body: {
+      intentId: intent.intentId, expectedVersion: 4,
+      verification: { status: 'verified', isValid: true, invalidReason: null, checkedAt: new Date().toISOString() },
+    } });
+    expect(resp.status).toBe(200);
+    const body = await bodyOf(resp);
+    expect(body.intent.state).toBe('AUTHORIZED');       // state unchanged
+    expect(body.intent.stateVersion).toBe(4);           // version unchanged
+    expect(body.intent.facilitatorVerification.status).toBe('verified');
+  });
+
+  it('rejects verification evidence on a non-AUTHORIZED intent (not_authorized)', async () => {
+    const { doObj } = makeDO();
+    const intent = await preparedIntent(doObj); // AWAITING_AUTHORIZATION
+    const resp = await doFetch(doObj, 'record-verification', { method: 'POST', body: {
+      intentId: intent.intentId, expectedVersion: 3,
+      verification: { status: 'verified', isValid: true, invalidReason: null, checkedAt: new Date().toISOString() },
+    } });
+    const body = await bodyOf(resp);
+    expect(resp.status).toBe(409);
+    expect(body.error).toBe('not_authorized');
+  });
+
+  it('rejects stale-version verification evidence', async () => {
+    const { doObj } = makeDO();
+    const intent = await preparedIntent(doObj);
+    const { td, signature } = await signFor(intent);
+    await doFetch(doObj, 'authorize', { method: 'POST', body: {
+      intentId: intent.intentId, expectedVersion: 3,
+      authorization: { from: td.value.from, to: td.value.to, value: td.value.value, validAfter: '0', validBefore: '9999999999', nonce: td.value.nonce, signature },
+    } });
+    const resp = await doFetch(doObj, 'record-verification', { method: 'POST', body: {
+      intentId: intent.intentId, expectedVersion: 3, // stale (current 4)
+      verification: { status: 'verified', isValid: true, invalidReason: null, checkedAt: new Date().toISOString() },
+    } });
+    const body = await bodyOf(resp);
+    expect(resp.status).toBe(409);
+    expect(body.error).toBe('stale_version');
   });
 });

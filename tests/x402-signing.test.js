@@ -104,6 +104,7 @@ function buildIntent(over = {}) {
     authorizationSignature: null,
     authorizationValidAfter: null,
     authorizationValidBefore: null,
+    facilitatorVerification: null,
     settlementAttemptId: null,
     settlementStatus: null,
     transactionHash: null,

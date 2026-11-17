@@ -167,6 +167,9 @@ export class X402IntentStore {
         if (request.method === 'POST' && path === '/authorize') {
           return this._authorize(request);
         }
+        if (request.method === 'POST' && path === '/record-verification') {
+          return this._recordVerification(request);
+        }
         return X402IntentStore.json({ error: 'not_found' }, 404);
       });
     } catch (e) {
@@ -261,6 +264,7 @@ export class X402IntentStore {
     // Future financial fields must be inactive (null) at creation time.
     if (intent.transactionHash !== null || intent.settlementStatus !== null) return 'invalid_terminal_fields';
     if (intent.authorizationSignature !== null) return 'invalid_terminal_fields';
+    if (intent.facilitatorVerification !== null) return 'invalid_terminal_fields';
     return null;
   }
 
@@ -471,6 +475,58 @@ export class X402IntentStore {
         authorizationSignature: sig,
         authorizationValidAfter: validAfter,
         authorizationValidBefore: validBefore,
+      };
+      await txn.put(KEY_INTENT + intentId, updated);
+      return { status: 200, body: { ok: true, intent: updated } };
+    });
+
+    return X402IntentStore.json(outcome.body, outcome.status);
+  }
+
+  /* ── POST /record-verification (trusted internal) ───────────────────── */
+  // Records NON-destructive facilitator verification evidence on an AUTHORIZED
+  // intent. Does NOT change the core state or stateVersion (verification is a
+  // read-only observation, not a state transition); uses expectedVersion as an
+  // optimistic guard against stale writes. Idempotent for identical results.
+  async _recordVerification(request) {
+    let body;
+    try { body = await request.json(); } catch (_) {
+      return X402IntentStore.json({ error: 'invalid_json' }, 400);
+    }
+    const { intentId, expectedVersion, verification } = body || {};
+    if (!INTENT_ID_RE.test(String(intentId || ''))) return X402IntentStore.json({ error: 'invalid_intent_id' }, 400);
+    if (!Number.isInteger(expectedVersion) || expectedVersion < 1) return X402IntentStore.json({ error: 'invalid_version' }, 400);
+    if (!verification || typeof verification !== 'object') return X402IntentStore.json({ error: 'verification_required' }, 400);
+    const status = verification.status;
+    if (!['verified', 'rejected', 'unknown'].includes(status)) return X402IntentStore.json({ error: 'invalid_verification_status' }, 400);
+    if (typeof verification.isValid !== 'boolean') return X402IntentStore.json({ error: 'invalid_verification' }, 400);
+    const checkedAt = typeof verification.checkedAt === 'string' ? verification.checkedAt : iso(Date.now());
+
+    const outcome = await this.storage.transaction(async (txn) => {
+      const intent = await txn.get(KEY_INTENT + intentId);
+      if (!intent) return { status: 404, body: { ok: false, error: 'not_found' } };
+      if (intent.state !== STATES.AUTHORIZED) {
+        return { status: 409, body: { ok: false, error: 'not_authorized', state: intent.state } };
+      }
+      if (intent.stateVersion !== expectedVersion) {
+        return { status: 409, body: { ok: false, error: 'stale_version', current: intent.stateVersion, expected: expectedVersion } };
+      }
+      // Idempotent: identical status + checkedAt → current record.
+      if (intent.facilitatorVerification &&
+          intent.facilitatorVerification.status === status &&
+          intent.facilitatorVerification.checkedAt === checkedAt) {
+        return { status: 200, body: { ok: true, idempotent: true, intent } };
+      }
+      const now = Date.now();
+      const updated = {
+        ...intent,
+        facilitatorVerification: {
+          status,
+          isValid: verification.isValid,
+          invalidReason: verification.invalidReason || null,
+          checkedAt,
+        },
+        updatedAt: iso(now),
       };
       await txn.put(KEY_INTENT + intentId, updated);
       return { status: 200, body: { ok: true, intent: updated } };

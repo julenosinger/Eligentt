@@ -228,6 +228,7 @@ export function buildIntentRecord(opts) {
     authorizationSignature: null,
     authorizationValidAfter: null,
     authorizationValidBefore: null,
+    facilitatorVerification: null,
     settlementAttemptId: null,
     settlementStatus: null,
     transactionHash: null,
@@ -318,5 +319,10 @@ export function doReserveNonce(env, walletAddress, userId, intentId, nonce, expe
 
 export function doAuthorize(env, walletAddress, userId, intentId, expectedVersion, authorization) {
   return doFetch(env, walletAddress, 'authorize', { intentId, expectedVersion, authorization })
+    .then((res) => guardOwnership(res, userId));
+}
+
+export function doRecordVerification(env, walletAddress, userId, intentId, expectedVersion, verification) {
+  return doFetch(env, walletAddress, 'record-verification', { intentId, expectedVersion, verification })
     .then((res) => guardOwnership(res, userId));
 }
