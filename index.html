@@ -41013,9 +41013,41 @@ async function saExecGateway() {
 
 // Patch saDispatchSend to route to Gateway when _saGwOrigin is true
 var _saDispatchSendOrig = saDispatchSend;
-saDispatchSend = function() {
+saDispatchSend = async function() {
   if (_saGwOrigin && !_saCPNMode) {
-    saExecGateway();
+    // Send Assets → Gateway: sign + submit via saExecGateway, then execute the
+    // destination gatewayMint using the SAME proven mint helper as Unified Balance.
+    // The attestation returned by saExecGateway MUST be processed — otherwise the
+    // transfer stops after the first signature (submit without mint).
+    try {
+      var gwResult = await saExecGateway();
+      var gwStatus = gwResult && gwResult.status ? gwResult.status : 'error';
+      if (gwStatus === 'pending' && gwResult.attestation) {
+        var destChainEl = document.getElementById('sa-dest-chain');
+        var destChainId = destChainEl ? parseInt(destChainEl.value) : ((typeof activeChainId !== 'undefined') ? activeChainId : 5042);
+        if (typeof UBScreen !== 'undefined' && typeof UBScreen._execGatewayMint === 'function') {
+          try {
+            var mintTxHash = await UBScreen._execGatewayMint({
+              attestation: gwResult.attestation,
+              signature:   gwResult.operatorSig,
+              destChainId: destChainId,
+            });
+            toast('Gateway transfer confirmed — tx ' + String(mintTxHash).slice(0, 10) + '…', 'success');
+            if (typeof saUpdateRoute === 'function') saUpdateRoute();
+            try { if (typeof ubInvalidateGatewayCache === 'function') ubInvalidateGatewayCache(); } catch(_) {}
+          } catch(mintErr) {
+            toast('Gateway mint failed: ' + (mintErr && mintErr.message ? mintErr.message : String(mintErr)).slice(0, 120), 'error');
+          }
+          return;
+        }
+        // Mint helper unavailable — do not silently succeed.
+        toast('Gateway mint step unavailable — transfer submitted but not minted', 'error');
+        return;
+      }
+      // blocked / ambiguous / error — saExecGateway already surfaced a toast.
+    } catch(e) {
+      toast('Gateway error: ' + (e && e.message ? e.message : String(e)), 'error');
+    }
   } else {
     _saDispatchSendOrig.apply(this, arguments);
   }
@@ -54975,6 +55007,9 @@ const UBScreen = (function() {
     openSend: openSend, openSwap: openSwap, openBridge: openBridge,
     execSend: execSend, execSwap: execSwap, execBridge: execBridge,
     hideOperation: hideOperation, refreshDashboard: refreshDashboard, setStep: setStep, tick: tick,
+    // Gateway mint helper (exposed so the top-level Send Assets executor can reuse
+    // the proven mint path — avoids duplicating gatewayMint calldata + confirmation).
+    _execGatewayMint: _execGatewayMint,
     // Screen helpers
     _refreshSwap: _refreshSwap, _flipSwap: _flipSwap,
     _populateBridge: _populateBridge, _refreshBridge: _refreshBridge, _flipBridge: _flipBridge,

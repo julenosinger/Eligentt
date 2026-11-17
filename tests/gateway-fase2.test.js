@@ -69,11 +69,15 @@ describe('GF2-2 — JS: functions present and wired', () => {
   it('saExecGateway function defined', () => {
     expect(src).toContain('async function saExecGateway()');
   });
-  it('saDispatchSend patched to call saExecGateway when _saGwOrigin=true', () => {
+  it('saDispatchSend patched to route to Gateway (async, awaits saExecGateway) when _saGwOrigin=true', () => {
     const idx = src.indexOf('_saGwOrigin && !_saCPNMode');
     expect(idx).toBeGreaterThan(-1);
-    const snippet = src.slice(idx, idx + 80);
+    // Window spans the patch body (the corrected async+await form adds a comment
+    // before `await saExecGateway()`, so the original 80-char window is too short;
+    // CRLF line endings widen the span further).
+    const snippet = src.slice(idx, idx + 800);
     expect(snippet).toContain('saExecGateway');
+    expect(snippet).toContain('await saExecGateway()');
   });
   it('swpSetSource function defined', () => {
     expect(src).toContain('function swpSetSource(mode)');
