@@ -40810,12 +40810,17 @@ async function saExecGateway() {
     // ── Gateway contract addresses (same on all EVM chains) ──────────────────
     var GW_WALLET_ADDR  = '0x77777777dcc4d5a8b6e418fd04d8997ef11000ee'; // GatewayWallet
     var GW_MINTER_ADDR  = '0x2222222d7164433c4c09b0b0d809a9b52c04c205'; // GatewayMinter
-    var GW_API_BASE     = 'https://gateway-api.circle.com'; // mainnet
-    // For testnet chains (Arc Testnet, Sepolia, Fuji, Amoy, OP Sepolia, etc.) use:
+    // For testnet chains (Arc Testnet, Sepolia, Fuji, Amoy, OP Sepolia, etc.) the
+    // request goes DIRECTLY to the Circle testnet API (dev only, no real funds).
+    // For MAINNET the request MUST go through the protected Cloudflare proxy
+    // (/api/gateway/transfer) so the Durable Object salt reservation and replay
+    // protection run BEFORE Circle submission. A direct client submission to the
+    // mainnet Circle API would bypass the salt lock — prohibited.
     var GW_TESTNET_CHAINS = [2999, 11155111, 84532, 421614, 11155420, 80002, 43113, 713715];
-    if (GW_TESTNET_CHAINS.indexOf(chainId) !== -1 || GW_TESTNET_CHAINS.indexOf(destChainId) !== -1) {
-      GW_API_BASE = 'https://gateway-api-testnet.circle.com';
-    }
+    var _gwIsTestnet = GW_TESTNET_CHAINS.indexOf(chainId) !== -1 || GW_TESTNET_CHAINS.indexOf(destChainId) !== -1;
+    var _gwTransferUrl = _gwIsTestnet
+      ? 'https://gateway-api-testnet.circle.com/v1/transfer'
+      : '/api/gateway/transfer';
 
     var tokenMap = GW_TOKENS[asset];
     if (!tokenMap) {
@@ -40953,9 +40958,11 @@ async function saExecGateway() {
 
     if (btnContent) btnContent.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i> Submitting to Circle Gateway…';
 
-    // ── POST requests array directly to Circle Gateway API ───────────────────
+    // ── POST requests array directly to the protected transfer path ──────────
     // Body MUST be the JSON array itself, NOT wrapped as { requests: [...] }
-    var resp = await fetch(GW_API_BASE + '/v1/transfer', {
+    // Mainnet: /api/gateway/transfer (CF proxy → DO salt lock → Circle)
+    // Testnet: direct Circle testnet API (dev only)
+    var resp = await fetch(_gwTransferUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(requests, function(_, v) {
