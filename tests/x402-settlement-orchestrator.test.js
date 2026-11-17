@@ -14,7 +14,9 @@ import {
   prepareSettlement,
   recordSettlementOutcome,
   orchestrateSettlement,
+  settlementAuthorized,
 } from '../functions/api/x402/x402-settlement-orchestrator.mjs';
+import { buildApproval } from '../functions/api/x402/x402-approval.mjs';
 
 const TEST_PK = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
 const SECRET = 'test-internal-secret-0123456789abcdef';
@@ -86,6 +88,21 @@ describe('x402 settlement orchestrator — gate & preparation', () => {
   it('live settlement is hard-disabled regardless of flags', () => {
     expect(liveSettlementEnabled()).toBe(false);
     expect(liveSettlementEnabled({ X402_LIVE_SETTLEMENT_ENABLED: 'true' })).toBe(false);
+  });
+
+  it('a forged/tampered/mismatched approval can never activate settlement', async () => {
+    const approval = await buildApproval({
+      id: crypto.randomUUID(), operator: 'operator-1', chainId: 5042,
+      tokenAddress: ARC_USDC, sender: '0x' + 'ab'.repeat(20), recipient: '0x' + 'cd'.repeat(20),
+      maxAmountAtomic: '1000000', feeCeiling: '500000', settlementAttemptId: crypto.randomUUID(),
+      expiresAt: Date.now() + 3600_000,
+    }, 'operator-secret-123456');
+    const request = { chainId: 5042, tokenAddress: ARC_USDC, sender: '0x' + 'ab'.repeat(20), recipient: '0x' + 'cd'.repeat(20), amountAtomic: '1000000', settlementAttemptId: approval.settlementAttemptId };
+    // Hard-disabled: even a valid approval cannot activate settlement.
+    const res = await settlementAuthorized({ X402_OPERATOR_APPROVAL_SECRET: 'operator-secret-123456' }, approval, request, {});
+    expect(res.ok).toBe(false);
+    expect(res.reason).toBe('live_settlement_disabled');
+    // A tampered approval would be rejected by the approval layer (tested in x402-approval.test.js).
   });
 
   it('prepares settlement: acquires claim and persists SUBMITTING', async () => {

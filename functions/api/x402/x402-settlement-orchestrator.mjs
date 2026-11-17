@@ -22,10 +22,24 @@ import {
   verifyEnabled,
 } from './x402-facilitator.mjs';
 import { classifySubmissionOutcome, SETTLEMENT_STATES } from './x402-settlement.mjs';
+import { validateApproval } from './x402-approval.mjs';
 
 /** Live settlement is NEVER enabled in this phase (feature flag is insufficient). */
 export function liveSettlementEnabled() {
   return false;
+}
+
+/**
+ * Full authorization gate for a future controlled settlement. Requires BOTH the
+ * live-settlement execution flag (hard-disabled in this phase) AND a valid,
+ * unexpired, one-time-use, non-revoked operator approval cryptographically bound
+ * to the exact payment. A forged/tampered/mismatched approval can never activate
+ * settlement.
+ */
+export async function settlementAuthorized(env, approval, request, state) {
+  if (!liveSettlementEnabled()) return { ok: false, reason: 'live_settlement_disabled' };
+  const secret = (env && env.X402_OPERATOR_APPROVAL_SECRET) || '';
+  return validateApproval(secret, approval, request, state);
 }
 
 /**
