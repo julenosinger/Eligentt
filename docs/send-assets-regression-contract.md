@@ -18,6 +18,9 @@
 
 - **Exact decimal → BigInt conversion** in `saToRaw()`. NO floating point
   (`parseFloat`/`Math.pow(10, dec)`/`Math.round`) for signed amounts.
+- **Invalid monetary input is NEVER converted into a valid-looking zero or
+  silently rounded.** It is rejected (returns `null` / `_saValidateAmount` error)
+  before any financial side effect — approval, signing or broadcast.
 - Decimals: USDC 6, EURC 6, cirBTC 8, native ETH 18.
 - Arc native USDC gas (18-dec native layer) is distinct from the ERC-20 interface
   at `0x3600…0000` (6 decimals). Never merge them.

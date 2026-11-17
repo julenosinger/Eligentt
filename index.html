@@ -38768,16 +38768,17 @@ function saGetTokenAddr() {
 }
 function saToRaw(amount) {
   const dec = saGetTokenDecimals();
-  // Exact decimal → BigInt (NO floating point). ethers.parseUnits is the
-  // authoritative parser; it throws on malformed input or more decimals than the
-  // token supports. Invalid input yields 0n (never a silently-truncated value —
-  // callers validate the amount before signing).
+  var s = (amount == null) ? '' : String(amount).trim();
+  // Explicit rejection (never a silent 0n): malformed, negative, scientific,
+  // empty, or excess precision. Returns null so the caller can reject BEFORE any
+  // financial side effect (approval / signing / broadcast).
+  if (!/^\d+(\.\d+)?$/.test(s)) return null;
+  if ((s.split('.')[1] || '').length > Number(dec)) return null;
   if (typeof ethers !== 'undefined' && ethers.parseUnits) {
-    try { return ethers.parseUnits(String(amount), dec); }
-    catch (_) { return 0n; }
+    try { return ethers.parseUnits(s, Number(dec)); }
+    catch (_) { return null; }
   }
-  var r = _saParseUnitsExact(String(amount), dec);
-  return r == null ? 0n : r;
+  return _saParseUnitsExact(s, Number(dec));
 }
 
 // Exact decimal-string → BigInt parser (fallback when ethers is unavailable).
@@ -38792,6 +38793,22 @@ function _saParseUnitsExact(str, dec) {
   var fracPart = parts[1] || '';
   if (fracPart.length > dec) return null;       // excess precision → reject
   return BigInt(intPart + fracPart + '0'.repeat(dec - fracPart.length));
+}
+
+// Validate a Send Assets amount string at the EXECUTION BOUNDARY. Returns an
+// error message (string) on failure, or null when the amount is a valid,
+// strictly-positive decimal within the token's precision. Rejects malformed,
+// negative, scientific, NaN/Infinity and excess-precision input.
+function _saValidateAmount(amountStr) {
+  var s = (amountStr == null) ? '' : String(amountStr).trim();
+  var dec = saGetTokenDecimals();
+  if (dec == null || !Number.isFinite(Number(dec)) || Number(dec) < 0) return 'Unsupported token decimals';
+  if (!/^\d+(\.\d+)?$/.test(s)) return 'Enter a valid amount';
+  if ((s.split('.')[1] || '').length > Number(dec)) return 'Amount has too many decimal places';
+  var raw = saToRaw(s);
+  if (raw == null) return 'Invalid amount';
+  if (raw <= 0n) return 'Amount must be greater than 0';
+  return null;
 }
 
 // ── Asset selection ───────────────────────────────────────
@@ -39089,6 +39106,8 @@ function saExecuteCrossChain() {
   var amount    = parseFloat(amountStr) || 0;
   if (!walletAddress || !signer) { toast('Connect your wallet first', 'error'); return; }
   if (!isAddr(recipient)) { toast('Invalid recipient address', 'error'); return; }
+  var _amtErr = _saValidateAmount(amountStr);
+  if (_amtErr) { toast(_amtErr, 'error'); return; }
   if (amount <= 0) { toast('Amount must be greater than 0', 'error'); return; }
 
   var destChainId = saDestChainId;
@@ -39353,6 +39372,8 @@ async function saExecuteLiFiCrossChain() {
   var amount    = parseFloat(amountStr) || 0;
   if (!walletAddress || !signer) { toast('Connect your wallet first', 'error'); return; }
   if (!isAddr(recipient)) { toast('Invalid recipient address', 'error'); return; }
+  var _amtErr = _saValidateAmount(amountStr);
+  if (_amtErr) { toast(_amtErr, 'error'); return; }
   if (amount <= 0) { toast('Amount must be greater than 0', 'error'); return; }
   if (typeof LiFiAdapter === 'undefined' || typeof LiFiAdapter.getQuote !== 'function') {
     toast('LI.FI routing unavailable', 'error'); return;
@@ -39585,6 +39606,8 @@ async function saExecuteSend() {
   if (!walletAddress || !signer) { toast('Connect your wallet first', 'error'); return; }
   if (!isAddr(recipient) && !isEns(recipient)) { toast('Invalid recipient address', 'error'); return; }
   if (recipient === '0x0000000000000000000000000000000000000000') { toast('Zero address not allowed', 'error'); return; }
+  var _amtErr = _saValidateAmount(amountStr);
+  if (_amtErr) { toast(_amtErr, 'error'); return; }
   if (amount <= 0) { toast('Amount must be greater than 0', 'error'); return; }
 
   // ENS resolution

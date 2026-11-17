@@ -53,8 +53,9 @@ function buildSaToRaw(decimals) {
 describe('source contract — saToRaw must not use floating point', () => {
   it('saToRaw uses ethers.parseUnits (exact), not Math.round(parseFloat(...))', () => {
     const src = extractFn(html, 'function saToRaw(amount)');
-    expect(src).toContain('ethers.parseUnits(String(amount), dec)');
+    expect(src).toContain('ethers.parseUnits(s, Number(dec))');
     expect(src).not.toContain('Math.round(parseFloat');
+    expect(src).toContain('return null'); // invalid → null, never a silent 0n
   });
   it('_saParseUnitsExact rejects excess precision (never silently truncates)', () => {
     expect(html).toContain("if (fracPart.length > dec) return null;");
@@ -86,10 +87,16 @@ describe('_saParseUnitsExact — rejects invalid / excess / ambiguous input', ()
 describe('saToRaw — integration (fallback path, 6 decimals)', () => {
   const saToRaw = buildSaToRaw(6);
   it('converts exactly', () => expect(saToRaw('0.1')).toBe(100000n));
-  it('invalid input yields 0n (not a thrown exception, not a truncated value)', () => {
-    expect(saToRaw('abc')).toBe(0n);
-    expect(saToRaw('')).toBe(0n);
-    expect(saToRaw('0.1234567')).toBe(0n); // excess precision → 0n (caller rejects via validation)
+  it('legitimate zero parses to 0n', () => {
+    expect(saToRaw('0')).toBe(0n);
+    expect(saToRaw('0.0')).toBe(0n);
+  });
+  it('invalid input yields null (explicit rejection, NOT a silent 0n)', () => {
+    expect(saToRaw('abc')).toBeNull();
+    expect(saToRaw('')).toBeNull();
+    expect(saToRaw('-5')).toBeNull();
+    expect(saToRaw('1e3')).toBeNull();
+    expect(saToRaw('0.1234567')).toBeNull(); // excess precision
   });
   it('matches ethers.parseUnits for valid inputs', async () => {
     // Import the real ethers to cross-check the exact result.
@@ -97,5 +104,46 @@ describe('saToRaw — integration (fallback path, 6 decimals)', () => {
     for (const s of ['0', '0.1', '1.5', '1234.56789', '1234567890.123456']) {
       expect(saToRaw(s)).toBe(parseUnits(s, 6));
     }
+  });
+});
+
+describe('_saValidateAmount — execution-boundary rejection (6 decimals)', () => {
+  // Extract _saValidateAmount (adjacent to saToRaw) with a mocked saGetTokenDecimals.
+  function buildValidate(decimals) {
+    const start = html.indexOf('function saToRaw(amount)');
+    const end = html.indexOf('function saUpdateNetwork', start);
+    const block = html.slice(start, end);
+    const fn = new Function('saGetTokenDecimals', 'ethers', block + '\nreturn _saValidateAmount;');
+    return fn(() => decimals, undefined);
+  }
+  const validate = buildValidate(6);
+
+  it('valid positive → null (no error)', () => {
+    expect(validate('0.1')).toBeNull();
+    expect(validate('100')).toBeNull();
+    expect(validate('0.000001')).toBeNull(); // smallest USDC unit
+  });
+  it('zero → error (strictly positive required)', () => {
+    expect(validate('0')).toBe('Amount must be greater than 0');
+    expect(validate('0.0')).toBe('Amount must be greater than 0');
+  });
+  it('negative → error', () => {
+    expect(validate('-5')).toBe('Enter a valid amount');
+  });
+  it('scientific notation → error', () => {
+    expect(validate('1e3')).toBe('Enter a valid amount');
+  });
+  it('excess precision → error', () => {
+    expect(validate('0.1234567')).toBe('Amount has too many decimal places');
+  });
+  it('malformed / NaN / Infinity → error', () => {
+    expect(validate('abc')).toBe('Enter a valid amount');
+    expect(validate('NaN')).toBe('Enter a valid amount');
+    expect(validate('Infinity')).toBe('Enter a valid amount');
+    expect(validate('')).toBe('Enter a valid amount');
+  });
+  it('very large exact decimal is accepted (BigInt, no overflow)', () => {
+    expect(validate('999999999999.999999')).toBeNull();
+    expect(buildSaToRaw(6)('999999999999.999999')).toBe(999999999999999999n);
   });
 });
