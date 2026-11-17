@@ -184,6 +184,38 @@ describe('SwapUiModes — ROUTES list rendering (real quotes, no mock)', () => {
     expect(h).toContain("swpSelectRoute('local')");
   });
 
+  it('full-card click: selectable card is interactive (role/button, tabindex, onclick, Enter/Space)', () => {
+    const m = modes();
+    const h = m.buildRouteListHtml({
+      bestExecutable: { source: 'local' },
+      quotes: [q('local', { expectedOutRaw: 998200n, executable: true })],
+    }, null, OPTS);
+    // The card DIV itself must carry the selection onclick + keyboard a11y.
+    expect(h).toContain('role="button"');
+    expect(h).toContain('tabindex="0"');
+    expect(h).toContain('onclick="swpSelectRoute(\'local\')"');
+    expect(h).toContain('onkeydown=');
+    expect(h).toContain("event.key==='Enter'");
+    // The Select button still exists (with stopPropagation) so it never double-fires.
+    expect(h).toContain('event.stopPropagation()');
+  });
+
+  it('full-card click: non-selectable (reference-only) card is NOT interactive', () => {
+    const m = modes();
+    const h = m.buildRouteListHtml({
+      bestExecutable: { source: 'local' },
+      quotes: [
+        q('tower', { expectedOutRaw: 1001400n, executable: false }),
+        q('local', { expectedOutRaw: 998200n, executable: true }),
+      ],
+    }, 'local', OPTS);
+    // The tower card's opening <div> must carry NO onclick/tabindex/role.
+    const towerOpen = h.slice(h.indexOf('data-source="tower"'), h.indexOf('data-source="local"'));
+    expect(towerOpen).not.toContain('onclick=');
+    expect(towerOpen).not.toContain('tabindex=');
+    expect(towerOpen).not.toContain('role="button"');
+  });
+
   it('unavailable provider shows discreetly (Tower failure does not hide Elligentt)', () => {
     const m = modes();
     const h = m.buildRouteListHtml({

@@ -274,7 +274,17 @@
         (isSel  ? ' brs-selected' : '') +
         (!isSelectable ? ' brs-unavail' : '');
 
-      out += '<div class="' + cls + '" data-source="' + escH(q.source) + '">' +
+      // Full-card click selection — reuses the SAME swpSelectRoute handler as the
+      // Select button. The button already calls event.stopPropagation(), so it
+      // never double-fires. Keyboard: Enter/Space on the focused card selects it.
+      // Non-selectable (reference-only) and unavailable rows get NO interactivity.
+      var cardAttrs = '';
+      if (isSelectable) {
+        var srcQ = escH(q.source);
+        cardAttrs = ' role="button" tabindex="0" onclick="swpSelectRoute(\'' + srcQ + '\')" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();swpSelectRoute(\'' + srcQ + '\');}"';
+      }
+
+      out += '<div class="' + cls + '" data-source="' + escH(q.source) + '"' + cardAttrs + '>' +
         badges +
         '<div class="brs-route-top">' +
           '<div class="brs-provider-icon">' + provLetter + '</div>' +
