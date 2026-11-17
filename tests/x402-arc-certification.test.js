@@ -1,20 +1,23 @@
 /**
  * x402-arc-certification.test.js
  * ═══════════════════════════════════════════════════════════════════════════
- * Phase X402-2.0 — read-only Arc Mainnet certification invariants.
+ * Phase X402-2.0 / 2.0.1 — Arc Mainnet certification invariants (static).
  *
- * These tests enforce the NON-NEGOTIABLE certification facts so a future change
- * cannot silently "flip" Arc into EIP-3009-compatible or enable settlement:
+ * CORRECTED (X402-2.0.1): Arc USDC 0x3600…0000 IS EIP-3009 compatible — the
+ * X402-2.0 "incompatible" conclusion used WRONG function selectors
+ * (authorizationState is 0xe94a0102, not 0xe3ee160e; the on-chain
+ * DOMAIN_SEPARATOR() exactly matches the EIP-712 domain USDC/2/5042 — see
+ * docs/x402-mainnet-certification-corrective.md).
  *
- *   1. Arc (eip155:5042) remains eip3009Compatible:false (its native USDC
- *      precompile at 0x3600…0000 does NOT implement EIP-3009 — verified via
- *      read-only RPC: authorizationState()/eip712Domain() revert).
- *   2. Arc's trusted asset remains the canonical 0x3600…0000 (6 decimals).
- *   3. SETTLEMENT_IMPLEMENTED remains false (payments disabled).
- *   4. validateRequirement blocks Arc (network_eip3009 check fails).
+ * The code flag eip3009Compatible:false is CONSERVATIVE (settlement not yet
+ * implemented), NOT an on-chain fact. It must be flipped to true in X402-2.1.
  *
- * Network-dependent evidence is recorded in docs/x402-mainnet-certification.md;
- * these tests assert the STATIC contract only (no external RPC dependency).
+ * These tests assert the STATIC contract that must NOT regress silently:
+ *   1. Arc's trusted asset remains the canonical 0x3600…0000 (6 decimals).
+ *   2. SETTLEMENT_IMPLEMENTED remains false (payments disabled).
+ *   3. A facilitator URL is configured.
+ *   4. validateRequirement still blocks Arc while the flag is false (settlement
+ *      remains gated until X402-2.1 flips it).
  */
 import { describe, it, expect } from 'vitest';
 import {
@@ -30,9 +33,12 @@ const ARC_CAIP = 'eip155:5042';
 const ARC_USDC = '0x3600000000000000000000000000000000000000';
 
 describe('x402 Arc Mainnet certification (static contract)', () => {
-  it('Arc (eip155:5042) is registered with eip3009Compatible:false', () => {
+  it('Arc (eip155:5042) registered; eip3009Compatible flag is conservatively false until X402-2.1', () => {
     expect(X402_NETWORKS[ARC_CAIP]).toBeTruthy();
     expect(X402_NETWORKS[ARC_CAIP].chainId).toBe(5042);
+    // CORRECTED: on-chain evidence CONFIRMS EIP-3009 (see corrective doc). This
+    // flag stays false only because settlement is not implemented yet; X402-2.1
+    // must flip it to true when wiring the pay path.
     expect(X402_NETWORKS[ARC_CAIP].eip3009Compatible).toBe(false);
   });
 
