@@ -28,7 +28,14 @@ forged/tampered/expired/revoked/reused/mismatched approval is rejected.
 10. **Facilitator capabilities verified** — `/supported` returns Arc `exact` with `0x3600…0000`.
 11. **Signing verified** — Circle `sign/typedData` recovers to the sender (Level 3).
 12. **RPC certification** — `x402-rpc.mjs` `validateReceiptEvidence` green against a
-    live Arc receipt (network access required; UNVERIFIED until performed).
+    live Arc receipt (network access required). Read-only mainnet checks performed
+    in 2.1F: `eth_chainId`=5042, USDC `eth_getCode`=1798 bytes,
+    `authorizationState(0,0)` callable, latest block 31758224. Finality binding of
+    an actual Elligentt payment remains future work.
+13. **Authorization binding** — `validateAuthorizationBinding` requires the
+    transaction input to decode to `transferWithAuthorization` with the exact
+    nonce (and, when present, a matching `AuthorizationUsed` event); a plain
+    ERC-20 transfer is never accepted as proof.
 
 ## 2. Step-by-step procedure
 
