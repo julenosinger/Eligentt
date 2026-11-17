@@ -40810,12 +40810,17 @@ async function saExecGateway() {
     // ── Gateway contract addresses (same on all EVM chains) ──────────────────
     var GW_WALLET_ADDR  = '0x77777777dcc4d5a8b6e418fd04d8997ef11000ee'; // GatewayWallet
     var GW_MINTER_ADDR  = '0x2222222d7164433c4c09b0b0d809a9b52c04c205'; // GatewayMinter
-    var GW_API_BASE     = 'https://gateway-api.circle.com'; // mainnet
-    // For testnet chains (Arc Testnet, Sepolia, Fuji, Amoy, OP Sepolia, etc.) use:
+    // For testnet chains (Arc Testnet, Sepolia, Fuji, Amoy, OP Sepolia, etc.) the
+    // request goes DIRECTLY to the Circle testnet API (dev only, no real funds).
+    // For MAINNET the request MUST go through the protected Cloudflare proxy
+    // (/api/gateway/transfer) so the Durable Object salt reservation and replay
+    // protection run BEFORE Circle submission. A direct client submission to the
+    // mainnet Circle API would bypass the salt lock — prohibited.
     var GW_TESTNET_CHAINS = [2999, 11155111, 84532, 421614, 11155420, 80002, 43113, 713715];
-    if (GW_TESTNET_CHAINS.indexOf(chainId) !== -1 || GW_TESTNET_CHAINS.indexOf(destChainId) !== -1) {
-      GW_API_BASE = 'https://gateway-api-testnet.circle.com';
-    }
+    var _gwIsTestnet = GW_TESTNET_CHAINS.indexOf(chainId) !== -1 || GW_TESTNET_CHAINS.indexOf(destChainId) !== -1;
+    var _gwTransferUrl = _gwIsTestnet
+      ? 'https://gateway-api-testnet.circle.com/v1/transfer'
+      : '/api/gateway/transfer';
 
     var tokenMap = GW_TOKENS[asset];
     if (!tokenMap) {
@@ -40953,9 +40958,11 @@ async function saExecGateway() {
 
     if (btnContent) btnContent.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i> Submitting to Circle Gateway…';
 
-    // ── POST requests array directly to Circle Gateway API ───────────────────
+    // ── POST requests array directly to the protected transfer path ──────────
     // Body MUST be the JSON array itself, NOT wrapped as { requests: [...] }
-    var resp = await fetch(GW_API_BASE + '/v1/transfer', {
+    // Mainnet: /api/gateway/transfer (CF proxy → DO salt lock → Circle)
+    // Testnet: direct Circle testnet API (dev only)
+    var resp = await fetch(_gwTransferUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(requests, function(_, v) {
@@ -41006,9 +41013,41 @@ async function saExecGateway() {
 
 // Patch saDispatchSend to route to Gateway when _saGwOrigin is true
 var _saDispatchSendOrig = saDispatchSend;
-saDispatchSend = function() {
+saDispatchSend = async function() {
   if (_saGwOrigin && !_saCPNMode) {
-    saExecGateway();
+    // Send Assets → Gateway: sign + submit via saExecGateway, then execute the
+    // destination gatewayMint using the SAME proven mint helper as Unified Balance.
+    // The attestation returned by saExecGateway MUST be processed — otherwise the
+    // transfer stops after the first signature (submit without mint).
+    try {
+      var gwResult = await saExecGateway();
+      var gwStatus = gwResult && gwResult.status ? gwResult.status : 'error';
+      if (gwStatus === 'pending' && gwResult.attestation) {
+        var destChainEl = document.getElementById('sa-dest-chain');
+        var destChainId = destChainEl ? parseInt(destChainEl.value) : ((typeof activeChainId !== 'undefined') ? activeChainId : 5042);
+        if (typeof UBScreen !== 'undefined' && typeof UBScreen._execGatewayMint === 'function') {
+          try {
+            var mintTxHash = await UBScreen._execGatewayMint({
+              attestation: gwResult.attestation,
+              signature:   gwResult.operatorSig,
+              destChainId: destChainId,
+            });
+            toast('Gateway transfer confirmed — tx ' + String(mintTxHash).slice(0, 10) + '…', 'success');
+            if (typeof saUpdateRoute === 'function') saUpdateRoute();
+            try { if (typeof ubInvalidateGatewayCache === 'function') ubInvalidateGatewayCache(); } catch(_) {}
+          } catch(mintErr) {
+            toast('Gateway mint failed: ' + (mintErr && mintErr.message ? mintErr.message : String(mintErr)).slice(0, 120), 'error');
+          }
+          return;
+        }
+        // Mint helper unavailable — do not silently succeed.
+        toast('Gateway mint step unavailable — transfer submitted but not minted', 'error');
+        return;
+      }
+      // blocked / ambiguous / error — saExecGateway already surfaced a toast.
+    } catch(e) {
+      toast('Gateway error: ' + (e && e.message ? e.message : String(e)), 'error');
+    }
   } else {
     _saDispatchSendOrig.apply(this, arguments);
   }
@@ -54968,6 +55007,9 @@ const UBScreen = (function() {
     openSend: openSend, openSwap: openSwap, openBridge: openBridge,
     execSend: execSend, execSwap: execSwap, execBridge: execBridge,
     hideOperation: hideOperation, refreshDashboard: refreshDashboard, setStep: setStep, tick: tick,
+    // Gateway mint helper (exposed so the top-level Send Assets executor can reuse
+    // the proven mint path — avoids duplicating gatewayMint calldata + confirmation).
+    _execGatewayMint: _execGatewayMint,
     // Screen helpers
     _refreshSwap: _refreshSwap, _flipSwap: _flipSwap,
     _populateBridge: _populateBridge, _refreshBridge: _refreshBridge, _flipBridge: _flipBridge,
