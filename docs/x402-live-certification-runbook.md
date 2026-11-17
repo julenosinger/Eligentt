@@ -1,27 +1,34 @@
-# x402 Controlled Mainnet Certification Runbook (X402-2.1D.2B)
+# x402 Controlled Mainnet Certification Runbook (X402-2.1D.2B → 2.1E)
 
 > **DOCUMENTATION ONLY.** This runbook describes the future operator-controlled
-> live certification procedure. It is NOT executed in this phase, and no live
-> authorization, settlement, transfer or broadcast is permitted without a
-> separate, explicit owner authorization.
+> live certification procedure. It is NOT executed, and no live authorization,
+> settlement, transfer or broadcast is permitted without a separate, explicit
+> owner authorization.
 
-## 1. Prerequisites (all must be independently verified before any live step)
+## 0. Operator approval (new in 2.1E)
 
-1. **Owner approval** — a signed, dated authorization from the project owner
-   approving the exact scope below.
-2. **Exact amount** — a single fixed atomic USDC amount (e.g. `1000000` = 1.00 USDC),
-   never variable.
-3. **Sender wallet** — the exact Circle developer-controlled wallet address that
-   holds (or will hold) the test USDC.
-4. **Recipient wallet** — the exact payout address.
-5. **Token + network** — Arc USDC `0x3600…0000` on `eip155:5042`, decimals 6.
-6. **Maximum acceptable fee/gas** — an operator-set ceiling.
-7. **Balance check** — confirm the sender has at least `amount + fee` USDC.
-8. **DO persistence verified** — `x402-intent-do-persistence.test.js` green.
-9. **Facilitator capabilities verified** — `GET /v1/facilitator/x402/supported`
-   returns Arc `exact`/`upto` with `0x3600…0000`.
-10. **Signing verified** — the Circle `sign/typedData` flow returns a signature
-    that locally recovers to the sender (Level 3, separately authorized).
+Live settlement additionally requires a cryptographically-authenticated operator
+approval (`functions/api/x402/x402-approval.mjs`): a unique, HMAC-SHA256-signed,
+one-time-use, revocable approval binding operator identity, chain, token, sender,
+recipient, max atomic amount, fee ceiling, settlement attempt id, and expiry.
+A feature flag or a general-purpose API key never authorizes payment; a
+forged/tampered/expired/revoked/reused/mismatched approval is rejected.
+
+## 1. Infrastructure prerequisites (all independently verified)
+
+1. **Owner approval** — signed, dated authorization for the exact scope.
+2. **Operator approval** — a valid `buildApproval(...)` for the exact attempt.
+3. **Exact amount** — a fixed atomic USDC amount, never variable.
+4. **Sender wallet** — exact Circle developer-controlled wallet.
+5. **Recipient wallet** — exact payout address.
+6. **Token + network** — Arc USDC `0x3600…0000` on `eip155:5042`, decimals 6.
+7. **Maximum fee/gas** — operator-set ceiling (bound into the approval).
+8. **Balance check** — sender ≥ amount + fee.
+9. **DO persistence verified** — `x402-intent-do-persistence.test.js` green.
+10. **Facilitator capabilities verified** — `/supported` returns Arc `exact` with `0x3600…0000`.
+11. **Signing verified** — Circle `sign/typedData` recovers to the sender (Level 3).
+12. **RPC certification** — `x402-rpc.mjs` `validateReceiptEvidence` green against a
+    live Arc receipt (network access required; UNVERIFIED until performed).
 
 ## 2. Step-by-step procedure
 
@@ -58,11 +65,12 @@
 
 ## 6. Final evidence requirements
 
-A payment may be reported `SETTLED` only with all of:
-correct chain, token, authorizer, recipient, exact atomic amount, nonce,
-authorization fingerprint, a provider-confirmed transaction reference AND a
-verified receipt (or documented provider finality) — with no contradictory
-evidence.
+A payment may be reported `SETTLED` only with ALL of: correct chain, token,
+authorizer, recipient, exact atomic amount, nonce, authorization fingerprint, a
+provider-confirmed transaction reference AND a verified receipt whose `Transfer`
+event binds the exact terms (or documented provider finality), with `confirmations`
+meeting policy and no contradictory evidence. `authorizationState=true` alone is
+insufficient.
 
 > This runbook is not an authorization to execute. Live certification requires a
 > future, separately-authorized phase.
