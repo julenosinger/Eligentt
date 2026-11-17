@@ -38,10 +38,13 @@ const REQUIREMENT_DOMAIN = 'elligentt:x402:requirement:v1';
 const CREATE_DOMAIN     = 'elligentt:x402:create:v1';
 
 export const IDEMPOTENCY_KEY_RE = /^[A-Za-z0-9._-]{8,128}$/;
-export const NONCE_RE = /^\d{1,78}$/;
+// EIP-3009 authorization nonce is a bytes32: canonical lowercase hex `0x` + 64.
+export const NONCE_RE = /^0x[0-9a-fA-F]{64}$/;
 
 const DEFAULT_INTENT_TTL_SECONDS = 3600; // 1 hour (server policy, ≠ requirement timeout)
 const DEFAULT_MAX_INTENTS_PER_USER = 200;
+// Maximum permitted payment lifetime for a signed authorization window (seconds).
+const DEFAULT_MAX_AUTH_WINDOW_SECONDS = 3600;
 
 /* ── Hashing (Web Crypto — available in Workers and Node ≥ 18) ──────── */
 
@@ -49,6 +52,15 @@ async function sha256Hex(text) {
   const data = new TextEncoder().encode(text);
   const digest = await crypto.subtle.digest('SHA-256', data);
   return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * Generate a cryptographically-secure random 32-byte EIP-3009 authorization
+ * nonce as canonical lowercase hex (`0x` + 64 chars). Uses the Web Crypto CSPRNG.
+ */
+export function generateAuthorizationNonce() {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  return '0x' + Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
 /**
@@ -213,6 +225,9 @@ export function buildIntentRecord(opts) {
     updatedAt: new Date(now).toISOString(),
     expiresAt: new Date(now + (opts.ttlSeconds * 1000)).toISOString(),
     authorizedAt: null,
+    authorizationSignature: null,
+    authorizationValidAfter: null,
+    authorizationValidBefore: null,
     settlementAttemptId: null,
     settlementStatus: null,
     transactionHash: null,
@@ -230,12 +245,31 @@ function doHeaders(env) {
   return h;
 }
 
-async function doFetch(env, userId, path, body) {
+/**
+ * Strip executable authorization material before an intent is returned to the
+ * browser. The signature is an executable EIP-3009 authorization and must never
+ * be exposed in a client-facing response (kept in DO storage only).
+ */
+export function redactIntent(intent) {
+  if (!intent || typeof intent !== 'object') return intent;
+  const out = { ...intent };
+  delete out.authorizationSignature;
+  return out;
+}
+
+/**
+ * Coordinator sharding key is the AUTHORITATIVE nonce namespace boundary: the
+ * lowercase wallet address. All intents — and therefore all EIP-3009 nonce
+ * reservations — for a wallet serialize in one DO, independent of any
+ * wallet→user mapping assumption. Ownership is additionally re-checked against
+ * the intent's `userId` by each wrapper below (defense in depth).
+ */
+async function doFetch(env, walletAddress, path, body) {
   const binding = intentBinding(env);
   if (!binding) return { ok: false, status: 503, error: 'x402_intent_lock_not_configured' };
   let res;
   try {
-    const doId = binding.idFromName(String(userId));
+    const doId = binding.idFromName(String(walletAddress).toLowerCase());
     const stub = binding.get(doId);
     res = await stub.fetch('https://x402-intent-do/' + path, {
       method: body ? 'POST' : 'GET',
@@ -254,18 +288,35 @@ async function doFetch(env, userId, path, body) {
   return { ok: true, status: res.status, body: json };
 }
 
-export function doCreateIntent(env, userId, record, requestDigest) {
-  return doFetch(env, userId, 'create', { intent: record, requestDigest });
+// Reject when the returned intent is owned by a different user (cross-user access
+// defense-in-depth; the per-wallet shard already scopes to a single wallet).
+function guardOwnership(res, userId) {
+  if (res && res.ok && res.body && res.body.intent && res.body.intent.userId !== userId) {
+    return { ok: false, status: 404, error: 'not_found' };
+  }
+  return res;
 }
 
-export function doGetIntent(env, userId, intentId) {
-  return doFetch(env, userId, 'intent?id=' + encodeURIComponent(intentId), null);
+export function doCreateIntent(env, walletAddress, record, requestDigest) {
+  return doFetch(env, walletAddress, 'create', { intent: record, requestDigest });
 }
 
-export function doTransition(env, userId, intentId, to, expectedVersion) {
-  return doFetch(env, userId, 'transition', { intentId, to, expectedVersion });
+export function doGetIntent(env, walletAddress, userId, intentId) {
+  return doFetch(env, walletAddress, 'intent?id=' + encodeURIComponent(intentId), null)
+    .then((res) => guardOwnership(res, userId));
 }
 
-export function doReserveNonce(env, userId, intentId, nonce, expectedVersion) {
-  return doFetch(env, userId, 'reserve-nonce', { intentId, nonce, expectedVersion });
+export function doTransition(env, walletAddress, userId, intentId, to, expectedVersion) {
+  return doFetch(env, walletAddress, 'transition', { intentId, to, expectedVersion })
+    .then((res) => guardOwnership(res, userId));
+}
+
+export function doReserveNonce(env, walletAddress, userId, intentId, nonce, expectedVersion) {
+  return doFetch(env, walletAddress, 'reserve-nonce', { intentId, nonce, expectedVersion })
+    .then((res) => guardOwnership(res, userId));
+}
+
+export function doAuthorize(env, walletAddress, userId, intentId, expectedVersion, authorization) {
+  return doFetch(env, walletAddress, 'authorize', { intentId, expectedVersion, authorization })
+    .then((res) => guardOwnership(res, userId));
 }

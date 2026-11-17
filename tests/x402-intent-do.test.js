@@ -22,9 +22,18 @@
  * worker restart. That guarantee is documented as not integration-verified.
  */
 import { describe, it, expect } from 'vitest';
+import { Wallet } from 'ethers';
 import { X402IntentStore } from '../functions/api/x402/x402-intent.do.js';
+import {
+  buildTransferWithAuthorization,
+  TRANSFER_WITH_AUTHORIZATION_TYPES,
+} from '../functions/api/x402/x402-eip712.mjs';
 
 const SECRET = 'test-internal-secret-0123456789abcdef';
+// Deterministic test signer (no mainnet funds) — its address becomes the intent's
+// wallet so the signed `from` matches the persisted wallet.
+const TEST_PK = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
+const testSignerAddress = () => new Wallet(TEST_PK).address.toLowerCase();
 
 /* ── In-memory DO state mock (serialized via async mutex) ────────────── */
 
@@ -107,6 +116,9 @@ function makeIntent(over = {}) {
     updatedAt: new Date(Date.now() - 1000).toISOString(),
     expiresAt: new Date(Date.now() + 3600_000).toISOString(),
     authorizedAt: null,
+    authorizationSignature: null,
+    authorizationValidAfter: null,
+    authorizationValidBefore: null,
     settlementAttemptId: null,
     settlementStatus: null,
     transactionHash: null,
@@ -117,6 +129,8 @@ function makeIntent(over = {}) {
 }
 
 const DIGEST = 'c'.repeat(64);
+// EIP-3009 authorization nonce is a canonical bytes32 hex string.
+function nonce(n) { return '0x' + n.toString(16).padStart(64, '0'); }
 
 async function createIntent(doObj, intent, digest = DIGEST) {
   const resp = await doFetch(doObj, 'create', { method: 'POST', body: { intent, requestDigest: digest } });
@@ -240,11 +254,11 @@ describe('X402IntentStore — state machine', () => {
     expect(pb.intent.state).toBe('PREPARED');
     expect(pb.intent.stateVersion).toBe(2);
 
-    const n = await doFetch(doObj, 'reserve-nonce', { method: 'POST', body: { intentId: intent.intentId, nonce: '12345', expectedVersion: 2 } });
+    const n = await doFetch(doObj, 'reserve-nonce', { method: 'POST', body: { intentId: intent.intentId, nonce: nonce(0x3039), expectedVersion: 2 } });
     const nb = await bodyOf(n);
     expect(n.status).toBe(200);
     expect(nb.intent.state).toBe('AWAITING_AUTHORIZATION');
-    expect(nb.intent.authorizationNonce).toBe('12345');
+    expect(nb.intent.authorizationNonce).toBe(nonce(0x3039));
     expect(nb.intent.stateVersion).toBe(3);
   });
 
@@ -332,14 +346,14 @@ describe('X402IntentStore — nonce reservation / replay protection', () => {
     await createIntent(doObj, intent);
     await doFetch(doObj, 'transition', { method: 'POST', body: { intentId: intent.intentId, to: 'PREPARED', expectedVersion: 1 } });
 
-    const first = await doFetch(doObj, 'reserve-nonce', { method: 'POST', body: { intentId: intent.intentId, nonce: '42', expectedVersion: 2 } });
+    const first = await doFetch(doObj, 'reserve-nonce', { method: 'POST', body: { intentId: intent.intentId, nonce: nonce(0x2a), expectedVersion: 2 } });
     expect(first.status).toBe(200);
     // Idempotent re-reserve by the same intent.
-    const again = await doFetch(doObj, 'reserve-nonce', { method: 'POST', body: { intentId: intent.intentId, nonce: '42', expectedVersion: 2 } });
+    const again = await doFetch(doObj, 'reserve-nonce', { method: 'POST', body: { intentId: intent.intentId, nonce: nonce(0x2a), expectedVersion: 2 } });
     const againBody = await bodyOf(again);
     expect(again.status).toBe(200);
     expect(againBody.idempotent).toBe(true);
-    expect(againBody.intent.authorizationNonce).toBe('42');
+    expect(againBody.intent.authorizationNonce).toBe(nonce(0x2a));
   });
 
   it('reservation by ANOTHER intent for the same nonce fails', async () => {
@@ -351,8 +365,8 @@ describe('X402IntentStore — nonce reservation / replay protection', () => {
     await doFetch(doObj, 'transition', { method: 'POST', body: { intentId: a.intentId, to: 'PREPARED', expectedVersion: 1 } });
     await doFetch(doObj, 'transition', { method: 'POST', body: { intentId: b.intentId, to: 'PREPARED', expectedVersion: 1 } });
 
-    await doFetch(doObj, 'reserve-nonce', { method: 'POST', body: { intentId: a.intentId, nonce: '7', expectedVersion: 2 } });
-    const resp = await doFetch(doObj, 'reserve-nonce', { method: 'POST', body: { intentId: b.intentId, nonce: '7', expectedVersion: 2 } });
+    await doFetch(doObj, 'reserve-nonce', { method: 'POST', body: { intentId: a.intentId, nonce: nonce(7), expectedVersion: 2 } });
+    const resp = await doFetch(doObj, 'reserve-nonce', { method: 'POST', body: { intentId: b.intentId, nonce: nonce(7), expectedVersion: 2 } });
     const body = await bodyOf(resp);
     expect(resp.status).toBe(409);
     expect(body.error).toBe('nonce_already_reserved');
@@ -373,8 +387,8 @@ describe('X402IntentStore — nonce reservation / replay protection', () => {
     await doFetch(doObj, 'transition', { method: 'POST', body: { intentId: base.intentId, to: 'PREPARED', expectedVersion: 1 } });
     await doFetch(doObj, 'transition', { method: 'POST', body: { intentId: arc.intentId, to: 'PREPARED', expectedVersion: 1 } });
 
-    const r1 = await doFetch(doObj, 'reserve-nonce', { method: 'POST', body: { intentId: base.intentId, nonce: '99', expectedVersion: 2 } });
-    const r2 = await doFetch(doObj, 'reserve-nonce', { method: 'POST', body: { intentId: arc.intentId, nonce: '99', expectedVersion: 2 } });
+    const r1 = await doFetch(doObj, 'reserve-nonce', { method: 'POST', body: { intentId: base.intentId, nonce: nonce(0x63), expectedVersion: 2 } });
+    const r2 = await doFetch(doObj, 'reserve-nonce', { method: 'POST', body: { intentId: arc.intentId, nonce: nonce(0x63), expectedVersion: 2 } });
     expect(r1.status).toBe(200);
     expect(r2.status).toBe(200);
   });
@@ -392,7 +406,7 @@ describe('X402IntentStore — nonce reservation / replay protection', () => {
     const { doObj } = makeDO();
     const intent = makeIntent();
     await createIntent(doObj, intent);
-    const resp = await doFetch(doObj, 'reserve-nonce', { method: 'POST', body: { intentId: intent.intentId, nonce: '1', expectedVersion: 1 } });
+    const resp = await doFetch(doObj, 'reserve-nonce', { method: 'POST', body: { intentId: intent.intentId, nonce: nonce(1), expectedVersion: 1 } });
     const body = await bodyOf(resp);
     expect(resp.status).toBe(400);
     expect(body.error).toBe('invalid_transition');
@@ -424,8 +438,8 @@ describe('X402IntentStore — concurrency (serialized)', () => {
     await doFetch(doObj, 'transition', { method: 'POST', body: { intentId: b.intentId, to: 'PREPARED', expectedVersion: 1 } });
 
     const results = await Promise.all([
-      doFetch(doObj, 'reserve-nonce', { method: 'POST', body: { intentId: a.intentId, nonce: '777', expectedVersion: 2 } }),
-      doFetch(doObj, 'reserve-nonce', { method: 'POST', body: { intentId: b.intentId, nonce: '777', expectedVersion: 2 } }),
+      doFetch(doObj, 'reserve-nonce', { method: 'POST', body: { intentId: a.intentId, nonce: nonce(0x309), expectedVersion: 2 } }),
+      doFetch(doObj, 'reserve-nonce', { method: 'POST', body: { intentId: b.intentId, nonce: nonce(0x309), expectedVersion: 2 } }),
     ]);
     const statuses = await Promise.all(results.map((r) => r.json()));
     const okCount = statuses.filter((s) => s.ok === true).length;
@@ -511,7 +525,7 @@ describe('X402IntentStore — expiration & recovery', () => {
     const intent = makeIntent({ idempotencyKey: 'key-keep-1234', expiresAt: new Date(Date.now() + 10_000).toISOString() });
     await createIntent(doObj, intent);
     await doFetch(doObj, 'transition', { method: 'POST', body: { intentId: intent.intentId, to: 'PREPARED', expectedVersion: 1 } });
-    await doFetch(doObj, 'reserve-nonce', { method: 'POST', body: { intentId: intent.intentId, nonce: '424242', expectedVersion: 2 } });
+    await doFetch(doObj, 'reserve-nonce', { method: 'POST', body: { intentId: intent.intentId, nonce: nonce(0x67932), expectedVersion: 2 } });
 
     // Simulate wall-clock advancing past expiresAt (trusted server clock only).
     const stored = state._store.get('intent:' + intent.intentId);
@@ -520,14 +534,14 @@ describe('X402IntentStore — expiration & recovery', () => {
     await doObj.alarm();
 
     // The nonce:424242 reservation must still exist (retained, NOT released).
-    const nonceKey = [String(intent.chainId), intent.assetAddress.toLowerCase(), intent.walletAddress.toLowerCase(), '424242'].join(':');
+    const nonceKey = [String(intent.chainId), intent.assetAddress.toLowerCase(), intent.walletAddress.toLowerCase(), nonce(0x67932)].join(':');
     expect(state._store.has('nonce:' + nonceKey)).toBe(true);
 
     // A second intent cannot now grab that nonce (still reserved).
     const other = makeIntent({ idempotencyKey: 'key-other-123', expiresAt: new Date(Date.now() + 60_000).toISOString() });
     await createIntent(doObj, other);
     await doFetch(doObj, 'transition', { method: 'POST', body: { intentId: other.intentId, to: 'PREPARED', expectedVersion: 1 } });
-    const resp = await doFetch(doObj, 'reserve-nonce', { method: 'POST', body: { intentId: other.intentId, nonce: '424242', expectedVersion: 2 } });
+    const resp = await doFetch(doObj, 'reserve-nonce', { method: 'POST', body: { intentId: other.intentId, nonce: nonce(0x67932), expectedVersion: 2 } });
     expect(resp.status).toBe(409);
   });
 
@@ -543,18 +557,147 @@ describe('X402IntentStore — expiration & recovery', () => {
   });
 });
 
-describe('X402IntentStore — cross-user isolation (sharding)', () => {
-  it('two DO instances (different users) do not share idempotency or nonce state', async () => {
+describe('X402IntentStore — cross-wallet isolation (sharding)', () => {
+  it('two DO instances (different wallets) do not share idempotency or nonce state', async () => {
     const a = makeDO();
     const b = makeDO();
-    const intentA = makeIntent({ userId: 'user-A' });
-    const intentB = makeIntent({ userId: 'user-B', idempotencyKey: intentA.idempotencyKey });
+    // Sharding boundary is the wallet address (authoritative nonce namespace).
+    const intentA = makeIntent({ walletAddress: '0x' + 'ab'.repeat(20) });
+    const intentB = makeIntent({ walletAddress: '0x' + 'ef'.repeat(20), idempotencyKey: intentA.idempotencyKey });
 
     const ra = await createIntent(a.doObj, intentA);
     const rb = await createIntent(b.doObj, intentB);
-    // Same idempotency key but different users → both create successfully.
+    // Same idempotency key but different wallets → both create successfully.
     expect(ra.resp.status).toBe(201);
     expect(rb.resp.status).toBe(201);
     expect(ra.body.intent.intentId).not.toBe(rb.body.intent.intentId);
+  });
+});
+
+describe('X402IntentStore — trusted internal /authorize', () => {
+  // Drive an intent to AWAITING_AUTHORIZATION with a reserved bytes32 nonce.
+  async function preparedIntent(doObj) {
+    const intent = makeIntent({ walletAddress: testSignerAddress() });
+    await createIntent(doObj, intent);
+    await doFetch(doObj, 'transition', { method: 'POST', body: { intentId: intent.intentId, to: 'PREPARED', expectedVersion: 1 } });
+    const reserved = await doFetch(doObj, 'reserve-nonce', { method: 'POST', body: { intentId: intent.intentId, nonce: nonce(0xabc), expectedVersion: 2 } });
+    const reservedBody = await bodyOf(reserved);
+    return reservedBody.intent; // AWAITING_AUTHORIZATION with the reserved nonce
+  }
+
+  async function signFor(intent) {
+    const wallet = new Wallet(TEST_PK);
+    const td = buildTransferWithAuthorization({
+      from: intent.walletAddress,
+      to: intent.payTo,
+      value: intent.amountAtomic,
+      validAfter: '0',
+      validBefore: '9999999999',
+      nonce: intent.authorizationNonce,
+    });
+    const signature = await wallet.signTypedData(td.domain, TRANSFER_WITH_AUTHORIZATION_TYPES, td.value);
+    return { td, signature };
+  }
+
+  it('authorizes a valid signature and persists AUTHORIZED + metadata', async () => {
+    const { doObj } = makeDO();
+    const intent = await preparedIntent(doObj);
+    const { td, signature } = await signFor(intent);
+
+    const resp = await doFetch(doObj, 'authorize', { method: 'POST', body: {
+      intentId: intent.intentId, expectedVersion: 3,
+      authorization: { from: td.value.from, to: td.value.to, value: td.value.value, validAfter: '0', validBefore: '9999999999', nonce: td.value.nonce, signature },
+    } });
+    expect(resp.status).toBe(200);
+    const body = await bodyOf(resp);
+    expect(body.intent.state).toBe('AUTHORIZED');
+    expect(body.intent.stateVersion).toBe(4);
+    expect(body.intent.authorizedAt).toBeTruthy();
+    expect(body.intent.authorizationSignature).toBe(signature);
+    expect(body.intent.authorizationValidAfter).toBe('0');
+    expect(body.intent.authorizationValidBefore).toBe('9999999999');
+  });
+
+  it('rejects a stale stateVersion (409)', async () => {
+    const { doObj } = makeDO();
+    const intent = await preparedIntent(doObj);
+    const { td, signature } = await signFor(intent);
+    const resp = await doFetch(doObj, 'authorize', { method: 'POST', body: {
+      intentId: intent.intentId, expectedVersion: 2, // stale (current is 3)
+      authorization: { from: td.value.from, to: td.value.to, value: td.value.value, validAfter: '0', validBefore: '9999999999', nonce: td.value.nonce, signature },
+    } });
+    const body = await bodyOf(resp);
+    expect(resp.status).toBe(409);
+    expect(body.error).toBe('stale_version');
+  });
+
+  it('rejects a nonce mismatch (signed nonce ≠ reserved nonce)', async () => {
+    const { doObj } = makeDO();
+    const intent = await preparedIntent(doObj);
+    const { td } = await signFor(intent);
+    const resp = await doFetch(doObj, 'authorize', { method: 'POST', body: {
+      intentId: intent.intentId, expectedVersion: 3,
+      authorization: { from: td.value.from, to: td.value.to, value: td.value.value, validAfter: '0', validBefore: '9999999999', nonce: nonce(0xdef), signature: '0x' + '11'.repeat(65) },
+    } });
+    const body = await bodyOf(resp);
+    expect(resp.status).toBe(409);
+    expect(body.error).toBe('nonce_mismatch');
+  });
+
+  it('rejects an amount mismatch (signed value ≠ intent amount)', async () => {
+    const { doObj } = makeDO();
+    const intent = await preparedIntent(doObj);
+    const { td, signature } = await signFor(intent);
+    const resp = await doFetch(doObj, 'authorize', { method: 'POST', body: {
+      intentId: intent.intentId, expectedVersion: 3,
+      authorization: { from: td.value.from, to: td.value.to, value: '999999999', validAfter: '0', validBefore: '9999999999', nonce: td.value.nonce, signature },
+    } });
+    const body = await bodyOf(resp);
+    expect(resp.status).toBe(409);
+    expect(body.error).toBe('amount_mismatch');
+  });
+
+  it('rejects authorizing before AWAITING_AUTHORIZATION (invalid_transition)', async () => {
+    const { doObj } = makeDO();
+    const intent = makeIntent({ walletAddress: testSignerAddress() });
+    await createIntent(doObj, intent); // state CREATED
+    const resp = await doFetch(doObj, 'authorize', { method: 'POST', body: {
+      intentId: intent.intentId, expectedVersion: 1,
+      authorization: { from: intent.walletAddress, to: intent.payTo, value: intent.amountAtomic, validAfter: '0', validBefore: '9999999999', nonce: nonce(0xabc), signature: '0x' + '11'.repeat(65) },
+    } });
+    const body = await bodyOf(resp);
+    expect(resp.status).toBe(400);
+    expect(body.error).toBe('invalid_transition');
+  });
+
+  it('is idempotent on re-entry with the identical signature', async () => {
+    const { doObj } = makeDO();
+    const intent = await preparedIntent(doObj);
+    const { td, signature } = await signFor(intent);
+    const authBody = { intentId: intent.intentId, expectedVersion: 3, authorization: { from: td.value.from, to: td.value.to, value: td.value.value, validAfter: '0', validBefore: '9999999999', nonce: td.value.nonce, signature } };
+    await doFetch(doObj, 'authorize', { method: 'POST', body: authBody });
+    const again = await doFetch(doObj, 'authorize', { method: 'POST', body: authBody });
+    const body = await bodyOf(again);
+    expect(again.status).toBe(200);
+    expect(body.idempotent).toBe(true);
+    expect(body.intent.stateVersion).toBe(4); // no double increment
+  });
+
+  it('does NOT auto-expire an AUTHORIZED (signed) intent', async () => {
+    const { doObj } = makeDO();
+    const intent = await preparedIntent(doObj);
+    const { td, signature } = await signFor(intent);
+    await doFetch(doObj, 'authorize', { method: 'POST', body: {
+      intentId: intent.intentId, expectedVersion: 3,
+      authorization: { from: td.value.from, to: td.value.to, value: td.value.value, validAfter: '0', validBefore: '9999999999', nonce: td.value.nonce, signature },
+    } });
+    // Force the expiresAt into the past and run the alarm: a signed intent must stay AUTHORIZED.
+    const store = doObj.storage;
+    const stored = await store.get('intent:' + intent.intentId);
+    stored.expiresAt = new Date(Date.now() - 1000).toISOString();
+    await store.put('intent:' + intent.intentId, stored);
+    await doObj.alarm();
+    const after = await bodyOf(await doFetch(doObj, 'intent?id=' + intent.intentId));
+    expect(after.intent.state).toBe('AUTHORIZED');
   });
 });

@@ -551,5 +551,5 @@ export {
   W3S_BASE, CHAIN_RPC, getCredentials, isConfigured, corsHeaders, json, err,
   createContractExecution, fetchNonce, getTransaction, getReceipt, CANONICAL_CIRCLE_WALLET,
   mapStructuredRequest, isKnownContract, isAddress, SIGN_ALLOWLIST, KNOWN_CONTRACTS,
-  createUserWallet, getUserCredentials,
+  createUserWallet, getUserCredentials, encryptEntitySecret,
 };

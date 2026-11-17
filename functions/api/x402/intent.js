@@ -38,6 +38,7 @@ import {
   doCreateIntent,
   doGetIntent,
   doTransition,
+  redactIntent,
   intentTtlSeconds,
   IDEMPOTENCY_KEY_RE,
 } from './intent-service.mjs';
@@ -114,7 +115,7 @@ async function handleCreate(env, request) {
     ttlSeconds: intentTtlSeconds(env),
   });
 
-  const res = await doCreateIntent(env, auth.userId, record, requestDigest);
+  const res = await doCreateIntent(env, auth.walletAddress, record, requestDigest);
   if (!res.ok) {
     if (res.status === 409 && res.detail && res.detail.existingIntentId) {
       return err('idempotencyKey already used for a different payment request', 409, { code: 'idempotency_conflict' });
@@ -123,19 +124,19 @@ async function handleCreate(env, request) {
     return err(res.error || 'intent persistence unavailable', res.status || 503, { code: res.error });
   }
 
-  return json({ ok: true, idempotent: !res.body.created, intent: res.body.intent });
+  return json({ ok: true, idempotent: !res.body.created, intent: redactIntent(res.body.intent) });
 }
 
 async function handleGet(env, request, intentId) {
   const auth = await resolveUserWallet(env, request);
   if (!auth.authed) return err('Unauthorized: ' + auth.reason, auth.status || 401);
 
-  const res = await doGetIntent(env, auth.userId, intentId);
+  const res = await doGetIntent(env, auth.walletAddress, auth.userId, intentId);
   if (!res.ok) {
     if (res.status === 404) return err('intent not found', 404, { code: 'not_found' });
     return err(res.error || 'intent persistence unavailable', res.status || 503, { code: res.error });
   }
-  return json({ ok: true, intent: res.body.intent });
+  return json({ ok: true, intent: redactIntent(res.body.intent) });
 }
 
 async function handlePrepare(env, request, intentId) {
@@ -149,7 +150,7 @@ async function handlePrepare(env, request, intentId) {
     return err('expectedVersion (integer ≥ 1) is required', 400, { code: 'invalid_version' });
   }
 
-  const res = await doTransition(env, auth.userId, intentId, 'PREPARED', expectedVersion);
+  const res = await doTransition(env, auth.walletAddress, auth.userId, intentId, 'PREPARED', expectedVersion);
   return mapTransitionResult(res);
 }
 
@@ -164,7 +165,7 @@ async function handleCancel(env, request, intentId) {
     return err('expectedVersion (integer ≥ 1) is required', 400, { code: 'invalid_version' });
   }
 
-  const res = await doTransition(env, auth.userId, intentId, 'CANCELLED', expectedVersion);
+  const res = await doTransition(env, auth.walletAddress, auth.userId, intentId, 'CANCELLED', expectedVersion);
   return mapTransitionResult(res);
 }
 
@@ -183,7 +184,7 @@ function mapTransitionResult(res) {
     }
     return err(res.error || 'intent persistence unavailable', res.status || 503, { code: res.error });
   }
-  return json({ ok: true, idempotent: !!res.body.idempotent, intent: res.body.intent });
+  return json({ ok: true, idempotent: !!res.body.idempotent, intent: redactIntent(res.body.intent) });
 }
 
 /* ── Main handler ────────────────────────────────────────────────────── */

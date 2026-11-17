@@ -72,12 +72,13 @@ const TERMINAL_STATES = new Set(['EXPIRED', 'CANCELLED', 'SETTLED', 'FAILED']);
 // submitted intent is NEVER auto-expired — see §10).
 const ACTIVE_UNSIGNED = new Set(['CREATED', 'PREPARED', 'AWAITING_AUTHORIZATION']);
 
-// Allowlisted transitions (source of truth). Future financial states have NO
-// outgoing transitions here — they are reserved and unreachable in this phase.
+// Allowlisted transitions (source of truth). AUTHORIZED is reachable ONLY via the
+// trusted internal /authorize action (signature-verified). SETTLED / FAILED /
+// SUBMITTING / SETTLEMENT_UNKNOWN remain reserved and unreachable in this phase.
 const VALID_TRANSITIONS = Object.freeze({
   CREATED:                ['PREPARED', 'CANCELLED', 'EXPIRED'],
   PREPARED:               ['AWAITING_AUTHORIZATION', 'CANCELLED', 'EXPIRED'],
-  AWAITING_AUTHORIZATION: ['CANCELLED', 'EXPIRED'],
+  AWAITING_AUTHORIZATION: ['AUTHORIZED', 'CANCELLED', 'EXPIRED'],
   EXPIRED:                [],
   CANCELLED:              [],
   AUTHORIZED:             [],
@@ -97,9 +98,9 @@ const KEY_IDEM   = 'idem:';
 const KEY_NONCE  = 'nonce:';
 const KEY_INDEX  = 'index:intents';
 
-// Nonce is an EIP-3009 authorization identifier (uint256). Canonical form is a
-// decimal string of at most 78 digits (2^256 ≈ 1.15e77).
-const NONCE_RE = /^\d{1,78}$/;
+// EIP-3009 authorization nonce is a `bytes32`. Canonical form is lowercase hex
+// `0x` + exactly 64 hex characters (no sign, no decimal, no truncation).
+const NONCE_RE = /^0x[0-9a-fA-F]{64}$/;
 // Intent id is a UUID v4 string.
 const INTENT_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // Idempotency key: printable, no whitespace/control chars, bounded length.
@@ -147,7 +148,7 @@ export class X402IntentStore {
     }
 
     const url = new URL(request.url);
-    const path = url.pathname.replace(/\/+$/, ''); // e.g. /create | /intent | /transition | /reserve-nonce
+    const path = url.pathname.replace(/\/+$/, ''); // e.g. /create | /intent | /transition | /reserve-nonce | /authorize
 
     try {
       return await this.state.blockConcurrencyWhile(async () => {
@@ -162,6 +163,9 @@ export class X402IntentStore {
         }
         if (request.method === 'POST' && path === '/reserve-nonce') {
           return this._reserveNonce(request);
+        }
+        if (request.method === 'POST' && path === '/authorize') {
+          return this._authorize(request);
         }
         return X402IntentStore.json({ error: 'not_found' }, 404);
       });
@@ -256,6 +260,7 @@ export class X402IntentStore {
     if (typeof intent.expiresAt !== 'string' || !Number.isFinite(Date.parse(intent.expiresAt))) return 'invalid_expiry';
     // Future financial fields must be inactive (null) at creation time.
     if (intent.transactionHash !== null || intent.settlementStatus !== null) return 'invalid_terminal_fields';
+    if (intent.authorizationSignature !== null) return 'invalid_terminal_fields';
     return null;
   }
 
@@ -338,6 +343,7 @@ export class X402IntentStore {
     if (!INTENT_ID_RE.test(String(intentId || ''))) return X402IntentStore.json({ error: 'invalid_intent_id' }, 400);
     if (typeof nonce !== 'string' || !NONCE_RE.test(nonce)) return X402IntentStore.json({ error: 'invalid_nonce' }, 400);
     if (!Number.isInteger(expectedVersion) || expectedVersion < 1) return X402IntentStore.json({ error: 'invalid_version' }, 400);
+    const canonicalNonce = nonce.toLowerCase(); // normalize casing (bytes32 hex)
 
     const outcome = await this.storage.transaction(async (txn) => {
       const intent = await txn.get(KEY_INTENT + intentId);
@@ -347,7 +353,7 @@ export class X402IntentStore {
       if (expiredNow) return { status: 409, body: { ok: false, error: 'intent_expired', intent: expiredNow } };
 
       // Idempotent: same intent already reserved this nonce.
-      if (intent.state === STATES.AWAITING_AUTHORIZATION && intent.authorizationNonce === nonce) {
+      if (intent.state === STATES.AWAITING_AUTHORIZATION && intent.authorizationNonce === canonicalNonce) {
         return { status: 200, body: { ok: true, idempotent: true, intent } };
       }
 
@@ -360,7 +366,7 @@ export class X402IntentStore {
       }
 
       // Authoritative nonce namespace: (chainId, token, wallet, nonce).
-      const nonceKey = [String(intent.chainId), intent.assetAddress.toLowerCase(), intent.walletAddress.toLowerCase(), nonce].join(':');
+      const nonceKey = [String(intent.chainId), intent.assetAddress.toLowerCase(), intent.walletAddress.toLowerCase(), canonicalNonce].join(':');
       const existingNonce = await txn.get(KEY_NONCE + nonceKey);
       if (existingNonce) {
         if (existingNonce.intentId === intentId) {
@@ -374,9 +380,97 @@ export class X402IntentStore {
       const updated = {
         ...intent,
         state: STATES.AWAITING_AUTHORIZATION,
-        authorizationNonce: nonce,
+        authorizationNonce: canonicalNonce,
         stateVersion: intent.stateVersion + 1,
         updatedAt: iso(now),
+      };
+      await txn.put(KEY_INTENT + intentId, updated);
+      return { status: 200, body: { ok: true, intent: updated } };
+    });
+
+    return X402IntentStore.json(outcome.body, outcome.status);
+  }
+
+  /* ── POST /authorize (trusted internal — signature-verified) ────────── */
+  // Only the trusted service (DO_INTERNAL_SECRET) may call this. It persists an
+  // already-locally-verified EIP-712 authorization and atomically transitions
+  // AWAITING_AUTHORIZATION → AUTHORIZED, re-binding the signed terms to the
+  // persisted intent. No client can set AUTHORIZED.
+  async _authorize(request) {
+    let body;
+    try { body = await request.json(); } catch (_) {
+      return X402IntentStore.json({ error: 'invalid_json' }, 400);
+    }
+    const { intentId, expectedVersion, authorization } = body || {};
+    if (!INTENT_ID_RE.test(String(intentId || ''))) return X402IntentStore.json({ error: 'invalid_intent_id' }, 400);
+    if (!Number.isInteger(expectedVersion) || expectedVersion < 1) return X402IntentStore.json({ error: 'invalid_version' }, 400);
+    if (!authorization || typeof authorization !== 'object') return X402IntentStore.json({ error: 'authorization_required' }, 400);
+
+    const sig = authorization.signature;
+    const nonce = authorization.nonce;
+    const validAfter = authorization.validAfter;
+    const validBefore = authorization.validBefore;
+    // 65-byte EIP-712 signature (r||s||v) = 130 hex chars.
+    if (typeof sig !== 'string' || !/^0x[0-9a-fA-F]{130}$/.test(sig)) return X402IntentStore.json({ error: 'invalid_signature' }, 400);
+    if (typeof nonce !== 'string' || !NONCE_RE.test(nonce)) return X402IntentStore.json({ error: 'invalid_nonce' }, 400);
+    if (typeof validAfter !== 'string' || !/^\d{1,78}$/.test(validAfter)) return X402IntentStore.json({ error: 'invalid_valid_after' }, 400);
+    if (typeof validBefore !== 'string' || !/^\d{1,78}$/.test(validBefore)) return X402IntentStore.json({ error: 'invalid_valid_before' }, 400);
+
+    const outcome = await this.storage.transaction(async (txn) => {
+      const intent = await txn.get(KEY_INTENT + intentId);
+      if (!intent) return { status: 404, body: { ok: false, error: 'not_found' } };
+
+      const expiredNow = this._maybeExpire(txn, intent);
+      if (expiredNow) return { status: 409, body: { ok: false, error: 'intent_expired', intent: expiredNow } };
+
+      // Idempotent re-entry: already authorized with the identical signature.
+      if (intent.state === STATES.AUTHORIZED && intent.authorizationSignature === sig) {
+        return { status: 200, body: { ok: true, idempotent: true, intent } };
+      }
+
+      const allowed = VALID_TRANSITIONS[intent.state] || [];
+      if (!allowed.includes(STATES.AUTHORIZED)) {
+        return { status: 400, body: { ok: false, error: 'invalid_transition', from: intent.state, to: STATES.AUTHORIZED, allowed } };
+      }
+      if (intent.stateVersion !== expectedVersion) {
+        return { status: 409, body: { ok: false, error: 'stale_version', current: intent.stateVersion, expected: expectedVersion } };
+      }
+
+      // Binding: signed terms MUST equal the persisted intent (immutable terms).
+      const canonNonce = nonce.toLowerCase();
+      if (intent.authorizationNonce !== canonNonce) {
+        return { status: 409, body: { ok: false, error: 'nonce_mismatch' } };
+      }
+      if (String(intent.amountAtomic) !== String(authorization.value)) {
+        return { status: 409, body: { ok: false, error: 'amount_mismatch' } };
+      }
+      if (String(intent.payTo).toLowerCase() !== String(authorization.to).toLowerCase()) {
+        return { status: 409, body: { ok: false, error: 'payto_mismatch' } };
+      }
+      if (String(intent.walletAddress).toLowerCase() !== String(authorization.from).toLowerCase()) {
+        return { status: 409, body: { ok: false, error: 'from_mismatch' } };
+      }
+
+      // Validity-window sanity (server clock; no silent conversion).
+      let va, vb;
+      try { va = BigInt(validAfter); vb = BigInt(validBefore); } catch (_) {
+        return { status: 400, body: { ok: false, error: 'invalid_validity_window' } };
+      }
+      if (va > vb) return { status: 400, body: { ok: false, error: 'invalid_validity_window' } };
+      const nowSec = BigInt(Math.floor(Date.now() / 1000));
+      if (vb < nowSec) return { status: 400, body: { ok: false, error: 'authorization_expired' } };
+
+      const now = Date.now();
+      const updated = {
+        ...intent,
+        state: STATES.AUTHORIZED,
+        stateVersion: intent.stateVersion + 1,
+        updatedAt: iso(now),
+        authorizedAt: iso(now),
+        authorizationNonce: canonNonce,
+        authorizationSignature: sig,
+        authorizationValidAfter: validAfter,
+        authorizationValidBefore: validBefore,
       };
       await txn.put(KEY_INTENT + intentId, updated);
       return { status: 200, body: { ok: true, intent: updated } };

@@ -343,6 +343,23 @@ describe('/api/x402/intent — HTTP routes (gated, real DO)', () => {
     expect(res.status).toBe(404);
   });
 
+  it('defends cross-user access even if two users reference the SAME wallet', async () => {
+    const env = makeEnv();
+    const created = await jsonOf(await onIntentRequest({ request: req('/api/x402/intent', { method: 'POST', body: { resourceUrl: 'https://api.example.com/x', requirement: ARC_REQ, idempotencyKey: 'key-http-1234' } }), env }));
+
+    // A different user whose session resolves to the SAME wallet address as user A
+    // (edge case: wallet→user uniqueness is not assumed). Ownership is re-checked
+    // against the intent's userId, so the read must still be denied.
+    const tokenC = '2'.repeat(40);
+    const envC = makeEnv();
+    envC.AUTH_KV = makeKV({
+      ['session:' + tokenC]: JSON.stringify({ userId: 'user-3333', email: 'carol@example.com' }),
+      ['user:carol@example.com']: JSON.stringify({ id: 'user-3333', circleWalletId: 'w1', circleWalletAddress: PAYER }), // same wallet as user A
+    });
+    const res = await onIntentRequest({ request: req('/api/x402/intent/' + created.intent.intentId, { token: tokenC }), env: envC });
+    expect(res.status).toBe(404);
+  });
+
   it('rejects when wallet is not provisioned (400 wallet_not_provisioned)', async () => {
     const env = makeEnv();
     // Session exists but user record has no wallet.
