@@ -316,10 +316,23 @@
       });
       if (!res.ok) return null;
       var data = await res.json();
-      if (!data || !Array.isArray(data.assets)) return null;
-      var asset = data.assets.find(function(a){ return a.token === token; });
-      if (!asset || !Array.isArray(asset.balances)) return null;
-      var row = asset.balances.find(function(b){ return b.domain === domain; });
+      if (!data || typeof data !== 'object') return null;
+
+      // P0.6 — the /api/gateway/balances proxy returns a per-token map:
+      //   { USDC:[{domain,domainName,balance},...], EURC:[...], cirBTC:[...] }
+      // Historically this client expected { assets:[{token,balances:[...]}] }.
+      // Accept BOTH shapes so the balance check never silently fails on a shape
+      // mismatch (a failed parse returns null → the caller blocks the send).
+      var rows = null;
+      if (Array.isArray(data.assets)) {
+        var asset = data.assets.find(function(a){ return a.token === token; });
+        rows = asset && Array.isArray(asset.balances) ? asset.balances : null;
+      } else if (Array.isArray(data[token])) {
+        rows = data[token];
+      }
+      if (!rows) return null;
+
+      var row = rows.find(function(b){ return Number(b.domain) === Number(domain); });
       return row ? String(row.balance) : '0';
     } catch(e) {
       return null;
@@ -600,6 +613,56 @@
     }
   }
 
+  /**
+   * P0.2 — Verify a Circle /v1/transfer response's echoed BurnIntent corresponds
+   * to the submitted BurnIntent. The response echoes the intent; its salt (the
+   * unique operation identifier, committed by the EIP-712 signature) MUST match,
+   * and every other authorization-critical field must match too. This prevents
+   * minting an attestation that belongs to a DIFFERENT intent (e.g. a mismatched
+   * Circle/malicious response swapped the attestation).
+   *
+   * Throws (fatal) on a detected mismatch. No-op when the response does not echo
+   * the intent (opaque attestation) — the server /confirm re-verifies the salt
+   * on-chain in that case.
+   */
+  function verifyEchoedBurnIntent(echoed, submitted) {
+    if (!echoed || !submitted) return;
+    var es = echoed.spec || {};
+    var ss = submitted.spec || {};
+
+    function canon(v) {
+      if (v == null) return '';
+      if (typeof v === 'bigint') return v.toString();
+      return String(v).toLowerCase();
+    }
+
+    var fields = [
+      'salt',
+      'sourceDomain',
+      'destinationDomain',
+      'sourceContract',
+      'destinationContract',
+      'sourceToken',
+      'destinationToken',
+      'sourceDepositor',
+      'destinationRecipient',
+      'sourceSigner',
+      'destinationCaller',
+      'value',
+    ];
+    var mismatches = [];
+    for (var i = 0; i < fields.length; i++) {
+      var f = fields[i];
+      if (canon(es[f]) !== canon(ss[f])) mismatches.push(f);
+    }
+    if (mismatches.length) {
+      throw Object.assign(
+        new Error('attestation_intent_mismatch: ' + mismatches.join(',')),
+        { fatal:true, mismatches }
+      );
+    }
+  }
+
   // ── prepare() — validate + balance check + fee preview ───────────────────────
 
   /**
@@ -828,9 +891,11 @@
       // ── Step 6: Extract attestation ────────────────────────────────────────
       var attestationPayload = null;
       var attestationSig     = null;
+      var echoedBurnIntent   = null;
 
       if (Array.isArray(transferRes) && transferRes.length > 0) {
         var firstRes = transferRes[0];
+        echoedBurnIntent = firstRes && firstRes.burnIntent ? firstRes.burnIntent : null;
         if (firstRes && firstRes.attestation) {
           attestationPayload = firstRes.attestation.payload
                             || firstRes.attestation.attestationPayload;
@@ -851,6 +916,12 @@
       if (!attestationPayload || !attestationSig) {
         throw Object.assign(new Error('invalid_attestation_response'), { fatal:true });
       }
+
+      // ── Step 6b: P0.2 — bind the attestation to THIS BurnIntent ────────────
+      // If Circle echoes the intent back, its salt (and every other critical
+      // field) MUST equal the submitted intent. This prevents minting an
+      // attestation that belongs to a different operation.
+      verifyEchoedBurnIntent(echoedBurnIntent, burnIntent);
 
       // ── Step 7: Call GatewayMinter.gatewayMint on destination ──────────────
       emit(STATE.AWAITING_MINT, { attestationPayload, salt });
@@ -1022,6 +1093,7 @@
     domainOf,
     decOf,
     maxFeeFor,
+    verifyEchoedBurnIntent,
     queryGatewaySalt,
     patchGatewaySalt,
     confirmGatewaySalt,
