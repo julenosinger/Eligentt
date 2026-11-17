@@ -28,15 +28,35 @@ function padBytes32(hex) {
 
 /**
  * Pure classification of a reconciliation recommendation given the attempt,
- * provider status and on-chain authorization-consumed flag.
+ * provider status, on-chain authorization-consumed flag and (optional) verified
+ * transaction receipt.
  * Returns `{ state, evidence }`.
  */
-export function evaluateReconciliation(attempt, providerStatus, onChainAuthorizationUsed) {
+export function evaluateReconciliation(attempt, providerStatus, onChainAuthorizationUsed, transactionReceipt) {
   if (!attempt) return { state: null, evidence: null };
 
   // Terminal states are not re-evaluated.
   if (attempt.state === SETTLEMENT_STATES.SETTLED || attempt.state === SETTLEMENT_STATES.FAILED) {
     return { state: attempt.state, evidence: null };
+  }
+
+  // A verified on-chain receipt is authoritative evidence.
+  if (transactionReceipt && transactionReceipt.status === 1) {
+    return {
+      state: SETTLEMENT_STATES.SETTLED,
+      evidence: {
+        classification: 'confirmed',
+        transactionHash: transactionReceipt.transactionHash || null,
+        finality: transactionReceipt.confirmations >= 1 ? 'confirmed' : 'pending',
+      },
+    };
+  }
+  // A reverted transaction is a definitive failure.
+  if (transactionReceipt && transactionReceipt.status === 0) {
+    return {
+      state: SETTLEMENT_STATES.FAILED,
+      evidence: { classification: 'definitive_rejection', transactionHash: transactionReceipt.transactionHash || null, reverted: true },
+    };
   }
 
   // Provider-confirmed settlement → SETTLED (authoritative transaction reference).
@@ -58,6 +78,11 @@ export function evaluateReconciliation(attempt, providerStatus, onChainAuthoriza
       state: SETTLEMENT_STATES.FAILED,
       evidence: { classification: 'definitive_rejection', providerReference: providerStatus.reference || providerStatus.id || null },
     };
+  }
+
+  // Pending provider / transaction status is not terminal.
+  if (providerStatus && (providerStatus.status === 'pending' || providerStatus.status === 'submitted')) {
+    return { state: SETTLEMENT_STATES.SETTLEMENT_UNKNOWN, evidence: { classification: 'ambiguous' } };
   }
 
   // Authorization consumed on-chain WITHOUT a provider-confirmed recipient is
