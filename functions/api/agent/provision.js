@@ -80,11 +80,24 @@ export async function onRequest({ request, env }) {
     });
   }
 
-  // Provision new Circle wallet
+  // Provision new Circle wallet — serialized per-user so concurrent requests
+  // (double-click, multi-tab, OTP + explicit provision race, CF retry) cannot
+  // create two wallets. The KV lock is best-effort serialization; the
+  // deterministic Circle idempotency key in createUserWallet (derived from
+  // user.id) is the authoritative dedupe — together they guarantee one logical
+  // wallet per user.
+  const lockKey = 'provision_lock:' + user.id;
+  const inFlight = await KV.get(lockKey);
+  if (inFlight) {
+    return json({ ok: false, error: 'Wallet provisioning already in progress', inProgress: true }, 409);
+  }
+  await KV.put(lockKey, JSON.stringify({ startedAt: Date.now() }), { expirationTtl: 60 });
+
   let circleWallet;
   try {
     circleWallet = await createUserWallet(env, user.id);
   } catch (e) {
+    await KV.delete(lockKey).catch(() => {});
     console.error('[provision] Circle wallet creation failed:', e && e.message);
     return json({ ok: false, error: 'Circle wallet provisioning failed: ' + (e && e.message) }, 502);
   }
@@ -95,8 +108,10 @@ export async function onRequest({ request, env }) {
   try {
     await KV.put('user:' + session.email, JSON.stringify(user));
   } catch (e) {
+    await KV.delete(lockKey).catch(() => {});
     return json({ ok: false, error: 'Failed to save wallet: ' + (e && e.message) }, 500);
   }
+  await KV.delete(lockKey).catch(() => {});
 
   console.log('[provision] Circle wallet provisioned for user:', user.id, circleWallet.walletId);
 
