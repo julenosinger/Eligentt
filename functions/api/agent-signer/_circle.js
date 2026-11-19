@@ -468,7 +468,12 @@ async function createUserWallet(env, userId, userEmail) {
   if (!resolvedWalletSetId) {
     const wsCiphertext = await encryptEntitySecret(env); // fresh per request
     const wsBody = {
-      idempotencyKey: randomUUID(),          // fresh UUID v4 per Circle spec
+      // DETERMINISTIC idempotency key derived from the user id: concurrent or
+      // retried provisioning requests resolve to the SAME wallet set at Circle
+      // (idempotent dedupe), so a double-click / multi-tab / OTP race cannot
+      // create duplicate wallet sets. The entitySecretCiphertext stays fresh
+      // (RSA-OAEP is randomized) — dedupe is keyed on idempotencyKey only.
+      idempotencyKey: await deterministicUUID('elligentt:provision-walletset:' + userId),
       entitySecretCiphertext: wsCiphertext,
       name: 'Elligentt',
     };
@@ -495,7 +500,10 @@ async function createUserWallet(env, userId, userEmail) {
   // blockchain: "ARC" = Arc Mainnet (chain id 5042). "ARC-TESTNET" for testnet.
   const walletCiphertext = await encryptEntitySecret(env);
   const walletBody = {
-    idempotencyKey: randomUUID(),            // fresh UUID v4 per Circle spec
+    // DETERMINISTIC idempotency key derived from the user id — concurrent or
+    // retried requests resolve to the SAME per-user wallet at Circle (dedupe),
+    // guaranteeing "one logical Circle wallet per user".
+    idempotencyKey: await deterministicUUID('elligentt:provision-wallet:' + userId),
     entitySecretCiphertext: walletCiphertext,
     accountType: 'EOA',
     walletSetId: resolvedWalletSetId,

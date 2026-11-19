@@ -7029,12 +7029,12 @@ select.cinput option { background: #161a24; color: #dde2f0; }
         <div class="auth-success-card">
           <div class="auth-success-icon"><i class="ti ti-circle-check"></i></div>
           <div style="font-size:14px;font-weight:800;color:#dde2f0" id="auth-success-title">Account Created</div>
-          <div style="font-size:10px;color:#8892aa;margin-top:4px" id="auth-success-sub">Your Intelligent Wallet is ready</div>
+          <div style="font-size:10px;color:#8892aa;margin-top:4px" id="auth-success-sub">Account ready</div>
         </div>
         <div class="auth-wallet-card">
           <div class="auth-wallet-row"><span class="label">Wallet Address</span><span class="value purple" id="auth-success-addr">—</span></div>
           <div class="auth-wallet-row"><span class="label">Network</span><span class="value green">Arc Mainnet</span></div>
-          <div class="auth-wallet-row"><span class="label">Type</span><span class="value purple">Internal Smart Wallet</span></div>
+          <div class="auth-wallet-row"><span class="label">Type</span><span class="value purple">—</span></div>
           <div class="auth-wallet-row"><span class="label">Account</span><span class="value" id="auth-success-email">—</span></div>
         </div>
         <button class="auth-btn primary" onclick="authFinish()"><i class="ti ti-arrow-right"></i> Continue to App</button>
@@ -40810,12 +40810,17 @@ async function saExecGateway() {
     // ── Gateway contract addresses (same on all EVM chains) ──────────────────
     var GW_WALLET_ADDR  = '0x77777777dcc4d5a8b6e418fd04d8997ef11000ee'; // GatewayWallet
     var GW_MINTER_ADDR  = '0x2222222d7164433c4c09b0b0d809a9b52c04c205'; // GatewayMinter
-    var GW_API_BASE     = 'https://gateway-api.circle.com'; // mainnet
-    // For testnet chains (Arc Testnet, Sepolia, Fuji, Amoy, OP Sepolia, etc.) use:
+    // For testnet chains (Arc Testnet, Sepolia, Fuji, Amoy, OP Sepolia, etc.) the
+    // request goes DIRECTLY to the Circle testnet API (dev only, no real funds).
+    // For MAINNET the request MUST go through the protected Cloudflare proxy
+    // (/api/gateway/transfer) so the Durable Object salt reservation and replay
+    // protection run BEFORE Circle submission. A direct client submission to the
+    // mainnet Circle API would bypass the salt lock — prohibited.
     var GW_TESTNET_CHAINS = [2999, 11155111, 84532, 421614, 11155420, 80002, 43113, 713715];
-    if (GW_TESTNET_CHAINS.indexOf(chainId) !== -1 || GW_TESTNET_CHAINS.indexOf(destChainId) !== -1) {
-      GW_API_BASE = 'https://gateway-api-testnet.circle.com';
-    }
+    var _gwIsTestnet = GW_TESTNET_CHAINS.indexOf(chainId) !== -1 || GW_TESTNET_CHAINS.indexOf(destChainId) !== -1;
+    var _gwTransferUrl = _gwIsTestnet
+      ? 'https://gateway-api-testnet.circle.com/v1/transfer'
+      : '/api/gateway/transfer';
 
     var tokenMap = GW_TOKENS[asset];
     if (!tokenMap) {
@@ -40953,9 +40958,11 @@ async function saExecGateway() {
 
     if (btnContent) btnContent.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i> Submitting to Circle Gateway…';
 
-    // ── POST requests array directly to Circle Gateway API ───────────────────
+    // ── POST requests array directly to the protected transfer path ──────────
     // Body MUST be the JSON array itself, NOT wrapped as { requests: [...] }
-    var resp = await fetch(GW_API_BASE + '/v1/transfer', {
+    // Mainnet: /api/gateway/transfer (CF proxy → DO salt lock → Circle)
+    // Testnet: direct Circle testnet API (dev only)
+    var resp = await fetch(_gwTransferUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(requests, function(_, v) {
@@ -41006,9 +41013,41 @@ async function saExecGateway() {
 
 // Patch saDispatchSend to route to Gateway when _saGwOrigin is true
 var _saDispatchSendOrig = saDispatchSend;
-saDispatchSend = function() {
+saDispatchSend = async function() {
   if (_saGwOrigin && !_saCPNMode) {
-    saExecGateway();
+    // Send Assets → Gateway: sign + submit via saExecGateway, then execute the
+    // destination gatewayMint using the SAME proven mint helper as Unified Balance.
+    // The attestation returned by saExecGateway MUST be processed — otherwise the
+    // transfer stops after the first signature (submit without mint).
+    try {
+      var gwResult = await saExecGateway();
+      var gwStatus = gwResult && gwResult.status ? gwResult.status : 'error';
+      if (gwStatus === 'pending' && gwResult.attestation) {
+        var destChainEl = document.getElementById('sa-dest-chain');
+        var destChainId = destChainEl ? parseInt(destChainEl.value) : ((typeof activeChainId !== 'undefined') ? activeChainId : 5042);
+        if (typeof UBScreen !== 'undefined' && typeof UBScreen._execGatewayMint === 'function') {
+          try {
+            var mintTxHash = await UBScreen._execGatewayMint({
+              attestation: gwResult.attestation,
+              signature:   gwResult.operatorSig,
+              destChainId: destChainId,
+            });
+            toast('Gateway transfer confirmed — tx ' + String(mintTxHash).slice(0, 10) + '…', 'success');
+            if (typeof saUpdateRoute === 'function') saUpdateRoute();
+            try { if (typeof ubInvalidateGatewayCache === 'function') ubInvalidateGatewayCache(); } catch(_) {}
+          } catch(mintErr) {
+            toast('Gateway mint failed: ' + (mintErr && mintErr.message ? mintErr.message : String(mintErr)).slice(0, 120), 'error');
+          }
+          return;
+        }
+        // Mint helper unavailable — do not silently succeed.
+        toast('Gateway mint step unavailable — transfer submitted but not minted', 'error');
+        return;
+      }
+      // blocked / ambiguous / error — saExecGateway already surfaced a toast.
+    } catch(e) {
+      toast('Gateway error: ' + (e && e.message ? e.message : String(e)), 'error');
+    }
   } else {
     _saDispatchSendOrig.apply(this, arguments);
   }
@@ -48804,19 +48843,29 @@ function _authCompleteLogin(profile) {
   const emailEl = document.getElementById('auth-success-email');
   const titleEl = document.getElementById('auth-success-title');
   const subEl = document.getElementById('auth-success-sub');
-  // Prefer Circle wallet address; fall back to server profile address
-  const _circleAddrForModal = (typeof CircleAgent !== 'undefined' && CircleAgent.getCachedAddress) ? CircleAgent.getCachedAddress() : null;
-  const _displayAddr = _circleAddrForModal || profile.wallet.address || null;
+  // Authoritative Circle identity: prefer the backend profile's circleWallet,
+  // then the CircleAgent cache. The legacy profile.wallet.address is historical
+  // only and must NOT be presented as the active wallet identity.
+  const _circleAddrForModal =
+    (profile && profile.circleWallet && profile.circleWallet.address)
+      ? profile.circleWallet.address
+      : ((typeof CircleAgent !== 'undefined' && CircleAgent.getCachedAddress) ? CircleAgent.getCachedAddress() : null);
+  const _displayAddr = _circleAddrForModal || null;
   if (addrEl) addrEl.textContent = _displayAddr ? _displayAddr.slice(0, 8) + '...' + _displayAddr.slice(-6) : '—';
   if (emailEl) emailEl.textContent = profile.email || '—';
   if (titleEl) titleEl.textContent = _authIsNewUser ? 'Account Created' : 'Welcome Back';
-  if (subEl) subEl.textContent = _authIsNewUser ? 'Your Intelligent Wallet is ready' : 'Session restored successfully';
-  // Update wallet type label in modal
+  if (subEl) subEl.textContent = _authIsNewUser
+    ? (_circleAddrForModal ? 'Your Circle AI Wallet is ready' : 'Account ready — create your AI Wallet')
+    : 'Session restored successfully';
+  // Update wallet type label in modal — Circle is the sole agent identity;
+  // never fall back to an "Internal Smart Wallet" label.
   const _walletTypeEl = document.querySelector('#auth-step-success .auth-wallet-row .value.purple');
-  if (_walletTypeEl) _walletTypeEl.textContent = _circleAddrForModal ? 'Circle Developer-Controlled' : (profile.wallet.type || 'Internal Smart Wallet');
+  if (_walletTypeEl) _walletTypeEl.textContent = _circleAddrForModal
+    ? 'Circle Developer-Controlled'
+    : 'Not provisioned';
 
   _authShowStep('auth-step-success');
-  try { toast('Intelligent Wallet activated: ' + (profile.wallet.address || '').slice(0, 8) + '...', 'success'); } catch (_) {}
+  try { toast(_circleAddrForModal ? ('Circle AI Wallet: ' + _displayAddr.slice(0, 8) + '...') : 'Account ready', 'success'); } catch (_) {}
 }
 
 function authFinish() {
@@ -54968,6 +55017,9 @@ const UBScreen = (function() {
     openSend: openSend, openSwap: openSwap, openBridge: openBridge,
     execSend: execSend, execSwap: execSwap, execBridge: execBridge,
     hideOperation: hideOperation, refreshDashboard: refreshDashboard, setStep: setStep, tick: tick,
+    // Gateway mint helper (exposed so the top-level Send Assets executor can reuse
+    // the proven mint path — avoids duplicating gatewayMint calldata + confirmation).
+    _execGatewayMint: _execGatewayMint,
     // Screen helpers
     _refreshSwap: _refreshSwap, _flipSwap: _flipSwap,
     _populateBridge: _populateBridge, _refreshBridge: _refreshBridge, _flipBridge: _flipBridge,
