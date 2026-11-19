@@ -43860,7 +43860,17 @@ async function _signRelayerAuth(opts) {
     signer = WalletManager.internalWallet;
     address = WalletManager.internalWallet.address;
   }
-  const isRemote = !!(signer && signer._isRemoteSigner && typeof AuthManager !== 'undefined');
+  let isRemote = !!(signer && signer._isRemoteSigner && typeof AuthManager !== 'undefined');
+  // Legacy signer isolation (Autonoma 1.1): the custodial remote signer is no
+  // longer activated as the app-wide "internal" wallet, but x402/relayer still
+  // needs it for silent server-side signing. Resolve it on-demand from
+  // AuthManager — only when NO other signer is present, so an external wallet
+  // is never overridden. This preserves the existing signing mechanism without
+  // mutating the global wallet identity.
+  if (!signer && typeof AuthManager !== 'undefined' && typeof AuthManager.getRemoteSigner === 'function') {
+    const _remote = AuthManager.getRemoteSigner();
+    if (_remote && _remote._isRemoteSigner) { signer = _remote; isRemote = true; }
+  }
   if (isRemote) address = AuthManager.getWalletAddress();
 
   if (!signer && !(typeof AuthManager !== 'undefined' && AuthManager.isAuthenticated())) {

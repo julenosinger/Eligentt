@@ -49,19 +49,26 @@ describe('L2 — createUserWallet uses deterministic idempotency key', () => {
   });
 });
 
-describe('L3 — provision.js serializes concurrent provisioning', () => {
-  it('uses a per-user KV lock and fails closed while in flight', () => {
+describe('L3 — provision.js durable provisioning state machine', () => {
+  it('uses a per-user durable provisioning state (not a bare KV lock)', () => {
     const s = src('functions/api/agent/provision.js');
-    expect(s).toContain("const lockKey = 'provision_lock:' + user.id");
+    expect(s).toContain("const stateKey = 'provision_state:' + user.id");
     expect(s).toContain("'Wallet provisioning already in progress'");
     expect(s).toContain('inProgress: true');
-    expect(s).toContain('expirationTtl: 60');
+    expect(s).toContain("status === 'provisioning'");
+    expect(s).toContain("status === 'done'");
   });
 
-  it('releases the lock on success and on every failure path', () => {
+  it('records an ambiguous state on Circle failure (no blind re-create)', () => {
     const s = src('functions/api/agent/provision.js');
-    // Three release sites: create failure, KV-save failure, success.
-    expect(s.match(/KV\.delete\(lockKey\)/g).length).toBeGreaterThanOrEqual(3);
+    expect(s).toContain("status: 'ambiguous'");
+    expect(s).toContain('reconcile: true');
+  });
+
+  it('persists durable done state before the user-record write (reconciliation)', () => {
+    const s = src('functions/api/agent/provision.js');
+    expect(s).toContain("status: 'done', walletId: circleWallet.walletId");
+    expect(s).toContain('expirationTtl: 86400');
   });
 });
 

@@ -255,21 +255,17 @@ const WalletManager = (() => {
   }
 
   function activateFromAuth() {
-    if (typeof AuthManager === 'undefined' || !AuthManager.isAuthenticated()) return false;
-    const remoteSigner = AuthManager.getRemoteSigner();
-    const remoteProvider = AuthManager.getRemoteProvider();
-    const walletAddr = AuthManager.getWalletAddress();
-    if (!remoteSigner || !walletAddr) return false;
-    _internalProvider = remoteProvider;
-    _accountType = 'internal';
-    window.walletAddress = walletAddr;
-    window.signer = remoteSigner;
-    window.provider = remoteProvider;
-    window.activeChainId = ARC_CHAIN_ID;
-    window.activeWalletType = 'intelligent';
-    _activeSource = 'internal';
-    _syncUI(walletAddr);
-    return true;
+    // ── Legacy signer isolation (Autonoma Wallet Identity 1.1) ──────────────
+    // Authentication must NEVER surface the legacy custodial wallet as the
+    // app-wide "internal" wallet identity (window.walletAddress / signer /
+    // activeWalletType='intelligent'). Autonoma's agent identity is the
+    // per-user Circle wallet only.
+    //
+    // Compatibility: the legacy custodial SIGNING service is preserved for
+    // x402/relayer and other internal consumers via AuthManager.getRemoteSigner()
+    // / signOnServer() / getWalletAddress(), which callers (e.g. _signRelayerAuth)
+    // resolve on-demand — never by mutating the global wallet state here.
+    return false;
   }
 
   /** Called by external wallet connection flow to register an external wallet. */
