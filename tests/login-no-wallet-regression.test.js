@@ -78,11 +78,15 @@ describe('auth.js: _buildRemoteSigner safe when wallet.address is null', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-describe('walletManager.js: activateFromAuth safe when no remote signer', () => {
+describe('walletManager.js: activateFromAuth never activates a legacy wallet', () => {
 
-  it('activateFromAuth returns false when remoteSigner or walletAddr is missing', () => {
+  it('activateFromAuth is a no-op that returns false (no global internal-wallet activation)', () => {
     const src = loadSource('shared/walletManager.js');
-    expect(src).toContain('if (!remoteSigner || !walletAddr) return false');
+    // The function must not mutate window.walletAddress / signer / activeWalletType.
+    const fn = src.slice(src.indexOf('function activateFromAuth()'), src.indexOf('function registerExternalWallet'));
+    expect(fn).toContain('return false');
+    expect(fn).not.toContain("window.walletAddress = walletAddr");
+    expect(fn).not.toContain("activeWalletType = 'intelligent'");
   });
 });
 

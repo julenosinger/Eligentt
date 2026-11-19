@@ -151,6 +151,10 @@ export async function onRequestPost(context) {
     email: normalizedEmail,
     userId: user.id,
     walletAddress: user.wallet.address,
+    // Circle identity — persist so session restoration can resolve the SAME
+    // per-user Circle wallet without re-provisioning (parity with verify.js).
+    circleWalletId: user.circleWalletId || null,
+    circleWalletAddress: user.circleWalletAddress || null,
     createdAt: Date.now(),
   }), { expirationTtl: 86400 });
 
@@ -174,6 +178,13 @@ export async function onRequestPost(context) {
         network: user.wallet.network,
         chainId: user.wallet.chainId,
       },
+      // Per-user Circle wallet identity (parity with verify.js). The legacy
+      // `wallet.address` field above remains for historical record only; the
+      // authoritative agent identity is `circleWallet` when present.
+      circleWallet: user.circleWalletId ? {
+        id: user.circleWalletId,
+        address: user.circleWalletAddress,
+      } : null,
       auth: user.auth,
       stats: user.stats,
       permissions: {

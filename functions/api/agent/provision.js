@@ -80,17 +80,56 @@ export async function onRequest({ request, env }) {
     });
   }
 
-  // Provision new Circle wallet
+  // Provision new Circle wallet — durable per-user state machine so concurrent
+  // requests (double-click, multi-tab, OTP + explicit provision race, CF retry)
+  // and ambiguous outcomes (Circle created but KV persist failed) resolve to ONE
+  // logical wallet. The deterministic Circle idempotency key in createUserWallet
+  // (derived from user.id) is the authoritative dedupe; this state machine adds
+  // durable pending/done state + reconciliation and a fast 409 for in-flight
+  // requests. It does NOT rely on KV atomicity (KV has no CAS).
+  const stateKey = 'provision_state:' + user.id;
+
+  // 1) Reconcile a prior completion whose user-record write failed.
+  const stateRaw = await KV.get(stateKey);
+  if (stateRaw) {
+    let st = null;
+    try { st = JSON.parse(stateRaw); } catch (_) {}
+    if (st && st.status === 'done' && st.walletId && st.address) {
+      if (!user.circleWalletId) {
+        user.circleWalletId = st.walletId;
+        user.circleWalletAddress = st.address;
+        try { await KV.put('user:' + session.email, JSON.stringify(user)); } catch (_) {}
+      }
+      return json({ ok: true, alreadyProvisioned: true, walletId: st.walletId, address: st.address });
+    }
+    if (st && st.status === 'provisioning' && (Date.now() - (st.startedAt || 0)) < 120000) {
+      return json({ ok: false, error: 'Wallet provisioning already in progress', inProgress: true }, 409);
+    }
+    // Stale 'provisioning' or 'ambiguous' → fall through. The deterministic
+    // idempotency key makes the re-create below a get-or-create (no duplicate).
+  }
+
+  // 2) Mark provisioning (durable; TTL covers the slowest Circle attempt).
+  await KV.put(stateKey, JSON.stringify({ status: 'provisioning', startedAt: Date.now() }), { expirationTtl: 600 });
+
   let circleWallet;
   try {
     circleWallet = await createUserWallet(env, user.id);
   } catch (e) {
+    // Ambiguous: Circle may have created the wallet but the response is
+    // inconclusive. Record 'ambiguous' — do NOT create a replacement wallet here.
+    // A retry reuses the same deterministic idempotency key and reconciles.
+    await KV.put(stateKey, JSON.stringify({ status: 'ambiguous', startedAt: Date.now(), error: String(e && e.message) }), { expirationTtl: 600 }).catch(() => {});
     console.error('[provision] Circle wallet creation failed:', e && e.message);
-    return json({ ok: false, error: 'Circle wallet provisioning failed: ' + (e && e.message) }, 502);
+    return json({ ok: false, error: 'Circle wallet provisioning failed: ' + (e && e.message), reconcile: true }, 502);
   }
 
   user.circleWalletId = circleWallet.walletId;
   user.circleWalletAddress = circleWallet.address;
+
+  // 3) Persist the durable 'done' state FIRST so a user-record write failure is
+  //    still reconcilable, then persist the user record.
+  await KV.put(stateKey, JSON.stringify({ status: 'done', walletId: circleWallet.walletId, address: circleWallet.address, doneAt: Date.now() }), { expirationTtl: 86400 }).catch(() => {});
 
   try {
     await KV.put('user:' + session.email, JSON.stringify(user));

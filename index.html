@@ -7029,12 +7029,12 @@ select.cinput option { background: #161a24; color: #dde2f0; }
         <div class="auth-success-card">
           <div class="auth-success-icon"><i class="ti ti-circle-check"></i></div>
           <div style="font-size:14px;font-weight:800;color:#dde2f0" id="auth-success-title">Account Created</div>
-          <div style="font-size:10px;color:#8892aa;margin-top:4px" id="auth-success-sub">Your Intelligent Wallet is ready</div>
+          <div style="font-size:10px;color:#8892aa;margin-top:4px" id="auth-success-sub">Account ready</div>
         </div>
         <div class="auth-wallet-card">
           <div class="auth-wallet-row"><span class="label">Wallet Address</span><span class="value purple" id="auth-success-addr">—</span></div>
           <div class="auth-wallet-row"><span class="label">Network</span><span class="value green">Arc Mainnet</span></div>
-          <div class="auth-wallet-row"><span class="label">Type</span><span class="value purple">Internal Smart Wallet</span></div>
+          <div class="auth-wallet-row"><span class="label">Type</span><span class="value purple">—</span></div>
           <div class="auth-wallet-row"><span class="label">Account</span><span class="value" id="auth-success-email">—</span></div>
         </div>
         <button class="auth-btn primary" onclick="authFinish()"><i class="ti ti-arrow-right"></i> Continue to App</button>
@@ -43860,7 +43860,17 @@ async function _signRelayerAuth(opts) {
     signer = WalletManager.internalWallet;
     address = WalletManager.internalWallet.address;
   }
-  const isRemote = !!(signer && signer._isRemoteSigner && typeof AuthManager !== 'undefined');
+  let isRemote = !!(signer && signer._isRemoteSigner && typeof AuthManager !== 'undefined');
+  // Legacy signer isolation (Autonoma 1.1): the custodial remote signer is no
+  // longer activated as the app-wide "internal" wallet, but x402/relayer still
+  // needs it for silent server-side signing. Resolve it on-demand from
+  // AuthManager — only when NO other signer is present, so an external wallet
+  // is never overridden. This preserves the existing signing mechanism without
+  // mutating the global wallet identity.
+  if (!signer && typeof AuthManager !== 'undefined' && typeof AuthManager.getRemoteSigner === 'function') {
+    const _remote = AuthManager.getRemoteSigner();
+    if (_remote && _remote._isRemoteSigner) { signer = _remote; isRemote = true; }
+  }
   if (isRemote) address = AuthManager.getWalletAddress();
 
   if (!signer && !(typeof AuthManager !== 'undefined' && AuthManager.isAuthenticated())) {
@@ -48804,19 +48814,29 @@ function _authCompleteLogin(profile) {
   const emailEl = document.getElementById('auth-success-email');
   const titleEl = document.getElementById('auth-success-title');
   const subEl = document.getElementById('auth-success-sub');
-  // Prefer Circle wallet address; fall back to server profile address
-  const _circleAddrForModal = (typeof CircleAgent !== 'undefined' && CircleAgent.getCachedAddress) ? CircleAgent.getCachedAddress() : null;
-  const _displayAddr = _circleAddrForModal || profile.wallet.address || null;
+  // Authoritative Circle identity: prefer the backend profile's circleWallet,
+  // then the CircleAgent cache. The legacy profile.wallet.address is historical
+  // only and must NOT be presented as the active wallet identity.
+  const _circleAddrForModal =
+    (profile && profile.circleWallet && profile.circleWallet.address)
+      ? profile.circleWallet.address
+      : ((typeof CircleAgent !== 'undefined' && CircleAgent.getCachedAddress) ? CircleAgent.getCachedAddress() : null);
+  const _displayAddr = _circleAddrForModal || null;
   if (addrEl) addrEl.textContent = _displayAddr ? _displayAddr.slice(0, 8) + '...' + _displayAddr.slice(-6) : '—';
   if (emailEl) emailEl.textContent = profile.email || '—';
   if (titleEl) titleEl.textContent = _authIsNewUser ? 'Account Created' : 'Welcome Back';
-  if (subEl) subEl.textContent = _authIsNewUser ? 'Your Intelligent Wallet is ready' : 'Session restored successfully';
-  // Update wallet type label in modal
+  if (subEl) subEl.textContent = _authIsNewUser
+    ? (_circleAddrForModal ? 'Your Circle AI Wallet is ready' : 'Account ready — create your AI Wallet')
+    : 'Session restored successfully';
+  // Update wallet type label in modal — Circle is the sole agent identity;
+  // never fall back to an "Internal Smart Wallet" label.
   const _walletTypeEl = document.querySelector('#auth-step-success .auth-wallet-row .value.purple');
-  if (_walletTypeEl) _walletTypeEl.textContent = _circleAddrForModal ? 'Circle Developer-Controlled' : (profile.wallet.type || 'Internal Smart Wallet');
+  if (_walletTypeEl) _walletTypeEl.textContent = _circleAddrForModal
+    ? 'Circle Developer-Controlled'
+    : 'Not provisioned';
 
   _authShowStep('auth-step-success');
-  try { toast('Intelligent Wallet activated: ' + (profile.wallet.address || '').slice(0, 8) + '...', 'success'); } catch (_) {}
+  try { toast(_circleAddrForModal ? ('Circle AI Wallet: ' + _displayAddr.slice(0, 8) + '...') : 'Account ready', 'success'); } catch (_) {}
 }
 
 function authFinish() {
