@@ -108,14 +108,82 @@ describe('AutonomaAi module', () => {
     });
     const win = loadAi({ fetch: async () => new Response(sse, { status: 200 }) });
     const out = await win.AutonomaAi.chat('send 1 USDC');
-    expect(out.toolCall.name).toBe('send');
-    expect(out.toolCall.arguments.amount).toBe(1);
-    expect(out.toolCall.arguments.to).toBe('0x' + 'a'.repeat(40));
+    expect(out.toolCalls[0].name).toBe('send');
+    expect(out.toolCalls[0].arguments.amount).toBe(1);
+    expect(out.toolCalls[0].arguments.to).toBe('0x' + 'a'.repeat(40));
   });
 
-  it('chat() returns null on provider failure (fallback path)', async () => {
+  it('chat() returns an error (not null) on provider failure', async () => {
     const win = loadAi({ fetch: async () => new Response('error', { status: 502 }) });
     const out = await win.AutonomaAi.chat('hi');
-    expect(out).toBeNull();
+    expect(out.error).toBeDefined();
+    expect(out.code).toBe('provider_error');
+  });
+
+  it('chat() handles fragmented SSE (partial lines across chunks)', async () => {
+    const enc = new TextEncoder();
+    const sse = new ReadableStream({
+      start(c) {
+        c.enqueue(enc.encode('data: {"choices":[{"delta":{"content":"Hel'));
+        c.enqueue(enc.encode('lo"}}]}\n\n'));
+        c.enqueue(enc.encode('data: {"choices":[{"delta":{"content":" world"}}]}\n\n'));
+        c.enqueue(enc.encode('data: [DONE]\n\n'));
+        c.close();
+      },
+    });
+    const win = loadAi({ fetch: async () => new Response(sse, { status: 200 }) });
+    const out = await win.AutonomaAi.chat('hi');
+    expect(out.text).toBe('Hello world');
+  });
+
+  it('chat() handles CRLF line endings', async () => {
+    const enc = new TextEncoder();
+    const sse = new ReadableStream({
+      start(c) {
+        c.enqueue(enc.encode('data: {"choices":[{"delta":{"content":"hi"}}]}\r\n\r\n'));
+        c.enqueue(enc.encode('data: [DONE]\r\n\r\n'));
+        c.close();
+      },
+    });
+    const win = loadAi({ fetch: async () => new Response(sse, { status: 200 }) });
+    const out = await win.AutonomaAi.chat('hi');
+    expect(out.text).toBe('hi');
+  });
+
+  it('chat() handles multiple tool calls', async () => {
+    const enc = new TextEncoder();
+    const tc1 = { choices: [{ delta: { tool_calls: [{ index: 0, id: 't1', function: { name: 'send', arguments: '{"amount":1}' } }] } }] };
+    const tc2 = { choices: [{ delta: { tool_calls: [{ index: 1, id: 't2', function: { name: 'swap', arguments: '{"amount":2}' } }] } }] };
+    const sse = new ReadableStream({
+      start(c) {
+        c.enqueue(enc.encode('data: ' + JSON.stringify(tc1) + '\n\n'));
+        c.enqueue(enc.encode('data: ' + JSON.stringify(tc2) + '\n\n'));
+        c.enqueue(enc.encode('data: [DONE]\n\n'));
+        c.close();
+      },
+    });
+    const win = loadAi({ fetch: async () => new Response(sse, { status: 200 }) });
+    const out = await win.AutonomaAi.chat('do both');
+    expect(out.toolCalls.length).toBe(2);
+    expect(out.toolCalls[0].name).toBe('send');
+    expect(out.toolCalls[1].name).toBe('swap');
+  });
+
+  it('chat() sends conversation history as prior messages', async () => {
+    let capturedBody = null;
+    const enc = new TextEncoder();
+    const sse = new ReadableStream({
+      start(c) {
+        c.enqueue(enc.encode('data: {"choices":[{"delta":{"content":"ok"}}]}\n\n'));
+        c.enqueue(enc.encode('data: [DONE]\n\n'));
+        c.close();
+      },
+    });
+    const win = loadAi({ fetch: async (url, opts) => { capturedBody = JSON.parse(opts.body); return new Response(sse, { status: 200 }); } });
+    await win.AutonomaAi.chat('current', { history: [{ role: 'user', content: 'send 10 USDC' }, { role: 'assistant', content: 'Please confirm.' }] });
+    expect(capturedBody.messages.length).toBe(3);
+    expect(capturedBody.messages[0].role).toBe('user');
+    expect(capturedBody.messages[1].role).toBe('assistant');
+    expect(capturedBody.messages[2].content).toBe('current');
   });
 });

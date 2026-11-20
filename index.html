@@ -58768,15 +58768,22 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
   async function _autAiProcess(msg){
     if (typeof AutonomaAi === 'undefined') return null;
     var out;
-    try { out = await AutonomaAi.chat(msg); } catch(_) { return null; }
+    try { out = await AutonomaAi.chat(msg, { history: _autConversationHistory() }); } catch(_) { return null; }
     if (!out) return null;
+
+    // Provider/auth/interruption failure → observable fallback to the legacy
+    // deterministic pipeline (never a silent provider switch).
+    if (out.error) {
+      console.warn('[AutonomaAi] AI unavailable, falling back to legacy pipeline:', out.code || out.error);
+      return null;
+    }
 
     if (out.text) {
       return '<div class="aut-intro">' + _autAiFormat(out.text) + '</div>';
     }
 
-    if (out.toolCall) {
-      var tc = out.toolCall;
+    if (Array.isArray(out.toolCalls) && out.toolCalls.length) {
+      var tc = out.toolCalls[0];
       var name = tc.name;
       var args = tc.arguments || {};
       var intent = null, params = {};
@@ -58831,6 +58838,37 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
       .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
       .replace(/`([^`]+)`/g, '<code style="background:rgba(255,255,255,.07);padding:1px 5px;border-radius:4px;font-size:10px">$1</code>')
       .replace(/\n/g, '<br>');
+  }
+
+  // Build prior conversation turns ({role,content}) from the current Autonoma
+  // chat for AI context. Excludes the current (last) user message. Assistant HTML
+  // is stripped to plain text so only meaningful prior context is sent.
+  function _autConversationHistory(){
+    try {
+      var chat = autChats.find(function(c){ return c.id === autCurId; });
+      if (!chat || !Array.isArray(chat.messages)) return [];
+      var msgs = chat.messages;
+      var hist = [];
+      for (var i = 0; i < msgs.length; i++) {
+        var m = msgs[i];
+        if (!m || !m.role) continue;
+        if (m.role === 'user') {
+          if (i === msgs.length - 1) continue; // skip the current message
+          hist.push({ role: 'user', content: String(m.content || '') });
+        } else if (m.role === 'ai') {
+          hist.push({ role: 'assistant', content: _autStripHtml(String(m.content || '')) });
+        }
+      }
+      return hist.slice(-20);
+    } catch(_e) { return []; }
+  }
+
+  function _autStripHtml(html){
+    try {
+      var d = document.createElement('div');
+      d.innerHTML = html;
+      return (d.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 2000);
+    } catch(_e) { return String(html || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 2000); }
   }
 
   async function autProcess(msg){
@@ -60395,16 +60433,13 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
 
     var customBtn = '{icon:"pencil",label:"Custom",cls:"",action:"_promptCustomPermission(\''+intent+'\')"}';
 
-    return R.intro('I need your <strong style="color:#a78bfa">authorization</strong> before I can execute <strong>' + opLabel + '</strong> operations on your behalf. Choose a spending limit — I\'ll continue automatically after you authorize.') +
-      '<div class="aut-rc" style="border-color:rgba(167,139,250,.3);margin-top:8px">'+
-      R.head('shield-lock','Agent Authorization Required',{text:opLabel,cls:'pending'})+
-      '<div class="aut-rc-body">'+
-      '<div style="font-size:10px;color:var(--muted2);margin-bottom:8px">Select a spending limit for <strong>'+opLabel+'</strong>. After authorizing, I\'ll resume your original request automatically.</div>'+
+    return R.intro('Your <strong style="color:#2775ca">Circle Agent Wallet</strong> needs <strong>' + opLabel + '</strong> authorization before proceeding. Choose a spending limit — I\'ll resume your request automatically after you authorize.') +
+      '<div style="margin-top:8px">'+
       presets.map(function(a){
         return '<button class="aut-act primary" onclick="_confirmPermission('+a+',\''+intent+'\')" style="display:block;width:100%;margin-bottom:4px;text-align:left;padding:8px 12px"><i class="ti ti-cash" style="margin-right:8px"></i><strong>$'+a.toLocaleString()+'</strong><span style="float:right;color:var(--muted2);font-size:9px">'+opLabel+' daily limit → resume</span></button>';
       }).join('')+
       '<button class="aut-act" onclick="_promptCustomPermission(\''+intent+'\')" style="display:block;width:100%;text-align:left;padding:8px 12px;margin-top:2px"><i class="ti ti-pencil" style="margin-right:8px"></i>Custom amount</button>'+
-      '</div></div>';
+      '</div>';
   }
 
   // ── OTP Authorization Card ──────────────────────────────────────────────────
@@ -60552,16 +60587,9 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
     }
     var c = document.getElementById('aut-messages');
     if(c){
-      var html = '<div class="aut-msg ai"><div class="aut-msg-header"><i class="ti ti-robot" style="color:#a78bfa"></i><span class="aut-msg-role">Autonoma Agent</span></div>'+
-        '<div class="aut-msg-body">'+
-        '<div class="aut-rc" style="border-color:rgba(34,197,94,.3);margin-top:4px">'+
-        R.head('shield-check','Agent Ready',{text:'Authorized',cls:'live'})+
-        '<div class="aut-rc-body">'+
-        R.row('Daily Limit','<strong>$'+amount.toLocaleString()+'</strong>','green')+
-        R.row('Max Spending','<strong>$'+(amount*10).toLocaleString()+'</strong>','green')+
-        R.row('Operation',normalizedOp.charAt(0).toUpperCase()+normalizedOp.slice(1),'purple')+
-        R.row('Duration','30 days','muted')+
-        '</div></div></div></div>';
+      var html = '<div class="aut-msg ai"><div class="aut-msg-body">'+
+        '<div class="aut-intro"><i class="ti ti-circle-check" style="color:var(--green);margin-right:4px"></i>Authorization confirmed (<strong>$'+amount.toLocaleString()+'</strong> daily limit). Continuing your request…</div>'+
+        '</div></div>';
       c.insertAdjacentHTML('beforeend', html);
       c.scrollTop = c.scrollHeight;
     }
