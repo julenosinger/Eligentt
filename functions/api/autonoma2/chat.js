@@ -47,8 +47,9 @@ async function requireSession(request, env) {
   return { ok: true, user: session };
 }
 
-function errSSE(cors, status, msg) {
-  const body = 'data: ' + JSON.stringify({ error: msg }) + '\n\ndata: [DONE]\n\n';
+function errSSE(cors, status, msg, code) {
+  const payload = code ? { error: msg, code } : { error: msg };
+  const body = 'data: ' + JSON.stringify(payload) + '\n\ndata: [DONE]\n\n';
   return new Response(body, { status, headers: { ...cors, 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' } });
 }
 
@@ -198,9 +199,25 @@ export async function onRequestPost(context) {
   });
 
   if (!result.ok) {
-    const statusMap = { ai_disabled: 503, multi_provider_disabled: 503, no_provider: 503, budget_exceeded: 429, timeout: 504, auth_error: 502, rate_limited: 502 };
+    // Complete error taxonomy — every internal code maps to an accurate HTTP
+    // status and is surfaced as a sanitized `code` field (no raw provider body).
+    const statusMap = {
+      ai_disabled: 503,
+      multi_provider_disabled: 503,
+      no_provider: 503,
+      provider_not_configured: 503,
+      invalid_provider: 400,
+      invalid_model: 400,
+      budget_exceeded: 429,
+      timeout: 504,
+      auth_error: 502,
+      rate_limited: 429,
+      network_error: 502,
+      provider_error: 502,
+      malformed_response: 502,
+    };
     const status = statusMap[result.code] || 502;
-    return errSSE(cors, status, result.error || 'AI error');
+    return errSSE(cors, status, result.error || 'AI error', result.code || 'unknown');
   }
 
   const headers = { ...cors, 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no' };
