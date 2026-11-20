@@ -122,6 +122,7 @@
 <script src="/shared/economicMonitoring.js"></script>
 <script src="/shared/autonomaAgent.js"></script>
 <script src="/shared/autonomaNlu.js"></script>
+<script src="/shared/autonomaAi.js"></script>
 <script src="/shared/autonomaAgentBrain.js"></script>
 <script src="/shared/agentCapabilityRouter.js"></script>
 <script src="/shared/agentIdentity.js"></script>
@@ -12504,6 +12505,15 @@ select.cinput option { background: #161a24; color: #dde2f0; }
           <div class="aut-workspace-bar">
             <span class="aut-workspace-title">✦ Autonoma</span>
             <span class="aut-workspace-status"><span class="aut-online-dot"></span> Circle Agent · Arc Mainnet</span>
+            <span style="margin-left:auto;display:flex;align-items:center;gap:6px">
+              <i class="ti ti-brain" style="font-size:12px;color:var(--muted2)"></i>
+              <select id="aut-ai-provider" onchange="autSetAiProvider(this.value)" title="AI provider"
+                style="background:var(--card);border:1px solid var(--border2);border-radius:6px;color:var(--text);font-size:9.5px;padding:4px 8px;cursor:pointer;outline:none;font-family:inherit">
+                <option value="deepseek">DeepSeek</option>
+                <option value="openai">OpenAI</option>
+                <option value="anthropic">Anthropic</option>
+              </select>
+            </span>
           </div>
           <div class="aut-messages" id="aut-messages">
             <div class="aut-welcome" id="aut-welcome">
@@ -57742,6 +57752,13 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
       document.addEventListener('click', function(){ if(autOpenMenuId!==null){ autOpenMenuId=null; autRenderSidebar(); } });
       autMenuListenerInstalled=true;
     }
+    // Sync the AI provider selector with the persisted selection.
+    try {
+      if (typeof AutonomaAi !== 'undefined' && typeof AutonomaAi.getProvider === 'function') {
+        var _sel = document.getElementById('aut-ai-provider');
+        if (_sel) _sel.value = AutonomaAi.getProvider();
+      }
+    } catch(_e) {}
     // Consume pending context from Recipients → Autonoma integration (once)
     if (typeof _rcpConsumeAutonomaCtx === 'function') {
       setTimeout(_rcpConsumeAutonomaCtx, 0);
@@ -57762,6 +57779,16 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
     const el=document.getElementById('aut-input'); if(!el) return;
     const msg=el.value.trim(); if(!msg) return;
     el.value=''; el.style.height='auto'; autonomaSendQuick(msg);
+  };
+
+  // ── AI provider selection (multi-provider) ───────────────────────────────
+  window.autSetAiProvider = function(id){
+    try {
+      if (typeof AutonomaAi !== 'undefined' && typeof AutonomaAi.setProvider === 'function') {
+        AutonomaAi.setProvider(id);
+      }
+    } catch(_e) {}
+    try { toast('AI provider set to ' + (id || 'deepseek'), 'info'); } catch(_e) {}
   };
 
   /**
@@ -58734,6 +58761,116 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
   }
 
   // ── Core Process Engine ──────────────────────────────
+  // AI-first reasoning bridge: calls the multi-provider AI and maps its
+  // structured tool calls to the existing execution engine via
+  // AgentCapabilityRouter (conversational). Read tools resolve to existing
+  // surfaces. Returns HTML or null (fallback to the legacy pipeline).
+  async function _autAiProcess(msg){
+    if (typeof AutonomaAi === 'undefined') return null;
+    var out;
+    try { out = await AutonomaAi.chat(msg, { history: _autConversationHistory() }); } catch(_) { return null; }
+    if (!out) return null;
+
+    // Provider/auth/interruption failure → observable fallback to the legacy
+    // deterministic pipeline (never a silent provider switch).
+    if (out.error) {
+      console.warn('[AutonomaAi] AI unavailable, falling back to legacy pipeline:', out.code || out.error);
+      return null;
+    }
+
+    if (out.text) {
+      return '<div class="aut-intro">' + _autAiFormat(out.text) + '</div>';
+    }
+
+    if (Array.isArray(out.toolCalls) && out.toolCalls.length) {
+      var tc = out.toolCalls[0];
+      var name = tc.name;
+      var args = tc.arguments || {};
+      var intent = null, params = {};
+
+      switch (name) {
+        case 'send':
+          intent = 'SEND_PAYMENT';
+          params = { amount: args.amount, token: args.token || 'USDC', address: args.to || args.recipient };
+          break;
+        case 'swap':
+          intent = 'SWAP_EXECUTE';
+          params = { amount: args.amount, token: args.fromToken || 'USDC', toToken: args.toToken || 'EURC' };
+          break;
+        case 'bridge':
+          intent = 'BRIDGE';
+          params = { amount: args.amount, token: args.token || 'USDC', fromChain: args.fromChain, toChain: args.toChain };
+          break;
+        case 'create_invoice':
+          intent = 'CREATE_INVOICE';
+          params = { amount: args.amount, client: args.client, currency: args.currency, description: args.description };
+          break;
+        case 'create_schedule':
+          intent = 'CREATE_SCHEDULE';
+          params = { amount: args.amount, token: args.token, recipient: args.recipient, recurrence: args.frequency, recipientName: args.name };
+          break;
+        case 'create_payment_link':
+          intent = 'CREATE_PAYMENT_LINK';
+          params = { amount: args.amount, token: args.token, label: args.label };
+          break;
+        case 'balance':
+          if (typeof AgentCapabilityRouter !== 'undefined' && typeof AgentCapabilityRouter.buildBalanceSurface === 'function') {
+            return '<div class="aut-intro">Here\'s your <strong style="color:#2775ca">Circle Agent</strong> wallet balance:</div>' + (await AgentCapabilityRouter.buildBalanceSurface());
+          }
+          return null;
+        case 'wallet_info':
+          return '<div class="aut-intro">Your agent uses your <strong style="color:#2775ca">Circle Agent Wallet</strong> on Arc Mainnet as its canonical wallet. Balances and permissions are managed there.</div>';
+        default:
+          return null; // unknown tool → fall back to the legacy pipeline
+      }
+
+      if (intent && typeof AgentCapabilityRouter !== 'undefined') {
+        var _surf = AgentCapabilityRouter.createSurface(intent, params, { executeIntent: _executeIntent, msg: msg });
+        return '<div class="aut-intro">I\'m ready to <strong style="color:#06F7E9">' + esc((intent||'').replace(/_/g,' ').toLowerCase()) + '</strong>. Please review and approve.</div>' + _surf;
+      }
+    }
+
+    return null;
+  }
+
+  function _autAiFormat(text){
+    return esc(text)
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/`([^`]+)`/g, '<code style="background:rgba(255,255,255,.07);padding:1px 5px;border-radius:4px;font-size:10px">$1</code>')
+      .replace(/\n/g, '<br>');
+  }
+
+  // Build prior conversation turns ({role,content}) from the current Autonoma
+  // chat for AI context. Excludes the current (last) user message. Assistant HTML
+  // is stripped to plain text so only meaningful prior context is sent.
+  function _autConversationHistory(){
+    try {
+      var chat = autChats.find(function(c){ return c.id === autCurId; });
+      if (!chat || !Array.isArray(chat.messages)) return [];
+      var msgs = chat.messages;
+      var hist = [];
+      for (var i = 0; i < msgs.length; i++) {
+        var m = msgs[i];
+        if (!m || !m.role) continue;
+        if (m.role === 'user') {
+          if (i === msgs.length - 1) continue; // skip the current message
+          hist.push({ role: 'user', content: String(m.content || '') });
+        } else if (m.role === 'ai') {
+          hist.push({ role: 'assistant', content: _autStripHtml(String(m.content || '')) });
+        }
+      }
+      return hist.slice(-20);
+    } catch(_e) { return []; }
+  }
+
+  function _autStripHtml(html){
+    try {
+      var d = document.createElement('div');
+      d.innerHTML = html;
+      return (d.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 2000);
+    } catch(_e) { return String(html || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 2000); }
+  }
+
   async function autProcess(msg){
     // ── Fast-track: skip NLU/DocIntel for clear batch/multisend/cross-chain commands ──
     // (prevents NLU from asking "who?" when addresses are already present,
@@ -58748,6 +58885,16 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
     // ── Expose executeIntent globally for AgentCapabilityRouter ──
     if (typeof window.__autExecuteIntent === 'undefined') {
       window.__autExecuteIntent = _executeIntent;
+    }
+
+    // ── AI-first orchestration ─────────────────────────────────────────────
+    // The selected external AI (multi-provider) is the primary reasoning layer.
+    // It returns conversational text or a structured tool call that we bridge to
+    // the existing execution engine. On any failure we fall back to the legacy
+    // deterministic pipeline below (never a hardcoded response).
+    if(!_fastTrack){
+      var _aiOut = await _autAiProcess(msg);
+      if (_aiOut) return _aiOut;
     }
 
     // ── Agent Brain orchestration — full agent-first pipeline ──
@@ -60286,16 +60433,13 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
 
     var customBtn = '{icon:"pencil",label:"Custom",cls:"",action:"_promptCustomPermission(\''+intent+'\')"}';
 
-    return R.intro('I need your <strong style="color:#a78bfa">authorization</strong> before I can execute <strong>' + opLabel + '</strong> operations on your behalf. Choose a spending limit — I\'ll continue automatically after you authorize.') +
-      '<div class="aut-rc" style="border-color:rgba(167,139,250,.3);margin-top:8px">'+
-      R.head('shield-lock','Agent Authorization Required',{text:opLabel,cls:'pending'})+
-      '<div class="aut-rc-body">'+
-      '<div style="font-size:10px;color:var(--muted2);margin-bottom:8px">Select a spending limit for <strong>'+opLabel+'</strong>. After authorizing, I\'ll resume your original request automatically.</div>'+
+    return R.intro('Your <strong style="color:#2775ca">Circle Agent Wallet</strong> needs <strong>' + opLabel + '</strong> authorization before proceeding. Choose a spending limit — I\'ll resume your request automatically after you authorize.') +
+      '<div style="margin-top:8px">'+
       presets.map(function(a){
         return '<button class="aut-act primary" onclick="_confirmPermission('+a+',\''+intent+'\')" style="display:block;width:100%;margin-bottom:4px;text-align:left;padding:8px 12px"><i class="ti ti-cash" style="margin-right:8px"></i><strong>$'+a.toLocaleString()+'</strong><span style="float:right;color:var(--muted2);font-size:9px">'+opLabel+' daily limit → resume</span></button>';
       }).join('')+
       '<button class="aut-act" onclick="_promptCustomPermission(\''+intent+'\')" style="display:block;width:100%;text-align:left;padding:8px 12px;margin-top:2px"><i class="ti ti-pencil" style="margin-right:8px"></i>Custom amount</button>'+
-      '</div></div>';
+      '</div>';
   }
 
   // ── OTP Authorization Card ──────────────────────────────────────────────────
@@ -60443,16 +60587,9 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
     }
     var c = document.getElementById('aut-messages');
     if(c){
-      var html = '<div class="aut-msg ai"><div class="aut-msg-header"><i class="ti ti-robot" style="color:#a78bfa"></i><span class="aut-msg-role">Autonoma Agent</span></div>'+
-        '<div class="aut-msg-body">'+
-        '<div class="aut-rc" style="border-color:rgba(34,197,94,.3);margin-top:4px">'+
-        R.head('shield-check','Agent Ready',{text:'Authorized',cls:'live'})+
-        '<div class="aut-rc-body">'+
-        R.row('Daily Limit','<strong>$'+amount.toLocaleString()+'</strong>','green')+
-        R.row('Max Spending','<strong>$'+(amount*10).toLocaleString()+'</strong>','green')+
-        R.row('Operation',normalizedOp.charAt(0).toUpperCase()+normalizedOp.slice(1),'purple')+
-        R.row('Duration','30 days','muted')+
-        '</div></div></div></div>';
+      var html = '<div class="aut-msg ai"><div class="aut-msg-body">'+
+        '<div class="aut-intro"><i class="ti ti-circle-check" style="color:var(--green);margin-right:4px"></i>Authorization confirmed (<strong>$'+amount.toLocaleString()+'</strong> daily limit). Continuing your request…</div>'+
+        '</div></div>';
       c.insertAdjacentHTML('beforeend', html);
       c.scrollTop = c.scrollHeight;
     }

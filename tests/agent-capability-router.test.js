@@ -111,12 +111,14 @@ describe('AgentCapabilityRouter — createSurface', () => {
     expect(typeof router.buildBalanceSurface).toBe('function');
   });
 
-  it('creates a SEND proposal card for SEND_PAYMENT intent', () => {
+  it('creates a conversational SEND message (no proposal card) for SEND_PAYMENT', () => {
     const html = router.createSurface('SEND_PAYMENT', {
       amount: 50, token: 'USDC', address: '0xRecipient00000000000000000000000000000001', chain: 'Arc Mainnet'
     });
-    expect(html).toContain('das-wrap');
-    expect(html).toContain('SEND PROPOSAL');
+    // Conversational: no legacy proposal card / no risk widget.
+    expect(html).not.toContain('das-wrap');
+    expect(html).not.toContain('SEND PROPOSAL');
+    expect(html).not.toContain('RISK');
     expect(html).toContain('50');
     expect(html).toContain('USDC');
     expect(html).toContain('Arc Mainnet');
@@ -128,12 +130,12 @@ describe('AgentCapabilityRouter — createSurface', () => {
     expect(html).toContain('AgentCapabilityRouter.cancel(');
   });
 
-  it('creates a SWAP proposal card for SWAP_EXECUTE intent', () => {
+  it('creates a conversational SWAP message (no proposal card) for SWAP_EXECUTE', () => {
     const html = router.createSurface('SWAP_EXECUTE', {
       amount: 100, token: 'USDC', toToken: 'EURC'
     });
-    expect(html).toContain('das-wrap');
-    expect(html).toContain('SWAP PROPOSAL');
+    expect(html).not.toContain('das-wrap');
+    expect(html).not.toContain('SWAP PROPOSAL');
     expect(html).toContain('100');
     expect(html).toContain('USDC');
     expect(html).toContain('EURC');
@@ -472,7 +474,7 @@ describe('Agent Brain flag', () => {
 
 // ══════════════════════════════════════════════════════════════════════════════
 describe('Intent → Plan → Surface pipeline (integration)', () => {
-  it('SEND_PAYMENT with full params produces an approvable proposal', () => {
+  it('SEND_PAYMENT with full params produces an approvable conversational message', () => {
     const win = makeWindow();
     const router = loadRouter(win);
     const params = {
@@ -486,15 +488,18 @@ describe('Intent → Plan → Surface pipeline (integration)', () => {
     expect(Object.keys(router._proposals).length).toBe(1);
     // HTML contains approve button
     expect(html).toContain('AgentCapabilityRouter.approve(');
-    // Risk is LOW for 100 USDC
-    expect(html).toContain('LOW RISK');
+    // Conversational — no legacy card and no risk widget.
+    expect(html).not.toContain('SEND PROPOSAL');
+    expect(html).not.toContain('das-wrap');
+    expect(html).not.toContain('RISK');
   });
 
-  it('SEND_PAYMENT with high amount shows HIGH RISK badge', () => {
+  it('SEND_PAYMENT conversational message has no risk badge (amount is inline text)', () => {
     const win = makeWindow();
     const router = loadRouter(win);
     const html = router.createSurface('SEND_PAYMENT', { amount: 50000, token: 'USDC' });
-    expect(html).toContain('HIGH RISK');
+    expect(html).not.toContain('HIGH RISK');
+    expect(html).toContain('50000');
   });
 
   it('BRIDGE proposal contains CCTP branding', () => {

@@ -292,9 +292,9 @@ describe('Circle AI Smart Wallet context across capabilities', function() {
       token: 'USDC',
       address: '0xRecipient0000000000000000000000000000001'
     }, {});
-    assert.ok(html.includes('SEND PROPOSAL'), 'must be a send proposal');
-    assert.ok(html.includes('Recipient'), 'must show recipient');
-    assert.ok(html.includes('0xRecip') || html.includes('Recipient'), 'must show recipient address (may be shortened)');
+    assert.ok(!html.includes('SEND PROPOSAL'), 'must NOT be a legacy send proposal card');
+    assert.ok(html.includes('0xRecip'), 'must show recipient address (shortened)');
+    assert.ok(!html.includes('0xPersonal'), 'must NOT use the agent/personal wallet address');
   });
 
   it('createSurface for SWAP_EXECUTE uses correct from/to tokens', function() {
@@ -305,7 +305,7 @@ describe('Circle AI Smart Wallet context across capabilities', function() {
       token: 'USDC',
       toToken: 'EURC'
     }, {});
-    assert.ok(html.includes('SWAP PROPOSAL'), 'must be a swap proposal');
+    assert.ok(!html.includes('SWAP PROPOSAL'), 'must NOT be a legacy swap proposal card');
     assert.ok(html.includes('USDC'), 'must show from token');
     assert.ok(html.includes('EURC'), 'must show to token');
   });
