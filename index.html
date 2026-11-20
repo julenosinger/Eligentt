@@ -58790,6 +58790,98 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
     return p;
   }
 
+  // ── Read-only app-awareness surface (Phase 3.0) ────────────────────────────
+  // Renders client-side read-tool results (contacts / queue / invoices / payment
+  // links) conversationally from localStorage data. Never writes, never exposes
+  // another user's data (the data source is the current browser's own Store).
+  var _AUT_CLIENT_READ_TOOLS = ['contacts.list','contacts.search','contacts.get','queue.list','invoices.list','paymentLinks.list'];
+  function _autIsClientReadTool(n){ return _AUT_CLIENT_READ_TOOLS.indexOf(n) !== -1; }
+  function _autContactChainName(c){ return c && c.chainId === 'Arc_Mainnet' ? 'Arc Mainnet' : (c && c.chainId || 'Unknown'); }
+  function _autShortAddr(a){ return (a && a.length > 14) ? a.slice(0,8) + '…' + a.slice(-6) : (a || ''); }
+
+  function _autReadSurface(name, args){
+    args = args || {};
+    try {
+      // ── Contacts (P0) ────────────────────────────────────────────────
+      if (name === 'contacts.list' || name === 'contacts.search' || name === 'contacts.get') {
+        var all = (typeof RecipientResolver !== 'undefined' && RecipientResolver.all)
+          ? RecipientResolver.all()
+          : (typeof Store !== 'undefined' && Store.load ? Store.load('contacts', []) : []);
+        if (!Array.isArray(all)) all = [];
+        var q = String(args.query || args.name || '').toLowerCase().trim();
+        var list = all;
+        if (q) {
+          list = all.filter(function(c){
+            var nm = String(c.name || '').toLowerCase();
+            var ad = String(c.addr || '').toLowerCase();
+            return nm.indexOf(q) !== -1 || ad.indexOf(q) !== -1;
+          });
+        }
+        if (!list.length) {
+          return '<div class="aut-intro">' + (q
+            ? ('Não encontrei nenhum contato para <strong>' + esc(q) + '</strong>.')
+            : 'Você ainda não tem contatos salvos.') + '</div>';
+        }
+        var head = q
+          ? ('Encontrei <strong>' + list.length + '</strong> contato' + (list.length === 1 ? '' : 's') + ' para <strong>' + esc(q) + '</strong>:')
+          : ('Encontrei <strong>' + list.length + '</strong> contato' + (list.length === 1 ? '' : 's') + ' cadastrado' + (list.length === 1 ? '' : 's') + ':');
+        var rows = list.slice(0, 30).map(function(c){
+          return '<div style="font-size:10px">• <strong>' + esc(c.name || 'Sem nome') + '</strong>' +
+            (c.addr ? ' · <code style="font-size:9px">' + esc(_autShortAddr(c.addr)) + '</code>' : '') +
+            ' · <span style="color:var(--muted)">' + esc(_autContactChainName(c)) + '</span></div>';
+        }).join('');
+        var extra = list.length > 30 ? '<div style="color:var(--muted);font-size:9px">+ ' + (list.length - 30) + ' outros</div>' : '';
+        return '<div class="aut-intro">' + head + '</div>' + rows + extra;
+      }
+
+      // ── Queue ────────────────────────────────────────────────────────
+      if (name === 'queue.list') {
+        var tasks = [];
+        try { if (typeof ExecutionQueue !== 'undefined' && ExecutionQueue.getQueue) tasks = ExecutionQueue.getQueue(); } catch(_e){}
+        if (!Array.isArray(tasks)) tasks = [];
+        if (!tasks.length) return '<div class="aut-intro">Sua fila de pagamentos está vazia.</div>';
+        var active = tasks.filter(function(t){ return ['pending','running','waiting_permit','waiting_confirm'].indexOf(t.status) !== -1; });
+        var qbody = tasks.slice(0, 20).map(function(t){
+          var st = t.status || 'pending';
+          var color = (st === 'completed') ? '#22c55e' : (st === 'failed' || st === 'cancelled') ? '#ef4444' : '#f59e0b';
+          return '<div style="font-size:10px">• <strong>' + esc(t.operation || t.type || 'Task') + '</strong>' +
+            (t.amount ? ' · ' + esc(String(t.amount)) + ' ' + esc(t.asset || 'USDC') : '') +
+            ' · <span style="color:' + color + '">' + esc(st) + '</span></div>';
+        }).join('');
+        return '<div class="aut-intro">Sua fila tem <strong>' + tasks.length + '</strong> item(ns)' +
+          (active.length ? (' (' + active.length + ' pendente' + (active.length === 1 ? '' : 's') + ')') : '') + ':</div>' + qbody;
+      }
+
+      // ── Invoices ─────────────────────────────────────────────────────
+      if (name === 'invoices.list') {
+        var invs = (typeof Store !== 'undefined' && Store.load) ? Store.load('invoices', []) : [];
+        if (!Array.isArray(invs)) invs = [];
+        if (!invs.length) return '<div class="aut-intro">Você não tem faturas cadastradas.</div>';
+        var ibody = invs.slice(0, 20).map(function(i){
+          return '<div style="font-size:10px">• <strong>#' + esc(String(i.id || '')) + '</strong>' +
+            (i.toName ? ' · ' + esc(i.toName) : '') +
+            ' · ' + esc(String(i.total != null ? i.total : '')) + ' ' + esc(i.currency || 'USDC') +
+            ' · <span style="color:var(--muted)">' + esc(i.status || 'Outstanding') + '</span></div>';
+        }).join('');
+        return '<div class="aut-intro">Encontrei <strong>' + invs.length + '</strong> fatura' + (invs.length === 1 ? '' : 's') + ':</div>' + ibody;
+      }
+
+      // ── Payment links ─────────────────────────────────────────────────
+      if (name === 'paymentLinks.list') {
+        var links = (typeof Store !== 'undefined' && Store.load) ? Store.load('links', []) : [];
+        if (!Array.isArray(links)) links = [];
+        if (!links.length) return '<div class="aut-intro">Você não tem links de pagamento criados.</div>';
+        var lb = links.slice(0, 20).map(function(l){
+          return '<div style="font-size:10px">• <strong>' + esc(l.label || 'Link') + '</strong>' +
+            ' · ' + esc(String(l.amount != null ? l.amount : '')) + ' ' + esc(l.token || l.currency || 'USDC') +
+            ' · <span style="color:var(--muted)">' + esc(l.status || 'Active') + '</span></div>';
+        }).join('');
+        return '<div class="aut-intro">Encontrei <strong>' + links.length + '</strong> link' + (links.length === 1 ? '' : 's') + ' de pagamento:</div>' + lb;
+      }
+    } catch(_e) { return null; }
+    return null;
+  }
+
   // ── Core Process Engine ──────────────────────────────
   // AI-first reasoning bridge: calls the multi-provider AI and maps its
   // structured tool calls to the existing execution engine via
@@ -58813,6 +58905,18 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
     }
 
     if (Array.isArray(out.toolCalls) && out.toolCalls.length) {
+      // ── Phase 3.0: all-client-read tool calls resolve locally (contacts/queue/
+      //    invoices/paymentLinks). Render each and combine (multi-tool support).
+      var _readCalls = out.toolCalls.filter(function(_tc){ return _autIsClientReadTool(_tc && _tc.name); });
+      if (_readCalls.length === out.toolCalls.length) {
+        var _parts = [];
+        for (var _ri = 0; _ri < _readCalls.length; _ri++) {
+          var _rh = _autReadSurface(_readCalls[_ri].name, _readCalls[_ri].arguments || {});
+          if (_rh) _parts.push(_rh);
+        }
+        if (_parts.length) return _parts.join('');
+      }
+
       var tc = out.toolCalls[0];
       var name = tc.name;
       var args = tc.arguments || {};

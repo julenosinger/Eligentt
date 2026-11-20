@@ -8,8 +8,11 @@
  * the frontend execution gate (Autonoma 2) validates and gates every operation.
  */
 
-import { stream, flags } from '../_ai/orchestrator.js';
+import { generate, flags } from '../_ai/orchestrator.js';
 import { TRUSTED_SYSTEM_PROMPT, resolveAuthorizedTools } from '../_ai/trustedTools.js';
+import { executeReadTool, isServerReadTool } from './readTools.js';
+
+const MAX_TOOL_ITERS = 4; // bounded orchestration cycle — prevents infinite loops
 
 const TIMEOUT_MS = 35000;
 
@@ -47,6 +50,84 @@ async function requireSession(request, env) {
 function errSSE(cors, status, msg) {
   const body = 'data: ' + JSON.stringify({ error: msg }) + '\n\ndata: [DONE]\n\n';
   return new Response(body, { status, headers: { ...cors, 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' } });
+}
+
+// ── Bounded read-tool orchestration (Phase 3.0) ──────────────────────────────
+// Runs a generate() loop so the selected model can invoke server-side READ tools
+// (balance / history / wallet_info), receive structured results, and produce a
+// grounded natural-language answer. Client-side read tools + write tools are
+// returned to the frontend (existing bridge / execution gate) and are NEVER
+// executed server-side. The loop is bounded (MAX_TOOL_ITERS) to prevent runaway
+// tool-call cycles.
+function sseEvent(delta) {
+  return 'data: ' + JSON.stringify({ choices: [{ delta }] }) + '\n\n';
+}
+
+function toolCallsDelta(toolCalls) {
+  return {
+    tool_calls: toolCalls.map((tc, i) => ({
+      index: i,
+      id: tc.id || null,
+      type: 'function',
+      function: { name: tc.name, arguments: JSON.stringify(tc.arguments || {}) },
+    })),
+  };
+}
+
+const LOOP_FALLBACK_TEXT = 'I retrieved your information, but I could not complete the analysis. Please try again.';
+
+async function runReadLoop(env, opts) {
+  const { provider, model, toolChoice, user, waitUntil } = opts;
+  let msgs = opts.messages.slice();
+  let lastProvider = null;
+
+  for (let iter = 0; iter < MAX_TOOL_ITERS; iter++) {
+    const g = await generate(env, {
+      provider, model, messages: msgs, tools: opts.tools, toolChoice,
+      maxTokens: 1024, temperature: 0.3, timeoutMs: TIMEOUT_MS,
+      userId: user ? user.userId : null, operationType: 'chat', waitUntil,
+    });
+    if (!g.ok) return { ok: false, code: g.code, error: g.error };
+    lastProvider = g.result.provider;
+
+    const toolCalls = (g.result.toolCalls || []).filter((tc) => tc && tc.name);
+
+    // No tool calls → final text answer (single SSE chunk).
+    if (!toolCalls.length) {
+      return { ok: true, provider: lastProvider, body: sseEvent({ content: g.result.message || '' }) + 'data: [DONE]\n\n' };
+    }
+
+    const serverCalls = toolCalls.filter((tc) => isServerReadTool(tc.name));
+    const otherCalls = toolCalls.filter((tc) => !isServerReadTool(tc.name));
+
+    // Any client-read or write tool call → hand to the frontend (never executed here).
+    if (otherCalls.length) {
+      return { ok: true, provider: lastProvider, body: sseEvent(toolCallsDelta(toolCalls)) + 'data: [DONE]\n\n' };
+    }
+
+    // All server-read → execute, append assistant tool_calls + tool results, loop.
+    const assistant = {
+      role: 'assistant',
+      content: null,
+      tool_calls: serverCalls.map((tc, i) => ({
+        id: tc.id || ('call_' + iter + '_' + i),
+        type: 'function',
+        function: { name: tc.name, arguments: JSON.stringify(tc.arguments || {}) },
+      })),
+    };
+    msgs = msgs.concat([assistant]);
+    for (let i = 0; i < serverCalls.length; i++) {
+      const tc = serverCalls[i];
+      const r = await executeReadTool(tc.name, tc.arguments || {}, user, env);
+      const content = r.clientSide
+        ? JSON.stringify({ clientSide: true, tool: r.tool })
+        : r.ok ? JSON.stringify(r.data) : JSON.stringify({ ok: false, error: r.error });
+      msgs.push({ role: 'tool', tool_call_id: assistant.tool_calls[i].id, content });
+    }
+  }
+
+  // Bounded loop exhausted without a clean answer — grounded fallback, never fabricated data.
+  return { ok: true, provider: lastProvider, body: sseEvent({ content: LOOP_FALLBACK_TEXT }) + 'data: [DONE]\n\n' };
 }
 
 export async function onRequestOptions(context) {
@@ -106,17 +187,13 @@ export async function onRequestPost(context) {
   if (!toolsResolved.ok) return errSSE(cors, 400, toolsResolved.reason);
   const toolsList = toolsResolved.tools.length ? toolsResolved.tools : undefined;
 
-  const result = await stream(env, {
+  const result = await runReadLoop(env, {
     provider: provider || undefined,
     model: model || undefined,
     messages: [finalSystem, ...otherMessages.slice(-20)],
     tools: toolsList,
     toolChoice: tool_choice || 'auto',
-    maxTokens: 1024,
-    temperature: 0.3,
-    timeoutMs: TIMEOUT_MS,
-    userId: auth.user ? auth.user.userId : null,
-    operationType: 'chat',
+    user: auth.user,
     waitUntil: (typeof context.waitUntil === 'function') ? context.waitUntil.bind(context) : undefined,
   });
 
@@ -128,5 +205,5 @@ export async function onRequestPost(context) {
 
   const headers = { ...cors, 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no' };
   if (result.provider) headers['X-AI-Provider'] = result.provider;
-  return new Response(result.response.body, { status: 200, headers });
+  return new Response(result.body, { status: 200, headers });
 }

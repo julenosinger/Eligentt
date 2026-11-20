@@ -20,15 +20,16 @@ export const TRUSTED_SYSTEM_PROMPT = [
   '',
   'RULES:',
   '1. Be concise and conversational. Format amounts clearly (e.g. "500 USDC").',
-  '2. For any read operation (balance, history, routes), call the appropriate tool.',
-  '3. For any write operation (send, swap, bridge, create), call the tool — it will ask for approval.',
-  '4. Never invent balances, addresses, or transaction hashes.',
-  '5. If the wallet is not connected, say so clearly.',
-  '6. For multi-step workflows, describe each step before executing.',
-  '7. Cross-chain routes use LI.FI. CCTP v2 is available for USDC bridging.',
-  '8. Supported chains: Arc (5042), Ethereum (1), Base (8453), Arbitrum (42161), Optimism (10), Polygon (137).',
-  '9. If a tool returns an error, explain it clearly without technical jargon.',
-  '10. For "send to a name", resolve it from contacts if available, or ask for the address.',
+  '2. For any READ operation, call the appropriate read-only tool: balance, history, wallet_info, contacts.list, contacts.search, contacts.get, queue.list, invoices.list, paymentLinks.list.',
+  '3. For "show my contacts" / "search NAME in contacts" / "what address is saved for NAME", use contacts.list / contacts.search / contacts.get.',
+  '4. For any write operation (send, swap, bridge, create), call the tool — it will ask for approval.',
+  '5. Never invent balances, addresses, transaction hashes, contacts, or schedules.',
+  '6. If the wallet is not connected or not provisioned, say so clearly.',
+  '7. For multi-step workflows, describe each step before executing.',
+  '8. Cross-chain routes use LI.FI. CCTP v2 is available for USDC bridging.',
+  '9. Supported chains: Arc (5042), Ethereum (1), Base (8453), Arbitrum (42161), Optimism (10), Polygon (137).',
+  '10. If a tool returns an error, explain it clearly without technical jargon.',
+  '11. For "send to a name", resolve it from contacts if available, or ask for the address.',
 ].join('\n');
 
 // Authoritative tool definitions (OpenAI function-calling format). Mirrors the
@@ -81,6 +82,55 @@ export const TRUSTED_TOOLS = Object.freeze([
     function: {
       name: 'schedules',
       description: 'List the user\'s scheduled and recurring payments.',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  // ── Phase 3.0 read-only app-awareness tools ──────────────────────────────
+  {
+    type: 'function',
+    function: {
+      name: 'contacts.list',
+      description: 'List the user\'s saved contacts (name, address, network). Optional: query (partial name search).',
+      parameters: { type: 'object', properties: { query: { type: 'string' } } },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'contacts.search',
+      description: 'Search the user\'s saved contacts by name or address. Parameters: query (string, required).',
+      parameters: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'contacts.get',
+      description: 'Get a specific saved contact by name. Parameters: name (string, required).',
+      parameters: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'queue.list',
+      description: 'List the user\'s pending execution queue. No parameters needed.',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'invoices.list',
+      description: 'List the user\'s invoices. No parameters needed.',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'paymentLinks.list',
+      description: 'List the user\'s payment links. No parameters needed.',
       parameters: { type: 'object', properties: {} },
     },
   },
