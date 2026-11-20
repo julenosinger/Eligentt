@@ -136,6 +136,76 @@
       '</div></div>';
   }
 
+  /* ── CONVERSATIONAL SEND / SWAP (no proposal cards) ────────
+     Autonoma chat presents Send/Swap as natural-language messages with a
+     compact inline Approve/Cancel — no large proposal card, no financial
+     widgets. Execution still routes through approve() → __autExecuteIntent
+     (unchanged financial path + authorization checks). */
+
+  function _convSurface(propId, text, actionLabel) {
+    return '<div data-prop="' + propId + '" style="margin-top:6px">' +
+      '<div class="aut-intro" style="margin-bottom:8px">' + text + '</div>' +
+      '<div style="display:flex;gap:8px">' +
+      '<button class="das-btn review" onclick="AgentCapabilityRouter.approve(\'' + propId + '\')"><i class="ti ti-check"></i>Approve & ' + esc(actionLabel) + '</button>' +
+      '<button class="das-btn cancel" onclick="AgentCapabilityRouter.cancel(\'' + propId + '\')"><i class="ti ti-x"></i>Cancel</button>' +
+      '</div></div>';
+  }
+
+  function buildSendConversational(params, propId) {
+    var amount  = params.amount || '?';
+    var token   = params.token  || 'USDC';
+    var addr    = params.address || '';
+    var name    = params.recipientName || '';
+    var network = params.chain || 'Arc Mainnet';
+    var recipient = name
+      ? esc(name) + ' <code style="font-size:9px">' + shortAddr(addr) + '</code>'
+      : '<code style="font-size:9px">' + shortAddr(addr) + '</code>';
+    var text = 'I can send <strong>' + esc(String(amount)) + ' ' + esc(token) + '</strong> to ' + recipient + ' on <strong>' + esc(network) + '</strong>.';
+    return _convSurface(propId, text, 'Send');
+  }
+
+  function buildSwapConversational(params, propId) {
+    var amount   = params.amount  || '?';
+    var fromTok  = params.token   || 'USDC';
+    var toTok    = params.toToken || params.toAsset || (fromTok === 'USDC' ? 'EURC' : 'USDC');
+    var network  = params.chain   || 'Arc Mainnet';
+    var route    = params.route   || 'LI.FI';
+    var estimate = params.estimate || null;
+
+    var estDisplay = estimate ? fmtUSDC(estimate) : null;
+    try {
+      var SA = mod('SwapAggregator');
+      if (SA && typeof SA.getBestEstimate === 'function') {
+        var est = SA.getBestEstimate(fromTok, toTok, parseFloat(amount));
+        if (est && est.output) { estDisplay = fmtUSDC(est.output); route = est.route || route; }
+      }
+    } catch (e) {}
+
+    // Never claim a route was found while the quote is still computing.
+    var text = estDisplay
+      ? 'I found a route for your swap: <strong>' + esc(String(amount)) + ' ' + esc(fromTok) + '</strong> → <strong>≈ ' + esc(estDisplay) + ' ' + esc(toTok) + '</strong> on <strong>' + esc(network) + '</strong> via <strong>' + esc(route) + '</strong>.'
+      : 'I\'ll swap <strong>' + esc(String(amount)) + ' ' + esc(fromTok) + '</strong> → <strong>' + esc(toTok) + '</strong> on <strong>' + esc(network) + '</strong>.';
+    return _convSurface(propId, text, 'Swap');
+  }
+
+  function buildResultConversational(intent, params, txHash, status) {
+    var statusLabel = status === 'confirmed' ? 'Completed' : status === 'failed' ? 'Failed' : 'Pending';
+    var statusIcon  = status === 'confirmed' ? 'circle-check' : status === 'failed' ? 'circle-x' : 'clock';
+    var statusColor = status === 'confirmed' ? 'var(--green)' : status === 'failed' ? 'var(--red)' : 'var(--yellow)';
+    var opLabel = { SEND_PAYMENT: 'Send', SWAP_EXECUTE: 'Swap', BRIDGE: 'Bridge', CREATE_SCHEDULE: 'Schedule', MULTISEND: 'Batch', CROSS_CHAIN: 'Cross-Chain' }[intent] || (intent || '').replace(/_/g, ' ');
+    var amount  = params.amount || '';
+    var token   = params.token  || 'USDC';
+    var toToken = params.toToken || null;
+    var addr    = params.address || '';
+    var summary = toToken
+      ? esc(String(amount)) + ' ' + esc(token) + ' → ' + esc(toToken)
+      : (addr ? esc(String(amount)) + ' ' + esc(token) + ' to <code style="font-size:9px">' + shortAddr(addr) + '</code>' : esc(String(amount)) + ' ' + esc(token));
+    var tx = txHash
+      ? ' <code style="font-size:9px">' + shortAddr(txHash) + '</code> <a href="https://explorer.arc.io/tx/' + esc(txHash) + '" target="_blank" rel="noopener" style="color:var(--blue)">View <i class="ti ti-external-link"></i></a>'
+      : '';
+    return '<div class="aut-intro"><i class="ti ti-' + statusIcon + '" style="color:' + statusColor + ';margin-right:4px"></i><strong>' + statusLabel + '</strong> — ' + esc(opLabel.toLowerCase()) + ': ' + summary + '.' + tx + '</div>';
+  }
+
   /* ── BRIDGE PROPOSAL ────────────────────────────────────── */
   function buildBridgeProposal(params, propId) {
     var amount    = params.amount    || '?';
@@ -296,9 +366,12 @@
     runtime = runtime || {};
     var propId = storeProp(intent, params, runtime);
     var canonical = (intent || '').toUpperCase();
+    // Autonoma chat is conversational (no Send/Swap proposal cards); the UB panel
+    // (runtime._ubPanel) keeps the card format.
+    var conversational = !runtime._ubPanel;
 
-    if (canonical === 'SEND_PAYMENT')     return buildSendProposal(params, propId);
-    if (canonical === 'SWAP_EXECUTE')     return buildSwapProposal(params, propId);
+    if (canonical === 'SEND_PAYMENT')     return conversational ? buildSendConversational(params, propId) : buildSendProposal(params, propId);
+    if (canonical === 'SWAP_EXECUTE')     return conversational ? buildSwapConversational(params, propId) : buildSwapProposal(params, propId);
     if (canonical === 'BRIDGE')           return buildBridgeProposal(params, propId);
     if (canonical === 'CREATE_SCHEDULE')  return buildScheduleProposal(params, propId);
     if (canonical === 'MULTISEND' || canonical === 'MASS_PAYMENT')
@@ -339,8 +412,8 @@
     var params  = entry.params;
     var runtime = entry.runtime || {};
 
-    // Replace the proposal card in the last AI message with a "processing" indicator
-    _replaceSurface(propId, '<div class="das-executing"><span class="das-exec-spinner"></span>Executing ' + esc((intent||'').replace(/_/g,' ').toLowerCase()) + '…</div>');
+    // Replace the proposal message in the last AI message with a "processing" indicator
+    _replaceSurface(propId, '<div class="das-executing" data-prop="' + propId + '"><span class="das-exec-spinner"></span>Executing ' + esc((intent||'').replace(/_/g,' ').toLowerCase()) + '…</div>');
 
     // Route to the existing executeIntent function
     try {
@@ -360,11 +433,18 @@
       var C = mod('AutonomaAgentBrain');
       var verification = C ? C.verify({ ok: true, html: result }, { canonical: (intent||'').toLowerCase(), entities: params, isWrite: true }, runtime) : { status: 'pending', transactionHash: null };
 
-      // Replace executing indicator with result
+      // Replace executing indicator with result (conversational for Autonoma chat
+      // Send/Swap; card for UB panel and other operations).
       var txHash = verification ? verification.transactionHash : null;
       var status = verification ? verification.status : 'pending';
-
-      _replaceSurface(propId, buildResultCard(intent, params, txHash, status) + (result || ''));
+      var canonical = (intent || '').toUpperCase();
+      var resultHtml;
+      if (!runtime._ubPanel && (canonical === 'SEND_PAYMENT' || canonical === 'SWAP_EXECUTE')) {
+        resultHtml = buildResultConversational(intent, params, txHash, status);
+      } else {
+        resultHtml = buildResultCard(intent, params, txHash, status);
+      }
+      _replaceSurface(propId, resultHtml + (result || ''));
 
     } catch (e) {
       _replaceSurface(propId, '<div class="das-result"><div class="das-result-status" style="color:var(--red)"><i class="ti ti-circle-x"></i> Error</div>' +
@@ -397,9 +477,10 @@
       var msgs = document.querySelectorAll('#aut-messages .aut-msg.ai .aut-msg-body');
       for (var i = msgs.length - 1; i >= 0; i--) {
         var body = msgs[i];
-        var wrap = body.querySelector('.das-wrap[data-prop="' + propId + '"], .das-executing[data-prop="' + propId + '"]');
+        // Generic: any element carrying data-prop (conversational + executing).
+        var wrap = body.querySelector('[data-prop="' + propId + '"]');
         if (!wrap) {
-          // Try finding via button onclick containing propId
+          // Try finding via button onclick containing propId (legacy .das-wrap cards)
           var btns = body.querySelectorAll('[onclick*="' + propId + '"]');
           if (btns.length) { wrap = btns[0].closest('.das-wrap') || btns[0].closest('.das-executing'); }
         }
