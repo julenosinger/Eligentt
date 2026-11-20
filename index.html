@@ -58882,6 +58882,17 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
     return null;
   }
 
+  // ── AI-unavailable fallback (Phase 3.0 hotfix) ─────────────────────────────
+  // When the selected AI provider cannot answer an ordinary conversational
+  // message, surface a clear error + retry. The message is NEVER re-interpreted
+  // as a payment intent by the legacy classifier.
+  function _autAiUnavailable(msg){
+    try { window._autAiRetryMsg = String(msg || ''); } catch(_e) {}
+    return '<div class="aut-intro">I couldn\'t reach the AI service to answer that just now. Please try again.</div>' +
+      '<div style="margin-top:6px;font-size:10px;color:var(--muted2)">Your message was saved — use Retry to resend it.</div>' +
+      '<div style="margin-top:8px"><button type="button" class="btn" style="font-size:10px" onclick="if(window._autAiRetryMsg)autonomaSendQuick(window._autAiRetryMsg)"><i class="ti ti-refresh"></i> Retry</button></div>';
+  }
+
   // ── Core Process Engine ──────────────────────────────
   // AI-first reasoning bridge: calls the multi-provider AI and maps its
   // structured tool calls to the existing execution engine via
@@ -59024,11 +59035,17 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
     // ── AI-first orchestration ─────────────────────────────────────────────
     // The selected external AI (multi-provider) is the primary reasoning layer.
     // It returns conversational text or a structured tool call that we bridge to
-    // the existing execution engine. On any failure we fall back to the legacy
-    // deterministic pipeline below (never a hardcoded response).
+    // the existing execution engine. If the AI cannot answer, an ordinary
+    // conversational message (no recognized intent) surfaces a clear error — it
+    // is NEVER silently re-interpreted as a payment intent by the legacy
+    // classifier ("I understood you want to default… Missing Information").
     if(!_fastTrack){
       var _aiOut = await _autAiProcess(msg);
       if (_aiOut) return _aiOut;
+      var _fbIntent = _classifyIntent(msg);
+      if (!_fbIntent || _fbIntent.intent === 'DEFAULT') {
+        return _autAiUnavailable(msg);
+      }
     }
 
     // ── Agent Brain orchestration — full agent-first pipeline ──
