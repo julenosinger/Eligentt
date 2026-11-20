@@ -158,9 +158,9 @@ describe('orchestrator: generate', () => {
     expect(out.code).toBe('rate_limited');
   });
 
-  it('falls back to the next provider on 500', async () => {
-    // DeepSeek 500, then OpenAI succeeds.
-    const env2 = { DEEPSEEK_API_KEY: 'dk', OPENAI_API_KEY: 'ok' };
+  it('falls back to the next provider on 500 (only when multi-provider enabled)', async () => {
+    // DeepSeek 500, then OpenAI succeeds — fallback requires multi-provider flag.
+    const env2 = { DEEPSEEK_API_KEY: 'dk', OPENAI_API_KEY: 'ok', AUTONOMA_MULTI_PROVIDER_ENABLED: 'true' };
     vi.stubGlobal('fetch', vi.fn(async (url) => {
       if (String(url).includes('deepseek')) return new Response('down', { status: 500 });
       return new Response(JSON.stringify({ model: 'gpt-4o-mini', choices: [{ message: { content: 'fb' }, finish_reason: 'stop' }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } }), { status: 200 });
@@ -168,6 +168,14 @@ describe('orchestrator: generate', () => {
     const out = await generate(env2, { messages: [{ role: 'user', content: 'hi' }] });
     expect(out.ok).toBe(true);
     expect(out.result.provider).toBe('openai');
+  });
+
+  it('does NOT fall back on 500 when multi-provider is disabled', async () => {
+    const env2 = { DEEPSEEK_API_KEY: 'dk', OPENAI_API_KEY: 'ok' };
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('down', { status: 500 })));
+    const out = await generate(env2, { messages: [{ role: 'user', content: 'hi' }] });
+    expect(out.ok).toBe(false);
+    expect(out.code).toBe('provider_error');
   });
 
   it('returns malformed_response on empty body', async () => {

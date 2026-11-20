@@ -13,7 +13,7 @@
  */
 
 import { getProvider, listProviders, defaultProviderId, DEFAULT_MODEL } from './providerRegistry.js';
-import { recordUsage, checkDailyBudget } from './usageLedger.js';
+import { recordUsage } from './usageLedger.js';
 
 const DEFAULT_TIMEOUT_MS = 35000;
 const MAX_FALLBACK_PROVIDERS = 2; // primary + at most 1 fallback
@@ -45,14 +45,16 @@ export function resolveProvider(env, requestedId) {
   const f = flags(env);
   const req = (requestedId || '').toLowerCase();
 
+  // GLOBAL GATE FIRST — AUTONOMA_AI_ENABLED=false blocks ALL provider calls,
+  // even an explicit provider request. Must run before any resolution.
+  if (!f.aiEnabled) return { ok: false, code: 'ai_disabled', message: 'AI is disabled' };
+
   if (req && getProvider(req) && getProvider(req).isAvailable(env)) {
     if (!f.multiProviderEnabled && req !== 'deepseek') {
       return { ok: false, code: 'multi_provider_disabled', message: 'Multi-provider routing is disabled' };
     }
-    return { ok: true, provider: getProvider(req), model: req === 'deepseek' ? 'deepseek-chat' : getProvider(req).defaultModel };
+    return { ok: true, provider: getProvider(req), model: getProvider(req).defaultModel };
   }
-
-  if (!f.aiEnabled) return { ok: false, code: 'ai_disabled', message: 'AI is disabled' };
 
   const id = defaultProviderId(env);
   if (!id) return { ok: false, code: 'no_provider', message: 'No AI provider configured' };
@@ -83,11 +85,9 @@ export async function generate(env, opts) {
     ? requestedModel
     : resolution.model;
 
-  // Daily budget check (best-effort; only when a limit is configured).
-  if (opts.userId) {
-    const budget = await checkDailyBudget(env, opts.userId, f.dailyTokenLimit);
-    if (!budget.ok) return { ok: false, error: 'Daily AI usage limit reached', code: 'budget_exceeded', used: budget.used, limit: budget.limit };
-  }
+  // NOTE: no hard per-user budget gate here — the KV daily counter is approximate
+  // telemetry, not an atomic spend limit (see usageLedger.js). Hard rate limiting /
+  // billing guarantees are disabled in this phase.
 
   const apiKey = resolution.provider.apiKey(env);
   const req = resolution.provider.buildRequest({ model, messages: opts.messages, tools: opts.tools, temperature: opts.temperature, maxTokens: opts.maxTokens, stream: false });
@@ -113,7 +113,9 @@ export async function generate(env, opts) {
     const errText = await upstream.text().catch(() => '');
     const mapped = mapProviderError(upstream.status, errText);
     // Safe bounded fallback on transient failures (never on 4xx auth errors).
-    if (upstream.status >= 500 || upstream.status === 429) {
+    // Fallback is permitted ONLY when multi-provider routing is enabled — when
+    // disabled, the approved legacy DeepSeek path is the only provider.
+    if ((upstream.status >= 500 || upstream.status === 429) && f.multiProviderEnabled) {
       const fb = await _fallbackGenerate(env, opts, resolution.provider.id, requestId);
       if (fb.ok) return fb;
     }
@@ -145,6 +147,11 @@ export async function generate(env, opts) {
 }
 
 async function _fallbackGenerate(env, opts, failedProviderId, requestId) {
+  // Fallback is only allowed when multi-provider routing is enabled (defence in
+  // depth — the caller already gates, but this must never switch providers while
+  // the legacy DeepSeek-only path is active).
+  if (!flags(env).multiProviderEnabled) return { ok: false };
+
   // Try the next available provider (bounded) — text-only, never re-runs tools.
   const candidates = listProviders().filter((p) => p.id !== failedProviderId && p.isAvailable(env));
   if (!candidates.length) return { ok: false };
@@ -180,24 +187,39 @@ async function _fallbackGenerate(env, opts, failedProviderId, requestId) {
 }
 
 /**
- * Streaming generation. OpenAI-compatible providers stream SSE directly;
- * Anthropic (content_block_delta) is materialised non-streaming and emitted as a
- * single OpenAI-style SSE chunk so the client never branches on provider format.
+ * Streaming generation. OpenAI-compatible providers stream SSE directly (with
+ * usage tracked from the final `usage` chunk); Anthropic (content_block_delta)
+ * is materialised non-streaming and emitted as a single OpenAI-style SSE chunk
+ * (preserving both text AND tool calls) so the client never branches on provider
+ * format.
  *
  * Returns { ok:true, response } or { ok:false, error, code }.
  */
 export async function stream(env, opts) {
+  const requestId = opts.requestId || ('req_' + Math.random().toString(36).slice(2, 10));
   const resolution = resolveProvider(env, opts.provider);
   if (!resolution.ok) return { ok: false, error: resolution.message, code: resolution.code };
 
   const model = opts.model && resolution.provider.isModelAllowed(opts.model) ? opts.model : resolution.model;
   const apiKey = resolution.provider.apiKey(env);
+  const userId = opts.userId || null;
+  const inputEstimate = _estimateInputTokens(opts.messages);
 
   if (!resolution.provider.streamCompatible) {
-    // Anthropic: non-streaming → single SSE chunk.
-    const g = await generate(env, { ...opts, provider: resolution.provider.id, model });
+    // Anthropic: non-streaming → single SSE chunk (preserve text + tool calls).
+    const g = await generate(env, { ...opts, provider: resolution.provider.id, model, requestId });
     if (!g.ok) return { ok: false, error: g.error, code: g.code };
-    const body = 'data: ' + JSON.stringify({ choices: [{ delta: { content: g.result.message } }] }) + '\n\ndata: [DONE]\n\n';
+    const delta = {};
+    if (g.result.message) delta.content = g.result.message;
+    if (g.result.toolCalls && g.result.toolCalls.length) {
+      delta.tool_calls = g.result.toolCalls.map((tc, i) => ({
+        index: i,
+        id: tc.id || null,
+        type: 'function',
+        function: { name: tc.name, arguments: JSON.stringify(tc.arguments || {}) },
+      }));
+    }
+    const body = 'data: ' + JSON.stringify({ choices: [{ delta }] }) + '\n\ndata: [DONE]\n\n';
     return { ok: true, response: new Response(body, { status: 200, headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' } }), provider: resolution.provider.id };
   }
 
@@ -226,14 +248,87 @@ export async function stream(env, opts) {
     return { ok: false, error: mapped.message, code: mapped.code };
   }
 
-  const { readable, writable } = new TransformStream();
-  upstream.body.pipeTo(writable).catch(() => {});
+  // Pass the stream through unchanged while parsing it for a provider-confirmed
+  // `usage` chunk. Usage is recorded (best-effort) when the stream completes.
+  const tracked = _usageTrackingStream(upstream.body, async (usage) => {
+    try {
+      await recordUsage(env, {
+        requestId,
+        userId,
+        provider: resolution.provider.id,
+        model,
+        inputTokens: usage ? usage.inputTokens : inputEstimate,
+        outputTokens: usage ? usage.outputTokens : null,
+        operationType: opts.operationType || 'chat',
+        operationId: opts.operationId || null,
+        confirmed: !!usage,
+        status: usage ? 'confirmed' : 'unknown_usage',
+      });
+    } catch (_) { /* telemetry must never break the user-facing response */ }
+  });
+
   return {
     ok: true,
-    response: new Response(readable, {
+    response: new Response(tracked, {
       status: 200,
       headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no' },
     }),
     provider: resolution.provider.id,
   };
+}
+
+// Rough input-token estimate from message content (~4 chars/token). Used only as
+// an UNCONFIRMED estimate when the provider returns no usage metadata.
+function _estimateInputTokens(messages) {
+  let chars = 0;
+  for (const m of messages || []) {
+    chars += String(m.content || '').length;
+    chars += 4; // role overhead
+  }
+  return Math.max(1, Math.round(chars / 4));
+}
+
+// Wrap an upstream SSE body in a TransformStream that (1) passes every chunk
+// through unchanged (preserving event ordering + content) and (2) parses SSE
+// events (split safely across chunks) to extract a provider `usage` object.
+// `onUsage` is invoked once at stream end with the extracted usage or null.
+function _usageTrackingStream(upstreamBody, onUsage) {
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let usage = null;
+
+  const transform = new TransformStream({
+    transform(chunk, controller) {
+      buffer += decoder.decode(chunk, { stream: true });
+      let idx;
+      while ((idx = buffer.indexOf('\n\n')) !== -1) {
+        const event = buffer.slice(0, idx);
+        buffer = buffer.slice(idx + 2);
+        for (const line of event.split('\n')) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6).trim();
+            if (!data || data === '[DONE]') continue;
+            try {
+              const parsed = JSON.parse(data);
+              if (parsed && parsed.usage) usage = parsed.usage;
+            } catch (_) { /* skip malformed event */ }
+          }
+        }
+      }
+      controller.enqueue(chunk);
+    },
+    async flush() {
+      if (usage) {
+        await onUsage({
+          inputTokens: usage.prompt_tokens ?? usage.input_tokens ?? null,
+          outputTokens: usage.completion_tokens ?? usage.output_tokens ?? null,
+        });
+      } else {
+        await onUsage(null);
+      }
+    },
+  });
+
+  upstreamBody.pipeTo(transform.writable).catch(() => {});
+  return transform.readable;
 }

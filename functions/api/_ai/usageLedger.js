@@ -36,14 +36,32 @@ export async function recordUsage(env, record) {
   if (!record || !record.requestId) return { ok: false, error: 'requestId required' };
 
   const key = usageKey(record.requestId);
-  const existing = await KV.get(key);
-  if (existing) return { ok: true, deduplicated: true }; // idempotent — no double count
 
-  const inputTokens  = Number(record.inputTokens)  || 0;
-  const outputTokens = Number(record.outputTokens) || 0;
+  // Best-effort idempotency. Cloudflare KV has NO atomic compare-and-swap: this
+  // read-then-write is a heuristic dedup, NOT a financial guarantee. It is
+  // TELEMETRY ONLY (see header note). We still detect requestId reuse across
+  // different users/payloads so cross-account double-counting is surfaced.
+  const existingRaw = await KV.get(key);
+  if (existingRaw) {
+    try {
+      const existing = JSON.parse(existingRaw);
+      if (record.userId && existing.userId && existing.userId !== record.userId) {
+        return { ok: false, error: 'requestId_reused_by_other_user', existingUserId: existing.userId };
+      }
+      return { ok: true, deduplicated: true };
+    } catch (_) { /* fall through and overwrite */ }
+  }
+
+  // Token counts may be null (unknown/partial usage) — never coerce null to a
+  // "confirmed 0". `confirmed` + `status` carry the provenance.
+  const inputTokens  = record.inputTokens == null ? null : (Number(record.inputTokens) || 0);
+  const outputTokens = record.outputTokens == null ? null : (Number(record.outputTokens) || 0);
+
   const estimatedProviderCost = record.estimatedProviderCost != null
     ? Number(record.estimatedProviderCost)
-    : estimateProviderCost(record.provider, record.model, inputTokens, outputTokens);
+    : (inputTokens == null || outputTokens == null
+      ? null
+      : estimateProviderCost(record.provider, record.model, inputTokens, outputTokens));
 
   const rec = {
     requestId: record.requestId,
@@ -62,8 +80,9 @@ export async function recordUsage(env, record) {
 
   await KV.put(key, JSON.stringify(rec), { expirationTtl: 90 * 86400 });
 
-  // Per-user daily token budget (best-effort counter; not a hard billing gate).
-  if (record.userId) {
+  // Per-user daily token counter — APPROXIMATE telemetry only. KV is not atomic,
+  // so concurrent updates can be lost. This is NOT a hard financial/billing limit.
+  if (record.userId && inputTokens != null && outputTokens != null) {
     try {
       const dk = dailyKey(record.userId, dayStamp());
       const cur = parseInt(await KV.get(dk) || '0', 10) || 0;
@@ -75,8 +94,11 @@ export async function recordUsage(env, record) {
 }
 
 /**
- * Check a per-user daily token budget. Returns { ok } when within budget,
- * { ok:false, used, limit } when exceeded. A missing/invalid limit disables the check.
+ * Approximate per-user daily token counter. TELEMETRY ONLY — Cloudflare KV is not
+ * atomic, so this counter can lose concurrent updates and must NOT be used as a
+ * hard financial/billing limit. The orchestrator does not gate requests on this.
+ * A proper atomic budget/reservation mechanism (Durable Object) is out of scope
+ * for this phase.
  */
 export async function checkDailyBudget(env, userId, limitTokens) {
   if (!userId || !Number.isFinite(Number(limitTokens)) || Number(limitTokens) <= 0) return { ok: true };

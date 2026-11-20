@@ -42,6 +42,9 @@ function openAiCompatibleAdapter(cfg) {
         body.tools = tools;
         body.tool_choice = 'auto';
       }
+      // Request a trailing usage chunk on streaming so the server can record
+      // provider-confirmed token counts (OpenAI-compatible `stream_options`).
+      if (stream) body.stream_options = { include_usage: true };
       return { url: cfg.baseUrl + '/chat/completions', body };
     },
 

@@ -68,6 +68,18 @@ export async function onRequestPost(context) {
   const { messages, tools, tool_choice, context: ctx, provider, model } = body;
   if (!Array.isArray(messages) || messages.length === 0) return errSSE(cors, 400, 'messages required');
 
+  // Reject invalid / oversized requests BEFORE any provider call (prevents
+  // uncontrolled API spend and malformed payloads reaching the model).
+  if (messages.length > 40) return errSSE(cors, 400, 'Too many messages');
+  let totalChars = 0;
+  for (const m of messages) {
+    if (!m || typeof m.role !== 'string' || typeof m.content !== 'string') {
+      return errSSE(cors, 400, 'Invalid message structure');
+    }
+    totalChars += m.content.length;
+  }
+  if (totalChars > 100000) return errSSE(cors, 400, 'Request too large');
+
   // Build context block for system prompt injection (unchanged).
   const ctxLines = [];
   if (ctx) {
