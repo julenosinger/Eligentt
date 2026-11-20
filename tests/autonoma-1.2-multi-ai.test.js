@@ -113,7 +113,9 @@ describe('orchestrator: flags and provider resolution', () => {
     expect(f.billingEnabled).toBe(true);
   });
   it('resolveProvider: no key → no_provider', () => {
-    expect(resolveProvider({}, null)).toEqual({ ok: false, code: 'no_provider', message: 'No AI provider configured' });
+    const r = resolveProvider({}, null);
+    expect(r.ok).toBe(false);
+    expect(r.code).toBe('no_provider');
   });
   it('resolveProvider: explicit non-deepseek rejected when multi-provider disabled', () => {
     const r = resolveProvider({ DEEPSEEK_API_KEY: 'x', OPENAI_API_KEY: 'y' }, 'openai');

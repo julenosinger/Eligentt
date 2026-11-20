@@ -49,16 +49,42 @@ export function resolveProvider(env, requestedId) {
   // even an explicit provider request. Must run before any resolution.
   if (!f.aiEnabled) return { ok: false, code: 'ai_disabled', message: 'AI is disabled' };
 
-  if (req && getProvider(req) && getProvider(req).isAvailable(env)) {
-    if (!f.multiProviderEnabled && req !== 'deepseek') {
+  // ── Multi-provider DISABLED: DeepSeek is the ONLY permitted provider. ──────
+  // AUTONOMA_DEFAULT_PROVIDER must NOT bypass this; no fallback to another
+  // provider; an explicit non-deepseek request is rejected.
+  if (!f.multiProviderEnabled) {
+    if (req && req !== 'deepseek') {
       return { ok: false, code: 'multi_provider_disabled', message: 'Multi-provider routing is disabled' };
     }
-    return { ok: true, provider: getProvider(req), model: getProvider(req).defaultModel };
+    if (!getProvider('deepseek').isAvailable(env)) {
+      return { ok: false, code: 'no_provider', message: 'DeepSeek is not configured' };
+    }
+    return { ok: true, provider: getProvider('deepseek'), model: getProvider('deepseek').defaultModel };
   }
 
+  // ── Multi-provider ENABLED: explicit must be a valid, configured provider ──
+  if (req) {
+    const p = getProvider(req);
+    if (!p) return { ok: false, code: 'invalid_provider', message: 'Unknown provider: ' + req };
+    if (!p.isAvailable(env)) return { ok: false, code: 'provider_not_configured', message: 'Provider not configured: ' + req };
+    return { ok: true, provider: p, model: p.defaultModel };
+  }
+
+  // Automatic: honor AUTONOMA_DEFAULT_PROVIDER, then DeepSeek, then first available.
   const id = defaultProviderId(env);
   if (!id) return { ok: false, code: 'no_provider', message: 'No AI provider configured' };
   return { ok: true, provider: getProvider(id), model: getProvider(id).defaultModel };
+}
+
+/**
+ * Resolve the model for a request against the provider's allowlist.
+ * An unsupported model is an EXPLICIT error — never silently substituted with a
+ * default (which could change cost or capabilities).
+ */
+function resolveModel(provider, requestedModel) {
+  if (!requestedModel) return { ok: true, model: provider.defaultModel };
+  if (provider.isModelAllowed(requestedModel)) return { ok: true, model: requestedModel };
+  return { ok: false, code: 'invalid_model', message: 'Unsupported model for ' + provider.id + ': ' + requestedModel };
 }
 
 function mapProviderError(status, bodyText) {
@@ -81,9 +107,9 @@ export async function generate(env, opts) {
   const resolution = resolveProvider(env, opts.provider);
   if (!resolution.ok) return { ok: false, error: resolution.message, code: resolution.code };
 
-  const model = requestedModel && resolution.provider.isModelAllowed(requestedModel)
-    ? requestedModel
-    : resolution.model;
+  const m = resolveModel(resolution.provider, requestedModel);
+  if (!m.ok) return { ok: false, error: m.message, code: m.code };
+  const model = m.model;
 
   // NOTE: no hard per-user budget gate here — the KV daily counter is approximate
   // telemetry, not an atomic spend limit (see usageLedger.js). Hard rate limiting /
@@ -200,7 +226,9 @@ export async function stream(env, opts) {
   const resolution = resolveProvider(env, opts.provider);
   if (!resolution.ok) return { ok: false, error: resolution.message, code: resolution.code };
 
-  const model = opts.model && resolution.provider.isModelAllowed(opts.model) ? opts.model : resolution.model;
+  const m = resolveModel(resolution.provider, opts.model);
+  if (!m.ok) return { ok: false, error: m.message, code: m.code };
+  const model = m.model;
   const apiKey = resolution.provider.apiKey(env);
   const userId = opts.userId || null;
   const inputEstimate = _estimateInputTokens(opts.messages);
@@ -249,22 +277,29 @@ export async function stream(env, opts) {
   }
 
   // Pass the stream through unchanged while parsing it for a provider-confirmed
-  // `usage` chunk. Usage is recorded (best-effort) when the stream completes.
-  const tracked = _usageTrackingStream(upstream.body, async (usage) => {
-    try {
-      await recordUsage(env, {
-        requestId,
-        userId,
-        provider: resolution.provider.id,
-        model,
-        inputTokens: usage ? usage.inputTokens : inputEstimate,
-        outputTokens: usage ? usage.outputTokens : null,
-        operationType: opts.operationType || 'chat',
-        operationId: opts.operationId || null,
-        confirmed: !!usage,
-        status: usage ? 'confirmed' : 'unknown_usage',
-      });
-    } catch (_) { /* telemetry must never break the user-facing response */ }
+  // `usage` chunk. Usage is recorded asynchronously (never blocking the stream).
+  const tracked = _usageTrackingStream(upstream.body, (usage) => {
+    const recordPromise = (async () => {
+      try {
+        await recordUsage(env, {
+          requestId,
+          userId,
+          provider: resolution.provider.id,
+          model,
+          inputTokens: usage ? usage.inputTokens : inputEstimate,
+          outputTokens: usage ? usage.outputTokens : null,
+          operationType: opts.operationType || 'chat',
+          operationId: opts.operationId || null,
+          confirmed: !!usage,
+          status: usage ? 'confirmed' : 'unknown_usage',
+        });
+      } catch (_) { /* telemetry must never break the user-facing response */ }
+    })();
+    // Non-blocking persistence: extend the worker lifetime via waitUntil (Cloudflare)
+    // when available; otherwise fire-and-forget (best-effort, documented).
+    if (typeof opts.waitUntil === 'function') {
+      try { opts.waitUntil(recordPromise); } catch (_) { /* ignore */ }
+    }
   });
 
   return {
@@ -289,43 +324,57 @@ function _estimateInputTokens(messages) {
 }
 
 // Wrap an upstream SSE body in a TransformStream that (1) passes every chunk
-// through unchanged (preserving event ordering + content) and (2) parses SSE
-// events (split safely across chunks) to extract a provider `usage` object.
-// `onUsage` is invoked once at stream end with the extracted usage or null.
+// through unchanged (preserving exact bytes + event ordering) and (2) parses SSE
+// incrementally per the event-stream spec (LF / CRLF / CR line endings, multi-line
+// `data:` fields, comment lines, arbitrary UTF-8 chunk boundaries) to extract a
+// provider `usage` object. `onUsage(usage)` is called once at stream end with the
+// extracted usage or null, and is NOT awaited (non-blocking).
 function _usageTrackingStream(upstreamBody, onUsage) {
   const decoder = new TextDecoder();
   let buffer = '';
+  let dataLines = [];
   let usage = null;
+  const MAX_BUFFER = 256 * 1024; // 256KB parse-state cap (prevents unbounded growth)
+
+  function finalizeEvent() {
+    if (!dataLines.length) return;
+    const payload = dataLines.join('\n');
+    dataLines = [];
+    if (!payload || payload === '[DONE]') return;
+    try {
+      const parsed = JSON.parse(payload);
+      if (parsed && parsed.usage) usage = parsed.usage;
+    } catch (_) { /* malformed metadata — never treated as confirmed usage */ }
+  }
+
+  function handleLine(line) {
+    if (line === '') { finalizeEvent(); return; }
+    if (line[0] === ':') return; // comment
+    const ci = line.indexOf(':');
+    if (ci === -1) return;
+    const field = line.slice(0, ci);
+    let value = line.slice(ci + 1);
+    if (value[0] === ' ') value = value.slice(1); // strip single leading space
+    if (field === 'data') dataLines.push(value);
+    // other fields (event/id/retry) are ignored for usage extraction
+  }
 
   const transform = new TransformStream({
     transform(chunk, controller) {
       buffer += decoder.decode(chunk, { stream: true });
-      let idx;
-      while ((idx = buffer.indexOf('\n\n')) !== -1) {
-        const event = buffer.slice(0, idx);
-        buffer = buffer.slice(idx + 2);
-        for (const line of event.split('\n')) {
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6).trim();
-            if (!data || data === '[DONE]') continue;
-            try {
-              const parsed = JSON.parse(data);
-              if (parsed && parsed.usage) usage = parsed.usage;
-            } catch (_) { /* skip malformed event */ }
-          }
-        }
-      }
+      if (buffer.length > MAX_BUFFER) { dataLines = []; buffer = buffer.slice(-MAX_BUFFER); }
+      // Split into complete lines (handles CRLF / LF / CR via alternation order).
+      const parts = buffer.split(/\r\n|\n|\r/);
+      const remainder = parts.pop(); // last element may be an incomplete line
+      for (const line of parts) handleLine(line);
+      buffer = remainder || '';
       controller.enqueue(chunk);
     },
-    async flush() {
-      if (usage) {
-        await onUsage({
-          inputTokens: usage.prompt_tokens ?? usage.input_tokens ?? null,
-          outputTokens: usage.completion_tokens ?? usage.output_tokens ?? null,
-        });
-      } else {
-        await onUsage(null);
-      }
+    flush() {
+      // Incomplete final event (no trailing blank line): process best-effort.
+      if (buffer.length) { for (const line of buffer.split(/\r\n|\n|\r/)) handleLine(line); buffer = ''; }
+      else finalizeEvent();
+      onUsage(usage ? { inputTokens: usage.prompt_tokens ?? usage.input_tokens ?? null, outputTokens: usage.completion_tokens ?? usage.output_tokens ?? null } : null);
     },
   });
 

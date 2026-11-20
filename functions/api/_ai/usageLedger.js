@@ -24,6 +24,22 @@ function dayStamp(d) {
   return (d || new Date()).toISOString().slice(0, 10);
 }
 
+// Normalize a token count to a non-negative safe integer, or null (unknown).
+// Returns { ok:true, value } or { ok:false } for invalid input.
+function _normalizeTokens(v) {
+  if (v === null || v === undefined) return { ok: true, value: null };
+  if (typeof v === 'number') {
+    if (Number.isSafeInteger(v) && v >= 0) return { ok: true, value: v };
+    return { ok: false };
+  }
+  if (typeof v === 'string' && /^\d+$/.test(v)) {
+    const n = Number(v);
+    if (Number.isSafeInteger(n)) return { ok: true, value: n };
+    return { ok: false };
+  }
+  return { ok: false };
+}
+
 /**
  * Record a usage entry (idempotent by requestId).
  * @param {object} env — Cloudflare env (env.AUTH_KV).
@@ -52,16 +68,19 @@ export async function recordUsage(env, record) {
     } catch (_) { /* fall through and overwrite */ }
   }
 
-  // Token counts may be null (unknown/partial usage) — never coerce null to a
-  // "confirmed 0". `confirmed` + `status` carry the provenance.
-  const inputTokens  = record.inputTokens == null ? null : (Number(record.inputTokens) || 0);
-  const outputTokens = record.outputTokens == null ? null : (Number(record.outputTokens) || 0);
+  // Strict token validation: non-negative safe integers or null (unknown).
+  // Reject negatives, fractions, NaN, Infinity, and malformed numeric strings.
+  const inp = _normalizeTokens(record.inputTokens);
+  const out = _normalizeTokens(record.outputTokens);
+  if (!inp.ok || !out.ok) return { ok: false, error: 'invalid_token_count' };
+  const inputTokens  = inp.value;
+  const outputTokens = out.value;
 
-  const estimatedProviderCost = record.estimatedProviderCost != null
-    ? Number(record.estimatedProviderCost)
-    : (inputTokens == null || outputTokens == null
-      ? null
-      : estimateProviderCost(record.provider, record.model, inputTokens, outputTokens));
+  // Provider cost is ALWAYS computed server-side; client-supplied estimates are
+  // never trusted.
+  const estimatedProviderCost = (inputTokens == null || outputTokens == null)
+    ? null
+    : estimateProviderCost(record.provider, record.model, inputTokens, outputTokens);
 
   const rec = {
     requestId: record.requestId,
