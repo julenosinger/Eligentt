@@ -6884,6 +6884,19 @@ select.cinput option { background: #161a24; color: #dde2f0; }
 .aut-step-item.failed .aut-step-label{color:#ef4444}
 @keyframes autStepPulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.55;transform:scale(.92)}}
 @media (prefers-reduced-motion:reduce){.aut-step-item.active .aut-step-dot{animation:none}}
+/* ── Autonoma inline transaction receipt (no card/panel/border) ── */
+.aut-receipt{display:flex;flex-direction:column;gap:3px;margin:2px 0 6px;font-size:10px;line-height:1.55}
+.aut-receipt-head{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:700;color:var(--text)}
+.aut-receipt-head i{font-size:13px;color:#22c55e}
+.aut-receipt-sub{color:var(--muted);font-size:9px}
+.aut-receipt-amount{font-size:11px;color:var(--text)}
+.aut-receipt-meta{color:var(--muted2);font-size:9px}
+.aut-receipt-meta code{font-size:8.5px;color:var(--text)}
+.aut-receipt-actions{display:flex;gap:14px;margin-top:3px;font-size:9px}
+.aut-receipt-actions a,.aut-receipt-actions button{color:var(--blue);text-decoration:none;background:none;border:none;cursor:pointer;font-size:9px;font-family:inherit;padding:0}
+.aut-receipt-actions button:hover{text-decoration:underline}
+.aut-receipt.failed .aut-receipt-head i{color:#ef4444}
+.aut-receipt.failed .aut-receipt-head{color:#ef4444}
 .aut-rc{background:linear-gradient(135deg,rgba(6,247,233,.03),rgba(79,142,247,.03));border:1px solid rgba(6,247,233,.12);border-radius:10px;overflow:hidden;margin-top:4px}
 .aut-rc-head{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid rgba(6,247,233,.08);background:rgba(6,247,233,.04)}
 .aut-rc-head i{font-size:14px;color:#06F7E9}
@@ -63671,12 +63684,48 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
         R.row('Authorized','<span>Not authorized - use manual execution</span>','yellow'));
   }
 
+  // ── Inline transaction receipt helpers (presentation-only) ──────────────────
+  function _shortHash(h){ return (h && h.length > 14) ? h.slice(0,8) + '…' + h.slice(-6) : (h || ''); }
+  function _shortAddr(a){ return (a && a.length > 14) ? a.slice(0,8) + '…' + a.slice(-6) : (a || ''); }
+
+  // Render a clean, borderless, inline transaction receipt (no card/panel).
+  function _agentReceipt(opts){
+    opts = opts || {};
+    var failed = !!opts.failed;
+    var html = '<div class="aut-receipt' + (failed ? ' failed' : '') + '">';
+    html += '<div class="aut-receipt-head"><i class="ti ti-' + (failed ? 'circle-x' : 'circle-check') + '"></i>' + esc(opts.title || 'Transaction') + '</div>';
+    if (opts.subtitle) html += '<div class="aut-receipt-sub">' + esc(opts.subtitle) + '</div>';
+    if (opts.amount) html += '<div class="aut-receipt-amount"><strong>' + esc(opts.amount) + '</strong>' + (opts.amountNote ? ' <span class="aut-receipt-sub">' + esc(opts.amountNote) + '</span>' : '') + '</div>';
+    if (opts.recipient) html += '<div class="aut-receipt-meta">To: <code>' + esc(_shortAddr(opts.recipient)) + '</code></div>';
+    if (opts.network) html += '<div class="aut-receipt-meta">Network: ' + esc(opts.network) + '</div>';
+    if (opts.from) html += '<div class="aut-receipt-meta">From: ' + esc(opts.from) + '</div>';
+    if (opts.block != null) html += '<div class="aut-receipt-meta">Block: #' + esc(String(opts.block)) + '</div>';
+    if (opts.txHash) html += '<div class="aut-receipt-meta">Transaction: <code>' + esc(_shortHash(opts.txHash)) + '</code></div>';
+    if (opts.txHash) {
+      html += '<div class="aut-receipt-actions">' +
+        '<a href="' + esc(opts.explorerUrl || ('https://explorer.arc.io/tx/' + opts.txHash)) + '" target="_blank" rel="noopener">View on Arc Explorer</a>' +
+        '<button type="button" onclick="_agentCopyHash(\'' + opts.txHash + '\', this)">Copy transaction hash</button>' +
+        '</div>';
+    }
+    html += '</div>';
+    return html;
+  }
+
+  window._agentCopyHash = function(hash, btn){
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(hash).then(function(){
+          if (btn) { var o = btn.textContent; btn.textContent = 'Copied ✓'; setTimeout(function(){ btn.textContent = o; }, 1500); }
+        }).catch(function(){});
+      }
+    } catch(_) {}
+  };
+
   function _addAgentResultMsg(text, type){
     var c=document.getElementById('aut-messages'); if(!c) return;
-    var color=type==='success'?'#22c55e':type==='failed'?'#ef4444':'#f59e0b';
-    var msg='<div class="aut-msg ai"><div class="aut-msg-header"><i class="ti ti-robot" style="color:#a78bfa"></i><span class="aut-msg-role">Autonoma Agent</span></div>'+
-      '<div class="aut-msg-body"><div class="aut-rc" style="border-color:rgba(167,139,250,.25);margin:0"><div class="aut-rc-body">'+
-      '<div style="font-size:10px;color:'+color+'">'+text+'</div></div></div></div></div>';
+    // Inline, borderless message (no card / header / color wrapper) — the text
+    // carries its own structure and colors.
+    var msg='<div class="aut-msg ai"><div class="aut-msg-body"><div style="font-size:10px">'+text+'</div></div></div>';
     c.insertAdjacentHTML('beforeend', msg);
     c.scrollTop=c.scrollHeight;
   }
@@ -63860,16 +63909,17 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
         _agentGateClaimDone(paymentGate.claimKey, 'confirmed', _resolvedHash);
 
         _addAgentResultMsg(
-          '<div style="font-size:10px">'+
-          '<span style="color:#22c55e;font-size:12px">✓ Payment Verified On-chain</span><br><br>'+
-          '<strong>'+amount+' USDC sent</strong><br>'+
-          'To: <code style="font-size:8px">'+dest.substring(0,10)+'...</code><br>'+
-          (_resolvedHash
-            ? 'Tx: <code style="font-size:8px;word-break:break-all;color:#a78bfa">'+_resolvedHash+'</code><br>'+
-              '<a href="https://explorer.arc.io/tx/'+_resolvedHash+'" target="_blank" style="color:#a78bfa">Open in ArcScan →</a><br>'
-            : '')+
-          'Block: #'+(receipt?receipt.blockNumber:'?')+' · From: '+agentAddr.substring(0,8)+'... (Agent)'+
-          '</div>', 'success');
+          _agentReceipt({
+            title: 'Payment confirmed',
+            subtitle: 'Verified on Arc Mainnet',
+            amount: amount + ' USDC',
+            amountNote: 'Sent successfully',
+            recipient: dest,
+            network: 'Arc Mainnet',
+            from: 'Circle Agent Wallet',
+            block: receipt ? receipt.blockNumber : null,
+            txHash: _resolvedHash,
+          }), 'success');
 
         if(typeof AgentAudit!=='undefined') AgentAudit.recordExecution({
           operation:'payment', amount:amount, asset:'USDC', chain:'Arc Mainnet',
@@ -64357,16 +64407,16 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
 
     var duration = Date.now() - startTime;
     _addAgentResultMsg(
-      '<div style="font-size:10px">'+
-      '<span style="color:#22c55e;font-size:12px">✓ Swap Verified On-chain</span><br><br>'+
-      '<strong>'+amount+' '+tokenIn+' → '+tokenOut+'</strong><br><br>'+
-      '<span style="color:var(--muted);font-size:9px">'+
-      'From: <code style="font-size:8px">'+agentAddr.substring(0,10)+'... (Agent)</code><br>'+
-      'Tx: <code style="font-size:8px;word-break:break-all;color:#a78bfa">'+lastTxHash+'</code><br>'+
-      '<a href="https://explorer.arc.io/tx/'+lastTxHash+'" target="_blank" style="color:#a78bfa">Open in ArcScan →</a><br>'+
-      'Block: #'+(lastReceipt?lastReceipt.blockNumber:'?')+' · Duration: '+(duration/1000).toFixed(1)+'s'+
-      '</span></div>',
-      'success');
+      _agentReceipt({
+        title: 'Swap confirmed',
+        subtitle: 'Verified on Arc Mainnet',
+        amount: amount + ' ' + tokenIn,
+        amountNote: '→ ' + tokenOut,
+        network: 'Arc Mainnet',
+        from: 'Circle Agent Wallet',
+        block: lastReceipt ? lastReceipt.blockNumber : null,
+        txHash: lastTxHash,
+      }), 'success');
 
     // Only now update reputation/audit
     if(typeof AgentAudit!=='undefined') AgentAudit.recordExecution({
@@ -64706,20 +64756,18 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
       : '<div style="margin-top:6px;color:#f59e0b;font-size:9px">⚠ Attestation still pending — check <a href="https://iris-api.circle.com" target="_blank" style="color:#f59e0b">Circle Iris ↗</a></div>';
 
     _addAgentResultMsg(
-      '<div style="font-size:10px">'+
-      '<span style="color:#22c55e;font-size:12px">✓ Bridge Verified On-chain</span><br><br>'+
-      '<strong>'+amount+' USDC ('+chainName+' → '+destChainName+')</strong><br><br>'+
-      '<span style="color:var(--muted);font-size:9px">'+
-      'Agent: <code style="font-size:8px">'+agentAddr.substring(0,10)+'...</code><br>'+
-      (payoutRecipient ? 'Recipient: <code style="font-size:8px;color:#06F7E9">'+payoutRecipient+'</code><br>' : '')+
-      'Tx: <code style="font-size:8px;word-break:break-all;color:#a78bfa">'+lastTxHash+'</code><br>'+
-      '<a href="'+EXPLORER_URL+'/tx/'+lastTxHash+'" target="_blank" style="color:#a78bfa">'+chainName+' Explorer →</a> · '+
-      '<a href="'+destExplorer+'" target="_blank" style="color:#06F7E9">'+destChainName+' Explorer →</a>'+
-      (mintTxHash ? '<br><span style="font-size:8px;color:#a78bfa">✓ Mint: </span><a href="'+destExplorer+'/tx/'+mintTxHash+'" target="_blank" style="color:#22c55e;font-size:8px">'+mintTxHash.substring(0,14)+'...</a>' : '')+
-      '<br>'+
-      'Block: #'+(lastReceipt?lastReceipt.blockNumber:'?')+' · Duration: '+(duration/1000).toFixed(1)+'s'+
-      '</span></div>'+
-      attestHtml,
+      _agentReceipt({
+        title: 'Bridge sent',
+        subtitle: 'Source confirmed on ' + chainName,
+        amount: amount + ' USDC',
+        amountNote: chainName + ' → ' + destChainName,
+        recipient: payoutRecipient,
+        network: chainName,
+        from: 'Circle Agent Wallet',
+        block: lastReceipt ? lastReceipt.blockNumber : null,
+        txHash: lastTxHash,
+        explorerUrl: EXPLORER_URL + '/tx/' + lastTxHash,
+      }) + attestHtml,
       'success');
 
     if(typeof AgentAudit!=='undefined') AgentAudit.recordExecution({
