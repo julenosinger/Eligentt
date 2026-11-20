@@ -95,13 +95,9 @@ const anthropicAdapter = {
   },
 
   buildRequest({ model, messages, tools, temperature, maxTokens, stream, toolChoice }) {
-    // Map OpenAI-style messages → Anthropic messages.
-    const systemParts = [];
-    const anthropicMessages = [];
-    for (const m of messages || []) {
-      if (m.role === 'system') { systemParts.push(m.content || ''); continue; }
-      anthropicMessages.push({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.content || '' });
-    }
+    // Map OpenAI-style messages → Anthropic messages (including tool_use / tool_result
+    // blocks so multi-step read-tool loops round-trip correctly).
+    const { systemParts, messages: anthropicMessages } = _toAnthropicMessages(messages);
     const anthropicTools = (tools || []).map((t) => ({
       name: t.function && t.function.name,
       description: t.function && t.function.description,
@@ -153,6 +149,41 @@ const anthropicAdapter = {
 function _safeParseArgs(raw) {
   if (!raw) return {};
   try { return JSON.parse(raw); } catch (_) { return {}; }
+}
+
+// Convert OpenAI-style messages (assistant tool_calls + `role: tool` results) to
+// Anthropic's content-block format so multi-step read-tool loops round-trip.
+// Additive: single-turn flows (no tool results) map exactly as before.
+function _toAnthropicMessages(messages) {
+  const systemParts = [];
+  const out = [];
+  for (const m of messages || []) {
+    if (!m) continue;
+    if (m.role === 'system') { systemParts.push(m.content || ''); continue; }
+    if (m.role === 'tool') {
+      out.push({
+        role: 'user',
+        content: [{ type: 'tool_result', tool_use_id: m.tool_call_id || '', content: String(m.content || '') }],
+      });
+      continue;
+    }
+    if (m.role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length) {
+      const blocks = [];
+      if (m.content) blocks.push({ type: 'text', text: m.content });
+      for (const tc of m.tool_calls) {
+        blocks.push({
+          type: 'tool_use',
+          id: tc.id || '',
+          name: (tc.function && tc.function.name) || '',
+          input: _safeParseArgs(tc.function && tc.function.arguments),
+        });
+      }
+      out.push({ role: 'assistant', content: blocks });
+      continue;
+    }
+    out.push({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.content || '' });
+  }
+  return { systemParts, messages: out };
 }
 
 // Normalize an OpenAI-compatible tool_choice. Defaults to 'auto'; allows the
