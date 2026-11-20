@@ -122,6 +122,7 @@
 <script src="/shared/economicMonitoring.js"></script>
 <script src="/shared/autonomaAgent.js"></script>
 <script src="/shared/autonomaNlu.js"></script>
+<script src="/shared/autonomaAi.js"></script>
 <script src="/shared/autonomaAgentBrain.js"></script>
 <script src="/shared/agentCapabilityRouter.js"></script>
 <script src="/shared/agentIdentity.js"></script>
@@ -12504,6 +12505,15 @@ select.cinput option { background: #161a24; color: #dde2f0; }
           <div class="aut-workspace-bar">
             <span class="aut-workspace-title">✦ Autonoma</span>
             <span class="aut-workspace-status"><span class="aut-online-dot"></span> Circle Agent · Arc Mainnet</span>
+            <span style="margin-left:auto;display:flex;align-items:center;gap:6px">
+              <i class="ti ti-brain" style="font-size:12px;color:var(--muted2)"></i>
+              <select id="aut-ai-provider" onchange="autSetAiProvider(this.value)" title="AI provider"
+                style="background:var(--card);border:1px solid var(--border2);border-radius:6px;color:var(--text);font-size:9.5px;padding:4px 8px;cursor:pointer;outline:none;font-family:inherit">
+                <option value="deepseek">DeepSeek</option>
+                <option value="openai">OpenAI</option>
+                <option value="anthropic">Anthropic</option>
+              </select>
+            </span>
           </div>
           <div class="aut-messages" id="aut-messages">
             <div class="aut-welcome" id="aut-welcome">
@@ -57742,6 +57752,13 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
       document.addEventListener('click', function(){ if(autOpenMenuId!==null){ autOpenMenuId=null; autRenderSidebar(); } });
       autMenuListenerInstalled=true;
     }
+    // Sync the AI provider selector with the persisted selection.
+    try {
+      if (typeof AutonomaAi !== 'undefined' && typeof AutonomaAi.getProvider === 'function') {
+        var _sel = document.getElementById('aut-ai-provider');
+        if (_sel) _sel.value = AutonomaAi.getProvider();
+      }
+    } catch(_e) {}
     // Consume pending context from Recipients → Autonoma integration (once)
     if (typeof _rcpConsumeAutonomaCtx === 'function') {
       setTimeout(_rcpConsumeAutonomaCtx, 0);
@@ -57762,6 +57779,16 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
     const el=document.getElementById('aut-input'); if(!el) return;
     const msg=el.value.trim(); if(!msg) return;
     el.value=''; el.style.height='auto'; autonomaSendQuick(msg);
+  };
+
+  // ── AI provider selection (multi-provider) ───────────────────────────────
+  window.autSetAiProvider = function(id){
+    try {
+      if (typeof AutonomaAi !== 'undefined' && typeof AutonomaAi.setProvider === 'function') {
+        AutonomaAi.setProvider(id);
+      }
+    } catch(_e) {}
+    try { toast('AI provider set to ' + (id || 'deepseek'), 'info'); } catch(_e) {}
   };
 
   /**
@@ -58734,6 +58761,78 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
   }
 
   // ── Core Process Engine ──────────────────────────────
+  // AI-first reasoning bridge: calls the multi-provider AI and maps its
+  // structured tool calls to the existing execution engine via
+  // AgentCapabilityRouter (conversational). Read tools resolve to existing
+  // surfaces. Returns HTML or null (fallback to the legacy pipeline).
+  async function _autAiProcess(msg){
+    if (typeof AutonomaAi === 'undefined') return null;
+    var out;
+    try { out = await AutonomaAi.chat(msg); } catch(_) { return null; }
+    if (!out) return null;
+
+    if (out.text) {
+      return '<div class="aut-intro">' + _autAiFormat(out.text) + '</div>';
+    }
+
+    if (out.toolCall) {
+      var tc = out.toolCall;
+      var name = tc.name;
+      var args = tc.arguments || {};
+      var intent = null, params = {};
+
+      switch (name) {
+        case 'send':
+          intent = 'SEND_PAYMENT';
+          params = { amount: args.amount, token: args.token || 'USDC', address: args.to || args.recipient };
+          break;
+        case 'swap':
+          intent = 'SWAP_EXECUTE';
+          params = { amount: args.amount, token: args.fromToken || 'USDC', toToken: args.toToken || 'EURC' };
+          break;
+        case 'bridge':
+          intent = 'BRIDGE';
+          params = { amount: args.amount, token: args.token || 'USDC', fromChain: args.fromChain, toChain: args.toChain };
+          break;
+        case 'create_invoice':
+          intent = 'CREATE_INVOICE';
+          params = { amount: args.amount, client: args.client, currency: args.currency, description: args.description };
+          break;
+        case 'create_schedule':
+          intent = 'CREATE_SCHEDULE';
+          params = { amount: args.amount, token: args.token, recipient: args.recipient, recurrence: args.frequency, recipientName: args.name };
+          break;
+        case 'create_payment_link':
+          intent = 'CREATE_PAYMENT_LINK';
+          params = { amount: args.amount, token: args.token, label: args.label };
+          break;
+        case 'balance':
+          if (typeof AgentCapabilityRouter !== 'undefined' && typeof AgentCapabilityRouter.buildBalanceSurface === 'function') {
+            return '<div class="aut-intro">Here\'s your <strong style="color:#2775ca">Circle Agent</strong> wallet balance:</div>' + (await AgentCapabilityRouter.buildBalanceSurface());
+          }
+          return null;
+        case 'wallet_info':
+          return '<div class="aut-intro">Your agent uses your <strong style="color:#2775ca">Circle Agent Wallet</strong> on Arc Mainnet as its canonical wallet. Balances and permissions are managed there.</div>';
+        default:
+          return null; // unknown tool → fall back to the legacy pipeline
+      }
+
+      if (intent && typeof AgentCapabilityRouter !== 'undefined') {
+        var _surf = AgentCapabilityRouter.createSurface(intent, params, { executeIntent: _executeIntent, msg: msg });
+        return '<div class="aut-intro">I\'m ready to <strong style="color:#06F7E9">' + esc((intent||'').replace(/_/g,' ').toLowerCase()) + '</strong>. Please review and approve.</div>' + _surf;
+      }
+    }
+
+    return null;
+  }
+
+  function _autAiFormat(text){
+    return esc(text)
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/`([^`]+)`/g, '<code style="background:rgba(255,255,255,.07);padding:1px 5px;border-radius:4px;font-size:10px">$1</code>')
+      .replace(/\n/g, '<br>');
+  }
+
   async function autProcess(msg){
     // ── Fast-track: skip NLU/DocIntel for clear batch/multisend/cross-chain commands ──
     // (prevents NLU from asking "who?" when addresses are already present,
@@ -58748,6 +58847,16 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
     // ── Expose executeIntent globally for AgentCapabilityRouter ──
     if (typeof window.__autExecuteIntent === 'undefined') {
       window.__autExecuteIntent = _executeIntent;
+    }
+
+    // ── AI-first orchestration ─────────────────────────────────────────────
+    // The selected external AI (multi-provider) is the primary reasoning layer.
+    // It returns conversational text or a structured tool call that we bridge to
+    // the existing execution engine. On any failure we fall back to the legacy
+    // deterministic pipeline below (never a hardcoded response).
+    if(!_fastTrack){
+      var _aiOut = await _autAiProcess(msg);
+      if (_aiOut) return _aiOut;
     }
 
     // ── Agent Brain orchestration — full agent-first pipeline ──
