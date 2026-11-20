@@ -6867,6 +6867,23 @@ select.cinput option { background: #161a24; color: #dde2f0; }
 .aut-msg-name{font-size:9px;font-weight:700;color:#06F7E9}
 .aut-msg-time{font-size:8px;color:var(--muted)}
 .aut-intro{font-size:11px;color:var(--text);margin-bottom:10px;line-height:1.6}
+/* ── Autonoma inline transaction timeline (no card/panel/border) ── */
+.aut-step-timeline{display:flex;flex-direction:column;margin:2px 0 6px;padding-left:2px}
+.aut-step-item{position:relative;display:flex;align-items:flex-start;gap:10px;padding:0 0 14px;min-height:18px}
+.aut-step-item:last-child{padding-bottom:2px}
+.aut-step-item::before{content:'';position:absolute;left:6px;top:20px;bottom:0;width:2px;background:var(--border2);opacity:.5}
+.aut-step-item:last-child::before{display:none}
+.aut-step-dot{flex-shrink:0;width:14px;height:14px;line-height:14px;text-align:center;font-size:9px;color:var(--muted2);position:relative;z-index:1}
+.aut-step-label{font-size:10px;color:var(--muted2);line-height:1.5}
+.aut-step-detail{display:block;font-size:8.5px;color:var(--muted);line-height:1.5}
+.aut-step-item.done .aut-step-dot{color:#22c55e}
+.aut-step-item.done .aut-step-label{color:var(--text)}
+.aut-step-item.active .aut-step-dot{color:#06F7E9;animation:autStepPulse 1.6s ease-in-out infinite}
+.aut-step-item.active .aut-step-label{color:var(--text);font-weight:600}
+.aut-step-item.failed .aut-step-dot{color:#ef4444}
+.aut-step-item.failed .aut-step-label{color:#ef4444}
+@keyframes autStepPulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.55;transform:scale(.92)}}
+@media (prefers-reduced-motion:reduce){.aut-step-item.active .aut-step-dot{animation:none}}
 .aut-rc{background:linear-gradient(135deg,rgba(6,247,233,.03),rgba(79,142,247,.03));border:1px solid rgba(6,247,233,.12);border-radius:10px;overflow:hidden;margin-top:4px}
 .aut-rc-head{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid rgba(6,247,233,.08);background:rgba(6,247,233,.04)}
 .aut-rc-head i{font-size:14px;color:#06F7E9}
@@ -63968,33 +63985,74 @@ window.AUTONOMA_AGENT_BRAIN_ENABLED = true;
 
   function _agentAddMsg(msg){ var c=document.getElementById("aut-messages"); if(!c) return; var h="<div class=aut-msg ai><div class=aut-msg-body><div style=background:rgba(167,139,250,.1);border:1px solid rgba(167,139,250,.25);border-radius:8px;padding:10px 14px;font-size:11px;color:var(--text)>"+msg+"</div></div></div>"; c.insertAdjacentHTML("beforeend", h); c.scrollTop=c.scrollHeight; }
 
+  // ── Inline transaction timeline (presentation-only; no card/panel) ──────────
+  var _AGENT_STEPS = [
+    { label: 'Preparing transaction' },
+    { label: 'Broadcasting transaction' },
+    { label: 'Awaiting confirmation' },
+    { label: 'Transaction completed' },
+  ];
+  function _agentStepIndex(state) {
+    switch (state) {
+      case 'PLANNING': return 0;
+      case 'BROADCASTING': return 1;
+      case 'SUBMITTED':
+      case 'CONFIRMING':
+      case 'VERIFYING':
+      case 'ATTESTING':
+      case 'MINTING':
+      case 'CONFIRMED': return 2;
+      case 'COMPLETED': return 3;
+      default: return null; // failure / unknown
+    }
+  }
+  var _AGENT_FAIL_STATES = { FAILED:1, REJECTED:1, REVERTED:1, DROPPED:1, VERIFICATION_FAILED:1, CANCELLED:1 };
+
+  function _agentRenderTimeline(execId) {
+    var st = _agentExecState[execId];
+    if (!st) return;
+    var c = document.getElementById('aut-messages'); if (!c) return;
+    var active = (st.stepIndex == null) ? -1 : st.stepIndex;
+    var failed = !!st.failed;
+    var items = '';
+    for (var i = 0; i < _AGENT_STEPS.length; i++) {
+      var cls = 'aut-step-item';
+      var icon;
+      var detail = '';
+      if (failed && i === active) { cls += ' failed'; icon = '✕'; if (st.detail) detail = '<span class="aut-step-detail">' + esc(st.detail) + '</span>'; }
+      else if (i < active || (i === active && active === _AGENT_STEPS.length - 1)) { cls += ' done'; icon = '✓'; }
+      else if (i === active) { cls += ' active'; icon = '◉'; if (st.detail) detail = '<span class="aut-step-detail">' + esc(st.detail) + '</span>'; }
+      else { icon = '○'; }
+      items += '<div class="' + cls + '"><span class="aut-step-dot">' + icon + '</span><span class="aut-step-label">' + _AGENT_STEPS[i].label + '</span>' + detail + '</div>';
+    }
+    var html = '<div class="aut-step-timeline" id="aut-timeline-' + execId + '">' + items + '</div>';
+    var el = document.getElementById('aut-timeline-' + execId);
+    if (el) {
+      el.outerHTML = html;
+    } else {
+      var d = document.createElement('div');
+      d.className = 'aut-msg ai';
+      d.innerHTML = '<div class="aut-msg-avatar"><i class="ti ti-brain"></i></div><div class="aut-msg-body">' + html + '</div>';
+      c.appendChild(d);
+    }
+    c.scrollTop = c.scrollHeight;
+  }
+
   function _agentStateMsg(execId, state, detail){
-    var states = {
-      PLANNING:       ['#6b7280','Planning execution...'],
-      BROADCASTING:   ['#06F7E9','Broadcasting transaction...'],
-      CONFIRMING:     ['#f59e0b','Waiting blockchain confirmation...'],
-      CONFIRMED:      ['#22c55e','Block confirmed'],
-      SUBMITTED:      ['#06F7E9','Transaction submitted — awaiting confirmation'],
-      UNKNOWN:        ['#f59e0b','Submission status unknown — reconcile before retrying'],
-      ATTESTING:      ['#a78bfa','Polling CCTP attestation...'],
-      MINTING:        ['#06F7E9','Minting on destination chain...'],
-      VERIFYING:      ['#a78bfa','Verifying on-chain state...'],
-      COMPLETED:      ['#22c55e','Completed on-chain'],
-      FAILED:         ['#ef4444','Execution failed'],
-      REJECTED:       ['#f59e0b','Transaction rejected'],
-      REVERTED:       ['#ef4444','Transaction reverted on-chain'],
-      DROPPED:        ['#ef4444','Transaction dropped'],
-      VERIFICATION_FAILED: ['#ef4444','Verification failed'],
-      CANCELLED:        ['#ef4444','Cancelled by user']
-    };
-    var s = states[state] || ['#6b7280',state];
-    var msg = '<div style="font-size:10px"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:'+s[0]+';margin-right:6px;vertical-align:middle"></span>'+
-      '<strong style="color:'+s[0]+'">'+s[1]+'</strong>'+
-      (detail?'<br><span style="color:var(--muted);font-size:9px">'+detail+'</span>':'')+
-      '</div>';
-    _addAgentResultMsg(msg, state==='COMPLETED'?'success':state==='FAILED'||state==='REVERTED'?'failed':'pending');
-    if(!_agentExecState[execId]) _agentExecState[execId] = {status:state, txs:[], startTime:Date.now()};
-    else _agentExecState[execId].status = state;
+    // Presentation-only: update a single persistent inline timeline (keyed by
+    // execId) instead of appending a separate progress block per state change.
+    if(!_agentExecState[execId]) _agentExecState[execId] = {status:state, txs:[], startTime:Date.now(), stepIndex:null, detail:null, failed:false};
+    var st = _agentExecState[execId];
+    st.status = state;
+    st.detail = detail || null;
+    var idx = _agentStepIndex(state);
+    if (idx != null) {
+      st.stepIndex = Math.max(st.stepIndex == null ? -1 : st.stepIndex, idx);
+      st.failed = false;
+    } else if (_AGENT_FAIL_STATES[state]) {
+      st.failed = true;
+    }
+    _agentRenderTimeline(execId);
   }
 
   async function _agentVerifyOnChain(provider, operation, agentAddr, expected){
