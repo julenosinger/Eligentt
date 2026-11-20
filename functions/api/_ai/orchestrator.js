@@ -278,10 +278,10 @@ export async function stream(env, opts) {
 
   // Pass the stream through unchanged while parsing it for a provider-confirmed
   // `usage` chunk. Usage is recorded asynchronously (never blocking the stream).
-  const tracked = _usageTrackingStream(upstream.body, (usage) => {
+  const tracked = _usageTrackingStream(upstream.body, ({ usage, completed }) => {
     const recordPromise = (async () => {
       try {
-        await recordUsage(env, {
+        const r = await recordUsage(env, {
           requestId,
           userId,
           provider: resolution.provider.id,
@@ -291,9 +291,14 @@ export async function stream(env, opts) {
           operationType: opts.operationType || 'chat',
           operationId: opts.operationId || null,
           confirmed: !!usage,
-          status: usage ? 'confirmed' : 'unknown_usage',
+          status: usage ? (completed ? 'confirmed' : 'interrupted') : 'unknown_usage',
         });
-      } catch (_) { /* telemetry must never break the user-facing response */ }
+        // Sanitized observability: log only the fixed failure code, never content.
+        if (!r.ok) console.warn('[autonoma-ai] usage record failed:', r.error || 'unknown');
+      } catch (e) {
+        // Never log the error message (may embed sensitive data) — type only.
+        console.warn('[autonoma-ai] usage record exception:', (e && e.name) || 'unknown');
+      }
     })();
     // Non-blocking persistence: extend the worker lifetime via waitUntil (Cloudflare)
     // when available; otherwise fire-and-forget (best-effort, documented).
@@ -325,22 +330,28 @@ function _estimateInputTokens(messages) {
 
 // Wrap an upstream SSE body in a TransformStream that (1) passes every chunk
 // through unchanged (preserving exact bytes + event ordering) and (2) parses SSE
-// incrementally per the event-stream spec (LF / CRLF / CR line endings, multi-line
-// `data:` fields, comment lines, arbitrary UTF-8 chunk boundaries) to extract a
-// provider `usage` object. `onUsage(usage)` is called once at stream end with the
-// extracted usage or null, and is NOT awaited (non-blocking).
+// incrementally per the event-stream spec (LF / CRLF / CR line endings incl.
+// cross-chunk CRLF, multi-line `data:`, comment lines, arbitrary UTF-8 chunk
+// boundaries) to extract a provider `usage` object and track `[DONE]` completion.
+// `onUsage({ usage, completed })` is called once at stream end and NOT awaited.
 function _usageTrackingStream(upstreamBody, onUsage) {
   const decoder = new TextDecoder();
   let buffer = '';
+  let pendingCR = false; // previous chunk ended with a lone \r (possible CRLF split)
   let dataLines = [];
+  let dataSize = 0;
   let usage = null;
-  const MAX_BUFFER = 256 * 1024; // 256KB parse-state cap (prevents unbounded growth)
+  let sawDone = false;
+  const MAX_BUFFER = 256 * 1024; // cap on the line buffer
+  const MAX_EVENT = 256 * 1024;  // cap on the accumulated event data
 
   function finalizeEvent() {
     if (!dataLines.length) return;
     const payload = dataLines.join('\n');
     dataLines = [];
-    if (!payload || payload === '[DONE]') return;
+    dataSize = 0;
+    if (!payload) return;
+    if (payload === '[DONE]') { sawDone = true; return; }
     try {
       const parsed = JSON.parse(payload);
       if (parsed && parsed.usage) usage = parsed.usage;
@@ -355,26 +366,59 @@ function _usageTrackingStream(upstreamBody, onUsage) {
     const field = line.slice(0, ci);
     let value = line.slice(ci + 1);
     if (value[0] === ' ') value = value.slice(1); // strip single leading space
-    if (field === 'data') dataLines.push(value);
+    if (field === 'data') {
+      dataLines.push(value);
+      dataSize += value.length;
+      if (dataSize > MAX_EVENT) { dataLines = []; dataSize = 0; } // oversized event: drop parse state
+    }
     // other fields (event/id/retry) are ignored for usage extraction
+  }
+
+  function processBuffer(final) {
+    // Cross-chunk CRLF: a lone \r at the end of the previous chunk + a leading \n
+    // here form ONE CRLF terminator — skip the \n.
+    if (pendingCR && buffer.length) {
+      if (buffer.charCodeAt(0) === 10) buffer = buffer.slice(1);
+      pendingCR = false;
+    }
+    let start = 0;
+    let i = 0;
+    while (i < buffer.length) {
+      const ch = buffer.charCodeAt(i);
+      if (ch === 10) { // LF
+        handleLine(buffer.slice(start, i)); i++; start = i;
+      } else if (ch === 13) { // CR
+        const next = buffer.charCodeAt(i + 1);
+        if (next === 10) { // CRLF
+          handleLine(buffer.slice(start, i)); i += 2; start = i;
+        } else if (i + 1 < buffer.length) { // lone CR mid-buffer
+          handleLine(buffer.slice(start, i)); i++; start = i;
+        } else { // trailing lone CR — emit line, defer CR to next chunk
+          handleLine(buffer.slice(start, i)); i++; start = i; pendingCR = true;
+        }
+      } else { i++; }
+    }
+    buffer = buffer.slice(start);
+    if (final) {
+      if (buffer.length) { handleLine(buffer); buffer = ''; }
+      finalizeEvent();
+    }
   }
 
   const transform = new TransformStream({
     transform(chunk, controller) {
       buffer += decoder.decode(chunk, { stream: true });
-      if (buffer.length > MAX_BUFFER) { dataLines = []; buffer = buffer.slice(-MAX_BUFFER); }
-      // Split into complete lines (handles CRLF / LF / CR via alternation order).
-      const parts = buffer.split(/\r\n|\n|\r/);
-      const remainder = parts.pop(); // last element may be an incomplete line
-      for (const line of parts) handleLine(line);
-      buffer = remainder || '';
+      if (buffer.length > MAX_BUFFER) { dataLines = []; dataSize = 0; buffer = buffer.slice(-MAX_BUFFER); pendingCR = false; }
+      processBuffer(false);
       controller.enqueue(chunk);
     },
     flush() {
-      // Incomplete final event (no trailing blank line): process best-effort.
-      if (buffer.length) { for (const line of buffer.split(/\r\n|\n|\r/)) handleLine(line); buffer = ''; }
-      else finalizeEvent();
-      onUsage(usage ? { inputTokens: usage.prompt_tokens ?? usage.input_tokens ?? null, outputTokens: usage.completion_tokens ?? usage.output_tokens ?? null } : null);
+      processBuffer(true);
+      const completed = sawDone;
+      onUsage({
+        usage: usage ? { inputTokens: usage.prompt_tokens ?? usage.input_tokens ?? null, outputTokens: usage.completion_tokens ?? usage.output_tokens ?? null } : null,
+        completed,
+      });
     },
   });
 

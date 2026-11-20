@@ -1,9 +1,12 @@
 /**
- * Autonoma 1.2.2 — Server-authoritative prompt & trusted tool registry.
+ * Autonoma 1.2.3 — Server-authoritative prompt & trusted tool registry.
  * ═══════════════════════════════════════════════════════════════════════════════
  * The backend owns the trusted system instructions and the authoritative tool
  * definitions. The client may NOT redefine system-level policy, tool descriptions,
  * or tool parameters — this is the single source of truth.
+ *
+ * Tool schemas use STANDARD JSON Schema (top-level `required` array, never a
+ * `required: true` inside individual properties).
  *
  * chat.js builds the tool list from this registry (never from client input) and
  * substitutes the trusted system prompt for any client `role: system` message.
@@ -29,7 +32,7 @@ export const TRUSTED_SYSTEM_PROMPT = [
 ].join('\n');
 
 // Authoritative tool definitions (OpenAI function-calling format). Mirrors the
-// frontend A2ToolRegistry but owned server-side.
+// frontend A2ToolRegistry but owned server-side. Schemas are standard JSON Schema.
 export const TRUSTED_TOOLS = Object.freeze([
   {
     type: 'function',
@@ -44,7 +47,7 @@ export const TRUSTED_TOOLS = Object.freeze([
     function: {
       name: 'history',
       description: 'Retrieve recent transactions. Optional: limit (number, default 10).',
-      parameters: { type: 'object', properties: { limit: { type: 'number', default: 10 } } },
+      parameters: { type: 'object', properties: { limit: { type: 'number' } } },
     },
   },
   {
@@ -59,16 +62,17 @@ export const TRUSTED_TOOLS = Object.freeze([
     type: 'function',
     function: {
       name: 'routes',
-      description: 'Find routes for swapping or bridging tokens. Parameters: fromToken, toToken, amount, fromChain (optional), toChain (optional).',
+      description: 'Find routes for swapping or bridging tokens.',
       parameters: {
         type: 'object',
         properties: {
-          fromToken: { type: 'string', required: true },
-          toToken: { type: 'string', required: true },
-          amount: { type: 'number', required: true },
-          fromChain: { type: 'string', default: 'Arc' },
-          toChain: { type: 'string', default: 'Arc' },
+          fromToken: { type: 'string' },
+          toToken: { type: 'string' },
+          amount: { type: 'number' },
+          fromChain: { type: 'string' },
+          toChain: { type: 'string' },
         },
+        required: ['fromToken', 'toToken', 'amount'],
       },
     },
   },
@@ -84,15 +88,16 @@ export const TRUSTED_TOOLS = Object.freeze([
     type: 'function',
     function: {
       name: 'send',
-      description: 'Send USDC, EURC, or cirBTC to a recipient. Parameters: to (address), amount (number), token (USDC|EURC|cirBTC, default USDC), memo (optional string).',
+      description: 'Send USDC, EURC, or cirBTC to a recipient.',
       parameters: {
         type: 'object',
         properties: {
-          to: { type: 'string', required: true },
-          amount: { type: 'number', required: true },
-          token: { type: 'string', default: 'USDC', enum: ['USDC', 'EURC', 'cirBTC'] },
+          to: { type: 'string' },
+          amount: { type: 'number' },
+          token: { type: 'string', enum: ['USDC', 'EURC', 'cirBTC'] },
           memo: { type: 'string' },
         },
+        required: ['to', 'amount'],
       },
     },
   },
@@ -100,14 +105,15 @@ export const TRUSTED_TOOLS = Object.freeze([
     type: 'function',
     function: {
       name: 'swap',
-      description: 'Swap tokens. Parameters: fromToken (USDC|EURC|cirBTC), toToken (USDC|EURC|cirBTC), amount (number).',
+      description: 'Swap tokens.',
       parameters: {
         type: 'object',
         properties: {
-          fromToken: { type: 'string', required: true, enum: ['USDC', 'EURC', 'cirBTC'] },
-          toToken: { type: 'string', required: true, enum: ['USDC', 'EURC', 'cirBTC'] },
-          amount: { type: 'number', required: true },
+          fromToken: { type: 'string', enum: ['USDC', 'EURC', 'cirBTC'] },
+          toToken: { type: 'string', enum: ['USDC', 'EURC', 'cirBTC'] },
+          amount: { type: 'number' },
         },
+        required: ['fromToken', 'toToken', 'amount'],
       },
     },
   },
@@ -115,15 +121,16 @@ export const TRUSTED_TOOLS = Object.freeze([
     type: 'function',
     function: {
       name: 'bridge',
-      description: 'Bridge tokens between chains. Parameters: fromChain, toChain, amount, token (default USDC).',
+      description: 'Bridge tokens between chains.',
       parameters: {
         type: 'object',
         properties: {
-          fromChain: { type: 'string', required: true },
-          toChain: { type: 'string', required: true },
-          amount: { type: 'number', required: true },
-          token: { type: 'string', default: 'USDC' },
+          fromChain: { type: 'string' },
+          toChain: { type: 'string' },
+          amount: { type: 'number' },
+          token: { type: 'string' },
         },
+        required: ['fromChain', 'toChain', 'amount'],
       },
     },
   },
@@ -131,16 +138,17 @@ export const TRUSTED_TOOLS = Object.freeze([
     type: 'function',
     function: {
       name: 'create_invoice',
-      description: 'Create an invoice. Parameters: client (name or address), amount (number), currency (USDC|EURC|cirBTC), description (optional), due_days (optional, default 7).',
+      description: 'Create an invoice.',
       parameters: {
         type: 'object',
         properties: {
-          client: { type: 'string', required: true },
-          amount: { type: 'number', required: true },
-          currency: { type: 'string', default: 'USDC', enum: ['USDC', 'EURC', 'cirBTC'] },
+          client: { type: 'string' },
+          amount: { type: 'number' },
+          currency: { type: 'string', enum: ['USDC', 'EURC', 'cirBTC'] },
           description: { type: 'string' },
-          due_days: { type: 'number', default: 7 },
+          due_days: { type: 'number' },
         },
+        required: ['client', 'amount'],
       },
     },
   },
@@ -148,16 +156,17 @@ export const TRUSTED_TOOLS = Object.freeze([
     type: 'function',
     function: {
       name: 'create_schedule',
-      description: 'Schedule a recurring payment. Parameters: name, amount, recipient (address), frequency (once|daily|weekly|biweekly|monthly), token (default USDC).',
+      description: 'Schedule a recurring payment.',
       parameters: {
         type: 'object',
         properties: {
-          name: { type: 'string', required: true },
-          amount: { type: 'number', required: true },
-          recipient: { type: 'string', required: true },
-          frequency: { type: 'string', required: true, enum: ['once', 'daily', 'weekly', 'biweekly', 'monthly'] },
-          token: { type: 'string', default: 'USDC' },
+          name: { type: 'string' },
+          amount: { type: 'number' },
+          recipient: { type: 'string' },
+          frequency: { type: 'string', enum: ['once', 'daily', 'weekly', 'biweekly', 'monthly'] },
+          token: { type: 'string' },
         },
+        required: ['name', 'amount', 'recipient', 'frequency'],
       },
     },
   },
@@ -165,15 +174,16 @@ export const TRUSTED_TOOLS = Object.freeze([
     type: 'function',
     function: {
       name: 'create_payment_link',
-      description: 'Create a payment link. Parameters: label, amount (0 for open), token (default USDC), type (fixed|open|donation).',
+      description: 'Create a payment link.',
       parameters: {
         type: 'object',
         properties: {
-          label: { type: 'string', required: true },
-          amount: { type: 'number', default: 0 },
-          token: { type: 'string', default: 'USDC' },
-          type: { type: 'string', default: 'fixed', enum: ['fixed', 'open', 'donation'] },
+          label: { type: 'string' },
+          amount: { type: 'number' },
+          token: { type: 'string' },
+          type: { type: 'string', enum: ['fixed', 'open', 'donation'] },
         },
+        required: ['label'],
       },
     },
   },
@@ -181,6 +191,10 @@ export const TRUSTED_TOOLS = Object.freeze([
 
 export const TRUSTED_TOOL_NAMES = new Set(TRUSTED_TOOLS.map((t) => t.function.name));
 const TRUSTED_BY_NAME = Object.fromEntries(TRUSTED_TOOLS.map((t) => [t.function.name, t]));
+
+// Tools that require explicit user confirmation (proposal-only). Financial
+// execution remains gated by the frontend execution gate + AUTONOMA_AI_FINANCIAL_EXECUTION_ENABLED.
+const WRITE_TOOL_NAMES = new Set(['send', 'swap', 'bridge', 'create_invoice', 'create_schedule', 'create_payment_link']);
 
 /**
  * Resolve the authoritative tool list for a request.
@@ -199,4 +213,24 @@ export function resolveTools(clientTools) {
     if (names.indexOf(name) === -1) names.push(name);
   }
   return { ok: true, tools: names.map((n) => TRUSTED_BY_NAME[n]) };
+}
+
+/**
+ * Server-authoritative tool availability for an authenticated user.
+ * All authenticated users may REQUEST any trusted tool. Write tools are
+ * PROPOSAL-ONLY: their `requiresApproval` flag is surfaced so callers keep the
+ * confirmation + execution gate. Per-user capability filtering is deferred until
+ * a permissions model exists — financial execution remains disabled in this phase.
+ */
+export function resolveAuthorizedTools(user, clientTools) {
+  if (!user || !user.userId) {
+    return { ok: false, reason: 'unauthenticated' };
+  }
+  const r = resolveTools(clientTools);
+  if (!r.ok) return r;
+  return {
+    ok: true,
+    tools: r.tools,
+    writeTools: r.tools.filter((t) => WRITE_TOOL_NAMES.has(t.function.name)).map((t) => t.function.name),
+  };
 }

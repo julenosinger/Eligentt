@@ -9,7 +9,7 @@
  */
 
 import { stream, flags } from '../_ai/orchestrator.js';
-import { TRUSTED_SYSTEM_PROMPT, resolveTools } from '../_ai/trustedTools.js';
+import { TRUSTED_SYSTEM_PROMPT, resolveAuthorizedTools } from '../_ai/trustedTools.js';
 
 const TIMEOUT_MS = 35000;
 
@@ -30,8 +30,8 @@ function extractSessionToken(request) {
 }
 
 async function requireSession(request, env) {
+  // FAIL CLOSED: a missing AUTH_KV binding is a server error, never an auth bypass.
   if (!env.AUTH_KV) {
-    if (env.DEV_AUTH_BYPASS === 'true') return { ok: true, user: null };
     return { ok: false, status: 503, error: 'Authentication service unavailable' };
   }
   const token = extractSessionToken(request);
@@ -100,8 +100,9 @@ export async function onRequestPost(context) {
   const finalSystem = { role: 'system', content: TRUSTED_SYSTEM_PROMPT + contextAppend };
 
   // Server-authoritative tools: names validated against the allowlist, definitions
-  // always from the trusted registry (never client-provided descriptions/params).
-  const toolsResolved = resolveTools(tools);
+  // always from the trusted registry (never client-provided descriptions/params),
+  // and availability resolved against the authenticated user.
+  const toolsResolved = resolveAuthorizedTools(auth.user, tools);
   if (!toolsResolved.ok) return errSSE(cors, 400, toolsResolved.reason);
   const toolsList = toolsResolved.tools.length ? toolsResolved.tools : undefined;
 
