@@ -95,6 +95,24 @@ function mapProviderError(status, bodyText) {
   return { code: 'provider_error', status: 502, message: 'AI provider error (' + status + ')', detail: snippet };
 }
 
+// ── Safe runtime diagnostics (Phase 3.0.2) ──────────────────────────────────
+// Logs a single structured key=value line for every failed AI request so the
+// exact failure stage/code/status is observable in Cloudflare logs. NEVER logs
+// credentials, keys, prompts, contact data, wallet secrets, or raw provider
+// response bodies (the `detail` field is intentionally omitted here).
+function logAiFailure(info) {
+  try {
+    const p = ['autonoma_ai_failure'];
+    if (info.provider) p.push('provider=' + info.provider);
+    if (info.stage) p.push('stage=' + info.stage);
+    if (info.code) p.push('code=' + info.code);
+    if (info.upstreamStatus != null) p.push('upstream_status=' + info.upstreamStatus);
+    if (info.requestId) p.push('request_id=' + info.requestId);
+    if (info.durationMs != null) p.push('duration_ms=' + info.durationMs);
+    console.log(p.join(' '));
+  } catch (_) { /* never throw from diagnostics */ }
+}
+
 /**
  * Non-streaming generation with normalized output + usage metering.
  * Returns { ok:true, result } or { ok:false, error, code }.
@@ -103,12 +121,20 @@ export async function generate(env, opts) {
   const f = flags(env);
   const requestId = opts.requestId || ('req_' + Math.random().toString(36).slice(2, 10));
   const requestedModel = opts.model;
+  const t0 = Date.now();
+  const _dur = () => Date.now() - t0;
 
   const resolution = resolveProvider(env, opts.provider);
-  if (!resolution.ok) return { ok: false, error: resolution.message, code: resolution.code };
+  if (!resolution.ok) {
+    logAiFailure({ provider: opts.provider || 'default', stage: 'resolve', code: resolution.code, requestId, durationMs: _dur() });
+    return { ok: false, error: resolution.message, code: resolution.code };
+  }
 
   const m = resolveModel(resolution.provider, requestedModel);
-  if (!m.ok) return { ok: false, error: m.message, code: m.code };
+  if (!m.ok) {
+    logAiFailure({ provider: resolution.provider.id, stage: 'model', code: m.code, requestId, durationMs: _dur() });
+    return { ok: false, error: m.message, code: m.code };
+  }
   const model = m.model;
 
   // NOTE: no hard per-user budget gate here — the KV daily counter is approximate
@@ -130,7 +156,11 @@ export async function generate(env, opts) {
     });
   } catch (err) {
     clearTimeout(timer);
-    if (err.name === 'AbortError') return { ok: false, error: 'AI provider timeout', code: 'timeout' };
+    if (err.name === 'AbortError') {
+      logAiFailure({ provider: resolution.provider.id, stage: 'upstream', code: 'timeout', requestId, durationMs: _dur() });
+      return { ok: false, error: 'AI provider timeout', code: 'timeout' };
+    }
+    logAiFailure({ provider: resolution.provider.id, stage: 'upstream', code: 'network_error', requestId, durationMs: _dur() });
     return { ok: false, error: 'AI provider unreachable', code: 'network_error' };
   }
   clearTimeout(timer);
@@ -145,11 +175,15 @@ export async function generate(env, opts) {
       const fb = await _fallbackGenerate(env, opts, resolution.provider.id, requestId);
       if (fb.ok) return fb;
     }
+    logAiFailure({ provider: resolution.provider.id, stage: 'upstream', code: mapped.code, upstreamStatus: upstream.status, requestId, durationMs: _dur() });
     return { ok: false, error: mapped.message, code: mapped.code, detail: mapped.detail };
   }
 
   const json = await upstream.json().catch(() => null);
-  if (!json) return { ok: false, error: 'Malformed AI response', code: 'malformed_response' };
+  if (!json) {
+    logAiFailure({ provider: resolution.provider.id, stage: 'parse', code: 'malformed_response', requestId, durationMs: _dur() });
+    return { ok: false, error: 'Malformed AI response', code: 'malformed_response' };
+  }
 
   const result = resolution.provider.normalizeResponse(json, requestId);
 
