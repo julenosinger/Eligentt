@@ -116,7 +116,7 @@ export async function generate(env, opts) {
   // billing guarantees are disabled in this phase.
 
   const apiKey = resolution.provider.apiKey(env);
-  const req = resolution.provider.buildRequest({ model, messages: opts.messages, tools: opts.tools, temperature: opts.temperature, maxTokens: opts.maxTokens, stream: false });
+  const req = resolution.provider.buildRequest({ model, messages: opts.messages, tools: opts.tools, temperature: opts.temperature, maxTokens: opts.maxTokens, stream: false, toolChoice: opts.toolChoice });
 
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs || DEFAULT_TIMEOUT_MS);
@@ -153,19 +153,20 @@ export async function generate(env, opts) {
 
   const result = resolution.provider.normalizeResponse(json, requestId);
 
-  // Usage metering (server-side; never trusts client numbers).
+  // Usage metering (server-side; never trusts client numbers). Missing provider
+  // usage is recorded as null + unconfirmed (never as a confirmed zero).
   if (opts.userId) {
     await recordUsage(env, {
       requestId,
       userId: opts.userId,
       provider: result.provider,
       model: result.model,
-      inputTokens: result.usage.inputTokens,
-      outputTokens: result.usage.outputTokens,
+      inputTokens: result.usage.present ? result.usage.inputTokens : null,
+      outputTokens: result.usage.present ? result.usage.outputTokens : null,
       operationType: opts.operationType || 'chat',
       operationId: opts.operationId || null,
-      confirmed: true,
-      status: 'recorded',
+      confirmed: result.usage.present,
+      status: result.usage.present ? 'recorded' : 'unknown_usage',
     }).catch(() => {});
   }
 
@@ -184,7 +185,7 @@ async function _fallbackGenerate(env, opts, failedProviderId, requestId) {
   const fb = candidates[0];
   const apiKey = fb.apiKey(env);
   const model = fb.defaultModel;
-  const req = fb.buildRequest({ model, messages: opts.messages, tools: opts.tools, temperature: opts.temperature, maxTokens: opts.maxTokens, stream: false });
+  const req = fb.buildRequest({ model, messages: opts.messages, tools: opts.tools, temperature: opts.temperature, maxTokens: opts.maxTokens, stream: false, toolChoice: opts.toolChoice });
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs || DEFAULT_TIMEOUT_MS);
   let upstream;
@@ -204,9 +205,10 @@ async function _fallbackGenerate(env, opts, failedProviderId, requestId) {
   if (opts.userId) {
     await recordUsage(env, {
       requestId, userId: opts.userId, provider: result.provider, model: result.model,
-      inputTokens: result.usage.inputTokens, outputTokens: result.usage.outputTokens,
+      inputTokens: result.usage.present ? result.usage.inputTokens : null,
+      outputTokens: result.usage.present ? result.usage.outputTokens : null,
       operationType: opts.operationType || 'chat', operationId: opts.operationId || null,
-      confirmed: true, status: 'recorded',
+      confirmed: result.usage.present, status: result.usage.present ? 'recorded' : 'unknown_usage',
     }).catch(() => {});
   }
   return { ok: true, result, fallback: true };
@@ -251,7 +253,7 @@ export async function stream(env, opts) {
     return { ok: true, response: new Response(body, { status: 200, headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' } }), provider: resolution.provider.id };
   }
 
-  const req = resolution.provider.buildRequest({ model, messages: opts.messages, tools: opts.tools, temperature: opts.temperature, maxTokens: opts.maxTokens, stream: true });
+  const req = resolution.provider.buildRequest({ model, messages: opts.messages, tools: opts.tools, temperature: opts.temperature, maxTokens: opts.maxTokens, stream: true, toolChoice: opts.toolChoice });
 
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs || DEFAULT_TIMEOUT_MS);
@@ -405,6 +407,13 @@ function _usageTrackingStream(upstreamBody, onUsage) {
     }
   }
 
+  let recorded = false;
+  function recordOnce(payload) {
+    if (recorded) return;
+    recorded = true;
+    onUsage(payload);
+  }
+
   const transform = new TransformStream({
     transform(chunk, controller) {
       buffer += decoder.decode(chunk, { stream: true });
@@ -414,14 +423,21 @@ function _usageTrackingStream(upstreamBody, onUsage) {
     },
     flush() {
       processBuffer(true);
-      const completed = sawDone;
-      onUsage({
+      recordOnce({
         usage: usage ? { inputTokens: usage.prompt_tokens ?? usage.input_tokens ?? null, outputTokens: usage.completion_tokens ?? usage.output_tokens ?? null } : null,
-        completed,
+        completed: sawDone,
       });
     },
   });
 
-  upstreamBody.pipeTo(transform.writable).catch(() => {});
+  // On upstream error or client cancellation, flush() does NOT run — record the
+  // interrupted lifecycle here so incomplete streams are accounted for exactly
+  // once (recordOnce guards against any double-write).
+  upstreamBody.pipeTo(transform.writable).catch(() => {
+    recordOnce({
+      usage: usage ? { inputTokens: usage.prompt_tokens ?? usage.input_tokens ?? null, outputTokens: usage.completion_tokens ?? usage.output_tokens ?? null } : null,
+      completed: false,
+    });
+  });
   return transform.readable;
 }

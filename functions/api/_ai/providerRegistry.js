@@ -30,7 +30,7 @@ function openAiCompatibleAdapter(cfg) {
     isModelAllowed(model) { return cfg.models.indexOf(model) !== -1; },
     authHeaders(apiKey) { return { 'Authorization': 'Bearer ' + apiKey }; },
 
-    buildRequest({ model, messages, tools, temperature, maxTokens, stream }) {
+    buildRequest({ model, messages, tools, temperature, maxTokens, stream, toolChoice }) {
       const body = {
         model: model || cfg.defaultModel,
         messages,
@@ -40,7 +40,7 @@ function openAiCompatibleAdapter(cfg) {
       };
       if (tools && tools.length) {
         body.tools = tools;
-        body.tool_choice = 'auto';
+        body.tool_choice = _normalizeToolChoice(toolChoice);
       }
       // Request a trailing usage chunk on streaming so the server can record
       // provider-confirmed token counts (OpenAI-compatible `stream_options`).
@@ -57,11 +57,14 @@ function openAiCompatibleAdapter(cfg) {
         arguments: _safeParseArgs(tc.function && tc.function.arguments),
       })).filter((tc) => tc.name);
       const u = json && json.usage;
+      // Distinguish MISSING usage (null tokens, present:false) from a valid
+      // provider-confirmed zero (present:true). Never collapse missing → 0.
       const usage = u ? {
-        inputTokens: u.prompt_tokens || u.input_tokens || 0,
-        outputTokens: u.completion_tokens || u.output_tokens || 0,
-        totalTokens: u.total_tokens || ((u.prompt_tokens || 0) + (u.completion_tokens || 0)),
-      } : { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+        inputTokens: u.prompt_tokens ?? u.input_tokens ?? null,
+        outputTokens: u.completion_tokens ?? u.output_tokens ?? null,
+        totalTokens: u.total_tokens ?? ((u.prompt_tokens ?? 0) + (u.completion_tokens ?? 0)),
+        present: true,
+      } : { inputTokens: null, outputTokens: null, totalTokens: null, present: false };
       return {
         provider: cfg.id,
         model: (json && json.model) || cfg.defaultModel,
@@ -91,7 +94,7 @@ const anthropicAdapter = {
     return { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' };
   },
 
-  buildRequest({ model, messages, tools, temperature, maxTokens, stream }) {
+  buildRequest({ model, messages, tools, temperature, maxTokens, stream, toolChoice }) {
     // Map OpenAI-style messages → Anthropic messages.
     const systemParts = [];
     const anthropicMessages = [];
@@ -113,6 +116,8 @@ const anthropicAdapter = {
     if (systemParts.length) body.system = systemParts.join('\n');
     body.messages = anthropicMessages;
     if (anthropicTools.length) body.tools = anthropicTools;
+    const tc = _anthropicToolChoice(toolChoice);
+    if (tc) body.tool_choice = tc;
     return { url: this.baseUrl + '/messages', body };
   },
 
@@ -128,10 +133,11 @@ const anthropicAdapter = {
     }
     const u = json && json.usage;
     const usage = u ? {
-      inputTokens: u.input_tokens || 0,
-      outputTokens: u.output_tokens || 0,
-      totalTokens: (u.input_tokens || 0) + (u.output_tokens || 0),
-    } : { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+      inputTokens: u.input_tokens ?? null,
+      outputTokens: u.output_tokens ?? null,
+      totalTokens: (u.input_tokens ?? 0) + (u.output_tokens ?? 0),
+      present: true,
+    } : { inputTokens: null, outputTokens: null, totalTokens: null, present: false };
     return {
       provider: 'anthropic',
       model: json && json.model,
@@ -147,6 +153,31 @@ const anthropicAdapter = {
 function _safeParseArgs(raw) {
   if (!raw) return {};
   try { return JSON.parse(raw); } catch (_) { return {}; }
+}
+
+// Normalize an OpenAI-compatible tool_choice. Defaults to 'auto'; allows the
+// supported scalar options and a well-formed single-function object. Unsupported
+// values fall back to 'auto' (never silently enable a specific/forced tool).
+function _normalizeToolChoice(tc) {
+  if (tc === undefined || tc === null) return 'auto';
+  if (tc === 'auto' || tc === 'none' || tc === 'required') return tc;
+  if (typeof tc === 'object' && tc && tc.type === 'function' && tc.function && typeof tc.function.name === 'string') {
+    return { type: 'function', function: { name: tc.function.name } };
+  }
+  return 'auto';
+}
+
+// Map an OpenAI-style tool_choice to Anthropic's tool_choice. Defaults to null
+// (omit → provider default 'auto'). 'required' → 'any'; 'none' → { type:'none' };
+// a specific function → { type:'tool', name }.
+function _anthropicToolChoice(tc) {
+  if (tc === undefined || tc === null || tc === 'auto') return null;
+  if (tc === 'required') return { type: 'any' };
+  if (tc === 'none') return { type: 'none' };
+  if (typeof tc === 'object' && tc && tc.function && typeof tc.function.name === 'string') {
+    return { type: 'tool', name: tc.function.name };
+  }
+  return null;
 }
 
 const REGISTRY = {
