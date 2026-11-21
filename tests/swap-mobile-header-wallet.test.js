@@ -72,12 +72,6 @@ describe('Supported wallet list & deep links', () => {
     for (const id of walletIds) expect(html).toContain('id="' + id + '"');
   });
 
-  it('does NOT invent an OKX connector (no OKX integration exists in the codebase)', () => {
-    expect(html).not.toContain('connectOKX');
-    expect(html).not.toContain('wm-okx');
-    expect(html).not.toContain('okxwallet');
-  });
-
   it('maps deep links for MetaMask/Coinbase/Trust/Rabby and returns null for unknown wallets', () => {
     const fn = html.match(/function getMobileDeepLink\(wallet\) \{[\s\S]*?\n\}/);
     expect(fn).toBeTruthy();

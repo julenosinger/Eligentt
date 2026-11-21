@@ -7458,6 +7458,34 @@ select.cinput option { background: #161a24; color: #dde2f0; }
               <i class="ti ti-arrow-right wm-wallet-arrow"></i>
             </div>
           </div>
+          <!-- OKX Wallet -->
+          <div class="wm-wallet" id="wm-okx" onclick="connectOKX()">
+            <div class="wm-wallet-ico">
+              <img src="/assets/wallets/okx.svg" alt="OKX Wallet" width="32" height="32" style="border-radius:6px" onerror="this.onerror=null;this.style.display='none';this.parentNode.style.background='#000000';this.parentNode.innerHTML='<span style=font-size:13px;font-weight:800;color:#fff>OKX</span>'"/>
+            </div>
+            <div class="wm-wallet-info">
+              <div class="wm-wallet-name">OKX Wallet</div>
+              <div class="wm-wallet-desc" id="wm-desc-okx">Browser extension &amp; mobile app</div>
+            </div>
+            <div class="wm-wallet-status">
+              <span class="installed-badge" id="okx-installed" style="display:none">Installed</span>
+              <i class="ti ti-arrow-right wm-wallet-arrow"></i>
+            </div>
+          </div>
+          <!-- Bitget Wallet -->
+          <div class="wm-wallet" id="wm-bitget" onclick="connectBitget()">
+            <div class="wm-wallet-ico">
+              <img src="/assets/wallets/bitget.svg" alt="Bitget Wallet" width="32" height="32" style="border-radius:6px" onerror="this.onerror=null;this.style.display='none';this.parentNode.style.background='#00F0FF';this.parentNode.innerHTML='<span style=font-size:13px;font-weight:800;color:#000>BG</span>'"/>
+            </div>
+            <div class="wm-wallet-info">
+              <div class="wm-wallet-name">Bitget Wallet</div>
+              <div class="wm-wallet-desc" id="wm-desc-bitget">Browser extension &amp; mobile app</div>
+            </div>
+            <div class="wm-wallet-status">
+              <span class="installed-badge" id="bg-installed" style="display:none">Installed</span>
+              <i class="ti ti-arrow-right wm-wallet-arrow"></i>
+            </div>
+          </div>
           <!-- WalletConnect -->
           <div class="wm-wallet" id="wm-wc" onclick="connectWalletConnect()">
             <div class="wm-wallet-ico">
@@ -17489,6 +17517,23 @@ function _safeEth() {
   try { return window.ethereum || null; } catch(e) { return null; }
 }
 
+// OKX Wallet injects window.okxwallet (EIP-1193 provider, like MetaMask).
+// Bitget Wallet (formerly BitKeep) injects window.bitkeep.ethereum.
+function _safeOkx() {
+  try {
+    if (window.okxwallet && typeof window.okxwallet.request === 'function') return window.okxwallet;
+    if (window.okxwallet && window.okxwallet.ethereum && typeof window.okxwallet.ethereum.request === 'function') return window.okxwallet.ethereum;
+    return null;
+  } catch(e) { return null; }
+}
+function _safeBitget() {
+  try {
+    if (window.bitkeep && window.bitkeep.ethereum && typeof window.bitkeep.ethereum.request === 'function') return window.bitkeep.ethereum;
+    if (window.bitget && window.bitget.ethereum && typeof window.bitget.ethereum.request === 'function') return window.bitget.ethereum;
+    return null;
+  } catch(e) { return null; }
+}
+
 // ── Wallet/provider readiness guards (race-condition hardening) ──────────
 // Prevents the Bridge / Cross-Chain "stuck wallet" issue: a single global guard
 // stops overlapping wallet operations from firing duplicate EIP-1193 requests
@@ -17547,6 +17592,10 @@ function updateWalletBadges() {
     if (cbBadge && wallets.coinbase) cbBadge.style.display = 'inline-flex';
     const twBadge = document.getElementById('tw-installed');
     if (twBadge && wallets.trust) twBadge.style.display = 'inline-flex';
+    const okxBadge = document.getElementById('okx-installed');
+    if (okxBadge && wallets.okx) okxBadge.style.display = 'inline-flex';
+    const bgBadge = document.getElementById('bg-installed');
+    if (bgBadge && wallets.bitget) bgBadge.style.display = 'inline-flex';
   } catch(e) { _warn('updateWalletBadges:', e.message); }
 }
 
@@ -17557,6 +17606,8 @@ const _wmKnownMap = [
   { match: ['rabby'],           fn: 'connectRabby',         color: '#7B6EF6', letter: 'R' },
   { match: ['coinbase'],        fn: 'connectCoinbase',      color: '#0052FF', letter: 'C' },
   { match: ['trust'],           fn: 'connectTrustWallet',   color: '#0500FF', letter: 'T' },
+  { match: ['okx', 'okex'],     fn: 'connectOKX',           color: '#000000', letter: 'OKX' },
+  { match: ['bitget', 'bitkeep'], fn: 'connectBitget',      color: '#00F0FF', letter: 'BG' },
   { match: ['walletconnect'],   fn: 'connectWalletConnect', color: '#3396FF', letter: 'WC' },
 ];
 function _wmMatchFn(name) {
@@ -17826,7 +17877,7 @@ async function finalizeConnection(raw, walletType) {
 
   const chain = getActiveChain();
   const short = shortAddr(walletAddress);
-  const badges = { metamask:'🦊 MetaMask', coinbase:'🔵 Coinbase', rabby:'🐰 Rabby', injected:'💼 Wallet', walletconnect:'🔗 WalletConnect' };
+  const badges = { metamask:'🦊 MetaMask', coinbase:'🔵 Coinbase', rabby:'🐰 Rabby', injected:'💼 Wallet', walletconnect:'🔗 WalletConnect', okx:'OKX Wallet', bitget:'Bitget Wallet' };
 
   // Update UI
   const set = (id, val, prop='textContent') => { const el=document.getElementById(id); if(el) el[prop]=val; };
@@ -18218,9 +18269,16 @@ function openWalletModal() {
     setDesc('wm-desc-coinbase', cb && cb.isCoinbaseWallet, 'Coinbase');
     setDesc('wm-desc-rabby',    rb && rb.isRabby, 'Rabby');
     setDesc('wm-desc-trust',    tw, 'Trust Wallet');
+    setDesc('wm-desc-okx',      !!_safeOkx(), 'OKX');
+    setDesc('wm-desc-bitget',   !!_safeBitget(), 'Bitget');
     if (mobile && !hasWallet) {
       const wcEl = document.getElementById('wm-wc');
       if (wcEl) wcEl.style.order = '-1';
+      // OKX/Bitget mobile apps connect via WalletConnect (no deep-link DApp scheme).
+      const okxD = document.getElementById('wm-desc-okx');
+      if (okxD) okxD.textContent = 'Connect via WalletConnect';
+      const bgD = document.getElementById('wm-desc-bitget');
+      if (bgD) bgD.textContent = 'Connect via WalletConnect';
     }
   }
 }
@@ -18396,37 +18454,47 @@ function switchNetwork(chainId) {
 }
 
 function detectWallets() {
-  const detected = { metamask: false, coinbase: false, rabby: false, trust: false, any: false };
+  const detected = { metamask: false, coinbase: false, rabby: false, trust: false, okx: false, bitget: false, any: false };
   try {
     for (const w of _eip6963) {
       detected.any = true;
       const n = (w.info?.name || '').toLowerCase();
+      const r = (w.info?.rdns || '').toLowerCase();
       if (n.includes('metamask')) detected.metamask = true;
       if (n.includes('coinbase')) detected.coinbase = true;
       if (n.includes('rabby')) detected.rabby = true;
       if (n.includes('trust')) detected.trust = true;
+      if (n.includes('okx') || n.includes('okex') || r.includes('okex')) detected.okx = true;
+      if (n.includes('bitget') || n.includes('bitkeep') || r.includes('bitget') || r.includes('bitkeep')) detected.bitget = true;
     }
     const eth = _safeEth();
-    if (!eth) return detected;
-    detected.any = true;
-    const providerList = eth.providers;
-    if (Array.isArray(providerList) && providerList.length) {
-      providerList.forEach(p => {
-        if (p.isMetaMask) detected.metamask = true;
-        if (p.isCoinbaseWallet) detected.coinbase = true;
-        if (p.isRabby) detected.rabby = true;
-        if (p.isTrust || p.isTrustWallet) detected.trust = true;
-      });
-    } else {
-      if (eth.isMetaMask) detected.metamask = true;
-      if (eth.isCoinbaseWallet) detected.coinbase = true;
-      if (eth.isRabby) detected.rabby = true;
-      if (eth.isTrust || eth.isTrustWallet) detected.trust = true;
+    if (eth) {
+      detected.any = true;
+      const providerList = eth.providers;
+      if (Array.isArray(providerList) && providerList.length) {
+        providerList.forEach(p => {
+          if (p.isMetaMask) detected.metamask = true;
+          if (p.isCoinbaseWallet) detected.coinbase = true;
+          if (p.isRabby) detected.rabby = true;
+          if (p.isTrust || p.isTrustWallet) detected.trust = true;
+          if (p.isOKXWallet || p.isOkxWallet || p.isOKExWallet) detected.okx = true;
+          if (p.isBitKeep || p.isBitget) detected.bitget = true;
+        });
+      } else {
+        if (eth.isMetaMask) detected.metamask = true;
+        if (eth.isCoinbaseWallet) detected.coinbase = true;
+        if (eth.isRabby) detected.rabby = true;
+        if (eth.isTrust || eth.isTrustWallet) detected.trust = true;
+        if (eth.isOKXWallet || eth.isOkxWallet || eth.isOKExWallet) detected.okx = true;
+        if (eth.isBitKeep || eth.isBitget) detected.bitget = true;
+      }
     }
   } catch(e) { _warn('detectWallets error:', e.message); }
   try { if (window.trustwallet) detected.trust = true; } catch(_) {}
   try { if (window.rabby) detected.rabby = true; } catch(_) {}
   try { if (window.coinbaseWalletExtension) detected.coinbase = true; } catch(_) {}
+  try { if (_safeOkx()) detected.okx = true; } catch(_) {}
+  try { if (_safeBitget()) detected.bitget = true; } catch(_) {}
   return detected;
 }
 
@@ -18551,6 +18619,98 @@ async function connectRabby() {
     if(row) row.style.opacity = '1';
     if(e.code === 4001) { if (!walletAddress) toast('Connection rejected', 'error'); }
     else { _err('Rabby:', e); toast('Rabby: ' + (e.message||'error'), 'error'); }
+  }
+}
+
+// ── OKX Wallet / Bitget Wallet ──────────────────────────────
+// OKX injects window.okxwallet; Bitget injects window.bitkeep.ethereum. Both
+// announce via EIP-6963 (preferred). On mobile (no extension) they connect
+// through WalletConnect (their apps are WC-compatible) with a clear notice —
+// never a silent redirect to another wallet.
+let _connectingWallet = null;
+async function connectOKX() {
+  if (_connectingWallet) return;
+  _connectingWallet = 'okx';
+  try {
+    let raw = null;
+    if (_eip6963.length) {
+      const m = _eip6963.find(w => {
+        const n = (w.info?.name || '').toLowerCase();
+        const r = (w.info?.rdns || '').toLowerCase();
+        return n.includes('okx') || n.includes('okex') || r.includes('okex');
+      });
+      if (m) raw = m.provider;
+    }
+    if (!raw) raw = _safeOkx();
+    if (!raw) {
+      if (isMobileDevice()) {
+        toast('Connect OKX Wallet via WalletConnect', 'info');
+        connectWalletConnect();
+        return;
+      }
+      showInstallPanel(
+        'OKX Wallet', 'https://www.okx.com/web3',
+        '<img src="/assets/wallets/okx.svg" alt="OKX Wallet" style="width:44px;height:44px;border-radius:10px"/>',
+        '<strong style="color:#dde2f0">OKX Wallet not detected.</strong><br/>1. Install the OKX Wallet extension<br/>2. Import your wallet<br/>3. Reload this page and connect'
+      );
+      return;
+    }
+    const row = document.getElementById('wm-okx');
+    if (row) row.style.opacity = '.5';
+    try {
+      await raw.request({ method: 'eth_requestAccounts' });
+      await finalizeConnection(raw, 'okx');
+      setupProviderEvents(raw);
+    } catch(e) {
+      if (row) row.style.opacity = '1';
+      if (e.code === 4001) { if (!walletAddress) toast('Connection rejected by user', 'error'); }
+      else { _err('OKX:', e); toast('OKX Wallet: ' + (e.shortMessage || e.message || 'error'), 'error'); }
+    }
+  } finally {
+    _connectingWallet = null;
+  }
+}
+
+async function connectBitget() {
+  if (_connectingWallet) return;
+  _connectingWallet = 'bitget';
+  try {
+    let raw = null;
+    if (_eip6963.length) {
+      const m = _eip6963.find(w => {
+        const n = (w.info?.name || '').toLowerCase();
+        const r = (w.info?.rdns || '').toLowerCase();
+        return n.includes('bitget') || n.includes('bitkeep') || r.includes('bitget') || r.includes('bitkeep');
+      });
+      if (m) raw = m.provider;
+    }
+    if (!raw) raw = _safeBitget();
+    if (!raw) {
+      if (isMobileDevice()) {
+        toast('Connect Bitget Wallet via WalletConnect', 'info');
+        connectWalletConnect();
+        return;
+      }
+      showInstallPanel(
+        'Bitget Wallet', 'https://web3.bitget.com/wallet-download?type=2',
+        '<img src="/assets/wallets/bitget.svg" alt="Bitget Wallet" style="width:44px;height:44px;border-radius:10px"/>',
+        '<strong style="color:#dde2f0">Bitget Wallet not detected.</strong><br/>1. Install the Bitget Wallet extension<br/>2. Import your wallet<br/>3. Reload this page and connect'
+      );
+      return;
+    }
+    const row = document.getElementById('wm-bitget');
+    if (row) row.style.opacity = '.5';
+    try {
+      await raw.request({ method: 'eth_requestAccounts' });
+      await finalizeConnection(raw, 'bitget');
+      setupProviderEvents(raw);
+    } catch(e) {
+      if (row) row.style.opacity = '1';
+      if (e.code === 4001) { if (!walletAddress) toast('Connection rejected by user', 'error'); }
+      else { _err('Bitget:', e); toast('Bitget Wallet: ' + (e.shortMessage || e.message || 'error'), 'error'); }
+    }
+  } finally {
+    _connectingWallet = null;
   }
 }
 
