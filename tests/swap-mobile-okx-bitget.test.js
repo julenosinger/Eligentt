@@ -123,18 +123,16 @@ describe('EIP-6963 wallet name → connect function mapping', () => {
 
 // ── 4. Mobile path: WalletConnect fallback (no silent redirect) ─────────────
 describe('mobile fallback uses WalletConnect, not fabricated deep links', () => {
-  it('connectOKX falls back to WalletConnect on mobile (no provider)', () => {
+  it('connectOKX awaits WalletConnect on mobile (no provider)', () => {
     const fn = extractFn('connectOKX');
     expect(fn).toContain('isMobileDevice()');
-    expect(fn).toContain('connectWalletConnect()');
-    expect(fn).toContain('Connect OKX Wallet via WalletConnect');
+    expect(fn).toContain("await connectWalletConnect('okx')");
   });
 
-  it('connectBitget falls back to WalletConnect on mobile (no provider)', () => {
+  it('connectBitget awaits WalletConnect on mobile (no provider)', () => {
     const fn = extractFn('connectBitget');
     expect(fn).toContain('isMobileDevice()');
-    expect(fn).toContain('connectWalletConnect()');
-    expect(fn).toContain('Connect Bitget Wallet via WalletConnect');
+    expect(fn).toContain("await connectWalletConnect('bitget')");
   });
 
   it('does not fabricate OKX/Bitget deep-link URLs', () => {

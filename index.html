@@ -14019,7 +14019,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
 // ── Cloudflare Pages runtime configuration ──────────────────
 // Keys are injected at runtime by the Cloudflare Pages Function
 window.__ARC_PAY_CONFIG__ = window.__ARC_PAY_CONFIG__ || {
-  wcProjectId:   '',    // WalletConnect v2 Project ID (injected at runtime)
+  wcProjectId:   '__WC_PROJECT_ID_PLACEHOLDER__',    // WalletConnect v2 Project ID (injected at runtime)
   kitKey:        '',    // Circle App Kit key (for Swap)
   testApiKey:    '', // Circle API key
   googleClientId: '',
@@ -18644,8 +18644,8 @@ async function connectOKX() {
     if (!raw) raw = _safeOkx();
     if (!raw) {
       if (isMobileDevice()) {
-        toast('Connect OKX Wallet via WalletConnect', 'info');
-        connectWalletConnect();
+        // OKX mobile app connects via WalletConnect (no DApp deep-link scheme).
+        await connectWalletConnect('okx');
         return;
       }
       showInstallPanel(
@@ -18687,8 +18687,8 @@ async function connectBitget() {
     if (!raw) raw = _safeBitget();
     if (!raw) {
       if (isMobileDevice()) {
-        toast('Connect Bitget Wallet via WalletConnect', 'info');
-        connectWalletConnect();
+        // Bitget mobile app connects via WalletConnect (no DApp deep-link scheme).
+        await connectWalletConnect('bitget');
         return;
       }
       showInstallPanel(
@@ -18715,13 +18715,23 @@ async function connectBitget() {
 }
 
 // ── WalletConnect v2 ───────────────────────────────────────
-async function connectWalletConnect() {
-  const statusEl = document.getElementById('wc-status');
-  const row      = document.getElementById('wm-wc');
-  if(statusEl) statusEl.textContent = 'Loading WalletConnect…';
-  if(row) row.style.opacity = '.6';
+// `sourceWallet` is an optional UI hint ('okx' | 'bitget') so the feedback
+// (Connecting… / Opening…) appears on the tapped wallet's row instead of the
+// generic WalletConnect row. The actual connection is still WalletConnect.
+async function connectWalletConnect(sourceWallet) {
+  const rowId  = sourceWallet === 'okx' ? 'wm-okx' : sourceWallet === 'bitget' ? 'wm-bitget' : 'wm-wc';
+  const descId = sourceWallet === 'okx' ? 'wm-desc-okx' : sourceWallet === 'bitget' ? 'wm-desc-bitget' : 'wc-status';
+  const idleText = sourceWallet
+    ? 'Browser extension & mobile app'
+    : 'Scan QR · 300+ wallets';
+  const statusEl = document.getElementById(descId);
+  const row      = document.getElementById(rowId);
+  const _reset = () => { if (statusEl) statusEl.textContent = idleText; if (row) row.style.opacity = '1'; };
 
-  if(!window._wcLoaded) {
+  if (statusEl) statusEl.textContent = 'Loading WalletConnect…';
+  if (row) row.style.opacity = '.6';
+
+  if (!window._wcLoaded) {
     try {
       await new Promise((resolve, reject) => {
         const s = document.createElement('script');
@@ -18732,10 +18742,9 @@ async function connectWalletConnect() {
       });
       window._wcLoaded = true;
     } catch {
-      if(statusEl) statusEl.textContent = 'Trust, Rainbow, Uniswap & 300+ wallets';
-      if(row) row.style.opacity = '1';
+      _reset();
       toast('WalletConnect failed to load — check internet connection', 'error');
-      return;
+      return false;
     }
   }
 
@@ -18743,14 +18752,22 @@ async function connectWalletConnect() {
     || window.WalletConnectProvider?.default
     || window.WalletConnectProvider;
 
-  if(!WCProvider?.init) {
-    if(statusEl) statusEl.textContent = 'Trust, Rainbow, Uniswap & 300+ wallets';
-    if(row) row.style.opacity = '1';
-    toast('WalletConnect unavailable — try MetaMask or Preview mode', 'error');
-    return;
+  if (!WCProvider?.init) {
+    _reset();
+    toast('WalletConnect unavailable — try another wallet', 'error');
+    return false;
   }
 
-  if(statusEl) statusEl.textContent = 'Initializing…';
+  // WalletConnect v2 requires a real Project ID. Without it the SDK cannot
+  // initialise and the QR/selection modal never opens.
+  if (!WC_PROJECT_ID) {
+    _reset();
+    toast('WalletConnect is not configured — contact support', 'error');
+    _err('WalletConnect: empty WC_PROJECT_ID');
+    return false;
+  }
+
+  if (statusEl) statusEl.textContent = 'Opening WalletConnect…';
   try {
     wcProvider = await WCProvider.init({
       projectId:      WC_PROJECT_ID,
@@ -18772,16 +18789,18 @@ async function connectWalletConnect() {
         icons:       ['https://raw.githubusercontent.com/circlefin/circle-cctp/main/logo.png']
       }
     });
-    if(statusEl) statusEl.textContent = 'Scan QR with your mobile wallet…';
+    if (statusEl) statusEl.textContent = sourceWallet ? 'Waiting for approval…' : 'Scan QR with your mobile wallet…';
     await wcProvider.connect({ chains: [5042] });
     await finalizeConnection(wcProvider, 'walletconnect');
     setupProviderEvents(wcProvider);
-  } catch(e) {
-    if(row) row.style.opacity = '1';
-    if(statusEl) statusEl.textContent = 'Trust, Rainbow, Uniswap & 300+ wallets';
-    const cancelled = /User rejected|cancelled|Modal closed/i.test(e.message||'');
-    if(cancelled) toast('WalletConnect cancelled', 'info');
+    _reset();
+    return true;
+  } catch (e) {
+    _reset();
+    const cancelled = /User rejected|cancelled|Modal closed/i.test(e.message || '');
+    if (cancelled) { toast('WalletConnect cancelled', 'info'); }
     else { _err('WalletConnect:', e); toast('WalletConnect error — see console', 'error'); }
+    return false;
   }
 }
 
