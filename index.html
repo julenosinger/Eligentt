@@ -17025,7 +17025,7 @@ const BridgeEngine = {
 };
 
 let swapTokenInIdx  = 0, swapTokenOutIdx = 1;
-let bridgeFromIdx   = 1, bridgeToIdx     = 0;  // Ethereum → Arc Mainnet
+let bridgeFromIdx   = 0, bridgeToIdx     = 1;  // Arc Mainnet → Ethereum (default source = Arc)
 let bridgeFromToken = 'USDC', bridgeToToken = 'USDC'; // Multi-token Bridge 1.0
 
 // ── Utilities ──────────────────────────────────────────────
@@ -27768,8 +27768,8 @@ function stStopAutoRefresh() {
 // ══════════════════════════════════════════════════════════
 // Initialize Bridge direction from the active Arc network (production → Mainnet).
 function initBridgeChains(){
-  bridgeFromIdx = 1; // Ethereum
-  bridgeToIdx   = 0; // Arc Mainnet
+  bridgeFromIdx = 0; // Arc Mainnet (default source)
+  bridgeToIdx   = 1; // Ethereum
   bridgeFromToken = 'USDC';
   bridgeToToken   = 'USDC';
   applyBridgeChains(); updateBridgeEst();
@@ -35880,8 +35880,8 @@ document.addEventListener("DOMContentLoaded", () => {
 //  CROSS-CHAIN PAYMENTS  (CCTP v2 — real wallet signing)
 // ══════════════════════════════════════════════════════════
 
-let xcFromIdx = 1; // Ethereum
-let xcToIdx   = 0; // Arc Mainnet
+let xcFromIdx = 0; // Arc Mainnet (default source)
+let xcToIdx   = 1; // Ethereum
 let xcToken   = 'USDC'; // 'USDC' | 'EURC'
 let xcStats   = { count: 0, volume: 0, chains: new Set() };
 
@@ -42341,7 +42341,11 @@ function openNetworkSelector() {
   // Build chain list HTML
   function rowHtml(chain) {
     const isActive = chain.chainId === activeChainId;
-    return `<div class="ns-chain-row${isActive ? ' ns-row-active' : ''}" data-chain-id="${chain.chainId}" onclick="_nsSelectChain(${chain.chainId})">
+    // On mobile (<=600px) the right detail panel (which holds the "Switch to this
+    // network" button) is hidden, so tapping a row must switch directly. On
+    // desktop tapping a row previews it in the right panel.
+    const tap = "(window.innerWidth <= 600 ? _nsSwitchTo : _nsSelectChain)(" + chain.chainId + ")";
+    return `<div class="ns-chain-row${isActive ? ' ns-row-active' : ''}" data-chain-id="${chain.chainId}" onclick="${tap}">
       <div class="ns-row-logo">${_nsChainLogo(chain)}</div>
       <div class="ns-row-info">
         <div class="ns-row-name">${chain.name}</div>
