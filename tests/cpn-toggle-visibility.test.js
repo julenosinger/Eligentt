@@ -31,23 +31,22 @@ function blockAt(text, anchor, size = 3000) {
 }
 
 describe('Send to Bank (CPN) — visibility restored', () => {
-  it('the "Send to Bank (CPN)" button exists', () => {
-    expect(html).toContain('id="sa-cpn-toggle"');
-    expect(html).toContain('id="sa-cpn-toggle-label">Send to Bank (CPN)');
+  it('the "Send to Bank" entry point exists as the third Send Assets tab', () => {
+    // The in-card "Send to Bank (CPN)" button was moved into an independent tab.
+    expect(html).toContain('id="sa-mtab-bank"');
+    expect(html).toContain("onclick=\"saSetModeTab('bank',this)\"");
+    expect(html).not.toContain('id="sa-cpn-toggle"');
   });
 
-  it('the button is VISIBLE (display:flex), never display:none', () => {
-    // Extract just the button's own style attribute (not the neighbouring
-    // sa-cpn-notice div, which is legitimately display:none until fiat mode).
-    const btnStart = html.indexOf('id="sa-cpn-toggle"');
-    const styleStart = html.indexOf('style="', btnStart);
-    const styleEnd = html.indexOf('"', styleStart + 7);
-    const style = html.slice(styleStart, styleEnd);
-    expect(style).toContain('display:flex');
-    expect(style).not.toContain('display:none');
+  it('the tab is VISIBLE (never display:none) and carries no feature flag', () => {
+    const btnStart = html.indexOf('id="sa-mtab-bank"');
+    const tagEnd = html.indexOf('>', btnStart);
+    const tag = html.slice(btnStart, tagEnd);
+    expect(tag).not.toContain('display:none');
+    expect(tag).not.toContain('hidden');
   });
 
-  it('no feature flag hides the button (no SA_CPN_ENABLED anywhere)', () => {
+  it('no feature flag hides the entry point (no SA_CPN_ENABLED anywhere)', () => {
     expect(html).not.toContain('SA_CPN_ENABLED');
   });
 

@@ -4853,6 +4853,22 @@ select.ub-op-input{cursor:pointer;-webkit-appearance:none;appearance:none;backgr
 .sa-mode-tab{background:none;border:none;border-bottom:2px solid transparent;padding:10px 16px;font-size:10px;font-weight:600;color:var(--muted2);cursor:pointer;display:flex;align-items:center;gap:6px;transition:color .15s,border-color .15s;white-space:nowrap;font-family:inherit}
 .sa-mode-tab:hover{color:var(--text)}
 .sa-mode-active{color:var(--teal,#06F7E9)!important;border-bottom-color:var(--teal,#06F7E9)!important}
+/* Send to Bank tab: crypto-only chrome is hidden while the CPN tab is active (state is untouched). */
+#sa-panel-send.sa-bank-mode #sa-origin-bar,
+#sa-panel-send.sa-bank-mode #sa-gw-notice,
+#sa-panel-send.sa-bank-mode .sa-quick-actions-card{display:none!important}
+/* Route Preview: the on-chain-only rows (address, token contract, crypto fee, ERC-20 route type) would
+   describe a transfer that is not happening, so they are hidden in the bank tab. Values stay in the DOM. */
+#sa-panel-send.sa-bank-mode .sa-route-row:has(#sa-rt-dest),
+#sa-panel-send.sa-bank-mode .sa-route-row:has(#sa-rt-contract),
+#sa-panel-send.sa-bank-mode .sa-route-row:has(#sa-rt-fee),
+#sa-panel-send.sa-bank-mode .sa-route-row:has(#sa-rt-type){display:none}
+/* Three mode tabs must stay reachable on narrow screens: scroll instead of clipping. */
+@media(max-width:640px){
+  .sa-mode-tabs{padding:0 8px;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+  .sa-mode-tabs::-webkit-scrollbar{display:none}
+  .sa-mode-tab{padding:10px 12px;flex-shrink:0}
+}
 .sa-mode-tab-badge{font-size:7px;font-weight:700;padding:1px 5px;border-radius:4px;background:rgba(6,247,233,.12);color:var(--teal,#06F7E9);border:1px solid rgba(6,247,233,.25);margin-left:2px}
 /* ── x402 inline panel (reuses x402Client.js CSS vars) ── */
 /* ── x402 Payment Center — redesigned UI ─────────────────────────────── */
@@ -8582,6 +8598,9 @@ select.cinput option { background: #161a24; color: #dde2f0; }
             <i class="ti ti-credit-card-pay" style="color:#06F7E9"></i>x402 Payments
             <span class="sa-mode-tab-badge">Beta</span>
           </button>
+          <button class="sa-mode-tab" id="sa-mtab-bank" onclick="saSetModeTab('bank',this)" title="Send to a bank account via Circle Payments Network (requires OFI onboarding)">
+            <i class="ti ti-building-bank"></i>Send to Bank
+          </button>
         </div>
 
         <!-- ── x402 Payments panel ───────────────────────────────────────── -->
@@ -8671,14 +8690,6 @@ select.cinput option { background: #161a24; color: #dde2f0; }
             <div class="sa-card">
               <div class="sa-card-title" style="justify-content:space-between">
                 <span><i class="ti ti-form"></i>Transfer Details</span>
-                <!-- CPN Fiat Payout toggle -->
-                <button id="sa-cpn-toggle"
-                  onclick="saToggleCPN()"
-                  title="Send to a bank account via Circle Payments Network (requires OFI onboarding)"
-                  style="display:flex;align-items:center;gap:5px;background:rgba(45,212,191,.08);border:1px solid rgba(45,212,191,.2);border-radius:6px;padding:4px 10px;cursor:pointer;font-size:9px;font-weight:600;color:var(--teal);transition:all .2s">
-                  <i class="ti ti-building-bank" style="font-size:11px"></i>
-                  <span id="sa-cpn-toggle-label">Send to Bank (CPN)</span>
-                </button>
               </div>
 
               <!-- CPN onboarding notice (shown only in fiat mode) -->
@@ -8856,7 +8867,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
             </div>
 
             <!-- Quick Actions -->
-            <div class="sa-card">
+            <div class="sa-card sa-quick-actions-card">
               <div class="sa-card-title"><i class="ti ti-bolt"></i>Quick Actions</div>
               <div class="sa-actions-row">
                 <button class="sa-action-btn" onclick="saSaveRecipient()">
@@ -41451,6 +41462,102 @@ function saSetModeTab(mode, btn) {
     if (x402Panel) x402Panel.style.display = 'none';
   }
 }
+
+// ════════════════════════════════════════════════════════════
+//  SEND ASSETS — "Send to Bank" (CPN) mode tab
+//  Third tab next to "Single & Batch Send" and "x402 Payments".
+//  Pure navigation layer: it reuses the existing CPN mode (saToggleCPN,
+//  saFetchCPNQuotes, saExecuteCPNPayout) and never calls a financial
+//  function itself. The CPN engine is untouched.
+//
+//  - Entering the tab turns CPN mode on; leaving it turns it off, exactly
+//    like the former in-card button did, so Send Asset can never route to CPN
+//    from the other tabs.
+//  - In-flight guard: the tab cannot be left while a CPN payout is running,
+//    and cannot be entered while a crypto/Gateway send is running.
+//  - Lossless switching: the CPN quote / idempotency / payment pins are
+//    stashed on leave and restored on return, so an unfinished payout keeps
+//    its idempotency key and nothing is silently reset.
+// ════════════════════════════════════════════════════════════
+var _saModeCur = 'send';
+var _saBankStash = null;
+var _saBusy = { send: 0, gateway: 0, cpn: 0 };
+
+(function _saTrackInFlight() {
+  // Observe (never alter) the async send entry points. The original promise
+  // is returned untouched, so callers see identical results and rejections.
+  var map = { saExecuteSend: 'send', saExecGateway: 'gateway', saExecuteCPNPayout: 'cpn' };
+  Object.keys(map).forEach(function(name) {
+    var orig = window[name];
+    if (typeof orig !== 'function') return;
+    window[name] = function() {
+      var kind = map[name];
+      _saBusy[kind]++;
+      var done = function() { _saBusy[kind] = Math.max(0, _saBusy[kind] - 1); };
+      var r;
+      try { r = orig.apply(this, arguments); } catch (e) { done(); throw e; }
+      Promise.resolve(r).then(done, done);
+      return r;
+    };
+  });
+})();
+
+function _saBankEnter() {
+  if (!_saCPNMode) saToggleCPN();
+  if (_saBankStash) {
+    _saCPNQuotes = _saBankStash.quotes;
+    _saCPNSelectedQuote = _saBankStash.selectedQuote;
+    _saCPNIdempotencyKey = _saBankStash.idempotencyKey;
+    _saCPNPaymentId = _saBankStash.paymentId;
+    _saCPNExpectedRecipient = _saBankStash.expectedRecipient;
+    _saBankStash = null;
+    saUpdateRoute();
+  }
+}
+
+function _saBankLeave() {
+  if (!_saCPNMode) return;
+  var hasState = _saCPNIdempotencyKey || _saCPNPaymentId || _saCPNExpectedRecipient ||
+                 _saCPNSelectedQuote || (_saCPNQuotes && _saCPNQuotes.length);
+  _saBankStash = hasState ? {
+    quotes: _saCPNQuotes,
+    selectedQuote: _saCPNSelectedQuote,
+    idempotencyKey: _saCPNIdempotencyKey,
+    paymentId: _saCPNPaymentId,
+    expectedRecipient: _saCPNExpectedRecipient
+  } : null;
+  saToggleCPN();
+}
+
+var _saSetModeTabBase = saSetModeTab;
+saSetModeTab = function(mode, btn) {
+  if (mode !== 'bank' && mode !== 'x402') mode = 'send';
+  var prev = _saModeCur;
+  var panel = document.getElementById('sa-panel-send');
+
+  if (mode === 'bank') {
+    if (prev === 'bank') return;
+    if (_saBusy.send > 0 || _saBusy.gateway > 0) {
+      toast('A transfer is in progress. Wait for it to finish before opening Send to Bank.', 'warning');
+      return;
+    }
+    _saSetModeTabBase('send', document.getElementById('sa-mtab-send')); // show the send panel, hide x402
+    document.querySelectorAll('#sa-mode-tabs .sa-mode-tab').forEach(function(t) { t.classList.remove('sa-mode-active'); });
+    var bankBtn = document.getElementById('sa-mtab-bank');
+    if (bankBtn) bankBtn.classList.add('sa-mode-active');
+    if (panel) panel.classList.add('sa-bank-mode');
+    _saBankEnter();
+  } else {
+    if (prev === 'bank' && _saBusy.cpn > 0) {
+      toast('A bank payout is in progress. Wait for it to finish before leaving this tab.', 'warning');
+      return;
+    }
+    if (prev === 'bank') _saBankLeave();
+    if (panel) panel.classList.remove('sa-bank-mode');
+    _saSetModeTabBase(mode, btn);
+  }
+  _saModeCur = mode;
+};
 
 // ════════════════════════════════════════════════════════════
 //  SA_X402 — Inline x402 panel controller for Send Assets.
