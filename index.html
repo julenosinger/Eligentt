@@ -3413,7 +3413,7 @@ html[data-theme="light"]:not(:has(#page-unified-balance.active)) #bridge-routes-
 html[data-theme="light"]:not(:has(#page-unified-balance.active)) #bridge-routes-inner .brs-badge--gw{color:#5B3FC4}
 html[data-theme="light"]:not(:has(#page-unified-balance.active)) #bridge-routes-inner .brs-select-btn{background:var(--lt-selected-bg);border-color:var(--lt-selected-border);color:var(--teal)}
 html[data-theme="light"]:not(:has(#page-unified-balance.active)) #bridge-routes-inner .brs-select-btn:hover{background:rgba(0,143,135,.14)}
-html[data-theme="light"]:not(:has(#page-unified-balance.active)) #bridge-routes-inner .brs-select-btn--selected{background:var(--teal);border-color:var(--teal);color:#fff}
+html[data-theme="light"]:not(:has(#page-unified-balance.active)) #bridge-routes-inner .brs-select-btn--selected{background:rgba(0,143,135,.12);border-color:var(--lt-accent);color:var(--teal)}
 /* Mobile: panel stacks below */
 @media(max-width:1080px){
   .swap-col.bridge-routes-active{display:flex !important;flex-direction:column !important}
@@ -28811,7 +28811,7 @@ function _brsRenderRoutes(routes, fromChain, toChain) {
       : '<span class="brs-unavail-tag">Unavailable</span>';
 
     var _cardClick = route.available ? ' onclick="brSelectRoute(' + i + ')" style="cursor:pointer"' : '';
-    html += '<div class="' + classes + '" id="brs-card-' + i + '"' + _cardClick + '>' +
+    html += '<div class="' + classes + '" id="brs-card-' + i + '" data-route-id="' + escHtml(String(route.id)) + '"' + _cardClick + '>' +
       badges +
       /* Row 1: icon · provider · amount · select */
       '<div class="brs-route-top">' +
@@ -28840,6 +28840,35 @@ function _brsRenderRoutes(routes, fromChain, toChain) {
   inner.innerHTML = html;
 }
 
+// Visual selection state is ALWAYS derived from the real selected route (_selectedBridgeRoute), never
+// from card positions. Cards are matched by their stable route id (data-route-id) and the lookup is
+// scoped to the Bridge panel: the Swap route list re-uses the .brs-* classes, so a document-wide query
+// used to hit its cards first and leave the Bridge cards showing "Select".
+function _brsSyncSelectionUi() {
+  var inner = document.getElementById('bridge-routes-inner');
+  if (!inner) return;
+  var selId = _selectedBridgeRoute ? String(_selectedBridgeRoute.id) : null;
+  var cards = inner.querySelectorAll('.brs-route[data-route-id]');
+  for (var k = 0; k < cards.length; k++) {
+    var card = cards[k];
+    var rid = card.getAttribute('data-route-id');
+    var isSel = selId !== null && rid === selId;
+    card.classList.toggle('brs-selected', isSel);
+    var hint = card.querySelector('.brs-route-steps');
+    if (!hint) continue;
+    var idx = -1;
+    for (var j = 0; j < _bridgeRoutes.length; j++) {
+      if (String(_bridgeRoutes[j].id) === rid) { idx = j; break; }
+    }
+    if (idx === -1 || !_bridgeRoutes[idx].available) continue;
+    var hasSelBtn = !!hint.querySelector('.brs-select-btn--selected');
+    if (isSel === hasSelBtn) continue; // already in the right state: no DOM churn
+    hint.innerHTML = isSel
+      ? '<button class="brs-select-btn brs-select-btn--selected" onclick="event.stopPropagation();brSelectRoute(' + idx + ')"><i class="ti ti-check"></i> Selected</button>'
+      : '<button class="brs-select-btn" onclick="event.stopPropagation();brSelectRoute(' + idx + ')">Select</button>';
+  }
+}
+
 // Select a route explicitly (does NOT execute — user must click Bridge button).
 function brSelectRoute(idx) {
   var route = _bridgeRoutes[idx];
@@ -28851,21 +28880,8 @@ function brSelectRoute(idx) {
   if (route.provider === 'lifi') { _bridgeLastQuote = route.quote; }
   else                           { _bridgeLastQuote = null; }
 
-  // Re-render cards to update selection highlight and SELECT buttons.
-  var cards = document.querySelectorAll('.brs-route');
-  cards.forEach(function(c, i) {
-    if (i === idx) c.classList.add('brs-selected');
-    else           c.classList.remove('brs-selected');
-    var hint = c.querySelector('.brs-route-steps');
-    if (!hint) return;
-    var r = _bridgeRoutes[i];
-    if (!r || !r.available) return;
-    if (i === idx) {
-      hint.innerHTML = '<button class="brs-select-btn brs-select-btn--selected" onclick="event.stopPropagation();brSelectRoute(' + i + ')"><i class="ti ti-check"></i> Selected</button>';
-    } else {
-      hint.innerHTML = '<button class="brs-select-btn" onclick="event.stopPropagation();brSelectRoute(' + i + ')">Select</button>';
-    }
-  });
+  // Sync the card highlight + Select/Selected buttons from the real selected route.
+  _brsSyncSelectionUi();
 
   // Update main rate-box with selected route data
   var outAmt   = route.outAmt  != null ? route.outAmt  : 0;
