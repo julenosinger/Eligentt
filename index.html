@@ -2324,6 +2324,39 @@ html[data-theme="light"]:not(:has(#page-unified-balance.active)) #swap-route-lis
 .brg-hist-btn:hover { background: rgba(45,212,191,.15); border-color: rgba(45,212,191,.35); }
 .brg-hist-btn i { font-size: 12px; }
 @media (max-width: 480px) { .brg-hist-btn-label { display: none; } }
+
+/* ═══ Bridge Help & Recovery modal ═══════════════════════════════════════
+   Informational only. Reuses the Bridge network-picker modal shell
+   (.ns-overlay / .ns-box / .ns-close); everything below is new, brg-help-* only. */
+.brg-help-overlay { z-index: 10010; }
+.brg-help-box { width: 480px; max-width: 95vw; max-height: 88vh; }
+.brg-help-head { display: flex; align-items: center; gap: 12px; padding: 20px 52px 14px 20px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.brg-help-icon { width: 38px; height: 38px; border-radius: 10px; background: rgba(6,247,233,.1); border: 1px solid rgba(6,247,233,.22); display: flex; align-items: center; justify-content: center; flex-shrink: 0; color: var(--teal); font-size: 20px; }
+.brg-help-title { font-size: 16px; font-weight: 700; color: var(--text); line-height: 1.25; }
+.brg-help-sub { font-size: 12px; color: var(--muted2); margin-top: 3px; line-height: 1.4; }
+.brg-help-body { padding: 16px 20px 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; }
+.brg-help-sec h3 { font-size: 13px; font-weight: 700; color: var(--text); margin: 0 0 6px; }
+.brg-help-sec p, .brg-help-sec li { font-size: 12.5px; line-height: 1.55; color: var(--muted2); margin: 0; }
+.brg-help-sec ol { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; }
+.brg-help-sec li::marker { color: var(--teal); font-weight: 700; }
+.brg-help-cta { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 10px 16px; border-radius: 10px; background: var(--teal); color: #04110f; font-size: 13.5px; font-weight: 700; text-decoration: none; border: 1px solid transparent; transition: filter .15s; }
+.brg-help-cta:hover { filter: brightness(1.08); }
+.brg-help-cta:focus-visible, .brg-help-box .ns-close:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.brg-help-ext { font-size: 11.5px; line-height: 1.5; color: var(--muted2); margin-top: 8px; display: flex; gap: 6px; align-items: flex-start; }
+.brg-help-ext i { font-size: 13px; margin-top: 1px; flex-shrink: 0; }
+.brg-help-safe { border: 1px solid var(--border2); background: var(--card2); border-radius: 10px; padding: 12px 14px; }
+.brg-help-safe h3 { display: flex; align-items: center; gap: 6px; }
+.brg-help-safe h3 i { color: var(--yellow); font-size: 15px; }
+.brg-help-safe ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
+.brg-help-safe li { font-size: 12px; line-height: 1.5; color: var(--muted2); }
+.brg-help-note { font-size: 12px; line-height: 1.5; color: var(--muted2); border-left: 3px solid var(--blue); padding: 2px 0 2px 10px; }
+@media (max-width: 600px) { .brg-help-box { width: 100%; max-width: 100%; max-height: 92vh; } .brg-help-head { padding: 16px 48px 12px 16px; } .brg-help-body { padding: 14px 16px 18px; } }
+[data-theme="light"] .brg-help-icon { background: rgba(0,143,135,.1); border-color: rgba(0,143,135,.25); }
+[data-theme="light"] .brg-help-cta { background: var(--teal); color: #fff; }
+[data-theme="light"] .brg-help-overlay { background: rgba(20,33,61,.45); }
+[data-theme="light"] .brg-help-box { background: var(--card); border-color: var(--border2); box-shadow: 0 24px 60px rgba(20,33,61,.22); }
+[data-theme="light"] .brg-help-box .ns-close { background: var(--card2); border-color: var(--border2); color: var(--muted2); }
+[data-theme="light"] .brg-help-box .ns-close:hover { border-color: var(--teal); color: var(--text); background: var(--lt-selected-bg, var(--card2)); }
 .brg-hist-overlay {
   position: fixed; inset: 0; z-index: 2400;
   background: rgba(0,0,0,.55);
@@ -8683,6 +8716,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
           <div class="page-sub" id="bridge-page-sub">Cross-chain bridge · LI.FI · Arc Mainnet</div>
         </div>
         <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+          <button class="brg-hist-btn brg-help-btn" id="brg-help-btn" type="button" onclick="brgOpenHelp()" aria-haspopup="dialog" aria-label="Help" title="Bridge help &amp; CCTP recovery"><i class="ti ti-help-circle"></i><span class="brg-hist-btn-label">Help</span></button>
           <button class="brg-hist-btn" id="brg-hist-btn" onclick="brgOpenHistory()" title="View bridge history"><i class="ti ti-history"></i><span class="brg-hist-btn-label">History</span></button>
           <div class="kit-badge" style="background:rgba(45,212,191,.1);border-color:rgba(45,212,191,.25);color:var(--teal)"><i class="ti ti-world" style="font-size:9px"></i>LI.FI</div>
         </div>
@@ -20723,6 +20757,75 @@ async function executeMint(intentId){
     var mintBtn = document.getElementById('xd-mint-btn');
     if(mintBtn && !mintBtn.disabledByUser){ mintBtn.disabled = false; mintBtn.textContent = 'Execute Mint'; }
   }
+}
+
+// ── Bridge Help & Recovery (informational modal; no transactions) ─────
+// Pure UI: renders static guidance and a plain external link. It never calls
+// the bridge engine, a wallet, an RPC or any API.
+var _brgHelpOpener = null;
+
+function brgOpenHelp() {
+  if (document.getElementById('brg-help-modal')) return;
+  _brgHelpOpener = document.activeElement;
+  var modal = document.createElement('div');
+  modal.id = 'brg-help-modal';
+  modal.className = 'ns-overlay brg-help-overlay';
+  modal.setAttribute('role', 'dialog');
+  modal.setAttribute('aria-modal', 'true');
+  modal.setAttribute('aria-labelledby', 'brg-help-title');
+  modal.innerHTML = ''
+    + '<div class="ns-box brg-help-box" onclick="event.stopPropagation()">'
+    +   '<button class="ns-close" type="button" onclick="brgCloseHelp()" aria-label="Close help"><i class="ti ti-x"></i></button>'
+    +   '<div class="brg-help-head">'
+    +     '<div class="brg-help-icon"><i class="ti ti-help-circle"></i></div>'
+    +     '<div><div class="brg-help-title" id="brg-help-title">Bridge Help &amp; Recovery</div>'
+    +     '<div class="brg-help-sub">Having trouble completing your CCTP transfer?</div></div>'
+    +   '</div>'
+    +   '<div class="brg-help-body">'
+    +     '<section class="brg-help-sec"><h3>Mint not completed?</h3>'
+    +       '<p>If your source transaction was confirmed but your funds have not arrived, your transfer may still be awaiting attestation or minting.</p></section>'
+    +     '<section class="brg-help-sec"><h3>How to recover your transfer</h3><ol>'
+    +       '<li>Open your Bridge transaction history.</li>'
+    +       '<li>Locate the original CCTP transfer.</li>'
+    +       '<li>Copy the source transaction hash.</li>'
+    +       '<li>Open the external CCTP recovery tool.</li>'
+    +       '<li>Follow the available recovery instructions and verify the destination network, recipient and transaction status.</li>'
+    +     '</ol></section>'
+    +     '<div><a class="brg-help-cta" id="brg-help-cta" href="https://www.cctp.io/bridge" target="_blank" rel="noopener noreferrer">'
+    +       '<i class="ti ti-external-link"></i>Open CCTP Recovery</a>'
+    +       '<div class="brg-help-ext"><i class="ti ti-info-circle"></i><span>Opens an external, third-party website (cctp.io) in a new tab. Elligentt does not operate it and has not verified it as an official Circle tool.</span></div></div>'
+    +     '<section class="brg-help-safe"><h3><i class="ti ti-shield-exclamation"></i>Stay safe</h3><ul>'
+    +       '<li>Never share your private key or recovery phrase.</li>'
+    +       '<li>Do not initiate another transfer before verifying the original transaction.</li>'
+    +       '<li>Recovery availability depends on the transaction status and protocol. Recovery is not guaranteed.</li>'
+    +       '<li>This recovery guidance applies to Circle CCTP transfers.</li>'
+    +     '</ul></section>'
+    +     '<p class="brg-help-note">Transfers made through LI.FI or other providers are not covered by this CCTP guidance. For those, check your Bridge history and the status page of the provider that executed the route.</p>'
+    +   '</div>'
+    + '</div>';
+  modal.addEventListener('click', function(e) { if (e.target === modal) brgCloseHelp(); });
+  modal._brgHelpKey = function(e) {
+    if (e.key === 'Escape') { brgCloseHelp(); return; }
+    if (e.key !== 'Tab') return;
+    var f = modal.querySelectorAll('a[href], button');
+    if (!f.length) return;
+    var first = f[0], last = f[f.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  };
+  document.addEventListener('keydown', modal._brgHelpKey);
+  document.body.appendChild(modal);
+  var cta = document.getElementById('brg-help-cta');
+  if (cta) cta.focus();
+}
+
+function brgCloseHelp() {
+  var modal = document.getElementById('brg-help-modal');
+  if (!modal) return;
+  if (modal._brgHelpKey) document.removeEventListener('keydown', modal._brgHelpKey);
+  modal.remove();
+  if (_brgHelpOpener && typeof _brgHelpOpener.focus === 'function') _brgHelpOpener.focus();
+  _brgHelpOpener = null;
 }
 
 // ── Bridge History Panel (slide-in, mirrors Swap History) ────────────
