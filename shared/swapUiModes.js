@@ -257,7 +257,7 @@
       // Badges — absolute-positioned like Bridge (brs-best-badge).
       var badges = '';
       if (isBest)    badges += '<div class="brs-best-badge">Best Rate</div>';
-      if (isFastest) badges += '<div class="brs-best-badge" style="right:auto;left:12px;background:var(--purple)">Fastest</div>';
+      if (isFastest) badges += '<div class="brs-best-badge brs-badge--fast">Fastest</div>';
 
       // Select button — same style as Bridge.
       var selectHtml;
@@ -288,7 +288,7 @@
         badges +
         '<div class="brs-route-top">' +
           '<div class="brs-provider-icon">' + provLetter + '</div>' +
-          '<div style="flex:1;min-width:0;overflow:hidden">' +
+          '<div class="brs-prov-info">' +
             '<div class="brs-provider-name">' + escH(meta.name) + '</div>' +
             '<div class="brs-protocol-tag">' + escH(meta.sourceLabel) + '</div>' +
           '</div>' +

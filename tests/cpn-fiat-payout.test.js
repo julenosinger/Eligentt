@@ -454,7 +454,7 @@ describe('functions/api/cpn/[[route]].mjs — key isolation and safe error messa
 
 // ── 10. index.html — CPN UI elements present ──────────────────────────────────
 describe('index.html — CPN UI elements present', () => {
-  it('CPN toggle button exists', () => { expect(html).toContain('saToggleCPN()'); });
+  it('CPN entry point exists (Send to Bank tab drives saToggleCPN)', () => { expect(html).toContain('saToggleCPN()'); expect(html).toContain('id="sa-mtab-bank"'); });
   it('CPN form hidden by default', () => { expect(html).toMatch(/id=["']sa-cpn-form["']/); });
   it('OFI onboarding notice exists', () => { expect(html).toMatch(/id=["']sa-cpn-notice["']/); });
   it('all beneficiary + sender fields exist', () => {
