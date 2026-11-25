@@ -69,12 +69,27 @@ describe('fit CSS is isolated and structural (no offsets or negative margins)', 
   it('only two documented !important (inline-style overrides on the Refresh button)', () => {
     expect((FIT_CSS.match(/!important/g) || []).length).toBe(2);
   });
-  it('desktop: the terminal fills the panel, columns stretch and scroll inside', () => {
+  it('desktop: columns stretch to one row; the catalog is sized by the row, not the row by the catalog', () => {
     expect(FIT_CSS).toContain('@media(min-width:1181px)');
-    expect(FIT_CSS).toContain('grid-template-rows:minmax(0,1fr)');
     expect(FIT_CSS).toContain('align-items:stretch');
-    expect(FIT_CSS).toContain('#rwa-panel-trade.active{display:flex;flex-direction:column;overflow:hidden');
-    expect(FIT_CSS).toMatch(/\.rwa-exec-btn\{position:sticky;bottom:0/);
+    expect(FIT_CSS).toContain('height:0;min-height:100%');
+  });
+  it('centre column never scrolls on its own and the button stays in the normal flow', () => {
+    const noComments = FIT_CSS.replace(/\/\*[\s\S]*?\*\//g, '');
+    expect(noComments).not.toMatch(/position:\s*sticky/);
+    expect(noComments).not.toMatch(/scrollbar-width/);
+    expect(noComments).not.toMatch(/rwa-trade-wrap[^{]*\{[^}]*overflow/);
+    expect(noComments).not.toMatch(/rwa-exec-btn[^{]*\{[^}]*(^|[;{\s])(position|bottom|top)\s*:/);
+    expect(noComments).toMatch(/\.rwa-exec-btn\{margin-top:6px\}/);
+    // the earlier terminal rules must not reintroduce a clipped/scrolling centre column either
+    const tt = html.slice(html.indexOf('/* ═══ RWA Trade Terminal 2.0'), html.indexOf('@media(max-width:768px){\n        .rwa-grid{')).replace(/\/\*[\s\S]*?\*\//g, '');
+    expect(tt).not.toMatch(/\.rwa-trade-wrap[^{]*\{[^}]*overflow/);
+    expect(tt).not.toMatch(/\.rwa-exec-btn[^{]*\{[^}]*(^|[;{\s])position:\s*(sticky|fixed|absolute)/);
+  });
+  it('the page panel stays the vertical scroller', () => {
+    expect(html).toMatch(/\.rwa-panel\{display:none;flex:1;overflow-y:auto/);
+    expect(FIT_CSS).not.toContain('#rwa-panel-trade.active{display:flex');
+    expect(FIT_CSS).not.toMatch(/#rwa-panel-trade(\.active)?\s*\{[^}]*overflow/);
   });
   it('sub-nav is 40px, header min-height 56px', () => {
     expect(FIT_CSS).toContain('#page-rwa .rwa-tab{height:40px');
@@ -129,18 +144,29 @@ describe.skipIf(!E2E)('real layout in Chromium (mocked network)', () => {
       const m = await p.evaluate(() => {
         const r = (s) => document.querySelector(s).getBoundingClientRect();
         const panel = document.getElementById('rwa-panel-trade');
-        return { header: r('.rwa-header').height, nav: r('.rwa-nav').height, navBottom: r('.rwa-nav').bottom, cols: [r('.rwa-tt-markets').top, r('.rwa-trade-wrap').top, r('.rwa-tt-side').top],
+        const wrap = document.querySelector('.rwa-trade-wrap'), btnEl = document.getElementById('rwa-trade-btn'), b = btnEl.getBoundingClientRect();
+        const others = [...wrap.children].filter((e) => e !== btnEl && e.offsetHeight > 0).map((e) => e.getBoundingClientRect());
+        const btnOverlap = others.reduce((a, o) => a + Math.max(0, Math.min(b.bottom, o.bottom) - Math.max(b.top, o.top)), 0);
+        const info = document.getElementById('rwa-info').getBoundingClientRect();
+        return { centerScroll: wrap.scrollHeight - wrap.clientHeight, centerOverflow: getComputedStyle(wrap).overflowY, btnPos: getComputedStyle(btnEl).position, btnGap: Math.round(b.top - info.bottom), btnOverlap,
+          header: r('.rwa-header').height, nav: r('.rwa-nav').height, navBottom: r('.rwa-nav').bottom, cols: [r('.rwa-tt-markets').top, r('.rwa-trade-wrap').top, r('.rwa-tt-side').top],
           label: r('.rwa-field-label').top, routes: r('.rwa-ttr-title').top, markets: r('.rwa-ttm-title').top, btn: r('#rwa-trade-btn'), vh: innerHeight,
-          outerScroll: panel.scrollHeight - panel.clientHeight, ovfX: document.documentElement.scrollWidth > innerWidth || panel.scrollWidth > panel.clientWidth + 1 };
+          ovfX: document.documentElement.scrollWidth > innerWidth || panel.scrollWidth > panel.clientWidth + 1 };
       });
+      await p.evaluate(() => document.getElementById('rwa-trade-btn').scrollIntoView({ block: 'nearest' }));
+      m.reachable = await p.evaluate(() => { const b = document.getElementById('rwa-trade-btn').getBoundingClientRect(); return b.top >= 0 && b.bottom <= innerHeight + 1; });
       expect(m.header).toBeLessThanOrEqual(64);                       // 56-64px header (status integrated)
       expect(m.nav).toBeGreaterThanOrEqual(40); expect(m.nav).toBeLessThanOrEqual(44);
       expect(new Set(m.cols.map(Math.round)).size).toBe(1);           // three columns share one top edge
       const gap = m.cols[0] - m.navBottom;
       expect(gap).toBeGreaterThanOrEqual(16); expect(gap).toBeLessThanOrEqual(22);
       expect(m.label).toBeGreaterThan(m.navBottom); expect(m.routes).toBeGreaterThan(m.navBottom); expect(m.markets).toBeGreaterThan(m.navBottom);
-      expect(m.btn.bottom).toBeLessThanOrEqual(m.vh);                  // main button never cut off
-      expect(m.outerScroll).toBeLessThanOrEqual(1);                    // no outer scroll: columns scroll internally
+      expect(m.centerScroll).toBeLessThanOrEqual(1);                   // centre column has no scrollbar of its own
+      expect(m.centerOverflow).toBe('visible');
+      expect(m.btnPos).toBe('static');
+      expect(m.btnGap).toBeGreaterThanOrEqual(12); expect(m.btnGap).toBeLessThanOrEqual(16);   // button sits below the last info block
+      expect(m.btnOverlap).toBe(0);                                    // ...and overlaps nothing
+      expect(m.reachable).toBe(true);                                  // reachable by scrolling the page panel
       expect(m.ovfX).toBe(false);
       await ctx.close();
     }, 60000);
