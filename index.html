@@ -7767,6 +7767,167 @@ select.cinput option { background: #161a24; color: #dde2f0; }
   }
 }
 </style>
+<style id="brg-modern-ui">
+/* ═══════════════════════════════════════════════════════════════════════════
+   BRIDGE TOKENS — modern card (presentation only)
+   Every rule is scoped to #page-bridge and reuses the shared theme tokens the
+   Swap card already uses (--panel-*, --swap-*), so Dark and Light both apply.
+   Markup, IDs, handlers and the engine are untouched; no zoom/scale, no
+   overflow clipping, no inner scrollbar on the card.
+   ═══════════════════════════════════════════════════════════════════════════ */
+#page-bridge{
+  --brg-accent:#06F7E9;
+  --brg-accent-soft:rgba(6,247,233,.10);
+  --brg-accent-line:rgba(6,247,233,.35);
+  --brg-gap:8px;--brg-pad:14px;--brg-sec-py:12px;--brg-row-py:6px;--brg-amt-fs:30px;--brg-btn-h:48px;--brg-sel-h:40px;
+}
+html[data-theme="light"] #page-bridge{
+  --brg-accent:#008F87;
+  --brg-accent-soft:rgba(0,143,135,.09);
+  --brg-accent-line:rgba(0,143,135,.40);
+}
+#page-bridge .page-content{padding:12px 16px}
+#page-bridge .swap-col{gap:10px}
+
+/* Card */
+#page-bridge #bridge-main-card{display:flex;flex-direction:column;gap:var(--brg-gap);padding:var(--brg-pad);overflow:visible;border-radius:16px;background:var(--panel-bg);border:1px solid var(--panel-border);box-shadow:0 4px 24px rgba(0,0,0,.18)}
+html[data-theme="light"] #page-bridge #bridge-main-card{box-shadow:0 1px 2px rgba(20,33,61,.04),0 4px 14px rgba(20,33,61,.045)}
+
+/* YOU SEND / YOU RECEIVE surfaces */
+#page-bridge .brg-section{display:flex;flex-direction:column;padding:var(--brg-sec-py) 14px calc(var(--brg-sec-py) - 2px);background:var(--swap-input-bg);border:1px solid var(--swap-input-border);border-radius:14px;transition:border-color .15s}
+#page-bridge .brg-section:focus-within{border-color:var(--brg-accent-line)}
+#page-bridge .brg-section-from{padding-bottom:calc(var(--brg-sec-py) + 8px)}   /* room for the flip button that overlaps the edge */
+#page-bridge .brg-section-label{order:0;margin:0 0 4px;font-size:11px;font-weight:700;letter-spacing:.7px;text-transform:uppercase;color:var(--muted2)}
+#page-bridge .brg-chain-row{order:1;display:flex;align-items:center;flex-wrap:wrap;gap:0;padding:0;background:transparent;border:0;border-radius:0}
+/* amount (middle child in the markup) goes first; token and network read as one joined selector */
+#page-bridge .brg-chain-row > div:not(.chain-sel):not(.token-sel){order:1;flex:1 1 150px!important;min-width:0;padding-left:0!important}   /* !important: the amount cell carries inline flex/padding in the existing markup */
+#page-bridge .brg-chain-row .token-sel{order:2;box-sizing:border-box;height:var(--brg-sel-h);padding:0 12px;gap:7px;border-radius:12px 0 0 12px;background:var(--panel-bg2);border:1px solid var(--panel-border);transition:border-color .15s,background .15s}
+#page-bridge .brg-chain-row .chain-sel{order:3;box-sizing:border-box;min-width:0;height:var(--brg-sel-h);margin-left:-1px;padding:0 10px;gap:7px;border-radius:0 12px 12px 0;background:var(--panel-bg2);border:1px solid var(--panel-border);font-size:12px;font-weight:600}
+#page-bridge .brg-chain-row .token-sel:hover,
+#page-bridge .brg-chain-row .chain-sel:hover{position:relative;z-index:1;border-color:var(--brg-accent-line);background:var(--brg-accent-soft)}
+#page-bridge .brg-chain-row .token-sel:focus-visible,
+#page-bridge .brg-chain-row .chain-sel:focus-visible{outline:2px solid var(--brg-accent);outline-offset:1px}
+#page-bridge .brg-chain-row .token-icon{width:24px;height:24px;font-size:10px}
+#page-bridge .brg-chain-row .token-name{font-size:13px;font-weight:700}
+#page-bridge #from-chain-name,#page-bridge #to-chain-name{max-width:96px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#page-bridge #bridge-amount{font-size:var(--brg-amt-fs)!important;line-height:1.15;font-weight:700;font-variant-numeric:tabular-nums}
+#page-bridge #bridge-usd{margin-top:1px;font-size:11.5px;color:var(--muted2)}
+#page-bridge .brg-out-amount{display:flex;flex-wrap:wrap;align-items:baseline;gap:0 6px;overflow-wrap:anywhere;font-size:var(--brg-amt-fs);font-weight:700;line-height:1.15;color:var(--text);font-variant-numeric:tabular-nums}
+#page-bridge .brg-out-sym{font-size:12px;font-weight:600;color:var(--muted2)}
+
+/* Balance row (+ 25 / 50 / MAX on YOU SEND) */
+#page-bridge .brg-bal-row{order:2;display:flex;align-items:center;gap:4px;margin:6px 0 0;padding:0;font-size:12px;color:var(--muted2)}
+#page-bridge .brg-bal-row > i{font-size:13px}
+#page-bridge .brg-bal-row > span:not(.brg-pct){color:var(--text);font-weight:600;font-variant-numeric:tabular-nums}
+#page-bridge .brg-pct{margin-left:auto;display:inline-flex;gap:6px}
+#page-bridge .brg-pct-btn{min-height:26px;padding:3px 10px;border-radius:8px;border:1px solid var(--brg-accent-line);background:var(--brg-accent-soft);color:var(--brg-accent);font-family:inherit;font-size:11px;font-weight:700;letter-spacing:.2px;cursor:pointer;transition:background .15s,border-color .15s}
+#page-bridge .brg-pct-btn:hover{background:var(--brg-accent-line);color:var(--text)}
+#page-bridge .brg-pct-btn:focus-visible{outline:2px solid var(--brg-accent);outline-offset:1px}
+
+/* Route selector (CCTP V2 / LI.FI) — injected with inline styles; sits at the bottom of YOU SEND */
+#page-bridge .br-route-inline{order:3;margin-top:8px;padding:0!important;gap:6px!important}
+#page-bridge .br-route-inline > span:first-child{font-size:11px!important;font-weight:700;letter-spacing:.6px;text-transform:uppercase}
+#page-bridge .br-route-inline > span:not(:first-child),
+#page-bridge .br-route-inline > button{font-size:11px!important;padding:4px 10px!important;border-radius:8px!important;font-family:inherit}
+#page-bridge .br-route-inline > button:focus-visible{outline:2px solid var(--brg-accent);outline-offset:1px}
+
+/* Flip button: centred between the two surfaces, Swap-style */
+#page-bridge .brg-swap-arrow{position:relative;z-index:2;width:34px;height:34px;margin:-17px auto;align-self:center;border-radius:10px;font-size:15px;background:var(--panel-bg);border:1px solid var(--swap-input-border);color:var(--brg-accent);box-shadow:0 0 0 4px var(--panel-bg);transition:border-color .15s,background .15s,transform .2s}
+#page-bridge .brg-swap-arrow:hover{border-color:var(--brg-accent-line);background:var(--brg-accent-soft)}
+
+/* Bridge summary: always present, neutral placeholders until a route is selected */
+#page-bridge #bridge-rate-box{display:block!important;margin:0;padding:4px 14px;border:1px solid var(--swap-details-border);border-radius:14px;background:var(--swap-details-bg);font-size:12.5px}
+#page-bridge #bridge-rate-box.brg-updated{animation:none}
+#page-bridge #bridge-rate-box .rate-row{display:flex;align-items:center;gap:8px;padding:var(--brg-row-py) 0;color:var(--muted2);border-bottom:1px solid var(--swap-details-border)}
+#page-bridge #bridge-rate-box .rate-row:last-child{border-bottom:0}
+#page-bridge #bridge-rate-box .rate-row > i{flex:none;font-size:14px;color:var(--muted2)}
+#page-bridge #bridge-rate-box .rate-row > span:first-of-type{flex:1;min-width:0}
+#page-bridge #bridge-rate-box .rate-val{margin-left:auto;font-weight:600;text-align:right;color:var(--text);font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+#page-bridge #bridge-rate-box .rate-val.teal{color:var(--brg-accent)}
+
+/* Route divider (visible only once a route is selected) */
+#page-bridge .brg-route-divider{display:none;align-items:center;gap:8px;margin:0;padding:0 2px}
+#page-bridge .brg-route-divider.visible{display:flex}
+#page-bridge .brg-route-divider-line{flex:1;height:1px;background:var(--swap-details-border)}
+#page-bridge .brg-route-divider-label{padding:2px 10px;border:1px solid var(--swap-details-border);border-radius:999px;background:var(--swap-details-bg);font-size:11px;font-weight:600;color:var(--muted2);white-space:nowrap}
+
+/* Destination Readiness (logic and indicators untouched; spacing and alignment only) */
+#page-bridge #bridge-main-card #dgv-panel-bridge{margin:0;padding:0;border:1px solid var(--swap-details-border);border-radius:14px;background:var(--swap-details-bg)}
+#page-bridge #dgv-panel-bridge .dgv2-wrap{padding:10px 14px;font-size:12.5px;line-height:1.4}
+#page-bridge #dgv-panel-bridge .dgv2-hdr{flex-wrap:nowrap;gap:6px;margin-bottom:6px}
+#page-bridge #dgv-panel-bridge .dgv2-hdr > *{flex-shrink:0}
+#page-bridge #dgv-panel-bridge .dgv2-hdr > .dgv2-updated{flex-shrink:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#page-bridge #dgv-panel-bridge .dgv2-dot{width:8px;height:8px}
+#page-bridge #dgv-panel-bridge .dgv2-title{flex:1 1 auto;font-size:13px;white-space:nowrap}
+#page-bridge #dgv-panel-bridge .dgv2-live{font-size:10px;padding:1px 6px;border-radius:5px}
+#page-bridge #dgv-panel-bridge .dgv2-updated{font-size:10.5px}
+#page-bridge #dgv-panel-bridge .dgv2-refresh{padding:2px 7px;font-size:11px;border-radius:6px}
+#page-bridge #dgv-panel-bridge .dgv2-badge{font-size:11px;padding:2px 10px}
+#page-bridge #dgv-panel-bridge .dgv2-body{gap:0}
+#page-bridge #dgv-panel-bridge .dgv2-grid{grid-template-columns:1fr;gap:0}
+/* !important: Wallet / Network rows carry an inline column layout in the existing markup */
+#page-bridge #dgv-panel-bridge .dgv2-row{flex-direction:row!important;align-items:center;gap:8px;padding:3px 0;border-bottom:1px solid var(--swap-details-border)!important}
+#page-bridge #dgv-panel-bridge .dgv2-body > .dgv2-row:last-of-type{border-bottom:0!important}
+#page-bridge #dgv-panel-bridge .dgv2-val{font-size:12.5px;overflow-wrap:anywhere}
+#page-bridge #dgv-panel-bridge .dgv3-route{flex-direction:row;align-items:center;gap:10px;margin-top:8px;padding:6px 12px;border-radius:10px}
+#page-bridge #dgv-panel-bridge .dgv3-line{flex:1 1 auto;min-width:0}
+#page-bridge #dgv-panel-bridge .dgv3-caption{flex:none;align-self:center;max-width:46%;font-size:11px;text-align:right}
+#page-bridge #dgv-panel-bridge .dgv-msg{font-size:11.5px!important}
+#page-bridge #dgv-panel-bridge .dgv2-suggest{font-size:11px}
+#page-bridge #dgv-panel-bridge .dgv2-ack{font-size:11.5px}
+
+/* Primary button */
+#page-bridge .brg-btn-wrap{padding:0;margin-top:2px}
+#page-bridge .brg-btn-wrap .action-btn.teal-btn{min-height:var(--brg-btn-h);padding:12px 14px;border-radius:12px;font-size:14px;font-weight:700;letter-spacing:.2px;gap:8px;transition:transform .15s,box-shadow .15s,background .15s,border-color .15s}
+#page-bridge .brg-btn-wrap .action-btn.teal-btn i{font-size:16px}
+#page-bridge .brg-btn-wrap .action-btn.teal-btn:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 4px 16px rgba(45,212,191,.28)}
+#page-bridge .brg-btn-wrap .action-btn.teal-btn:active:not(:disabled){transform:translateY(0);box-shadow:none}
+#page-bridge .brg-btn-wrap .action-btn.teal-btn:focus-visible{outline:2px solid var(--brg-accent);outline-offset:2px}
+#page-bridge .brg-btn-wrap .action-btn.teal-btn:disabled{opacity:1;background:var(--panel-bg2);border:1px solid var(--panel-border);color:var(--muted2);box-shadow:none;transform:none;cursor:not-allowed}
+
+/* Shorter windows: same height-tier idea as the Swap card (local variables and spacing only) */
+@media (min-width:769px) and (max-height:900px){
+  #page-bridge{--brg-gap:6px;--brg-pad:12px;--brg-sec-py:10px;--brg-row-py:4px;--brg-amt-fs:28px}
+  #page-bridge .page-content{padding-top:10px}
+  #page-bridge{--brg-sel-h:38px}
+  #page-bridge #dgv-panel-bridge .dgv2-wrap{padding:8px 12px}
+  #page-bridge #dgv-panel-bridge .dgv2-row{padding:2px 0}
+  #page-bridge #dgv-panel-bridge .dgv3-route{margin-top:6px;padding:5px 10px}
+}
+@media (min-width:769px) and (max-height:820px){
+  #page-bridge{--brg-gap:5px;--brg-pad:10px;--brg-sec-py:8px;--brg-row-py:3px;--brg-amt-fs:26px;--brg-btn-h:46px}
+  #page-bridge .br-route-inline{margin-top:6px}
+  #page-bridge{--brg-sel-h:36px}
+  #page-bridge .brg-bal-row{margin-top:4px}
+  #page-bridge #dgv-panel-bridge .dgv2-grid{grid-template-columns:1fr 1fr;gap:0 16px}
+  #page-bridge #dgv-panel-bridge .dgv2-hdr{margin-bottom:4px}
+  #page-bridge #bridge-rate-box{padding:2px 12px}
+}
+
+@media (min-width:769px) and (max-height:700px){
+  #page-bridge{--brg-gap:4px;--brg-pad:8px;--brg-sec-py:7px;--brg-row-py:2px;--brg-amt-fs:24px;--brg-btn-h:44px}
+  #page-bridge .page-content{padding-top:8px}
+  #page-bridge .br-route-inline{margin-top:4px}
+  #page-bridge{--brg-sel-h:34px}
+  #page-bridge #bridge-rate-box{font-size:12px}
+  #page-bridge #dgv-panel-bridge .dgv2-wrap{padding:6px 12px}
+  #page-bridge #dgv-panel-bridge .dgv2-row{padding:1px 0}
+  #page-bridge #dgv-panel-bridge .dgv3-route{margin-top:4px;padding:4px 10px}
+}
+
+/* Narrow screens: amount on its own line, selectors below; page scrolls naturally */
+@media (max-width:480px){
+  #page-bridge .page-content{padding:10px}
+  #page-bridge .brg-chain-row > div:not(.chain-sel):not(.token-sel){flex:1 1 100%!important;margin-bottom:6px}
+  #page-bridge .brg-chain-row .token-sel{flex:1 1 auto}
+  #page-bridge .brg-chain-row .chain-sel{flex:1 1 auto;justify-content:space-between}
+  #page-bridge .brg-pct{margin-left:auto}
+  #page-bridge #dgv-panel-bridge .dgv2-hdr{flex-wrap:wrap}
+}
+@media (prefers-reduced-motion:reduce){
+  #page-bridge .brg-swap-arrow,#page-bridge .brg-btn-wrap .action-btn.teal-btn{transition:none}
+}
+</style>
 </head>
 <body>
 
@@ -9069,7 +9230,7 @@ select.cinput option { background: #161a24; color: #dde2f0; }
           <div class="swap-card" id="bridge-main-card">
             <!-- FROM section -->
             <div class="brg-section brg-section-from">
-              <div class="brg-section-label">FROM CHAIN</div>
+              <div class="brg-section-label">YOU SEND</div>
               <div class="chain-row brg-chain-row">
                 <div class="chain-sel brg-chain-sel" onclick="brgOpenNetPicker('from')" id="from-chain-sel" title="Select source network">
                   <div class="brg-chain-logo-wrap" id="from-chain-logo"><div class="chain-dot" id="from-chain-dot" style="background:#627eea"></div></div>
@@ -9086,15 +9247,20 @@ select.cinput option { background: #161a24; color: #dde2f0; }
                   <i class="ti ti-chevron-down" style="font-size:9px;color:var(--muted2);margin-left:2px"></i>
                 </div>
               </div>
-              <div class="brg-bal-row"><i class="ti ti-wallet"></i>Balance: <span id="bridge-from-bal">—</span> <span id="bridge-from-bal-sym">USDC</span></div>
+              <div class="brg-bal-row"><i class="ti ti-wallet"></i>Balance: <span id="bridge-from-bal">—</span> <span id="bridge-from-bal-sym">USDC</span>
+                <span class="brg-pct" role="group" aria-label="Amount shortcuts">
+                  <button type="button" class="brg-pct-btn" onclick="brgSetPct(25)" aria-label="Use 25% of balance">25%</button>
+                  <button type="button" class="brg-pct-btn" onclick="brgSetPct(50)" aria-label="Use 50% of balance">50%</button>
+                  <button type="button" class="brg-pct-btn brg-pct-max" onclick="brgSetPct(100)" aria-label="Use maximum available balance">MAX</button>
+                </span></div>
             </div>
 
             <!-- Swap arrow -->
             <div class="swap-arrow brg-swap-arrow" onclick="swapBridgeChains()"><i class="ti ti-arrows-up-down"></i></div>
 
-            <!-- TO section + rate summary embedded inside -->
+            <!-- TO section -->
             <div class="brg-section brg-section-to">
-              <div class="brg-section-label">TO CHAIN</div>
+              <div class="brg-section-label">YOU RECEIVE</div>
               <div class="chain-row brg-chain-row">
                 <div class="chain-sel brg-chain-sel" onclick="brgOpenNetPicker('to')" id="to-chain-sel" title="Select destination network">
                   <div class="brg-chain-logo-wrap" id="to-chain-logo"><div class="chain-dot" id="to-chain-dot" style="background:#ff0202"></div></div>
@@ -9114,15 +9280,15 @@ select.cinput option { background: #161a24; color: #dde2f0; }
                 </div>
               </div>
               <div class="brg-bal-row"><i class="ti ti-wallet"></i>Balance: <span id="bridge-to-bal">—</span> <span id="bridge-to-bal-sym">USDC</span></div>
+            </div>
 
-              <!-- Rate summary — embedded in TO section, Fase 3 -->
-              <div class="rate-box brg-rate-box brg-rate-embedded" style="display:none" id="bridge-rate-box">
-                <div class="rate-row"><span>Route</span><span class="rate-val teal" id="bridge-protocol">LI.FI</span></div>
-                <div class="rate-row"><span>Bridge Fee</span><span class="rate-val" id="bridge-fee-display">—</span></div>
-                <div class="rate-row"><span>Estimated Time</span><span class="rate-val" id="bridge-time">Fetching route…</span></div>
-                <div class="rate-row"><span>You Receive</span><span class="rate-val teal" id="bridge-receive">—</span></div>
-                <div class="rate-row"><span>Minimum Received</span><span class="rate-val" id="bridge-min">—</span></div>
-              </div>
+            <!-- Bridge summary (same element as before; its own block below the receive surface) -->
+            <div class="rate-box brg-rate-box brg-rate-embedded" style="display:none" id="bridge-rate-box">
+              <div class="rate-row"><i class="ti ti-route" aria-hidden="true"></i><span>Route</span><span class="rate-val teal" id="bridge-protocol">—</span></div>
+              <div class="rate-row"><i class="ti ti-receipt-2" aria-hidden="true"></i><span>Bridge Fee</span><span class="rate-val" id="bridge-fee-display">—</span></div>
+              <div class="rate-row"><i class="ti ti-clock" aria-hidden="true"></i><span>Estimated Time</span><span class="rate-val" id="bridge-time">—</span></div>
+              <div class="rate-row"><i class="ti ti-arrow-down-right" aria-hidden="true"></i><span>You Receive</span><span class="rate-val teal" id="bridge-receive">—</span></div>
+              <div class="rate-row"><i class="ti ti-shield-check" aria-hidden="true"></i><span>Minimum Received</span><span class="rate-val" id="bridge-min">—</span></div>
             </div>
 
             <!-- Route divider — Fase 4: only visible when a route is selected -->
@@ -29959,6 +30125,61 @@ async function _fetchBridgeQuote(fromChain, toChain, amt) {
 
   BridgeEngine.notifyEstimateUpdated(fromChain.id, toChain.id, amt, feePct, outAmt);
 }
+// ── Bridge: amount shortcuts (25% / 50% / MAX) — UI helper only ─────────────────
+// Reads the balance string already shown (4 decimals) and does exact integer math in
+// 1e-4 units: the result is floored, can never exceed the displayed balance, and MAX
+// keeps one display unit of rounding headroom plus a small gas reserve when the token
+// is also the source chain's native gas currency (e.g. USDC on Arc). It only fills the
+// amount field and fires the field's own input handler; every validation and the quote
+// flow run exactly as if the value had been typed.
+var BRG_NATIVE_GAS_RESERVE_4DP = 500n;   // 0.0500 (1e-4 units)
+function brgSetPct(pct) {
+  var p = Number(pct);
+  if (p !== 25 && p !== 50 && p !== 100) return;
+  var balEl = document.getElementById('bridge-from-bal');
+  var amtEl = document.getElementById('bridge-amount');
+  if (!balEl || !amtEl) return;
+  var m = /^\s*(\d+)(?:\.(\d{1,4}))?\s*$/.exec(String(balEl.textContent || ''));
+  if (!m) return;                                   // balance unknown ("—"): nothing to compute
+  var units = BigInt(m[1]) * 10000n + BigInt((m[2] || '').padEnd(4, '0'));
+  var v;
+  if (p === 100) {
+    var nativeGas = false;
+    try {
+      var fc = CHAINS[bridgeFromIdx];
+      var sym = String((typeof bridgeFromToken !== 'undefined' && bridgeFromToken) || 'USDC').toUpperCase();
+      nativeGas = !!(fc && fc.nativeCurrency && String(fc.nativeCurrency.symbol).toUpperCase() === sym);
+    } catch (_e) {}
+    v = units - 1n - (nativeGas ? BRG_NATIVE_GAS_RESERVE_4DP : 0n);
+  } else {
+    v = (units * BigInt(p)) / 100n;
+  }
+  if (v <= 0n) { try { toast('Balance too low to bridge after keeping a gas reserve', 'warning'); } catch (_e) {} return; }
+  var whole = (v / 10000n).toString();
+  var frac = (v % 10000n).toString().padStart(4, '0').replace(/0+$/, '');
+  amtEl.value = frac ? whole + '.' + frac : whole;
+  amtEl.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+// Summary placeholders: updateBridgeEst() pre-fills "LI.FI" / "Fetching route…" even when
+// there is no amount or both chains are equal. Keep the original running, then make sure the
+// summary only shows neutral placeholders until a real route is selected (no stale or implied data).
+(function _brgSummaryPlaceholders() {
+  if (window.__brgSummaryPH) return;
+  window.__brgSummaryPH = true;
+  var orig = updateBridgeEst;
+  updateBridgeEst = function () {
+    var r = orig.apply(this, arguments);
+    try {
+      var amt = parseFloat((document.getElementById('bridge-amount') || {}).value) || 0;
+      var f = CHAINS[bridgeFromIdx], t = CHAINS[bridgeToIdx];
+      _bridgeSetText('bridge-protocol', '—');
+      if (amt <= 0 || !f || !t || f.chainId === t.chainId) _bridgeSetText('bridge-time', '—');
+    } catch (_e) {}
+    return r;
+  };
+})();
+
 async function refreshBridgeBalances(){
   const set=(id,v)=>{const el=document.getElementById(id);if(el)el.textContent=v;};
   if(!walletAddress){set('bridge-from-bal','—');set('bridge-to-bal','—');return;}
