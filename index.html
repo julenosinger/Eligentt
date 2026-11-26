@@ -5686,6 +5686,55 @@ html[data-theme="light"] #page-send{
   #page-send .sa-asset-btn::after{top:5px;right:5px;width:15px;height:15px}
   #page-send .sa-asset-btn.selected::after{font-size:9px}
 }
+/* Payment Route — lives inside Route Preview; shown only for a real cross-chain execution */
+#page-send #sa-xroute-viz{display:none;margin:8px 0 10px;padding:8px 12px 10px;border:1px solid rgba(245,158,11,.22);border-radius:12px;background:linear-gradient(155deg,rgba(245,158,11,.07),rgba(245,158,11,.02))}
+/* !important: the CPN toggle leaves an inline display:none on this node after the bank tab was opened once */
+#page-send #sa-xroute-viz.sa-pr-on{display:block!important}
+#page-send #sa-panel-send.sa-bank-mode #sa-xroute-viz{display:none!important}
+#page-send .sa-pr-head{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:4px 10px;margin-bottom:6px}
+/* the title keeps its original inline markup; size aligned with the rest of Route Preview */
+#page-send .sa-pr-head>span:first-child{font-size:12px!important;letter-spacing:.2px}
+#page-send .sa-pr-steps{display:inline-flex;align-items:center;gap:10px}
+#page-send .sa-pr-pip{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;color:var(--muted2)}
+#page-send .sa-pr-pip i{width:8px;height:8px;border-radius:50%;background:var(--border2);transition:background-color .2s,box-shadow .2s}
+#page-send .sa-pr-pip[data-c="blue"] i{background:#4f8ef7;box-shadow:0 0 5px rgba(79,142,247,.5)}
+#page-send .sa-pr-pip[data-c="amber"] i{background:#f59e0b;box-shadow:0 0 5px rgba(245,158,11,.5)}
+#page-send .sa-pr-pip[data-c="green"] i{background:var(--green)}
+#page-send .sa-pr-pip[data-c="red"] i{background:var(--red)}
+#page-send .sa-pr-pip:not([data-c="grey"]){color:var(--text)}
+#page-send .sa-pr[data-mech="lifi"] .sa-pr-steps{display:none}
+#page-send .sa-pr-time{display:none;align-items:center;gap:4px;font-size:11px;color:var(--yellow)}
+#page-send .sa-pr-time.on{display:inline-flex}
+#page-send .sa-pr-track{display:flex;align-items:center;gap:10px;padding:8px 12px;background:rgba(0,0,0,.18);border:1px solid var(--border);border-radius:10px}
+html[data-theme="light"] #page-send .sa-pr-track{background:rgba(20,33,61,.04)}
+#page-send .sa-pr-end{display:flex;align-items:center;gap:6px;min-width:0;max-width:38%;flex:0 1 auto}
+#page-send .sa-pr-name{font-size:12px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#page-send .sa-pr-dot{width:12px;height:12px;flex-shrink:0;border-radius:50%;background:var(--border2);transition:background-color .2s,box-shadow .2s}
+#page-send .sa-pr-dot[data-c="blue"]{background:#4f8ef7;box-shadow:0 0 6px rgba(79,142,247,.45)}
+#page-send .sa-pr-dot[data-c="amber"]{background:#f59e0b;box-shadow:0 0 6px rgba(245,158,11,.45)}
+#page-send .sa-pr-dot[data-c="green"]{background:var(--green);box-shadow:0 0 6px rgba(34,197,94,.35)}
+#page-send .sa-pr-dot[data-c="red"]{background:var(--red);box-shadow:0 0 6px rgba(239,68,68,.35)}
+#page-send .sa-pr-line{position:relative;flex:1 1 auto;min-width:28px;height:3px;border-radius:2px;background:var(--border2)}
+#page-send .sa-pr-fill{position:absolute;inset:0;border-radius:2px;opacity:.8;transition:background .2s}
+#page-send .sa-pr-fill[data-c="run"]{background:linear-gradient(90deg,#4f8ef7,#f59e0b)}
+#page-send .sa-pr-fill[data-c="warn"]{background:#f59e0b}
+#page-send .sa-pr-fill[data-c="ok"]{background:var(--green)}
+#page-send .sa-pr-fill[data-c="err"]{background:var(--red)}
+/* the moving marker only exists while the operation is actually in progress (indeterminate: no percentages) */
+#page-send .sa-pr:not([data-phase="running"]) #sa-xroute-packet{display:none}
+#page-send .sa-pr-status{margin-top:6px;font-size:12px;font-weight:600;line-height:1.35;overflow-wrap:anywhere}
+#page-send .sa-pr-status[data-tone="blue"]{color:var(--blue)}
+#page-send .sa-pr-status[data-tone="amber"]{color:var(--yellow)}
+#page-send .sa-pr-status[data-tone="green"]{color:var(--green)}
+#page-send .sa-pr-status[data-tone="red"]{color:var(--red)}
+@media(max-width:768px){
+  /* the route card is collapsed behind "Transaction Details" on mobile; keep it open while a Payment Route is active */
+  #page-send .sa-right .sa-route-card:has(#sa-xroute-viz.sa-pr-on){display:block}
+}
+@media (prefers-reduced-motion:reduce){
+  /* !important: the packet carries its animation and position inline (original markup) */
+  #page-send #sa-xroute-packet{animation:none!important;left:calc(50% - 7px)!important}
+}
 </style>
 
 <style>
@@ -9362,32 +9411,6 @@ select.cinput option { background: #161a24; color: #dde2f0; }
               </div>
             </div>
 
-            <!-- Cross-Chain Route Visualization (shown when source ≠ destination) -->
-            <div id="sa-xroute-viz" style="display:none;background:linear-gradient(155deg,rgba(245,158,11,.06),rgba(245,158,11,.02));border:1px solid rgba(245,158,11,.18);border-radius:10px;padding:10px 14px;margin-bottom:2px">
-              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-                <span style="font-size:10px;font-weight:600;color:#f59e0b">Payment Route</span>
-                <span style="font-size:8px;color:var(--muted2);display:flex;align-items:center;gap:4px">
-                  <i class="ti ti-clock" style="font-size:9px;color:#f59e0b"></i><span id="sa-xroute-time" style="color:#f59e0b">~2 minutes</span>
-                </span>
-              </div>
-              <div style="display:flex;align-items:center;gap:0;background:rgba(0,0,0,.2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;overflow:hidden;position:relative">
-                <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
-                  <div style="width:12px;height:12px;border-radius:50%;background:#4f8ef7;box-shadow:0 0 6px #4f8ef766"></div>
-                  <span id="sa-xroute-from" style="font-size:9px;font-weight:600;color:var(--text)">Arc Mainnet</span>
-                </div>
-                <div style="flex:1;position:relative;height:2px;margin:0 8px">
-                  <div style="position:absolute;inset:0;background:linear-gradient(90deg,#4f8ef7,#f59e0b,#ff0202);border-radius:2px;opacity:.6"></div>
-                  <div id="sa-xroute-packet" style="position:absolute;top:-6px;left:0;width:14px;height:14px;background:#f59e0b;border-radius:50%;box-shadow:0 0 10px #f59e0b;animation:xc-travel 2.2s linear infinite">
-                    <i class="ti ti-currency-dollar" style="font-size:7px;color:#000;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%)"></i>
-                  </div>
-                </div>
-                <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
-                  <div id="sa-xroute-to-dot" style="width:12px;height:12px;border-radius:50%;background:#ff0202;box-shadow:0 0 6px #ff020266"></div>
-                  <span id="sa-xroute-to" style="font-size:9px;font-weight:600;color:var(--text)">Ethereum</span>
-                </div>
-              </div>
-            </div>
-
             <!-- Transfer Form -->
             <div class="sa-card">
               <div class="sa-card-title" style="justify-content:space-between">
@@ -9618,6 +9641,36 @@ select.cinput option { background: #161a24; color: #dde2f0; }
                   <span class="sa-rt-node-logo" id="sa-rt-to-logo"></span>
                   <span class="sa-rt-node-txt"><span class="sa-rt-node-k">To</span><span class="sa-rt-node-n" id="sa-rt-to-name">—</span><span class="sa-rt-node-t" id="sa-rt-to-asset">USDC</span></span>
                 </div>
+              </div>
+              <!-- Payment Route (reused component): only visible while a real cross-chain execution is in progress or finished.
+                   Driven by the existing execution state (saUpdateXCStep / LI.FI flow); never by the network selection. -->
+              <div id="sa-xroute-viz" class="sa-pr" data-phase="idle" data-mech="">
+                <div class="sa-pr-head">
+                  <span style="font-size:10px;font-weight:600;color:#f59e0b">Payment Route</span>
+                  <span class="sa-pr-steps" id="sa-xroute-steps" aria-hidden="true">
+                    <span class="sa-pr-pip" data-step="burn" data-c="grey"><i></i>Burn</span>
+                    <span class="sa-pr-pip" data-step="attest" data-c="grey"><i></i>Attestation</span>
+                    <span class="sa-pr-pip" data-step="mint" data-c="grey"><i></i>Mint</span>
+                  </span>
+                  <span class="sa-pr-time" id="sa-xroute-time-wrap"><i class="ti ti-clock"></i><span id="sa-xroute-time"></span></span>
+                </div>
+                <div class="sa-pr-track">
+                  <div class="sa-pr-end">
+                    <span class="sa-pr-dot" id="sa-xroute-from-dot" data-c="blue"></span>
+                    <span id="sa-xroute-from" class="sa-pr-name">—</span>
+                  </div>
+                  <div class="sa-pr-line">
+                    <div class="sa-pr-fill" id="sa-xroute-line" data-c="none"></div>
+                    <div id="sa-xroute-packet" style="position:absolute;top:-6px;left:0;width:14px;height:14px;background:#f59e0b;border-radius:50%;box-shadow:0 0 10px #f59e0b;animation:xc-travel 2.2s linear infinite">
+                      <i class="ti ti-currency-dollar" style="font-size:7px;color:#000;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%)"></i>
+                    </div>
+                  </div>
+                  <div class="sa-pr-end sa-pr-end-to">
+                    <span class="sa-pr-dot" id="sa-xroute-to-dot" data-c="grey"></span>
+                    <span id="sa-xroute-to" class="sa-pr-name">—</span>
+                  </div>
+                </div>
+                <div class="sa-pr-status" id="sa-xroute-status" role="status" aria-live="polite" data-tone="blue"></div>
               </div>
               <div class="sa-route-row">
                 <span class="sa-route-lbl">Asset</span>
@@ -42532,6 +42585,245 @@ function saRenderActivity() {
     logEl.appendChild(item);
   });
 }
+
+// ════════════════════════════════════════════════════════════
+//  SEND ASSETS — Payment Route (Route Preview) · presentation only
+//  Observes the EXISTING cross-chain execution and mirrors the state it
+//  already reports. It never drives, delays or alters an execution:
+//   • CCTP (Bridge Kit / legacy flow): the saUpdateXCStep() events the engine
+//     already emits (burn → attestation → mint).
+//   • LI.FI: the engine's own busy states on the Send button and its saLogTx().
+//     LI.FI has no destination tracking in this flow, so it never shows
+//     "completed" — only "confirmed on source".
+//   • Circle Gateway does not take its destination from this form, so it is
+//     intentionally not drawn here.
+//  Nothing is shown for selection, typing, quotes or a cancelled confirmation;
+//  a result stays visible until a new Send Assets cross-chain operation really
+//  starts or the form goes back to a same-chain transfer.
+// ════════════════════════════════════════════════════════════
+var _saPR = { cur: null, arm: null, seq: 0, inOuter: false, mo: null };
+
+function _saPRArm() {
+  var from = null, to = null;
+  try { from = getActiveChain(); } catch (_e) {}
+  try { to = getChainById(saDestChainId); } catch (_e) {}
+  var c = {
+    id: ++_saPR.seq, mech: null, phase: 'armed', active: true, legacy: false, sawBusy: false,
+    from: (from && from.name) || 'Arc Mainnet',
+    to: (to && to.name) || (typeof saGetDestChainName === 'function' ? saGetDestChainName() : ''),
+    steps: { burn: null, attest: null, mint: null },
+    lifi: { stage: null, txHash: null }
+  };
+  _saPR.arm = c;           // not visible, not replacing the previous result until a real signal arrives
+  return c;
+}
+
+function _saPRPromote(c) {
+  if (c && _saPR.arm === c) { _saPR.cur = c; _saPR.arm = null; }
+}
+
+function _saPRTarget() { return _saPR.arm || _saPR.cur; }
+
+// Step events already emitted by the engine (pending/starting are resets, never progress).
+function _saPRStep(step, status, detail) {
+  var c = _saPRTarget();
+  if (!c || !c.active || c.mech === 'lifi' || c.phase === 'done') return;
+  if (!Object.prototype.hasOwnProperty.call(c.steps, step)) return;
+  var st = status === 'failed' ? 'error' : status;
+  if (st !== 'active' && st !== 'done' && st !== 'error') return;
+  c.steps[step] = { s: st, d: String(detail || '') };
+  _saPRPromote(c);
+  if (c.steps.mint && c.steps.mint.s === 'done') { c.phase = 'done'; c.active = false; }
+  else c.phase = (st === 'error') ? 'failed' : 'running';
+  _saPRRender();
+}
+
+function _saPRStopObserve() {
+  if (_saPR.mo) { try { _saPR.mo.disconnect(); } catch (_e) {} _saPR.mo = null; }
+}
+
+// LI.FI: reflect the engine's own busy labels (Approving / Sending / Confirming).
+function _saPRObserveLifi(c) {
+  _saPRStopObserve();
+  var el = document.getElementById('sa-send-btn-content');
+  if (!c || !el || typeof MutationObserver === 'undefined') return;
+  var read = function () {
+    if (!c.active || c.mech !== 'lifi') return;
+    var t = String(el.textContent || '');
+    var stage = /Approving/i.test(t) ? 'approve' : /Sending/i.test(t) ? 'send' : /Confirming/i.test(t) ? 'confirm' : null;
+    if (!stage) return;
+    c.sawBusy = true;
+    c.lifi.stage = stage;
+    _saPRPromote(c);
+    c.phase = 'running';
+    _saPRRender();
+  };
+  _saPR.mo = new MutationObserver(read);
+  _saPR.mo.observe(el, { childList: true, subtree: true, characterData: true });
+  read();
+}
+
+function _saPRLifiEnd(c) {
+  _saPRStopObserve();
+  if (!c || c.mech !== 'lifi') return;
+  c.active = false;
+  if (c.lifi.txHash) { _saPRPromote(c); c.phase = 'partial'; }          // source tx confirmed (engine logged it)
+  else if (c.sawBusy) { _saPRPromote(c); c.phase = 'unconfirmed'; }     // reached the wallet/network but never confirmed
+  else if (_saPR.arm === c) { _saPR.arm = null; }                       // cancelled or rejected before execution: show nothing
+  _saPRRender();
+}
+
+function _saPRCctpEnd(c) {
+  if (!c || c.mech !== 'cctp') return;
+  c.active = false;
+  if (c.phase === 'running') c.phase = 'unconfirmed';                   // engine returned without a terminal event
+  else if (_saPR.arm === c && c.phase === 'armed') _saPR.arm = null;
+  _saPRRender();
+}
+
+// ── View model: real state → colours + copy ─────────────────
+function _saPRView(c) {
+  var v = { from: 'blue', to: 'grey', line: 'none', tone: 'blue', text: '', pips: { burn: 'grey', attest: 'grey', mint: 'grey' } };
+  if (c.mech === 'lifi') {
+    if (c.phase === 'partial') { v.from = 'green'; v.line = 'warn'; v.tone = 'amber'; v.text = 'Confirmed on source network. Delivery by LI.FI is not tracked here.'; }
+    else if (c.phase === 'unconfirmed') { v.line = 'warn'; v.tone = 'amber'; v.text = 'Not confirmed. Check your wallet or explorer before retrying.'; }
+    else {
+      v.line = 'run';
+      if (c.lifi.stage === 'approve') { v.text = 'Approval pending'; }
+      else if (c.lifi.stage === 'confirm') { v.tone = 'amber'; v.text = 'Confirming on source network'; }
+      else { v.text = 'Sending transaction'; }
+    }
+    return v;
+  }
+  var b = c.steps.burn, a = c.steps.attest, m = c.steps.mint;
+  var rank = function (x) { return x ? (x.s === 'done' ? 2 : 1) : 0; };
+  // A later step that is active/done implies the earlier ones finished (burn → attestation → mint).
+  var impl = { burn: rank(a) + rank(m) > 0, attest: rank(m) > 0 };
+  var pip = function (name, x) {
+    if (x && x.s === 'error') return 'red';
+    if (x && x.s === 'done') return 'green';
+    if (impl[name] && !x) return 'green';
+    if (x && x.s === 'active') return name === 'burn' ? 'blue' : 'amber';
+    return 'grey';
+  };
+  v.pips = { burn: pip('burn', b), attest: pip('attest', a), mint: pip('mint', m) };
+  var burnDone = (b && b.s === 'done') || impl.burn;
+  if (burnDone) v.from = 'green';
+  if (c.phase === 'unconfirmed') { v.line = 'warn'; v.tone = 'amber'; v.text = 'Not confirmed. Check your wallet or explorer before retrying.'; return v; }
+  if (m && m.s === 'done') { v.to = 'green'; v.line = 'ok'; v.tone = 'green'; v.text = 'Completed. Mint confirmed on destination.'; return v; }
+  var err = (m && m.s === 'error') ? 'mint' : (a && a.s === 'error') ? 'attest' : (b && b.s === 'error') ? 'burn' : null;
+  if (err) {
+    v.line = 'err'; v.tone = 'red';
+    if (err === 'burn') { v.from = 'red'; v.text = 'Burn failed or was rejected.'; }
+    else if (err === 'attest') { v.text = 'Attestation failed.'; }
+    else { v.to = 'red'; v.text = 'Mint failed.' + (burnDone ? ' Burn confirmed on source: use Retry mint.' : ''); }
+    return v;
+  }
+  v.line = 'run';
+  if (m && m.s === 'active') { v.to = 'amber'; v.tone = 'amber'; v.text = /^retry/i.test(m.d) ? ('Mint ' + m.d) : 'Mint submitted. Confirming on destination.'; }
+  else if (a && a.s === 'done') { v.tone = 'amber'; v.text = 'Attestation available.'; }
+  else if (a && a.s === 'active') { v.tone = 'amber'; v.text = 'Awaiting Circle attestation.'; }
+  else if (b && b.s === 'done') { v.tone = 'amber'; v.text = 'Burn confirmed on source.'; }
+  else { v.text = (b && /submitted/i.test(b.d)) ? 'Burn submitted.' : 'Burn pending.'; }
+  return v;
+}
+
+function _saPRRender() {
+  var el = document.getElementById('sa-xroute-viz');
+  if (!el) return;
+  var c = _saPR.cur;
+  var show = !!c && (c.phase === 'running' || c.phase === 'done' || c.phase === 'failed' || c.phase === 'partial' || c.phase === 'unconfirmed');
+  el.classList.toggle('sa-pr-on', show);
+  el.setAttribute('data-phase', show ? c.phase : 'idle');
+  el.setAttribute('data-mech', show && c.mech ? c.mech : '');
+  if (!show) return;
+  var v = _saPRView(c);
+  var setTxt = function (id, t) { var n = document.getElementById(id); if (n && n.textContent !== t) n.textContent = t; };
+  var setAttr = function (id, k, val) { var n = document.getElementById(id); if (n && n.getAttribute(k) !== val) n.setAttribute(k, val); };
+  setTxt('sa-xroute-from', c.from);
+  setTxt('sa-xroute-to', c.to);
+  setAttr('sa-xroute-from-dot', 'data-c', v.from);
+  setAttr('sa-xroute-to-dot', 'data-c', v.to);
+  setAttr('sa-xroute-line', 'data-c', v.line);
+  setTxt('sa-xroute-status', v.text);
+  setAttr('sa-xroute-status', 'data-tone', v.tone);
+  var wrap = document.getElementById('sa-xroute-time-wrap');
+  if (wrap) wrap.classList.remove('on');   // no real ETA is available from the engine, so none is shown
+  ['burn', 'attest', 'mint'].forEach(function (k) {
+    var pipEl = document.querySelector('#sa-xroute-steps .sa-pr-pip[data-step="' + k + '"]');
+    if (pipEl && pipEl.getAttribute('data-c') !== v.pips[k]) pipEl.setAttribute('data-c', v.pips[k]);
+  });
+}
+
+(function _saPRInstall() {
+  if (window.__saPRInstalled) return;
+  window.__saPRInstalled = true;
+
+  // Send-page cross-chain dispatcher: arms a fresh operation context (invisible until a real signal).
+  var origCross = saExecuteCrossChain;
+  saExecuteCrossChain = function () {
+    var c = _saPRArm();
+    _saPR.inOuter = true;
+    try { return origCross.apply(this, arguments); }
+    finally {
+      _saPR.inOuter = false;
+      if (c && !c.mech) { c.mech = 'cctp'; c.legacy = true; }   // neither CCTP nor LI.FI took it: legacy burn/attest/mint flow
+    }
+  };
+
+  var origCctp = saExecuteCCTPCrossChain;
+  saExecuteCCTPCrossChain = function () {
+    var c = _saPR.inOuter ? _saPR.arm : _saPRArm();
+    if (c && !c.mech) c.mech = 'cctp';
+    var r;
+    try { r = origCctp.apply(this, arguments); } catch (e) { if (c) c.active = false; throw e; }
+    var fin = function () { _saPRCctpEnd(c); };
+    Promise.resolve(r).then(fin, fin);
+    return r;
+  };
+
+  var origLifi = saExecuteLiFiCrossChain;
+  saExecuteLiFiCrossChain = function () {
+    var c = _saPR.inOuter ? _saPR.arm : _saPRArm();
+    if (c) c.mech = 'lifi';
+    var r;
+    try { r = origLifi.apply(this, arguments); } catch (e) { _saPRLifiEnd(c); throw e; }
+    _saPRObserveLifi(c);
+    var fin = function () { _saPRLifiEnd(c); };
+    Promise.resolve(r).then(fin, fin);
+    return r;
+  };
+
+  // Engine step reports (observe only; the original runs first and unchanged).
+  var origStep = saUpdateXCStep;
+  saUpdateXCStep = function (step, status, detail) {
+    var r = origStep.apply(this, arguments);
+    try { _saPRStep(step, status, detail); } catch (_e) {}
+    return r;
+  };
+
+  // LI.FI success evidence = the engine logging the confirmed source transaction.
+  var origLog = saLogTx;
+  saLogTx = function (tx) {
+    try {
+      var c = _saPRTarget();
+      if (c && c.active && c.mech === 'lifi' && tx && tx.provider === 'lifi') c.lifi.txHash = tx.txHash || tx.hash || 'confirmed';
+    } catch (_e) {}
+    return origLog.apply(this, arguments);
+  };
+
+  // Route Preview refreshes rewrite the network labels from the current selection: restore the operation's own.
+  var origRoute = saUpdateRoute;
+  saUpdateRoute = function () {
+    var r = origRoute.apply(this, arguments);
+    try {
+      var c = _saPR.cur;
+      if (c && c.phase !== 'running' && !saIsCrossChain()) _saPR.cur = null;   // back to a same-chain transfer: finished result is dismissed
+      _saPRRender();
+    } catch (_e) {}
+    return r;
+  };
+})();
 
 // ── Quick action helpers ──────────────────────────────────
 function saSaveRecipient() {
