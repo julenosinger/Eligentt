@@ -42718,9 +42718,16 @@ async function saExecGateway() {
     var GW_API_BASE     = 'https://gateway-api.circle.com'; // mainnet
     // For testnet chains (Arc Testnet, Sepolia, Fuji, Amoy, OP Sepolia, etc.) use:
     var GW_TESTNET_CHAINS = [2999, 11155111, 84532, 421614, 11155420, 80002, 43113, 713715];
-    if (GW_TESTNET_CHAINS.indexOf(chainId) !== -1 || GW_TESTNET_CHAINS.indexOf(destChainId) !== -1) {
-      GW_API_BASE = 'https://gateway-api-testnet.circle.com';
+    // Gate F (Phase 1.0.1B): a single transfer must be entirely mainnet OR entirely
+    // testnet. The previous `||` (OR) treated a mixed source/destination as testnet,
+    // which could route a mainnet intent to the testnet API. Block mixed environments.
+    var _srcIsTestnet = GW_TESTNET_CHAINS.indexOf(chainId) !== -1;
+    var _dstIsTestnet = GW_TESTNET_CHAINS.indexOf(destChainId) !== -1;
+    if (_srcIsTestnet !== _dstIsTestnet) {
+      toast('Cannot mix mainnet and testnet chains in one transfer', 'error');
+      return { status: 'error', error: 'mainnet_testnet_mismatch' };
     }
+    GW_API_BASE = _srcIsTestnet ? 'https://gateway-api-testnet.circle.com' : 'https://gateway-api.circle.com';
 
     var tokenMap = GW_TOKENS[asset];
     if (!tokenMap) {
@@ -42871,7 +42878,7 @@ async function saExecGateway() {
     // (Durable-Object idempotence, state machine, replay protection). Testnet chains
     // keep the direct Circle API — the proxy is mainnet-only.
     // Body MUST be the JSON array itself, NOT wrapped as { requests: [...] }.
-    var _isTestnetChain = GW_TESTNET_CHAINS.indexOf(chainId) !== -1 || GW_TESTNET_CHAINS.indexOf(destChainId) !== -1;
+    var _isTestnetChain = _srcIsTestnet && _dstIsTestnet; // both testnet (mismatch already blocked)
     var _transferUrl = _isTestnetChain ? (GW_API_BASE + '/v1/transfer') : '/api/gateway/transfer';
 
     var resp = await fetch(_transferUrl, {
@@ -42890,17 +42897,20 @@ async function saExecGateway() {
     } catch(_) {}
 
     // ── Extract attestation (array response `[{ burnIntent, attestation:{payload,signature} }]`
-    //    or a legacy object response) ───────────────────────────────────────────
-    var attPayload = null, attSig = null;
+    //    or a legacy object response) + transferId (Gate D: restore when provided,
+    //    never invent) ───────────────────────────────────────────────────────────
+    var attPayload = null, attSig = null, transferId = null;
     if (Array.isArray(respBody) && respBody.length) {
       var first = respBody[0];
       if (first && first.attestation) {
         attPayload = first.attestation.payload || first.attestation.attestationPayload;
         attSig     = first.attestation.signature || first.attestation.attestationSignature;
       }
+      transferId = (first && (first.transferId || (first.burnIntent && first.burnIntent.transferId))) || null;
     } else if (respBody && !Array.isArray(respBody)) {
       attPayload = respBody.attestationPayload || respBody.attestation;
       attSig     = respBody.signature || respBody.attestationSignature;
+      transferId = respBody.transferId || null;
     }
 
     if (resp.ok && attPayload && attSig) {
@@ -42909,7 +42919,7 @@ async function saExecGateway() {
       toast('Gateway transfer attestation received. Ready to mint on destination chain.', 'success');
       if (typeof saUpdateRoute === 'function') saUpdateRoute();
       try { if (typeof ubInvalidateGatewayCache === 'function') ubInvalidateGatewayCache(); } catch(_) {}
-      return { status: 'pending', salt: salt, attestation: attPayload, operatorSig: attSig };
+      return { status: 'pending', salt: salt, transferId: transferId || undefined, attestation: attPayload, operatorSig: attSig };
     }
 
     var proxyErr = (respBody && (respBody.error || respBody.message)) ? (respBody.error || respBody.message) : null;
@@ -42920,9 +42930,12 @@ async function saExecGateway() {
       return { status: 'ambiguous', salt: salt, error: 'already_submitted' };
     }
 
-    // 503 = persistence/DO required but unavailable (fail-closed) — the salt was
-    // NOT reserved and the transfer was NOT forwarded. Definitive "could not submit".
-    if (resp.status === 503) {
+    // Gate B (Phase 1.0.1B): distinguish "reserve failed → NOT submitted" from
+    // "Circle 5xx/timeout AFTER the POST" (ambiguous). The proxy sets `blocked:true`
+    // ONLY when the salt could not be reserved (no forward happened). A 503 WITHOUT
+    // `blocked:true` is the Circle 5xx passing through → ambiguous, never "not submitted".
+    var _reserveBlocked = !!(respBody && respBody.blocked === true);
+    if (_reserveBlocked) {
       toast('Gateway persistence unavailable — transfer was not submitted', 'error');
       return { status: 'error', error: proxyErr || 'persistence_unavailable' };
     }

@@ -126,13 +126,28 @@ describe('saExecGateway secure proxy routing (Gate B)', () => {
     expect(fn).toContain('first.attestation.signature');
   });
 
-  it('maps proxy errors to the correct status (409 ambiguous, 503 fail-closed error, 5xx ambiguous)', () => {
+  it('maps proxy errors to the correct status (409 ambiguous, blocked=not-submitted, 5xx ambiguous)', () => {
     const fn = extractAsync('saExecGateway');
     expect(fn).toContain("resp.status === 409");
     expect(fn).toContain("error: 'already_submitted'");
-    expect(fn).toContain("resp.status === 503");
-    // 503 is fail-closed but NOT a 'blocked' status (Fase 2.9.4 removed it).
-    expect(fn).toContain("error: proxyErr || 'persistence_unavailable'");
+    // Gate B: "not submitted" is decided by the `blocked:true` contract, not the bare
+    // HTTP status (a 503 can also be a Circle 5xx AFTER the POST).
+    expect(fn).toContain('var _reserveBlocked = !!(respBody && respBody.blocked === true);');
+    expect(fn).toContain('if (_reserveBlocked)');
+  });
+
+  it('restores transferId when provided by Circle (never invents one) (Gate D)', () => {
+    const fn = extractAsync('saExecGateway');
+    expect(fn).toContain('transferId = (first && (first.transferId');
+    expect(fn).toContain('transferId: transferId || undefined');
+  });
+
+  it('blocks mixed mainnet/testnet environments (Gate F)', () => {
+    const fn = extractAsync('saExecGateway');
+    expect(fn).toContain('var _srcIsTestnet = GW_TESTNET_CHAINS.indexOf(chainId) !== -1;');
+    expect(fn).toContain('var _dstIsTestnet = GW_TESTNET_CHAINS.indexOf(destChainId) !== -1;');
+    expect(fn).toContain('_srcIsTestnet !== _dstIsTestnet');
+    expect(fn).toContain("error: 'mainnet_testnet_mismatch'");
   });
 });
 
