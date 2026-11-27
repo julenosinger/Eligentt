@@ -42634,8 +42634,21 @@ async function saExecGateway() {
 
   if (!addr)  { toast('Connect your wallet first', 'warn'); return { status: 'error', error: 'no_wallet' }; }
   if (!recip) { toast('Enter a recipient address', 'warn'); return { status: 'error', error: 'no_recipient' }; }
-  if (!amt || isNaN(Number(amt)) || Number(amt) <= 0) {
-    toast('Enter a valid amount', 'warn');
+  // P0 (Phase 1.0.1): validate EVM address format + reject the zero address.
+  if (!/^0x[0-9a-fA-F]{40}$/.test(recip)) {
+    toast('Enter a valid 0x recipient address', 'warn');
+    return { status: 'error', error: 'invalid_recipient' };
+  }
+  if (/^0x0{40}$/i.test(recip)) {
+    toast('Recipient cannot be the zero address', 'warn');
+    return { status: 'error', error: 'zero_address' };
+  }
+  // P0 (Phase 1.0.1): strict decimal-string validation — digits + optional single
+  // '.', no sign, no scientific notation, no whitespace tricks. Never route through
+  // Number()/parseFloat (float drift + scientific-notation acceptance).
+  var _amtStr = String(amt).trim();
+  if (!/^\d+(\.\d+)?$/.test(_amtStr)) {
+    toast('Enter a valid amount (digits only, optional decimals)', 'warn');
     return { status: 'error', error: 'invalid_amount' };
   }
   if (!window.ethereum) {
@@ -42736,6 +42749,11 @@ async function saExecGateway() {
     var dotIdx = amtStr.indexOf('.');
     var intPart = dotIdx === -1 ? amtStr : amtStr.slice(0, dotIdx);
     var fracPart = dotIdx === -1 ? '' : amtStr.slice(dotIdx + 1);
+    // P0 (Phase 1.0.1): reject excessive precision instead of silently truncating.
+    if (fracPart.length > srcTokenCfg.decimals) {
+      toast('Too many decimal places for ' + asset + ' (max ' + srcTokenCfg.decimals + ')', 'warn');
+      return { status: 'error', error: 'amount_too_precise' };
+    }
     fracPart = (fracPart + '000000000').slice(0, srcTokenCfg.decimals);
     var amtAtomic = BigInt(intPart || '0') * BigInt(10 ** srcTokenCfg.decimals) + BigInt(fracPart || '0');
     if (amtAtomic <= 0n) {
@@ -56867,18 +56885,26 @@ const UBScreen = (function() {
 
     if (!mintTxHash) throw new Error('No tx hash returned from wallet — check that attestation and signature are non-empty (att=' + (attestation ? attestation.slice(0,20) : 'null') + ' sig=' + (operatorSig ? operatorSig.slice(0,20) : 'null') + ')');
 
-    // Wait for receipt (non-blocking best-effort: up to 60 polls × 3s = 3 min)
+    // Wait for receipt (up to 60 polls × 3s = 3 min)
     var provider = new ethers.BrowserProvider(window.ethereum);
     var receipt = null;
     for (var i = 0; i < 60 && !receipt; i++) {
       await new Promise(function(r){ setTimeout(r, 3000); });
       try { receipt = await provider.getTransactionReceipt(mintTxHash); } catch(_) {}
     }
-    if (receipt && receipt.status === 0) {
-      throw new Error('gatewayMint tx reverted — check attestation validity');
-    }
 
-    return mintTxHash;
+    // P0 (Phase 1.0.1): a tx hash is NOT confirmation.
+    //  - receipt.status 0        → 'failed'   (definitive revert)
+    //  - no receipt after polling → 'pending'  (never report success)
+    //  - receipt.status 1        → 'confirmed'
+    // Callers MUST branch on status and never treat a pending hash as success.
+    if (receipt && (receipt.status === 0 || receipt.status === '0x0')) {
+      return { status: 'failed', txHash: mintTxHash, receipt: receipt };
+    }
+    if (!receipt) {
+      return { status: 'pending', txHash: mintTxHash };
+    }
+    return { status: 'confirmed', txHash: mintTxHash, receipt: receipt };
   }
 
   async function execSend() {
@@ -56937,19 +56963,31 @@ const UBScreen = (function() {
           // Must call GatewayMinter.gatewayMint(attestation, signature) on destination chain.
           setStep(1, 'Submitted to Circle Gateway', 'done');
           setStep(2, 'Awaiting on-chain confirmation…', 'active');
+          var mintResult;
           try {
-            var mintTxHash = await _execGatewayMint({
+            mintResult = await _execGatewayMint({
               attestation: gwResult.attestation,
               signature:   gwResult.operatorSig,
               destChainId: destChainId,
             });
-            setStep(2, 'Minted on destination chain', 'done');
-            showResult(true, amt + ' ' + token + ' confirmed — tx ' + mintTxHash.slice(0, 10) + '…');
-            try { if (typeof ubInvalidateGatewayCache === 'function') ubInvalidateGatewayCache(); } catch(_) {}
           } catch(mintErr) {
             var mintMsg = mintErr && mintErr.message ? mintErr.message : String(mintErr);
             setStep(2, 'Mint failed: ' + mintMsg.slice(0, 120), 'error');
             showResult(false, 'Mint failed: ' + mintMsg.slice(0, 200));
+            return;
+          }
+          // P0 (Phase 1.0.1): branch on the mint status — a tx hash alone is not
+          // confirmation. 'pending' means no receipt yet (do not resubmit).
+          if (mintResult && mintResult.status === 'confirmed') {
+            setStep(2, 'Minted on destination chain', 'done');
+            showResult(true, amt + ' ' + token + ' confirmed — tx ' + mintResult.txHash.slice(0, 10) + '…');
+            try { if (typeof ubInvalidateGatewayCache === 'function') ubInvalidateGatewayCache(); } catch(_) {}
+          } else if (mintResult && mintResult.status === 'pending') {
+            setStep(2, 'Submitted — awaiting on-chain confirmation', 'active');
+            showResult(false, amt + ' ' + token + ' submitted (tx ' + mintResult.txHash.slice(0, 10) + '…) — awaiting confirmation. Do not resubmit.');
+          } else {
+            setStep(2, 'Mint reverted', 'error');
+            showResult(false, 'Mint transaction reverted — check the attestation and retry.');
           }
           return;
         }
