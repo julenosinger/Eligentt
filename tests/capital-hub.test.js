@@ -138,7 +138,7 @@ describe('Treasury integration (index.html)', () => {
   });
   it('has one section, the scripts, and the lazy show hook', () => {
     expect((html.match(/id="trs-capital-hub"/g) || []).length).toBe(1);
-    ['capitalHub.js', 'capitalHubUI.js', 'capitalHubTabs.js'].forEach((f) => expect(html).toContain('<script src="/shared/' + f + '"></script>'));
+    ['capitalHub.js', 'capitalHubUI.js', 'capitalHubTabs.js', 'capitalHubManage.js'].forEach((f) => expect(html).toContain('<script src="/shared/' + f + '"></script>'));
     expect(html).toContain("else if (name === 'capital-hub') { if (window.CapitalHubUI) window.CapitalHubUI.onShow(); }");
   });
   it('the deposit hook is observer-only and wrapped so it can never affect the deposit', () => {
@@ -161,10 +161,40 @@ describe('Treasury integration (index.html)', () => {
     expect(fs.readFileSync(path.join(root, 'functions/api/gateway/transfer.js'), 'utf8')).not.toContain('CapitalHub');
   });
   it('no secrets or new endpoints are introduced by the Capital Hub modules', () => {
-    ['capitalHub.js', 'capitalHubUI.js', 'capitalHubTabs.js'].forEach((f) => {
+    ['capitalHub.js', 'capitalHubUI.js', 'capitalHubTabs.js', 'capitalHubManage.js'].forEach((f) => {
       const t = fs.readFileSync(path.join(root, 'shared', f), 'utf8');
       expect(t).not.toMatch(/api[_-]?key|secret|privateKey|mnemonic/i);
       (t.match(/['"`]\/api\/[^'"`?]*/g) || []).forEach((u) => expect(u).toBe("'/api/gateway/transfer"));
     });
+  });
+});
+
+describe('Manage Funds Phase 0 is presentation only', () => {
+  const manage = fs.readFileSync(path.join(root, 'shared/capitalHubManage.js'), 'utf8');
+  it('defines the five Quick Actions in order, Deposit selected first', () => {
+    const keys = [...manage.matchAll(/\{ k: '([a-z]+)',\s+t: '([^']+)'/g)].map((m) => m[1] + ':' + m[2]);
+    expect(keys).toEqual(['deposit:Deposit', 'send:Send', 'crosschain:Cross-chain', 'charge:Charge in USDC', 'withdraw:Withdraw']);
+    expect(manage).toContain("act: 'deposit'");
+  });
+  it('contains no signing, sending, approval, burn, mint or network code', () => {
+    ['fetch(', 'XMLHttpRequest', 'signTypedData', 'eth_sign', 'eth_send', 'sendTransaction', 'ethers', '.approve(', 'depositForBurn', 'gatewayMint', '/v1/transfer', '/api/', 'GatewaySpendService', 'setInterval', 'setTimeout'].forEach((w) => expect(manage, w).not.toContain(w));
+  });
+  it('primary action buttons are rendered disabled and say native execution is not enabled', () => {
+    expect(manage).toMatch(/class="ch-act ch-act-primary ch-wide" disabled aria-disabled="true"/);
+    expect(manage).toContain('Native execution is not enabled yet');
+  });
+  it('existing flows are reached only through the existing launchers', () => {
+    expect(manage).toContain('UI.launch(');
+    expect(manage).not.toMatch(/showPage\(|saSetOrigin|ubGwDepOpen/);
+  });
+  it('steps are neutral (no active / done classes) and details never invent fees or times', () => {
+    expect(manage).not.toMatch(/ch-step(-on|-done|-active)/);
+    expect(manage).toContain("['Estimated fee', NA]");
+    expect(manage).toContain("['Estimated time', NA]");
+  });
+  it('the footer is the neutral security note and the old three-card layout is gone', () => {
+    expect(manage).toContain('Secure execution · Every operation is signed by your wallet · Powered by');
+    const tabs = fs.readFileSync(path.join(root, 'shared/capitalHubTabs.js'), 'utf8');
+    expect(tabs).not.toContain('ch-mf-');
   });
 });

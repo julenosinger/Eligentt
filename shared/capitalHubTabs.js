@@ -12,33 +12,7 @@
   var S = UI.S, esc = UI.esc, short = UI.short, pill = UI.pill;
   var PAGE = 10;
 
-  function assetOpts(sel) { return CH.ASSETS.map(function (a) { return '<option value="' + a + '"' + (a === sel ? ' selected' : '') + '>' + a + '</option>'; }).join(''); }
-  function avail(g, sym) {
-    if (!UI.usable(g)) return g.state === 'loading' ? UI.skel(80) : '<span class="ch-dim">—</span>';
-    var e = g.assets[sym]; if (e && e.error) return '<span class="ch-err">Unavailable</span>';
-    var t = CH.total(g, sym); return t == null ? '<span class="ch-dim">—</span>' : '<b>' + esc(CH.fmt(t, CH.DEC[sym], CH.DEC[sym])) + '</b> ' + sym;
-  }
-
-  // ── Manage Funds ────────────────────────────────────────────────────────────
-  UI.tabs.manage = function (g) {
-    var w = CH.wallet(), dis = w ? '' : ' disabled';
-    var hasDep = typeof ubGwDepOpen === 'function', hasSend = typeof saSetOrigin === 'function' && typeof showPage === 'function';
-    function card(kind, icon, title, desc, avail_, extra, ok, btn) {
-      return '<div class="ch-panel ch-mf"><div class="ch-mf-h"><span class="ch-mf-ic"><i class="ti ti-' + icon + '"></i></span><div><div class="ch-panel-t">' + title + '</div><div class="ch-panel-s">' + desc + '</div></div></div>' +
-        '<label class="ch-lbl" for="ch-mf-' + kind + '">Asset</label><select class="ch-sel" id="ch-mf-' + kind + '">' + assetOpts(S.asset) + '</select>' +
-        '<div class="ch-kv ch-kv-line"><span>Gateway available</span><span>' + avail_ + '</span></div>' + extra +
-        '<button class="ch-act ch-act-primary ch-wide" data-ch-launch="' + kind + ':x"' + (ok ? dis : ' disabled') + '><i class="ti ti-' + icon + '"></i>' + btn + '</button></div>';
-    }
-    var a = avail(g, S.asset);
-    return UI.stateBanner(g) + '<div class="ch-grid3">' +
-      card('deposit', 'download', 'Deposit', 'Move tokens from your EVM wallet into Circle Gateway.', a,
-        '<ul class="ch-list"><li>Choose the source network and amount in the deposit window.</li><li>Approval, gas and the deposit are each signed in your wallet.</li><li>Shows as <b>Processing</b> until Gateway credits the balance.</li></ul>', hasDep, 'Open deposit') +
-      card('transfer', 'arrows-exchange', 'Transfer', 'Send from your Gateway balance to another address.', a,
-        '<ul class="ch-list"><li>Opens Send Assets with Circle Gateway as the source.</li><li>Recipient, amount, fees and the signed burn intent are reviewed there.</li><li>Not confirmed here until Gateway reports it.</li></ul>', hasSend, 'Open transfer') +
-      card('withdraw', 'upload', 'Withdraw', 'Bring Gateway funds back to your own wallet.', a,
-        '<ul class="ch-list"><li>Uses the Gateway transfer flow with <b>your connected address</b> as recipient.</li><li>Funds can only go to an address you control.</li><li>Trustless on-chain withdrawal is not available in this app.</li></ul>', hasSend, 'Open withdraw') +
-      '</div><div class="ch-note">Capital Hub does not sign or send anything by itself. Every operation requires your wallet signature in the existing flow, which also provides the review, fee estimate and duplicate-submission protection.</div>';
-  };
+  // Manage Funds lives in capitalHubManage.js (Quick Actions + operation panel).
 
   // ── Networks ────────────────────────────────────────────────────────────────
   UI.tabs.networks = function (g) {

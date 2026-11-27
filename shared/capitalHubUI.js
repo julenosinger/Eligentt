@@ -226,9 +226,9 @@
     var g = CH.gateway();
     var body = S.tab === 'overview' ? overview(g) : (UI.tabs[S.tab] ? UI.tabs[S.tab](g) : '');
     var sc = r.scrollTop;
-    var keep = document.activeElement && document.activeElement.id === 'ch-q' ? { s: document.activeElement.selectionStart } : null;
+    var ae = document.activeElement, aid = ae && ae.id, keep = (aid === 'ch-q' || (aid && aid.indexOf('ch-qf-') === 0 && ae.tagName === 'INPUT')) ? { id: aid, s: ae.selectionStart } : null;
     r.innerHTML = header() + '<div class="ch-body">' + body + '</div>';
-    if (keep) { var q = document.getElementById('ch-q'); if (q) { q.focus(); try { q.setSelectionRange(keep.s, keep.s); } catch (_) {} } }
+    if (keep) { var q = document.getElementById(keep.id); if (q) { q.focus(); try { q.setSelectionRange(keep.s, keep.s); } catch (_) {} } }
     r.scrollTop = sc;
   }
   function schedule() { if (_raf) return; _raf = requestAnimationFrame(function () { _raf = 0; render(); }); }
@@ -270,11 +270,14 @@
     if (!sec || sec.__chBound) return;
     sec.__chBound = true;
     sec.addEventListener('click', function (ev) {
-      var t = ev.target.closest('[data-ch-tab],[data-ch-asset],[data-ch-flow],[data-ch-act],[data-ch-refresh],[data-ch-copy],[data-ch-launch],[data-ch-page],[data-ch-open],[data-ch-export],[data-ch-clear]');
+      var t = ev.target.closest('[data-ch-tab],[data-ch-asset],[data-ch-flow],[data-ch-act],[data-ch-refresh],[data-ch-copy],[data-ch-launch],[data-ch-qa],[data-ch-max],[data-ch-qa-open],[data-ch-page],[data-ch-open],[data-ch-export],[data-ch-clear]');
       if (!t || t.disabled) return;
       if (t.hasAttribute('data-ch-tab')) { S.tab = t.getAttribute('data-ch-tab'); render(); }
       else if (t.hasAttribute('data-ch-asset')) { S.asset = t.getAttribute('data-ch-asset'); render(); }
       else if (t.hasAttribute('data-ch-flow')) { S.flow = Number(t.getAttribute('data-ch-flow')); render(); }
+      else if (t.hasAttribute('data-ch-qa') && UI.qaSelect) UI.qaSelect(t.getAttribute('data-ch-qa'));
+      else if (t.hasAttribute('data-ch-max') && UI.qaMax) UI.qaMax(t.getAttribute('data-ch-max'));
+      else if (t.hasAttribute('data-ch-qa-open') && UI.qaOpen) UI.qaOpen(t.getAttribute('data-ch-qa-open'));
       else if (t.hasAttribute('data-ch-act')) launch(t.getAttribute('data-ch-act'), S.asset);
       else if (t.hasAttribute('data-ch-launch')) { var p = t.getAttribute('data-ch-launch').split(':'); var sel = document.getElementById('ch-mf-' + p[0]); launch(p[0], sel ? sel.value : S.asset); }
       else if (t.hasAttribute('data-ch-refresh')) refresh();
@@ -284,8 +287,8 @@
       else if (t.hasAttribute('data-ch-export') && UI.exportCsv) UI.exportCsv();
       else if (t.hasAttribute('data-ch-clear') && UI.txClear) UI.txClear();
     });
-    sec.addEventListener('input', function (ev) { if (ev.target.id === 'ch-q' && UI.txFilter) UI.txFilter('q', ev.target.value); });
-    sec.addEventListener('change', function (ev) { var id = ev.target.id || ''; if (id.indexOf('ch-f-') === 0 && UI.txFilter) UI.txFilter(id.slice(5), ev.target.value); else if (id.indexOf('ch-mf-') === 0) { S.asset = ev.target.value; render(); } });
+    sec.addEventListener('input', function (ev) { var id = ev.target.id || ''; if (id === 'ch-q' && UI.txFilter) UI.txFilter('q', ev.target.value); else if (id.indexOf('ch-qf-') === 0 && UI.qaInput) UI.qaInput(id, ev.target.value); });
+    sec.addEventListener('change', function (ev) { var id = ev.target.id || ''; if (id.indexOf('ch-f-') === 0 && UI.txFilter) UI.txFilter(id.slice(5), ev.target.value); else if (id.indexOf('ch-qf-') === 0 && UI.qaChange) UI.qaChange(id, ev.target.value); });
     sec.addEventListener('mouseover', function (ev) {
       var g = ev.target.closest && ev.target.closest('.ch-bg'); var tip = document.getElementById('ch-tip'); if (!tip) return;
       if (!g) { tip.style.display = 'none'; return; }
