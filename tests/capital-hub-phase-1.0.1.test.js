@@ -43,12 +43,19 @@ describe('_execGatewayMint confirmation integrity', () => {
     expect(fn).not.toMatch(/\n\s*return mintTxHash;\s*\n/);
   });
 
+  it('uses POSITIVE success validation — only status 1/0x1 is confirmed (Gate E)', () => {
+    expect(fn).toContain("receipt.status === 1 || receipt.status === '0x1'");
+    // Confirmed is the positive branch; any other receipt (null/undefined/0x2) is pending.
+    expect(fn).toContain("if (receipt.status === 1 || receipt.status === '0x1')");
+  });
+
   it('treats a revert (status 0 / 0x0) as failed, not pending', () => {
     expect(fn).toContain("receipt.status === 0 || receipt.status === '0x0'");
   });
 
   it('treats a missing receipt after polling as pending (never success)', () => {
-    expect(fn).toContain('if (!receipt) {');
+    // No receipt → the only fallthrough is the pending return (positive success
+    // requires receipt.status 1/'0x1').
     expect(fn).toContain("return { status: 'pending', txHash: mintTxHash };");
   });
 
@@ -75,7 +82,7 @@ describe('saExecGateway amount validation', () => {
 
   it('still uses BigInt for the atomic conversion (no float)', () => {
     const fn = extractAsync('saExecGateway');
-    expect(fn).toContain('BigInt(10 ** srcTokenCfg.decimals)');
+    expect(fn).toContain('10n ** BigInt(srcTokenCfg.decimals)');
     expect(fn).toContain('amtAtomic <= 0n');
   });
 
@@ -84,6 +91,48 @@ describe('saExecGateway amount validation', () => {
     expect(fn).toContain('/^0x[0-9a-fA-F]{40}$/.test(recip)');
     expect(fn).toContain('zero_address');
     expect(fn).toContain('/^0x0{40}$/i.test(recip)');
+  });
+
+  it('uses BigInt exponentiation for the decimal scale (Gate F)', () => {
+    const fn = extractAsync('saExecGateway');
+    expect(fn).toContain('10n ** BigInt(srcTokenCfg.decimals)');
+    expect(fn).not.toContain('BigInt(10 ** srcTokenCfg.decimals)');
+  });
+
+  it('pads the fractional part with padEnd, not a fixed 9-zero pad (Gate F)', () => {
+    const fn = extractAsync('saExecGateway');
+    expect(fn).toContain("fracPart.padEnd(srcTokenCfg.decimals, '0')");
+    expect(fn).not.toContain("(fracPart + '000000000')");
+  });
+});
+
+describe('saExecGateway secure proxy routing (Gate B)', () => {
+  it('routes MAINNET submissions through /api/gateway/transfer (the secure proxy)', () => {
+    const fn = extractAsync('saExecGateway');
+    expect(fn).toContain("'/api/gateway/transfer'");
+    expect(fn).toContain("var _transferUrl = _isTestnetChain ? (GW_API_BASE + '/v1/transfer') : '/api/gateway/transfer'");
+  });
+
+  it('keeps testnet on the direct Circle API (the proxy is mainnet-only)', () => {
+    const fn = extractAsync('saExecGateway');
+    expect(fn).toContain('_isTestnetChain');
+    expect(fn).toContain('GW_TESTNET_CHAINS.indexOf(chainId) !== -1');
+  });
+
+  it('parses the array attestation response (not a bare object)', () => {
+    const fn = extractAsync('saExecGateway');
+    expect(fn).toContain("Array.isArray(respBody)");
+    expect(fn).toContain('first.attestation.payload');
+    expect(fn).toContain('first.attestation.signature');
+  });
+
+  it('maps proxy errors to the correct status (409 ambiguous, 503 fail-closed error, 5xx ambiguous)', () => {
+    const fn = extractAsync('saExecGateway');
+    expect(fn).toContain("resp.status === 409");
+    expect(fn).toContain("error: 'already_submitted'");
+    expect(fn).toContain("resp.status === 503");
+    // 503 is fail-closed but NOT a 'blocked' status (Fase 2.9.4 removed it).
+    expect(fn).toContain("error: proxyErr || 'persistence_unavailable'");
   });
 });
 

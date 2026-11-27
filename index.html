@@ -42754,8 +42754,11 @@ async function saExecGateway() {
       toast('Too many decimal places for ' + asset + ' (max ' + srcTokenCfg.decimals + ')', 'warn');
       return { status: 'error', error: 'amount_too_precise' };
     }
-    fracPart = (fracPart + '000000000').slice(0, srcTokenCfg.decimals);
-    var amtAtomic = BigInt(intPart || '0') * BigInt(10 ** srcTokenCfg.decimals) + BigInt(fracPart || '0');
+    fracPart = fracPart.padEnd(srcTokenCfg.decimals, '0');
+    // P0 (Phase 1.0.1A): BigInt exponentiation for the decimal scale (no Number
+    // `10 ** decimals` — loses precision for >15-decimal tokens), and `padEnd`
+    // instead of a fixed 9-zero pad.
+    var amtAtomic = BigInt(intPart || '0') * (10n ** BigInt(srcTokenCfg.decimals)) + BigInt(fracPart || '0');
     if (amtAtomic <= 0n) {
       toast('Amount too small', 'warn');
       return { status: 'error', error: 'amount_too_small' };
@@ -42863,9 +42866,15 @@ async function saExecGateway() {
 
     if (btnContent) btnContent.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i> Submitting to Circle Gateway…';
 
-    // ── POST requests array directly to Circle Gateway API ───────────────────
-    // Body MUST be the JSON array itself, NOT wrapped as { requests: [...] }
-    var resp = await fetch(GW_API_BASE + '/v1/transfer', {
+    // ── POST requests array to the SECURE proxy (mainnet) ────────────────────
+    // Gate B (Phase 1.0.1A): mainnet submissions MUST go through /api/gateway/transfer
+    // (Durable-Object idempotence, state machine, replay protection). Testnet chains
+    // keep the direct Circle API — the proxy is mainnet-only.
+    // Body MUST be the JSON array itself, NOT wrapped as { requests: [...] }.
+    var _isTestnetChain = GW_TESTNET_CHAINS.indexOf(chainId) !== -1 || GW_TESTNET_CHAINS.indexOf(destChainId) !== -1;
+    var _transferUrl = _isTestnetChain ? (GW_API_BASE + '/v1/transfer') : '/api/gateway/transfer';
+
+    var resp = await fetch(_transferUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(requests, function(_, v) {
@@ -42880,24 +42889,53 @@ async function saExecGateway() {
       respBody = JSON.parse(respText);
     } catch(_) {}
 
-    if (resp.ok && respBody && respBody.attestation) {
-      // Circle returned an attestation — transfer accepted.
+    // ── Extract attestation (array response `[{ burnIntent, attestation:{payload,signature} }]`
+    //    or a legacy object response) ───────────────────────────────────────────
+    var attPayload = null, attSig = null;
+    if (Array.isArray(respBody) && respBody.length) {
+      var first = respBody[0];
+      if (first && first.attestation) {
+        attPayload = first.attestation.payload || first.attestation.attestationPayload;
+        attSig     = first.attestation.signature || first.attestation.attestationSignature;
+      }
+    } else if (respBody && !Array.isArray(respBody)) {
+      attPayload = respBody.attestationPayload || respBody.attestation;
+      attSig     = respBody.signature || respBody.attestationSignature;
+    }
+
+    if (resp.ok && attPayload && attSig) {
+      // Circle accepted and returned an attestation.
       // Next step: caller should invoke gatewayMint(attestation, signature) on dest chain.
       toast('Gateway transfer attestation received. Ready to mint on destination chain.', 'success');
       if (typeof saUpdateRoute === 'function') saUpdateRoute();
       try { if (typeof ubInvalidateGatewayCache === 'function') ubInvalidateGatewayCache(); } catch(_) {}
-      return { status: 'pending', salt: salt, transferId: respBody.transferId, attestation: respBody.attestation, operatorSig: respBody.signature };
+      return { status: 'pending', salt: salt, attestation: attPayload, operatorSig: attSig };
     }
 
-    // API error — surface the actual error text for actionable debugging
+    var proxyErr = (respBody && (respBody.error || respBody.message)) ? (respBody.error || respBody.message) : null;
+
+    // 409 = salt already reserved by the proxy (idempotence). Do NOT resubmit.
+    if (resp.status === 409) {
+      toast('This transfer was already submitted — check status before retrying', 'warn');
+      return { status: 'ambiguous', salt: salt, error: 'already_submitted' };
+    }
+
+    // 503 = persistence/DO required but unavailable (fail-closed) — the salt was
+    // NOT reserved and the transfer was NOT forwarded. Definitive "could not submit".
+    if (resp.status === 503) {
+      toast('Gateway persistence unavailable — transfer was not submitted', 'error');
+      return { status: 'error', error: proxyErr || 'persistence_unavailable' };
+    }
+
+    // 5xx / 429 / 502 / 504 = ambiguous — Circle result unknown. Do NOT resubmit.
     if (resp.status >= 500 || resp.status === 429) {
-      var errText = respText || ('HTTP ' + resp.status);
-      toast('Gateway server error (' + resp.status + '): ' + errText.slice(0, 120), 'warn');
+      var errText = proxyErr || respText || ('HTTP ' + resp.status);
+      toast('Gateway server error (' + resp.status + '): ' + String(errText).slice(0, 120), 'warn');
       return { status: 'ambiguous', salt: salt, error: 'server_' + resp.status };
     }
 
     // 4xx — definitive failure with actionable message
-    var apiErr = (respBody && (respBody.error || respBody.message)) ? (respBody.error || respBody.message) : (respText || ('http_' + resp.status));
+    var apiErr = proxyErr || respText || ('http_' + resp.status);
     toast('Gateway transfer failed: ' + String(apiErr).slice(0, 200), 'error');
     return { status: 'error', error: String(apiErr) };
 
@@ -56893,18 +56931,21 @@ const UBScreen = (function() {
       try { receipt = await provider.getTransactionReceipt(mintTxHash); } catch(_) {}
     }
 
-    // P0 (Phase 1.0.1): a tx hash is NOT confirmation.
-    //  - receipt.status 0        → 'failed'   (definitive revert)
-    //  - no receipt after polling → 'pending'  (never report success)
-    //  - receipt.status 1        → 'confirmed'
+    // P0 (Phase 1.0.1A — positive success validation): a tx hash is NOT confirmation.
+    //  - receipt.status 0/'0x0'  → 'failed'   (definitive revert)
+    //  - receipt.status 1/'0x1'  → 'confirmed' (ONLY this is success)
+    //  - no receipt, or any other/unparseable status → 'pending' (inconclusive —
+    //    never report success without positive on-chain evidence)
     // Callers MUST branch on status and never treat a pending hash as success.
-    if (receipt && (receipt.status === 0 || receipt.status === '0x0')) {
-      return { status: 'failed', txHash: mintTxHash, receipt: receipt };
+    if (receipt) {
+      if (receipt.status === 0 || receipt.status === '0x0') {
+        return { status: 'failed', txHash: mintTxHash, receipt: receipt };
+      }
+      if (receipt.status === 1 || receipt.status === '0x1') {
+        return { status: 'confirmed', txHash: mintTxHash, receipt: receipt };
+      }
     }
-    if (!receipt) {
-      return { status: 'pending', txHash: mintTxHash };
-    }
-    return { status: 'confirmed', txHash: mintTxHash, receipt: receipt };
+    return { status: 'pending', txHash: mintTxHash };
   }
 
   async function execSend() {
