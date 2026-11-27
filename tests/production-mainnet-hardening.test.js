@@ -85,12 +85,22 @@ describe('Bridge — LI.FI only (CCTP removed from active path)', () => {
     expect(fn).toContain("status === 'DONE'");
   });
 
-  it('Treasury nav item is hidden', () => {
-    expect(html).not.toContain('id="nav-treasury"');
+  // Treasury was hidden in the Mainnet-only release (nav item removed, route redirected to Send).
+  // It has since been restored on purpose: the page, vault engine and permissions were never removed.
+  it('Treasury nav item is restored under PROTOCOL', () => {
+    expect(html).toContain('id="nav-treasury" onclick="showPage(\'treasury\')"');
+    const proto = html.indexOf('<div class="nav-group" style="margin-top:4px">Protocol</div>');
+    const nav = html.indexOf('id="nav-treasury"');
+    const manage = html.indexOf('<div class="nav-group" style="margin-top:4px">Manage</div>');
+    expect(proto).toBeGreaterThan(-1);
+    expect(nav).toBeGreaterThan(proto);
+    expect(nav).toBeLessThan(manage);
   });
 
-  it('treasury route redirects to send', () => {
-    expect(html).toContain("if (id === 'treasury') { showPage('send'); return; }");
+  it('treasury route opens the Treasury page (no redirect to send) and refreshes the vault UI', () => {
+    expect(html).not.toContain("if (id === 'treasury') { showPage('send'); return; }");
+    expect(html).toContain("if (id === 'treasury') {\n      setTimeout(() => { if (typeof vaultRefreshUI === 'function') vaultRefreshUI(); }, 50);");
+    expect(html).toContain('id="page-treasury"');
   });
 
   it('requireArcMainnet gate exists for production execution', () => {
