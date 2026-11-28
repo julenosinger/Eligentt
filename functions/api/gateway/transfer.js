@@ -70,6 +70,11 @@
  *   Set env.GATEWAY_ENV='production' on the production Pages env.
  */
 
+import {
+  depositorOf,
+  environmentFor,
+} from './coordinator-util.js';
+
 const GATEWAY_API  = 'https://gateway-api.circle.com';
 const MAX_BODY_LEN = 65536;    // 64 KB
 const TIMEOUT_MS   = 18000;    // 18s
@@ -325,6 +330,82 @@ async function tryRollback(salt, env) {
   }
 }
 
+// ── GatewayExecutionCoordinator integration (Phase 1.0.1C — ISOLATED) ────────
+// The coordinator adds cross-salt dedup on top of the per-salt GatewayOpLock.
+// It is DISABLED by default: active only when BOTH the
+// GATEWAY_EXECUTION_COORDINATOR binding is present AND
+// env.GATEWAY_EXECUTION_COORDINATOR_ENABLED is truthy ('true'). When enabled but
+// the coordinator is unavailable, transfers fail closed (503). When disabled,
+// behavior is byte-for-byte identical to before this integration.
+function isTruthyFlag(v) {
+  return v === true || v === 'true' || v === '1' || v === 1;
+}
+
+function coordinatorEnabled(env) {
+  return !!(env && env.GATEWAY_EXECUTION_COORDINATOR && isTruthyFlag(env.GATEWAY_EXECUTION_COORDINATOR_ENABLED));
+}
+
+function coordinatorStub(env, depositor, environment) {
+  const coord = env && env.GATEWAY_EXECUTION_COORDINATOR;
+  const doId  = coord.idFromName('gateway-exec:' + depositor + ':' + environment);
+  return coord.get(doId);
+}
+
+// Returns { ok, recovered?, conflict?, record?, error }.
+async function coordinatorReserve(burnIntent, env) {
+  const depositor   = depositorOf(burnIntent);
+  const environment = environmentFor(burnIntent);
+  if (!depositor || environment === null) {
+    return { ok: false, error: 'coordinator_identity_unavailable' };
+  }
+  try {
+    const stub = coordinatorStub(env, depositor, environment);
+    const res  = await stub.fetch('https://internal/reserve', {
+      method:  'POST',
+      headers: doHeaders(env),
+      body:    JSON.stringify({ burnIntent }),
+    });
+    const body = await res.json();
+    if (res.status === 401) return { ok: false, error: 'coordinator_auth_failed' };
+    if (res.status === 409) return { ok: false, conflict: true, error: body.error, record: body.record };
+    if (res.status === 200) return { ok: true, recovered: true,  record: body.record };
+    if (res.status === 201) return { ok: true, recovered: false, record: body.record };
+    return { ok: false, error: body.error || 'coordinator_reserve_failed' };
+  } catch(_) {
+    return { ok: false, error: 'coordinator_unavailable' };
+  }
+}
+
+// Returns { ok, record?, error }.
+async function coordinatorUpdate(burnIntent, operationId, to, expectedVersion, evidence, env) {
+  const depositor   = depositorOf(burnIntent);
+  const environment = environmentFor(burnIntent);
+  if (!depositor || environment === null) {
+    return { ok: false, error: 'coordinator_identity_unavailable' };
+  }
+  try {
+    const stub = coordinatorStub(env, depositor, environment);
+    const res  = await stub.fetch('https://internal/update', {
+      method:  'POST',
+      headers: doHeaders(env),
+      body:    JSON.stringify({ operationId, to, expectedVersion, evidence }),
+    });
+    if (res.status === 401) return { ok: false, error: 'coordinator_auth_failed' };
+    let body;
+    try { body = await res.json(); } catch(_) { body = {}; }
+    if (!res.ok) return { ok: false, error: body.error || 'coordinator_update_failed' };
+    return { ok: true, record: body.record };
+  } catch(_) {
+    return { ok: false, error: 'coordinator_unavailable' };
+  }
+}
+
+// Best-effort rollback of a reserved coordinator slot (frees it when the forward
+// is blocked). Idempotent; the forward is BLOCKED regardless of the outcome.
+async function coordinatorRollback(burnIntent, operationId, version, env) {
+  return coordinatorUpdate(burnIntent, operationId, 'failed', version, { rollback: true }, env);
+}
+
 // ── POST /api/gateway/transfer ────────────────────────────────────────────────
 export async function onRequestPost(ctx) {
   const { request, env } = ctx;
@@ -378,6 +459,12 @@ export async function onRequestPost(ctx) {
   const now      = new Date().toISOString();
   const reserved = [];
 
+  // ── GatewayExecutionCoordinator (cross-salt dedup) — Phase 1.0.1C, isolated ─
+  // Active only when the binding is present AND enabled. Fail-closed when on but
+  // unavailable. When disabled, `coordReserved` stays empty and this is a no-op.
+  const coordinatorActive = coordinatorEnabled(env);
+  const coordReserved     = [];   // { burnIntent, operationId, version }
+
   for (const item of body) {
     const salt   = item.burnIntent.spec.salt;
     const signer = unpad(item.burnIntent.spec.sourceSigner);
@@ -425,6 +512,74 @@ export async function onRequestPost(ctx) {
     reserved.push(salt);
   }
 
+  // ── Coordinator reserve (cross-salt dedup) ────────────────────────────────
+  // After all salts are reserved, coordinate by (depositor, environment). A
+  // duplicate (same slot + same payload) or conflict (same slot, different payload)
+  // blocks the forward and rolls back the salt reservations. Unavailable
+  // coordinator (when enabled) fails closed.
+  if (coordinatorActive) {
+    for (const item of body) {
+      const cr = await coordinatorReserve(item.burnIntent, env);
+      if (!cr.ok) {
+        const rollbackFailures = [];
+        for (const rs of reserved) {
+          const rb = await tryRollback(rs, env);
+          if (!rb.ok) rollbackFailures.push({ salt: rs, error: rb.error });
+        }
+        for (const ce of coordReserved) {
+          const rb = await coordinatorRollback(ce.burnIntent, ce.operationId, ce.version, env);
+          if (!rb.ok) rollbackFailures.push({ operationId: ce.operationId, error: rb.error });
+        }
+
+        if (cr.conflict) {
+          return jsonResp({
+            error:            'coordinator_conflict',
+            detail:           cr.error,
+            salt:             item.burnIntent.spec.salt,
+            depositor:        cr.record ? cr.record.depositor : null,
+            recoverable:      false,
+            rollbackFailures: rollbackFailures.length ? rollbackFailures : undefined,
+          }, 409);
+        }
+
+        const isUnavailable =
+          cr.error === 'coordinator_unavailable' ||
+          cr.error === 'coordinator_auth_failed' ||
+          cr.error === 'coordinator_identity_unavailable';
+        return jsonResp({
+          error:            cr.error || 'coordinator_reserve_failed',
+          blocked:          true,
+          rollbackFailures: rollbackFailures.length ? rollbackFailures : undefined,
+        }, isUnavailable ? 503 : 500);
+      }
+
+      // Duplicate intent (same slot + same payload, different salt): do NOT forward.
+      if (cr.recovered) {
+        const rollbackFailures = [];
+        for (const rs of reserved) {
+          const rb = await tryRollback(rs, env);
+          if (!rb.ok) rollbackFailures.push({ salt: rs, error: rb.error });
+        }
+        return jsonResp({
+          error:            'already_submitted',
+          salt:             item.burnIntent.spec.salt,
+          status:           cr.record ? cr.record.status : 'submitted',
+          submittedAt:      cr.record ? cr.record.createdAt : null,
+          depositor:        cr.record ? cr.record.depositor : null,
+          operationId:      cr.record ? cr.record.operationId : null,
+          recoverable:      true,
+          rollbackFailures: rollbackFailures.length ? rollbackFailures : undefined,
+        }, 409);
+      }
+
+      coordReserved.push({
+        burnIntent:  item.burnIntent,
+        operationId: cr.record.operationId,
+        version:     cr.record.version,
+      });
+    }
+  }
+
   // ── Build clean upstream payload ──────────────────────────────────────────
   const upstream = body.map(item => ({
     burnIntent: item.burnIntent,
@@ -455,6 +610,12 @@ export async function onRequestPost(ctx) {
     for (const item of body) {
       const up = await tryUpdate(item.burnIntent.spec.salt, { status: 'ambiguous' }, env);
       if (!up.ok) persistFailures.push({ salt: item.burnIntent.spec.salt, error: up.error });
+    }
+    if (coordinatorActive) {
+      for (const ce of coordReserved) {
+        const cu = await coordinatorUpdate(ce.burnIntent, ce.operationId, 'ambiguous', ce.version, {}, env);
+        if (!cu.ok) persistFailures.push({ operationId: ce.operationId, error: cu.error });
+      }
     }
     return jsonResp({
       error:     isTimeout ? 'gateway_timeout' : 'gateway_unreachable',
@@ -491,15 +652,33 @@ export async function onRequestPost(ctx) {
     return 'ambiguous'; // 5xx or anything unexpected
   }
   const newStatus = classifyHttpStatus(upRes.status);
+
+  let parsed;
+  try { parsed = JSON.parse(upBody); } catch(_) { parsed = { raw: upBody }; }
+
+  // Extract transferId from the array response for coordinator evidence (never
+  // invented — only persisted when Circle actually returns it).
+  let transferId = null;
+  if (Array.isArray(parsed) && parsed.length && parsed[0]) {
+    const first = parsed[0];
+    transferId = first.transferId || (first.burnIntent && first.burnIntent.transferId) || null;
+  } else if (parsed && !Array.isArray(parsed) && parsed.transferId) {
+    transferId = parsed.transferId;
+  }
+
   const persistFailures = [];
   for (const item of body) {
     const up = await tryUpdate(item.burnIntent.spec.salt,
       { status: newStatus, httpStatus: upRes.status }, env);
     if (!up.ok) persistFailures.push({ salt: item.burnIntent.spec.salt, error: up.error });
   }
-
-  let parsed;
-  try { parsed = JSON.parse(upBody); } catch(_) { parsed = { raw: upBody }; }
+  if (coordinatorActive) {
+    const evidence = transferId ? { transferId } : {};
+    for (const ce of coordReserved) {
+      const cu = await coordinatorUpdate(ce.burnIntent, ce.operationId, newStatus, ce.version, evidence, env);
+      if (!cu.ok) persistFailures.push({ operationId: ce.operationId, error: cu.error });
+    }
+  }
 
   // P0 — Circle responded but we could not persist the result. Do NOT present the
   // operation as concluded and do NOT discard the Circle response. Return an
