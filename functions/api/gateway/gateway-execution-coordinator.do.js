@@ -395,12 +395,13 @@ export class GatewayExecutionCoordinator {
   }
 
   /* ── POST /set-balance ────────────────────────────────────────────────── */
-  // Body: { scope, amount, source?, asOf? } — trusted internal only. Sets the
-  // authoritative balance snapshot for a scope (amount MUST be atomic units).
-  // Snapshots are ordered monotonically: an older snapshot (asOf < current) is
-  // rejected so a slow/out-of-order fetch can never restore already-committed
-  // balance. A `generation` counter guarantees monotonic writes even on equal
-  // timestamps.
+  // Body: { scope, amount, source?, asOf?, expectedGeneration? } — trusted
+  // internal only. Sets the authoritative balance snapshot (amount MUST be atomic).
+  // Financial fencing (Gate E): `expectedGeneration` is the generation the caller
+  // observed BEFORE its external balance query. If the generation advanced since
+  // (a settle/write happened during the query), the snapshot is rejected
+  // (`409 stale_generation`), so a pre-settlement query can never restore committed
+  // balance. `asOf` ordering + the monotonic generation remain as defense-in-depth.
   async _setBalance(request) {
     let body;
     try { body = await request.json(); } catch (_) {
@@ -415,15 +416,22 @@ export class GatewayExecutionCoordinator {
       return GatewayExecutionCoordinator.json({ error: 'invalid_amount' }, 400);
     }
     const asOf = (typeof body.asOf === 'string' && body.asOf) ? body.asOf : new Date().toISOString();
+    const expectedGeneration = (body.expectedGeneration != null && Number.isInteger(body.expectedGeneration))
+      ? body.expectedGeneration : null;
 
     const outcome = await this.storage.transaction(async (txn) => {
       const current = await txn.get(KEY_BAL + scope);
       if (current) {
+        const currentGen = typeof current.generation === 'number' ? current.generation : 0;
+        // Fencing: reject a query that started before the current generation.
+        if (expectedGeneration != null && expectedGeneration < currentGen) {
+          return { status: 409, body: { error: 'stale_generation', scope, currentGeneration: currentGen, expectedGeneration } };
+        }
         // Reject an out-of-order (older) snapshot.
         if (typeof current.asOf === 'string' && current.asOf && asOf < current.asOf) {
           return { status: 409, body: { error: 'stale_snapshot', scope, currentAsOf: current.asOf, providedAsOf: asOf } };
         }
-        const generation = (typeof current.generation === 'number' ? current.generation : 0) + 1;
+        const generation = currentGen + 1;
         const snapshot = { amount, source: body.source || 'circle', asOf, stale: false, generation };
         await txn.put(KEY_BAL + scope, snapshot);
         return { status: 200, body: { ok: true, scope, balance: snapshot } };
@@ -462,89 +470,100 @@ export class GatewayExecutionCoordinator {
     }
 
     const outcome = await this.storage.transaction(async (txn) => {
-      const record = await txn.get(KEY_OP + operationId);
-      if (!record) return { status: 404, body: { error: 'not_found' } };
-
-      if (record.version !== expectedVersion) {
-        return { status: 409, body: { error: 'stale_version', current: record.version, expected: expectedVersion } };
-      }
-      if (record.status === to) {
-        return { status: 200, body: { ok: true, idempotent: true, record } };
-      }
-
-      const allowed = VALID_TRANSITIONS[record.status] || [];
-      if (!allowed.includes(to)) {
-        return { status: 400, body: { error: 'invalid_transition', from: record.status, to, allowed } };
-      }
-
-      // reserved/submitting → failed is ONLY a batch rollback, and ONLY when the
-      // operation was never dispatched (Gate E). A dispatched op cannot be rolled
-      // back by a bare boolean flag — it must go through `ambiguous` reconciliation.
-      if ((record.status === 'reserved' || record.status === 'submitting') &&
-          to === 'failed') {
-        if (evidence.rollback !== true) {
-          return { status: 400, body: { error: 'rollback_required', from: record.status, to } };
-        }
-        if (record.dispatched === true) {
-          return { status: 409, body: { error: 'cannot_rollback_dispatched', from: record.status, to, detail: 'Operation was already dispatched; use ambiguous instead.' } };
-        }
-      }
-
-      if (to === 'confirmed' && !evidence.transactionHash) {
-        return { status: 400, body: { error: 'confirmed_requires_transaction_hash' } };
-      }
-      if (to === 'requires_review' && !evidence.reason) {
-        return { status: 400, body: { error: 'requires_review_requires_reason' } };
-      }
-
-      const now = Date.now();
-      const updated = {
-        ...record,
-        status:    to,
-        version:   record.version + 1,
-        updatedAt: new Date(now).toISOString(),
-        transferId:      evidence.transferId      || record.transferId      || null,
-        expirationBlock: evidence.expirationBlock || record.expirationBlock || null,
-        attestationHash: evidence.attestationHash || record.attestationHash || null,
-        signatureHash:   evidence.signatureHash   || record.signatureHash   || null,
-        attestationPayload:   evidence.attestationPayload   || record.attestationPayload   || null,
-        attestationSignature: evidence.attestationSignature || record.attestationSignature || null,
-        txHash:          evidence.transactionHash || record.txHash          || null,
-        burnTxHash:      evidence.burnTxHash      || record.burnTxHash      || null,
-        evidence:        record.evidence.concat([{ to, at: new Date(now).toISOString(), ...(evidence.reason ? { reason: evidence.reason } : {}) }]),
-      };
-      await txn.put(KEY_OP + operationId, updated);
-
-      // ── Reservation release on terminal transition ──────────────────────
-      if (TERMINAL_STATES.has(to)) {
-        const balRes = await txn.get(KEY_BALRES + record.scope);
-        const reservedTotal = (balRes && balRes.total) || '0';
-        const newTotal = subUint(reservedTotal, record.reservedAmount);
-        await txn.put(KEY_BALRES + record.scope, { total: newTotal });
-
-        // Settled (Circle actually debited) → decrement the snapshot conservatively
-        // and mark stale so the next reserve requires a fresh balance sync. Bump
-        // `asOf` + `generation` so an in-flight snapshot fetched BEFORE this settle
-        // is rejected as stale (never restores already-debited balance).
-        const settled = to === 'confirmed' || (to === 'failed' && record.status !== 'reserved' && record.status !== 'submitting');
-        if (settled) {
-          const snapshot = await txn.get(KEY_BAL + record.scope);
-          if (snapshot && typeof snapshot.amount === 'string') {
-            await txn.put(KEY_BAL + record.scope, {
-              ...snapshot,
-              amount:     subUint(snapshot.amount, record.reservedAmount),
-              stale:      true,
-              asOf:       new Date(now).toISOString(),
-              generation: (typeof snapshot.generation === 'number' ? snapshot.generation : 0) + 1,
-            });
-          }
-        }
-      }
-
-      return { status: 200, body: { ok: true, record: updated } };
+      return this._transitionOp(txn, operationId, to, evidence, { expectedVersion, via: 'update' });
     });
 
     return GatewayExecutionCoordinator.json(outcome.body, outcome.status);
+  }
+
+  /* ── Unified transactional transition (Gate D) ─────────────────────────── */
+  // The SINGLE implementation of the financial state machine. Every path —
+  // /update, /reconcile, alarm recovery — funnels through here, so no alternate
+  // path can bypass fencing, evidence validation, post-dispatch protection,
+  // reserve release, balance update, or terminal idempotency.
+  //
+  // Returns { status, body, resolved } where resolved ∈ 'applied' | 'already' | null.
+  async _transitionOp(txn, opId, to, evidence, opts = {}) {
+    const record = await txn.get(KEY_OP + opId);
+    if (!record) return { status: 404, body: { error: 'not_found' } };
+
+    // Fencing: an explicit expectedVersion must match the current version.
+    if (opts.expectedVersion != null && record.version !== opts.expectedVersion) {
+      return { status: 409, body: { error: 'stale_version', current: record.version, expected: opts.expectedVersion } };
+    }
+    // Terminal idempotency: already in the target state → no-op (never double release).
+    if (record.status === to) {
+      return { status: 200, body: { ok: true, idempotent: true, record }, resolved: 'already' };
+    }
+
+    const allowed = VALID_TRANSITIONS[record.status] || [];
+    if (!allowed.includes(to)) {
+      return { status: 400, body: { error: 'invalid_transition', from: record.status, to, allowed } };
+    }
+
+    // reserved/submitting → failed is ONLY a batch rollback, and ONLY when the
+    // operation was never dispatched (Gate E). A dispatched op cannot be rolled
+    // back by a bare boolean flag — it must go through `ambiguous` reconciliation.
+    if ((record.status === 'reserved' || record.status === 'submitting') && to === 'failed') {
+      if (evidence.rollback !== true) {
+        return { status: 400, body: { error: 'rollback_required', from: record.status, to } };
+      }
+      if (record.dispatched === true) {
+        return { status: 409, body: { error: 'cannot_rollback_dispatched', from: record.status, to, detail: 'Operation was already dispatched; use ambiguous instead.' } };
+      }
+    }
+
+    if (to === 'confirmed' && !evidence.transactionHash) {
+      return { status: 400, body: { error: 'confirmed_requires_transaction_hash' } };
+    }
+    if (to === 'requires_review' && !evidence.reason) {
+      return { status: 400, body: { error: 'requires_review_requires_reason' } };
+    }
+
+    const now = Date.now();
+    const updated = {
+      ...record,
+      status:    to,
+      version:   record.version + 1,
+      updatedAt: new Date(now).toISOString(),
+      transferId:      evidence.transferId      || record.transferId      || null,
+      expirationBlock: evidence.expirationBlock || record.expirationBlock || null,
+      attestationHash: evidence.attestationHash || record.attestationHash || null,
+      signatureHash:   evidence.signatureHash   || record.signatureHash   || null,
+      attestationPayload:   evidence.attestationPayload   || record.attestationPayload   || null,
+      attestationSignature: evidence.attestationSignature || record.attestationSignature || null,
+      txHash:          evidence.transactionHash || record.txHash          || null,
+      burnTxHash:      evidence.burnTxHash      || record.burnTxHash      || null,
+      evidence:        record.evidence.concat([{ to, at: new Date(now).toISOString(), via: opts.via || 'update', ...(evidence.reason ? { reason: evidence.reason } : {}) }]),
+    };
+    await txn.put(KEY_OP + opId, updated);
+
+    // ── Reservation release on terminal transition (at most once) ──────────
+    if (TERMINAL_STATES.has(to)) {
+      const balRes = await txn.get(KEY_BALRES + record.scope);
+      const reservedTotal = (balRes && balRes.total) || '0';
+      await txn.put(KEY_BALRES + record.scope, { total: subUint(reservedTotal, record.reservedAmount) });
+
+      // Settled (Circle actually debited) → decrement the snapshot conservatively
+      // and mark stale so the next reserve requires a fresh balance sync. Bump
+      // `asOf` + `generation` so an in-flight snapshot fetched BEFORE this settle
+      // is rejected as stale (never restores already-debited balance).
+      const settled = to === 'confirmed' || (to === 'failed' && record.status !== 'reserved' && record.status !== 'submitting');
+      if (settled) {
+        const snapshot = await txn.get(KEY_BAL + record.scope);
+        if (snapshot && typeof snapshot.amount === 'string') {
+          await txn.put(KEY_BAL + record.scope, {
+            ...snapshot,
+            amount:     subUint(snapshot.amount, record.reservedAmount),
+            stale:      true,
+            asOf:       new Date(now).toISOString(),
+            generation: (typeof snapshot.generation === 'number' ? snapshot.generation : 0) + 1,
+          });
+        }
+      }
+    }
+
+    return { status: 200, body: { ok: true, record: updated }, resolved: 'applied' };
   }
 
   /* ── GET /status?operationId= | idempotencyKey= | salt= ──────────────── */
@@ -671,8 +690,10 @@ export class GatewayExecutionCoordinator {
 
   /* ── POST /reconcile ──────────────────────────────────────────────────── */
   // Body: { salt, to, evidence }. Registers a durable reconciliation obligation
-  // (Gate B) and attempts an immediate idempotent transition. Returns { ok } only
-  // when the obligation is durably persisted. The alarm retries with backoff.
+  // (Gate B) and attempts an immediate idempotent transition. Returns 404 when the
+  // salt is NOT in this environment (so the caller probes the other shard); 200 with
+  // resolved ∈ applied|already|durably_queued when the obligation is durably
+  // persisted; 409 on a divergent terminal state.
   async _reconcile(request) {
     let body;
     try { body = await request.json(); } catch (_) {
@@ -689,82 +710,65 @@ export class GatewayExecutionCoordinator {
     }
 
     const outcome = await this.storage.transaction(async (txn) => {
+      // Environment isolation: only register the obligation if the salt is bound
+      // in THIS shard. Otherwise return 404 so the caller probes the other shard.
+      const opId = await txn.get(KEY_SALT + salt);
+      if (!opId) {
+        return { status: 404, body: { error: 'not_in_this_environment' } };
+      }
       // Durable obligation BEFORE the transition.
       await txn.put(KEY_RECON + salt, { salt, to, evidence, attempts: 0, createdAt: new Date().toISOString() });
-      return this._applyReconcile(txn, salt, to, evidence);
+      const result = await this._applyReconcile(txn, salt, to, evidence);
+      switch (result.resolved) {
+        case 'applied':
+        case 'already':
+          return { status: 200, body: { ok: true, resolved: result.resolved, record: result.body.record } };
+        case 'conflict':
+          return { status: 409, body: result.body };
+        case 'no_record':
+          return { status: 500, body: result.body };
+        case 'pending':
+        default:
+          return { status: 200, body: { ok: true, resolved: 'durably_queued' } };
+      }
     });
 
-    if (outcome.ok) {
-      // Clear the alarm if no more pending markers (best-effort; re-armed on demand).
+    if (outcome.status === 200 && outcome.body && (outcome.body.resolved === 'applied' || outcome.body.resolved === 'already')) {
       const remaining = await this._hasPendingReconciles();
       if (!remaining) await this.storage.deleteAlarm().catch(() => {});
-    } else {
+    } else if (outcome.status === 200 || outcome.status === 500) {
       await this._armReconcileAlarm();
     }
-    return GatewayExecutionCoordinator.json(outcome.body, outcome.ok ? 200 : 500);
+    return GatewayExecutionCoordinator.json(outcome.body, outcome.status);
   }
 
   /* ── Reconcile application (shared by /reconcile and alarm) ───────────── */
-  // Idempotent: reads the op by salt, applies the terminal transition if it is
-  // still pending, and clears the marker on success.
+  // Gate C/D: applies the terminal transition through the SAME unified state
+  // machine as /update. Never discards an obligation for a missing op / corrupt
+  // index / divergent state. Returns `resolved` ∈
+  //   'applied' | 'already' | 'conflict' | 'pending' | 'no_operation' | 'no_record'.
   async _applyReconcile(txn, salt, to, evidence) {
     const opId = await txn.get(KEY_SALT + salt);
     if (!opId) {
-      await txn.delete(KEY_RECON + salt); // nothing to reconcile
-      return { ok: true, body: { ok: true, resolved: 'no_operation' } };
+      return { resolved: 'no_operation', body: { error: 'reconcile_no_operation' } };
     }
     const record = await txn.get(KEY_OP + opId);
     if (!record) {
+      return { resolved: 'no_record', body: { error: 'reconcile_no_record', operationId: opId } };
+    }
+    // Divergent terminal state → auditable conflict (never silently succeed).
+    if (TERMINAL_STATES.has(record.status) && record.status !== to) {
       await txn.delete(KEY_RECON + salt);
-      return { ok: true, body: { ok: true, resolved: 'no_record' } };
+      return { resolved: 'conflict', body: { ok: false, error: 'divergent_terminal_state', current: record.status, requested: to, operationId: opId } };
     }
-    if (record.status === to || TERMINAL_STATES.has(record.status)) {
-      await txn.delete(KEY_RECON + salt); // already reconciled
-      return { ok: true, body: { ok: true, resolved: 'already', record } };
-    }
-    const allowed = VALID_TRANSITIONS[record.status] || [];
-    if (!allowed.includes(to)) {
-      // Cannot apply (e.g. still 'reserved'); escalate to requires_review if terminal target unsupported.
-      if (record.status === 'reserved' || record.status === 'submitting') {
-        return { ok: false, body: { error: 'reconcile_not_applicable', current: record.status } };
-      }
+
+    const outcome = await this._transitionOp(txn, opId, to, evidence, { via: 'reconcile' });
+    if (outcome.resolved === 'applied' || outcome.resolved === 'already') {
       await txn.delete(KEY_RECON + salt);
-      return { ok: true, body: { ok: true, resolved: 'invalid_transition', record } };
+      return { resolved: outcome.resolved, body: outcome.body };
     }
-    if (to === 'confirmed' && !evidence.transactionHash) {
-      return { ok: false, body: { error: 'confirmed_requires_transaction_hash' } };
-    }
-    const now = Date.now();
-    const updated = {
-      ...record,
-      status:    to,
-      version:   record.version + 1,
-      updatedAt: new Date(now).toISOString(),
-      txHash:    evidence.transactionHash || record.txHash || null,
-      evidence:  record.evidence.concat([{ to, at: new Date(now).toISOString(), via: 'reconcile' }]),
-    };
-    // Release the reservation on terminal transition.
-    if (TERMINAL_STATES.has(to)) {
-      const balRes = await txn.get(KEY_BALRES + record.scope);
-      const reservedTotal = (balRes && balRes.total) || '0';
-      await txn.put(KEY_BALRES + record.scope, { total: subUint(reservedTotal, record.reservedAmount) });
-      const settled = to === 'confirmed' || (to === 'failed' && record.status !== 'reserved' && record.status !== 'submitting');
-      if (settled) {
-        const snapshot = await txn.get(KEY_BAL + record.scope);
-        if (snapshot && typeof snapshot.amount === 'string') {
-          await txn.put(KEY_BAL + record.scope, {
-            ...snapshot,
-            amount:     subUint(snapshot.amount, record.reservedAmount),
-            stale:      true,
-            asOf:       new Date(now).toISOString(),
-            generation: (typeof snapshot.generation === 'number' ? snapshot.generation : 0) + 1,
-          });
-        }
-      }
-    }
-    await txn.put(KEY_OP + opId, updated);
-    await txn.delete(KEY_RECON + salt);
-    return { ok: true, body: { ok: true, record: updated } };
+    // Not applied (e.g. still 'reserved', missing evidence) → keep pending for retry.
+    return { resolved: 'pending', body: outcome.body };
   }
 
   async _hasPendingReconciles() {
@@ -792,9 +796,11 @@ export class GatewayExecutionCoordinator {
         if (!marker) { await this.storage.delete(key); continue; }
         const attempts = (typeof marker.attempts === 'number' ? marker.attempts : 0) + 1;
         maxAttempts = Math.max(maxAttempts, attempts);
-        const outcome = await this.storage.transaction((txn) =>
+        const result = await this.storage.transaction((txn) =>
           this._applyReconcile(txn, marker.salt, marker.to, marker.evidence));
-        if (!outcome.ok) {
+        // applied / already / conflict → the marker was already resolved in the txn.
+        const pending = result.resolved === 'pending' || result.resolved === 'no_record' || result.resolved === 'no_operation';
+        if (pending) {
           if (attempts >= MAX_RECONCILE_ATTEMPTS) {
             // Escalate: mark the op requires_review (best-effort, evidence preserved).
             await this.storage.transaction(async (txn) => {

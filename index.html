@@ -42613,11 +42613,18 @@ function _saFmtGwBal(balStr) {
   return s.slice(0, dotIdx + 7).padEnd(dotIdx + 7, '0');
 }
 
-// ── Gateway idempotency key resolution (Phase 1.0.1C.3) ────────────────────
-// Server-bound, session-stable identity. The server (/api/gateway/intent) issues
-// and persists the key; sessionStorage caches it across refresh. A local UUID is
-// the fallback only when the identity endpoint is unreachable (never the authority).
-var _gwIdemSessionKey = 'gw:idem:key';
+// ── Gateway idempotency key resolution (Phase 1.0.1D) ──────────────────────
+// Server-bound, session-stable identity. The server (/api/gateway/intent) derives
+// the key deterministically from the intent session; sessionStorage caches it,
+// ISOLATED per wallet so a wallet switch never reuses another wallet's identity.
+// A local UUID is the fallback only when the identity endpoint is unreachable.
+var _gwIdemSessionPrefix = 'gw:idem:key:';
+
+function _gwCurrentWallet() {
+  var w = (typeof walletAddress !== 'undefined' ? walletAddress : '') ||
+          (typeof _ubWalletKey === 'function' ? _ubWalletKey() : '');
+  return String(w || '').toLowerCase();
+}
 
 function _gwNewLocalIdemKey() {
   var b = new Uint8Array(16);
@@ -42628,22 +42635,29 @@ function _gwNewLocalIdemKey() {
 }
 
 async function _gwResolveIdemKey() {
+  var wallet = _gwCurrentWallet();
+  var sKey = _gwIdemSessionPrefix + wallet;
   try {
-    var cached = sessionStorage.getItem(_gwIdemSessionKey);
+    var cached = sessionStorage.getItem(sKey);
     if (cached && /^[A-Za-z0-9._-]{8,128}$/.test(cached)) return cached;
   } catch(_) {}
   try {
     var res = await fetch('/api/gateway/intent', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
+      body: JSON.stringify({ walletAddress: wallet, intentSessionId: ('session-' + wallet.replace(/^0x/, '').slice(0, 24)) }),
     });
     if (res.ok) {
       var data = await res.json();
       if (data && data.idempotencyKey) {
-        try { sessionStorage.setItem(_gwIdemSessionKey, data.idempotencyKey); } catch(_) {}
+        try { sessionStorage.setItem(sKey, data.idempotencyKey); } catch(_) {}
         return data.idempotencyKey;
       }
+    }
+    // A definitive error (e.g. 409 payload mismatch) must NOT silently fall back
+    // to a local UUID — surface it so the caller does not mask the conflict.
+    if (res.status === 409 || res.status === 400) {
+      return { __intentError: res.status };
     }
   } catch(_) {}
   // Fallback: local UUID (identity endpoint unreachable). The coordinator, when
@@ -42824,6 +42838,10 @@ async function saExecGateway() {
     // SAME key. Falls back to a local UUID only when the identity endpoint is
     // unreachable. The GatewayExecutionCoordinator (when enabled) dedups on it.
     var gwIdempotencyKey = await _gwResolveIdemKey();
+    if (gwIdempotencyKey && gwIdempotencyKey.__intentError) {
+      toast('Intent identity conflict — please restart the transfer', 'error');
+      return { status: 'error', error: 'intent_identity_conflict' };
+    }
 
     // ── bytes32 pad helper: lowercase hex addr → 32-byte zero-padded hex ──────
     function pad32(hexAddr) {

@@ -541,6 +541,40 @@ describe('GatewayExecutionCoordinator — dedup + balance reservation (real clas
     expect(r2.status).toBe(200);
   });
 
+  it('a reconcile for a salt NOT in this shard returns 404 (environment isolation, Gate C)', async () => {
+    const coord = makeCoord();
+    // No op reserved under this salt → 404 (caller probes the other shard).
+    const res = await doFetch(coord, '/reconcile', 'POST', { salt: '0x' + 'ab'.repeat(32), to: 'confirmed', evidence: { transactionHash: '0x' + 'cc'.repeat(32) } });
+    expect(res.status).toBe(404);
+    expect((await res.json()).error).toBe('not_in_this_environment');
+  });
+
+  it('a divergent terminal state yields an auditable conflict, never silent success (Gate D)', async () => {
+    const coord = makeCoord();
+    await seedBalance(coord, scopeOf(makeBurnIntent()), '100000000');
+    const rec = (await (await doFetch(coord, '/reserve', 'POST', { burnIntent: makeBurnIntent(), idempotencyKey: IDEM_KEY_A })).json()).record;
+    await doFetch(coord, '/update', 'POST', { operationId: rec.operationId, to: 'submitting', expectedVersion: 1, evidence: {} });
+    await doFetch(coord, '/update', 'POST', { operationId: rec.operationId, to: 'accepted', expectedVersion: 2, evidence: {} });
+    // Terminal as 'failed' first.
+    await doFetch(coord, '/update', 'POST', { operationId: rec.operationId, to: 'failed', expectedVersion: 3, evidence: {} });
+
+    // Reconcile to 'confirmed' → divergent terminal → conflict (409).
+    const res = await doFetch(coord, '/reconcile', 'POST', { salt: rec.salt, to: 'confirmed', evidence: { transactionHash: '0x' + 'cc'.repeat(32) } });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe('divergent_terminal_state');
+  });
+
+  it('rejects a stale_generation snapshot (Gate E fencing)', async () => {
+    const coord = makeCoord();
+    const scope = scopeOf(makeBurnIntent());
+    await seedBalance(coord, scope, '100000000'); // generation 1
+    await doFetch(coord, '/set-balance', 'POST', { scope, amount: '90000000', asOf: new Date(Date.now() + 3600000).toISOString() }); // generation 2
+    // A query that observed generation 1 (before the 2nd write) is now stale.
+    const res = await doFetch(coord, '/set-balance', 'POST', { scope, amount: '100000000', asOf: new Date(Date.now() + 7200000).toISOString(), expectedGeneration: 1 });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe('stale_generation');
+  });
+
   it('an expired balance snapshot is treated as stale (Gate D temporal validity)', async () => {
     const coord = makeCoord();
     const scope = scopeOf(makeBurnIntent());
@@ -663,6 +697,25 @@ describe('transfer.js — flag-gated coordinator integration (real handler)', ()
     const body = await st.json();
     expect(body.record.status).toBe('accepted');
     expect(body.record.transferId).toBe(null); // no transferId in this mock body
+  });
+
+  it('enabled → HTTP 200 without a valid attestation stays ambiguous (Gate F)', async () => {
+    const ns = makeCoordinatorNamespace();
+    const env = makeEnv(ns, true);
+    // 200 response but NO attestation field → the item is inconclusive, not accepted.
+    globalThis.fetch = async (url) => {
+      if (String(url).includes('/v1/balances')) return new Response(JSON.stringify({ balances: [{ domain: 26, balance: '100.000000' }] }), { status: 200 });
+      if (String(url).includes('/v1/transfer')) return new Response(JSON.stringify([{ burnIntent: { spec: { salt: '0x' + '44'.repeat(32) } } }]), { status: 200 });
+      return new Response('{}', { status: 404 });
+    };
+    const res = await onRequestPost({ request: makePostRequest([makeTransferItem(makeBurnIntent({ sourceToken: USDC_ARC }), IDEM_KEY_A)]), env });
+    expect(res.status).toBe(200);
+
+    const names = [...ns.instances.keys()];
+    const coord = ns.instances.get(names[0]);
+    const st = await coord.fetch(new Request('https://do/status?idempotencyKey=' + IDEM_KEY_A, { headers: { 'X-DO-Internal-Secret': SECRET } }));
+    const body = await st.json();
+    expect(body.record.status).toBe('ambiguous');
   });
 
   it('enabled → blocks a cross-salt duplicate (409) and does NOT forward', async () => {

@@ -486,14 +486,14 @@ async function fetchGatewayBalance(symbol, domain, depositor, env) {
 
 // The DO is keyed by depositor:environment; set-balance needs that key. The call
 // site derives depositor/environment from the burnIntent. `asOf` is the fetch-start
-// time used for monotonic snapshot ordering (Gate C).
-async function coordinatorSetBalanceFor(scope, amount, depositor, environment, asOf, env) {
+// time; `expectedGeneration` is the generation observed before the query (fencing).
+async function coordinatorSetBalanceFor(scope, amount, depositor, environment, asOf, expectedGeneration, env) {
   try {
     const stub = coordinatorStub(env, depositor, environment);
     const res  = await stub.fetch('https://internal/set-balance', {
       method:  'POST',
       headers: doHeaders(env),
-      body:    JSON.stringify({ scope, amount, source: 'circle', asOf }),
+      body:    JSON.stringify({ scope, amount, source: 'circle', asOf, expectedGeneration }),
     });
     if (!res.ok) {
       let body; try { body = await res.json(); } catch(_) { body = {}; }
@@ -502,6 +502,20 @@ async function coordinatorSetBalanceFor(scope, amount, depositor, environment, a
     return { ok: true };
   } catch(_) {
     return { ok: false, error: 'coordinator_unavailable' };
+  }
+}
+
+// Read the current balance snapshot generation (for query fencing — Gate E).
+// Returns null when unavailable (the caller then relies on asOf ordering).
+async function coordinatorBalanceGeneration(scope, depositor, environment, env) {
+  try {
+    const stub = coordinatorStub(env, depositor, environment);
+    const res  = await stub.fetch('https://internal/balance?scope=' + scope, { headers: doHeaders(env) });
+    if (!res.ok) return null;
+    const body = await res.json().catch(() => ({}));
+    return (typeof body.generation === 'number') ? body.generation : null;
+  } catch(_) {
+    return null;
   }
 }
 
@@ -538,8 +552,9 @@ async function coordinatorConfirm(salt, depositor, to, evidence, env) {
 // durably acknowledged the obligation — never a false "queued" claim.
 
 // Register a durable reconciliation obligation in the coordinator DO. Probes both
-// environments (the DO is sharded by depositor:environment). Returns { ok } only on
-// a durable ack.
+// environments (the DO is sharded by depositor:environment). Returns { ok, resolved?,
+// conflict?, error } — ok only on a durable ack; 404 → try the other shard; 409 →
+// divergent-terminal conflict.
 async function enqueueReconcile(salt, depositor, to, evidence, env) {
   for (const environment of ['mainnet', 'testnet']) {
     try {
@@ -550,7 +565,12 @@ async function enqueueReconcile(salt, depositor, to, evidence, env) {
         body:    JSON.stringify({ salt, to, evidence }),
       });
       if (res.status === 200 || res.status === 201) {
-        return { ok: true };
+        const body = await res.json().catch(() => ({}));
+        return { ok: true, resolved: body.resolved || 'durably_queued' };
+      }
+      if (res.status === 409) {
+        const body = await res.json().catch(() => ({}));
+        return { ok: false, conflict: true, error: body.error || 'divergent_terminal_state' };
       }
       // 404 = no op under this environment; try the other one.
     } catch(_) { /* try the other environment */ }
@@ -760,8 +780,10 @@ export async function onRequestPost(ctx) {
       }
 
       // Authoritative balance (server-side fetch, never client-supplied). `asOf`
-      // is the fetch-start time used for monotonic snapshot ordering (Gate C).
+      // is the fetch-start time; `expectedGeneration` is the generation observed
+      // BEFORE the query, used for financial fencing (Gate E).
       const balanceAsOf = new Date().toISOString();
+      const expectedGeneration = await coordinatorBalanceGeneration(scope, depositor, environment, env);
       const amount = await fetchGatewayBalance(symbol, domain, depositor, env);
       if (amount === null) {
         const rollbackFailures = await rollbackAll(reserved, coordReserved, env);
@@ -771,7 +793,7 @@ export async function onRequestPost(ctx) {
           rollbackFailures: rollbackFailures.length ? rollbackFailures : undefined,
         }, 503);
       }
-      const sb = await coordinatorSetBalanceFor(scope, amount, depositor, environment, balanceAsOf, env);
+      const sb = await coordinatorSetBalanceFor(scope, amount, depositor, environment, balanceAsOf, expectedGeneration, env);
       if (!sb.ok) {
         const rollbackFailures = await rollbackAll(reserved, coordReserved, env);
         return jsonResp({
@@ -954,6 +976,20 @@ export async function onRequestPost(ctx) {
   }
   const newStatus = classifyHttpStatus(upRes.status);
 
+  // Gate F (coordinated mode): classify each item INDIVIDUALLY. HTTP 2xx alone is
+  // not proof of financial acceptance — an item is only 'accepted' with a valid
+  // attestation + a verifiable salt echo; otherwise a 2xx is inconclusive
+  // ('ambiguous'). Legacy (per-salt) flow keeps the whole-batch `newStatus`.
+  function classifyItemStatus(httpStatus, ev) {
+    if (httpStatus >= 200 && httpStatus < 300) {
+      const hasAttestation = !!(ev && ev.attestationPayload != null && ev.attestationSignature != null);
+      return hasAttestation ? 'accepted' : 'ambiguous';
+    }
+    if (httpStatus === 408 || httpStatus === 429) return 'ambiguous';
+    if (httpStatus >= 400 && httpStatus < 500) return 'rejected';
+    return 'ambiguous';
+  }
+
   let parsed;
   try { parsed = JSON.parse(upBody); } catch(_) { parsed = { raw: upBody }; }
 
@@ -984,7 +1020,9 @@ export async function onRequestPost(ctx) {
         attestationPayload:   ev.attestationPayload != null ? String(ev.attestationPayload) : null,
         attestationSignature: ev.attestationSignature != null ? String(ev.attestationSignature) : null,
       };
-      const cu = await coordinatorUpdate(ce.burnIntent, ce.operationId, newStatus, ce.version, evidence, env);
+      // Per-item status: 2xx without valid evidence stays inconclusive.
+      const itemStatus = classifyItemStatus(upRes.status, ev);
+      const cu = await coordinatorUpdate(ce.burnIntent, ce.operationId, itemStatus, ce.version, evidence, env);
       if (!cu.ok) persistFailures.push({ operationId: ce.operationId, error: cu.error });
     }
   }
