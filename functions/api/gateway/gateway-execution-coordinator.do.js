@@ -109,6 +109,8 @@ const KEY_INDEX = 'index:operations';
 const KEY_BAL   = 'bal:';
 const KEY_BALRES = 'balres:';
 const KEY_RECON = 'reconcile:';
+const KEY_PILOT_ACTIVE = 'pilot:active';
+const KEY_PILOT_DAILY  = 'pilot:daily:';
 
 // Reconciliation alarm backoff (ms). Bounded retry — after exhaustion the marker
 // is escalated to requires_review rather than retried forever.
@@ -327,6 +329,38 @@ export class GatewayExecutionCoordinator {
         };
       }
 
+      // ── Pilot limits (Gate D) — enforced atomically, server-side ─────────
+      // Per-op, daily, and concurrent caps bound financial exposure. Counters are
+      // keyed by depositor (the DO is per-depositor) and are atomic with reserve.
+      const pilot = (body.pilot && typeof body.pilot === 'object') ? body.pilot : null;
+      if (pilot) {
+        if (pilot.maxPerOp && BigInt(reservedAmount) > BigInt(String(pilot.maxPerOp))) {
+          return { status: 429, body: { error: 'pilot_per_op_limit', requested: reservedAmount, maxPerOp: String(pilot.maxPerOp) } };
+        }
+        if (pilot.maxConcurrent != null) {
+          const active = await txn.get(KEY_PILOT_ACTIVE);
+          const activeCount = (active && typeof active.count === 'number') ? active.count : 0;
+          if (activeCount >= Number(pilot.maxConcurrent)) {
+            return { status: 429, body: { error: 'pilot_concurrent_limit', active: activeCount, maxConcurrent: Number(pilot.maxConcurrent) } };
+          }
+        }
+        if (pilot.maxPerDay) {
+          const dayKey = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+          const daily = await txn.get(KEY_PILOT_DAILY + dayKey);
+          const dailyTotal = (daily && daily.total) || '0';
+          const nextDaily = addUint(dailyTotal, reservedAmount);
+          if (nextDaily === null || BigInt(nextDaily) > BigInt(String(pilot.maxPerDay))) {
+            return { status: 429, body: { error: 'pilot_daily_limit', requested: reservedAmount, daily: dailyTotal, maxPerDay: String(pilot.maxPerDay) } };
+          }
+          await txn.put(KEY_PILOT_DAILY + dayKey, { total: nextDaily });
+        }
+        if (pilot.maxConcurrent != null) {
+          const active = await txn.get(KEY_PILOT_ACTIVE);
+          const activeCount = (active && typeof active.count === 'number') ? active.count : 0;
+          await txn.put(KEY_PILOT_ACTIVE, { count: activeCount + 1 });
+        }
+      }
+
       const record = {
         schemaVersion:  SCHEMA_VERSION,
         operationId,
@@ -543,6 +577,11 @@ export class GatewayExecutionCoordinator {
       const balRes = await txn.get(KEY_BALRES + record.scope);
       const reservedTotal = (balRes && balRes.total) || '0';
       await txn.put(KEY_BALRES + record.scope, { total: subUint(reservedTotal, record.reservedAmount) });
+
+      // Release a pilot concurrent slot (at most once).
+      const active = await txn.get(KEY_PILOT_ACTIVE);
+      const activeCount = (active && typeof active.count === 'number') ? active.count : 0;
+      await txn.put(KEY_PILOT_ACTIVE, { count: Math.max(0, activeCount - 1) });
 
       // Settled (Circle actually debited) → decrement the snapshot conservatively
       // and mark stale so the next reserve requires a fresh balance sync. Bump

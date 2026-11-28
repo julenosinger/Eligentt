@@ -350,10 +350,11 @@ function isTruthyFlag(v) {
   return v === true || v === 'true' || v === '1' || v === 1;
 }
 
-// Returns 'enabled' | 'draining' | 'disabled'.
+// Returns 'enabled' | 'pilot' | 'draining' | 'disabled'.
 function coordinatorDesired(env) {
   const flag = env && env.GATEWAY_EXECUTION_COORDINATOR_ENABLED;
   if (flag === 'drain' || flag === 'draining') return 'draining';
+  if (flag === 'pilot') return 'pilot';
   if (isTruthyFlag(flag)) return 'enabled';
   return 'disabled';
 }
@@ -364,14 +365,22 @@ function coordinatorAvailable(env) {
             typeof env.GATEWAY_EXECUTION_COORDINATOR.get === 'function');
 }
 
+// Parse the pilot allowlist (comma/whitespace-separated 0x addresses) into a set of
+// lowercase addresses. Always returns an array (empty → nobody authorized).
+function parseAllowlist(raw) {
+  if (typeof raw !== 'string' || !raw.trim()) return [];
+  return raw.split(/[,\s]+/).map((a) => a.trim().toLowerCase()).filter((a) => /^0x[0-9a-f]{40}$/.test(a));
+}
+
 function coordinatorStub(env, depositor, environment) {
   const coord = env && env.GATEWAY_EXECUTION_COORDINATOR;
   const doId  = coord.idFromName('gateway-exec:' + depositor + ':' + environment);
   return coord.get(doId);
 }
 
-// Returns { ok, recovered?, conflict?, record?, error }.
-async function coordinatorReserve(burnIntent, idempotencyKey, env) {
+// Returns { ok, recovered?, conflict?, record?, error }. `pilot` carries the
+// per-op/daily/concurrent limits enforced server-side by the DO.
+async function coordinatorReserve(burnIntent, idempotencyKey, pilot, env) {
   const depositor   = depositorOf(burnIntent);
   const environment = environmentFor(burnIntent);
   if (!depositor || environment === null) {
@@ -382,12 +391,13 @@ async function coordinatorReserve(burnIntent, idempotencyKey, env) {
     const res  = await stub.fetch('https://internal/reserve', {
       method:  'POST',
       headers: doHeaders(env),
-      body:    JSON.stringify({ burnIntent, idempotencyKey }),
+      body:    JSON.stringify({ burnIntent, idempotencyKey, pilot }),
     });
     const body = await res.json();
     if (res.status === 401) return { ok: false, error: 'coordinator_auth_failed' };
     if (res.status === 409) return { ok: false, conflict: true, error: body.error, record: body.record };
     if (res.status === 422) return { ok: false, insufficient: true, error: body.error, detail: body };
+    if (res.status === 429) return { ok: false, limited: true, error: body.error, detail: body };
     if (res.status === 200) return { ok: true, recovered: true,  record: body.record };
     if (res.status === 201) return { ok: true, recovered: false, record: body.record };
     return { ok: false, error: body.error || 'coordinator_reserve_failed', detail: body };
@@ -505,17 +515,19 @@ async function coordinatorSetBalanceFor(scope, amount, depositor, environment, a
   }
 }
 
-// Read the current balance snapshot generation (for query fencing — Gate E).
-// Returns null when unavailable (the caller then relies on asOf ordering).
+// Read the current balance snapshot generation (for query fencing — Gate E/C).
+// Returns 0 when no snapshot exists yet (initial), null when the DO is unavailable
+// (the caller then fails closed).
 async function coordinatorBalanceGeneration(scope, depositor, environment, env) {
   try {
     const stub = coordinatorStub(env, depositor, environment);
     const res  = await stub.fetch('https://internal/balance?scope=' + scope, { headers: doHeaders(env) });
-    if (!res.ok) return null;
+    if (res.status === 404) return 0; // no snapshot yet → initial generation
+    if (!res.ok) return null; // DO unavailable → fail closed
     const body = await res.json().catch(() => ({}));
-    return (typeof body.generation === 'number') ? body.generation : null;
+    return (typeof body.generation === 'number') ? body.generation : 0;
   } catch(_) {
-    return null;
+    return null; // DO unavailable → fail closed
   }
 }
 
@@ -672,7 +684,29 @@ export async function onRequestPost(ctx) {
       detail:  'The Gateway coordinator is draining; new coordinated transfers are suspended.',
     }, 503);
   }
-  const coordinatorActive = coordDesired === 'enabled' && coordAvailable;
+
+  // ── Pilot gate (Gate D): allowlist + kill switch ───────────────────────────
+  // In pilot mode, only allowlisted wallets run through the coordinator; any
+  // unauthorized wallet falls through to the legacy flow unchanged. A kill switch
+  // blocks ALL new coordinated operations immediately.
+  const pilotMode = coordDesired === 'pilot' && coordAvailable;
+  let pilotAuthorized = true;
+  if (pilotMode) {
+    if (isTruthyFlag(env.GATEWAY_PILOT_KILL_SWITCH)) {
+      return jsonResp({ error: 'pilot_kill_switch', blocked: true, detail: 'The Capital Hub pilot is disabled (kill switch).' }, 503);
+    }
+    const allowlist = parseAllowlist(env.GATEWAY_PILOT_ALLOWLIST);
+    for (const item of body) {
+      const signer = unpad(item.burnIntent.spec.sourceSigner);
+      if (!allowlist.includes(signer.toLowerCase())) {
+        pilotAuthorized = false; // unauthorized wallet → legacy flow, not an error
+        break;
+      }
+    }
+  }
+  // Coordinator is active for coordinated execution in 'enabled', or in 'pilot'
+  // when every wallet is allowlisted. Unauthorized pilot wallets → legacy flow.
+  const coordinatorActive = (coordDesired === 'enabled' || (pilotMode && pilotAuthorized)) && coordAvailable;
 
   // ── Validate each item ────────────────────────────────────────────────────
   for (const item of body) {
@@ -781,9 +815,18 @@ export async function onRequestPost(ctx) {
 
       // Authoritative balance (server-side fetch, never client-supplied). `asOf`
       // is the fetch-start time; `expectedGeneration` is the generation observed
-      // BEFORE the query, used for financial fencing (Gate E).
+      // BEFORE the query, used for financial fencing (Gate E/C — mandatory in
+      // coordinated mode).
       const balanceAsOf = new Date().toISOString();
       const expectedGeneration = await coordinatorBalanceGeneration(scope, depositor, environment, env);
+      if (expectedGeneration === null) {
+        const rollbackFailures = await rollbackAll(reserved, coordReserved, env);
+        return jsonResp({
+          error:            'coordinator_generation_unavailable',
+          blocked:          true,
+          rollbackFailures: rollbackFailures.length ? rollbackFailures : undefined,
+        }, 503);
+      }
       const amount = await fetchGatewayBalance(symbol, domain, depositor, env);
       if (amount === null) {
         const rollbackFailures = await rollbackAll(reserved, coordReserved, env);
@@ -803,10 +846,25 @@ export async function onRequestPost(ctx) {
         }, 503);
       }
 
-      const cr = await coordinatorReserve(burnIntent, item.idempotencyKey, env);
+      // Pilot limits (enforced server-side by the DO, atomic).
+      const pilot = pilotMode ? {
+        maxPerOp:      env.GATEWAY_PILOT_MAX_PER_OP      || '1000000',   // 1 USDC (atomic)
+        maxPerDay:     env.GATEWAY_PILOT_MAX_PER_DAY     || '10000000',  // 10 USDC (atomic)
+        maxConcurrent: parseInt(env.GATEWAY_PILOT_MAX_CONCURRENT || '1', 10),
+      } : null;
+
+      const cr = await coordinatorReserve(burnIntent, item.idempotencyKey, pilot, env);
       if (!cr.ok) {
         const rollbackFailures = await rollbackAll(reserved, coordReserved, env);
-
+        if (cr.limited) {
+          return jsonResp({
+            error:            cr.error || 'pilot_limit_exceeded',
+            detail:           cr.detail,
+            salt:             burnIntent.spec.salt,
+            recoverable:      true,
+            rollbackFailures: rollbackFailures.length ? rollbackFailures : undefined,
+          }, 429);
+        }
         if (cr.conflict) {
           return jsonResp({
             error:            'coordinator_conflict',
@@ -1321,7 +1379,7 @@ export async function onRequestPostConfirm(ctx) {
   // (during drain, existing operations must still reconcile). Reconciliation never
   // silently falls back to a bypass.
   const coordDesired2   = coordinatorDesired(env);
-  const coordinatorActive = (coordDesired2 === 'enabled' || coordDesired2 === 'draining') && coordinatorAvailable(env);
+  const coordinatorActive = (coordDesired2 === 'enabled' || coordDesired2 === 'pilot' || coordDesired2 === 'draining') && coordinatorAvailable(env);
 
   // ── Validate inputs ───────────────────────────────────────────────────────
   if (!salt || !/^0x[0-9a-fA-F]{64}$/.test(salt))

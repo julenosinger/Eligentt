@@ -66,7 +66,11 @@ export async function onRequestPost(ctx) {
   }
 
   const kv = env && env.GATEWAY_OPS_KV;
-  const secret = (env && env.DO_INTERNAL_SECRET) || 'elligentt-gateway-intent-v1';
+  // Gate A: require a securely-configured server secret. No public fallback.
+  const secret = env && env.DO_INTERNAL_SECRET;
+  if (!secret || typeof secret !== 'string' || secret.length < 16) {
+    return jsonResp({ error: 'identity_secret_not_configured', detail: 'DO_INTERNAL_SECRET must be configured to issue identities.' }, 503);
+  }
 
   let idempotencyKey;
   let recovered = false;

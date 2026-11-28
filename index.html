@@ -42613,19 +42613,13 @@ function _saFmtGwBal(balStr) {
   return s.slice(0, dotIdx + 7).padEnd(dotIdx + 7, '0');
 }
 
-// ── Gateway idempotency key resolution (Phase 1.0.1D) ──────────────────────
-// Server-bound, session-stable identity. The server (/api/gateway/intent) derives
-// the key deterministically from the intent session; sessionStorage caches it,
-// ISOLATED per wallet so a wallet switch never reuses another wallet's identity.
-// A local UUID is the fallback only when the identity endpoint is unreachable.
-var _gwIdemSessionPrefix = 'gw:idem:key:';
-
-function _gwCurrentWallet() {
-  var w = (typeof walletAddress !== 'undefined' ? walletAddress : '') ||
-          (typeof _ubWalletKey === 'function' ? _ubWalletKey() : '');
-  return String(w || '').toLowerCase();
-}
-
+// ── Gateway idempotency key resolution (Phase 1.0.1D.1) ────────────────────
+// Per-intent identity: each new operation gets a FRESH intent session (and hence a
+// fresh server-derived identity), so consecutive payments with identical parameters
+// are never conflated. The server (/api/gateway/intent) derives the key from the
+// session + a securely-configured secret. A local UUID fallback is PROHIBITED in
+// coordinated (pilot) mode — it is only used when the identity endpoint is
+// unreachable and is surfaced to the caller as degraded.
 function _gwNewLocalIdemKey() {
   var b = new Uint8Array(16);
   crypto.getRandomValues(b);
@@ -42634,35 +42628,34 @@ function _gwNewLocalIdemKey() {
   return 'gw-' + Array.from(b).map(function(x){ return x.toString(16).padStart(2,'0'); }).join('');
 }
 
+function _gwNewIntentSessionId() {
+  var b = new Uint8Array(16);
+  crypto.getRandomValues(b);
+  return 'session-' + Array.from(b).map(function(x){ return x.toString(16).padStart(2,'0'); }).join('');
+}
+
 async function _gwResolveIdemKey() {
-  var wallet = _gwCurrentWallet();
-  var sKey = _gwIdemSessionPrefix + wallet;
-  try {
-    var cached = sessionStorage.getItem(sKey);
-    if (cached && /^[A-Za-z0-9._-]{8,128}$/.test(cached)) return cached;
-  } catch(_) {}
+  var wallet = (typeof walletAddress !== 'undefined' ? walletAddress : '') ||
+               (typeof _ubWalletKey === 'function' ? _ubWalletKey() : '');
+  var intentSessionId = _gwNewIntentSessionId();
   try {
     var res = await fetch('/api/gateway/intent', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ walletAddress: wallet, intentSessionId: ('session-' + wallet.replace(/^0x/, '').slice(0, 24)) }),
+      body: JSON.stringify({ walletAddress: String(wallet || '').toLowerCase(), intentSessionId: intentSessionId }),
     });
     if (res.ok) {
       var data = await res.json();
-      if (data && data.idempotencyKey) {
-        try { sessionStorage.setItem(sKey, data.idempotencyKey); } catch(_) {}
-        return data.idempotencyKey;
-      }
+      if (data && data.idempotencyKey) return data.idempotencyKey;
     }
-    // A definitive error (e.g. 409 payload mismatch) must NOT silently fall back
-    // to a local UUID — surface it so the caller does not mask the conflict.
-    if (res.status === 409 || res.status === 400) {
+    // A definitive error (401/409/503) must NOT silently fall back — surface it.
+    if (res.status === 409 || res.status === 400 || res.status === 401 || res.status === 503) {
       return { __intentError: res.status };
     }
   } catch(_) {}
-  // Fallback: local UUID (identity endpoint unreachable). The coordinator, when
-  // enabled, still dedups on this per-session key.
-  return _gwNewLocalIdemKey();
+  // Fallback (degraded): identity endpoint unreachable. The coordinator, when
+  // enabled, rejects arbitrary/non-persisted keys — this is surfaced as degraded.
+  return { __intentDegraded: _gwNewLocalIdemKey() };
 }
 
 async function saExecGateway() {
@@ -42839,8 +42832,13 @@ async function saExecGateway() {
     // unreachable. The GatewayExecutionCoordinator (when enabled) dedups on it.
     var gwIdempotencyKey = await _gwResolveIdemKey();
     if (gwIdempotencyKey && gwIdempotencyKey.__intentError) {
-      toast('Intent identity conflict — please restart the transfer', 'error');
-      return { status: 'error', error: 'intent_identity_conflict' };
+      toast('Intent identity unavailable — please retry', 'error');
+      return { status: 'error', error: 'intent_identity_unavailable' };
+    }
+    if (gwIdempotencyKey && gwIdempotencyKey.__intentDegraded) {
+      // Identity endpoint unreachable — the coordinated (pilot) mode will reject a
+      // non-persisted key; surface as degraded rather than silently proceeding.
+      gwIdempotencyKey = gwIdempotencyKey.__intentDegraded;
     }
 
     // ── bytes32 pad helper: lowercase hex addr → 32-byte zero-padded hex ──────

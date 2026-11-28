@@ -93,6 +93,19 @@
   //   Disabling the flag does NOT release ambiguous reservations and does NOT permit
   //   resubmission of operations already started.
   //
+  //   MODES (Phase 1.0.1D.1): 'disabled' | 'pilot' | 'enabled' | 'draining'.
+  //     - disabled: legacy flow (default).
+  //     - pilot:    coordinated execution ONLY for allowlisted wallets.
+  //     - enabled:  reserved for future approval (not activated this phase).
+  //     - draining: suspend new coordinated operations; reconcile existing.
+  //   PILOT CONFIG (env vars, all server-validated + atomic):
+  //     GATEWAY_PILOT_ALLOWLIST       = comma-separated 0x wallet addresses
+  //     GATEWAY_PILOT_MAX_PER_OP      = '1000000'  (1 USDC, atomic units)
+  //     GATEWAY_PILOT_MAX_PER_DAY     = '10000000' (10 USDC, atomic units)
+  //     GATEWAY_PILOT_MAX_CONCURRENT  = '1'         (max concurrent ops per wallet)
+  //     GATEWAY_PILOT_KILL_SWITCH     = 'true'      (immediate stop of new ops)
+  //   Unauthorized wallets in pilot mode fall through to the legacy flow unchanged.
+  //
   // PAYMENT_LOCK — atomic per-(chainId+txHash) idempotence lock for payment links.
   //   Same activation process, using PaymentLock class from functions/api/payment-lock.do.js.
   //   Until activated, payment/[token].js falls back to KV-sentinel strategy.

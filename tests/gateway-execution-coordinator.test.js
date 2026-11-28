@@ -652,9 +652,40 @@ describe('transfer.js — flag-gated coordinator integration (real handler)', ()
     expect(forwarded).toBe(false);
   });
 
+  it('pilot mode: an unauthorized wallet falls through to the legacy flow (no coordinator)', async () => {
+    const ns = makeCoordinatorNamespace();
+    const env = { GATEWAY_OPS_KV: makeKV(), DO_INTERNAL_SECRET: SECRET, GATEWAY_EXECUTION_COORDINATOR: ns, GATEWAY_EXECUTION_COORDINATOR_ENABLED: 'pilot', GATEWAY_PILOT_ALLOWLIST: '0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef' };
+    let forwarded = false;
+    globalThis.fetch = async () => { forwarded = true; return new Response(JSON.stringify([{ attestation: {} }]), { status: 200 }); };
+    const res = await onRequestPost({ request: makePostRequest([makeTransferItem(makeBurnIntent({ sourceToken: USDC_ARC }), IDEM_KEY_A)]), env });
+    expect(res.status).toBe(200); // legacy flow forwards
+    expect(forwarded).toBe(true);
+    expect(ns.instances.size).toBe(0); // no coordinator instance created
+  });
+
+  it('pilot mode: kill switch blocks all new coordinated operations (503)', async () => {
+    const ns = makeCoordinatorNamespace();
+    const env = { GATEWAY_OPS_KV: makeKV(), DO_INTERNAL_SECRET: SECRET, GATEWAY_EXECUTION_COORDINATOR: ns, GATEWAY_EXECUTION_COORDINATOR_ENABLED: 'pilot', GATEWAY_PILOT_KILL_SWITCH: 'true', GATEWAY_PILOT_ALLOWLIST: DEPOSITOR };
+    let forwarded = false;
+    globalThis.fetch = mockFetch({});
+    const res = await onRequestPost({ request: makePostRequest([makeTransferItem(makeBurnIntent({ sourceToken: USDC_ARC }), IDEM_KEY_A)]), env });
+    expect(res.status).toBe(503);
+    expect((await res.json()).error).toBe('pilot_kill_switch');
+    expect(forwarded).toBe(false);
+  });
+
+  it('pilot mode: over per-op limit → 429', async () => {
+    const ns = makeCoordinatorNamespace();
+    const env = { GATEWAY_OPS_KV: makeKV(), DO_INTERNAL_SECRET: SECRET, GATEWAY_EXECUTION_COORDINATOR: ns, GATEWAY_EXECUTION_COORDINATOR_ENABLED: 'pilot', GATEWAY_PILOT_ALLOWLIST: DEPOSITOR, GATEWAY_PILOT_MAX_PER_OP: '1000' };
+    globalThis.fetch = mockFetch({ balance: '100.000000', transferStatus: 200 });
+    const res = await onRequestPost({ request: makePostRequest([makeTransferItem(makeBurnIntent({ sourceToken: USDC_ARC }), IDEM_KEY_A)]), env });
+    expect(res.status).toBe(429);
+    expect((await res.json()).error).toBe('pilot_per_op_limit');
+  });
+
   it('the intent endpoint issues a server-bound idempotency key and recovers it by session', async () => {
     const kv = makeKV();
-    const env = { GATEWAY_OPS_KV: kv };
+    const env = { GATEWAY_OPS_KV: kv, DO_INTERNAL_SECRET: SECRET };
     const mk = (body) => new Request('https://elligentttest.pages.dev/api/gateway/intent', {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'Origin': 'https://elligentttest.pages.dev' }, body: JSON.stringify(body),
     });
@@ -664,7 +695,7 @@ describe('transfer.js — flag-gated coordinator integration (real handler)', ()
     const key = (await r1.json()).idempotencyKey;
     expect(key).toMatch(/^gw-[0-9a-f]{32}$/);
 
-    // Same session → recover the SAME key.
+    // Same session → recover the SAME key (deterministic derivation).
     const r2 = await onRequestPostIntent({ request: mk({ intentSessionId: 'session-abc-123456' }), env });
     const r2body = await r2.json();
     expect(r2body.idempotencyKey).toBe(key);
@@ -673,6 +704,16 @@ describe('transfer.js — flag-gated coordinator integration (real handler)', ()
     // A new session → a NEW key.
     const r3 = await onRequestPostIntent({ request: mk({ intentSessionId: 'session-xyz-654321' }), env });
     expect((await r3.json()).idempotencyKey).not.toBe(key);
+  });
+
+  it('the intent endpoint fails closed without a configured secret (Gate A)', async () => {
+    const env = { GATEWAY_OPS_KV: makeKV() }; // no DO_INTERNAL_SECRET
+    const mk = (body) => new Request('https://elligentttest.pages.dev/api/gateway/intent', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'Origin': 'https://elligentttest.pages.dev' }, body: JSON.stringify(body),
+    });
+    const res = await onRequestPostIntent({ request: mk({ intentSessionId: 'session-abc-123456' }), env });
+    expect(res.status).toBe(503);
+    expect((await res.json()).error).toBe('identity_secret_not_configured');
   });
 
   it('enabled + missing idempotencyKey → 400', async () => {
