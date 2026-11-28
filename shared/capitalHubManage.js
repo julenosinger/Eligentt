@@ -203,10 +203,12 @@
           fld('Description', '<input class="ch-in ch-in-b" id="ch-qf-charge-desc" maxlength="120" autocomplete="off" placeholder="Optional reference" value="' + esc(f.desc) + '" aria-label="Description">') +
           fld('Expiration', '<select class="ch-sel" id="ch-qf-charge-exp" disabled aria-label="Expiration"><option>Not supported yet</option></select>');
       } else {
-        out += fld('Asset', assetSel) + fld('Gateway available', '<div class="ch-balv">' + avHtml + '</div>') + netSel(k === 'withdraw' ? 'Destination network' : 'Destination network');
-        if (k === 'withdraw') out += fld('Connected wallet', '<div class="ch-balv ch-mono" title="' + esc(w || '') + '">' + (w ? esc(shortAddr(w)) : '<span class="ch-dim">Not connected</span>') + '</div>');
-        else out += fld('Recipient address', '<input class="ch-in ch-in-b" id="ch-qf-' + k + '-to" autocomplete="off" spellcheck="false" placeholder="0x…" value="' + esc(f.to === null ? (w || '') : f.to) + '" aria-label="Recipient address">');
-        out += fld('Amount', amountField(k, asset, true), 'full');
+        // Layout (Phase 1.0.1D.2.4): row 1 Asset | Gateway available; row 2
+        // Destination network | Amount; row 3 Recipient address full-width.
+        out += fld('Asset', assetSel) + fld('Gateway available', '<div class="ch-balv">' + avHtml + '</div>');
+        out += netSel(k === 'withdraw' ? 'Destination network' : 'Destination network') + fld('Amount', amountField(k, asset, true));
+        if (k === 'withdraw') out += fld('Connected wallet', '<div class="ch-balv ch-mono" title="' + esc(w || '') + '">' + (w ? esc(shortAddr(w)) : '<span class="ch-dim">Not connected</span>') + '</div>', 'full');
+        else out += fld('Recipient address', '<input class="ch-in ch-in-b" id="ch-qf-' + k + '-to" autocomplete="off" spellcheck="false" placeholder="0x…" value="' + esc(f.to === null ? (w || '') : f.to) + '" aria-label="Recipient address">', 'full');
       }
     }
     var native = (k === 'send' || k === 'crosschain' || k === 'withdraw');

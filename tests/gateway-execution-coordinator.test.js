@@ -36,6 +36,7 @@ const { GatewayExecutionCoordinator } = await import('../functions/api/gateway/g
 const transfer = await import('../functions/api/gateway/transfer.js');
 const { onRequestPost } = transfer;
 const { onRequestPost: onRequestPostIntent } = await import('../functions/api/gateway/intent.js');
+const { onRequestGet: onRequestGetHealth } = await import('../functions/api/gateway/health.js');
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 const SECRET      = 'test-internal-secret-1234567890abcdef';
@@ -760,6 +761,33 @@ describe('transfer.js — flag-gated coordinator integration (real handler)', ()
     const res = await onRequestPostIntent({ request: mk({ intentSessionId: 'session-abc-123456' }), env });
     expect(res.status).toBe(503);
     expect((await res.json()).error).toBe('identity_secret_not_configured');
+  });
+
+  it('health endpoint reports persistence: none when no binding is configured (P0 diagnosis)', async () => {
+    const env = {}; // no GATEWAY_OP_LOCK, no GATEWAY_OPS_KV
+    const res = await onRequestGetHealth({ request: new Request('https://x/api/gateway/health'), env });
+    expect(res.status).toBe(503);
+    const body = await res.json();
+    expect(body.persistence).toBe('none');
+    expect(body.ok).toBe(false);
+  });
+
+  it('health endpoint reports persistence: kv with the non-production KV fallback', async () => {
+    const env = { GATEWAY_OPS_KV: makeKV() }; // no DO, non-prod KV
+    const res = await onRequestGetHealth({ request: new Request('https://x/api/gateway/health'), env });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.persistence).toBe('kv');
+  });
+
+  it('health endpoint reports persistence: do when GATEWAY_OP_LOCK is bound and reachable', async () => {
+    const ns = makeCoordinatorNamespace();
+    const env = { GATEWAY_OP_LOCK: ns, DO_INTERNAL_SECRET: SECRET };
+    const res = await onRequestGetHealth({ request: new Request('https://x/api/gateway/health'), env });
+    // The DO probe reads a non-existent salt → 404 = reachable.
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.persistence).toBe('do');
   });
 
   it('enabled + missing idempotencyKey → 400', async () => {

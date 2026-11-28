@@ -42918,6 +42918,23 @@ async function saExecGateway() {
       message: burnIntent,
     };
 
+    // ── Operational preflight (Phase 1.0.1D.2.4) ────────────────────────────
+    // Non-destructive backend check BEFORE asking the wallet to sign: if the
+    // Gateway persistence is unavailable, surface the specific reason now instead
+    // of after the user signs.
+    try {
+      var _hl = await fetch('/api/gateway/health', { headers: { 'Accept': 'application/json' } });
+      if (!_hl.ok) {
+        var _hb = await _hl.json().catch(function(){ return {}; });
+        var _hReason = (_hb && _hb.detail) ? _hb.detail : ('HTTP ' + _hl.status);
+        toast('Gateway unavailable: ' + _hReason, 'error');
+        return { status: 'error', error: 'gateway_preflight_failed', detail: _hReason };
+      }
+    } catch(_) {
+      toast('Gateway backend unreachable', 'error');
+      return { status: 'error', error: 'gateway_backend_unreachable' };
+    }
+
     if (btnContent) btnContent.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i> Sign in wallet…';
 
     var signature = await window.ethereum.request({
