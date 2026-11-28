@@ -42647,8 +42647,11 @@ async function _gwResolveIdemKey() {
     if (res.ok) {
       var data = await res.json();
       if (data && data.idempotencyKey) return data.idempotencyKey;
+      // Coordinator disabled → identity not required. Use a benign local key; the
+      // legacy per-salt idempotency remains the protection (P0.2).
+      if (data && data.identityNotRequired) return _gwNewLocalIdemKey();
     }
-    // A definitive error (401/409/503) must NOT silently fall back — surface it.
+    // A definitive error (401/409/503) in ACTIVE modes must NOT silently fall back.
     if (res.status === 409 || res.status === 400 || res.status === 401 || res.status === 503) {
       return { __intentError: res.status };
     }

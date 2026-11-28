@@ -34,6 +34,16 @@ function jsonResp(body, status) {
   });
 }
 
+// Authoritative coordinator mode (same semantics as transfer.js coordinatorDesired).
+// The mode is decided server-side from env, never from a client-controlled flag.
+function coordinatorMode(env) {
+  const flag = env && env.GATEWAY_EXECUTION_COORDINATOR_ENABLED;
+  if (flag === 'drain' || flag === 'draining') return 'draining';
+  if (flag === 'pilot') return 'pilot';
+  if (flag === true || flag === 'true' || flag === '1' || flag === 1) return 'enabled';
+  return 'disabled';
+}
+
 function randomKey() {
   const b = crypto.getRandomValues(new Uint8Array(16));
   b[6] = (b[6] & 0x0f) | 0x40;
@@ -65,8 +75,18 @@ export async function onRequestPost(ctx) {
     return jsonResp({ error: 'invalid_intent_session_id' }, 400);
   }
 
+  // ── Legacy isolation (P0.2) ──────────────────────────────────────────────
+  // When the coordinator is DISABLED, the legacy flow must not depend on this
+  // endpoint and must not require DO_INTERNAL_SECRET. Return a benign
+  // "identityNotRequired" response; the client uses its local idempotency key and
+  // the existing per-salt idempotency remains the protection.
+  if (coordinatorMode(env) === 'disabled') {
+    return jsonResp({ identityNotRequired: true, mode: 'disabled' });
+  }
+
   const kv = env && env.GATEWAY_OPS_KV;
-  // Gate A: require a securely-configured server secret. No public fallback.
+  // Gate A: in active modes, require a securely-configured server secret. No public
+  // fallback.
   const secret = env && env.DO_INTERNAL_SECRET;
   if (!secret || typeof secret !== 'string' || secret.length < 16) {
     return jsonResp({ error: 'identity_secret_not_configured', detail: 'DO_INTERNAL_SECRET must be configured to issue identities.' }, 503);

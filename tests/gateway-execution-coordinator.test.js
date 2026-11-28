@@ -685,7 +685,8 @@ describe('transfer.js — flag-gated coordinator integration (real handler)', ()
 
   it('the intent endpoint issues a server-bound idempotency key and recovers it by session', async () => {
     const kv = makeKV();
-    const env = { GATEWAY_OPS_KV: kv, DO_INTERNAL_SECRET: SECRET };
+    // Pilot mode → identity IS required and issued.
+    const env = { GATEWAY_OPS_KV: kv, DO_INTERNAL_SECRET: SECRET, GATEWAY_EXECUTION_COORDINATOR_ENABLED: 'pilot' };
     const mk = (body) => new Request('https://elligentttest.pages.dev/api/gateway/intent', {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'Origin': 'https://elligentttest.pages.dev' }, body: JSON.stringify(body),
     });
@@ -706,8 +707,20 @@ describe('transfer.js — flag-gated coordinator integration (real handler)', ()
     expect((await r3.json()).idempotencyKey).not.toBe(key);
   });
 
-  it('the intent endpoint fails closed without a configured secret (Gate A)', async () => {
-    const env = { GATEWAY_OPS_KV: makeKV() }; // no DO_INTERNAL_SECRET
+  it('the intent endpoint requires NO secret when the coordinator is DISABLED (P0.2 legacy isolation)', async () => {
+    const env = { GATEWAY_OPS_KV: makeKV() }; // no DO_INTERNAL_SECRET, no coordinator flag → disabled
+    const mk = (body) => new Request('https://elligentttest.pages.dev/api/gateway/intent', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'Origin': 'https://elligentttest.pages.dev' }, body: JSON.stringify(body),
+    });
+    const res = await onRequestPostIntent({ request: mk({ intentSessionId: 'session-abc-123456' }), env });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.identityNotRequired).toBe(true);
+    expect(body.idempotencyKey).toBeUndefined();
+  });
+
+  it('the intent endpoint fails closed in pilot mode without a configured secret (Gate A)', async () => {
+    const env = { GATEWAY_OPS_KV: makeKV(), GATEWAY_EXECUTION_COORDINATOR_ENABLED: 'pilot' }; // no DO_INTERNAL_SECRET
     const mk = (body) => new Request('https://elligentttest.pages.dev/api/gateway/intent', {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'Origin': 'https://elligentttest.pages.dev' }, body: JSON.stringify(body),
     });

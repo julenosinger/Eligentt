@@ -61,4 +61,12 @@ describe('Capital Hub — native execution wiring (Phase 1.0.1D.2)', () => {
     expect(manage).toContain("var recipient = (k === 'withdraw') ? w : (f.to === null ? w : f.to)");
     expect(manage).toContain('Not a trustless withdrawal');
   });
+
+  it('the legacy flow does not block when identity is not required (P0.2)', () => {
+    // _gwResolveIdemKey returns a benign local key when the endpoint says
+    // identityNotRequired (coordinator disabled), never a hard error.
+    const fn = fnOf(html, 'async function _gwResolveIdemKey()');
+    expect(fn).toContain('identityNotRequired');
+    expect(fn).toContain('return _gwNewLocalIdemKey()');
+  });
 });
