@@ -108,6 +108,16 @@ const KEY_SALT  = 'salt:';
 const KEY_INDEX = 'index:operations';
 const KEY_BAL   = 'bal:';
 const KEY_BALRES = 'balres:';
+const KEY_RECON = 'reconcile:';
+
+// Reconciliation alarm backoff (ms). Bounded retry — after exhaustion the marker
+// is escalated to requires_review rather than retried forever.
+const RECONCILE_BACKOFF_MS = [1000, 5000, 30000];
+const MAX_RECONCILE_ATTEMPTS = RECONCILE_BACKOFF_MS.length;
+
+// Balance snapshot temporal validity: a snapshot older than this (ms) is treated
+// as stale and requires a re-sync before reserving.
+const BALANCE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 const OPERATION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SALT_RE         = /^0x[0-9a-fA-F]{64}$/;
@@ -175,7 +185,10 @@ export class GatewayExecutionCoordinator {
         if (method === 'POST'   && path === '/reserve')      return this._reserve(request);
         if (method === 'POST'   && path === '/set-balance')  return this._setBalance(request);
         if (method === 'POST'   && path === '/update')       return this._update(request);
+        if (method === 'POST'   && path === '/dispatch')     return this._dispatch(request);
+        if (method === 'POST'   && path === '/reconcile')    return this._reconcile(request);
         if (method === 'GET'    && path === '/status')       return this._status(url);
+        if (method === 'GET'    && path === '/balance')      return this._balanceMeta(url);
         if (method === 'DELETE' && path === '/release')      return this._release(request);
         return GatewayExecutionCoordinator.json({ error: 'not_found' }, 404);
       });
@@ -285,6 +298,14 @@ export class GatewayExecutionCoordinator {
       if (snapshot.stale === true) {
         return { status: 503, body: { error: 'balance_stale', scope, detail: 'Balance snapshot is stale; re-sync before reserving.' } };
       }
+      // Temporal validity (Gate D): an expired snapshot is treated as stale, so a
+      // never-re-synced snapshot cannot authorize reservation indefinitely.
+      if (typeof snapshot.asOf === 'string' && snapshot.asOf) {
+        const asOfMs = Date.parse(snapshot.asOf);
+        if (Number.isFinite(asOfMs) && (Date.now() - asOfMs) > BALANCE_TTL_MS) {
+          return { status: 503, body: { error: 'balance_expired', scope, detail: 'Balance snapshot exceeded its validity window; re-sync before reserving.' } };
+        }
+      }
       const balRes = await txn.get(KEY_BALRES + scope);
       const reservedTotal = (balRes && balRes.total) || '0';
       const available = subUint(snapshot.amount, reservedTotal);
@@ -326,6 +347,7 @@ export class GatewayExecutionCoordinator {
         scope,
         salt,
         status:         'reserved',
+        dispatched:     false,          // set true (durably) only right before the POST
         version:        1,
         createdAt:      now,
         updatedAt:      now,
@@ -455,10 +477,17 @@ export class GatewayExecutionCoordinator {
         return { status: 400, body: { error: 'invalid_transition', from: record.status, to, allowed } };
       }
 
-      // reserved/submitting → failed is ONLY a batch rollback.
+      // reserved/submitting → failed is ONLY a batch rollback, and ONLY when the
+      // operation was never dispatched (Gate E). A dispatched op cannot be rolled
+      // back by a bare boolean flag — it must go through `ambiguous` reconciliation.
       if ((record.status === 'reserved' || record.status === 'submitting') &&
-          to === 'failed' && evidence.rollback !== true) {
-        return { status: 400, body: { error: 'rollback_required', from: record.status, to } };
+          to === 'failed') {
+        if (evidence.rollback !== true) {
+          return { status: 400, body: { error: 'rollback_required', from: record.status, to } };
+        }
+        if (record.dispatched === true) {
+          return { status: 409, body: { error: 'cannot_rollback_dispatched', from: record.status, to, detail: 'Operation was already dispatched; use ambiguous instead.' } };
+        }
       }
 
       if (to === 'confirmed' && !evidence.transactionHash) {
@@ -590,5 +619,206 @@ export class GatewayExecutionCoordinator {
     });
 
     return GatewayExecutionCoordinator.json(outcome.body, outcome.status);
+  }
+
+  /* ── POST /dispatch ───────────────────────────────────────────────────── */
+  // Body: { operationId, expectedVersion } — marks the operation `dispatched:true`
+  // DURABLY, right before the Circle POST. After this, a rollback via the boolean
+  // flag is refused; an interrupted POST must resolve as `ambiguous`. This makes
+  // "was it submitted?" durable and independent of the caller's word.
+  async _dispatch(request) {
+    let body;
+    try { body = await request.json(); } catch (_) {
+      return GatewayExecutionCoordinator.json({ error: 'invalid_json' }, 400);
+    }
+    const operationId     = body && body.operationId;
+    const expectedVersion = body && body.expectedVersion;
+    if (typeof operationId !== 'string' || !OPERATION_ID_RE.test(operationId)) {
+      return GatewayExecutionCoordinator.json({ error: 'invalid_operation_id' }, 400);
+    }
+    if (!Number.isInteger(expectedVersion) || expectedVersion < 1) {
+      return GatewayExecutionCoordinator.json({ error: 'invalid_version' }, 400);
+    }
+
+    const outcome = await this.storage.transaction(async (txn) => {
+      const record = await txn.get(KEY_OP + operationId);
+      if (!record) return { status: 404, body: { error: 'not_found' } };
+      if (record.version !== expectedVersion) {
+        return { status: 409, body: { error: 'stale_version', current: record.version, expected: expectedVersion } };
+      }
+      // Dispatch is only meaningful from 'submitting' (dispatch authorized).
+      if (record.status !== 'submitting') {
+        return { status: 409, body: { error: 'not_submitting', current: record.status } };
+      }
+      const updated = { ...record, dispatched: true, updatedAt: new Date().toISOString() };
+      await txn.put(KEY_OP + operationId, updated);
+      return { status: 200, body: { ok: true, record: updated } };
+    });
+
+    return GatewayExecutionCoordinator.json(outcome.body, outcome.status);
+  }
+
+  /* ── GET /balance?scope= ──────────────────────────────────────────────── */
+  // Returns the current balance snapshot metadata (amount + generation) so the
+  // caller can fence a subsequent /set-balance against a stale query.
+  async _balanceMeta(url) {
+    const scope = url.searchParams.get('scope') || '';
+    if (!SCOPE_RE.test(scope)) return GatewayExecutionCoordinator.json({ error: 'invalid_scope' }, 400);
+    const snapshot = await this.storage.get(KEY_BAL + scope);
+    if (!snapshot) return GatewayExecutionCoordinator.json({ error: 'not_found' }, 404);
+    return GatewayExecutionCoordinator.json({ scope, amount: snapshot.amount, generation: snapshot.generation || 0, asOf: snapshot.asOf });
+  }
+
+  /* ── POST /reconcile ──────────────────────────────────────────────────── */
+  // Body: { salt, to, evidence }. Registers a durable reconciliation obligation
+  // (Gate B) and attempts an immediate idempotent transition. Returns { ok } only
+  // when the obligation is durably persisted. The alarm retries with backoff.
+  async _reconcile(request) {
+    let body;
+    try { body = await request.json(); } catch (_) {
+      return GatewayExecutionCoordinator.json({ error: 'invalid_json' }, 400);
+    }
+    const salt     = body && body.salt;
+    const to       = body && body.to;
+    const evidence = body && body.evidence && typeof body.evidence === 'object' ? body.evidence : {};
+    if (typeof salt !== 'string' || !SALT_RE.test(salt)) {
+      return GatewayExecutionCoordinator.json({ error: 'invalid_salt' }, 400);
+    }
+    if (typeof to !== 'string' || !KNOWN_STATES.has(to)) {
+      return GatewayExecutionCoordinator.json({ error: 'unknown_status', detail: 'Unknown status: ' + to }, 400);
+    }
+
+    const outcome = await this.storage.transaction(async (txn) => {
+      // Durable obligation BEFORE the transition.
+      await txn.put(KEY_RECON + salt, { salt, to, evidence, attempts: 0, createdAt: new Date().toISOString() });
+      return this._applyReconcile(txn, salt, to, evidence);
+    });
+
+    if (outcome.ok) {
+      // Clear the alarm if no more pending markers (best-effort; re-armed on demand).
+      const remaining = await this._hasPendingReconciles();
+      if (!remaining) await this.storage.deleteAlarm().catch(() => {});
+    } else {
+      await this._armReconcileAlarm();
+    }
+    return GatewayExecutionCoordinator.json(outcome.body, outcome.ok ? 200 : 500);
+  }
+
+  /* ── Reconcile application (shared by /reconcile and alarm) ───────────── */
+  // Idempotent: reads the op by salt, applies the terminal transition if it is
+  // still pending, and clears the marker on success.
+  async _applyReconcile(txn, salt, to, evidence) {
+    const opId = await txn.get(KEY_SALT + salt);
+    if (!opId) {
+      await txn.delete(KEY_RECON + salt); // nothing to reconcile
+      return { ok: true, body: { ok: true, resolved: 'no_operation' } };
+    }
+    const record = await txn.get(KEY_OP + opId);
+    if (!record) {
+      await txn.delete(KEY_RECON + salt);
+      return { ok: true, body: { ok: true, resolved: 'no_record' } };
+    }
+    if (record.status === to || TERMINAL_STATES.has(record.status)) {
+      await txn.delete(KEY_RECON + salt); // already reconciled
+      return { ok: true, body: { ok: true, resolved: 'already', record } };
+    }
+    const allowed = VALID_TRANSITIONS[record.status] || [];
+    if (!allowed.includes(to)) {
+      // Cannot apply (e.g. still 'reserved'); escalate to requires_review if terminal target unsupported.
+      if (record.status === 'reserved' || record.status === 'submitting') {
+        return { ok: false, body: { error: 'reconcile_not_applicable', current: record.status } };
+      }
+      await txn.delete(KEY_RECON + salt);
+      return { ok: true, body: { ok: true, resolved: 'invalid_transition', record } };
+    }
+    if (to === 'confirmed' && !evidence.transactionHash) {
+      return { ok: false, body: { error: 'confirmed_requires_transaction_hash' } };
+    }
+    const now = Date.now();
+    const updated = {
+      ...record,
+      status:    to,
+      version:   record.version + 1,
+      updatedAt: new Date(now).toISOString(),
+      txHash:    evidence.transactionHash || record.txHash || null,
+      evidence:  record.evidence.concat([{ to, at: new Date(now).toISOString(), via: 'reconcile' }]),
+    };
+    // Release the reservation on terminal transition.
+    if (TERMINAL_STATES.has(to)) {
+      const balRes = await txn.get(KEY_BALRES + record.scope);
+      const reservedTotal = (balRes && balRes.total) || '0';
+      await txn.put(KEY_BALRES + record.scope, { total: subUint(reservedTotal, record.reservedAmount) });
+      const settled = to === 'confirmed' || (to === 'failed' && record.status !== 'reserved' && record.status !== 'submitting');
+      if (settled) {
+        const snapshot = await txn.get(KEY_BAL + record.scope);
+        if (snapshot && typeof snapshot.amount === 'string') {
+          await txn.put(KEY_BAL + record.scope, {
+            ...snapshot,
+            amount:     subUint(snapshot.amount, record.reservedAmount),
+            stale:      true,
+            asOf:       new Date(now).toISOString(),
+            generation: (typeof snapshot.generation === 'number' ? snapshot.generation : 0) + 1,
+          });
+        }
+      }
+    }
+    await txn.put(KEY_OP + opId, updated);
+    await txn.delete(KEY_RECON + salt);
+    return { ok: true, body: { ok: true, record: updated } };
+  }
+
+  async _hasPendingReconciles() {
+    const list = await this.storage.list({ prefix: KEY_RECON });
+    return (list.keys || []).length > 0;
+  }
+
+  async _armReconcileAlarm() {
+    const current = await this.storage.getAlarm();
+    if (current === null) {
+      await this.storage.setAlarm(Date.now() + RECONCILE_BACKOFF_MS[0]);
+    }
+  }
+
+  /* ── alarm — durable reconciliation retry with backoff ────────────────── */
+  // Fires for pending reconcile markers. Applies each idempotently; exhausted
+  // markers are escalated to requires_review. Re-arms for any remaining marker.
+  async alarm() {
+    await this.state.blockConcurrencyWhile(async () => {
+      const list = await this.storage.list({ prefix: KEY_RECON });
+      const keys = (list.keys || []).map((k) => k.name);
+      let maxAttempts = 0;
+      for (const key of keys) {
+        const marker = await this.storage.get(key);
+        if (!marker) { await this.storage.delete(key); continue; }
+        const attempts = (typeof marker.attempts === 'number' ? marker.attempts : 0) + 1;
+        maxAttempts = Math.max(maxAttempts, attempts);
+        const outcome = await this.storage.transaction((txn) =>
+          this._applyReconcile(txn, marker.salt, marker.to, marker.evidence));
+        if (!outcome.ok) {
+          if (attempts >= MAX_RECONCILE_ATTEMPTS) {
+            // Escalate: mark the op requires_review (best-effort, evidence preserved).
+            await this.storage.transaction(async (txn) => {
+              const opId = await txn.get(KEY_SALT + marker.salt);
+              if (opId) {
+                const record = await txn.get(KEY_OP + opId);
+                if (record && !TERMINAL_STATES.has(record.status) && record.status !== 'requires_review') {
+                  await txn.put(KEY_OP + opId, { ...record, status: 'requires_review', version: record.version + 1, updatedAt: new Date().toISOString() });
+                }
+              }
+            });
+            await this.storage.delete(key);
+            continue;
+          }
+          await this.storage.put(key, { ...marker, attempts });
+        }
+      }
+      const remaining = await this._hasPendingReconciles();
+      if (remaining) {
+        const idx = Math.max(0, Math.min(maxAttempts - 1, RECONCILE_BACKOFF_MS.length - 1));
+        await this.storage.setAlarm(Date.now() + RECONCILE_BACKOFF_MS[idx]);
+      } else {
+        await this.storage.deleteAlarm().catch(() => {});
+      }
+    });
   }
 }

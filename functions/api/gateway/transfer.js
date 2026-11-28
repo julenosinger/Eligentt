@@ -335,20 +335,27 @@ async function tryRollback(salt, env) {
   }
 }
 
-// ── GatewayExecutionCoordinator integration (Phase 1.0.1C.1 — ISOLATED) ──────
+// ── GatewayExecutionCoordinator integration (Phase 1.0.1C.3 — ISOLATED) ──────
 // The coordinator adds cross-salt dedup (on a caller-provided idempotency key) and
 // quantitative balance reservation on top of the per-salt GatewayOpLock.
 //
-// INTENT vs AVAILABILITY (fail-closed): the activation flag is the *intent*; the
-// binding is the *availability*. A flag set to ON with no (or invalid) binding is
-// an error that fails closed BEFORE any reservation or submission — it must never
-// silently fall back to the legacy per-salt-only flow.
+// MODES (Gate G): the flag is the *intent*; the binding is the *availability*.
+//   - absent/false          → 'disabled'  (legacy per-salt-only flow)
+//   - 'true'/'1'/true       → 'enabled'   (coordinated)
+//   - 'drain'               → 'draining'  (suspend NEW coordinated operations;
+//                                           existing ones stay protected/reconciled)
+// A flag set to 'true'/'drain' with no (or invalid) binding fails closed BEFORE any
+// reservation or submission — never a silent fallback to the legacy flow.
 function isTruthyFlag(v) {
   return v === true || v === 'true' || v === '1' || v === 1;
 }
 
+// Returns 'enabled' | 'draining' | 'disabled'.
 function coordinatorDesired(env) {
-  return !!(env && isTruthyFlag(env.GATEWAY_EXECUTION_COORDINATOR_ENABLED));
+  const flag = env && env.GATEWAY_EXECUTION_COORDINATOR_ENABLED;
+  if (flag === 'drain' || flag === 'draining') return 'draining';
+  if (isTruthyFlag(flag)) return 'enabled';
+  return 'disabled';
 }
 
 function coordinatorAvailable(env) {
@@ -414,9 +421,40 @@ async function coordinatorUpdate(burnIntent, operationId, to, expectedVersion, e
 }
 
 // Best-effort rollback of a reserved coordinator slot (frees it when the forward
-// is blocked). Idempotent; the forward is BLOCKED regardless of the outcome.
+// is blocked). Idempotent; the forward is BLOCKED regardless of the outcome. A
+// dispatched op cannot be rolled back to 'failed' — it is rolled to 'ambiguous'
+// (the POST may already be in-flight; the reservation is preserved, not released).
 async function coordinatorRollback(burnIntent, operationId, version, env) {
-  return coordinatorUpdate(burnIntent, operationId, 'failed', version, { rollback: true }, env);
+  const r = await coordinatorUpdate(burnIntent, operationId, 'failed', version, { rollback: true }, env);
+  if (r.ok) return r;
+  if (r.error === 'cannot_rollback_dispatched') {
+    return coordinatorUpdate(burnIntent, operationId, 'ambiguous', version, {}, env);
+  }
+  return r;
+}
+
+// Mark an operation dispatched (durable, before the Circle POST).
+async function coordinatorDispatch(burnIntent, operationId, version, env) {
+  const depositor   = depositorOf(burnIntent);
+  const environment = environmentFor(burnIntent);
+  if (!depositor || environment === null) {
+    return { ok: false, error: 'coordinator_identity_unavailable' };
+  }
+  try {
+    const stub = coordinatorStub(env, depositor, environment);
+    const res  = await stub.fetch('https://internal/dispatch', {
+      method:  'POST',
+      headers: doHeaders(env),
+      body:    JSON.stringify({ operationId, expectedVersion: version }),
+    });
+    if (res.status === 401) return { ok: false, error: 'coordinator_auth_failed' };
+    let body;
+    try { body = await res.json(); } catch(_) { body = {}; }
+    if (!res.ok) return { ok: false, error: body.error || 'coordinator_dispatch_failed' };
+    return { ok: true };
+  } catch(_) {
+    return { ok: false, error: 'coordinator_unavailable' };
+  }
 }
 
 // Server-side authoritative balance fetch from Circle /v1/balances for a single
@@ -494,38 +532,30 @@ async function coordinatorConfirm(salt, depositor, to, evidence, env) {
 // ── Durable /confirm → coordinator reconciliation (Gate F) ──────────────────
 // A confirmation is a two-DO write: the per-salt GatewayOpLock record (authoritative)
 // and the coordinator record (replica). There is no distributed transaction, so a
-// partial confirmation (per-salt updated, coordinator not yet) is persisted as a
-// durable marker in KV and replayed idempotently. Replay survives restart and does
-// NOT require a new manual user action — it runs on the next /confirm for the same
-// depositor. When GATEWAY_OPS_KV is absent (production DO-only), the marker write
-// is skipped and reconciliation is a 1.0.1D cron/alarm concern.
-const RECONCILE_KV_PREFIX = 'gw:reconcile:';
+// partial confirmation is persisted as a durable reconciliation obligation IN the
+// coordinator DO itself (independent of GATEWAY_OPS_KV), processed idempotently by
+// the DO's alarm with backoff. enqueueReconcile returns { ok } only when the DO
+// durably acknowledged the obligation — never a false "queued" claim.
 
-async function writeReconcileMarker(salt, depositor, to, evidence, env) {
-  const kv = env && env.GATEWAY_OPS_KV;
-  if (!kv) return;
-  try {
-    await kv.put(RECONCILE_KV_PREFIX + salt, JSON.stringify({
-      salt, depositor, to, evidence, createdAt: new Date().toISOString(),
-    }), { expirationTtl: KV_TTL_SECS });
-  } catch(_) { /* best-effort; the per-salt record remains authoritative */ }
-}
-
-async function reconcilePendingFor(depositor, env) {
-  const kv = env && env.GATEWAY_OPS_KV;
-  if (!kv) return;
-  let keys;
-  try { keys = (await kv.list({ prefix: RECONCILE_KV_PREFIX })).keys || []; } catch(_) { return; }
-  for (const k of keys) {
-    let marker;
-    try { marker = await kv.get(k.name, { type: 'json' }); } catch(_) { continue; }
-    if (!marker || marker.depositor !== depositor) continue;
-    const res = await coordinatorConfirm(marker.salt, marker.depositor, marker.to, marker.evidence, env);
-    if (res.ok) {
-      try { await kv.delete(k.name); } catch(_) {}
-    }
-    // else: leave for the next reconciliation pass (idempotent retry).
+// Register a durable reconciliation obligation in the coordinator DO. Probes both
+// environments (the DO is sharded by depositor:environment). Returns { ok } only on
+// a durable ack.
+async function enqueueReconcile(salt, depositor, to, evidence, env) {
+  for (const environment of ['mainnet', 'testnet']) {
+    try {
+      const stub = coordinatorStub(env, depositor, environment);
+      const res = await stub.fetch('https://internal/reconcile', {
+        method:  'POST',
+        headers: doHeaders(env),
+        body:    JSON.stringify({ salt, to, evidence }),
+      });
+      if (res.status === 200 || res.status === 201) {
+        return { ok: true };
+      }
+      // 404 = no op under this environment; try the other one.
+    } catch(_) { /* try the other environment */ }
   }
+  return { ok: false, error: 'reconcile_not_persisted' };
 }
 
 // SHA-256 hex digest (for attestation/signature integrity hashes — Gate F).
@@ -600,20 +630,29 @@ export async function onRequestPost(ctx) {
     return jsonResp({ error: 'requests_required' }, 400);
   }
 
-  // ── Coordinator configuration check (fail-closed) — Phase 1.0.1C.1 ────────
-  // Intent (flag) is separated from availability (binding). A flag set ON with a
-  // missing/invalid binding must fail closed BEFORE any reservation or submission;
-  // it must NOT silently fall back to the legacy per-salt-only flow.
+  // ── Coordinator configuration check (fail-closed) — Phase 1.0.1C.3 ────────
+  // Intent (flag) is separated from availability (binding). A flag set to
+  // 'enabled'/'draining' with a missing/invalid binding must fail closed BEFORE any
+  // reservation or submission — never a silent fallback to the legacy flow.
   const coordDesired    = coordinatorDesired(env);
   const coordAvailable  = coordinatorAvailable(env);
-  if (coordDesired && !coordAvailable) {
+  if (coordDesired !== 'disabled' && !coordAvailable) {
     return jsonResp({
       error:   'coordinator_not_configured',
       blocked: true,
       detail:  'GATEWAY_EXECUTION_COORDINATOR_ENABLED is set but the GATEWAY_EXECUTION_COORDINATOR binding is absent or invalid. Refusing to submit.',
     }, 503);
   }
-  const coordinatorActive = coordDesired && coordAvailable;
+  // Draining: suspend NEW coordinated operations (existing ones stay protected and
+  // reconciled by the DO alarm). Never fall back to the legacy flow for new work.
+  if (coordDesired === 'draining' && coordAvailable) {
+    return jsonResp({
+      error:   'coordinator_draining',
+      blocked: true,
+      detail:  'The Gateway coordinator is draining; new coordinated transfers are suspended.',
+    }, 503);
+  }
+  const coordinatorActive = coordDesired === 'enabled' && coordAvailable;
 
   // ── Validate each item ────────────────────────────────────────────────────
   for (const item of body) {
@@ -821,6 +860,24 @@ export async function onRequestPost(ctx) {
         }, 503);
       }
       ce.version = cu.record ? cu.record.version : ce.version + 1;
+    }
+  }
+
+  // ── Mark dispatched DURABLY before the POST (Gate E) ──────────────────────
+  // Once dispatched:true is persisted, a rollback via the boolean flag is refused
+  // (an interrupted POST resolves as 'ambiguous', never silently rolled back).
+  if (coordinatorActive) {
+    for (const ce of coordReserved) {
+      const dc = await coordinatorDispatch(ce.burnIntent, ce.operationId, ce.version, env);
+      if (!dc.ok) {
+        const rollbackFailures = await rollbackAll(reserved, coordReserved, env);
+        return jsonResp({
+          error:            'coordinator_dispatch_failed',
+          detail:           dc.error,
+          blocked:          true,
+          rollbackFailures: rollbackFailures.length ? rollbackFailures : undefined,
+        }, 503);
+      }
     }
   }
 
@@ -1111,7 +1168,7 @@ export async function onRequestDelete() { return jsonResp({ error: 'method_not_a
 // ONLY chains listed here are supported for /confirm. Unlisted chains → 422.
 //
 // Testnet (confirmed, same address on all testnet chains):
-//   Arc Testnet (chainId 1777078 / domain 26), Arbitrum Sepolia (421614),
+//   Arc Testnet (chainId 5042002 / domain 26), Arbitrum Sepolia (421614),
 //   Base Sepolia (84532), ETH Sepolia (11155111), Avalanche Fuji (43113),
 //   OP Sepolia (11155420), Polygon Amoy (80002), Sei Atlantic (713715),
 //   Sonic Testnet (57054), Unichain Sepolia (1301), World Chain Sepolia (4801)
@@ -1139,7 +1196,7 @@ const GATEWAY_MINTER_ADDRESSES = {
   57054:    GATEWAY_MINTER_TESTNET, // Sonic Testnet
   1301:     GATEWAY_MINTER_TESTNET, // Unichain Sepolia
   4801:     GATEWAY_MINTER_TESTNET, // World Chain Sepolia
-  1777078:  GATEWAY_MINTER_TESTNET, // Arc Testnet (domain 26)
+  5042002:  GATEWAY_MINTER_TESTNET, // Arc Testnet (official chainId; domain 26)
   // ── Mainnet ───────────────────────────────────────────────────────────────
   42161:  GATEWAY_MINTER_MAINNET,  // Arbitrum
   5042:   GATEWAY_MINTER_MAINNET,  // Arc
@@ -1222,9 +1279,11 @@ export async function onRequestPostConfirm(ctx) {
 
   const { salt, depositor, txHash, dstChainId } = body;
 
-  // Coordinator is used for the terminal transition only when both desired and
-  // available. (Reconciliation never silently falls back to a bypass.)
-  const coordinatorActive = coordinatorDesired(env) && coordinatorAvailable(env);
+  // Coordinator is used for the terminal transition when enabled OR draining
+  // (during drain, existing operations must still reconcile). Reconciliation never
+  // silently falls back to a bypass.
+  const coordDesired2   = coordinatorDesired(env);
+  const coordinatorActive = (coordDesired2 === 'enabled' || coordDesired2 === 'draining') && coordinatorAvailable(env);
 
   // ── Validate inputs ───────────────────────────────────────────────────────
   if (!salt || !/^0x[0-9a-fA-F]{64}$/.test(salt))
@@ -1236,13 +1295,6 @@ export async function onRequestPostConfirm(ctx) {
   const chainId = parseInt(dstChainId, 10);
   if (!chainId || isNaN(chainId))
     return jsonResp({ error: 'dstchainid_required' }, 400);
-
-  // ── Durable reconciliation of prior partial confirmations (Gate F) ────────
-  // Replay any pending coordinator terminal transitions for this depositor before
-  // processing this confirmation. Idempotent; no new user action required.
-  if (coordinatorActive) {
-    await reconcilePendingFor(depositor, env);
-  }
 
   // ── Verify GatewayMinter address is known for this chain ─────────────────
   const minterAddr = GATEWAY_MINTER_ADDRESSES[chainId];
@@ -1773,24 +1825,25 @@ export async function onRequestPostConfirm(ctx) {
     }, 502);
   }
 
-  // ── Coordinator terminal transition (Gate E/F, isolated) ───────────────────
+  // ── Coordinator terminal transition (Gate B/E, isolated) ───────────────────
   // After the per-salt record is confirmed/failed, advance the coordinated
   // operation to the same terminal state via the durable salt→operationId binding.
-  // On failure, persist a durable reconciliation marker (replayed on a later
-  // /confirm) instead of depending on a manual retry.
+  // On failure, register a DURABLE reconciliation obligation in the coordinator DO
+  // (processed by its alarm). `reconciliationQueued` is true ONLY on a durable ack.
   if (coordinatorActive) {
     const cc = await coordinatorConfirm(salt, depositor, newStatus, { transactionHash: txHash }, env);
     if (!cc.ok) {
-      await writeReconcileMarker(salt, depositor, newStatus, { transactionHash: txHash }, env);
+      const eq = await enqueueReconcile(salt, depositor, newStatus, { transactionHash: txHash }, env);
       return jsonResp({
-        ok:                   true,
-        salt:                 salt,
-        status:               newStatus,
-        txHash:               txHash,
-        txSuccess:            txSuccess,
-        blockNumber:          receipt.blockNumber || null,
-        coordinatorWarning:   cc.error,
-        reconciliationQueued: true,
+        ok:                    true,
+        salt:                  salt,
+        status:                newStatus,
+        txHash:                txHash,
+        txSuccess:             txSuccess,
+        blockNumber:           receipt.blockNumber || null,
+        coordinatorWarning:    cc.error,
+        reconciliationQueued:  eq.ok === true,
+        reconciliationPending: !(eq.ok === true),
       });
     }
   }

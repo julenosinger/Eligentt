@@ -35,6 +35,7 @@ const {
 const { GatewayExecutionCoordinator } = await import('../functions/api/gateway/gateway-execution-coordinator.do.js');
 const transfer = await import('../functions/api/gateway/transfer.js');
 const { onRequestPost } = transfer;
+const { onRequestPost: onRequestPostIntent } = await import('../functions/api/gateway/intent.js');
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 const SECRET      = 'test-internal-secret-1234567890abcdef';
@@ -84,6 +85,7 @@ const IDEM_KEY_A = 'intent-aaaaaaaa-0001';
 // ── DO-compatible storage mock (serialized single-flight) ───────────────────
 function makeDOState() {
   const store = new Map();
+  let alarmAt = null;
   let queue = Promise.resolve();
   function enqueue(fn) {
     const run = queue.then(fn);
@@ -94,6 +96,14 @@ function makeDOState() {
     async get(k) { return store.has(k) ? store.get(k) : undefined; },
     async put(k, v) { store.set(k, v); },
     async delete(k) { store.delete(k); },
+    async list({ prefix } = {}) {
+      const keys = [];
+      for (const k of store.keys()) if (!prefix || k.startsWith(prefix)) keys.push({ name: k });
+      return { keys };
+    },
+    async getAlarm() { return alarmAt; },
+    async setAlarm(t) { alarmAt = t; },
+    async deleteAlarm() { alarmAt = null; },
     async transaction(fn) {
       const txn = {
         get: async (k) => (store.has(k) ? store.get(k) : undefined),
@@ -103,7 +113,7 @@ function makeDOState() {
       return fn(txn);
     },
   };
-  return { storage, blockConcurrencyWhile: (fn) => enqueue(fn), _store: store };
+  return { storage, blockConcurrencyWhile: (fn) => enqueue(fn), _store: store, _alarm: () => alarmAt };
 }
 
 function makeCoord(secret = SECRET) {
@@ -494,6 +504,53 @@ describe('GatewayExecutionCoordinator — dedup + balance reservation (real clas
     expect((await withRollback.json()).record.status).toBe('failed');
   });
 
+  it('a dispatched operation CANNOT be rolled back to failed (must go ambiguous) (Gate E)', async () => {
+    const coord = makeCoord();
+    await seedBalance(coord, scopeOf(makeBurnIntent()), '100000000');
+    const rec = (await (await doFetch(coord, '/reserve', 'POST', { burnIntent: makeBurnIntent(), idempotencyKey: IDEM_KEY_A })).json()).record;
+    await doFetch(coord, '/update', 'POST', { operationId: rec.operationId, to: 'submitting', expectedVersion: 1, evidence: {} });
+    // Mark dispatched (durable, before POST).
+    const dc = await doFetch(coord, '/dispatch', 'POST', { operationId: rec.operationId, expectedVersion: 2 });
+    expect(dc.status).toBe(200);
+
+    // Rollback to failed is now refused — the op was dispatched.
+    const rb = await doFetch(coord, '/update', 'POST', { operationId: rec.operationId, to: 'failed', expectedVersion: 2, evidence: { rollback: true } });
+    expect(rb.status).toBe(409);
+    expect((await rb.json()).error).toBe('cannot_rollback_dispatched');
+
+    // It can resolve as ambiguous (preserving the reservation).
+    const amb = await doFetch(coord, '/update', 'POST', { operationId: rec.operationId, to: 'ambiguous', expectedVersion: 2, evidence: {} });
+    expect(amb.status).toBe(200);
+    expect((await amb.json()).record.status).toBe('ambiguous');
+  });
+
+  it('/reconcile registers a durable obligation and applies the terminal transition idempotently (Gate B)', async () => {
+    const coord = makeCoord();
+    await seedBalance(coord, scopeOf(makeBurnIntent()), '100000000');
+    const rec = (await (await doFetch(coord, '/reserve', 'POST', { burnIntent: makeBurnIntent(), idempotencyKey: IDEM_KEY_A })).json()).record;
+    await doFetch(coord, '/update', 'POST', { operationId: rec.operationId, to: 'submitting', expectedVersion: 1, evidence: {} });
+    await doFetch(coord, '/update', 'POST', { operationId: rec.operationId, to: 'accepted', expectedVersion: 2, evidence: {} });
+
+    // Reconcile to confirmed (with the required txHash evidence).
+    const r1 = await doFetch(coord, '/reconcile', 'POST', { salt: rec.salt, to: 'confirmed', evidence: { transactionHash: '0x' + 'cc'.repeat(32) } });
+    expect(r1.status).toBe(200);
+    expect((await r1.json()).record.status).toBe('confirmed');
+
+    // Idempotent replay (op already confirmed → resolved:already, no double release).
+    const r2 = await doFetch(coord, '/reconcile', 'POST', { salt: rec.salt, to: 'confirmed', evidence: { transactionHash: '0x' + 'cc'.repeat(32) } });
+    expect(r2.status).toBe(200);
+  });
+
+  it('an expired balance snapshot is treated as stale (Gate D temporal validity)', async () => {
+    const coord = makeCoord();
+    const scope = scopeOf(makeBurnIntent());
+    // Set a snapshot with an asOf far in the past → expired.
+    await doFetch(coord, '/set-balance', 'POST', { scope, amount: '100000000', asOf: new Date(Date.now() - 10 * 60 * 1000).toISOString() });
+    const res = await doFetch(coord, '/reserve', 'POST', { burnIntent: makeBurnIntent(), idempotencyKey: IDEM_KEY_A });
+    expect(res.status).toBe(503);
+    expect((await res.json()).error).toBe('balance_expired');
+  });
+
   it('fails safe on a corrupt idempotency index (missing record)', async () => {
     const state = makeDOState();
     const coord = new GatewayExecutionCoordinator(state, { DO_INTERNAL_SECRET: SECRET });
@@ -548,6 +605,40 @@ describe('transfer.js — flag-gated coordinator integration (real handler)', ()
     const res = await onRequestPost({ request: makePostRequest([makeTransferItem(makeBurnIntent({ sourceToken: USDC_ARC }), IDEM_KEY_A)]), env });
     expect(res.status).toBe(503);
     expect(forwarded).toBe(false);
+  });
+
+  it('drain mode suspends NEW coordinated operations (503) and does NOT fall back', async () => {
+    const ns = makeCoordinatorNamespace();
+    const env = { GATEWAY_OPS_KV: makeKV(), DO_INTERNAL_SECRET: SECRET, GATEWAY_EXECUTION_COORDINATOR: ns, GATEWAY_EXECUTION_COORDINATOR_ENABLED: 'drain' };
+    let forwarded = false;
+    globalThis.fetch = mockFetch({});
+    const res = await onRequestPost({ request: makePostRequest([makeTransferItem(makeBurnIntent({ sourceToken: USDC_ARC }), IDEM_KEY_A)]), env });
+    expect(res.status).toBe(503);
+    expect((await res.json()).error).toBe('coordinator_draining');
+    expect(forwarded).toBe(false);
+  });
+
+  it('the intent endpoint issues a server-bound idempotency key and recovers it by session', async () => {
+    const kv = makeKV();
+    const env = { GATEWAY_OPS_KV: kv };
+    const mk = (body) => new Request('https://elligentttest.pages.dev/api/gateway/intent', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'Origin': 'https://elligentttest.pages.dev' }, body: JSON.stringify(body),
+    });
+
+    const r1 = await onRequestPostIntent({ request: mk({ intentSessionId: 'session-abc-123456' }), env });
+    expect(r1.status).toBe(200);
+    const key = (await r1.json()).idempotencyKey;
+    expect(key).toMatch(/^gw-[0-9a-f]{32}$/);
+
+    // Same session → recover the SAME key.
+    const r2 = await onRequestPostIntent({ request: mk({ intentSessionId: 'session-abc-123456' }), env });
+    const r2body = await r2.json();
+    expect(r2body.idempotencyKey).toBe(key);
+    expect(r2body.recovered).toBe(true);
+
+    // A new session → a NEW key.
+    const r3 = await onRequestPostIntent({ request: mk({ intentSessionId: 'session-xyz-654321' }), env });
+    expect((await r3.json()).idempotencyKey).not.toBe(key);
   });
 
   it('enabled + missing idempotencyKey → 400', async () => {

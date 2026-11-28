@@ -42613,6 +42613,44 @@ function _saFmtGwBal(balStr) {
   return s.slice(0, dotIdx + 7).padEnd(dotIdx + 7, '0');
 }
 
+// ── Gateway idempotency key resolution (Phase 1.0.1C.3) ────────────────────
+// Server-bound, session-stable identity. The server (/api/gateway/intent) issues
+// and persists the key; sessionStorage caches it across refresh. A local UUID is
+// the fallback only when the identity endpoint is unreachable (never the authority).
+var _gwIdemSessionKey = 'gw:idem:key';
+
+function _gwNewLocalIdemKey() {
+  var b = new Uint8Array(16);
+  crypto.getRandomValues(b);
+  b[6] = (b[6] & 0x0f) | 0x40;
+  b[8] = (b[8] & 0x3f) | 0x80;
+  return 'gw-' + Array.from(b).map(function(x){ return x.toString(16).padStart(2,'0'); }).join('');
+}
+
+async function _gwResolveIdemKey() {
+  try {
+    var cached = sessionStorage.getItem(_gwIdemSessionKey);
+    if (cached && /^[A-Za-z0-9._-]{8,128}$/.test(cached)) return cached;
+  } catch(_) {}
+  try {
+    var res = await fetch('/api/gateway/intent', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    if (res.ok) {
+      var data = await res.json();
+      if (data && data.idempotencyKey) {
+        try { sessionStorage.setItem(_gwIdemSessionKey, data.idempotencyKey); } catch(_) {}
+        return data.idempotencyKey;
+      }
+    }
+  } catch(_) {}
+  // Fallback: local UUID (identity endpoint unreachable). The coordinator, when
+  // enabled, still dedups on this per-session key.
+  return _gwNewLocalIdemKey();
+}
+
 async function saExecGateway() {
   // Returns a discriminated result: { status: 'error'|'pending'|'ambiguous', error?, salt?, transferId? }
   // Callers MUST check the returned status — never interpret a normal return as success.
@@ -42779,17 +42817,13 @@ async function saExecGateway() {
     crypto.getRandomValues(saltBytes);
     var salt = '0x' + Array.from(saltBytes).map(function(b){ return b.toString(16).padStart(2,'0'); }).join('');
 
-    // ── Idempotency key (Phase 1.0.1C.2) ───────────────────────────────────
-    // A caller-provided stable identifier for this signed intent, created BEFORE
-    // signing and sent with the request. The GatewayExecutionCoordinator (when
-    // enabled) dedups on it; the per-salt GatewayOpLock and the quantitative
-    // balance reservation remain the primary safeguards. It is ignored when the
-    // coordinator is disabled.
-    var _idemBytes = new Uint8Array(16);
-    crypto.getRandomValues(_idemBytes);
-    _idemBytes[6] = (_idemBytes[6] & 0x0f) | 0x40;
-    _idemBytes[8] = (_idemBytes[8] & 0x3f) | 0x80;
-    var gwIdempotencyKey = 'gw-' + Array.from(_idemBytes).map(function(b){ return b.toString(16).padStart(2,'0'); }).join('');
+    // ── Idempotency key (Phase 1.0.1C.3) ───────────────────────────────────
+    // Server-bound, session-stable identity for this intent, created BEFORE
+    // signing. Resolved from the server (/api/gateway/intent) and cached in
+    // sessionStorage (survives refresh), so a retry of the SAME intent reuses the
+    // SAME key. Falls back to a local UUID only when the identity endpoint is
+    // unreachable. The GatewayExecutionCoordinator (when enabled) dedups on it.
+    var gwIdempotencyKey = await _gwResolveIdemKey();
 
     // ── bytes32 pad helper: lowercase hex addr → 32-byte zero-padded hex ──────
     function pad32(hexAddr) {
