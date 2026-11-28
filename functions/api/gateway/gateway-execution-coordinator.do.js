@@ -1,54 +1,52 @@
 /**
  * GatewayExecutionCoordinator — Durable Object for cross-salt Gateway financial
- * coordination.
+ * coordination + quantitative balance reservation.
  * ═══════════════════════════════════════════════════════════════════════════
- * Phase 1.0.1C (isolated development — NOT active in production).
+ * Phase 1.0.1C.1 (isolated development — NOT active in production).
  *
  * WHY THIS EXISTS
- *   GatewayOpLock keys by `idFromName(salt)` and therefore only deduplicates the
- *   SAME salt. Two concurrent submissions of the SAME financial intent with
- *   DIFFERENT salts each reserve cleanly and both forward — a cross-salt double
- *   submission. This DO coordinates by (depositor, environment) so a depositor
- *   cannot hold two conflicting in-flight intents in the same "payment slot",
- *   even when the salts differ.
+ *   GatewayOpLock keys by `idFromName(salt)` and only deduplicates the SAME salt.
+ *   This DO coordinates by (depositor, environment) and adds two guarantees:
+ *     1. CROSS-SALT DEDUP on a caller-provided idempotency key (stable across
+ *        retries, independent of the salt).
+ *     2. QUANTITATIVE BALANCE RESERVATION per balance scope, so concurrent
+ *        operations cannot commit more than the authoritative available balance.
  *
  * COORDINATOR SCOPE (sharding proof)
- *   One DO instance per `depositor:environment`. The idempotency key and payload
- *   hash are derived entirely from the burnIntent (see coordinator-util.js), so
- *   two conflicting submissions always reach the SAME DO instance and are
- *   serialized by the Cloudflare runtime.
- *
- *   GatewayOpLock REMAINS the per-salt authority. This DO is ADDITIVE: it adds a
- *   cross-salt dedup gate; it does not replace the salt lock, and it is not a
- *   parallel financial executor. Both gates must pass before a transfer forwards.
+ *   One DO instance per `depositor:environment`. All operations that could
+ *   conflict — same idempotency key, same balance scope — reach the SAME instance
+ *   and are serialized by the CF runtime. GatewayOpLock REMAINS the per-salt
+ *   authority; this DO is additive (a gate, not a parallel executor).
  *
  * STORAGE (durable, SQLite-backed on modern CF)
- *   op:<operationId>   → full operation record (see RECORD SHAPE)
- *   idem:<idemKey>     → { operationId, payloadHash }
- *   index:operations   → JSON array of operationId (audit + count cap)
+ *   op:<operationId>    → operation record (see RECORD SHAPE)
+ *   idem:<idemKey>      → { operationId, payloadHash }
+ *   salt:<salt>         → operationId            (for /confirm reconciliation)
+ *   index:operations    → JSON array of operationId (audit — never pruned by release)
+ *   bal:<scope>         → { amount, asOf, source, stale }
+ *   balres:<scope>      → { total } (BigInt string of active reserved amounts)
  *
  * ATOMICITY
  *   Every read-modify-write runs inside `storage.transaction()` and every request
- *   runs inside `state.blockConcurrencyWhile()`, so the reserve/update/release
- *   check-then-write is atomic and race-free.
+ *   inside `state.blockConcurrencyWhile()`. Reserve/update/release are race-free.
+ *   No external calls happen inside storage transactions.
  *
  * INTERNAL AUTH
  *   Every request must carry `X-DO-Internal-Secret` matching env.DO_INTERNAL_SECRET
- *   (constant-time compare). Absent/wrong secret → 401. Never a public route.
+ *   (constant-time). Never a public route.
  *
  * STATE MACHINE
- *   States: reserved | submitting | accepted | ambiguous | requires_review
- *         | confirmed | rejected | failed
+ *   reserved | submitting | accepted | ambiguous | requires_review
+ *   | confirmed | rejected | failed
  *
- *   reserved         reservation + signed intent persisted (nothing forwarded yet)
- *   submitting       forwarded to Circle (in-flight)
- *   accepted         Circle returned 2xx — attestation available (mint pending)
- *   ambiguous        Circle result unknown (timeout / 5xx / 429 / 408)
- *   requires_review  needs manual reconciliation (e.g. persistence failure after
- *                    response, contradictory evidence)
- *   confirmed        on-chain settlement verified          (TERMINAL)
- *   rejected         Circle definitively refused (4xx)     (TERMINAL)
- *   failed           verified failure / batch rollback     (TERMINAL)
+ *     reserved         reservation + signed intent + balance reserved (not forwarded)
+ *     submitting       forwarded to Circle (persisted BEFORE the POST)
+ *     accepted         Circle 2xx — attestation available (mint pending)
+ *     ambiguous        Circle result unknown (timeout / 5xx / 429 / 408)
+ *     requires_review  manual reconciliation needed
+ *     confirmed        on-chain settlement verified   (TERMINAL)
+ *     rejected         Circle definitive 4xx          (TERMINAL)
+ *     failed           verified failure / rollback    (TERMINAL)
  *
  *   Transitions:
  *     reserved        → submitting | rejected | failed(rollback only)
@@ -56,38 +54,40 @@
  *     accepted        → confirmed | failed | requires_review
  *     ambiguous       → accepted | rejected | confirmed | failed | requires_review
  *     requires_review → accepted | rejected | confirmed | failed
- *     confirmed/rejected/failed → (none)
  *
- *   A terminal transition may only be requested by the trusted caller (transfer.js),
- *   which performs the on-chain / Circle verification first. The DO additionally
- *   enforces monotonic versioning + fencing tokens and evidence requirements.
+ *   RESERVATION RELEASE (terminal transitions)
+ *     rejected          → never settled: release reserved amount, balance unchanged.
+ *     failed (rollback) → never settled: release reserved amount, balance unchanged.
+ *     failed (post-accept) → settled: release + decrement balance snapshot (conservative).
+ *     confirmed         → settled: release + decrement balance snapshot (conservative).
+ *   Ambiguous / requires_review reservations are NEVER released on timeout/lease.
  *
  * ── Activation (Cloudflare Pages, isolated — like GATEWAY_OP_LOCK) ──────────
- *   1. Deploy a separate Worker exporting GatewayExecutionCoordinator from this
- *      file (wrangler.toml: durable_objects.bindings name = GATEWAY_EXECUTION_COORDINATOR,
- *      class_name = GatewayExecutionCoordinator, migrations tag = "v1").
+ *   1. Deploy a standalone Worker exporting GatewayExecutionCoordinator from this
+ *      file (wrangler.toml: durable_objects.bindings name =
+ *      GATEWAY_EXECUTION_COORDINATOR, class_name = GatewayExecutionCoordinator,
+ *      migrations tag = "v1").
  *   2. CF Dashboard → Pages → elligentt → Settings → Functions → DO bindings:
  *        Variable name: GATEWAY_EXECUTION_COORDINATOR
  *        Namespace:     (namespace from step 1)
- *   3. Set DO_INTERNAL_SECRET in Pages → Environment variables.
- *   4. Re-deploy the Pages project.
- *   The DO is INACTIVE in transfer.js unless BOTH the binding is present AND
- *   env.GATEWAY_EXECUTION_COORDINATOR_ENABLED === 'true'. When enabled but the DO
- *   is unavailable, transfer.js fails closed (503) — see transfer.js.
+ *   3. Set DO_INTERNAL_SECRET (already required by GATEWAY_OP_LOCK).
+ *   4. Re-deploy, then set GATEWAY_EXECUTION_COORDINATOR_ENABLED = 'true'.
+ *   INACTIVE unless BOTH the binding is present AND the flag is truthy.
  */
 
 import {
   canonicalPayloadHash,
-  idempotencyKeyFor,
+  isValidIdempotencyKey,
   depositorOf,
   environmentFor,
+  scopeKeyFor,
 } from './coordinator-util.js';
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 // ── State machine ────────────────────────────────────────────────────────────
 const VALID_TRANSITIONS = {
-  reserved:        ['submitting', 'accepted', 'rejected', 'ambiguous', 'failed'],
+  reserved:        ['submitting', 'rejected', 'failed'],
   submitting:      ['accepted', 'rejected', 'ambiguous'],
   accepted:        ['confirmed', 'failed', 'requires_review'],
   ambiguous:       ['accepted', 'rejected', 'confirmed', 'failed', 'requires_review'],
@@ -99,16 +99,21 @@ const VALID_TRANSITIONS = {
 
 const TERMINAL_STATES = new Set(['confirmed', 'rejected', 'failed']);
 const KNOWN_STATES   = new Set(Object.keys(VALID_TRANSITIONS));
+// States in which the operation's amount is still "reserved" against the balance.
+const ACTIVE_STATES  = new Set(['reserved', 'submitting', 'accepted', 'ambiguous', 'requires_review']);
 
 const KEY_OP    = 'op:';
 const KEY_IDEM  = 'idem:';
+const KEY_SALT  = 'salt:';
 const KEY_INDEX = 'index:operations';
+const KEY_BAL   = 'bal:';
+const KEY_BALRES = 'balres:';
 
-// operationId is a UUID v4 (generated by transfer.js or here).
 const OPERATION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SALT_RE         = /^0x[0-9a-fA-F]{64}$/;
-const DEPOSITOR_RE    = /^0x[0-9a-fA-F]{40}$/;
 const HASH_RE         = /^[0-9a-f]{64}$/i;
+const SCOPE_RE        = /^0x[0-9a-f]{40}:\d{1,10}$/;
+const UINT_STR_RE     = /^\d{1,78}$/;   // non-negative decimal string, no sign
 
 function timingSafeEqual(a, b) {
   if (typeof a !== 'string' || typeof b !== 'string') return false;
@@ -119,12 +124,22 @@ function timingSafeEqual(a, b) {
 }
 
 function uuid() {
-  // RFC4122 v4 — sufficient uniqueness for an operation id within a DO instance.
   const b = crypto.getRandomValues(new Uint8Array(16));
   b[6] = (b[6] & 0x0f) | 0x40;
   b[8] = (b[8] & 0x3f) | 0x80;
   const h = Array.from(b).map((x) => x.toString(16).padStart(2, '0')).join('');
   return h.slice(0, 8) + '-' + h.slice(8, 12) + '-' + h.slice(12, 16) + '-' + h.slice(16, 20) + '-' + h.slice(20);
+}
+
+// BigInt arithmetic on canonical decimal strings (fail-closed on parse error).
+function addUint(a, b) {
+  try { return (BigInt(a) + BigInt(b)).toString(); } catch(_) { return null; }
+}
+function subUint(a, b) {
+  try {
+    const x = BigInt(a) - BigInt(b);
+    return x < 0n ? '0' : x.toString();
+  } catch(_) { return null; }
 }
 
 export class GatewayExecutionCoordinator {
@@ -152,17 +167,16 @@ export class GatewayExecutionCoordinator {
     if (!this._authorized(request)) {
       return GatewayExecutionCoordinator.json({ error: 'unauthorized' }, 401);
     }
-
     const url    = new URL(request.url);
     const path   = url.pathname.replace(/\/+$/, '');
     const method = request.method;
-
     try {
       return await this.state.blockConcurrencyWhile(async () => {
-        if (method === 'POST'   && path === '/reserve') return this._reserve(request);
-        if (method === 'POST'   && path === '/update')  return this._update(request);
-        if (method === 'GET'    && path === '/status')  return this._status(url);
-        if (method === 'DELETE' && path === '/release') return this._release(request);
+        if (method === 'POST'   && path === '/reserve')      return this._reserve(request);
+        if (method === 'POST'   && path === '/set-balance')  return this._setBalance(request);
+        if (method === 'POST'   && path === '/update')       return this._update(request);
+        if (method === 'GET'    && path === '/status')       return this._status(url);
+        if (method === 'DELETE' && path === '/release')      return this._release(request);
         return GatewayExecutionCoordinator.json({ error: 'not_found' }, 404);
       });
     } catch (e) {
@@ -171,15 +185,18 @@ export class GatewayExecutionCoordinator {
   }
 
   /* ── POST /reserve ────────────────────────────────────────────────────── */
-  // Body: { burnIntent, operationId? }
-  // The DO recomputes depositor/environment/idempotencyKey/payloadHash server-side
-  // (single source of truth — never trusts a client-computed hash).
+  // Body: { burnIntent, idempotencyKey, operationId? }
+  // The DO recomputes depositor/environment/scope/payloadHash server-side (never
+  // trusts client-computed values). Dedups on the caller-provided idempotency key;
+  // enforces the quantitative balance reservation.
   //
   // Outcome:
-  //   201 { reserved:true, record }                        — new operation
-  //   200 { recovered:true, record }                       — duplicate (same slot+hash)
-  //   409 { error:'conflict', record }                     — same slot, different hash
-  //   400 { error:'...' }                                  — invalid input
+  //   201 { reserved:true, record }
+  //   200 { recovered:true, record }        — same key + same payload
+  //   409 { error:'conflict', record }      — same key + different payload
+  //   422 { error:'insufficient_available_balance', available, requested }
+  //   503 { error:'balance_not_synced' }    — no authoritative balance snapshot
+  //   400 { error:'...' }
   async _reserve(request) {
     let body;
     try { body = await request.json(); } catch (_) {
@@ -190,7 +207,14 @@ export class GatewayExecutionCoordinator {
     const v = this._validateBurnIntent(burnIntent);
     if (v) return GatewayExecutionCoordinator.json({ error: v }, 400);
 
-    // Server-side canonical derivation (single source of truth).
+    if (!isValidIdempotencyKey(body && body.idempotencyKey)) {
+      return GatewayExecutionCoordinator.json({
+        error:  'idempotencyKey_required',
+        detail: 'A caller-provided idempotency key (8–128 chars, [A-Za-z0-9._-]) is required.',
+      }, 400);
+    }
+    const idemKey = body.idempotencyKey;
+
     const depositor = depositorOf(burnIntent);
     const envName   = environmentFor(burnIntent);
     if (envName === null) {
@@ -199,35 +223,71 @@ export class GatewayExecutionCoordinator {
         detail: 'sourceContract is not a recognized GatewayWallet (mainnet/testnet).',
       }, 400);
     }
-    const idemKey     = await idempotencyKeyFor(burnIntent);
+    const scope       = scopeKeyFor(burnIntent);
     const payloadHash = await canonicalPayloadHash(burnIntent);
 
     const operationId = (typeof body.operationId === 'string' && OPERATION_ID_RE.test(body.operationId))
       ? body.operationId
       : uuid();
 
-    const spec    = burnIntent.spec;
-    const salt    = spec.salt;
-    const now     = new Date().toISOString();
+    const spec = burnIntent.spec;
+    const salt = spec.salt;
+    const now  = new Date().toISOString();
+
+    // Reserved amount = value + maxFee (worst-case debit), computed in BigInt.
+    const valueStr = String(spec.value);
+    const feeStr   = burnIntent.maxFee != null ? String(burnIntent.maxFee) : '0';
+    if (!UINT_STR_RE.test(valueStr) || !UINT_STR_RE.test(feeStr)) {
+      return GatewayExecutionCoordinator.json({ error: 'invalid_amount' }, 400);
+    }
+    const reservedAmount = addUint(valueStr, feeStr);
+    if (reservedAmount === null) {
+      return GatewayExecutionCoordinator.json({ error: 'invalid_amount' }, 400);
+    }
 
     const outcome = await this.storage.transaction(async (txn) => {
+      // ── Idempotency dedup (caller-provided key) ─────────────────────────
       const existingIdem = await txn.get(KEY_IDEM + idemKey);
       if (existingIdem) {
         const existing = await txn.get(KEY_OP + existingIdem.operationId);
         if (existing) {
-          // Terminal → allow a NEW operation in this slot (freed).
           if (TERMINAL_STATES.has(existing.status)) {
-            // fall through to (re)create below
+            // terminal → slot freed; fall through to (re)create below.
           } else if (existing.payloadHash === payloadHash) {
             return { status: 200, body: { recovered: true, record: existing } };
           } else {
-            return {
-              status: 409,
-              body:   { error: 'conflict', detail: 'same_payment_slot_different_payload', record: existing },
-            };
+            return { status: 409, body: { error: 'conflict', detail: 'idempotency_key_reused_with_different_payload', record: existing } };
           }
         }
-        // Index points to a missing record (corruption) — recreate below.
+      }
+
+      // ── Quantitative balance reservation ────────────────────────────────
+      const snapshot = await txn.get(KEY_BAL + scope);
+      if (!snapshot || typeof snapshot.amount !== 'string') {
+        return { status: 503, body: { error: 'balance_not_synced', scope, detail: 'No authoritative balance snapshot for this scope.' } };
+      }
+      if (snapshot.stale === true) {
+        return { status: 503, body: { error: 'balance_stale', scope, detail: 'Balance snapshot is stale; re-sync before reserving.' } };
+      }
+      const balRes = await txn.get(KEY_BALRES + scope);
+      const reservedTotal = (balRes && balRes.total) || '0';
+      const available = subUint(snapshot.amount, reservedTotal);
+      if (available === null) {
+        return { status: 500, body: { error: 'balance_arithmetic_error' } };
+      }
+      // requested amount must fit within the authoritative available balance.
+      if (BigInt(reservedAmount) > BigInt(available)) {
+        return {
+          status: 422,
+          body:   {
+            error:     'insufficient_available_balance',
+            scope,
+            requested: reservedAmount,
+            available,
+            reserved:  reservedTotal,
+            balance:   snapshot.amount,
+          },
+        };
       }
 
       const record = {
@@ -244,8 +304,10 @@ export class GatewayExecutionCoordinator {
         sourceToken:    spec.sourceToken,
         destinationToken: spec.destinationToken,
         destinationRecipient: spec.destinationRecipient,
-        value:          String(spec.value),
+        value:          valueStr,
         maxFee:         burnIntent.maxFee != null ? String(burnIntent.maxFee) : null,
+        reservedAmount,
+        scope,
         salt,
         status:         'reserved',
         version:        1,
@@ -253,14 +315,22 @@ export class GatewayExecutionCoordinator {
         updatedAt:      now,
         transferId:     null,
         expirationBlock: null,
-        attestationHash: null,   // SHA-256 of attestation payload (NOT raw payload)
-        signatureHash:  null,    // SHA-256 of operator signature (NOT raw signature)
+        attestationHash: null,
+        signatureHash:  null,
+        attestationPayload: null,   // protected recovery material (Gate F)
+        attestationSignature: null, // protected recovery material (Gate F)
         txHash:         null,
+        burnTxHash:     null,
         evidence:       [],
+        released:       false,
+        releasedAt:     null,
       };
 
+      const newTotal = addUint(reservedTotal, reservedAmount);
       await txn.put(KEY_OP + operationId, record);
       await txn.put(KEY_IDEM + idemKey, { operationId, payloadHash });
+      await txn.put(KEY_SALT + salt, operationId);
+      await txn.put(KEY_BALRES + scope, { total: newTotal });
 
       const index = (await txn.get(KEY_INDEX)) || [];
       await txn.put(KEY_INDEX, Array.isArray(index) ? index.concat([operationId]) : [operationId]);
@@ -282,23 +352,46 @@ export class GatewayExecutionCoordinator {
     if (!/^0x[0-9a-fA-F]{64}$/.test(String(spec.destinationContract || ''))) return 'destinationContract_required';
     if (!/^0x[0-9a-fA-F]{64}$/.test(String(spec.sourceToken || ''))) return 'sourceToken_required';
     if (!/^0x[0-9a-fA-F]{64}$/.test(String(spec.destinationToken || ''))) return 'destinationToken_required';
-    if (spec.value == null || !/^\d{1,78}$/.test(String(spec.value))) return 'invalid_value';
+    if (spec.value == null || !UINT_STR_RE.test(String(spec.value))) return 'invalid_value';
     return null;
+  }
+
+  /* ── POST /set-balance ────────────────────────────────────────────────── */
+  // Body: { scope, amount, source?, asOf? } — trusted internal only. Sets the
+  // authoritative balance snapshot for a scope. Replaces any stale flag.
+  async _setBalance(request) {
+    let body;
+    try { body = await request.json(); } catch (_) {
+      return GatewayExecutionCoordinator.json({ error: 'invalid_json' }, 400);
+    }
+    const scope  = body && body.scope;
+    const amount = body && body.amount;
+    if (typeof scope !== 'string' || !SCOPE_RE.test(scope)) {
+      return GatewayExecutionCoordinator.json({ error: 'invalid_scope' }, 400);
+    }
+    if (typeof amount !== 'string' || !UINT_STR_RE.test(amount)) {
+      return GatewayExecutionCoordinator.json({ error: 'invalid_amount' }, 400);
+    }
+    const snapshot = {
+      amount,
+      source: body.source || 'circle',
+      asOf:   body.asOf   || new Date().toISOString(),
+      stale:  false,
+    };
+    await this.storage.put(KEY_BAL + scope, snapshot);
+    return GatewayExecutionCoordinator.json({ ok: true, scope, balance: snapshot });
   }
 
   /* ── POST /update ─────────────────────────────────────────────────────── */
   // Body: { operationId, to, expectedVersion, evidence? }
   //   evidence: { transactionHash?, transferId?, expirationBlock?,
-  //               attestationHash?, signatureHash?, reason? }
-  //
-  // Monotonic versioning + fencing: expectedVersion MUST equal record.version
-  // (else 409 stale_version). Terminal transitions require evidence (see below).
+  //               attestationHash?, signatureHash?,
+  //               attestationPayload?, attestationSignature?, reason?, rollback? }
   async _update(request) {
     let body;
     try { body = await request.json(); } catch (_) {
       return GatewayExecutionCoordinator.json({ error: 'invalid_json' }, 400);
     }
-
     const operationId     = body && body.operationId;
     const to              = body && body.to;
     const expectedVersion = body && body.expectedVersion;
@@ -318,12 +411,9 @@ export class GatewayExecutionCoordinator {
       const record = await txn.get(KEY_OP + operationId);
       if (!record) return { status: 404, body: { error: 'not_found' } };
 
-      // Fencing: stale version is rejected outright.
       if (record.version !== expectedVersion) {
         return { status: 409, body: { error: 'stale_version', current: record.version, expected: expectedVersion } };
       }
-
-      // Idempotent re-entry: already in the target state → current record.
       if (record.status === to) {
         return { status: 200, body: { ok: true, idempotent: true, record } };
       }
@@ -339,9 +429,6 @@ export class GatewayExecutionCoordinator {
         return { status: 400, body: { error: 'rollback_required', from: record.status, to } };
       }
 
-      // Terminal transition evidence requirements:
-      //   confirmed → must carry an on-chain settlement hash.
-      //   requires_review → must carry a reason.
       if (to === 'confirmed' && !evidence.transactionHash) {
         return { status: 400, body: { error: 'confirmed_requires_transaction_hash' } };
       }
@@ -359,20 +446,47 @@ export class GatewayExecutionCoordinator {
         expirationBlock: evidence.expirationBlock || record.expirationBlock || null,
         attestationHash: evidence.attestationHash || record.attestationHash || null,
         signatureHash:   evidence.signatureHash   || record.signatureHash   || null,
+        attestationPayload:   evidence.attestationPayload   || record.attestationPayload   || null,
+        attestationSignature: evidence.attestationSignature || record.attestationSignature || null,
         txHash:          evidence.transactionHash || record.txHash          || null,
+        burnTxHash:      evidence.burnTxHash      || record.burnTxHash      || null,
         evidence:        record.evidence.concat([{ to, at: new Date(now).toISOString(), ...(evidence.reason ? { reason: evidence.reason } : {}) }]),
       };
       await txn.put(KEY_OP + operationId, updated);
+
+      // ── Reservation release on terminal transition ──────────────────────
+      if (TERMINAL_STATES.has(to)) {
+        const balRes = await txn.get(KEY_BALRES + record.scope);
+        const reservedTotal = (balRes && balRes.total) || '0';
+        const newTotal = subUint(reservedTotal, record.reservedAmount);
+        await txn.put(KEY_BALRES + record.scope, { total: newTotal });
+
+        // Settled (Circle actually debited) → decrement the snapshot conservatively
+        // and mark stale so the next reserve requires a fresh balance sync.
+        const settled = to === 'confirmed' || (to === 'failed' && record.status !== 'reserved' && record.status !== 'submitting');
+        if (settled) {
+          const snapshot = await txn.get(KEY_BAL + record.scope);
+          if (snapshot && typeof snapshot.amount === 'string') {
+            await txn.put(KEY_BAL + record.scope, {
+              ...snapshot,
+              amount: subUint(snapshot.amount, record.reservedAmount),
+              stale:  true,
+            });
+          }
+        }
+      }
+
       return { status: 200, body: { ok: true, record: updated } };
     });
 
     return GatewayExecutionCoordinator.json(outcome.body, outcome.status);
   }
 
-  /* ── GET /status?operationId= | idempotencyKey= ───────────────────────── */
+  /* ── GET /status?operationId= | idempotencyKey= | salt= ──────────────── */
   async _status(url) {
     const operationId = url.searchParams.get('operationId') || '';
     const idemKey     = url.searchParams.get('idempotencyKey') || '';
+    const salt        = url.searchParams.get('salt') || '';
 
     const outcome = await this.storage.transaction(async (txn) => {
       if (operationId) {
@@ -387,15 +501,26 @@ export class GatewayExecutionCoordinator {
         if (!record) return { status: 404, body: { error: 'not_found' } };
         return { status: 200, body: { record } };
       }
-      return { status: 400, body: { error: 'operationId_or_idempotencyKey_required' } };
+      if (salt) {
+        const opId = await txn.get(KEY_SALT + salt);
+        if (!opId) return { status: 404, body: { error: 'not_found' } };
+        const record = await txn.get(KEY_OP + opId);
+        if (!record) return { status: 404, body: { error: 'not_found' } };
+        return { status: 200, body: { record } };
+      }
+      return { status: 400, body: { error: 'operationId_or_idempotencyKey_or_salt_required' } };
     });
 
     return GatewayExecutionCoordinator.json(outcome.body, outcome.status);
   }
 
   /* ── DELETE /release ──────────────────────────────────────────────────── */
-  // Body: { operationId }. Only terminal operations may be released. Preserves the
-  // audit trail up to release; the idem mapping is freed for a new operation.
+  // Body: { operationId }. Only terminal operations may be released. Release does
+  // NOT delete history: it marks the record released and removes ONLY the
+  // idempotency/salt bindings so a new intent can reuse the slot — the op record
+  // and the audit index are preserved for replay protection and reconciliation.
+  // The index membership is verified atomically so an old operation can never
+  // remove a newer operation's index entry.
   async _release(request) {
     let body;
     try { body = await request.json(); } catch (_) {
@@ -412,10 +537,26 @@ export class GatewayExecutionCoordinator {
       if (!TERMINAL_STATES.has(record.status)) {
         return { status: 409, body: { error: 'not_terminal', current: record.status } };
       }
-      await txn.delete(KEY_OP + operationId);
-      await txn.delete(KEY_IDEM + record.idempotencyKey);
-      const index = (await txn.get(KEY_INDEX)) || [];
-      await txn.put(KEY_INDEX, Array.isArray(index) ? index.filter((id) => id !== operationId) : []);
+
+      // Only unbind if the binding still points to THIS operation (idempotent +
+      // protects against an old op unbinding a newer op that reused the slot).
+      const idem = await txn.get(KEY_IDEM + record.idempotencyKey);
+      if (idem && idem.operationId === operationId) {
+        await txn.delete(KEY_IDEM + record.idempotencyKey);
+      }
+      const saltOp = await txn.get(KEY_SALT + record.salt);
+      if (saltOp === operationId) {
+        await txn.delete(KEY_SALT + record.salt);
+      }
+
+      const now = Date.now();
+      await txn.put(KEY_OP + operationId, {
+        ...record,
+        released:   true,
+        releasedAt: new Date(now).toISOString(),
+      });
+
+      // Preserve the audit index (do NOT remove operationId) — history is kept.
       return { status: 200, body: { ok: true, released: operationId } };
     });
 

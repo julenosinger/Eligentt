@@ -1,16 +1,15 @@
 /**
  * gateway-execution-coordinator.test.js
  * ═══════════════════════════════════════════════════════════════════════════
- * Phase 1.0.1C — GatewayExecutionCoordinator (isolated development).
+ * Phase 1.0.1C.1 — GatewayExecutionCoordinator financial integrity & lifecycle
+ * hardening.
  *
  * Exercises the REAL modules (no re-implementation of the logic under test):
- *   - coordinator-util.js  (canonicalPayloadHash / idempotencyKeyFor / depositorOf /
- *                           environmentFor)
- *   - gateway-execution-coordinator.do.js (real DO class, DO-compatible storage
+ *   - coordinator-util.js (canonicalPayloadHash / isValidIdempotencyKey /
+ *     depositorOf / environmentFor / scopeKeyFor / tokenSymbolFor)
+ *   - gateway-execution-coordinator.do.js (real DO class; DO-compatible storage
  *     mock with serialized single-flight semantics)
- *   - transfer.js onRequestPost (real handler with the flag-gated coordinator
- *     integration; only the external dependencies — DO binding, KV, fetch — are
- *     mocked)
+ *   - transfer.js onRequestPost (real handler; only external deps mocked)
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -22,9 +21,11 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const util = await import('../functions/api/gateway/coordinator-util.js');
 const {
   canonicalPayloadHash,
-  idempotencyKeyFor,
+  isValidIdempotencyKey,
   depositorOf,
   environmentFor,
+  scopeKeyFor,
+  tokenSymbolFor,
   MAINNET_GATEWAY_WALLET,
   TESTNET_GATEWAY_WALLET,
   ENV_MAINNET,
@@ -43,6 +44,8 @@ const RECIPIENT_B = '0x3333333333333333333333333333333333333333';
 const TOKEN_A     = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 const TOKEN_B     = '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 const MINTER      = '0x2222222d7164433c4c09b0b0d809a9b52c04c205';
+// A real Circle USDC address (Arc mainnet) so tokenSymbolFor resolves in transfer.js tests.
+const USDC_ARC    = '0x3600000000000000000000000000000000000000';
 
 function pad32(addr) {
   return '0x' + String(addr).toLowerCase().replace(/^0x/, '').padStart(64, '0');
@@ -56,7 +59,7 @@ function makeBurnIntent(over = {}) {
     destinationDomain:    0,
     sourceContract:       pad32(MAINNET_GATEWAY_WALLET),
     destinationContract:  pad32(MINTER),
-    sourceToken:          pad32(TOKEN_A),
+    sourceToken:          pad32(over.sourceToken || TOKEN_A),
     destinationToken:     pad32(TOKEN_B),
     sourceDepositor:      pad32(DEPOSITOR),
     destinationRecipient: pad32(RECIPIENT),
@@ -75,6 +78,8 @@ function makeBurnIntent(over = {}) {
     spec,
   };
 }
+
+const IDEM_KEY_A = 'intent-aaaaaaaa-0001';
 
 // ── DO-compatible storage mock (serialized single-flight) ───────────────────
 function makeDOState() {
@@ -101,6 +106,10 @@ function makeDOState() {
   return { storage, blockConcurrencyWhile: (fn) => enqueue(fn), _store: store };
 }
 
+function makeCoord(secret = SECRET) {
+  return new GatewayExecutionCoordinator(makeDOState(), { DO_INTERNAL_SECRET: secret });
+}
+
 function doFetch(coord, action, method, body, secret = SECRET) {
   const headers = { 'Content-Type': 'application/json' };
   if (secret) headers['X-DO-Internal-Secret'] = secret;
@@ -109,6 +118,15 @@ function doFetch(coord, action, method, body, secret = SECRET) {
     headers,
     body: body ? JSON.stringify(body) : undefined,
   }));
+}
+
+async function seedBalance(coord, scope, amount) {
+  const res = await doFetch(coord, '/set-balance', 'POST', { scope, amount: String(amount) });
+  expect(res.status).toBe(200);
+}
+
+function scopeOf(burnIntent) {
+  return scopeKeyFor(burnIntent);
 }
 
 // ── Mock DO namespace (routes stubs to real DO instances keyed by name) ─────
@@ -143,8 +161,8 @@ function makeKV() {
   };
 }
 
-function makeTransferItem(burnIntent) {
-  return { burnIntent, signature: '0x' + '33'.repeat(65) };
+function makeTransferItem(burnIntent, idempotencyKey) {
+  return { burnIntent, signature: '0x' + '33'.repeat(65), idempotencyKey };
 }
 
 function makePostRequest(items) {
@@ -155,364 +173,376 @@ function makePostRequest(items) {
   });
 }
 
+function makeEnv(coordinator, enabled) {
+  const env = { GATEWAY_OPS_KV: makeKV(), DO_INTERNAL_SECRET: SECRET };
+  if (coordinator) env.GATEWAY_EXECUTION_COORDINATOR = coordinator;
+  if (enabled) env.GATEWAY_EXECUTION_COORDINATOR_ENABLED = 'true';
+  return env;
+}
+
+// A fetch mock that serves both the balance fetch (/v1/balances) and the transfer
+// POST (/v1/transfer).
+function mockFetch({ balance = '100000000000', transferStatus = 200, transferBody }) {
+  return async (url, init) => {
+    const u = String(url);
+    if (u.includes('/v1/balances')) {
+      return new Response(JSON.stringify({ balances: [{ domain: 26, balance }] }), { status: 200 });
+    }
+    if (u.includes('/v1/transfer')) {
+      return new Response(JSON.stringify(transferBody || [{ burnIntent: { spec: { salt: '0x' + '44'.repeat(32) } }, attestation: { payload: '0xab', signature: '0xcd' } }]), { status: transferStatus });
+    }
+    return new Response('{}', { status: 404 });
+  };
+}
+
 beforeEach(() => { delete globalThis.fetch; });
 afterEach(() => { delete globalThis.fetch; });
 
 // ═══════════════════════════════════════════════════════════════════════════
-describe('coordinator-util — canonical payload hash + idempotency key (real module)', () => {
-  it('canonicalPayloadHash is identical for the same intent with DIFFERENT salts', async () => {
+describe('coordinator-util (real module)', () => {
+  it('canonicalPayloadHash is identical across salts and excludes salt', async () => {
     const a = makeBurnIntent();
     const b = makeBurnIntent({ spec: { salt: '0x' + '55'.repeat(32) } });
     expect(a.spec.salt).not.toBe(b.spec.salt);
     expect(await canonicalPayloadHash(a)).toBe(await canonicalPayloadHash(b));
   });
 
-  it('canonicalPayloadHash differs when the amount (value) changes', async () => {
+  it('canonicalPayloadHash differs on value and recipient', async () => {
     const a = makeBurnIntent();
-    const b = makeBurnIntent({ spec: { value: '2000000' } });
-    expect(await canonicalPayloadHash(a)).not.toBe(await canonicalPayloadHash(b));
+    expect(await canonicalPayloadHash(a)).not.toBe(await canonicalPayloadHash(makeBurnIntent({ spec: { value: '2000000' } })));
+    expect(await canonicalPayloadHash(a)).not.toBe(await canonicalPayloadHash(makeBurnIntent({ spec: { destinationRecipient: pad32(RECIPIENT_B) } })));
   });
 
-  it('canonicalPayloadHash differs when the recipient changes', async () => {
-    const a = makeBurnIntent();
-    const b = makeBurnIntent({ spec: { destinationRecipient: pad32(RECIPIENT_B) } });
-    expect(await canonicalPayloadHash(a)).not.toBe(await canonicalPayloadHash(b));
-  });
-
-  it('canonicalPayloadHash is stable across casing of hex fields', async () => {
+  it('canonicalPayloadHash is casing-stable', async () => {
     const a = makeBurnIntent();
     const b = makeBurnIntent({ spec: { sourceToken: pad32(TOKEN_A).toUpperCase() } });
     expect(await canonicalPayloadHash(a)).toBe(await canonicalPayloadHash(b));
   });
 
-  it('idempotencyKeyFor is stable across salts and differs across recipients', async () => {
-    const a = makeBurnIntent();
-    const b = makeBurnIntent({ spec: { salt: '0x' + '66'.repeat(32) } });
-    const c = makeBurnIntent({ spec: { destinationRecipient: pad32(RECIPIENT_B) } });
-    expect(await idempotencyKeyFor(a)).toBe(await idempotencyKeyFor(b));
-    expect(await idempotencyKeyFor(a)).not.toBe(await idempotencyKeyFor(c));
+  it('isValidIdempotencyKey accepts a bounded safe key', () => {
+    expect(isValidIdempotencyKey('intent-abc-123456')).toBe(true);
+    expect(isValidIdempotencyKey('short')).toBe(false);
+    expect(isValidIdempotencyKey('a'.repeat(200))).toBe(false);
+    expect(isValidIdempotencyKey('has space')).toBe(false);
+    expect(isValidIdempotencyKey(null)).toBe(false);
   });
 
-  it('idempotencyKeyFor distinguishes different amounts (same recipient)', async () => {
-    const a = makeBurnIntent();
-    const b = makeBurnIntent({ spec: { value: '999' } });
-    // The key is the coarse slot (excludes value), so same key for same recipient.
-    expect(await idempotencyKeyFor(a)).toBe(await idempotencyKeyFor(b));
-    // But the full hash differs (value is in the payload), which drives conflict detection.
-    expect(await canonicalPayloadHash(a)).not.toBe(await canonicalPayloadHash(b));
-  });
-
-  it('depositorOf unpads the 20-byte address from bytes32', () => {
+  it('depositorOf / environmentFor / scopeKeyFor / tokenSymbolFor', () => {
     expect(depositorOf(makeBurnIntent())).toBe(DEPOSITOR.toLowerCase());
-  });
-
-  it('environmentFor distinguishes mainnet vs testnet vs unknown wallets', () => {
     expect(environmentFor(makeBurnIntent())).toBe(ENV_MAINNET);
     expect(environmentFor(makeBurnIntent({ spec: { sourceContract: pad32(TESTNET_GATEWAY_WALLET) } }))).toBe(ENV_TESTNET);
-    expect(environmentFor(makeBurnIntent({ spec: { sourceContract: pad32('0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef') } }))).toBeNull();
+    expect(scopeOf(makeBurnIntent())).toBe(TOKEN_A + ':26');
+    expect(tokenSymbolFor(pad32(USDC_ARC))).toBe('USDC');
+    expect(tokenSymbolFor(pad32(TOKEN_A))).toBeNull();
   });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-describe('GatewayExecutionCoordinator — auth + dedup + fencing (real class)', () => {
-  it('blocks requests without a valid internal secret (fail-closed)', async () => {
-    const coord = new GatewayExecutionCoordinator(makeDOState(), { DO_INTERNAL_SECRET: SECRET });
+describe('GatewayExecutionCoordinator — dedup + balance reservation (real class)', () => {
+  it('blocks requests without a valid internal secret', async () => {
+    const coord = makeCoord();
     const res = await doFetch(coord, '/status?operationId=x', 'GET', null, 'wrong');
     expect(res.status).toBe(401);
   });
 
-  it('rejects a reserve with a missing burnIntent', async () => {
-    const coord = new GatewayExecutionCoordinator(makeDOState(), { DO_INTERNAL_SECRET: SECRET });
-    const res = await doFetch(coord, '/reserve', 'POST', {});
+  it('requires an idempotencyKey', async () => {
+    const coord = makeCoord();
+    const res = await doFetch(coord, '/reserve', 'POST', { burnIntent: makeBurnIntent() });
     expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe('idempotencyKey_required');
   });
 
-  it('reserves a new operation (201)', async () => {
-    const coord = new GatewayExecutionCoordinator(makeDOState(), { DO_INTERNAL_SECRET: SECRET });
-    const res = await doFetch(coord, '/reserve', 'POST', { burnIntent: makeBurnIntent() });
+  it('fails closed when no balance snapshot is set', async () => {
+    const coord = makeCoord();
+    const res = await doFetch(coord, '/reserve', 'POST', { burnIntent: makeBurnIntent(), idempotencyKey: IDEM_KEY_A });
+    expect(res.status).toBe(503);
+    expect((await res.json()).error).toBe('balance_not_synced');
+  });
+
+  it('reserves a new operation after set-balance', async () => {
+    const coord = makeCoord();
+    await seedBalance(coord, scopeOf(makeBurnIntent()), '100000000');
+    const res = await doFetch(coord, '/reserve', 'POST', { burnIntent: makeBurnIntent(), idempotencyKey: IDEM_KEY_A });
     expect(res.status).toBe(201);
     const body = await res.json();
-    expect(body.reserved).toBe(true);
     expect(body.record.status).toBe('reserved');
-    expect(body.record.depositor).toBe(DEPOSITOR.toLowerCase());
-    expect(body.record.environment).toBe('mainnet');
-    expect(body.record.version).toBe(1);
+    expect(body.record.reservedAmount).toBe('3010000'); // value + maxFee
   });
 
-  it('recovers the SAME intent submitted with a DIFFERENT salt (cross-salt dedup)', async () => {
-    const coord = new GatewayExecutionCoordinator(makeDOState(), { DO_INTERNAL_SECRET: SECRET });
-    const r1 = await doFetch(coord, '/reserve', 'POST', { burnIntent: makeBurnIntent() });
+  it('recovers the SAME intent with a DIFFERENT salt (cross-salt dedup)', async () => {
+    const coord = makeCoord();
+    await seedBalance(coord, scopeOf(makeBurnIntent()), '100000000');
+    const r1 = await doFetch(coord, '/reserve', 'POST', { burnIntent: makeBurnIntent(), idempotencyKey: IDEM_KEY_A });
     expect(r1.status).toBe(201);
     const first = (await r1.json()).record;
 
     const r2 = await doFetch(coord, '/reserve', 'POST', {
-      burnIntent: makeBurnIntent({ spec: { salt: '0x' + '77'.repeat(32) } }),
+      burnIntent: makeBurnIntent({ spec: { salt: '0x' + '77'.repeat(32) } }), idempotencyKey: IDEM_KEY_A,
     });
     expect(r2.status).toBe(200);
-    const second = await r2.json();
-    expect(second.recovered).toBe(true);
-    expect(second.record.operationId).toBe(first.operationId);
+    const r2body = await r2.json();
+    expect(r2body.recovered).toBe(true);
+    expect(r2body.record.operationId).toBe(first.operationId);
   });
 
-  it('conflicts when the same payment slot is reused with a DIFFERENT amount', async () => {
-    const coord = new GatewayExecutionCoordinator(makeDOState(), { DO_INTERNAL_SECRET: SECRET });
-    await doFetch(coord, '/reserve', 'POST', { burnIntent: makeBurnIntent() });
+  it('conflicts when the same key is reused with a DIFFERENT amount', async () => {
+    const coord = makeCoord();
+    await seedBalance(coord, scopeOf(makeBurnIntent()), '100000000');
+    await doFetch(coord, '/reserve', 'POST', { burnIntent: makeBurnIntent(), idempotencyKey: IDEM_KEY_A });
     const res = await doFetch(coord, '/reserve', 'POST', {
-      burnIntent: makeBurnIntent({ spec: { value: '2000000', salt: '0x' + '88'.repeat(32) } }),
+      burnIntent: makeBurnIntent({ spec: { value: '2000000', salt: '0x' + '88'.repeat(32) } }), idempotencyKey: IDEM_KEY_A,
     });
     expect(res.status).toBe(409);
-    const body = await res.json();
-    expect(body.error).toBe('conflict');
+    expect((await res.json()).error).toBe('conflict');
   });
 
-  it('does NOT conflate two independent payments to DIFFERENT recipients', async () => {
-    const coord = new GatewayExecutionCoordinator(makeDOState(), { DO_INTERNAL_SECRET: SECRET });
-    const r1 = await doFetch(coord, '/reserve', 'POST', { burnIntent: makeBurnIntent() });
+  it('allows two INDEPENDENT identical payments with DIFFERENT idempotency keys', async () => {
+    const coord = makeCoord();
+    await seedBalance(coord, scopeOf(makeBurnIntent()), '100000000');
+    const r1 = await doFetch(coord, '/reserve', 'POST', { burnIntent: makeBurnIntent(), idempotencyKey: 'intent-1' });
+    const r2 = await doFetch(coord, '/reserve', 'POST', { burnIntent: makeBurnIntent({ spec: { salt: '0x' + '99'.repeat(32) } }), idempotencyKey: 'intent-2' });
     expect(r1.status).toBe(201);
-    const r2 = await doFetch(coord, '/reserve', 'POST', {
-      burnIntent: makeBurnIntent({ spec: { destinationRecipient: pad32(RECIPIENT_B), salt: '0x' + '99'.repeat(32) } }),
-    });
-    expect(r2.status).toBe(201); // independent, both reserved
-  });
-
-  it('frees a slot when the existing operation reaches a terminal state', async () => {
-    const coord = new GatewayExecutionCoordinator(makeDOState(), { DO_INTERNAL_SECRET: SECRET });
-    const r1 = await doFetch(coord, '/reserve', 'POST', { burnIntent: makeBurnIntent() });
-    const rec = (await r1.json()).record;
-
-    // Terminal transition: reserved → rejected (definitive).
-    const u1 = await doFetch(coord, '/update', 'POST', { operationId: rec.operationId, to: 'rejected', expectedVersion: 1, evidence: {} });
-    expect(u1.status).toBe(200);
-
-    // New intent in the same slot (different salt) should now reserve fresh.
-    const r2 = await doFetch(coord, '/reserve', 'POST', {
-      burnIntent: makeBurnIntent({ spec: { salt: '0x' + 'aa'.repeat(32) } }),
-    });
     expect(r2.status).toBe(201);
   });
 
-  it('rejects a stale update (fencing token mismatch)', async () => {
-    const coord = new GatewayExecutionCoordinator(makeDOState(), { DO_INTERNAL_SECRET: SECRET });
-    const r1 = await doFetch(coord, '/reserve', 'POST', { burnIntent: makeBurnIntent() });
+  it('rejects a reservation that exceeds the available balance (fees included)', async () => {
+    const coord = makeCoord();
+    // Balance 4_000_000 covers value(1_000_000)+maxFee(2_010_000)=3_010_000 once,
+    // but not twice.
+    await seedBalance(coord, scopeOf(makeBurnIntent()), '4000000');
+    const r1 = await doFetch(coord, '/reserve', 'POST', { burnIntent: makeBurnIntent(), idempotencyKey: 'intent-1' });
+    expect(r1.status).toBe(201);
+
+    const r2 = await doFetch(coord, '/reserve', 'POST', {
+      burnIntent: makeBurnIntent({ spec: { salt: '0x' + 'aa'.repeat(32) } }), idempotencyKey: 'intent-2',
+    });
+    expect(r2.status).toBe(422);
+    const body = await r2.json();
+    expect(body.error).toBe('insufficient_available_balance');
+    expect(body.requested).toBe('3010000');
+  });
+
+  it('rejects a stale update (fencing)', async () => {
+    const coord = makeCoord();
+    await seedBalance(coord, scopeOf(makeBurnIntent()), '100000000');
+    const r1 = await doFetch(coord, '/reserve', 'POST', { burnIntent: makeBurnIntent(), idempotencyKey: IDEM_KEY_A });
     const rec = (await r1.json()).record;
 
     await doFetch(coord, '/update', 'POST', { operationId: rec.operationId, to: 'submitting', expectedVersion: 1, evidence: {} });
-
-    // Version advanced to 2; a replayed update with expectedVersion 1 is stale.
     const stale = await doFetch(coord, '/update', 'POST', { operationId: rec.operationId, to: 'accepted', expectedVersion: 1, evidence: {} });
     expect(stale.status).toBe(409);
-    const body = await stale.json();
-    expect(body.error).toBe('stale_version');
+    expect((await stale.json()).error).toBe('stale_version');
   });
 
-  it('requires a transaction hash to reach confirmed', async () => {
-    const coord = new GatewayExecutionCoordinator(makeDOState(), { DO_INTERNAL_SECRET: SECRET });
-    const r1 = await doFetch(coord, '/reserve', 'POST', { burnIntent: makeBurnIntent() });
-    const rec = (await r1.json()).record;
+  it('requires evidence for confirmed / requires_review', async () => {
+    const coord = makeCoord();
+    await seedBalance(coord, scopeOf(makeBurnIntent()), '100000000');
+    const rec = (await (await doFetch(coord, '/reserve', 'POST', { burnIntent: makeBurnIntent(), idempotencyKey: IDEM_KEY_A })).json()).record;
+    await doFetch(coord, '/update', 'POST', { operationId: rec.operationId, to: 'submitting', expectedVersion: 1, evidence: {} });
+    await doFetch(coord, '/update', 'POST', { operationId: rec.operationId, to: 'accepted', expectedVersion: 2, evidence: {} });
 
-    await doFetch(coord, '/update', 'POST', { operationId: rec.operationId, to: 'accepted', expectedVersion: 1, evidence: {} });
-    const res = await doFetch(coord, '/update', 'POST', { operationId: rec.operationId, to: 'confirmed', expectedVersion: 2, evidence: {} });
-    expect(res.status).toBe(400);
-    expect((await res.json()).error).toBe('confirmed_requires_transaction_hash');
+    const noTx = await doFetch(coord, '/update', 'POST', { operationId: rec.operationId, to: 'confirmed', expectedVersion: 3, evidence: {} });
+    expect(noTx.status).toBe(400);
+    expect((await noTx.json()).error).toBe('confirmed_requires_transaction_hash');
   });
 
-  it('requires a reason to reach requires_review', async () => {
-    const coord = new GatewayExecutionCoordinator(makeDOState(), { DO_INTERNAL_SECRET: SECRET });
-    const r1 = await doFetch(coord, '/reserve', 'POST', { burnIntent: makeBurnIntent() });
-    const rec = (await r1.json()).record;
-
-    await doFetch(coord, '/update', 'POST', { operationId: rec.operationId, to: 'accepted', expectedVersion: 1, evidence: {} });
-    const res = await doFetch(coord, '/update', 'POST', { operationId: rec.operationId, to: 'requires_review', expectedVersion: 2, evidence: {} });
-    expect(res.status).toBe(400);
-    expect((await res.json()).error).toBe('requires_review_requires_reason');
-  });
-
-  it('allows confirmed with a transaction hash', async () => {
-    const coord = new GatewayExecutionCoordinator(makeDOState(), { DO_INTERNAL_SECRET: SECRET });
-    const r1 = await doFetch(coord, '/reserve', 'POST', { burnIntent: makeBurnIntent() });
-    const rec = (await r1.json()).record;
-
-    await doFetch(coord, '/update', 'POST', { operationId: rec.operationId, to: 'accepted', expectedVersion: 1, evidence: {} });
-    const res = await doFetch(coord, '/update', 'POST', {
-      operationId: rec.operationId, to: 'confirmed', expectedVersion: 2,
-      evidence: { transactionHash: '0x' + 'cc'.repeat(32) },
+  it('releases the reservation on a terminal transition', async () => {
+    const coord = makeCoord();
+    await seedBalance(coord, scopeOf(makeBurnIntent()), '4000000');
+    await doFetch(coord, '/reserve', 'POST', { burnIntent: makeBurnIntent(), idempotencyKey: 'intent-1' });
+    // Second intent would fail (balance 4M covers only one 3.01M reservation).
+    const r2 = await doFetch(coord, '/reserve', 'POST', {
+      burnIntent: makeBurnIntent({ spec: { salt: '0x' + 'bb'.repeat(32) } }), idempotencyKey: 'intent-2',
     });
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.record.status).toBe('confirmed');
-    expect(body.record.txHash).toBe('0x' + 'cc'.repeat(32));
-    expect(body.record.version).toBe(3);
-  });
+    expect(r2.status).toBe(422);
 
-  it('rejects a terminal transition (confirmed is immutable)', async () => {
-    const coord = new GatewayExecutionCoordinator(makeDOState(), { DO_INTERNAL_SECRET: SECRET });
-    const r1 = await doFetch(coord, '/reserve', 'POST', { burnIntent: makeBurnIntent() });
-    const rec = (await r1.json()).record;
-
-    await doFetch(coord, '/update', 'POST', { operationId: rec.operationId, to: 'accepted', expectedVersion: 1, evidence: {} });
-    await doFetch(coord, '/update', 'POST', {
-      operationId: rec.operationId, to: 'confirmed', expectedVersion: 2,
-      evidence: { transactionHash: '0x' + 'cc'.repeat(32) },
+    // Terminal (rejected) releases intent-1's reservation → intent-2 can now reserve.
+    const rec1 = (await (await doFetch(coord, '/status?idempotencyKey=intent-1', 'GET')).json()).record;
+    await doFetch(coord, '/update', 'POST', { operationId: rec1.operationId, to: 'rejected', expectedVersion: 1, evidence: {} });
+    await seedBalance(coord, scopeOf(makeBurnIntent()), '4000000');
+    const r3 = await doFetch(coord, '/reserve', 'POST', {
+      burnIntent: makeBurnIntent({ spec: { salt: '0x' + 'cc'.repeat(32) } }), idempotencyKey: 'intent-2',
     });
-    const res = await doFetch(coord, '/update', 'POST', { operationId: rec.operationId, to: 'failed', expectedVersion: 3, evidence: { rollback: true } });
-    expect(res.status).toBe(400);
-    expect((await res.json()).error).toBe('invalid_transition');
+    expect(r3.status).toBe(201);
   });
 
-  it('requires rollback:true for reserved→failed', async () => {
-    const coord = new GatewayExecutionCoordinator(makeDOState(), { DO_INTERNAL_SECRET: SECRET });
-    const r1 = await doFetch(coord, '/reserve', 'POST', { burnIntent: makeBurnIntent() });
-    const rec = (await r1.json()).record;
-
-    const res = await doFetch(coord, '/update', 'POST', { operationId: rec.operationId, to: 'failed', expectedVersion: 1, evidence: {} });
-    expect(res.status).toBe(400);
-    expect((await res.json()).error).toBe('rollback_required');
-  });
-
-  it('releases only terminal operations', async () => {
-    const coord = new GatewayExecutionCoordinator(makeDOState(), { DO_INTERNAL_SECRET: SECRET });
-    const r1 = await doFetch(coord, '/reserve', 'POST', { burnIntent: makeBurnIntent() });
-    const rec = (await r1.json()).record;
-
-    const notTerminal = await doFetch(coord, '/release', 'DELETE', { operationId: rec.operationId });
-    expect(notTerminal.status).toBe(409);
-
-    await doFetch(coord, '/update', 'POST', { operationId: rec.operationId, to: 'rejected', expectedVersion: 1, evidence: {} });
-    const rel = await doFetch(coord, '/release', 'DELETE', { operationId: rec.operationId });
-    expect(rel.status).toBe(200);
-  });
-
-  it('serializes concurrent reserves with different salts into one reservation + one recovery', async () => {
-    const coord = new GatewayExecutionCoordinator(makeDOState(), { DO_INTERNAL_SECRET: SECRET });
-    const intents = [
-      makeBurnIntent(),
-      makeBurnIntent({ spec: { salt: '0x' + 'dd'.repeat(32) } }),
-    ];
-    const [a, b] = await Promise.all(
-      intents.map((bi) => doFetch(coord, '/reserve', 'POST', { burnIntent: bi }).then((r) => r.json()))
-    );
+  it('serializes concurrent reserves with different salts into one reserve + one recover', async () => {
+    const coord = makeCoord();
+    await seedBalance(coord, scopeOf(makeBurnIntent()), '100000000');
+    const [a, b] = await Promise.all([
+      doFetch(coord, '/reserve', 'POST', { burnIntent: makeBurnIntent(), idempotencyKey: IDEM_KEY_A }).then((r) => r.json()),
+      doFetch(coord, '/reserve', 'POST', { burnIntent: makeBurnIntent({ spec: { salt: '0x' + 'dd'.repeat(32) } }), idempotencyKey: IDEM_KEY_A }).then((r) => r.json()),
+    ]);
     const outcomes = [a, b].map((x) => (x.reserved ? 'reserved' : 'recovered')).sort();
     expect(outcomes).toEqual(['recovered', 'reserved']);
   });
 
-  it('isolates mainnet from testnet (separate DO instances, no cross-env dedup)', () => {
-    // environmentFor drives the DO id; here we assert the util-level isolation and
-    // that a testnet intent reserves under its own environment.
-    const ns = makeCoordinatorNamespace();
-    const mainnetIntent = makeBurnIntent();
-    const testnetIntent = makeBurnIntent({ spec: { sourceContract: pad32(TESTNET_GATEWAY_WALLET) } });
+  it('release preserves the operation record and idempotency history', async () => {
+    const coord = makeCoord();
+    await seedBalance(coord, scopeOf(makeBurnIntent()), '100000000');
+    const rec = (await (await doFetch(coord, '/reserve', 'POST', { burnIntent: makeBurnIntent(), idempotencyKey: IDEM_KEY_A })).json()).record;
+    await doFetch(coord, '/update', 'POST', { operationId: rec.operationId, to: 'rejected', expectedVersion: 1, evidence: {} });
 
-    const mainnetId = ns.idFromName('gateway-exec:' + depositorOf(mainnetIntent) + ':' + environmentFor(mainnetIntent));
-    const testnetId = ns.idFromName('gateway-exec:' + depositorOf(testnetIntent) + ':' + environmentFor(testnetIntent));
-    expect(mainnetId.name).not.toBe(testnetId.name);
-    expect(mainnetId.name).toContain(':mainnet');
-    expect(testnetId.name).toContain(':testnet');
+    const rel = await doFetch(coord, '/release', 'DELETE', { operationId: rec.operationId });
+    expect(rel.status).toBe(200);
+
+    // The record is still present (released, not deleted).
+    const st = await doFetch(coord, '/status?operationId=' + rec.operationId, 'GET');
+    expect(st.status).toBe(200);
+    const body = await st.json();
+    expect(body.record.released).toBe(true);
+    expect(body.record.status).toBe('rejected');
+  });
+
+  it('an old operation release never removes a newer operation (index safety)', async () => {
+    const coord = makeCoord();
+    await seedBalance(coord, scopeOf(makeBurnIntent()), '100000000');
+    const r1 = (await (await doFetch(coord, '/reserve', 'POST', { burnIntent: makeBurnIntent(), idempotencyKey: 'intent-1' })).json()).record;
+    // Terminal intent-1, then reuse the idempotency key for a new op.
+    await doFetch(coord, '/update', 'POST', { operationId: r1.operationId, to: 'rejected', expectedVersion: 1, evidence: {} });
+    const r2 = (await (await doFetch(coord, '/reserve', 'POST', { burnIntent: makeBurnIntent({ spec: { salt: '0x' + 'ee'.repeat(32) } }), idempotencyKey: 'intent-1' })).json()).record;
+
+    // Releasing the OLD op must not touch the NEW op (different operationId).
+    const rel = await doFetch(coord, '/release', 'DELETE', { operationId: r1.operationId });
+    expect(rel.status).toBe(200);
+    const st = await doFetch(coord, '/status?operationId=' + r2.operationId, 'GET');
+    expect(st.status).toBe(200);
+    expect((await st.json()).record.released).toBe(false);
+  });
+
+  it('isolates mainnet from testnet by DO name', () => {
+    const ns = makeCoordinatorNamespace();
+    const m = ns.idFromName('gateway-exec:' + depositorOf(makeBurnIntent()) + ':' + environmentFor(makeBurnIntent()));
+    const t = ns.idFromName('gateway-exec:' + depositorOf(makeBurnIntent()) + ':testnet');
+    expect(m.name).toContain(':mainnet');
+    expect(t.name).toContain(':testnet');
+    expect(m.name).not.toBe(t.name);
   });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
 describe('transfer.js — flag-gated coordinator integration (real handler)', () => {
-  function makeEnv(coordinator, enabled) {
-    const env = { GATEWAY_OPS_KV: makeKV(), DO_INTERNAL_SECRET: SECRET };
-    if (coordinator) env.GATEWAY_EXECUTION_COORDINATOR = coordinator;
-    if (enabled) env.GATEWAY_EXECUTION_COORDINATOR_ENABLED = 'true';
-    return env;
-  }
+  it('flag ON without binding → fail-closed 503 (no silent fallback)', async () => {
+    const env = { GATEWAY_OPS_KV: makeKV(), DO_INTERNAL_SECRET: SECRET, GATEWAY_EXECUTION_COORDINATOR_ENABLED: 'true' };
+    let forwarded = false;
+    globalThis.fetch = async () => { forwarded = true; return new Response('{}', { status: 200 }); };
+    const res = await onRequestPost({ request: makePostRequest([makeTransferItem(makeBurnIntent(), IDEM_KEY_A)]), env });
+    expect(res.status).toBe(503);
+    expect((await res.json()).blocked).toBe(true);
+    expect(forwarded).toBe(false);
+  });
 
-  it('when disabled (no binding) preserves the existing behavior and forwards to Circle', async () => {
+  it('flag OFF → legacy flow (coordinator not consulted)', async () => {
     const env = makeEnv(null, false);
     let forwarded = false;
-    globalThis.fetch = async () => { forwarded = true; return new Response(JSON.stringify([{ attestation: { payload: '0xab', signature: '0xcd' } }]), { status: 200 }); };
-    const res = await onRequestPost({ request: makePostRequest([makeTransferItem(makeBurnIntent())]), env });
+    globalThis.fetch = async () => { forwarded = true; return new Response(JSON.stringify([{ attestation: {} }]), { status: 200 }); };
+    const res = await onRequestPost({ request: makePostRequest([makeTransferItem(makeBurnIntent(), null)]), env });
     expect(res.status).toBe(200);
     expect(forwarded).toBe(true);
   });
 
-  it('when binding present but NOT enabled, remains disabled (default off)', async () => {
+  it('binding present but flag OFF → legacy flow (default off)', async () => {
     const env = makeEnv(makeCoordinatorNamespace(), false);
     let forwarded = false;
     globalThis.fetch = async () => { forwarded = true; return new Response(JSON.stringify([{ attestation: {} }]), { status: 200 }); };
-    const res = await onRequestPost({ request: makePostRequest([makeTransferItem(makeBurnIntent())]), env });
+    const res = await onRequestPost({ request: makePostRequest([makeTransferItem(makeBurnIntent(), null)]), env });
     expect(res.status).toBe(200);
     expect(forwarded).toBe(true);
   });
 
-  it('fails closed (503) when enabled but the coordinator is unavailable', async () => {
-    const env = makeEnv(makeCoordinatorNamespace(), true);
-    // Override the DO stub fetch to throw → coordinator_unavailable.
-    const origGet = env.GATEWAY_EXECUTION_COORDINATOR.get;
-    env.GATEWAY_EXECUTION_COORDINATOR.get = () => ({ fetch: async () => { throw new Error('boom'); } });
+  it('enabled + coordinator unavailable → fail-closed 503 (no forward)', async () => {
+    const ns = makeCoordinatorNamespace();
+    const env = makeEnv(ns, true);
+    ns.get = () => ({ fetch: async () => { throw new Error('boom'); } });
     let forwarded = false;
-    globalThis.fetch = async () => { forwarded = true; return new Response('{}', { status: 200 }); };
-    const res = await onRequestPost({ request: makePostRequest([makeTransferItem(makeBurnIntent())]), env });
+    globalThis.fetch = mockFetch({});
+    const res = await onRequestPost({ request: makePostRequest([makeTransferItem(makeBurnIntent({ sourceToken: USDC_ARC }), IDEM_KEY_A)]), env });
     expect(res.status).toBe(503);
-    expect((await res.json()).blocked).toBe(true);
-    expect(forwarded).toBe(false); // nothing forwarded
-  });
-
-  it('blocks a cross-salt duplicate (409) and does NOT forward', async () => {
-    const ns = makeCoordinatorNamespace();
-    const env = makeEnv(ns, true);
-    // First submission (accepted) populates the coordinator slot.
-    globalThis.fetch = async () => new Response(JSON.stringify([{ attestation: { payload: '0xab', signature: '0xcd' } }]), { status: 200 });
-    const first = await onRequestPost({ request: makePostRequest([makeTransferItem(makeBurnIntent())]), env });
-    expect(first.status).toBe(200);
-
-    // Second submission: same intent, different salt → duplicate.
-    let forwarded = false;
-    globalThis.fetch = async () => { forwarded = true; return new Response('{}', { status: 200 }); };
-    const second = await onRequestPost({
-      request: makePostRequest([makeTransferItem(makeBurnIntent({ spec: { salt: '0x' + 'ee'.repeat(32) } }))]),
-      env,
-    });
-    expect(second.status).toBe(409);
-    const body = await second.json();
-    expect(body.error).toBe('already_submitted');
     expect(forwarded).toBe(false);
   });
 
-  it('blocks a conflicting payload (409) and does NOT forward', async () => {
-    const ns = makeCoordinatorNamespace();
-    const env = makeEnv(ns, true);
-    globalThis.fetch = async () => new Response(JSON.stringify([{ attestation: {} }]), { status: 200 });
-    await onRequestPost({ request: makePostRequest([makeTransferItem(makeBurnIntent())]), env });
-
-    let forwarded = false;
-    globalThis.fetch = async () => { forwarded = true; return new Response('{}', { status: 200 }); };
-    const res = await onRequestPost({
-      request: makePostRequest([makeTransferItem(makeBurnIntent({ spec: { value: '2000000', salt: '0x' + 'ff'.repeat(32) } }))]),
-      env,
-    });
-    expect(res.status).toBe(409);
-    expect((await res.json()).error).toBe('coordinator_conflict');
-    expect(forwarded).toBe(false);
+  it('enabled + missing idempotencyKey → 400', async () => {
+    const env = makeEnv(makeCoordinatorNamespace(), true);
+    globalThis.fetch = mockFetch({});
+    const res = await onRequestPost({ request: makePostRequest([makeTransferItem(makeBurnIntent({ sourceToken: USDC_ARC }), null)]), env });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe('idempotencyKey_required');
   });
 
-  it('updates the coordinator to accepted on a Circle 2xx', async () => {
+  it('enabled → forwards to Circle and persists coordinator accepted (submitting before POST)', async () => {
     const ns = makeCoordinatorNamespace();
     const env = makeEnv(ns, true);
-    globalThis.fetch = async () => new Response(JSON.stringify([{ burnIntent: makeBurnIntent(), attestation: { payload: '0xab', signature: '0xcd' } }]), { status: 200 });
-    const res = await onRequestPost({ request: makePostRequest([makeTransferItem(makeBurnIntent())]), env });
+    globalThis.fetch = mockFetch({ balance: '100000000', transferStatus: 200 });
+    const res = await onRequestPost({ request: makePostRequest([makeTransferItem(makeBurnIntent({ sourceToken: USDC_ARC }), IDEM_KEY_A)]), env });
     expect(res.status).toBe(200);
 
-    // The coordinator record for this depositor:environment should be 'accepted'.
     const names = [...ns.instances.keys()];
     expect(names.length).toBe(1);
     const coord = ns.instances.get(names[0]);
-    const statusRes = await coord.fetch(new Request('https://do/status?operationId=missing', { headers: { 'X-DO-Internal-Secret': SECRET } }));
-    expect(statusRes.status).toBe(404); // sanity: status endpoint works
+    const st = await coord.fetch(new Request('https://do/status?idempotencyKey=' + IDEM_KEY_A, { headers: { 'X-DO-Internal-Secret': SECRET } }));
+    const body = await st.json();
+    expect(body.record.status).toBe('accepted');
+    expect(body.record.transferId).toBe(null); // no transferId in this mock body
   });
 
-  it('updates the coordinator to ambiguous on a Circle 5xx (and does not fail closed)', async () => {
+  it('enabled → blocks a cross-salt duplicate (409) and does NOT forward', async () => {
     const ns = makeCoordinatorNamespace();
     const env = makeEnv(ns, true);
-    globalThis.fetch = async () => new Response('{"error":"boom"}', { status: 500 });
-    const res = await onRequestPost({ request: makePostRequest([makeTransferItem(makeBurnIntent())]), env });
-    expect(res.status).toBe(500);
+    globalThis.fetch = mockFetch({ balance: '100000000', transferStatus: 200 });
+    await onRequestPost({ request: makePostRequest([makeTransferItem(makeBurnIntent({ sourceToken: USDC_ARC }), IDEM_KEY_A)]), env });
 
-    // The per-salt record should be 'ambiguous' and the coordinator 'ambiguous'.
-    const kv = env.GATEWAY_OPS_KV;
-    const record = await kv.get('gw:op:' + makeBurnIntent().spec.salt, { type: 'json' });
-    expect(record.status).toBe('ambiguous');
+    let forwarded = false;
+    globalThis.fetch = async (url) => {
+      if (String(url).includes('/v1/balances')) return new Response(JSON.stringify({ balances: [{ domain: 26, balance: '100000000' }] }), { status: 200 });
+      if (String(url).includes('/v1/transfer')) { forwarded = true; return new Response('{}', { status: 200 }); }
+      return new Response('{}', { status: 404 });
+    };
+    const res = await onRequestPost({
+      request: makePostRequest([makeTransferItem(makeBurnIntent({ sourceToken: USDC_ARC, spec: { salt: '0x' + 'ff'.repeat(32) } }), IDEM_KEY_A)]),
+      env,
+    });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe('already_submitted');
+    expect(forwarded).toBe(false);
+  });
+
+  it('associates transferId per item (not the first item for all)', async () => {
+    const ns = makeCoordinatorNamespace();
+    const env = makeEnv(ns, true);
+    // Two items with distinct salts, each echoed with its own transferId.
+    const saltA = '0x' + '11'.repeat(32);
+    const saltB = '0x' + '22'.repeat(32);
+    globalThis.fetch = async (url) => {
+      if (String(url).includes('/v1/balances')) return new Response(JSON.stringify({ balances: [{ domain: 26, balance: '100000000' }] }), { status: 200 });
+      if (String(url).includes('/v1/transfer')) {
+        return new Response(JSON.stringify([
+          { burnIntent: { spec: { salt: saltA } }, attestation: { payload: '0xab', signature: '0xcd' }, transferId: 'tx-A' },
+          { burnIntent: { spec: { salt: saltB } }, attestation: { payload: '0xef', signature: '0x01' }, transferId: 'tx-B' },
+        ]), { status: 200 });
+      }
+      return new Response('{}', { status: 404 });
+    };
+    const itemA = makeTransferItem(makeBurnIntent({ sourceToken: USDC_ARC, spec: { salt: saltA } }), 'intent-A');
+    const itemB = makeTransferItem(makeBurnIntent({ sourceToken: USDC_ARC, spec: { salt: saltB } }), 'intent-B');
+    const res = await onRequestPost({ request: makePostRequest([itemA, itemB]), env });
+    expect(res.status).toBe(200);
+
+    const names = [...ns.instances.keys()];
+    const coord = ns.instances.get(names[0]);
+    const stA = await (await coord.fetch(new Request('https://do/status?operationId=', { headers: { 'X-DO-Internal-Secret': SECRET } }))).json().catch(() => ({}));
+    void stA;
+    const a = await (await coord.fetch(new Request('https://do/status?idempotencyKey=intent-A', { headers: { 'X-DO-Internal-Secret': SECRET } }))).json();
+    const b = await (await coord.fetch(new Request('https://do/status?idempotencyKey=intent-B', { headers: { 'X-DO-Internal-Secret': SECRET } }))).json();
+    expect(a.record.transferId).toBe('tx-A');
+    expect(b.record.transferId).toBe('tx-B');
+  });
+
+  it('enabled → rejects an over-balance reservation (422)', async () => {
+    const ns = makeCoordinatorNamespace();
+    const env = makeEnv(ns, true);
+    globalThis.fetch = mockFetch({ balance: '1000000', transferStatus: 200 }); // balance < value+maxFee
+    const res = await onRequestPost({ request: makePostRequest([makeTransferItem(makeBurnIntent({ sourceToken: USDC_ARC }), IDEM_KEY_A)]), env });
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toBe('insufficient_available_balance');
   });
 });

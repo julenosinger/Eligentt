@@ -1,57 +1,48 @@
 /**
- * coordinator-util.js — server-side canonical hashing helpers for the
+ * coordinator-util.js — server-side canonical helpers for the
  * GatewayExecutionCoordinator Durable Object.
  *
- * Phase 1.0.1C (isolated development — NOT active in production).
+ * Phase 1.0.1C.1 (isolated development — NOT active in production).
  *
  * PURPOSE
- *   The per-salt GatewayOpLock deduplicates only the SAME salt. Two concurrent
- *   submissions of the SAME financial intent (same depositor, token, value,
- *   recipient, domains) with DIFFERENT salts would each reserve successfully and
- *   both be forwarded — a cross-salt double-submission.
+ *   The per-salt GatewayOpLock deduplicates only the SAME salt. The
+ *   GatewayExecutionCoordinator adds cross-salt dedup and quantitative balance
+ *   reservation, keyed by (depositor, environment).
  *
- *   The GatewayExecutionCoordinator closes that gap by deduplicating on a
- *   server-side canonical fingerprint that does NOT include the salt. This module
- *   is the single source of truth for that fingerprint.
+ * IDENTITY MODEL (Phase 1.0.1C.1 — corrected)
+ *   The idempotency key is a CALLER-PROVIDED, explicit, stable identifier — it is
+ *   NOT derived from payment characteristics. Deriving it from the payment "slot"
+ *   (depositor + domains + token + recipient) conflates two independent payments
+ *   that happen to share the same recipient/network/asset/amount. Instead:
  *
- * TWO-LEVEL IDENTITY (both computed server-side, deterministic, salt-independent)
- *   1. canonicalPayloadHash(burnIntent)
- *        SHA-256 of the FULL immutable financial terms:
- *          maxBlockHeight, maxFee, and every spec field EXCEPT `salt`
- *          (version, sourceDomain, destinationDomain, sourceContract,
- *           destinationContract, sourceToken, destinationToken, sourceDepositor,
- *           destinationRecipient, sourceSigner, destinationCaller, value, hookData).
- *        Two intents with the same fingerprint are the SAME financial operation
- *        regardless of salt.
+ *     idempotencyKey  — caller-generated once per logical intent, reused across
+ *                       retries/recovery (even with different salts). This is the
+ *                       dedup key: same key + same payload → recover; same key +
+ *                       different payload → conflict; new key → independent.
  *
- *   2. idempotencyKeyFor(burnIntent)
- *        SHA-256 of the COARSE financial identity ("payment slot"):
- *          sourceDepositor, sourceDomain, destinationDomain, sourceToken,
- *          destinationToken, destinationRecipient.
- *        A depositor has ONE in-flight slot per (from-domain, to-domain,
- *        token-pair, recipient). Two genuinely-independent payments (different
- *        recipient, different chain, different token) map to DIFFERENT slots and
- *        are never conflated.
+ *     payloadHash     — SHA-256 of the full immutable financial terms EXCLUDING
+ *                       `salt`, computed server-side. It is the conflict-detection
+ *                       fingerprint (detects a key reused with mutated terms). It
+ *                       is NOT used as a dedup key on its own (that would conflate
+ *                       independent identical payments).
  *
- *   Dedup semantics (enforced by the DO, keyed by depositor:environment):
- *     same key + same hash          → RECOVER existing operation (duplicate)
- *     same key + different hash     → CONFLICT (slot reused with mutated terms)
- *     terminal record under the key → allow a NEW operation (slot freed)
+ *   Two independent payments to the same recipient with the same amount MUST use
+ *   two different idempotency keys; a retry of the same intent MUST reuse its key.
+ *   This is the caller's contract, and it is what keeps "same intent across
+ *   modules/refresh/retry" distinct from "a new explicitly-authorized intent".
+ *
+ * BALANCE SCOPE
+ *   Circle Gateway balance is per (token, domain, depositor). A transfer debits the
+ *   balance of its source token on its source domain. `scopeKeyFor` derives the
+ *   balance scope `sourceToken:sourceDomain` (lowercased, unpadded) used by the DO's
+ *   quantitative reservation. `tokenSymbolFor` maps a known Circle token address to
+ *   its symbol (for the server-side balance fetch against /v1/balances).
  *
  * ENVIRONMENT DETECTION
- *   environmentFor(burnIntent) derives `mainnet` | `testnet` from
- *   spec.sourceContract (the GatewayWallet bytes32). The mainnet and testnet
- *   GatewayWallet deployments have DIFFERENT addresses (see constants below,
- *   sourced from Circle's published contract addresses). An UNKNOWN sourceContract
- *   returns `null` so the caller fails closed (never coordinates an unrecognized
- *   environment).
- *
- * SECURITY / PORTABILITY
- *   - Uses `crypto.subtle.digest('SHA-256', …)` — available in both Cloudflare
- *     Workers and Node 18+ (Vitest). No Node-only imports.
- *   - Never stores or returns private keys, signatures, or attestation payloads.
- *   - `canon` normalizes BigInt/Number/hex so the hash is stable across JSON
- *     round-trips and casing.
+ *   `environmentFor` derives `mainnet` | `testnet` from spec.sourceContract (the
+ *   GatewayWallet bytes32). Mainnet and testnet GatewayWallet deployments have
+ *   DIFFERENT addresses. An UNKNOWN sourceContract returns `null` → caller fails
+ *   closed.
  */
 
 // ── GatewayWallet addresses (sourceContract) ─────────────────────────────────
@@ -63,9 +54,16 @@ export const TESTNET_GATEWAY_WALLET  = '0x0077777d7eba4688bdef3e311b846f25870a19
 export const ENV_MAINNET = 'mainnet';
 export const ENV_TESTNET = 'testnet';
 
+// ── Idempotency key format (caller-provided) ────────────────────────────────
+// Printable, no whitespace/control chars, bounded length — mirrors the x402
+// idempotency-key contract. The caller generates it once per logical intent.
+export const IDEMPOTENCY_KEY_RE = /^[A-Za-z0-9._-]{8,128}$/;
+
+export function isValidIdempotencyKey(key) {
+  return typeof key === 'string' && IDEMPOTENCY_KEY_RE.test(key);
+}
+
 // ── Canonical value normalization ────────────────────────────────────────────
-// BigInt → decimal string, Number → string, hex/address → lowercase. Stable and
-// deterministic regardless of input casing or JSON serialization.
 export function canon(v) {
   if (v == null) return '';
   if (typeof v === 'bigint') return v.toString();
@@ -74,7 +72,6 @@ export function canon(v) {
 }
 
 // ── bytes32 helpers ──────────────────────────────────────────────────────────
-// A bytes32 field is 64 hex chars; the 20-byte EVM address is the low 40 chars.
 export function unpadAddress(bytes32) {
   if (typeof bytes32 !== 'string') return null;
   const raw = bytes32.replace(/^0x/, '');
@@ -118,52 +115,67 @@ const PAYLOAD_FIELDS = [
 /**
  * SHA-256 of the full immutable financial terms, EXCLUDING `spec.salt`.
  * Two intents with the same hash are the same financial operation regardless of
- * salt. Returns a 64-char lowercase hex digest.
+ * salt. Used for conflict detection (same idempotency key + mutated terms).
  */
 export async function canonicalPayloadHash(burnIntent) {
   const parts = PAYLOAD_FIELDS.map(([name, get]) => name + '=' + canon(get(burnIntent)));
   return sha256Hex(parts.join('|'));
 }
 
-// ── Coarse identity ("payment slot") key ─────────────────────────────────────
-const IDENTITY_FIELDS = [
-  ['sourceDepositor',      (bi) => bi.spec.sourceDepositor],
-  ['sourceDomain',         (bi) => bi.spec.sourceDomain],
-  ['destinationDomain',    (bi) => bi.spec.destinationDomain],
-  ['sourceToken',          (bi) => bi.spec.sourceToken],
-  ['destinationToken',     (bi) => bi.spec.destinationToken],
-  ['destinationRecipient', (bi) => bi.spec.destinationRecipient],
-];
-
-/**
- * Stable idempotency key per financial intent (salt-independent). Coarser than
- * `canonicalPayloadHash`: it identifies the "payment slot" so a depositor cannot
- * hold two conflicting in-flight intents in the same slot. Returns `gw:` + 64 hex.
- */
-export async function idempotencyKeyFor(burnIntent) {
-  const parts = IDENTITY_FIELDS.map(([name, get]) => name + '=' + canon(get(burnIntent)));
-  return 'gw:' + (await sha256Hex(parts.join('|')));
-}
-
-// ── Depositor + environment ──────────────────────────────────────────────────
-/**
- * The 20-byte depositor address (unpadded sourceDepositor), lowercase.
- * Returns null when the bytes32 field is malformed.
- */
+// ── Depositor + environment + balance scope ──────────────────────────────────
 export function depositorOf(burnIntent) {
   if (!burnIntent || !burnIntent.spec) return null;
   return unpadAddress(burnIntent.spec.sourceDepositor);
 }
 
-/**
- * `mainnet` | `testnet` | `null` — derived from spec.sourceContract
- * (the GatewayWallet). `null` means the wallet is not a recognized GatewayWallet,
- * and callers MUST fail closed.
- */
 export function environmentFor(burnIntent) {
   if (!burnIntent || !burnIntent.spec) return null;
   const wallet = unpadAddress(burnIntent.spec.sourceContract);
   if (wallet === MAINNET_GATEWAY_WALLET) return ENV_MAINNET;
   if (wallet === TESTNET_GATEWAY_WALLET)  return ENV_TESTNET;
   return null;
+}
+
+/**
+ * Balance scope key for the quantitative reservation: `sourceToken:sourceDomain`
+ * (token address lowercased + unpadded, joined to the numeric domain). Two intents
+ * that debit the same source token on the same source domain share a scope.
+ */
+export function scopeKeyFor(burnIntent) {
+  if (!burnIntent || !burnIntent.spec) return null;
+  const token = unpadAddress(burnIntent.spec.sourceToken);
+  if (!token) return null;
+  const domain = burnIntent.spec.sourceDomain;
+  if (domain == null) return null;
+  return token + ':' + String(domain);
+}
+
+// ── Token address → symbol (for the server-side /v1/balances fetch) ──────────
+// Sourced from shared/GatewaySpendService.js TOKEN_ADDR (Circle-published mainnet
+// token addresses). Used only to map a burnIntent's sourceToken address back to a
+// Circle balance symbol; an unknown address returns null → caller fails closed.
+const TOKEN_SYMBOLS = {
+  // USDC
+  '0x3600000000000000000000000000000000000000': 'USDC', // Arc
+  '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48': 'USDC', // Ethereum
+  '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913': 'USDC', // Base
+  '0xaf88d065e77c8cc2239327c5edb3a432268e5831': 'USDC', // Arbitrum
+  '0x0b2c639c533813f4aa9d7837caf62653d097ff85': 'USDC', // Optimism
+  '0x3c499c542cef5e3811e1192ce70d8cc03d5c3359': 'USDC', // Polygon
+  '0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e': 'USDC', // Avalanche
+  '0x3894085ef7ff0f0aedf52e2a2704928d1ec074f1': 'USDC', // Sei
+  // EURC
+  '0xbef5f6d51cb62b58e6a8f77868681825c6fe21c1': 'EURC', // Arc
+  '0x1abaea1f7c830bd89acc67ec4af516284b1bc33c': 'EURC', // Ethereum
+  '0x60a3e35cc302bfa44cb288bc5a4f316fdb1adb42': 'EURC', // Base
+  '0xc891eb4cbdeff6e073e859e987815ed1505c2acd': 'EURC', // Avalanche
+  // cirBTC
+  '0x171a4217b86a807a64eb94757db6849fb4bdbaa0': 'cirBTC', // Arc
+  '0x72dfb2e44f59c5ad2bafe84314e5b99a7cd5075e': 'cirBTC', // Ethereum
+};
+
+export function tokenSymbolFor(sourceToken) {
+  const addr = unpadAddress(sourceToken);
+  if (!addr) return null;
+  return TOKEN_SYMBOLS[addr] || null;
 }

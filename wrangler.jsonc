@@ -61,11 +61,16 @@
   //   4. Re-deploy the Pages project.
   //
   // GATEWAY_EXECUTION_COORDINATOR — cross-salt Gateway financial coordinator
-  //   (Phase 1.0.1C, isolated development — NOT active in production).
+  //   (Phase 1.0.1C.1, isolated development — NOT active in production).
   //   One Durable Object per (depositor, environment) adds a cross-salt dedup gate
-  //   on top of the per-salt GATEWAY_OP_LOCK. It is INACTIVE in transfer.js unless
-  //   BOTH this binding is present AND env.GATEWAY_EXECUTION_COORDINATOR_ENABLED
-  //   === 'true'. When enabled but the DO is unavailable, transfers fail closed (503).
+  //   (on a caller-provided idempotency key) and a quantitative balance reservation
+  //   (per source token+domain scope) on top of the per-salt GATEWAY_OP_LOCK. It is
+  //   INACTIVE in transfer.js unless BOTH this binding is present AND
+  //   env.GATEWAY_EXECUTION_COORDINATOR_ENABLED === 'true'. When the flag is ON but
+  //   the binding is absent/invalid/unavailable, transfers fail closed (503) BEFORE
+  //   any submission — never a silent fallback to the legacy per-salt-only flow.
+  //   Requires each request item to carry a stable idempotencyKey, and requires an
+  //   authoritative balance snapshot per scope (server-side fetch + /set-balance).
   //   Activation steps (same pattern as GATEWAY_OP_LOCK):
   //     1. Create a separate CF Worker whose wrangler.toml declares:
   //          [[durable_objects.bindings]]
@@ -82,9 +87,11 @@
   //     3. Set DO_INTERNAL_SECRET (already required by GATEWAY_OP_LOCK).
   //     4. Re-deploy the Pages project, then set
   //        GATEWAY_EXECUTION_COORDINATOR_ENABLED = 'true' (controlled roll-out).
-  //   Rollback: set GATEWAY_EXECUTION_COORDINATOR_ENABLED = 'false' (or remove the
-  //   binding). Pending operations in the coordinator remain readable via /status
-  //   for reconciliation; the per-salt GATEWAY_OP_LOCK records are untouched.
+  //   Rollback (drain): set GATEWAY_EXECUTION_COORDINATOR_ENABLED = 'false' (or
+  //   remove the binding). Pending operations in the coordinator remain readable via
+  //   /status for reconciliation; the per-salt GATEWAY_OP_LOCK records are untouched.
+  //   Disabling the flag does NOT release ambiguous reservations and does NOT permit
+  //   resubmission of operations already started.
   //
   // PAYMENT_LOCK — atomic per-(chainId+txHash) idempotence lock for payment links.
   //   Same activation process, using PaymentLock class from functions/api/payment-lock.do.js.
