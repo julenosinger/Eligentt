@@ -109,6 +109,65 @@
   }
   function hint(k, g) { var h = check(k, g); return h[1] ? '<span class="ch-h-' + h[0] + '">' + esc(h[1]) + '</span>' : ''; }
 
+  // ── Native execution readiness (Phase 1.0.1D.2) ─────────────────────────
+  // A Gateway transfer (send/cross-chain/withdraw) is ready only when the wallet is
+  // connected, the amount is a valid positive value within the available Gateway
+  // balance, and (for send/cross-chain) the recipient is a valid EVM address.
+  function isReady(k, g) {
+    if (k !== 'send' && k !== 'crosschain' && k !== 'withdraw') return false;
+    if (!CH.wallet()) return false;
+    var f = M.f[k], asset = f.asset, dec = CH.DEC[asset] || 6;
+    if (!f.amount) return false;
+    var a = CH.toAtomic(f.amount, dec);
+    if (a == null || a === 0n) return false;
+    if (k === 'send' || k === 'crosschain') { var r = f.to === null ? '' : f.to; if (!isAddr(r)) return false; }
+    var av = gwAvail(g, asset);
+    if (av != null && a > av) return false;
+    return true;
+  }
+  function execState() {
+    var d = document.getElementById('ch-exec-state');
+    return d ? d : null;
+  }
+  function showExecState(k, cls, msg) {
+    var d = document.getElementById('ch-exec-state');
+    if (!d) return;
+    d.className = 'ch-exec-state ch-h-' + cls;
+    d.innerHTML = msg;
+  }
+
+  // Execute a native Gateway transfer (send / cross-chain / withdraw) inside the
+  // Capital Hub, reusing the existing saExecGateway engine with explicit parameters.
+  UI.qaExec = async function (k) {
+    var f = M.f[k]; if (!f) return;
+    var g = CH.gateway();
+    if (!isReady(k, g)) return;
+    var w = CH.wallet(), asset = f.asset;
+    var recipient = (k === 'withdraw') ? w : (f.to === null ? w : f.to);
+    var srcChainId = activeId(), destChainId = f.net;
+
+    var btn = document.querySelector('[data-ch-exec="' + k + '"]');
+    if (btn) { btn.disabled = true; var _c = btn.innerHTML; btn.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i> Processing…'; }
+    showExecState(k, 'info', 'Signing and submitting the transfer…');
+    try {
+      var res = (typeof saExecGateway === 'function')
+        ? await saExecGateway({ recipient: recipient, amount: f.amount, asset: asset, chainId: srcChainId, destChainId: destChainId })
+        : { status: 'error', error: 'gateway_engine_unavailable' };
+      if (res && res.status === 'pending') {
+        showExecState(k, 'info', 'Transfer submitted — awaiting mint on the destination network. Do not resubmit.');
+      } else if (res && res.status === 'ambiguous') {
+        showExecState(k, 'warn', 'Transfer result is indeterminate (' + (res.error || 'unknown') + '). Do not resubmit — it will be reconciled.');
+      } else {
+        showExecState(k, 'err', 'Transfer failed: ' + (res && res.error ? res.error : 'unknown error'));
+      }
+    } catch (e) {
+      showExecState(k, 'err', 'Transfer failed: ' + (e && e.message ? e.message : 'unknown error'));
+    } finally {
+      if (btn) { btn.disabled = false; btn.innerHTML = _c; }
+      try { if (typeof ubGatewaySyncRefresh === 'function') ubGatewaySyncRefresh(); } catch (_) {}
+    }
+  };
+
   // ── Form ──────────────────────────────────────────────────────────────────
   function sel(id, opts, cur, lead) {
     return '<div class="ch-selw">' + (lead || '') + '<select class="ch-sel' + (lead ? ' ch-sel-lead' : '') + '" id="' + id + '">' + opts.map(function (o) { return '<option value="' + esc(o[0]) + '"' + (String(o[0]) === String(cur) ? ' selected' : '') + '>' + esc(o[1]) + '</option>'; }).join('') + '</select></div>';
@@ -142,15 +201,22 @@
         out += fld('Amount', amountField(k, asset, true), 'full');
       }
     }
-    out += '</div><div class="ch-hint" id="ch-qf-hint" aria-live="polite">' + hint(k, g) + '</div>' +
-      '<button type="button" class="ch-act ch-act-primary ch-wide" disabled aria-disabled="true" title="Native execution is not enabled yet"><i class="ti ti-' + A.ic + '"></i>' + A.btn + '</button>' +
-      '<div class="ch-pending"><i class="ti ti-info-circle"></i><span>Native execution is not enabled yet. ' + (A.ex ? 'The existing flow still works:' : 'Payment links are created in Billing today.') + '</span>' +
-      (A.ex ? '<button type="button" class="ch-link" data-ch-qa-open="' + k + '">' + A.ex + '</button>' : '') + '</div>';
+    var native = (k === 'send' || k === 'crosschain' || k === 'withdraw');
+    var ready = native && isReady(k, g);
+    out += '</div><div class="ch-hint" id="ch-qf-hint" aria-live="polite">' + hint(k, g) + '</div>';
+    if (native) {
+      out += '<button type="button" class="ch-act ch-act-primary ch-wide" data-ch-exec="' + k + '"' + (ready ? '' : ' disabled aria-disabled="true"') + '><i class="ti ti-' + A.ic + '"></i>' + A.btn + '</button>' +
+        '<div class="ch-exec-state" id="ch-exec-state" aria-live="polite"></div>';
+    } else {
+      out += '<button type="button" class="ch-act ch-act-primary ch-wide" disabled aria-disabled="true"><i class="ti ti-' + A.ic + '"></i>' + A.btn + '</button>' +
+        '<div class="ch-pending"><i class="ti ti-info-circle"></i><span>' + (k === 'charge' ? 'Payment links are created in Billing today.' : 'The existing flow still works:') + '</span>' +
+        (A.ex ? '<button type="button" class="ch-link" data-ch-qa-open="' + k + '">' + A.ex + '</button>' : '') + '</div>';
+    }
     return out;
   }
   function steps(k) {
     return '<ol class="ch-steps">' + STEPS[k].map(function (s, i) { return '<li class="ch-step"><span class="ch-step-n">' + (i + 1) + '</span><div><div class="ch-step-t">' + s[0] + '</div><div class="ch-step-d">' + s[1] + '</div></div></li>'; }).join('') + '</ol>' +
-      '<div class="ch-card-f">Steps stay inactive until native execution is connected.</div>';
+      '<div class="ch-card-f">Each step reflects the real on-chain state — nothing is reported completed without verifiable confirmation.</div>';
   }
 
   UI.tabs.manage = function (g) {

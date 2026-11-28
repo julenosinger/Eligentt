@@ -42661,21 +42661,26 @@ async function _gwResolveIdemKey() {
 async function saExecGateway() {
   // Returns a discriminated result: { status: 'error'|'pending'|'ambiguous', error?, salt?, transferId? }
   // Callers MUST check the returned status — never interpret a normal return as success.
+  // Phase 1.0.1D.2: accepts an optional `opts` (arguments[0]) = { recipient, amount,
+  // asset, chainId, destChainId } so the Capital Hub can execute natively with
+  // explicit parameters (no hidden DOM dependency on the Send Assets tab). When
+  // `opts` is omitted, the existing Send Assets DOM fields are used unchanged.
   // Implements Circle Gateway /v1/transfer exactly per official docs (Oct 2026):
   //   https://developers.circle.com/gateway/howtos/transfer-unified-usdc-balance.md
   //   POST body = JSON array of { burnIntent, signature } items (root is array, NOT object)
   //   EIP-712 domain = { name: 'GatewayWallet', version: '1' } — NO chainId field
   //   All bytes32 fields = lowercase hex padded to 32 bytes with leading zeros
+  var opts = arguments[0] || {};
   var btn = document.getElementById('sa-send-btn');
   var btnContent = document.getElementById('sa-send-btn-content');
   var addr  = (typeof walletAddress !== 'undefined') ? walletAddress : null;
-  var recip = (document.getElementById('sa-recipient') || {}).value || '';
+  var recip = (opts.recipient !== undefined) ? opts.recipient : ((document.getElementById('sa-recipient') || {}).value || '');
   var amtEl = document.getElementById('sa-amount');
-  var amt   = amtEl ? amtEl.value : '';
-  var asset = (typeof saCurrentAsset !== 'undefined') ? saCurrentAsset : 'USDC';
-  var chainId = (typeof activeChainId !== 'undefined') ? activeChainId : 5042;
+  var amt   = (opts.amount !== undefined) ? String(opts.amount) : (amtEl ? amtEl.value : '');
+  var asset = opts.asset || (typeof saCurrentAsset !== 'undefined' ? saCurrentAsset : 'USDC');
+  var chainId = (opts.chainId != null) ? opts.chainId : (typeof activeChainId !== 'undefined' ? activeChainId : 5042);
   var destChainEl = document.getElementById('sa-dest-chain');
-  var destChainId = destChainEl ? parseInt(destChainEl.value) : chainId;
+  var destChainId = (opts.destChainId != null) ? opts.destChainId : (destChainEl ? parseInt(destChainEl.value) : chainId);
 
   if (!addr)  { toast('Connect your wallet first', 'warn'); return { status: 'error', error: 'no_wallet' }; }
   if (!recip) { toast('Enter a recipient address', 'warn'); return { status: 'error', error: 'no_recipient' }; }

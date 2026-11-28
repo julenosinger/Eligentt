@@ -270,7 +270,7 @@
     if (!sec || sec.__chBound) return;
     sec.__chBound = true;
     sec.addEventListener('click', function (ev) {
-      var t = ev.target.closest('[data-ch-tab],[data-ch-asset],[data-ch-flow],[data-ch-act],[data-ch-refresh],[data-ch-copy],[data-ch-launch],[data-ch-qa],[data-ch-max],[data-ch-qa-open],[data-ch-page],[data-ch-open],[data-ch-export],[data-ch-clear]');
+      var t = ev.target.closest('[data-ch-tab],[data-ch-asset],[data-ch-flow],[data-ch-act],[data-ch-refresh],[data-ch-copy],[data-ch-launch],[data-ch-qa],[data-ch-max],[data-ch-qa-open],[data-ch-exec],[data-ch-page],[data-ch-open],[data-ch-export],[data-ch-clear]');
       if (!t || t.disabled) return;
       if (t.hasAttribute('data-ch-tab')) { S.tab = t.getAttribute('data-ch-tab'); render(); }
       else if (t.hasAttribute('data-ch-asset')) { S.asset = t.getAttribute('data-ch-asset'); render(); }
@@ -278,6 +278,7 @@
       else if (t.hasAttribute('data-ch-qa') && UI.qaSelect) UI.qaSelect(t.getAttribute('data-ch-qa'));
       else if (t.hasAttribute('data-ch-max') && UI.qaMax) UI.qaMax(t.getAttribute('data-ch-max'));
       else if (t.hasAttribute('data-ch-qa-open') && UI.qaOpen) UI.qaOpen(t.getAttribute('data-ch-qa-open'));
+      else if (t.hasAttribute('data-ch-exec') && UI.qaExec) UI.qaExec(t.getAttribute('data-ch-exec'));
       else if (t.hasAttribute('data-ch-act')) launch(t.getAttribute('data-ch-act'), S.asset);
       else if (t.hasAttribute('data-ch-launch')) { var p = t.getAttribute('data-ch-launch').split(':'); var sel = document.getElementById('ch-mf-' + p[0]); launch(p[0], sel ? sel.value : S.asset); }
       else if (t.hasAttribute('data-ch-refresh')) refresh();

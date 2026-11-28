@@ -271,17 +271,18 @@
       if (typeof saExecGateway === 'function') {
         var orig = saExecGateway;
         saExecGateway = function () {
-          var recip = (document.getElementById('sa-recipient') || {}).value || '';
-          var amt = (document.getElementById('sa-amount') || {}).value || '';
-          var asset = (typeof saCurrentAsset !== 'undefined') ? saCurrentAsset : 'USDC';
-          var chainId = (typeof activeChainId !== 'undefined') ? activeChainId : null;
+          var o = arguments[0] || {};
+          var recip = (o.recipient !== undefined) ? o.recipient : ((document.getElementById('sa-recipient') || {}).value || '');
+          var amt = (o.amount !== undefined) ? String(o.amount) : ((document.getElementById('sa-amount') || {}).value || '');
+          var asset = o.asset || (typeof saCurrentAsset !== 'undefined' ? saCurrentAsset : 'USDC');
+          var chainId = (o.chainId != null) ? o.chainId : (typeof activeChainId !== 'undefined' ? activeChainId : null);
           var w = wallet();
           var r = orig.apply(this, arguments);
           Promise.resolve(r).then(function (res) {
             try {
               if (!res || !w || (res.status !== 'pending' && res.status !== 'ambiguous')) return;
               var id = 'gw:' + (res.salt || res.transferId || ('t' + Date.now()));
-              var self = recip.toLowerCase() === w;
+              var self = String(recip).toLowerCase() === w;
               record({
                 id: id, type: self ? 'Withdraw' : 'Transfer', asset: asset, amount: String(amt).trim(),
                 srcChainId: chainId, srcName: 'Circle Gateway', dstName: self ? 'Own wallet' : recip, recipient: recip,
