@@ -153,10 +153,17 @@ function isAllowedOrigin(origin, env) {
     'https://app.elligentt.com',
     'https://elligentt.pages.dev',
     'https://elligentttest.pages.dev',
+    // Authoritative app domains (aligned with CORE_ALLOWED_ORIGINS in wrangler.jsonc).
+    'https://elligente.pages.dev',
+    'https://elligentt.xyz',
+    'https://execdaat.xyz',
   ];
-  const envList = env && env.ALLOWED_ORIGINS
-    ? env.ALLOWED_ORIGINS.split(',').map(s => s.trim()).filter(Boolean)
-    : [];
+  // Read BOTH the gateway-specific ALLOWED_ORIGINS and the shared CORE_ALLOWED_ORIGINS
+  // (the latter is the authoritative domain list configured in wrangler.jsonc vars).
+  const envList = [
+    ...(env && env.ALLOWED_ORIGINS ? env.ALLOWED_ORIGINS.split(',').map(s => s.trim()).filter(Boolean) : []),
+    ...(env && env.CORE_ALLOWED_ORIGINS ? env.CORE_ALLOWED_ORIGINS.split(',').map(s => s.trim()).filter(Boolean) : []),
+  ];
   const allowlist = [...new Set([...defaults, ...envList])];
   if (/^https?:\/\/localhost(:\d+)?$/.test(origin))     return true;
   if (/^https?:\/\/127\.0\.0\.1(:\d+)?$/.test(origin)) return true;

@@ -58,7 +58,7 @@ describe('Capital Hub — native execution wiring (Phase 1.0.1D.2)', () => {
   });
 
   it('withdraw executes a Gateway transfer to the connected wallet (never reported as trustless)', () => {
-    expect(manage).toContain("var recipient = (k === 'withdraw') ? w : (f.to === null ? w : f.to)");
+    expect(manage).toContain('var recipient = recipientOf(k)');
     expect(manage).toContain('Not a trustless withdrawal');
   });
 

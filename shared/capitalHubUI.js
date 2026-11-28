@@ -248,6 +248,11 @@
       if (typeof ubGwDepOpen === 'function') ubGwDepOpen(asset); else try { toast('Gateway deposit is not available in this build', 'error'); } catch (_) {}
       return;
     }
+    if (kind === 'charge') {
+      // Reuse the existing Billing Payment Links flow (no second charge engine).
+      if (typeof showPage === 'function') showPage('links'); else try { toast('Payment Links are not available in this build', 'error'); } catch (_) {}
+      return;
+    }
     if (typeof showPage !== 'function' || typeof saSetOrigin !== 'function') { try { toast('Gateway transfers are not available in this build', 'error'); } catch (_) {} return; }
     showPage('send');
     setTimeout(function () {

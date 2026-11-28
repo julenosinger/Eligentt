@@ -602,6 +602,26 @@ describe('GatewayExecutionCoordinator — dedup + balance reservation (real clas
 
 // ═══════════════════════════════════════════════════════════════════════════
 describe('transfer.js — flag-gated coordinator integration (real handler)', () => {
+  it('allows a legitimate app origin and rejects an unauthorized origin (P0 CORS)', async () => {
+    globalThis.fetch = async () => new Response(JSON.stringify([{ attestation: {} }]), { status: 200 });
+
+    const reqFor = (origin, salt) => new Request('https://elligentttest.pages.dev/api/gateway/transfer', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'Origin': origin },
+      body: JSON.stringify([makeTransferItem(makeBurnIntent({ spec: { salt } }), IDEM_KEY_A)]),
+    });
+    // Legitimate domains (aligned with CORE_ALLOWED_ORIGINS) must be accepted.
+    const legit = ['https://execdaat.xyz', 'https://elligentt.xyz', 'https://elligente.pages.dev', 'https://elligentttest.pages.dev'];
+    for (let i = 0; i < legit.length; i++) {
+      const env = makeEnv(null, false); // fresh KV per request (fresh salt space)
+      const res = await onRequestPost({ request: reqFor(legit[i], '0x' + (i + 10).toString(16).padStart(2, '0').repeat(32)), env });
+      expect(res.status, legit[i]).toBe(200);
+    }
+    // An unauthorized origin must be rejected (403).
+    const evil = await onRequestPost({ request: reqFor('https://evil.example.com', '0x' + '99'.repeat(32)), env: makeEnv(null, false) });
+    expect(evil.status).toBe(403);
+    expect((await evil.json()).error).toBe('forbidden');
+  });
+
   it('flag ON without binding → fail-closed 503 (no silent fallback)', async () => {
     const env = { GATEWAY_OPS_KV: makeKV(), DO_INTERNAL_SECRET: SECRET, GATEWAY_EXECUTION_COORDINATOR_ENABLED: 'true' };
     let forwarded = false;

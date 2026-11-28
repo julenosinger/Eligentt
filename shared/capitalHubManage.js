@@ -21,7 +21,7 @@
     { k: 'deposit',    t: 'Deposit',        s: 'Add funds',        ic: 'download',        d: 'Fund your unified balance with assets from your EVM wallet.', btn: 'Review deposit', ex: 'Use existing deposit window' },
     { k: 'send',       t: 'Send',           s: 'Transfer funds',   ic: 'send',            d: 'Send from your Gateway balance to another address.',          btn: 'Review transfer', ex: 'Use existing flow (Send Assets)' },
     { k: 'crosschain', t: 'Cross-chain',    s: 'Move capital',     ic: 'arrows-exchange', d: 'Move Gateway capital to another supported network.',          btn: 'Review cross-chain transfer', ex: 'Use existing flow (Send Assets)' },
-    { k: 'charge',     t: 'Charge in USDC', s: 'Request payment',  ic: 'receipt-2',       d: 'Create a USDC payment request that someone can pay.',         btn: 'Create payment request', ex: '' },
+    { k: 'charge',     t: 'Charge in USDC', s: 'Request payment',  ic: 'receipt-2',       d: 'Create a USDC payment request that someone can pay.',         btn: 'Create payment request', ex: 'Create in Billing (Payment Links)' },
     { k: 'withdraw',   t: 'Withdraw',       s: 'Return funds',     ic: 'upload',          d: 'Return Gateway funds to your connected wallet.',              btn: 'Review withdrawal', ex: 'Use existing flow (Send Assets)' }
   ];
   var STEPS = {
@@ -93,9 +93,12 @@
 
   // ── Transaction details (real values only) ────────────────────────────────
   function amountText(k) { var f = M.f[k]; return f.amount ? esc(f.amount) + ' ' + (k === 'charge' ? 'USDC' : esc(f.asset)) : '<span class="ch-dim">0.00</span>'; }
+  // Circle Gateway does not expose a fee-estimation endpoint; the burn intent
+  // authorizes a conservative maxFee ceiling (USDC/EURC 2.01, cirBTC 0.000021).
+  function feeCeil(asset) { return asset === 'cirBTC' ? '≤ 0.000021 ' + asset : '≤ 2.01 ' + asset; }
   function details(k) {
     var f = M.f[k], asset = k === 'charge' ? 'USDC' : f.asset, net = chainName(asset, pickNet(f, asset)), w = CH.wallet();
-    var recip = k === 'withdraw' ? w : (f.to === null ? w : f.to);
+    var recip = recipientOf(k);
     var rows;
     if (k === 'deposit') rows = [['Estimated fee', NA], ['Estimated time', NA], ['You will deposit', amountText(k)], ['Gateway credit', 'After confirmation and finality']];
     else if (k === 'charge') rows = [['Amount', amountText(k)], ['Receiving network', net ? esc(net) : NA], ['Beneficiary', recip ? esc(shortAddr(recip)) : NA], ['Expiration', NA], ['Settlement', 'Paid to the beneficiary wallet, not credited to Gateway']];
@@ -103,7 +106,7 @@
       rows = [['Amount', amountText(k)], [k === 'withdraw' ? 'Destination network' : 'Destination', net ? esc(net) : NA]];
       if (k === 'crosschain') rows.unshift(['Source of funds', 'Unified Gateway balance']);
       if (k === 'withdraw') rows.push(['Wallet', w ? esc(shortAddr(w)) : NA]);
-      rows.push(['Estimated fee', NA], ['Estimated time', NA], ['Net amount', NA], ['Settlement', k === 'withdraw' ? 'Gateway transfer to your own wallet. Not a trustless withdrawal.' : 'Minted on the destination network']);
+      rows.push(['Estimated fee', feeCeil(asset)], ['Estimated time', 'Typically under 30s'], ['Net amount', amountText(k)], ['Settlement', k === 'withdraw' ? 'Gateway transfer to your own wallet. Not a trustless withdrawal.' : 'Minted on the destination network']);
     }
     return rows.map(function (r) { return '<div class="ch-kv"><span>' + r[0] + '</span><span>' + r[1] + '</span></div>'; }).join('');
   }
@@ -113,6 +116,11 @@
   // A Gateway transfer (send/cross-chain/withdraw) is ready only when the wallet is
   // connected, the amount is a valid positive value within the available Gateway
   // balance, and (for send/cross-chain) the recipient is a valid EVM address.
+  function recipientOf(k) {
+    var f = M.f[k], w = CH.wallet();
+    if (k === 'withdraw') return w;
+    return (f.to === null || String(f.to).trim() === '') ? w : String(f.to).trim();
+  }
   function isReady(k, g) {
     if (k !== 'send' && k !== 'crosschain' && k !== 'withdraw') return false;
     if (!CH.wallet()) return false;
@@ -120,7 +128,7 @@
     if (!f.amount) return false;
     var a = CH.toAtomic(f.amount, dec);
     if (a == null || a === 0n) return false;
-    if (k === 'send' || k === 'crosschain') { var r = f.to === null ? '' : f.to; if (!isAddr(r)) return false; }
+    if (k === 'send' || k === 'crosschain') { var r = recipientOf(k); if (!isAddr(r)) return false; }
     var av = gwAvail(g, asset);
     if (av != null && a > av) return false;
     return true;
@@ -143,7 +151,7 @@
     var g = CH.gateway();
     if (!isReady(k, g)) return;
     var w = CH.wallet(), asset = f.asset;
-    var recipient = (k === 'withdraw') ? w : (f.to === null ? w : f.to);
+    var recipient = recipientOf(k);
     var srcChainId = activeId(), destChainId = f.net;
 
     var btn = document.querySelector('[data-ch-exec="' + k + '"]');
@@ -240,6 +248,10 @@
     var g = CH.gateway(), d = document.getElementById('ch-op-det'), h = document.getElementById('ch-qf-hint');
     if (d) d.innerHTML = details(M.act);
     if (h) h.innerHTML = hint(M.act, g);
+    // Reactive: update the native button's disabled state as the user types or
+    // changes values (send/cross-chain/withdraw only).
+    var btn = document.querySelector('[data-ch-exec="' + M.act + '"]');
+    if (btn) { var ready = isReady(M.act, g); if (btn.disabled === ready) btn.disabled = !ready; }
   }
   UI.qaSelect = function (k) { if (!M.f[k] || M.act === k) return; M.act = k; M.anim = true; UI.render(); };
   UI.qaInput = function (id, v) {
@@ -265,6 +277,6 @@
   };
   UI.qaOpen = function (k) {      // existing flows only (same launchers as the Overview)
     var f = M.f[k]; if (!f) return;
-    UI.launch(k === 'deposit' ? 'deposit' : k === 'withdraw' ? 'withdraw' : 'transfer', f.asset);
+    UI.launch(k === 'deposit' ? 'deposit' : k === 'withdraw' ? 'withdraw' : k === 'charge' ? 'charge' : 'transfer', f.asset);
   };
 })();
