@@ -179,3 +179,36 @@ export function tokenSymbolFor(sourceToken) {
   if (!addr) return null;
   return TOKEN_SYMBOLS[addr] || null;
 }
+
+// ── Asset decimals (Circle official) ────────────────────────────────────────
+// https://developers.circle.com/gateway/concepts/non-usdc-assets — USDC 6, EURC 6,
+// cirBTC 8. Amounts in burn intents are atomic; the /v1/balances `balance` field
+// is a DECIMAL string and must be normalized to atomic with this count.
+const TOKEN_DECIMALS = { USDC: 6, EURC: 6, cirBTC: 8 };
+
+export function tokenDecimalsFor(symbol) {
+  if (typeof symbol !== 'string') return null;
+  return TOKEN_DECIMALS[symbol] ?? null;
+}
+
+/**
+ * Strict decimal-string → atomic BigInt (no float, no scientific notation, no
+ * sign). Rejects excess precision. Returns a canonical unsigned-integer string,
+ * or `null` on invalid input. Used to normalize the Circle /v1/balances balance
+ * (a decimal string, e.g. "10.000000") into atomic units.
+ */
+export function decimalToAtomic(str, dec) {
+  if (typeof str !== 'string' || typeof dec !== 'number' || !Number.isInteger(dec) || dec < 0 || dec > 77) return null;
+  const s = str.trim();
+  if (!/^\d+(\.\d+)?$/.test(s)) return null;
+  const parts = s.split('.');
+  const intPart = parts[0] || '0';
+  const fracPart = parts[1] || '';
+  if (fracPart.length > dec) return null; // excess precision — never truncate silently
+  const fracPadded = fracPart.padEnd(dec, '0');
+  try {
+    return (BigInt(intPart) * (10n ** BigInt(dec)) + BigInt(fracPadded || '0')).toString();
+  } catch(_) {
+    return null;
+  }
+}

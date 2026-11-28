@@ -88,7 +88,7 @@ const SCHEMA_VERSION = 2;
 // ── State machine ────────────────────────────────────────────────────────────
 const VALID_TRANSITIONS = {
   reserved:        ['submitting', 'rejected', 'failed'],
-  submitting:      ['accepted', 'rejected', 'ambiguous'],
+  submitting:      ['accepted', 'rejected', 'ambiguous', 'failed'], // 'failed' = rollback only
   accepted:        ['confirmed', 'failed', 'requires_review'],
   ambiguous:       ['accepted', 'rejected', 'confirmed', 'failed', 'requires_review'],
   requires_review: ['accepted', 'rejected', 'confirmed', 'failed'],
@@ -246,19 +246,35 @@ export class GatewayExecutionCoordinator {
     }
 
     const outcome = await this.storage.transaction(async (txn) => {
-      // ── Idempotency dedup (caller-provided key) ─────────────────────────
+      // ── Idempotency dedup (caller-provided key — PERMANENT identity) ──────
+      // The idempotency key is bound to ONE operation forever. Once used, it is
+      // never reusable for a new intent — a new intent MUST carry a new key.
       const existingIdem = await txn.get(KEY_IDEM + idemKey);
       if (existingIdem) {
         const existing = await txn.get(KEY_OP + existingIdem.operationId);
         if (existing) {
-          if (TERMINAL_STATES.has(existing.status)) {
-            // terminal → slot freed; fall through to (re)create below.
-          } else if (existing.payloadHash === payloadHash) {
+          // Same key + same payload → recover the ORIGINAL operation, even after
+          // confirmed/rejected/failed (identity is permanent).
+          if (existing.payloadHash === payloadHash) {
             return { status: 200, body: { recovered: true, record: existing } };
-          } else {
-            return { status: 409, body: { error: 'conflict', detail: 'idempotency_key_reused_with_different_payload', record: existing } };
           }
+          // Same key + different payload → conflict (never silently replace).
+          return { status: 409, body: { error: 'conflict', detail: 'idempotency_key_reused_with_different_payload', record: existing } };
         }
+        // Index points to a missing record (corruption) — fail safe, do NOT recreate.
+        return { status: 500, body: { error: 'corrupt_idempotency_index', detail: 'idempotency key bound to a missing operation record', idempotencyKey: idemKey } };
+      }
+
+      // ── Collision checks (salt + operationId) — atomic ───────────────────
+      // A salt bound to a DIFFERENT operation is a replay attempt.
+      const saltBound = await txn.get(KEY_SALT + salt);
+      if (saltBound && saltBound !== operationId) {
+        return { status: 409, body: { error: 'salt_already_bound', detail: 'salt already bound to a different operation', operationId: saltBound } };
+      }
+      // A caller-provided operationId that already exists is a collision.
+      const existingOp = await txn.get(KEY_OP + operationId);
+      if (existingOp) {
+        return { status: 409, body: { error: 'operation_id_collision', detail: 'operationId already exists', operationId } };
       }
 
       // ── Quantitative balance reservation ────────────────────────────────
@@ -358,7 +374,11 @@ export class GatewayExecutionCoordinator {
 
   /* ── POST /set-balance ────────────────────────────────────────────────── */
   // Body: { scope, amount, source?, asOf? } — trusted internal only. Sets the
-  // authoritative balance snapshot for a scope. Replaces any stale flag.
+  // authoritative balance snapshot for a scope (amount MUST be atomic units).
+  // Snapshots are ordered monotonically: an older snapshot (asOf < current) is
+  // rejected so a slow/out-of-order fetch can never restore already-committed
+  // balance. A `generation` counter guarantees monotonic writes even on equal
+  // timestamps.
   async _setBalance(request) {
     let body;
     try { body = await request.json(); } catch (_) {
@@ -372,14 +392,26 @@ export class GatewayExecutionCoordinator {
     if (typeof amount !== 'string' || !UINT_STR_RE.test(amount)) {
       return GatewayExecutionCoordinator.json({ error: 'invalid_amount' }, 400);
     }
-    const snapshot = {
-      amount,
-      source: body.source || 'circle',
-      asOf:   body.asOf   || new Date().toISOString(),
-      stale:  false,
-    };
-    await this.storage.put(KEY_BAL + scope, snapshot);
-    return GatewayExecutionCoordinator.json({ ok: true, scope, balance: snapshot });
+    const asOf = (typeof body.asOf === 'string' && body.asOf) ? body.asOf : new Date().toISOString();
+
+    const outcome = await this.storage.transaction(async (txn) => {
+      const current = await txn.get(KEY_BAL + scope);
+      if (current) {
+        // Reject an out-of-order (older) snapshot.
+        if (typeof current.asOf === 'string' && current.asOf && asOf < current.asOf) {
+          return { status: 409, body: { error: 'stale_snapshot', scope, currentAsOf: current.asOf, providedAsOf: asOf } };
+        }
+        const generation = (typeof current.generation === 'number' ? current.generation : 0) + 1;
+        const snapshot = { amount, source: body.source || 'circle', asOf, stale: false, generation };
+        await txn.put(KEY_BAL + scope, snapshot);
+        return { status: 200, body: { ok: true, scope, balance: snapshot } };
+      }
+      const snapshot = { amount, source: body.source || 'circle', asOf, stale: false, generation: 1 };
+      await txn.put(KEY_BAL + scope, snapshot);
+      return { status: 200, body: { ok: true, scope, balance: snapshot } };
+    });
+
+    return GatewayExecutionCoordinator.json(outcome.body, outcome.status);
   }
 
   /* ── POST /update ─────────────────────────────────────────────────────── */
@@ -462,15 +494,19 @@ export class GatewayExecutionCoordinator {
         await txn.put(KEY_BALRES + record.scope, { total: newTotal });
 
         // Settled (Circle actually debited) → decrement the snapshot conservatively
-        // and mark stale so the next reserve requires a fresh balance sync.
+        // and mark stale so the next reserve requires a fresh balance sync. Bump
+        // `asOf` + `generation` so an in-flight snapshot fetched BEFORE this settle
+        // is rejected as stale (never restores already-debited balance).
         const settled = to === 'confirmed' || (to === 'failed' && record.status !== 'reserved' && record.status !== 'submitting');
         if (settled) {
           const snapshot = await txn.get(KEY_BAL + record.scope);
           if (snapshot && typeof snapshot.amount === 'string') {
             await txn.put(KEY_BAL + record.scope, {
               ...snapshot,
-              amount: subUint(snapshot.amount, record.reservedAmount),
-              stale:  true,
+              amount:     subUint(snapshot.amount, record.reservedAmount),
+              stale:      true,
+              asOf:       new Date(now).toISOString(),
+              generation: (typeof snapshot.generation === 'number' ? snapshot.generation : 0) + 1,
             });
           }
         }
@@ -538,17 +574,10 @@ export class GatewayExecutionCoordinator {
         return { status: 409, body: { error: 'not_terminal', current: record.status } };
       }
 
-      // Only unbind if the binding still points to THIS operation (idempotent +
-      // protects against an old op unbinding a newer op that reused the slot).
-      const idem = await txn.get(KEY_IDEM + record.idempotencyKey);
-      if (idem && idem.operationId === operationId) {
-        await txn.delete(KEY_IDEM + record.idempotencyKey);
-      }
-      const saltOp = await txn.get(KEY_SALT + record.salt);
-      if (saltOp === operationId) {
-        await txn.delete(KEY_SALT + record.salt);
-      }
-
+      // Releasing a reservation NEVER deletes the operation identity or the
+      // idempotency/salt bindings. Those are permanent replay-protection + audit
+      // links (Gate A/D). Release only marks the record released — a later reserve
+      // with the SAME idempotency key still recovers/conflicts against this record.
       const now = Date.now();
       await txn.put(KEY_OP + operationId, {
         ...record,

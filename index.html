@@ -42779,6 +42779,18 @@ async function saExecGateway() {
     crypto.getRandomValues(saltBytes);
     var salt = '0x' + Array.from(saltBytes).map(function(b){ return b.toString(16).padStart(2,'0'); }).join('');
 
+    // ── Idempotency key (Phase 1.0.1C.2) ───────────────────────────────────
+    // A caller-provided stable identifier for this signed intent, created BEFORE
+    // signing and sent with the request. The GatewayExecutionCoordinator (when
+    // enabled) dedups on it; the per-salt GatewayOpLock and the quantitative
+    // balance reservation remain the primary safeguards. It is ignored when the
+    // coordinator is disabled.
+    var _idemBytes = new Uint8Array(16);
+    crypto.getRandomValues(_idemBytes);
+    _idemBytes[6] = (_idemBytes[6] & 0x0f) | 0x40;
+    _idemBytes[8] = (_idemBytes[8] & 0x3f) | 0x80;
+    var gwIdempotencyKey = 'gw-' + Array.from(_idemBytes).map(function(b){ return b.toString(16).padStart(2,'0'); }).join('');
+
     // ── bytes32 pad helper: lowercase hex addr → 32-byte zero-padded hex ──────
     function pad32(hexAddr) {
       var raw = hexAddr.toLowerCase().replace(/^0x/, '');
@@ -42864,7 +42876,7 @@ async function saExecGateway() {
 
     // ── Build requests array — MUST be non-empty before POST ─────────────────
     var requests = [];
-    requests.push({ burnIntent: typedData.message, signature: signature });
+    requests.push({ burnIntent: typedData.message, signature: signature, idempotencyKey: gwIdempotencyKey });
     if (requests.length === 0) {
       // Safety guard: should never happen after the push above
       toast('No burn intents signed — transfer aborted', 'error');

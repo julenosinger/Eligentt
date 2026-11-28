@@ -181,3 +181,73 @@ describe('GatewayExecutionCoordinator — real workerd runtime integration', () 
     expect(r2.status).toBe(503);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Gate J — real disk persistence (SQLite) across a genuine runtime restart.
+// Creates a Miniflare with `durableObjectsPersist` (on-disk SQLite), writes state,
+// disposes the runtime, then creates a NEW runtime on the same directory and
+// verifies the reservations, balance snapshot, idempotency binding and salt
+// binding survive the restart.
+import os from 'os';
+
+function makePersistMf(persistDir) {
+  return new Miniflare({
+    modules: [
+      { type: 'ESModule', path: 'coordinator-bundle.js', contents: bundleDOWithUtil() },
+    ],
+    script: `
+      export { GatewayExecutionCoordinator } from 'coordinator-bundle.js';
+      export default { async fetch() { return new Response('gateway-exec worker'); } };
+    `,
+    durableObjects: { GATEWAY_EXECUTION_COORDINATOR: { className: 'GatewayExecutionCoordinator', useSQLite: true } },
+    durableObjectsPersist: persistDir,
+    compatibilityFlags: ['nodejs_compat'],
+    bindings: { DO_INTERNAL_SECRET: SECRET },
+  });
+}
+
+describe('GatewayExecutionCoordinator — on-disk persistence across restart', () => {
+  it('recovers reservations, snapshot and bindings after a real restart', async () => {
+    const persistDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gw-coord-persist-'));
+    const doName = 'gateway-exec:' + DEPOSITOR + ':mainnet';
+    const scope = SCOPE;
+    const idemKey = 'intent-persist-1';
+
+    // ── Phase 1: write durable state ──────────────────────────────────────
+    let mf1 = makePersistMf(persistDir);
+    let ns1 = await mf1.getDurableObjectNamespace('GATEWAY_EXECUTION_COORDINATOR');
+    let stub1 = ns1.get(ns1.idFromName(doName));
+    const H = { 'X-DO-Internal-Secret': SECRET, 'Content-Type': 'application/json' };
+    const f1 = (p, m = 'GET', b) => stub1.fetch('https://gateway-exec-do/' + p, { method: m, headers: H, body: b ? JSON.stringify(b) : undefined });
+
+    await f1('set-balance', 'POST', { scope, amount: '100000000' });
+    const reserve = await f1('reserve', 'POST', { burnIntent: makeBurnIntent(), idempotencyKey: idemKey });
+    expect(reserve.status).toBe(201);
+    const rec = (await reserve.json()).record;
+    // Advance to submitting + ambiguous to persist a non-terminal in-flight state.
+    await f1('update', 'POST', { operationId: rec.operationId, to: 'submitting', expectedVersion: 1, evidence: {} });
+    await f1('update', 'POST', { operationId: rec.operationId, to: 'ambiguous', expectedVersion: 2, evidence: {} });
+    await mf1.dispose();
+
+    // ── Phase 2: a NEW runtime on the same directory ──────────────────────
+    let mf2 = makePersistMf(persistDir);
+    let ns2 = await mf2.getDurableObjectNamespace('GATEWAY_EXECUTION_COORDINATOR');
+    let stub2 = ns2.get(ns2.idFromName(doName));
+    const f2 = (p, m = 'GET', b) => stub2.fetch('https://gateway-exec-do/' + p, { method: m, headers: H, body: b ? JSON.stringify(b) : undefined });
+
+    // The operation survives, still 'ambiguous' (in-flight).
+    const st = await f2('status?operationId=' + rec.operationId);
+    expect(st.status).toBe(200);
+    const stBody = await st.json();
+    expect(stBody.record.status).toBe('ambiguous');
+    expect(stBody.record.idempotencyKey).toBe(idemKey);
+
+    // The idempotency binding survives: a re-reserve with the same key recovers.
+    const r2 = await f2('reserve', 'POST', { burnIntent: makeBurnIntent({ spec: { salt: '0x' + 'aa'.repeat(32) } }), idempotencyKey: idemKey });
+    expect(r2.status).toBe(200);
+    expect((await r2.json()).recovered).toBe(true);
+
+    await mf2.dispose();
+    fs.rmSync(persistDir, { recursive: true, force: true });
+  }, 60000);
+});

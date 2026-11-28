@@ -181,8 +181,9 @@ function makeEnv(coordinator, enabled) {
 }
 
 // A fetch mock that serves both the balance fetch (/v1/balances) and the transfer
-// POST (/v1/transfer).
-function mockFetch({ balance = '100000000000', transferStatus = 200, transferBody }) {
+// POST (/v1/transfer). Circle returns the balance as a DECIMAL string (e.g.
+// "100.000000" = 100 USDC); fetchGatewayBalance normalizes it to atomic.
+function mockFetch({ balance = '100.000000', transferStatus = 200, transferBody }) {
   return async (url, init) => {
     const u = String(url);
     if (u.includes('/v1/balances')) {
@@ -234,6 +235,27 @@ describe('coordinator-util (real module)', () => {
     expect(scopeOf(makeBurnIntent())).toBe(TOKEN_A + ':26');
     expect(tokenSymbolFor(pad32(USDC_ARC))).toBe('USDC');
     expect(tokenSymbolFor(pad32(TOKEN_A))).toBeNull();
+  });
+
+  it('tokenDecimalsFor returns official asset decimals (USDC/EURC=6, cirBTC=8)', async () => {
+    const { tokenDecimalsFor } = await import('../functions/api/gateway/coordinator-util.js');
+    expect(tokenDecimalsFor('USDC')).toBe(6);
+    expect(tokenDecimalsFor('EURC')).toBe(6);
+    expect(tokenDecimalsFor('cirBTC')).toBe(8);
+    expect(tokenDecimalsFor('UNKNOWN')).toBeNull();
+  });
+
+  it('decimalToAtomic normalizes the Circle balance (decimal string → atomic BigInt)', async () => {
+    const { decimalToAtomic } = await import('../functions/api/gateway/coordinator-util.js');
+    expect(decimalToAtomic('10.000000', 6)).toBe('10000000');
+    expect(decimalToAtomic('0.500000', 6)).toBe('500000');
+    expect(decimalToAtomic('0', 6)).toBe('0');
+    expect(decimalToAtomic('1.23456789', 8)).toBe('123456789');
+    // Invalid / incomplete / excess precision → null (fail-closed, never a fake zero).
+    expect(decimalToAtomic('abc', 6)).toBeNull();
+    expect(decimalToAtomic('-5', 6)).toBeNull();
+    expect(decimalToAtomic('1e3', 6)).toBeNull();
+    expect(decimalToAtomic('1.2345678', 6)).toBeNull(); // 7 decimals > 6
   });
 });
 
@@ -394,20 +416,43 @@ describe('GatewayExecutionCoordinator — dedup + balance reservation (real clas
     expect(body.record.status).toBe('rejected');
   });
 
-  it('an old operation release never removes a newer operation (index safety)', async () => {
+  it('the idempotency key is permanent: a terminal+released key recovers, never a new op', async () => {
     const coord = makeCoord();
     await seedBalance(coord, scopeOf(makeBurnIntent()), '100000000');
     const r1 = (await (await doFetch(coord, '/reserve', 'POST', { burnIntent: makeBurnIntent(), idempotencyKey: 'intent-1' })).json()).record;
-    // Terminal intent-1, then reuse the idempotency key for a new op.
     await doFetch(coord, '/update', 'POST', { operationId: r1.operationId, to: 'rejected', expectedVersion: 1, evidence: {} });
-    const r2 = (await (await doFetch(coord, '/reserve', 'POST', { burnIntent: makeBurnIntent({ spec: { salt: '0x' + 'ee'.repeat(32) } }), idempotencyKey: 'intent-1' })).json()).record;
+    await doFetch(coord, '/release', 'DELETE', { operationId: r1.operationId });
 
-    // Releasing the OLD op must not touch the NEW op (different operationId).
-    const rel = await doFetch(coord, '/release', 'DELETE', { operationId: r1.operationId });
-    expect(rel.status).toBe(200);
-    const st = await doFetch(coord, '/status?operationId=' + r2.operationId, 'GET');
-    expect(st.status).toBe(200);
-    expect((await st.json()).record.released).toBe(false);
+    // Reusing the SAME key after terminal+release → recover the ORIGINAL operation
+    // (identity is permanent), never a new operation.
+    const r2 = await doFetch(coord, '/reserve', 'POST', {
+      burnIntent: makeBurnIntent({ spec: { salt: '0x' + 'ee'.repeat(32) } }), idempotencyKey: 'intent-1',
+    });
+    expect(r2.status).toBe(200);
+    const r2body = await r2.json();
+    expect(r2body.recovered).toBe(true);
+    expect(r2body.record.operationId).toBe(r1.operationId);
+    expect(r2body.record.released).toBe(true);
+
+    // A DIFFERENT key is required for a new independent intent.
+    const r3 = await doFetch(coord, '/reserve', 'POST', {
+      burnIntent: makeBurnIntent({ spec: { salt: '0x' + 'ff'.repeat(32) } }), idempotencyKey: 'intent-2',
+    });
+    expect(r3.status).toBe(201);
+  });
+
+  it('rejects a salt collision (same salt bound to a different operation)', async () => {
+    const coord = makeCoord();
+    await seedBalance(coord, scopeOf(makeBurnIntent()), '100000000');
+    const r1 = await doFetch(coord, '/reserve', 'POST', { burnIntent: makeBurnIntent(), idempotencyKey: 'intent-1' });
+    expect(r1.status).toBe(201);
+
+    // Same salt but a DIFFERENT key → salt collision.
+    const r2 = await doFetch(coord, '/reserve', 'POST', {
+      burnIntent: makeBurnIntent(), idempotencyKey: 'intent-2',
+    });
+    expect(r2.status).toBe(409);
+    expect((await r2.json()).error).toBe('salt_already_bound');
   });
 
   it('isolates mainnet from testnet by DO name', () => {
@@ -417,6 +462,50 @@ describe('GatewayExecutionCoordinator — dedup + balance reservation (real clas
     expect(m.name).toContain(':mainnet');
     expect(t.name).toContain(':testnet');
     expect(m.name).not.toBe(t.name);
+  });
+
+  it('rejects an out-of-order (older) balance snapshot (Gate C)', async () => {
+    const coord = makeCoord();
+    const scope = scopeOf(makeBurnIntent());
+    await seedBalance(coord, scope, '100000000');
+    // A newer snapshot with a later asOf.
+    const newer = await doFetch(coord, '/set-balance', 'POST', { scope, amount: '90000000', asOf: new Date(Date.now() + 3600000).toISOString() });
+    expect(newer.status).toBe(200);
+    // An older snapshot (earlier asOf) must be rejected — never restore committed balance.
+    const older = await doFetch(coord, '/set-balance', 'POST', { scope, amount: '100000000', asOf: new Date(Date.now() - 3600000).toISOString() });
+    expect(older.status).toBe(409);
+    expect((await older.json()).error).toBe('stale_snapshot');
+  });
+
+  it('allows submitting → failed ONLY as a rollback (Gate E)', async () => {
+    const coord = makeCoord();
+    await seedBalance(coord, scopeOf(makeBurnIntent()), '100000000');
+    const rec = (await (await doFetch(coord, '/reserve', 'POST', { burnIntent: makeBurnIntent(), idempotencyKey: IDEM_KEY_A })).json()).record;
+    await doFetch(coord, '/update', 'POST', { operationId: rec.operationId, to: 'submitting', expectedVersion: 1, evidence: {} });
+
+    // submitting → failed WITHOUT rollback flag is forbidden.
+    const noRollback = await doFetch(coord, '/update', 'POST', { operationId: rec.operationId, to: 'failed', expectedVersion: 2, evidence: {} });
+    expect(noRollback.status).toBe(400);
+    expect((await noRollback.json()).error).toBe('rollback_required');
+
+    // submitting → failed WITH rollback flag is allowed (batch aborted before POST).
+    const withRollback = await doFetch(coord, '/update', 'POST', { operationId: rec.operationId, to: 'failed', expectedVersion: 2, evidence: { rollback: true } });
+    expect(withRollback.status).toBe(200);
+    expect((await withRollback.json()).record.status).toBe('failed');
+  });
+
+  it('fails safe on a corrupt idempotency index (missing record)', async () => {
+    const state = makeDOState();
+    const coord = new GatewayExecutionCoordinator(state, { DO_INTERNAL_SECRET: SECRET });
+    await doFetch(coord, '/set-balance', 'POST', { scope: scopeOf(makeBurnIntent()), amount: '100000000' });
+    await doFetch(coord, '/reserve', 'POST', { burnIntent: makeBurnIntent(), idempotencyKey: IDEM_KEY_A });
+    // Simulate corruption: delete the op record but leave the idem index.
+    for (const k of [...state._store.keys()]) {
+      if (k.startsWith('op:')) state._store.delete(k);
+    }
+    const res = await doFetch(coord, '/reserve', 'POST', { burnIntent: makeBurnIntent({ spec: { salt: '0x' + '77'.repeat(32) } }), idempotencyKey: IDEM_KEY_A });
+    expect(res.status).toBe(500);
+    expect((await res.json()).error).toBe('corrupt_idempotency_index');
   });
 });
 
@@ -472,7 +561,7 @@ describe('transfer.js — flag-gated coordinator integration (real handler)', ()
   it('enabled → forwards to Circle and persists coordinator accepted (submitting before POST)', async () => {
     const ns = makeCoordinatorNamespace();
     const env = makeEnv(ns, true);
-    globalThis.fetch = mockFetch({ balance: '100000000', transferStatus: 200 });
+    globalThis.fetch = mockFetch({ balance: '100.000000', transferStatus: 200 });
     const res = await onRequestPost({ request: makePostRequest([makeTransferItem(makeBurnIntent({ sourceToken: USDC_ARC }), IDEM_KEY_A)]), env });
     expect(res.status).toBe(200);
 
@@ -488,12 +577,12 @@ describe('transfer.js — flag-gated coordinator integration (real handler)', ()
   it('enabled → blocks a cross-salt duplicate (409) and does NOT forward', async () => {
     const ns = makeCoordinatorNamespace();
     const env = makeEnv(ns, true);
-    globalThis.fetch = mockFetch({ balance: '100000000', transferStatus: 200 });
+    globalThis.fetch = mockFetch({ balance: '100.000000', transferStatus: 200 });
     await onRequestPost({ request: makePostRequest([makeTransferItem(makeBurnIntent({ sourceToken: USDC_ARC }), IDEM_KEY_A)]), env });
 
     let forwarded = false;
     globalThis.fetch = async (url) => {
-      if (String(url).includes('/v1/balances')) return new Response(JSON.stringify({ balances: [{ domain: 26, balance: '100000000' }] }), { status: 200 });
+      if (String(url).includes('/v1/balances')) return new Response(JSON.stringify({ balances: [{ domain: 26, balance: '100.000000' }] }), { status: 200 });
       if (String(url).includes('/v1/transfer')) { forwarded = true; return new Response('{}', { status: 200 }); }
       return new Response('{}', { status: 404 });
     };
@@ -513,7 +602,7 @@ describe('transfer.js — flag-gated coordinator integration (real handler)', ()
     const saltA = '0x' + '11'.repeat(32);
     const saltB = '0x' + '22'.repeat(32);
     globalThis.fetch = async (url) => {
-      if (String(url).includes('/v1/balances')) return new Response(JSON.stringify({ balances: [{ domain: 26, balance: '100000000' }] }), { status: 200 });
+      if (String(url).includes('/v1/balances')) return new Response(JSON.stringify({ balances: [{ domain: 26, balance: '100.000000' }] }), { status: 200 });
       if (String(url).includes('/v1/transfer')) {
         return new Response(JSON.stringify([
           { burnIntent: { spec: { salt: saltA } }, attestation: { payload: '0xab', signature: '0xcd' }, transferId: 'tx-A' },
@@ -540,7 +629,7 @@ describe('transfer.js — flag-gated coordinator integration (real handler)', ()
   it('enabled → rejects an over-balance reservation (422)', async () => {
     const ns = makeCoordinatorNamespace();
     const env = makeEnv(ns, true);
-    globalThis.fetch = mockFetch({ balance: '1000000', transferStatus: 200 }); // balance < value+maxFee
+    globalThis.fetch = mockFetch({ balance: '2.000000', transferStatus: 200 }); // balance < value+maxFee
     const res = await onRequestPost({ request: makePostRequest([makeTransferItem(makeBurnIntent({ sourceToken: USDC_ARC }), IDEM_KEY_A)]), env });
     expect(res.status).toBe(422);
     expect((await res.json()).error).toBe('insufficient_available_balance');

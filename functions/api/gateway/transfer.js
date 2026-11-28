@@ -75,6 +75,8 @@ import {
   environmentFor,
   scopeKeyFor,
   tokenSymbolFor,
+  tokenDecimalsFor,
+  decimalToAtomic,
   isValidIdempotencyKey,
 } from './coordinator-util.js';
 
@@ -418,8 +420,15 @@ async function coordinatorRollback(burnIntent, operationId, version, env) {
 }
 
 // Server-side authoritative balance fetch from Circle /v1/balances for a single
-// (token, domain, depositor) scope. Returns the balance string or null.
+// (token, domain, depositor) scope.
+//
+// Gate B (monetary normalization): Circle returns the `balance` field as a
+// DECIMAL string (e.g. "10.000000"), NOT atomic units. It is normalized to atomic
+// BigInt here using the asset's official decimals. An invalid/incomplete/missing
+// response returns null (fail-closed) — never a confirmed zero.
 async function fetchGatewayBalance(symbol, domain, depositor, env) {
+  const decimals = tokenDecimalsFor(symbol);
+  if (decimals === null) return null; // unknown asset → fail closed
   try {
     const res = await fetch(GATEWAY_API + '/v1/balances', {
       method:  'POST',
@@ -430,21 +439,23 @@ async function fetchGatewayBalance(symbol, domain, depositor, env) {
     const data = await res.json();
     const balances = Array.isArray(data.balances) ? data.balances : [];
     const entry = balances.find((b) => String(b.domain) === String(domain));
-    return entry && entry.balance != null ? String(entry.balance) : '0';
+    if (!entry || entry.balance == null) return null; // incomplete → fail closed
+    return decimalToAtomic(String(entry.balance), decimals); // null on invalid
   } catch(_) {
     return null;
   }
 }
 
 // The DO is keyed by depositor:environment; set-balance needs that key. The call
-// site derives depositor/environment from the burnIntent.
-async function coordinatorSetBalanceFor(scope, amount, depositor, environment, env) {
+// site derives depositor/environment from the burnIntent. `asOf` is the fetch-start
+// time used for monotonic snapshot ordering (Gate C).
+async function coordinatorSetBalanceFor(scope, amount, depositor, environment, asOf, env) {
   try {
     const stub = coordinatorStub(env, depositor, environment);
     const res  = await stub.fetch('https://internal/set-balance', {
       method:  'POST',
       headers: doHeaders(env),
-      body:    JSON.stringify({ scope, amount, source: 'circle' }),
+      body:    JSON.stringify({ scope, amount, source: 'circle', asOf }),
     });
     if (!res.ok) {
       let body; try { body = await res.json(); } catch(_) { body = {}; }
@@ -478,6 +489,43 @@ async function coordinatorConfirm(salt, depositor, to, evidence, env) {
     }
   }
   return { ok: false, error: 'coordinator_not_found' };
+}
+
+// ── Durable /confirm → coordinator reconciliation (Gate F) ──────────────────
+// A confirmation is a two-DO write: the per-salt GatewayOpLock record (authoritative)
+// and the coordinator record (replica). There is no distributed transaction, so a
+// partial confirmation (per-salt updated, coordinator not yet) is persisted as a
+// durable marker in KV and replayed idempotently. Replay survives restart and does
+// NOT require a new manual user action — it runs on the next /confirm for the same
+// depositor. When GATEWAY_OPS_KV is absent (production DO-only), the marker write
+// is skipped and reconciliation is a 1.0.1D cron/alarm concern.
+const RECONCILE_KV_PREFIX = 'gw:reconcile:';
+
+async function writeReconcileMarker(salt, depositor, to, evidence, env) {
+  const kv = env && env.GATEWAY_OPS_KV;
+  if (!kv) return;
+  try {
+    await kv.put(RECONCILE_KV_PREFIX + salt, JSON.stringify({
+      salt, depositor, to, evidence, createdAt: new Date().toISOString(),
+    }), { expirationTtl: KV_TTL_SECS });
+  } catch(_) { /* best-effort; the per-salt record remains authoritative */ }
+}
+
+async function reconcilePendingFor(depositor, env) {
+  const kv = env && env.GATEWAY_OPS_KV;
+  if (!kv) return;
+  let keys;
+  try { keys = (await kv.list({ prefix: RECONCILE_KV_PREFIX })).keys || []; } catch(_) { return; }
+  for (const k of keys) {
+    let marker;
+    try { marker = await kv.get(k.name, { type: 'json' }); } catch(_) { continue; }
+    if (!marker || marker.depositor !== depositor) continue;
+    const res = await coordinatorConfirm(marker.salt, marker.depositor, marker.to, marker.evidence, env);
+    if (res.ok) {
+      try { await kv.delete(k.name); } catch(_) {}
+    }
+    // else: leave for the next reconciliation pass (idempotent retry).
+  }
 }
 
 // SHA-256 hex digest (for attestation/signature integrity hashes — Gate F).
@@ -672,7 +720,9 @@ export async function onRequestPost(ctx) {
         }, 503);
       }
 
-      // Authoritative balance (server-side fetch, never client-supplied).
+      // Authoritative balance (server-side fetch, never client-supplied). `asOf`
+      // is the fetch-start time used for monotonic snapshot ordering (Gate C).
+      const balanceAsOf = new Date().toISOString();
       const amount = await fetchGatewayBalance(symbol, domain, depositor, env);
       if (amount === null) {
         const rollbackFailures = await rollbackAll(reserved, coordReserved, env);
@@ -682,7 +732,7 @@ export async function onRequestPost(ctx) {
           rollbackFailures: rollbackFailures.length ? rollbackFailures : undefined,
         }, 503);
       }
-      const sb = await coordinatorSetBalanceFor(scope, amount, depositor, environment, env);
+      const sb = await coordinatorSetBalanceFor(scope, amount, depositor, environment, balanceAsOf, env);
       if (!sb.ok) {
         const rollbackFailures = await rollbackAll(reserved, coordReserved, env);
         return jsonResp({
@@ -1186,6 +1236,13 @@ export async function onRequestPostConfirm(ctx) {
   const chainId = parseInt(dstChainId, 10);
   if (!chainId || isNaN(chainId))
     return jsonResp({ error: 'dstchainid_required' }, 400);
+
+  // ── Durable reconciliation of prior partial confirmations (Gate F) ────────
+  // Replay any pending coordinator terminal transitions for this depositor before
+  // processing this confirmation. Idempotent; no new user action required.
+  if (coordinatorActive) {
+    await reconcilePendingFor(depositor, env);
+  }
 
   // ── Verify GatewayMinter address is known for this chain ─────────────────
   const minterAddr = GATEWAY_MINTER_ADDRESSES[chainId];
@@ -1716,14 +1773,15 @@ export async function onRequestPostConfirm(ctx) {
     }, 502);
   }
 
-  // ── Coordinator terminal transition (Gate E, isolated) ─────────────────────
+  // ── Coordinator terminal transition (Gate E/F, isolated) ───────────────────
   // After the per-salt record is confirmed/failed, advance the coordinated
   // operation to the same terminal state via the durable salt→operationId binding.
-  // Failure here is non-fatal to the per-salt confirmation but is surfaced for
-  // reconciliation (the coordinator record stays non-terminal until re-driven).
+  // On failure, persist a durable reconciliation marker (replayed on a later
+  // /confirm) instead of depending on a manual retry.
   if (coordinatorActive) {
     const cc = await coordinatorConfirm(salt, depositor, newStatus, { transactionHash: txHash }, env);
     if (!cc.ok) {
+      await writeReconcileMarker(salt, depositor, newStatus, { transactionHash: txHash }, env);
       return jsonResp({
         ok:                   true,
         salt:                 salt,
@@ -1732,7 +1790,7 @@ export async function onRequestPostConfirm(ctx) {
         txSuccess:            txSuccess,
         blockNumber:          receipt.blockNumber || null,
         coordinatorWarning:   cc.error,
-        coordinatorRecovered: false,
+        reconciliationQueued: true,
       });
     }
   }
