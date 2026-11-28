@@ -622,6 +622,19 @@ describe('transfer.js — flag-gated coordinator integration (real handler)', ()
     expect((await evil.json()).error).toBe('forbidden');
   });
 
+  it('allows a same-origin (dynamic preview) request without a static allowlist entry', async () => {
+    const env = makeEnv(null, false);
+    globalThis.fetch = async () => new Response(JSON.stringify([{ attestation: {} }]), { status: 200 });
+    // A dynamic Pages preview URL — its Origin matches the request's own host.
+    const previewHost = 'https://abc123.elligentt.pages.dev';
+    const req = new Request(previewHost + '/api/gateway/transfer', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'Origin': previewHost },
+      body: JSON.stringify([makeTransferItem(makeBurnIntent(), IDEM_KEY_A)]),
+    });
+    const res = await onRequestPost({ request: req, env });
+    expect(res.status).toBe(200);
+  });
+
   it('flag ON without binding → fail-closed 503 (no silent fallback)', async () => {
     const env = { GATEWAY_OPS_KV: makeKV(), DO_INTERNAL_SECRET: SECRET, GATEWAY_EXECUTION_COORDINATOR_ENABLED: 'true' };
     let forwarded = false;

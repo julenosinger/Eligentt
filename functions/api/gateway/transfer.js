@@ -145,8 +145,18 @@ function isProduction(env) {
 }
 
 // ── CORS exact-origin allowlist ───────────────────────────────────────────────
-function isAllowedOrigin(origin, env) {
+// `requestUrl` is the function's own URL (the `request.url`), so a SAME-ORIGIN call
+// (the frontend and this Pages Function share a host — e.g. a Cloudflare Pages
+// preview URL) is always allowed without registering every temporary preview domain.
+// Cross-origin calls still require the explicit allowlist below.
+function isAllowedOrigin(origin, env, requestUrl) {
   if (!origin) return true;
+  // Same-origin: allow the request's own host (no manual registration needed).
+  if (requestUrl) {
+    try {
+      if (new URL(origin).host === new URL(requestUrl).host) return true;
+    } catch(_) {}
+  }
   const defaults = [
     'https://elligentt.com',
     'https://www.elligentt.com',
@@ -646,7 +656,7 @@ export async function onRequestPost(ctx) {
   const { request, env } = ctx;
 
   const origin = request.headers.get('Origin') || '';
-  if (!isAllowedOrigin(origin, env)) {
+  if (!isAllowedOrigin(origin, env, request.url)) {
     return jsonResp({ error: 'forbidden' }, 403);
   }
 
@@ -1119,7 +1129,7 @@ export async function onRequestGet(ctx) {
   const { request, env } = ctx;
 
   const origin = request.headers.get('Origin') || '';
-  if (!isAllowedOrigin(origin, env)) return jsonResp({ error: 'forbidden' }, 403);
+  if (!isAllowedOrigin(origin, env, request.url)) return jsonResp({ error: 'forbidden' }, 403);
 
   const url       = new URL(request.url);
   const salt      = url.searchParams.get('salt');
@@ -1148,7 +1158,7 @@ export async function onRequestPatch(ctx) {
   const { request, env } = ctx;
 
   const origin = request.headers.get('Origin') || '';
-  if (!isAllowedOrigin(origin, env)) return jsonResp({ error: 'forbidden' }, 403);
+  if (!isAllowedOrigin(origin, env, request.url)) return jsonResp({ error: 'forbidden' }, 403);
 
   const url       = new URL(request.url);
   const salt      = url.searchParams.get('salt');
@@ -1370,7 +1380,7 @@ export async function onRequestPostConfirm(ctx) {
   const { request, env } = ctx;
 
   const origin = request.headers.get('Origin') || '';
-  if (!isAllowedOrigin(origin, env)) return jsonResp({ error: 'forbidden' }, 403);
+  if (!isAllowedOrigin(origin, env, request.url)) return jsonResp({ error: 'forbidden' }, 403);
 
   // Body size guard
   const contentLength = parseInt(request.headers.get('Content-Length') || '0', 10);
