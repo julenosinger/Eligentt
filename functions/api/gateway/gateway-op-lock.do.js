@@ -153,6 +153,9 @@ export class GatewayOpLock {
         updatedAt:   new Date().toISOString(),
         txHash:      null,
         httpStatus:  null,
+        transferId:  null,
+        attestation: null,
+        signature:   null,
       };
 
       await this.storage.put('record', record);
@@ -193,10 +196,16 @@ export class GatewayOpLock {
 
       const updated = {
         ...record,
-        status:     toStatus,
-        updatedAt:  new Date().toISOString(),
-        txHash:     body.txHash     || record.txHash     || null,
-        httpStatus: body.httpStatus || record.httpStatus || null,
+        status:      toStatus,
+        updatedAt:   new Date().toISOString(),
+        txHash:      body.txHash     || record.txHash     || null,
+        httpStatus:  body.httpStatus || record.httpStatus || null,
+        // Recovery material (Phase 1.0.1D.2.6): the Circle attestation payload and
+        // operator signature + transferId, persisted so an interrupted mint can be
+        // completed without re-signing or re-submitting the BurnIntent.
+        transferId:  body.transferId  !== undefined ? body.transferId  : (record.transferId  || null),
+        attestation: body.attestation !== undefined ? body.attestation : (record.attestation || null),
+        signature:   body.signature   !== undefined ? body.signature   : (record.signature   || null),
       };
 
       await this.storage.put('record', updated);

@@ -16,6 +16,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const html   = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const manage = fs.readFileSync(path.join(root, 'shared/capitalHubManage.js'), 'utf8');
 const ui     = fs.readFileSync(path.join(root, 'shared/capitalHubUI.js'), 'utf8');
+const hub    = fs.readFileSync(path.join(root, 'shared/capitalHub.js'), 'utf8');
 
 function fnOf(src, name) {
   const i = src.indexOf(name);
@@ -68,5 +69,46 @@ describe('Capital Hub — native execution wiring (Phase 1.0.1D.2)', () => {
     const fn = fnOf(html, 'async function _gwResolveIdemKey()');
     expect(fn).toContain('identityNotRequired');
     expect(fn).toContain('return _gwNewLocalIdemKey()');
+  });
+});
+
+describe('Capital Hub — mint completion + recovery (Phase 1.0.1D.2.6)', () => {
+  it('exposes the mint executor from UBScreen so the Capital Hub can drive gatewayMint', () => {
+    const ret = fnOf(html, 'gatewayMint: _execGatewayMint');
+    expect(ret).toContain('gatewayMint: _execGatewayMint');
+  });
+
+  it('qaExec completes the SECOND wallet interaction after the attestation', () => {
+    expect(manage).toContain('res.attestation && res.operatorSig');
+    expect(manage).toContain('CH.finishMint(');
+    expect(manage).toContain('await CH.finishMint(opId, res.attestation, res.operatorSig, destChainId)');
+  });
+
+  it('the mint executor and recovery live in the core module (CapitalHub.recoverMint)', () => {
+    expect(hub).toContain('UBScreen.gatewayMint');
+    expect(hub).toContain('function finishMint(');
+    expect(hub).toContain('function recoverMint(');
+    expect(hub).toContain('finishMint: finishMint, recoverMint: recoverMint');
+  });
+
+  it('recovers a pending mint without re-signing or re-submitting (salt + recover=1)', () => {
+    expect(hub).toContain('&recover=1');
+    expect(hub).toContain("'salt=' + encodeURIComponent(op.salt || '')");
+    expect(hub).toContain('No valid attestation is available yet');
+  });
+
+  it('guards against a duplicate mint (a recorded txHash blocks re-minting)', () => {
+    expect(hub).toContain('No duplicate mint');
+    expect(hub).toContain('if (op.txHash)');
+  });
+
+  it('exposes a "Complete mint" action on the Operations list', () => {
+    expect(ui).toContain('UI.recoverable = recoverable');
+    expect(ui).toContain('data-ch-recover');
+    expect(ui).toContain('Complete mint');
+  });
+
+  it('delegated listener dispatches data-ch-recover to UI.recoverMint', () => {
+    expect(ui).toContain("else if (t.hasAttribute('data-ch-recover') && UI.recoverMint) UI.recoverMint(t.getAttribute('data-ch-recover'))");
   });
 });

@@ -34,7 +34,7 @@ const {
 
 const { GatewayExecutionCoordinator } = await import('../functions/api/gateway/gateway-execution-coordinator.do.js');
 const transfer = await import('../functions/api/gateway/transfer.js');
-const { onRequestPost } = transfer;
+const { onRequestPost, onRequestGet } = transfer;
 const { onRequestPost: onRequestPostIntent } = await import('../functions/api/gateway/intent.js');
 const { onRequestGet: onRequestGetHealth } = await import('../functions/api/gateway/health.js');
 
@@ -892,5 +892,71 @@ describe('transfer.js — flag-gated coordinator integration (real handler)', ()
     const res = await onRequestPost({ request: makePostRequest([makeTransferItem(makeBurnIntent({ sourceToken: USDC_ARC }), IDEM_KEY_A)]), env });
     expect(res.status).toBe(422);
     expect((await res.json()).error).toBe('insufficient_available_balance');
+  });
+
+  // ── Recovery (Phase 1.0.1D.2.6) ─────────────────────────────────────────────
+  it('legacy POST persists the Circle attestation + transferId, recoverable via GET recover=1', async () => {
+    const env = makeEnv(null, false); // legacy per-salt flow (KV)
+    const salt = '0x' + '44'.repeat(32);
+    globalThis.fetch = async () => new Response(JSON.stringify([
+      { burnIntent: { spec: { salt } }, attestation: { payload: '0xdeadbeef', signature: '0xc0ffee' }, transferId: 'tx-recover-01' },
+    ]), { status: 200 });
+    const post = await onRequestPost({ request: makePostRequest([makeTransferItem(makeBurnIntent({ spec: { salt } }), null)]), env });
+    expect(post.status).toBe(200);
+
+    const get = await onRequestGet({
+      request: new Request('https://elligentttest.pages.dev/api/gateway/transfer?salt=' + salt + '&depositor=' + DEPOSITOR + '&recover=1', {
+        headers: { 'Origin': 'https://elligentttest.pages.dev' },
+      }),
+      env,
+    });
+    expect(get.status).toBe(200);
+    const body = await get.json();
+    expect(body.attestation).toBe('0xdeadbeef');
+    expect(body.signature).toBe('0xc0ffee');
+    expect(body.transferId).toBe('tx-recover-01');
+  });
+
+  it('recovery re-fetches the attestation from Circle when not persisted (pre-fix operation)', async () => {
+    const env = makeEnv(null, false);
+    const salt = '0x' + '55'.repeat(32);
+    const TID = '123e4567-e89b-12d3-a456-426614174000'; // Circle transferId is a UUID (hex + dashes)
+    // POST persists NO attestation (simulates a pre-fix record with only status).
+    globalThis.fetch = async () => new Response(JSON.stringify([{ burnIntent: { spec: { salt } } }]), { status: 200 });
+    const post = await onRequestPost({ request: makePostRequest([makeTransferItem(makeBurnIntent({ spec: { salt } }), null)]), env });
+    expect(post.status).toBe(200);
+
+    // Recovery fetches Circle GET /v1/transfer/{id} for the attestation.
+    globalThis.fetch = async (url) => {
+      if (String(url).includes('/v1/transfer/' + TID)) {
+        return new Response(JSON.stringify({ attestation: { payload: '0xabc123', signature: '0xdef456' } }), { status: 200 });
+      }
+      return new Response('{}', { status: 404 });
+    };
+    const get = await onRequestGet({
+      request: new Request('https://elligentttest.pages.dev/api/gateway/transfer?salt=' + salt + '&depositor=' + DEPOSITOR + '&recover=1&transferId=' + TID, {
+        headers: { 'Origin': 'https://elligentttest.pages.dev' },
+      }),
+      env,
+    });
+    expect(get.status).toBe(200);
+    const body = await get.json();
+    expect(body.attestation).toBe('0xabc123');
+    expect(body.signature).toBe('0xdef456');
+  });
+
+  it('recovery enforces depositor isolation against the per-salt record (404 on mismatch)', async () => {
+    const env = makeEnv(null, false);
+    const salt = '0x' + '66'.repeat(32);
+    globalThis.fetch = async () => new Response(JSON.stringify([{ burnIntent: { spec: { salt } }, attestation: { payload: '0xab', signature: '0xcd' } }]), { status: 200 });
+    await onRequestPost({ request: makePostRequest([makeTransferItem(makeBurnIntent({ spec: { salt } }), null)]), env });
+
+    const get = await onRequestGet({
+      request: new Request('https://elligentttest.pages.dev/api/gateway/transfer?salt=' + salt + '&depositor=0x9999999999999999999999999999999999999999&recover=1', {
+        headers: { 'Origin': 'https://elligentttest.pages.dev' },
+      }),
+      env,
+    });
+    expect(get.status).toBe(404);
   });
 });

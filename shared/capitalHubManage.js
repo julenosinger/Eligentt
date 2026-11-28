@@ -144,6 +144,9 @@
     d.innerHTML = msg;
   }
 
+  // Idempotent op id (matches the installHooks recorder so the two merge, never duplicate).
+  function gwOpId(res) { return 'gw:' + (res && (res.salt || res.transferId) ? (res.salt || res.transferId) : ('t' + Date.now())); }
+
   // Execute a native Gateway transfer (send / cross-chain / withdraw) inside the
   // Capital Hub, reusing the existing saExecGateway engine with explicit parameters.
   UI.qaExec = async function (k) {
@@ -161,8 +164,35 @@
       var res = (typeof saExecGateway === 'function')
         ? await saExecGateway({ recipient: recipient, amount: f.amount, asset: asset, chainId: srcChainId, destChainId: destChainId })
         : { status: 'error', error: 'gateway_engine_unavailable' };
-      if (res && res.status === 'pending') {
-        showExecState(k, 'info', 'Transfer submitted — awaiting mint on the destination network. Do not resubmit.');
+
+      if (res && res.status === 'pending' && res.attestation && res.operatorSig) {
+        // Second wallet interaction (the mint on the destination chain).
+        var opId = gwOpId(res);
+        // Persist the recovery material (type/source/dest + attestation/signature) so a
+        // failed/interrupted mint can be completed without re-signing or re-submitting.
+        try {
+          CH.record({ id: opId, type: k === 'withdraw' ? 'Withdraw' : 'Transfer', asset: asset, amount: String(f.amount).trim(),
+            srcChainId: srcChainId, dstChainId: destChainId, recipient: recipient,
+            salt: res.salt || null, transferId: res.transferId || null,
+            attestation: res.attestation, operatorSig: res.operatorSig, txHash: null, status: 'Processing', ts: Date.now() });
+        } catch (_) {}
+        showExecState(k, 'info', 'Submitted to Circle — approve the mint transaction in your wallet…');
+        try {
+          var mintResult = (typeof CH.finishMint === 'function')
+            ? await CH.finishMint(opId, res.attestation, res.operatorSig, destChainId)
+            : { status: 'error', error: 'mint_engine_unavailable' };
+          if (mintResult && mintResult.status === 'confirmed') {
+            showExecState(k, 'info', 'Minted on destination — tx ' + String(mintResult.txHash || '').slice(0, 10) + '…');
+          } else if (mintResult && mintResult.status === 'pending') {
+            showExecState(k, 'info', 'Mint submitted — awaiting on-chain confirmation (tx ' + String(mintResult.txHash || '').slice(0, 10) + '…). Do not resubmit.');
+          } else {
+            showExecState(k, 'err', 'Mint failed: ' + (mintResult && mintResult.error ? mintResult.error : 'reverted'));
+          }
+        } catch (mintErr) {
+          showExecState(k, 'err', 'Mint failed: ' + (mintErr && mintErr.message ? mintErr.message : String(mintErr)));
+        }
+      } else if (res && res.status === 'pending') {
+        showExecState(k, 'info', 'Submitted — no attestation returned yet. Do not resubmit; it will be reconciled.');
       } else if (res && res.status === 'ambiguous') {
         showExecState(k, 'warn', 'Transfer result is indeterminate (' + (res.error || 'unknown') + '). Do not resubmit — it will be reconciled.');
       } else {
@@ -174,6 +204,15 @@
       if (btn) { btn.disabled = false; btn.innerHTML = _c; }
       try { if (typeof ubGatewaySyncRefresh === 'function') ubGatewaySyncRefresh(); } catch (_) {}
     }
+  };
+
+  // ── Recovery: complete a pending mint without re-signing/re-submitting ──
+  // (Phase 1.0.1D.2.6). Used from the Operations list ("Complete mint") for a
+  // transfer that is Processing/Requires Review. The heavy lifting (attestation
+  // re-fetch + mint executor + duplicate-mint guard) lives in CapitalHub.recoverMint.
+  UI.recoverMint = function (opId) {
+    if (typeof CH.recoverMint === 'function') return CH.recoverMint(opId);
+    return Promise.resolve();
   };
 
   // ── Form ──────────────────────────────────────────────────────────────────

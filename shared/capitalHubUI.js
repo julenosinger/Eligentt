@@ -55,9 +55,25 @@
   function dt(ts) { try { var d = new Date(ts); return d.toLocaleDateString('en-US', { month: 'short', day: '2-digit' }) + ', ' + d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }); } catch (_) { return '—'; } }
   UI.copyBtn = copyBtn; UI.hashCell = hashCell; UI.dt = dt;
 
+  // ── Recovery (Phase 1.0.1D.2.6) ──────────────────────────────────────────────
+  // A pending Gateway transfer/withdraw can be completed via "Complete mint" when it
+  // has a recoverable attestation (stored or re-fetchable by transferId) and no mint
+  // has been submitted yet. This never re-signs nor re-submits the BurnIntent.
+  function recoverable(o) {
+    return (o.type === 'Transfer' || o.type === 'Withdraw') &&
+      (o.status === 'Processing' || o.status === 'Requires Review') &&
+      !o.txHash &&
+      ((o.attestation && o.operatorSig) || o.transferId);
+  }
+  UI.recoverable = recoverable;
+  function recoverBtn(o) {
+    if (!recoverable(o)) return '';
+    return '<button type="button" class="ch-recover" data-ch-recover="' + esc(o.id) + '" title="Complete the pending mint from your wallet (no re-sign, no duplicate submit)"><i class="ti ti-wallet"></i>Complete mint</button>';
+  }
+
   function opRow(o) {
     var amt = CH.toAtomic(o.amount, CH.DEC[o.asset]);
-    return '<tr><td>' + esc(dt(o.ts)) + '</td><td><b>' + esc(o.type) + '</b></td><td>' + esc(short(o.srcName)) + '</td><td>' + esc(String(o.dstName || '').length > 18 ? short(o.dstName) : (o.dstName || '—')) + '</td><td>' + esc(o.asset) + '</td><td class="ch-num">' + esc(amt == null ? '—' : CH.fmt(amt, CH.DEC[o.asset], CH.DEC[o.asset])) + '</td><td>' + statusPill(o.status) + '</td><td>' + hashCell(o) + '</td></tr>';
+    return '<tr><td>' + esc(dt(o.ts)) + '</td><td><b>' + esc(o.type) + '</b></td><td>' + esc(short(o.srcName)) + '</td><td>' + esc(String(o.dstName || '').length > 18 ? short(o.dstName) : (o.dstName || '—')) + '</td><td>' + esc(o.asset) + '</td><td class="ch-num">' + esc(amt == null ? '—' : CH.fmt(amt, CH.DEC[o.asset], CH.DEC[o.asset])) + '</td><td>' + statusPill(o.status) + recoverBtn(o) + '</td><td>' + hashCell(o) + '</td></tr>';
   }
   UI.opRow = opRow;
   var OPS_HEAD = '<thead><tr><th>Date &amp; Time</th><th>Operation</th><th>Source</th><th>Destination</th><th>Asset</th><th class="ch-num">Amount</th><th>Status</th><th>Tx Hash</th></tr></thead>';
@@ -275,7 +291,7 @@
     if (!sec || sec.__chBound) return;
     sec.__chBound = true;
     sec.addEventListener('click', function (ev) {
-      var t = ev.target.closest('[data-ch-tab],[data-ch-asset],[data-ch-flow],[data-ch-act],[data-ch-refresh],[data-ch-copy],[data-ch-launch],[data-ch-qa],[data-ch-max],[data-ch-qa-open],[data-ch-exec],[data-ch-page],[data-ch-open],[data-ch-export],[data-ch-clear]');
+      var t = ev.target.closest('[data-ch-tab],[data-ch-asset],[data-ch-flow],[data-ch-act],[data-ch-refresh],[data-ch-copy],[data-ch-launch],[data-ch-qa],[data-ch-max],[data-ch-qa-open],[data-ch-exec],[data-ch-page],[data-ch-open],[data-ch-export],[data-ch-clear],[data-ch-recover]');
       if (!t || t.disabled) return;
       if (t.hasAttribute('data-ch-tab')) { S.tab = t.getAttribute('data-ch-tab'); render(); }
       else if (t.hasAttribute('data-ch-asset')) { S.asset = t.getAttribute('data-ch-asset'); render(); }
@@ -292,6 +308,7 @@
       else if (t.hasAttribute('data-ch-open') && UI.txOpen) UI.txOpen(t.getAttribute('data-ch-open'));
       else if (t.hasAttribute('data-ch-export') && UI.exportCsv) UI.exportCsv();
       else if (t.hasAttribute('data-ch-clear') && UI.txClear) UI.txClear();
+      else if (t.hasAttribute('data-ch-recover') && UI.recoverMint) UI.recoverMint(t.getAttribute('data-ch-recover'));
     });
     sec.addEventListener('input', function (ev) { var id = ev.target.id || ''; if (id === 'ch-q' && UI.txFilter) UI.txFilter('q', ev.target.value); else if (id.indexOf('ch-qf-') === 0 && UI.qaInput) UI.qaInput(id, ev.target.value); });
     sec.addEventListener('change', function (ev) { var id = ev.target.id || ''; if (id.indexOf('ch-f-') === 0 && UI.txFilter) UI.txFilter(id.slice(5), ev.target.value); else if (id.indexOf('ch-qf-') === 0 && UI.qaChange) UI.qaChange(id, ev.target.value); });

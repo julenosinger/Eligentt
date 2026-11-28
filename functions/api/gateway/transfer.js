@@ -1074,9 +1074,21 @@ export async function onRequestPost(ctx) {
 
   const persistFailures = [];
   for (const item of body) {
-    const up = await tryUpdate(item.burnIntent.spec.salt,
-      { status: newStatus, httpStatus: upRes.status }, env);
-    if (!up.ok) persistFailures.push({ salt: item.burnIntent.spec.salt, error: up.error });
+    const salt = item.burnIntent.spec.salt;
+    // Persist the Circle recovery material (transferId + attestation payload +
+    // operator signature) in the per-salt record — Phase 1.0.1D.2.6. This makes an
+    // interrupted mint recoverable via GET /api/gateway/transfer?salt=...&recover=1
+    // without re-signing or re-submitting the BurnIntent.
+    const ev = evidenceBySalt[String(salt).toLowerCase()] || {};
+    const update = {
+      status:      newStatus,
+      httpStatus:  upRes.status,
+      transferId:  ev.transferId || null,
+      attestation: ev.attestationPayload   != null ? String(ev.attestationPayload)   : null,
+      signature:   ev.attestationSignature != null ? String(ev.attestationSignature) : null,
+    };
+    const up = await tryUpdate(salt, update, env);
+    if (!up.ok) persistFailures.push({ salt, error: up.error });
   }
   if (coordinatorActive) {
     for (const ce of coordReserved) {
@@ -1131,9 +1143,11 @@ export async function onRequestGet(ctx) {
   const origin = request.headers.get('Origin') || '';
   if (!isAllowedOrigin(origin, env, request.url)) return jsonResp({ error: 'forbidden' }, 403);
 
-  const url       = new URL(request.url);
-  const salt      = url.searchParams.get('salt');
-  const depositor = url.searchParams.get('depositor');
+  const url        = new URL(request.url);
+  const salt       = url.searchParams.get('salt');
+  const depositor  = url.searchParams.get('depositor');
+  const transferId = url.searchParams.get('transferId');
+  const recover    = url.searchParams.get('recover') === '1' || transferId != null;
 
   if (!salt || !/^0x[0-9a-fA-F]{64}$/.test(salt)) {
     return jsonResp({ error: 'salt_required' }, 400);
@@ -1142,9 +1156,54 @@ export async function onRequestGet(ctx) {
     return jsonResp({ error: 'depositor_required' }, 400);
   }
 
+  // Depositor isolation is enforced against the per-salt DO record (the only
+  // authoritative identity source — Circle's transfer summary has no sourceSigner).
   const record = await tryRead(salt, env);
-  if (!record)                                              return jsonResp({ error: 'not_found', salt }, 404);
-  if (normAddr(record.depositor) !== normAddr(depositor))   return jsonResp({ error: 'not_found', salt }, 404);
+  if (!record)                                             return jsonResp({ error: 'not_found', salt }, 404);
+  if (normAddr(record.depositor) !== normAddr(depositor))  return jsonResp({ error: 'not_found', salt }, 404);
+
+  // ── Recovery (Phase 1.0.1D.2.6) ─────────────────────────────────────────────
+  // Return the attestation + operator signature needed to complete a pending mint,
+  // WITHOUT re-signing or re-submitting the BurnIntent. Sources, in order:
+  //   1. the per-salt record (persisted at accept time — no Circle round-trip);
+  //   2. Circle GET /v1/transfer/{id} (for operations recorded before this fix,
+  //      or forwarded transfers that omit top-level attestation on POST).
+  if (recover) {
+    let att = record.attestation || null;
+    let sig = record.signature   || null;
+    const tid = (transferId && /^[0-9a-fA-F-]{8,64}$/.test(transferId)) ? transferId : (record.transferId || null);
+
+    if ((!att || !sig) && tid) {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 15000);
+      let rec = null;
+      try {
+        const r = await fetch(GATEWAY_API + '/v1/transfer/' + encodeURIComponent(tid), {
+          headers: { 'Content-Type': 'application/json' },
+          signal: ctrl.signal,
+        });
+        if (r.ok) rec = await r.json();
+      } catch(_) {}
+      clearTimeout(timer);
+      if (rec) {
+        const a = rec.attestation || null;
+        att = a ? (a.payload || a.attestationPayload || null) : null;
+        sig = a ? (a.signature || a.attestationSignature || null) : null;
+      }
+    }
+
+    if (!att || !sig) {
+      return jsonResp({ error: 'attestation_not_available', salt, detail: 'No recoverable attestation yet (it may still be finalizing, or it has expired). Nothing was re-signed or re-submitted.' }, 404);
+    }
+    return jsonResp({
+      salt,
+      transferId: tid,
+      attestation: att,
+      signature: sig,
+      dstDomain: record.dstDomain || null,
+      status: record.status,
+    });
+  }
 
   return jsonResp({ salt, ...record });
 }

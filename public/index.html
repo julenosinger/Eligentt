@@ -170,7 +170,14 @@
 
 
 
+
+
+
+
+
 <!-- Autonoma 2 — isolated modules, no conflict with autonoma v1 -->
+
+
 
 
 
@@ -208,13 +215,16 @@
 
 
 
-<link rel="stylesheet" href="/app.css?h=6a167d8c">
+
+
+
+<link rel="stylesheet" href="/app.css?h=08af7f18">
 <!-- Bridge Kit vendor bundle (Circle CCTP) -->
 <script defer src="/vendor/bridge-kit.js"></script>
 <!-- Core Bundle: 25 modules (synchronous) -->
-<script src="/bundles/core.b17c34aa.js"></script>
-<!-- App Bundle: 115 modules (deferred) -->
-<script defer src="/bundles/app.ba0598d6.js"></script>
+<script src="/bundles/core.85763718.js"></script>
+<!-- App Bundle: 120 modules (deferred) -->
+<script defer src="/bundles/app.7e50ae93.js"></script>
 <!-- Dormant modules skipped: 10 (oracle + unused) -->
 <!-- Inline scripts extracted: 7 files -->
 </head>
@@ -288,12 +298,12 @@
         <div class="auth-success-card">
           <div class="auth-success-icon"><i class="ti ti-circle-check"></i></div>
           <div style="font-size:14px;font-weight:800;color:#dde2f0" id="auth-success-title">Account Created</div>
-          <div style="font-size:10px;color:#8892aa;margin-top:4px" id="auth-success-sub">Your Intelligent Wallet is ready</div>
+          <div style="font-size:10px;color:#8892aa;margin-top:4px" id="auth-success-sub">Account ready</div>
         </div>
         <div class="auth-wallet-card">
           <div class="auth-wallet-row"><span class="label">Wallet Address</span><span class="value purple" id="auth-success-addr">—</span></div>
           <div class="auth-wallet-row"><span class="label">Network</span><span class="value green">Arc Mainnet</span></div>
-          <div class="auth-wallet-row"><span class="label">Type</span><span class="value purple">Internal Smart Wallet</span></div>
+          <div class="auth-wallet-row"><span class="label">Type</span><span class="value purple">—</span></div>
           <div class="auth-wallet-row"><span class="label">Account</span><span class="value" id="auth-success-email">—</span></div>
         </div>
         <button class="auth-btn primary" onclick="authFinish()"><i class="ti ti-arrow-right"></i> Continue to App</button>
@@ -675,6 +685,34 @@
               <i class="ti ti-arrow-right wm-wallet-arrow"></i>
             </div>
           </div>
+          <!-- OKX Wallet -->
+          <div class="wm-wallet" id="wm-okx" onclick="connectOKX()">
+            <div class="wm-wallet-ico">
+              <img src="/assets/wallets/okx.svg" alt="OKX Wallet" width="32" height="32" style="border-radius:6px" onerror="this.onerror=null;this.style.display='none';this.parentNode.style.background='#000000';this.parentNode.innerHTML='<span style=font-size:13px;font-weight:800;color:#fff>OKX</span>'"/>
+            </div>
+            <div class="wm-wallet-info">
+              <div class="wm-wallet-name">OKX Wallet</div>
+              <div class="wm-wallet-desc" id="wm-desc-okx">Browser extension &amp; mobile app</div>
+            </div>
+            <div class="wm-wallet-status">
+              <span class="installed-badge" id="okx-installed" style="display:none">Installed</span>
+              <i class="ti ti-arrow-right wm-wallet-arrow"></i>
+            </div>
+          </div>
+          <!-- Bitget Wallet -->
+          <div class="wm-wallet" id="wm-bitget" onclick="connectBitget()">
+            <div class="wm-wallet-ico">
+              <img src="/assets/wallets/bitget.svg" alt="Bitget Wallet" width="32" height="32" style="border-radius:6px" onerror="this.onerror=null;this.style.display='none';this.parentNode.style.background='#00F0FF';this.parentNode.innerHTML='<span style=font-size:13px;font-weight:800;color:#000>BG</span>'"/>
+            </div>
+            <div class="wm-wallet-info">
+              <div class="wm-wallet-name">Bitget Wallet</div>
+              <div class="wm-wallet-desc" id="wm-desc-bitget">Browser extension &amp; mobile app</div>
+            </div>
+            <div class="wm-wallet-status">
+              <span class="installed-badge" id="bg-installed" style="display:none">Installed</span>
+              <i class="ti ti-arrow-right wm-wallet-arrow"></i>
+            </div>
+          </div>
           <!-- WalletConnect -->
           <div class="wm-wallet" id="wm-wc" onclick="connectWalletConnect()">
             <div class="wm-wallet-ico">
@@ -802,6 +840,7 @@
       <div class="nav-item" id="nav-aiwallet" onclick="showPage('aiwallet')" title="Smart Wallet"><i class="ti ti-building-bank"></i>Smart Wallet<span class="nav-new">New</span></div>
       <div class="nav-item" id="nav-rwa" onclick="showPage('rwa')" title="RWA Advanced Trading"><i class="ti ti-chart-candle"></i>RWA<span class="nav-new" style="background:rgba(168,85,247,.15);color:#a855f7;border:1px solid rgba(168,85,247,.3)">Pro</span></div>
       <div class="nav-group" style="margin-top:4px">Protocol</div>
+      <div class="nav-item" id="nav-treasury" onclick="showPage('treasury')" title="Treasury Vault"><i class="ti ti-building-bank"></i>Treasury<span class="nav-kit" style="background:rgba(79,142,247,.12);color:#7b9ef7;border:1px solid rgba(79,142,247,.25)">Vault</span></div>
       <div class="nav-group" style="margin-top:4px">Manage</div>
       <div class="nav-item" id="nav-recipients" onclick="showPage('recipients')" title="Recipients"><i class="ti ti-users"></i>Recipients</div>
       <div class="nav-item" id="nav-templates" onclick="showPage('templates')" title="Templates"><i class="ti ti-template"></i>Templates</div>
@@ -1180,14 +1219,14 @@
                   </div>
                 </div>
                 <!-- Gateway source selector for Swap -->
-                <div id="swp-gw-source-row" style="display:flex;align-items:center;gap:5px;margin-top:5px">
-                  <span style="font-size:7.5px;font-weight:700;color:var(--muted2);text-transform:uppercase;letter-spacing:.6px">Source</span>
-                  <button id="swp-src-evm" onclick="swpSetSource('evm')"
-                    style="font-size:8px;font-weight:700;padding:2px 8px;border-radius:999px;border:1px solid rgba(79,142,247,.4);background:rgba(79,142,247,.12);color:var(--blue);cursor:pointer;transition:all .15s">
+                <div id="swp-gw-source-row" class="swp-src-row" style="display:flex;align-items:center;gap:5px;margin-top:5px">
+                  <span class="swp-src-label">Source</span>
+                  <button id="swp-src-evm" class="swp-src-btn" onclick="swpSetSource('evm')"
+                    style="border:1px solid rgba(79,142,247,.4);background:rgba(79,142,247,.12);color:var(--blue)">
                     Wallet
                   </button>
-                  <button id="swp-src-gw" onclick="swpSetSource('gateway')"
-                    style="font-size:8px;font-weight:700;padding:2px 8px;border-radius:999px;border:1px solid rgba(167,139,250,.2);background:transparent;color:var(--muted2);cursor:pointer;transition:all .15s">
+                  <button id="swp-src-gw" class="swp-src-btn" onclick="swpSetSource('gateway')"
+                    style="border:1px solid rgba(167,139,250,.2);background:transparent;color:var(--muted2)">
                     Gateway
                   </button>
                   <span id="swp-gw-bal-label" style="display:none;font-size:7.5px;color:#a78bfa;margin-left:auto">GW: —</span>
@@ -1226,11 +1265,11 @@
               <button type="button" class="swp-det-toggle" id="swp-det-toggle" aria-expanded="true" aria-controls="swp-rate-bar" onclick="swpToggleOrderDetails()"><span>Order details</span><i class="ti ti-chevron-down"></i></button>
               <!-- Rate Details -->
               <div class="st-swap-details" id="swp-rate-bar">
-                <div class="st-swap-detail-row"><span><i class="ti ti-arrow-right-bar" style="font-size:8px;margin-right:3px;color:var(--blue)"></i>Rate</span><span class="st-swap-detail-val blue" id="swap-rate">—</span></div>
-                <div class="st-swap-detail-row"><span><i class="ti ti-chart-bubble" style="font-size:8px;margin-right:3px;color:var(--yellow)"></i>Price Impact</span><span class="st-swap-detail-val" id="swp-impact-val">—</span></div>
-                <div class="st-swap-detail-row"><span><i class="ti ti-shield-check" style="font-size:8px;margin-right:3px;color:var(--green)"></i>Min Received</span><span class="st-swap-detail-val green" id="swp-min-received">—</span></div>
-                <div class="st-swap-detail-row"><span><i class="ti ti-coins" style="font-size:8px;margin-right:3px;color:var(--muted2)"></i>LP Fee</span><span class="st-swap-detail-val" id="swp-fee-val">—</span></div>
-                <div class="st-swap-detail-row"><span><i class="ti ti-route" style="font-size:8px;margin-right:3px;color:var(--purple)"></i>Route</span><span class="st-swap-detail-val purple" id="swp-route-pool">—</span></div>
+                <div class="st-swap-detail-row"><span><i class="ti ti-arrow-right-bar swp-di" style="color:var(--blue)"></i>Exchange Rate</span><span class="st-swap-detail-val blue" id="swap-rate">—</span></div>
+                <div class="st-swap-detail-row"><span><i class="ti ti-chart-bubble swp-di" style="color:var(--yellow)"></i>Price Impact</span><span class="st-swap-detail-val" id="swp-impact-val">—</span></div>
+                <div class="st-swap-detail-row"><span><i class="ti ti-shield-check swp-di" style="color:var(--green)"></i>Minimum Received</span><span class="st-swap-detail-val green" id="swp-min-received">—</span></div>
+                <div class="st-swap-detail-row"><span><i class="ti ti-coins swp-di" style="color:var(--muted2)"></i>LP Fee</span><span class="st-swap-detail-val" id="swp-fee-val">—</span></div>
+                <div class="st-swap-detail-row"><span><i class="ti ti-route swp-di" style="color:var(--purple)"></i>Route</span><span class="st-swap-detail-val purple" id="swp-route-pool">—</span></div>
               </div>
 
               <!-- Price Chart -->
@@ -1239,6 +1278,7 @@
                   <span class="swp-chart-label" id="swp-chart-label">Rate history</span>
                   <span class="swp-chart-pts" id="swp-chart-pts"></span>
                 </div>
+                <div class="swp-chart-latest" id="swp-chart-latest" title="Last observed quote rate (historical, not an executable offer)"></div>
                 <div class="swp-chart-body">
                   <svg id="swp-chart-svg" class="swp-chart-svg" viewBox="0 0 300 80" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
                     <defs>
@@ -1247,12 +1287,15 @@
                         <stop offset="100%" stop-color="var(--blue)" stop-opacity="0.02"/>
                       </linearGradient>
                     </defs>
+                    <g id="swp-chart-grid" class="swp-chart-grid"><line x1="0" y1="4" x2="300" y2="4"/><line x1="0" y1="40" x2="300" y2="40"/><line x1="0" y1="76" x2="300" y2="76"/></g>
                     <path id="swp-chart-fill" fill="url(#swpChartGrad)" stroke="none" d=""/>
                     <polyline id="swp-chart-line" fill="none" stroke="var(--blue)" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" points=""/>
                     <line id="swp-chart-last" x1="0" y1="0" x2="0" y2="80" stroke="var(--blue)" stroke-width="0.5" stroke-dasharray="2,2" opacity="0.4"/>
                   </svg>
                   <div class="swp-chart-yaxis" id="swp-chart-yaxis"></div>
+                  <span class="swp-chart-dot" id="swp-chart-dot" style="display:none" aria-hidden="true"></span>
                 </div>
+                <div class="swp-chart-foot"><span>Earlier</span><span>Latest</span></div>
               </div>
 
               <!-- Quick Pair Switcher -->
@@ -1323,7 +1366,7 @@
                 <span>AVAILABLE ROUTES</span>
                 <span class="swap-route-status" id="swap-route-status">Compare execution routes</span>
                 <button class="swp-refresh-btn" id="swp-refresh-btn" onclick="swpManualRefresh()" title="Refresh quotes now" style="margin-left:6px;background:rgba(148,163,184,.1);border:1px solid var(--border);border-radius:5px;color:var(--muted2);cursor:pointer;font-size:10px;padding:2px 7px;display:flex;align-items:center;gap:4px"><i class="ti ti-refresh"></i></button>
-                <span class="swp-updated" id="swp-updated" style="font-size:7.5px;color:var(--muted2);margin-left:auto;display:none"></span>
+                <span class="swp-updated" id="swp-updated" style="color:var(--muted2);margin-left:auto;display:none"></span>
               </div>
               <div class="swap-route-list" id="swap-route-list"></div>
             </div>
@@ -1472,6 +1515,7 @@
           <div class="page-sub" id="bridge-page-sub">Cross-chain bridge · LI.FI · Arc Mainnet</div>
         </div>
         <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+          <button class="brg-hist-btn brg-help-btn" id="brg-help-btn" type="button" onclick="brgOpenHelp()" aria-haspopup="dialog" aria-label="Help" title="Bridge help &amp; CCTP recovery"><i class="ti ti-help-circle"></i><span class="brg-hist-btn-label">Help</span></button>
           <button class="brg-hist-btn" id="brg-hist-btn" onclick="brgOpenHistory()" title="View bridge history"><i class="ti ti-history"></i><span class="brg-hist-btn-label">History</span></button>
           <div class="kit-badge" style="background:rgba(45,212,191,.1);border-color:rgba(45,212,191,.25);color:var(--teal)"><i class="ti ti-world" style="font-size:9px"></i>LI.FI</div>
         </div>
@@ -1486,7 +1530,7 @@
           <div class="swap-card" id="bridge-main-card">
             <!-- FROM section -->
             <div class="brg-section brg-section-from">
-              <div class="brg-section-label">FROM CHAIN</div>
+              <div class="brg-section-label">YOU SEND</div>
               <div class="chain-row brg-chain-row">
                 <div class="chain-sel brg-chain-sel" onclick="brgOpenNetPicker('from')" id="from-chain-sel" title="Select source network">
                   <div class="brg-chain-logo-wrap" id="from-chain-logo"><div class="chain-dot" id="from-chain-dot" style="background:#627eea"></div></div>
@@ -1503,15 +1547,20 @@
                   <i class="ti ti-chevron-down" style="font-size:9px;color:var(--muted2);margin-left:2px"></i>
                 </div>
               </div>
-              <div class="brg-bal-row"><i class="ti ti-wallet"></i>Balance: <span id="bridge-from-bal">—</span> <span id="bridge-from-bal-sym">USDC</span></div>
+              <div class="brg-bal-row"><i class="ti ti-wallet"></i>Balance: <span id="bridge-from-bal">—</span> <span id="bridge-from-bal-sym">USDC</span>
+                <span class="brg-pct" role="group" aria-label="Amount shortcuts">
+                  <button type="button" class="brg-pct-btn" onclick="brgSetPct(25)" aria-label="Use 25% of balance">25%</button>
+                  <button type="button" class="brg-pct-btn" onclick="brgSetPct(50)" aria-label="Use 50% of balance">50%</button>
+                  <button type="button" class="brg-pct-btn brg-pct-max" onclick="brgSetPct(100)" aria-label="Use maximum available balance">MAX</button>
+                </span></div>
             </div>
 
             <!-- Swap arrow -->
             <div class="swap-arrow brg-swap-arrow" onclick="swapBridgeChains()"><i class="ti ti-arrows-up-down"></i></div>
 
-            <!-- TO section + rate summary embedded inside -->
+            <!-- TO section -->
             <div class="brg-section brg-section-to">
-              <div class="brg-section-label">TO CHAIN</div>
+              <div class="brg-section-label">YOU RECEIVE</div>
               <div class="chain-row brg-chain-row">
                 <div class="chain-sel brg-chain-sel" onclick="brgOpenNetPicker('to')" id="to-chain-sel" title="Select destination network">
                   <div class="brg-chain-logo-wrap" id="to-chain-logo"><div class="chain-dot" id="to-chain-dot" style="background:#ff0202"></div></div>
@@ -1531,15 +1580,15 @@
                 </div>
               </div>
               <div class="brg-bal-row"><i class="ti ti-wallet"></i>Balance: <span id="bridge-to-bal">—</span> <span id="bridge-to-bal-sym">USDC</span></div>
+            </div>
 
-              <!-- Rate summary — embedded in TO section, Fase 3 -->
-              <div class="rate-box brg-rate-box brg-rate-embedded" style="display:none" id="bridge-rate-box">
-                <div class="rate-row"><span>Route</span><span class="rate-val teal" id="bridge-protocol">LI.FI</span></div>
-                <div class="rate-row"><span>Bridge Fee</span><span class="rate-val" id="bridge-fee-display">—</span></div>
-                <div class="rate-row"><span>Estimated Time</span><span class="rate-val" id="bridge-time">Fetching route…</span></div>
-                <div class="rate-row"><span>You Receive</span><span class="rate-val teal" id="bridge-receive">—</span></div>
-                <div class="rate-row"><span>Minimum Received</span><span class="rate-val" id="bridge-min">—</span></div>
-              </div>
+            <!-- Bridge summary (same element as before; its own block below the receive surface) -->
+            <div class="rate-box brg-rate-box brg-rate-embedded" style="display:none" id="bridge-rate-box">
+              <div class="rate-row"><i class="ti ti-route" aria-hidden="true"></i><span>Route</span><span class="rate-val teal" id="bridge-protocol">—</span></div>
+              <div class="rate-row"><i class="ti ti-receipt-2" aria-hidden="true"></i><span>Bridge Fee</span><span class="rate-val" id="bridge-fee-display">—</span></div>
+              <div class="rate-row"><i class="ti ti-clock" aria-hidden="true"></i><span>Estimated Time</span><span class="rate-val" id="bridge-time">—</span></div>
+              <div class="rate-row"><i class="ti ti-arrow-down-right" aria-hidden="true"></i><span>You Receive</span><span class="rate-val teal" id="bridge-receive">—</span></div>
+              <div class="rate-row"><i class="ti ti-shield-check" aria-hidden="true"></i><span>Minimum Received</span><span class="rate-val" id="bridge-min">—</span></div>
             </div>
 
             <!-- Route divider — Fase 4: only visible when a route is selected -->
@@ -1768,6 +1817,9 @@
             <i class="ti ti-credit-card-pay" style="color:#06F7E9"></i>x402 Payments
             <span class="sa-mode-tab-badge">Beta</span>
           </button>
+          <button class="sa-mode-tab" id="sa-mtab-bank" onclick="saSetModeTab('bank',this)" title="Send to a bank account via Circle Payments Network (requires OFI onboarding)">
+            <i class="ti ti-building-bank"></i>Send to Bank
+          </button>
         </div>
 
         <!-- ── x402 Payments panel ───────────────────────────────────────── -->
@@ -1779,75 +1831,47 @@
           <!-- LEFT: Form -->
           <div class="sa-left">
 
-            <!-- Asset Selector -->
-            <div class="sa-card">
-              <div class="sa-card-title"><i class="ti ti-coins"></i>Select Asset</div>
-              <div class="sa-asset-grid" id="sa-asset-grid">
-                <button class="sa-asset-btn selected" data-asset="USDC" onclick="saSelectAsset('USDC',this)">
+            <!-- Asset Selector (Source switch lives in the lower region of this card) -->
+            <div class="sa-card sa-asset-card">
+              <div class="sa-card-title sa-card-title-split"><span class="sa-card-title-main"><i class="ti ti-coins"></i>Select Asset</span><span class="sa-card-meta">3 assets available</span></div>
+              <div class="sa-asset-grid" id="sa-asset-grid" role="group" aria-label="Select asset">
+                <button type="button" class="sa-asset-btn selected" data-asset="USDC" aria-pressed="true" onclick="saSelectAsset('USDC',this)">
                   <div class="sa-asset-icon" style="background:linear-gradient(135deg,#2775ca,#1a4fa0)">U</div>
                   <div class="sa-asset-symbol">USDC</div>
                   <div class="sa-asset-name">USD Coin</div>
                 </button>
-                <button class="sa-asset-btn" data-asset="EURC" onclick="saSelectAsset('EURC',this)">
+                <button type="button" class="sa-asset-btn" data-asset="EURC" aria-pressed="false" onclick="saSelectAsset('EURC',this)">
                   <div class="sa-asset-icon" style="background:linear-gradient(135deg,#1a56a0,#0d3a70)">E</div>
                   <div class="sa-asset-symbol">EURC</div>
                   <div class="sa-asset-name">Euro Coin</div>
                 </button>
-                <button class="sa-asset-btn" data-asset="cirBTC" onclick="saSelectAsset('cirBTC',this)">
+                <button type="button" class="sa-asset-btn" data-asset="cirBTC" aria-pressed="false" onclick="saSelectAsset('cirBTC',this)">
                   <div class="sa-asset-icon" style="background:linear-gradient(135deg,#f7931a,#e2740a)">₿</div>
                   <div class="sa-asset-symbol">cirBTC</div>
                   <div class="sa-asset-name">Circle BTC</div>
                 </button>
               </div>
-            </div>
 
-            <!-- Cross-Chain Route Visualization (shown when source ≠ destination) -->
-            <div id="sa-xroute-viz" style="display:none;background:linear-gradient(155deg,rgba(245,158,11,.06),rgba(245,158,11,.02));border:1px solid rgba(245,158,11,.18);border-radius:10px;padding:10px 14px;margin-bottom:2px">
-              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-                <span style="font-size:10px;font-weight:600;color:#f59e0b">Payment Route</span>
-                <span style="font-size:8px;color:var(--muted2);display:flex;align-items:center;gap:4px">
-                  <i class="ti ti-clock" style="font-size:9px;color:#f59e0b"></i><span id="sa-xroute-time" style="color:#f59e0b">~2 minutes</span>
-                </span>
-              </div>
-              <div style="display:flex;align-items:center;gap:0;background:rgba(0,0,0,.2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;overflow:hidden;position:relative">
-                <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
-                  <div style="width:12px;height:12px;border-radius:50%;background:#4f8ef7;box-shadow:0 0 6px #4f8ef766"></div>
-                  <span id="sa-xroute-from" style="font-size:9px;font-weight:600;color:var(--text)">Arc Mainnet</span>
+              <!-- ── Gateway Origin Toggle ──────────────────────────────────────── -->
+              <div id="sa-origin-bar" class="sa-origin-bar">
+                <span class="sa-origin-lbl">Source</span>
+                <div class="sa-origin-btns">
+                  <button id="sa-origin-evm" type="button" class="sa-origin-btn sa-origin-active" onclick="saSetOrigin('evm')"
+                    style="border:1px solid rgba(79,142,247,.4);background:rgba(79,142,247,.15);color:var(--blue)">
+                    <i class="ti ti-wallet"></i>EVM Wallet
+                  </button>
+                  <button id="sa-origin-gw" type="button" class="sa-origin-btn" onclick="saSetOrigin('gateway')"
+                    style="border:1px solid rgba(167,139,250,.25);background:transparent;color:var(--muted2)">
+                    <i class="ti ti-circle-dotted"></i>Circle Gateway
+                  </button>
                 </div>
-                <div style="flex:1;position:relative;height:2px;margin:0 8px">
-                  <div style="position:absolute;inset:0;background:linear-gradient(90deg,#4f8ef7,#f59e0b,#ff0202);border-radius:2px;opacity:.6"></div>
-                  <div id="sa-xroute-packet" style="position:absolute;top:-6px;left:0;width:14px;height:14px;background:#f59e0b;border-radius:50%;box-shadow:0 0 10px #f59e0b;animation:xc-travel 2.2s linear infinite">
-                    <i class="ti ti-currency-dollar" style="font-size:7px;color:#000;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%)"></i>
-                  </div>
-                </div>
-                <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
-                  <div id="sa-xroute-to-dot" style="width:12px;height:12px;border-radius:50%;background:#ff0202;box-shadow:0 0 6px #ff020266"></div>
-                  <span id="sa-xroute-to" style="font-size:9px;font-weight:600;color:var(--text)">Ethereum</span>
-                </div>
+                <span id="sa-gw-bal-pill" class="sa-gw-pill" style="display:none">— GW</span>
               </div>
-            </div>
-
-            <!-- ── Gateway Origin Toggle ──────────────────────────────────────── -->
-            <div id="sa-origin-bar" style="display:flex;align-items:center;gap:6px;margin-bottom:6px;background:rgba(0,0,0,.18);border:1px solid var(--border);border-radius:9px;padding:4px 6px">
-              <span style="font-size:8.5px;font-weight:700;color:var(--muted2);text-transform:uppercase;letter-spacing:.7px;flex-shrink:0">Source</span>
-              <div style="display:flex;gap:4px;flex:1">
-                <button id="sa-origin-evm" class="sa-origin-btn sa-origin-active" onclick="saSetOrigin('evm')"
-                  style="flex:1;padding:4px 8px;font-size:9px;font-weight:700;border-radius:6px;border:1px solid rgba(79,142,247,.4);background:rgba(79,142,247,.15);color:var(--blue);cursor:pointer;transition:all .15s">
-                  <i class="ti ti-wallet" style="font-size:10px;margin-right:3px"></i>EVM Wallet
-                </button>
-                <button id="sa-origin-gw" class="sa-origin-btn" onclick="saSetOrigin('gateway')"
-                  style="flex:1;padding:4px 8px;font-size:9px;font-weight:700;border-radius:6px;border:1px solid rgba(167,139,250,.25);background:transparent;color:var(--muted2);cursor:pointer;transition:all .15s">
-                  <i class="ti ti-circle-dotted" style="font-size:10px;margin-right:3px"></i>Circle Gateway
-                </button>
-              </div>
-              <span id="sa-gw-bal-pill" style="display:none;font-size:8px;font-weight:700;color:#a78bfa;background:rgba(167,139,250,.12);border:1px solid rgba(167,139,250,.25);border-radius:999px;padding:2px 7px;flex-shrink:0">— GW</span>
-            </div>
-            <!-- Gateway notice (shown when GW origin selected) -->
-            <div id="sa-gw-notice" style="display:none;background:rgba(167,139,250,.06);border:1px solid rgba(167,139,250,.2);border-radius:7px;padding:8px 12px;margin-bottom:6px">
-              <div style="display:flex;align-items:flex-start;gap:7px">
-                <i class="ti ti-shield-lock" style="color:#a78bfa;font-size:12px;margin-top:1px;flex-shrink:0"></i>
-                <div style="font-size:8.5px;color:var(--muted2);line-height:1.5">
-                  <b style="color:#a78bfa">Circle Gateway</b> — Transfers use your unified Gateway balance via EIP-712 signed burn intent + on-chain mint on the destination network.<br>
+              <!-- Gateway notice (shown when GW origin selected) -->
+              <div id="sa-gw-notice" class="sa-gw-notice" style="display:none">
+                <i class="ti ti-shield-lock"></i>
+                <div class="sa-gw-notice-text">
+                  <b>Circle Gateway</b> — Transfers use your unified Gateway balance via EIP-712 signed burn intent + on-chain mint on the destination network.<br>
                   <span id="sa-gw-blocked-msg" style="display:none"></span>
                 </div>
               </div>
@@ -1856,15 +1880,7 @@
             <!-- Transfer Form -->
             <div class="sa-card">
               <div class="sa-card-title" style="justify-content:space-between">
-                <span><i class="ti ti-form"></i>Transfer Details</span>
-                <!-- CPN Fiat Payout toggle -->
-                <button id="sa-cpn-toggle"
-                  onclick="saToggleCPN()"
-                  title="Send to a bank account via Circle Payments Network (requires OFI onboarding)"
-                  style="display:flex;align-items:center;gap:5px;background:rgba(45,212,191,.08);border:1px solid rgba(45,212,191,.2);border-radius:6px;padding:4px 10px;cursor:pointer;font-size:9px;font-weight:600;color:var(--teal);transition:all .2s">
-                  <i class="ti ti-building-bank" style="font-size:11px"></i>
-                  <span id="sa-cpn-toggle-label">Send to Bank (CPN)</span>
-                </button>
+                <span class="sa-card-title-main"><i class="ti ti-arrows-exchange"></i>Transfer Details</span>
               </div>
 
               <!-- CPN onboarding notice (shown only in fiat mode) -->
@@ -1976,57 +1992,67 @@
                 </button>
               </div>
 
-              <!-- From Network -->
-              <div class="sa-field">
-                <label class="sa-label">From Network</label>
-                <div class="sa-input-wrap">
-                  <i class="ti ti-topology-star-3 sa-input-icon"></i>
-                  <input id="sa-network-display" class="sa-input" value="Arc" readonly style="color:var(--blue);background:rgba(79,142,247,.04)">
+              <!-- From / To Network (side by side on desktop, stacked on mobile) -->
+              <div class="sa-net-row">
+                <!-- From Network -->
+                <div class="sa-field">
+                  <label class="sa-label" for="sa-network-display">From Network</label>
+                  <div class="sa-input-wrap">
+                    <i class="ti ti-topology-star-3 sa-input-icon"></i>
+                    <input id="sa-network-display" class="sa-input" value="Arc" readonly style="color:var(--blue);background:rgba(79,142,247,.04)">
+                  </div>
                 </div>
-              </div>
 
-              <!-- To Network -->
-              <div class="sa-field">
-                <label class="sa-label">To Network</label>
-                <div class="sa-input-wrap" style="position:relative">
-                  <i class="ti ti-world-share sa-input-icon"></i>
-                  <select id="sa-dest-network" class="sa-input sa-select" onchange="saOnDestChange()" style="color:#f59e0b;cursor:pointer;appearance:none;-webkit-appearance:none;padding-right:28px">
-                    <!-- Options populated dynamically by saPopulateDestNetworks() -->
-                  </select>
-                  <i class="ti ti-chevron-down" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);color:#f59e0b;font-size:10px;pointer-events:none"></i>
+                <!-- To Network -->
+                <div class="sa-field">
+                  <label class="sa-label" for="sa-dest-network">To Network</label>
+                  <div class="sa-input-wrap" style="position:relative">
+                    <i class="ti ti-world-share sa-input-icon"></i>
+                    <select id="sa-dest-network" class="sa-input sa-select" onchange="saOnDestChange()" style="color:#f59e0b;cursor:pointer;appearance:none;-webkit-appearance:none;padding-right:28px">
+                      <!-- Options populated dynamically by saPopulateDestNetworks() -->
+                    </select>
+                    <i class="ti ti-chevron-down" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);color:#f59e0b;font-size:10px;pointer-events:none"></i>
+                  </div>
                 </div>
               </div>
 
               <!-- Recipient -->
               <div class="sa-field">
-                <label class="sa-label">Recipient Address <span class="sa-required">*</span></label>
+                <label class="sa-label" for="sa-recipient">Recipient Address <span class="sa-required">*</span></label>
                 <div class="sa-input-wrap">
                   <i class="ti ti-wallet sa-input-icon"></i>
-                  <input id="sa-recipient" class="sa-input mono" type="text" placeholder="0x..." oninput="saUpdateRoute();saAutocomplete(this.value)">
+                  <input id="sa-recipient" class="sa-input mono" type="text" placeholder="Enter wallet address (0x...)" oninput="saUpdateRoute();saAutocomplete(this.value)">
+                  <button type="button" class="sa-paste-btn" id="sa-paste-btn" onclick="saPasteRecipient()" title="Paste address from clipboard" aria-label="Paste address from clipboard"><i class="ti ti-clipboard"></i></button>
                   <div id="sa-autocomplete-list" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:100;background:var(--card);border:1px solid var(--border2);border-radius:0 0 6px 6px;max-height:160px;overflow-y:auto"></div>
                 </div>
               </div>
 
               <!-- Amount -->
               <div class="sa-field">
-                <label class="sa-label">Amount <span class="sa-required">*</span></label>
-                <div class="sa-amount-wrap">
-                  <span class="sa-amount-icon" style="left:10px;color:var(--muted2);font-size:12px"><i class="ti ti-currency-dollar"></i></span>
-                  <input id="sa-amount" class="sa-amount-input" type="number" placeholder="0.00" oninput="saUpdateRoute()">
-                  <span class="sa-amount-badge" id="sa-amount-badge">USDC</span>
-                </div>
-                <div class="sa-balance-row">
-                  <span class="sa-balance-lbl">Available balance:</span>
-                  <div style="display:flex;align-items:center;gap:6px">
+                <div class="sa-label-row">
+                  <label class="sa-label" for="sa-amount">Amount <span class="sa-required">*</span></label>
+                  <div class="sa-balance-row">
+                    <span class="sa-balance-lbl">Available balance:</span>
                     <span class="sa-balance-val" id="sa-balance-val">—</span>
-                    <button class="sa-max-btn" onclick="saSetMax()">MAX</button>
+                  </div>
+                </div>
+                <div class="sa-amount-line">
+                  <div class="sa-amount-wrap">
+                    <span class="sa-amount-icon" style="left:12px;color:var(--muted2);font-size:14px"><i class="ti ti-currency-dollar"></i></span>
+                    <input id="sa-amount" class="sa-amount-input" type="number" placeholder="0.00" oninput="saUpdateRoute()">
+                    <span class="sa-amount-badge" id="sa-amount-badge">USDC</span>
+                  </div>
+                  <div class="sa-pct-group" role="group" aria-label="Amount shortcuts">
+                    <button type="button" class="sa-pct-btn" onclick="saSetPercent(25)" aria-label="Use 25% of available balance">25%</button>
+                    <button type="button" class="sa-pct-btn" onclick="saSetPercent(50)" aria-label="Use 50% of available balance">50%</button>
+                    <button type="button" class="sa-max-btn" onclick="saSetMax()" aria-label="Use maximum available balance">MAX</button>
                   </div>
                 </div>
               </div>
 
               <!-- Memo -->
               <div class="sa-field">
-                <label class="sa-label">Memo <span style="color:var(--muted2);font-weight:400;text-transform:none;letter-spacing:0">(optional)</span></label>
+                <label class="sa-label" for="sa-memo">Memo <span style="color:var(--muted2);font-weight:400;text-transform:none;letter-spacing:0">(optional)</span></label>
                 <div class="sa-input-wrap">
                   <i class="ti ti-note sa-input-icon"></i>
                   <input id="sa-memo" class="sa-input" type="text" placeholder="Payment for invoice #123, coffee, etc.">
@@ -2042,20 +2068,20 @@
             </div>
 
             <!-- Quick Actions -->
-            <div class="sa-card">
-              <div class="sa-card-title"><i class="ti ti-bolt"></i>Quick Actions</div>
+            <div class="sa-card sa-quick-actions-card">
+              <div class="sa-card-title"><span class="sa-card-title-main"><i class="ti ti-bolt"></i>Quick Actions</span></div>
               <div class="sa-actions-row">
-                <button class="sa-action-btn" onclick="saSaveRecipient()">
-                  <i class="ti ti-user-plus"></i> Save Recipient
+                <button type="button" class="sa-action-btn" onclick="saSaveRecipient()">
+                  <i class="ti ti-user-plus"></i><span>Save Recipient</span>
                 </button>
-                <button class="sa-action-btn" onclick="saCreatePayLink()">
-                  <i class="ti ti-link"></i> Payment Link
+                <button type="button" class="sa-action-btn" onclick="saCreatePayLink()">
+                  <i class="ti ti-link"></i><span>Payment Link</span>
                 </button>
-                <button class="sa-action-btn" onclick="saCreateInvoice()">
-                  <i class="ti ti-file-invoice"></i> Invoice
+                <button type="button" class="sa-action-btn" onclick="saCreateInvoice()">
+                  <i class="ti ti-file-invoice"></i><span>Invoice</span>
                 </button>
-                <button class="sa-action-btn" onclick="saGenerateQR()">
-                  <i class="ti ti-qrcode"></i> QR Code
+                <button type="button" class="sa-action-btn" onclick="saGenerateQR()">
+                  <i class="ti ti-qrcode"></i><span>QR Code</span>
                 </button>
               </div>
             </div>
@@ -2069,7 +2095,49 @@
 
             <!-- Route Preview -->
             <div class="sa-route-card">
-              <div class="sa-card-title" style="margin-bottom:12px"><i class="ti ti-route"></i>Route Preview</div>
+              <div class="sa-card-title sa-card-title-split"><span class="sa-card-title-main"><i class="ti ti-route"></i>Route Preview</span></div>
+              <!-- Compact FROM → TO flow (real networks, mirrors the active/destination chain) -->
+              <div class="sa-rt-flow" id="sa-rt-flow" aria-label="Transfer route">
+                <div class="sa-rt-node">
+                  <span class="sa-rt-node-logo" id="sa-rt-from-logo"></span>
+                  <span class="sa-rt-node-txt"><span class="sa-rt-node-k">From</span><span class="sa-rt-node-n" id="sa-rt-from-name">—</span><span class="sa-rt-node-t" id="sa-rt-from-asset">USDC</span></span>
+                </div>
+                <i class="ti ti-arrow-right sa-rt-arrow" aria-hidden="true"></i>
+                <div class="sa-rt-node">
+                  <span class="sa-rt-node-logo" id="sa-rt-to-logo"></span>
+                  <span class="sa-rt-node-txt"><span class="sa-rt-node-k">To</span><span class="sa-rt-node-n" id="sa-rt-to-name">—</span><span class="sa-rt-node-t" id="sa-rt-to-asset">USDC</span></span>
+                </div>
+              </div>
+              <!-- Payment Route (reused component): only visible while a real cross-chain execution is in progress or finished.
+                   Driven by the existing execution state (saUpdateXCStep / LI.FI flow); never by the network selection. -->
+              <div id="sa-xroute-viz" class="sa-pr" data-phase="idle" data-mech="">
+                <div class="sa-pr-head">
+                  <span style="font-size:10px;font-weight:600;color:#f59e0b">Payment Route</span>
+                  <span class="sa-pr-steps" id="sa-xroute-steps" aria-hidden="true">
+                    <span class="sa-pr-pip" data-step="burn" data-c="grey"><i></i>Burn</span>
+                    <span class="sa-pr-pip" data-step="attest" data-c="grey"><i></i>Attestation</span>
+                    <span class="sa-pr-pip" data-step="mint" data-c="grey"><i></i>Mint</span>
+                  </span>
+                  <span class="sa-pr-time" id="sa-xroute-time-wrap"><i class="ti ti-clock"></i><span id="sa-xroute-time"></span></span>
+                </div>
+                <div class="sa-pr-track">
+                  <div class="sa-pr-end">
+                    <span class="sa-pr-dot" id="sa-xroute-from-dot" data-c="blue"></span>
+                    <span id="sa-xroute-from" class="sa-pr-name">—</span>
+                  </div>
+                  <div class="sa-pr-line">
+                    <div class="sa-pr-fill" id="sa-xroute-line" data-c="none"></div>
+                    <div id="sa-xroute-packet" style="position:absolute;top:-6px;left:0;width:14px;height:14px;background:#f59e0b;border-radius:50%;box-shadow:0 0 10px #f59e0b;animation:xc-travel 2.2s linear infinite">
+                      <i class="ti ti-currency-dollar" style="font-size:7px;color:#000;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%)"></i>
+                    </div>
+                  </div>
+                  <div class="sa-pr-end sa-pr-end-to">
+                    <span class="sa-pr-dot" id="sa-xroute-to-dot" data-c="grey"></span>
+                    <span id="sa-xroute-to" class="sa-pr-name">—</span>
+                  </div>
+                </div>
+                <div class="sa-pr-status" id="sa-xroute-status" role="status" aria-live="polite" data-tone="blue"></div>
+              </div>
               <div class="sa-route-row">
                 <span class="sa-route-lbl">Asset</span>
                 <span class="sa-route-val blue" id="sa-rt-asset">USDC</span>
@@ -2088,11 +2156,11 @@
               </div>
               <div class="sa-route-row">
                 <span class="sa-route-lbl">Token Contract</span>
-                <span class="sa-route-val mono" id="sa-rt-contract" style="font-size:8px">—</span>
+                <span class="sa-route-val mono" id="sa-rt-contract">—</span>
               </div>
               <div class="sa-route-row">
                 <span class="sa-route-lbl">Estimated Fee</span>
-                <span class="sa-route-val green" id="sa-rt-fee">~0.001 USDC</span>
+                <span class="sa-route-val green" id="sa-rt-fee">—</span>
               </div>
               <div class="sa-route-row">
                 <span class="sa-route-lbl">Route Type</span>
@@ -2143,11 +2211,12 @@
 
             <!-- Transaction Log -->
             <div class="sa-activity-card">
-              <div class="sa-card-title" style="margin-bottom:12px"><i class="ti ti-history"></i>Recent Activity</div>
+              <div class="sa-card-title sa-card-title-split"><span class="sa-card-title-main"><i class="ti ti-history"></i>Recent Activity</span><span class="sa-card-meta" id="sa-activity-count">0 transactions</span></div>
               <div class="sa-tx-log" id="sa-tx-log">
                 <div class="sa-activity-empty" id="sa-activity-empty">
-                  <i class="ti ti-send" style="font-size:20px;margin-bottom:8px;display:block;opacity:.3"></i>
-                  No transactions yet. Send your first asset.
+                  <span class="sa-activity-empty-ico"><i class="ti ti-send"></i></span>
+                  <div class="sa-activity-empty-t">No transactions yet</div>
+                  <div class="sa-activity-empty-s">Send your first asset to see it here.</div>
                 </div>
               </div>
             </div>
@@ -3653,7 +3722,7 @@
     <!-- PAGE: TREASURY -->
     <div class="page" id="page-treasury">
       <div class="page-header">
-        <div class="page-icon" style="background:linear-gradient(135deg,rgba(79,142,247,.18),rgba(139,92,246,.18));color:#7b9ef7"><i class="ti ti-vault"></i></div>
+        <div class="page-icon" style="background:linear-gradient(135deg,rgba(79,142,247,.18),rgba(139,92,246,.18));color:#7b9ef7"><i class="ti ti-building-bank"></i></div>
         <div>
           <div class="page-title">Treasury <span style="font-size:9px;background:rgba(79,142,247,.15);color:#7b9ef7;border:1px solid rgba(79,142,247,.3);border-radius:4px;padding:2px 7px;margin-left:6px;font-weight:700;vertical-align:middle">PROTOCOL</span> <span style="font-size:9px;background:rgba(245,158,11,.12);color:var(--yellow);border:1px solid rgba(245,158,11,.25);border-radius:4px;padding:2px 7px;margin-left:2px;font-weight:700;vertical-align:middle">BETA</span></div>
           <div class="page-sub">Vault · Liquidity · Fulfiller Engine · CCTP Settlement</div>
@@ -3689,6 +3758,9 @@
           </div>
           <div class="trs-nav-item" id="trs-nav-vault" onclick="showTrsSection('vault')">
             <i class="ti ti-vault"></i><span>Vault</span>
+          </div>
+          <div class="trs-nav-item" id="trs-nav-capital-hub" onclick="showTrsSection('capital-hub')">
+            <i class="ti ti-world"></i><span>Capital Hub</span><span class="nav-kit" style="margin-left:auto;background:rgba(45,212,191,.12);color:#2dd4bf;border:1px solid rgba(45,212,191,.28)">Unified</span>
           </div>
           <div class="trs-nav-item" id="trs-nav-liquidity" onclick="showTrsSection('liquidity')">
             <i class="ti ti-droplet"></i><span>Liquidity</span>
@@ -3942,6 +4014,9 @@
           </div>
 
           <!-- ── LIQUIDITY ── -->
+          <!-- Capital Hub: unified Gateway capital management (rendered by shared/capitalHub*.js) -->
+          <div class="trs-section" id="trs-capital-hub"><div id="ch-root"></div></div>
+
           <div class="trs-section" id="trs-liquidity">
             <div class="trs-section-title"><i class="ti ti-droplet"></i>Liquidity Manager
               <span class="trs-section-sub">Monitor · Manage · Auto-rebalance</span>
@@ -5763,6 +5838,15 @@
           <div class="aut-workspace-bar">
             <span class="aut-workspace-title">✦ Autonoma</span>
             <span class="aut-workspace-status"><span class="aut-online-dot"></span> Circle Agent · Arc Mainnet</span>
+            <span style="margin-left:auto;display:flex;align-items:center;gap:6px">
+              <i class="ti ti-brain" style="font-size:12px;color:var(--muted2)"></i>
+              <select id="aut-ai-provider" onchange="autSetAiProvider(this.value)" title="AI provider"
+                style="background:var(--card);border:1px solid var(--border2);border-radius:6px;color:var(--text);font-size:9.5px;padding:4px 8px;cursor:pointer;outline:none;font-family:inherit">
+                <option value="deepseek">DeepSeek</option>
+                <option value="openai">OpenAI</option>
+                <option value="anthropic">Anthropic</option>
+              </select>
+            </span>
           </div>
           <div class="aut-messages" id="aut-messages">
             <div class="aut-welcome" id="aut-welcome">
@@ -5864,13 +5948,12 @@
             <div class="rwa-header-title">RWA Advanced Trading</div>
             <div class="rwa-header-sub">Tokenized real-world assets · onchain stocks · permissioned assets · powered by LI.FI</div>
           </div>
+          <div class="rwa-policy-bar" id="rwa-policy-bar" style="display:none" role="status">
+            <div class="rwa-policy-dot" id="rwa-policy-dot"></div>
+            <span id="rwa-policy-msg" style="color:var(--muted2)"></span>
+          </div>
           <div class="rwa-header-badge" id="rwa-policy-badge">Checking policy…</div>
           <button onclick="rwaRefresh()" style="margin-left:8px;background:transparent;border:1px solid var(--border);border-radius:7px;color:var(--muted2);padding:5px 10px;cursor:pointer;font-size:11px;display:flex;align-items:center;gap:5px"><i class="ti ti-refresh" id="rwa-refresh-icon"></i>Refresh</button>
-        </div>
-        <!-- Policy info bar -->
-        <div class="rwa-policy-bar" id="rwa-policy-bar" style="display:none">
-          <div class="rwa-policy-dot" id="rwa-policy-dot"></div>
-          <span id="rwa-policy-msg" style="color:var(--muted2)"></span>
         </div>
         <!-- Sub-navigation -->
         <div class="rwa-nav">
@@ -5904,20 +5987,44 @@
           <div id="rwa-filter-chips" class="rwa-chips" style="display:none"></div>
           <div id="rwa-markets-grid" class="rwa-grid"><div class="rwa-empty"><div class="rwa-spinner"></div><div class="rwa-empty-title" style="margin-top:12px">Loading RWA markets…</div></div></div>
         </div>
-        <!-- Trade Terminal -->
+        <!-- Trade Terminal: RWA Markets | RWA Swap | Available Routes + Trade Summary -->
         <div class="rwa-panel" id="rwa-panel-trade">
+          <div class="rwa-tt" id="rwa-tt">
+            <aside class="rwa-tt-markets" id="rwa-tt-markets" aria-label="RWA Markets">
+              <button type="button" class="rwa-ttm-toggle" id="rwa-ttm-toggle" onclick="rwaTTToggleMarkets()" aria-expanded="false" aria-controls="rwa-ttm-body"><i class="ti ti-chart-bar"></i><span>RWA Markets</span><i class="ti ti-chevron-down rwa-ttm-chev"></i></button>
+              <div class="rwa-ttm-body" id="rwa-ttm-body">
+                <div class="rwa-ttm-head"><i class="ti ti-chart-bar"></i><div><div class="rwa-ttm-title">RWA Markets</div><div class="rwa-ttm-sub">Tokenized stocks, ETFs and real-world assets</div></div></div>
+                <div class="rwa-ttm-search"><i class="ti ti-search"></i><input id="rwa-tt-search" type="search" placeholder="Search by name or symbol" autocomplete="off" aria-label="Search RWA assets" oninput="rwaTTSearchInput()"></div>
+                <div class="rwa-ttm-filters">
+                  <div class="rwa-ttm-chips" id="rwa-tt-chips" role="group" aria-label="Filter by issuer"></div>
+                  <select id="rwa-tt-chain" class="rwa-ttm-chain" aria-label="Filter by network" onchange="rwaTTRenderCatalog(true)"><option value="">All networks</option></select>
+                </div>
+                <div class="rwa-ttm-note" id="rwa-tt-note" style="display:none"></div>
+                <div class="rwa-ttm-list" id="rwa-tt-list" role="listbox" aria-label="RWA assets"><div class="rwa-ttm-empty"><div class="rwa-spinner"></div><div>Loading RWA markets…</div></div></div>
+                <div class="rwa-ttm-foot" id="rwa-tt-foot"></div>
+              </div>
+            </aside>
           <div class="rwa-trade-wrap">
             <!-- From -->
             <div class="rwa-field-group">
               <div class="rwa-field-label">You send</div>
               <div class="rwa-token-row">
                 <div class="rwa-token-sel" id="rwa-from-sel" onclick="rwaOpenPicker('from')">
+                  <span class="rwa-tok-logo" id="rwa-from-logo" aria-hidden="true"></span>
                   <span id="rwa-from-sym" style="font-size:12px;font-weight:700;color:var(--text)">USDC</span>
                   <i class="ti ti-chevron-down" style="font-size:10px;color:var(--muted2);margin-left:auto"></i>
                 </div>
                 <input id="rwa-amount-in" class="rwa-amount-input" type="number" min="0" step="any" placeholder="0.00" oninput="rwaOnAmountChange()">
               </div>
-              <div class="rwa-bal" id="rwa-from-bal">Balance: —</div>
+              <div class="rwa-fmeta">
+                <div class="rwa-bal" id="rwa-from-bal">Balance: —</div>
+                <div class="rwa-usd" id="rwa-from-usd"></div>
+                <div class="rwa-pct" id="rwa-pct" role="group" aria-label="Fill amount from balance">
+                  <button type="button" class="rwa-pct-btn" id="rwa-pct-25" onclick="rwaSetPct(25)" disabled>25%</button>
+                  <button type="button" class="rwa-pct-btn" id="rwa-pct-50" onclick="rwaSetPct(50)" disabled>50%</button>
+                  <button type="button" class="rwa-pct-btn" id="rwa-pct-100" onclick="rwaSetPct(100)" disabled>MAX</button>
+                </div>
+              </div>
             </div>
             <!-- Arrow -->
             <div class="rwa-swap-arrow">
@@ -5928,12 +6035,14 @@
               <div class="rwa-field-label">You receive</div>
               <div class="rwa-token-row">
                 <div class="rwa-token-sel" id="rwa-to-sel" onclick="rwaOpenPicker('to')">
+                  <span class="rwa-tok-logo" id="rwa-to-logo" aria-hidden="true"></span>
                   <span id="rwa-to-sym" style="font-size:12px;font-weight:700;color:var(--text)">Select RWA</span>
                   <i class="ti ti-chevron-down" style="font-size:10px;color:var(--muted2);margin-left:auto"></i>
                 </div>
                 <div style="flex:1;text-align:right">
                   <div id="rwa-amount-out" style="font-size:18px;font-weight:600;color:var(--muted2)">—</div>
                   <div id="rwa-amount-out-min" style="font-size:9.5px;color:var(--muted);margin-top:2px"></div>
+                  <div class="rwa-usd" id="rwa-to-usd"></div>
                 </div>
               </div>
               <div class="rwa-bal" id="rwa-to-bal">Balance: —</div>
@@ -5967,6 +6076,13 @@
                 </div>
               </div>
             </div>
+            <!-- Trade info strip (read-only, derived from the selected route) -->
+            <div class="rwa-info" id="rwa-info" aria-live="polite">
+              <div class="rwa-info-cell"><span class="rwa-info-k">Exchange Rate</span><span class="rwa-info-v" id="rwa-info-rate">—</span></div>
+              <div class="rwa-info-cell"><span class="rwa-info-k">Minimum Received</span><span class="rwa-info-v" id="rwa-info-min">—</span></div>
+              <div class="rwa-info-cell"><span class="rwa-info-k">Slippage</span><span class="rwa-info-v" id="rwa-info-slip">0.5%</span></div>
+              <div class="rwa-info-cell"><span class="rwa-info-k">Type</span><span class="rwa-info-v" id="rwa-info-type">—</span></div>
+            </div>
             <!-- Quote box -->
             <div id="rwa-quote-box" class="rwa-quote-box" style="display:none">
               <div class="rwa-quote-row"><span class="rwa-quote-label">Route</span><span class="rwa-quote-val" id="rwa-quote-tool">—</span></div>
@@ -5978,6 +6094,17 @@
             </div>
             <div id="rwa-quote-err" style="display:none;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.25);border-radius:8px;padding:10px 12px;font-size:10.5px;color:#ef4444;margin-bottom:10px"></div>
             <button id="rwa-trade-btn" class="rwa-exec-btn" onclick="rwaConfirmTrade()" disabled>Connect wallet to trade</button>
+          </div>
+            <aside class="rwa-tt-side" aria-label="Routes and trade summary">
+              <section class="rwa-ttr" id="rwa-ttr" aria-label="Available Routes">
+                <div class="rwa-ttr-head"><i class="ti ti-route"></i><div class="rwa-ttr-headtxt"><div class="rwa-ttr-title">Available Routes</div><div class="rwa-ttr-sub" id="rwa-ttr-sub">—</div></div><div class="rwa-ttr-count" id="rwa-ttr-count"></div></div>
+                <div class="rwa-ttr-list" id="rwa-ttr-list" role="radiogroup" aria-label="Available routes"></div>
+              </section>
+              <section class="rwa-tts" id="rwa-tts" aria-label="Trade Summary">
+                <div class="rwa-tts-title"><i class="ti ti-file-text"></i>Trade Summary</div>
+                <div class="rwa-tts-rows" id="rwa-tts-rows"></div>
+              </section>
+            </aside>
           </div>
         </div>
         <!-- Route Comparison -->
@@ -6983,7 +7110,7 @@ window.__ARC_PAY_CONFIG__ = window.__ARC_PAY_CONFIG__ || {
 };
 </script>
 
-<script defer src="/bundles/inline-1.ea6d479b.js"></script>
+<script defer src="/bundles/inline-1.6785d15b.js"></script>
 
   <!-- ═══ SMART PAYMENT LANDING MODAL ═══ -->
   <div class="pay-modal-overlay" id="pay-landing-overlay" style="display:none !important; visibility:hidden !important; opacity:0 !important; pointer-events:none !important;">
@@ -7116,7 +7243,7 @@ window.__ARC_PAY_CONFIG__ = window.__ARC_PAY_CONFIG__ || {
 <!-- ══════════════════════════════════════════════════════════════════════
      RWA ADVANCED TRADING — JavaScript (rwa namespace)
      ══════════════════════════════════════════════════════════════════════ -->
-<script defer src="/bundles/inline-6.07a617bd.js"></script>
+<script defer src="/bundles/inline-6.5f55f8b6.js"></script>
 
 <!-- ── Circle Gateway Deposit Modal ────────────────────────────────────── -->
 <div id="ub-gw-dep-overlay" onclick="if(event.target===this)ubGwDepClose()">

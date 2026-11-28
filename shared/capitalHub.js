@@ -263,6 +263,82 @@
     }).catch(function () { _recBusy = false; });
   }
 
+  // ── Mint completion + recovery (Phase 1.0.1D.2.6) ─────────────────────────
+  // The Circle Gateway transfer needs a SECOND wallet interaction: after the
+  // BurnIntent is accepted and an attestation is returned, the caller must invoke
+  // GatewayMinter.gatewayMint(attestation, signature) on the destination chain.
+  // These helpers drive that mint and make an interrupted mint recoverable without
+  // re-signing or re-submitting the BurnIntent.
+
+  // The mint executor is closure-scoped inside UBScreen; it is reached through
+  // UBScreen.gatewayMint (exposed for this). Fall back to a top-level executor.
+  function mintExecutor() {
+    try {
+      if (typeof UBScreen !== 'undefined' && UBScreen && typeof UBScreen.gatewayMint === 'function') return UBScreen.gatewayMint;
+    } catch (_) {}
+    return (typeof _execGatewayMint === 'function') ? _execGatewayMint : null;
+  }
+
+  // Complete the mint for an accepted transfer. Persists recovery material first,
+  // then mints. Never reports success without a positive on-chain receipt, and never
+  // resubmits the BurnIntent. Idempotent by op id (merges with the installHooks record).
+  function finishMint(opId, att, sig, destChainId) {
+    var fn = mintExecutor();
+    if (!fn) return Promise.resolve({ status: 'error', error: 'mint_engine_unavailable' });
+    try { record({ id: opId, attestation: att, operatorSig: sig, dstChainId: destChainId, txHash: null, status: 'Processing', ts: Date.now() }); } catch (_) {}
+    return fn({ attestation: att, signature: sig, destChainId: destChainId })
+      .then(function (mr) {
+        if (mr && mr.status === 'confirmed') { try { record({ id: opId, status: 'Confirmed', txHash: mr.txHash || null, confirmedAt: Date.now() }); } catch (_) {} }
+        else if (mr && mr.status === 'pending') { try { record({ id: opId, status: 'Processing', txHash: mr.txHash || null }); } catch (_) {} }
+        else if (mr && mr.status === 'failed') { try { record({ id: opId, status: 'Failed', txHash: mr.txHash || null }); } catch (_) {} }
+        return mr || { status: 'error', error: 'mint_unknown' };
+      });
+  }
+
+  // Recover a pending transfer/withdraw: re-fetch the attestation from the server
+  // (persisted record, or Circle GET /v1/transfer/{id}) and complete the mint with
+  // a manual wallet confirmation. Guards against a duplicate mint.
+  function recoverMint(opId) {
+    var w = wallet();
+    if (!w || !opId) return Promise.resolve();
+    var op = null;
+    ops().forEach(function (o) { if (o.id === opId) op = o; });
+    if (!op) return Promise.resolve();
+    if (op.status === 'Confirmed' || op.status === 'Failed') return Promise.resolve();
+    if (op.txHash) { try { if (typeof toast === 'function') toast('A mint transaction was already submitted (tx ' + String(op.txHash).slice(0, 10) + '…). No duplicate mint.', 'warn'); } catch (_) {} return Promise.resolve(); }
+    var fn = mintExecutor();
+    if (!fn) { try { if (typeof toast === 'function') toast('Mint engine unavailable', 'error'); } catch (_) {} return Promise.resolve(); }
+
+    var att = op.attestation, sig = op.operatorSig;
+    var destChainId = op.dstChainId || op.dstNet || null;
+
+    function applyRec(rec) {
+      if (rec && rec.attestation && rec.signature) {
+        att = rec.attestation; sig = rec.signature;
+        if (rec.dstDomain != null && typeof chainOfDomain === 'function') { var cid = chainOfDomain(Number(rec.dstDomain)); if (cid != null) destChainId = cid; }
+        if (destChainId == null && op.srcChainId != null) destChainId = op.srcChainId;
+      }
+    }
+    function run() {
+      if (!att || !sig) { try { if (typeof toast === 'function') toast('No valid attestation is available yet. Nothing was re-signed or re-submitted — retry shortly.', 'warn'); } catch (_) {} return Promise.resolve(); }
+      return finishMint(opId, att, sig, destChainId).then(function (mr) {
+        if (mr && mr.status === 'confirmed') { try { if (typeof toast === 'function') toast('Mint confirmed — tx ' + String(mr.txHash || '').slice(0, 10) + '…', 'success'); } catch (_) {} }
+        else if (mr && mr.status === 'pending') { try { if (typeof toast === 'function') toast('Mint submitted — awaiting on-chain confirmation.', 'info'); } catch (_) {} }
+        else { try { if (typeof toast === 'function') toast('Mint failed: ' + (mr && mr.error ? mr.error : 'reverted'), 'error'); } catch (_) {} }
+      }).catch(function (e) { try { if (typeof toast === 'function') toast('Mint failed: ' + (e && e.message ? e.message : String(e)), 'error'); } catch (_) {} });
+    }
+
+    if ((!att || !sig) && (op.salt || op.transferId)) {
+      var ctrl = new AbortController(); var t = setTimeout(function () { ctrl.abort(); }, 15000);
+      var q = 'salt=' + encodeURIComponent(op.salt || '') + '&depositor=' + encodeURIComponent(w) + '&recover=1' + (op.transferId ? '&transferId=' + encodeURIComponent(op.transferId) : '');
+      return fetch('/api/gateway/transfer?' + q, { signal: ctrl.signal })
+        .then(function (r) { clearTimeout(t); return r.ok ? r.json() : null; })
+        .then(function (rec) { applyRec(rec); return run(); })
+        .catch(function () { clearTimeout(t); return run(); });
+    }
+    return run();
+  }
+
   // ── observe the existing Gateway transfer flow (no change to its behaviour) ──
   function installHooks() {
     if (window.__capitalHubHooks) return;
@@ -304,6 +380,7 @@
     gateway: gateway, total: total, balanceAt: balanceAt, networks: networks,
     walletBalances: walletBalances, vaultBalances: vaultBalances,
     ops: ops, record: record, noteDeposit: noteDeposit, on: on, emit: emit,
-    reconcileDeposits: reconcileDeposits, reconcileTransfers: reconcileTransfers, installHooks: installHooks
+    reconcileDeposits: reconcileDeposits, reconcileTransfers: reconcileTransfers, installHooks: installHooks,
+    finishMint: finishMint, recoverMint: recoverMint
   };
 })();
